@@ -56,9 +56,9 @@
  * today" is exactly the reasoning that missed 4.
  *
  * Arms S3-S5 are the bounded negative.  S3 pins the WHOLE `innerHTML`
- * population — 48 writes, 14 of them non-clearing, every one triaged — so a
- * forty-ninth is a red run.  It pins them as a TABLE of files and a TRANSCRIPT
- * of the fourteen live writes, not as the number 48, so the red run names the
+ * population — 47 writes, 13 of them non-clearing, every one triaged — so a
+ * forty-eighth is a red run.  It pins them as a TABLE of files and a TRANSCRIPT
+ * of the thirteen live writes, not as the number 47, so the red run names the
  * file that grew and quotes the line that did it: a budget whose failure
  * cannot say what it found is a budget the next reader bumps.  S4 sweeps the
  * other ways in (`outerHTML`,
@@ -396,12 +396,33 @@ assertEqual(checkedOutput, HOSTILE_OUTPUT_COUNT,
 describe('S. Source scan — the sinks stay written this way');
 
 const SCAN_EXTENSIONS = new Set(['.nim', '.js', '.mjs', '.ts']);
+
+// BUILD OUTPUT IS NOT SOURCE. `src/build-*/` and any `dist/` are produced by
+// `just build-once` and are git-ignored (`.gitignore` carries `build-*/` and
+// `dist/`). They hold `frontend_bundle.js`, `ui.js` and the vendored chunks —
+// the COMPILED form of the very sources scanned below — so every pattern this
+// section asserts about is found a second time, in a generated file, and
+// reported as though someone had written it that way.
+//
+// Without this the section passes only on a tree that has NEVER been built and
+// fails on every tree that has, which is the sequence AGENTS.md and CI both
+// prescribe. Same defect, same fix as `monacoMarkdownSanitizer.test.mjs`.
+const isGeneratedDir = (name) =>
+  name === 'node_modules' || name === 'dist' || name.startsWith('build-');
+
 const scanned = [];
+/** Generated directories skipped above, so the skip itself can be asserted. */
+const skippedGenerated = [];
 (function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) { walk(full); continue; }
+    if (entry.isDirectory()) {
+      if (isGeneratedDir(entry.name)) { skippedGenerated.push(path.relative(REPO, full)); continue; }
+      walk(full);
+      continue;
+    }
+    if (isGeneratedDir(entry.name)) continue;
     if (!SCAN_EXTENSIONS.has(path.extname(entry.name))) continue;
     const rel = path.relative(REPO, full);
     if (rel === SELF) continue;  // this file quotes the patterns on purpose
@@ -413,6 +434,25 @@ const scanned = [];
 console.log(`  \x1b[2mfiles scanned: ${scanned.length}\x1b[0m`);
 assert(scanned.length >= 900,
   `the scan reached the source tree (${scanned.length} files)`);
+
+// Trap 4b: the exclusion must not become a way to scan nothing, and must not
+// silently stop excluding. Both directions are asserted; the second only when
+// there IS build output, so this stays honest on a clean checkout too.
+assert(!scanned.some((rel) => rel.split(path.sep).some(isGeneratedDir)),
+  'no generated directory survived the scan filter');
+
+// Stated as ONE unconditional assertion, not an `if` around one: this suite
+// reconciles its total assertion count at the end, so an assertion that runs
+// only on a built tree would make that total depend on whether anyone had run
+// `just build-once` — reintroducing, in the counter, exactly the build-state
+// dependence this fix removes from the scan.
+const builtDirs = ['src/build-debug', 'src/public/dist']
+  .filter((rel) => fs.existsSync(path.join(REPO, rel)));
+console.log(`  \x1b[2mbuild output present: ${builtDirs.length > 0 ? builtDirs.join(', ') : '(none)'}; generated dirs skipped: ${skippedGenerated.length}\x1b[0m`);
+assert(builtDirs.length === 0 || skippedGenerated.length > 0,
+  builtDirs.length === 0
+    ? 'no build output in this tree, so there was nothing for the scan to skip'
+    : `this tree HAS build output, so the scan must have skipped some (skipped ${skippedGenerated.length})`);
 
 const sources = new Map(
   scanned.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
@@ -507,6 +547,23 @@ assert(/buildFileConflictOverlay\(path\)/.test(sources.get('src/frontend/rendere
   'and renderer.nim builds the overlay through it');
 assertEqual(filesMatching(/innerHTML = cstring\((&|fmt)"/), '',
   'no source interpolates a formatted string into innerHTML');
+
+// --- site 1b: the Scene-1 live-edit panel -----------------------------------
+//
+// Same shape as the dialog above and on the list for a stronger reason than
+// symmetry. The two variable things this panel shows are the apply-edit
+// command's `status`/`message` and the edit the user typed, and the message is
+// assembled from an agent refusal that quotes RELOCATION SYMBOL NAMES and
+// THREAD NAMES out of a process CodeTracer did not build. None of that is
+// markup.
+assertEqual(filesMatching(/const HcrLiveEditPanelMarkup\* = /),
+  'src/frontend/ui/hcr_live_edit_panel.nim',
+  'the scan finds the module that owns the live-edit panel markup');
+assertEqual(shippedMatching(/statusEl\.innerHTML|detailEl\.innerHTML/), '',
+  'the panel never writes the provider status or message as markup');
+assert(/statusEl\.textContent = status/.test(
+  sources.get('src/frontend/ui/hcr_live_edit_panel.nim')),
+  'and writes the provider status as text');
 
 // --- the two sites the scan above FOUND, in `ui/layout.nim` -----------------
 //
@@ -677,7 +734,7 @@ describe('S3. The whole innerHTML population, pinned');
 // failure prints the file that grew and the line of source that did it, and
 // triage starts from a diff instead of a hunt.
 //
-// The 48 in this file's header is DERIVED from the table rather than written
+// The 47 in this file's header is DERIVED from the table rather than written
 // twice, so the prose and the pin cannot drift apart.
 
 /** Every shipped front-end file that writes innerHTML: `[file, clears, live]`. */
@@ -686,13 +743,14 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/storybook_components.nim', 7, 2],
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
-  ['src/frontend/ui/auto_hide.nim', 3, 1],
+  ['src/frontend/ui/auto_hide.nim', 3, 0],
   ['src/frontend/ui/calltrace.nim', 2, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
   ['src/frontend/ui/event_log.nim', 1, 0],
   ['src/frontend/ui/file_conflict_dialog.nim', 0, 1],
   ['src/frontend/ui/flow.nim', 2, 0],
+  ['src/frontend/ui/hcr_live_edit_panel.nim', 0, 1],
   ['src/frontend/ui/layout.nim', 3, 0],
   ['src/frontend/ui/request_panel.nim', 1, 0],
   ['src/frontend/ui/scratchpad.nim', 1, 0],
@@ -711,17 +769,19 @@ const INNER_HTML_BY_FILE = [
  * The source text of every NON-CLEARING write, verbatim.
  *
  * The clears are counted but not transcribed: `x.innerHTML = cstring""` cannot
- * carry a payload, and `isClear` is what says so.  These fourteen are the
+ * carry a payload, and `isClear` is what says so.  These thirteen are the
  * actual sinks, and each one is triaged by name in arm S or S2 above.
+ * (There were fourteen: `ui/auto_hide.nim`'s floating unpin button wrote a
+ * literal `&#x2715;`.  Its icon is now drawn by CSS, so the write is gone.)
  */
 const INNER_HTML_LIVE_WRITES = [
   'src/frontend/storybook_components.nim: denseHost.innerHTML = `denseHtml`;',
   'src/frontend/storybook_components.nim: if (detailedHost) detailedHost.innerHTML = `detailedHtml`;',
-  'src/frontend/ui/auto_hide.nim: pinBtn.innerHTML = cstring"&#x2715;"  # X close/dismiss icon',
   'src/frontend/ui/datatable.nim: endRowField.innerHTML = cstring($(self.endRow))',
   'src/frontend/ui/datatable.nim: rowsCountField.innerHTML = cstring($(self.rowsCount))',
   'src/frontend/ui/editor.nim: el.innerHTML = frames[i]',
   'src/frontend/ui/file_conflict_dialog.nim: overlay.innerHTML = cstring(FileConflictDialogMarkup)',
+  'src/frontend/ui/hcr_live_edit_panel.nim: overlay.innerHTML = cstring(HcrLiveEditPanelMarkup)',
   'src/frontend/ui/trace.nim: self.kindSwitchButton.innerHTML =',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
@@ -770,7 +830,7 @@ assertEqual(
   [...INNER_HTML_LIVE_WRITES].sort().join('\n'),
   `and the ${INNER_HTML_LIVE_WRITES.length} non-clearing ones are written exactly this way`);
 
-// The four that arm S/S2 do not already name, so all fourteen are accounted
+// The three that arm S/S2 do not already name, so all thirteen are accounted
 // for rather than merely counted.
 {
   const traceNim = sources.get('src/frontend/ui/trace.nim');
@@ -779,9 +839,12 @@ assertEqual(
     'trace.nim\'s two overlay messages are markup-free string constants');
   assert(/innerHTML =\s*\n?\s*\(\$self\.chart\.viewKind\)\[4\.\.\^1\]/.test(traceNim),
     'and its third write is an enum name, which the type keeps markup-free');
-  assert(/innerHTML = cstring"&#x2715;"/.test(
+  // Kept as an assertion (not deleted) so the suite's assertion count holds,
+  // and so the ✕ cannot quietly come back: that glyph also means "close" on
+  // the overlay header, and the icon is now `.overlay-floating-pin::before`.
+  assert(!/pinBtn\.innerHTML/.test(
     sources.get('src/frontend/ui/auto_hide.nim')),
-    'auto_hide\'s remaining write is a literal HTML entity — markup on purpose');
+    'auto_hide\'s floating unpin button writes no markup — CSS draws its icon');
   assert(/htmlEscape\(/.test(sources.get('src/frontend/storybook_components.nim')),
     'the storybook table builder escapes the values it interpolates');
 }
@@ -887,7 +950,19 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ASSERTIONS = 158;
+// 158 -> 160 on 2026-09-05, for the two guards added to the source scan above:
+// "no generated directory survived the scan filter" and, when the tree has
+// build output, "the scan must have skipped some". The number goes UP because
+// the suite gained two contracts; it is raised here, in the same diff, rather
+// than the reconciliation being relaxed — this check caught the edit, which is
+// exactly what it is for.
+// 160 -> 163 on 2026-09-16, for the three assertions triaging the Scene-1
+// live-edit panel (`ui/hcr_live_edit_panel.nim`), which adds the tree's
+// fourteenth live `innerHTML` write. Raised in the same diff that adds them
+// and that adds the panel to `INNER_HTML_BY_FILE` / `INNER_HTML_LIVE_WRITES`,
+// rather than the reconciliation being relaxed — this check is what forced the
+// new sink to be triaged by name instead of appearing unnoticed.
+const EXPECTED_ASSERTIONS = 163;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

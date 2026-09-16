@@ -276,9 +276,9 @@ proc lineOnlyGli(pathCount: int): GlobalLineIndex =
   ## The global-line index a COLUMN-UNAWARE trace was written against: the
   ## writer allocates ``DefaultLinesPerFile`` lines per file, so the index is
   ## ``file_base + line``.  This is what ``ct print`` reconstructs
-  ## (``buildGliFromMeta`` in ``codetracer_ct_print_lib``) from the writer's
-  ## own constant, so the suite resolves such steps the way the shipped CLI
-  ## does.
+  ## (``NewTraceReader.globalPositionSpace``, which ``codetracer_ct_print_lib``
+  ## resolves through) from the writer's own constant, so the suite resolves
+  ## such steps the way the shipped CLI does.
   var counts = newSeq[uint64](max(pathCount, 1))
   for i in 0 ..< counts.len:
     counts[i] = DefaultLinesPerFile

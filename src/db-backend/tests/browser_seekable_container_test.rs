@@ -476,10 +476,10 @@ fn browser_breakpoint_resolution_avoids_the_whole_table_build() {
     let f = fixture();
     let path_id = f
         .browser
-        .path_id_for(SRC)
+        .path_id_for_first_version(SRC)
         .expect("the fixture's source path must be interned");
     assert_eq!(
-        f.native.path_id_for(SRC),
+        f.native.path_id_for_first_version(SRC),
         Some(path_id),
         "both readers must intern the source path at the same id"
     );

@@ -34,3 +34,4 @@ codetracer-trace-format-nim
 codetracer-python-recorder
 codetracer-ruby-recorder
 codetracer-js-recorder
+codetracer-beam-recorder

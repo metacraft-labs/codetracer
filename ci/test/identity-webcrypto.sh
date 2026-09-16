@@ -23,18 +23,21 @@
 # and "no summary" must never be read as "no failures".
 #
 # Usage:  bash ci/test/identity-webcrypto.sh
-# Env:    CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache)
+# Env:    CT_NIM_CACHE_ROOT  nimcache root (default: per-checkout, see ci/lib/nim-cache-root.sh)
 
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 MODULE="src/frontend/viewmodel/identity/webcrypto_verifier.nim"
 PROBE="ci/test/identity_webcrypto_probe.nim"
 EXPECTED_CHECKS=14
 
-cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+cache_root="$(ct_nim_cache_root "${repo_root}")"
 work="$(mktemp -d)"
 
 checks=0

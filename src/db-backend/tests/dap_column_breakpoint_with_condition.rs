@@ -92,7 +92,7 @@ fn build_trace(trace_dir: &PathBuf) -> (Arc<dyn TraceReader>, String) {
     // PathId(0) is the sentinel reserved by the CTFS loader.
     db.paths.push(String::new());
     db.paths.push(recorded.clone());
-    db.path_map.insert(recorded.clone(), PathId(1));
+    db.register_path_version(recorded.clone(), PathId(1));
 
     // The Int type — variable `i` resolves to this.
     db.types.push(TypeRecord {

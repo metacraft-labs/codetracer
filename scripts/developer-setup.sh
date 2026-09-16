@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: one-time developer machine setup.
+# One-time developer machine setup, run as `just developer-setup`; it grants a
+# workstation the BPF capabilities bpftrace needs.
 #
-# Run as `just developer-setup`; it grants a workstation the BPF
-# capabilities bpftrace needs. It asserts nothing and has no verdict.
+# It no longer carries the not-a-CI-gate marker. What it asserts now is the
+# freshness refusal below — a `ct` older than the Nim it is compiled from is not
+# installed — and `ci/test/stale-artefact-guards-test.sh` (run by `lint-bash`)
+# EXECUTES that refusal, so the file is reachable from CI and
+# `shell-gate-coverage.sh` fails a file that is both reachable and declared
+# unwired. Nothing else here checks anything.
 # scripts/developer-setup.sh — One-time developer machine setup for CodeTracer
 #
 # Usage:
@@ -64,12 +69,46 @@
 
 set -euo pipefail
 
-CT_BIN="src/build-debug/bin/ct"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The repository's one spelling of "this artefact must be current with respect
+# to its sources"; see the library's own header for why an install script
+# shares a file with the doc captures.
+# Read by the library; every diagnostic is prefixed with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="developer-setup"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/docs/deep-review-capture-lib.sh"
+
+# THE MESSAGE NAMED THE CONDITION THE GUARD COULD NOT DETECT.
+#
+# `[ ! -f "$CT_BIN" ]` -> "Please run 'just build-once' first." Existence
+# answers "did anyone ever run it", and the sentence underneath asks for
+# something else entirely: that it was run SINCE the sources changed. Any
+# `just build-once` from any branch at any time in the past satisfies the test
+# forever, because nothing deletes `src/build-debug/bin/ct`.
+#
+# And what happens next is not a report. `ct install` writes a PATH entry and a
+# desktop file, and Phase 2 copies THIS binary to
+# `/usr/local/lib/codetracer/`, chowns it root:codetracer-bpf and grants it
+# cap_bpf,cap_perfmon,cap_dac_read_search. A stale core does not merely get
+# used once — it gets INSTALLED onto the workstation, with capabilities, and
+# stays there being the `ct` on the developer's PATH until someone reruns this.
+#
+# Sources come from `git ls-files`, so the ignored build trees are not in the
+# list; the path is absolute so the check no longer depends on the caller's cwd
+# either, which the relative `CT_BIN` above silently did.
+CT_BIN="$ROOT_DIR/src/build-debug/bin/ct"
 if [ ! -f "$CT_BIN" ]; then
 	echo "ct binary not found at $CT_BIN"
 	echo "Please run 'just build-once' first."
 	exit 1
 fi
+ctdr_require_tracked_sources_not_newer "build" "the ct binary" \
+	"$CT_BIN" \
+	"This script installs THAT binary: 'ct install' puts it on your PATH, and Phase 2 copies it to /usr/local/lib/codetracer/ with cap_bpf,cap_perfmon,cap_dac_read_search. An out-of-date core would be installed and granted capabilities. Rebuild with: just build-once" \
+	"$ROOT_DIR" 'src/*.nim' 'src/*.nims' 'config.nims'
 
 echo "=== CodeTracer Developer Machine Setup ==="
 echo

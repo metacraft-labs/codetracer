@@ -291,12 +291,22 @@
     // Matches the hover overlay z-index (101) for identical visual behaviour.
     z-index: 101
 
+// The bottom dock's resize handle: a 4px #1b1b1b bar along the dock's top
+// edge (`.auto-hide-docked-resize-handle-bottom` below).  It is drawn inside the
+// dock, so the panel's visible top edge is this far below the dock's own.
+DOCK_BOTTOM_HANDLE_SIZE = 4px
+
 #auto-hide-docked-bottom-content
   flex: 1
   overflow: auto
   min-width: 0
   position: relative
-  padding-top: 4px  // reserve space for the resize handle
+  // The handle, then PANEL_INSET (8px, button.styl): a docked panel's first row
+  // starts 8px below its VISIBLE top edge — the bottom of the handle — like
+  // every panel in the layout (`.lm_content`, golden_layout.styl).  With the
+  // handle counted inside the 8px, Find in Files' search field and the
+  // Requests filters sat only 4px under it.
+  padding-top: "calc(%s + %s)" % (DOCK_BOTTOM_HANDLE_SIZE PANEL_INSET)
 
 // Bottom resize handle — horizontal bar on the TOP edge, drag up to expand.
 // Inherits base styles from .auto-hide-docked-resize-handle; overrides for
@@ -306,7 +316,7 @@
   left: 0
   right: 0
   bottom: auto
-  height: 4px
+  height: DOCK_BOTTOM_HANDLE_SIZE
   width: auto
   cursor: ns-resize
 
@@ -574,6 +584,54 @@
 #auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child::before
   display: none
 
+// ...and with no curve there, the tab's left corners have nothing to round
+// against: it sits flush with the panel's own left edge, and the upward bridge
+// shadow already joins the two into one shape.  Rounding them only puts a notch
+// in an edge that should run straight down from the panel into the tab, so
+// square the left side and leave the right corners as they are.
+#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child
+  // Top-left only.  That corner is where the tab meets the panel above, and the
+  // bridge shadow already fuses the two, so a curve there notches an edge that
+  // should run straight down.  The bottom-left is the opposite case: nothing
+  // continues past it, the tab simply ends, so it keeps the 0.36em every other
+  // corner has.
+  border-top-left-radius: 0
+
+// The panel's own bottom-left corner is the last thing rounding that edge.  With
+// the first tab active the two are one shape, squared down the left side, so a
+// curve here only reintroduces the notch the rule above just removed.
+//
+// Scoped with :has() to that case alone: with any later tab active the first tab
+// is an inactive pill sitting apart from the panel, and the panel's corner
+// should still curve.  The strip lives in `#status-base` and the panel under
+// `#root-container`, so `body` is the nearest shared ancestor to hang this on.
+//
+// The `.ct-docked-outline` SVG reads its corner radii back out of computed
+// style, so the traced line follows this without a second change.
+// Both surfaces that can sit above the tab have to give up the same corner:
+// clicking docks the panel, hovering opens the overlay, and either way the
+// square-topped tab is directly beneath.  `#auto-hide-overlay-body` is listed
+// too because it, not the outer overlay, paints the background and clips to the
+// rounded corners.
+body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
+  #auto-hide-docked-bottom,
+  #auto-hide-overlay.auto-hide-overlay-bottom,
+  #auto-hide-overlay.auto-hide-overlay-bottom #auto-hide-overlay-body
+    border-bottom-left-radius: 0
+
+// The first tab's bottom-left is where the strip's left edge finishes: the tab
+// is flush with the window inset and nothing continues past that corner, so it
+// carries a wider 0.5rem than the 0.36em the other corners use.
+//
+// `rem`, not `em`: 0.36em resolves against whatever font-size the tab inherits
+// and lands on 5.76px at 16px — a quarter-pixel short of the 6px it reads as,
+// so the curve antialiases instead of coming out crisp.  0.5rem is 8px exactly,
+// on a whole pixel, and does not move with the strip's type size.
+//
+// Not scoped to `.active`: this corner looks the same docked, hovered or idle.
+#auto-hide-bottom-strip .auto-hide-strip-tab:first-child
+  border-bottom-left-radius: 0.5rem
+
 // ---------------------------------------------------------------------------
 // Tab label span — carries the text rotation so the tab div stays un-rotated.
 // ---------------------------------------------------------------------------
@@ -714,14 +772,14 @@
 
 // Left overlay: flush with the strip's right edge (2em from screen left).
 #auto-hide-overlay.auto-hide-overlay-left
-  top: 2.125em  // matches #root-container top: 2.125em (the caption bar height)
+  top: CAPTION_BAR_HEIGHT  // flush below the caption bar, like #root-container
   left: 2em
   bottom: 2rem  // stop above the bottom tab strip (2rem)
   width: 360px
 
 // Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
-  top: 2.125em
+  top: CAPTION_BAR_HEIGHT
   right: 2em
   bottom: 2rem
   width: 360px
@@ -824,7 +882,13 @@
 #auto-hide-overlay-content
   flex: 1
   overflow: auto
-  padding: 0
+  // PANEL_INSET (8px, button.styl) above the panel's first row — the same gap
+  // the panel gets docked (`#auto-hide-docked-bottom-content`) or in the layout
+  // (`.lm_content`).  The panels carry no top padding of their own, so without
+  // this a panel previewed on hover had its first row against the body's top
+  // edge.  The resize handle is outside the body (see the margins above), so
+  // unlike the dock there is nothing to add for it.
+  padding: PANEL_INSET 0 0
   position: relative  // Anchor for the floating pin button
 
 // ---------------------------------------------------------------------------
@@ -859,6 +923,19 @@
   &:hover
     background-color: colors-ui-surface-primary-secondary-hover
     opacity: 1.0
+
+  // The crossed-out pin — the same file and 12px size as
+  // `.auto-hide-strip-tab-unpin` above, so "unpin" has one icon everywhere.
+  // It replaces a ✕ glyph that read as "close" (see ui/auto_hide.nim).
+  &::before
+    content: ''
+    display: block
+    width: 0.75rem
+    height: 0.75rem
+    background-image: url('../../public/resources/shared/sidebar_unpin.svg')
+    background-size: contain
+    background-repeat: no-repeat
+    background-position: center
 
 // ---------------------------------------------------------------------------
 // Collapsed-mode icon zone — rendered in the status bar.
@@ -954,7 +1031,7 @@
   writing-mode: vertical-lr
   text-orientation: mixed
   transform: rotate(180deg)
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
   font-size: 12px
   font-weight: 600
   color: colors-ui-text-primary-label

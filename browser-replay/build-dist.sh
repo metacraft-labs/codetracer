@@ -20,6 +20,20 @@ if [ ! -f "src/db-backend/wasm-testing/pkg/db_backend_bg.wasm" ]; then
 	exit 1
 fi
 
+# `build_wasm.sh` above pipes through `tail -5`, so this script never sees its
+# exit status. "A .wasm file is present" therefore proves only that SOME build
+# once succeeded here — which, on a dev machine where dist/ and pkg/ are both
+# gitignored and survive every branch switch, can be a build from another
+# branch entirely. Assert the engine is this tree's before bundling it for
+# deployment.
+# shellcheck source=ci/lib/wasm-engine-freshness.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$REPO_ROOT/ci/lib/wasm-engine-freshness.sh"
+wasm_engine_assert_fresh "$REPO_ROOT" || {
+	echo "ERROR: refusing to bundle an engine that is not this tree's (see above)" >&2
+	exit 1
+}
+
 # Step 2: Create dist directory
 echo ">>> Creating dist directory..."
 rm -rf "$DIST_DIR"
@@ -34,6 +48,11 @@ cp "$SCRIPT_DIR/app/transport-test.html" "$DIST_DIR/"
 # Step 4: Copy WASM module
 cp "$REPO_ROOT/src/db-backend/wasm-testing/pkg/db_backend.js" "$DIST_DIR/pkg/"
 cp "$REPO_ROOT/src/db-backend/wasm-testing/pkg/db_backend_bg.wasm" "$DIST_DIR/pkg/"
+# Carry the build stamp with the engine, so a reader of dist/ can tell which
+# sources the bundle it is holding was built from. Without it, dist/pkg is a
+# second untracked copy of the artefact with even less provenance than the
+# first.
+cp "$REPO_ROOT/src/db-backend/wasm-testing/pkg/.engine-stamp" "$DIST_DIR/pkg/"
 
 # Step 5: Create a sample traces directory
 mkdir -p "$DIST_DIR/traces"
@@ -96,9 +115,9 @@ echo "  WASM size: $WASM_SIZE bytes"
 echo "  Total size: $TOTAL_SIZE"
 echo ""
 echo "  Files:"
-find "$DIST_DIR" -type f | sort | while read f; do
+find "$DIST_DIR" -type f | sort | while read -r f; do
 	SIZE=$(wc -c <"$f" | tr -d ' ')
-	echo "    $(echo "$f" | sed "s|$DIST_DIR/||") ($SIZE bytes)"
+	echo "    ${f#"$DIST_DIR"/} ($SIZE bytes)"
 done
 echo ""
 echo "  To serve locally:"

@@ -47,11 +47,61 @@ let
   # the fixed-output hash - differs per build platform. Select the hash for the
   # host system; the Linux hash is what CI / the binary cache is built against.
   #
-  # To add a new platform: build once, take the ``got:`` hash from the
-  # "hash mismatch" error, and add it below.
+  # To add a new platform, or to refresh a stale one: you cannot simply build
+  # and wait for a "hash mismatch" error. ``cacheDrv`` is a *fixed-output*
+  # derivation, so its store path is a function of the hash written here, not
+  # of ``yarn.lock``. If the value below is a hash that was ever valid, Nix
+  # finds that exact path in the binary cache, substitutes it, and NEVER RUNS
+  # THE BUILDER -- so no mismatch is ever reported. What you get instead is a
+  # pile of ``YN0056: Cache entry required but missing`` from ``yarn install``
+  # further down the build, naming the packages whose lockfile entries changed.
+  #
+  # To force the real hash out, first invalidate the entry deliberately:
+  #
+  #   "x86_64-linux" = sentinelHash;   # see below
+  #
+  # No substitute can exist for the sentinel path, so the builder runs for
+  # real and the "hash mismatch" error reports the true ``got:`` value. Paste
+  # that in. (``nix-build --rebuild`` is not a substitute for this: it needs a
+  # local realisation of the path to compare against.)
+  #
+  # NOTE: any change to ``yarn.lock`` invalidates BOTH hashes below, so they
+  # have to be refreshed in the same commit range as the lockfile change or
+  # every nix build fails with a hash mismatch. Running *any* yarn command in
+  # this directory also makes the nixify plugin rewrite this file and DELETE
+  # this whole per-system block, collapsing it to a single ``outputHash`` for
+  # whichever machine happened to run yarn -- see commit 2c4b0a76, which had
+  # to restore it once already. It did it five more times while the security
+  # bumps in this branch were being prepared. Always check
+  # ``git diff node-packages/yarn-project.nix`` after invoking yarn.
+  # A hash that is valid in form but cannot match any real output, so the
+  # fixed-output store path it names has no substitute anywhere. Assigning it
+  # to a platform below forces that platform's cache to be built for real, and
+  # the resulting "hash mismatch" error prints the true ``got:`` value.
+  sentinelHash =
+    "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
   cacheOutputHashes = {
-    "x86_64-linux" = "sha512-2guUBYTPk7MUt9DfamxnVESTpzx06r7rPnl2GGenNdrXqw3wgIfMZ4dvGHubyj4Lj+m2XVtQNow9hRjUz0cCsg==";
-    "aarch64-darwin" = "sha512-mt7iF+4GNu9oGd42DeCMddB5bcemUYNdzj8g1gEKgzSIfGemBZxJCNC/u0k6kD1xwg7OfOwksHXWq88JBqA56A==";
+    # Refreshed for the ``electron-rebuild@3.2.9`` -> ``@electron/rebuild@4.2.0``
+    # swap that drops ``tar@6.2.1`` (GHSA-23hp-3jrh-7fpw). That lockfile change
+    # invalidated both hashes below, exactly as the NOTE above warns.
+    #
+    # Forced with ``sentinelHash`` rather than by waiting for a mismatch, per the
+    # procedure above -- the previous values were real, so Nix would have
+    # substituted the stale caches from the binary cache and never run the
+    # builder, surfacing as ``YN0056: Cache entry required but missing``.
+    # Measured on CI (run 34337422212) after the sentinel forced a real build of
+    # yarn-cache.drv on x86_64-linux -- no Linux builder is configured on the
+    # machine this branch was prepared on, so this value could not be obtained
+    # locally. Three independent jobs -- test-non-gui (nixos, eph-linux-x64-g1),
+    # reprobuild-linux-smoke, and ct-test release gate (M16 provider matrix) --
+    # each built /nix/store/jkmf1s93nsmg5n2hyxc9hggwyj044yqv-yarn-cache.drv and
+    # reported this identical ``got:`` value.
+    "x86_64-linux" = "sha512-YOh4Lqjn3A2V2gYD+sspl5ZVOZJ+SCRPLHwp+DD03wq9t4eHQv2kXEv6aqhYW4ybT5itznWOe6E1SxfFDC57sg==";
+    # Measured locally on aarch64-darwin: the sentinel above forced a real build
+    # of yarn-cache.drv (no substitute can exist for it), and the mismatch
+    # reported this ``got:``. Re-pinned and rebuilt to confirm it is stable.
+    "aarch64-darwin" = "sha512-rJ3Oka4DrMUZPVorCFF5usgDOBwQaXM/6AfzvVohcMiR7qB1EkYkr+hCNn3AVu+9Hl4TAZ472TBFhfSwxE8XJw==";
   };
 
   cacheOutputHash =

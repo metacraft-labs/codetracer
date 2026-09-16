@@ -299,7 +299,7 @@ fn continue_to_an_early_breakpoint_costs_what_it_walked() {
     let reader = Arc::new(browser_reader(&ct));
     let probe = reader.clone();
     assert!(
-        probe.path_id_for(SRC).is_some(),
+        probe.path_id_for_first_version(SRC).is_some(),
         "the source path must be interned, or the breakpoint below cannot resolve"
     );
     let mut session = MaterializedReplaySession::new(reader);

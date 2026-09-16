@@ -619,6 +619,80 @@ run_guard "${APP}"
 expect_line "PASSED: every Mach-O dependency resolves inside the bundle" \
 	"correct depth is accepted"
 
+# The shape Electron actually ships, which the first version of the Mach-O
+# reader called broken. `Electron Framework` carries one rpath that does NOT
+# reach Squirrel, and `Squirrel` carries no rpath at all -- yet both load,
+# because dyld searches the rpaths of the whole LOADER CHAIN and the main
+# executable contributes `@executable_path/../Frameworks`.
+#
+# Verified against the real runtime rather than assumed: with all three
+# frameworks staged, `Electron --version` prints v44.1.1 and
+# DYLD_PRINT_LIBRARIES shows Squirrel, ReactiveObjC and Mantle loading out of
+# Contents/Frameworks; with Mantle.framework removed dyld aborts and lists
+# exactly the two candidate paths this fixture models.
+make_chain_bundle() {
+	local app="${FIX}/Chain.app"
+	rm -rf "${app}"
+	local fw="${app}/Contents/Frameworks"
+	mkdir -p "${app}/Contents/MacOS" \
+		"${fw}/Electron Framework.framework/Versions/A" \
+		"${fw}/Squirrel.framework/Versions/A" \
+		"${fw}/Mantle.framework/Versions/A"
+
+	python3 "${FIX}/mkmacho.py" "${fw}/Mantle.framework/Versions/A/Mantle" \
+		dylib "id:@rpath/Mantle.framework/Mantle"
+	# No LC_RPATH at all: Squirrel reaches Mantle only through the chain.
+	python3 "${FIX}/mkmacho.py" "${fw}/Squirrel.framework/Versions/A/Squirrel" \
+		dylib "id:@rpath/Squirrel.framework/Squirrel" \
+		"dep:@rpath/Mantle.framework/Mantle"
+	# One rpath, and it does not reach the siblings in Contents/Frameworks.
+	python3 "${FIX}/mkmacho.py" \
+		"${fw}/Electron Framework.framework/Versions/A/Electron Framework" \
+		dylib "id:@rpath/Electron Framework.framework/Versions/A/Electron Framework" \
+		"rpath:@loader_path/Libraries" \
+		"dep:@rpath/Squirrel.framework/Squirrel"
+	python3 "${FIX}/mkmacho.py" "${app}/Contents/MacOS/Electron" \
+		exec "rpath:@executable_path/../Frameworks" \
+		"dep:@rpath/Electron Framework.framework/Versions/A/Electron Framework"
+	chmod +x "${app}/Contents/MacOS/Electron"
+
+	# The framework symlinks the real bundle has: a dependency resolves through
+	# `Squirrel.framework/Squirrel`, while the image that was walked is the real
+	# file behind it in `Versions/A`.
+	local f
+	for f in "Electron Framework" Squirrel Mantle; do
+		ln -s A "${fw}/${f}.framework/Versions/Current"
+		ln -s "Versions/Current/${f}" "${fw}/${f}.framework/${f}"
+	done
+	echo "${app}"
+}
+
+echo
+echo "--- arm: an @rpath that resolves only through the LOADER CHAIN is accepted"
+make_fixture
+macho_writer
+APP="$(make_chain_bundle)"
+run_guard "${APP}"
+expect_line "PASSED: every Mach-O dependency resolves inside the bundle" \
+	"a chain-resolved @rpath is accepted, as dyld resolves it"
+expect_no_line "@rpath/Mantle.framework/Mantle" \
+	"the rpath-less dylib's dependency is not reported as unresolvable"
+
+echo
+echo "--- arm: the same chain with Mantle.framework DELETED is refused"
+# The falsification for the arm above. If inheriting the chain's rpaths made
+# `@rpath` resolve unconditionally, this would pass and the widened rule would
+# be worth nothing. The framework deleted here is one the real bundle loads.
+make_fixture
+macho_writer
+APP="$(make_chain_bundle)"
+rm -rf "${APP}/Contents/Frameworks/Mantle.framework"
+run_guard "${APP}"
+expect_line "FAILED: the bundle has Mach-O load commands that do not resolve" \
+	"a framework that is genuinely absent is still refused"
+expect_line "@rpath/Mantle.framework/Mantle" \
+	"the refusal names the missing framework"
+
 echo
 echo "--- arm: an absolute /nix/store load command WHOSE TARGET EXISTS HERE"
 # The Mach-O twin of the symlink arm above, and the same trap: the builder and

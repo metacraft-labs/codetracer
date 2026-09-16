@@ -746,14 +746,16 @@ package codeTracer:
                      extraInputsValue: openArray[string] = [];
                      extraOutputsValue: openArray[string] = [];
                      afterValue: openArray[BuildActionDef] = [];
-                     cacheableValue = true): BuildActionDef =
+                     cacheableValue = true;
+                     extraEnvValue: openArray[(string, string)] = []): BuildActionDef =
       shell(
         command = commandValue,
         actionId = actionIdValue,
         extraInputs = extraInputsValue,
         extraOutputs = extraOutputsValue,
         after = afterValue,
-        cacheable = cacheableValue)
+        cacheable = cacheableValue,
+        extraEnv = extraEnvValue)
 
     let generatedConfigHeader = fs.writeText(
       output = "build/generated/ct_config.h",
@@ -1079,16 +1081,47 @@ package codeTracer:
     # checkout, worktree and sandboxed build on the machine share a single
     # object directory keyed only by target name, so two builds of the same
     # target from different source roots overwrote each other's ``.o`` files
-    # and produced undefined-reference link failures. Honouring ``$TMPDIR``
-    # lets a caller that already scopes its temp directory (test harnesses,
-    # CI runners, sandboxes) scope the nimcache with it. The nimcache path is
+    # and produced undefined-reference link failures. The nimcache path is
     # consumed raw by nim.exe (not via bash), so backslash mixing is OK.
-    let ctNimCacheRoot =
+    #
+    # HONOURING ``$TMPDIR`` WAS NOT ENOUGH, and the paragraph above used to
+    # stop there and claim the defect fixed. ``$TMPDIR`` is per-USER on macOS
+    # and usually unset on Linux, so on the machine this is developed on it
+    # resolves to one directory for every checkout — which is the collision it
+    # was supposed to end, with an extra step. It helps only the callers that
+    # already scope their own temp directory (sandboxes, some CI runners), and
+    # those are not the common case.
+    #
+    # So the checkout itself is in the key. ``getCurrentDir()`` is the source
+    # root the build is running in — the same discrimination
+    # ``ci/lib/nim-cache-root.sh`` makes for the shell gates, which see the
+    # identical problem from the identical cause.
+    #
+    # FNV-1a WRITTEN OUT RATHER THAN ``std/hashes``: this value names a
+    # directory that must be found again on the next build, and ``hash()``
+    # offers no cross-version stability guarantee — a Nim upgrade would
+    # silently orphan every cache. This is fixed by definition. It is not a
+    # security boundary and does not need to be; it needs to differ when the
+    # path differs.
+    let ctNimCacheKey = block:
+      var h: uint64 = 0xcbf29ce484222325'u64
+      for ch in getCurrentDir():
+        h = h xor uint64(ord(ch))
+        h = h * 0x100000001b3'u64
+      toHex(h, 16).toLowerAscii()
+
+    let ctNimCacheBase =
       when defined(windows):
         (getEnv("TEMP") / "ct-nim-cache").replace('\\', '/')
       else:
         (if getEnv("TMPDIR").len > 0: getEnv("TMPDIR") else: "/tmp") /
           "ct-nim-cache"
+
+    # The basename is kept alongside the digest only so that a human reading
+    # the directory listing can tell the checkouts apart; the digest is what
+    # makes them distinct.
+    let ctNimCacheRoot =
+      ctNimCacheBase / (getCurrentDir().lastPathPart & "-" & ctNimCacheKey)
 
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(
@@ -1623,6 +1656,260 @@ package codeTracer:
       after = @[buildCDir])
     target("c-sudoku-object-with-generated-header",
       cSudokuObjectWithGeneratedHeader)
+
+    # ---------------------------------------------------------------------
+    # CodeTracer's self-contained gate scripts as build-graph edges.
+    #
+    # WHY. Every gate below is reached today only through a `just` recipe
+    # and a CI workflow step, so reprobuild cannot see any of them: it can
+    # neither cache a green verdict nor skip a gate whose inputs did not
+    # move. A full `repro build` of this project schedules 44 actions and
+    # not one of them is a test. One edge per gate is the smallest change
+    # that fixes that, and per-gate is the granularity that pays: the
+    # engine monitors each script's reads, so editing `flake.lock` re-runs
+    # exactly the gates that read it and leaves the rest cached. It is the
+    # same property the `docs-book` edges below were declared for -- "a
+    # tracked graph input instead of a side effect of one shell script".
+    #
+    # NON-DESTRUCTIVE, DELIBERATELY. The scripts stay authoritative and
+    # unmodified: the edge runs the same `bash <script>` the recipe runs,
+    # from the same working directory, and the process's exit status is
+    # the verdict -- so the node cannot disagree with the script it
+    # mirrors. `ci/test/shell-gate-coverage.sh` measures reachability from
+    # CI WORKFLOW LANES (workflows, and the `just` recipes those lanes
+    # call), so these edges neither satisfy that guard nor disturb it: a
+    # gate wired here is still required to be wired there.
+    #
+    # THE COLLECTION SPLIT follows reprobuild-specs/Build-Graph-Collections
+    # .md, which distinguishes `test` ("every test-binary run-edge in the
+    # project") from `lint` ("static-analysis and quality-gate checks ...
+    # lint failures often gate merge but do not exercise behavior"). The
+    # assertion suites drive a routine through pass AND failure arms and
+    # count what they asserted, so they are tests; the consistency and
+    # coverage guards compare declarations across the tree and exercise no
+    # behaviour, so they are lint.
+    #
+    # NEITHER COLLECTION IS REACHABLE FROM A BARE `repro build`. The
+    # default build action is the `codetracer` aggregate declared above,
+    # and every id here is added to `auxiliaryActionIds` so the
+    # source-subset fallback at the bottom of this file does not schedule
+    # them either. That is what Build-Graph-Collections.md's Generic Build
+    # Exclude Rules require: these edges fire only when their collection
+    # (or the edge's own target name) is selected explicitly.
+    #
+    # SELECT THEM AS `repro build .#test` / `repro build .#lint`. The
+    # fragment form is REQUIRED for `test`, not decoration: this repo has a
+    # `test/` directory, and the CLI's path-vs-name classifier resolves a
+    # bare selector that names an existing on-disk path as that path (see
+    # Build-Graph-Collections.md §"CLI Resolution" rule 1). `lint` has no
+    # such directory today, but is spelled the same way so the two lines
+    # cannot drift apart the day one is added. Each edge also carries its
+    # own `target(...)` name so a single gate can be run on its own.
+    #
+    # NO EXISTENCE GUARD, ON PURPOSE. A missing gate script must be a loud
+    # failure naming the path, not an edge that silently disappears from
+    # the graph -- the exact failure mode `ci/test/test-lane-coverage.sh`
+    # and `ci/test/shell-gate-coverage.sh` were both written to prevent.
+    #
+    # `cacheable = true` under `ctShell`'s default automatic-monitor
+    # policy: the engine records every file each gate actually reads, so a
+    # verdict is keyed on observed evidence rather than on the declared
+    # list. The declared inputs are the script itself plus the data files
+    # it is pointless to rediscover; they make the edge order correctly
+    # before any monitored run of it exists.
+    #
+    # PYTHONHASHSEED=0 ON EVERY GATE. NOT A BLESSING -- THE OPPOSITE OF ONE.
+    #
+    # Five of these gates run `python3`, and a bare CPython start reads the
+    # OS entropy pool once to seed `hash()` for `str`/`bytes`. Measured, on
+    # this build graph: `python3 -c 'print(1)'` emits one io-mon
+    # `non-deterministic` record; `PYTHONHASHSEED=0 python3 -c 'print(1)'`
+    # emits NONE. The engine graded the former `unblessed-entropy` and
+    # withheld the capture, so those five gates could never cache.
+    #
+    # The obvious-looking remedy -- adding `python3` to the per-image
+    # entropy blessing table next to `mktemp` and `git` -- WOULD BE
+    # UNSOUND, and this comment exists so the next reader does not reach
+    # for it. A blessing says "this tool's entropy cannot reach its
+    # output". That is true of `mktemp` (the random suffix names a file
+    # nobody's verdict depends on) and of `git` (its entropy seeds
+    # internal hashing, not what it prints). It is FALSE of the hash seed:
+    # the seed decides `set` and `dict` iteration order, which is exactly
+    # the kind of thing a script prints, sorts by, or picks a "first"
+    # element out of. Entropy that genuinely can reach output must not be
+    # waived.
+    #
+    # So the nondeterminism is REMOVED instead of waived. Pinning the seed
+    # makes CPython skip the entropy read altogether -- there is no record
+    # left to grade -- and simultaneously makes the iteration order the
+    # gates observe a function of the recipe rather than of the run. The
+    # cache key improves because the RUN became deterministic, not because
+    # the evidence was silenced. That distinction is the whole rule:
+    # uncacheable is safe, falsely-cacheable is not.
+    #
+    # ON ALL TEN, NOT ONLY THE FIVE THAT RUN PYTHON TODAY. The property
+    # being asserted is about the family -- "no gate's verdict depends on
+    # CPython's hash seed" -- not about today's call sites. A gate that
+    # grows a `python3` line later would otherwise silently stop caching,
+    # and the person who added the line would have no reason to connect
+    # the two. Declaring it costs nothing where python is never spawned:
+    # `shell`'s `extraEnv` folds the (name, value) pair into the action's
+    # weak fingerprint, and a constant pair shifts every key once and then
+    # never again.
+    #
+    # DECLARED, not merely exported, and that matters twice over: a
+    # declared variable REPLACES the inherited one, so a developer with
+    # `PYTHONHASHSEED` set in their shell gets the same gate run as CI;
+    # and because it is declared it is part of the key, so a future change
+    # of this value cannot serve a result computed under the old one.
+    const GateEnv = [("PYTHONHASHSEED", "0")]
+    let gateFlakePinAlignment = ctShell(
+      actionIdValue = "codetracer.gate.flake-pin-alignment",
+      commandValue = "bash ci/test/flake-pin-alignment-test.sh",
+      # A CONTRACT SUITE, so its inputs are itself and the guard it drives
+      # over fixtures -- NOT this repo's `flake.nix` / `flake.lock`, which it
+      # never reads. Declaring those would have made every lock bump re-run a
+      # suite whose verdict cannot depend on it.
+      extraInputsValue = @[
+        "ci/test/flake-pin-alignment-test.sh",
+        "scripts/test-flake-pin-alignment.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-flake-pin-alignment", gateFlakePinAlignment)
+
+    let gatePythonVersionAlignment = ctShell(
+      actionIdValue = "codetracer.gate.python-version-alignment",
+      commandValue = "bash ci/test/python-version-alignment-test.sh",
+      extraInputsValue = @[
+        "ci/test/python-version-alignment-test.sh",
+        "scripts/test-python-version-alignment.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-python-version-alignment", gatePythonVersionAlignment)
+
+    let gateRequireRuntimeAssets = ctShell(
+      actionIdValue = "codetracer.gate.require-runtime-assets",
+      commandValue = "bash ci/test/require-runtime-assets-test.sh",
+      extraInputsValue = @[
+        "ci/test/require-runtime-assets-test.sh",
+        "scripts/require-runtime-assets.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-require-runtime-assets", gateRequireRuntimeAssets)
+
+    let gateTestLaneReport = ctShell(
+      actionIdValue = "codetracer.gate.test-lane-report",
+      commandValue = "bash ci/test/test-lane-report-test.sh",
+      extraInputsValue = @[
+        "ci/test/test-lane-report-test.sh", "ci/lib/test-lane-report.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-test-lane-report", gateTestLaneReport)
+
+    let gateTestLaneCoverageContract = ctShell(
+      actionIdValue = "codetracer.gate.test-lane-coverage-contract",
+      commandValue = "bash ci/test/test-lane-coverage-test.sh",
+      extraInputsValue = @[
+        "ci/test/test-lane-coverage-test.sh", "ci/test/test-lane-coverage.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-test-lane-coverage-contract", gateTestLaneCoverageContract)
+
+    let gateSiblingPins = ctShell(
+      actionIdValue = "codetracer.gate.sibling-pins",
+      commandValue = "bash ci/test/sibling-pins-test.sh",
+      extraInputsValue = @[
+        "ci/test/sibling-pins-test.sh", "scripts/sibling-pins.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-sibling-pins", gateSiblingPins)
+
+    let gateKnownFailures = ctShell(
+      actionIdValue = "codetracer.gate.known-failures",
+      commandValue = "bash ci/test/known-failures-gate.sh",
+      # The ledger this drives is a fixture the gate writes into a temp dir;
+      # `ci/lib/known-test-failures.tsv` is deliberately NOT declared because
+      # the gate never reads it.
+      extraInputsValue = @[
+        "ci/test/known-failures-gate.sh", "ci/lib/known_failures.py"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-known-failures", gateKnownFailures)
+
+    # THE ONE GATE THAT STILL CANNOT PUBLISH, AND WHY -- so the next reader
+    # measures something else instead of re-deriving this.
+    #
+    # `run_port_busy_scenario` is a real TCP test: a `python3` holder binds and
+    # listens on 127.0.0.1:<port>, and `scripts/build.sh`'s OWN LiveReload
+    # preflight -- `exec 3<>/dev/tcp/127.0.0.1/$port`, the behaviour the (H)
+    # contracts exist to pin -- connects to it. Measured: three successful
+    # AF_INET connects, one `ipc peer outside monitored tree pid=... peer=0`
+    # event loss, `mcIncomplete`, capture withheld.
+    #
+    # `peer=0` is not a gap io-mon could close by trying harder. `SO_PEERCRED`
+    # returns a pid for AF_UNIX and nothing for INET, and BOTH layers treat
+    # that as final on purpose: io-mon's exemption requires `peer != 0`, and
+    # repro_build_engine's `resolvePeerAttribution` states it as rule 4 -- "a
+    # network peer is therefore unattributable and stays unattributable no
+    # matter what this set contains". Making this gate publish means relaxing
+    # that rule so a connect counts as in-tree on weaker evidence than a
+    # kernel-supplied peer identity. That is the same class of act as blessing
+    # `sh` for entropy, and it is refused here for the same reason:
+    # uncacheable is safe, falsely-cacheable is not.
+    #
+    # The available honest move, if this miss ever costs enough to matter, is
+    # to SPLIT the port-busy scenario into its own `cacheable = false` edge --
+    # which relocates the uncacheable work rather than pretending it is not
+    # there. Not done here; nine of ten is the correct number while the tenth
+    # genuinely talks to a socket.
+    let gateBuildAlignment = ctShell(
+      actionIdValue = "codetracer.gate.build-alignment",
+      commandValue = "bash scripts/test-build-alignment.sh",
+      extraInputsValue = @["scripts/test-build-alignment.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-build-alignment", gateBuildAlignment)
+
+    let gateRustTestCrateCoverage = ctShell(
+      actionIdValue = "codetracer.gate.rust-test-crate-coverage",
+      commandValue = "bash ci/test/rust-test-crate-coverage.sh",
+      extraInputsValue = @[
+        "ci/test/rust-test-crate-coverage.sh",
+        "ci/test/rust-test-crate-coverage.known-dark.txt",
+        "ci/test/rust-test-crate-coverage.fixture.txt"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-rust-test-crate-coverage", gateRustTestCrateCoverage)
+
+    let gateTestLaneCoverage = ctShell(
+      actionIdValue = "codetracer.gate.test-lane-coverage",
+      commandValue = "bash ci/test/test-lane-coverage.sh",
+      extraInputsValue = @[
+        "ci/test/test-lane-coverage.sh", "ci/lib/test-lane-files.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-test-lane-coverage", gateTestLaneCoverage)
+
+    let ctGateTestActions = @[
+      gateFlakePinAlignment,
+      gatePythonVersionAlignment,
+      gateRequireRuntimeAssets,
+      gateTestLaneReport,
+      gateTestLaneCoverageContract,
+      gateSiblingPins,
+      gateKnownFailures]
+    let ctGateLintActions = @[
+      gateBuildAlignment,
+      gateRustTestCrateCoverage,
+      gateTestLaneCoverage]
+
+    for gateAction in ctGateTestActions:
+      auxiliaryActionIds.add(gateAction.id)
+    for gateAction in ctGateLintActions:
+      auxiliaryActionIds.add(gateAction.id)
+
+    discard collect("test", ctGateTestActions)
+    discard collect("lint", ctGateLintActions)
 
     # ---------------------------------------------------------------------
     # Documentation (docs/book-isonim) as build-graph edges.

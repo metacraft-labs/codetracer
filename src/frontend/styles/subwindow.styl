@@ -13,6 +13,9 @@ NOTIFICATION_SUCCESS_COLOR = #22C55E
 MARGIN_RIGHT=15px
 
 @import "generated/fonts"
+// The design tokens (variables only — no rules), so colours here can name
+// them instead of copying hex values.
+@import "generated/index"
 
 body
   font-family Arial, sans-serif
@@ -64,7 +67,7 @@ body
 
 .dialog-content
   color: #f3f3f3
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
   font-size: 28px
   font-style: normal
   font-weight: 500
@@ -81,7 +84,7 @@ body
   margin-bottom 60px
 
 .install-btn
-  background-color #4f46e5
+  background-color colors-brand-500
   color white
   border none
   padding 10px 16px
@@ -90,7 +93,7 @@ body
   font-weight normal
   width 146px
   height: 34px
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
 
 .dismiss-btn
   background-color #3a3a3a
@@ -101,7 +104,7 @@ body
   cursor pointer
   width: 89px
   height: 34px
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
 
 .install-btn:hover
   background-color #7c6efc
@@ -114,7 +117,7 @@ body
   flex-direction column
   gap 8px
   margin-bottom: 32px
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
 
 .dialog-options input[type="checkbox"]
   appearance none
@@ -197,7 +200,7 @@ body
 .dialog-ask-again
   margin-bottom: 0px !important
   color: #ABABAB
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
   font-size: 14px
   font-style: normal
   font-weight: 400
@@ -210,7 +213,7 @@ body
   margin-right: 0px !important
 
 .dialog-install-status
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
   font-size: 22px
   font-style: normal
   font-weight: 400

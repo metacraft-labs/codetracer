@@ -11,15 +11,17 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
 cd "$REPO_ROOT" || exit 1
 
 WASM_TESTING="src/db-backend/wasm-testing"
-PKG="$WASM_TESTING/pkg"
 HOST="$WASM_TESTING/node-host/worker_host.mjs"
 WORKER="$WASM_TESTING/worker.js"
 SRC="src/frontend/viewmodel/tests/e2e/worker_backend_wasm_e2e.nim"
 TRACE="${CT_WORKER_E2E_TRACE:-src/db-backend/tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct}"
-OUT="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/worker-backend-e2e"
+OUT="$(ct_nim_cache_root "${REPO_ROOT}")/worker-backend-e2e"
 
 fail() {
 	echo "FAIL: $*" >&2
@@ -28,15 +30,24 @@ fail() {
 
 echo "=== WorkerBackendService <-> db-backend WASM e2e ==="
 
-for required in "$PKG/db_backend_bg.wasm" "$PKG/db_backend.js" "$WORKER" "$HOST" "$SRC" "$TRACE"; do
-	[ -f "$required" ] || fail "missing required input: $required
-  (the WASM engine is built by src/db-backend/build_wasm.sh; its output
-   lands in $PKG and is not checked in)"
+for required in "$WORKER" "$HOST" "$SRC" "$TRACE"; do
+	[ -f "$required" ] || fail "missing required input: $required"
 done
 
-wasm_bytes=$(wc -c <"$PKG/db_backend_bg.wasm" | tr -d ' ')
-[ "$wasm_bytes" -gt 1000000 ] || fail "$PKG/db_backend_bg.wasm is only ${wasm_bytes} bytes — not a real engine build"
-echo "  engine:  $PKG/db_backend_bg.wasm (${wasm_bytes} bytes)"
+# The engine has to be the one THIS TREE builds, not merely one that exists.
+#
+# This check replaces "the file is there and is over a megabyte", which was not
+# a check of anything. Measured on 2026-09-06 in a worktree at origin/dev
+# (1006b5ab1) carrying the engine built on 2026-08-31 — 42 db-backend commits
+# earlier, a binary 79,304 bytes different from this tree's — this suite
+# reported "19 passed, 0 failed". Nineteen green assertions about a replay
+# engine, none of them about the engine in the tree.
+#
+# `wasm_engine_assert_fresh` prints the reason and the exact rebuild command.
+# shellcheck source=ci/lib/wasm-engine-freshness.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$REPO_ROOT/ci/lib/wasm-engine-freshness.sh"
+wasm_engine_assert_fresh "$REPO_ROOT" || fail "the WASM engine does not match this tree (see above)"
 echo "  trace:   $TRACE"
 
 command -v node >/dev/null 2>&1 || fail "node is not on PATH"

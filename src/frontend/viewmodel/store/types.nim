@@ -16,6 +16,14 @@
 import ../../../common/value_presentation
 export value_presentation
 
+const
+  CodeStateLineSeparator* = " | "
+    ## Joins the line number and the source in the State panel's
+    ## "<line> | <source>" string (``ReplayDataStore.updateCodeStateLine``).
+    ## The view splits on it again to style the two halves separately, and
+    ## the GUI tests look for it in the element's text, so it is declared
+    ## once here rather than spelled at each site.
+
 type
   LoadingState* = enum
     ## Tracks the status of an async data-fetch operation.
@@ -1126,14 +1134,36 @@ type
     original*: string
     modified*: string
 
+  AgentActivityToolCallEntry* = object
+    toolCallId*: string
+    name*: string
+    status*: string  # "in_progress", "completed", "failed"
+
+  AgentActivitySegment* = object
+    ## VM mirror of AgentSegment: one ordered unit (text block or tool call).
+    isToolCall*: bool
+    content*: string
+    toolCallId*: string
+    toolName*: string
+    toolStatus*: string
+
   AgentActivityMessageEntry* = object
     id*: string
     content*: string
     role*: AgentActivityMessageRole
     canceled*: bool
     isLoading*: bool
+    images*: seq[string]
+      ## Base64 data URLs of images the user attached to this message.
     diffs*: seq[AgentActivityDiffEntry]
+    toolCalls*: seq[AgentActivityToolCallEntry]
+    segments*: seq[AgentActivitySegment]
+    thinkingEndedAt*: float
     toolName*: string
+    createdAt*: float
+    duration*: float
+      ## Seconds the agent spent generating this response. Set when stopReason
+      ## arrives; 0.0 while streaming or for user messages.
       ## AA-3 — the tool this row *is*, when it is a tool call rather than
       ## prose.  Empty for everything else, which is what makes it usable as
       ## the "is this a tool call at all" test.
@@ -1349,6 +1379,18 @@ proc `==`*(a, b: AgentActivityDiffEntry): bool {.noSideEffect.} =
     a.original == b.original and
     a.modified == b.modified
 
+proc `==`*(a, b: AgentActivityToolCallEntry): bool {.noSideEffect.} =
+  a.toolCallId == b.toolCallId and
+    a.name == b.name and
+    a.status == b.status
+
+proc `==`*(a, b: AgentActivitySegment): bool {.noSideEffect.} =
+  a.isToolCall == b.isToolCall and
+    a.content == b.content and
+    a.toolCallId == b.toolCallId and
+    a.toolName == b.toolName and
+    a.toolStatus == b.toolStatus
+
 proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
   a.id == b.id and
     a.content == b.content and
@@ -1356,6 +1398,9 @@ proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
     a.canceled == b.canceled and
     a.isLoading == b.isLoading and
     a.diffs == b.diffs and
+    a.toolCalls == b.toolCalls and
+    a.segments == b.segments and
+    a.thinkingEndedAt == b.thinkingEndedAt and
     a.toolName == b.toolName and
     a.toolCallId == b.toolCallId and
     a.status == b.status

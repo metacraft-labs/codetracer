@@ -1500,9 +1500,58 @@ impl BackendManager {
 
                 // Fire-and-forget requests: silently consume the backend
                 // response without forwarding anything to the client.
-                // This is used for setBreakpoints/setDataBreakpoints
-                // commands whose results the client does not need.
+                // This is used for setDataBreakpoints commands whose
+                // results the client does not need.
                 if pending.kind == PendingPyRequestKind::FireAndForget {
+                    return;
+                }
+
+                // `ct/py-add-breakpoint`: the backend's per-line
+                // `verified` flag decides whether this succeeded, and it
+                // is handled here rather than in the formatter table
+                // below because a refusal also has to be rolled back out
+                // of the daemon's own breakpoint table.
+                if let PendingPyRequestKind::AddBreakpoint {
+                    trace_path,
+                    bp_id,
+                    index,
+                } = &pending.kind
+                {
+                    let (success, body_or_error) =
+                        python_bridge::format_add_breakpoint_response(msg, *index, *bp_id);
+
+                    if !success {
+                        // Drop the breakpoint the backend refused, so it
+                        // is not re-sent with every subsequent add for
+                        // this file — and so a later `remove_breakpoint`
+                        // cannot be answered for an id that never bound.
+                        if let Some(ds) = self.daemon_state.as_mut() {
+                            ds.py_bridge
+                                .breakpoint_state_mut(trace_path)
+                                .forget_breakpoint(*bp_id);
+                        }
+                    }
+
+                    let py_response = if success {
+                        serde_json::json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": true,
+                            "command": pending.response_command,
+                            "body": body_or_error,
+                        })
+                    } else {
+                        serde_json::json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": false,
+                            "command": pending.response_command,
+                            "message": body_or_error.get("message")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown error"),
+                        })
+                    };
+                    self.send_to_client(pending.client_id, py_response);
                     return;
                 }
 
@@ -1549,8 +1598,9 @@ impl BackendManager {
                         // the backend's history update.
                         python_bridge::format_resolve_variable_step_response(msg, &pending.expression)
                     }
-                    PendingPyRequestKind::FireAndForget => {
-                        // Already handled above; unreachable.
+                    PendingPyRequestKind::AddBreakpoint { .. }
+                    | PendingPyRequestKind::FireAndForget => {
+                        // Both are answered above; unreachable.
                         return;
                     }
                 };
@@ -2426,6 +2476,7 @@ impl BackendManager {
                     "ct/py-read-source" => self.handle_py_read_source(seq, args).await,
                     "ct/py-processes" => self.handle_py_processes(seq, args).await,
                     "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
+                    "ct/py-origin-chain" => self.handle_py_origin_chain(seq, args).await,
                     "ct/py-memory-diff" => self.handle_py_memory_diff(seq, args).await,
                     "ct/mcrMemoryDiff" => self.handle_py_memory_diff(seq, args).await,
                     "ct/py-memory-diff-record-vs-replay" => {
@@ -2444,9 +2495,24 @@ impl BackendManager {
                             && let Some(id) = id.as_u64()
                         {
                             let backend_id = id as usize;
+                            // `replay-id` is a *routing* directive for this
+                            // daemon, not part of any backend command's
+                            // argument schema — note the kebab-case, unlike
+                            // every camelCase DAP field.  Strip it before
+                            // forwarding: several backend argument structs
+                            // (e.g. `CtOriginChainArguments`) are
+                            // `#[serde(deny_unknown_fields)]` and reject the
+                            // whole request when it survives the hop.
+                            let mut forwarded = message.clone();
+                            if let Some(args) = forwarded
+                                .get_mut("arguments")
+                                .and_then(Value::as_object_mut)
+                            {
+                                args.remove("replay-id");
+                            }
                             // Reset TTL for the session that owns this replay.
                             self.reset_ttl_for_backend_id(backend_id);
-                            return self.message(backend_id, message).await;
+                            return self.message(backend_id, forwarded).await;
                         }
                         // Reset TTL for the currently selected replay.
                         self.reset_ttl_for_backend_id(self.selected);
@@ -3315,8 +3381,21 @@ impl BackendManager {
     /// Handles `ct/py-add-breakpoint` requests from Python clients.
     ///
     /// Adds a breakpoint to the per-trace breakpoint state, sends a
-    /// `setBreakpoints` command to the backend (fire-and-forget), and
-    /// immediately returns the assigned breakpoint ID to the client.
+    /// `setBreakpoints` command to the backend, and answers the client
+    /// only once the backend has said whether the breakpoint BOUND.
+    ///
+    /// The wait is the point.  `setBreakpoints` answers `success: true`
+    /// even when it could not place a breakpoint — an unplaceable one is
+    /// reported per-line as `verified: false` with a `message`.  While
+    /// this handler fired and forgot, that verdict was discarded and the
+    /// client was told `success: true` with an id before the backend had
+    /// seen the request, so a breakpoint on a path the trace never
+    /// recorded looked identical to one that bound, and the caller's
+    /// next `continue` simply ran to the end of the trace.
+    ///
+    /// A rejected breakpoint is also dropped from the daemon's own table
+    /// (see [`python_bridge::BreakpointState::forget_breakpoint`]) so it
+    /// is not re-sent with the next add for the same file.
     ///
     /// # Wire protocol
     ///
@@ -3334,7 +3413,7 @@ impl BackendManager {
     /// }
     /// ```
     ///
-    /// **Response:**
+    /// **Response (bound):**
     /// ```json
     /// {
     ///   "type": "response",
@@ -3342,6 +3421,19 @@ impl BackendManager {
     ///   "success": true,
     ///   "command": "ct/py-add-breakpoint",
     ///   "body": {"breakpointId": 1}
+    /// }
+    /// ```
+    ///
+    /// **Response (not bound)** — carries the backend's own reason, which
+    /// is what tells a typo apart from a missing recording:
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": false,
+    ///   "command": "ct/py-add-breakpoint",
+    ///   "message": "failed to set breakpoint at other.nim:10: can't add a
+    ///               breakpoint: can't find path `other.nim` in trace"
     /// }
     /// ```
     async fn handle_py_add_breakpoint(
@@ -3405,7 +3497,9 @@ impl BackendManager {
         self.reset_ttl_for_backend_id(backend_id);
 
         // Update the breakpoint state and get the full list for the file.
-        let (bp_id, all_lines) = match self.daemon_state.as_mut() {
+        // `index` is where this breakpoint's verdict will sit in the
+        // backend's per-line `setBreakpoints` response.
+        let (bp_id, all_lines, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
                 let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
                 bp_state.add_breakpoint(&source_path, line)
@@ -3431,30 +3525,50 @@ impl BackendManager {
             }
         });
 
-        // Fire-and-forget: send the DAP command but register a pending
-        // request so the response router silently consumes the backend's
-        // response instead of forwarding it to the client.
-        let _ = self.message(backend_id, dap_request).await;
+        // Wait for the backend.  This used to be fire-and-forget: the
+        // handler answered `success: true` with a breakpoint id before
+        // the backend had even seen the request, and the response router
+        // then dropped the backend's answer on the `FireAndForget` arm.
+        // That answer is the only place the backend says whether the
+        // breakpoint BOUND — `setBreakpoints` reports an unplaceable
+        // breakpoint as `verified: false` with a reason, not as a failed
+        // request.  Discarding it meant `Trace.add_breakpoint()` returned
+        // an id for a breakpoint registered nowhere but in the daemon's
+        // own table, and the next `continue_forward()` ran to the end of
+        // the trace and raised `StopIteration: Reached end of trace` with
+        // nothing in the API's output to explain it.
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            // Roll back: nothing was sent, so the daemon must not keep a
+            // breakpoint the backend has never heard of.
+            if let Some(ds) = self.daemon_state.as_mut() {
+                ds.py_bridge
+                    .breakpoint_state_mut(&trace_path)
+                    .forget_breakpoint(bp_id);
+            }
+            self.send_py_command_error(
+                seq,
+                "ct/py-add-breakpoint",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
-                kind: PendingPyRequestKind::FireAndForget,
-                client_id: 0,
-                original_seq: 0,
+                kind: PendingPyRequestKind::AddBreakpoint {
+                    trace_path,
+                    bp_id,
+                    index,
+                },
+                client_id,
+                original_seq: seq,
                 backend_seq: dap_seq,
-                response_command: String::new(),
+                response_command: "ct/py-add-breakpoint".to_string(),
                 expression: String::new(),
             });
         }
 
-        // Respond to the client immediately with the breakpoint ID.
-        let response = json!({
-            "type": "response",
-            "request_seq": seq,
-            "success": true,
-            "command": "ct/py-add-breakpoint",
-            "body": {"breakpointId": bp_id}
-        });
-        self.send_response_for_seq(seq, response);
         Ok(())
     }
 
@@ -4955,6 +5069,170 @@ impl BackendManager {
                 backend_seq: dap_seq,
                 response_command: "ct/py-read-source".to_string(),
                 expression: String::new(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-origin-chain` requests from Python clients.
+    ///
+    /// Backs `Trace.value_origin(...)` (M8 of the Value Origin Tracking
+    /// milestones) by translating the request into the backend's
+    /// `ct/originChain` DAP command and registering a pending request
+    /// whose response is forwarded verbatim (spec §4.1 is the public
+    /// wire contract — see
+    /// [`python_bridge::format_origin_chain_response`]).
+    ///
+    /// Without this route the command fell through to the generic
+    /// "forward to the selected replay" arm, which handed the backend a
+    /// `ct/py-origin-chain` command it does not implement — so every
+    /// `trace.value_origin(...)` call raised `TraceError`, and the
+    /// `PendingPyRequestKind::OriginChain` arm below was unreachable.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request** (from the Python client):
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-origin-chain",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "variableName": "total",
+    ///     "maxHops": 16,
+    ///     "lazy": false,
+    ///     "stepId": 137,
+    ///     "frameId": 0
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:** the backend's `OriginChain` body, unmodified.
+    async fn handle_py_origin_chain(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let variable_name = match args
+            .and_then(|a| a.get("variableName"))
+            .and_then(Value::as_str)
+        {
+            Some(v) if !v.is_empty() => v.to_string(),
+            _ => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    "missing 'variableName' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    &self.no_session_error_message(&trace_path_str),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Negative frame / step mean "topmost frame" / "current step" on
+        // the backend side, which is exactly what an omitted argument
+        // should mean here.
+        let frame_id = args
+            .and_then(|a| a.get("frameId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let step_id = args
+            .and_then(|a| a.get("stepId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let max_hops = args
+            .and_then(|a| a.get("maxHops"))
+            .and_then(Value::as_u64)
+            .unwrap_or(16);
+        let lazy = args
+            .and_then(|a| a.get("lazy"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // `CtOriginChainArguments` is `#[serde(deny_unknown_fields)]`, so
+        // every key here must be one of its camelCase fields — do not
+        // forward the client's argument object wholesale (it carries
+        // `tracePath`, which the backend would reject).
+        let mut backend_args = serde_json::json!({
+            "variableName": variable_name,
+            "variablePath": [],
+            "frameId": frame_id,
+            "stepId": step_id,
+            "threadId": 0,
+            "maxHops": max_hops,
+            "lazy": lazy,
+            "sessionId": "",
+            "classifySource": true,
+        });
+        if let Some(token) = args
+            .and_then(|a| a.get("continuationToken"))
+            .and_then(Value::as_str)
+        {
+            backend_args["continuationToken"] = serde_json::json!(token);
+        }
+
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/originChain",
+            "seq": dap_seq,
+            "arguments": backend_args,
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-origin-chain",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::OriginChain,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-origin-chain".to_string(),
+                expression: variable_name,
             });
         }
 

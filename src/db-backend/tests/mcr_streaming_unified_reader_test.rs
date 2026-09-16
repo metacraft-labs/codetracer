@@ -30,7 +30,9 @@
 
 use std::path::PathBuf;
 
+use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::follow_stream_source::FollowReader;
+use db_backend::ctfs_trace_reader::line_position_space::container_line_space;
 
 mod test_harness;
 use test_harness::{Language, TestRecording};
@@ -81,11 +83,25 @@ fn e2e_mcr_streaming_flow_via_unified_reader() {
         "the unified follow reader must surface the recorded execution steps (got {step_count})"
     );
 
-    // Every surfaced step must carry a real source location decoded through the
-    // production seekable path (the same decode the final-file reader uses).
+    // Every surfaced step's address must name a location THIS container can
+    // hold — resolved against the space its own path table defines, which is
+    // what the final-file reader resolves against too.
+    //
+    // Asserting the line is non-negative would not be an assertion: every
+    // reading of every integer produces a non-negative line, including a wrong
+    // one. Resolution against the container's own space is falsifiable — an
+    // address from a different scheme lands above the top of it.
+    let mut ctfs = CtfsReader::open(ct_path).expect("open the MCR .ct for its path table");
+    let space = container_line_space(&mut ctfs).expect("a recorder-produced .ct registers source paths");
     for i in 0..step_count {
         let step = reader.steps().step(i).expect("decoded step");
-        assert!(step.line.0 >= 0, "step {i} has a valid source line");
+        let (path_id, line) = step.resolve(&space).unwrap_or_else(|e| panic!("step {i}: {e}"));
+        assert!(
+            path_id.0 < space.file_count(),
+            "step {i} resolves to path {}, which the container does not register",
+            path_id.0
+        );
+        assert!(line.0 >= 1, "step {i} resolves to line {}; lines are 1-based", line.0);
     }
 
     // Values/calls are advertised by their own capability flags. When present,

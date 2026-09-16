@@ -30,6 +30,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
 cd "$REPO_ROOT" || exit 1
 
 WASM_TESTING="src/db-backend/wasm-testing"
@@ -41,7 +44,7 @@ WORKER="$WASM_TESTING/worker.js"
 HOST="$NODE_HOST/worker_host.mjs"
 INPROC="$NODE_HOST/inproc_host.mjs"
 EXAMPLE="src/db-backend/examples/write_seekable_fixture.rs"
-OUT="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/m0-seekable"
+OUT="$(ct_nim_cache_root "${REPO_ROOT}")/m0-seekable"
 
 STEP_SIZES="${CT_M0_STEP_SIZES:-20 1000 9000}"
 BENCH_ITERS="${CT_M0_BENCH_ITERS:-60}"

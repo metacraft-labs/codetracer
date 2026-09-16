@@ -3,7 +3,7 @@
  * described in tools/screen-briefs.md for formal design review.
  *
  * This test injects data into auto-hide bottom panes (BUILD, PROBLEMS,
- * SEARCH RESULTS) rather than relying on real build/search operations.
+ * FIND IN FILES) rather than relying on real build/search operations.
  * The auto-hide panels are standalone Karax renderers created by
  * addStandaloneAutoHidePanel in layout.nim. Their component instances
  * are accessible via window.data.ui.componentMapping[Content.X][0],
@@ -43,6 +43,7 @@ import {
 } from "../../lib/layout-reset";
 import {
   DOCKED_OPEN_CLASS,
+  FIND_IN_FILES_TAB_TITLE,
   OVERLAY_SELECTOR,
   bottomStripTab,
   dockedContainer,
@@ -516,7 +517,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await closeBottomAutoHideTab(ctPage, "PROBLEMS");
   });
 
-  test("Screen 5: SEARCH RESULTS", async ({ ctPage }) => {
+  test("Screen 5: FIND IN FILES", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
@@ -552,8 +553,10 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     });
     await wait(300);
 
-    // Click SEARCH RESULTS auto-hide bottom tab.
-    await openBottomAutoHideTab(ctPage, "SEARCH RESULTS");
+    // Click the Find in Files auto-hide bottom tab. `layout.nim` renamed
+    // this pane's title from SEARCH RESULTS; see FIND_IN_FILES_TAB_TITLE in
+    // `page-objects/auto-hide-strip.ts`.
+    await openBottomAutoHideTab(ctPage, FIND_IN_FILES_TAB_TITLE);
 
     // Re-render the search results panel now that the overlay is visible.
     await ctPage.evaluate(() => {
@@ -562,7 +565,7 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await wait(500);
 
     await ctPage.screenshot({ path: `${DIR}/05-search-results.png` });
-    await closeBottomAutoHideTab(ctPage, "SEARCH RESULTS");
+    await closeBottomAutoHideTab(ctPage, FIND_IN_FILES_TAB_TITLE);
   });
 
   // Was marked FAILING (2026-05-01) with "`#auto-hide-strip-left

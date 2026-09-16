@@ -70,6 +70,9 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 # shellcheck source=ci/lib/published-asset.sh
@@ -77,6 +80,19 @@ cd "${repo_root}" || exit 2
 source "${repo_root}/ci/lib/published-asset.sh"
 
 trips="${CT_MODE_TRIPS:-3}"
+
+# STEPS PER TRIP. Five, not three, and the reason is what a step now costs and
+# what it buys.
+#
+# The leg used to press step-OVER from the session's opening `<toplevel>`
+# position, where one press runs the whole program — so steps 2 and 3 had
+# nothing to do and each sat out a 5s deadline. Stepping IN advances one trace
+# tick per press and settles in milliseconds, so more steps are both cheaper
+# than the three used to be and worth more: measured on this gate's own `/noir`
+# subject, five steps walk `main.nr` 8, 8, 9, 9, 10 — three distinct positions
+# and two legitimate same-line repeats, which is exactly the mix that tells a
+# caret that FOLLOWS from one that merely CHANGES.
+steps_per_trip="${CT_MODE_STEPS:-5}"
 
 checks=0
 failures=0
@@ -125,7 +141,7 @@ node -e "require('playwright')" >/dev/null 2>&1 || {
 	exit 2
 }
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/mode-roundtrip"
+cache="$(ct_nim_cache_root "${repo_root}")/mode-roundtrip"
 mkdir -p "${cache}" || exit 2
 
 bundle="${CT_WEB_BUNDLE_DIR:-}"
@@ -303,7 +319,7 @@ run_probe() {
 	# run whose first compile was slow and report it as "produced no JSON" — a
 	# could-not-run dressed as a failure.
 	timeout 2400 node ci/test/noir_mode_roundtrip_probe.mjs \
-		"http://127.0.0.1:${port}/noir" 60000 "${trips}" 3 \
+		"http://127.0.0.1:${port}/noir" 60000 "${trips}" "${steps_per_trip}" \
 		>"${out}" 2>"${out}.err"
 	stop_server
 	[ -s "${out}" ] && jq -e . "${out}" >/dev/null 2>&1
@@ -416,6 +432,26 @@ while [ "${trip}" -le "${trips}" ]; do
 	d_step="$(leg "${control}" "trip-${trip}-replay" '.stepButtonPresent')"
 	d_build="$(leg "${control}" "trip-${trip}-replay" '.buildButtonPresent')"
 	d_carets="$(num "$(leg "${control}" "trip-${trip}-step" '.caretPositions | length')")"
+	# THE SAMPLE SERIES, so a slow repaint is visible rather than absorbed. It
+	# now names the line the ENGINE reported and the line the EDITOR painted,
+	# because a disagreement between those two is the failure this leg is for
+	# and a single number cannot show it.
+	d_caretseries="$(leg "${control}" "trip-${trip}-step" \
+		'[.caretSamples[]? | "step\(.step): \(.settledMs)ms/\(.polls) polls engine=\(.wantLine) painted=\(.paintedLine)\(if .followed then "" else " MISMATCH" end)"] | join(", ")')"
+	# THE PER-STEP VERDICT. `caretFollowed` counts the steps whose painted line
+	# equalled the line the engine reported; `stepsTaken` is how many steps the
+	# probe actually drove, so "all of them followed" cannot be satisfied by a
+	# leg that drove none.
+	d_followed="$(num "$(leg "${control}" "trip-${trip}-step" '.caretFollowed')")"
+	d_taken="$(num "$(leg "${control}" "trip-${trip}-step" '.stepsTaken')")"
+	# THE HOST ANSWERED EVERY PRESS — no more than that. `moveLines` is one
+	# report per step; `d_moves` counts the steps for which none arrived. What
+	# these two cannot tell you is whether the reported position CHANGED, which
+	# is why the line the engine names is now compared against the line the
+	# editor paints, above.
+	d_steps="$(num "$(leg "${control}" "trip-${trip}-step" '.moveLines | length')")"
+	d_moves="$(num "$(leg "${control}" "trip-${trip}-step" \
+		'[.moveLines[] | select(startswith("(no move reported"))] | length')")"
 
 	s_before="$(leg "${control}" "trip-${trip}-stop-gesture" '.surfaceBefore')"
 	s_clicked="$(leg "${control}" "trip-${trip}-stop-gesture" '(.gesture.clicked and .gesture.clickEventFired)')"
@@ -461,8 +497,51 @@ while [ "${trip}" -le "${trips}" ]; do
 		"trip ${trip}: and Build is GONE from the topbar (EMT-D12: rebuilding under a live replay invalidates its trace)"
 	ck "$([ "${d_step}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and the stepping controls are there"
+	note "trip ${trip}: caret settle — ${d_caretseries}"
+	# THE SAME THRESHOLD, OVER A READING THAT MEANS WHAT IT SAYS. `> 1` is
+	# untouched. What changed is that a "position" is now `<file>:<line>` and
+	# not a viewport pixel — see the probe's `caretMark` for the measurement
+	# that forced it: four consecutive genuine moves at one identical `y`,
+	# because revealing a line by centring it scrolls the pane by exactly the
+	# distance the caret travelled.
 	ck "$([ "${d_carets}" -gt 1 ] && echo ok || echo no)" \
-		"trip ${trip}: stepping moved the painted caret through ${d_carets} position(s) — a live session, not a painted one"
+		"trip ${trip}: stepping moved the painted caret through ${d_carets} distinct source position(s) — a live session, not a painted one"
+	# AND THE CARET WENT WHERE THE SESSION WENT, EVERY STEP.
+	#
+	# This is the claim the leg is named for and could not make. Reading a
+	# pixel, "the caret followed" was inferred from "some pixel differed from
+	# some other pixel"; here the editor's painted line is compared against the
+	# line `web_replay_host.nim:155` reported for that same step, and every step
+	# must agree. A caret that follows the first step and then stops — the
+	# defect shape this gate is supposed to catch — fails this and cannot fail
+	# the threshold above, which a single early move already satisfies.
+	#
+	# `-eq d_taken` and `d_taken -eq stepsPerTrip` together, because "all the
+	# steps followed" is vacuous over zero steps.
+	ck "$([ "${d_taken}" -eq "${steps_per_trip}" ] && [ "${d_followed}" -eq "${d_taken}" ] &&
+		echo ok || echo no)" \
+		"trip ${trip}: and the caret painted the engine's line on every one of ${d_taken} step(s) (${d_followed} followed) — the caret follows the session, not merely some pixel that changed"
+	# THE ENGINE ANSWERED AT ALL — and that is ALL this arm says.
+	#
+	# ITS PREVIOUS COMMENT OVERSOLD IT AND THE OVERSELL IS THE POINT. It called
+	# itself "the independent half — the SESSION moved, not just the paint". It
+	# is not, and cannot be: `web_replay_host.nim:155` logs `move` on every
+	# `ct/complete-move` WHETHER OR NOT THE POSITION CHANGED, which its own
+	# comment says two lines further up. So a session sitting on the last tick
+	# of the trace, going nowhere, reports a move per press and satisfies this.
+	#
+	# MEASURED, not deduced. Driving the old `#next-image` gesture eight times
+	# on `/noir/demo`: the first press took the session from rrTicks 0 to 474
+	# (the last tick of a 475-tick trace) and presses 2-8 did nothing at all —
+	# yet all eight logged `move /oracle_settlement/src/main.nr:24` and this arm
+	# read "8 step(s), 0 unreported". Green, over a session that had stopped.
+	#
+	# It is KEPT because "the host said nothing" is still worth failing on, and
+	# it is DEMOTED to what it can support. The claim it used to make is now
+	# made properly by the arm above, which compares the line it reports against
+	# the line the editor paints.
+	ck "$([ "${d_steps}" -gt 0 ] && [ "${d_moves}" -eq 0 ] && echo ok || echo no)" \
+		"trip ${trip}: and the engine reported a move for every one of ${d_steps} step(s) (${d_moves} unreported) — the host answered each press"
 
 	# THE CONTROL THIS CAMPAIGN ADDED.
 	ck "$([ "${d_stop}" = true ] && echo ok || echo no)" \
@@ -675,7 +754,19 @@ echo "${checks} check(s), ${failures} failure(s)"
 # wrong, not the assertions. Editing the guard DOWN to meet a short tally is
 # the failure this guard exists to catch, and it would have cemented the four
 # checks' silence rather than reporting it.
-expect_count $((8 + 18 * trips + 3 + 1 + 4))
+#
+# 18 -> 19 PER TRIP. The per-trip block gained "the engine reported a move for
+# every step", the engine-side half of the claim the caret arm makes about
+# pixels. It is an assertion this file added, not a tally corrected to meet the
+# code, so the number goes UP with it: `grep -c '^\tck '` over the loop body is
+# 19 and over everything outside it is still 16.
+#
+# 19 -> 20 PER TRIP. The per-trip block gained "the caret painted the engine's
+# line on every step". Again an assertion ADDED, so again the number goes UP:
+# `grep -c '^\tck '` over the loop body is 20 and outside it is still 16.
+# Nothing was removed to make room for it — the arm it supersedes in strength
+# (the engine's move report) is kept, demoted to the claim it can carry.
+expect_count $((8 + 20 * trips + 3 + 1 + 4))
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — Run enters the debugger, Stop comes back, ${trips} times, and the edit survives"
 	exit 0

@@ -79,8 +79,8 @@ fn build_trace(recipe: Recipe<'_>) -> (Db, TempDir) {
     let mut db = Db::new(&workdir);
     db.paths.push(String::new());
     db.paths.push(recipe.source_path.to_string());
-    db.path_map.insert(recipe.source_path.to_string(), PathId(1));
-    db.path_map.insert(abs_source.to_string_lossy().to_string(), PathId(1));
+    db.register_path_version(recipe.source_path.to_string(), PathId(1));
+    db.register_path_version(abs_source.to_string_lossy().to_string(), PathId(1));
 
     db.types.push(make_int_type());
     db.functions.push(FunctionRecord {

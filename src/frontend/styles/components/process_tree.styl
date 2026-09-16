@@ -2,7 +2,7 @@
 // app-wide `body` rule, which is now Space Grotesk (the interface face), so
 // it has to be stated here — process names and commands read as code.
 .ct-process-tree
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
 
 // Multi-process session sidebar (spec
 // GUI/Debugging-Features/Value-Origin-Tracking.md §14.8: "A process tree
@@ -84,8 +84,10 @@
   cursor: pointer
   border-left: 2px solid transparent
 
+  // The list hover (LIST_HOVER_BG, button.styl).  The active row has the same
+  // fill, but is also marked by its left rail, which the hover never draws.
   &:hover
-    background-color: colors-ui-surface-base-card
+    background-color: LIST_HOVER_BG
 
   &.active
     border-left-color: colors-ui-border-action

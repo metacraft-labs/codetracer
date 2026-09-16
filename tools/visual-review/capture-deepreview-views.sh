@@ -181,8 +181,29 @@ trap cleanup EXIT
 # it. The cache is keyed on a fingerprint of THIS script, so editing the corpus
 # below invalidates it rather than silently outliving its own definition.
 
+# A KEYED CACHE WHOSE KEY OMITTED THE RECORDER.
+#
+# This hashed only the script, which describes the PROGRAM that gets recorded
+# and says nothing about the thing that records it. So a `ct` rebuilt from
+# changed sources reused a `.ct` corpus produced by the previous one, and every
+# view captured from it — the images the whole unified-diff campaign is reviewed
+# through — showed the old recorder's output while the preflight two screens up
+# was busy refusing a stale BUILD. Same defect, one level down: existence of a
+# cache entry standing in for the cache entry being current.
+#
+# `ct` is hashed by content, not stat'ed, for the same reason
+# `scripts/materialize-recording.sh` hashes its binaries: a rebuild that
+# produces identical bytes should legitimately hit the cache, and a rebuild that
+# produces different bytes must not.
+#
+# It is the recorder's own bytes and not its whole dependency closure. That is
+# the honest limit of what this can see, and it covers the case that actually
+# happens here — `just build-once` between two capture runs.
 corpus_fingerprint() {
-	sha256sum "${BASH_SOURCE[0]}" | cut -d' ' -f1
+	{
+		sha256sum "${BASH_SOURCE[0]}"
+		sha256sum "${CTDR_CT}"
+	} | sha256sum | cut -d' ' -f1
 }
 
 # build_corpus <dir>

@@ -44,9 +44,10 @@
 ## scan the whole step stream for it: `stepAbsoluteGlobalLineIndex(entryStep)`
 ## SEEKS to the single `steps.dat` chunk that holds that one step (bounded
 ## decompression — see `NewTraceReader.execChunkDecompressions`), and we resolve
-## its `(path_id, line)` with the same `buildGliFromMeta` / `resolveGli` global
-## line index `ct-print --json-events` uses, so the resolved file/line are
-## byte-for-byte what the subprocess produced.  The **value stream is never
+## its `(path_id, line)` through the same address space and the same
+## `resolveGli` `ct-print --json-events` uses, so the resolved file/line are
+## byte-for-byte what the subprocess produced.  An address that space cannot
+## hold is left as the best-effort gap below rather than answered.  The **value stream is never
 ## touched** on any path here (`valueStreamLoaded` stays false).
 ##
 ## When def-line resolution is disabled (`resolveDefLines = false`) — or when a
@@ -66,7 +67,7 @@ import std/[algorithm, tables]
 import results
 
 import codetracer_trace_writer/new_trace_reader
-import codetracer_ct_print_lib  # buildGliFromMeta, resolveGli (shared GLI helpers)
+import codetracer_ct_print_lib  # resolveGli (shared GLI helper)
 
 import trace_reader  # ExecutedFunction
 
@@ -109,11 +110,13 @@ proc buildExecutedFunctions(reader: var NewTraceReader; resolveDefLines: bool):
     return err("failed to read call count: " & ccRes.error)
   let callCount = ccRes.value
 
-  # Build the GLI only if we will resolve def-lines (it depends solely on
-  # meta.dat paths, so it is cheap and reads no streams).
+  # Build the address space only if we will resolve def-lines.  It comes from
+  # the trace's paths and their per-line tables (`globalPositionSpace`), which
+  # is what makes it agree with the writer's layout on a column-aware bundle
+  # whose files are not all tabled; it reads no streams.
   let gli =
-    if resolveDefLines: buildGliFromMeta(reader.meta)
-    else: default(typeof(buildGliFromMeta(reader.meta)))
+    if resolveDefLines: reader.globalPositionSpace()
+    else: default(typeof(reader.globalPositionSpace()))
 
   # First call per distinct function id determines its definition site (the
   # earliest entry, mirroring ct-print emitting the entry step at call order).
@@ -168,11 +171,19 @@ proc buildExecutedFunctions(reader: var NewTraceReader; resolveDefLines: bool):
             line = uint64(posRes.value.line)
             resolved = true
         if not resolved:
-          (fileId, line) = resolveGli(gli, gliRes.value)
-        let pRes = reader.path(uint64(fileId))
-        if pRes.isOk:
-          file = pRes.value
-          defLine = int(line)
+          # `resolveGli` REFUSES an address this trace's space cannot hold
+          # rather than clamping it into a file that exists.  A refusal leaves
+          # the best-effort gap below — a def-line nothing was recorded at
+          # would be worse than none.
+          let lineOnly = resolveGli(gli, gliRes.value)
+          if lineOnly.isOk:
+            (fileId, line) = lineOnly.value
+            resolved = true
+        if resolved:
+          let pRes = reader.path(uint64(fileId))
+          if pRes.isOk:
+            file = pRes.value
+            defLine = int(line)
       # On any failure leave file=""/defLine=0 — the documented best-effort gap.
 
     resultSeq.add ExecutedFunction(name: name, file: file, defLine: defLine)

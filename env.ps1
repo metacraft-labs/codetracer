@@ -192,27 +192,16 @@ function Set-EnvDefault {
   }
 }
 
-function Resolve-InstallDirFromRelativePathFile {
-  param(
-    [Parameter(Mandatory = $true)][string]$InstallRoot,
-    [Parameter(Mandatory = $true)][string]$RelativePathFile,
-    [string]$FallbackDir = ""
-  )
-
-  if (Test-Path -LiteralPath $RelativePathFile -PathType Leaf) {
-    $relative = (Get-Content -LiteralPath $RelativePathFile -Raw).Trim()
-    if (-not [string]::IsNullOrWhiteSpace($relative)) {
-      $parts = $relative -split '[\\/]'
-      return (Join-Path $InstallRoot ([System.IO.Path]::Combine($parts)))
-    }
-  }
-
-  if (-not [string]::IsNullOrWhiteSpace($FallbackDir)) {
-    return $FallbackDir
-  }
-
-  return ""
-}
+# `Resolve-InstallDirFromRelativePathFile` MOVED to
+# `non-nix-build/windows/toolchain-utils.ps1`, beside `Write-InstallPointer`
+# and `ConvertTo-InstallRelativePath`.
+#
+# It lived here while `env.ps1` was its only caller. It is not any more: the
+# `Ensure-*` scripts now resolve their own install directory through the same
+# pointer file they write, so the reader and the writer have to sit in the one
+# module both sides dot-source. `env.ps1` sources `toolchain-utils.ps1` at the
+# top of the bootstrap block, well before the first use below, so this is a
+# relocation and not a behaviour change.
 
 function Resolve-DotnetRoot {
   param(
@@ -895,19 +884,63 @@ function Ensure-GoldenLayoutAsset {
   }
 }
 
+# Normalise a PATH segment for COMPARISON ONLY. Windows path comparison is
+# case-insensitive, and `C:\foo`, `C:\foo\` and ` C:\foo ` all name the same
+# directory. The normalised form is never what gets written to PATH -- only the
+# caller's original spelling is -- so this cannot corrupt an entry.
+function Get-PathEntryComparisonKey {
+  param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$Value)
+  if ($null -eq $Value) { return "" }
+  return $Value.Trim().TrimEnd('\', '/').ToLowerInvariant()
+}
+
+# Prepend directories to PATH, IDEMPOTENTLY.
+#
+# Prepending must be idempotent because activation is not once-per-machine: a
+# second `. .\env.ps1` in the same session, a nested script that activates
+# again, or a long-lived agent shell that re-enters the dev shell all re-run
+# this. An unbounded per-activation prepend then grows PATH without limit.
+#
+# That is not a cosmetic problem. Anything that resolves through cmd.exe
+# truncates PATH at 8191 characters, and the truncation does not report itself
+# as a truncation -- it reports a missing tool or a failed link. Two separate
+# families of phantom diagnosis on this host have already been traced back to
+# exactly that: one written up as product link defects, one as a missing
+# `tailwindcss` package. Neither was real; both were PATH overflow.
+#
+# So an entry already on PATH is MOVED to the front rather than added again:
+# the caller's intent is precedence, and precedence is achieved by moving.
+# Segments that match nothing being prepended are preserved verbatim, empty
+# segments included, so this is a pure dedup with no other effect on PATH.
 function Prepend-PathEntries {
   param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][AllowEmptyCollection()][string[]]$Entries)
   $existing = [Environment]::GetEnvironmentVariable("PATH")
   $prefix = @()
+  $prefixKeys = @{}
   foreach ($entry in $Entries) {
     if ($null -eq $entry) { continue }
     $entryPath = [string]$entry
     if ([string]::IsNullOrWhiteSpace($entryPath)) { continue }
     if (-not (Test-Path -LiteralPath $entryPath)) { continue }
+    $key = Get-PathEntryComparisonKey -Value $entryPath
+    if ($key.Length -eq 0) { continue }
+    # The same directory named twice in one call is added once.
+    if ($prefixKeys.ContainsKey($key)) { continue }
+    $prefixKeys[$key] = $true
     $prefix += $entryPath
   }
   if ($prefix.Count -eq 0) { return }
-  [Environment]::SetEnvironmentVariable("PATH", (($prefix -join ";") + ";" + $existing), "Process")
+
+  $kept = @()
+  foreach ($segment in ($existing -split ";")) {
+    # Preserve empty/whitespace segments verbatim: dropping them would make
+    # this function rewrite parts of PATH it was never asked to touch.
+    if ([string]::IsNullOrWhiteSpace($segment)) { $kept += $segment; continue }
+    if ($prefixKeys.ContainsKey((Get-PathEntryComparisonKey -Value $segment))) { continue }
+    $kept += $segment
+  }
+
+  [Environment]::SetEnvironmentVariable("PATH", ((@($prefix) + @($kept)) -join ";"), "Process")
 }
 
 function Resolve-GitBashBinDir {
@@ -1028,6 +1061,13 @@ $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 
 # Dot-source ensure modules for install-on-demand bootstrap.
 . "$windowsDir/toolchain-utils.ps1"
+
+# Before any bootstrap step runs, make sure a debugger prompt cannot strand
+# this job. See Assert-NonInteractiveDebugger for the hazard and its limits.
+foreach ($guard in (Assert-NonInteractiveDebugger)) {
+  Write-Warning "Interactive-debugger guard: $guard."
+}
+
 . "$windowsDir/ensure-rust.ps1"
 . "$windowsDir/ensure-just.ps1"
 . "$windowsDir/ensure-nextest.ps1"
@@ -1110,7 +1150,10 @@ if (Test-Path -LiteralPath (Join-Path $ioMonRoot "io_mon.nimble")) {
   $ioMonSnoopExe = Join-Path $ioMonRoot "build\bin\io-mon.exe"
   if (Test-Path -LiteralPath $ioMonSnoopExe) {
     Set-EnvDefault -Name "IO_MON" -Value $ioMonSnoopExe
-    $env:PATH = (Join-Path $ioMonRoot "build\bin") + [IO.Path]::PathSeparator + $env:PATH
+    # Through Prepend-PathEntries, never by hand: a raw prepend here re-added
+    # io-mon's bin directory on EVERY activation, with no dedup, which is
+    # precisely the unbounded growth that helper exists to prevent.
+    Prepend-PathEntries -Entries @((Join-Path $ioMonRoot "build\bin"))
   }
   $ioMonShimDll = Join-Path $ioMonRoot "build\lib\librepro_monitor_shim.dll"
   if (Test-Path -LiteralPath $ioMonShimDll) {
@@ -1135,44 +1178,110 @@ if (-not $doSync -and $forceTtd -and (Test-BootstrapStepEnabled "TTD")) {
 if ($doSync) {
   $arch = Get-WindowsArch
 
+  # Each gated component runs through Invoke-BootstrapStep, which applies the
+  # same WINDOWS_DIY_SKIP_<NAME> gate Test-BootstrapStepEnabled did and
+  # additionally records wall clock, install size and relocatability class.
+  # That table -- written by Write-BootstrapStepReport at the end of this
+  # block -- is the per-component decomposition any sizing of this bootstrap
+  # is derived from.
+  #
+  # The -Relocatability value is the INSTALL MECHANISM, read off the
+  # corresponding ensure-*.ps1: an archive extraction or an in-place build is
+  # "relocatable", a vendor installer is "installer". Do not change one
+  # without changing the script it describes.
+  #
+  # `ci/test/bootstrap-decomposition.ps1` parses this block and fails if any
+  # Ensure-* call here bypasses the wrapper, so a component added later
+  # cannot silently fall out of the decomposition.
+
+  # The dispatch is wrapped so the decomposition is written even when a
+  # component throws. A failing run's timings are the MOST useful ones right
+  # now -- they are what identifies the component that blocks the lane -- and
+  # letting the exception skip the report would leave the slowest and most
+  # interesting runs unmeasured.
+  try {
+
   # Phase 1: No dependencies
-  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "NODE") { Ensure-Node -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "UV")   { Ensure-Uv   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "GCC")  { Ensure-Gcc  -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "GNAT") { Ensure-Gnat -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "GO")    { Ensure-Go    -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "LDC")   { Ensure-Ldc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "VLANG") { Ensure-Vlang -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "FPC")   { Ensure-Fpc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "ZSTD") { Ensure-Zstd -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "TTD"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Ttd   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "NODE"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Node  -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "UV"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Uv    -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "GCC"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Gcc   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "GNAT"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Gnat  -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "GO"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Go    -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "LDC"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Ldc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "VLANG" -Relocatability relocatable -Root $installRoot -Action { Ensure-Vlang -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  # FPC is the one component installed by a vendor installer rather than an
+  # archive: FreePascal ships an Inno Setup .exe (ensure-fpc.ps1:45-50,
+  # /VERYSILENT), so it may write outside the install root and is not a
+  # store candidate without repackaging.
+  Invoke-BootstrapStep -Step "FPC"   -Relocatability installer   -Root $installRoot -Action { Ensure-Fpc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "ZSTD"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Zstd  -Root $installRoot -Arch $arch -Toolchain $toolchain }
   # Ensure-Zlib must run after Ensure-Gcc (depends on mingw32-make + gcc).
-  if (Test-BootstrapStepEnabled "ZLIB") { Ensure-Zlib -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "LLVM") { Ensure-Llvm -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "ZLIB"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Zlib  -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "LLVM"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Llvm  -Root $installRoot -Arch $arch -Toolchain $toolchain }
   # Clingo is the ASP solver `repro` and its child `extract_runner.exe`
   # dlopen at runtime via `clingo.dll`. It has no other build-system
   # dependency; install it whenever the user does not opt out via
   # WINDOWS_DIY_SKIP_CLINGO=1.
-  if (Test-BootstrapStepEnabled "CLINGO") { Ensure-Clingo -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "CLINGO" -Relocatability relocatable -Root $installRoot -Action { Ensure-Clingo -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 2: Rust (no deps on other managed tools)
-  if (Test-BootstrapStepEnabled "RUST") { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "RUST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 3: Depends on Rust/cargo
-  if (Test-BootstrapStepEnabled "JUST") { Ensure-Just -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "NEXTEST") { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "JUST"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Just    -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "NEXTEST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
 
   # Phase 4: May need MSYS2 for source builds
-  if (Test-BootstrapStepEnabled "NIM")   { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "CAPNP") { Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "TUP")   { Ensure-Tup   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "NIM"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "CAPNP" -Relocatability relocatable -Root $installRoot -Action { Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "TUP"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Tup   -Root $installRoot -Toolchain $toolchain }
 
   # Phase 5: Depends on Rust + MSYS2
-  if (Test-BootstrapStepEnabled "NARGO") { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
+  Invoke-BootstrapStep -Step "NARGO" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
 
   # Phase 6: dotnet and tools that depend on it
-  if (Test-BootstrapStepEnabled "DOTNET")    { Ensure-Dotnet    -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "CT_REMOTE") { Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir }
+  Invoke-BootstrapStep -Step "DOTNET"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Dotnet   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "CT_REMOTE" -Relocatability relocatable -Root $installRoot -Action { Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir }
+
+  } finally {
+    # Publish the decomposition. An incomplete run is recorded as incomplete
+    # (`complete: false` plus the skipped/failed lists) rather than omitted,
+    # because a median over runs that never completed, with nothing saying
+    # so, is how this bootstrap's cost gets mis-stated.
+    #
+    # A failure to WRITE the report must not mask the failure that caused
+    # the run to abort, so this is best-effort and warns rather than throws.
+    try {
+      $decompositionDir = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_REPORT_DIR")
+      if ([string]::IsNullOrWhiteSpace($decompositionDir)) {
+        $decompositionDir = Join-Path $repoRoot ".tmp/windows-diy"
+      }
+      $script:BootstrapReportPath =
+        Write-BootstrapStepReport -Root $installRoot -OutputDir $decompositionDir
+    } catch {
+      Write-Warning "Failed to write the env.ps1 component decomposition: $($_.Exception.Message)"
+      $script:BootstrapReportPath = ""
+    }
+  }
+
+  # OUTSIDE the `finally`, deliberately.
+  #
+  # This is the FAIL half of the relocatability check the report records. It
+  # runs only on a bootstrap that otherwise succeeded, because a
+  # relocatability throw raised from inside that `finally` would replace the
+  # error that actually stopped the run with a downstream one -- and the
+  # blocking component's identity is the single most valuable thing a failed
+  # provision produces.
+  #
+  # It is a failure rather than a warning because the store is published and
+  # refilled across machines: a component that bakes a path produces a tree
+  # that works for the machine that built it and misresolves everywhere else,
+  # silently. A warning nobody must act on is how the next mis-declaration
+  # gets in.
+  if (-not [string]::IsNullOrWhiteSpace($script:BootstrapReportPath)) {
+    Assert-BootstrapRelocatability -ReportPath $script:BootstrapReportPath
+  }
 }
 
 $arch = Get-WindowsArch
@@ -1212,7 +1321,15 @@ $dotnetExe = Join-Path $dotnetRoot "dotnet.exe"
 # error, but the explicit gate is useful when the caller wants to avoid
 # the probe entirely (e.g. faster startup, or environments where Appx
 # behaves unpredictably).
-$skipTtdProbe = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SKIP_TTD_PROBE" -Default $false
+#
+# It also defaults ON under WINDOWS_DIY_ONLY unless TTD is one of the named
+# components. Probing for a component the caller did not ask for buys nothing
+# and costs a `Get-AppxPackage` call, which is the least reliable thing this
+# script does on a CI guest -- "Server execution failed" / "The remote
+# procedure call failed" is a routine outcome there. An explicit
+# WINDOWS_DIY_SKIP_TTD_PROBE still wins in both directions.
+$skipTtdProbe = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SKIP_TTD_PROBE" `
+  -Default ((Test-BootstrapAllowlistActive) -and -not (Test-BootstrapStepEnabled "TTD"))
 if ($skipTtdProbe) {
   Write-Host "WINDOWS_DIY_SKIP_TTD_PROBE=1 - skipping Resolve-TtdRuntimeInfo (TTD treated as absent)."
   $ttdRuntime = [ordered]@{
@@ -1353,7 +1470,17 @@ $shimsDir = Join-Path $installRoot "shims"
 $nargoRoot = Join-Path $installRoot "nargo"
 $nargoDir = Resolve-InstallDirFromRelativePathFile -InstallRoot $installRoot -RelativePathFile (Join-Path $nargoRoot "nargo.install.relative-path")
 
-$gccDir = Join-Path $installRoot ("gcc\" + $toolchain["GCC_VERSION"])
+# GCC resolves through its pointer file since the junction was removed (see the
+# relocatability note at the top of `Ensure-Gcc`). The fallback keeps an
+# install root provisioned by an older revision working: there, `gcc\<version>`
+# is the junction itself, which still resolves ON THE MACHINE THAT MADE IT --
+# which is the whole reason the junction had to go, and also the reason the
+# fallback is safe to keep as a compatibility path.
+$gccVersionRoot = Join-Path $installRoot ("gcc\" + $toolchain["GCC_VERSION"])
+$gccDir = Resolve-InstallDirFromRelativePathFile `
+  -InstallRoot $installRoot `
+  -RelativePathFile (Join-Path $gccVersionRoot "gcc.install.relative-path") `
+  -FallbackDir $gccVersionRoot
 $gccBinDir = Join-Path $gccDir "bin"
 
 $gnatVersion = if (-not [string]::IsNullOrWhiteSpace($toolchain["GNAT_VERSION"])) { $toolchain["GNAT_VERSION"] } else { $toolchain["GCC_VERSION"] }
@@ -1373,8 +1500,15 @@ $vlangBinDir = $vlangDir
 $fpcDir = Join-Path $installRoot ("fpc\" + $toolchain["FPC_VERSION"])
 $fpcBinDir = Join-Path $fpcDir "bin/i386-win32"
 
+# zstd and LLVM resolve through their pointer files since their system/manual
+# junction arms became copies. The fallback is the historical layout, so an
+# install root provisioned before the conversion still resolves.
 $zstdArch = ConvertTo-ZstdFileArch -Arch $arch
-$zstdDir = Join-Path $installRoot ("zstd\" + $toolchain["ZSTD_VERSION"] + "\zstd-v" + $toolchain["ZSTD_VERSION"] + "-" + $zstdArch)
+$zstdVersionRoot = Join-Path $installRoot ("zstd\" + $toolchain["ZSTD_VERSION"])
+$zstdDir = Resolve-InstallDirFromRelativePathFile `
+  -InstallRoot $installRoot `
+  -RelativePathFile (Join-Path $zstdVersionRoot "zstd.install.relative-path") `
+  -FallbackDir (Join-Path $zstdVersionRoot ("zstd-v" + $toolchain["ZSTD_VERSION"] + "-" + $zstdArch))
 
 # zlib install layout is `$installRoot/zlib/<version>/{include,lib}/`. Both
 # subdirs must be added to the toolchain search paths so the MinGW linker can
@@ -1385,7 +1519,17 @@ $zlibIncludeDir = Join-Path $zlibDir "include"
 $zlibLibDir = Join-Path $zlibDir "lib"
 
 $llvmTarget = ConvertTo-LlvmFileArch -Arch $arch
-$llvmDir = Join-Path $installRoot ("llvm\" + $toolchain["LLVM_VERSION"] + "\LLVM-" + $toolchain["LLVM_VERSION"] + "-" + $llvmTarget)
+$llvmVersionRoot = Join-Path $installRoot ("llvm\" + $toolchain["LLVM_VERSION"])
+# The pointer file also settles a directory-name disagreement that predates it:
+# `ensure-llvm.ps1` extracts to `clang+llvm-<ver>-<target>` (the real upstream
+# asset stem; its own comment records that `LLVM-<ver>-<target>` never existed),
+# while the fallback below is the `LLVM-`-prefixed name this line has always
+# used. Reading the pointer means the installer states where it put the tree
+# instead of two files having to agree on a guess.
+$llvmDir = Resolve-InstallDirFromRelativePathFile `
+  -InstallRoot $installRoot `
+  -RelativePathFile (Join-Path $llvmVersionRoot "llvm.install.relative-path") `
+  -FallbackDir (Join-Path $llvmVersionRoot ("LLVM-" + $toolchain["LLVM_VERSION"] + "-" + $llvmTarget))
 $llvmBinDir = Join-Path $llvmDir "bin"
 
 # Clingo install layout produced by ensure-clingo.ps1:
@@ -1410,7 +1554,10 @@ $clingoBinDir = Join-Path $clingoDir "bin"
 # manually after sourcing env.ps1. Ensure-NodeModulesJunction and
 # Ensure-GoldenLayoutAsset are already silent no-ops when their targets don't
 # exist, so they stay unconditional.
-if ($doSync) {
+# ...and not at all under WINDOWS_DIY_ONLY: yarn-installing codetracer's own
+# node-packages is part of making CODETRACER buildable, not part of providing
+# the one pinned component a satellite repo asked for.
+if ($doSync -and -not (Test-BootstrapAllowlistActive)) {
   Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
 }
 Ensure-NodeModulesJunction -RepoRoot $repoRoot
@@ -1514,10 +1661,25 @@ if (Test-Path -LiteralPath $llvmLibDir -PathType Container) {
 
 $clExe = Resolve-ClExePath
 if ([string]::IsNullOrWhiteSpace($clExe)) {
-  throw "cl.exe was not found on PATH and MSVC_BIN_DIR did not resolve it. Install Visual Studio Build Tools with the MSVC toolchain (e.g., 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' or 'Microsoft.VisualStudio.Component.VC.Tools.ARM64')."
+  # MSVC is a requirement of BUILDING codetracer, not of every component
+  # env.ps1 can install. Under WINDOWS_DIY_ONLY the caller asked for a named
+  # subset -- `codetracer-trace-format` asks for CAPNP, whose x64 path
+  # extracts a pinned prebuilt archive and needs no compiler at all -- so
+  # demanding cl.exe there would fail a run that got exactly what it wanted.
+  # Outside that mode nothing changes: the absence is still fatal.
+  if (Test-BootstrapAllowlistActive) {
+    Write-Warning ("cl.exe was not found, and WINDOWS_DIY_ONLY is set, so this is not treated " +
+                   "as fatal. WINDOWS_DIY_CL_EXE will be empty and anything that needs MSVC " +
+                   "will fail at the point of use.")
+  } else {
+    throw "cl.exe was not found on PATH and MSVC_BIN_DIR did not resolve it. Install Visual Studio Build Tools with the MSVC toolchain (e.g., 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' or 'Microsoft.VisualStudio.Component.VC.Tools.ARM64')."
+  }
 }
 [Environment]::SetEnvironmentVariable("WINDOWS_DIY_CL_EXE", $clExe, "Process")
-if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion)) {
+# The toolset-version assertion reads the version out of the resolved cl.exe,
+# so it is only meaningful when one was found.
+if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion) -and
+    -not [string]::IsNullOrWhiteSpace($clExe)) {
   $actualMsvcToolsetVersion = Resolve-MsvcToolsetVersion
   Assert-MsvcToolsetVersion -ActualVersion $actualMsvcToolsetVersion -PinnedVersion $msvcToolsetPinnedVersion
   [Environment]::SetEnvironmentVariable("WINDOWS_DIY_MSVC_TOOLSET_VERSION", $actualMsvcToolsetVersion, "Process")
@@ -1632,7 +1794,12 @@ Prepend-PathEntries -Entries @(
   $clingoBinDir
 )
 
-$ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" -Default $true
+# Default off under WINDOWS_DIY_ONLY: the tree-sitter Nim parser is one of
+# codetracer's own build inputs, not a component any caller can request, and
+# regenerating it needs bash + a codetracer checkout. An explicit
+# WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER still wins in both directions.
+$ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" `
+  -Default (-not (Test-BootstrapAllowlistActive))
 if ($ensureParser) {
   # Prefer the Git Bash discovered earlier (WINDOWS_DIY_GIT_BASH_BIN).
   # On hosted Windows Server 2022, `Get-Command bash` resolves to
@@ -1664,7 +1831,11 @@ if ($ensureParser) {
   & $bashExe $tsParserScript
 }
 
-& (Join-Path $windowsDir "setup-codetracer-runtime-env.ps1") -RepoRoot $repoRoot
+# Codetracer's own runtime env (recorder/backend discovery). Out of scope for a
+# caller that named a component subset via WINDOWS_DIY_ONLY.
+if (-not (Test-BootstrapAllowlistActive)) {
+  & (Join-Path $windowsDir "setup-codetracer-runtime-env.ps1") -RepoRoot $repoRoot
+}
 
 # Keep shims first-class after runtime setup path mutations.
 Prepend-PathEntries -Entries @($shimsDir)

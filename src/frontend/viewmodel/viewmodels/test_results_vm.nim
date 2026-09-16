@@ -158,9 +158,27 @@ import test_run_summary_vm
 export test_run_summary_vm
 
 type
-  RunTestsProc* = proc()
+  RunTestsProc* = proc(): string
     ## The host's runner, named so a `Signal` of it can be created carrying
     ## `nil` — an untyped `nil` gives `createSignal` nothing to infer from.
+    ##
+    ## IT ANSWERS A SENTENCE, and the return type is the fix rather than a
+    ## convenience. It was `proc()`, so a host that took the call and then
+    ## declined it had nowhere to say so: `ui_js` installed
+    ## `web_noir_build.startNoirTests`, whose first three lines are
+    ## `report("test-ignored", "reason=already-running")`,
+    ## `report("test-refused", "reason=no-project")` and
+    ## `report("test-refused", "reason=no-build-vm")` — each of which writes one
+    ## line to the browser console and RETURNS. `canRun` is true in all three
+    ## states (they are not `runAbsence`, they are not `inFlight`), so the ▶ was
+    ## enabled, took the click, and produced nothing a user could see.
+    ##
+    ## "" means the run was dispatched. Anything else is why it was not, and
+    ## `startRun` files it where the pane already paints such things.
+    ##
+    ## A `string` and not a `bool`: "it refused" and "it refused BECAUSE" are
+    ## different products, and a bool would have let every caller re-invent a
+    ## sentence the host was already holding.
 
   TestRowActionProc* = proc(testId: string; selector: string)
     ## One row's action, as the host implements it. Named for `RunTestsProc`'s
@@ -474,15 +492,47 @@ proc endRun*(vm: TestResultsVM) =
   ## Called by the host when the run settles, however it settled.
   vm.inFlight.val = false
 
+proc noteRunRefusal*(vm: TestResultsVM; message: string) =
+  ## An attempt was made and the host declined it. Say so, where a user looks.
+  ##
+  ## FILED AS A RUN-LEVEL DIAGNOSTIC, so it renders in the pane's existing
+  ## `.test-results-failure` block — the surface that already exists for "an
+  ## attempt was made and it did not work", and which the view unhides the
+  ## moment `runFailure` is non-empty. Nothing new is painted and no second
+  ## place to look is invented.
+  ##
+  ## SPECIFICALLY NOT `setRunAbsence`. `runAbsence` means "this DEPLOYMENT
+  ## cannot run tests" and greys the ▶ and every row's `⟳`; a transient
+  ## refusal written there would turn one declined click into a standing claim
+  ## about the bundle. See `noteRowActionRefusal`, which files per-row
+  ## refusals here for the same reason and now shares this proc so the two
+  ## cannot drift.
+  if message.len == 0:
+    return
+  var current = vm.summary.val
+  current.diagnostics.add TestRunDiagnostic(
+    severity: "error", message: message)
+  vm.summary.val = current
+
 proc startRun*(vm: TestResultsVM) =
   ## The view's click handler. Guarded here rather than in the view so the mock
   ## and web renderers cannot disagree about when the button is live.
+  ##
+  ## AND THE HOST'S ANSWER IS RENDERED. `canRun` is what this pane knows —
+  ## a runner is installed, the deployment stated no reason, nothing is in
+  ## flight — and it is not everything the HOST knows. `web_noir_build`
+  ## declines a dispatch when a Build is already running, when no project is
+  ## open and when the producer is nil, and `canRun` is true in all three. Those
+  ## refusals used to reach a `console.log` and stop there: the button was
+  ## enabled, the click was taken, and the pane did not move. So the runner's
+  ## sentence is filed rather than discarded, and the click always ends in
+  ## something a user can see.
   if not vm.canRun():
     return
   # Bound first: `vm.runTests.val()` parses as `val(vm.runTests)` and calls
   # nothing.
   let runner = vm.runTests.val
-  runner()
+  vm.noteRunRefusal(runner())
 
 proc clearRun*(vm: TestResultsVM) =
   ## Blank the RUN. Recordings are untouched — see `TestResultsVM.recordings`
@@ -713,12 +763,11 @@ proc noteRowActionRefusal*(vm: TestResultsVM; message: string) =
   ## out the header's ▶ and every row's `⟳` because a `⏵` did not work — a
   ## refusal in one control disabling three others, and a standing claim about
   ## the bundle made out of a transient event.
-  if message.len == 0:
-    return
-  var current = vm.summary.val
-  current.diagnostics.add TestRunDiagnostic(
-    severity: "error", message: message)
-  vm.summary.val = current
+  ##
+  ## ONE BODY, shared with `noteRunRefusal`: the header's ▶ and a row's `⟳`
+  ## are different controls with the same obligation, and two copies of "file
+  ## it as a diagnostic" is how one of them would later stop doing it.
+  vm.noteRunRefusal(message)
 
 proc triggerRefresh*(vm: TestResultsVM; row: TestResultsRow) =
   ## The `⟳` click. Guarded HERE and not in the view, so the mock and web

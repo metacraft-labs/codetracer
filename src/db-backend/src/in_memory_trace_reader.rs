@@ -169,8 +169,16 @@ impl TraceReader for InMemoryTraceReader {
 
     // ── Secondary indices ───────────────────────────────────────────
 
-    fn path_id_for(&self, path: &str) -> Option<PathId> {
-        self.db.path_map.get(path).copied()
+    fn path_ids_for(&self, path: &str) -> Vec<PathId> {
+        self.db.path_ids_for(path).to_vec()
+    }
+
+    fn path_version_ordinal(&self, path_id: PathId) -> i64 {
+        self.db.path_version_ordinal(path_id)
+    }
+
+    fn source_digest_for_path(&self, path_id: PathId) -> String {
+        self.db.source_digest_for_path(path_id)
     }
 
     fn steps_on_line(&self, path_id: PathId, line: usize) -> Option<&Vec<DbStep>> {
@@ -201,7 +209,16 @@ impl TraceReader for InMemoryTraceReader {
     }
 
     fn path_entries_iter(&self) -> Box<dyn Iterator<Item = (&str, PathId)> + '_> {
-        Box::new(self.db.path_map.iter().map(|(s, &id)| (s.as_str(), id)))
+        // GDH-M7: one item per (string, id) PAIR, not per map key. The map
+        // holds every version's id now, and the fuzzy ladder's stages walk
+        // this iterator — a version missing from it would be invisible to
+        // suffix, canonicalize and filename matching alike.
+        Box::new(
+            self.db
+                .path_map
+                .iter()
+                .flat_map(|(s, ids)| ids.iter().map(move |&id| (s.as_str(), id))),
+        )
     }
 
     // ── Instructions ────────────────────────────────────────────────
@@ -258,7 +275,7 @@ mod tests {
         assert!(reader.function(FunctionId(0)).is_none());
         assert!(reader.type_record(TypeId(0)).is_none());
         assert!(reader.variable_name(VariableId(0)).is_none());
-        assert!(reader.path_id_for("nonexistent.rs").is_none());
+        assert!(reader.path_ids_for("nonexistent.rs").is_empty());
     }
 
     #[test]

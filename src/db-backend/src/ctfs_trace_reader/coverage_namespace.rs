@@ -311,11 +311,14 @@ impl CoverageMap {
     ///
     /// The underlying CoW B-tree writer is insert/update-only (single-writer
     /// replay-time path; no key deletion), so a removal is implemented by
-    /// **rebuilding** the namespace image from the surviving rows and committing
-    /// it. Collapse is a comparatively rare compaction event, so the rebuild cost
-    /// is acceptable and the result stays crash-safe (the rebuilt image publishes
-    /// a fresh, consistent root). Returns the new commit id (or the prior
-    /// committed id when nothing was removed).
+    /// **rebuilding** the namespace image from the surviving rows. The rebuild is
+    /// a from-scratch construction over an already-sorted, duplicate-free row set
+    /// (`rows` is a `BTreeMap`), which is exactly
+    /// [`CowNamespaceWriter::bulk_load`]'s contract — so it costs one bottom-up
+    /// pass and one commit, and the rebuilt image carries no superseded pages.
+    /// The result stays crash-safe (the rebuilt image publishes a fresh,
+    /// consistent root). Returns the new commit id (or the prior committed id
+    /// when nothing was removed).
     pub fn coverage_remove_range(&mut self, tick_lo: u64, tick_hi: u64) -> Result<u64, CoverageError> {
         if tick_hi <= tick_lo {
             return Err(CoverageError::EmptyInterval { tick_lo, tick_hi });
@@ -330,15 +333,17 @@ impl CoverageMap {
             // Nothing in range; keep the existing image untouched.
             return Ok(self.writer.committed_commit_id());
         }
-        // Rebuild a fresh CoW namespace from the surviving rows. Inserting in
-        // ascending key order mirrors a from-scratch build.
-        let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        // Rebuild a fresh CoW namespace from the surviving rows in one pass. The
+        // survivors come out of a `BTreeMap` in ascending `tick_lo` order and the
+        // keys are unique, so the batch satisfies `bulk_load`'s contract.
         let mut rows = BTreeMap::new();
-        let mut last_commit = 0u64;
+        let mut entries: Vec<(u64, [u8; 16])> = Vec::with_capacity(survivors.len());
         for (row_lo, (row_hi, state)) in survivors {
-            last_commit = writer.insert_and_commit(row_lo, &encode_descriptor(row_hi, state))?;
+            entries.push((row_lo, encode_descriptor(row_hi, state)));
             rows.insert(row_lo, (row_hi, state));
         }
+        let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        let last_commit = writer.bulk_load(&entries)?;
         self.writer = writer;
         self.rows = rows;
         Ok(last_commit)

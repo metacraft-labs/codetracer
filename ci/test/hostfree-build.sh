@@ -95,11 +95,14 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 HOSTFREE_DIR="ci/hostfree"
 PROBE="${HOSTFREE_DIR}/hostfree_probe.nim"
-CACHE="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/hostfree"
+CACHE="$(ct_nim_cache_root "${repo_root}")/hostfree"
 NIM_FLAGS=(-d:asyncBackend=none --hints:off --warnings:off
 	--path:src/frontend/viewmodel --nimcache:"${CACHE}")
 

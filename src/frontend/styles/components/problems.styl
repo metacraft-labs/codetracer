@@ -8,8 +8,24 @@
   overflow: hidden
   color: colors-ui-text-primary-body
   font-size: 13px
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   background: colors-ui-surface-base-panel
+
+// No top inset for Problems.  Every other panel opens with a row of controls
+// and gets PANEL_INSET (8px, button.styl) above it; Problems opens with a
+// header band — a full-width strip with its own background — which reads as
+// the panel's top edge, so it sits flush against that edge instead:
+//   * docked: right under the 4px resize handle (DOCK_BOTTOM_HANDLE_SIZE,
+//     auto_hide.styl — imported ahead of this file);
+//   * previewed on hover, and in the layout: at the top of the body.
+// Each container only ever holds the panel it is showing, so `:has()` here
+// cannot catch another panel.
+#auto-hide-docked-bottom-content:has(.problems-panel)
+  padding-top: DOCK_BOTTOM_HANDLE_SIZE
+
+#auto-hide-overlay-content:has(.problems-panel),
+.lm_content:has(.problems-panel)
+  padding-top: 0
 
 // -- Header bar --
 
@@ -17,7 +33,11 @@
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 4px 10px
+  // Content at the panel inset (PANEL_INSET, 8px, button.styl); the band runs
+  // edge to edge.  6px above the counts and filters, 4px below: the band sits
+  // flush against the panel's top edge (see the top of this file), so its own
+  // top padding is the only room its contents get there.
+  padding: 0.375rem PANEL_INSET 0.25rem
   border-bottom: 1px solid colors-ui-surface-input-default
   background: colors-ui-surface-primary-tertiary
   flex-shrink: 0
@@ -46,7 +66,12 @@
   gap: 4px
 
 .problems-filter-btn
-  padding: 2px 8px
+  // The small control size (button.styl), the height of the count badges on
+  // the same bar; the height was padding around the label, 28px.
+  display: inline-flex
+  align-items: center
+  height: CONTROL_HEIGHT_SM
+  padding: 0 8px
   border-radius: 4px
   cursor: pointer
   font-size: 12px
@@ -69,7 +94,6 @@
 .problems-empty
   padding: 16px 10px
   opacity: 0.6
-  font-style: italic
 
 // -- Individual problem row --
 
@@ -77,12 +101,13 @@
   display: flex
   align-items: baseline
   gap: 8px
-  padding: 3px 10px
+  padding: 3px PANEL_INSET
   cursor: pointer
   white-space: nowrap
   border-bottom: 1px solid colors-ui-border-secondary
+  // The list hover (LIST_HOVER_BG, button.styl).
   &:hover
-    background: colors-ui-surface-input-default
+    background: LIST_HOVER_BG
 
 // The row `next error` / `previous error` has moved to, and the row a failed
 // build highlights.
@@ -161,7 +186,7 @@
   margin-bottom: 2px
 
 .problems-file-header
-  padding: 4px 10px
+  padding: 4px PANEL_INSET
   font-weight: 600
   font-size: 12px
   color: #8b949e

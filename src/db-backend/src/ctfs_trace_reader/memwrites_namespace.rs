@@ -117,6 +117,15 @@ fn decode_records(payload: &[u8]) -> Result<Vec<(u32, MemWriteEntry)>, Memwrites
 }
 
 /// Build a production CoW `memwrites.tc` image from a sparse interval-tagged map.
+///
+/// The index is written in ONE bottom-up pass. `IntervalTaggedMap` is keyed by a
+/// `BTreeMap`, so [`IntervalTaggedMap::keys`] is already strictly ascending and
+/// duplicate-free — exactly [`CowNamespaceWriter::bulk_load`]'s contract — and
+/// this encoder runs once over a finished map rather than key by key over a live
+/// one. A per-key incremental build would copy the B-tree spine and publish a
+/// new root for every address, so the finished image would carry kilobytes of
+/// superseded pages per key and the cost per key would grow with the address
+/// count; recordings reach millions of distinct addresses.
 pub fn encode_memwrites_cow_namespace(
     map: &IntervalTaggedMap<MemWriteEntry>,
 ) -> Result<Option<Vec<u8>>, MemwritesNsError> {
@@ -125,14 +134,14 @@ pub fn encode_memwrites_cow_namespace(
     }
 
     let keys = map.keys();
-    let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
-    for key in &keys {
-        sizing.insert_and_commit(*key, &[0u8; 16])?;
-    }
-    let payload_base = sizing.serialize().len();
+    // Descriptors are `(offset, len)` into the payload appended after the
+    // page-aligned index, so the index's final length has to be known before the
+    // first descriptor can be built. Bulk load allocates only live pages, so that
+    // length is a pure function of the key count — no throwaway sizing build.
+    let payload_base = CowNamespaceWriter::bulk_load_image_len(CowLeafType::TypeB, keys.len());
 
-    let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
     let mut payload = Vec::new();
+    let mut entries: Vec<(u64, [u8; 16])> = Vec::with_capacity(keys.len());
     for key in keys {
         let offset = payload_base + payload.len();
         let before = payload.len();
@@ -141,9 +150,15 @@ pub fn encode_memwrites_cow_namespace(
                 encode_record(interval_id, &record, &mut payload);
             }
         }
-        writer.insert_and_commit(key, &descriptor(offset, payload.len() - before))?;
+        entries.push((key, descriptor(offset, payload.len() - before)));
     }
 
+    let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+    writer.bulk_load(&entries)?;
+
+    // `bulk_load` fails rather than return an image whose length disagrees with
+    // `bulk_load_image_len`, so `image.len() == payload_base` holds here and
+    // every descriptor offset above points where the payload actually lands.
     let mut image = writer.serialize();
     image.extend_from_slice(&payload);
     while !image.len().is_multiple_of(PAGE_SIZE) {
@@ -280,5 +295,150 @@ mod tests {
     fn rejects_legacy_wlog_blob_as_cow_namespace() {
         let result = MemwritesNamespace::open(b"WLOG legacy");
         assert!(matches!(result, Err(MemwritesNsError::Cow(_))));
+    }
+
+    // ── one-pass index build ────────────────────────────────────────────────
+
+    /// A map with `keys` distinct addresses, some carrying several records and
+    /// several interval ids so the multi-record bucket shape is exercised too.
+    fn map_with(keys: u64) -> IntervalTaggedMap<MemWriteEntry> {
+        let mut map = IntervalTaggedMap::new();
+        for k in 0..keys {
+            let address = ADDR + k * 8;
+            map.append(address, 0, mw_full(k * 10, 0xA000 + k, 8, k, k + 1));
+            // Every 7th address gets two more records, one from another interval,
+            // so buckets of 1 and of 3 (spanning 2 intervals) both occur.
+            if k % 7 == 0 {
+                map.append(address, 0, mw_full(k * 10 + 1, 0xB000 + k, 4, k + 1, k + 2));
+                map.append(address, 3, mw_full(k * 10 + 2, 0xC000 + k, 2, k + 2, k + 3));
+            }
+        }
+        map
+    }
+
+    /// The pre-existing per-key build, kept here as the REFERENCE encoder: a
+    /// sizing pass to learn where the payload lands, then one CoW insert-and-
+    /// commit per address. Nothing in production uses this shape any more; it
+    /// exists so the one-pass build can be proved equivalent to it.
+    fn per_key_reference_image(map: &IntervalTaggedMap<MemWriteEntry>) -> Vec<u8> {
+        let keys = map.keys();
+        let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        for key in &keys {
+            sizing.insert_and_commit(*key, &[0u8; 16]).unwrap();
+        }
+        let payload_base = sizing.serialize().len();
+
+        let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        let mut payload = Vec::new();
+        for key in keys {
+            let offset = payload_base + payload.len();
+            let before = payload.len();
+            for (interval_id, records) in map.records_by_interval(key) {
+                for record in records {
+                    encode_record(interval_id, &record, &mut payload);
+                }
+            }
+            writer
+                .insert_and_commit(key, &descriptor(offset, payload.len() - before))
+                .unwrap();
+        }
+        let mut image = writer.serialize();
+        image.extend_from_slice(&payload);
+        while !image.len().is_multiple_of(PAGE_SIZE) {
+            image.push(0);
+        }
+        image
+    }
+
+    /// DECODED equivalence against the per-key build — the right equivalence
+    /// test, because the two images are deliberately not byte-identical (the
+    /// per-key one carries a higher commit id, the other root slot, and the pages
+    /// its spine copies left behind). Every address and every record, including
+    /// the multi-record multi-interval buckets, must decode the same.
+    #[test]
+    fn one_pass_and_per_key_builds_decode_to_the_same_memwrites() {
+        let map = map_with(3_000);
+        let one_pass = encode_memwrites_cow_namespace(&map).unwrap().expect("image");
+        let per_key = per_key_reference_image(&map);
+
+        assert_ne!(
+            one_pass, per_key,
+            "the two packings are not expected to be byte-identical"
+        );
+
+        let a = MemwritesNamespace::open(&one_pass).expect("open one-pass");
+        let b = MemwritesNamespace::open(&per_key).expect("open per-key");
+        let keys = map.keys();
+        assert_eq!(keys.len(), 3_000);
+
+        let mut multi_record_buckets = 0;
+        for key in &keys {
+            let ra = a.writes_for_address(*key).unwrap();
+            let rb = b.writes_for_address(*key).unwrap();
+            assert_eq!(ra, rb, "address {key} decodes differently between the two builds");
+            // …and both agree with the map the image was built from.
+            let expected: Vec<(u32, MemWriteEntry)> = map
+                .records_by_interval(*key)
+                .into_iter()
+                .flat_map(|(id, recs)| recs.into_iter().map(move |r| (id, r)))
+                .collect();
+            assert_eq!(ra, expected, "address {key} does not match the source map");
+            if ra.len() > 1 {
+                multi_record_buckets += 1;
+            }
+        }
+        assert!(
+            multi_record_buckets > 0,
+            "the fixture must contain multi-record buckets for this to mean anything"
+        );
+        // The flattened warm-restart view agrees too.
+        assert_eq!(a.all_writes().unwrap(), b.all_writes().unwrap());
+    }
+
+    /// REGRESSION GATE — on BYTES, never on time, so a busy host cannot tip it.
+    ///
+    /// The per-key build published one commit and copy-on-write copied the root→
+    /// leaf spine per address, which both inflated the finished index and made the
+    /// cost per address grow with the address count. Two deterministic assertions
+    /// pin the one-pass build:
+    ///
+    /// * the index region is EXACTLY the live-page image a bottom-up build
+    ///   produces for this key count — no superseded pages, at all; and
+    /// * one commit was published, not one per address.
+    ///
+    /// Both are pure functions of the key count, so neither can flake. The
+    /// bytes-per-key ceilings are the headline number the gate exists to hold:
+    /// they are ~1.4x below what the per-key build produced at the same
+    /// cardinalities (102.4 and 89.7 bytes/key measured).
+    #[test]
+    fn the_memwrites_index_is_built_in_one_pass_not_one_commit_per_address() {
+        for (keys, max_bytes_per_key) in [(1_000u64, 80.0f64), (10_000, 72.0)] {
+            let mut map = IntervalTaggedMap::new();
+            for k in 0..keys {
+                map.append(ADDR + k * 8, 0, mw_full(k, 0xA000, 8, 0, k));
+            }
+            let image = encode_memwrites_cow_namespace(&map).unwrap().expect("image");
+
+            let bytes_per_key = image.len() as f64 / keys as f64;
+            assert!(
+                bytes_per_key <= max_bytes_per_key,
+                "{keys} addresses cost {bytes_per_key:.1} bytes/key \
+                 (image {} bytes); the gate is {max_bytes_per_key:.1}",
+                image.len()
+            );
+
+            let index = CowNamespaceReader::open(&image, CowLeafType::TypeB).expect("open index");
+            assert_eq!(index.commit_id(), 1, "the whole index must be published in ONE commit");
+
+            // The lowest key is encoded first, so its payload offset IS the length
+            // of the index region — measurable from the finished image alone.
+            let first = *map.keys().first().expect("a key");
+            let index_len = read_u64(index.lookup(first).expect("descriptor"), 0) as usize;
+            assert_eq!(
+                index_len,
+                CowNamespaceWriter::bulk_load_image_len(CowLeafType::TypeB, keys as usize),
+                "the index must be exactly the live pages a one-pass build needs for {keys} keys"
+            );
+        }
     }
 }

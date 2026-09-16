@@ -341,13 +341,13 @@ the full flag table.
 The CodeTracer MCP server registers two tools that surface origin
 tracking to LLM agents directly:
 
-- **`get_value_origin`** — one-shot lookup. Returns the canonical
-  `OriginChain` JSON for `variable` at `step`/`frame`. Use this when you
-  only need a single chain without authoring a script.
-- **`resolve_variable_step`** — helper that maps a variable name to the
-  most recent step at which it was assigned. Pair it with
-  `get_value_origin` when you want the chain at the assignment site
-  rather than the current step.
+- **`get_value_origin`** — one-shot lookup. Runs to `path`:`line`,
+  then returns the canonical `OriginChain` for `variable` at that step.
+  Use this when you only need a single chain without authoring a script.
+- **`resolve_variable_step`** — the first hop of that same chain: where
+  the value the variable holds at `path`:`line` came from, reported as
+  the step at which it becomes observable plus the statement that
+  assigned it.
 
 The **preferred** multi-step path is to send a Python script through the
 existing `exec_script` MCP tool and call `trace.value_origin(...)`

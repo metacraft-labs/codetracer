@@ -1437,12 +1437,12 @@ mod tests {
         );
     }
 
-    /// Build a minimal valid v3 `meta.dat` payload with the given flags.
+    /// Build a minimal valid current-version `meta.dat` payload with the given flags.
     fn meta_dat_bytes(flags: u16) -> Vec<u8> {
         const TEST_UUID_V7: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
         let mut buf = Vec::new();
         buf.extend_from_slice(&super::super::meta_dat::META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&super::super::meta_dat::META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&flags.to_le_bytes());
         let put_str = |s: &str, out: &mut Vec<u8>| {
             out.push(s.len() as u8);
@@ -1468,11 +1468,37 @@ mod tests {
     /// not know is not a container this build may read spans out of.  The check
     /// goes through `parse_meta_dat` precisely so `KNOWN_FLAGS_MASK` governs the
     /// span path too.
+    ///
+    /// THE PROBE IS RETIRED, AND ITS ABSENCE IS THE ASSERTION.  The unknown bit
+    /// was derived from `KNOWN_FLAGS_MASK` rather than written as a literal, so
+    /// that allocating a bit could not leave this test probing one the reader
+    /// now knows.  Bit 14 went to `FLAG_HAS_LINE_COUNT_TABLE` and bit 15 to
+    /// `FLAG_HAS_CORRELATION_INDEX`, so the derivation now yields nothing:
+    /// there is no bit left this build can honestly call unknown.
+    ///
+    /// What remains is the invariant that made the probe impossible, plus the
+    /// control the probe was measured against.  The invariant fails the moment
+    /// the flag word grows, which is when the probe has to be reinstated.
     #[test]
     fn meta_dat_with_an_unknown_bit_alongside_bit_13_is_refused() {
-        const FUTURE_BIT: u16 = 1 << 14;
-        assert!(!meta_dat_has_span_stream(&meta_dat_bytes(
-            FLAG_HAS_SPAN_STREAM | FUTURE_BIT
-        )));
+        assert_eq!(
+            lowest_unknown_flag_bit(),
+            0,
+            "an unknown flag bit exists again, so the fail-closed probe this \
+             replaced must be reinstated: assert that bit 13 alongside it is \
+             refused"
+        );
+
+        // The control the probe was measured against: bit 13 ALONE is
+        // recognised.  Keeping it means the span path is still asserted to
+        // read a well-formed span-bearing header, which is the half of this
+        // test that does not depend on an unknown bit existing.
+        assert!(meta_dat_has_span_stream(&meta_dat_bytes(FLAG_HAS_SPAN_STREAM)));
+    }
+
+    /// The lowest flag bit this build does not know, or 0 when it knows them all.
+    fn lowest_unknown_flag_bit() -> u16 {
+        let unknown = !super::super::meta_dat::known_flags_mask();
+        unknown & unknown.wrapping_neg()
     }
 }

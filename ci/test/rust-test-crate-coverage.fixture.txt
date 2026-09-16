@@ -1,0 +1,50 @@
+# The fixture ci/test/rust-test-crate-coverage.sh runs its two recognition
+# rules against BEFORE it is allowed to scan the repository. A detector that has
+# stopped matching finds no invocations and reports every crate dark (loud), or
+# finds no crates and reports a clean tree (silent) -- and the silent one is the
+# same class of defect this gate exists to catch. So every HIT row must be
+# detected, every MISS row must not be, and every DIR row must resolve to
+# exactly the recorded directory, or the gate exits before scanning anything.
+#
+# This file is deliberately EXCLUDED from the gate's own scan. It is under ci/,
+# it contains real-looking `cargo test` lines, and counting them would invent
+# both invocations and coverage. Same reason, and the same fix, as
+# ci/test/grep-q-pipefail-gate.fixture.txt.
+#
+# Formats (tab-separated; anything else is ignored, so the verdict travels WITH
+# the case and adding one cannot silently weaken the check):
+#
+#   HIT <TAB> line          rule 1 must see a Rust test-runner invocation
+#   MISS <TAB> line         rule 1 must NOT
+#   DIR <TAB> expected <TAB> line   rule 2 must resolve this working directory
+#                                   ('-' means the line establishes none)
+
+# -- RULE 1, positive: the shapes this repository actually writes --
+HIT	cargo test --offline --no-default-features --test reprobuild_hcr_mcr_dap_test
+HIT	cargo nextest run --release --test '*' -E 'not test(~bash_flow_integration)'
+HIT	dev-exec cargo test -- --skip ruby_flow_integration
+HIT	cd src/backend-manager && cargo nextest run --release
+HIT	"$cargo_bin" test --test origin_dap_gate_test
+HIT	cargo +nightly test --all-features
+
+# -- RULE 1, negative: near-misses that must NOT count as running tests --
+# `cargo run` is how src/codetracer-bench is invoked. Reading it as a test run
+# is precisely the false green that kept that crate's 27 tests invisible.
+MISS	cd src/codetracer-bench && cargo run --release --bin ct-bench -- gui-ops
+MISS	cargo build --release
+MISS	cargo nextest list --workspace
+MISS	cargo clippy --all-targets -- -D warnings
+MISS	echo "run the tests with: just test-rust"
+MISS	cargo fmt --check
+
+# -- RULE 2, positive: every working-directory shape in the tree --
+DIR	src/db-backend	        working-directory: src/db-backend
+DIR	src/db-backend	cd "$REPO_ROOT/src/db-backend"
+DIR	src/backend-manager	cd src/backend-manager && cargo nextest run --release
+DIR	src/tui	  working-directory: "src/tui"
+DIR	libs/origin-classifier	cd ./libs/origin-classifier
+
+# -- RULE 2, negative: lines that establish no working directory at all --
+DIR	-	cargo nextest run --release --bin replay-server
+DIR	-	just test-rust
+DIR	-	run: ./ci/test/non-gui.sh

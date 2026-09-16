@@ -137,9 +137,8 @@ fn trace_with_a_scalar_a_sequence_and_a_struct() -> (Db, TempDir) {
     let mut db = Db::new(&workdir);
     db.paths.push(String::new());
     db.paths.push(SOURCE_PATH.to_string());
-    db.path_map.insert(SOURCE_PATH.to_string(), PathId(1));
-    db.path_map
-        .insert(workdir.join(SOURCE_PATH).to_string_lossy().to_string(), PathId(1));
+    db.register_path_version(SOURCE_PATH.to_string(), PathId(1));
+    db.register_path_version(workdir.join(SOURCE_PATH).to_string_lossy().to_string(), PathId(1));
 
     // TypeId(0) int, TypeId(1) sequence, TypeId(2) the struct.
     db.types.push(TypeRecord {

@@ -278,6 +278,54 @@ harness = false
 [features]
 debugging = []
 
+# GDH-M7 falsifier arms — design §7.1/§7.2's named implementation errors,
+# compiled in only when explicitly asked for, never in `default`.
+#
+# They exist so the gates under `tests/gdh7_*` can be shown to DISCRIMINATE:
+# a gate that is green over a correct build and green over a build carrying
+# the defect it names has not tested anything. Each arm restores exactly one
+# pre-GDH-M7 behaviour, in the shipped code path, and each must turn its own
+# gate red while leaving the single-version control green.
+#
+#   gdh7-falsify-string-keyed-cache       §7.2 — key the served source by path
+#                                         STRING instead of path id, so a
+#                                         backward read across a reload
+#                                         boundary serves the newest text.
+#   gdh7-falsify-single-destination       §7.1(3) — restore
+#                                         `load_bundled_sources`' one-file
+#                                         write, so both versions materialise
+#                                         on top of each other on disk.
+#   gdh7-falsify-single-version-breakpoint §7.1 — bind a breakpoint to one
+#                                         version instead of fanning out.
+#   gdh7-falsify-zero-source-generation   §7.0 — leave `source_generation` at
+#                                         the literal 0 it was before.
+#   gdh7-falsify-fuzzy-unique-only        §2.2(e) — restore
+#                                         `fuzzy_path_ids_for` stage 6's
+#                                         `matches.len() == 1` gate, so an
+#                                         ambiguous filename resolves to
+#                                         nothing.
+#   gdh7-falsify-newest-wins-path-map     §2.2 — the ROOT defect: restore the
+#                                         last-wins `insert` in
+#                                         `Db::register_path_version`, so the
+#                                         newest version of a path string
+#                                         evicts every earlier one.
+#
+# TWO OF THESE HAVE NO GATE TO REDDEN, and that is recorded rather than
+# glossed: `gdh7-falsify-fuzzy-unique-only` and
+# `gdh7-falsify-single-version-breakpoint` both aim at
+# `gdh7_a_breakpoint_binds_to_every_version`, which is NOT RUN because the
+# GDH-M6 fixture cannot carry it. Neither running gate resolves a path by
+# NAME — a stop resolves through the step's own recorded `path_id` — so
+# neither arm has anything to bite. They are kept, wired into the shipped
+# ladder and off by default, for whoever writes that fixture. An arm with no
+# gate is not a kill and must never be counted as one.
+gdh7-falsify-string-keyed-cache = []
+gdh7-falsify-single-destination = []
+gdh7-falsify-single-version-breakpoint = []
+gdh7-falsify-zero-source-generation = []
+gdh7-falsify-fuzzy-unique-only = []
+gdh7-falsify-newest-wins-path-map = []
+
 default = ["io-transport", "syntax-highlight", "nim-reader"]
 
 io-transport = ["dep:shellexpand", "dep:ureq"]

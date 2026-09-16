@@ -51,6 +51,37 @@
 # not-a-gate, 21 recorded dark — the dark inventory did NOT grow, because one
 # gate was deleted as dead and one declared not-a-gate in its own header.
 #
+# AND A SIXTH, ON 2026-09-06, WHICH IS ARMS 15, 15b AND 15c — and this one had
+# already cost the build chain a night. The guard went RED on `dev` demanding
+# that `ci/test/worker-backend-wasm-e2e.sh` be DELETED from the recorded-dark
+# inventory, because 295f36835 had added an assignment and two reads of it to a
+# meta-test. Nothing in that commit builds the WASM engine; the gate was as dark
+# as the day it was recorded. `lint-nim` gates `nix-build`, so eleven build and
+# release jobs were skipped behind a demand to retire a truthfully recorded
+# blocker.
+#
+# `refs_of_text` was extracting EVERY path token on every non-comment line, and
+# arm 9 was the only thing holding that up — by dropping lines that name one of
+# eight linters. A blacklist of readers is unbounded (grep, cat, head, cp, diff,
+# echo, a Python docstring), and every name missing from it fails silently and
+# green. The rule is now POSITIONAL: a path counts when it stands where a
+# command goes — first word of a command, or the argument of `bash`/`node`/
+# `source`/`python3`. `shellcheck x.sh` needs no special case any more, which is
+# why arm 9 still passes with the blacklist deleted.
+#
+# 15b and 15c are the controls that rule needs, and they are not decorative:
+# twenty-nine suites here name their subject in a VARIABLE and then run it, and
+# three browser probes are run by a local wrapper that executes its `$2`. A
+# position rule without them would have invented dark gates by the dozen, which
+# is how a guard gets switched off.
+#
+# Honest figures, same tree: 236 found, 196 reachable, 10 declared not-a-gate,
+# 30 recorded dark, 0 UNRECORDED. Reachable fell by four and the recorded-dark
+# CEILING DID NOT MOVE: the four were `worker-backend-wasm-e2e.sh` (already
+# recorded, and now counted as such), and three files that are not gates and now
+# say so in their own headers — the canonical text of an inline pre-checkout
+# step, and the two fixtures a text-scanning gate greps.
+#
 # AND A FIFTH, WHICH IS WHY THERE ARE NOW FIFTEEN, and it is the same sentence
 # as blind spot (b) with one word changed: the scan was `-name '*.sh'`. 43 gates
 # under `ci/` and `scripts/` are Node or Python and none of them could produce a
@@ -154,7 +185,11 @@ run_guard() { bash "${guard}" --root "$1" 2>&1; }
 # negative here reads as "this arm SURVIVED", which is a mutation test reporting
 # that the guard is broken when the guard is fine.
 
-echo "=== shell-gate-coverage selftest — fifteen arms ==="
+# The banner carried a count of the arms, and the count went stale the first
+# time an arm was added — it read "fifteen" over nineteen. The run prints the
+# real number of checks at the end; a claim that has to be maintained by hand to
+# stay true is exactly what this suite exists to distrust.
+echo "=== shell-gate-coverage selftest — mutation arms ==="
 echo
 
 # ---------------------------------------------------------------------------
@@ -402,6 +437,88 @@ if grep -q 'RESULT: OK' <<<"${nonshell_out}"; then
 else
 	bad "14c/a .mjs invoked by a reachable gate was reported dark — the widening invents holes"
 	printf '%s\n' "${nonshell_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
+fi
+
+# ---------------------------------------------------------------------------
+# ARMS 15 — READING A FILE IS NOT RUNNING IT, AND ARM 9 ONLY EVER SAID THAT
+# ABOUT ONE TOOL.
+#
+# On 2026-09-06 the guard demanded that `ci/test/worker-backend-wasm-e2e.sh` be
+# DELETED from the recorded-dark inventory — "IS now reachable" — because
+# 295f36835 added three lines to `stale-artefact-guards-test.sh`:
+#
+#     WORKER_E2E="${SUITE_ROOT}/ci/test/worker-backend-wasm-e2e.sh"
+#     grep -q wasm_engine_assert_fresh "${WORKER_E2E}"
+#     assert_not_contains "$(cat "${WORKER_E2E}")" ...
+#
+# An assignment and two reads. Nothing in that commit builds the WASM engine and
+# nothing executes the gate, so it was as dark as the day it was recorded — and
+# the guard, gating `lint-nim` and through it eleven build jobs, went red until
+# somebody retired a truthfully recorded blocker on a false premise.
+#
+# Arm 9 could not catch this. It drops lines by TOOL NAME, and the tools that
+# read a file are unbounded: grep, cat, head, tail, cp, diff, echo, a Python
+# docstring. The rule is now positional — a path counts when it stands where a
+# command goes — and these three arms pin both edges of it.
+m_read_only_reference() {
+	printf '#!/usr/bin/env bash\necho x\n' >"${work}/arm/ci/test/only-read.sh"
+	# shellcheck disable=SC2016  # the ${...} here is TEXT WRITTEN INTO THE
+	# FIXTURE, not a value this suite wants: the fixture has to contain the
+	# literal read that fooled the guard, so it must not expand here.
+	{
+		printf 'READ_ONLY_GATE="ci/test/only-read.sh"\n'
+		printf 'grep -q needle "${READ_ONLY_GATE}"\n'
+		printf 'cat "${READ_ONLY_GATE}"\n'
+		printf 'head -5 ci/test/only-read.sh\n'
+		printf 'echo "see ci/test/only-read.sh for the rules"\n'
+	} >>"${work}/arm/ci/test/gate2.sh"
+}
+arm "15/a gate only assigned, grepped, catted and echoed is not a wire" \
+	"ci/test/only-read.sh is reachable from NO workflow lane" m_read_only_reference
+
+# 15b — THE CONTROL THE ARM ABOVE REQUIRES, and the reason the fix is two passes
+# rather than "ignore assignments". Twenty-nine contract suites in this tree name
+# their subject in a variable and then RUN it, and a rule that dropped the
+# assignment would have invented a dark gate for every one of them.
+stage "${work}/arm"
+printf '#!/usr/bin/env bash\necho x\n' >"${work}/arm/ci/test/run-via-var.sh"
+# shellcheck disable=SC2016  # written into the fixture verbatim, as above.
+{
+	printf 'RUN_GATE="ci/test/run-via-var.sh"\n'
+	printf 'bash "${RUN_GATE}" --root "${TMP}"\n'
+} >>"${work}/arm/ci/test/gate2.sh"
+via_var_out="$(run_guard "${work}/arm")"
+if grep -q 'RESULT: OK' <<<"${via_var_out}"; then
+	ok "15b/a gate RUN through the variable that names it IS credited"
+else
+	bad "15b/a gate run as \${VAR} was reported dark — the position rule dropped a real wire"
+	printf '%s\n' "${via_var_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
+fi
+
+# 15c — AND THROUGH A LOCAL WRAPPER. `chord-and-pane-uniqueness.sh` runs three
+# browser probes as `probe <label> ci/test/<probe>.mjs /noir`, and `probe` is its
+# own function: the path is an ARGUMENT, and only the function body says whether
+# that argument is executed or read. It executes `$2`; `expect_leak` in
+# `sourced-var-collision-gate.sh` greps `$1`. Without this the position rule
+# calls all three probes dark.
+stage "${work}/arm"
+printf '// a probe a wrapper runs\nconsole.log("x");\n' \
+	>"${work}/arm/ci/test/via_wrapper_probe.mjs"
+# shellcheck disable=SC2016  # `$1`, `$2` and `${script}` are the FIXTURE
+# function's own parameters, resolved when the guard reads that file.
+{
+	printf 'probe() {\n'
+	printf '\tlocal label="$1" script="$2"\n'
+	printf '\tnode "${script}" "${label}"\n'
+	printf '}\n'
+	printf 'probe chords ci/test/via_wrapper_probe.mjs /noir\n'
+} >>"${work}/arm/ci/test/gate2.sh"
+wrapper_out="$(run_guard "${work}/arm")"
+if grep -q 'RESULT: OK' <<<"${wrapper_out}"; then
+	ok "15c/a gate a local wrapper EXECUTES as \$2 IS credited"
+else
+	bad "15c/a gate run by a local wrapper was reported dark — the position rule stops at the call"
+	printf '%s\n' "${wrapper_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
 fi
 
 echo

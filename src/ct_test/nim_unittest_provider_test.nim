@@ -3,6 +3,7 @@ import std/[json, os, osproc, sequtils, strutils, unittest]
 import ct_test
 import contracts
 import discovery
+import nim_lexer
 import frameworks/nim_unittest
 
 proc fixtureRoot(): string =
@@ -342,6 +343,156 @@ suite "ct-test Nim unittest lexical regressions":
     check detectFrameworksInContent("import std/unittest\n").len == 1
     # A single-line literal is preserved: `import "module"` is legal Nim.
     check detectFrameworksInContent("import \"std/unittest\"\n").len == 1
+
+# ---------------------------------------------------------------------------
+# Import clauses are STATEMENTS, not lines.
+#
+# The defect these pin: the framework scan read one physical line and called it
+# the import statement, so the house-style bracketed clause
+#
+#     import std/[os, strutils,
+#                 unittest]
+#
+# never showed `unittest` — and a file whose framework is not detected is never
+# scanned for declarations at all, so it left the catalog entirely. Every case
+# below therefore comes in a matched pair: a continuation form that MUST be
+# read, and a shape that MUST NOT be swallowed by reading past the end of the
+# statement. A scan that joins everything passes the first half and fails the
+# second; a scan that joins nothing does the reverse.
+# ---------------------------------------------------------------------------
+
+proc clausesOf(source: string): seq[NimImportClause] =
+  scanNimImportClauses(source, scanNimSource(source))
+
+suite "ct-test Nim import clause scanning":
+  test "a bracketed import continued on the next line is read whole":
+    const source = "import std/[os, strutils,\n            unittest]\n"
+    let clauses = clausesOf(source)
+    check clauses.len == 1
+    check clauses[0].keyword == "import"
+    check clauses[0].modules == @["std/os", "std/strutils", "std/unittest"]
+    check detectFrameworksInContent(source) == @[nufStdUnittest]
+
+  test "a comma-continued import is read whole":
+    const source = "import std/os,\n       std/unittest\n"
+    let clauses = clausesOf(source)
+    check clauses.len == 1
+    check clauses[0].modules == @["std/os", "std/unittest"]
+    check detectFrameworksInContent(source) == @[nufStdUnittest]
+
+  test "consecutive imports stay separate statements":
+    # The other direction: reading past the line break when nothing invites it
+    # would fuse two statements and mis-report both module lists.
+    let clauses = clausesOf("import std/os\nimport std/strutils\n")
+    check clauses.len == 2
+    check clauses[0].modules == @["std/os"]
+    check clauses[1].modules == @["std/strutils"]
+
+  test "a statement that ends does not swallow the next line":
+    # `unittest` here is a local identifier on the following line, not an
+    # import. A scan that keeps reading past the end of the clause would
+    # detect a framework this file does not use.
+    const source = "import std/os\nvar unittest = 1\ndiscard unittest\n"
+    let clauses = clausesOf(source)
+    check clauses.len == 1
+    check clauses[0].modules == @["std/os"]
+    check detectFrameworksInContent(source).len == 0
+
+  test "a semicolon separates two import statements on one line":
+    let clauses = clausesOf("import std/os; import std/unittest\n")
+    check clauses.len == 2
+    check clauses[0].modules == @["std/os"]
+    check clauses[1].modules == @["std/unittest"]
+    check detectFrameworksInContent("import std/os; import std/unittest\n") ==
+      @[nufStdUnittest]
+
+  test "a comment inside a bracketed clause neither ends nor joins it":
+    const source =
+      "import std/[os, # the platform bits\n" &
+      "            unittest] # and the framework\n" &
+      "import std/strutils\n"
+    let clauses = clausesOf(source)
+    check clauses.len == 2
+    check clauses[0].modules == @["std/os", "std/unittest"]
+    check clauses[1].modules == @["std/strutils"]
+
+  test "an import inside a conditional branch is still an import":
+    const source = "when defined(posix): import std/unittest\n"
+    check clausesOf(source).len == 1
+    check detectFrameworksInContent(source) == @[nufStdUnittest]
+
+  test "`from` names the module, not the symbols it pulls in":
+    let clauses = clausesOf("from std/unittest import check, suite\n")
+    check clauses.len == 1
+    check clauses[0].keyword == "from"
+    check clauses[0].modules == @["std/unittest"]
+
+  test "an `include` is recorded but is not a framework detection":
+    # Resolving an include path is a different job from reading one file, so
+    # the framework answer stays "no" — but the clause is still recorded, so
+    # the diagnostic can say why the answer might be wrong.
+    const source = "include ./common\n"
+    let clauses = clausesOf(source)
+    check clauses.len == 1
+    check clauses[0].keyword == "include"
+    check clauses[0].modules == @["./common"]
+    check detectFrameworksInContent(source).len == 0
+
+  test "a multi-line clause naming no framework detects nothing":
+    # The negative control for the whole suite: if the fix worked by declaring
+    # everything a detection, this would fail.
+    check detectFrameworksInContent(
+      "import std/[os, strutils,\n            tables]\n").len == 0
+
+  test "an import only quoted in a here-doc is still not an import":
+    check clausesOf(
+      "const doc = \"\"\"\nimport std/[os,\n  unittest]\n\"\"\"\n").len == 0
+
+  test "a multi-line import recovers the file's declarations end to end":
+    # The measurable consequence, at the level the defect was visible: file in,
+    # catalog out. Before the fix this catalog was empty and the file carried
+    # an `info` note claiming it had no unittest import.
+    let catalog = catalogForSource(
+      "import std/[os, strutils,\n            unittest]\n" & declarationTail)
+    check catalog.selectorsOf ==
+      @["round trip::", "round trip::keeps the probe"]
+    check "no Nim unittest imports detected" notin catalog.messagesOf
+
+suite "ct-test Nim unittest detection diagnostics":
+  test "a negative detection reports the imports it actually read":
+    # The bare conclusion "no Nim unittest imports detected in file" reads the
+    # same whether the file imports no framework or the scan failed to see the
+    # one it has. Naming the modules makes the two distinguishable: a missed
+    # import is an import missing from this list.
+    let catalog = catalogForSource(
+      "import std/[os, strutils]\nimport std/tables\n\nechoBanner()\n")
+    let messages = catalog.messagesOf
+    check "no Nim unittest imports detected in file" in messages
+    check "std/os" in messages
+    check "std/strutils" in messages
+    check "std/tables" in messages
+
+  test "a file with no imports at all says so, rather than reporting a scan":
+    let catalog = catalogForSource("echo \"hello\"\n")
+    check "no imports were read from this file at all" in catalog.messagesOf
+
+  test "an unfollowed `include` is named as the reason the answer may be wrong":
+    let catalog = catalogForSource("import std/os\ninclude ./shared_cases\n")
+    let messages = catalog.messagesOf
+    check "`include`" in messages
+    check "./shared_cases" in messages
+    check "does not follow" in messages
+
+  test "a long import list is summarised rather than dumped":
+    var modules: seq[string] = @[]
+    for i in 0 ..< 20:
+      modules.add "mod" & $i
+    let catalog = catalogForSource("import " & modules.join(", ") & "\n")
+    let messages = catalog.messagesOf
+    check "the 20 module(s) it imports are" in messages
+    check "mod0" in messages
+    check "and 8 more" in messages
+    check "mod19" notin messages
 
 suite "ct-test CLI surface":
   test "the usage string documents the scoping escape hatch":

@@ -266,6 +266,37 @@ test_lane_backend() {
 	esac
 }
 
+# test_lane_parity_partner ID — the lane that deliberately compiles the SAME
+# files on the other backend, or empty.
+#
+# Two lanes on different backends sharing a file is normally a defect: one of
+# them is feeding the compiler something that cannot build, and because
+# coverage is a union nothing notices. That is what happened to
+# `stop_command_test.nim` -- claimed by `frontend-js` AND by
+# `frontend-native-units`, dying on `nim c` with "Module jsFFI is designed to
+# be used with the JavaScript backend" on every run, while counting as
+# covered. Eight files were in that state.
+#
+# But it is not ALWAYS a defect. Two pairs below exist precisely to compile
+# one suite twice and compare: that is the parity they test. So the exception
+# is DECLARED here, per lane pair, rather than inferred -- and declared as a
+# pair of lanes, not as a list of files. The rot mode this is guarding against
+# is per-file drift (a file joins one lane, nobody edits the other's list);
+# lane pairs are four lines and change about once a year.
+#
+# `ci/test/test-lane-coverage.sh` Check C reads this. Adding a lane pair here
+# switches that check off for those two lanes, so it needs the same
+# justification these two have: the suites must genuinely build on both.
+test_lane_parity_partner() {
+	case "$1" in
+	vm-js) echo "vm-native" ;;
+	vm-native) echo "vm-js" ;;
+	vm-unit-js) echo "vm-unit" ;;
+	vm-unit) echo "vm-unit-js" ;;
+	*) echo "" ;;
+	esac
+}
+
 # test_lane_extra_flags ID — extra `nim` flags the lane's files need. Each
 # non-empty answer must say what breaks without it.
 test_lane_extra_flags() {
@@ -632,13 +663,30 @@ test_lane_files() {
 		# real suite whose name simply does not end in `_test`.
 		#
 		# Minus the suites that are ABOUT the JS frontend and only compile for
-		# it (they are the `frontend-js` lane below).
+		# it. SUBTRACTED AS THE `frontend-js` LANE ITSELF, not as a copy of its
+		# contents, and that difference was a live red rather than a tidy-up.
+		#
+		# This used to reject four names by hand while `frontend-js` below
+		# listed twelve. The eight in the gap were claimed by BOTH lanes, and
+		# every one of them fails identically the moment `nim c` touches it:
+		#
+		#   src/frontend/tests/stop_command_test.nim ... COMPILE ERROR
+		#     nim/lib/js/jsffi.nim(36, 10) Error: fatal error: Module jsFFI is
+		#     designed to be used with the JavaScript backend.
+		#
+		# `stop_command_test.nim` joined `frontend-js` in d2ac3f802 and nobody
+		# updated the denylist -- which is exactly the drift a hand-maintained
+		# list sitting next to a discovery glob produces, and exactly what this
+		# file's own header was written to stop. The suite itself is fine: on
+		# its real lane it is 7 [OK], 0 [FAILED]. It was the CLAIM that was
+		# wrong, so the claim is what moved.
+		#
+		# Expressing it as a set difference means the two lanes cannot disagree
+		# again: adding a file to `frontend-js` removes it from here in the
+		# same edit, and `ci/test/test-lane-coverage.sh` still sees it claimed
+		# by the union.
 		_tlf_find src/frontend/tests '*_test.nim' '*_test_plan.nim' |
-			_tlf_reject \
-				'^src/frontend/tests/frontend_lang_test\.nim$' \
-				'^src/frontend/tests/scratchpad_add_dispatch_test\.nim$' \
-				'^src/frontend/tests/ipc_registry_test\.nim$' \
-				'^src/frontend/tests/target_axes_js_test\.nim$'
+			grep -vxF -f <(test_lane_files frontend-js) || true
 		;;
 
 	frontend-js)
@@ -1099,6 +1147,7 @@ test_lane_files() {
 		test_lane_files vm-native |
 			_tlf_reject \
 				'/agentic-coding/' \
+				'/status-bar/certificate_indicator_native_test\.nim$' \
 				'/welcome-screen/welcome_screen_recent_folders_test\.nim$' \
 				'/request-panel/demo_recipe_vm_test\.nim$' \
 				'/request-panel/python_request_panel_vm_test\.nim$' \
@@ -1110,7 +1159,19 @@ test_lane_files() {
 				'/request-panel/remote_request_panel_vm_test\.nim$' \
 				'/request-panel/request_span_conformance_test\.nim$'
 		# agentic-coding/* import std/osproc, whose `quoteShell` does not exist
-		# on the JS target. `welcome_screen_recent_folders_test.nim` is the same
+		# on the JS target. `certificate_indicator_native_test.nim` (SB-1) is the
+		# same error for the same reason and one more besides: it drives the
+		# SHIPPED native platform instantiation (`host/desktop_native.nim`, a
+		# hard `{.error.}` under `nim js`) against a real git repository, which
+		# is the only way to prove the indicator's refresh triggers fire when
+		# real facts move. Its backend-independent half is
+		# `status-bar/certificate_indicator_vm_test.nim`, which carries no host
+		# or filesystem dependency and DOES run in this lane on both backends —
+		# the same split drawn for `test_platform_desktop_native` in `vm-unit`.
+		# Rejecting it here rather than `when defined(js)`-guarding it is
+		# deliberate: a suite compiled with its whole subject elided would report
+		# green having asserted nothing.
+		# `welcome_screen_recent_folders_test.nim` is the same
 		# error through `src/common/trace_index` (osproc + db_sqlite), and it
 		# exists as a separate file precisely so this rejection costs one
 		# genuinely-native case instead of the 44 headless `WelcomeScreenVM`
@@ -1154,7 +1215,26 @@ test_lane_files() {
 		# named after what they exercise rather than after the convention. That
 		# is the failure mode this whole file exists to remove, so the glob
 		# follows the directory, not the naming habit.
-		_tlf_find src/ct_test/incremental 'test_*.nim' 'e2e_*.nim'
+		#
+		# AND THE INCREMENTAL SUITES THAT SIT ONE LEVEL UP. The directory rule
+		# above reaches `src/ct_test/incremental/` and stops there, so
+		# `src/ct_test/incremental_cli_test.nim` -- the argument-parsing
+		# contract of `ct test --incremental`, 144 lines of ordinary `unittest`
+		# over `incremental_cli` and `incremental/engine` -- ran in NO lane and
+		# was caught by `ci/test/test-lane-coverage.sh`. It is a glob and not
+		# an added path on purpose: the next `incremental_*_test.nim` written
+		# beside it is covered without anyone editing this file, which is the
+		# rule this whole file exists to enforce.
+		#
+		# `incremental_e2e_test.nim` is rejected because it belongs to
+		# `ct-test-incremental-e2e`: it records with a real recorder sibling,
+		# and this lane's recipe builds none. It is not dropped -- that lane
+		# names it explicitly -- so the coverage guard still sees it.
+		{
+			_tlf_find src/ct_test/incremental 'test_*.nim' 'e2e_*.nim'
+			_tlf_glob src/ct_test 'incremental_*_test.nim' |
+				_tlf_reject '/incremental_e2e_test\.nim$'
+		} | sort -u
 		;;
 
 	ct-test-incremental-e2e)
@@ -1212,6 +1292,7 @@ test_lane_files() {
 			src/ct_test/python_providers_test.nim \
 			src/ct_test/rust_libtest_provider_test.nim \
 			src/ct_test/playwright_provider_test.nim \
+			src/ct_test/m13_harness_outcomes_test.nim \
 			src/frontend/viewmodel/tests/unit/test_test_explorer_vm.nim \
 			src/frontend/viewmodel/tests/unit/test_editor_test_controls_m4.nim \
 			src/ct_test/m13_smart_contract_harnesses_test.nim \

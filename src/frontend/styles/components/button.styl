@@ -1,12 +1,72 @@
 @import "../generated/index"
 
+// Control heights — ONE scale for buttons, icon buttons and inputs, so a button
+// beside a field is the same height as the field and the size of a control says
+// where it belongs:
+//
+//   extra large  34px  the welcome screens: their form fields and buttons
+//   large        28px  the caption bar: the command prompt and its controls
+//   medium       26px  controls inside a panel: search and filter fields, and
+//                      the buttons beside them
+//   small        24px  compact controls
+//   extra small  20px  inline controls inside rows, e.g. the event log's Rows
+//
+// Defined here because this file is imported first (codetracer.styl), so every
+// component sees it; input.styl's INPUT_HEIGHT_* are these same values.  `rem`
+// so each step is a whole pixel at the 16px root wherever the control sits —
+// the icon-button sizes below were `em` and resolved differently per container.
+CONTROL_HEIGHT_XL = 2.125rem
+CONTROL_HEIGHT_LG = 1.75rem
+CONTROL_HEIGHT_MD = 1.625rem
+CONTROL_HEIGHT_SM = 1.5rem
+CONTROL_HEIGHT_XS = 1.25rem
+
+// Control outline — ONE border for fields, icon buttons and the segmented tabs'
+// track: 1px `border/secondary` (#3a3a3a) with 6px corners.  It was the tabs'
+// border first; fields and icon buttons took it on from there so the three read
+// as one family.  Hover lightens it to `border/primary/hover` and an active
+// control (a focused field, an open menu's trigger) turns it `border/action`.
+CONTROL_BORDER_WIDTH = 0.0625rem
+CONTROL_BORDER_COLOR = colors-ui-border-secondary
+CONTROL_RADIUS = 0.375rem
+
+// Panel inset — ONE distance between a panel's edges and its content: 8px on
+// the left, the right and the top, in every panel (Nikolay, 2026-09-14).
+//   * top: the panel body's own padding (`.lm_content`, golden_layout.styl; the
+//     bottom dock, auto_hide.styl), so a panel's first row starts 8px down;
+//   * left / right: each panel's toolbar, fields and text.  Rows that carry a
+//     background (list and table rows, header bands) still run edge to edge;
+//     their content sits PANEL_INSET in.
+// Not for the code editor, whose gutter owns its own spacing.
+PANEL_INSET = 0.5rem
+
+// List hover — ONE hover for every row of a list, menu, table or tree: the row's
+// background becomes `surface/primary/secondary-hover` (#333333), across the
+// whole row, with square corners, and nothing else changes — not the text
+// colour, not a border.  It is the VCS panel's row hover (`.vcs-commit-header`,
+// vcs.styl), made the default everywhere.
+//
+// Not for the code editor, its gutters or code lines: those keep their own.
+LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
+
+// Button transition — ONE timing for every button's state change (hover, and
+// the welcome forms' Record / Download turning primary): the colours ease over
+// 250ms after a 100ms beat, so a button settles into its new state instead of
+// snapping.  Only the timing is shared; each button keeps its own colours.
+// First introduced on the welcome screen's Record / Download buttons, then
+// made the default.  Imported first (codetracer.styl), so every stylesheet can
+// use it.
+BUTTON_TRANSITION_TIMING = 250ms ease 100ms
+BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRANSITION_TIMING, border-color BUTTON_TRANSITION_TIMING
+
 // -- Buttons --
 button
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
   border-radius: 0.5em !important
   display: inline-flex
   outline: none
   border-width: 0em
+  transition: BUTTON_TRANSITION
   flex: 0 0 1.75em !important
   box-sizing: border-box
   white-space: nowrap
@@ -38,32 +98,50 @@ button
     pointer-events: none
     cursor: not-allowed
 
-// Sizes
+// Sizes — text buttons, on the control scale above.
 //
 // Each size matches TWO spellings, because the class the markup emits carries a
-// variant segment: an icon button is `ct-button-image-md-secondary` and a text
-// button is `ct-button-text-md-secondary`.  Neither contains the substring
-// `ct-button-md-`, so a bare `[class*="ct-button-md-"]` matches NEITHER — and
-// the text buttons went unstyled for their whole existence, falling back to the
-// user-agent's `padding: 1px 6px`.  That 1px is why the edit-mode toolbar's
-// labels sat crammed against their borders.
+// variant segment: a text button is `ct-button-text-md-secondary` or plain
+// `ct-button-md-secondary`, and an icon button `ct-button-image-md-secondary`.
+// `[class*="ct-button-md-"]` matches neither `-text-` nor `-image-`, so the
+// `-text-` spelling is listed as well; icon buttons have their own rules below.
 //
-// Only the `-text-` spellings are added.  Icon buttons miss these rules too,
-// but they set their own `width`/`height` and centre their glyph, so padding
-// has nothing to push there — adding it would move glyphs that are correct
-// today, which is a different change from fixing a selector that matches
-// nothing.
+// A set height, not vertical padding: padding made the height whatever the
+// label's line box came to (about 31px for `md`), off every other control.
+// The horizontal padding is unchanged; `align-items` centres the label.
+// xl keeps lg's side padding: it gains height, not width.  At 1em the welcome
+// screen's five start options overran their row by 7px.
+[class*="ct-button-xl-"]
+[class*="ct-button-text-xl-"]
+  height: CONTROL_HEIGHT_XL
+  padding: 0 0.875em
+  align-items: center
+  // The xl form fields' 6px (`.ct-input-form`), so the two match side by side.
+  border-radius: 0.375rem !important
+
 [class*="ct-button-lg-"]
 [class*="ct-button-text-lg-"]
-  padding: 0.75em 0.875em 0.75em 0.875em
+  height: CONTROL_HEIGHT_LG
+  padding: 0 0.875em
+  align-items: center
 
 [class*="ct-button-md-"]
 [class*="ct-button-text-md-"]
-  padding: 0.5em 0.75em 0.5em 0.75em
+  height: CONTROL_HEIGHT_MD
+  padding: 0 0.75em
+  align-items: center
 
 [class*="ct-button-sm-"]
 [class*="ct-button-text-sm-"]
-  padding: 0.25em 0.625em 0.25em 0.625em
+  height: CONTROL_HEIGHT_SM
+  padding: 0 0.625em
+  align-items: center
+
+[class*="ct-button-xs-"]
+[class*="ct-button-text-xs-"]
+  height: CONTROL_HEIGHT_XS
+  padding: 0 0.5em
+  align-items: center
 
 // TODO: For now restrict to button class -
 // later on maybe combine the three styles?
@@ -104,6 +182,9 @@ button
     border: 0em !important
 
 // -- Icon-buttons --
+//
+// Square, one step of the control scale each: xl 34, lg 28, md 26, sm 24,
+// xs 20.
 [class*="ct-button-image-"]
   background-position: center
   background-size: auto 1em !important
@@ -115,29 +196,35 @@ button
   align-items: center
   justify-content: center
 
+[class*="ct-button-image-xl-"]
+  width: CONTROL_HEIGHT_XL
+  max-width: CONTROL_HEIGHT_XL
+  height: CONTROL_HEIGHT_XL
+  max-height: CONTROL_HEIGHT_XL
+
 [class*="ct-button-image-lg-"]
-  width: 2em
-  max-width: 2em
-  height: 2em
-  max-height: 2em
+  width: CONTROL_HEIGHT_LG
+  max-width: CONTROL_HEIGHT_LG
+  height: CONTROL_HEIGHT_LG
+  max-height: CONTROL_HEIGHT_LG
 
 [class*="ct-button-image-md-"]
-  width: 1.75em
-  max-width: 1.75em
-  height: 1.75em
-  max-height: 1.75em
+  width: CONTROL_HEIGHT_MD
+  max-width: CONTROL_HEIGHT_MD
+  height: CONTROL_HEIGHT_MD
+  max-height: CONTROL_HEIGHT_MD
 
 [class*="ct-button-image-sm-"]
-  width: 1.25em
-  max-width: 1.25em
-  height: 1.25em
-  max-height: 1.25em
+  width: CONTROL_HEIGHT_SM
+  max-width: CONTROL_HEIGHT_SM
+  height: CONTROL_HEIGHT_SM
+  max-height: CONTROL_HEIGHT_SM
 
 [class*="ct-button-image-xs-"]
-  width: 1em
-  max-width: 1em
-  height: 1em
-  max-height: 1em
+  width: CONTROL_HEIGHT_XS
+  max-width: CONTROL_HEIGHT_XS
+  height: CONTROL_HEIGHT_XS
+  max-height: CONTROL_HEIGHT_XS
 
 // -- The debugger control strip's marks --
 //
@@ -241,28 +328,31 @@ button
   background-image: ct-images-layout-tab
   background-size: 1em auto !important
 
-  // States match `.vcs-branch-current` (vcs.styl), the reference for anything
-  // that opens a menu: a 1px border, transparent at rest, grey on hover and
-  // blue while the menu is open, with the surface left alone throughout.
+  // States match the input fields (components/input.styl), which this button
+  // sits beside: the field's surface in every state, its resting border, and
+  // its hover border.  Open is the one state of its own — the blue border every
+  // menu trigger shows while its menu is up (`.vcs-branch-current`, vcs.styl).
   //
   // Two inherited behaviours have to be undone for that. `ct-button-no-border`
   // sets `border: none !important`, so the width has to come back with
-  // `!important`; and `[class*="-secondary"]:hover` lightens the background,
-  // which would double up on the border as a second state cue.
+  // `!important`; and `[class*="-secondary"]:hover` changes the background,
+  // which would give the button a hover the fields do not have.
   //
   // The width lives on the base rule and `box-sizing: border-box` is already
   // set on `button`, so the control stays 28x28 in every state and the centred
   // icon does not move.  This replaces an inset `box-shadow` that drew a fake
   // border in `em` — 0.0625em against a 16px button, so a hair under 1px.
-  border: 0.0625rem solid transparent !important
+  // The shared control outline (CONTROL_BORDER_*, top of this file).
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR !important
+  background-color: colors-ui-surface-input-secondary
 
   &:hover
     border-color: colors-ui-border-primary-hover !important
-    background-color: colors-ui-surface-primary-default
+    background-color: colors-ui-surface-input-secondary
 
   &.open
     border-color: colors-ui-border-action !important
-    background-color: colors-ui-surface-primary-default
+    background-color: colors-ui-surface-input-secondary
 
 #close-element
   background-image: ct-images-close-button
@@ -295,27 +385,74 @@ button
   background-image: ct-images-hamburger-dropdown
   z-index: 100
 
+// The value-history toggle on each State row.  Its mark is the design system's
+// `code-icons=history-value-new` (the 2×2 grid), drawn at its 12px glyph size and
+// painted with `icon/primary/default` through a mask — the same way as the
+// origin badge beside it (below), so the two icons are one colour.  A mask on a
+// `::before`, not on the button, because the button also holds the tooltip.
+// `padding: 0` drops the browser's default 1px 6px, which left the mark only
+// 6px of the 20px button.
 .value-history-button
-  background-image: ct-images-value-history-toggle
-  background-size: auto 0.5em !important
+  background-image: none !important
+  padding: 0
+  // The tooltip below is placed relative to THIS button.  Without it the
+  // button was `static`, so `left: 120%` was measured against a wide ancestor
+  // in the State pane and the tooltip landed ~130px past the window's right
+  // edge — it was never visible.
+  position: relative
+
+  &::before
+    content: ''
+    display: block
+    flex: 0 0 auto
+    width: 0.75rem
+    height: 0.75rem
+    background-color: colors-ui-icon-primary-default
+    // A direct url, not the `ct-images-value-history-toggle` theme variable:
+    // only the dark theme defines that, and the light themes would get the
+    // bare identifier, no mask, and a solid square.  A mask uses only the
+    // file's shape, so the one file serves every theme.
+    mask-image: url("../../public/resources/shared/history_value_view_toggle_dark.svg")
+    mask-size: contain
+    mask-repeat: no-repeat
+    mask-position: center
 
   &:hover > .custom-tooltip
     opacity: 1
     visibility: visible
     transition-delay: TOOLTIP_DELAY_TIMER
 
+  // Beside the button, not under it: under it the tooltip would cover the next
+  // State row.  Vertically centred on the button, 8px to its right, with the
+  // arrow on its left edge pointing back at the button.
   .custom-tooltip
-    top: -30%
-    left: 120%
+    top: 50%
+    left: calc(100% + 0.5rem)
+    transform: translateY(-50%)
+    // The origin badge is the button's next sibling and comes later in the
+    // row, so without a z-index its clock icon paints over the tooltip's text.
+    z-index: 1
 
     &:after
-      content: '';
-      position: absolute;
-      left: -0.875em
-      top: 20%
+      content: ''
+      position: absolute
+      // The arrow box is 1em wide (0.5em border each side) and only its right
+      // border is painted, so -1em puts the triangle flush against the edge.
+      left: -1em
+      top: calc(50% - 0.5em)
+      // The shared `.custom-tooltip:after` anchors with `bottom: 100%` for an
+      // upward arrow; with `top` set too, that would fight the centring.
+      bottom: auto
       border-width: 0.5em
       border-style: solid
       border-color: transparent colors-ui-surface-base-canvas transparent transparent
+
+  // `[class*="ct-button-image-"]:hover > .custom-tooltip` (further down) drops
+  // every icon button's tooltip BELOW the button on hover, and this button is
+  // one of them (`ct-button-image-xs-secondary`).  Repeating the attribute
+  // selector here outranks it, so the tooltip stays where it is placed above.
+  &[class*="ct-button-image-"]:hover > .custom-tooltip
+    top: 50%
 
 .ct-button-no-border
   border: none !important
@@ -371,42 +508,66 @@ button
   top: calc(100% + 0.3125em)
   transition-delay: TOOLTIP_DELAY_TIMER
 
+// The value-origin badge on each State row sits beside the value-history toggle
+// (above), so it is built as the same extra-small icon button: 20px tall, the
+// shared control outline (CONTROL_BORDER_*, 6px corners), 8px from its
+// neighbour.  With text it grows sideways into a pill; with none — the backend
+// sends an empty expression for some terminators, e.g. "recording start" — it
+// stays a 20px square instead of a pill with a hole where the text would be.
+// Sizes are `rem`, not `em`: the badge's own 12px font would otherwise shrink
+// every one of them.
 .ct-origin-badge
   display: inline-flex
   align-items: center
   justify-content: center
-  padding: 0.2em 0.5em
-  gap: 0.25em
-  border-radius: 0.375em !important
+  box-sizing: border-box
+  height: CONTROL_HEIGHT_XS
+  min-width: CONTROL_HEIGHT_XS
+  padding: 0 0.375rem
+  gap: 0.25rem
+  border-radius: CONTROL_RADIUS !important
   font-family: inherit
-  font-size: 0.75em
+  font-size: 0.75rem
   line-height: 1
   cursor: pointer
   user-select: none
-  transition: background-color 0.15s ease, border-color 0.15s ease
+  // The shared button transition (BUTTON_TRANSITION, top of this file).
+  transition: BUTTON_TRANSITION
   vertical-align: middle
-  margin-left: 0.5em
+  margin-left: 0.5rem
 
   // Design system colors matching secondary image button
   background-color: colors-ui-surface-primary-default
-  border: 0.03125em solid colors-ui-border-primary
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
   color: colors-ui-text-primary-body-subtle
 
   &:hover
     background-color: colors-ui-surface-primary-default-hover
-    border-color: colors-ui-border-secondary
+    border-color: colors-ui-border-primary-hover
 
   &:focus-visible
     outline: none
     box-shadow: 0 0 0 0.125em colors-ui-border-focus
 
+  &:has(.ct-origin-badge-text:empty)
+    width: CONTROL_HEIGHT_XS
+    max-width: CONTROL_HEIGHT_XS
+    padding: 0
+
+  // The terminator icons are single-colour line art that says
+  // `stroke="currentColor"`.  A `background-image` SVG is a separate document
+  // and cannot see this page's colour, so they drew in black — invisible on
+  // the dark panel.  Used as a mask instead, the icon is only a stencil and
+  // the colour is this element's background: `icon/primary/default`, the same
+  // as the value-history mark beside it.
   .ct-origin-badge-icon
     display: inline-block
-    width: 1.1em
-    height: 1.1em
-    background-size: contain
-    background-repeat: no-repeat
-    background-position: center
+    width: 1rem
+    height: 1rem
+    background-color: colors-ui-icon-primary-default
+    mask-size: contain
+    mask-repeat: no-repeat
+    mask-position: center
     flex: 0 0 auto
 
   .ct-origin-badge-text
@@ -415,12 +576,14 @@ button
     text-overflow: ellipsis
     white-space: nowrap
 
-  // Icon-only variant
+    &:empty
+      display: none
+
+  // Icon-only variant: the same 20px square as an empty badge
   &.ct-origin-badge-icon-only
-    padding: 0.125em
-    border-radius: 0.375em !important
-    width: 1.25em
-    height: 1.25em
+    padding: 0
+    width: CONTROL_HEIGHT_XS
+    max-width: CONTROL_HEIGHT_XS
 
     .ct-origin-badge-text
       display: none
@@ -435,18 +598,41 @@ button
     .ct-origin-badge-icon
       display: none
 
-// Icon backgrounds mapping to terminator types
+// Icon masks mapping to terminator types (painted by `.ct-origin-badge-icon`)
 .ct-origin-icon-sigma .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/sigma.svg")
+  mask-image: url("../../../public/resources/origin-icons/sigma.svg")
 .ct-origin-icon-quotation .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/quotation.svg")
+  mask-image: url("../../../public/resources/origin-icons/quotation.svg")
 .ct-origin-icon-door .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/door.svg")
+  mask-image: url("../../../public/resources/origin-icons/door.svg")
 .ct-origin-icon-globe .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/globe.svg")
+  mask-image: url("../../../public/resources/origin-icons/globe.svg")
 .ct-origin-icon-clock-rewind .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/clock-rewind.svg")
+  mask-image: url("../../../public/resources/origin-icons/clock-rewind.svg")
 .ct-origin-icon-question .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/question.svg")
+  mask-image: url("../../../public/resources/origin-icons/question.svg")
 .ct-origin-icon-hourglass .ct-origin-badge-icon
-  background-image: url("../../../public/resources/origin-icons/hourglass.svg")
+  mask-image: url("../../../public/resources/origin-icons/hourglass.svg")
+
+// Every icon button carries the shared control outline (CONTROL_BORDER_*, top of
+// this file) — the same 1px `border/secondary`, 6px corners, as the fields and
+// the segmented tabs — and lightens it on hover, as a field does.
+//
+// Doubled selector for specificity, not style: `ct-button-no-border` sets
+// `border: none !important` at one class's weight, and most icon buttons carry
+// it.  The caption-bar logo is excluded in menu_bar.styl: it reads as part of
+// the bar, not as a button.
+//
+// The caption bar's debugger toolbar (`#isonim-debug-controls` — back/forward,
+// the step and continue controls) is a category of its own and is left out
+// entirely, so its buttons keep the look they had before this outline existed:
+// most carry `ct-button-no-border` and have none.  `:where()` inside the `:not()`
+// adds nothing to the specificity, so this rule still loses to the id-level
+// borders it lost to before (e.g. `#category-image`).  See also the toolbar's
+// transition in menu_bar.styl.
+[class*="ct-button-image-"][class*="ct-button-image-"]:not(:where(#isonim-debug-controls *))
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR !important
+  border-radius: CONTROL_RADIUS !important
+
+  &:hover:not(:disabled)
+    border-color: colors-ui-border-primary-hover !important

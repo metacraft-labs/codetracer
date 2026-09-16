@@ -760,6 +760,39 @@ and a correlation marker's counterpart is by definition in another process.
   — which is COMPILABLE, so `nim c -r` on it is an independent ground truth for
   what discovery must report (1 suite + 5 cases).
 
+- 2026-09-08 (ct-test Nim framework detection: a statement is not a line): the
+  framework scan in `frameworks/nim_unittest.nim` read ONE PHYSICAL LINE and
+  called it the `import` statement. A bracketed clause continued on the next
+  line —
+      import std/[os, strutils,
+                  unittest]
+  — therefore never showed `unittest`. That is not a small mis-read: a file
+  whose framework is not detected is never scanned for declarations at all, so
+  it left the catalog whole. Measured on the reprobuild workspace: 46 sources
+  and 200 cases were absent for this reason alone (1,394 -> 1,440 addressable
+  sources, 8,028 -> 8,228 cases), with no file's count moving and no identity
+  changing.
+  The clause extent is now decided by the token stream (`importClauseEnd`): the
+  statement continues while a bracket is open or the line ended on `,`/`/`/`.`,
+  and ends at a line break or a `;`. That also picks up `import` inside a
+  `when …:` branch and two clauses separated by `;`, and makes an `import`
+  written inside a string literal a non-event. STILL NOT COVERED: `include`
+  (the included file's imports are not followed) and `import unittest as u` /
+  `except`, both by design.
+  MIRROR DEFECT, also fixed — and the reason this sat unnoticed: the negative
+  diagnostic was the bare sentence `no Nim unittest imports detected in file`,
+  emitted identically for a file with no test import and for a file whose
+  import the scan failed to read. 206 rows in one workspace report, 46 of them
+  false, indistinguishable. A conclusion with no evidence attached cannot be
+  audited: `noFrameworkMessage` now names the modules the scan actually read,
+  and names any `include` whose imports it did not follow.
+  Regression guards: the `ct-test Nim import clause scanning` and `ct-test Nim
+  unittest detection diagnostics` suites in `nim_unittest_provider_test.nim`
+  (each continuation form paired with a shape that must NOT be swallowed, so
+  neither "join everything" nor "join nothing" passes), plus the fixture
+  `fixtures/nim_unittest_project/tests/test_lexical_edge_cases.nim`, whose
+  import now deliberately spans two lines.
+
 - 2026-08-13 (ct-test silent output truncation): `execCaptured` bounds captured
   child output at `DefaultCaptureLimit` (16 MiB) and used to drop the fact that
   it had cut anything. `CapturedRun` now carries `outputBytes` (the true
@@ -2160,11 +2193,26 @@ Measured, not theorised:
 The fix, and where to look:
 
 * `ci/lib/lint-steps.sh` — `lint_step "<literal name>" cmd...` runs each check in
-  a subshell, records the verdict, and ALWAYS returns 0, so a red step cannot
-  abort a caller running under `set -e`. `lint_summary` prints one verdict line
-  per step and decides the exit status from all of them. A step exiting **78**
+  a subshell, records the verdict, and returns 0 for EVERY verdict, so a red step
+  cannot abort a caller running under `set -e`. `lint_summary` prints one verdict
+  line per step and decides the exit status from all of them. A step exiting **78**
   is QUARANTINED: reported and counted, but not fatal. The library uses shell
   builtins only, on purpose — see the guard.
+
+  **Every call belongs to the shell that sourced the file.** The report lives in
+  shell arrays, so both entry points compare `BASHPID` against the pid captured at
+  source time and refuse a foreign caller. `lint_step` in a pipeline stage, a
+  `while read` loop or a `$(...)` would append to a copy that dies with the
+  subshell — it used to print `--> FAILED` and be counted `0 FAILED` — so it
+  refuses to run the body at all and returns **2**, the single exception to the
+  return-0 rule (a caller-side misuse with no result, not a red step). Under the
+  lint scripts' `set -uo pipefail` that return does not abort anything and does
+  not redden the job on its own; what reddens is `ci/test/lint-step-isolation-test.sh`
+  B3, which asserts no `ci/lint` script emits the refusal banner. `lint_summary`
+  carries the mirrored check because in a subshell it is its RETURN VALUE that is
+  lost, and suppresses the report rather than print one whose status cannot reach
+  the job. Sourcing the file twice is also a no-op now — it used to reinitialise
+  the arrays and discard every verdict recorded so far.
 
   **Do not "simplify" that to `("$@") || rc=$?`.** Bash suppresses errexit
   inside any command that is an operand of `||`, and A SUBSHELL INHERITS THE
@@ -2190,7 +2238,14 @@ The fix, and where to look:
   names every step it declared. Pass old scripts as arguments to see it go red:
   the pre-fix `bash.sh` dies at its first command and never mentions the other
   eight checks. It also runs the lint scripts against a throwaway copy of `ci/`
-  with cwd inside it, because `ci/lint/rust.sh` writes files.
+  with cwd inside it, because `ci/lint/rust.sh` writes files. Part C checks the
+  guard's OWN scanner: it drives this script, as a subprocess, over synthetic
+  lint scripts. Part B's declaration scan is deliberately NOT `^`-anchored — a
+  `lint_step` behind `if …; then` used to be invisible to it, which made the
+  enforcement mechanism the delivery route past every check it makes — so
+  whole-line comments are stripped first and `(^|[^[:alnum:]_])` keeps
+  `maybe_lint_step` from matching. Part C runs only when no targets are given,
+  which is what terminates the recursion.
 * Order still matters, for a different reason: put pure-bash/git guards ahead of
   anything needing a compiler so their answer reaches the log sooner. They just
   no longer HIDE what follows.
@@ -2342,7 +2397,11 @@ runners exit 0 for an all-skipped suite:
 The remaining providers still derive a whole file's status from one subprocess
 exit code (`cpp_common`, `native_m11_common`, `m12_fallback_common`,
 `smart_contract_common`, and `ruby_common`'s minitest branch), so a skip is
-indistinguishable from a pass there. The rest of the registry -- jest, vitest,
+indistinguishable from a pass there. All of them now at least report a FAILURE
+honestly — see "the counters read `tekTestFinished` ONLY" below — but the
+coarse granularity is unchanged either way: one event per file, not per test.
+
+The rest of the registry -- jest, vitest,
 pytest, python-unittest, nim-unittest, rust-libtest -- has no `run` wired at
 all (`unsupportedRun` / a not-implemented stub), so it reports no finished
 test and can claim nothing; do not read it as a third category of gap.
@@ -2373,6 +2432,64 @@ Ruby test FAILED reported `executed 0, failed 0` and exited 2
 on a one-method failing minitest project before the fix. If you add a provider
 branch that means "this did not pass", the `tekTestFinished` is the part that
 counts; the `tekFailure` beside it only carries the reason.
+
+The same hole was open in three more places and is now closed in ONE:
+`cpp_common.runNativeCommand` (cpp-gtest, cpp-catch2, cpp-ctest),
+`native_m11_common.runCommand` (go-test, d-unittest, crystal-spec) and
+`m12_fallback_common.runShellCommand` (pascal, fortran, ada, odin, v, lean,
+julia, assembly) each carried their own copy of the "emit the terminal events"
+tail, and all three failure branches were missing the `tekTestFinished`.
+Measured with the standalone `ct-test` binary (`--mm:orc --threads:on`; the
+`ct` binary is refc and refuses `test run`) on a one-test Go module whose only
+test calls `t.Fatalf`: before, `executed 0, failed 0`, verdict
+"nothing-executed", exit 2, certificate withheld `wrNoTestsExecuted`; after,
+`executed 1, failed 1`, verdict "failed", exit 1, withheld `wrTestsFailed`.
+The three copies are now one emitter — `native_m11_common.unitOutcomeEvents`,
+which cpp_common reaches as `nativeM11.unitOutcomeEvents` and
+m12_fallback_common by plain import — so the failure branch cannot drift from
+the passing one again in any of the fourteen providers.
+
+AND THE SAME HOLE, CLOSED IN TWO MORE PLACES, THROUGH THE SAME EMITTER:
+`smart_contract_common.runRecorderCommand` (the fourteen M13 smart-contract
+and VM harnesses -- and it serves BOTH `run` and `record`, so it was a
+run-path defect for twelve of them; `smart-wasm` and `smart-wasmi` are
+`shrmUnsupported` and never reach it) and `native_m11_common.recordCommand`
+(the M11 file-RECORDING path). Both emitted a `tekTestFinished(tsPassed)` when
+the recorder succeeded and NONE at all when it failed or produced no artifact.
+Measured on a scratch workspace holding one `.cairo` fixture and a stub
+recorder that exits 3, driven through the shipped
+`ct test run --workspace <ws> --summary <path>`: before, `executed 0, failed
+0`, verdict "nothing-executed", exit 2, certificate withheld
+`wrNoTestsExecuted`; after, `executed 1, failed 1`, verdict "failed", exit 1,
+withheld `wrTestsFailed`.
+
+`unitOutcomeEvents` grew a `status` overload for it (the recording paths have
+a THIRD outcome the exit-code overload cannot express -- `tsErrored`, meaning
+the command succeeded and produced no artifact) plus `finishedKind` and
+`trace`, so `tekRecordFinished`-closing callers use the same emitter as
+`tekRunFinished`-closing ones. The exit-code predicate moved out to
+`statusForExitCode`, which is the only place in the family that decides which
+exit codes are a pass.
+
+The M13 provider capabilities the REGISTRY stores are still computed with no
+project root (see the KNOWN GAP note on `newSmartHarnessProvider`), so a
+recorder discoverable only at `<repo>/target/{debug,release}/<binary>` still
+yields units `run_orchestration` marks unrunnable without dispatching. That is
+unchanged, and it is why `m13_harness_outcomes_test.nim`'s CLI case sets
+`<SPEC>_CMD`.
+
+STILL OPEN, same class, same argument, and NOT covered by the change above:
+
+* `js_common.recordCommand` (~:930/:948) and `ruby_common.recordCommand`
+  (~:984/:998) -- the JS and Ruby file-RECORDING paths, both failure branches.
+* `js_playwright.nim:391` -- when the Playwright results JSON cannot be
+  parsed, the provider emits `tekRunFinished(tsErrored)` and no
+  `tekTestFinished`, so an unparseable reporter stream reads as "nothing ran".
+* `noir_nargo.nim:365` and `:386` -- the truncated-output and
+  no-per-test-results branches do the same.
+
+Do not "grep for the fix" — follow the `tekRecordFinished` / `tekRunFinished`
+emissions and check whether a `tekTestFinished` sits beside each of them.
 
 ## The `executed` field means TESTS, and the exit code has three outcomes
 
@@ -4057,3 +4174,342 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   state". So `codetracer-gpui <trace>` with no flags prints nothing, opens
   nothing and exits **0** in ~0.13 s. Use `--report-plan` to see anything at
   all. Do not read a green exit as a rendered window. (PLAT-23, 2026-09-16.)
+- 2026-09-09 (SB-1): **`except CatchableError` / `except Exception` DO NOT
+  CATCH A FOREIGN JS EXCEPTION on the `nim js` backend.** jsgen emits a
+  `catch (e)` that tests `e.m_type` and RE-THROWS when the test fails, and
+  anything thrown by `require('fs')`, `require('child_process')` or any other
+  node API has no `m_type`. Only a BARE `except:` catches it, and
+  `getCurrentExceptionMsg()` then returns the real message
+  (`ENOENT: no such file or directory, scandir '…'`). Measured with a
+  four-line program, not inferred.
+  This is not academic: `viewmodel/host/desktop_electron.nim`'s `jsGuard`
+  template had exactly the two typed arms and no bare one, so **every**
+  `pkNotFound` / `pkAccessDenied` / `errorText()` in that file was dead code
+  for its whole life, and the facade's "failures are values" contract was
+  false on the instantiation the product actually ships. It surfaced only
+  when the status bar's certificate indicator listed a directory most
+  workspaces do not have. If you add a `try` around a host call in a
+  `nim js` module, add a bare arm.
+  AND NOTHING GUARDS THE FIX — checked, not assumed. With the bare arm
+  removed and the frontend rebuilt, `status-bar-render-stability.spec.ts`'s
+  `verify_clean_console_on_trace_open` still passes, because the certificate
+  indicator's own store adapter (`certificate_indicator_source.nim`) wraps
+  every facade call in a bare `except:` and swallows the re-thrown node
+  exception before it can reach `window.onerror`. Measured in the running
+  app: the indicator then reads *unverifiable* for an ordinary
+  store-less workspace with an EMPTY console error bucket — a silently wrong
+  verdict rather than a loud one. `desktop_electron.nim` is `{.error.}` off
+  the JS backend and is imported by no test, so any real guard for it has to
+  run inside Electron and assert the facade's OUTCOME (`fs.listDir` on a
+  missing directory returns `pkNotFound` rather than throwing).
+- 2026-09-09 (SB-1): a CAPTURE-FREE closure literal assigned inside a
+  `std/unittest` `test` body is `jsgen.nim(1239) env is missing
+  [AssertionDefect]` under `nim js` — the file compiles on the C backend and
+  dies in the JS lane. Declare the proc at module level and assign the name
+  instead. Two of the status-bar suites hit this; both now say so at the
+  site.
+- 2026-09-09 (SB-1): `ci/test/frontend-reachability.sh` matches BY NAME
+  across all of `src/frontend`, so adding a symbol anywhere marks every
+  unreached export of the same name as reached, and the count silently drops.
+  (This remark used to continue "and the ratchet is an EQUALITY, so the lane
+  demands you lower the ceiling". That half stopped being true on 2026-09-12:
+  `--max` is a CEILING again, so a drop no longer reddens anything. The
+  masking below is the part that still bites.) A drop is therefore not
+  automatically progress: check whether a name went away or merely arrived
+  somewhere else. SB-1 masked
+  `viewmodel/identity/token.nim`'s `SignatureVerifier` (renamed the new type
+  to `CertificateSignatureVerifier` to un-mask it) and still masks that
+  file's `issuedAt`, which cannot be avoided — `issued_at` is the test
+  certificate standard's own field name.
+- 2026-09-09 (SB-1): a refresh driven by "after a render pass" is not a
+  trigger in an idle Electron renderer, because an idle status bar does not
+  render. `ui/certificate_indicator.nim` uses a `setInterval` now. If you need
+  periodic revalidation of anything, do not hang it off a render.
+  MEASURED, with `window.__ctStatusRenderStats()` (status.nim exposes it):
+  across 60 s of untouched idle in edit mode the status bar performed TWO
+  render passes, both inside one 10 s window and none in the other 50. Driving
+  the same change (an edit to a tracked file deep in the tree, which no wired
+  watch can see) the shipped timer moved the label after 15.1 s — one
+  `RevalidateIntervalMs` exactly — and the render-hook design after 29.2 s,
+  and only because a notification happened to draw. So it is not literally
+  "never fires"; its latency is governed by unrelated render activity, which
+  in a quiet window is unbounded.
+- 2026-09-11 (M-LX-7): THERE ARE TWO extension→language maps in db-backend and
+  they do not agree. `src/lang.rs::lang_from_context` is the one that decides
+  which value loader the native replay worker uses, and it knows `.adb`/`.ads`,
+  `.f90`/`.F90`, `.cr`, `.jl`, `.lean`, … `src/expr_loader.rs::
+  ExprLoader::get_current_language` is a SEPARATE, older map that decides which
+  tree-sitter grammar parses the file, and it knows far fewer. A language in the
+  first but not the second computes `Lang::Unknown` there, misses `NODE_NAMES`,
+  and `process_file`'s `if NODE_NAMES.contains_key(&lang)` guard then extracts
+  ZERO expressions — the flow comes back with steps and no variables, which
+  reads exactly like a broken extractor. Ada and Fortran are in that gap today.
+  If you add a language, add it to BOTH.
+- 2026-09-11 (M-LX-7): `log_expressions`'s documented "no tree-sitter grammar →
+  load variable names from the trace data" fallback is reached for those
+  languages and, for MCR traces, returns nothing: an Ada session stopped inside
+  `Calculate_Sum` logs `no tree-sitter var list for line Position(30)` then
+  `loaded 0 variables from trace data`. So the fallback is not the safety net it
+  looks like on MCR traces.
+- 2026-09-11 (M-LX-7): `add_mcr_source_breakpoint` (codetracer-native-backend)
+  answers the DAP `setBreakpoints` request with `verified: true` even when LLDB
+  resolved ZERO locations — it downgrades to a *pending* breakpoint and logs
+  `created pending source breakpoint N`. `ct-dap-client`'s
+  `validate_set_breakpoints_body` checks `verified` and nothing else — not the
+  location count — so a breakpoint with zero locations passes that gate and the
+  failure surfaces much later as an empty flow at `<unknown>:0`. Late resolution
+  IS a designed outcome (`mcr_refresh_pending_breakpoints` re-checks and logs
+  `pending source breakpoint N resolved with M location(s)`); the defect is that
+  `verified: true` is asserted BEFORE that happens, so the client cannot tell
+  "resolved" from "hoping". When a flow test reports `Stopped at <unknown>:0`,
+  grep the worker log for `pending source breakpoint` before suspecting the
+  extractor. Note also that this path forces BASENAME matching
+  (`utils::lldb_breakpoint_file` reduces any path with a `/` to its file name).
+- 2026-09-11 (M-LX-7): a hard-coded `breakpoint_line` in a flow test is a
+  liability — `rust_mcr_streaming_flow_test` pointed at line 12 for two days
+  after a ~390-line preamble was prepended to the fixture, and the symptom was
+  indistinguishable from a variable-extraction defect. That test now derives the
+  line from the source text and panics if the anchor is missing or ambiguous;
+  prefer that shape for new ones. The other EIGHT language arms
+  (c/cpp/ada/d/fortran/go/nim/pascal) still hard-code theirs and carry the same
+  hazard.
+- 2026-09-11 (M-LX-7): `flow_preloader.rs`'s flow walk pushes
+  `new_location.line` into a `FlowViewUpdate` whose `location` is the WINDOW's
+  file, and NEVER compares `new_location.path` against `self.location.path`. So
+  a step that legitimately reports a line in another file — a Nim `=destroy`
+  hook inlined from `system.nim`, an inlined header function in C++ — is filed
+  as that line number of the file you asked about. This is how the nim MCR arm
+  reports "steps at lines 394 and 398" of a 23-line fixture: those are real
+  `system.nim` lines. Symptom to recognise: step lines beyond the end of the
+  file, together with locals that belong to a different translation unit
+  (`colontmpD_`, `nimErr_`, `FR_`, `gEnv`). `ExprLoader::get_source_line`
+  already warns on the out-of-range row and nothing acts on it.
+- 2026-09-13 (cow namespace indexes): `memwrites.tc` / `linehits.tc` are now
+  built bottom-up in one pass (`CowNamespaceWriter::bulk_load`), not one
+  `insert_and_commit` per key. **The failure mode here is NOT the one the Nim
+  writer has**, and the difference is worth knowing before you go looking for
+  it: Nim's `cow_btree` holds superseded pages "pending free" and never
+  reclaims during a build, so a per-key Nim build blows the IMAGE up (1.18 GB
+  at 100k keys) and bytes/key climbs. The Rust writer reclaims eagerly into the
+  free list at every commit (see its module doc), so the Rust images stayed
+  modest and bytes/key stayed FLAT — 89 bytes/key at every cardinality from
+  10k to 200k. What grew instead was encode TIME, because
+  `insert_and_commit` calls `collect_reachable` on the old AND new root and
+  then does an O(pages) `contains` per page: 0.13 s at 10k keys, 2.1 s at 50k,
+  10.6 s at 100k, 72.5 s at 200k. So an image-size check alone would have
+  called the Rust side healthy. Measure the encode, not just the artefact.
+- 2026-09-13: both encoders used to run a whole THROWAWAY per-key build over
+  every key purely to learn how long the finished index would be, because
+  descriptors carry `(payload_offset, len)` into a payload appended after the
+  page-aligned index. That doubled the cost. A one-pass index's length is a
+  pure function of the key count — `CowNamespaceWriter::bulk_load_image_len`.
+  If you add another namespace with an appended payload, use that rather than
+  building the tree twice. `bulk_load` refuses to return an image whose length
+  disagrees with it, because an under-estimate misplaces every payload offset
+  while still producing a structurally valid `NSB1` image.
+- 2026-09-13: the same sizing-pass-plus-per-key shape survives in THREE test
+  fixture helpers (`linehits_namespace.rs` `image_with_entries`,
+  `mod.rs` `cow_linehits_image`, and the deliberate reference builders in the
+  two encoders' test modules). Those are kept on purpose — they mean the
+  readers are still exercised against a per-key-packed image, which is a real
+  second packing, not dead weight. Do not "fix" them to `bulk_load` without
+  leaving something that reads a per-key build.
+- 2026-09-13: a bulk-built and a per-key-built namespace of the same keys are
+  reader- and value-equivalent but **never byte-identical** (different commit
+  id, the other root slot, and the per-key one keeps the pages its spine
+  copies left behind). Any equivalence check between the two must be on decoded
+  content. `codetracer-trace-format-nim/tests/check_nsb1_namespace.nim` is the
+  canonical adjudicator for "a foreign writer emitted a real namespace" — it
+  takes an image plus a `<key> <descriptor-hex>` / `!<absent-key>` manifest and
+  judges it with the production Nim `loadCowBTree`/`lookup`.
+- 2026-09-14: the bottom auto-hide pane for `Content.SearchResults` is titled
+  **FIND IN FILES**, not "SEARCH RESULTS" — renamed in `ui/layout.nim`'s
+  `standaloneAutoHidePanels` by 529c8dd1 ("feat: Add find in files component").
+  The DOM did NOT follow: the component id is still `searchResultsComponent-0`
+  and the CSS class is still `.search-results`, so a spec can hold a correct
+  id-based locator and a dead title-based one at the same time. That is what
+  happened — `bottomStripTab(page, "SEARCH RESULTS")` matched nothing, both
+  cases of `tests/build/search-results-e2e.spec.ts` failed on a timed-out
+  `toBeVisible` after the click, and the Find-in-Files Web renderer arm was left
+  with zero behavioural coverage. `status-bar-render-stability.spec.ts` was
+  asserting `toHaveCount(1)` for the same missing tab. The titles now live as
+  named exports in `src/tests/gui/page-objects/auto-hide-strip.ts`
+  (`FIND_IN_FILES_TAB_TITLE` and siblings); name a bottom pane through those,
+  never with a literal. Note the tab COUNT stayed 4 the whole time, so
+  `DEFAULT_BOTTOM_TAB_COUNT` went on agreeing with the app while the titles
+  beside it did not — a count is not evidence that the names are alive.
+- 2026-09-14: `scripts/build-siblings.sh` decides "already built" by
+  `[ -e "$artifact_path" ]` (existence), never freshness — the very
+  "existence-checked-as-freshness" defect `ci/test/stale-artefact-guards-test.sh`
+  exists to grade, in the script that feeds the e2e lane. Measured: a
+  `codetracer-js-recorder` built against an older `codetracer-trace-format`
+  sibling kept emitting `meta.dat` **version 3**, current `ct` accepts only 4/5,
+  and every `recordChromeTraceFixture` spec died in `importTraceFolder` with
+  "unsupported version 3 ... re-record the trace" while `build-siblings` happily
+  reported `SKIP ... already built`. The failure names the TRACE, not the stale
+  recorder, so it reads as a corrupt fixture. Remedy until this is fixed:
+  `bash scripts/build-siblings.sh --force --only <sibling>`.
+- 2026-09-14: A STALE RENDERER BUNDLE CAN SURVIVE A "SUCCESSFUL" SOURCE REVERT,
+  and it looks exactly like a product bug. `just build-once` runs tup, and tup
+  ABORTS ON THE FIRST FAILED JOB — so when the `db-backend` step dies (e.g. the
+  `cargo build --locked` failure a stale `src/db-backend/Cargo.lock` produces),
+  webpack never re-runs and `src/public/dist/frontend_bundle.js` keeps whatever
+  the LAST complete build baked in. The Nim source can be clean, `git diff`
+  empty, and the running Electron app still render the previous contents.
+  Measured the hard way: a `.search-results` → `.search-results-MUTANT` class
+  edit stayed live in the app across a source revert and two `build-once`
+  invocations, and the resulting spec failures read convincingly as an
+  order-dependent mount defect ("passes alone, fails when not first in the
+  worker") because the passing runs predated the poisoned bundle.
+  DO NOT verify bundle freshness by grepping the bundle for a class or id: the
+  isonim DSL does not emit them as contiguous literals, so `grep -c` returns 0
+  for a class that is demonstrably rendered. Both `fif-panel search-results`
+  and the mutated form return 0. The only reliable check is to read the LIVE
+  DOM (`ctPage.evaluate(() => el.outerHTML)`); the `#auto-hide-docked-bottom-content`
+  dump is what finally showed the mutant class still present. Confirm
+  `build-once` exited 0 before trusting any GUI e2e result.
+- 2026-09-14: A COMMAND LINE CANNOT BE SPLIT WITHOUT KNOWING WHICH SHELL WROTE
+  IT, and `viewmodels/evidence_call_vm.nim`'s `splitCommandLine` now says so in
+  its signature (`dialect: CommandLineDialect = cldAuto`). `\` ESCAPES on a
+  POSIX shell and SEPARATES on cmd.exe/PowerShell, and the two readings are
+  mutually exclusive, not merely different — the proof is a pair of inputs each
+  unambiguous on its own: `-o C:\out\ --diff` needs `\ ` to be a separator plus
+  a delimiter or the two arguments glue into one, while `CT_LOG=/home/a\ b/log`
+  needs `\ ` to be an escaped space or one argument splits into two. Any single
+  context-free per-character rule trades one of these for the other, which is
+  how the previous "escape only before a delimiter" rule was reached and why it
+  left four residuals behind.
+  The dialect is a RUNTIME parameter, deliberately not `when defined(windows)`:
+  the producer is an agent session and the reader is whoever opens it later, so
+  they need not be the same machine (the reported case is a Windows agent's
+  dataset opened in a Linux CodeTracer), and both CI lanes being Linux means a
+  `defined(windows)` arm would execute zero assertions while looking covered.
+  `cldAuto` is what production passes because NOTHING RECORDS THE AGENT'S OS —
+  not `AgentActivityMessageEntry`, not ACP's `tool_call.title`, not Agent
+  Harbor's shell events. Giving the splitter a real dialect is therefore a
+  change to the PRODUCERS, not to the recogniser. Auto decides per TOKEN, never
+  per line, because one line legitimately carries both readings.
+  THE TRAP INSIDE AUTO, worth the space because the obvious rule is wrong and
+  its wrongness is silent. It is tempting to say a token carrying a literal
+  backslash cannot be POSIX-escaped, since the POSIX reading would have to call
+  it a pointless escape (`\o` in `C:\out`). That holds for QUOTES — `'` and `"`
+  are not legal Windows path characters, so `\"` in such a token is a trailing
+  separator meeting a closing quote. IT DOES NOT HOLD FOR WHITESPACE. A token
+  can be Windows-shaped AND POSIX-escaped at once:
+      C:\Program\ Files\out\r.json
+  is what git-bash/WSL/any shell-quoting harness emits for the commonest spaced
+  Windows path there is — single separators, only the space escaped — and its
+  `\ ` is a genuine, necessary escape. Withdrawing the escape on the
+  literal-backslash evidence alone truncates it to `C:\Program\` and orphans
+  the rest: a wrong-but-plausible dataset path, the exact failure this module
+  exists to prevent. It is locally IDENTICAL to `-o C:\out\ --diff`, which
+  needs the opposite reading, so only LOOKAHEAD separates them: what follows
+  the escaped whitespace is more path in one case and a flag in the other.
+  `continuesTheSamePath` is that lookahead — a flag is the one argv token that
+  can never be a path continuation. STATED LOSS: a trailing separator followed
+  by a POSITIONAL argument (`-o C:\out\ report.json`) reads as one token. The
+  two classes cannot both win; the rarer one loses, and `-o`/`--output` is
+  followed by a flag or by end of line in every spelling this recogniser
+  accepts.
+  `cldWindows` is the SHELL reading, not MSVCRT's `CommandLineToArgvW`
+  backslash-run rule. That rule turns `"C:\dir\"` into `C:\dir"` — a string no
+  Windows path may contain, since `"` is not a legal path character. It is a
+  known CRT trap rather than an intent, and reproducing it would name a
+  wrong-but-plausible dataset, which is the whole failure class this module
+  exists to prevent. cmd.exe and PowerShell both read it as `C:\dir\`.
+  Also: `commandBaseName`'s `.exe` test folded case while the name comparison
+  did not, so `ct.EXE` was accepted and `CT.EXE` refused. Half a fold is not a
+  rule. The name test now lives in `namesCtBinary` and folds case there.
+- 2026-09-14: A path containing an apostrophe (`C:\Users\O'Brien\review.json`)
+  is mis-split by `splitCommandLine` in ALL THREE dialects: the `'` opens a
+  single-quote region, and because nothing closes it the apostrophe is
+  SWALLOWED and the remainder appended — `C:\Users\OBrien\review.json`, not a
+  truncation. Pre-existing at HEAD and unchanged; fixing it needs a "`'` quotes
+  only at a token boundary" rule that no reported case asks for.
+- 2026-09-14: `src/tests/gui/tests/views/isonim_views_test.nim` DOES NOT report
+  "465 OK, 0 FAILED" any more, contrary to the note above about the raising
+  mock-DOM lookups. Measured at 9aad6671 with the tree otherwise pristine, on
+  the JS backend: 465 OK and 3 FAILED — `loadStepLinesFor emits
+  ct/load-step-lines with location + count` and `loadStepLinesFor falls back to
+  default panel height when unset` (both `InvalidDapCommandDefect`: the engine
+  has no `ct/load-step-lines`) plus `diff previews and terminals preserve legacy
+  ids` (`MockNodeNotFoundError` for class `agent-editor`). They are unrelated to
+  anything in the AA-3 evidence chain; do not read them as a regression from an
+  evidence/agent-activity change.
+- 2026-09-14: To compile ANY test that reaches
+  `views/isonim_agent_activity_view.nim` by hand, you need BOTH `nim js` and
+  `-d:nimNoLentIterators`. Without the JS target it dies on an `importjs`
+  pragma; with the JS target but no define it dies on `'seg' is of type <lent
+  MsgSegment> which cannot be captured`. The define is in
+  `appimage-scripts/build_with_nim.sh`'s NIM_COMMON_FLAGS, so the real builds
+  have it and only a hand-typed `nim js` does not. Affects
+  `agent_activity_evidence_view_test.nim`, `agent_activity_test_run_view_test.nim`
+  AND `views/isonim_views_test.nim` — the `vm-js` lane is red today on all three,
+  because `ci/lib/test-lane-files.sh` passes only `--path:src/frontend/viewmodel`
+  for that lane. Tracked separately; not fixed here.
+- 2026-09-15: A `flake.lock` node can be INTERNALLY INCOHERENT — `lastModified`
+  carrying one commit's date while `rev` names another — and nix rejects such an
+  input outright ("mismatch in field 'lastModified'"), but ONLY when it actually
+  FETCHES it. Two things stop that happening: a warm store reuses the cached
+  entry without re-resolving, and a workspace `.envrc` overrides the
+  metacraft-labs inputs with sibling paths so the github node is never fetched
+  at all. Consequence: a hand-edited pin is green locally, green on warm
+  runners, and fatal on a cold one — which reads as flake and sends the
+  investigation at whatever the PR happened to touch. Two guards now exist and
+  NEITHER subsumes the other: `ci/test/flake-lock-metadata-test.sh` asks GitHub
+  about the 31 direct `github` inputs (needs a token, CI only, ~18 s), and
+  `scripts/test-flake-lock-node-dates.sh` reads `git show -s --format=%ct` out
+  of the sibling checkouts already on disk (42 nodes including the `type: git`
+  ones and the transitive metacraft-labs ones, no network, ~0.5 s, in
+  `just test`). A commit sha commits to its committer date, so where both can
+  answer they cannot disagree.
+- 2026-09-15: Three nodes in `flake.lock` carry a `rev` and NO `lastModified`
+  and NO `narHash` — `codetracer-src`, `nim-shm-gset-src`,
+  `reprobuild-test-adapters-src`, all `"flake": false` source inputs from
+  reprobuild's closure, in that shape since cb3fff2e6. This is NOT rot: a node
+  with no timestamp has nothing for its rev to disagree with, and nix verifies
+  it by narHash at fetch time. Do not "repair" them by filling the fields in by
+  hand — that is precisely how 4d15c1ea introduced the incoherence above. If a
+  pin has to move without a full re-lock, dropping `lastModified`/`narHash` is
+  the SAFE hand-edit; leaving a stale `lastModified` behind is the unsafe one.
+- 2026-09-15: `repro.nim` DOES NOT COMPILE on `dev`, and has not for at least as
+  long as dd971ae36. Measured two ways: in CI, `test-ui-tests (macos,
+  aarch64-darwin)` -- which is the ONLY pull-request job that compiles this
+  repo's own provider -- dies with `repro.nim(1247, 31) Error: type mismatch`,
+  byte-identically on PR 754 and on dev@dd971ae36 (runs 34934002629 and
+  34907519270); locally, `repro build --list-targets` dies at `repro.nim(1766,
+  40) Error: type mismatch`, again byte-identically on a pristine dev worktree,
+  because the `repro` on PATH is 0.1.3 while flake.nix pins reprobuild
+  3a7ef0d7. Consequences worth knowing before you edit that file:
+    * The compile ABORTS at 1247, so anything below it is never type-checked by
+      anything, anywhere. An edit near the gate registrations (~1780) cannot be
+      validated by CI or locally; do not believe a green PR about it.
+    * `reprobuild-linux-smoke` / `-macos-smoke` do NOT read this repo's
+      repro.nim -- `ci/reprobuild/linux-smoke.sh` builds in a `mktemp -d`
+      scratch project. Their passing says nothing about it.
+    * `windows-installer-build`, which runs `repro build windows-installer` in
+      the repo root, is gated to `main`. So the first thing that would compile a
+      repro.nim edit end-to-end is a RELEASE build.
+  A gate added to `ci/lint/bash.sh` + the `just test` aggregate is fully
+  verifiable today; the matching `repro.nim` test-gate registration is not, and
+  was deliberately left out of the lock-node-dates gate for that reason.
+- 2026-09-16 (merge of the bundled-source containment work with the
+  hot-reload version work): **`expr_loader::bundled_source_path` now takes a
+  `generation`, and the containment wrapper takes it too.** The two changes
+  landed on different branches and are not independent: the guard has to be
+  applied to the VERSIONED destination that will really be written or read,
+  not to a generation-0 stand-in for it, or a second-version file would be
+  reached by a path nothing checked. So:
+  * `bundled_source_path(root, source_path, generation)` is still the RAW,
+    UNGUARDED mapping. It is public only so a test can name the raw key; every
+    raw call site in this repo is inside a `#[cfg(test)]` module, and
+    `cargo check --all-targets` is what keeps that true.
+  * `contained_bundled_source_path(root, source_path, generation)` is the form
+    every production caller uses — both srcviews extractors (native and VFS)
+    and `get_source_line_v2`'s bundled branch.
+  * Generation 0 is the historical destination byte for byte, so
+    `resolve_bundled_source` — which answers a DAP `source` request and has no
+    version ordinal to key on — passes 0 and behaves exactly as before.
+  The GDH-M7 falsifier arm in `get_source_line_v2` goes through the contained
+  candidate too. Routing it around the guard would have made the arm test a
+  code path the product does not ship.

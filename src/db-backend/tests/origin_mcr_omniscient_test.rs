@@ -141,6 +141,26 @@ fn require_compiler(name: &str, test_label: &str) -> bool {
     }
 }
 
+/// Fail loudly when every prerequisite a test probes for is present but
+/// the test's end-to-end body was never written.
+///
+/// Returning quietly here would report success for work that never
+/// happened — and would do so precisely on the runner where the test
+/// *could* have run, so installing `ct-mcr` would flip these from
+/// "skipped" to "passed" while still executing nothing. See
+/// `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
+fn unimplemented_end_to_end(test_name: &str, fixture: &str) -> ! {
+    panic!(
+        "UNIMPLEMENTED END-TO-END BODY: `{test_name}` asserts nothing.\n\
+         Every prerequisite this test probes for is present, so it was selected to run, \
+         yet it records nothing, replays nothing and checks nothing.\n\
+         Implement it against `tests/fixtures/origin/{fixture}/ANSWERS.md`, using \
+         `test_origin_mcr_omniscient_skips_breakpoint_fallback` in this file as the worked \
+         template.\n\
+         Tracked in `codetracer-specs/Testing/Known-Test-Failures.md`."
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Test #1 — omniscient log supersedes Tier-2 fallback entirely.
 // ---------------------------------------------------------------------------
@@ -288,7 +308,10 @@ fn test_origin_mcr_omniscient_c_simple_trivial_chain() {
     if !require_ct_mcr("c_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_omniscient_c_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_omniscient_c_simple_trivial_chain",
+        "c/simple_trivial_chain",
+    );
 }
 
 /// Sibling — Rust fixture coverage (M11 parity).
@@ -300,7 +323,10 @@ fn test_origin_mcr_omniscient_rust_simple_trivial_chain() {
     if !require_ct_mcr("rust_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_omniscient_rust_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_omniscient_rust_simple_trivial_chain",
+        "rust/simple_trivial_chain",
+    );
 }
 
 /// Sibling — Nim fixture coverage (M11 parity).
@@ -312,7 +338,10 @@ fn test_origin_mcr_omniscient_nim_simple_trivial_chain() {
     if !require_ct_mcr("nim_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_omniscient_nim_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_omniscient_nim_simple_trivial_chain",
+        "nim/simple_trivial_chain",
+    );
 }
 
 /// Sibling — Go fixture coverage (M11 parity).
@@ -324,7 +353,10 @@ fn test_origin_mcr_omniscient_go_simple_trivial_chain() {
     if !require_ct_mcr("go_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_omniscient_go_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_omniscient_go_simple_trivial_chain",
+        "go/simple_trivial_chain",
+    );
 }
 
 /// Sibling — D fixture coverage (M11 parity).
@@ -336,7 +368,10 @@ fn test_origin_mcr_omniscient_d_simple_trivial_chain() {
     if !require_ct_mcr("d_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_omniscient_d_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_omniscient_d_simple_trivial_chain",
+        "d/simple_trivial_chain",
+    );
 }
 
 // ---------------------------------------------------------------------------

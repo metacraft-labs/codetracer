@@ -22,7 +22,7 @@ from ../viewmodel/store/types as vmtypes import SearchResultLine
 from ../viewmodel/viewmodels/search_results_vm import
   SearchResultsVM, createSearchResultsVM,
   setQuery, setResults, appendResults, clearResults,
-  setActive, setFilter, setLoading, addRecentSearch, jumpToResult,
+  setActive, setLoading, addRecentSearch, jumpToResult,
   currentQuery, currentResultCount
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_search_results_view import
@@ -278,13 +278,21 @@ proc syncLegacySearchResultsIntoVM*(self: SearchResultsComponent) =
 
   # Use ``setResults`` for the wholesale replace path so re-running
   # ``__ctRenderPanel`` after E2E tests inject results does not double
-  # up the rows.  ``setResults`` flips ``active`` to true when the
-  # list is non-empty so the panel becomes visible.
+  # up the rows.  ``setResults`` also flips ``active`` to true when the
+  # list is non-empty.
   searchResultsVMInstance.setResults(rows)
 
-  # Mirror the active-flag and the query string from the legacy
-  # records so the panel root's ``search-results-active`` modifier
-  # tracks the legacy state.
+  # Mirror the active-flag and the query string from the legacy records.
+  #
+  # NOTHING IN PRODUCTION READS ``active`` ANY MORE.  It used to drive the
+  # root's ``search-results-active`` / ``search-results-non-active``
+  # modifier, which the Find in Files redesign retired and whose CSS has
+  # since been deleted; the view decides its empty-state overlay from
+  # ``vm.results`` (and ``vm.loading``), not from this flag.  It is kept
+  # because it is the assertable stand-in for that retired modifier — the
+  # view suite checks ``vm.active`` across the pre-search ⇄ results ⇄
+  # cleared transitions — and the legacy component remains its one source
+  # of truth.
   searchResultsVMInstance.setActive(self.active or
     (not service.query.isNil and service.query.query.len > 0))
   if not service.query.isNil:

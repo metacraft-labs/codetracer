@@ -3512,6 +3512,12 @@ impl Handler {
 
         // Map the srcviews `path_id` back to the recorded path string (e.g.
         // `res://gf_values.gd`) the classifier probes with.
+        //
+        // GDH-M7: `path_entries_iter` now yields one item per (string, id)
+        // PAIR, so a file interned in three versions contributes three
+        // entries and every one of them gets a destination below. Under the
+        // old string-keyed map it contributed one, and two of the three views
+        // had nowhere to go.
         let path_strings: HashMap<u64, String> = self
             .reader
             .path_entries_iter()
@@ -3547,7 +3553,27 @@ impl Handler {
             // bytes anywhere the replay process can reach. The read side refuses
             // the same paths, so skipping here loses nothing that could have
             // been served.
-            let Some(dest) = crate::expr_loader::contained_bundled_source_path(&root, Path::new(recorded_path)) else {
+            //
+            // GDH-M7 / design §7.1(3). The destination now carries the VERSION
+            // ORDINAL of `sv.path_id`. Without it every raw view for one path
+            // string wrote to one file and the last one silently won, so a
+            // container that recorded all three versions of `res://probe.gd`
+            // still served exactly one of them for the whole session — the
+            // defect §2.2(f) measured.
+            #[cfg(not(feature = "gdh7-falsify-single-destination"))]
+            let generation = self.reader.path_version_ordinal(PathId(sv.path_id as usize));
+            #[cfg(feature = "gdh7-falsify-single-destination")]
+            // FALSIFIER ARM (gdh7_reverse_across_the_boundary_shows_v1, arm 2):
+            // restore the single-destination write. Every version materialises
+            // to one file on disk and the newest wins, so a backward read
+            // across the boundary serves v3's text under v1's line numbers.
+            // This is a DIFFERENT mechanism from the string-keyed-cache arm
+            // and the entry requires both: one breaks the lookup, this one
+            // breaks the bytes underneath a correct lookup.
+            let generation = 0i64;
+            let Some(dest) =
+                crate::expr_loader::contained_bundled_source_path(&root, Path::new(recorded_path), generation)
+            else {
                 warn!("bundled-sources: refusing to extract {recorded_path}: it does not map inside the bundle root");
                 continue;
             };
@@ -3649,7 +3675,13 @@ impl Handler {
             // escapes here, but the read side
             // (`expr_loader::contained_bundled_source_path`) refuses a `..` key
             // and the two must not disagree about which views exist.
-            let Some(dest) = crate::expr_loader::contained_bundled_source_path(&root, Path::new(recorded_path)) else {
+            //
+            // GDH-M7: same version key as the native path — the two layouts
+            // are derived from ONE function precisely so they cannot drift.
+            let generation = self.reader.path_version_ordinal(PathId(sv.path_id as usize));
+            let Some(dest) =
+                crate::expr_loader::contained_bundled_source_path(&root, Path::new(recorded_path), generation)
+            else {
                 warn!(
                     "bundled-sources(vfs): refusing to extract {recorded_path}: it does not map inside the bundle root"
                 );
@@ -4174,14 +4206,30 @@ impl Handler {
     /// only the two jump arms did not. Two methods with one name and opposite
     /// tolerance is what kept re-teaching this bug; they now agree.
     ///
-    /// `fuzzy_path_id_for` tries exact match first, so every path that
-    /// resolved before still resolves to the same id. What is new is that
-    /// paths which previously returned `None` may now resolve — including its
-    /// filename-only strategy, which is gated on the filename matching exactly
-    /// one entry (`matches.len() == 1`), so an ambiguous name still fails
-    /// rather than guessing.
+    /// The ladder tries exact match first, so every path that resolved before
+    /// still resolves to the same id. What is new is that paths which
+    /// previously returned `None` may now resolve.
+    ///
+    /// GDH-M7 CORRECTION: this comment used to end "…its filename-only
+    /// strategy, which is gated on the filename matching exactly one entry
+    /// (`matches.len() == 1`), so an ambiguous name still fails rather than
+    /// guessing." That gate is GONE — removing it is deliverable 2 of GDH-M7,
+    /// because a hot reload interns one file twice and the gate turned an
+    /// ambiguous name into "absent". Stage 6 now returns the whole candidate
+    /// SET, and THIS method takes the newest of it. The disambiguation moved
+    /// from the ladder into the caller, which is the point: a jump is a
+    /// question about the file the user is looking at, so the current content
+    /// is the right answer and saying so is better than the ladder declining.
+    /// A step's own rendering never comes through here — it resolves through
+    /// the step's recorded `path_id`.
     fn load_path_id(&self, path: &str) -> Option<PathId> {
-        self.reader.fuzzy_path_id_for(path)
+        self.load_path_ids(path).last().copied()
+    }
+
+    /// Every `PathId` the fuzzy ladder resolves `path` to, oldest version
+    /// first. GDH-M7: see `MaterializedReplaySession::load_path_ids`.
+    fn load_path_ids(&self, path: &str) -> Vec<PathId> {
+        self.reader.fuzzy_path_ids_for(path)
     }
 
     /// The step on `line` that a jump with `behaviour` should land on.
@@ -7113,7 +7161,7 @@ mod tests {
         let noir_payload = root.join("files").join("src").join("main.nr");
         std::fs::create_dir_all(noir_payload.parent().expect("has a parent"))?;
         std::fs::write(&noir_payload, "PAYLOAD-NOIR\nmod shield;\n")?;
-        let calc_payload = crate::expr_loader::bundled_source_path(&root.join("files"), &calc_recorded);
+        let calc_payload = crate::expr_loader::bundled_source_path(&root.join("files"), &calc_recorded, 0);
         std::fs::create_dir_all(calc_payload.parent().expect("has a parent"))?;
         std::fs::write(&calc_payload, "PAYLOAD-CALC\nprint(1)\n")?;
 
@@ -7167,7 +7215,7 @@ mod tests {
         let recorded = root.join("worktree").join("recorded.src");
         std::fs::create_dir_all(recorded.parent().expect("has a parent"))?;
         std::fs::write(&recorded, "recorded\n")?;
-        let payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded);
+        let payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded, 0);
         std::fs::create_dir_all(payload.parent().expect("has a parent"))?;
         std::fs::write(&payload, "recorded\n")?;
 
@@ -7256,7 +7304,7 @@ mod tests {
             .join("noir_space_ship")
             .join("src")
             .join("main.nr");
-        let files_payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded);
+        let files_payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded, 0);
         std::fs::create_dir_all(files_payload.parent().expect("has a parent"))?;
         std::fs::write(&files_payload, "FILES-PAYLOAD\nmod shield;\n")?;
 
@@ -7335,7 +7383,7 @@ mod tests {
         // An honest file inside the payload, so the trace is a real recording
         // and the control at the end has something to serve.
         let recorded = trace.join("worktree").join("recorded.src");
-        let payload = crate::expr_loader::bundled_source_path(&trace.join("files"), &recorded);
+        let payload = crate::expr_loader::bundled_source_path(&trace.join("files"), &recorded, 0);
         std::fs::create_dir_all(payload.parent().expect("has a parent"))?;
         std::fs::write(&payload, "recorded\n")?;
 
@@ -7345,11 +7393,11 @@ mod tests {
         let escapes_files = "/../../secret.txt";
         let escapes_srcviews = "/../secret.txt";
         assert!(
-            crate::expr_loader::bundled_source_path(&trace.join("files"), Path::new(escapes_files)).is_file(),
+            crate::expr_loader::bundled_source_path(&trace.join("files"), Path::new(escapes_files), 0).is_file(),
             "the escape must really reach the file, or the refusal below proves nothing"
         );
         assert!(
-            crate::expr_loader::bundled_source_path(&srcviews, Path::new(escapes_srcviews)).is_file(),
+            crate::expr_loader::bundled_source_path(&srcviews, Path::new(escapes_srcviews), 0).is_file(),
             "the escape must really reach the file, or the refusal below proves nothing"
         );
 

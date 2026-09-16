@@ -1086,6 +1086,22 @@ type
     AgentMessageAgent
     AgentMessageUser
 
+  ToolCallEntry* = ref object
+    toolCallId*: cstring
+    name*: cstring
+    status*: cstring  # "in_progress", "completed", "failed"
+
+  AgentSegment* = ref object
+    ## One ordered unit of agent output: either a block of streamed text
+    ## or a single tool invocation.  Segments are appended in arrival
+    ## order so the view can interleave text and tool calls correctly
+    ## instead of grouping them all into two separate blobs.
+    isToolCall*: bool
+    content*: cstring      # text segment: accumulated streamed text
+    toolCallId*: cstring   # tool segment: ACP toolCallId
+    toolName*: cstring     # tool segment: human-readable name
+    toolStatus*: cstring   # tool segment: "in_progress"|"completed"|"failed"
+
   AgentMessage* = ref object
     id*: cstring
     content*: cstring
@@ -1093,6 +1109,15 @@ type
     canceled*: bool
     isLoading*: bool
     sessionDiffs*: seq[DiffPreview]
+    createdAt*: float
+    duration*: float
+    toolCalls*: seq[ToolCallEntry]
+    segments*: seq[AgentSegment]
+    ## Epoch-ms timestamp when the first content arrived (text or tool call).
+    ## 0.0 means the agent is still in the "thinking" / waiting phase.
+    thinkingEndedAt*: float
+    images*: seq[string]
+      ## Base64 data URLs of images the user attached to this message.
 
   AgentTerminal* = object
     id*: cstring
@@ -1125,6 +1150,7 @@ type
     reRecordInProgress*: bool
     wantsPassword*: bool
     wantsPermission*: bool
+    permissionDescription*: cstring
     wasCancelled*: bool
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]

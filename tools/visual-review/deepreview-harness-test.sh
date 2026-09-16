@@ -44,7 +44,11 @@ STYLES_TUPFILE="${REPO_ROOT}/src/frontend/styles/Tupfile"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=66
+# 66 -> 72: six contracts added with the #100 stale-capture sweep. Four are the
+# review prompt's new freshness refusal (stale screenshot, the artefact it
+# names, the healthy case still emitting, and a build that has vanished); two
+# are the corpus cache no longer surviving a `ct` rebuild.
+EXPECTED_ASSERTIONS=72
 
 ASSERTIONS=0
 FAILURES=0
@@ -464,15 +468,33 @@ section "the review prompt is emitted only for something that exists"
 SHOT_DIR="${TEST_ROOT}/shots"
 mkdir -p "${SHOT_DIR}"
 
+# The prompt emitter now asks the SAME freshness question the capture asks, in
+# the other direction — a screenshot older than the build it claims to show is
+# refused rather than packaged for a reviewer. So it needs a build tree, and the
+# stub one below is what stands in for it here. Touched BEFORE the screenshots
+# are created, so a healthy PNG is genuinely newer than the build.
+PROMPT_BUILD="${TEST_ROOT}/prompt-build"
+mkdir -p "${PROMPT_BUILD}/bin" "${PROMPT_BUILD}/frontend/styles"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${PROMPT_BUILD}/bin/ct"
+chmod +x "${PROMPT_BUILD}/bin/ct"
+touch "${PROMPT_BUILD}/ui.js" \
+	"${PROMPT_BUILD}/frontend/styles/default_dark_theme_electron.css" \
+	"${PROMPT_BUILD}/frontend/styles/default_white_theme_electron.css"
+
+prompt_env() {
+	env CODETRACER_DESIGN_REVIEW_DIR="${SHOT_DIR}" \
+		CODETRACER_CT_CMD="${PROMPT_BUILD}/bin/ct" "$@"
+}
+
 run_expect_failure "the prompt emitter refuses an unknown view" "unknown view 'nope'" -- \
-	env CODETRACER_DESIGN_REVIEW_DIR="${SHOT_DIR}" bash "${PROMPT}" \
+	prompt_env bash "${PROMPT}" \
 	--view nope --size wide --theme dark
 run_expect_failure "the prompt emitter refuses a screenshot that is not there" "Capture it first" -- \
-	env CODETRACER_DESIGN_REVIEW_DIR="${SHOT_DIR}" bash "${PROMPT}" \
+	prompt_env bash "${PROMPT}" \
 	--view diff-flow-values --size wide --theme dark
 
 : >"${SHOT_DIR}/diff-flow-values--wide--dark.png"
-PROMPT_TEXT="$(CODETRACER_DESIGN_REVIEW_DIR="${SHOT_DIR}" bash "${PROMPT}" \
+PROMPT_TEXT="$(prompt_env bash "${PROMPT}" \
 	--view diff-flow-values --size wide --theme dark --changed "UD-1 landed the diff editor" 2>&1)"
 
 assert_contains "${PROMPT_TEXT}" "${BRIEF}" "the prompt names the brief"
@@ -497,10 +519,38 @@ assert_contains "${PROMPT_TEXT}" "The image is a CLIP" \
 assert_contains "${PROMPT_TEXT}" "1920x1080" \
 	"the prompt states the window geometry the clip was taken from"
 : >"${SHOT_DIR}/review-shell--wide--dark.png"
-SHELL_PROMPT="$(CODETRACER_DESIGN_REVIEW_DIR="${SHOT_DIR}" bash "${PROMPT}" \
+SHELL_PROMPT="$(prompt_env bash "${PROMPT}" \
 	--view review-shell --size wide --theme dark 2>&1)"
 assert_contains "${SHELL_PROMPT}" "WHOLE application window" \
 	"the whole-window view is described as the whole window, not as a clip"
+
+# -- a screenshot older than the build it shows is refused -------------------
+#
+# THE RED THIS SITE NEVER HAD. Only a FULL regeneration clears the screenshots
+# directory, so a targeted re-capture leaves every other view's PNG at its old
+# mtime; the emitter used to ask only `[[ -f ${SHOT} ]]` and would hand a
+# reviewer a picture of a CodeTracer that had since been rebuilt twice. The
+# reviewer cannot tell — that is the whole reason this has to be caught here.
+touch -d '1990-01-01' "${SHOT_DIR}/diff-flow-values--wide--dark.png"
+run_expect_failure "a screenshot older than the build is refused, naming the re-capture" \
+	"Re-capture it with" -- \
+	prompt_env bash "${PROMPT}" --view diff-flow-values --size wide --theme dark
+run_expect_failure "the refusal names the build artefact that outran it" \
+	"ui.js" -- \
+	prompt_env bash "${PROMPT}" --view diff-flow-values --size wide --theme dark
+touch "${SHOT_DIR}/diff-flow-values--wide--dark.png"
+FRESH_AGAIN="$(prompt_env bash "${PROMPT}" \
+	--view diff-flow-values --size wide --theme dark 2>&1)"
+assert_contains "${FRESH_AGAIN}" "Read the design brief" \
+	"a screenshot newer than the build is emitted as before"
+
+# The producer refuses a stale BUILD; the consumer must refuse a build that has
+# since vanished rather than review a picture of something unreproducible.
+mv "${PROMPT_BUILD}/ui.js" "${TEST_ROOT}/parked-ui.js"
+run_expect_failure "a missing renderer bundle is refused rather than assumed" \
+	"the renderer bundle" -- \
+	prompt_env bash "${PROMPT}" --view diff-flow-values --size wide --theme dark
+mv "${TEST_ROOT}/parked-ui.js" "${PROMPT_BUILD}/ui.js"
 
 # ---------------------------------------------------------------------------
 section "capture orchestration (stubbed ct / node / Xvfb)"
@@ -594,7 +644,12 @@ seed_corpus() {
 	rm -rf "${CORPUS}"
 	mkdir -p "${CORPUS}/review"
 	printf '{}\n' >"${CORPUS}/review/review.json"
-	sha256sum "${CAPTURE}" | cut -d' ' -f1 >"${CORPUS}/.fingerprint"
+	# Mirrors `corpus_fingerprint` in the capture script, which keys the cache
+	# on the script AND on the recorder that made the recording.
+	{
+		sha256sum "${CAPTURE}"
+		sha256sum "${BUILD}/bin/ct"
+	} | sha256sum | cut -d' ' -f1 >"${CORPUS}/.fingerprint"
 }
 
 run_capture() {
@@ -715,6 +770,21 @@ printf 'not-the-current-fingerprint\n' >"${CORPUS}/.fingerprint"
 STALE_CORPUS_OUT="$(run_capture --view review-shell --size wide --theme dark)"
 assert_not_contains "${STALE_CORPUS_OUT}" "reusing the corpus" \
 	"a corpus recorded from a different fixture definition is rebuilt, not reused"
+
+# -- a corpus recorded by a DIFFERENT ct is not reused -----------------------
+#
+# The cache key used to hash only this script, which describes the PROGRAM that
+# is recorded and says nothing about what records it. So `just build-once`
+# between two capture runs left every view showing the old recorder's output
+# while the preflight was busy refusing a stale build. A keyed cache whose key
+# omits the recorder is existence-as-freshness one level down.
+seed_corpus
+printf '\n# a rebuild that changed the bytes\n' >>"${BUILD}/bin/ct"
+REBUILT_CT_OUT="$(run_capture --view review-shell --size wide --theme dark)"
+assert_not_contains "${REBUILT_CT_OUT}" "reusing the corpus" \
+	"a corpus recorded by a different ct is re-recorded, not reused"
+assert_contains "${REBUILT_CT_OUT}" "recording run-1 and run-2" \
+	"the rebuilt recorder actually re-records the corpus"
 
 # -- preflight refuses rather than photographing the wrong thing -------------
 seed_corpus

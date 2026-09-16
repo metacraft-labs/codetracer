@@ -268,11 +268,19 @@ fn extract_var_value_at_stop(flow: &FlowData, var_name: &str, stop_rr_ticks: i64
 // independent flow windows. That is out of scope for this test.
 #[test]
 fn test_python_hcr_ctfs_integration() {
-    // -- Guard: skip if the CTFS-emitting recorder or Python 3.10+ unavailable --
+    // -- Guard: prerequisite check. Loud, and fatal when CI says so. --
+    //
+    // A bare `return` here is tallied by cargo/nextest as `1 passed` with zero
+    // assertions run, which is indistinguishable in the summary from a real
+    // verification. `skip_or_fail_missing_prerequisite` prints an unmissable
+    // NOT VERIFIED banner and panics outright under
+    // CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false.
     if find_python_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: CTFS-emitting Python recorder not found \
-             (install codetracer_python_recorder or set CODETRACER_PYTHON_RECORDER_PATH)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_python_hcr_ctfs_integration",
+            "CTFS-emitting Python recorder not found",
+            "install codetracer_python_recorder (sibling repo codetracer-python-recorder) \
+             or set CODETRACER_PYTHON_RECORDER_PATH",
         );
         return;
     }
@@ -280,7 +288,11 @@ fn test_python_hcr_ctfs_integration() {
     let (_python_cmd, version_label) = match find_suitable_python() {
         Some(pair) => pair,
         None => {
-            eprintln!("SKIPPED: Python 3.10+ not found (needed for the recorder)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "test_python_hcr_ctfs_integration",
+                "Python 3.10+ not found (needed for the recorder)",
+                "install Python 3.10 or newer, or set CODETRACER_PYTHON_CMD",
+            );
             return;
         }
     };

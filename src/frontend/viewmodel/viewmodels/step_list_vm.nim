@@ -178,16 +178,55 @@ proc loadStepLinesFor*(vm: StepListVM; loc: StepLineLocation) =
   ## row list before the streamed responses arrive, mirroring the
   ## legacy ``loadStepLinesFor`` proc.  The backend reply lands as
   ## individual ``appendLineSteps`` calls dispatched by the UI bridge.
+  ##
+  ## THE PAYLOAD IS A ``LoadStepLinesArg``, because that is the only
+  ## shape anything on this wire declares.  Both peers already agree on
+  ## it and always did — ``task.rs``'s ``LoadStepLinesArg`` and
+  ## ``common_types/debugger_features/stepping.nim``'s are the same
+  ## record: a nested ``location``, a ``forwardCount`` and a
+  ## ``backwardCount``.
+  ##
+  ## This used to send ``{path, line, rrTicks, count}`` — flat, and with
+  ## ONE count.  Not one field of that object appears in either
+  ## declaration: the destination sat at the top level, where a
+  ## ``LoadStepLinesArg`` never looks, and ``count`` names neither
+  ## direction.  It is the same invention as ``no_source_vm.jumpBack``'s
+  ## ``{previousPath, action}`` (codetracer#698), with one difference
+  ## worth stating: ``LoadStepLinesArg`` is NOT ``#[serde(default)]`` at
+  ## container level, so this payload could never have silently
+  ## succeeded the way a zeroed ``Location`` did — it would have failed
+  ## ``load_args`` on the missing ``location`` field.  A hard error, but
+  ## only once something dispatches the command at all.
+  ##
+  ## The single measured capacity is sent as BOTH counts, which is the
+  ## legacy contract rather than a choice made here:
+  ## ``ui/step_list.nim`` measures one ``panelHeight()`` and
+  ## ``flow_service.loadStepLines`` fills ``forwardCount`` and
+  ## ``backwardCount`` from it.
+  ##
+  ## Correcting the shape does NOT make this request work, and is not
+  ## meant to: ``ct/load-step-lines`` is absent from
+  ## ``VALID_DAP_COMMANDS`` and has no arm in either ``dap_server.rs``
+  ## dispatch table, so the two cases covering it stay red and stay
+  ## registered in ``ci/lib/known-test-failures.tsv``.  What changes is
+  ## that they now pin what both peers declare instead of a shape that
+  ## would still have been wrong the day an engine arm landed.
   vm.clearLineSteps()
   vm.setCurrentLocation(loc)
   let count =
     if vm.panelHeight.val <= 0: DEFAULT_STEP_LIST_PANEL_HEIGHT
     else: vm.panelHeight.val
   let args = %*{
-    "path": loc.path,
-    "line": loc.line,
-    "rrTicks": loc.rrTicks,
-    "count": count,
+    "location": {
+      "path": loc.path,
+      "line": loc.line,
+      "rrTicks": loc.rrTicks,
+      "functionName": loc.functionName,
+      "highLevelPath": loc.path,
+      "highLevelLine": loc.line,
+    },
+    "forwardCount": count,
+    "backwardCount": count,
   }
   discard vm.store.backend.send("ct/load-step-lines", args)
 

@@ -141,6 +141,34 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 #
 #   1223  measured after the equality landed and the dead entry points went
 #   1226  `viewmodel/platform/web_deployment.nim` gained three exports
+#   1225  SB-1's status-bar certificate indicator, LOWERED not raised
+#
+# THE 1225 LOWER, AND WHY IT IS A LOWER AT ALL. SB-1 added ~40 exported
+# declarations under `src/frontend` (the certificate indicator's ViewModel, its
+# fact source, and the projection onto the status bar's record) and every one of
+# them is reached, so none of them is a finding. The count went DOWN by one for
+# a reason worth writing here, because it is a property of this guard rather
+# than of that milestone: THE SCAN IS BY NAME, so a symbol added anywhere in
+# `src/frontend` marks every unreached export of the same name as reached.
+#
+# `viewmodel/identity/token.nim:254 issuedAt` — an accessor on `IdentityClaims`
+# that no product module reaches — is now masked, because the indicator's
+# disclosure reads `cert.issuedAt` off a test certificate. Those are unrelated
+# symbols in unrelated modules. The masking is not fixable from the milestone's
+# side either: `issued_at` is the certificate standard's own field name and the
+# disclosure is required to show it.
+#
+# A SECOND MASKING WAS FOUND THE SAME WAY AND WAS FIXED. `token.nim:234`
+# exports its own `SignatureVerifier`, and SB-1's verifier seam was first
+# called the same thing, which masked it and would have taken this to 1224.
+# The seam is now `CertificateSignatureVerifier`, so token.nim's export is
+# counted again. Two unrelated types of one name in one import graph was worth
+# separating on its own terms; that it also un-masked a finding is how it was
+# noticed.
+#
+# THE LESSON FOR THE NEXT READER: a DROP in this number is not automatically
+# progress. Check whether a name went away or a name merely arrived somewhere
+# else.
 #
 # THE 1226 RAISE, ARGUED RATHER THAN ASSUMED. The three are `bundledAssetPaths`
 # and `isBundledAssetPath` (which the guard counts twice — a forward
@@ -184,7 +212,7 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # was supposed to.
 #
 # THE CEILING WAS NOT LOWERED TO MATCH, and that is deliberate rather than an
-# oversight: at 1078 against 1226 this step now PASSES with 148 slots of
+# oversight: at 1078 against 1225 this step now PASSES with 147 slots of
 # reported slack. Re-fitting the number is the ratchet-policy pass's call — see
 # THE RATCHET POLICY, DECIDED in `ci/test/frontend-reachability-guard.py`'s
 # header, which records (c) "no new findings in files this change touched" as
@@ -288,12 +316,18 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # What changed on 2026-09-12 is the COUNT and not the ceiling. The bucket-A
 # reclassification above stopped labelling a symbol its own module reaches as
 # "no product module reaches it", which took the counted total 1800 -> 1078;
-# and `--max` went back to being a ceiling, so 1078 against 1226 is a report
-# rather than a failure. Nothing was wired, nothing was deleted, and no `*`
-# came off: 1078 is the same tree, counted correctly.
+# and `--max` went back to being a ceiling, so 1078 against the ceiling is a
+# report rather than a failure. Nothing was wired, nothing was deleted, and no
+# `*` came off: 1078 is the same tree, counted correctly.
 #
-# SO THE LANE NOW CARRIES 148 SLOTS OF SLACK, which is a real budget and is
-# reported on every run. THE CEILING IS STILL DELIBERATELY NOT BEING MOVED —
+# THE CEILING IS 1225 AND NOT 1226 BECAUSE ONE FINDING WAS WIRED UP ON THE
+# OTHER SIDE OF THIS MERGE, while the count was being corrected on this one.
+# A ratchet only ever moves down, so the tighter of the two numbers is the one
+# that survives, and `ci/test/frontend-reachability.sh`'s header — which the
+# prose guard above checks against this line — already says 1225.
+#
+# SO THE LANE NOW CARRIES 147 SLOTS OF SLACK, which is a real budget and is
+# reported on every run. THE CEILING IS STILL DELIBERATELY NOT BEING MOVED FAR —
 # neither up to 1800, which would convert a broken gate into a silent one, nor
 # down to 1078, which is the ratchet-policy pass's call rather than this one's.
 # Three repairs that would make the number mean something again were costed —
@@ -304,8 +338,8 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # ci/test/frontend-reachability-guard.py's header, beside the instrument it
 # changes. It is not implemented here: it is a repo-wide policy change and
 # needs its own pass, with its own contract suite.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1226 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1225 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1225 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

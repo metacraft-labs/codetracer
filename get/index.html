@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Install CodeTracer</title>
+<meta name="description" content="Install CodeTracer — one command, any shell. curl -fsSL https://get.codetracer.com/sh | sh" />
+<style>
+  :root {
+    --bg: #0c0a1a;
+    --panel: #16122b;
+    --ink: #f0edff;
+    --muted: #b3a9d6;
+    --accent: #a78bfa;
+    --accent-ink: #1a0f33;
+    --line: #2a2447;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #221a44 0%, var(--bg) 60%);
+    color: var(--ink);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  main { width: 100%; max-width: 680px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 18px var(--accent); }
+  .brand span { font-weight: 700; letter-spacing: .3px; }
+  h1 { font-size: clamp(28px, 5vw, 40px); margin: 12px 0 6px; letter-spacing: -.5px; }
+  p.lede { color: var(--muted); margin: 0 0 28px; font-size: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 14px 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .cmd { display: flex; align-items: center; gap: 10px; }
+  code {
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #0a0818; border: 1px solid var(--line); border-radius: 9px;
+    padding: 12px 14px; color: var(--ink); display: block; flex: 1;
+    overflow-x: auto; white-space: pre;
+  }
+  button.copy {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 9px;
+    padding: 12px 14px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  button.copy:hover { background: #c4b5fd; }
+  .foot { color: var(--muted); font-size: 14px; margin-top: 26px; }
+  .foot a { color: var(--accent); text-decoration: none; }
+  .foot a:hover { text-decoration: underline; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><span class="dot"></span><span>CodeTracer</span></div>
+  <h1>Install CodeTracer</h1>
+  <p class="lede">One command, any shell. The script is served as plain text — read it before you run it.</p>
+
+  <div class="card">
+    <h2>Linux &middot; macOS &middot; WSL</h2>
+    <div class="cmd">
+      <code id="sh">curl -fsSL https://get.codetracer.com/sh | sh</code>
+      <button class="copy" data-target="sh">Copy</button>
+    </div>
+    <p class="note">Pin a version: <code style="display:inline;padding:2px 6px">VERSION=v0.1.0 curl -fsSL https://get.codetracer.com/sh | sh</code></p>
+  </div>
+
+  <div class="card">
+    <h2>Windows &middot; PowerShell</h2>
+    <div class="cmd">
+      <code id="pwsh">irm https://get.codetracer.com/pwsh | iex</code>
+      <button class="copy" data-target="pwsh">Copy</button>
+    </div>
+  </div>
+
+  <p class="foot">
+    Prefer to read first? <a href="/sh">View the shell installer</a> &middot;
+    <a href="/pwsh">View the PowerShell installer</a><br />
+    Source &amp; releases: <a href="https://github.com/metacraft-labs/codetracer">github.com/metacraft-labs/codetracer</a>
+  </p>
+</main>
+<script>
+  document.querySelectorAll('button.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = document.getElementById(b.dataset.target);
+      navigator.clipboard.writeText(t.textContent).then(function () {
+        var old = b.textContent; b.textContent = 'Copied'; setTimeout(function () { b.textContent = old; }, 1200);
+      });
+    });
+  });
+</script>
+</body>
+</html>

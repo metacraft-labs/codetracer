@@ -6,7 +6,23 @@ export const repoRoot = path.resolve(__dirname, "../../../..");
 export const elixirOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "elixir-canonical-flow");
 export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "erlang-canonical-flow");
 
-const expectedMetaDatVersion = 3;
+/**
+ * The `meta.dat` schema version a cached fixture must carry to be reused.
+ *
+ * Must track `SUPPORTED_VERSIONS` in
+ * `src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is `&[4]`:
+ * a cached container the backend would refuse is not a reusable
+ * fixture. It cannot be widened to also accept 3 for the same reason
+ * the backend's set cannot — v3 packs a step's line-only
+ * `global_position_index` as `prefix_sums[file_id] + line` where v4
+ * packs `prefix_sums[file_id] + (line - 1)`, so a v3 fixture would
+ * drive the UI one line high rather than fail.
+ *
+ * Getting this stale is quiet in both directions: too low and every run
+ * judges a current fixture stale and re-records it, too high and a run
+ * reuses one the backend will reject.
+ */
+const expectedMetaDatVersion = 4;
 const ctfsMagic = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
 const base40Alphabet = "\0" + "0123456789abcdefghijklmnopqrstuvwxyz./-";
 

@@ -184,6 +184,16 @@ with pkgs;
     # Build runner (Linux only — `mkOptionals` below).
     just
 
+    # tree-sitter CLI, for the `libs/tree-sitter-nim/src/parser.c` regen in
+    # the shellHook below. BUILD-CRITICAL, not developer convenience: that
+    # file is `.gitignore`d in the submodule and generated from `grammar.js`,
+    # and `src/db-backend`'s `tree-sitter-nim` path dependency compiles it
+    # directly (`bindings/rust/build.rs` does not generate it). Without the
+    # CLI here the regen falls back to an `npm install tree-sitter-cli` over
+    # the network. It used to live in main.nix's dev-only package tail, which
+    # is precisely why `devShells.ci` could not run the regen.
+    tree-sitter
+
     # Frontend: webpack bundle + Electron host + Yarn package mgmt.
     nodejs_22
     nodePackages.webpack-cli
@@ -227,13 +237,21 @@ with pkgs;
     gh
     awscli2
 
-    # Cloudflare Pages deploy. `wrangler pages deploy` publishes the
-    # browser-replay bundle (browser-replay/dist) to the `web-codetracer`
-    # Pages project on merges to `cloud` — see
-    # .github/workflows/deploy-web-codetracer.yml. We do NOT preinstall
-    # node/npx on the eph-* runners; wrangler is pinned by flake.lock and
-    # every deploy command runs inside `nix develop .#ci`, mirroring the
-    # proven metacraft-labs/web-site pattern. (nixpkgs pin: wrangler 4.x.)
+    # Cloudflare Pages deploy. ONE wrangler, TWO Pages projects — `dev` and
+    # `stable` each grew this entry independently, with the same package and
+    # different rationales; both consumers are live, so the entry is kept once
+    # and both are recorded here.
+    #
+    #   * `web-codetracer` — `wrangler pages deploy` publishes the
+    #     browser-replay bundle (browser-replay/dist) on merges to `cloud`.
+    #     See .github/workflows/deploy-web-codetracer.yml.
+    #   * `get.codetracer.com` — publishes the installer site built by
+    #     get/build-get.sh. See .github/workflows/deploy-get.yml.
+    #
+    # We do NOT preinstall node/npx on the eph-* runners; wrangler is pinned by
+    # flake.lock and every deploy command runs inside `nix develop .#ci`
+    # (never an ad-hoc npx / `nix run nixpkgs#wrangler`), mirroring the proven
+    # metacraft-labs/web-site pattern. (nixpkgs pin: wrangler 4.x.)
     wrangler
 
     # Playwright (M5 lane + codetracer's own TS e2e suite).
@@ -335,6 +353,46 @@ with pkgs;
     export CFLAGS_wasm32_unknown_unknown="-I$(pwd)/src/db-backend/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
 
     ROOT_PATH=$(git rev-parse --show-toplevel)
+
+    # tree-sitter-nim's generated parser. BUILD-CRITICAL, and it lives here --
+    # in the shellHook BOTH shells compose -- rather than in main.nix's
+    # dev-only tail, which is where it used to live and where `devShells.ci`
+    # never reached it.
+    #
+    # `libs/tree-sitter-nim/.gitignore` line 2 is literally `src/parser.c`:
+    # the file is generated from `grammar.js` by `tree-sitter generate` and is
+    # NEVER committed. `bindings/rust/build.rs` does not generate it either --
+    # it goes straight to `cc::Build::new().file(src_dir.join("parser.c"))` --
+    # so `src/db-backend`'s path dependency on that crate fails on a fresh
+    # checkout with a clang error naming a C file and nothing else:
+    #
+    #   clang: error: no such file or directory: '.../src/parser.c'
+    #   clang: error: no input files
+    #   error: failed to run custom build command for `tree-sitter-nim v0.1.0`
+    #
+    # That is what failed every arm of `launcher-recorder-e2e (desktop edge)`
+    # (runs 33983224255, 33991455608). It was invisible to everyone locally
+    # because the file survives in a long-lived checkout as an untracked
+    # artefact once any `devShells.default` entry has generated it.
+    #
+    # THE GUARD IS ON `grammar.js`, NOT ON THE DIRECTORY. Lanes that check out
+    # with `submodules: false` still get an EMPTY `libs/tree-sitter-nim/`
+    # mount point, so a directory test passes there and the script below would
+    # then exit 1 on the missing grammar -- failing every such lane at shell
+    # entry. `grammar.js` present is the precise statement "the submodule is
+    # really checked out, so the parser both can and must be generated".
+    #
+    # The work itself is delegated to the SHARED gate the non-Nix Unix and
+    # Windows flows already call (non-nix-build/build_db_backend.sh,
+    # setup_node_deps.sh, non-nix-build/windows/env.sh). It regenerates only
+    # when `src/parser.c` is missing or older than `grammar.js`, so re-entering
+    # the shell is a stat comparison, not a 42 MB rebuild. Reusing it is the
+    # point: three hand-rolled `tree-sitter generate` copies already exist
+    # (three powershell jobs in codetracer.yml, and nix/packages/default.nix),
+    # and a fourth is how the next path gets missed.
+    if [ -f "$ROOT_PATH/libs/tree-sitter-nim/grammar.js" ]; then
+      ROOT_DIR="$ROOT_PATH" bash "$ROOT_PATH/non-nix-build/ensure_tree_sitter_nim_parser.sh"
+    fi
 
     # CT_LD_LIBRARY_PATH is consumed at runtime by `ct` itself
     # (passed through to child processes). gcc.cc.lib is needed by

@@ -3,9 +3,9 @@
 ! Mirrors the C/Nim/Rust flow tests:
 !   a = 10, b = 32, sum = 42, doubled = 84, final_result = 94
 !
-! Breakpoint is set at the `calculate_sum = final_result` assignment line
-! inside `calculate_sum`; the DAP test verifies that the listed locals
-! are reported with the expected values.
+! Breakpoint is set at the LAST print statement inside `calculate_sum`,
+! where every local is live.  The test DERIVES that line by searching this
+! file, so do not quote the statement here: two matches are ambiguous.
 
 program fortran_flow_test
     implicit none

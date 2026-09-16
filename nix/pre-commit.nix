@@ -16,6 +16,76 @@ in
     "^src/db-backend/Cargo\\.lock$"
     "\\.min\\.js$"
     "\\.min\\.css$"
+
+    # A VENDORED COPY, and byte-identity IS the contract.
+    #
+    # tools/check-test-assertions.sh is a byte-for-byte copy of
+    # codetracer-specs/tools/check-test-assertions.sh (37e193050 explains why
+    # it is copied rather than referenced: ci/lint/bash.sh is deliberately the
+    # lane that needs no siblings and no network). The copy is only safe
+    # because ci/test/test-assertion-baseline.sh compares the two by sha256
+    # whenever both repos are on disk, so it cannot drift silently -- and the
+    # editable original, the one with a self-test, lives in the other repo.
+    #
+    # shfmt would reformat 77 lines of it on the first commit that touches its
+    # mode, breaking that sha256 against an upstream nobody had changed and
+    # turning the drift check into noise about whitespace. Formatting hooks
+    # must not have opinions about a file this repository does not own.
+    "^tools/check-test-assertions\\.sh$"
+
+    # A CANONICAL BODY WITH SEVEN PASTED COPIES, and byte-identity IS the
+    # contract -- the same reason as the entry above, arrived at from the
+    # opposite direction: that file is owned elsewhere, this one is owned here
+    # but duplicated into YAML.
+    #
+    # ci/runner/sweep-readonly-leftovers.sh keeps its body between
+    # `# --- BEGIN INLINE BODY` / `# --- END INLINE BODY` markers, and that body
+    # is pasted verbatim into SEVEN `run:` blocks in
+    # .github/workflows/codetracer.yml (jobs: reprobuild-macos-smoke,
+    # origin-dap-macos, origin-dap-macos-nightly, dmg-build, dmg-lib-check,
+    # test-non-gui, test-ui-tests). It cannot simply be invoked instead: the
+    # sweep runs BEFORE actions/checkout, when the file is not yet on the
+    # runner's disk. ci/test/readonly-leftovers-sweep-test.sh is what stops the
+    # seven copies drifting -- it de-indents each `run:` block and compares it
+    # to the canonical body with exact string equality (`found[name] != body`),
+    # so every byte of leading whitespace is contractual.
+    #
+    # WHY IT IS SAFE TODAY. This exclusion, and only this exclusion.
+    #
+    # An earlier note here said the file was safe because "shfmt reads
+    # .editorconfig, whose `[*]` stanza says space/2, so shfmt currently
+    # rewrites NOTHING here (`shfmt -l` does not list it)". That is wrong in a
+    # way worth spelling out, because the mistake is easy to repeat: `shfmt -l`
+    # DOES leave this file alone, but the hook does not run `shfmt -l`. It runs
+    # `shfmt -w -l -ln auto -s`, and shfmt consults .editorconfig only when it
+    # is given NO formatting flags -- `-ln` and `-s` each suppress it on their
+    # own. So the hook formats at shfmt's built-in default of `-i 0`, i.e.
+    # TABS, and `shfmt -l -ln auto -s` on this file lists it and wants to
+    # rewrite 84 lines. Reproduce with shfmt 3.12.0, the pinned version:
+    #
+    #     shfmt -l ci/runner/sweep-readonly-leftovers.sh                 # quiet
+    #     shfmt -l -ln auto -s ci/runner/sweep-readonly-leftovers.sh     # lists it
+    #
+    # The consequence is the opposite of what that note predicted. Adding
+    # `[*.sh] indent_style = tab` to .editorconfig is NOT the edit that breaks
+    # the seven copies -- it is a no-op for this hook, which never reads the
+    # file. (It has since been added, for the separate reason documented
+    # there.) The edit that breaks them is deleting the exclusion below.
+    #
+    # The repo-wide hazard runs the other way. Because .editorconfig is
+    # suppressed, its `[*]` = space/2 has never applied to shell scripts, and
+    # 305 of 366 tracked *.sh files are tab-indented in disagreement with it.
+    # Anything that makes shfmt start reading .editorconfig -- dropping `-s`,
+    # dropping `-ln auto`, or an upstream git-hooks.nix bump that rewrites this
+    # entry -- would have reformatted 306 files in one commit. The `[*.sh]`
+    # stanza in .editorconfig now pins the tab default explicitly, which takes
+    # that from 306 files to none.
+    #
+    # Nor could that be "resolved" by tabbing both sides: YAML block scalars
+    # cannot use tabs for indentation at all. Do not fix a future breakage here
+    # by relaxing the equality in readonly-leftovers-sweep-test.sh -- that
+    # equality is the only thing holding the seven copies together.
+    "^ci/runner/sweep-readonly-leftovers\\.sh$"
   ];
 
   hooks = {
@@ -54,7 +124,43 @@ in
       pass_filenames = false;
     };
 
-    # Shell hooks
+    # Shell hooks.
+    #
+    # THESE TWO DISAGREE WITH EACH OTHER ON REAL FILES, AND ONLY ONE OF THEM
+    # RUNS IN CI. shellcheck is enforced by ci/lint/bash.sh (`shellcheck
+    # ci/**/*.sh` and the per-directory steps below it). shfmt is NOT invoked
+    # anywhere in ci/ or .github/ -- pre-commit is its only enforcement, and
+    # pre-commit only ever sees the files a commit touches. So an unformatted
+    # script can sit on dev indefinitely: as of 37fe0a75, 34 of the 366 tracked
+    # *.sh files are listed by `shfmt -l -ln auto -s`.
+    #
+    # That matters because of how the two tools interact. `-s` rewrites an
+    # escaped double-quoted string into a single-quoted one:
+    #
+    #     echo "a \`b\` c"   ->   echo 'a `b` c'
+    #
+    # and if the string also contains a `$`, shellcheck then reports SC2016
+    # ("expressions don't expand in single quotes"). shellcheck exits 1 on a
+    # note, so CI fails. Of the 34 files above, 9 are clean under shellcheck
+    # today and acquire SC2016 the moment shfmt formats them:
+    #
+    #     ci/test/backend-manager-check-phase-test.sh    ci/test/web-bundle-assets.sh
+    #     ci/test/grep-q-pipefail-gate.sh                ci/verdict/workspace-lock-freshness-test.sh
+    #     ci/test/shell-gate-coverage.sh                 scripts/build-desktop-component.sh
+    #     ci/test/shell-gate-coverage-test.sh            scripts/require-runtime-assets.sh
+    #     scripts/test-python-version-alignment.sh
+    #
+    # Each is a trap for whoever next edits one: pre-commit's `shfmt -w`
+    # reformats the file they touched, and CI then fails on an SC2016 they did
+    # not write, in a line they did not change. The fix is per-file and is
+    # already the established pattern here -- accept shfmt's form and add an
+    # explicit `# shellcheck disable=SC2016` with a sentence saying why, as
+    # ci/test/nimsuggest-check.sh, ci/test/windows-install-root-test.sh,
+    # ci/test/stale-artefact-guards-test.sh and ci/test/vm-js-lane-test.sh all
+    # do. Do NOT resolve it by widening an exclusion or lowering shellcheck's
+    # severity; the nine are listed here so the work can be done file by file,
+    # in the change that touches each file anyway, rather than as one
+    # unreviewable whitespace commit.
     shellcheck.enable = true;
     shfmt.enable = true;
 

@@ -61,18 +61,21 @@
 #
 # Usage:  bash ci/test/renderer-browser-build.sh
 # Env:    ISONIM_SRC        isonim source tree (else the ../isonim sibling)
-#         CT_NIM_CACHE_ROOT nimcache root (default /tmp/ct-nim-cache)
+#         CT_NIM_CACHE_ROOT nimcache root (default: per-checkout, see ci/lib/nim-cache-root.sh)
 
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 # shellcheck source=ci/lib/test-lane-files.sh
 # shellcheck disable=SC1091 # resolved at runtime from $repo_root
 source "${repo_root}/ci/lib/test-lane-files.sh"
 
-cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+cache_root="$(ct_nim_cache_root "${repo_root}")"
 checks=0
 failures=0
 

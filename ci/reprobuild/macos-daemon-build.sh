@@ -52,6 +52,59 @@ echo "repro: $(command -v repro)"
 echo "runquotad: $(command -v runquotad)"
 echo "build target: ${build_target}"
 
+# De-poison the runner before we start, and do not poison it on the way out.
+#
+# This is the SAME hazard ci/reprobuild/macos-smoke.sh documents at length, and
+# this script is the other half of it: a556399c0 named two victims of a stale
+# daemon's dangling cwd but only guarded the smoke script, while THIS script is
+# the one that deliberately runs `repro build --daemon=auto` (below) and so is
+# the most likely thing on the runner to LEAVE a daemon behind.
+#
+# The repro user daemon is PERSISTENT and its endpoint is deliberately stable
+# across nix-develop sessions, so one daemon serves every job on a runner
+# indefinitely. On macOS it is started via launchd, and when that fails it falls
+# back to a plain fork+setsid -- `launchWithFork` in reprobuild's
+# repro_daemon_core/runtime.nim calls `setsid()` and then `execve` with NO
+# `chdir` between them, and no launchd plist this project writes sets
+# `WorkingDirectory`. So the daemon inherits, and keeps, the cwd of whichever
+# `repro build` first spawned it. Once that directory is gone -- a re-cloned
+# workspace, a deleted temp root, a cleaned checkout -- every later
+# `repro build` on this runner dies in `getCurrentDir()` with
+#
+#     daemon-hosted build failed: No such file or directory
+#
+# which names no path and no owner, which is what made it expensive.
+#
+# So: stop any daemon inherited from an earlier job (otherwise this run dies on
+# someone else's dangling cwd), and stop ours on the way out (otherwise the next
+# job dies on ours). `|| true` because "no daemon running" is the normal case,
+# not an error.
+#
+# The durable fix is upstream in reprobuild -- add the missing `chdir("/")` to
+# the fork path and let the daemon tolerate a vanished cwd. This only stops
+# codetracer's jobs being both the cause and the victim.
+#
+# Checked by: ci/verdict/reprobuild-daemon-guard.sh
+# Contract suite: ci/test/reprobuild-daemon-guard-test.sh
+repro daemon stop >/dev/null 2>&1 || true
+
+# One EXIT trap for the whole script, installed HERE rather than inside
+# `start_runquotad` as it was before. Two reasons: a second `trap ... EXIT`
+# REPLACES the first rather than composing with it, and the old trap was
+# installed inside a function that returns early when `RUNQUOTA_SOCKET` is
+# already set -- so on that path the script had no EXIT handler at all.
+cleanup() {
+	# MUST run on every exit path, including failure: a daemon this script
+	# spawned outlives it and holds this checkout as its cwd.
+	repro daemon stop >/dev/null 2>&1 || true
+	if [ -n "${runquotad_pid:-}" ]; then
+		kill "$runquotad_pid" 2>/dev/null || true
+		wait "$runquotad_pid" 2>/dev/null || true
+	fi
+	rm -rf "${runquota_dir:-}"
+}
+trap cleanup EXIT
+
 capabilities_json="$(repro capabilities --format=json)"
 if ! printf '%s\n' "${capabilities_json}" |
 	grep -Eq '"runQuota"[[:space:]]*:[[:space:]]*"supported"'; then
@@ -89,7 +142,10 @@ start_runquotad() {
 		--pool console=1 \
 		>"$runquota_log" 2>&1 &
 	runquotad_pid="$!"
-	trap 'if [ -n "${runquotad_pid:-}" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi; rm -rf "${runquota_dir:-}"' EXIT
+	# No `trap` here. The single EXIT handler installed at the top of this
+	# script already reaps ${runquotad_pid} and ${runquota_dir}; re-arming
+	# the trap from inside this function would REPLACE that handler and so
+	# silently drop the `repro daemon stop`, which is the whole point of it.
 
 	for _ in {1..300}; do
 		if grep -q "runquotad listening" "$runquota_log" 2>/dev/null; then

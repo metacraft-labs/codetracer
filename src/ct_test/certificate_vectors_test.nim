@@ -35,6 +35,7 @@
 import std/[algorithm, json, options, os, sets, strutils, unittest]
 
 import certificate
+import certificate_signature
 import certificate_verification
 
 const RelativeVectorsPath = "test-certificates-spec/vectors"
@@ -293,7 +294,8 @@ suite "test-certificate conformance vectors":
       if fileExists(dir / "registered-keys.toml"):
         store = readKeyStore(readFile(dir / "registered-keys.toml"))
 
-      let report = verifyCertificates(state, requirement, candidates, store)
+      let report = verifyCertificates(state, requirement, candidates, store,
+                                      sshKeygenSignatureVerifier())
 
       checkpoint "verify/" & name & ": expected " & expected.str("outcome") &
                  ", got " & $report.outcome & " — " & report.reason

@@ -531,12 +531,88 @@ proc diffRows(self: UnifiedDiffComponent): seq[VCSDiffFileRow] =
       hunks: hunks,
       sourceLines: self.sourceLinesFor(file, path)))
 
+# ---------------------------------------------------------------------------
+# Agent diff registry — raw original/modified content from agent activity
+# ---------------------------------------------------------------------------
+
+var agentDiffRegistry: JsAssoc[cstring, js] = JsAssoc[cstring, js]{}
+
+proc registerAgentDiffEntry*(key: string; paths, originals, modifieds: seq[string]) =
+  ## Store diff content for a ``Content.UnifiedDiff`` tab opened from agent
+  ## activity.  ``paths[i]``, ``originals[i]``, ``modifieds[i]`` describe one
+  ## file each.  ``key`` is used as the registry lookup key and must match the
+  ## target string embedded in the tab's ``diffTarget``.
+  var arr: seq[js] = @[]
+  for i in 0 ..< paths.len:
+    arr.add(js{
+      path: cstring(paths[i]),
+      original: cstring(originals[i]),
+      modified: cstring(modifieds[i])
+    })
+  agentDiffRegistry[cstring(key)] = arr.toJs
+
+proc loadFromAgentRegistry(self: UnifiedDiffComponent): bool =
+  ## Fill the tab from the in-memory agent diff registry.  Returns true when
+  ## the target is an ``agent-diff:`` one and the registry entry exists.
+  let target = self.rawTarget()
+  if not target.startsWith("agent-diff:"):
+    return false
+  let key = target[11 .. ^1]
+  let ckey = cstring(key)
+  if not agentDiffRegistry.hasKey(ckey):
+    return false
+  let entries = agentDiffRegistry[ckey]
+  let count = entries.length.to(int)
+  var files: seq[DeepReviewFileData] = @[]
+  for i in 0 ..< count:
+    let e = entries[i]
+    let path = $(e.path.to(cstring))
+    let original = $(e.original.to(cstring))
+    let modified = $(e.modified.to(cstring))
+    let origLines = original.splitLines()
+    let modLines = modified.splitLines()
+    var hunkLines: seq[DeepReviewHunkLine] = @[]
+    var oldNum = 1
+    for line in origLines:
+      hunkLines.add(DeepReviewHunkLine(
+        `type`: cstring"removed", content: cstring(line),
+        oldLine: oldNum, newLine: 0))
+      inc oldNum
+    var newNum = 1
+    for line in modLines:
+      hunkLines.add(DeepReviewHunkLine(
+        `type`: cstring"added", content: cstring(line),
+        oldLine: 0, newLine: newNum))
+      inc newNum
+    files.add(DeepReviewFileData(
+      path: cstring(path),
+      sourceContent: cstring(modified),
+      symbols: @[], coverage: @[], functions: @[], loops: @[], flow: @[],
+      diff: DeepReviewFileDiff(
+        status: cstring"M",
+        linesAdded: modLines.len,
+        linesRemoved: origLines.len,
+        hunks: @[DeepReviewHunk(
+          oldStart: 1, oldCount: origLines.len,
+          newStart: 1, newCount: modLines.len,
+          lines: hunkLines)])))
+  let title =
+    if count == 1: cstring("Agent Diff: " & $files[0].path)
+    else: cstring"Agent Unified Diff"
+  self.diffData = DeepReviewData(
+    commitSha: cstring"", baseCommitSha: cstring"",
+    collectionTimeMs: 0, recordingCount: 0,
+    sessionTitle: title, files: files)
+  self.reviewBacked = true
+  true
+
 proc ensureLoaded(self: UnifiedDiffComponent) =
   if self.initialized:
     return
   self.initialized = true
   if not self.loadFromReview():
-    self.loadFromGit()
+    if not self.loadFromAgentRegistry():
+      self.loadFromGit()
 
 # ---------------------------------------------------------------------------
 # Monaco

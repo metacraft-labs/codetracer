@@ -119,6 +119,24 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["locals", "globals", "loadingState", "loadedForRRTicks", "codeStateLine"],
     vscBackendAuthoritative,
     "Variable data and source excerpt are backend-derived for a debugger tick.")
+  # `watches` is the ANSWERS, not the questions. The expressions a user typed
+  # are `StateVM.watchExpressions`, classified below as shared session view
+  # state; what comes back for them rides the same `ct/load-locals` response as
+  # `locals` and `globals` (told apart by `value.isWatch`, which the backend
+  # sets) and is a fact about the loaded step. A refused watch is still a row
+  # here, carrying the backend's reason — which is the clearest sign these are
+  # the owning peer's answers rather than anything a participant authored.
+  entries.addEntry("LocalsStore", "watches", vscBackendAuthoritative,
+    "Answers to the shared watch expressions at the loaded step; they arrive on the same backend response as `locals`.")
+  # §14's four degraded-state axes. They are on the STORE precisely so that
+  # five panes cannot disagree about whether this replay is windowed, and each
+  # one is a property of the recording and the backend replaying it — never of
+  # a participant. A collaborator must receive all four from the backend owner;
+  # merging two peers' views of trace integrity would be inventing a third.
+  entries.addMany("DegradedStateStore",
+    ["availability", "integrity", "capability", "sourceAvailability"],
+    vscBackendAuthoritative,
+    "The degraded-state catalogue's four axes are facts about the recording and the replay backend, not about a viewer.")
   # RS-M3 HTTP request tail. The store owns the poll, not the panel: rows,
   # the opaque poll cursor, the producer label and the load status are all
   # values the backend-owning peer hands over. The cursor in particular is
@@ -162,7 +180,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Search result payloads come from backend queries.")
   entries.addDerived("CalltraceVM",
     ["visibleLines", "hasMoreAbove", "hasMoreBelow", "highlightedMatches",
-     "isLoading"])
+     "isLoading", "degradedState"])
 
   entries.addMany("StateVM", ["activeTab", "watchExpressions"],
     vscSharedSessionViewState,
@@ -197,7 +215,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("StateVM", "lastContextMenu", vscRendererLocal,
     "Most-recent right-click context menu is a transient local render artefact.")
   entries.addDerived("StateVM", ["currentVariables", "isLoading",
-      "codeStateLine"])
+      "codeStateLine", "degradedState", "hasCodeState"])
 
   # M4 Value Origin Tracking — dedicated VM behind the State Pane badge,
   # the side panel, the scratchpad pins, and the editor hover card.
@@ -252,7 +270,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("EventLogVM", "filterBar", vscSharedSessionViewState,
     "Parsed marker filter bar mirrors the shared search/filter intent.")
   entries.addDerived("EventLogVM",
-    ["totalPages", "isLoading", "visibleMarkerRows"])
+    ["totalPages", "isLoading", "visibleMarkerRows", "degradedState"])
 
   entries.addMany("FlowVM", ["flowMode", "showRawValues"],
     vscSharedSessionViewState,
@@ -293,7 +311,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Logical editor overlays are shared session view preferences.")
   entries.addDerived("EditorVM",
     ["activeFileName", "activeSourceGeneration", "activeSourceDigest",
-     "executionCursorKind"])
+     "executionCursorKind", "degradedState", "sourceAvailability",
+     "instructionLevelStepping"])
 
   entries.addMany("TimelineVM", ["zoomLevel", "viewStart", "viewEnd"],
     vscSharedSessionViewState,
@@ -305,7 +324,23 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("DebugControlsVM",
     ["canStepForward", "canStepBackward", "canContinue", "canReverseContinue",
      "isRunning", "statusText", "toolbarModeText", "recordingHeadText",
-     "showRecordingHead", "showJumpToLive", "canJumpToLive"])
+     "showRecordingHead", "showJumpToLive", "canJumpToLive",
+     "degradedState", "replayUsable", "capabilityRung", "divergenceDetected",
+     "traceTruncated"])
+  # THE ONE MUTABLE SIGNAL THIS VM OWNS, and its own header says so. It is a
+  # revision counter the host bumps whenever `shortcutFor` starts answering
+  # differently — i.e. when a new `Config` is installed — so that tooltips
+  # naming a chord re-render.
+  #
+  # Renderer-local because of what it invalidates: a key binding is a
+  # participant's own preference, read out of THEIR `default_config.yaml` and
+  # their overrides, and two people in one session are expected to have
+  # different ones. Publishing the counter would re-render everyone's toolbar
+  # to say nothing new, and publishing what it stands for would put one
+  # participant's keyboard on another participant's screen. Same call as
+  # `OriginChainVM.latestRequestId`: a local invalidation token, not a value.
+  entries.addEntry("DebugControlsVM", "shortcutsRevision", vscRendererLocal,
+    "Invalidation counter for this participant's own key bindings; the chords it stands for are a local preference.")
 
   entries.addMany("SearchVM", ["mode", "query", "resultsVisible"],
     vscSharedSessionViewState,
@@ -346,9 +381,13 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("ShellVM", "inputHistory", vscPresenceAwareness,
     "Command history is participant-local awareness, not replayable ViewState.")
 
-  entries.addMany("SearchResultsVM", ["query", "active", "filter"],
+  entries.addMany("SearchResultsVM", ["query", "active"],
     vscSharedSessionViewState,
-    "Global search results panel query/filter/visibility are shared view state.")
+    "Global search results panel query and visibility are shared view state. " &
+    "There is no `filter` alongside them any more: the client-side " &
+    "result-narrowing signal was retired with the Find in Files redesign, " &
+    "which had already dropped the (never-wired) input that was meant to " &
+    "drive it.")
   entries.addEntry("SearchResultsVM", "results", vscBackendAuthoritative,
     "Search result rows are backend/search service output.")
   entries.addEntry("SearchResultsVM", "loading", vscBackendAuthoritative,
@@ -358,8 +397,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "state. Same call as ShellVM.inputHistory: what one person typed is " &
     "theirs, not replayable session state, and publishing it would put " &
     "another participant's search history in front of everyone.")
-  entries.addDerived("SearchResultsVM",
-    ["visibleResults", "resultCount", "fileCount"])
+  entries.addDerived("SearchResultsVM", ["resultCount", "fileCount"])
 
   entries.addMany("TestResultsVM", ["catalog", "summary", "projectName"],
     vscBackendAuthoritative,
@@ -378,7 +416,33 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Publishing it would hand one participant a closure that only means " &
     "anything inside another participant's process. Classified for the same " &
     "reason `runAbsence` is — the pair answers 'can a run start HERE'.")
-  entries.addDerived("TestResultsVM", ["rows", "isEmpty", "headline"])
+  # The three row actions are `runTests` again, one per row affordance, and
+  # they take their classification from it for the identical reason: each is a
+  # `TestRowActionProc` the HOST installed, closing over that host's recorder,
+  # its filesystem and its subprocess machinery. Handing one to another
+  # participant would hand them a closure that only means anything inside the
+  # process it was built in.
+  entries.addMany("TestResultsVM",
+    ["refreshRecording", "openExistingRecording", "recordAndOpenRecording"],
+    vscRendererLocal,
+    "Host-installed per-row action closures; like `runTests`, they only mean anything inside the process that installed them.")
+  entries.addEntry("TestResultsVM", "recordings", vscBackendAuthoritative,
+    "Which tests have a recording that can be entered is an artefact of the " &
+    "workspace, not of a viewer — and it deliberately OUTLIVES the run that " &
+    "made it, unlike `summary`. Everyone in a session is looking at the same " &
+    "recordings on the same disk.")
+  entries.addEntry("TestResultsVM", "inFlight", vscBackendAuthoritative,
+    "A run this pane started is still going — the request-lifecycle half of " &
+    "`summary`, covering the window before the worker emits `run-started` " &
+    "and `summary.inProgress` can be true. Classified with the fact it " &
+    "guards, the same call as `VCSVM.loadingMore` and `SearchResultsVM.loading`.")
+  entries.addEntry("TestResultsVM", "shiftHeld", vscRendererLocal,
+    "Whether Shift is down RIGHT NOW, driven by document-level keydown/keyup " &
+    "so the tooltip and the button can change under a resting pointer. It is " &
+    "a participant's own hand on their own keyboard; publishing it would " &
+    "rewrite everyone's buttons when one person leaned on a modifier.")
+  entries.addDerived("TestResultsVM",
+    ["rows", "isEmpty", "headline", "runFailure"])
 
   entries.addMany("ConstraintsVM", ["report", "projectName"],
     vscBackendAuthoritative,
@@ -418,7 +482,54 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["instructions", "address", "errorMessage", "noirProject"],
     vscBackendAuthoritative,
     "Instruction data and status are backend-derived facts.")
-  entries.addDerived("LowLevelCodeVM", ["isEmpty"])
+  # NS4 anchoring. `anchors` is the mapping a PRODUCER emitted and `validate`
+  # accepted; `anchorDefects` is why the last `setAnchors` was refused. Both
+  # are answers about the artefact, identical for every participant looking at
+  # the same build, so they follow `instructions` rather than merging.
+  #
+  # `anchorDefects` is kept as state rather than logged because §4 requires a
+  # suspension to be VISIBLE — a pane silently showing no mapping cannot be
+  # told from one whose producer is broken. That requirement is about every
+  # viewer, which is the same reason it is backend-authoritative and not local.
+  entries.addMany("LowLevelCodeVM", ["anchors", "anchorDefects"],
+    vscBackendAuthoritative,
+    "The installed producer mapping and the reason the last one was refused are facts about the artefact.")
+  entries.addEntry("LowLevelCodeVM", "syncSettings", vscSharedSessionViewState,
+    "Whether this pane follows the source caret is a logical view preference, the same class as EditorVM's overlay toggles.")
+  entries.addDerived("LowLevelCodeVM",
+    ["isEmpty", "hasAnchors", "anchorsRejected"])
+
+  # Generated-Code-Listing.md. The sibling of LowLevelCodeVM one abstraction
+  # up: a producer's listing for a target, plus the source caret it follows.
+  # The split below is exactly that sentence — the listing is a fact, the
+  # caret is a person.
+  entries.addMany("GeneratedCodeVM",
+    ["state", "targetId", "targetName", "producer", "listingPath", "rows",
+     "revision", "anchors", "listingAbsence", "failure", "stale"],
+    vscBackendAuthoritative,
+    "The opened listing and everything describing it — producer, target, rows, anchors, revision, the two distinct empty answers (§8) and whether it has since gone stale — are a producer's output for a build every participant shares.")
+  # `revision` is in that list rather than treated as bookkeeping on purpose:
+  # its whole contract is that it increments ONLY when the rows are replaced
+  # and a cursor move leaves it alone, which is to say it is a property of the
+  # listing and not of the reading. That is also why it must not merge — two
+  # peers counting their own re-anchorings would produce a number that means
+  # nothing on either side.
+  entries.addEntry("GeneratedCodeVM", "activeTabPath",
+    vscSharedSessionViewState,
+    "Which source file the pane is describing — the same shared pane intent " &
+    "as `EditorVM.activeTabIndex`, and already a path rather than an index, " &
+    "so unlike that field it is not stable-id blocked.")
+  entries.addEntry("GeneratedCodeVM", "cursorLine", vscPresenceAwareness,
+    "The mirrored source caret this pane follows (`syncFromSource`). It is " &
+    "`EditorVM.cursorLine` observed from one pane over, so it carries the " &
+    "same classification: a caret is per-participant awareness, and syncing " &
+    "it as view state would drag every collaborator's listing to wherever " &
+    "the last person clicked.")
+  entries.addEntry("GeneratedCodeVM", "syncEnabled", vscSharedSessionViewState,
+    "Whether the listing follows the caret at all is a logical view preference, the same class as `LowLevelCodeVM.syncSettings`.")
+  entries.addDerived("GeneratedCodeVM",
+    ["isOpen", "describesActiveTab", "focus", "focusRows",
+     "instantiationCount", "focusText", "tabTitle", "producerLine"])
 
   entries.addMany("NoSourceVM",
     ["message", "location", "history", "originatingAddress", "stopSignalText"],
@@ -437,13 +548,81 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Auto-scroll is a local panel behavior.")
   entries.addDerived("BuildVM", ["status", "isRunning", "hasOutput"])
 
+  # VN-M3/M4. BuildVM's shape, one verifier over: a long-running tool is
+  # launched against the project and everything this VM holds is that tool's
+  # report on it. Nothing here is authored by a participant — there is no
+  # filter, no selection, no toggle — so the whole mutable surface is a single
+  # backend-authoritative block rather than a split.
+  #
+  # `commandLine` and `projectRoot` are in it for the same reason `BuildVM`'s
+  # `command` is: they describe the invocation that produced the report, and a
+  # peer that substituted its own would be labelling someone else's results
+  # with its own paths. `elapsedMs`/`outputLineCount`/`lastOutputLine` are the
+  # progress the run itself reported; the header note on `lastOutputLine` —
+  # that Verno is not chatty, so it is often stale and `elapsedMs` is shown
+  # BESIDE it rather than instead of it — is exactly why the two must travel
+  # together from the owning peer and never be recomputed locally.
+  #
+  # The four payload fields are VN-M4's structured tier. `payloadStatus` is a
+  # verdict about an artifact (found / refused / believed), `payloadProblems`
+  # is why a refusal happened and `payloadNotes` is where an accepted payload
+  # disagreed with the text tier. All three are answers about the artifact, so
+  # every participant is entitled to the same one.
+  entries.addMany("VerificationVM",
+    ["phase", "actionId", "actionLabel", "commandLine", "projectRoot",
+     "elapsedMs", "outputLineCount", "lastOutputLine", "startFailure",
+     "report", "payloadStatus", "payload", "payloadProblems", "payloadNotes"],
+    vscBackendAuthoritative,
+    "A verification run's invocation, progress, outcome and structured payload are the verifier's report on the shared project.")
+  entries.addDerived("VerificationVM",
+    ["isRunning", "isCancellable", "hasReport", "statusText", "outcomeText",
+     "markers", "findingCount", "failedObligationCount", "limitationCount"])
+
+  # VN-M5. One OPEN counterexample, and its identity is the finding it came
+  # from — so unlike the VM above, this one does carry participant intent, and
+  # the block splits along that line.
+  entries.addMany("CounterexampleSessionVM", ["isOpen", "findingId"],
+    vscSharedSessionViewState,
+    "Whether a counterexample is open and which obligation's it is: the " &
+    "affordance is 'open THIS finding's counterexample', which is shared " &
+    "session intent over an id the solver already made stable.")
+  entries.addMany("CounterexampleSessionVM", ["trace", "refusalReason"],
+    vscBackendAuthoritative,
+    "The solver's model, and why the last open declined to show one. Both " &
+    "are functions of the payload rather than of the click: two participants " &
+    "opening the same finding get the same answer, which is what makes the " &
+    "refusal worth storing (`CounterexampleIsOfferedOnlyWhenSteppable`) " &
+    "instead of leaving a button that does nothing and says nothing.")
+  entries.addEntry("CounterexampleSessionVM", "currentStep",
+    vscSharedSessionViewState,
+    "Where in the counterexample the session is standing — stepping through " &
+    "it together is the point of opening it.",
+    requiresStableId = true,
+    stableIdNote = "An index into `steps`, which is a projection of `trace`. It means nothing against a different solver run, so sharing it needs a step identity that names the trace it belongs to.")
+  entries.addDerived("CounterexampleSessionVM",
+    ["steps", "loops", "stepCount", "canStepForward", "canStepBackward",
+     "violationStep", "currentLoop", "currentIteration"])
+
   entries.addEntry("ErrorsVM", "problems", vscBackendAuthoritative,
     "Problem rows are produced by build/diagnostic services.")
   entries.addMany("ErrorsVM", ["filter", "groupByFile"],
     vscSharedSessionViewState,
     "Problem filter/grouping are logical view state.")
+  entries.addEntry("ErrorsVM", "selectedIndex", vscSharedSessionViewState,
+    "Which diagnostic the pane is sitting on is shared session intent, the same class as `TraceLogVM.selectedIndex`.",
+    requiresStableId = true,
+    stableIdNote = "An index into `problems`, and this pane already knows that is not an identity: `visibleRefs` exists because two diagnostics on the same line of the same file are equal by value and must still be distinguishable. Needs a stable diagnostic id.")
+  # EMT-D22.2's "the wrap is announced", made observable. `gotoError` writes
+  # the sentence its own key press produced ("wrapped to the first error") and
+  # the pane header paints it, because this repo has no status bar to put it
+  # in. It is one participant's navigation feedback about one participant's
+  # key press — publishing it would announce someone else's wrap to everybody,
+  # and the selection it accompanies is already shared above.
+  entries.addEntry("ErrorsVM", "statusMessage", vscRendererLocal,
+    "The last thing THIS participant's error navigation announced; ephemeral local feedback, not session state.")
   entries.addDerived("ErrorsVM",
-    ["visibleProblems", "errorCount", "warningCount", "totalCount"])
+    ["visibleProblems", "errorCount", "warningCount", "totalCount",
+     "visibleRefs"])
 
   entries.addMany("CommandPaletteVM",
     ["isActive", "inputValue", "inputPlaceholder", "mode", "query",
@@ -620,6 +799,20 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Drilled-open test-run and test rows are shared review intent, keyed by agent message anchor ids.")
   entries.addEntry("AgentActivityVM", "inputValue", vscRendererLocal,
     "Prompt draft is local typing state.")
+  # The toolbar's three session facts, set by the host rather than typed by a
+  # user: which model this agent session is running (`setSelectedModel`), the
+  # branch it is working on, and the branches its repository offers for
+  # checkout. All three answer "what is this session doing", which is the same
+  # question `sessionKey` and `messages` answer, so they stream from the peer
+  # that owns the session. `permissionInfo` joins them because it is the
+  # DETAIL of the prompt `wantsPermission` announces, and that flag is already
+  # classified backend-authoritative directly above.
+  entries.addMany("AgentActivityVM",
+    ["selectedModel", "currentBranch", "branches", "permissionInfo"],
+    vscBackendAuthoritative,
+    "Active model, working branch, available branches and the pending permission prompt's detail are agent-session facts the host reports.")
+  entries.addEntry("AgentActivityVM", "branchDropdownOpen", vscRendererLocal,
+    "Whether the branch selector is open; the same call as `VCSVM.branchDropdownOpen` — a dropdown is local UI state.")
   entries.addDerived("AgentActivityVM",
     ["messageCount", "terminalCount", "hasMessages", "hasSessionNotice",
      "testRunCount", "evidenceCallCount"])

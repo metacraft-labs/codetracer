@@ -24,10 +24,16 @@ if !IS_EXTENSION
   ::-webkit-scrollbar-thumb:horizontal
     background-color: colors-ui-surface-primary-tertiary
 
-  // TODO: Ask Niky for a constant in mapped for the color
+  // Under the pointer and while dragged, the thumb steps LIGHTER — the same
+  // step a tertiary button takes on hover (`surface/primary/tertiary` #333333
+  // → `tertiary-hover` #414141, button.styl).  The dragged thumb used to be
+  // `surface/primary/secondary`, #282828: exactly the panel background
+  // (`surface/base/panel`), so the thumb vanished the moment you grabbed it.
+  ::-webkit-scrollbar-thumb:vertical:hover,
+  ::-webkit-scrollbar-thumb:horizontal:hover,
   ::-webkit-scrollbar-thumb:vertical:active,
   ::-webkit-scrollbar-thumb:horizontal:active
-    background-color: colors-ui-surface-primary-secondary
+    background-color: colors-ui-surface-primary-tertiary-hover
 
 if IS_EXTENSION
   .component-container-html
@@ -150,6 +156,62 @@ dropdown-scrollbar()
   ::-webkit-scrollbar
     width: DROPDOWN_SCROLLBAR_SIZE
     height: DROPDOWN_SCROLLBAR_SIZE
+
+// Segmented tabs — the design system's mode-switcher ("I2 · Mode switcher",
+// CodeTracer Design System node 4342:744): one outlined track, the selected tab
+// raised inside it.  For any control that switches a panel between modes or
+// views: State (Locals / Globals / Watches), Search (Command / File / …), Flow
+// (Call / Line / Function).  The event-log filter menu draws the same track
+// with `::before` (event_log.styl) and uses `segmented-tab()` for its tabs.
+//
+// Sizes, on the control scale (CONTROL_HEIGHT_*, button.styl): the track is
+// the MEDIUM size, 26px, and each tab EXTRA SMALL, 20px, with 2px of track
+// around it: 1px border + 2px padding + 20 + 2px padding + 1px border = 26px.
+// No hover on the tabs: selection is the only state they show.
+segmented-tab()
+  display: flex
+  align-items: center
+  // A set height rather than padding around the line, so the tab is 20px
+  // whatever the text's line box; `align-items` centres the label.
+  height: CONTROL_HEIGHT_XS
+  // Sized by the label.  `!important` only to beat the app-wide
+  // `button { flex: 0 0 1.75em !important }` (button.styl), which would fix
+  // every tab at 1.75em wide; the labels only escaped it while `min-width`
+  // stayed `auto`, and a `min-width: 0` collapsed them onto each other.
+  flex: 0 0 auto !important
+  padding: 0 0.625rem
+  border: none
+  // `!important` only to beat the app-wide `button` radius (0.5em, itself
+  // `!important`); the tabs are 5px.
+  border-radius: 0.3125rem !important
+  background-color: transparent
+  font-family: "SpaceGrotesk"
+  font-weight: 400
+  font-size: 0.75rem
+  // 16px, so the 20px tab splits evenly around it: 2px above, 2px below.
+  line-height: 1rem
+  white-space: nowrap
+  color: colors-ui-text-primary-body-subtle
+  cursor: pointer
+
+  &.active,
+  &[data-selected="true"]
+    background-color: colors-ui-surface-base-card
+    color: colors-ui-text-primary-headings
+
+segmented-tabs()
+  display: flex
+  gap: 0.125rem
+  // The outline wraps the tabs instead of running the panel's width.
+  width: fit-content
+  padding: 0.125rem
+  background-color: colors-ui-surface-base-raised
+  // The shared control outline (button.styl) — this is where it started.
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+  border-radius: CONTROL_RADIUS
+
+  > button
+    segmented-tab()
 
 // Dropdown surface — the panel a menu opens into.
 //
@@ -397,10 +459,42 @@ body
 //     text-overflow: ellipsis !important
 //     white-space: nowrap !important
 
+// The caption bar's height (#menu, menu_bar.styl), which depends on what is on
+// screen:
+//
+//   working area (panels, editor)    6px + 26px tab row + 2px = 34px
+//   a welcome / new-trace screen     6px + 26px tab row + 6px = 38px
+//
+// With panels below, the 2px is right: the layout root continues in the bar's
+// colour and leaves 4px above the panel tabs, so the prompt reads 5px / 5px
+// (see the CAPTION_BAR_PADDING notes in menu_bar.styl).  A welcome screen paints
+// its own ground straight under the bar, so there the tab row needs the full
+// 6px below it (Nikolay, 2026-09-14).
+//
+// One switch drives both: the two custom properties below change when
+// `#welcomeScreen` is displayed with content in it — it is hidden with an
+// inline `display: none` and emptied otherwise — and everything that sits flush
+// under the bar reads CAPTION_BAR_HEIGHT: #root-container here, the auto-hide
+// overlays, the welcome screen's top, the command-results and tab-overflow
+// menus.  Defined in this file because it is imported before all of them.
+CAPTION_BAR_HEIGHT_WORKSPACE = 2.125rem
+CAPTION_BAR_HEIGHT_WELCOME = 2.375rem
+
+:root
+  --caption-bar-height: CAPTION_BAR_HEIGHT_WORKSPACE
+  --caption-bar-padding-bottom: 0.125rem
+
+:root:has(> body > #welcomeScreen:not([style*="display: none"]):not([style*="display:none"]) > *)
+  --caption-bar-height: CAPTION_BAR_HEIGHT_WELCOME
+  --caption-bar-padding-bottom: 0.375rem
+
+CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
+
 #root-container
   position: fixed
-  height: calc(100vh - 2.125em - 2rem)  // 2rem = #status-base height (2em at font-size:1rem)
-  top: 2.125em
+  // 2rem = #status-base height (2em at font-size:1rem)
+  height: "calc(100vh - %s - 2rem)" % CAPTION_BAR_HEIGHT
+  top: CAPTION_BAR_HEIGHT
   left: 0
   right: 0
   z-index: 0
@@ -466,7 +560,7 @@ body
 
 // TODO: Fix it?
 .component-container
-  font-family: "SpaceMono" !important
+  font-family: "SpaceGrotesk" !important
   font-size: inherit !important
   line-height: 1.5em !important
   font-weight: 400 !important
@@ -742,8 +836,10 @@ input:checked ~ .checkmark:after
 .ct-picker-trigger
   display: flex
   align-items: center
-  height: 1.75rem
-  max-height: 1.75rem
+  // The medium control size (button.styl) — pickers sit in panel toolbars
+  // beside medium fields (the Requests search), so they match them.
+  height: CONTROL_HEIGHT_MD
+  max-height: CONTROL_HEIGHT_MD
   padding: 0 0.625em
   cursor: pointer
   gap: 0.375em

@@ -26,6 +26,22 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that every `flake.lock` node whose repository is checked out beside
+# this one records the `lastModified` that its own `rev` actually carries. A
+# node whose timestamp names one commit and whose `rev` names another is
+# refused outright by nix ("mismatch in field 'lastModified'") — but only when
+# nix FETCHES the input, which a warm store and a sibling-path override both
+# avoid. So a hand-edited pin passes locally, passes on warm runners, and kills
+# a cold one before anything has evaluated. Reads the lock and runs `git show`
+# against the siblings already on disk: no network, no nix, half a second.
+# Skips LOUDLY (never silently passes) when no sibling holds any locked
+# revision; CT_FLAKE_LOCK_NODE_DATES_STRICT=1 makes that a failure. It does NOT
+# cover the nodes with no sibling checkout — that is
+# ci/test/flake-lock-metadata-test.sh, which needs the network and runs in CI.
+# See the header of scripts/test-flake-lock-node-dates.sh.
+test-flake-lock-node-dates:
+  bash scripts/test-flake-lock-node-dates.sh
+
 # Assert that every place a Python version can be observed still agrees with
 # the one place it is CHOSEN (nix/python.nix): the dev shell's exports and its
 # first `python3` on PATH, `.python-recorder-venv`'s interpreter, the ABI tag
@@ -611,17 +627,15 @@ build-storybook-components:
 # a permanent red that no one could act on. `npm ci` from the committed
 # `package-lock.json` takes ~17s and is idempotent, so the guard below is a
 # no-op on a warm checkout.
+#
+# THE WARM-CHECKOUT GUARD ASKED THE WRONG QUESTION and the body now lives in
+# `scripts/storybook-deps.sh`, which explains why and can be executed against a
+# synthetic tree by `ci/test/stale-artefact-guards-test.sh`. In short: `[ -x
+# node_modules/.bin/storybook ]` is existence, and what this needs is that the
+# installed tree matches `package-lock.json` -- so a lockfile change was never
+# installed on any machine that had run this once.
 storybook-deps:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd storybook
-  if [ -x node_modules/.bin/storybook ]; then
-    exit 0
-  fi
-  npm ci --no-audit --no-fund
-  # `npm ci` exits 0 on a lockfile that installs nothing useful, so assert the
-  # binary the `npm run` scripts below actually invoke.
-  test -x node_modules/.bin/storybook
+  bash scripts/storybook-deps.sh
 
 storybook: build-storybook-components storybook-deps
   cd storybook && npm run storybook
@@ -785,22 +799,55 @@ test-ct-print:
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.
 # Both are skipped here; they run in their own CI steps or via dev builds.
+#
+# EVERY LANE RUNS, AND THE AGGREGATE FAILS IF ANY OF THEM DID.
+#
+# This body used to be `set -e` plus a straight sequence of `just <lane>`
+# calls, which meant the FIRST failing lane aborted it and the remaining six
+# never ran at all.  This is the `test-non-gui` CI job (ci/test/non-gui.sh
+# execs `just test` inside the dev shell), so the cost of that was one full
+# round trip of CI — nix dev-shell startup included — per broken lane, and no
+# point at which anyone could see how much was actually broken.
+#
+# ci/lib/run-just-lanes.sh runs them all and then names every failure.  It does
+# not weaken any lane: each still runs the same recipe, each exit status is
+# still load-bearing, and `just test` still exits non-zero if any lane failed.
 test:
   #!/usr/bin/env bash
-  set -e
-  just test-build-alignment
-  just test-flake-pin-alignment
-  just test-python-version-alignment
-  just test-sibling-backend-path
-  just test-agent-api-contract
-  just test-rust
-  just test-nimsuggest
+  set -uo pipefail
+  # A genuine capability gate, not a hidden failure: the cross-repo tests need
+  # a checkout of codetracer-native-backend, and ci/test/non-gui.sh explicitly
+  # sets CODETRACER_RR_BACKEND_PATH= so they do not run in this CI job.  When
+  # the path IS set the lane joins the list below, so it aggregates exactly
+  # like every other lane — it cannot be silently skipped once chosen, and its
+  # failure fails `just test`.
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
-    echo "codetracer-native-backend detected — running cross-repo tests..."
-    just cross-test
+    echo "codetracer-native-backend detected — cross-repo tests included"
+    set -- cross-test
   else
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
+    set --
   fi
+  # THE SEVEN LANE NAMES ARE LITERAL ARGUMENTS ON THIS INVOCATION, and that is
+  # load-bearing beyond style.  They used to be built up in a bash array, which
+  # made them invisible to `ci/test/shell-gate-coverage.sh`: its walk reaches a
+  # recipe only through a name it can SEE, and an array element is not one.
+  # `scripts/test-build-alignment.sh` and `ci/test/sibling-backend-path-test.sh`
+  # were reachable through nothing else, so converting this recipe off a
+  # dependency list orphaned them (merge a4681be7, job 102285037564).  Both were
+  # still RUNNING the whole time — the walk had gone blind, not the coverage —
+  # but a reachability guard that cannot see a live edge is exactly the defect
+  # this recipe's own aggregate exists to prevent.  Keep them literal here.
+  bash ci/lib/run-just-lanes.sh test \
+    test-build-alignment \
+    test-flake-pin-alignment \
+    test-flake-lock-node-dates \
+    test-python-version-alignment \
+    test-sibling-backend-path \
+    test-agent-api-contract \
+    test-rust \
+    test-nimsuggest \
+    "$@"
 
 # Run all GUI tests headlessly against an already-built CodeTracer binary.
 test-gui-prebuilt *args:
@@ -1241,7 +1288,7 @@ test-nimsuggest:
 # BPF monitor unit tests — exercises JSON parsing, timestamp conversion,
 # and event accumulation without needing bpftrace or root access.
 test-bpf-monitor:
-  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:/tmp/ct-nim-cache/bpf_monitor_test src/ct/ci/bpf_monitor_test.nim
+  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_monitor_test" src/ct/ci/bpf_monitor_test.nim
 
 # BPF integration tests — requires a capabilities-aware bpftrace binary
 # and the bpftrace-collection.bt script from the codetracer-ci sibling repo.
@@ -1252,7 +1299,7 @@ test-bpf-monitor:
 # require either passwordless sudo or a patched bpftrace build. They will
 # skip with a diagnostic message when the prerequisite is not met.
 test-bpf-integration:
-  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:/tmp/ct-nim-cache/bpf_integration_test src/ct/ci/bpf_integration_test.nim
+  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_integration_test" src/ct/ci/bpf_integration_test.nim
 
 # Grant BPF capabilities to the ct binary after (re)compilation.
 # Requires the sudoers rule installed by `just developer-setup`.
@@ -1306,7 +1353,7 @@ test-bpf-native:
   nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc \
     --passC:"-I$LIBBPF_PATH/include" \
     --passL:"-L$LIBBPF_PATH/lib" --passL:"-lbpf" --passL:"-lelf" --passL:"-lz" \
-    --nimcache:/tmp/ct-nim-cache/bpf_monitor_native_test \
+    --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_monitor_native_test" \
     src/ct/ci/bpf_monitor_native_test.nim
 
 # Native BPF E2E integration tests — drives the ct binary with
@@ -1319,13 +1366,30 @@ test-bpf-native-integration:
   #!/usr/bin/env bash
   set -euo pipefail
   nim c --hints:off --warnings:off --mm:refc \
-    --nimcache:/tmp/ct-nim-cache/bpf_native_integration_test \
+    --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_native_integration_test" \
     src/ct/ci/bpf_native_integration_test.nim
   LD_LIBRARY_PATH="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}" \
     src/ct/ci/bpf_native_integration_test
 
 # Run all BPF-related tests (unit + native + integration).
-test-bpf: test-bpf-monitor test-bpf-native test-bpf-native-integration test-bpf-integration
+#
+# This was a DEPENDENCY LIST — `test-bpf: test-bpf-monitor test-bpf-native
+# test-bpf-native-integration test-bpf-integration` — and `just` aborts the
+# whole invocation at the first dependency that exits non-zero, so three of the
+# four lanes went unreported whenever the first one broke.  That is not a
+# `set -e` artefact and no shell flag fixes it; the only fix is to stop
+# expressing the aggregate as a dependency list.  The four lanes still run in
+# the same order (they share the built `ct` binary and the BPF programs), each
+# still fails on its own terms, and `just test-bpf` still exits non-zero if any
+# of them did — it now names all of them rather than only the first.
+test-bpf:
+  #!/usr/bin/env bash
+  set -uo pipefail
+  bash ci/lib/run-just-lanes.sh test-bpf \
+    test-bpf-monitor \
+    test-bpf-native \
+    test-bpf-native-integration \
+    test-bpf-integration
 
 # ===========================
 # trace folder helpers
@@ -3230,8 +3294,13 @@ test-vm-collab-integration: vm-test-prereqs
   exec > >(tee test-logs/test-vm-collab-integration.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-collab-integration
 
-# ct-test's incremental engine: fourteen suites under src/ct_test/incremental,
-# none of which was reachable by any recipe or CI script.
+# ct-test's incremental engine: seventeen suites, none of which was reachable
+# by any recipe or CI script when this lane was written. The count is not
+# maintained by hand -- `ci/lib/test-lane-files.sh` discovers them -- and it has
+# only ever moved UPWARD: fourteen when written, sixteen under
+# `src/ct_test/incremental/` today, plus `src/ct_test/incremental_cli_test.nim`
+# one level up, which `ci/test/test-lane-coverage.sh` caught running in no lane
+# at all.
 test-ct-test-incremental:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -4159,7 +4228,7 @@ test-noir-studio-signed-out:
   mkdir -p test-logs
   exec > >(tee test-logs/test-noir-studio-signed-out.log) 2>&1
   bash ci/test/noir-studio-signed-out.sh
-  cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+  cache="$(ci/lib/nim-cache-root.sh)"
   CT_WEB_ENTRY_BUNDLE="${cache}/nsso-loop/web.js" \
   CT_RENDERER_WEB_BUNDLE="${cache}/nsso-renderer/ui.js" \
     bash ci/test/noir-studio-signed-out-test.sh
@@ -4457,7 +4526,7 @@ test-no-sidecar-manifests: vm-test-prereqs
   echo "=== RS-M12 sidecar retirement (real recording per language) ==="
   f=src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim
   name=$(basename "$f" .nim)
-  cache="/tmp/ct-nim-cache/vm-native-$name"
+  cache="$(ci/lib/nim-cache-root.sh)/vm-native-$name"
   nim c -r --hints:off \
     --path:src/frontend/viewmodel \
     --nimcache:"$cache" \
@@ -4569,7 +4638,7 @@ test-vm-recorder-gated: vm-test-prereqs
   skipped=0
   for f in $(test_lane_files vm-recorder-gated); do
     name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/vm-gated-$name"
+    cache="$(ci/lib/nim-cache-root.sh)/vm-gated-$name"
     echo -n "  $f ... "
     output=$(nim c -r --hints:off \
       --path:src/frontend/viewmodel \
@@ -4856,10 +4925,38 @@ ensure-ct-native-replay:
         # working tree; the ``nix develop ... true`` guard above confirms
         # the devShell actually evaluates before we commit to this branch
         # (the sibling's ``path:libs/...`` flake inputs can fail to lock
-        # under a dirty workspace checkout). ``unset`` clears LLDB/CXX env
-        # leaking from the codetracer shell so the sibling hook owns it.
+        # under a dirty workspace checkout). ``unset`` clears the C/C++
+        # compiler env leaking from the codetracer shell so the sibling
+        # toolchain owns it.
+        #
+        # LLVM_CONFIG / LLDB_LIB_PATH / LLDB_ADDITIONAL_INCLUDE_DIRS are
+        # deliberately NOT unset here, and they used to be. Measured in the
+        # sibling's shell rather than assumed:
+        #
+        #   * LLVM_CONFIG and LLDB_LIB_PATH are exported UNCONDITIONALLY by
+        #     the sibling's shellHook (its nix/shells/main.nix), so by the
+        #     time this bash runs the hook has already replaced whatever
+        #     leaked in -- entering the shell with both set to ``/bogus``
+        #     yields the two nixpkgs store paths. Unsetting them therefore
+        #     discards the sibling's OWN values, never the leaked ones.
+        #   * LLDB_ADDITIONAL_INCLUDE_DIRS is not exported by that hook at
+        #     all; only the sibling's macOS-only ``build-mcr`` recipe
+        #     derives it, and only when it is empty. Unsetting it here can
+        #     at best cost that recipe an extra ``nix build``.
+        #
+        # And the premise the old unset rested on does not hold either: the
+        # codetracer dev shell sets none of the three (it sets CC/CXX), so
+        # there was nothing of ours to clear.
+        #
+        # Dropping the sibling's LLDB paths was harmless on macOS, where
+        # ``backend_target`` is ``build-mcr`` and that recipe re-provisions
+        # each var via ``nix build`` when unset. On Linux ``backend_target``
+        # is ``build`` -- a bare ``cargo build`` with no provisioning -- so
+        # lldb-sys's build script failed with "unable to locate shared
+        # library of liblldb" and ``just test-mcr-dap-flow`` could never
+        # reach the flow tests.
         ( cd "$sibling" && nix develop '.?submodules=1' --command bash -lc \
-            "unset LLVM_CONFIG LLDB_LIB_PATH LLDB_ADDITIONAL_INCLUDE_DIRS CXXFLAGS CC CXX; just $backend_target" )
+            "unset CXXFLAGS CC CXX; just $backend_target" )
     elif command -v just >/dev/null 2>&1; then
         # Fallback: the sibling dev shell could not be evaluated, but we are
         # already inside the codetracer Nix dev shell which provides cargo +

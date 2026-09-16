@@ -1157,14 +1157,15 @@ fn materialized_interval_from_worker_response(
                 .map_err(|e| format!("MaterializeInterval linehits.tc decode failed: {e}"))?
                 .into_iter()
                 .flat_map(|(file_id, line, ticks)| {
-                    let key =
-                        codetracer_trace_writer::step_stream::pack_global_line_index(file_id as usize, i64::from(line));
+                    // The LOCATION travels; the cache turns it into an address
+                    // in its own space when it ingests it, so nothing outside
+                    // that space builds a `linehits.tc` key.
                     ticks
                         .into_iter()
                         .filter(move |tick| *tick >= expected_lo && *tick < expected_hi)
                         .map(move |tick| {
                             (
-                                key,
+                                (file_id, line),
                                 crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick },
                             )
                         })
@@ -1474,16 +1475,15 @@ mod tests {
         let materialized =
             materialized_interval_from_worker_response(10, 20, &serde_json::to_string(&response).unwrap()).unwrap();
 
-        let key = codetracer_trace_writer::step_stream::pack_global_line_index(7, 100);
         assert_eq!(
             materialized.line_hits,
             vec![
                 (
-                    key,
+                    (7, 100),
                     crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 10 }
                 ),
                 (
-                    key,
+                    (7, 100),
                     crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 19 }
                 ),
             ]
@@ -1520,18 +1520,16 @@ mod tests {
         let materialized =
             materialized_interval_from_worker_response(300, 302, &serde_json::to_string(&response).unwrap()).unwrap();
 
-        let first_key = codetracer_trace_writer::step_stream::pack_global_line_index(11, 71);
-        let second_key = codetracer_trace_writer::step_stream::pack_global_line_index(11, 72);
         assert_eq!(materialized.writes, vec![(0x404030, inside_write)]);
         assert_eq!(
             materialized.line_hits,
             vec![
                 (
-                    first_key,
+                    (11, 71),
                     crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 300 },
                 ),
                 (
-                    second_key,
+                    (11, 72),
                     crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 301 },
                 ),
             ]
@@ -1632,7 +1630,7 @@ mod tests {
         assert_eq!(
             materialized.line_hits,
             vec![(
-                codetracer_trace_writer::step_stream::pack_global_line_index(2, 30),
+                (2, 30),
                 crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 12 },
             )]
         );

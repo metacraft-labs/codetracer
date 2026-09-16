@@ -301,7 +301,7 @@ fn build_trace_with_column(column_1based: i64) -> (Arc<dyn TraceReader>, PathBuf
     // recorded path.
     db.paths.push(String::new());
     db.paths.push(recorded.clone());
-    db.path_map.insert(recorded.clone(), PathId(1));
+    db.register_path_version(recorded.clone(), PathId(1));
 
     db.types.push(TypeRecord {
         kind: TypeKind::Int,

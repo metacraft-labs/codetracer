@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{Language, TestRecording};
+use test_harness::{Language, TestRecording, find_line_containing};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
@@ -55,9 +55,23 @@ fn rust_mcr_streaming_flow_variables_and_values() {
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
     // --- configure expected flow data ---
-    // Breakpoint at line 12 (`final_result`) inside calculate_sum().
-    // At this point all locals should be in scope:
+    // Breakpoint on the `let final_result = doubled + 10;` line inside
+    // `calculate_sum()`.  At this point all locals are in scope:
     //   a = 10, b = 32, sum = 42, doubled = 84, final_result = 94
+    //
+    // The line number is RESOLVED FROM THE SOURCE, not hard-coded.  It used to
+    // be a literal `12`, which was correct when this fixture was 23 lines long
+    // and stopped being correct the moment the ~390-line macOS pinned-allocator
+    // preamble was prepended: line 12 became a comment inside that preamble,
+    // `rustc` emitted no line-table entry for it (the lowest line in
+    // `.debug_line` for this file is 412), LLDB resolved the breakpoint to zero
+    // locations, `add_mcr_source_breakpoint` downgraded it to a *pending*
+    // breakpoint and still answered `verified: true`, and the DAP `continue`
+    // ran the program to exit.  The test then failed on empty flow data —
+    // indistinguishable from a real flow-extraction defect, which is how it was
+    // classified for two days.  Deriving the line means moving the function
+    // again cannot reintroduce that.
+    let breakpoint_line = find_line_containing(&source_path, "let final_result = doubled + 10;");
     let mut expected_values = HashMap::new();
     expected_values.insert("a".to_string(), 10);
     expected_values.insert("b".to_string(), 32);
@@ -67,7 +81,7 @@ fn rust_mcr_streaming_flow_variables_and_values() {
 
     let config = FlowTestConfig {
         source_file: source_path.to_str().unwrap().to_string(),
-        breakpoint_line: 12,
+        breakpoint_line,
         expected_variables: vec!["a", "b", "sum", "doubled", "final_result"]
             .into_iter()
             .map(String::from)

@@ -31,6 +31,57 @@ proc rspecSample(): string =
 proc minitestSample(): string =
   minitestRoot() / "test/calculator_test.rb"
 
+proc rubyRecorderSibling(): string =
+  ## The real ``codetracer-ruby-recorder`` checkout beside this one, or ``""``.
+  ## Only the *test* is allowed to look here: it is describing the machine it
+  ## runs on, whereas the provider must answer from the workspace it is given
+  ## (``workspace_scope.siblingRepoInWorkspace``).
+  ##
+  ## PROBE THE COMPILED EXTENSION, NOT THE WRAPPER — the same trap
+  ## ``scripts/detect-siblings.sh`` documents at its own Ruby block.
+  ## ``gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`` is a Ruby
+  ## shim CHECKED INTO GIT at mode 100755, so it is present in every fresh
+  ## clone and a probe of it can never fail — it would report a recorder that
+  ## was never built and move the failure to a `require` error inside
+  ## ``CodeTracer::Native.load_extension!``. What has to exist is the cdylib
+  ## that shim loads, which is what is probed here.
+  let
+    candidate = getCurrentDir().parentDir / "codetracer-ruby-recorder"
+    extDir = candidate / "gems" / "codetracer-ruby-recorder" / "ext" /
+      "native_tracer" / "target" / "release"
+  for name in ["codetracer_ruby_recorder.so",
+               "codetracer_ruby_recorder.bundle",
+               "libcodetracer_ruby_recorder.so",
+               "libcodetracer_ruby_recorder.dylib",
+               "libcodetracer_ruby_recorder.bundle"]:
+    if fileExists(extDir / name):
+      return candidate
+  ""
+
+proc haveRubyRecorder(): bool =
+  rubyRecorderSibling().len > 0 or
+    findExe("codetracer-ruby-recorder").len > 0 or
+    getEnv("CODETRACER_RUBY_RECORDER_PATH", "").len > 0
+
+proc recorderWorkspace(fixtureRoot: string): string =
+  ## A temporary workspace that is a copy of ``fixtureRoot`` and also CONTAINS
+  ## the recorder checkout — the way a caller names a sibling recorder now that
+  ## ``rubyRecorderCommandPrefix`` resolves step 2 from the workspace it is
+  ## given instead of from the process working directory.
+  ##
+  ## The basename is preserved deliberately: ``ensureRubyBundle`` keys its
+  ## ``BUNDLE_PATH`` on ``splitPath(projectRoot).tail``, so a copy named like
+  ## the fixture reuses the bundle the fixture already installed rather than
+  ## driving a second, network-dependent ``bundle install`` inside the gate.
+  result = getTempDir() / ("ct-ruby-record-workspace-" &
+      $getCurrentProcessId()) / splitPath(fixtureRoot).tail
+  removeDir(result.parentDir)
+  createDir(result.parentDir)
+  copyDir(fixtureRoot, result)
+  let sibling = rubyRecorderSibling()
+  if sibling.len > 0:
+    createSymlink(sibling, result / "codetracer-ruby-recorder")
+
 proc itemBySelector(catalog: TestCatalog; selector: string): TestItem =
   for item in catalog.items:
     if item.selector == selector:
@@ -546,14 +597,39 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
       "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips")
 
   test "RSpec records one real nested example to non-empty CTFS":
-    ensureRubyBundle(rspecRoot())
-    let catalog = rspecFileCatalog(rspecRoot(), rspecSample()).value
+    ## Runs against a workspace that CONTAINS the recorder checkout, which is
+    ## how a caller names a sibling recorder now that the provider no longer
+    ## searches the process working directory.
+    ##
+    ## This test used to name the fixture project itself as the workspace. That
+    ## worked only while ``rubyRecorderCommandPrefix`` seeded its sibling search
+    ## from ``getCurrentDir().parentDir`` — i.e. while the answer depended on
+    ## where the shell happened to be standing. When that resolver was anchored
+    ## to the caller's workspace, the JavaScript suite's matching test was moved
+    ## to a named workspace and this one was not, so it kept naming a directory
+    ## with no recorder in it and the provider correctly refused to record.
+    ## The refusal is right; the workspace this test named was wrong.
+    ##
+    ## Per ci/test/ct-providers.sh, a recording test must FAIL rather than skip
+    ## when its recorder is absent — a silent skip is how recorder coverage
+    ## disappears — so the absence is asserted, not tolerated.
+    if not haveRubyRecorder():
+      checkpoint("codetracer-ruby-recorder is required: build the sibling " &
+        "checkout (`direnv exec ../codetracer-ruby-recorder just build`) or " &
+        "set CODETRACER_RUBY_RECORDER_PATH")
+    check haveRubyRecorder()
+
+    let workspace = recorderWorkspace(rspecRoot())
+    defer: removeDir(workspace.parentDir)
+    let sampleInWorkspace = workspace / "spec/calculator_spec.rb"
+    ensureRubyBundle(workspace)
+    let catalog = rspecFileCatalog(workspace, sampleInWorkspace).value
     let nested = catalog.itemBySelector(RspecAddsSelector)
     let provider = newRubyRspecM1Provider()
     let recordResult = provider.provider.record(TestScope(
       kind: tskSingle,
-      projectRoot: rspecRoot(),
-      file: rspecSample(),
+      projectRoot: workspace,
+      file: sampleInWorkspace,
       testId: nested.id,
       selector: nested.selector))
 
@@ -567,14 +643,26 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
     check mapped[nested.id].metadata["catalogTestId"] == nested.id
 
   test "Minitest records one real test method to non-empty CTFS":
-    ensureRubyBundle(minitestRoot())
-    let catalog = minitestFileCatalog(minitestRoot(), minitestSample()).value
+    ## Same workspace-naming requirement as the RSpec recording test above;
+    ## see the note there for why the fixture project alone is not a workspace
+    ## the provider can resolve a recorder from.
+    if not haveRubyRecorder():
+      checkpoint("codetracer-ruby-recorder is required: build the sibling " &
+        "checkout (`direnv exec ../codetracer-ruby-recorder just build`) or " &
+        "set CODETRACER_RUBY_RECORDER_PATH")
+    check haveRubyRecorder()
+
+    let workspace = recorderWorkspace(minitestRoot())
+    defer: removeDir(workspace.parentDir)
+    let sampleInWorkspace = workspace / "test/calculator_test.rb"
+    ensureRubyBundle(workspace)
+    let catalog = minitestFileCatalog(workspace, sampleInWorkspace).value
     let item = catalog.itemBySelector(MinitestAddsSelector)
     let provider = newRubyMinitestM1Provider()
     let recordResult = provider.provider.record(TestScope(
       kind: tskSingle,
-      projectRoot: minitestRoot(),
-      file: minitestSample(),
+      projectRoot: workspace,
+      file: sampleInWorkspace,
       testId: item.id,
       selector: item.selector))
 

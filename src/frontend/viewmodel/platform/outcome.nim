@@ -354,3 +354,49 @@ proc foldOutcome*[A](items: seq[A];
       proc(ignored: Nothing): PlatformFuture[PlatformOutcome[Nothing]] =
         capturedStep(current))
   accumulated
+
+proc awaitSync*[T](future: PlatformFuture[PlatformOutcome[T]]
+                  ): PlatformOutcome[T] =
+  ## Settle a facade call whose caller cannot yet be asynchronous.
+  ##
+  ## Lives HERE rather than in `platform_host.nim`, where it was written, so
+  ## that a ViewModel can use it. `platform_host` picks a host instantiation —
+  ## importing it from the ViewModel layer would link Electron's or the native
+  ## host's whole module graph into every headless suite, which is precisely
+  ## what the facade exists to make unnecessary. `platform_host.ctAwaitSync`
+  ## is now a one-line alias over this, so there is still one implementation.
+  ##
+  ## ## Why it fails loudly rather than blocking
+  ##
+  ## It drains nim-everywhere's callback queue once. That settles anything the
+  ## *local* instantiations produce, because their work really is synchronous
+  ## underneath. It cannot settle a genuinely remote call — and it does not
+  ## try: there is no spin, no sleep and no event-loop reentry, because a
+  ## renderer that spins on a network hop is a frozen window.
+  ##
+  ## An unsettled future therefore returns `pkTimeout` naming this function.
+  ## That is the point: the day one of these call sites runs against the
+  ## container instantiation, it reports "this call site still needs
+  ## converting" instead of silently reading a zero value.
+  var captured: PlatformOutcome[T]
+  var settled = false
+
+  proc onValue(value: PlatformOutcome[T]) =
+    captured = value
+    settled = true
+
+  proc onFailure(message: string) =
+    captured = failed[T](pkTransport, "the platform call failed", message)
+    settled = true
+
+  future.onComplete(onValue, onFailure)
+  drainPlatformCallbacks()
+
+  if not settled:
+    return failed[T](
+      pkTimeout,
+      "this call site needs an asynchronous caller",
+      "awaitSync drained once and the platform had not answered; the " &
+      "instantiation is remote, so the caller must be converted to a " &
+      "continuation (NS1)")
+  captured

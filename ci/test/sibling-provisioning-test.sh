@@ -1049,6 +1049,136 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 2b. Every job that runs `ci/test/non-gui.sh` provisions codetracer-js-recorder.
+#
+# `ci/test/non-gui.sh` runs `just test` -> `just test-rust` -> `cargo nextest
+# run --release --test '*'`. That `-E` filter excludes only
+# `javascript_flow_integration`, so FIVE JavaScript tests execute on this lane:
+#
+#   javascript_flow_dap_test::javascript_flow_dap_variables_and_values
+#   javascript_flow_dap_test::test_js_locals_all_statements
+#   javascript_hcr_ctfs_integration::test_javascript_hcr_ctfs_integration
+#   javascript_locals_dap_test::test_js_load_locals_is_point_in_time_not_a_frame_union
+#   javascript_locals_dap_test::test_js_locals_live_recording_has_values_on_every_step
+#
+# Every one of them resolves the recorder through `find_js_recorder()`
+# (`src/db-backend/tests/test_harness/mod.rs:2469`), whose last resort is the
+# SIBLING path `../../../codetracer-js-recorder/packages/cli/dist/index.js`.
+# With the sibling absent it answers None and the HCR test takes its loud-skip
+# path instead of asserting.
+#
+# `origin_javascript_dap_test`'s four tests resolve it the same way and also run
+# on this lane; their guard is a bare `return`, so without the sibling they pass
+# while asserting nothing. Nine tests depend on this provisioning, not five.
+#
+# WHY THIS IS ASSERTED RATHER THAN LEFT TO REVIEW: no CI lane built this
+# recorder at all. `test-non-gui` provisioned trace-format, trace-format-nim,
+# python-, ruby- and beam-recorder and not this one; `windows-rust-components`
+# runs a bare `cargo test` with the JS suites `--skip`ped outright. A defect
+# affecting EVERY multi-file JavaScript trace survived roughly two months
+# behind that gap and was found only because one developer happened to have
+# the sibling built locally. Removing the entry again must be a red lane, not
+# a quiet return to skipping.
+#
+# Note this checks PROVISIONING only. The clone alone is not enough --
+# `packages/cli/dist/` is produced, never committed -- which is why the job
+# also carries a build step that hard-fails on a missing `dist/index.js`. That
+# half is enforced by `ci/verdict/recorder-clone-implies-build.py`.
+# ---------------------------------------------------------------------------
+echo
+echo "non-gui legs provision codetracer-js-recorder"
+
+# Named explicitly so a scanner that stops matching turns into a FAILURE
+# rather than a vacuous "nothing forbidden was found".
+readonly NON_GUI_ANCHOR='codetracer.yml:test-non-gui'
+
+non_gui_sites=()
+non_gui_missing=()
+
+for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+	case "$wf" in
+	"$ACTIONS_DIR"/*) wf_name="${wf#"$ACTIONS_DIR"/}" ;;
+	*) wf_name="${wf##*/}" ;;
+	esac
+	job=""
+	seen_js_recorder=0
+	line_no=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		stripped_line="${line#"${line%%[![:space:]]*}"}"
+		case "$line" in
+		'  '[a-zA-Z0-9_-]*':'*)
+			case "$line" in
+			'   '*) ;;
+			*)
+				job="${line#  }"
+				job="${job%%:*}"
+				seen_js_recorder=0
+				;;
+			esac
+			;;
+		esac
+		# A YAML comment naming the repo is prose, not provisioning -- and the
+		# steps this guards carry long ones. Skipping comments is also what
+		# keeps the CALL-SITE match below from firing on a comment that
+		# merely mentions ci/test/non-gui.sh, of which this job has several.
+		case "$stripped_line" in
+		'#'*) continue ;;
+		esac
+		# Both approved provisioning spellings: a `siblings:` list entry, and
+		# a `clone-repo` step's `repo:` (which is what this job uses -- the
+		# `siblings:` branch-tip ceiling is never raised, so a new `=dev`
+		# entry there is not available).
+		case "$stripped_line" in
+		'codetracer-js-recorder='* | 'codetracer-js-recorder' | \
+			'repo:'*'codetracer-js-recorder' | 'repo:'*'codetracer-js-recorder '*)
+			seen_js_recorder=1
+			;;
+		esac
+		# `paths:` filter entries are quoted sequence items, not commands.
+		case "$stripped_line" in
+		"- '"* | '- "'*) continue ;;
+		esac
+		case "$stripped_line" in
+		*'ci/test/non-gui.sh'*)
+			non_gui_sites+=("$wf_name:$job")
+			if [ "$seen_js_recorder" -eq 0 ]; then
+				non_gui_missing+=("$wf_name:$line_no: job '$job' runs ci/test/non-gui.sh with no codetracer-js-recorder sibling provisioned before it")
+			fi
+			;;
+		esac
+	done <"$wf"
+done
+
+_anchor_found=0
+for _s in "${non_gui_sites[@]}"; do
+	[ "$_s" = "$NON_GUI_ANCHOR" ] && _anchor_found=1
+done
+unset _s
+
+if [ "$_anchor_found" -eq 1 ]; then
+	ok "the non-gui scanner still matches its anchor (${#non_gui_sites[@]} call site(s))"
+else
+	fail "the non-gui scanner still matches its anchor" \
+		"expected to find a ci/test/non-gui.sh call site at '$NON_GUI_ANCHOR', and did" \
+		"not. Either that job was removed -- in which case move the anchor to another" \
+		"real call site -- or this scanner has stopped matching, which would make the" \
+		"assertion below a vacuous pass." \
+		"found: ${non_gui_sites[*]:-<none>}"
+fi
+unset _anchor_found
+
+if [ "${#non_gui_missing[@]}" -eq 0 ]; then
+	ok "every ci/test/non-gui.sh leg provisions codetracer-js-recorder first"
+else
+	fail "every ci/test/non-gui.sh leg provisions codetracer-js-recorder first" \
+		"without it find_js_recorder() returns None and the five JavaScript db-backend" \
+		"tests on this lane skip or panic instead of asserting -- the gap that hid a" \
+		"defect in every multi-file JavaScript trace for two months." \
+		"${non_gui_missing[@]}"
+fi
+
+# ---------------------------------------------------------------------------
 # 3. Every `ci/setup-rr-backend.sh` step overrides the ref explicitly.
 # ---------------------------------------------------------------------------
 echo
@@ -1546,7 +1676,9 @@ echo
 # four about the lock and the action that reads it (the action still runs the
 # command, it hand-writes no set or revision, the lock declares the set, and
 # every member is pinned to a 40-hex SHA).
-readonly EXPECTED_ASSERTIONS=27
+# 27 -> 29: assertion 2c ("non-gui legs provision codetracer-js-recorder")
+# contributes the scanner-anchor check and the contract itself.
+readonly EXPECTED_ASSERTIONS=29
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

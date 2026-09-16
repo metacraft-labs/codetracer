@@ -51,6 +51,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$REPO_ROOT/target/cross-test-logs"
 CLONE_DIR="$REPO_ROOT/target/rr-backend-clone"
 
+# The repository's one spelling of "this artefact must be current with respect
+# to its sources"; see the library's own header for why a cross-repo test
+# runner shares a file with the doc captures.
+# Read by the library; every diagnostic is prefixed with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="run-cross-repo-tests"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/docs/deep-review-capture-lib.sh"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -218,17 +228,131 @@ find_rr_backend_repo() {
 	return 1
 }
 
+# PRESENCE IS NOT THE LOCKED REVISION — THE TWIN OF `ci/setup-rr-backend.sh`.
+#
+# `resolve_pin_ref` above computes the workspace-locked revision of
+# codetracer-native-backend, and until now this script used that value on ONE
+# path only: the CI clone. When a sibling checkout was found on disk (the local
+# path, and the CI path whenever `setup-dev-env` has pre-cloned one) the ref was
+# never resolved and never compared — the one value that could have said whether
+# the checkout is the pinned one was simply not computed. That is the exact
+# defect `ci/setup-rr-backend.sh` carried, described at length in its
+# `require_locked_checkout`, and this is the same refusal for the same sibling.
+#
+# It matters more here than it looks: what this script decides is which
+# `ct-native-replay` the nim/rust/go/lean flow suites replay against, so a
+# checkout at last month's revision produces a green cross-repo run that names
+# no revision and measured the wrong backend.
+#
+# IT REFUSES RATHER THAN RE-CHECKING-OUT, for `require_locked_checkout`'s
+# reason: a developer's sibling checkout with work in it and a reused CI
+# workspace are the same directory to this script, and `git checkout` in the
+# first is destructive. `RR_BACKEND_REF` states a different revision on purpose.
+#
+# A LOCK THAT CANNOT BE RESOLVED IS SAID OUT LOUD, not passed over. Unlike
+# `ci/setup-rr-backend.sh`, this script is run by hand on workstations, where a
+# commit with no workspace lock is ordinary; dying there would make the guard
+# something people route around. So an unresolvable pin degrades to a spoken
+# "this could not be asked" — and the mtime comparison below, which needs no
+# lock at all, still runs.
+require_locked_sibling_checkout() {
+	local dir="$1" ref head want is_sha=0
+
+	[[ -d "$dir/.git" ]] || {
+		warn "cannot check which revision '$dir' is at — it is not a git checkout, so the workspace lock cannot be compared against it."
+		return 0
+	}
+	if ! ref="$(resolve_pin_ref 2>/dev/null)" || [[ -z $ref ]]; then
+		warn "cannot check whether '$dir' is at the workspace-locked revision of codetracer-native-backend — no lock resolved for this commit and RR_BACKEND_REF is unset. Set RR_BACKEND_REF to the revision you mean to have this checked."
+		return 0
+	fi
+
+	head="$(git -C "$dir" rev-parse HEAD 2>/dev/null)" ||
+		die "'$dir' has a .git but no resolvable HEAD; it is not a usable checkout of codetracer-native-backend."
+
+	# A FULL SHA CAN BE ANSWERED LOCALLY; A BRANCH CANNOT. A reused checkout's
+	# local `dev` is exactly as stale as the checkout sitting on it, so
+	# resolving a moving ref locally would answer "is this the `dev` it was at
+	# last week", which is not a freshness question. Same rule, same wording, as
+	# `ci/setup-rr-backend.sh`.
+	[[ $ref =~ ^[0-9a-f]{40}$ ]] && is_sha=1
+	want=""
+	if [[ $is_sha -eq 1 ]]; then
+		want="$(git -C "$dir" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null)" || want=""
+	fi
+	if [[ -z $want ]]; then
+		if [[ $is_sha -eq 0 ]]; then
+			log "Ref '$ref' is a moving ref; re-fetching it so the comparison is against what it points at NOW."
+		else
+			log "Ref '$ref' is not known to the existing checkout; fetching it."
+		fi
+		if git -C "$dir" fetch --quiet origin "$ref" 2>/dev/null; then
+			want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
+		fi
+	fi
+
+	if [[ -z $want ]]; then
+		die "cannot tell whether the codetracer-native-backend at '$dir' is the revision this run is pinned to.
+  it is at:      $head
+  it must be at: $ref  (which this checkout could not resolve and could not fetch)
+Fetch it there, re-provision the sibling, or set RR_BACKEND_REF to the revision you mean."
+	fi
+
+	if [[ $head != "$want" ]]; then
+		die "stale codetracer-native-backend checkout at '$dir'.
+  it is at:      $head
+  it must be at: $want  (from ref '$ref')
+This decides which ct-native-replay the flow suites replay against, so it is
+refused rather than silently reused. Fix it with:
+  git -C '$dir' checkout $want && git -C '$dir' submodule update --init --recursive
+or set RR_BACKEND_REF to the revision you actually mean."
+	fi
+
+	log "codetracer-native-backend at '$dir' verified at $head"
+}
+
+# THE NEWEST BUILD, NOT THE FIRST ONE THAT EXISTS.
+#
+# This loop used to return `target/release/ct-native-replay` whenever it was
+# executable, so a release binary from an arbitrarily old revision outranked a
+# `target/debug` one built ten minutes ago — the two profiles are separate
+# directories and neither build removes the other. "Prefer release" was a
+# preference between two CURRENT builds; applied to whatever is on disk it is a
+# preference for whichever happens to be older.
+#
+# The freshness question is asked of the winner separately, by
+# `require_fresh_native_replay`; this only stops the choice itself from being
+# made by existence.
 find_binary_in_repo() {
-	local repo_dir="$1"
-	# Prefer release, then debug
+	local repo_dir="$1" best="" profile bin
+	# Release first, so that it still wins a tie between two builds of the same
+	# revision — `-nt` is false for equal mtimes.
 	for profile in release debug; do
-		local bin="$repo_dir/target/$profile/ct-native-replay"
-		if [[ -x $bin ]]; then
-			echo "$bin"
-			return 0
+		bin="$repo_dir/target/$profile/ct-native-replay"
+		[[ -x $bin ]] || continue
+		if [[ -z $best || $bin -nt $best ]]; then
+			best="$bin"
 		fi
 	done
-	return 1
+	[[ -n $best ]] || return 1
+	echo "$best"
+}
+
+# EXECUTABILITY IS NOT CURRENCY, ASKED OF THE SIBLING'S OWN SOURCES.
+#
+# The revision check above answers "is this checkout the pinned one"; it says
+# nothing about whether the binary in `target/` was built FROM that checkout.
+# A `git checkout` of the locked revision leaves the previous revision's
+# `ct-native-replay` sitting in `target/`, correctly pinned and completely
+# stale, and the flow suites would replay against it.
+#
+# `git ls-files` in the sibling is used rather than a source pattern guessed
+# from here, because this repository does not know and must not assume how
+# codetracer-native-backend lays its sources out.
+require_fresh_native_replay() {
+	local bin="$1" repo_dir="$2"
+	ctdr_require_sibling_binary_not_stale "ct-native-replay" "$bin" "$repo_dir" \
+		"Build it with: cd '$repo_dir' && cargo build"
 }
 
 resolve_ct_native_replay() {
@@ -250,22 +374,29 @@ resolve_ct_native_replay() {
 	local rr_repo
 	if rr_repo="$(find_rr_backend_repo)"; then
 		log "Found native-backend repo at $rr_repo"
+		require_locked_sibling_checkout "$rr_repo"
+
+		# IN CI, BUILD FIRST — the build used to be conditional on no binary
+		# being there, which is the same existence-as-freshness mistake one
+		# level up: a `ct-native-replay` from a previous job on a reused
+		# workspace suppressed the build entirely. `cargo build` is incremental,
+		# so running it when the tree is already current costs a dependency scan
+		# and nothing else, and it is the remedy the refusal below would name
+		# anyway.
+		if [[ ${CI:-} == "true" ]]; then
+			log "CI mode: building ct-native-replay in $rr_repo ..."
+			(cd "$rr_repo" && cargo build)
+		fi
+
 		local bin
 		if bin="$(find_binary_in_repo "$rr_repo")"; then
+			require_fresh_native_replay "$bin" "$rr_repo"
 			export CT_NATIVE_REPLAY_PATH="$bin"
 			log "Using ct-native-replay: $CT_NATIVE_REPLAY_PATH"
 			return 0
 		fi
 
-		# In CI, build it
 		if [[ ${CI:-} == "true" ]]; then
-			log "CI mode: building ct-native-replay in $rr_repo ..."
-			(cd "$rr_repo" && cargo build)
-			if bin="$(find_binary_in_repo "$rr_repo")"; then
-				export CT_NATIVE_REPLAY_PATH="$bin"
-				log "Built ct-native-replay: $CT_NATIVE_REPLAY_PATH"
-				return 0
-			fi
 			die "cargo build succeeded but ct-native-replay binary not found in $rr_repo/target/"
 		fi
 
@@ -453,9 +584,20 @@ run_test() {
 		test_file="$(selector_to_rr_test_file "$selector")"
 		log "Running: $selector (rr-backend test: $test_file)"
 
-		# rr-backend tests need to find db-backend
+		# rr-backend tests need to find db-backend.
+		#
+		# EXECUTABILITY DECIDED THIS ONE TOO. The C/C++/D/Pascal flow suites
+		# replay through whatever `DB_BACKEND_BIN` names, and `-x` says only
+		# that a build happened at some point — `src/build-debug/bin/db-backend`
+		# is never deleted. Handing an old replay engine to four suites that
+		# then go green is the whole defect, so it is refused here instead.
 		local db_backend_bin="$REPO_ROOT/src/build-debug/bin/db-backend"
 		if [[ -x $db_backend_bin ]]; then
+			ctdr_require_tracked_sources_not_newer "build" "db-backend" \
+				"$db_backend_bin" \
+				"The $selector suite replays through that binary, so it would report green over an out-of-date replay engine. Rebuild with: just build-once" \
+				"$REPO_ROOT" 'src/db-backend/src/*.rs' 'src/db-backend/build.rs' \
+				'src/db-backend/Cargo.toml' 'src/db-backend/Cargo.lock'
 			env_vars+=("DB_BACKEND_BIN=$db_backend_bin")
 		fi
 

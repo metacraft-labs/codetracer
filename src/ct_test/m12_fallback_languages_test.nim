@@ -203,6 +203,84 @@ suite "ct-test M12 fallback language providers":
           message.contains("is required") or
           message.contains("ct-mcr native recorder is required")
 
+  test "a failing M12 fixture finishes as failed rather than reporting nothing":
+    ## THE REGRESSION, at the M12 fallback seam. `runShellCommand`'s failure
+    ## branch emitted `tekFailure` + `tekRunFinished` and no `tekTestFinished`
+    ## — and `tekTestFinished` is the only kind `run_orchestration.summarize`
+    ## and `certificate_issuance.recordUnitResult` count. A workspace of M12
+    ## fixtures that all failed therefore reported `executed 0, failed 0` and
+    ## took the "nothing executed" verdict (exit 2) instead of "failed"
+    ## (exit 1), which is a real failure reported as an absence.
+    ##
+    ## Grounded in test-certificates-spec Standard.md §3.1 (`passed` is the
+    ## only value supporting a positive claim) and §8 (a producer must not
+    ## claim targets that did not run): the fix must make the failing unit
+    ## COUNT as failed, and must not make it disappear.
+    ##
+    ## Pascal is the vehicle because `fpc` is in the dev shell and the fixture
+    ## is a single self-contained program: `halt(3)` is a non-zero exit from
+    ## the test itself, not a broken toolchain. On a host without `fpc` the
+    ## provider's own missing-tool contract is asserted instead — the same
+    ## either/or the fixture-run case above uses, so this never passes silently
+    ## on a machine that could not run anything.
+    let spec = pascalSpec()
+    let root = getTempDir() / ("ct-m12-pascal-failing-" &
+        $getCurrentProcessId())
+    removeDir(root)
+    createDir(root / "tests")
+    defer: removeDir(root)
+    # The project marker keeps the scratch tree discoverable the same way the
+    # checked-in fixture is; scratch rather than checked-in because the
+    # discovery case above pins the fixture directories' exact item counts.
+    writeFile(root / "m12-pascal.fixture", "")
+    let file = root / "tests" / "test_failing.pas"
+    writeFile(file, """
+program TestFailing;
+
+begin
+  writeln('pascal fixture about to fail');
+  halt(3);
+end.
+""")
+
+    let provider = newPascalFallbackM1Provider()
+    let runResult = provider.provider.run(TestScope(kind: tskFile,
+        projectRoot: root, file: file,
+        selector: normalizedRelative(root, file)))
+
+    if not toolOrNixAvailable(spec):
+      check runResult.value.len == 0
+      check runResult.diagnostics.len == 1
+      check runResult.diagnostics[0].message.contains(
+          spec.runTool & " is required")
+    else:
+      # The failure is reported in BOTH registers, and neither substitutes for
+      # the other: a diagnostic a human reads, and the finished event the
+      # counters read.
+      check runResult.diagnostics.len == 1
+      check runResult.diagnostics[0].severity == dsError
+      check runResult.diagnostics[0].message.contains(
+          "fallback execution failed with exit code 3")
+
+      let failures = runResult.value.eventsOfKind(tekFailure)
+      check failures.len == 1
+      if failures.len == 1:
+        check failures[0].status.get == tsFailed
+        check failures[0].message.contains("fallback command exited with 3")
+
+      let finished = runResult.value.eventsOfKind(tekTestFinished)
+      check finished.len == 1
+      if finished.len == 1:
+        check finished[0].status.get == tsFailed
+
+      let runFinished = runResult.value.eventsOfKind(tekRunFinished)
+      check runFinished.len == 1
+      if runFinished.len == 1:
+        check runFinished[0].status.get == tsFailed
+
+      for event in runResult.value:
+        check event.validateEvent.valid
+
   test "default CLI JSON includes M12 providers":
     let executable = compileCtTestBinary("ct-test-m12-cli")
     let output = execProcess(executable,

@@ -32,6 +32,25 @@ for f in index.html worker.js pkg/db_backend.js pkg/db_backend_bg.wasm serve.con
 	fi
 done
 
+# Test 1b: the bundled engine is the one THIS TREE builds.
+#
+# Every other check in this file is satisfied by any 1–10 MB file with the
+# right name. dist/ and src/db-backend/wasm-testing/pkg/ are both gitignored,
+# so a bundle built from another branch survives here indefinitely and passes
+# all of them. The stamp is copied in beside the engine by build-dist.sh; see
+# ci/lib/wasm-engine-freshness.sh for why this compares input CONTENT and not
+# mtimes.
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=ci/lib/wasm-engine-freshness.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$REPO_ROOT/ci/lib/wasm-engine-freshness.sh"
+if wasm_engine_assert_dir_fresh "$REPO_ROOT" "$DIST_DIR/pkg" >/dev/null 2>&1; then
+	pass "bundled engine was built from this tree"
+else
+	wasm_engine_assert_dir_fresh "$REPO_ROOT" "$DIST_DIR/pkg" || true
+	fail "bundled engine was not built from this tree (see above)"
+fi
+
 # Test 2: WASM size < 10 MB
 WASM_SIZE=$(wc -c <"$DIST_DIR/pkg/db_backend_bg.wasm" | tr -d ' ')
 if [ "$WASM_SIZE" -lt 10485760 ]; then

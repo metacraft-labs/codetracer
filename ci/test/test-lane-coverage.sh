@@ -309,6 +309,79 @@ while read -r f; do
 done <"${work}/claimed"
 
 # ---------------------------------------------------------------------------
+# Check C — one file claimed by two lanes that compile it differently
+#
+# Coverage is a UNION question and Checks A/B ask it that way, which is why
+# this was invisible: `stop_command_test.nim` was claimed by `frontend-js` AND
+# by `frontend-native-units`, so it counted as covered while the second lane
+# fed a `std/jsffi` suite to `nim c` and got
+#
+#     fatal error: Module jsFFI is designed to be used with the JavaScript
+#     backend
+#
+# on every run. Eight files were in that state at once. A hand-written
+# denylist next to a discovery glob drifts the moment someone adds a file to
+# the other lane and does not think of the list; nothing here noticed.
+#
+# Two lanes on the SAME backend sharing a file is deliberate and common (a
+# suite that is both a unit and part of a bigger sweep), so that is not
+# flagged. Two lanes on DIFFERENT backends are flagged UNLESS they declare
+# each other via `test_lane_parity_partner` -- vm-js/vm-native and
+# vm-unit-js/vm-unit compile one suite twice on purpose, and that duplication
+# IS what they test. The exception is a lane-pair declaration, not a file
+# list, so it cannot rot the way the denylist did.
+#
+# Skipped when --lane-files-from is used: that mode receives a flat list with
+# the lanes already merged, so the per-lane fact this needs is gone.
+: >"${work}/backend-clash"
+if [ -z "${lane_files_from}" ] && ! command -v test_lane_parity_partner >/dev/null 2>&1; then
+	echo "ERROR: ci/lib/test-lane-files.sh defines no test_lane_parity_partner." >&2
+	echo "  Check C cannot tell a deliberate cross-backend parity pair from a" >&2
+	echo "  lane feeding the compiler something that cannot build, so it would" >&2
+	echo "  have to be skipped -- and a skipped check that still prints OK is" >&2
+	echo "  how the thing it guards comes back. Restore the accessor." >&2
+	exit 2
+fi
+if [ -z "${lane_files_from}" ]; then
+	while read -r lane; do
+		[ -n "${lane}" ] || continue
+		[ -f "${work}/lane.${lane}" ] || continue
+		be="$(test_lane_backend "${lane}")"
+		while read -r f; do
+			[ -n "${f}" ] || continue
+			printf '%s\t%s\t%s\n' "${f}" "${be}" "${lane}"
+		done <"${work}/lane.${lane}"
+	done < <(test_lane_ids) | sort >"${work}/claims-by-backend"
+
+	while read -r f; do
+		[ -n "${f}" ] || continue
+		# Drop, from this file's claims, every lane whose declared parity
+		# partner also claims it. What remains is unexplained sharing.
+		: >"${work}/unexplained"
+		while IFS=$'\t' read -r _ be lane; do
+			partner="$(test_lane_parity_partner "${lane}")"
+			if [ -n "${partner}" ] &&
+				awk -F'\t' -v p="${f}" -v l="${partner}" \
+					'$1 == p && $3 == l { found = 1 } END { exit !found }' \
+					<"${work}/claims-by-backend"; then
+				continue
+			fi
+			printf '%s\t%s\n' "${be}" "${lane}" >>"${work}/unexplained"
+		done < <(awk -F'\t' -v p="${f}" '$1 == p' <"${work}/claims-by-backend")
+
+		backends="$(cut -f1 <"${work}/unexplained" | sort -u | tr '\n' ' ')"
+		case "${backends}" in
+		*' '*' '*)
+			lanes="$(awk -F'\t' '{ print $2 "(" $1 ")" }' \
+				<"${work}/unexplained" | sort -u | tr '\n' ' ')"
+			printf '%s\t%s\n' "${f}" "${lanes}" >>"${work}/backend-clash"
+			;;
+		esac
+	done < <(cut -f1 <"${work}/claims-by-backend" | sort -u)
+fi
+clash_n=$(grep -c . <"${work}/backend-clash" || true)
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 shaped_n=$(grep -c . <"${work}/shaped" || true)
@@ -379,6 +452,26 @@ if [ "${contradiction_n}" -gt 0 ]; then
 
   One of the two statements is wrong. Either the file is a real suite (remove
   the marker) or it is not (remove it from the lane).
+
+EOF
+fi
+
+if [ "${clash_n}" -gt 0 ]; then
+	status=1
+	echo "ERROR: ${clash_n} file(s) are claimed by lanes with DIFFERENT backends:"
+	while IFS=$'\t' read -r f lanes; do
+		printf '  %s\n      claimed by: %s\n' "${f}" "${lanes}"
+	done <"${work}/backend-clash"
+	cat <<'EOF'
+
+  A file cannot be both JS-only and C-compilable. One of these lanes is
+  feeding the compiler something that cannot build, and it has been doing so
+  on every run -- coverage is a union, so the file still counted as covered.
+
+  Fix the CLAIM, not the suite. Prefer expressing one lane as the set
+  difference of the other (see frontend-native-units in
+  ci/lib/test-lane-files.sh) so the two cannot drift apart again; a
+  hand-maintained denylist beside a discovery glob is what produced this.
 
 EOF
 fi

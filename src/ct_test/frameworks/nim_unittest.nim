@@ -119,40 +119,162 @@ proc splitTopLevelImports(raw: string): seq[string] =
       discard
   result.add raw[start .. ^1].strip
 
-proc detectFrameworksInTokens*(content: string;
-    tokens: seq[NimToken]): seq[NimUnitFramework] =
-  ## Which unittest flavours does this source import?
+proc continuesClause(token: NimToken): bool =
+  ## May an import clause carry on past a line break that follows ``token``?
   ##
-  ## The scan is line-oriented (an ``import`` clause is a statement, and the
-  ## overwhelmingly common form is a single line), but it runs over
-  ## ``maskNimNonCode`` rather than the raw text.  That is what keeps a ``#``
-  ## or a quote inside a literal from being read as code — the hand-rolled
-  ## per-line comment stripper this replaced shared the apostrophe bug that
-  ## used to break declaration scanning, and duplicated its logic besides.
+  ## Nim's line-continuation rule for these statements in practice: the clause
+  ## goes on when the line ended on the separator between modules or on one of
+  ## the operators that cannot end a module name.  See the grammar's
+  ## ``importStmt``/``includeStmt`` productions in
+  ## https://nim-lang.org/docs/manual.html#modules — an open bracket also
+  ## continues the clause, and that case is handled by the bracket depth in
+  ## ``importClauseEnd`` rather than here.
+  token.kind == ntkPunct and token.ch in {',', '/', '.'}
+
+proc importClauseEnd(tokens: seq[NimToken]; start: int): int =
+  ## Index one past the last token of the import clause whose module list
+  ## begins at ``start``.
+  ##
+  ## THE STATEMENT, NOT THE LINE, IS THE UNIT.  An ``import`` clause routinely
+  ## spans two lines — ``import std/[os, strutils,`` / ``            unittest]``
+  ## is the house style once the list outgrows a line — and a scan that reads
+  ## one physical line and calls it the statement simply does not see the
+  ## continuation.  When the module it cannot see is ``unittest``, the file is
+  ## not merely mis-imported: no framework is detected, so the file is never
+  ## scanned for declarations at all and drops out of the catalog entirely.
+  ##
+  ## So the clause ends at the first line break that is not held open by an
+  ## unclosed bracket and not invited by a trailing separator, or at a ``;``
+  ## statement separator, whichever comes first.
+  var
+    index = start
+    depth = 0
+    previous = -1
+  while index < tokens.len:
+    let token = tokens[index]
+    # Comments carry no syntax: they may sit anywhere inside the clause
+    # (``import std/[os, # why not\n  unittest]``) without ending or
+    # continuing it, so they are neither a break candidate nor a `previous`.
+    if token.kind == ntkComment:
+      inc index
+      continue
+    if previous >= 0 and token.line > tokens[previous].endLine and
+        depth == 0 and not tokens[previous].continuesClause:
+      break
+    if token.kind == ntkPunct:
+      case token.ch
+      of '[', '(', '{':
+        inc depth
+      of ']', ')', '}':
+        if depth > 0:
+          dec depth
+      of ';':
+        # ``import os; import unittest`` — two statements on one line.
+        if depth == 0:
+          break
+      else:
+        discard
+    previous = index
+    inc index
+  max(start, previous + 1)
+
+type
+  NimImportClause* = object
+    ## One ``import`` / ``from … import`` / ``include`` statement, as read by
+    ## ``scanNimImportClauses``.
+    keyword*: string            ## "import", "from" or "include"
+    modules*: seq[string]       ## module names, ``std/[a, b]`` already expanded
+    line*: int                  ## 1-based line the keyword sits on
+
+proc scanNimImportClauses*(content: string;
+    tokens: seq[NimToken]): seq[NimImportClause] =
+  ## Every module this source names in an import-like statement.
+  ##
+  ## Driven by the token stream rather than by lines, which is what makes the
+  ## scan see a clause that spans lines (``importClauseEnd``), an ``import``
+  ## that is not the first thing on its line (``when defined(x): import …``),
+  ## and two clauses separated by ``;``.  It equally makes an ``import`` that
+  ## is only *mentioned* — in a comment, or inside a string literal holding
+  ## sample source — a non-event, because those are tokens of their own kind.
+  ##
+  ## The module list itself is still read out of the source text, over
+  ## ``maskNimNonCode`` so that a comment inside the clause contributes
+  ## nothing; the clause's extent is what the tokens decide.
   ##
   ## Takes the token stream rather than scanning for itself so a caller that
   ## also needs the declarations pays for exactly one scan of the file.
-  var seen = initTable[NimUnitFramework, bool]()
-  for rawLine in maskNimNonCode(content, tokens).splitLines:
-    let line = rawLine.strip
-    if line.len == 0:
+  let masked = maskNimNonCode(content, tokens)
+  var index = 0
+  while index < tokens.len:
+    let token = tokens[index]
+    if token.kind != ntkIdent:
+      inc index
       continue
-    if line.startsWith("import "):
-      for part in splitTopLevelImports(line["import ".len .. ^1]):
-        for candidate in importCandidates(part):
-          let maybeFramework = frameworkForImport(candidate)
-          if maybeFramework.isSome:
-            seen[maybeFramework.get] = true
-    elif line.startsWith("from "):
-      let tail = line["from ".len .. ^1]
-      let moduleName = tail.split("import", maxsplit = 1)[0]
-      let maybeFramework = frameworkForImport(moduleName)
+    let keyword =
+      if content.identIs(token, "import"): "import"
+      elif content.identIs(token, "from"): "from"
+      elif content.identIs(token, "include"): "include"
+      else: ""
+    if keyword.len == 0:
+      inc index
+      continue
+    # ``import`` is a keyword, so an identifier spelled that way can only be a
+    # backtick-quoted one (a field or routine deliberately named after the
+    # keyword). That is not a statement, and reading a module list out of what
+    # follows it would be reading someone else's expression.
+    if index > 0 and tokens[index - 1].kind == ntkPunct and
+        tokens[index - 1].ch == '`':
+      inc index
+      continue
+
+    let stop = importClauseEnd(tokens, index + 1)
+    if stop <= index + 1:
+      inc index
+      continue
+    let
+      clauseStart = min(token.endOffset, masked.len)
+      clauseEnd = min(tokens[stop - 1].endOffset, masked.len)
+    var clause = NimImportClause(keyword: keyword, line: token.line)
+    if clauseStart < clauseEnd:
+      let text = masked[clauseStart ..< clauseEnd]
+      if keyword == "from":
+        # ``from <module> import <symbols>``: only the module is a dependency
+        # of this file on another module; the symbol list names its contents.
+        clause.modules.add text.split("import", maxsplit = 1)[0].strip
+      else:
+        for part in splitTopLevelImports(text):
+          for candidate in importCandidates(part):
+            clause.modules.add candidate
+    result.add clause
+    index = stop
+
+proc detectFrameworksInClauses*(clauses: seq[NimImportClause]):
+    seq[NimUnitFramework] =
+  ## Which unittest flavours do these clauses import?
+  ##
+  ## ``include`` is deliberately not a detection: the included file's own
+  ## imports are what would matter, and resolving an include path is a
+  ## different (and much larger) job than reading one file's text.  A file that
+  ## reaches ``unittest`` only through an ``include`` is therefore still
+  ## undetected — but ``nimUnittestFileCatalog`` reports the include in the
+  ## diagnostic, so the conclusion carries the evidence it was drawn from.
+  var seen = initTable[NimUnitFramework, bool]()
+  for clause in clauses:
+    if clause.keyword == "include":
+      continue
+    for module in clause.modules:
+      let maybeFramework = frameworkForImport(module)
       if maybeFramework.isSome:
         seen[maybeFramework.get] = true
 
   for framework in NimUnitFramework:
     if seen.getOrDefault(framework, false):
       result.add framework
+
+proc detectFrameworksInTokens*(content: string;
+    tokens: seq[NimToken]): seq[NimUnitFramework] =
+  ## Which unittest flavours does this source import?
+  detectFrameworksInClauses(scanNimImportClauses(content, tokens))
 
 proc detectFrameworksInContent*(content: string): seq[NimUnitFramework] =
   ## Convenience wrapper for callers that only need the framework answer
@@ -374,6 +496,56 @@ proc unsupportedDiagnostics(filePath: string; frameworks: seq[NimUnitFramework])
         "Nim " & framework.frameworkName & " discovery is detected but not implemented in M2; only std/unittest is parsed",
         filePath)
 
+const MaxReportedModules = 12
+  ## How many module names the "no unittest import" diagnostic spells out
+  ## before summarising the rest. Enough to recognise a file at a glance
+  ## without turning one info line into a screenful.
+
+proc noFrameworkMessage*(clauses: seq[NimImportClause]): string =
+  ## The message for "this file imports no unittest flavour I know".
+  ##
+  ## It states what the scan READ, not just what it concluded, and that is the
+  ## whole point.  The bare conclusion — "no Nim unittest imports detected in
+  ## file" — is emitted identically whether the file genuinely imports no test
+  ## framework or whether the scan failed to read the import that is right
+  ## there in the source.  Those two are opposite facts, and a diagnostic that
+  ## renders them the same way is why a scan defect that dropped whole files
+  ## out of the catalog could sit in a workspace report, dozens of rows deep,
+  ## looking exactly like the rows that were correct.
+  ##
+  ## With the module list attached, the reader can check the claim against the
+  ## file: an import the scan missed is an import missing from this list.
+  var
+    imported: seq[string] = @[]
+    included: seq[string] = @[]
+  for clause in clauses:
+    for module in clause.modules:
+      if module.len == 0:
+        continue
+      if clause.keyword == "include":
+        included.add module
+      else:
+        imported.add module
+
+  proc summarise(modules: seq[string]): string =
+    if modules.len <= MaxReportedModules:
+      modules.join(", ")
+    else:
+      modules[0 ..< MaxReportedModules].join(", ") &
+        " and " & $(modules.len - MaxReportedModules) & " more"
+
+  if imported.len == 0:
+    result = "no imports were read from this file at all, so no Nim unittest " &
+      "framework could be detected"
+  else:
+    result = "no Nim unittest imports detected in file; the " & $imported.len &
+      " module(s) it imports are " & summarise(imported)
+  if included.len > 0:
+    # The one blind spot left once the clause scan is statement-oriented:
+    # whatever the included file imports is invisible from here.
+    result.add ". It also has " & $included.len & " `include` clause(s) (" &
+      summarise(included) & ") whose own imports this scan does not follow"
+
 proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[TestCatalog] =
   let info = providerInfo()
   if not filePath.endsWith(".nim"):
@@ -386,7 +558,10 @@ proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[Test
   # every candidate file in a workspace, and a second scan per file is a
   # second pass over every byte of the project's source for no new information.
   let tokens = scanNimSource(content)
-  let frameworks = detectFrameworksInTokens(content, tokens)
+  # Read the import clauses once: the framework answer and the diagnostic that
+  # explains a negative answer are two readings of the same evidence.
+  let clauses = scanNimImportClauses(content, tokens)
+  let frameworks = detectFrameworksInClauses(clauses)
   var catalogDiagnostics = unsupportedDiagnostics(filePath, frameworks)
   var items: seq[TestItem] = @[]
 
@@ -406,7 +581,7 @@ proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[Test
   elif frameworks.len == 0:
     catalogDiagnostics.add diagnostic(
       dsInfo,
-      "no Nim unittest imports detected in file",
+      noFrameworkMessage(clauses),
       filePath)
 
   ProviderResult[TestCatalog](

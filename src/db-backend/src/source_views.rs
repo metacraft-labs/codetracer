@@ -436,6 +436,42 @@ pub fn build_srcviews_table(views: &[SourceView]) -> (Vec<u8>, Vec<u8>) {
     (dat, off)
 }
 
+/// `"sha256:<hex>"` of `content`.
+///
+/// GDH-M7 / design §7.0: this is what `Location::source_digest` carries for a
+/// step, and it is computed over the raw source view's bytes — the text that
+/// version actually executed — rather than over whatever is on the replaying
+/// filesystem under the same name. sha256 is the algorithm the whole reload
+/// path already speaks: the in-target agent verifies `snapshotDigest` with it
+/// (`repro_hcr_agent.c`, "this host implements sha256 only") and reports
+/// `appliedDigest` in the same form.
+pub fn source_view_digest(content: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+impl SourceViews {
+    /// `PathId` (as `u64`) → digest of that id's RAW (`view_kind == 0`) view.
+    ///
+    /// Formatted views (`view_kind != 0`, e.g. the JavaScript recorder's
+    /// prettier output) are excluded: they are a different rendering of the
+    /// same version, not a different version, and mixing them in would make
+    /// one path id carry two digests with nothing saying which won.
+    pub fn raw_digests_by_path_id(&self) -> HashMap<u64, String> {
+        let mut out = HashMap::new();
+        for view in self.entries() {
+            if view.view_kind != 0 {
+                continue;
+            }
+            out.entry(view.path_id)
+                .or_insert_with(|| source_view_digest(&view.content));
+        }
+        out
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

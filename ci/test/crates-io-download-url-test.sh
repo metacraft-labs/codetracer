@@ -50,6 +50,13 @@
 #      User-Agent. (2)-(5) prove we ask a different host; only this proves that
 #      host answers. It is the one assertion that can notice the CDN adopting
 #      the same policy.
+#   7. The one package this repository consumes from a FOREIGN flake's package
+#      set -- `metacraft-labs.cargo-stylus`, which `nix/shells/ci-base.nix` puts
+#      in the `ci` dev shell -- fetches no crate from the host that 403s, and
+#      the reach mechanism that gets it there costs nothing: its store path is
+#      the one the un-overridden attribute produces. An overlay declared here
+#      cannot reach that package set, so this assertion covers a mechanism the
+#      other six structurally cannot.
 #
 # WHAT IT DELIBERATELY DOES NOT ASSERT
 # ------------------------------------
@@ -57,12 +64,28 @@
 # uses the old URL. Measured: 957 still do, and they are not this repository's to fix -- they
 # are crate fetches belonging to package sets that sibling flakes (`noir`,
 # `wazero`, `nix-blockchain-development-sui`, ...) `import` themselves, which no
-# overlay declared here can reach. They are also all substitutable from
-# cache.nixos.org, so they only bite a machine forced to build them from source.
-# Asserting zero-in-the-closure would therefore be a red test this repository
-# cannot turn green, and the thing that actually fixes it -- moving the shared
-# nixpkgs pin in `metacraft-labs/nix-codetracer-toolchains` -- fixes it for
-# every repo at once. Recorded in codetracer-specs/Testing/Known-Test-Failures.md.
+# overlay declared here can reach.
+#
+#   CORRECTION (2026-09-14). The sentence that used to follow -- "They are also
+#   all substitutable from cache.nixos.org, so they only bite a machine forced
+#   to build them from source" -- was WRONG about the half of them that matters,
+#   and CI is what proved it. It holds for stock nixpkgs build tools. It does
+#   NOT hold for metacraft-labs' OWN packages, which cache.nixos.org has never
+#   heard of: `metacraft-labs.cargo-stylus` is in the `ci` dev shell, its
+#   `nix-blockchain-development` package set carries NO overlay, and its 546
+#   crate fetches all went to the host that 403s. Two LRC edges died there in
+#   `nix develop '.?submodules=1#ci'` -- runs 34834104633 (js,
+#   `crate-alloy-core-1.3.1`) and 34834129051 (ruby, `crate-alloy-eip2930-0.2.1`)
+#   -- on a runner whose private Attic substituter answered 401, which is
+#   exactly the "forced to build from source" case. Assertion 7 below now covers
+#   `cargo-stylus` directly; `nix/packages/default.nix` says how it is reached
+#   and why an overlay could not reach it.
+#
+# The general statement is otherwise unchanged: asserting zero-in-the-closure
+# would be a red test this repository cannot turn green, and the thing that
+# actually fixes it -- moving the shared nixpkgs pin in
+# `metacraft-labs/nix-codetracer-toolchains` -- fixes it for every repo at once.
+# Recorded in codetracer-specs/Testing/Known-Test-Failures.md.
 #
 # Run: bash ci/test/crates-io-download-url-test.sh
 # =============================================================================
@@ -319,6 +342,74 @@ else
 		fail "the CDN serves nixpkgs' fetcher UA" \
 			"$probe_url returned $code for User-Agent '$NIX_UA'. If this is 403, the CDN has adopted the API host's policy and this fix no longer works."
 	fi
+fi
+
+# -----------------------------------------------------------------------------
+# 7. The FOREIGN package set: `metacraft-labs.cargo-stylus`.
+#
+# Everything above covers packages this flake builds from its own `pkgs`, which
+# the overlay reaches by construction. This one it does not: `cargo-stylus`
+# comes from `nix-blockchain-development`, whose `flake.nix` builds its package
+# set from a bare `import nixpkgs { config.allowUnfree = true; }` with no
+# overlays at all. `nixpkgs.follows` shares the input, not the overlays, so its
+# `fetchurl` is nixpkgs' unpatched one -- and `nix/packages/default.nix` reaches
+# it with `.override { inherit pkgs; }` instead. See that file for the three
+# narrower mechanisms that were measured and found inert.
+#
+# Two assertions, and the second is the one that keeps the reach honest:
+#
+#   a. no crate in its vendor directory comes from the host that 403s, and the
+#      number that come from the CDN equals the number of crate tarball
+#      derivations in that closure. As in (3), a bare "no legacy URLs" is also
+#      true of an empty vendor directory and of a half-rewritten one.
+#   b. the store path is the one the UN-OVERRIDDEN attribute produces. The
+#      override re-instantiates a package from a different package set, which is
+#      exactly the shape of change that silently orphans a cached closure --
+#      here it does not, because the only difference is inside fixed-output
+#      crate fetches and `hashDerivationModulo` looks through those. If a future
+#      nixpkgs/config divergence makes it stop being true, this fails loudly
+#      rather than quietly rebuilding cargo-stylus on every runner.
+#
+# It is also the assertion that notices `cargo-stylus/default.nix` changing its
+# argument from `{ pkgs, ... }` to ordinary `callPackage` arguments: the
+# `.override` would become a silent no-op, and (a) would go red.
+# -----------------------------------------------------------------------------
+stylus_deps_drv=$(nix eval --raw ".#packages.$SYSTEM.cargo-stylus.cargoDeps.drvPath" 2>/dev/null)
+if [ -z "$stylus_deps_drv" ]; then
+	fail "cargo-stylus: its vendor directory instantiates" \
+		"nix eval .#packages.$SYSTEM.cargo-stylus.cargoDeps.drvPath produced nothing"
+else
+	stylus_json=$(nix derivation show -r "$stylus_deps_drv" 2>/dev/null)
+	s_legacy=$(printf '%s' "$stylus_json" | grep -oE "\"${LEGACY_PREFIX}[^\"]+\"" | sort -u | grep -c .)
+	s_cdn=$(printf '%s' "$stylus_json" | grep -oE "\"${CDN_PREFIX}[^\"]+\"" | sort -u | grep -c .)
+	s_crates=$(printf '%s' "$stylus_json" | grep -oE '"/nix/store/[^"]*-crate-[^"]*\.tar\.gz\.drv"' | sort -u | grep -c .)
+
+	if [ "$s_legacy" -eq 0 ]; then
+		pass "cargo-stylus: no crate is fetched from the crates.io API host"
+	else
+		fail "cargo-stylus: no crate is fetched from the crates.io API host" \
+			"$s_legacy crate(s) still fetch from $LEGACY_PREFIX; this is what killed the ci dev shell in runs 34834104633 and 34834129051"
+	fi
+
+	if [ "$s_crates" -gt 0 ] && [ "$s_cdn" -eq "$s_crates" ]; then
+		pass "cargo-stylus: all $s_cdn crate tarballs come from the CDN (= every crate derivation in the closure)"
+	else
+		fail "cargo-stylus: all crate tarballs come from the CDN" \
+			"$s_cdn CDN URL(s) against $s_crates crate derivation(s) in the vendor closure"
+	fi
+fi
+
+stylus_ours=$(nix eval --raw ".#packages.$SYSTEM.cargo-stylus.outPath" 2>/dev/null)
+stylus_theirs=$(nix eval --raw --impure --expr \
+	"(builtins.getFlake (toString $REPO_ROOT)).inputs.nix-blockchain-development.legacyPackages.\"$SYSTEM\".metacraft-labs.cargo-stylus.outPath" 2>/dev/null)
+if [ -z "$stylus_ours" ] || [ -z "$stylus_theirs" ]; then
+	fail "cargo-stylus: the reach mechanism costs nothing" \
+		"could not instantiate both sides (ours='$stylus_ours' theirs='$stylus_theirs')"
+elif [ "$stylus_ours" = "$stylus_theirs" ]; then
+	pass "cargo-stylus: the reach mechanism costs nothing (identical store path)"
+else
+	fail "cargo-stylus: the reach mechanism costs nothing" \
+		"the override changed the store path: $stylus_theirs -> $stylus_ours. Every consumer would rebuild and nothing cached would substitute."
 fi
 
 echo

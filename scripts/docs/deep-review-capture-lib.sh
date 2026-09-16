@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: a library for documentation tooling.
+# Not a CI gate itself: a library for documentation tooling. It no longer
+# carries the not-a-CI-gate marker because it IS reached from CI --
+# `ci/test/stale-artefact-guards-test.sh` (run by `lint-bash`) executes the
+# capture scripts that source it, and `shell-gate-coverage.sh` fails a file that
+# is both reachable and declared unwired. What is reached is the freshness
+# refusals below; nothing here checks the product.
 #
 # The shared machinery behind the two DeepReview capture scripts. Its
 # other consumer, tools/visual-review/capture-deepreview-views.sh, is a
@@ -29,6 +34,28 @@
 #
 # Nothing here builds CodeTracer. Every consumer photographs the build tree as
 # it stands, which is why `ctdr_require_fresh_build` exists and is loud.
+#
+# THE FRESHNESS REFUSALS ARE NO LONGER ONLY THE CAPTURES'.
+#
+# `ctdr_require_not_stale`, `ctdr_require_artefact_not_stale` and
+# `ctdr_require_tracked_sources_not_newer` are the ONE spelling in this
+# repository of "this artefact must be current with respect to its sources",
+# and four scripts that ship or install rather than photograph now ask the same
+# question through them:
+#
+#   * `scripts/build-desktop-component.sh`  — publishes `ct` into a launcher
+#     component bundle.
+#   * `scripts/developer-setup.sh`          — installs `ct` onto a workstation.
+#   * `browser-replay/deploy-wasm.sh`       — deploys the db-backend WASM module
+#     into the directory nginx serves.
+#   * `scripts/run-cross-repo-tests.sh`     — runs the flow suites against a
+#     sibling repository's `ct-native-replay`.
+#
+# They live elsewhere in the tree and are not documentation tooling; a second
+# copy of the comparison for them would be a second thing to keep correct, and
+# the mistake this whole family exists to prevent is exactly the kind that
+# reappears in the copy nobody remembered. The file's PATH is a historical
+# accident, its contents are not.
 #
 # Sourced, never executed:
 #   source "${REPO_ROOT}/scripts/docs/deep-review-capture-lib.sh"
@@ -125,15 +152,155 @@ ctdr_require_not_stale() {
 ctdr_require_trace_not_stale() {
 	local label="$1" trace="$2"
 	shift 2
-	[[ -e ${trace} ]] || ctdr_die \
-		"missing ${label} at '${trace}'. Nothing to reuse."
+	ctdr_require_artefact_not_stale "recording" "${label}" "${trace}" \
+		"The capture would publish images of an out-of-date CodeTracer, or of a program that has since changed. Re-record it, or delete '${trace}' and run this again." \
+		"$@"
+}
+
+# ctdr_require_artefact_not_stale <kind> <label> <artefact> <consequence> <source...>
+#
+# The general form of the two above, extracted when a THIRD consumer needed the
+# same comparison and a different sentence after it. The consequence is a
+# parameter because it is the only part a reader acts on: "this would publish an
+# out-of-date picture, re-record it" and "this would have a reviewer rate an
+# out-of-date picture, re-capture it" are the same defect and different
+# remedies, and a message that names the wrong remedy is a message that gets
+# worked around.
+#
+# `-e`, not `-f`, so it works on the directory a `.ct` trace actually is.
+ctdr_require_artefact_not_stale() {
+	local kind="$1" label="$2" artefact="$3" consequence="$4"
+	shift 4
+	[[ -e ${artefact} ]] || ctdr_die \
+		"missing ${label} at '${artefact}'. Nothing to reuse."
 	local source newer
 	for source in "$@"; do
 		[[ -e ${source} ]] || continue
-		newer="$(find "${source}" -newer "${trace}" -print -quit 2>/dev/null || true)"
+		newer="$(find "${source}" -newer "${artefact}" -print -quit 2>/dev/null || true)"
 		[[ -z ${newer} ]] || ctdr_die \
-			"stale recording: ${label} ('${trace}') is older than '${newer}'. The capture would publish images of an out-of-date CodeTracer, or of a program that has since changed. Re-record it, or delete '${trace}' and run this again."
+			"stale ${kind}: ${label} ('${artefact}') is older than '${newer}'. ${consequence}"
 	done
+}
+
+# ctdr_require_sibling_binary_not_stale <label> <binary> <repo-root> <remedy>
+#
+# THE SAME QUESTION AS `ctdr_require_not_stale`, ASKED OF A SIBLING REPO'S
+# BINARY WHOSE INTERNAL LAYOUT THIS REPOSITORY DOES NOT KNOW.
+#
+# `capture-visual-recording-screenshots.sh` tested `-x` on
+# `../codetracer-native-recorder/ct_cli/ct_cli`, on
+# `../codetracer-visual-replay/ct_gfx_player` and on
+# `../codetracer-native-test-programs/gl/gl_scene`, and treated EXECUTABILITY as
+# currency. A recorder older than its own sources produces book images of an old
+# recorder; a `gl_scene` older than its own sources is a picture of a program
+# that no longer exists — and it is the SUBJECT of the recording the book
+# publishes. Nothing in the picture says so.
+#
+# `ctdr_require_not_stale` could not be reused as-is because it takes a
+# `<source-root> <pattern>` pair, and this repository does not know — and must
+# not assume — where a sibling keeps its sources or what they are named. A wrong
+# pattern here manufactures a refusal rather than catching one, which is exactly
+# why the three sites above were reported and left unfixed once already.
+#
+# So the source list is not guessed: it is asked of the sibling's own git
+# checkout. `git ls-files` is the sibling's own statement of what its sources
+# are, in whatever layout it happens to use, and a compiled binary is never in
+# it (build outputs are ignored). That makes the check layout-agnostic and
+# correct for a repository this one has never seen the inside of.
+#
+# Deliberately conservative in the same way as its siblings above: ANY tracked
+# file newer than the binary is a refusal, including a README, because a branch
+# switch rewrites mtimes wholesale and the remedy — rebuild the sibling — is
+# cheap next to publishing a picture nobody can reproduce.
+#
+# TWO CASES CANNOT BE ASKED, and both say so out loud rather than passing
+# quietly:
+#
+#   * the binary does not live inside `<repo-root>` — someone pointed
+#     `CODETRACER_CT_MCR_CMD` (or its siblings) at a Nix store path or another
+#     checkout, so this repository's sources are not the ones it was built from.
+#     Same exemption `capture-book-page-screenshot.mjs` grants
+#     `CODETRACER_BOOK_PAGE`, and for the same reason.
+#   * `<repo-root>` is not a git checkout — a vendored or unpacked tree has no
+#     statement of what its sources are.
+ctdr_require_sibling_binary_not_stale() {
+	local label="$1" binary="$2" repo_root="$3" remedy="$4"
+	[[ -x ${binary} ]] || ctdr_die \
+		"missing executable ${label}: '${binary}'. ${remedy}"
+
+	# The consequence sentence names the checkout the reader has to rebuild in,
+	# so it is spelled absolutely here rather than as whatever the caller typed.
+	# A `repo_root` that is not a directory is one of the two unanswerable cases
+	# below; it reaches them with the string unchanged.
+	local repo_abs="${repo_root}"
+	[[ -d ${repo_root} ]] && repo_abs="$(cd -- "${repo_root}" && pwd)"
+
+	ctdr_require_tracked_sources_not_newer "sibling build" "${label}" "${binary}" \
+		"This capture publishes what these binaries produce, so the book would get images made by an out-of-date binary. Rebuild it in '${repo_abs}', then run this again." \
+		"${repo_root}"
+}
+
+# ctdr_require_tracked_sources_not_newer <kind> <label> <artefact> <consequence> <repo-root> [pathspec...]
+#
+# THE GENERAL FORM OF `ctdr_require_sibling_binary_not_stale`'S COMPARISON,
+# extracted the same way `ctdr_require_artefact_not_stale` was extracted from
+# the two above it, and for the same reason: a fourth, fifth and sixth consumer
+# needed this exact question asked with a different sentence after it.
+#
+# The question is "is any file this git checkout CALLS A SOURCE newer than the
+# artefact?", and the source list is never guessed — `git ls-files` is the
+# checkout's own statement of what its sources are, in whatever layout it uses,
+# and a build output is never in it. That is what makes the comparison correct
+# for a sibling repository this one has never seen the inside of, and it is
+# equally what keeps it from tripping over `src/build-debug/` here: the build
+# tree is ignored, so it is not in the list, so a `find` that would have walked
+# into it never happens.
+#
+# THE PATHSPECS ARE THE ONE THING A CALLER MUST THINK ABOUT. With none, EVERY
+# tracked file counts — right for a sibling whose rebuild is one cheap command
+# and whose every file is arguably an input. Inside THIS repository that stance
+# would refuse a deploy because a README moved, which is how a guard gets
+# switched off; so the callers here name the sources their artefact is actually
+# compiled from (`'src/*.nim'` for the core binary, the db-backend crate for the
+# WASM module). Git pathspec globbing crosses `/`, so `'src/*.nim'` is the whole
+# subtree.
+#
+# TWO CASES CANNOT BE ASKED, and both say so out loud rather than passing
+# quietly — a binary supplied from OUTSIDE the checkout was not built from its
+# sources, and a tree that is not a git checkout carries no statement of what
+# its sources are. See `ctdr_require_sibling_binary_not_stale` above for why
+# each is an exemption rather than a refusal.
+ctdr_require_tracked_sources_not_newer() {
+	local kind="$1" label="$2" artefact="$3" consequence="$4" repo_root="$5"
+	shift 5
+
+	local artefact_abs repo_abs
+	artefact_abs="$(cd -- "$(dirname -- "${artefact}")" && pwd)/$(basename -- "${artefact}")" || return 0
+	[[ -d ${repo_root} ]] || {
+		echo "${CTDR_LABEL}: cannot check whether ${label} is current — '${repo_root}' is not a directory, so its sources are unknown." >&2
+		return 0
+	}
+	repo_abs="$(cd -- "${repo_root}" && pwd)"
+
+	if [[ ${artefact_abs} != "${repo_abs}/"* ]]; then
+		echo "${CTDR_LABEL}: not checking whether ${label} is current — '${artefact_abs}' was supplied from outside '${repo_abs}', so that checkout's sources are not what it was built from." >&2
+		return 0
+	fi
+	if [[ ! -e "${repo_abs}/.git" ]]; then
+		echo "${CTDR_LABEL}: cannot check whether ${label} is current — '${repo_abs}' is not a git checkout, so it carries no statement of what its sources are." >&2
+		return 0
+	fi
+
+	local file newer=""
+	while IFS= read -r -d '' file; do
+		if [[ ${repo_abs}/${file} -nt ${artefact_abs} ]]; then
+			newer="${repo_abs}/${file}"
+			break
+		fi
+	done < <(git -C "${repo_abs}" ls-files -z -- "$@" 2>/dev/null)
+
+	[[ -z ${newer} ]] || ctdr_die \
+		"stale ${kind}: ${label} ('${artefact_abs}') is older than its source '${newer}'. ${consequence}"
 }
 
 # ctdr_require_fresh_build <repo-root> [extra-stylesheet ...]

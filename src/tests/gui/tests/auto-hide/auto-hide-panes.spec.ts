@@ -177,7 +177,7 @@ test.describe("Auto-hide panes", () => {
     // mounted from a setTimeout after GoldenLayout builds its containers).
     await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
 
-    // `layout.nim` registers BUILD, PROBLEMS, SEARCH RESULTS and REQUESTS as
+    // `layout.nim` registers BUILD, PROBLEMS, FIND IN FILES and REQUESTS as
     // default bottom auto-hide tabs.  No user-pinned panels should be
     // present, so only those defaults exist.
     const bottomTabs = bottomStripTabs(ctPage);

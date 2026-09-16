@@ -194,15 +194,65 @@ seed_store_tools() {
 	FIX_PATH="$nimdir:$rustdir:$FIX/bin"
 }
 
-# Run the guard inside a fixture with a hermetic PATH. `/usr/bin` and `/bin`
-# come last so bash's own dependencies (`cut`, `sed`, `git`, `python3`) resolve
-# while the fake tools win.
+# The directories holding the ordinary system utilities the guard shells out to
+# (`dirname`, `cut`, `sed`, `git`, `python3`, …), resolved from the CURRENT
+# environment rather than assumed.
+#
+# This used to be the literal `/usr/bin:/bin:/usr/local/bin`, which is an FHS
+# assumption and is wrong on NixOS: there `/usr/bin` holds `env` and nothing
+# else, `/usr/local/bin` does not exist, and coreutils live in `/nix/store/…`
+# reached through a profile. `toolchain-pins.sh` calls `dirname` on its FIRST
+# executable line to compute `REPO_ROOT`, so the guard never started — it
+# reported `the toolchain declaration is missing at //ci/toolchain.pin` (note
+# the empty root in `//`) and 68 of 82 assertions failed against a process
+# that had not run. The fake tools still win because `FIX_PATH` is prepended,
+# so the fixture stays exactly as hermetic as it was.
+#
+# The `command -v` idiom here is the same one the "python3 removed from PATH"
+# fixture below already uses to populate `$FIX/nopy`; that arm passes on this
+# host for precisely this reason, which is what identified the cause.
+sys_utility_path() {
+	local tool resolved dir seen=":" out=""
+	for tool in dirname basename cut sed tr grep awk git python3 jq sort head tail \
+		wc uname mktemp readlink realpath cat env date find xargs; do
+		resolved="$(command -v "$tool" 2>/dev/null)" || continue
+		# `command -v` answers with a BARE WORD for a shell builtin or keyword
+		# (`printf` is the one that bit here), and `${resolved%/*}` leaves such
+		# a word untouched — which put a literal `printf` entry into PATH.
+		# Only an absolute path names a directory.
+		case "$resolved" in /*) ;; *) continue ;; esac
+		dir="${resolved%/*}"
+		[ -n "$dir" ] || continue
+		case "$seen" in *":$dir:"*) continue ;; esac
+		seen="$seen$dir:"
+		out="${out:+$out:}$dir"
+	done
+	# The FHS locations stay in the list, so a host that really has them behaves
+	# exactly as it did before this change; they are simply no longer the only
+	# thing tried.
+	for dir in /usr/bin /bin /usr/local/bin; do
+		[ -d "$dir" ] || continue
+		case "$seen" in *":$dir:"*) continue ;; esac
+		seen="$seen$dir:"
+		out="${out:+$out:}$dir"
+	done
+	printf '%s\n' "$out"
+}
+SYS_PATH="$(sys_utility_path)"
+if [ -z "$SYS_PATH" ]; then
+	printf 'toolchain-pins-test: could not resolve ANY system utility directory.\n' >&2
+	exit 2
+fi
+
+# Run the guard inside a fixture with a hermetic PATH. The system utility
+# directories come last so bash's own dependencies resolve while the fake tools
+# win.
 run_guard() {
 	OUT="$(
 		cd "$REPO" 2>/dev/null &&
 			env -i \
 				HOME="$FAKEHOME" \
-				PATH="${FIX_PATH:-$FIX/bin}:/usr/bin:/bin:/usr/local/bin" \
+				PATH="${FIX_PATH:-$FIX/bin}:$SYS_PATH" \
 				IN_NIX_SHELL="${GUARD_IN_NIX_SHELL-impure}" \
 				TOOLCHAIN_PINS_STORE_PREFIX="$STORE" \
 				TMPDIR="$TMP" \
@@ -586,7 +636,7 @@ unset GUARD_IN_NIX_SHELL
 make_fixture
 seed_store_tools
 OUT="$(
-	cd "$REPO" && env -i HOME="$FAKEHOME" PATH="$FIX_PATH:/usr/bin:/bin" \
+	cd "$REPO" && env -i HOME="$FAKEHOME" PATH="$FIX_PATH:$SYS_PATH" \
 		IN_NIX_SHELL=impure DIRENV_FILE="$WS/somewhere-else/.envrc" \
 		TOOLCHAIN_PINS_STORE_PREFIX="$STORE" \
 		bash "$REPO/scripts/toolchain-pins.sh" --verify 2>&1

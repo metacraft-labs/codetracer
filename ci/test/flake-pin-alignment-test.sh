@@ -105,14 +105,38 @@ EOF
 
 # A fake reprobuild checkout whose HEAD commit carries a flake.lock pinning
 # runquota-src at <rev>. Prints the commit sha.
-# make_reprobuild <dir> <runquota-src-rev>
+#
+# With a third argument the lock is written in the SHADOWED shape reprobuild
+# really produces since it began committing its whole lock: a nested flake in
+# the closure (there, `nixos-modules -> reprobuild`) also has an input called
+# `runquota-src`, so nix hands that one the plain node key and gives the ROOT's
+# own input the `_2` suffix. The decoy rev is the nested one; <rev> stays the
+# revision the root is actually locked against.
+# make_reprobuild <dir> <runquota-src-rev> [<shadowing-decoy-rev>]
 make_reprobuild() {
-	local dir="$1" rev="$2"
+	local dir="$1" rev="$2" decoy="${3:-}"
 	mkdir -p "$dir"
 	git -C "$dir" init -q 2>/dev/null
 	git -C "$dir" config user.email pin-test@example.invalid
 	git -C "$dir" config user.name "pin test"
-	cat >"$dir/flake.lock" <<EOF
+	if [ -n "$decoy" ]; then
+		cat >"$dir/flake.lock" <<EOF
+{
+  "nodes": {
+    "root": { "inputs": { "runquota-src": "runquota-src_2" } },
+    "runquota-src": {
+      "locked": { "rev": "$decoy", "type": "github", "owner": "metacraft-labs", "repo": "runquota" }
+    },
+    "runquota-src_2": {
+      "locked": { "rev": "$rev", "type": "github", "owner": "metacraft-labs", "repo": "runquota" }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
+EOF
+	else
+		cat >"$dir/flake.lock" <<EOF
 {
   "nodes": {
     "root": { "inputs": { "runquota-src": "runquota-src" } },
@@ -124,6 +148,7 @@ make_reprobuild() {
   "version": 7
 }
 EOF
+	fi
 	git -C "$dir" add flake.lock
 	git -C "$dir" commit -qm "pin runquota-src at $rev"
 	git -C "$dir" rev-parse HEAD
@@ -131,13 +156,13 @@ EOF
 
 # Build a workspace: <ws>/repo is the fake codetracer checkout, <ws>/reprobuild
 # the sibling. Echoes the reprobuild commit sha.
-# make_ws <ws> <ct-runquota-rev> <rb-runquota-src-rev>
+# make_ws <ws> <ct-runquota-rev> <rb-runquota-src-rev> [<shadowing-decoy-rev>]
 make_ws() {
 	local ws="$1"
 	mkdir -p "$ws/repo/scripts"
 	cp "$GUARD" "$ws/repo/scripts/"
 	local rb
-	rb="$(make_reprobuild "$ws/reprobuild" "$3")"
+	rb="$(make_reprobuild "$ws/reprobuild" "$3" "${4:-}")"
 	write_lock "$ws/repo/flake.lock" "$2" "$rb"
 	echo "$rb"
 }
@@ -164,6 +189,23 @@ assert_contains "misaligned pins demand equality" "$OUT" "They must be EQUAL"
 assert_contains "misaligned pins name this repo's rev" "$OUT" "$RQ_A"
 assert_contains "misaligned pins name reprobuild's rev" "$OUT" "$RQ_B"
 assert_contains "misaligned pins give the remedy url" "$OUT" "github:metacraft-labs/runquota/$RQ_B"
+
+echo
+echo "a homonym node deeper in reprobuild's closure does not shadow the root's own input"
+
+WS="$TMP/shadowed-aligned"
+make_ws "$WS" "$RQ_A" "$RQ_A" "$RQ_B" >/dev/null
+OUT="$(bash "$WS/repo/scripts/test-flake-pin-alignment.sh" 2>&1)"
+RC=$?
+assert_rc "the root's rev is the one compared" "$RC" 0
+assert_contains "and it reports the root's rev, not the nested one" "$OUT" "runquota-src:           $RQ_A"
+
+WS="$TMP/shadowed-misaligned"
+make_ws "$WS" "$RQ_B" "$RQ_A" "$RQ_B" >/dev/null
+OUT="$(bash "$WS/repo/scripts/test-flake-pin-alignment.sh" 2>&1)"
+RC=$?
+assert_rc "a real divergence is still caught through the shadow" "$RC" 1
+assert_contains "and the remedy names the root's rev" "$OUT" "github:metacraft-labs/runquota/$RQ_A"
 
 echo
 echo "a missing python3 names ITSELF and does not accuse the lock file"

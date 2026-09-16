@@ -70,9 +70,54 @@
 #     still rejects all nine with its count asserted.
 #
 #   ct/load-step-lines
-#     Genuinely dead. No engine arm loads step lines for a location and there is
-#     no analogue to redirect to, so there is nothing to rename it to either.
-#     Retired by: an engine command for it.
+#     Genuinely dead as a COMMAND. It is absent from `VALID_DAP_COMMANDS` and
+#     has no arm in either `dap_server.rs` dispatch table, so nothing dispatches
+#     it and there is no analogue to redirect it to.
+#     Retired by: wiring the engine arm — see the pricing note below.
+#
+#     REVIEWED 2026-09-05, and the entry was NOT clean. Two corrections:
+#
+#     1. THE REGISTERED CASES WERE PINNING AN INVENTED PAYLOAD, which fails
+#        this ledger's own admission bar ("a registered test still asserts the
+#        CORRECT behaviour"). `loadStepLinesFor` sent — and the two cases
+#        asserted — `{path, line, rrTicks, count}`: flat, one count. NOTHING
+#        declares that object. Both peers' `LoadStepLinesArg`
+#        (`db-backend/src/task.rs`, `common_types/debugger_features/
+#        stepping.nim`) is `{location, forwardCount, backwardCount}`, and they
+#        always agreed. So the rows were holding open a test that would still
+#        have been wrong the day the engine arm landed — the same invention as
+#        `no_source_vm.jumpBack`'s `{previousPath, action}` (codetracer#698),
+#        differing only in that `LoadStepLinesArg` is not `#[serde(default)]`
+#        at container level, so it could never have silently succeeded.
+#        FIXED: VM and both cases now send and assert the declared shape. The
+#        rows stay, with the same signature — the mock raises on the command
+#        NAME, before any payload is looked at.
+#
+#     2. "AN ENGINE COMMAND FOR IT" OVERPRICED THE FIX, in the same direction
+#        this file already caught itself once with the WelcomeScreenVM "four
+#        new seams" estimate. It reads as new construction. It is not:
+#        `db-backend/src/step_lines_loader.rs` implements `load_lines` in full
+#        (175 lines, flow values, call/return synthesis, relative deltas), and
+#        `DapHandler` already CONSTRUCTS a `StepLinesLoader` at
+#        `dap_handler.rs:532`. `DapHandler::load_step_lines` exists at :5076
+#        and is where the wiring stopped: it has no caller in any dispatch
+#        table, its loader call is commented out, its `send_event` is commented
+#        out, and the commented call still passes `&self.db` where the current
+#        signature takes `reader: Arc<dyn TraceReader>`. What is missing is a
+#        dispatch arm, that signature fix, and a DAP event — not a loader.
+#
+#     BEFORE ANYONE BUILDS THAT: there is no spec for this panel. It is in
+#     neither the Core Panes inventory (`codetracer-specs/GUI/GUI-Overview.md`)
+#     nor the `PaneKind` enumeration (`GUI/Layout-And-Navigation/
+#     Layout-System.md`), and `ct/load-step-lines` does not appear in
+#     `Architecture/CodeTracer-DAP-Extensions.md`. Its only mention in the
+#     specs repo is a defect record saying it is unimplemented. The pane is
+#     also unreachable: menu entry commented out, no binding in
+#     `default_config.yaml`, absent from `default_layout.json`, and
+#     `Content.StepList` is in `editModeHiddenContentIds()`. So these rows
+#     record an unfinished feature that nothing has yet asked for. The
+#     decision they are waiting on is whether the panel should exist at all,
+#     and that is a product/spec question, not a test question.
 #
 # Both files run in vm-native (C) and vm-js (node), so each case is registered
 # for both lanes: the defect is in the ViewModel, which is backend-neutral.

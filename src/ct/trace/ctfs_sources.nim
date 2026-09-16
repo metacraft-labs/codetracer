@@ -2,9 +2,81 @@ import std/[json, os, sets, strutils, sequtils]
 
 import source_paths
 
+const
+  LastShiftedGlobalIndexVersion* = 3'u16
+    ## The highest ``meta.dat`` schema version whose writer packed a
+    ## line-only ``global_position_index`` as ``prefix_sums[file_id] +
+    ## line``.
+    ##
+    ## Named rather than spelled ``3`` at the comparison site so the bound
+    ## and the refusal it drives move together: a later version that
+    ## changed the packing again would raise it, and a reader comparing
+    ## against a stale literal would answer such a container instead of
+    ## refusing it.
+
+  MetaDatVersionExtendedFlags* = 5'u16
+    ## GDH-M2 (2026-09-10) — the schema version a container carries when at
+    ## least one EXTENDED flag is set: a v4 header with a
+    ## ``[4] flags_ext u32 LE`` word inserted after the u16 flags.
+    ##
+    ## Accepted ALONGSIDE ``SupportedMetaDatVersion`` rather than replacing
+    ## it, and that is not a relaxation of the paragraph below.  v5 is not a
+    ## different meaning for the same bytes; it is a header with one extra
+    ## word in it, and the version field is what says the word is there —
+    ## the same discipline, applied to a header shape instead of to an
+    ## address packing.  A writer emits v5 only when an extended flag is
+    ## actually set, so a recording with no reload stays at v4 and is
+    ## byte-identical to one produced before the word existed.
+
+  FlagExtHasSourceReload* = 1'u32
+    ## Extended flag bit 0 (global bit 16) — the execution stream may
+    ## contain step-event tag ``0x08`` (``TagSourceReload``).
+
+  KnownExtFlags* = FlagExtHasSourceReload
+    ## Every ``flags_ext`` bit this reader understands.  A v5 header
+    ## carrying a bit outside it is refused, the same strict-rejection
+    ## contract the u16's known-bits mask enforces elsewhere.
+
+  SupportedMetaDatVersion* = 4'u16
+    ## The one ``meta.dat`` schema version this reader accepts.
+    ##
+    ## **One version, and it has to be one.** The tempting alternative —
+    ## accept ``{3, 4}``, since v4 changed no field of the header this
+    ## module decodes — reintroduces the exact defect the bump exists to
+    ## close. v3 and v4 differ not in the bytes of ``meta.dat`` but in
+    ## what the rest of the container's step addresses MEAN: a v3 writer
+    ## packed a line-only ``global_position_index`` as
+    ## ``prefix_sums[file_id] + line``, and v4 packs
+    ## ``prefix_sums[file_id] + (line - 1)``, the exact inverse of the
+    ## ``line = q + 1`` decode. Both land INSIDE the trace's own address
+    ## space, so accepting a v3 container fails nowhere: every step
+    ## resolves to a real file and a real line, each one exactly one line
+    ## above where it was recorded.
+    ##
+    ## The ``paths`` list this module returns is the file table those
+    ## addresses are indexed against, and it is what the importer writes
+    ## into the trace folder's ``paths.json``. Answering a v3 container
+    ## here therefore hands the frontend the file table for an address
+    ## space the backend is about to read one line high — or, since the
+    ## backend refuses v3 outright, a half-imported trace. Nothing else in
+    ## the container distinguishes the two encodes: ``recorder_id`` names
+    ## the producer, not its address packing, and the same recorders span
+    ## the change.
+    ##
+    ## Mirrors ``SUPPORTED_VERSIONS`` in
+    ## ``src/db-backend/src/ctfs_trace_reader/meta_dat.rs`` and
+    ## ``SUPPORTED_META_DAT_VERSIONS`` in
+    ## ``src/backend-manager/src/meta_dat.rs``, both ``&[4]``.
+    ##
+    ## A back-compat shim is not merely unimplemented, it is not
+    ## constructible: subtracting one from every address would correct a
+    ## trace whose writer used the old packing, and the version is
+    ## precisely what would have said that it did. Pre-1.0, v3 containers
+    ## are re-recorded rather than read.
+
 type
   CtfsMetaDat* = object
-    ## Subset of the v3 ``meta.dat`` payload that the Nim importer
+    ## Subset of the ``meta.dat`` payload that the Nim importer
     ## consumes.  Mirrors the fields used to populate the trace index.
     ## M-REC-1.5 made this the canonical metadata source — legacy
     ## ``trace_metadata.json`` and ``trace_db_metadata.json`` sidecars
@@ -65,6 +137,17 @@ proc openCtfs(path: string): CtfsReader =
   for i, b in CtfsMagic:
     if byte(result.data[i].ord) != b:
       raise newException(ValueError, "invalid CTFS magic")
+  # The CTFS *container* version, at offset 5 of the ``.ct`` file. It is a
+  # different number from the ``meta.dat`` schema version that
+  # ``parseCtfsMetaDat`` gates on, and the two move independently.
+  #
+  # A set is right here where a singleton is right there. This byte
+  # describes the block-and-mapping layout that locates internal files;
+  # every version in the set addresses blocks identically, so reading a v2
+  # container yields the same bytes a v4 one would. It says nothing about
+  # what those bytes MEAN — in particular nothing about how a step's
+  # ``global_position_index`` is packed — so it cannot stand in for the
+  # ``meta.dat`` gate, and widening it does not widen that one.
   let version = result.data[5].ord
   if version notin {2, 3, 4}:
     raise newException(ValueError, "unsupported CTFS version")
@@ -256,6 +339,30 @@ proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string
       createDir(outputPath.parentDir)
       writeFile(outputPath, sourceBytes)
 
+proc metaDatFlagWord(reader: CtfsReader): uint16 =
+  ## The ``meta.dat`` flag word, or 0 when the container has no readable
+  ## one.
+  ##
+  ## Reads the fixed header directly — magic, then the two flag bytes at
+  ## offset 6 — rather than going through ``parseCtfsMetaDat``, because
+  ## the flag word's position is fixed by the header across every schema
+  ## version while that parser accepts one specific version. The caller
+  ## needs one bit that selects a ``paths.dat`` record layout, and a
+  ## version this parser has not been taught about must not turn into a
+  ## silently mis-framed path list.
+  const Magic: array[4, byte] = [byte 0x43, 0x54, 0x4D, 0x44]
+  var data: string
+  try:
+    data = reader.readCtfsFile("meta.dat")
+  except CatchableError:
+    return 0
+  if data.len < 8:
+    return 0
+  for i in 0 ..< 4:
+    if byte(data[i].ord) != Magic[i]:
+      return 0
+  uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
+
 proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
   ## Decode the CTFS v4 interning-table path list (``paths.dat`` +
   ## ``paths.off``) written by the current trace writer
@@ -266,7 +373,14 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
   ##   * ``paths.off`` — a FixedRecordTable of ``N+1`` little-endian u64
   ##     cumulative byte offsets into ``paths.dat`` (offset[0] is always
   ##     0; offset[i+1] - offset[i] is the length of record ``i``).
-  ##   * ``paths.dat`` — the raw UTF-8 path bytes, concatenated.
+  ##   * ``paths.dat`` — the record bytes, concatenated. Which SHAPE a
+  ##     record is in is decided by ``meta.dat``, never by inspecting the
+  ##     bytes (the shapes' byte spaces overlap):
+  ##       * bare UTF-8 path bytes — the default;
+  ##       * ``path_len + path_bytes + line_count`` when bit 14
+  ##         (``FLAG_HAS_LINE_COUNT_TABLE``) is set;
+  ##       * ``path_len + path_bytes + line_count + line_lengths`` when
+  ##         bit 4 (``FLAG_HAS_COLUMN_AWARE_STEPS``) is set.
   ##
   ## Returns an empty seq when the container predates the v4 format
   ## (no ``paths.dat``); the caller falls back to ``paths.json``.
@@ -285,13 +399,47 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
   var offsets = newSeq[uint64](offsetCount)
   for i in 0 ..< offsetCount:
     offsets[i] = readU64Le(offBytes, i * 8)
+  # Bits 4 and 14 each frame the record; they are mutually exclusive, and
+  # a writer that sets both is rejected upstream. Both put the path bytes
+  # behind a varint length, so one branch strips the framing for either.
+  const FlagHasColumnAwareSteps: uint16 = 0x10
+  const FlagHasLineCountTable: uint16 = 0x4000
+  let flags = reader.metaDatFlagWord()
+  let framed = (flags and (FlagHasColumnAwareSteps or FlagHasLineCountTable)) != 0
   for i in 0 ..< offsetCount - 1:
     let startOff = int(offsets[i])
     let endOff = int(offsets[i + 1])
     if startOff > endOff or endOff > datBytes.len:
       raise newException(ValueError, "CTFS paths.dat offset out of range")
     if endOff > startOff:
-      result.add datBytes[startOff ..< endOff]
+      if framed:
+        # `path_len` varint, then exactly that many path bytes. The
+        # trailing `line_count` (and, for bit 4, the per-line table) sizes
+        # the file's slot in the position space and is not part of the
+        # path; appending the whole record here is what put a length
+        # prefix and a binary tail inside every path string.
+        var pos = startOff
+        var pathLen: uint64 = 0
+        var shift: uint32 = 0
+        var ok = false
+        while pos < endOff:
+          let b = byte(datBytes[pos].ord)
+          pos += 1
+          if shift >= 64:
+            break
+          pathLen = pathLen or (uint64(b and 0x7f) shl shift)
+          if (b and 0x80) == 0:
+            ok = true
+            break
+          shift += 7
+        if not ok or pos + int(pathLen) > endOff:
+          raise newException(ValueError,
+            "CTFS paths.dat record " & $i & ": path_len " & $pathLen &
+            " extends past the record. meta.dat flags 0x" & toHex(flags, 4) &
+            " declare a framed record layout")
+        result.add datBytes[pos ..< pos + int(pathLen)]
+      else:
+        result.add datBytes[startOff ..< endOff]
 
 proc parseCtfsMetaDat(data: string): CtfsMetaDat   # forward decl — used by materializeCtfsSources' meta.paths fallback below
 
@@ -309,24 +457,15 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     return false
 
   var paths: seq[string] = @[]
-  var pathsJsonNonEmpty = false
-  try:
-    let pathsJson = reader.readCtfsFile("paths.json")
-    if pathsJson.len > 0:
-      writeFile(outputFolder / "paths.json", pathsJson)
-      for pathNode in parseJson(pathsJson):
-        if pathNode.kind == JString:
-          paths.add pathNode.getStr()
-      result = true
-      pathsJsonNonEmpty = paths.len > 0
-  except CatchableError:
-    discard
-
-  # CTFS v4 containers replace the legacy JSON ``paths.json`` internal
-  # file with the binary ``paths.dat`` + ``paths.off`` interning table.
-  # When the JSON form is absent, decode the binary table so the
-  # frontend still gets a ``paths.json`` sidecar and the bundled
-  # ``files/`` payload is materialised below.
+  # NOTE: two different files are called ``paths.json`` in this proc. The one
+  # written to ``outputFolder`` is the SIDECAR the frontend reads to build the
+  # filesystem jstree, and it stays. The container-INTERNAL ``paths.json`` that
+  # used to be read here first is the retired legacy metadata sidecar, and is
+  # gone — recorded paths come from ``paths.dat`` or ``meta.dat`` below.
+  # A recorded container carries its source paths in the binary
+  # ``paths.dat`` + ``paths.off`` interning table. Decode it so the frontend
+  # gets a ``paths.json`` sidecar and the bundled ``files/`` payload is
+  # materialised below.
   if not result:
     try:
       let interningPaths = extractInterningTablePaths(reader)
@@ -337,15 +476,11 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     except CatchableError as e:
       echo "ct host: warning: failed to decode CTFS paths.dat: ", e.msg
 
-  # M-REC-1.5/M4a: the ct_recorder (live MCR) trace-writer currently
-  # finalizes the internal ``paths.json`` as a placeholder ``"[]"`` even
-  # when the operator passed ``--source`` paths (those paths *do* land
-  # in ``meta.dat``'s ``paths`` field — see
-  # ``ct_recorder/trace_writer.nim`` TODO("meta-json-retirement")).
-  # Until ``paths.json`` is retired, mirror ``meta.dat``'s paths into
-  # the sidecar when the internal ``paths.json`` was empty so the
-  # importer derives a usable jstree root from the recorded source
-  # paths instead of leaving an empty list.
+  # M-REC-1.5/M4a: mirror ``meta.dat``'s ``paths`` field into the sidecar so
+  # the importer derives a usable jstree root from the recorded source paths
+  # instead of leaving an empty list. This used to be conditional on the
+  # container-internal ``paths.json`` having been empty; that file is retired,
+  # so ``meta.dat`` is now simply where recorded ``--source`` paths come from.
   #
   # Any sibling sidecar already present in ``outputFolder`` (e.g.
   # ``trace_paths.json`` written by the local manifest importer to
@@ -353,7 +488,7 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   # is merged in — without the merge ``normalizeImportedTracePaths``
   # would silently drop the sidecar because it prefers ``paths.json``
   # whenever it exists.
-  if not pathsJsonNonEmpty:
+  block:
     try:
       let metaPaths = parseCtfsMetaDat(reader.readCtfsFile("meta.dat")).paths
       var merged: seq[string] = @[]
@@ -418,8 +553,9 @@ proc readVarStringFromMetaDat(data: string, pos: var int): string =
   pos += len
 
 proc parseCtfsMetaDat(data: string): CtfsMetaDat =
-  ## Parse the v3 ``meta.dat`` payload.  Only the fields the importer
-  ## consumes are decoded; the remainder of the block is left untouched.
+  ## Parse the ``meta.dat`` payload at ``SupportedMetaDatVersion``.  Only
+  ## the fields the importer consumes are decoded; the remainder of the
+  ## block is left untouched.
   ##
   ## Wire format reference:
   ## ``codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim``
@@ -427,7 +563,6 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
   ## sufficient for M-REC-1.5; if more fields ever need surfacing here,
   ## consider promoting the body to the shared trace-format-nim package.
   const Magic: array[4, byte] = [byte 0x43, 0x54, 0x4D, 0x44]
-  const Version: uint16 = 3
   const FlagHasMcrFields: uint16 = 1
   const FlagHasReplayLaunchFields: uint16 = 2
   const FlagHasLayoutSnapshot: uint16 = 4
@@ -439,13 +574,60 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     if byte(data[i].ord) != Magic[i]:
       raise newException(ValueError, "meta.dat: bad magic")
   let version = uint16(data[4].ord) or (uint16(data[5].ord) shl 8)
-  if version != Version:
+  if version != SupportedMetaDatVersion and
+     version != MetaDatVersionExtendedFlags:
+    let detail =
+      if version <= LastShiftedGlobalIndexVersion:
+        " — its step addresses use the superseded global_position_index " &
+        "packing (prefix_sums[file_id] + line), which the current decode " &
+        "reads one line high; re-record the trace"
+      else:
+        " — this reader predates that version"
     raise newException(ValueError,
       "meta.dat: unsupported version " & $version &
-      " (M-REC-1.5 retired v1/v2; expected " & $Version & ")")
+      " (expected " & $SupportedMetaDatVersion & " or " &
+      $MetaDatVersionExtendedFlags & ")" & detail)
   let flags = uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
 
-  var pos = 8
+  # GDH-M2: schema version 5 inserts a ``[4] flags_ext u32 LE`` word after
+  # the u16 flags.  The word is validated and its width consumed; nothing in
+  # this module reads its bits, but the BODY OFFSET moves with it, and a
+  # parser that read the body from a fixed 8 would decode the ext word as
+  # the recording id's length prefix — which surfaces as "invalid
+  # recording_id" rather than as anything about the version.
+  var bodyStart = 8
+  if version == MetaDatVersionExtendedFlags:
+    if data.len < 12:
+      raise newException(ValueError,
+        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
+        " declares a flags_ext word but the header is only " & $data.len &
+        " bytes")
+    let flagsExt = uint32(data[8].ord) or (uint32(data[9].ord) shl 8) or
+      (uint32(data[10].ord) shl 16) or (uint32(data[11].ord) shl 24)
+    let unknownExt = flagsExt and (not KnownExtFlags)
+    if unknownExt != 0:
+      raise newException(ValueError,
+        "meta.dat: unknown extended flag bits set: 0x" &
+        toHex(BiggestInt(unknownExt), 8))
+    if flagsExt == 0:
+      # The canonical reader (``meta_dat.nim``) refuses this shape BY NAME
+      # and this one must agree, or the two disagree about what a valid v5
+      # container is — and "which reader opened it" becomes part of the
+      # format. A v5 header with an all-zero extended word is a container
+      # that spent a schema version on nothing, which is precisely what a
+      # writer that bumped the version unconditionally produces; accepting
+      # it would make "no reload" and "reload machinery present but
+      # silent" indistinguishable at the byte level.
+      raise newException(ValueError,
+        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
+        " with an all-zero flags_ext word. Version " &
+        $MetaDatVersionExtendedFlags & " exists to carry extended flags; " &
+        "a container with none must be written at version " &
+        $SupportedMetaDatVersion & " so that it stays byte-identical to " &
+        "one produced before the word existed")
+    bodyStart = 12
+
+  var pos = bodyStart
   let recordingId = readVarStringFromMetaDat(data, pos)
   if recordingId.len != 36:
     raise newException(ValueError,

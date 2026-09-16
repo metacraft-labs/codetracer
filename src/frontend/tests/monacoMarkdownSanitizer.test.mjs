@@ -231,13 +231,35 @@ const SCAN_EXTENSIONS = new Set(['.nim', '.js', '.mjs', '.ts']);
 const SCAN_ROOT = path.join(REPO, 'src');
 const SELF = path.relative(REPO, fileURLToPath(import.meta.url));
 
+// BUILD OUTPUT IS NOT SOURCE. `src/build-*/` and any `dist/` are produced by
+// `just build-once` and are git-ignored (`.gitignore` carries `build-*/` and
+// `dist/`). They contain `frontend_bundle.js` and the vendored Monaco chunks —
+// i.e. Monaco's OWN definitions of `supportHtml`, `isTrusted` and
+// `MarkdownString`, bundled. Scanning them makes this suite report Monaco's
+// source as though CodeTracer had written it.
+//
+// Without this exclusion the suite passes only on a tree that has NEVER been
+// built and fails on every tree that has — including the one produced by the
+// `just build-once` that both CI and AGENTS.md tell you to run first. The
+// verdict therefore tracked whether a build had happened, not whether any
+// CodeTracer source sets the flag, which is the one thing it exists to answer.
+const isGeneratedDir = (name) =>
+  name === 'node_modules' || name === 'dist' || name.startsWith('build-');
+
 /** Files in `src/` this scan actually read, as repo-relative paths. */
 const scanned = [];
+/** Generated directories skipped above, so the skip itself can be asserted. */
+const skippedGenerated = [];
 (function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) { walk(full); continue; }
+    if (entry.isDirectory()) {
+      if (isGeneratedDir(entry.name)) { skippedGenerated.push(path.relative(REPO, full)); continue; }
+      walk(full);
+      continue;
+    }
+    if (isGeneratedDir(entry.name)) continue;
     if (!SCAN_EXTENSIONS.has(path.extname(entry.name))) continue;
     const rel = path.relative(REPO, full);
     if (rel === SELF) continue;  // this file names the flag on purpose
@@ -250,6 +272,25 @@ const scanned = [];
 console.log(`  \x1b[2mfiles scanned: ${scanned.length}\x1b[0m`);
 assert(scanned.length >= 900,
   `the scan reached the source tree (${scanned.length} files)`);
+
+// Trap 4b: the exclusion above must not become a way to scan nothing, and must
+// not silently stop excluding. Both directions are asserted, and the second is
+// asserted only when there IS build output to exclude — so this stays honest on
+// a clean checkout as well as on a built one.
+assert(!scanned.some((rel) => rel.split(path.sep).some(isGeneratedDir)),
+  'no generated directory survived the scan filter');
+
+// One unconditional assertion, not an `if` around one, so the number of
+// assertions this file runs does not depend on whether the tree has been
+// built. (`htmlSinks.test.mjs` reconciles its total and would fail outright;
+// keeping both files the same shape avoids planting that trap here later.)
+const builtDirs = ['src/build-debug', 'src/public/dist']
+  .filter((rel) => fs.existsSync(path.join(REPO, rel)));
+console.log(`  \x1b[2mbuild output present: ${builtDirs.length > 0 ? builtDirs.join(', ') : '(none)'}; generated dirs skipped: ${skippedGenerated.length}\x1b[0m`);
+assert(builtDirs.length === 0 || skippedGenerated.length > 0,
+  builtDirs.length === 0
+    ? 'no build output in this tree, so there was nothing for the scan to skip'
+    : `this tree HAS build output, so the scan must have skipped some (skipped ${skippedGenerated.length})`);
 
 const sources = new Map(scanned.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
 

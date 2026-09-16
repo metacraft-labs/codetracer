@@ -9,11 +9,19 @@
 //!
 //! Each test uses narrow probes — `find_ct_native_replay()`,
 //! `is_rr_available()`, and per-language compiler-on-PATH checks —
-//! mirroring the M3/M5/M6/M7/M8/M9 pattern. The dev shell here has
-//! neither `rr` nor `ct-native-replay`, so every test below SKIPs
-//! cleanly. On a CI runner with the full RR toolchain installed the
-//! tests run end-to-end against the per-fixture programs under
-//! `tests/fixtures/origin/<lang>/`.
+//! mirroring the M3/M5/M6/M7/M8/M9 pattern. Where the toolchain is
+//! absent the test SKIPs with a precise sentinel (see below).
+//!
+//! **Do not read a SKIP as coverage.** Whether `rr` and
+//! `ct-native-replay` are present is a property of the runner, not of
+//! this file: `find_ct_native_replay()` also probes sibling checkouts
+//! (`../../../codetracer-native-backend/target/debug/`), so a developer
+//! workspace can easily satisfy every probe. Several tests below still
+//! have no end-to-end body; when their probes all succeed they call
+//! `unimplemented_end_to_end()` and fail loudly rather than reporting a
+//! success for work that never ran. `test_origin_rr_cross_thread_copy_tagged`
+//! and `test_origin_rr_rust_simple_trivial_chain_evaluate_c_address` are
+//! the worked examples of a real body.
 //!
 //! Sentinels emitted on SKIP:
 //!
@@ -339,6 +347,33 @@ fn regen_script(language_subdir: &str, scenario: &str) -> PathBuf {
     fixture_source(language_subdir, scenario, "regenerate.sh")
 }
 
+/// Fail loudly when every prerequisite a test probes for is present but
+/// the test's end-to-end body was never written.
+///
+/// The tests below are structured as "probe for the toolchain, then run
+/// end-to-end". Where the body is still a stub, reaching this point means
+/// the toolchain *is* installed and the test was selected to run — and
+/// returning quietly here would report success for work that never
+/// happened. That is strictly worse than the SKIP path: installing the RR
+/// toolchain would flip these from "skipped" to "passed" while still
+/// executing nothing. See
+/// `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
+///
+/// Diverges, so the caller cannot accidentally continue into a vacuous
+/// success.
+fn unimplemented_end_to_end(test_name: &str, fixture: &str) -> ! {
+    panic!(
+        "UNIMPLEMENTED END-TO-END BODY: `{test_name}` asserts nothing.\n\
+         Every prerequisite this test probes for is present, so it was selected to run, \
+         yet it records nothing, replays nothing and checks nothing.\n\
+         Implement it against `tests/fixtures/origin/{fixture}/ANSWERS.md`, using \
+         `test_origin_rr_cross_thread_copy_tagged` in this file as the worked template \
+         (record via `record_rr_fixture_with_regenerate`, drive the DAP client, then \
+         assert the chain with `send_rr_origin_chain_request`).\n\
+         Tracked in `codetracer-specs/Testing/Known-Test-Failures.md`."
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Test #2 — stack-slot reuse guard.
 // ---------------------------------------------------------------------------
@@ -364,7 +399,7 @@ fn test_origin_rr_stack_slot_reuse_guard() {
     //
     // On the dev shell here the rr/ct-native-replay probes above
     // already returned None and we SKIPped cleanly.
-    eprintln!("END-TO-END (RR available): test_origin_rr_stack_slot_reuse_guard would run here");
+    unimplemented_end_to_end("test_origin_rr_stack_slot_reuse_guard", "c/stack_slot_reuse");
 }
 
 // ---------------------------------------------------------------------------
@@ -663,7 +698,7 @@ fn test_origin_rr_c_simple_trivial_chain() {
     if !require_gcc("c_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_c_simple_trivial_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_c_simple_trivial_chain", "c/simple_trivial_chain");
 }
 
 #[test]
@@ -676,7 +711,7 @@ fn test_origin_rr_c_computational_origin() {
     if !require_gcc("c_computational_origin") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_c_computational_origin would run here");
+    unimplemented_end_to_end("test_origin_rr_c_computational_origin", "c/computational_origin");
 }
 
 #[test]
@@ -689,7 +724,7 @@ fn test_origin_rr_c_pointer_deref_chain() {
     if !require_gcc("c_pointer_deref_chain") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_c_pointer_deref_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_c_pointer_deref_chain", "c/pointer_deref_chain");
 }
 
 // ---------------------------------------------------------------------------
@@ -706,7 +741,7 @@ fn test_origin_rr_cpp_memcpy_forward() {
     if !require_gpp("cpp_memcpy_forward") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_cpp_memcpy_forward would run here");
+    unimplemented_end_to_end("test_origin_rr_cpp_memcpy_forward", "cpp/memcpy_forward");
 }
 
 // ---------------------------------------------------------------------------
@@ -723,7 +758,7 @@ fn test_origin_rr_rust_simple_trivial_chain() {
     if !require_rustc("rust_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_rust_simple_trivial_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_rust_simple_trivial_chain", "rust/simple_trivial_chain");
 }
 
 #[test]
@@ -817,7 +852,7 @@ fn test_origin_rr_rust_clone_forwarder() {
     if !require_rustc("rust_clone_forwarder") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_rust_clone_forwarder would run here");
+    unimplemented_end_to_end("test_origin_rr_rust_clone_forwarder", "rust/clone_forwarder");
 }
 
 // ---------------------------------------------------------------------------
@@ -834,7 +869,7 @@ fn test_origin_rr_nim_simple_trivial_chain() {
     if !require_nim("nim_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_nim_simple_trivial_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_nim_simple_trivial_chain", "nim/simple_trivial_chain");
 }
 
 #[test]
@@ -847,7 +882,7 @@ fn test_origin_rr_nim_implicit_result() {
     if !require_nim("nim_implicit_result") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_nim_implicit_result would run here");
+    unimplemented_end_to_end("test_origin_rr_nim_implicit_result", "nim/implicit_result");
 }
 
 // ---------------------------------------------------------------------------
@@ -864,7 +899,7 @@ fn test_origin_rr_go_simple_trivial_chain() {
     if !require_go("go_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_go_simple_trivial_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_go_simple_trivial_chain", "go/simple_trivial_chain");
 }
 
 #[test]
@@ -877,7 +912,7 @@ fn test_origin_rr_go_multi_return_with_err() {
     if !require_go("go_multi_return_with_err") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_go_multi_return_with_err would run here");
+    unimplemented_end_to_end("test_origin_rr_go_multi_return_with_err", "go/multi_return_with_err");
 }
 
 // ---------------------------------------------------------------------------
@@ -899,7 +934,7 @@ fn test_origin_rr_d_simple_trivial_chain() {
     // 6103 (UnsupportedBackend), because the classifier doesn't yet
     // recognise the D language. When tree-sitter-d lands, the
     // assertion will switch to the canonical TrivialCopy-chain shape.
-    eprintln!("END-TO-END (D toolchain available): test_origin_rr_d_simple_trivial_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_d_simple_trivial_chain", "d/simple_trivial_chain");
 }
 
 // ---------------------------------------------------------------------------
@@ -920,7 +955,7 @@ fn test_origin_rr_budget_terminates_long_chain() {
     if !require_gcc("budget_terminates_long_chain") {
         return;
     }
-    eprintln!("END-TO-END (RR available): test_origin_rr_budget_terminates_long_chain would run here");
+    unimplemented_end_to_end("test_origin_rr_budget_terminates_long_chain", "c/simple_trivial_chain");
 }
 
 // ---------------------------------------------------------------------------
@@ -940,7 +975,10 @@ fn test_origin_rr_release_build_yields_out_of_budget() {
     // End-to-end on a CI runner: asserts terminator.kind == OutOfBudget
     // AND terminator.expression contains the "spec §6.3" documentation
     // pointer.
-    eprintln!("END-TO-END (RR available): test_origin_rr_release_build_yields_out_of_budget would run here");
+    unimplemented_end_to_end(
+        "test_origin_rr_release_build_yields_out_of_budget",
+        "c/release_build_elided",
+    );
 }
 
 // ---------------------------------------------------------------------------

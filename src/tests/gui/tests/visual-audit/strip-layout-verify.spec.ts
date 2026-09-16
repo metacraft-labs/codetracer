@@ -118,7 +118,7 @@ test.describe("Strip layout verification", () => {
     // --- Pin another panel to the BOTTOM edge ---
     //
     // Take the baseline BEFORE pinning.  The strip already carries the
-    // standalone BUILD / PROBLEMS / SEARCH RESULTS panes that `layout.nim`
+    // standalone BUILD / PROBLEMS / FIND IN FILES panes that `layout.nim`
     // registers at boot, so "how many tabs are there afterwards" is only
     // meaningful against a settled starting point.  The previous
     // `>= 1` assertion was written when the strip's tabs lived inside the

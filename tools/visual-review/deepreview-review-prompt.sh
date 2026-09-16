@@ -17,7 +17,16 @@
 #     otherwise produce a prompt pointing at a file that will never exist;
 #   * emit a prompt for a screenshot that is not on disk — an agent sent to
 #     look at a missing file reports a missing file, which is indistinguishable
-#     in the driving context from a view that renders nothing.
+#     in the driving context from a view that renders nothing;
+#   * emit a prompt for a screenshot that is OLDER THAN THE BUILD IT CLAIMS TO
+#     SHOW. The producer asks that question (`capture-deepreview-views.sh` calls
+#     `ctdr_resolve_ct` + `ctdr_require_fresh_build` before it photographs
+#     anything); this consumer asked nothing, and only a FULL regeneration
+#     clears the screenshots directory. So a targeted re-capture — the whole
+#     point of the harness's targeting — leaves every other view's PNG behind at
+#     its old mtime, and the next review round packages those for a reviewer who
+#     rates them as the current design. Existence was standing in for freshness
+#     at the exact seam where a rating is produced.
 #
 # Usage:
 #   bash tools/visual-review/deepreview-review-prompt.sh \
@@ -27,6 +36,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+
+# Read by the sourced library below, which prefixes every diagnostic with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="deepreview-review-prompt"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/docs/deep-review-capture-lib.sh"
 
 DRIVER="${SCRIPT_DIR}/capture-deepreview-views.mjs"
 BRIEF="${SCRIPT_DIR}/deepreview-diff-brief.md"
@@ -108,6 +125,28 @@ known theme "${THEME}" || die "unknown theme '${THEME}'; known: $(names_of theme
 
 SHOT="${SHOTS}/${VIEW}--${SIZE}--${THEME}.png"
 [[ -f ${SHOT} ]] || die "no screenshot at '${SHOT}'. Capture it first with: bash ${SCRIPT_DIR}/capture-deepreview-views.sh --view ${VIEW} --size ${SIZE} --theme ${THEME}"
+
+# ...AND IT MUST BE A PICTURE OF THE BUILD THAT IS ON DISK NOW.
+#
+# The same two artefacts the producer checks, asked in the other direction: the
+# capture refuses to photograph a build older than its sources, and this refuses
+# to review a photograph older than the build. Both stylesheets are named
+# because the matrix carries both themes, exactly as in
+# `capture-deepreview-views.sh` — a theme whose CSS was never built must fail
+# here by name rather than reach a reviewer as an unstyled window.
+#
+# There is no "if the build tree is missing, skip" branch on purpose. A
+# screenshot in this directory was produced by a run that REQUIRED a build tree,
+# so its absence means the thing this image documents is gone, and the honest
+# answer is a refusal rather than a prompt nobody can reproduce.
+ctdr_resolve_ct "${REPO_ROOT}"
+ctdr_require_fresh_build "${REPO_ROOT}" default_white_theme_electron.css
+ctdr_require_artefact_not_stale "capture" \
+	"the ${VIEW}--${SIZE}--${THEME} screenshot" "${SHOT}" \
+	"A reviewer would rate a CodeTracer that no longer exists, and the rating would be filed against the current one. Re-capture it with: bash ${SCRIPT_DIR}/capture-deepreview-views.sh --view ${VIEW} --size ${SIZE} --theme ${THEME}" \
+	"${CTDR_BUILD_ROOT}/ui.js" \
+	"${CTDR_BUILD_ROOT}/frontend/styles/default_dark_theme_electron.css" \
+	"${CTDR_BUILD_ROOT}/frontend/styles/default_white_theme_electron.css"
 
 DESCRIPTION="$(printf '%s\n' "${MATRIX}" |
 	awk -F'\t' -v n="${VIEW}" '$1 == "view" && $2 == n { print $4 }')"

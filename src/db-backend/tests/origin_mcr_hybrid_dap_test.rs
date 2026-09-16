@@ -163,6 +163,26 @@ fn default_budget() -> OriginBudget {
     }
 }
 
+/// Fail loudly when every prerequisite a test probes for is present but
+/// the test's end-to-end body was never written.
+///
+/// Returning quietly here would report success for work that never
+/// happened — and would do so precisely on the runner where the test
+/// *could* have run, so installing `ct-mcr` would flip these from
+/// "skipped" to "passed" while still executing nothing. See
+/// `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
+fn unimplemented_end_to_end(test_name: &str, fixture: &str) -> ! {
+    panic!(
+        "UNIMPLEMENTED END-TO-END BODY: `{test_name}` asserts nothing.\n\
+         Every prerequisite this test probes for is present, so it was selected to run, \
+         yet it records nothing, replays nothing and checks nothing.\n\
+         Implement it against `tests/fixtures/origin/{fixture}/ANSWERS.md`, using \
+         `test_origin_mcr_hybrid_uses_undo_map_in_last_mile` in this file as the worked \
+         template.\n\
+         Tracked in `codetracer-specs/Testing/Known-Test-Failures.md`."
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Test #1 — Tier 1 dominates within-window queries.
 // ---------------------------------------------------------------------------
@@ -261,7 +281,7 @@ fn test_origin_mcr_undo_c_simple_trivial_chain() {
     // canonical C fixture, build the MCR trace, dispatch
     // `ct/originChain`, and assert the chain shape matches
     // `tests/fixtures/origin/c/simple_trivial_chain/ANSWERS.md`.
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_undo_c_simple_trivial_chain would run here");
+    unimplemented_end_to_end("test_origin_mcr_undo_c_simple_trivial_chain", "c/simple_trivial_chain");
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +296,10 @@ fn test_origin_mcr_undo_rust_simple_trivial_chain() {
     if !require_ct_mcr("rust_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_undo_rust_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_undo_rust_simple_trivial_chain",
+        "rust/simple_trivial_chain",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +314,10 @@ fn test_origin_mcr_undo_nim_simple_trivial_chain() {
     if !require_ct_mcr("nim_simple_trivial_chain") {
         return;
     }
-    eprintln!("END-TO-END (ct-mcr available): test_origin_mcr_undo_nim_simple_trivial_chain would run here");
+    unimplemented_end_to_end(
+        "test_origin_mcr_undo_nim_simple_trivial_chain",
+        "nim/simple_trivial_chain",
+    );
 }
 
 // ---------------------------------------------------------------------------

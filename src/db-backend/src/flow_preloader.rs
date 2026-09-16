@@ -27,6 +27,69 @@ fn should_seek_materialized_call_body_from_line_only_location(location: &Locatio
     location.rr_ticks.0 == 0 && location.event == 0 && location.line > 0
 }
 
+/// Remove `.` components from a path so two spellings of the same file compare
+/// equal. Purely LEXICAL — nothing is read from the filesystem, because a flow
+/// walk must not depend on whether the recorded machine's tree still exists.
+///
+/// `..` is deliberately NOT resolved: doing that lexically is wrong across
+/// symlinks, and the only thing this comparison must never do is claim two
+/// DIFFERENT files are the same one.
+fn lexically_normalized(path: &str) -> PathBuf {
+    Path::new(path)
+        .components()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .collect()
+}
+
+/// Does a step at `step_path` belong to the file the flow window is showing?
+///
+/// THE MISSING INVARIANT. A flow view is a view OF ONE FILE: its steps carry a
+/// bare line number (`FlowStep.position`) and the frontend renders each one
+/// against the window's own source. Nothing enforced that a line pushed into
+/// the view actually came from the file the view names, and both halves of the
+/// system paid for it:
+///
+/// * **JavaScript.** The recorder emits the callee's DEFINITION-line step
+///   immediately *before* the `Call` event, on purpose
+///   (`codetracer-js-recorder/crates/recorder_native/src/lib.rs`, the `1 => {}`
+///   arm; the Ruby recorder's `:call` tracepoint does the same). Because the
+///   call has not opened yet, that step carries the CALLER's `call_key` while
+///   naming the CALLEE's file and line. `call_key` filtering is therefore
+///   correct and still lets the step through. Measured on
+///   `test-programs/javascript/javascript_hcr_flow_test`: the `index.js`
+///   window reported 169 steps of which only 93 are `index.js`; the other 76
+///   are `mymodule.js` rendered at `index.js` line numbers, and `index.js:13`
+///   — a loop that runs 12 times — was reported 24 times, the extra 12 being
+///   `mymodule.js:13`, the declaration line of `aggregate`.
+///
+/// * **Nim.** The same push with no path comparison put `system.nim` lines
+///   394 and 398 inside a 23-line user file's window.
+///
+/// **Why the fix does not belong in the recorders.** The obvious alternative —
+/// move the definition-line step *after* the `Call` so it carries the callee's
+/// `call_key` — collides with the trace-format `entryStep` convention, but not
+/// in the way the recorder's own comment claims. Both writers define `entryStep`
+/// as the **next-step** semantic: the index of the first step emitted *after*
+/// `registerCall` (`codetracer-trace-format-nim`'s
+/// `MultiStreamTraceWriter.registerCall`, and `call_stream.rs`'s
+/// `entry_step_id`, which returns `self.step_index`). The pre-`Call` step is
+/// what the **leaf clamp** falls back to: `registerReturn` detects a callee that
+/// emitted no body step (`stepCount == entryStep`) and clamps `entryStep` to the
+/// step flushed just before the call, which is exactly why the recorder puts the
+/// definition line there — so a leaf callee's entry anchors on its own
+/// definition instead of on the caller's call site. Changing the ordering is
+/// therefore a cross-recorder, cross-language contract change with a real
+/// regression surface, not a local tweak. The invariant belongs here, where the
+/// window's file is known and where one guard serves every language.
+///
+/// Comparison is byte equality first (the materialized path interns each file
+/// once, so this is the normal case) and lexically-normalized equality second.
+/// It never consults the filesystem and never treats two different files as
+/// one.
+fn step_belongs_to_window_file(window_path: &str, step_path: &str) -> bool {
+    window_path == step_path || lexically_normalized(window_path) == lexically_normalized(step_path)
+}
+
 #[derive(Debug)]
 pub struct FlowPreloader {
     pub expr_loader: ExprLoader,
@@ -636,6 +699,14 @@ impl<'a> CallFlowPreloader<'a> {
         const MAX_NONPROGRESSING_STEPS: i64 = 8;
         let mut last_seen_line: i64 = -1;
         let mut nonprogressing_steps: i64 = 0;
+        // Steps the walk visited, whether or not they were rendered. `step_count`
+        // counts only RENDERED steps, so it cannot bound a walk that is skipping
+        // foreign-file steps (see `step_belongs_to_window_file`).
+        let mut walked_steps: i64 = 0;
+        // How many steps this window declined because they came from another
+        // file. Reported once at the end so the skipping is visible rather than
+        // a silent difference in the step count.
+        let mut foreign_file_steps: i64 = 0;
         // match tracked_call_key_result {
         //     Ok(call_key) => {
         //         tracked_call_key = call_key;
@@ -828,6 +899,42 @@ impl<'a> CallFlowPreloader<'a> {
                 break;
             }
 
+            // A step from ANOTHER FILE is walked over, not rendered. See
+            // `step_belongs_to_window_file` for what this guard is for and what
+            // it cost not to have it.
+            //
+            // Deliberately after the `call_key` termination check: a foreign
+            // step still delimits the call exactly as before, so the walk ends
+            // where it always did. Only the PUSH is skipped, which is the whole
+            // change — `process_loops` and `log_expressions` are skipped with
+            // it, so a loop in another file can no longer be merged into this
+            // window's loop table either.
+            //
+            // `FlowMode::Diff` is exempt: a diff flow is explicitly a view over
+            // several call keys and its multi-file behaviour is not this
+            // guard's subject.
+            if self.mode == FlowMode::Call && !step_belongs_to_window_file(&self.location.path, &new_location.path) {
+                foreign_file_steps += 1;
+                if foreign_file_steps == 1 {
+                    info!(
+                        "  flow: skipping step from {}:{} — the window is a view of {}; \
+                         a line may only be rendered against the file it came from",
+                        new_location.path, new_location.line, self.location.path
+                    );
+                }
+                // Skipped steps do not advance `step_count`, so the
+                // `STEP_COUNT_LIMIT` guard above cannot see them. Bound the walk
+                // itself as well, or a trace that spends its whole call in
+                // other files would walk without limit.
+                walked_steps += 1;
+                if walked_steps >= STEP_COUNT_LIMIT as i64 {
+                    info!("  break flow because of walked step limit while skipping foreign-file steps");
+                    break;
+                }
+                continue;
+            }
+            walked_steps += 1;
+
             let events = self.load_step_flow_events(replay, step_id);
             // for now not sending last step id for line visit
             // but this flow step object *can* contain info about several actual steps
@@ -861,6 +968,13 @@ impl<'a> CallFlowPreloader<'a> {
                 &new_location,
             );
             step_count += 1;
+        }
+        if foreign_file_steps > 0 {
+            info!(
+                "  flow: {} step(s) of this call executed in other files and were not rendered \
+                 into the {} window ({} step(s) were)",
+                foreign_file_steps, self.location.path, step_count
+            );
         }
         let path_buf = &PathBuf::from(&self.location.path);
         // TODO: maybe not true for diff flow, we can have multiple files/paths there
@@ -1381,6 +1495,56 @@ mod tests {
         assert!(!should_seek_materialized_call_body_from_line_only_location(
             &make_location(0, 0, 0)
         ));
+    }
+
+    /// The flow window's file predicate, pinned in both directions.
+    ///
+    /// The end-to-end proof that this guard closes the frame-contamination
+    /// defect is `tests/javascript_hcr_ctfs_integration.rs`
+    /// (`assert_flow_window_is_index_js_only`), which drives a real recording
+    /// through the real walk: the `index.js` window went from 169 steps —
+    /// 76 of them `mymodule.js` lines, with `index.js:13` reported 24 times for
+    /// a loop that runs 12 — to exactly the 93 the file's own control flow
+    /// dictates.
+    ///
+    /// What is asserted HERE is the comparison rule itself, because it is the
+    /// part with a wrong answer that would be invisible: too strict and real
+    /// steps vanish from the window; too loose and two different files are
+    /// merged, which is the defect this exists to prevent.
+    #[test]
+    fn a_flow_step_belongs_to_the_window_only_when_it_names_the_same_file() {
+        // The normal case: the trace interns each path once, so the window's
+        // path and the step's path are the same bytes.
+        assert!(step_belongs_to_window_file("/tmp/p/index.js", "/tmp/p/index.js"));
+
+        // Different files in the same directory are NEVER the same file. This
+        // is the direction that must not be relaxed: `mymodule.js:13` landing
+        // in the `index.js` window is precisely the defect.
+        assert!(!step_belongs_to_window_file("/tmp/p/index.js", "/tmp/p/mymodule.js"));
+        assert!(!step_belongs_to_window_file("/tmp/p/index.js", "/tmp/p/mymodule_v2.js"));
+
+        // Same basename, different directory: also not the same file.
+        assert!(!step_belongs_to_window_file("/tmp/a/index.js", "/tmp/b/index.js"));
+
+        // The nim shape from the other side of the same defect: a stdlib file
+        // whose line numbers exceed the user file's length.
+        assert!(!step_belongs_to_window_file(
+            "/home/u/proj/example.nim",
+            "/nix/store/abc-nim/lib/system.nim"
+        ));
+
+        // Two spellings of ONE file compare equal, so a `./` in a recorded path
+        // cannot empty a window.
+        assert!(step_belongs_to_window_file("/tmp/p/index.js", "/tmp/p/./index.js"));
+        assert!(step_belongs_to_window_file("./index.js", "index.js"));
+
+        // `..` is deliberately not resolved (it is unsound across symlinks), so
+        // a path carrying one only matches itself — the conservative direction.
+        assert!(step_belongs_to_window_file(
+            "/tmp/p/../p/index.js",
+            "/tmp/p/../p/index.js"
+        ));
+        assert!(!step_belongs_to_window_file("/tmp/p/../p/index.js", "/tmp/p/index.js"));
     }
 
     #[test]

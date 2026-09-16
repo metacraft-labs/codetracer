@@ -577,7 +577,7 @@ else:
       check serializer.contains("overlayHeight")
       # A panel mid-unpin is a transient; persisting it would resurrect a
       # panel the user just dragged back into the layout.  A standalone pane
-      # (BUILD / PROBLEMS / SEARCH RESULTS / REQUESTS) is re-registered from
+      # (BUILD / PROBLEMS / FIND IN FILES / REQUESTS) is re-registered from
       # scratch every launch and has no GL config to re-attach from, so a
       # persisted copy would only suppress that registration and leave a
       # strip tab whose overlay is empty.

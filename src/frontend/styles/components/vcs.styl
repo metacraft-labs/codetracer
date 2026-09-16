@@ -29,7 +29,7 @@
   overflow: hidden
   background: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   line-height: 1.25em
 
 .vcs-panel-body
@@ -65,15 +65,17 @@
 // Branch picker
 // ---------------------------------------------------------------------------
 
-// Inset around the branch control.  Named because the dropdown has to subtract
+// Inset below the branch control.  Named because the dropdown has to subtract
 // it again: an absolutely positioned child measures `top: 100%` against this
 // box's padding edge, not against the trigger it is supposed to hang from.
+// Its sides are the panel inset (PANEL_INSET, 8px, button.styl), and its top is
+// the panel body's own 8px (`.lm_content`), like every panel.
 VCS_BRANCH_PICKER_INSET = 0.25em
 
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  padding: 0em VCS_BRANCH_PICKER_INSET VCS_BRANCH_PICKER_INSET VCS_BRANCH_PICKER_INSET
+  padding: 0em PANEL_INSET VCS_BRANCH_PICKER_INSET PANEL_INSET
   background: colors-ui-surface-base-panel
 
 // Styled to match .ct-input-small — consistent with other panel input fields.
@@ -130,8 +132,9 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   // pads itself, and `100%` measures to the outside of that padding, so the plain
   // offset would have measured 10px from the trigger while its twin measured 6.
   top: "calc(100% - %s + %s)" % (VCS_BRANCH_PICKER_INSET DROPDOWN_TRIGGER_GAP)
-  left: VCS_BRANCH_PICKER_INSET
-  right: 0.25em
+  // Level with the trigger's sides — the picker's PANEL_INSET padding.
+  left: PANEL_INSET
+  right: PANEL_INSET
   z-index: 100
   dropdown-surface()
   padding: 0.25em
@@ -182,7 +185,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   flex-shrink: 0
 
 .deepreview-trace-select
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 12px
   color: #cccccc
   background-color: #3c3c3c
@@ -217,7 +220,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   user-select: none
 
 .vcs-changed-files-commit
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 0.625em
   font-weight: 400
   text-transform: none
@@ -238,7 +241,8 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   background: colors-ui-surface-base-panel
 
 .vcs-toggle-button
-  height: 1.5em
+  // The small control size (button.styl); was 1.5em of its own 12px, 18px.
+  height: CONTROL_HEIGHT_SM
   display: inline-flex
   align-items: center
   padding: 0 0.625em
@@ -308,7 +312,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   &.vcs-commit-header-selected:hover
     background: colors-ui-surface-action-primary-hover
 
-// Selected commit: uses colors-ui-surface-action-primary (#4f46e5) background.
+// Selected commit: uses colors-ui-surface-action-primary (brand/500, #6366f1) background.
 // The dot becomes white with a border matching the row background so it
 // visually "punches through" the fill.  Text is forced white for contrast.
 .vcs-commit-header-selected
@@ -456,15 +460,17 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 
 .vcs-commit-msg
   flex: 1
-  font-size: 0.75em
+  // 14px — the commit message is the row's content, so it gets the panel's
+  // reading size; the timestamp beside it is a step smaller (13px).
+  font-size: 0.875rem
   color: colors-ui-text-primary-body-subtle
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
 
 .vcs-commit-time-col
-  font-family: "SpaceMono", monospace
-  font-size: 0.625em
+  font-family: "SpaceGrotesk"
+  font-size: 0.8125rem
   color: colors-ui-text-primary-body-subtle
   flex-shrink: 0
 
@@ -619,8 +625,9 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   padding-left: 0.5em
   cursor: pointer
 
+  // The list hover (LIST_HOVER_BG, button.styl), like the commit rows above.
   &:hover
-    background: colors-ui-surface-primary-default-hover
+    background: LIST_HOVER_BG
 
 // Inner content area of an accordion file row (status + name + stats).
 // font-size: 0.75em is scoped here so the lane spacer sibling is unaffected.
@@ -645,7 +652,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 
 // Status letter (M / A / D / …) shown right of the stats.
 .vcs-accordion-file-status
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-weight: 700
   flex-shrink: 0
   width: 1em
@@ -655,12 +662,12 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 // +N additions and -N deletions shown to the right of the filename,
 // matching the reference screenshot layout.
 .vcs-accordion-file-adds
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   color: colors-ui-text-success-primary
   flex-shrink: 0
 
 .vcs-accordion-file-dels
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   color: colors-ui-text-error-primary
   flex-shrink: 0
 
@@ -680,7 +687,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   font-size: 0.6875em
   color: colors-ui-text-primary-body
   text-align: center
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
 
 // Legacy flat commit items (kept for DeepReview / unified-diff code paths that
 // still call the old rendering procs; not used in the new graph mode).
@@ -751,7 +758,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   background: colors-ui-surface-primary-secondary-hover
 
 .vcs-file-status
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 0.6875em
   font-weight: bold
   width: 1em
@@ -778,7 +785,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   font-size: 0.75em
 
 .vcs-file-stats
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 0.625em
   flex-shrink: 0
   display: flex
@@ -799,7 +806,8 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   padding: 0.25em 0.5em
   text-align: center
   cursor: pointer
-  font-size: 0.6875em
+  // 12px, the same as the "Unified Diff" toggle and the commit tooltip.
+  font-size: 0.75rem
   color: colors-ui-text-primary-body
   background: colors-ui-surface-base-panel
   border-top: 1px solid colors-ui-border-secondary

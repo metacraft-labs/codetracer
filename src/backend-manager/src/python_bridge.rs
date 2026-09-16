@@ -71,16 +71,47 @@ pub struct BreakpointState {
 impl BreakpointState {
     /// Adds a breakpoint at the given source location.
     ///
-    /// Returns `(bp_id, all_breakpoint_lines_for_the_affected_file)`.
-    /// The caller must send a `setBreakpoints` DAP command to the backend
-    /// with the full list of lines for the affected file.
-    pub fn add_breakpoint(&mut self, source_path: &str, line: i64) -> (i64, Vec<i64>) {
+    /// Returns `(bp_id, all_breakpoint_lines_for_the_affected_file,
+    /// index_of_the_new_line)`.  The caller must send a `setBreakpoints`
+    /// DAP command to the backend with the full list of lines for the
+    /// affected file, and can then read the fate of THIS breakpoint out
+    /// of the backend's response at `index_of_the_new_line`:
+    /// `setBreakpoints` answers with one `Breakpoint` per requested line,
+    /// in the order the lines were sent, and each carries its own
+    /// `verified` flag.  A line the backend could not bind — most often
+    /// because the source path is not one the trace recorded — comes back
+    /// `verified: false` with a `message` saying why.
+    ///
+    /// The index is returned rather than left for the caller to work out,
+    /// because it depends on `breakpoints_for_file`'s ordering — an
+    /// ordering the caller has no business knowing, and one that was
+    /// nondeterministic until this needed it.
+    pub fn add_breakpoint(&mut self, source_path: &str, line: i64) -> (i64, Vec<i64>, usize) {
         self.next_bp_id += 1;
         let bp_id = self.next_bp_id;
         self.breakpoints
             .insert(bp_id, (source_path.to_string(), line));
         let lines = self.breakpoints_for_file(source_path);
-        (bp_id, lines)
+        // `breakpoints_for_file` orders by ascending breakpoint id and ids
+        // are monotonic, so the entry just inserted is always the last.
+        let index = lines.len() - 1;
+        (bp_id, lines, index)
+    }
+
+    /// Drops a breakpoint from the daemon's table WITHOUT deriving a new
+    /// line list for the backend.
+    ///
+    /// This rolls back an `add_breakpoint` the backend refused to bind.
+    /// No follow-up `setBreakpoints` is needed: the backend applied the
+    /// request it was sent and simply did not register the offending
+    /// line, so dropping that same line here leaves the two tables
+    /// agreeing.  `remove_breakpoint` is the wrong tool for this — it
+    /// exists to answer "what should I now tell the backend?", and the
+    /// answer here is "nothing".
+    ///
+    /// Returns whether the id was known.
+    pub fn forget_breakpoint(&mut self, bp_id: i64) -> bool {
+        self.breakpoints.remove(&bp_id).is_some()
     }
 
     /// Removes a breakpoint by its ID.
@@ -96,13 +127,25 @@ impl BreakpointState {
         }
     }
 
-    /// Returns all breakpoint lines for a given source file.
+    /// Returns all breakpoint lines for a given source file, ordered by
+    /// ascending breakpoint id.
+    ///
+    /// The order is part of the contract, not an accident.  The caller
+    /// sends this list to the backend as the `setBreakpoints`
+    /// `breakpoints` array and reads the per-line `verified` flags back
+    /// out of the response *positionally* — raw `HashMap::values`
+    /// iteration would make which answer belongs to which breakpoint a
+    /// coin flip, and a wrong pairing would report one breakpoint's
+    /// failure against another breakpoint's id.
     pub fn breakpoints_for_file(&self, source_path: &str) -> Vec<i64> {
-        self.breakpoints
-            .values()
-            .filter(|(f, _)| f == source_path)
-            .map(|(_, l)| *l)
-            .collect()
+        let mut entries: Vec<(i64, i64)> = self
+            .breakpoints
+            .iter()
+            .filter(|(_, (f, _))| f == source_path)
+            .map(|(id, (_, line))| (*id, *line))
+            .collect();
+        entries.sort_by_key(|(id, _)| *id);
+        entries.into_iter().map(|(_, line)| line).collect()
     }
 
     /// Adds a watchpoint on the given expression.
@@ -358,9 +401,36 @@ pub enum PendingPyRequestKind {
     /// path the materialised DB backend already exposes; the formatter
     /// extracts the most recent assignment hit.
     ResolveVariableStep,
-    /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
-    /// whose backend responses should be silently consumed and not forwarded
-    /// to any client.
+    /// `ct/py-add-breakpoint` -> backend `setBreakpoints`.
+    ///
+    /// This request WAITS for the backend, rather than firing and
+    /// forgetting, because the backend's answer carries the only
+    /// evidence that the breakpoint actually bound.  `setBreakpoints`
+    /// always succeeds at the request level; it reports a breakpoint it
+    /// could not place as `verified: false` with a `message` — for
+    /// instance when `source.path` is not one of the paths the trace
+    /// recorded.  Consuming that silently made `Trace.add_breakpoint()`
+    /// hand back an id for a breakpoint that existed nowhere but here,
+    /// after which `continue_forward()` ran to the end of the trace and
+    /// raised `StopIteration` with nothing to say why.
+    ///
+    /// The variant carries the context needed to interpret the answer,
+    /// because `setBreakpoints` replaces the whole per-file set and so
+    /// answers with one `Breakpoint` per line, not one per request:
+    ///
+    /// * `index` — where in that array THIS breakpoint's answer sits.
+    /// * `bp_id` — the id to hand back to the client on success.
+    /// * `trace_path` — key of the [`BreakpointState`] to roll back on
+    ///   failure, so a refused breakpoint does not linger in the
+    ///   daemon's table and get re-sent with every later add.
+    AddBreakpoint {
+        trace_path: PathBuf,
+        bp_id: i64,
+        index: usize,
+    },
+    /// Fire-and-forget commands (e.g., `setDataBreakpoints`) whose backend
+    /// responses should be silently consumed and not forwarded to any
+    /// client.
     FireAndForget,
 }
 
@@ -395,6 +465,94 @@ pub struct PendingPyRequest {
     /// the matching local variable by name instead of blindly taking the
     /// first entry.
     pub expression: String,
+}
+
+/// Formats a backend `setBreakpoints` response into the `ct/py-add-breakpoint`
+/// response body, for the ONE breakpoint the client asked about.
+///
+/// `setBreakpoints` is a whole-file replace: the request carries every
+/// line for the source and the response carries one `Breakpoint` per
+/// line, in the same order.  `index` selects the entry belonging to the
+/// breakpoint just added; `bp_id` is the daemon-side id to hand back if
+/// it bound.
+///
+/// The per-line `verified` flag is the point of this function.  The
+/// request-level `success` is `true` even when nothing bound — the
+/// backend answers "I processed your request", and then says per
+/// breakpoint whether it could place it.  A breakpoint on a path the
+/// trace never recorded comes back `verified: false` with a `message`
+/// like `` can't add a breakpoint: can't find path `…` in trace ``, and
+/// that message is exactly what the caller needs to tell a typo apart
+/// from a missing recording, so it is forwarded rather than replaced.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"breakpointId": bp_id}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_add_breakpoint_response(
+    backend_response: &Value,
+    index: usize,
+    bp_id: i64,
+) -> (bool, Value) {
+    // Request-level failure: the backend could not process the command at
+    // all, so there are no per-breakpoint verdicts to read.
+    if !backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("backend rejected setBreakpoints");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let entry = backend_response
+        .get("body")
+        .and_then(|b| b.get("breakpoints"))
+        .and_then(Value::as_array)
+        .and_then(|bps| bps.get(index));
+
+    let Some(entry) = entry else {
+        // The backend answered, but not about this breakpoint.  Reporting
+        // success here would recreate the very silence this handler
+        // exists to end, so it is a failure that says what was missing.
+        return (
+            false,
+            serde_json::json!({
+                "message": format!(
+                    "backend's setBreakpoints response carried no verdict for \
+                     this breakpoint (wanted entry {index}); response: \
+                     {backend_response}"
+                )
+            }),
+        );
+    };
+
+    if entry
+        .get("verified")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return (true, serde_json::json!({"breakpointId": bp_id}));
+    }
+
+    // Unbound.  Prefer the backend's own explanation; fall back to naming
+    // the coordinates when it did not supply one.
+    let message = entry
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let line = entry.get("line").and_then(Value::as_i64).unwrap_or(0);
+            let path = entry
+                .get("source")
+                .and_then(|s| s.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            format!("backend did not bind a breakpoint at {path}:{line}")
+        });
+    (false, serde_json::json!({"message": message}))
 }
 
 /// Formats a backend `ct/load-locals` response into the simplified
@@ -1739,14 +1897,22 @@ mod tests {
         let mut state = BreakpointState::default();
 
         // Add two breakpoints in the same file.
-        let (bp1, lines1) = state.add_breakpoint("main.nim", 10);
+        let (bp1, lines1, index1) = state.add_breakpoint("main.nim", 10);
         assert_eq!(bp1, 1);
         assert_eq!(lines1, vec![10]);
+        assert_eq!(index1, 0);
 
-        let (bp2, lines2) = state.add_breakpoint("main.nim", 20);
+        let (bp2, lines2, index2) = state.add_breakpoint("main.nim", 20);
         assert_eq!(bp2, 2);
         assert!(lines2.contains(&10));
         assert!(lines2.contains(&20));
+        // The returned index must select the line just added out of the
+        // per-file array — that is how the caller pairs the backend's
+        // per-line `verified` verdict with this breakpoint's id.
+        assert_eq!(
+            lines2[index2], 20,
+            "index {index2} must point at the newly added line in {lines2:?}"
+        );
 
         // Remove the first breakpoint.
         let result = state.remove_breakpoint(bp1);
@@ -1763,9 +1929,9 @@ mod tests {
     fn test_breakpoint_state_multiple_files() {
         let mut state = BreakpointState::default();
 
-        let (bp1, _) = state.add_breakpoint("main.nim", 10);
-        let (_bp2, _) = state.add_breakpoint("helpers.nim", 5);
-        let (_bp3, _) = state.add_breakpoint("main.nim", 30);
+        let (bp1, _, _) = state.add_breakpoint("main.nim", 10);
+        let (_bp2, _, _) = state.add_breakpoint("helpers.nim", 5);
+        let (_bp3, _, _) = state.add_breakpoint("main.nim", 30);
 
         // Only main.nim lines should be returned.
         let main_lines = state.breakpoints_for_file("main.nim");
@@ -1850,7 +2016,7 @@ mod tests {
         assert!(state.all_tracepoints().is_empty());
 
         // IDs should not be reused after clear.
-        let (bp_id, _) = state.add_breakpoint("main.nim", 10);
+        let (bp_id, _, _) = state.add_breakpoint("main.nim", 10);
         assert!(bp_id > 1, "breakpoint ID should not be reused");
         let (wp_id, _) = state.add_watchpoint("counter");
         assert!(wp_id > 1, "watchpoint ID should not be reused");
@@ -1865,7 +2031,7 @@ mod tests {
 
         // First access creates the state.
         let bp_state = state.breakpoint_state_mut(&trace_path);
-        let (bp_id, _) = bp_state.add_breakpoint("main.nim", 10);
+        let (bp_id, _, _) = bp_state.add_breakpoint("main.nim", 10);
         assert_eq!(bp_id, 1);
 
         // Subsequent access returns the same state.

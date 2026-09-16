@@ -23,6 +23,7 @@
 ## `indexEach` body so the structure is visible at a glance.
 
 import std/options
+from std/strutils import find
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -141,13 +142,43 @@ proc codeStateLineClass(vm: StateVM): string =
   if vm.hasCodeState.val: "code-state-line"
   else: "code-state-line no-code"
 
-proc codeStateLineText(vm: StateVM): string =
-  ## The formatted text rendered inside the inner ``<span>``. Empty
-  ## when there is no source for the current position — matching the
-  ## legacy ``excerpt`` proc's no-code branch which emitted an empty
-  ## ``<span>`` so the outer wrapper still occupies a stable slot in
-  ## the layout.
-  vm.codeStateLine.val
+# The line is drawn the way the editor draws the line execution is stopped
+# on — the yellow arrow, the line number in the gutter's type, then the
+# code — so it reads as that same line rather than as a label.  That needs
+# the number and the code in elements of their own, so the formatted
+# "<line> | <source>" string is split back into three spans:
+#
+#   <span class="code-state-arrow"></span>        drawn by CSS, no text
+#   <span class="code-state-number">7</span>
+#   <span class="code-state-separator"> | </span> not shown (state.styl)
+#   <span class="code-state-source">let w = …</span>
+#
+# The separator stays in the DOM, so the element's text is still exactly
+# the store's string: the GUI tests assert `toContainText(" | ")` and the
+# headless tests compare `textContent` against "11 | let x = 3;".  All
+# three are empty when there is no source (the ``no-code`` state).
+
+proc codeStateLineParts(vm: StateVM): tuple[number, separator, source: string] =
+  ## ``vm.codeStateLine`` cut at its first ``CodeStateLineSeparator``.
+  ## The number comes first and never contains the separator, so the first
+  ## match is the join even when the source line itself contains " | ".
+  ## A string without one (not produced today) is shown whole, as source.
+  let formatted = vm.codeStateLine.val
+  let at = formatted.find(CodeStateLineSeparator)
+  if at < 0:
+    ("", "", formatted)
+  else:
+    (formatted[0 ..< at], CodeStateLineSeparator,
+     formatted[at + CodeStateLineSeparator.len .. ^1])
+
+proc codeStateLineNumber(vm: StateVM): string =
+  codeStateLineParts(vm).number
+
+proc codeStateLineSeparator(vm: StateVM): string =
+  codeStateLineParts(vm).separator
+
+proc codeStateLineSource(vm: StateVM): string =
+  codeStateLineParts(vm).source
 
 # ---------------------------------------------------------------------------
 # Reactive expressions (used inside DSL attributes)
@@ -828,8 +859,13 @@ template renderStatePanelImpl(r, vm, RendererT, NodeT: untyped): untyped =
       # vm.codeStateLine.val (empty -> "no-code" fallback).
       tdiv(id = "code-state-line-0",
            class = codeStateLineClass(vm)):
-        span:
-          text codeStateLineText(vm)
+        span(class = "code-state-arrow")
+        span(class = "code-state-number"):
+          text codeStateLineNumber(vm)
+        span(class = "code-state-separator"):
+          text codeStateLineSeparator(vm)
+        span(class = "code-state-source"):
+          text codeStateLineSource(vm)
       tdiv(class = "watch-input-container",
            display = displayIf(vm.activeTab.val == stWatches)):
         input(class = "watch-input",
@@ -919,12 +955,18 @@ when defined(js):
         # element (with text "<line> | <source>") matching the legacy
         # `excerpt` proc output. Outer class flips between
         # `code-state-line` and `code-state-line no-code` depending on
-        # whether source is available; inner span text mirrors
-        # `vm.codeStateLine.val`.
+        # whether source is available; the inner spans are
+        # `vm.codeStateLine.val` split into arrow / number / separator /
+        # source (see `codeStateLineParts`).
         tdiv(id = "code-state-line-0",
              class = codeStateLineClass(vm)):
-          span:
-            text codeStateLineText(vm)
+          span(class = "code-state-arrow")
+          span(class = "code-state-number"):
+            text codeStateLineNumber(vm)
+          span(class = "code-state-separator"):
+            text codeStateLineSeparator(vm)
+          span(class = "code-state-source"):
+            text codeStateLineSource(vm)
         tdiv(id = "gdb-evaluate"):
           form(ref = formEl):
             input(ref = inputEl,

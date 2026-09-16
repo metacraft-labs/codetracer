@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use test_harness::{DapStdioTestClient, find_wazero, record_stylus_wasm_trace};
 
-use codetracer_trace_types::{EventLogKind, RecordEvent, TraceLowLevelEvent, TraceMetadata};
+use codetracer_trace_types::{EventLogKind, RecordEvent, TraceLowLevelEvent};
 
 const DEVNODE_RPC: &str = "http://localhost:8547";
 // Standard test private key for Arbitrum devnodes
@@ -286,17 +286,14 @@ fn record_stylus_trace(project_path: &Path) -> Result<(PathBuf, PathBuf, PathBuf
     Ok((wasm_path, trace_dir, temp_dir))
 }
 
-/// Load `TraceMetadata` from a `.ct` CTFS container in `trace_dir`.
+/// Load the recording's metadata from the `.ct` CTFS container in `trace_dir`.
 ///
-/// Per `Trace-Files/CTFS-Migration-Guide.md` §3e, the `.ct` container is
-/// the only supported materialized-trace format: metadata lives in
-/// `meta.dat` (or the older `meta.json` block written by recorders that
-/// have not yet migrated to the binary metadata format) inside the
-/// container.  The `meta.json` path is read here for compatibility with
-/// the in-tree Rust writer, which still emits it inside the container
-/// alongside event data.  Sidecar `trace_metadata.json` is no longer
+/// Per `Trace-Files/CTFS-Migration-Guide.md` §3e the `.ct` container is the
+/// only supported materialized-trace format, and `meta.dat` is where its
+/// metadata lives. The legacy `meta.json` block this used to read is retired —
+/// no writer emits it — and the sidecar `trace_metadata.json` was already not
 /// accepted.
-fn load_stylus_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, String> {
+fn load_stylus_trace_metadata(trace_dir: &Path) -> Result<db_backend::ctfs_trace_reader::meta_dat::MetaDat, String> {
     // Pick the first `*.ct` file in `trace_dir` (recorders may name it
     // `trace.ct` or `<program>.ct`).
     let ct_path = std::fs::read_dir(trace_dir)
@@ -309,9 +306,10 @@ fn load_stylus_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, String>
     let mut ctfs = db_backend::ctfs_trace_reader::ctfs_container::CtfsReader::open(&ct_path)
         .map_err(|e| format!("open {}: {}", ct_path.display(), e))?;
     let meta_bytes = ctfs
-        .read_file("meta.json")
-        .map_err(|e| format!("read meta.json from {}: {}", ct_path.display(), e))?;
-    serde_json::from_slice(&meta_bytes).map_err(|e| format!("parse meta.json from {}: {}", ct_path.display(), e))
+        .read_file("meta.dat")
+        .map_err(|e| format!("read meta.dat from {}: {}", ct_path.display(), e))?;
+    db_backend::ctfs_trace_reader::meta_dat::parse_meta_dat(&meta_bytes)
+        .map_err(|e| format!("parse meta.dat from {}: {:?}", ct_path.display(), e))
 }
 
 /// Copy the trace directory to an external fixture location if
@@ -558,11 +556,8 @@ fn test_stylus_trace_analysis() {
 
     // Parse and verify trace metadata.  Per the CTFS migration guide
     // (Trace-Files/CTFS-Migration-Guide.md §3e) the canonical home for
-    // metadata is `meta.json` (old CTFS) or `meta.dat` (new CTFS) inside
-    // the `.ct` container.  We prefer the legacy sidecar `trace_metadata.json`
-    // when it exists (current Stylus path), and otherwise extract
-    // `meta.json` from the `.ct` container via the CTFS reader library.
-    let metadata: TraceMetadata = load_stylus_trace_metadata(&trace_dir)
+    // metadata is `meta.dat` inside the `.ct` container.
+    let metadata = load_stylus_trace_metadata(&trace_dir)
         .unwrap_or_else(|e| panic!("Failed to load trace metadata from {}: {}", trace_dir.display(), e));
 
     assert!(

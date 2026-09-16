@@ -63,17 +63,34 @@ function Ensure-Llvm {
       } catch {}
 
       if ($currentVersion -eq $version) {
+        # RELOCATABILITY: this arm used to JUNCTION `$extractDir` at the
+        # system LLVM. The optimisation it buys is real -- a matching system
+        # install saves a multi-hundred-megabyte download -- but a junction
+        # bakes `C:\Program Files\LLVM` into the tree, and a tree that only
+        # resolves on a machine that happens to have that exact install is
+        # the definition of an entry that must not be published.
+        #
+        # It is a COPY now, so the arm keeps the saved download and produces
+        # a self-contained tree. Note why the branch was converted at all:
+        # provisioning runs on hosts with no system LLVM record zero reparse
+        # points for this component, because this branch is never taken there.
+        # That is a HOST-DEPENDENT observation and not a clearance -- a host
+        # that does have a matching system LLVM would produce a different
+        # result from the same code -- so the branch is converted rather than
+        # left alone on the strength of a zero.
         $parentDir = Split-Path -Parent $llvmVersionRoot
         New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
-        if (Test-Path -LiteralPath $llvmVersionRoot) {
-          Remove-Item -LiteralPath $llvmVersionRoot -Recurse -Force
-        }
-        New-Item -ItemType Directory -Force -Path $llvmVersionRoot | Out-Null
-        if (Test-Path -LiteralPath $extractDir) {
-          Remove-Item -LiteralPath $extractDir -Recurse -Force
-        }
-        New-Item -ItemType Junction -Path $extractDir -Target $systemDir | Out-Null
-        Write-Host "LLVM $version linked from system install at $systemDir to $extractDir"
+        Ensure-CleanDirectory -Path $llvmVersionRoot
+        Write-Host "Copying system LLVM $version from '$systemDir' into the install root; a junction there would not survive relocation."
+        Copy-Item -LiteralPath $systemDir -Destination $extractDir -Recurse -Force
+        $relative = Write-InstallPointer -Root $Root -Component "llvm" `
+          -VersionRoot $llvmVersionRoot -InstallDir $extractDir -Metadata @{
+            llvm_version = $version
+            llvm_target = $llvmTarget
+            install_arm = "system-copy"
+            system_source = $systemDir
+          }
+        Write-Host "Installed LLVM $version (system-copy) at $extractDir (install-relative: $relative)"
         return
       }
     }
@@ -107,15 +124,28 @@ function Ensure-Llvm {
     }
   }
 
+  $installDir = $extractDir
   if (-not (Test-Path -LiteralPath $clangExe -PathType Leaf)) {
     # Try bin/clang.exe in any subdirectory.
     $fallback = Get-ChildItem -LiteralPath $llvmVersionRoot -Recurse -Filter "clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $fallback) {
       Write-Warning "clang.exe found at '$($fallback.FullName)' instead of expected '$clangExe'."
+      # The pointer must name where clang ACTUALLY is, not where it was
+      # expected to be: a pointer file that records the expectation rather
+      # than the observation is worse than no pointer at all, because it
+      # looks authoritative.
+      $installDir = Split-Path -Parent (Split-Path -Parent $fallback.FullName)
     } else {
       throw "LLVM extraction did not produce '$clangExe'."
     }
   }
 
-  Write-Host "Installed LLVM $version to $extractDir"
+  $relative = Write-InstallPointer -Root $Root -Component "llvm" `
+    -VersionRoot $llvmVersionRoot -InstallDir $installDir -Metadata @{
+      llvm_version = $version
+      llvm_target = $llvmTarget
+      install_arm = "download"
+    }
+
+  Write-Host "Installed LLVM $version (download) to $installDir (install-relative: $relative)"
 }

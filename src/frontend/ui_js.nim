@@ -48,6 +48,11 @@ import
   # as an arrival; it was implemented as a diff, and the two disagree exactly
   # when the flag and the editors have got out of step.
   ui/read_only_transition,
+  # THE SCENE-1 LIVE-EDIT PANEL. A leaf module — `std/jsffi` and `kdom` only —
+  # for `file_conflict_dialog.nim`'s reason: its markup is a constant and
+  # everything variable goes in as text, and that rule is worth being able to
+  # test without loading the renderer.
+  ui/hcr_live_edit_panel,
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm],
@@ -889,6 +894,17 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         folder "Build":
           element "Rebuild/Re-record file", aReRecord, true
           element "Rebuild/Re-record project", aReRecordProject, true
+          # The in-app apply-edit -> HCR reload command. It sits beside the two
+          # rebuild entries because it is the same verb one step further in:
+          # those re-record the program, this one changes the program that is
+          # already running. Being a menu element is also what puts it in the
+          # command palette — `getCommands` walks this very tree — so the one
+          # declaration buys both surfaces.
+          element "Apply Edit & Hot-Reload", aApplyEditAndReload, true
+          # And the panel that lets you TYPE the edit rather than supply it as
+          # an action argument or an environment variable. Same tree, so the
+          # same one declaration buys the command-palette entry.
+          element "Live Edit (HCR)…", aToggleLiveEditPanel, true
           --sub
           # The chord beside each label comes for free: `menu.nim:424` fills
           # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
@@ -4436,8 +4452,173 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
     result.add(messageCode)
   # echo result.repr
 
+# ---------------------------------------------------------------------------
+# APPLY EDIT & HOT-RELOAD (`ClientAction.aApplyEditAndReload`)
+#
+# The in-app half of the apply-edit -> HCR reload path. The renderer's whole job
+# here is to ASK and to SURFACE: it does not compile anything, does not talk to
+# the coordinator, and does not decide whether an edit is acceptable. The main
+# process runs the project's apply-edit command and hands back exactly what that
+# command reported, and every answer it can give — applied, refused by name,
+# refused with a remedy, or "this command is not configured here" — ends up in
+# front of the user.
+#
+# That last clause is the point of routing a refusal through the UI at all. A
+# hot-reload tool that declines an edit and says so only in a log leaves whoever
+# is standing at the screen with a flame that did not change and no reason why.
+# ---------------------------------------------------------------------------
+
+var hcrLiveEditOverlay: kdom.Element = nil
+  ## The Scene-1 live-edit panel while it is open, or `nil`.
+  ##
+  ## Declared here, above `onHcrApplyEditResult`, because that proc writes the
+  ## provider's answer into it and Nim needs the declaration first. The panel's
+  ## own procs are below the result handler.
+var hcrLiveEditTimer: JsObject = nil
+  ## The pending debounced publication, or `nil`.
+
+proc applyEditAndReload*(actionData: JsObject) =
+  ## Ask the main process to apply a source/parameter edit to the running
+  ## process through the HCR path, with no restart.
+  ##
+  ## The edit comes from `actionData.edit` when a caller supplies one. There is
+  ## deliberately no default here: resolving one belongs to the main process,
+  ## which is the side that can read the environment, and an empty edit is
+  ## reported back as a named refusal rather than being turned into some edit
+  ## nobody asked for.
+  var edit = cstring""
+  if not actionData.isNil and not actionData.toJs.edit.isNil:
+    edit = cast[cstring](actionData.toJs.edit)
+  data.viewsApi.infoMessage(cstring"Apply Edit & Hot-Reload: asking the HCR provider…")
+  data.ipc.send "CODETRACER::hcr-apply-edit", js{edit: edit}
+
+proc onHcrApplyEditResult(sender: js, response: js) =
+  ## Surface what the apply-edit command reported.
+  ##
+  ## `status` is the command's own named outcome and is shown verbatim, because
+  ## the names are the vocabulary the edit-surface documentation uses and an
+  ## operator who is shown "failed" has not been told which mistake they made.
+  ## `surfaceRow` names the documented edit-surface row when the refusal maps
+  ## onto one, and `remedy` is shown as its own notification when the provider
+  ## supplied one — the Mesa quiescence refusal is the case that matters, since
+  ## its remedy is a change to how the target was launched and nothing about the
+  ## edit can fix it.
+  let status = if response.status.isNil: cstring"" else: cast[cstring](response.status)
+  let surfaceRow = if response.surfaceRow.isNil: cstring"" else: cast[cstring](response.surfaceRow)
+  let message = if response.message.isNil: cstring"" else: cast[cstring](response.message)
+  let remedy = if response.remedy.isNil: cstring"" else: cast[cstring](response.remedy)
+  var text = cstring""
+  if status == cstring"applied":
+    text = cstring("Apply Edit & Hot-Reload: applied — " & $message)
+    data.viewsApi.successMessage(text)
+  else:
+    var head = "Apply Edit & Hot-Reload refused: " & $status
+    if surfaceRow.len > 0:
+      head.add(" (" & $surfaceRow & ")")
+    text = cstring(head & " — " & $message)
+    data.viewsApi.errorMessage(text)
+  if remedy.len > 0:
+    data.viewsApi.warnMessage(cstring("Apply Edit & Hot-Reload remedy: " & $remedy))
+  # And into the live-edit panel, if it is open. The notifications above are
+  # TRANSIENT — a status notification auto-dismisses, which is the trap H4's own
+  # GUI arm walked into and recorded as §21 — so a panel that publishes on every
+  # pause needs a place where the LAST answer stays put. This is that place.
+  setHcrLiveEditStatus(hcrLiveEditOverlay, status,
+    cstring(
+      (if surfaceRow.len > 0: "(" & $surfaceRow & ") " else: "") & $message &
+      (if remedy.len > 0: "  REMEDY: " & $remedy else: "")))
+
+# ---------------------------------------------------------------------------
+# THE SCENE-1 LIVE-EDIT PANEL (`ClientAction.aToggleLiveEditPanel`)
+#
+# The input widget H4 deliberately did not build, and the reason it is a widget
+# at all rather than a better command line: Scene 1's claim is not "an edit can
+# be applied", which H4 already showed, but "the flame reshapes AS I TYPE".
+# That is a claim about a loop, and a loop needs somewhere to type.
+#
+# The renderer's job is unchanged from H4's and is deliberately small: collect
+# a string, send it, render the answer. It does not know what a knob is.
+# ---------------------------------------------------------------------------
+
+proc clearTimeoutJs(handle: JsObject) {.importjs: "clearTimeout(#)".}
+proc setTimeoutJs(callback: proc (), ms: int): JsObject {.importjs: "setTimeout(#, #)".}
+
+proc hcrLiveEditPublish() =
+  ## Publish whatever is currently in the field.
+  ##
+  ## An EMPTY field publishes nothing and says so in the panel. It is not routed
+  ## through the command, because the command would refuse it `no-edit-given` —
+  ## a correct answer to a question nobody meant to ask, and one that would
+  ## fill the panel with refusals every time the user cleared the box.
+  let edit = hcrLiveEditValue(hcrLiveEditOverlay)
+  if edit.len == 0:
+    setHcrLiveEditStatus(hcrLiveEditOverlay, cstring"waiting",
+      cstring"type a parameter edit, for example rise_speed=5.4")
+    return
+  setHcrLiveEditStatus(hcrLiveEditOverlay, cstring"applying…", edit)
+  applyEditAndReload(js{edit: edit})
+
+proc hcrLiveEditScheduleFromTyping() =
+  ## Debounce. Every keystroke cancels the pending publication and starts the
+  ## clock again, so a burst of typing produces ONE edit at the end of it.
+  ##
+  ## Without this, `rise_speed=5.4` is fourteen edits, each a clang++ invocation
+  ## and a publication into the running process, and the flame walks through
+  ## every prefix that happens to parse. That is not "reshapes as you type"; it
+  ## is a queue.
+  if not hcrLiveEditTimer.isNil:
+    clearTimeoutJs(hcrLiveEditTimer)
+  hcrLiveEditTimer = setTimeoutJs(proc () =
+    hcrLiveEditTimer = nil
+    hcrLiveEditPublish(), HcrLiveEditDebounceMs)
+
+proc closeHcrLiveEditPanel() =
+  if hcrLiveEditOverlay.isNil:
+    return
+  if not hcrLiveEditTimer.isNil:
+    clearTimeoutJs(hcrLiveEditTimer)
+    hcrLiveEditTimer = nil
+  hcrLiveEditOverlay.toJs.remove()
+  hcrLiveEditOverlay = nil
+
+proc toggleHcrLiveEditPanel*(actionData: JsObject) =
+  ## Open the panel, or close it if it is already open.
+  if not hcrLiveEditOverlay.isNil:
+    closeHcrLiveEditPanel()
+    return
+  let overlay = buildHcrLiveEditPanel()
+  hcrLiveEditOverlay = overlay
+  let input = overlay.toJs.querySelector(cstring"[data-hcr-live-edit-input]")
+  if not input.isNil:
+    input.addEventListener(cstring"input", proc (ev: JsObject) =
+      hcrLiveEditScheduleFromTyping())
+    # ENTER publishes immediately. Waiting out the debounce after a deliberate
+    # keypress reads as the tool having missed it.
+    input.addEventListener(cstring"keydown", proc (ev: JsObject) =
+      if cast[cstring](ev.key) == cstring"Enter":
+        if not hcrLiveEditTimer.isNil:
+          clearTimeoutJs(hcrLiveEditTimer)
+          hcrLiveEditTimer = nil
+        hcrLiveEditPublish()
+      elif cast[cstring](ev.key) == cstring"Escape":
+        closeHcrLiveEditPanel())
+  let applyButton = overlay.toJs.querySelector(cstring"[data-action='apply']")
+  if not applyButton.isNil:
+    applyButton.addEventListener(cstring"click", proc (ev: JsObject) =
+      hcrLiveEditPublish())
+  let closeButton = overlay.toJs.querySelector(cstring"[data-action='close']")
+  if not closeButton.isNil:
+    closeButton.addEventListener(cstring"click", proc (ev: JsObject) =
+      closeHcrLiveEditPanel())
+  kdom.document.body.appendChild(overlay)
+  setHcrLiveEditStatus(overlay, cstring"waiting",
+    cstring"type a parameter edit, for example rise_speed=5.4")
+  if not input.isNil:
+    input.focus()
+
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
+    "hcr-apply-edit-result"
     # "new-record-window"
     "record-path"
     "path-validated"
@@ -4551,6 +4732,9 @@ proc configureIPC(data: Data) =
     "acp-create-terminal"
     "acp-request-permission"
     "acp-render-diff"
+    "acp-clear-diffs"
+    "acp-tool-call"
+    "acp-tool-call-update"
 
     "reload-file"
 
@@ -5230,219 +5414,219 @@ proc installCollabInviteTestHooks() {.importjs: """
 installCollabInviteTestHooks()
 
 var actions*: array[ClientAction, ClientActionHandler] = [
-  proc(actionData: JsObject) =
+  forwardContinue: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"continue"):
       forwardContinue(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseContinue: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-continue"):
       reverseContinue(fromShortcut=true),
-  proc(actionData: JsObject) =
+  forwardNext: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"next"):
       next(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseNext: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-next"):
       reverseNext(fromShortcut=true),
-  proc(actionData: JsObject) =
+  forwardStep: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"step-in"):
       stepIn(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseStep: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-step-in"):
       reverseStepIn(fromShortcut=true),
-  proc(actionData: JsObject) =
+  forwardStepOut: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"step-out"):
       stepOut(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseStepOut: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-step-out"):
       reverseStepOut(fromShortcut=true),
-  proc(actionData: JsObject) = stopAction(),
-  proc(actionData: JsObject) = data.update(build=true),
-  proc(actionData: JsObject) = switchTab(change = -1),
-  proc(actionData: JsObject) = switchTab(change = 1),
-  proc(actionData: JsObject) = data.switchTabHistory(),
-  proc(actionData: JsObject) = openFile(),
-  proc(actionData: JsObject) = data.openNewTab(),
-  proc(actionData: JsObject) = data.reopenLastTab(),
-  proc(actionData: JsObject) = data.closeActiveTab(),
-  proc(actionData: JsObject) = data.switchToEdit(),
-  proc(actionData: JsObject) = data.switchToDebug(),
-  proc(actionData: JsObject) = data.commandSearch(),
-  proc(actionData: JsObject) = data.fileSearch(),
-  proc(actionData: JsObject) = data.fixedSearch(),
-  proc(actionData: JsObject) =
+  stop: proc(actionData: JsObject) = stopAction(),
+  build: proc(actionData: JsObject) = data.update(build=true),
+  switchTabLeft: proc(actionData: JsObject) = switchTab(change = -1),
+  switchTabRight: proc(actionData: JsObject) = switchTab(change = 1),
+  switchTabHistory: proc(actionData: JsObject) = data.switchTabHistory(),
+  openFile: proc(actionData: JsObject) = openFile(),
+  newTab: proc(actionData: JsObject) = data.openNewTab(),
+  reopenTab: proc(actionData: JsObject) = data.reopenLastTab(),
+  closeTab: proc(actionData: JsObject) = data.closeActiveTab(),
+  switchEdit: proc(actionData: JsObject) = data.switchToEdit(),
+  switchDebug: proc(actionData: JsObject) = data.switchToDebug(),
+  commandSearch: proc(actionData: JsObject) = data.commandSearch(),
+  fileSearch: proc(actionData: JsObject) = data.fileSearch(),
+  fixedSearch: proc(actionData: JsObject) = data.fixedSearch(),
+  del: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.delete(),
-  proc(actionData: JsObject) = discard data.onSelectFlow(),
-  proc(actionData: JsObject) = discard data.onSelectState(),
-  proc(actionData: JsObject) =
+  selectFlow: proc(actionData: JsObject) = discard data.onSelectFlow(),
+  selectState: proc(actionData: JsObject) = discard data.onSelectState(),
+  goUp: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onUp(),
-  proc(actionData: JsObject) =
+  goDown: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onDown(),
-  proc(actionData: JsObject) =
+  goRight: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onRight(),
-  proc(actionData: JsObject) =
+  goLeft: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onLeft(),
-  proc(actionData: JsObject) =
+  pageUp: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onPageUp(),
-  proc(actionData: JsObject) =
+  pageDown: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onPageDown(),
-  proc(actionData: JsObject) =
+  gotoStart: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onGotoStart(),
-  proc(actionData: JsObject) =
+  gotoEnd: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onGotoEnd(),
-  proc(actionData: JsObject) = # aEnter
+  aEnter: proc(actionData: JsObject) = # aEnter
     # echo "global array map: enter"
     # affects only renderer, map manually editor differently
     if not data.ui.activeFocus.isNil and not data.isInputElementFocused():
       # echo "  => global array map: enter: activeFocus not nil, calling its method"
       discard data.ui.activeFocus.onEnter(),
-  proc(actionData: JsObject) = # goUp
+  aEscape: proc(actionData: JsObject) = # goUp
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onEscape(),
-  proc(actionData: JsObject) = data.zoomInEditors(),
-  proc(actionData: JsObject) = data.zoomOutEditors(),
-  (proc(actionData: JsObject) = echo "example"),
-  proc(actionData: JsObject) = discard data.exit(), # aExit
-  proc(actionData: JsObject) = data.openNewTab(), # NewFile
-  proc(actionData: JsObject) = data.openPreferences(), # TODO: fix bottom panels Preferences
-  nil,# TODO proc = data.openNewTab(folder=true), # NewFold
-  nil,# TODO OpenRecent
+  zoomIn: proc(actionData: JsObject) = data.zoomInEditors(),
+  zoomOut: proc(actionData: JsObject) = data.zoomOutEditors(),
+  example: (proc(actionData: JsObject) = echo "example"),
+  aExit: proc(actionData: JsObject) = discard data.exit(), newFile: # aExit
+  proc(actionData: JsObject) = data.openNewTab(), preferences: # NewFile
+  proc(actionData: JsObject) = data.openPreferences(), openFolder: # TODO: fix bottom panels Preferences
+  nil,openRecent: # TODO proc = data.openNewTab(folder=true), # NewFold
+  nil,aSave: # TODO OpenRecent
   # aSave
   proc(actionData: JsObject) = data.saveFiles(data.services.editor.active),
-  proc(actionData: JsObject) = data.saveFiles(data.services.editor.active, saveAs=true),
-  proc(actionData: JsObject) = data.saveFiles(),
-  proc(actionData: JsObject) = discard data.closeAllFiles(), # close all,
-  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), # aCut
-  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), # aCopy
-  (proc(actionData: JsObject) = data.clipboardPaste()), # aPaste
+  saveAs: proc(actionData: JsObject) = data.saveFiles(data.services.editor.active, saveAs=true),
+  saveAll: proc(actionData: JsObject) = data.saveFiles(),
+  closeAllDocuments: proc(actionData: JsObject) = discard data.closeAllFiles(), aCut: # close all,
+  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), aCopy: # aCut
+  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), aPaste: # aCopy
+  (proc(actionData: JsObject) = data.clipboardPaste()), findOrFilter: # aPaste
   proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onFindOrFilter(),
+  aReplace: nil,
+  findInFiles: proc(actionData: JsObject) = data.findInFiles(),
+  replaceInFiles: nil,
+  aToggleComment: nil,
+  aIncreaseIndentation: nil,
+  aDecreaseIndentation: nil,
+  aMakeUppercase: nil,
+  aMakeLowercase: nil,
+  aCollapseUnderCursor: nil,
+  aExpandUnderCursor: nil,
+  aExpandAll: proc(actionData: JsObject) = data.expandWholeSource(), aCollapseAll: # aExpandAll
+  proc(actionData: JsObject) = data.collapseWholeSource(), aUndo: # aCollapseAll
   nil,
-  proc(actionData: JsObject) = data.findInFiles(),
+  aRedo: nil,
+  aProgramCallTrace: nil,
+  aProgramStateExplorer: nil,
+  aFindResults: nil,
+  aBuildLog: nil,
+  aFileExplorer: nil,
+  aSaveLayout: nil,
+  aLoadLayout: nil,
+  switchDebugWide: nil,
+  switchEditNormal: nil,
+  aNewHorizontalTabGroup: nil,
+  aNewVerticalTabGroup: nil,
+  aNotifications: nil,
+  aStartWindow: nil,
+  aFullScreen: nil,
+  aTheme0: proc(actionData: JsObject) = loadThemeForIndex(0), aTheme1: # aTheme0
+  proc(actionData: JsObject) = loadThemeForIndex(1), aTheme2: # aTheme1
+  proc(actionData: JsObject) = loadThemeForIndex(2), aTheme3: # aTheme2
+  proc(actionData: JsObject) = loadThemeForIndex(3), aMonacoTheme0: # aTheme3
   nil,
+  aMultiline: nil,
+  aSingleLine: nil,
+  aNoPreview: nil,
+  aLowLevel0: nil,
+  aLowLevel1: proc(actionData: JsObject) = data.openLowLevelCode(), aShowMinimap: # aLowLevel1
+  proc(actionData: JsObject) = data.toggleMinimap(), aGotoFile: # aShowMinimap
   nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.expandWholeSource(), # aExpandAll
-  proc(actionData: JsObject) = data.collapseWholeSource(), # aCollapseAll
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = loadThemeForIndex(0), # aTheme0
-  proc(actionData: JsObject) = loadThemeForIndex(1), # aTheme1
-  proc(actionData: JsObject) = loadThemeForIndex(2), # aTheme2
-  proc(actionData: JsObject) = loadThemeForIndex(3), # aTheme3
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.openLowLevelCode(), # aLowLevel1
-  proc(actionData: JsObject) = data.toggleMinimap(), # aShowMinimap
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.openLayoutTab(Content.PointList),
-  nil,
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Calltrace),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.State),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.EventLog),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.TerminalOutput),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.StepList),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Scratchpad),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.AgentActivity),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Filesystem),
-  proc(actionData: JsObject) = data.openShellTab(),
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.addBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.removeBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.removeAllBreakpoints(),
-  proc(actionData: JsObject) = data.enableBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.enableAllBreakpoints(),
-  proc(actionData: JsObject) = data.disableBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.disableAllBreakpoints(),
-  proc(actionData: JsObject) = data.addTracepointAtPosition(),
-  proc(actionData: JsObject) = data.removeTracepointAtPosition(),
-  proc(actionData: JsObject) = data.enableTracepointAtPosition(),
-  proc(actionData: JsObject) = data.enableAllTracepoints(),
-  proc(actionData: JsObject) = data.disableTracepointAtPosition(),
-  proc(actionData: JsObject) = data.disableAllTracepoints(),
-  proc(actionData: JsObject) = data.runTracepoints(),
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.ui.menu.toggle(),
-  proc(actionData: JsObject) = data.zoomFlowLoopIn(),
-  proc(actionData: JsObject) = data.zoomFlowLoopOut(),
-  proc(actionData: JsObject) = data.switchFocusedLoopLevelUp(),
-  proc(actionData: JsObject) = data.switchFocusedLoopLevelDown(),
-  proc(actionData: JsObject) = data.switchFocusedLoopLevelAtPosition(),
-  proc(actionData: JsObject) = data.setFlowTypeToMultiline(),
-  proc(actionData: JsObject) = data.setFlowTypeToParallel(),
-  proc(actionData: JsObject) = data.setFlowTypeToInline(),
-  proc(actionData: JsObject) = data.restartCodetracer(),
-  proc(actionData: JsObject) = data.findSymbol(),
-  proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=false),
-  proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=true),
-  proc(actionData: JsObject) = data.restartSubsystem(name="replay-server"),
-  proc(actionData: JsObject) = data.restartSubsystem(name="session-manager"),
-  proc(actionData: JsObject) = data.openTraceDialog(),
-  proc(actionData: JsObject) =
+  aGotoSymbol: nil,
+  aGotoDefinition: nil,
+  aFindReferences: nil,
+  aGotoLine: nil,
+  aGotoPreviousCursorLocation: nil,
+  aGotoNextCursorLocation: nil,
+  aGotoPrevious: nil,
+  aGotoNextEditLocation: nil,
+  aGotoPreviousPointInTime: nil,
+  aGotoNextPointInTime: nil,
+  aGotoNextError: nil,
+  aGotoPreviousError: nil,
+  aGotoNextSearchResult: nil,
+  aGotoPreviousSearchResult: nil,
+  aBuild: nil,
+  aCompile: nil,
+  aRunStatic: nil,
+  aTrace: nil,
+  aLoadTrace: nil,
+  aNewState: nil,
+  aNewEventLog: nil,
+  aNewFullCalltrace: nil,
+  aNewTerminal: nil,
+  aPointList: proc(actionData: JsObject) = data.openLayoutTab(Content.PointList),
+  aLocalCalltrace: nil,
+  aFullCalltrace: proc(actionData: JsObject) = data.openLayoutTab(Content.Calltrace),
+  aState: proc(actionData: JsObject) = data.openLayoutTab(Content.State),
+  aEventLog: proc(actionData: JsObject) = data.openLayoutTab(Content.EventLog),
+  aTerminal: proc(actionData: JsObject) = data.openLayoutTab(Content.TerminalOutput),
+  aStepList: proc(actionData: JsObject) = data.openLayoutTab(Content.StepList),
+  aScratchpad: proc(actionData: JsObject) = data.openLayoutTab(Content.Scratchpad),
+  aAgentActivity: proc(actionData: JsObject) = data.openLayoutTab(Content.AgentActivity),
+  aFilesystem: proc(actionData: JsObject) = data.openLayoutTab(Content.Filesystem),
+  aShell: proc(actionData: JsObject) = data.openShellTab(),
+  aOptions: nil,
+  aDebug: nil,
+  aBreakpoint: proc(actionData: JsObject) = data.addBreakpointAtPosition(),
+  aDeleteBreakpoint: proc(actionData: JsObject) = data.removeBreakpointAtPosition(),
+  aDeleteAllBreakpoints: proc(actionData: JsObject) = data.removeAllBreakpoints(),
+  aEnableBreakpoint: proc(actionData: JsObject) = data.enableBreakpointAtPosition(),
+  aEnableAllBreakpoint: proc(actionData: JsObject) = data.enableAllBreakpoints(),
+  aDisableBreakpoint: proc(actionData: JsObject) = data.disableBreakpointAtPosition(),
+  aDisableAllBreakpoints: proc(actionData: JsObject) = data.disableAllBreakpoints(),
+  aTracepoint: proc(actionData: JsObject) = data.addTracepointAtPosition(),
+  aDeleteTracepoint: proc(actionData: JsObject) = data.removeTracepointAtPosition(),
+  aEnableTracepoint: proc(actionData: JsObject) = data.enableTracepointAtPosition(),
+  aEnableAllTracepoints: proc(actionData: JsObject) = data.enableAllTracepoints(),
+  aDisableTracepoint: proc(actionData: JsObject) = data.disableTracepointAtPosition(),
+  aDisableAllTracepoints: proc(actionData: JsObject) = data.disableAllTracepoints(),
+  aCollectEnabledTracepointResults: proc(actionData: JsObject) = data.runTracepoints(),
+  aUserManual: nil,
+  aReportProblem: nil,
+  aSuggestFeature: nil,
+  aAbout: nil,
+  aMenu: proc(actionData: JsObject) = data.ui.menu.toggle(),
+  zoomFlowLoopIn: proc(actionData: JsObject) = data.zoomFlowLoopIn(),
+  zoomFlowLoopOut: proc(actionData: JsObject) = data.zoomFlowLoopOut(),
+  switchFocusedLoopLevelUp: proc(actionData: JsObject) = data.switchFocusedLoopLevelUp(),
+  switchFocusedLoopLevelDown: proc(actionData: JsObject) = data.switchFocusedLoopLevelDown(),
+  switchFocusedLoopLevelAtPosition: proc(actionData: JsObject) = data.switchFocusedLoopLevelAtPosition(),
+  setFlowTypeToMultiline: proc(actionData: JsObject) = data.setFlowTypeToMultiline(),
+  setFlowTypeToParallel: proc(actionData: JsObject) = data.setFlowTypeToParallel(),
+  setFlowTypeToInline: proc(actionData: JsObject) = data.setFlowTypeToInline(),
+  aRestart: proc(actionData: JsObject) = data.restartCodetracer(),
+  findSymbol: proc(actionData: JsObject) = data.findSymbol(),
+  aReRecord: proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=false),
+  aReRecordProject: proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=true),
+  aRestartDbBackend: proc(actionData: JsObject) = data.restartSubsystem(name="replay-server"),
+  aRestartBackendManager: proc(actionData: JsObject) = data.restartSubsystem(name="session-manager"),
+  aOpenTrace: proc(actionData: JsObject) = data.openTraceDialog(),
+  aOpenTraceInNewTab: proc(actionData: JsObject) =
     # aOpenTraceInNewTab: create a new session then open the trace dialog
     # so the selected trace loads into the fresh session tab.
     createNewSession(data)
     data.openTraceInNewTab(),
-  proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
-  proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
-  proc(actionData: JsObject) = createNewSession(data), # aNewTraceTab
+  aRecordNewTrace: proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
+  aRecordFromLaunch: proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
+  aNewTraceTab: proc(actionData: JsObject) = createNewSession(data), aViewGeneratedCSource: # aNewTraceTab
   # Language-specific View items.  The real implementations live
   # behind the Nim langserver / sourcemap flow (S3/S6/S7) and are not
   # all wired up yet — for now they surface a non-fatal info toast so
@@ -5451,24 +5635,24 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # aViewGeneratedCSource
     data.viewsApi.successMessage(
       cstring"View Generated C Source is not yet wired up"),
-  proc(actionData: JsObject) = # aViewDisassembly
+  aViewDisassembly: proc(actionData: JsObject) = # aViewDisassembly
     data.viewsApi.successMessage(
       cstring"View Disassembly is not yet wired up"),
-  proc(actionData: JsObject) = # aTraceMacroAtCursor
+  aTraceMacroAtCursor: proc(actionData: JsObject) = # aTraceMacroAtCursor
     data.viewsApi.successMessage(
       cstring"Trace Macro at Cursor is not yet wired up"),
-  proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
+  aTraceStaticBlockAtCursor: proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
     data.viewsApi.successMessage(
       cstring"Trace Static Block at Cursor is not yet wired up"),
-  proc(actionData: JsObject) = # aCollabInvite
+  aCollabInvite: proc(actionData: JsObject) = # aCollabInvite
     openCollabInviteDialog(@[
       cstring(cgpViewer.presetName),
       cstring(cgpDriver.presetName),
       cstring(cgpHost.presetName)]),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), # aTimeline
+  aTimeline: proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), aStartAgenticWorktreeSession: # aTimeline
   proc(actionData: JsObject) = # aStartAgenticWorktreeSession
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
-  # --- M4 Visual Replay / Video Player handlers ----------------------------
+  videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------
   # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
   # VideoPlayerVM instance.  Focus scoping is enforced *by the Mousetrap
   # overlay* registered in ``ui/shortcuts.nim`` (``configureVideoPlayerShortcuts``)
@@ -5482,56 +5666,56 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # videoPlayerTogglePlay
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaTogglePlay),
-  proc(actionData: JsObject) = # videoPlayerRewind
+  videoPlayerRewind: proc(actionData: JsObject) = # videoPlayerRewind
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaRewind),
-  proc(actionData: JsObject) = # videoPlayerFastForward
+  videoPlayerFastForward: proc(actionData: JsObject) = # videoPlayerFastForward
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaFastForward),
-  proc(actionData: JsObject) = # videoPlayerStepFrameBack
+  videoPlayerStepFrameBack: proc(actionData: JsObject) = # videoPlayerStepFrameBack
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepFrameBack),
-  proc(actionData: JsObject) = # videoPlayerStepFrameForward
+  videoPlayerStepFrameForward: proc(actionData: JsObject) = # videoPlayerStepFrameForward
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepFrameForward),
-  proc(actionData: JsObject) = # videoPlayerStepDrawBack
+  videoPlayerStepDrawBack: proc(actionData: JsObject) = # videoPlayerStepDrawBack
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepDrawBack),
-  proc(actionData: JsObject) = # videoPlayerStepDrawForward
+  videoPlayerStepDrawForward: proc(actionData: JsObject) = # videoPlayerStepDrawForward
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepDrawForward),
-  proc(actionData: JsObject) = # videoPlayerJumpStart
+  videoPlayerJumpStart: proc(actionData: JsObject) = # videoPlayerJumpStart
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaJumpStart),
-  proc(actionData: JsObject) = # videoPlayerJumpEnd
+  videoPlayerJumpEnd: proc(actionData: JsObject) = # videoPlayerJumpEnd
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaJumpEnd),
-  proc(actionData: JsObject) = # videoPlayerTogglePicker
+  videoPlayerTogglePicker: proc(actionData: JsObject) = # videoPlayerTogglePicker
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaTogglePicker),
-  proc(actionData: JsObject) = # videoPlayerCancelPicker
+  videoPlayerCancelPicker: proc(actionData: JsObject) = # videoPlayerCancelPicker
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaCancelPicker),
-  proc(actionData: JsObject) = # aVerification
+  aVerification: proc(actionData: JsObject) = # aVerification
     data.openLayoutTab(Content.Verification),
-  # The five debug-toolbar controls that gained chords. Each one hands the
+  aHistoryBack: # The five debug-toolbar controls that gained chords. Each one hands the
   # toolbar's own action id to `ui/debug.nim`'s dispatcher — the same `case`
   # the button's `onAction` bridge reaches — so the chord cannot drift from
   # the click. Appended at the end, in enum order, matching the five members
   # added at the end of `ClientAction`.
   proc(actionData: JsObject) = # aHistoryBack
     debug.invokeDebugToolbarAction("history-back"),
-  proc(actionData: JsObject) = # aHistoryForward
+  aHistoryForward: proc(actionData: JsObject) = # aHistoryForward
     debug.invokeDebugToolbarAction("history-forward"),
-  proc(actionData: JsObject) = # aRunToEntry
+  aRunToEntry: proc(actionData: JsObject) = # aRunToEntry
     debug.invokeDebugToolbarAction("run-to-entry"),
-  proc(actionData: JsObject) = # aResetOperation
+  aResetOperation: proc(actionData: JsObject) = # aResetOperation
     debug.invokeDebugToolbarAction("reset-operation"),
-  proc(actionData: JsObject) = # aRunTests
+  aRunTests: proc(actionData: JsObject) = # aRunTests
     debug.invokeDebugToolbarAction("run-tests"),
-  proc(actionData: JsObject) = # aKeyboardShortcuts
+  aKeyboardShortcuts: proc(actionData: JsObject) = # aKeyboardShortcuts
     openShortcutsDialog(),
-  proc(actionData: JsObject) = # aToggleReadOnly
+  aToggleReadOnly: proc(actionData: JsObject) = # aToggleReadOnly
     ## `CTRL+E`. The same `toggleReadOnly` the two deleted hardcoded binds
     ## called, reached through the table so that the chord is rebindable and so
     ## that both delivery paths dispatch ONE action — `CTRL+E` is in
@@ -5539,6 +5723,31 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## `delegateShortcuts` calls this slot and with the caret outside
     ## `configureShortcuts`' Mousetrap bind does.
     data.toggleReadOnly(),
+  aApplyEditAndReload: proc(actionData: JsObject) = # aApplyEditAndReload
+    ## Apply a source/parameter edit to the running process through the HCR
+    ## path, with no restart.
+    ##
+    ## The edit itself comes from `actionData.edit` when a caller supplies one
+    ## and from the `CODETRACER_HCR_EDIT` environment variable otherwise. There
+    ## is deliberately NO silent default: an apply-edit command that pushed some
+    ## edit nobody named would be a worse thing than one that refuses, so the
+    ## no-edit case is surfaced in the UI as a refusal with a sentence saying
+    ## how to supply one.
+    ##
+    ## An input widget for typing the edit is NOT part of this action; that is
+    ## the Scene-1 live-edit UX and belongs with the milestone that owns it.
+    ## What is here is the command, its place in the menu and the palette, and
+    ## the surfacing of every answer the provider can give.
+    applyEditAndReload(actionData),
+  aToggleLiveEditPanel: proc(actionData: JsObject) = # aToggleLiveEditPanel
+    ## Open (or close) the Scene-1 live-edit panel — the input widget the
+    ## action above deliberately did not have.
+    ##
+    ## Appended at the END of this array, matching the enum member appended at
+    ## the end of `ClientAction`. The keyed form this array is now written in
+    ## makes a mismatch a build error rather than a silent re-pointing, but the
+    ## keys must still appear in enum order for it to compile at all.
+    toggleHcrLiveEditPanel(actionData),
 ]
 
 data.actions = actions
@@ -6061,8 +6270,14 @@ when defined(ctWeb) and not defined(ctInExtension):
           # introduced to fix. Installation is necessarily against the instance
           # that exists now; only the two callbacks below can defer their read,
           # and they do.
+          # AND THE RUNNER ANSWERS. `RunTestsProc` returns the sentence saying
+          # why a run did not start, and `startRun` files it into the pane's
+          # `.test-results-failure` block. Nothing is discarded here: the three
+          # states `startNoirTests` declines in — a build already running, no
+          # project, no build view-model — are all states in which `canRun` is
+          # TRUE, so the ▶ was live, took the click, and moved nothing.
           test_results.testResultsVMInstance.setRunTests(
-            proc() = web_noir_build.startNoirTests())
+            proc(): string = web_noir_build.startNoirTests())
 
           # THE TWO PER-ROW CONTROLS, pointed at the two things they mean.
           #
@@ -6084,10 +6299,19 @@ when defined(ctWeb) and not defined(ctInExtension):
           # than a flag on the recorder: a flag could be got wrong and still
           # look right, whereas a proc with no `dispatch` in it cannot re-run a
           # test by accident.
+          # THE TWO RECORDING ACTIONS SAY WHY THEY DID NOT RUN, exactly as
+          # `openExisting` below already did. They reach
+          # `startNoirTestRecording`, whose five refusals used to be console
+          # lines — so `⟳` over a project with a Build in flight was a click
+          # that changed nothing on screen.
           test_results.testResultsVMInstance.setRowActions(
             refresh = proc(testId, selector: string) =
-              web_noir_build.startNoirTestRecording(
-                selector, newSessionTab = false, openWhenDone = false),
+              let refusal = web_noir_build.startNoirTestRecording(
+                selector, newSessionTab = false, openWhenDone = false)
+              if refusal.len > 0 and
+                 not test_results.testResultsVMInstance.isNil:
+                test_results.testResultsVMInstance.noteRowActionRefusal(
+                  refusal),
             openExisting = proc(testId, selector: string) =
               let refusal = web_noir_build.openRetainedTestRecording(selector)
               if refusal.len > 0 and
@@ -6103,8 +6327,12 @@ when defined(ctWeb) and not defined(ctInExtension):
                 test_results.testResultsVMInstance.noteRowActionRefusal(
                   refusal),
             recordAndOpen = proc(testId, selector: string) =
-              web_noir_build.startNoirTestRecording(
-                selector, newSessionTab = false, openWhenDone = true))
+              let refusal = web_noir_build.startNoirTestRecording(
+                selector, newSessionTab = false, openWhenDone = true)
+              if refusal.len > 0 and
+                 not test_results.testResultsVMInstance.isNil:
+                test_results.testResultsVMInstance.noteRowActionRefusal(
+                  refusal))
 
           # AND THE PANE IS TOLD WHICH RECORDING NOW EXISTS.
           #
@@ -6280,8 +6508,17 @@ when defined(ctWeb) and not defined(ctInExtension):
             # the test executes, its execution is captured, and the user lands
             # in a time-travel session on it — the verdict arrives first and
             # fills the Test Results pane, the session is what was asked for.
-            web_noir_build.startNoirTestRecording($selector)
-            cstring""
+            #
+            # AND ITS REFUSAL IS THE HOOK'S ANSWER. This used to dispatch and
+            # then return `cstring""` unconditionally — "accepted" — whatever
+            # the host had just decided. `runTestFromGutter` reads that as
+            # consent: it keeps the spinner it armed, sets a two-minute
+            # deadline and posts `"<selector>" started`. So a run declined
+            # inside this call left the slot spinning for two minutes under a
+            # message saying it had begun, which is the reported defect
+            # verbatim. Returning the sentence takes the branch beside it,
+            # which unwinds the spinner and shows the reason.
+            cstring(web_noir_build.startNoirTestRecording($selector))
 
         # AND RE-DERIVE, because the catalog has almost certainly already
         # arrived. `enterTemplateEditMode` above installs the pane host, which

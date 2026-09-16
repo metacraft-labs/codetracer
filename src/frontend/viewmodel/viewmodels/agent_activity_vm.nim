@@ -89,6 +89,7 @@ type
     reRecordInProgress*: Signal[bool]
     wantsPassword*: Signal[bool]
     wantsPermission*: Signal[bool]
+    permissionInfo*: Signal[string]
     sessionKey*: Signal[string]
     sessionNotice*: Signal[string]
       ## RV-6 — an explicit statement about *why* this panel is showing the
@@ -102,6 +103,32 @@ type
       ## DeepReview-GUI.md §2.1 names that a defect — "it must not silently
       ## render an empty session".  A loaded session that genuinely carries
       ## nothing also sets it, for the same reason.
+    selectedModel*: Signal[string]
+      ## The model name currently active in this agent session, shown in the
+      ## toolbar model button.  "" until the host sets it via setSelectedModel.
+    currentBranch*: Signal[string]
+      ## The branch the agent session is working on.  Shown in the branch button.
+    branches*: Signal[seq[string]]
+      ## Available branches for checkout.
+    branchDropdownOpen*: Signal[bool]
+      ## Whether the branch selector dropdown is open.
+    modelDropdownOpen*: Signal[bool]
+      ## Whether the model selector dropdown is open.
+    addContextDropdownOpen*: Signal[bool]
+      ## Whether the + context dropdown menu is open.
+    pastedImages*: Signal[seq[string]]
+      ## Base64 data URLs of images pasted by the user.  Each entry is either
+      ## "loading" (FileReader not yet done) or a data: URL.  Cleared after
+      ## submission.  Tracked here so the host can read them on submit.
+    settingsOpen*: Signal[bool]
+    settingsRuntime*: Signal[string]
+    settingsCpu*: Signal[string]
+    settingsMemory*: Signal[string]
+    settingsNetworkAccess*: Signal[bool]
+    settingsDeliveryMode*: Signal[string]
+    settingsDeliveryBranch*: Signal[string]
+    settingsPermissions*: Signal[string]
+    settingsActiveDropdown*: Signal[string]
 
     messageCount*: Memo[int]
     terminalCount*: Memo[int]
@@ -386,6 +413,9 @@ proc setPromptFlags*(vm: AgentActivityVM; wantsPassword, wantsPermission: bool) 
   vm.wantsPassword.val = wantsPassword
   vm.wantsPermission.val = wantsPermission
 
+proc setPermissionInfo*(vm: AgentActivityVM; info: string) =
+  vm.permissionInfo.val = info
+
 proc setSessionKey*(vm: AgentActivityVM; sessionKey: string) =
   vm.sessionKey.val = sessionKey
 
@@ -395,6 +425,55 @@ proc setSessionNotice*(vm: AgentActivityVM; notice: string) =
   if vm.sessionNotice.val == notice:
     return
   vm.sessionNotice.val = notice
+
+proc addPastedImageLoading*(vm: AgentActivityVM): int =
+  var images = vm.pastedImages.val
+  result = images.len
+  images.add("loading")
+  vm.pastedImages.val = images
+
+proc updatePastedImage*(vm: AgentActivityVM; idx: int; dataUrl: string) =
+  var images = vm.pastedImages.val
+  if idx >= 0 and idx < images.len:
+    images[idx] = dataUrl
+    vm.pastedImages.val = images
+
+proc removePastedImage*(vm: AgentActivityVM; idx: int) =
+  var images = vm.pastedImages.val
+  if idx >= 0 and idx < images.len:
+    images.delete(idx)
+    vm.pastedImages.val = images
+
+proc clearPastedImages*(vm: AgentActivityVM) =
+  vm.pastedImages.val = @[]
+
+proc getPastedImages*(vm: AgentActivityVM): seq[string] =
+  vm.pastedImages.val
+
+proc setSelectedModel*(vm: AgentActivityVM; model: string) =
+  vm.selectedModel.val = model
+
+proc setBranchState*(vm: AgentActivityVM; current: string;
+                     branches: openArray[string]) =
+  vm.currentBranch.val = current
+  vm.branches.val = @branches
+
+proc toggleBranchDropdown*(vm: AgentActivityVM) =
+  vm.branchDropdownOpen.val = not vm.branchDropdownOpen.val
+
+proc toggleSettingsOpen*(vm: AgentActivityVM) =
+  vm.settingsActiveDropdown.val = ""
+  vm.settingsOpen.val = not vm.settingsOpen.val
+
+proc resetSettingsToDefaults*(vm: AgentActivityVM) =
+  vm.settingsRuntime.val = "devcontainer"
+  vm.settingsCpu.val = "2 cores"
+  vm.settingsMemory.val = "4 GB"
+  vm.settingsNetworkAccess.val = false
+  vm.settingsDeliveryMode.val = "New branch"
+  vm.settingsDeliveryBranch.val = ""
+  vm.settingsPermissions.val = "Ask before commands"
+  vm.settingsActiveDropdown.val = ""
 
 proc clearConversation*(vm: AgentActivityVM) =
   vm.messages.val = @[]
@@ -411,7 +490,9 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.reRecordInProgress.val = false
   vm.wantsPassword.val = false
   vm.wantsPermission.val = false
+  vm.permissionInfo.val = ""
   vm.sessionNotice.val = ""
+  vm.pastedImages.val = @[]
 
 proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
   withViewModel proc(dispose: proc()): AgentActivityVM =
@@ -427,8 +508,25 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let reRecordInProgress = createSignal(false)
     let wantsPassword = createSignal(false)
     let wantsPermission = createSignal(false)
+    let permissionInfo = createSignal("")
     let sessionKey = createSignal("")
     let sessionNotice = createSignal("")
+    let selectedModel = createSignal("")
+    let currentBranch = createSignal("")
+    let branches = createSignal(newSeq[string]())
+    let branchDropdownOpen = createSignal(false)
+    let modelDropdownOpen = createSignal(false)
+    let addContextDropdownOpen = createSignal(false)
+    let pastedImages = createSignal(newSeq[string]())
+    let settingsOpen = createSignal(false)
+    let settingsRuntime = createSignal("devcontainer")
+    let settingsCpu = createSignal("2 cores")
+    let settingsMemory = createSignal("4 GB")
+    let settingsNetworkAccess = createSignal(false)
+    let settingsDeliveryMode = createSignal("New branch")
+    let settingsDeliveryBranch = createSignal("")
+    let settingsPermissions = createSignal("Ask before commands")
+    let settingsActiveDropdown = createSignal("")
 
     let messageCount = createMemo[int] proc(): int =
       messages.val.len
@@ -457,8 +555,25 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       reRecordInProgress: reRecordInProgress,
       wantsPassword: wantsPassword,
       wantsPermission: wantsPermission,
+      permissionInfo: permissionInfo,
       sessionKey: sessionKey,
       sessionNotice: sessionNotice,
+      selectedModel: selectedModel,
+      currentBranch: currentBranch,
+      branches: branches,
+      branchDropdownOpen: branchDropdownOpen,
+      modelDropdownOpen: modelDropdownOpen,
+      addContextDropdownOpen: addContextDropdownOpen,
+      pastedImages: pastedImages,
+      settingsOpen: settingsOpen,
+      settingsRuntime: settingsRuntime,
+      settingsCpu: settingsCpu,
+      settingsMemory: settingsMemory,
+      settingsNetworkAccess: settingsNetworkAccess,
+      settingsDeliveryMode: settingsDeliveryMode,
+      settingsDeliveryBranch: settingsDeliveryBranch,
+      settingsPermissions: settingsPermissions,
+      settingsActiveDropdown: settingsActiveDropdown,
       messageCount: messageCount,
       terminalCount: terminalCount,
       hasMessages: hasMessages,

@@ -881,8 +881,23 @@ proc noirTestRunAbsence*(): string =
     return degradedBehaviour(platform.profile, capProcessSpawn)
   ""
 
-proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
+proc startNoirTests*(saved: seq[string] = @[];
+                     only: seq[string] = @[]): string =
   ## TEST — run the open project's `#[test]` functions and report each verdict.
+  ##
+  ## RETURNS "" WHEN THE RUN WAS DISPATCHED, and otherwise the sentence saying
+  ## why it was not. The type is the fix: every refusal below used to
+  ## `report(...)` and return `void`, which put the reason in the browser
+  ## console and nowhere else. `test_results_vm.canRun` is TRUE in all three of
+  ## those states — none of them is `runAbsence`, none is the pane's own
+  ## `inFlight` — so the ▶ was painted live, took the click, and left the pane
+  ## exactly as it was. `openRetainedTestRecording` in this same module already
+  ## answers a sentence for precisely this reason; this proc now does too.
+  ##
+  ## The `report` calls are KEPT beside the sentences rather than replaced by
+  ## them. They are two different readers: the console line is what a gate
+  ## greps for (`ci/test/web_renderer_probe.mjs` reads `test-refused` /
+  ## `test-ignored` off it), and the sentence is what the user is owed.
   ##
   ## ONE DISPATCH, not a compile followed by anything: `nv_test_vfs` resolves
   ## the tree, elaborates the crate, discovers the tests with
@@ -897,15 +912,17 @@ proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
   ## is the single outcome this whole path exists to avoid.
   if activeInFlight:
     report("test-ignored", "reason=already-running")
-    return
+    return "a build or test run is already going in this tab; wait for it " &
+           "to finish, or stop it, and press ▶ again"
   let tmpl = currentProject()
   if not tmpl.hasFiles:
     report("test-refused", "reason=no-project")
-    return
+    return "no project is open, so there is nothing to test"
   let producer = producerFor(tmpl)
   if producer.isNil:
     report("test-refused", "reason=no-build-vm")
-    return
+    return "this tab has no build view-model, so a run cannot be reported " &
+           "anywhere; reload the page"
   activeIntent = nriTest
   if not noirTestRunStarted.isNil:
     noirTestRunStarted()
@@ -1019,8 +1036,24 @@ proc openRetainedTestRecording*(selector: string;
 
 proc startNoirTestRecording*(selector: string;
                              newSessionTab: bool = false;
-                             openWhenDone: bool = true) =
+                             openWhenDone: bool = true): string =
   ## RUN ONE TEST IN THE DEBUGGER — the editor's Run-test control.
+  ##
+  ## RETURNS "" WHEN THE RUN WAS DISPATCHED, and otherwise the sentence saying
+  ## why it was not — `startNoirTests`' change, for a worse version of the same
+  ## defect. This proc is what the GUTTER's run control reaches, and
+  ## `editor.runTestFromGutter` does not merely fail to show these refusals: it
+  ## ARMS THE SPINNER, calls this, reads back a `void` it takes for consent,
+  ## and then sets a two-minute deadline and posts `"<selector>" started`.
+  ##
+  ## So the five refusals below produced, verbatim, the reported defect — "it
+  ## just hanged in the browser without the ability to run the actual test":
+  ## a slot spinning over a dispatch that was declined before the click
+  ## finished, under an info message claiming it had begun, for two minutes,
+  ## with the actual reason on the console.
+  ##
+  ## `runTestFromGutter` has carried the branch that unwinds and shows the
+  ## sentence since the `pkCancelled` fix; it had no sentence to receive.
   ##
   ## "Running a test" in this product means recording it and replaying it: the
   ## test executes, its execution is captured, and the user lands in a
@@ -1034,24 +1067,27 @@ proc startNoirTestRecording*(selector: string;
   ## against the compile options a developer's own terminal uses.
   if activeInFlight:
     report("test-record-ignored", "reason=already-running")
-    return
+    return "a build or test run is already going in this tab; wait for it " &
+           "to finish, or stop it, and press this again"
   if selector.len == 0:
     report("test-record-refused", "reason=no-selector")
-    return
+    return "this line's run control names no test"
   let tmpl = currentProject()
   if not tmpl.hasFiles:
     report("test-record-refused", "reason=no-project")
-    return
+    return "no project is open, so there is nothing to run"
   let producer = producerFor(tmpl)
   if producer.isNil:
     report("test-record-refused", "reason=no-build-vm")
-    return
+    return "this tab has no build view-model, so a run cannot be reported " &
+           "anywhere; reload the page"
   if newSessionTab and not canRecordTestInNewSessionTab():
     # REFUSED BEFORE ANYTHING RUNS. Compiling, running and tracing a test and
     # only then discovering the session cannot be opened where it was asked for
     # would spend seconds to reach a refusal that was knowable at the click.
     report("test-record-refused", "reason=no-second-session")
-    return
+    return "this build holds one live session at a time, so the test was " &
+           "not run in a new tab"
   activeIntent = nriTestRecord
   activeRecordSelector = selector
   activeRecordInNewTab = newSessionTab
@@ -1067,7 +1103,7 @@ proc startNoirTestRecording*(selector: string;
     if not noirTestRunSettled.isNil:
       noirTestRunSettled()
 
-proc startNoirTest*(selector: string) =
+proc startNoirTest*(selector: string): string =
   ## Run ONE test — the editor's Run-test control, and the Test Results pane's
   ## per-row action when it grows one.
   ##
@@ -1078,7 +1114,7 @@ proc startNoirTest*(selector: string) =
   ## the same strings.
   if selector.len == 0:
     report("test-refused", "reason=no-selector")
-    return
+    return "no test was named"
   startNoirTests(only = @[selector])
 
 proc stopNoirBuild*() =

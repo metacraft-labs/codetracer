@@ -338,6 +338,32 @@ validate_fixture() {
 		[[ -n $id ]] || fixture_error "scenario $idx declares no 'id'"
 		[[ -n $kind ]] || fixture_error "scenario '$id' declares no 'kind'"
 		kinds="$kinds $kind"
+
+		# Non-`record` kinds owe their own completeness check.  Without it a
+		# scenario passes on its exit code ALONE: `negative-routing` and
+		# `isolation` on `rc != 0` (so a core crash, a missing shared library or
+		# a segfault would masquerade as the routing refusal they claim to
+		# prove), and `launcher-version` on `exit 0` with EMPTY output.  The
+		# `record` block below is guarded the same way; this keeps design
+		# section 5.5's "an incomplete fixture is rejected before anything is
+		# built" true for all four kinds, not just `record`.
+		case $kind in
+		negative-routing | isolation)
+			[[ -n $(fx_list "$s.expect.stderr-contains") ]] ||
+				fixture_error "$kind scenario '$id' declares no 'expect.stderr-contains'.
+  It would then pass on a non-zero exit ALONE -- a core crash, a missing shared
+  library or a segfault all satisfy that, and none of them is the routing
+  refusal this scenario exists to prove.  Name the message the launcher/core
+  prints when it refuses to route."
+			;;
+		launcher-version)
+			[[ -n $(fx_get "$s.expect.stdout-matches") ]] ||
+				fixture_error "launcher-version scenario '$id' declares no 'expect.stdout-matches'.
+  It would then pass on 'exit 0' with EMPTY --version output.  Give the regex
+  the version line must match (Recorder-CLI-Conventions.md section 7)."
+			;;
+		esac
+
 		[[ $kind == "record" ]] || continue
 
 		[[ -n $(fx_get "$s.expect.trace-glob") ]] ||
@@ -347,6 +373,10 @@ validate_fixture() {
 			fixture_error "record scenario '$id' declares 'expect.min-events' as '$floor', which is not a plain integer.
   Note this YAML subset does NOT strip inline comments: 'min-events: 20 # floor'
   is the value '20 # floor'."
+		[[ $floor -ge 1 ]] ||
+			fixture_error "record scenario '$id' declares 'expect.min-events: $floor'.
+  A floor of 0 accepts an empty recording -- the exact vacuous pass this gate
+  exists to prevent.  The floor must be at least 1."
 		[[ -n $(fx_list "$s.expect.function") ]] ||
 			fixture_error "record scenario '$id' declares no 'expect.function' -- the decode would be unchecked"
 		[[ -n $(fx_list "$s.expect.stdout-contains") ]] ||
@@ -1042,12 +1072,17 @@ scenario_record() {
 			bad "$id: decoded only $event_count events, fixture requires >= $min_events"
 		fi
 	fi
-	# The literal "0 events"/"0 steps" emptiness the design calls out (§5.5):
-	# a trace file can exist, decode cleanly, and still describe nothing.
-	if grep -qE '"(steps|calls|events)"[[:space:]]*:[[:space:]]*0([,}]|$)' "$full_f" "$meta_f"; then
-		bad "$id: the decoded trace reports a zero count -- an empty recording"
+	# The "0 events"/"0 steps" emptiness the design calls out (§5.5): a trace
+	# file can exist, decode cleanly, and still describe nothing.  ct-print
+	# prints an ABSENT stream as -1 (not 0), so a trace missing its
+	# step/call/event stream entirely slips past a check written only for 0 and
+	# yields a falsely reassuring pass (audit "Hole B").  Treat zero OR negative
+	# as empty; `expect.min-events` (>= 1, enforced in validate_fixture) is the
+	# positive floor that backs this up.
+	if grep -qE '"(steps|calls|events)"[[:space:]]*:[[:space:]]*(0|-[0-9]+)([,}]|$)' "$full_f" "$meta_f"; then
+		bad "$id: the decoded trace reports a zero or absent stream count -- an empty recording"
 	else
-		ok "$id: the decoded trace reports no zero-count stream"
+		ok "$id: the decoded trace reports no empty (zero or absent) stream"
 	fi
 
 	# --- the sample program's known functions -----------------------------

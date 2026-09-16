@@ -1,0 +1,36 @@
+# Rust crates that contain test code which no `cargo test` / `cargo nextest`
+# invocation in this repository reaches. See ci/test/rust-test-crate-coverage.sh
+# for the mechanism.
+#
+# THIS FILE FAILS IN BOTH DIRECTIONS. A recorded crate that is still dark is
+# reported and tolerated. A recorded crate that has been WIRED UP fails the gate
+# by name and demands its line be deleted -- so an entry cannot outlive the
+# defect it records, and nobody has to remember to clean up after fixing one.
+# Same rule, and the same reason, as ci/test/shell-gate-coverage.known-dark.txt
+# and ci/test/grep-q-pipefail.known-remaining.txt.
+#
+# It is NOT an exemption list. Every line here is test code that reports nothing
+# about anything; the only thing an entry buys is time. A crate that is
+# deliberately not tested by this repo says so in its own Cargo.toml with
+# `# NOT-A-TEST-CRATE: <reason>` and does not belong here.
+#
+# Format: `<crate dir><TAB><reason>`. `#` comments and blank lines are ignored.
+#
+# ---------------------------------------------------------------------------
+# All five below were measured on 2026-09-08, at the commit that added this
+# gate. Together they hold 61 `#[test]`/`#[tokio::test]` functions that have
+# never executed in CI.
+#
+# The shared mechanism: none of these crates is a Cargo workspace member. Each
+# is a plain `path = "..."` dependency of src/db-backend, and `cargo test` in a
+# dependent crate does not build a dependency's test targets. They were dark
+# from the day they were written, and nothing said so.
+#
+# Owner for all four: zahary.
+# ---------------------------------------------------------------------------
+
+libs/origin-classifier	20 tests, incl. tests/m1_verification.rs. Path dependency of src/db-backend (Cargo.toml:59), not a workspace member; no `cargo test` names it anywhere in justfile/ci/scripts/workflows.
+src/codetracer-bench	27 tests across five tests/*.rs. The justfile touches this crate four times (:4271,:4275,:4279,:4283) and every one is `cargo run --bin ct-bench`, never `cargo test`.
+libs/ct-dap-client	10 inline #[cfg(test)] tests. Same non-member path-dependency position as origin-classifier.
+libs/ct-lang	3 inline #[cfg(test)] tests. Same non-member path-dependency position as origin-classifier.
+src/db-backend/tree-sitter-trace	1 inline test in bindings/rust/lib.rs. An OPTIONAL path dependency (src/db-backend/Cargo.toml:176, behind the `dep:tree-sitter-tracepoint` feature at :299), so it is doubly out of reach: not a workspace member, and not even built unless that feature is on.

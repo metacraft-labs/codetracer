@@ -87,8 +87,9 @@ mkShell {
       # Lean programs yet.
       lean4
 
-      # tree-sitter CLI for the local parser regen step in shellHook.
-      tree-sitter
+      # (The tree-sitter CLI moved to ci-base.nix's package list alongside the
+      # parser regen it serves. Leaving it here would have kept it out of
+      # `devShells.ci`, where the regen now runs.)
 
       # Extra native-language compiler coverage. Not exercised by any
       # current CI lane — kept so `ct record` works locally for programs
@@ -195,11 +196,15 @@ mkShell {
 
     export RUST_LOG=info
 
-    # Tree-sitter-nim parser regen (local checkout — CI clones with
-    # submodules: false and skips this).
-    if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
-      (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
-    fi
+    # (The tree-sitter-nim parser regen used to sit here, guarded by "local
+    # checkout — CI clones with submodules: false and skips this". That
+    # premise was false: `launcher-recorder-e2e.yml` checks this repo out WITH
+    # submodules and builds it in `devShells.ci`, which composes ci-base's
+    # shellHook and never ran this dev-only tail -- so every arm of that gate
+    # died on the missing `src/parser.c`. It now lives in ci-base.nix's
+    # shellHook, which BOTH shells compose, and calls the shared
+    # `non-nix-build/ensure_tree_sitter_nim_parser.sh` rather than
+    # `just generate`.)
 
     # Workspace + sibling-repo detection — used by interactive dev
     # to wire up overlays between the host checkout and adjacent

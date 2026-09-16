@@ -541,18 +541,17 @@ proc runNativeCommand*(providerId: string; kind: CppFrameworkKind;
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId, output = result.output,
           durationMs = duration)
+    # Both branches go through the one shared emitter, so the failure branch
+    # cannot silently lose the `tekTestFinished` the counters read (see
+    # `nativeM11.unitOutcomeEvents`). One event per unit: gtest/catch2/ctest are
+    # launched once per file or project here and only their exit code is parsed.
+    events.add nativeM11.unitOutcomeEvents(providerId, runId, testId,
+        result.exitCode,
+        "native test command exited with " & $result.exitCode, result.output,
+        duration)
     if result.exitCode == 0:
-      events.add event(tekTestFinished, providerId, runId, testId, some(tsPassed),
-          "passed", durationMs = duration)
-      events.add event(tekRunFinished, providerId, runId, testId, some(tsPassed),
-          "passed", durationMs = duration)
       ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
     else:
-      events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
-          "native test command exited with " & $result.exitCode, result.output,
-          durationMs = duration)
-      events.add event(tekRunFinished, providerId, runId, testId, some(tsFailed),
-          "failed", durationMs = duration)
       ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "native test execution failed with exit code " & $result.exitCode,

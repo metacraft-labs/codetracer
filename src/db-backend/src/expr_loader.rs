@@ -543,6 +543,12 @@ pub struct ExprLoader {
     processed_files: HashMap<PathBuf, FileInfo>,
     loop_index: i64,
     pub trace: CoreTrace,
+    /// FALSIFIER ARM ONLY — see the arm's note in `get_source_line_v2`. Keyed
+    /// by path STRING, which is the whole point: it is design §7.2's named
+    /// implementation error made real so the reverse-navigation gate can be
+    /// shown to catch it. Absent from every build that does not ask for it.
+    #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
+    gdh7_string_keyed_cache: HashMap<PathBuf, String>,
 }
 
 // TODO: separate into
@@ -634,6 +640,8 @@ impl ExprLoader {
             processed_files: HashMap::new(),
             loop_index: 1,
             trace,
+            #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
+            gdh7_string_keyed_cache: HashMap::new(),
         }
     }
 
@@ -778,11 +786,17 @@ impl ExprLoader {
     /// not exist; failing both yields `SourceOrigin::Unavailable`.
     /// Existing callers continue to use [`Self::get_source_line`] which
     /// preserves the original behaviour.
+    /// `generation` is design §7.0's `Location::source_generation` for the
+    /// step whose line is being rendered — the version ordinal of that step's
+    /// OWN path id, never the newest sharing its string. Callers with no
+    /// version information pass `0`, which resolves to the historical
+    /// destination and is correct for every single-version trace.
     pub fn get_source_line_v2(
         &mut self,
         path: &PathBuf,
         row: usize,
         meta_dat_sources_root: Option<&Path>,
+        generation: i64,
     ) -> (String, SourceOrigin) {
         // Bundled copy first per spec §6.1: when the trace ships its own
         // sources under `meta_dat/sources/`, that is the authoritative
@@ -796,6 +810,44 @@ impl ExprLoader {
             // is the same over-certification `resolve_bundled_source` refuses,
             // one classifier away.
             //
+            // The contained mapping takes the same `generation` the raw one
+            // does, so the containment guard and the version key are one
+            // lookup: the guard applies to the versioned destination that will
+            // actually be read, not to a generation-0 stand-in for it.
+            let candidate = contained_bundled_source_path(root, path, generation);
+
+            // FALSIFIER ARM (gdh7_reverse_across_the_boundary_shows_v1, arm 1)
+            // — design §7.2's named implementation error, in the shipped code
+            // path.
+            //
+            // "The pane's cache key must be the PATH ID, not the path string.
+            // A pane keyed by string will show stale text on exactly one
+            // transition in each direction, which is the kind of defect that
+            // looks like a rendering glitch and is actually a correctness
+            // failure."
+            //
+            // The arm caches the bundled text under the path STRING, so the
+            // first version read for a file wins for the whole session: step
+            // forward past the reload and v2's line numbers render against
+            // v1's text; step BACK and — if v2 was read first — v1's line
+            // numbers render against v2's. The gate must go red either way,
+            // which is why it asserts the BYTES on both sides of the boundary
+            // and not only the backward one.
+            #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
+            {
+                if let Some(cached) = self.gdh7_string_keyed_cache.get(path) {
+                    let line = nth_line(cached, row.saturating_sub(1));
+                    return (line, SourceOrigin::BundledMetaData);
+                }
+                if let Some(candidate) = candidate.as_deref()
+                    && let Some(text) = source_text(candidate)
+                {
+                    self.gdh7_string_keyed_cache.insert(path.clone(), text.clone());
+                    let line = nth_line(&text, row.saturating_sub(1));
+                    return (line, SourceOrigin::BundledMetaData);
+                }
+            }
+
             // `candidate.exists() && fs::read_to_string(..)` — the shape this
             // used to have — is two filesystem calls, and on
             // `wasm32-unknown-unknown` the first is hardwired `false` and the
@@ -804,7 +856,7 @@ impl ExprLoader {
             // half of why `srcviews.dat` never surfaced there. `source_text`
             // keeps the filesystem first and adds the VFS behind it, so the
             // native answer is unchanged.
-            if let Some(candidate) = contained_bundled_source_path(root, path)
+            if let Some(candidate) = candidate
                 && let Some(text) = source_text(&candidate)
             {
                 // Match `get_source_line`'s 1-indexed convention: the
@@ -1005,6 +1057,48 @@ impl ExprLoader {
                     let grandparent_kind = grandparent.kind();
                     // Routine definitions, type definitions, enum fields
                     if matches!(grandparent_kind, "routine_definition" | "type_def" | "enum_field_def") {
+                        return false;
+                    }
+                }
+
+                // The DECLARED NAME of a routine, reached through however many
+                // wrapper nodes the grammar puts in the way.
+                //
+                // Neither of the two tests above sees it.  For
+                // `proc calculateSum(a: int, b: int): int =` tree-sitter-nim
+                // produces
+                //
+                //     routine_definition
+                //       name: exported_symbol
+                //         symbol
+                //           identifier  "calculateSum"   <- this node
+                //
+                // so the identifier's parent is `symbol`: not
+                // `routine_definition` (first test) and not `exported_symbol`
+                // (second test, which only looks one level up from the
+                // identifier and therefore only matches an
+                // `exported_symbol -> identifier` shape the grammar does not
+                // emit here).  The result was that the proc's own name was
+                // reported as a variable of the definition line, which is what
+                // `nim_mcr_streaming_flow_test`'s `excluded_identifiers` entry
+                // for `calculateSum` catches.
+                //
+                // Climb the wrapper chain instead of enumerating shapes: skip
+                // `symbol` / `exported_symbol` / `qualified_identifier` — the
+                // nodes tree-sitter-nim interposes between a declaration and
+                // its identifier — and ask whether what we surfaced into is the
+                // `name` of a declaration.  A `let`/`var` binding surfaces into
+                // `decl_def`, which is NOT in the set, so ordinary locals keep
+                // being extracted.
+                {
+                    let mut wrapper = parent;
+                    while matches!(wrapper.kind(), "symbol" | "exported_symbol" | "qualified_identifier") {
+                        match wrapper.parent() {
+                            Some(next) => wrapper = next,
+                            None => break,
+                        }
+                    }
+                    if matches!(wrapper.kind(), "routine_definition" | "type_def" | "enum_field_def") {
                         return false;
                     }
                 }
@@ -2482,7 +2576,7 @@ pub enum SourceOrigin {
 /// then refuses an answer that left the bundle. This function stays public and
 /// unguarded only so a test can name the raw key; see
 /// [`is_within_bundle_root`] for what "left the bundle" means.
-pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
+pub fn bundled_source_path(root: &Path, source_path: &Path, generation: i64) -> PathBuf {
     // Godot records GDScript source under its virtual-filesystem scheme
     // (`res://script.gd`, `user://...`). That is neither a real
     // filesystem path nor portable (a `res:` path component is invalid
@@ -2497,7 +2591,29 @@ pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
     };
     // Strip the leading "/" so absolute paths can sit under root/.
     let rel = source_path.strip_prefix("/").unwrap_or(source_path);
-    root.join(rel)
+
+    // GDH-M7 / design §7.1(3) — THE VERSION IS PART OF THE KEY.
+    //
+    // This function used to be `root.join(rel)` with no version term, and
+    // `Handler::load_bundled_sources` writes EVERY raw source view through it.
+    // A GDScript hot reload records two raw views for one `res://` string, so
+    // the second `fs::write` landed on the first's destination and silently
+    // replaced it: a container that carried both versions correctly still
+    // rendered ONE of them for every step in the session.
+    //
+    // Generation 0 keeps the historical destination EXACTLY, byte for byte in
+    // the path. That is deliberate and it is what makes this change invisible
+    // to every trace that has one version per path — which is every trace this
+    // repo has ever recorded outside this campaign. Only a second and later
+    // version moves, and it moves into a sibling directory rather than gaining
+    // a suffix, so the file keeps its extension and every extension-driven
+    // consumer (syntax highlighting, the classifier's `classifier_lang_for_
+    // path`) still sees `.gd`.
+    if generation <= 0 {
+        root.join(rel)
+    } else {
+        root.join(format!("__ctgen{generation}")).join(rel)
+    }
 }
 
 /// Whether `candidate` — a path produced by mapping a RECORDED path under
@@ -2584,8 +2700,13 @@ pub fn is_within_bundle_root(root: &Path, candidate: &Path) -> bool {
 /// writer that skipped the guard would place container-controlled bytes outside
 /// the extraction root; a reader that skipped it would serve bytes from outside
 /// the bundle under the bundle's provenance.
-pub fn contained_bundled_source_path(root: &Path, source_path: &Path) -> Option<PathBuf> {
-    let candidate = bundled_source_path(root, source_path);
+///
+/// `generation` is passed straight through to [`bundled_source_path`], so the
+/// guard is applied to the VERSIONED destination that will actually be written
+/// or read — not to a generation-0 stand-in for it. Callers with no version
+/// information pass `0`, which is the historical destination exactly.
+pub fn contained_bundled_source_path(root: &Path, source_path: &Path, generation: i64) -> Option<PathBuf> {
+    let candidate = bundled_source_path(root, source_path, generation);
     if is_within_bundle_root(root, &candidate) {
         Some(candidate)
     } else {
@@ -2676,7 +2797,13 @@ pub fn resolve_bundled_source(root: &Path, source_path: &Path) -> Option<PathBuf
     // Step 1 — the writer's exact mapping. `contained_bundled_source_path`
     // returns `None` for anything that would leave the root, so a `..` path
     // falls through to the walk below rather than being resolved by the OS.
-    if let Some(exact) = contained_bundled_source_path(root, source_path)
+    //
+    // Generation 0: this resolver answers a DAP `source` request, which names a
+    // file by path and carries no version ordinal, so there is no version to
+    // key on. 0 is the historical destination byte for byte, so this is the
+    // same answer this step has always given; a later version of a hot-reloaded
+    // file is reached through the suffix walk below, not through this step.
+    if let Some(exact) = contained_bundled_source_path(root, source_path, 0)
         && exact.is_file()
     {
         return Some(exact);
@@ -2771,7 +2898,7 @@ mod tests {
         //    `None` below would be indistinguishable from "there was nothing
         //    there anyway".
         assert!(
-            bundled_source_path(&root, Path::new("/../secret.txt")).is_file(),
+            bundled_source_path(&root, Path::new("/../secret.txt"), 0).is_file(),
             "the escape must really reach the file, or the refusal proves nothing"
         );
         assert_eq!(resolve_bundled_source(&root, Path::new("/../secret.txt")), None);
@@ -2779,12 +2906,12 @@ mod tests {
         // 2. `..` reached through the Godot scheme, which is stripped before the
         //    mapping and could otherwise smuggle one past a check placed on the
         //    raw string.
-        assert!(bundled_source_path(&root, Path::new("res://../secret.txt")).is_file());
+        assert!(bundled_source_path(&root, Path::new("res://../secret.txt"), 0).is_file());
         assert_eq!(resolve_bundled_source(&root, Path::new("res://../secret.txt")), None);
 
         // 3. `..` in the middle rather than at the front, so the refusal is not
         //    a prefix test.
-        assert!(bundled_source_path(&root, Path::new("/src/../../secret.txt")).is_file());
+        assert!(bundled_source_path(&root, Path::new("/src/../../secret.txt"), 0).is_file());
         assert_eq!(resolve_bundled_source(&root, Path::new("/src/../../secret.txt")), None);
 
         // 4. A `.` component is filtered, not refused: `a/./b` and `a/b` name

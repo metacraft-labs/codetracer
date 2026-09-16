@@ -11,7 +11,7 @@
  * — and §10.3 puts the collapsed-strip icon zone in the same bar.
  * `tools/screen-briefs.md` (Screen 1) states the same expectation for the
  * visual audit: "Footer: Status bar with `Python(db) | UTF-8 | stable: ready |
- * <file path>` on the right, BUILD | PROBLEMS | SEARCH RESULTS labels ... as
+ * <file path>` on the right, BUILD | PROBLEMS | FIND IN FILES labels ... as
  * auto-hide pane triggers".
  *
  * This spec exists because that contract was silently broken and the

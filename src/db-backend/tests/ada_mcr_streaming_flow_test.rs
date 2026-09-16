@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{Language, TestRecording};
+use test_harness::{Language, TestRecording, find_line_containing};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
@@ -59,12 +59,25 @@ fn ada_mcr_streaming_flow_variables_and_values() {
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
     // --- configure expected flow data ---
-    // Breakpoint at line 30 (`return Final_Result;`) inside Calculate_Sum.
-    // At this point all locals should be in scope:
-    //   A = 10, B = 32, Sum_Val = 42, Doubled = 84, Final_Result = 94
+    // Breakpoint on `return Final_Result;` inside Calculate_Sum, where all
+    // locals are in scope: A = 10, B = 32, Sum_Val = 42, Doubled = 84,
+    // Final_Result = 94.
+    //
+    // The line is DERIVED from the source rather than hard-coded. The
+    // hard-coded value used to be 30, which is `end Calculate_Sum;` — one line
+    // past the statement this comment names, and the function's epilogue.
+    // Both lines carry DWARF rows here so the breakpoint resolved either way
+    // and the drift stayed invisible; see `find_line_containing`.
+    //
+    // The needle carries the statement's indentation because the bare text
+    // also occurs in this fixture's own header comment on line 6, and
+    // `find_line_containing` refuses an ambiguous match rather than picking
+    // one — which is how that was found.
     //
     // Ada is case-insensitive; GNAT's DWARF typically uses lowercase
     // identifier names — we therefore expect lowercase here.
+    let breakpoint_line = find_line_containing(&source_path, "      return Final_Result;");
+
     let mut expected_values = HashMap::new();
     expected_values.insert("a".to_string(), 10);
     expected_values.insert("b".to_string(), 32);
@@ -74,7 +87,7 @@ fn ada_mcr_streaming_flow_variables_and_values() {
 
     let config = FlowTestConfig {
         source_file: source_path.to_str().unwrap().to_string(),
-        breakpoint_line: 30,
+        breakpoint_line,
         expected_variables: vec!["a", "b", "sum_val", "doubled", "final_result"]
             .into_iter()
             .map(String::from)

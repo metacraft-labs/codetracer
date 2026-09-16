@@ -253,8 +253,64 @@ pub trait TraceReader: std::fmt::Debug + Send {
 
     // ── Secondary indices ───────────────────────────────────────────
 
-    /// Reverse-lookup: find the `PathId` for a given path string.
-    fn path_id_for(&self, path: &str) -> Option<PathId>;
+    /// Reverse-lookup: **every** `PathId` interned under `path`, oldest
+    /// version first.
+    ///
+    /// GDH-M7 / design §7.1. This was `path_id_for -> Option<PathId>` over a
+    /// last-wins `HashMap<String, PathId>`; a GDScript hot reload interns the
+    /// same `res://` string a second time, and the single-id form had no
+    /// defensible answer — it returned the newest, so a step recorded before
+    /// the reload was served against the text that replaced it.
+    ///
+    /// An EMPTY result means the trace never recorded that path. That is a
+    /// different finding from "it recorded exactly one version", and callers
+    /// must not fold them together: "absent" and "ambiguous" have different
+    /// fixes, and `fuzzy_path_id_for`'s old stage 6 conflated them by
+    /// answering `None` to both.
+    fn path_ids_for(&self, path: &str) -> Vec<PathId>;
+
+    /// The version ordinal of `path_id` — `0` for the first entry carrying its
+    /// path string, `1` for the second, and so on. Design §7.0's
+    /// `Location::source_generation`.
+    ///
+    /// The default is `0`, which is what a reader with no version information
+    /// must answer and what the field's own doc comment promises for a legacy
+    /// trace.
+    fn path_version_ordinal(&self, path_id: PathId) -> i64 {
+        let _ = path_id;
+        0
+    }
+
+    /// The digest of the raw (`view_kind == 0`) source view recorded for
+    /// `path_id`, as `"sha256:<hex>"`.
+    ///
+    /// Empty means the container carried no raw view for that id — which the
+    /// `Location::source_digest` doc comment already defines as "the backend
+    /// did not provide a stable content identity". It is deliberately keyed on
+    /// the PATH ID rather than the path string: two versions of one file have
+    /// one string and two digests, and keying on the string is design §7.2's
+    /// named implementation error.
+    fn source_digest_for_path(&self, path_id: PathId) -> String {
+        let _ = path_id;
+        String::new()
+    }
+
+    /// The FIRST (oldest) version interned under `path`.
+    ///
+    /// Named rather than implicit: a caller reaching for one id out of several
+    /// is making a choice, and §7.1 requires that choice to be stated. Use
+    /// this where the question is "which file", not "which version" — and
+    /// prefer [`Self::path_ids_for`] wherever the answer should fan out.
+    fn path_id_for_first_version(&self, path: &str) -> Option<PathId> {
+        self.path_ids_for(path).first().copied()
+    }
+
+    /// The LAST (newest) version interned under `path`. This is what the
+    /// last-wins map used to return for every caller; it is now reachable only
+    /// by asking for it.
+    fn path_id_for_latest_version(&self, path: &str) -> Option<PathId> {
+        self.path_ids_for(path).last().copied()
+    }
 
     /// Return the step records on a given `line` within a given path.
     /// Returns `None` when the path or line has no recorded steps.
@@ -751,6 +807,34 @@ pub trait TraceReader: std::fmt::Debug + Send {
         // event and the breakpoint stop-check downstream both see the
         // recorded column.
         location.column = step_record.column.map(|c| c.0);
+        // GDH-M7 / design §7.0 — WHICH VERSION of this path the step ran
+        // against, taken from the step's OWN path id and never from the
+        // newest entry sharing its string. `Location::new` writes a literal
+        // `0` into both fields; on a legacy container that is still what they
+        // get, because a path interned once has ordinal 0 and a container
+        // with no source views has no digest.
+        //
+        // The frontend already keys its source cache on the pair
+        // (`sourceRevisionKey`, `utils.nim`), so populating them here is what
+        // makes a pane re-render when the cursor crosses a reload boundary —
+        // and, crossing it BACKWARDS, re-render to the older text.
+        #[cfg(not(feature = "gdh7-falsify-zero-source-generation"))]
+        {
+            location.source_generation = self.path_version_ordinal(step_record.path_id);
+            location.source_digest = self.source_digest_for_path(step_record.path_id);
+        }
+        #[cfg(feature = "gdh7-falsify-zero-source-generation")]
+        {
+            // FALSIFIER ARM (gdh7_no_step_is_attributed_to_the_wrong_version_
+            // through_dap, the arm specific to this layer): leave the fields at
+            // the literal `0` / `""` they carried before GDH-M7. Every path id
+            // is still correct and the source served is still correct — only
+            // the protocol field that TELLS a consumer which version it is
+            // looking at is blank, which is exactly the state design §7.0
+            // describes. The gate must go red on the post-reload half.
+            location.source_generation = 0;
+            location.source_digest = String::new();
+        }
         if function_name != "<top-level>" {
             let raw_path = self.path(step_record.path_id).unwrap_or("");
             let use_trace_function_boundaries = |location: &mut Location| {
@@ -1220,22 +1304,46 @@ pub trait TraceReader: std::fmt::Debug + Send {
 
     // ── Fuzzy path resolution ──────────────────────────────────────
 
-    /// Resolve a source path to its `PathId`, trying multiple matching
-    /// strategies beyond exact match.
+    /// Resolve a source path to the `PathId`s that can carry it, trying
+    /// multiple matching strategies beyond exact match.
+    ///
+    /// GDH-M7 / design §7.1(2). Every stage used to return a SINGLE
+    /// `Option<PathId>` and the last one, filename-only match, returned `Some`
+    /// only when `matches.len() == 1`. A GDScript hot reload interns the same
+    /// file a second time, so the filename matches twice and the stage
+    /// answered `None`: a path that resolved before a reload silently stopped
+    /// resolving after it, and "not found" is indistinguishable from a file
+    /// that was never recorded. Each stage now yields the candidate SET and
+    /// the caller disambiguates by version — a breakpoint fans out over all of
+    /// them (§7.1's table), a jump picks one and says which.
+    ///
+    /// The stages are unchanged and are tried in the same order; the FIRST
+    /// stage that matches anything wins, so a path that resolved exactly
+    /// before still resolves exactly, to the same ids, in the same order.
     ///
     /// Strategies tried in order:
-    /// 1. Exact match via `path_id_for`
+    /// 1. Exact match via `path_ids_for`
     /// 2. Workdir-stripped relative path match
     /// 3. Suffix match (component-wise)
     /// 4. Canonicalized path match (resolves symlinks)
     /// 5. Reverse canonicalize (stored paths may be symlink-resolved)
-    /// 6. Filename-only match (when unambiguous)
+    /// 6. Filename-only match — **all** matches, no longer only a unique one
     ///
     /// On Windows, path separators are normalized at each stage.
-    fn fuzzy_path_id_for(&self, path: &str) -> Option<PathId> {
+    ///
+    /// The result is in ascending `PathId` order, so index 0 is the oldest
+    /// version and the last entry the newest.
+    fn fuzzy_path_ids_for(&self, path: &str) -> Vec<PathId> {
+        fn sorted(mut ids: Vec<PathId>) -> Vec<PathId> {
+            ids.sort_by_key(|id| id.0);
+            ids.dedup();
+            ids
+        }
+
         // 1. Exact match (fast path).
-        if let Some(id) = self.path_id_for(path) {
-            return Some(id);
+        let exact = self.path_ids_for(path);
+        if !exact.is_empty() {
+            return sorted(exact);
         }
 
         // On Windows, normalize separators.
@@ -1243,10 +1351,13 @@ pub trait TraceReader: std::fmt::Debug + Send {
         let normalized = path.replace('\\', "/");
 
         #[cfg(windows)]
-        if normalized != path
-            && let Some(id) = self.path_id_for(&normalized)
         {
-            return Some(id);
+            if normalized != path {
+                let ids = self.path_ids_for(&normalized);
+                if !ids.is_empty() {
+                    return sorted(ids);
+                }
+            }
         }
 
         // On Windows, paths are case-insensitive and the drive letter is
@@ -1258,10 +1369,18 @@ pub trait TraceReader: std::fmt::Debug + Send {
         #[cfg(windows)]
         {
             let folded = normalized.to_lowercase();
-            for (stored_path, id) in self.path_entries_iter() {
-                if !stored_path.is_empty() && stored_path.replace('\\', "/").to_lowercase() == folded {
-                    return Some(id);
-                }
+            let ids: Vec<PathId> = self
+                .path_entries_iter()
+                .filter_map(|(stored_path, id)| {
+                    if !stored_path.is_empty() && stored_path.replace('\\', "/").to_lowercase() == folded {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !ids.is_empty() {
+                return sorted(ids);
             }
         }
 
@@ -1273,17 +1392,21 @@ pub trait TraceReader: std::fmt::Debug + Send {
             .strip_prefix(workdir)
             .ok()
             .and_then(|relative| relative.to_str());
-        if let Some(id) = relative_str.and_then(|rel_str| self.path_id_for(rel_str)) {
-            return Some(id);
+        if let Some(rel_str) = relative_str {
+            let ids = self.path_ids_for(rel_str);
+            if !ids.is_empty() {
+                return sorted(ids);
+            }
         }
         #[cfg(windows)]
         {
             if let Some(rel_str) = relative_str {
                 let norm_rel = rel_str.replace('\\', "/");
-                if norm_rel != rel_str
-                    && let Some(id) = self.path_id_for(&norm_rel)
-                {
-                    return Some(id);
+                if norm_rel != rel_str {
+                    let ids = self.path_ids_for(&norm_rel);
+                    if !ids.is_empty() {
+                        return sorted(ids);
+                    }
                 }
             }
         }
@@ -1294,51 +1417,88 @@ pub trait TraceReader: std::fmt::Debug + Send {
             let norm_workdir = workdir.to_string_lossy().replace('\\', "/");
             if normalized.starts_with(&norm_workdir) {
                 let relative = &normalized[norm_workdir.len()..].trim_start_matches('/');
-                if let Some(id) = self.path_id_for(relative) {
-                    return Some(id);
+                let ids = self.path_ids_for(relative);
+                if !ids.is_empty() {
+                    return sorted(ids);
                 }
             }
         }
 
         // 3. Suffix match: check if the absolute path ends with any stored
         //    relative path (compared component-wise).
-        for (stored_path, id) in self.path_entries_iter() {
-            if !stored_path.is_empty() && abs_path.ends_with(stored_path) {
-                return Some(id);
-            }
+        let ids: Vec<PathId> = self
+            .path_entries_iter()
+            .filter_map(|(stored_path, id)| {
+                if !stored_path.is_empty() && abs_path.ends_with(stored_path) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !ids.is_empty() {
+            return sorted(ids);
         }
 
         // 4. Canonicalize and retry.
         if let Ok(canonical) = abs_path.canonicalize()
             && canonical != abs_path
         {
-            if let Some(canonical_str) = canonical.to_str()
-                && let Some(id) = self.path_id_for(canonical_str)
-            {
-                return Some(id);
-            }
-            for (stored_path, id) in self.path_entries_iter() {
-                if !stored_path.is_empty() && canonical.ends_with(stored_path) {
-                    return Some(id);
+            if let Some(canonical_str) = canonical.to_str() {
+                let ids = self.path_ids_for(canonical_str);
+                if !ids.is_empty() {
+                    return sorted(ids);
                 }
+            }
+            let ids: Vec<PathId> = self
+                .path_entries_iter()
+                .filter_map(|(stored_path, id)| {
+                    if !stored_path.is_empty() && canonical.ends_with(stored_path) {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !ids.is_empty() {
+                return sorted(ids);
             }
         }
 
         // 5. Reverse canonicalize: stored paths may be symlink-resolved.
-        for (stored_path, id) in self.path_entries_iter() {
-            if stored_path.is_empty() {
-                continue;
-            }
-            let sp = std::path::Path::new(stored_path);
-            if sp.is_absolute()
-                && let Ok(canonical_stored) = sp.canonicalize()
-                && canonical_stored == abs_path
-            {
-                return Some(id);
-            }
+        let ids: Vec<PathId> = self
+            .path_entries_iter()
+            .filter_map(|(stored_path, id)| {
+                if stored_path.is_empty() {
+                    return None;
+                }
+                let sp = std::path::Path::new(stored_path);
+                if sp.is_absolute()
+                    && let Ok(canonical_stored) = sp.canonicalize()
+                    && canonical_stored == abs_path
+                {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !ids.is_empty() {
+            return sorted(ids);
         }
 
-        // 6. Filename-only match (unambiguous).
+        // 6. Filename-only match.
+        //
+        // THIS IS THE STAGE GDH-M7 CHANGES. It read:
+        //
+        //     if matches.len() == 1 { return Some(matches[0]); }
+        //
+        // so two versions of one file made the filename ambiguous and the
+        // whole ladder answered `None`. Returning the set keeps the caller's
+        // choice explicit: a breakpoint binds to every match (§7.1), and a
+        // caller that needs exactly one still has `matches.len()` to look at —
+        // what it no longer has is the ladder deciding, by silence, that an
+        // ambiguous name means an absent file.
         if let Some(lookup_filename) = abs_path.file_name() {
             let matches: Vec<PathId> = self
                 .path_entries_iter()
@@ -1351,11 +1511,35 @@ pub trait TraceReader: std::fmt::Debug + Send {
                     }
                 })
                 .collect();
+            #[cfg(not(feature = "gdh7-falsify-fuzzy-unique-only"))]
+            if !matches.is_empty() {
+                return sorted(matches);
+            }
+            #[cfg(feature = "gdh7-falsify-fuzzy-unique-only")]
+            // FALSIFIER ARM (gdh7_a_breakpoint_binds_to_every_version, the
+            // second resolution route): restore the `matches.len() == 1` gate.
+            // Two versions make the filename ambiguous and the whole ladder
+            // answers "absent", so a breakpoint set by filename stops binding
+            // at all after a reload — a RESOLUTION failure, which is a
+            // different finding from binding to the wrong version and must be
+            // reported under its own name.
             if matches.len() == 1 {
-                return Some(matches[0]);
+                return sorted(matches);
             }
         }
 
-        None
+        Vec::new()
+    }
+
+    /// The NEWEST version the fuzzy ladder resolves `path` to.
+    ///
+    /// Kept as a named accessor rather than as the ladder's return type,
+    /// because §7.1 requires a caller taking one id out of several to say
+    /// which one it took. Every caller of this is asserting that its question
+    /// is about the file's current content — a "go to this line in the file I
+    /// am looking at" jump, not a step's own rendering, which resolves through
+    /// the step's recorded `path_id` and never comes here.
+    fn fuzzy_path_id_for(&self, path: &str) -> Option<PathId> {
+        self.fuzzy_path_ids_for(path).last().copied()
     }
 }

@@ -46,8 +46,8 @@ jobs:
     # another's.
     #
     # `cancel-in-progress: false` because this action commits the signature
-    # file back to the `main` branch; cancelling mid-commit can leave the
-    # signature store half-written. Queueing is the correct behaviour here.
+    # file back to the `branch` named below; cancelling mid-commit can leave
+    # the signature store half-written. Queueing is the correct behaviour here.
     concurrency:
       group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: false
@@ -62,9 +62,42 @@ jobs:
           # PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: 'signatures/version1/cla.json'
-          path-to-document: 'https://github.com/metacraft-labs/codetracer/blob/main/docs/cla.md' # e.g. a CLA or a DCO document
-          # branch should not be protected
-          branch: 'main'
+          path-to-document: 'https://github.com/metacraft-labs/codetracer/blob/dev/docs/cla.md' # e.g. a CLA or a DCO document
+
+          # `dev`, not `main`: this repository has NO `main` branch -- the org
+          # renamed its mainlines, and nothing updated these two settings. The
+          # action could therefore never write the signature store, and failed
+          # every run with
+          #
+          #     Error occurred when creating the signed contributors file:
+          #       Branch main not found.
+          #     Committers of pull request N have to sign the CLA
+          #
+          # The second line names the contributor; the cause is the first. The
+          # last signature this store actually recorded is tzanko-matev on
+          # 2025-07-11 (PR #247), while `main` still existed -- so since the
+          # rename NO contributor has been able to sign at all, and every PR
+          # has carried a red CLA check that no action by its author could
+          # clear. `docs/cla.md` and `signatures/version1/cla.json` were on
+          # `dev` the whole time; only these settings pointed elsewhere.
+          #
+          # The action requires an UNPROTECTED branch, because it commits the
+          # signature file directly. Checked against
+          # `GET /repos/metacraft-labs/codetracer/rules/branches/dev`, which
+          # returns `[]` -- the authoritative view, since the legacy
+          # branch-protection endpoint reports 404 for a branch governed only
+          # by a ruleset and would have said "not protected" either way.
+          #
+          # Note what `dev` is NOT: the default branch is `stable`, and the
+          # active ruleset -- named "Protect main", from the same rename --
+          # includes `~DEFAULT_BRANCH`, so it governs `stable` (deletion,
+          # pull_request, required_linear_history), not `dev`. Pointing this
+          # at `stable` would therefore reintroduce the same failure in a new
+          # form: a direct commit into a branch that requires a pull request.
+          #
+          # If `dev` ever becomes protected, move this to a dedicated
+          # signatures branch. Do not point it at a protected branch.
+          branch: 'dev'
           allowlist: 'zah,NGPetrov,Ro6afF,Franz-Fischbach,Madman10K,Aristotelis2002,pxor,SersemPeca,fenix-ov,lispegistus,alehander92'
 
          # the followings are the optional inputs - If the optional inputs are not given, then default values will be taken

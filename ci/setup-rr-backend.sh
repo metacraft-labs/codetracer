@@ -14,9 +14,22 @@ set -euo pipefail
 # Requires GH_TOKEN to be set for cloning the private repo.
 # Exports CODETRACER_RR_BACKEND_PRESENT=1 and updated PATH/LD_LIBRARY_PATH
 # to GITHUB_ENV / GITHUB_PATH for subsequent CI steps.
-
-# Save the repo root (all paths relative to this)
-REPO_ROOT="$(pwd)"
+#
+# THIS SCRIPT IS SOURCED, so every name it assigns at top level lands in its
+# sourcer's shell. It now CLOBBERS NOTHING GENERIC, which is why it carries no
+# `ct-leaks:` line: `CLONE_DIR` is an input as much as an output — callers set
+# it to choose the checkout — so it is assigned default-preserving and can
+# never overwrite theirs. `ci/test/sourced-var-collision-gate.sh` checks that.
+#
+# `RR_REPO_ROOT` used to be `REPO_ROOT`, which is what made it worth writing
+# any of this down. `ci/test/stale-artefact-guards-test.sh` had a `REPO_ROOT`
+# of its own and had to source this file inside a SUBSHELL to survive it; once
+# `shopt -s globstar` let shellcheck see both files at once it read that
+# assignment as "modified in a subshell" and emitted nine FALSE SC2031s on the
+# suite's own variable, failing `lint-bash` and dark-gating every build job
+# behind it for 13 runs (3c7b257ed). The prefix is the fix: no sourcer can
+# collide with a name that says which script owns it.
+RR_REPO_ROOT="$(pwd)"
 # Clone as a sibling directory so that path deps in rr-backend's Cargo.toml
 # (../codetracer/libs/ct-dap-client) resolve correctly.
 CLONE_DIR="${CLONE_DIR:-$(pwd)/../codetracer-native-backend}"
@@ -29,7 +42,7 @@ resolve_sibling_rev() { # $1 = sibling repo name
 	local args=(--repo codetracer --sibling "$1")
 	[ -n "${CT_MANIFEST_DIR:-}" ] && args+=(--manifest-dir "$CT_MANIFEST_DIR")
 	[ -n "${CT_LOCK_SHA:-}" ] && args+=(--sha "$CT_LOCK_SHA" --no-walk)
-	"$REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
+	"$RR_REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
 }
 
 resolve_ref() {
@@ -43,16 +56,101 @@ resolve_ref() {
 	resolve_sibling_rev codetracer-native-backend
 }
 
+# PRESENCE IS NOT THE LOCKED REVISION.
+#
+# This script used to reuse whatever checkout happened to be at $CLONE_DIR on
+# the strength of `[[ -d "$CLONE_DIR/.git" ]]`, with a comment asserting the
+# revision was right ("cloned by the shared setup-dev-env CI action at the
+# workspace-locked revision") from nothing but the directory being there. Worse,
+# `main()` deliberately SKIPPED resolving the locked revision whenever the
+# directory existed, so the one value that could have answered the question was
+# never computed. The evidence that stale checkouts happen on exactly these
+# machines is nine lines below: "Clean up any previous clone (self-hosted
+# runners reuse workspaces)".
+#
+# What this decides is which backend binary CI builds and tests against, which
+# makes it the most consequential existence-as-freshness site in the tree: a
+# green run against last week's `ct-native-replay` is indistinguishable from a
+# green run against the locked one.
+#
+# It REFUSES rather than re-checking-out. A reused workspace on a runner and a
+# developer's sibling checkout with work in it are the same directory to this
+# script, and `git checkout` in the second is destructive. `RR_BACKEND_REF` is
+# the documented way to state a different revision on purpose.
+require_locked_checkout() {
+	local dir="$1" ref="$2" head want
+
+	head="$(git -C "$dir" rev-parse HEAD 2>/dev/null)" || {
+		echo "Error: '$dir' has a .git but no resolvable HEAD; it is not a usable checkout of codetracer-native-backend." >&2
+		exit 1
+	}
+
+	# A FULL SHA CAN BE ANSWERED LOCALLY; A BRANCH CANNOT.
+	#
+	# The workspace lock yields an immutable 40-hex commit, so resolving it in
+	# the existing checkout is the whole question: no network, no credential —
+	# which matters, because that is the common CI path.
+	#
+	# `RR_BACKEND_REF` may instead name a MOVING ref, and the one workflow step
+	# that calls this script passes `dev`. A reused workspace's local `dev`
+	# branch is exactly as stale as the checkout sitting on it, so resolving the
+	# name locally would answer "is this checkout at the `dev` it was at last
+	# week" — which is not a freshness question at all. A moving ref is therefore
+	# always re-fetched, and a fetch that fails is a refusal rather than a
+	# fallback to the stale local branch. Set `RR_BACKEND_REF` to a commit if
+	# this has to work offline.
+	local is_sha=0
+	[[ $ref =~ ^[0-9a-f]{40}$ ]] && is_sha=1
+
+	want=""
+	if [[ $is_sha -eq 1 ]]; then
+		want="$(git -C "$dir" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null)" || want=""
+	fi
+
+	if [[ -z $want ]]; then
+		if [[ $is_sha -eq 0 ]]; then
+			echo "Ref '$ref' is a moving ref; re-fetching it so the comparison is against what it points at NOW." >&2
+		else
+			echo "Ref '$ref' is not known to the existing checkout; fetching it." >&2
+		fi
+		if git -C "$dir" fetch --quiet origin "$ref" 2>/dev/null; then
+			want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
+		fi
+	fi
+
+	if [[ -z $want ]]; then
+		echo "Error: cannot tell whether the codetracer-native-backend at '$dir' is the revision this build is pinned to." >&2
+		echo "  it is at:      $head" >&2
+		echo "  it must be at: $ref  (which this checkout could not resolve and could not fetch)" >&2
+		echo "Fetch it there, re-provision the sibling, or set RR_BACKEND_REF to the revision you mean." >&2
+		exit 1
+	fi
+
+	if [[ $head != "$want" ]]; then
+		echo "Error: stale codetracer-native-backend checkout at '$dir'." >&2
+		echo "  it is at:      $head" >&2
+		echo "  it must be at: $want  (from ref '$ref')" >&2
+		echo "This decides which ct-native-replay CI builds and tests against, so it is" >&2
+		echo "refused rather than silently reused. Fix it with:" >&2
+		echo "  git -C '$dir' checkout $want && git -C '$dir' submodule update --init --recursive" >&2
+		echo "or set RR_BACKEND_REF to the revision you actually mean." >&2
+		exit 1
+	fi
+
+	echo "Reusing already-provided codetracer-native-backend at $dir (verified at $head)"
+}
+
 clone_rr_backend() {
 	local ref="$1"
 
 	# If the sibling was already provided at the expected location (e.g.
 	# cloned by the shared setup-dev-env CI action at the workspace-locked
-	# revision), reuse it instead of re-cloning. This keeps the script
-	# working both in CI (where setup-dev-env may pre-clone siblings) and
-	# locally (where the sibling typically already lives next to this repo).
+	# revision), reuse it instead of re-cloning -- but only after checking
+	# that it IS at that revision. This keeps the script working both in CI
+	# (where setup-dev-env may pre-clone siblings) and locally (where the
+	# sibling typically already lives next to this repo).
 	if [[ -d "$CLONE_DIR/.git" ]]; then
-		echo "Reusing already-provided codetracer-native-backend at $CLONE_DIR"
+		require_locked_checkout "$CLONE_DIR" "$ref"
 		return 0
 	fi
 
@@ -145,7 +243,7 @@ resolve_runtime_deps() {
 
 	# Create symlinks for rr, dlv, gdb that the codetracer nix shell expects
 	# at $PRJ_ROOT/target/debug/ (normally created by rr-backend shellHook)
-	local target_debug="${REPO_ROOT}/target/debug"
+	local target_debug="${RR_REPO_ROOT}/target/debug"
 	mkdir -p "$target_debug"
 
 	for tool in rr dlv gdb; do
@@ -181,7 +279,7 @@ export_to_github_env() {
 		bin_dir=$(dirname "$ct_native_replay")
 		echo "$bin_dir" >>"$GITHUB_PATH"
 		# Also add the target/debug dir for rr, dlv, gdb symlinks
-		echo "${REPO_ROOT}/target/debug" >>"$GITHUB_PATH"
+		echo "${RR_REPO_ROOT}/target/debug" >>"$GITHUB_PATH"
 	fi
 
 	echo ""
@@ -191,15 +289,20 @@ export_to_github_env() {
 }
 
 main() {
-	# Only resolve a sibling revision when we actually need to clone. If the
-	# sibling is already present (provided by setup-dev-env in CI, or living
-	# next to this repo locally), skip resolution entirely — the resolver and
-	# its workspace-lock lookup are not needed in that case.
-	local ref=""
-	if [[ ! -d "$CLONE_DIR/.git" ]]; then
-		ref=$(resolve_ref)
-		echo "Using rr-backend ref: $ref"
-	fi
+	# ALWAYS resolve the sibling revision, present or not.
+	#
+	# This used to be conditional on the directory being absent, on the
+	# reasoning that "the resolver and its workspace-lock lookup are not needed
+	# in that case". They are: the locked revision is the only thing that can
+	# distinguish a correctly-provisioned sibling from a workspace a self-hosted
+	# runner left behind, and skipping the lookup is what made that question
+	# unanswerable. It costs one script invocation and no network.
+	#
+	# A commit with no lock now fails here instead of silently accepting
+	# whatever is on disk; `RR_BACKEND_REF` states a revision explicitly.
+	local ref
+	ref=$(resolve_ref)
+	echo "Using rr-backend ref: $ref"
 
 	clone_rr_backend "$ref"
 	build_rr_support
@@ -207,4 +310,16 @@ main() {
 	export_to_github_env
 }
 
-main "$@"
+# Executed as a script, sourceable as a library.
+#
+# `ci/test/stale-artefact-guards-test.sh` sources this file to exercise
+# `require_locked_checkout` against real git repositories without reaching
+# `build_rr_support`, which needs nix, a private-repo credential and forty
+# minutes. The alternative — asserting on the source text of the guard — would
+# only prove the file contains a string, which is not what this repository means
+# by a contract suite. `AGENTS.md` asks for exactly this shape ("when creating
+# executables, always make sure the functionality can also be used as a
+# library").
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi

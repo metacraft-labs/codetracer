@@ -35,11 +35,105 @@
   min-height: 0
   min-width: 0
   display: flex
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk", sans-serif !important
   font-size: 0.875em
   flex-direction: column
   gap: 0.5em
-  padding: 0.5em
+  padding: 0.5em 0.5em
+  position: relative
+
+  .agent-input-wrapper
+    background: colors-ui-surface-base-canvas
+    border-radius: 0.5em
+    display: flex
+    flex-direction: column
+
+  .agent-input-text-row
+    position: relative
+
+  .agent-paste-strip
+    display: flex
+    flex-wrap: wrap
+    gap: 0.5em
+    padding: 0.5em 0.5em 0
+
+    &--empty
+      display: none
+
+  .agent-paste-thumb
+    position: relative
+    width: 4.5em
+    height: 4.5em
+    border-radius: 0.375em
+    overflow: hidden
+    flex-shrink: 0
+    background: colors-ui-surface-primary-default
+    cursor: zoom-in
+
+    &--loading
+      background: colors-ui-surface-primary-default
+
+    .agent-paste-img
+      width: 100%
+      height: 100%
+      object-fit: cover
+      display: block
+
+    .agent-paste-remove
+      position: absolute
+      top: 0.2em
+      right: 0.2em
+      width: 1.1em
+      height: 1.1em
+      border-radius: 50%
+      background: rgba(0, 0, 0, 0.65)
+      display: flex
+      align-items: center
+      justify-content: center
+      cursor: pointer
+      font-size: 0.7em
+      color: #fff
+      line-height: 1
+      user-select: none
+
+      &:hover
+        background: rgba(0, 0, 0, 0.85)
+
+  .agent-paste-shimmer
+    width: 100%
+    height: 100%
+    background: linear-gradient(90deg,
+      colors-ui-surface-primary-default 25%,
+      colors-ui-surface-base-panel 50%,
+      colors-ui-surface-primary-default 75%)
+    background-size: 200% 100%
+    animation: agent-paste-shimmer-anim 1.4s ease-in-out infinite
+
+  @keyframes agent-paste-shimmer-anim
+    0%
+      background-position: 200% 0
+    100%
+      background-position: -200% 0
+
+  .agent-input-highlight
+    position: absolute
+    top: 0
+    left: 0
+    right: 0
+    bottom: 0
+    pointer-events: none
+    z-index: 0
+    padding: 0.25em 0.5em
+    font-size: 1em
+    font-family: inherit
+    line-height: 1.5
+    white-space: pre-wrap
+    word-break: break-word
+    overflow: auto
+    scrollbar-width: none
+    color: colors-ui-text-primary-caption
+    &::-webkit-scrollbar
+      display: none
 
   textarea
     width: 100% !important
@@ -47,17 +141,22 @@
     margin-left: 0 !important
     margin-bottom: 0 !important
     padding-left: 0.5em !important
+    // ~35% of a typical 500px panel height; overflow-y:auto adds scrollbar after this cap
     max-height: 12em !important
+    field-sizing: content
     resize: none
     font-size: 1em
     font-family: inherit !important
+    line-height: 1.5 !important
     overflow-y: auto !important
     overflow-x: hidden !important
     white-space: pre-wrap !important
-    border-radius: 0.5em !important
+    border-radius: 0 !important
     padding: 0.25em 0.5em
     border: 0 !important
-    background: colors-ui-surface-base-panel !important
+    background: transparent !important
+    position: relative
+    z-index: 1
 
 
     // &::-webkit-scrollbar-corner
@@ -72,10 +171,11 @@
     //   border: 0.125em solid colors-ui-surface-base-panel !important
 
   .agent-command-input
-    color: #A5F3FC !important
+    color: transparent !important
+    caret-color: colors-ui-text-primary-caption !important
 
     &::placeholder
-      color: #a5f3fc
+      color: colors-ui-text-primary-caption
 
     &:focus
       // border: 0.0625em solid #0E7490 !important
@@ -83,19 +183,21 @@
 
 .agent-buttons-container
   display: flex
-  flex-wrap: wrap
+  flex-wrap: nowrap
   align-items: stretch
   gap: 0.5em
+  overflow: visible
+  min-width: 0
 
   .agent-button
     align-items: center
     gap: 0.375em
     min-width: 0
     white-space: nowrap
-    overflow: hidden
-    text-overflow: ellipsis
-    flex: 1 1 auto !important
-    padding: 0 0.5em 0 0.5em !important
+    overflow: visible
+    flex: 0 1 max-content !important
+    padding: 0 0.5em !important
+    height: 1.75em !important
 
     .add-file-img
       background-image: COMMAND_PALETTE_ADD_FILE_IMG
@@ -122,29 +224,62 @@
   .agent-icon-button
     flex: 0 0 auto !important
 
+  .agent-add-context-wrapper
+    position: relative
+    display: flex
+    flex: 0 0 auto
+
   .agent-add-context-button
-    justify-content: flex-start
-    flex: 1 1 12em !important
+    background-image: AGENT_ADD_CONTEXT_IMG
+    flex: 0 0 auto !important
+    padding: 0 !important
+
+  .agent-model-wrapper
+    flex: 0 1 max-content
+    min-width: 2em
 
   .agent-model-select
-    justify-content: space-between
-    flex: 1 1 10em !important
-    padding-right: 0.375em !important
+    flex: 1 1 auto !important
+    min-width: 0 !important
+
+    .agent-model-img
+      margin-left: auto
+      flex-shrink: 0
+
+  .agent-settings-button
+    background-image: AGENT_SETTINGS_IMG
+    flex: 0 0 auto !important
+    padding: 0 !important
 
   .agent-submit-button
     flex: 0 0 auto !important
+    margin-left: auto !important
 
   .agent-start-button
     background-image: COMMAND_PALETTE_START_MSG_IMG
     background-repeat: no-repeat
     background-size: 1em
     background-position: center
+    border-radius: 50% !important
 
   .agent-stop-button
-    background-image: COMMAND_PALETTE_STOP_MSG_IMG
+    background-image: AGENT_STOP_IMG
     background-repeat: no-repeat
     background-size: 1em
     background-position: center
+    background-color: colors-red-700 !important
+    border: none !important
+    border-radius: 50% !important
+    margin-left: auto !important
+
+    &:hover
+      background-color: colors-red-700 !important
+
+.agent-model-text
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  min-width: 0
 
 .agent-model-img
   height: 1.5em
@@ -162,18 +297,18 @@
   margin-bottom: 0.5em
 
 .user-img
-  height: 1.5em
-  width: 1.5em
-  background-image: COMMAND_PALETTE_USER_IMG
-  background-size: 1em 1em
+  height: 1rem
+  width: 1rem
+  min-width: 1rem
+  background-image: AGENT_USER_AVATAR_IMG
+  background-size: contain
   background-position: center
   background-repeat: no-repeat
 
 .header-wrapper
   display: flex
   justify-content: space-between
-  border-bottom: 0.0625em solid colors-ui-surface-primary-secondary
-  padding: 0.375em 0.5em
+  padding: 0 0.5em
   align-items: center
   gap: 0.5em
 
@@ -187,6 +322,156 @@
   border-radius: 0.25em
   background: colors-ui-surface-input-default
   margin-bottom: 0.5em
+
+.agent-thought-wrapper
+  background: transparent !important
+  border: none !important
+
+.agent-thought-header
+  display: flex
+  flex-direction: row
+  align-items: center
+  justify-content: space-between
+  padding: 0.25em 0
+  cursor: pointer
+  user-select: none
+
+  &:hover
+    opacity: 0.85
+
+  .agent-thought-header-left
+    display: flex
+    flex-direction: row
+    align-items: center
+    gap: 0.375em
+
+  .agent-chevron
+    display: inline-block
+    width: 9px
+    height: 5px
+    background-image: url("data:image/svg+xml,%3Csvg width='9' height='5' viewBox='0 0 9 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353577 0.353516L4.35358 4.35352L8.35358 0.353515' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E")
+    background-repeat: no-repeat
+    background-position: center
+    background-size: contain
+    transition: transform 0.15s ease
+    flex-shrink: 0
+
+    &.agent-chevron-collapsed
+      transform: rotate(-90deg)
+
+  .agent-thought-label
+    font-size: 0.8125rem
+    color: colors-ui-text-primary-label
+
+  .agent-thought-timestamp
+    font-size: 0.75rem
+    color: #727272
+    margin-left: auto
+    padding-left: 1em
+
+.agent-thought-collapsed
+  display: none !important
+
+.agent-inline-code
+  display: inline
+  font-family: "SpaceMono", monospace
+  color: colors-editor-action-primary
+  background: colors-ui-surface-primary-secondary
+  border-radius: 0.25em
+  padding: 0.05em 0.25em
+  font-size: 0.875em
+
+// Inside the highlight overlay the inline-code span must NOT change padding or
+// font-size — those shift the overlay text relative to the textarea, causing
+// the cursor (which the textarea owns) to appear at the wrong position.
+// Color-only styling is safe; layout properties are not.
+.agent-input-highlight .agent-inline-code
+  padding: 0 !important
+  font-size: inherit !important
+  font-family: inherit !important
+
+.agent-table-wrapper
+  overflow-x: auto
+  margin: 0.75em 0
+
+.agent-table
+  display: table
+  border-collapse: collapse
+  border: 1px solid colors-ui-border-primary
+  border-radius: 0.375em
+  overflow: hidden
+  min-width: 100%
+
+.agent-table-header-row
+  display: table-row
+  background: colors-ui-surface-primary-secondary
+
+.agent-table-header-cell
+  display: table-cell
+  padding: 0.5em 1em
+  border-bottom: 1px solid colors-ui-border-primary
+  border-right: 1px solid colors-ui-border-primary
+  font-weight: 600
+  font-size: 0.875rem
+  white-space: nowrap
+  color: colors-ui-text-primary-label
+  &:last-child
+    border-right: none
+
+.agent-table-row
+  display: table-row
+  border-bottom: 1px solid colors-ui-border-primary
+  &:last-child
+    border-bottom: none
+  &:hover
+    background: colors-ui-surface-primary-secondary
+
+.agent-table-cell
+  display: table-cell
+  padding: 0.5em 1em
+  border-right: 1px solid colors-ui-border-primary
+  font-size: 0.875rem
+  color: colors-ui-text-primary-label
+  vertical-align: top
+  &:last-child
+    border-right: none
+
+.agent-bold
+  font-weight: bold
+
+.agent-italic
+  font-style: italic
+
+.agent-bold-italic
+  font-weight: bold
+  font-style: italic
+
+.agent-strike
+  text-decoration: line-through
+
+.agent-code-block
+  display: block
+  background: colors-ui-surface-primary-secondary
+  border: 1px solid colors-ui-border-primary
+  border-radius: 0.25em
+  margin: 0.5em 0
+  overflow: hidden
+
+  .agent-code-block-lang
+    display: block
+    font-family: "SpaceMono", monospace
+    font-size: 0.75rem
+    color: colors-ui-text-primary-subtle
+    padding: 0.5em 0.75em 0.25em
+
+  .agent-code-block-content
+    display: block
+    font-family: "SpaceMono", monospace
+    color: colors-editor-action-primary
+    font-size: 0.875em
+    padding: 0.25em 0.75em 0.75em
+    white-space: pre
+    overflow-x: auto
 
 // RV-6 — the panel's explanation of a review's agent session: it is empty,
 // it could not be fetched, or the agent cannot replay sessions at all
@@ -244,8 +529,9 @@
   padding: 0.5em 0.75em
   cursor: pointer
 
+  // The list hover (LIST_HOVER_BG, button.styl).
   &:hover
-    background: colors-ui-surface-base-canvas
+    background: LIST_HOVER_BG
 
 .agent-test-run-toggle
   color: colors-ui-text-primary-caption
@@ -296,8 +582,9 @@
   padding: 0.375em 0.25em
   cursor: pointer
 
+  // The list hover (LIST_HOVER_BG, button.styl).
   &:hover
-    background: colors-ui-surface-base-canvas
+    background: LIST_HOVER_BG
 
 .agent-test-row-status
   flex: 0 0 auto
@@ -445,20 +732,64 @@
   max-height: 16em
 
 .user-wrapper
-  background: transparent !important
+  background: colors-ui-surface-primary-default !important
+  border-radius: border-border-radius-2xs !important
+  padding-top: 0.5em !important
+  padding-bottom: 0.5em !important
+
+.agent-user-copy-button
+  background-image: AGENT_USER_COPY_IMG
+  background-origin: content-box
+  background-size: contain
+  background-position: center
+  background-repeat: no-repeat
+  box-sizing: border-box
+  width: 1rem
+  height: 1rem
+  padding: (scale-200 * 1px)
+  flex: 0 0 auto
+  cursor: pointer
+  &.copied
+    background-image: AGENT_USER_COPY_SUCCESS_IMG
 
 .user-name
   margin-left: 0.25em
   margin-right: 0.25em
 
+.user-timestamp
+  margin-left: 0.25em
+  font-size: 0.75rem
+  color: colors-ui-icon-primary-subtle
+
 .ai-msg
   padding: 0.5em
   margin-bottom: 0.5em
 
-.msg-content
-  padding: 0.75em
+.agent-msg-images
   display: flex
-  flex-direction: column
+  flex-wrap: wrap
+  gap: 0.375em
+  padding: 0.375em 0.5em 0
+
+.agent-msg-thumb
+  width: 5em
+  height: 5em
+  border-radius: 0.375em
+  overflow: hidden
+  flex-shrink: 0
+  cursor: zoom-in
+
+  .agent-msg-thumb-img
+    width: 100%
+    height: 100%
+    object-fit: cover
+    display: block
+
+.msg-content
+  padding: 0.25em 0.5em
+  display: block
+  white-space: pre-wrap
+  word-break: break-word
 
 .ai-img
   height: 1.5em
@@ -505,6 +836,224 @@
 .terminal-copy-button
   margin-right: 0.375em
 
+.agent-diff-section
+  margin: 0.5em 0 0.25em 0
+  border-radius: 0.375em
+  overflow: hidden
+
+.agent-diff-header
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.5em 0.75em
+  background: colors-ui-surface-primary-tertiary
+
+.agent-diff-status-dot
+  width: 0.5em
+  height: 0.5em
+  border-radius: 50%
+  background: colors-ui-icon-success-primary
+  flex-shrink: 0
+
+.agent-diff-status-label
+  flex: 1
+  font-size: 0.8125rem
+  color: colors-ui-text-primary-body-subtle
+
+.agent-diff-unified-btn
+  display: inline-flex !important
+  align-items: center
+  gap: 0.375em
+  padding: 0.375em 0.75em !important
+  border-radius: 0.375em !important
+  font-size: 0.8125rem
+  font-family: inherit !important
+  cursor: pointer
+  flex: 0 0 auto !important
+  user-select: none
+  white-space: nowrap
+
+.agent-diff-unified-icon
+  width: 11px
+  height: 13px
+  background-image: url("data:image/svg+xml,%3Csvg width='11' height='13' viewBox='0 0 11 13' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.5 2.57324C0.776004 2.57324 0.999775 2.79729 1 3.07324V9.65234C1.0002 10.4803 1.67147 11.1503 2.5 11.1504H7.09766C7.37351 11.1504 7.59718 11.3747 7.59766 11.6504C7.59766 11.9265 7.3738 12.1504 7.09766 12.1504H2.5C1.11978 12.1503 0.000204816 11.0331 0 9.65234V3.07324C0.000224474 2.79734 0.224065 2.57332 0.5 2.57324ZM7.69629 0.00878906C7.78876 0.0266271 7.87584 0.071257 7.94531 0.136719L10.7393 2.77539C10.8392 2.86976 10.8954 3.00222 10.8955 3.13965V8.85742C10.8955 9.23267 10.7379 9.58654 10.4668 9.84277C10.1965 10.098 9.8354 10.2372 9.46484 10.2373H3.41016C3.0396 10.2372 2.67844 10.098 2.4082 9.84277C2.13723 9.58655 1.97852 9.2326 1.97852 8.85742V1.37988C1.97862 1.00464 2.13706 0.650698 2.4082 0.394531C2.67844 0.139294 3.0396 0.000119562 3.41016 0H7.60156L7.69629 0.00878906ZM3.41016 1C3.28703 1.00012 3.17363 1.04661 3.09473 1.12109C3.01684 1.19469 2.97862 1.28882 2.97852 1.37988V8.85742C2.97852 8.94846 3.01698 9.04256 3.09473 9.11621C3.17363 9.19073 3.287 9.23718 3.41016 9.2373H9.46484C9.58789 9.23721 9.70038 9.19059 9.7793 9.11621C9.85734 9.0425 9.89551 8.94863 9.89551 8.85742V3.35352L7.40234 1H3.41016ZM6.93945 4.55273H8.41895V5.55273H6.93945V7.03223H5.93945V5.55273H4.45996V4.55273H5.93945V3.07324H6.93945V4.55273Z' fill='%23DDDDDD'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-size: contain
+  flex-shrink: 0
+
+.agent-diff-file-row
+  display: flex
+  align-items: center
+  gap: 0.75em
+  padding: 0.5em 0.75em
+  border-top: 1px solid colors-ui-border-secondary
+  cursor: pointer
+  user-select: none
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+    .agent-diff-file-path
+      color: colors-ui-text-primary-body
+
+.agent-diff-file-path
+  flex: 1
+  font-size: 0.8125rem
+  color: colors-ui-text-primary-body-subtle
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.agent-diff-stat-added
+  font-size: 0.8125rem
+  font-weight: 600
+  color: colors-ui-icon-success-primary
+  flex-shrink: 0
+
+.agent-diff-stat-removed
+  font-size: 0.8125rem
+  font-weight: 600
+  color: colors-ui-icon-error-primary
+  flex-shrink: 0
+
+.agent-diff-open-icon
+  width: 11px
+  height: 13px
+  background-image: url("data:image/svg+xml,%3Csvg width='11' height='13' viewBox='0 0 11 13' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.5 2.57324C0.776004 2.57324 0.999775 2.79729 1 3.07324V9.65234C1.0002 10.4803 1.67147 11.1503 2.5 11.1504H7.09766C7.37351 11.1504 7.59718 11.3747 7.59766 11.6504C7.59766 11.9265 7.3738 12.1504 7.09766 12.1504H2.5C1.11978 12.1503 0.000204816 11.0331 0 9.65234V3.07324C0.000224474 2.79734 0.224065 2.57332 0.5 2.57324ZM7.69629 0.00878906C7.78876 0.0266271 7.87584 0.071257 7.94531 0.136719L10.7393 2.77539C10.8392 2.86976 10.8954 3.00222 10.8955 3.13965V8.85742C10.8955 9.23267 10.7379 9.58654 10.4668 9.84277C10.1965 10.098 9.8354 10.2372 9.46484 10.2373H3.41016C3.0396 10.2372 2.67844 10.098 2.4082 9.84277C2.13723 9.58655 1.97852 9.2326 1.97852 8.85742V1.37988C1.97862 1.00464 2.13706 0.650698 2.4082 0.394531C2.67844 0.139294 3.0396 0.000119562 3.41016 0H7.60156L7.69629 0.00878906ZM3.41016 1C3.28703 1.00012 3.17363 1.04661 3.09473 1.12109C3.01684 1.19469 2.97862 1.28882 2.97852 1.37988V8.85742C2.97852 8.94846 3.01698 9.04256 3.09473 9.11621C3.17363 9.19073 3.287 9.23718 3.41016 9.2373H9.46484C9.58789 9.23721 9.70038 9.19059 9.7793 9.11621C9.85734 9.0425 9.89551 8.94863 9.89551 8.85742V3.35352L7.40234 1H3.41016ZM6.93945 4.55273H8.41895V5.55273H6.93945V7.03223H5.93945V5.55273H4.45996V4.55273H5.93945V3.07324H6.93945V4.55273Z' fill='%23DDDDDD'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-size: contain
+  flex-shrink: 0
+  opacity: 0.7
+
+.agent-diff-file-row:hover .agent-diff-open-icon
+  opacity: 1
+
+.agent-diff-editor-wrapper
+  display: none
+
+.agent-diff-editor-wrapper.agent-diff-editor-visible
+  display: block
+
+// Tool calls section — rendered inside the agent thought block
+.agent-tc-section
+  margin-top: 0.625em
+  display: flex
+  flex-direction: column
+  gap: 0.25em
+
+// History rows: hidden by default, shown when .agent-tc-history-expanded is toggled
+.agent-tc-history
+  display: none
+  flex-direction: column
+  gap: 0.25em
+
+  &.agent-tc-history-expanded
+    display: flex
+
+// Toggle button showing how many tools were used; click expands history
+.agent-tc-toggle
+  display: flex
+  align-items: center
+  gap: 0.375em
+  padding: 0.25em 0.5em
+  cursor: pointer
+  user-select: none
+  color: colors-ui-text-primary-body-subtle
+  font-size: 0.75rem
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+.agent-tc-toggle-icon
+  width: 10px
+  height: 10px
+  flex-shrink: 0
+  opacity: 0.6
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 2L9 6H1L5 2Z' fill='%23888'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-position: center
+  background-size: contain
+
+.agent-tc-history-expanded ~ .agent-tc-toggle .agent-tc-toggle-icon
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 8L1 4H9L5 8Z' fill='%23888'/%3E%3C/svg%3E")
+
+// Individual tool call row
+.agent-tc-row
+  display: flex
+  align-items: center
+  gap: 0.625em
+  padding: 0.5em 0.75em
+  border-radius: 0.375em
+  background: colors-ui-surface-primary-tertiary
+
+.agent-tc-row-current
+  // No extra style needed; kept for selector specificity if needed
+
+// Expanded state: full tool name wraps instead of truncating with ellipsis
+.agent-tc-row-expanded
+  align-items: flex-start
+
+  .agent-tc-name
+    white-space: normal
+    overflow: visible
+    text-overflow: unset
+
+  .agent-tc-icon
+    transform: rotate(0deg)
+    margin-top: 0.2em
+
+// Chevron icon (left side of each row) — same icon as model/branch arrow buttons.
+// Default: rotate -90deg so it points right (collapsed). When expanded: 0deg (down).
+.agent-tc-icon
+  width: 1.25em
+  height: 1.25em
+  flex-shrink: 0
+  cursor: pointer
+  opacity: 0.65
+  transition: transform 0.15s ease
+  transform: rotate(-90deg)
+  background-image: COMMAND_PALETTE_ARROW_IMG
+  background-repeat: no-repeat
+  background-size: 0.5625em 0.375em
+  background-position: center
+
+  &:hover
+    opacity: 0.9
+
+// Tool name — monospace, truncated
+.agent-tc-name
+  flex: 1
+  font-family: monospace
+  font-size: 0.8125rem
+  color: colors-ui-text-primary-body-subtle
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+// Status dot (right side)
+.agent-tc-dot
+  width: 10px
+  height: 10px
+  border-radius: 50%
+  flex-shrink: 0
+  align-self: center
+
+.agent-tc-dot-running
+  background: colors-ui-icon-warning-primary
+  animation: agent-tc-pulse 1.2s ease-in-out infinite
+
+.agent-tc-dot-done
+  background: colors-ui-icon-success-primary
+
+.agent-tc-dot-failed
+  background: colors-ui-icon-error-primary
+
+@keyframes agent-tc-pulse
+  0%, 100%
+    opacity: 1
+  50%
+    opacity: 0.35
+
 .component-wrapper
   background: colors-ui-surface-base-panel
   border-radius: 0.25em
@@ -530,8 +1079,7 @@
     height: 100%
 
 .agent-interaction
-  border: 0.0625em solid #0E7490
-  background: colors-ui-surface-base-panel
+  background: colors-ui-surface-base-canvas
   border-radius: 0.5em
   padding: 0.5em
   flex: 0 0 auto
@@ -557,7 +1105,7 @@
       margin-left: 0 !important
       margin-bottom: 0 !important
       padding-left: 0.5em !important
-      background: #2C2C2C
+      background: colors-ui-surface-input-secondary
 
     .password-continue-button
       flex: 0 0 auto !important
@@ -575,6 +1123,57 @@
     .user-option
       flex: 0 0 auto !important
 
+.permission-prompt
+  background: colors-ui-surface-primary-default
+  border: 1px solid colors-ui-border-error
+  border-radius: 0.25em
+  display: flex
+  flex-direction: column
+  gap: 0.5em
+  margin-top: 0.5em
+  margin-bottom: 0.5em
+  padding: 0.75em
+
+  .permission-header
+    display: flex
+    flex-direction: row
+    align-items: center
+    gap: 0.375em
+
+  .permission-dot
+    background-image: AGENT_PERMISSION_DOT_IMG
+    background-repeat: no-repeat
+    background-size: contain
+    background-position: center
+    width: 0.4375rem
+    height: 0.4375rem
+    flex-shrink: 0
+
+  .permission-action-label
+    font-size: 0.875rem
+    font-weight: 500
+    color: colors-red-400
+
+  .permission-description
+    font-size: 0.875rem
+    color: colors-ui-text-primary-default
+    line-height: 1.4
+
+  .permission-subtitle
+    font-size: 0.75rem
+    color: colors-ui-icon-primary-subtle
+    line-height: 1.4
+
+  .permission-buttons
+    display: flex
+    flex-direction: row
+    flex-wrap: wrap
+    gap: 0.5em
+    margin-top: 0.25em
+
+    button
+      flex: 0 0 auto !importantimportant
+
 .ai-status
   background-image: AI_LOADING_ANIMATION
   background-position-y: 70%
@@ -582,3 +1181,514 @@
   width: 1.75em
   height: 1.75em
   background-repeat: no-repeat
+
+// Final text summary shown outside the collapsed thought block when done.
+// Hidden when the user expands the block (via agent-final-message-hidden toggle).
+.agent-final-message
+  padding: 0.25em 0.5em 0.375em
+  white-space: pre-wrap
+  word-break: break-word
+  color: colors-ui-text-primary-body
+  font-size: 0.875rem
+  line-height: 1.5
+
+.agent-final-message-hidden
+  display: none !important
+
+// "... Agent is working" indicator shown below message content while the agent
+// is still producing output after the thinking phase ended.
+.agent-working-indicator
+  display: flex
+  flex-direction: row
+  align-items: center
+  gap: 0.25em
+  padding: 0.375em 0.5em 0.25em
+  color: colors-ui-text-primary-body-subtle
+  font-size: 0.8125rem
+
+  .ai-status
+    width: 1.25em
+    height: 1.25em
+    background-size: 0.625em 0.625em
+
+// ---------------------------------------------------------------------------
+// Empty prompt — idle state (shown when the conversation has no messages yet)
+// ---------------------------------------------------------------------------
+
+.agent-idle-state
+  display: flex
+  flex-direction: column
+  align-items: center
+  justify-content: center
+  height: 100%
+  padding: 1.5em 1em
+  gap: 1.25em
+  text-align: center
+
+.agent-idle-header
+  display: flex
+  flex-direction: column
+  align-items: center
+  gap: 0.5em
+
+.agent-idle-heading
+  font-size: 1.25em
+  font-weight: 600
+  color: colors-ui-text-primary-headings
+  font-family: "SpaceGrotesk", sans-serif
+  line-height: 1.3
+
+.agent-idle-subtitle
+  font-size: 0.9em
+  color: colors-ui-text-primary-caption
+  line-height: 1.5
+
+.agent-idle-suggestions
+  display: flex
+  flex-wrap: wrap
+  gap: 0.5em
+  justify-content: center
+
+.agent-idle-chip
+  background: colors-ui-surface-input-default
+  border: 0.0625em solid colors-ui-border-secondary
+  border-radius: 9999px !important
+  color: colors-ui-text-primary-body
+  font-size: 0.8em
+  font-family: inherit
+  padding: 0.4em 1em
+  cursor: pointer
+  transition: background-color 0.15s ease, border-color 0.15s ease
+  white-space: nowrap
+  line-height: 1.5
+
+  &:hover
+    background: colors-ui-surface-primary-secondary
+    border-color: colors-ui-border-primary
+
+// Model selector button wrapper
+.agent-model-wrapper
+  position: relative
+  flex: 0 1 max-content
+  min-width: 2em
+  display: flex
+  overflow: visible
+
+.agent-model-dropdown
+  position: absolute
+  bottom: calc(100% + 0.375em)
+  left: 0
+  right: 0
+  z-index: 100
+  dropdown-surface-chrome()
+  animation: ct-dropdown-reveal 120ms ease-out
+  @media (prefers-reduced-motion: reduce)
+    animation: none
+  min-width: 10rem
+  overflow: hidden
+
+.agent-model-item
+  padding: 0.625em 0.75em
+  cursor: pointer
+  font-size: 0.875rem
+  color: colors-ui-text-primary-body
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+
+  &:first-child
+    border-top: none
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  &.agent-model-item--active
+    background: colors-ui-surface-primary-secondary
+
+// Branch context button in the agent toolbar
+.agent-branch-wrapper
+  position: relative
+  flex: 0 1 max-content
+  min-width: 2em
+  display: flex
+  overflow: visible
+
+.agent-branch-button
+  flex: 1 1 auto !important
+  min-width: 0 !important
+  padding-left: 0.5em !important
+
+  .agent-model-img
+    margin-left: auto
+    flex-shrink: 0
+
+.agent-branch-label
+  display: flex
+  align-items: center
+  gap: 0.375em
+  min-width: 0
+  overflow: hidden
+
+.agent-branch-text
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  min-width: 0
+
+.agent-branch-img
+  background-image: AGENT_BRANCH_IMG
+  background-size: 0.875em 0.875em
+  background-position: center
+  background-repeat: no-repeat
+  width: 1em
+  min-width: 1em
+  height: 1em
+  flex-shrink: 0
+
+.agent-branch-dropdown
+  position: absolute
+  bottom: calc(100% + 0.375em)
+  left: 0
+  right: 0
+  z-index: 100
+  dropdown-surface-chrome()
+  animation: ct-dropdown-reveal 120ms ease-out
+  @media (prefers-reduced-motion: reduce)
+    animation: none
+  display: flex
+  flex-direction: column
+  min-width: 12rem
+  max-height: 18rem
+  overflow: hidden
+
+.agent-branch-search-row
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.5em 0.75em
+  border-bottom: 0.0625rem solid colors-ui-border-tertiary
+  flex-shrink: 0
+
+  .agent-branch-search-icon
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+    opacity: 0.7
+
+  .agent-branch-search-input
+    flex: 1
+    border: none
+    background: transparent
+    outline: none
+    color: colors-ui-text-primary-body
+    font-size: 0.875rem
+    min-width: 0
+
+    &::placeholder
+      color: colors-ui-text-primary-subtle
+
+.agent-branch-list
+  flex: 1 1 auto
+  overflow-y: auto
+
+.agent-branch-item
+  padding: 0.625em 0.75em
+  cursor: pointer
+  font-family: monospace
+  font-size: 0.875rem
+  color: colors-ui-text-primary-body
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+
+  &:first-child
+    border-top: none
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  &.agent-branch-item--active
+    background: colors-ui-surface-primary-secondary
+
+.agent-branch-create-row
+  display: flex
+  align-items: center
+  gap: 0.625em
+  padding: 0.5em 0.75em
+  cursor: pointer
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+  flex-shrink: 0
+  font-size: 0.875rem
+  color: colors-ui-text-primary-body
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  .agent-branch-create-icon
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+
+// Dropdown opened by the + (add context) button.
+// Anchors to the left edge of the wrapper and opens upward by default.
+// Flips below (downward) when there is not enough space above — the
+// .agent-add-context-dropdown--below modifier is applied via JS when the menu
+// would overflow the viewport top.
+.agent-add-context-dropdown
+  position: absolute
+  bottom: calc(100% + 0.375em)
+  left: 0
+  z-index: 100
+  dropdown-surface()
+  min-width: 11rem
+  padding: 0.25em 0
+
+  // Flip downward when there is not enough space above.
+  &.agent-add-context-dropdown--below
+    bottom: auto
+    top: calc(100% + 0.375em)
+
+.agent-add-context-menu-item
+  display: flex
+  align-items: center
+  gap: 0.625em
+  padding: 0.5em 0.75em
+  cursor: pointer
+  white-space: nowrap
+  dropdown-surface-row()
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  .agent-add-context-menu-icon
+    display: flex
+    align-items: center
+    justify-content: center
+    width: 1em
+    flex-shrink: 0
+
+  .ct-menu-item-label
+    font-size: 0.875rem
+    color: colors-ui-text-primary
+
+// Settings button in the agent toolbar
+
+// ── Settings overlay panel ──────────────────────────────────────────────────
+
+.agent-settings-host
+  position: absolute
+  inset: 0
+  z-index: 20
+  pointer-events: none  // transparent when empty
+
+  // When the settings panel is rendered inside, restore pointer events
+  &:not(:empty)
+    pointer-events: all
+
+.agent-settings-panel
+  position: absolute
+  inset: 0
+  background: colors-ui-surface-base-panel
+  overflow-y: auto
+  display: flex
+  flex-direction: column
+  border-radius: inherit
+
+.agent-settings-section
+  padding: 1em 1em 0.75em
+  border-bottom: 1px solid colors-ui-border-primary
+  display: flex
+  flex-direction: column
+  gap: 0.375em
+
+  &--last
+    flex: 1 1 auto
+    border-bottom: none
+
+.agent-settings-section-header
+  font-size: 0.65em
+  letter-spacing: 0.08em
+  color: colors-ui-text-primary-subtle
+  text-transform: uppercase
+  margin-bottom: 0.25em
+
+.agent-settings-label
+  font-size: 0.75em
+  color: colors-ui-text-primary-subtle
+  margin-bottom: 0.125em
+
+.agent-settings-select-wrapper
+  position: relative
+
+.agent-settings-select-trigger
+  display: flex
+  align-items: center
+  background: colors-ui-surface-primary-default
+  border: 1px solid colors-ui-border-primary
+  border-radius: 0.375em
+  padding: 0.5em 0.75em
+  cursor: pointer
+  font-family: "SpaceMono"
+  font-size: 0.875em
+  color: colors-ui-text-primary-body
+  user-select: none
+  gap: 0.5em
+
+  &:hover
+    background: colors-ui-surface-primary-default-hover
+
+.agent-settings-select-text
+  flex: 1 1 auto
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.agent-settings-select-chevron
+  flex: 0 0 auto
+  width: 0.75em
+  height: 0.75em
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-position: center
+  background-size: contain
+
+.agent-settings-dropdown-list
+  position: absolute
+  left: 0
+  right: 0
+  top: calc(100% + 0.25em)
+  background: colors-ui-surface-primary-secondary
+  border: 1px solid colors-ui-border-primary
+  border-radius: 0.5em
+  z-index: 200
+  overflow: hidden
+  box-shadow: 0 0.5em 1.5em rgba(0, 0, 0, 0.4)
+
+.agent-settings-dropdown-item
+  display: flex
+  align-items: center
+  padding: 0.625em 1em
+  cursor: pointer
+  font-size: 0.875em
+  color: colors-ui-text-primary-body
+  font-family: "SpaceMono"
+  gap: 0.5em
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  &--active
+    color: colors-ui-text-primary-label
+
+.agent-settings-check-icon
+  margin-left: auto
+  width: 0.875em
+  height: 0.875em
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M2 7l4 4 6-6' stroke='%23fff' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-position: center
+  background-size: contain
+  flex-shrink: 0
+
+.agent-settings-two-col
+  display: flex
+  gap: 0.5em
+
+.agent-settings-half-col
+  flex: 1 1 50%
+  min-width: 0
+  display: flex
+  flex-direction: column
+  gap: 0.25em
+
+.agent-settings-toggle-row
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding-top: 0.25em
+
+.agent-settings-toggle
+  width: 2.25em
+  height: 1.25em
+  border-radius: 0.625em
+  background: colors-ui-surface-primary-secondary
+  position: relative
+  cursor: pointer
+  transition: background 0.2s
+  flex-shrink: 0
+
+  &--on
+    background: colors-ui-surface-action-primary
+
+  .agent-settings-toggle-thumb
+    position: absolute
+    top: 0.125em
+    left: 0.125em
+    width: 1em
+    height: 1em
+    border-radius: 50%
+    background: colors-ui-text-on-action-primary
+    transition: left 0.15s
+
+  &--on .agent-settings-toggle-thumb
+    left: 1.125em
+
+.agent-settings-agents-row
+  display: flex
+  align-items: center
+  flex-wrap: wrap
+  gap: 0.375em
+  padding-top: 0.125em
+
+.agent-settings-agent-chip
+  display: inline-flex
+  align-items: center
+  padding: 0.25em 0.625em
+  border: 1px solid colors-ui-border-primary
+  border-radius: 1em
+  font-size: 0.75em
+  color: colors-ui-text-primary-body
+  font-family: "SpaceMono"
+
+.agent-settings-add-chip
+  display: inline-flex
+  align-items: center
+  padding: 0.25em 0.625em
+  border: 1px solid colors-ui-border-primary
+  border-radius: 1em
+  font-size: 0.75em
+  color: colors-ui-text-primary-subtle
+  cursor: pointer
+  font-family: "SpaceMono"
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+    color: colors-ui-text-primary-body
+
+.agent-settings-footer
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding: 0.875em 1em
+  border-top: 1px solid colors-ui-border-primary
+  margin-top: auto
+
+.agent-settings-reset
+  background: none !important
+  border: none !important
+  color: colors-ui-text-primary-body-subtle
+  font-size: 0.8125em
+  font-family: "SpaceMono"
+  cursor: pointer
+  padding: 0.25em 0 !important
+  text-decoration: underline
+  text-underline-offset: 0.2em
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+.agent-settings-done
+  font-size: 0.875em
+  font-family: "SpaceMono"
+  padding: 0.5em 1.25em !important
+  height: auto !important
+  flex: 0 0 auto !important
+  border-radius: 0.5em !important

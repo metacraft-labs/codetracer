@@ -7,7 +7,7 @@
   box-sizing: border-box
   overflow: hidden
   color: colors-ui-text-primary-body
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 13px
   line-height: 20px
 
@@ -15,7 +15,9 @@
     display: flex
     align-items: center
     gap: 12px
-    padding: 6px 10px
+    // Content at the panel inset (PANEL_INSET, button.styl) left and right; the
+    // band itself runs edge to edge.
+    padding: 6px PANEL_INSET
     flex: 0 0 auto
     color: colors-ui-text-primary-body
     border-bottom: 1px solid colors-ui-surface-input-default
@@ -28,7 +30,7 @@
     display: flex
     align-items: center
     gap: 4px
-    padding: 8px 10px
+    padding: 8px PANEL_INSET
     flex: 0 0 auto
 
     button
@@ -49,7 +51,7 @@
   .timeline-track
     position: relative
     height: 42px
-    margin: 0 10px
+    margin: 0 PANEL_INSET
     border-top: 1px solid colors-ui-surface-input-default
     border-bottom: 1px solid colors-ui-surface-input-default
     background:

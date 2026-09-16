@@ -41,8 +41,22 @@ source ci/lib/lint-steps.sh
 # Derived from what these scripts INVOKE, not what they mention: this file
 # names `cargo`, `nim` and `node` in prose and invokes none of them directly.
 # `node` is here because tools/visual-review/deepreview-harness-test.sh runs it.
+# `openssl` and `sha256sum` are here because
+# `ci/test/stale-artefact-guards-test.sh` invokes both — the first to issue and
+# inspect real certificates, the second to key a lockfile install. That suite
+# exits 3 on a missing tool rather than skipping the section, so a shell without
+# them has to fail by name here and not four steps later.
+#
+# `python3:yaml` IS A MODULE, NOT A COMMAND, AND THAT DISTINCTION COST A LANE.
+# The derivation rule above is "commands in command position", which cannot see
+# an `import`. `devShells.lint` therefore carried `python3` and not PyYAML,
+# `ci/verdict/recorder-clone-implies-build.py` imports `yaml`, and the contract
+# suite that drives it exited 1 with "PyYAML is not available; this suite cannot
+# run" on every run -- failing this lane and skipping every build job behind it,
+# while `command -v python3` said yes throughout. Requirements are declared here
+# in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash git python3 node awk diff sort comm timeout
+	bash ci/lib/require-tools.sh shellcheck bash git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
@@ -70,6 +84,42 @@ lint_step "shellcheck: CI scripts" \
 # works rather than evidence the regex still parses.
 lint_step "contract suite: no producer is piped into 'grep -q' under pipefail" \
 	bash ci/test/grep-q-pipefail-gate.sh
+
+# THE SECOND DEFECT SHELLCHECK DOES NOT HAVE A CODE FOR, and this one has bitten
+# twice in one night. A script assigns a common name, sources another script that
+# assigns the SAME name at top level, and every later use silently resolves to
+# the other script's value — a path that exists, a step that exits 0, and an
+# artefact that is simply absent.
+#
+#   * `SCRIPT_DIR` (295f36835): `src/db-backend/build_wasm.sh` sources
+#     `ct_emulator/export_build_env.sh` from the recorder repo. The stamping step
+#     afterwards resolved to `/Users/zahary/m/dev/ci/lib/...` — one directory
+#     ABOVE BOTH REPOSITORIES — and the build finished 0 with its freshness stamp
+#     unwritten.
+#   * `REPO_ROOT` (3c7b257ed): `ci/test/stale-artefact-guards-test.sh` sources
+#     `ci/setup-rr-backend.sh`. Contained at runtime by a subshell, so it
+#     surfaced only as nine FALSE SC2031s once `shopt -s globstar` above let the
+#     linter see both files at once — failing this lane and dark-gating every
+#     build artefact job for 13 runs.
+#
+#     (Worded that way on purpose: a comment line whose first word is the
+#     linter's own name is parsed as a DIRECTIVE, and this paragraph reddened
+#     `shellcheck: CI scripts` with SC1072/SC1073 while it was being written.)
+#
+# Both were fixed at the site. Neither fix stopped the next one, and the hazard
+# was already written down in the stale-artefact suite's own header. The rule is
+# on the SOURCED side because that side is small (sixteen files are ever sourced;
+# eleven already leak nothing) and, decisively, CHECKABLE without knowing
+# anything about a file's callers. Its Arm B covers the one thing Arm A cannot:
+# a source into ANOTHER REPOSITORY, where no invariant of ours applies.
+#
+# Pure bash + awk + git over the committed tree, under a second. Its Step 0 runs
+# the detector against fixtures carrying one of each shape — three real leaks and
+# seven correct constructions — and refuses to report on the tree at all if any
+# is misjudged, because a detector that has rotted into a no-op produces exactly
+# the output of a clean repository.
+lint_step "contract suite: a sourced script leaks only what it declares" \
+	bash ci/test/sourced-var-collision-gate.sh
 
 lint_step "shellcheck: AppImage scripts" \
 	shellcheck appimage-scripts/*.sh
@@ -111,6 +161,30 @@ lint_step "shellcheck: build prerequisites checked before tup runs" \
 lint_step "shellcheck: build-alignment harness ('just test' runs it)" \
 	shellcheck scripts/test-build-alignment.sh
 
+# `just test` -- the recipe the line above says runs the build-alignment harness
+# -- is itself an aggregate over seven lanes, and until ci/lib/run-just-lanes.sh
+# existed it was a `set -e` sequence that stopped at the first failing one. Six
+# lanes, including that harness, went unrun and unreported whenever an earlier
+# one broke. `test-bpf` was the same defect spelled as a dependency list.
+#
+# Executed here, and not only linted, for the reason the stale-artefact suite
+# below is: an aggregate that has never been SEEN to report a second failure is
+# indistinguishable from one that still hides it.
+#
+# It is HERMETIC — it stubs `just` on PATH rather than needing the real one —
+# and that is a correctness requirement of running it here, not a convenience.
+# nix/shells/lint.nix carries no `just` on purpose, so the first version of this
+# registration refused to run and turned this job red. The stub costs nothing:
+# ci/lib/run-just-lanes.sh's whole interface to the outside is `just <lane>`,
+# one argument and one exit status. So: no nix, no build, no network, seconds.
+#
+# One section of the suite does need a real `just` (it asserts what `just`
+# itself does with a failing DEPENDENCY, which is why `test-bpf` could not stay
+# a dependency list). That section self-skips here and the suite's expected
+# assertion count drops to match, so a short tally is still a finding.
+lint_step "contract suite: an aggregate runs every lane and names every failure" \
+	bash ci/test/run-just-lanes-test.sh
+
 # UD-0's visual-design-iteration harness. Neither `tools/` nor `scripts/docs/`
 # is under ci/, so the glob at the top does not reach either; the harness and
 # its contract suite are named here.
@@ -131,6 +205,36 @@ lint_step "shellcheck: DeepReview design-review harness" \
 lint_step "contract suite: DeepReview design-review harness" \
 	bash tools/visual-review/deepreview-harness-test.sh
 
+# THE STALE-CAPTURE SWEEP (GOAL #100). Scripts that decide whether an artefact
+# may be reused, published or trusted by asking only whether a path EXISTS, when
+# what they need is that it is CURRENT. `scripts/docs/` and `browser-replay/` are
+# not under ci/, so the glob at the top reaches neither; `ci/setup-rr-backend.sh`
+# it does reach, but only because of the `globstar` note above.
+lint_step "shellcheck: stale-artefact guards" \
+	shellcheck \
+	scripts/docs/capture-visual-recording-screenshots.sh \
+	scripts/docs/generate-webp-animations.sh \
+	scripts/storybook-deps.sh \
+	scripts/build-desktop-component.sh \
+	scripts/developer-setup.sh \
+	scripts/run-cross-repo-tests.sh \
+	browser-replay/setup-certs.sh \
+	browser-replay/deploy-wasm.sh \
+	browser-replay/build-dist.sh \
+	browser-replay/tests/test_dist.sh \
+	ci/test/stale-artefact-guards-test.sh
+
+# Executed here, and not only linted, for the reason the whole sweep exists: a
+# freshness guard that has never been SEEN to refuse a stale artefact is
+# indistinguishable from one that cannot. The suite stales a real binary, a real
+# storybook corpus, a real git checkout, a real certificate and a real video
+# directory in throwaway trees and asserts each guard says no. It needs bash,
+# git, node, openssl and coreutils — no nix, no dev shell, no network, no
+# Playwright and no Electron — so it belongs on this stock lint runner rather
+# than behind any of the heavy lanes whose artefacts it is about.
+lint_step "contract suite: existence is not freshness" \
+	bash ci/test/stale-artefact-guards-test.sh
+
 # scripts/test-flake-pin-alignment.sh is the static guard on the `runquota` /
 # `reprobuild` lockstep. It is not under ci/, so the glob at the top does not
 # reach it.
@@ -144,6 +248,15 @@ lint_step "shellcheck: flake pin alignment guard" \
 # single worst place in the TUI's build for a diagnosis to arrive.
 lint_step "shellcheck: TUI grammar-archive builder" \
 	shellcheck scripts/build-tui-grammars.sh
+
+# scripts/test-flake-lock-node-dates.sh is the network-free half of the
+# flake.lock metadata question: it reads the true commit date of a locked `rev`
+# out of the workspace sibling that already has the object, so it can run in
+# `just test` and in the pre-push gate instead of waiting for the lane below
+# that has to ask GitHub. Not under ci/, so the glob at the top does not reach
+# it either.
+lint_step "shellcheck: flake lock node dates guard" \
+	shellcheck scripts/test-flake-lock-node-dates.sh
 
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
@@ -166,6 +279,17 @@ lint_step "shellcheck: toolchain resolver" \
 # that defect is invisible to shellcheck and to every happy-path run.
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
+
+# The same argument for the lock-node-dates guard, and it needed making twice
+# over: that guard has SEVEN failure paths that could accuse the wrong thing,
+# including reading a commit date out of a fork that merely shares a directory
+# name with the repository a node pins, and telling the reader to hand-edit
+# this lock about a node a sibling flake wrote. The suite drives real git
+# checkouts with controlled committer dates in throwaway trees, asserts both
+# the right diagnostic and the absence of the wrong one for every case, and
+# records the nine mutations it was proven live against.
+lint_step "contract suite: flake lock node dates guard" \
+	bash ci/test/flake-lock-node-dates-test.sh
 
 # scripts/test-python-version-alignment.sh is the static+artifact guard on the
 # ONE place this repo chooses a Python version (nix/python.nix). It sits here
@@ -207,6 +331,15 @@ lint_step "contract suite: direnv comes from a dev shell we define" \
 lint_step "contract suite: a job that runs nix installs Nix first" \
 	bash ci/test/nix-provisioning-test.sh
 
+# Naming a private substituter and supplying a credential for it are two edits
+# in two files, and doing only the first costs a 401 from `nix-cache-info`, a
+# disabled cache, and a full source build of everything not on cache.nixos.org.
+# That is what six launcher- and recorder-triggered runs died of, as crates.io
+# 403s inside a vendor derivation nobody expected to be built at all. Static,
+# python3 + PyYAML over `.github/` as committed.
+lint_step "contract suite: a private substituter comes with a credential" \
+	bash ci/test/private-substituter-credential-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
@@ -246,6 +379,47 @@ lint_step "contract suite: backend-manager checkPhase exclusion guards" \
 # CDN adopting the API host's policy.
 lint_step "contract suite: crates.io download URL (crate sources are fetchable)" \
 	bash ci/test/crates-io-download-url-test.sh
+
+# flake.lock is machine-written and hand-edited anyway, and nix checks every
+# field of a locked input -- not just `rev` and `narHash`. Commit 4d15c1ea moved
+# `codetracer-trace-format-nim`'s revision and hash and left `lastModified` at
+# the OLD revision's commit date; `nix develop` then refused the input outright
+# ("mismatch in field 'lastModified'"), killing all four arms of the LRC desktop
+# edge (run 34815351506) before anything had evaluated. Nothing local could
+# notice, because a workspace `.envrc` overrides that input with a sibling path
+# and never fetches the github node at all. It runs here because it needs no nix
+# and no toolchain -- one GitHub API request per direct input, about thirty --
+# and because the alternative is finding out from a CI job that never got a
+# shell.
+# THIS STEP HAS NEVER ONCE COMPARED ANYTHING, AND THAT IS A WIRING DEFECT IN
+# THIS JOB, NOT IN THE SUITE. `lint-bash` mints an installation token
+# (`steps.ci_token.outputs.token`) and hands it to setup-nix and to
+# actions/checkout, but the `- run:` step that invokes THIS file carries no
+# `env:`. So inside the lint shell `gh auth status` fails and neither
+# GITHUB_TOKEN nor GH_TOKEN is set, the suite's own `bail_or_skip` fires, and
+# because it is correctly a HARD failure in CI it exits 1 having made zero
+# requests. Verified on dev@dd971ae36, run 34934002629 / job 104187522246:
+#
+#     ERROR: ci/test/flake-lock-metadata-test.sh cannot run.
+#     Reason: no authenticated GitHub access (need 'gh auth status' to pass, ...)
+#     --> FAILED (contract suite: flake.lock records the commit dates it claims, exit 1, 0s)
+#
+# Zero seconds. A guard that exists and has never run is WORSE than no guard,
+# because the registration below reads as coverage. The remedy is an `env:` with
+# GH_TOKEN on that step in .github/workflows/codetracer.yml -- deliberately not
+# done here, because it puts a credential in the environment of every script
+# this file runs and several of them branch on exactly that, so it wants its own
+# change and its own verification.
+#
+# Until then the network half of this invariant is unenforced, and the only
+# thing actually checking it in CI is scripts/test-flake-lock-node-dates.sh,
+# which needs no credential and runs in `just test` (test-non-gui), where it
+# compared 14 real nodes on its first run. That guard covers the nodes with a
+# sibling checkout and says on every pass which ones it did NOT reach -- 211
+# locally, and the three metacraft-labs repositories among them
+# (`ethereum-nix` twice, `nim-results-src`) are visible to THIS step alone.
+lint_step "contract suite: flake.lock records the commit dates it claims" \
+	bash ci/test/flake-lock-metadata-test.sh
 
 # The Nix lane consumes siblings as flake inputs; every other lane clones them.
 # Nothing made the two agree on a branch until `codetracer-trace-format` was
@@ -331,5 +505,84 @@ lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes"
 # nix, no network, no siblings.
 lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
 	bash ci/test/git-hooks-worktree-test.sh
+
+# The macOS reprobuild drivers' daemon-cwd guards. Registered here because the
+# hazard is RUNNER-WIDE and cross-job: a driver that leaves a repro daemon
+# running poisons whatever runs next on that runner, so the job that fails is
+# never the job at fault, and no single lane can observe it. The checker is a
+# static reader (no nix, no Darwin, no daemon), and its suite proves it fails by
+# running it against the real pre-fix script read out of `origin/dev` rather
+# than against a mock of it.
+lint_step "contract suite: macOS reprobuild drivers stop the repro daemon" \
+	bash ci/test/reprobuild-daemon-guard-test.sh
+
+# The compiled-recorder probes in scripts/detect-siblings.sh. Registered here
+# because the thing they get wrong is invisible by construction: a probe that
+# tests a CHECKED-IN file instead of a BUILT one reports success on every clone,
+# so no job can fail on it and no developer sees a warning -- the breakage lands
+# later, inside a recorder's loader, naming a file nobody has heard of. The
+# suite builds fixtures under mktemp and needs no ruby, python, nix or network.
+lint_step "contract suite: recorder probes track the built artefact" \
+	bash ci/test/detect-siblings-recorder-artifacts-test.sh
+
+# The other half of the same defect: an honest detector reporting "not built" is
+# still a red job if no job builds it. Registered here because the check reads
+# the workflow statically -- it needs neither a runner nor a recorder -- and
+# because the gap it closes was invisible to every lane by construction: the
+# jobs that needed the artefact were the jobs that did not build it.
+lint_step "contract suite: a job that clones a recorder builds it" \
+	bash ci/test/recorder-clone-implies-build-test.sh
+
+# The self-hosted runner defect register (ci/runner/README.md). A document is
+# not usually a lint target, but this one makes checkable claims -- "gate X
+# runs", "commit Y fixed it", "there are seven of these" -- and it was written
+# because the list previously lived in one person's head and got recounted as
+# five. Unchecked prose decays faster than code: the assertion gets corrected
+# and the sentence describing it does not. Only existence and counts are
+# asserted, never line numbers, which drift honestly.
+lint_step "contract suite: the runner defect register still cites real things" \
+	bash ci/test/runner-register-citations-test.sh
+
+# THE RUST TEST-ASSERTION GATE. `tools/check-test-assertions.sh` is a vendored
+# copy of a lint codetracer-specs has shipped "for the product repos" since M0.
+# This repository invoked it NOWHERE, and could not have: the specs repo is
+# never checked out here. A guard was written, shipped, and connected to
+# nothing -- which is how assertion-less Rust tests came to live inside a
+# required gate. The glob at the top does not reach `tools/`.
+lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-specs)" \
+	shellcheck tools/check-test-assertions.sh
+
+# Registered here rather than left to be discovered, for the reason the lint
+# itself was worth wiring: an unrun check is the defect it exists to catch. It
+# is pure bash + awk over the committed tree -- no nix, no network, no siblings,
+# seconds -- so it belongs in the cheapest lane that will run it.
+#
+# It holds the flagged set to an ENUMERATED baseline rather than to zero, and
+# fails in both directions: a new assertion-less test is a line the baseline
+# lacks, and a baseline entry that gets fixed is a line the actual set lacks.
+# Because that baseline is non-empty it is also the lint's own canary -- a lint
+# that rotted into a no-op finds zero and reddens this step.
+lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
+	bash ci/test/test-assertion-baseline.sh
+
+# THE RUST TEST-CRATE COVERAGE GATE. The step above asks whether a Rust test
+# ASSERTS anything; this one asks the question underneath it -- whether the test
+# RUNS at all. `ci/test/test-lane-coverage.sh` answers that for Nim and
+# `ci/test/shell-gate-coverage.sh` for shell gates, and neither can answer it for
+# Rust: lanes enumerate FILES, and Rust tests are selected wholesale by
+# `cargo test` with the CRATE as the unit, so a crate nothing runs cargo test in
+# is dark in a way no per-file rule can express. Five were, holding 61 tests.
+#
+# Same lane and the same reason as the assertion baseline: pure bash + awk +
+# git over the committed tree, no nix, no network, no cargo, seconds. It holds
+# the dark set to an ENUMERATED baseline and fails in both directions -- a newly
+# dark crate is a line the baseline lacks, and a crate that gets wired up is a
+# line the actual set lacks, so an entry cannot outlive the defect it records.
+# Its recognition rules are checked against ci/test/rust-test-crate-coverage.
+# fixture.txt before it is allowed to scan, so it cannot rot into a no-op.
+lint_step "shellcheck: Rust test-crate coverage gate" \
+	shellcheck ci/test/rust-test-crate-coverage.sh
+lint_step "contract suite: every Rust crate with tests is run (enumerated baseline)" \
+	bash ci/test/rust-test-crate-coverage.sh
 
 lint_summary

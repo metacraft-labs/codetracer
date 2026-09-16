@@ -2,8 +2,8 @@
 //! backend-manager so it can extract per-trace metadata without depending
 //! on the heavier `codetracer_trace_types`/`replay-server` crates.
 //!
-//! The wire format is the v3 layout introduced in M-REC-1 and pinned by
-//! M-REC-1.5: pre-1.0, no backcompat for v1/v2 fixtures.  The canonical
+//! The wire format is the layout introduced in M-REC-1 and pinned by
+//! M-REC-1.5: pre-1.0, no backcompat for superseded versions.  The canonical
 //! reference parser is in
 //! `codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs`; the two
 //! implementations stay byte-compatible by construction (they both
@@ -34,7 +34,8 @@ use std::path::Path;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// Canonical meta.dat format version: v3 (M-REC-1, 2026-05-18).
+/// Canonical meta.dat format version: v4 (the global line index
+/// correction).
 ///
 /// Pre-1.0, CodeTracer enforces a strict no-backcompat policy on the
 /// trace format: every recorder is required to track the current
@@ -44,27 +45,136 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 /// § 3 and the M-REC-1 / M-REC-1.5 milestones for the rationale.
 ///
 /// Concretely this means [`SUPPORTED_META_DAT_VERSIONS`] is a
-/// singleton `&[3]`; any v1/v2 payload encountered in the wild is a
+/// singleton; any older payload encountered in the wild is a
 /// stale build artefact (e.g. an out-of-date
 /// `libcodetracer_trace_writer.a` static library) and must be
 /// rebuilt rather than worked around at the reader.
-pub const META_DAT_VERSION: u16 = 3;
+///
+/// This number must equal the db-backend's
+/// `ctfs_trace_reader::meta_dat::META_DAT_VERSION` and the Nim writer's
+/// `MetaDatVersion`.  The three read the same containers, so a number
+/// that moves in one place and not the others turns "this recording is
+/// too old" into "this tool is too old" for exactly the recordings the
+/// others open — a v4 recording would open in the debugger and be
+/// refused by `ct trace info` on the same file.
+pub const META_DAT_VERSION: u16 = 4;
 
 /// The set of `meta.dat` versions this parser accepts on read.  Kept
 /// as a slice (rather than a single constant) so callers that surface
 /// "unsupported version" errors can enumerate the accepted set in
 /// diagnostics; the slice is intentionally a singleton, mirroring
 /// [`META_DAT_VERSION`].
-pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[3];
+///
+/// v3 and below are refused even though this parser reads no step
+/// addresses and so could decode their header perfectly well.  The
+/// version is what says which line-only `global_position_index` packing
+/// the container's steps use, and at v3 that packing is one the
+/// debugger cannot resolve correctly (db-backend
+/// `ctfs_trace_reader::meta_dat::SUPPORTED_VERSIONS` has the arithmetic).
+/// Reporting on a recording that no reader in this repository can open
+/// is a worse answer than saying it must be re-recorded.
+///
+/// **GDH-M2 (2026-09-10) widened it to `&[4, 5]`.**  v5 is not a different
+/// meaning for the same bytes; it is a header with one EXTRA word in it —
+/// `[4] flags_ext u32 LE`, inserted after the u16 flags — and the version
+/// field is what says the word is there.  A writer emits v5 only when an
+/// extended flag is actually set, so a recording with no reload in it stays
+/// at [`META_DAT_VERSION`] and is byte-identical to one produced before the
+/// word existed.  A reader that did not know v5 would refuse such a
+/// container outright, which is why reader support ships before any writer
+/// sets an extended flag.
+pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
 
+/// GDH-M2 — the schema version a container carries when at least one
+/// EXTENDED flag is set.  Must match the Nim writer's `meta_dat.nim`
+/// `MetaDatVersionExtendedFlags`.
+pub const META_DAT_VERSION_EXTENDED_FLAGS: u16 = 5;
+
+/// Extended flag bit 0 (global bit 16) — the execution stream may contain
+/// step-event tag `0x08` (`TagSourceReload`), the source-version transition
+/// marker of a GDScript hot reload.  Present only at schema version
+/// [`META_DAT_VERSION_EXTENDED_FLAGS`].
+pub const FLAG_EXT_HAS_SOURCE_RELOAD: u32 = 1 << 0;
+
+/// Bitmask of all EXTENDED flag bits this implementation understands.  Any
+/// bit outside it is rejected, exactly as `KNOWN_FLAGS_MASK` does for the
+/// u16: validating one word and not the other would let a container declare
+/// a stream shape this reader cannot decode.
+const KNOWN_EXT_FLAGS_MASK: u32 = FLAG_EXT_HAS_SOURCE_RELOAD;
+
+// The canonical flag list lives in
+// `src/db-backend/src/ctfs_trace_reader/meta_dat.rs` (and mirrors the Nim
+// writer's `meta_dat.nim`).  This module is a second, smaller reader for
+// the fields backend-manager needs, and its mask MUST cover the same bits:
+// a bit outside `KNOWN_FLAGS_MASK` makes `parse_meta_dat` reject the whole
+// container, which takes down every backend-manager trace surface
+// (`ct trace info` / `query` / `origin`, and all the MCP tools) for a
+// recording the db-backend opens perfectly well.  Bits 4..13 were added to
+// the canonical reader without being mirrored here, so every trace from a
+// current recorder failed with "unknown flag bits set".
+//
+// Blocks gated by bits 4..13 live in CTFS files or in the step stream, not
+// in the `meta.dat` tail this parser walks, so recognising them costs
+// nothing beyond letting the container open.
 const FLAG_HAS_MCR_FIELDS: u16 = 1 << 0;
 const FLAG_HAS_REPLAY_LAUNCH_FIELDS: u16 = 1 << 1;
 const FLAG_HAS_LAYOUT_SNAPSHOT: u16 = 1 << 2;
 const FLAG_HAS_TRACE_FILTER_PROVENANCE: u16 = 1 << 3;
+/// Bit 4 — column-aware step encoding (P6.3 / P6.4).
+const FLAG_HAS_COLUMN_AWARE_STEPS: u16 = 1 << 4;
+/// Bit 5 — alternate source views (`srcviews.dat` / `srcviews.off`).
+const FLAG_HAS_ALTERNATE_SOURCE_VIEWS: u16 = 1 << 5;
+/// Bit 6 — recorder advertises per-column breakpoint placement.
+const FLAG_SUPPORTS_COLUMN_BREAKPOINTS: u16 = 1 << 6;
+/// Bit 7 — recorder advertises per-column step motions.
+const FLAG_SUPPORTS_COLUMN_MOTIONS: u16 = 1 << 7;
+/// Bit 8 — dedicated `calls.dat` call stream (M17a/M17b).
+const FLAG_HAS_CALL_STREAM: u16 = 1 << 8;
+/// Bit 9 — dedicated `steps.dat` execution stream (M23a).
+const FLAG_HAS_STEP_STREAM: u16 = 1 << 9;
+/// Bit 10 — dedicated `values.dat` value stream (M23b).
+const FLAG_HAS_VALUE_STREAM: u16 = 1 << 10;
+/// Bit 11 — dedicated `events.dat` I/O event stream (M23c).
+const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
+/// Bit 12 — binary varint interning tables (M23d).
+const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
+/// Bit 13 — `spans.dat` / `spans.idx` / `spantype.ns` span stream (RS-M1).
+const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
+/// Bit 14 — every `paths.dat` record carries its file's line count, and the
+/// line-only global position space is laid out from those counts rather than
+/// from the 100000-addresses-per-file convention.
+///
+/// This crate reads `meta.dat` only for the metadata fields it surfaces
+/// (`recording_id`, `program`, `workdir`, `paths`), none of which the bit
+/// changes. It is in the mask because the mask REJECTS what it does not know:
+/// without the constant, every count-bearing container would be refused here
+/// and the trace would look unopenable rather than merely unfamiliar.
+const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
+
+/// Bit 15 — `corrmark.ns` correlation index + `markers.dat`/`.off` (WTCI).
+///
+/// backend-manager has no use for the index, but a bit outside
+/// `KNOWN_FLAGS_MASK` makes `parse_meta_dat` reject the whole container — so
+/// without this constant every recording that declares a correlation marker
+/// would fail to open here, rather than opening with an index this component
+/// ignores.
+const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 15;
 const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_REPLAY_LAUNCH_FIELDS
     | FLAG_HAS_LAYOUT_SNAPSHOT
-    | FLAG_HAS_TRACE_FILTER_PROVENANCE;
+    | FLAG_HAS_TRACE_FILTER_PROVENANCE
+    | FLAG_HAS_COLUMN_AWARE_STEPS
+    | FLAG_HAS_ALTERNATE_SOURCE_VIEWS
+    | FLAG_SUPPORTS_COLUMN_BREAKPOINTS
+    | FLAG_SUPPORTS_COLUMN_MOTIONS
+    | FLAG_HAS_CALL_STREAM
+    | FLAG_HAS_STEP_STREAM
+    | FLAG_HAS_VALUE_STREAM
+    | FLAG_HAS_IO_EVENT_STREAM
+    | FLAG_HAS_INTERNING_TABLES
+    | FLAG_HAS_SPAN_STREAM
+    | FLAG_HAS_LINE_COUNT_TABLE
+    | FLAG_HAS_CORRELATION_INDEX;
 
 // ── Public types ─────────────────────────────────────────────────────────
 
@@ -134,6 +244,13 @@ pub enum MetaDatError {
         flags: u16,
         unknown_bits: u16,
     },
+    /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`, schema version
+    /// 5) were set that this reader does not know.  Same contract as
+    /// `UnknownFlags`: the writer is newer than this reader.
+    UnknownExtendedFlags {
+        ext_flags: u32,
+        unknown_bits: u32,
+    },
     VarintEof,
     VarintTooLong,
     StringEof {
@@ -170,6 +287,10 @@ impl fmt::Display for MetaDatError {
             } => write!(
                 f,
                 "meta.dat: unknown flag bits set (flags=0x{flags:04x}, unknown=0x{unknown_bits:04x})",
+            ),
+            MetaDatError::UnknownExtendedFlags { ext_flags, unknown_bits } => write!(
+                f,
+                "meta.dat: unknown extended flag bits set (flags_ext=0x{ext_flags:08x}, unknown=0x{unknown_bits:08x})",
             ),
             MetaDatError::VarintEof => {
                 write!(f, "meta.dat: unexpected end of input while reading varint")
@@ -293,8 +414,33 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
             unknown_bits,
         });
     }
+    // GDH-M2: the extended flag word, present at schema version 5 only.  It
+    // is validated and its width consumed; it is deliberately not surfaced
+    // as a field, because nothing in this crate reads the marker yet and a
+    // public field would only propagate a constant 0 through every
+    // `MetaDat` literal.  `body_start` moves with it — reading the body
+    // from a fixed 8 would decode the ext word as the recording id's length
+    // prefix, and this parser is strict about trailing bytes, so the
+    // failure would surface as a confusing `TrailingBytes` rather than as
+    // anything about the version.
+    let body_start = if version == META_DAT_VERSION_EXTENDED_FLAGS {
+        if input.len() < 12 {
+            return Err(MetaDatError::TooShort { got: input.len() });
+        }
+        let ext = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
+        let unknown_ext = ext & !KNOWN_EXT_FLAGS_MASK;
+        if unknown_ext != 0 {
+            return Err(MetaDatError::UnknownExtendedFlags {
+                ext_flags: ext,
+                unknown_bits: unknown_ext,
+            });
+        }
+        12usize
+    } else {
+        8usize
+    };
 
-    let mut pos = 8usize;
+    let mut pos = body_start;
     // v3 (M-REC-1) prepends a canonical UUIDv7 `recording_id` directly
     // after the flags word.  Pre-1.0, the parser only accepts v3, so
     // this read is unconditional — there is no v2-shaped layout to
@@ -807,6 +953,74 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> std::io::Resu
 mod tests {
     use super::*;
 
+    /// A REAL schema-version-5 `meta.dat`, produced by the canonical Nim
+    /// writer (`codetracer-trace-format-nim`) recording one file that is
+    /// reloaded once, and copied out of the container byte for byte.
+    ///
+    /// Captured rather than hand-built on purpose: the v5 branches here exist
+    /// so a container from THAT writer parses in THIS crate, and a fixture
+    /// this crate builds itself could only show its own serializer and its
+    /// own parser agreeing — which they would even if both put the
+    /// `flags_ext` word in the wrong place. These are the other
+    /// implementation's bytes, so a layout disagreement fails loudly.
+    ///
+    ///   [0..4)  "CTMD"       [4..6)  version = 5
+    ///   [6..8)  flags = 0x4f00    [8..12) flags_ext = 1 (source reload)
+    ///   [12..]  body — paths has TWO entries for ONE string, the reload.
+    const NIM_WRITTEN_V5_META_DAT: &[u8] = &[
+        0x43, 0x54, 0x4D, 0x44, 0x05, 0x00, 0x00, 0x4F, 0x01, 0x00, 0x00, 0x00, 0x24, 0x30, 0x31,
+        0x38, 0x39, 0x30, 0x30, 0x30, 0x30, 0x2D, 0x30, 0x30, 0x30, 0x30, 0x2D, 0x37, 0x30, 0x30,
+        0x30, 0x2D, 0x38, 0x30, 0x30, 0x30, 0x2D, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+        0x39, 0x31, 0x64, 0x39, 0x0B, 0x72, 0x65, 0x76, 0x5F, 0x70, 0x72, 0x6F, 0x64, 0x75, 0x63,
+        0x65, 0x00, 0x00, 0x00, 0x02, 0x12, 0x72, 0x65, 0x73, 0x3A, 0x2F, 0x2F, 0x72, 0x65, 0x76,
+        0x2F, 0x70, 0x72, 0x6F, 0x62, 0x65, 0x2E, 0x67, 0x64, 0x12, 0x72, 0x65, 0x73, 0x3A, 0x2F,
+        0x2F, 0x72, 0x65, 0x76, 0x2F, 0x70, 0x72, 0x6F, 0x62, 0x65, 0x2E, 0x67, 0x64,
+    ];
+
+    #[test]
+    fn a_v5_header_from_the_nim_writer_parses_here() {
+        // Anti-vacuity: prove the fixture is v5 first. A v4 fixture would
+        // take the old path and satisfy everything below while saying
+        // nothing about the word this test exists for.
+        assert_eq!(
+            u16::from_le_bytes([NIM_WRITTEN_V5_META_DAT[4], NIM_WRITTEN_V5_META_DAT[5]]),
+            META_DAT_VERSION_EXTENDED_FLAGS,
+            "fixture is not a v5 header"
+        );
+
+        let m = parse_meta_dat(NIM_WRITTEN_V5_META_DAT).expect("a v5 header must parse");
+        assert_eq!(m.version, META_DAT_VERSION_EXTENDED_FLAGS);
+        assert_eq!(m.program, "rev_produce");
+        assert_eq!(m.recording_id, "01890000-0000-7000-8000-0000000091d9");
+        // TWO path entries for ONE path string is the reload. Reaching it
+        // coherently proves the body started at offset 12; a four-byte error
+        // would desynchronise every string after the header.
+        assert_eq!(m.paths, vec!["res://rev/probe.gd", "res://rev/probe.gd"]);
+        // The u16 flags are still at offset 6 — the new word went in AFTER
+        // them, which is what leaves every offset-6 reader unaffected.
+        assert_eq!(m.flags, u16::from_le_bytes([0x00, 0x4f]));
+    }
+
+    #[test]
+    fn a_v5_header_with_an_unknown_ext_bit_is_refused() {
+        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
+        buf[9] = 0x01; // ext bit 8 — no constant in this crate claims it
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::UnknownExtendedFlags { .. }) => {}
+            other => panic!("expected UnknownExtendedFlags, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_v5_header_truncated_before_its_ext_word_is_refused() {
+        // Eleven bytes: past the u16 flags, one short of the ext word.
+        let buf = NIM_WRITTEN_V5_META_DAT[..11].to_vec();
+        assert!(
+            parse_meta_dat(&buf).is_err(),
+            "a v5 header too short to hold its flags_ext word must be refused"
+        );
+    }
+
     const TEST_RECORDING_ID: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
 
     fn fixture_minimal() -> MetaDat {
@@ -896,7 +1110,11 @@ mod tests {
     fn rejects_invalid_recording_id() {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        // Stamped from the constant, not written out: pinned to a superseded
+        // number this payload would be refused for its VERSION and the
+        // recording-id rule it exists to check would go untested behind a
+        // passing assertion.
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         let bad = "not-a-uuid";
         encode_varint(bad.len() as u64, &mut buf);

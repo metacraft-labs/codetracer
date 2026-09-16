@@ -143,28 +143,18 @@ proc ctAwaitSync*[T](future: PlatformFuture[PlatformOutcome[T]]
   ## instantiation, it reports "this call site still needs converting" instead of
   ## silently reading a zero value. A bridge that returned a default here would
   ## hide exactly the work NS2 and WD1 need to find.
-  var captured: PlatformOutcome[T]
-  var settled = false
-
-  proc onValue(value: PlatformOutcome[T]) =
-    captured = value
-    settled = true
-
-  proc onFailure(message: string) =
-    captured = failed[T](pkTransport, "the platform call failed", message)
-    settled = true
-
-  future.onComplete(onValue, onFailure)
-  drainPlatformCallbacks()
-
-  if not settled:
-    return failed[T](
-      pkTimeout,
-      "this call site needs an asynchronous caller",
-      "ctAwaitSync drained once and the platform had not answered; the " &
-      "instantiation is remote, so the caller must be converted to a " &
-      "continuation (NS1)")
-  captured
+  ##
+  ## ## The implementation moved down a layer, and this is now an alias
+  ##
+  ## SB-1 needed the same bridge from a ViewModel — the status bar's
+  ## certificate indicator reads a store through `FileSystemFacade` and must
+  ## compile on both Nim backends without linking a host. Importing
+  ## `platform_host` from the ViewModel layer would link Electron's or the
+  ## native host's whole module graph into every headless suite, which is what
+  ## the facade exists to make unnecessary. So the body is
+  ## `platform/outcome.awaitSync` and this keeps the name every existing call
+  ## site uses. One implementation, two names — not two implementations.
+  awaitSync(future)
 
 type PlatformCallError* = object of CatchableError
   ## What `ctOrRaise` raises. A distinct type so a caller that wants to

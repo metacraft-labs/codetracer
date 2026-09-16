@@ -61,6 +61,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CAPS_SRC="$ROOT_DIR/resources/codetracer-desktop-capabilities"
 
+# The repository's one spelling of "this artefact must be current with respect
+# to its sources". See the freshness refusal further down, and the library's
+# own header for why a packaging script shares a file with the doc captures.
+# Read by the library; every diagnostic is prefixed with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="build-desktop-component"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/docs/deep-review-capture-lib.sh"
+
 OUT_ROOT="${CODETRACER_COMPONENT_OUT_ROOT:-$ROOT_DIR/build-desktop-component}"
 CORE_BIN="${CODETRACER_CORE_BIN:-${CODETRACER_E2E_CT_PATH:-}}"
 PUBLISH_MODE="link"
@@ -236,6 +246,29 @@ if [[ -z $CORE_BIN || ! -x $CORE_BIN ]]; then
 	exit 1
 fi
 CORE_BIN="$(cd "$(dirname "$CORE_BIN")" && pwd)/$(basename "$CORE_BIN")"
+
+# EXECUTABILITY IS NOT CURRENCY, AND THE LOOP ABOVE ASKS FOR NOTHING ELSE.
+#
+# Five candidate build trees are tried in a fixed order and the FIRST ONE THAT
+# EXISTS wins. `src/build-debug/bin/ct` from a month ago beats a `build-release`
+# built ten minutes ago, and both beat nothing at all — so the deciding property
+# was "somebody once ran a build", never "this binary is the code on disk".
+#
+# What this script produces is the component the launcher execv()s: the bundle
+# is handed to `ct` as CODETRACER_COMPONENTS_ROOT and every launcher-recorder
+# compatibility test runs against whatever is inside it. A stale core is
+# therefore not a stale developer convenience — it is a stale product, shipped,
+# and a green launcher suite that measured last month's binary.
+#
+# The comparison is against the Nim sources `ct` is compiled from, taken from
+# `git ls-files` so the ignored build trees are not in the list, and it is
+# skipped with a spoken reason when `--core-bin` / `$CODETRACER_CORE_BIN` /
+# `$CODETRACER_E2E_CT_PATH` pointed outside this checkout — a Nix store path or
+# another worktree was not built from these sources.
+ctdr_require_tracked_sources_not_newer "build" "the CodeTracer core binary" \
+	"$CORE_BIN" \
+	"This bundle is what the launcher execv()s, so an out-of-date core would be published as the desktop component and every test run against it would be measuring it. Rebuild with: just build-once" \
+	"$ROOT_DIR" 'src/*.nim' 'src/*.nims' 'config.nims'
 
 # ---------------------------------------------------------------------------
 # Assemble.

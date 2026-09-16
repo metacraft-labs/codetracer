@@ -13,13 +13,37 @@ inputs:
   gh-token:
     description: GitHub token for accessing private repos
     required: true
+  attic-token:
+    # AN INPUT, NOT `secrets.ATTIC_TOKEN` READ HERE. A composite action has no
+    # `secrets` context at all: spelling it `${{ secrets.ATTIC_TOKEN }}` inside
+    # this file yields the EMPTY STRING and looks correct in review. Same
+    # reason `.github/actions/setup-db-backend-siblings` takes it as an input.
+    description: >-
+      Attic token for the private substituter named in `substituters`. Without
+      it nix reads that cache ANONYMOUSLY, gets 401 from `nix-cache-info`,
+      disables the substituter and builds from source everything that is not on
+      cache.nixos.org.
+    required: false
+    default: ""
 
 runs:
   using: "composite"
   steps:
-    - uses: metacraft-labs/nixos-modules/.github/setup-nix@main
+    - uses: metacraft-labs/devops-modules/.github/setup-nix@dev
       with:
         push-to-cache: false
         nix-github-token: ${{ inputs.gh-token }}
         substituters: ${{ inputs.substituters }}
         trusted-public-keys: ${{ inputs.trusted-public-keys }}
+        # devops-modules@ec644f2 writes this into the netrc that nix.conf's
+        # `netrc-file` names, so nix can READ the cache. Before that commit the
+        # action's `attic-token` fed only `attic login` -- the UPLOAD path,
+        # which writes nothing nix reads -- and a token passed here would have
+        # been inert while looking like the fix. That is why this forward
+        # could not land with piece 2 and lands now.
+        #
+        # `attic-cache` is deliberately NOT forwarded. It is the other half of
+        # `Start Attic watch-store`'s condition, so supplying it would turn on
+        # store UPLOADS from twenty-four more jobs. This change is about making
+        # the cache READABLE; widening who writes to it is a separate decision.
+        attic-token: ${{ inputs.attic-token }}

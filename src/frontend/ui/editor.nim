@@ -2756,17 +2756,39 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
   #
   # Armed first, the same settle finds this editor in the list and clears it,
   # and the refusal path below unwinds what it armed.
+  #
+  # WHAT WAS THERE BEFORE IS REMEMBERED, because the unwind must put back
+  # exactly what this click displaced and no more. The commonest refusal the
+  # host now answers is `already-running`, and in that state there IS a real
+  # run — this editor's or another tab's — whose slot and whose spinner belong
+  # to it. A blanket `settleEditorTestRun()` there would stop the animation on
+  # a run that is still going, so a second click would visibly "finish" the
+  # first. Recorded before the arm, restored after a refusal.
+  let wasSpinning = spinningTestEditors.find(self) >= 0
+  let hadRunningSlot = trace.gutterRunningTest.hasKey(self.name)
+  let previousSlot =
+    if hadRunningSlot: trace.gutterRunningTest[self.name] else: 0
   trace.gutterRunningTest[self.name] = attrLine
-  if spinningTestEditors.find(self) < 0:
+  if not wasSpinning:
     spinningTestEditors.add(self)
   self.updateLineNumbersOnly()
 
   let refusal = editorTestRunHook(self.name, selector, attrLine)
   if refusal.len > 0:
-    # UNWIND, so a refusal by sentence still shows no running state. `settle`
-    # rather than `restoreTestButton` because the list must be emptied too, and
-    # emptying it is what `restoreTestButton` alone does not do.
-    settleEditorTestRun()
+    # UNWIND WHAT THIS CLICK ARMED. When nothing was running, that is the whole
+    # of it — `settle` rather than `restoreTestButton` because the list must be
+    # emptied too, and emptying it is what `restoreTestButton` alone does not
+    # do. When a run WAS in flight, its slot and its place in the list are put
+    # back instead, so the refusal costs the user a sentence and not the
+    # progress they were already watching.
+    if hadRunningSlot:
+      trace.gutterRunningTest[self.name] = previousSlot
+      self.updateLineNumbersOnly()
+    elif wasSpinning:
+      trace.gutterRunningTest.del(self.name)
+      self.updateLineNumbersOnly()
+    else:
+      settleEditorTestRun()
     self.api.errorMessage($refusal)
     return
 

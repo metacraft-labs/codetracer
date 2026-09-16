@@ -62,22 +62,28 @@ if fileExists(reprobuildPathsFile):
 # The top-level `ct` entry point imports `src/ct_test/incremental_cli`.
 # Nim loads config files from the main module's directory, not from imported
 # module directories, so `src/ct_test/nim.cfg` is not seen when compiling `ct`.
-# Mirror the sibling discovery used by the dev shell: prefer an explicit source
-# path, then the normal workspace sibling checkout.
-addPathIfDir(getEnv("CODETRACER_TRACE_FORMAT_NIM_SRC"))
+# Mirror the sibling discovery used by the dev shell: the workspace sibling
+# checkout, then an explicit source path that OVERRIDES it.  Nim searches later
+# `--path` entries first, so each `getEnv` line has to come AFTER the sibling it
+# is meant to override, the way the `ISONIM_SRC` pair above is written.  Ordered
+# the other way the variable is inert whenever the sibling directory exists —
+# which is the normal case in a workspace checkout — so a build pinned to a
+# particular revision of a dependency silently compiles against the sibling's
+# revision instead, with nothing in the output saying so.
 addPathIfDir(workspaceRoot / "codetracer-trace-format-nim" / "src")
-addPathIfDir(getEnv("IO_MON_SRC"))
+addPathIfDir(getEnv("CODETRACER_TRACE_FORMAT_NIM_SRC"))
 addPathIfDir(workspaceRoot / "io-mon" / "src")
-addPathIfDir(getEnv("SHM_QUEUE_SRC"))
+addPathIfDir(getEnv("IO_MON_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-queue" / "src")
+addPathIfDir(getEnv("SHM_QUEUE_SRC"))
 # io-mon's writer now imports `shm_gset/transport` (the grow-only shared-memory
 # set that backs io-mon's Linux dependency-capture channel), in addition to
 # `shm_queue`. Thread nim-shm-gset onto the path the same way, or the `ct`
 # compile fails with `cannot open file: shm_gset/transport`.
-addPathIfDir(getEnv("SHM_GSET_SRC"))
 addPathIfDir(workspaceRoot / "nim-shm-gset" / "src")
-addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
+addPathIfDir(getEnv("SHM_GSET_SRC"))
 addPathIfDir(workspaceRoot / "nim-stackable-hooks" / "src")
+addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
 
 const runquotaLibs = [
   "runquota_process",

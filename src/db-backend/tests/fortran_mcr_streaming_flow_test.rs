@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{Language, TestRecording};
+use test_harness::{Language, TestRecording, find_line_containing};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
@@ -59,12 +59,20 @@ fn fortran_mcr_streaming_flow_variables_and_values() {
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
     // --- configure expected flow data ---
-    // Breakpoint at line 31 (`print *, "Final:", final_result`) inside
-    // calculate_sum(). At this point all locals should be in scope:
+    // Breakpoint on `print *, "Final:", final_result` inside calculate_sum(),
+    // where all locals are in scope:
     //   a = 10, b = 32, sum_val = 42, doubled = 84, final_result = 94
+    //
+    // The line is DERIVED from the source rather than hard-coded. The
+    // hard-coded value used to be 31, which is `end function calculate_sum` —
+    // one line past the statement this comment names, and the function's
+    // epilogue. Both lines carry DWARF rows here so the breakpoint resolved
+    // either way and the drift stayed invisible; see `find_line_containing`.
     //
     // Note: Fortran is case-insensitive but debug info typically lowercases
     // identifiers; we expect the lowercase forms here.
+    let breakpoint_line = find_line_containing(&source_path, "print *, \"Final:\", final_result");
+
     let mut expected_values = HashMap::new();
     expected_values.insert("a".to_string(), 10);
     expected_values.insert("b".to_string(), 32);
@@ -74,7 +82,7 @@ fn fortran_mcr_streaming_flow_variables_and_values() {
 
     let config = FlowTestConfig {
         source_file: source_path.to_str().unwrap().to_string(),
-        breakpoint_line: 31,
+        breakpoint_line,
         expected_variables: vec!["a", "b", "sum_val", "doubled", "final_result"]
             .into_iter()
             .map(String::from)

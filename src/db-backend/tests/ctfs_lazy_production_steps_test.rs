@@ -263,7 +263,7 @@ fn lazy_step_lines_equal_recorded() {
     let ct = write_production_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open production");
 
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
+    let path_id = reader.path_id_for_first_version(SRC).expect("source path interned");
 
     for i in 0..USER_STEPS {
         let sid = StepId((i + 2) as i64);
@@ -298,7 +298,7 @@ fn breakpoint_resolution_parity() {
     let ct = write_production_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open production");
 
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
+    let path_id = reader.path_id_for_first_version(SRC).expect("source path interned");
 
     // Before any line-map query, the whole-table view is not built.
     assert_eq!(reader.lazy_full_steps_materialized(), Some(false));
@@ -356,7 +356,7 @@ fn history_slice_and_materialized_db_parity() {
     let ct = write_production_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open production");
 
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
+    let path_id = reader.path_id_for_first_version(SRC).expect("source path interned");
 
     // `steps_from(0)` is the full sequence — used by backward breakpoint scans and
     // history. It must be every step in order with the recorded lines.

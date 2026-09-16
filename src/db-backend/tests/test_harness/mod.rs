@@ -1470,6 +1470,40 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// The 1-based line number of the unique line in `path` containing `needle`.
+///
+/// Panics — loudly, naming both the file and the needle — when the line is
+/// absent or ambiguous.  That is the point: a flow fixture whose breakpoint
+/// line has drifted must fail as "the anchor moved", not as an empty flow
+/// result, which reads exactly like a variable-extraction defect and has
+/// repeatedly been mistaken for one.
+///
+/// Hard-coded `breakpoint_line` constants have gone stale twice in this suite:
+/// the Rust fixture's `12` survived the file growing from 23 to 457 lines, and
+/// the Ada and Fortran fixtures shipped with anchors one line past the
+/// statement their own comments named (`end Calculate_Sum;` instead of
+/// `return Final_Result;`, `end function calculate_sum` instead of the final
+/// `print`). Deriving the line from the source text at test time is what stops
+/// that recurring.
+pub fn find_line_containing(path: &Path, needle: &str) -> usize {
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("could not read {} to locate {needle:?}: {e}", path.display()));
+    let hits: Vec<usize> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(index, _)| index + 1)
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected exactly one line containing {needle:?} in {}, found {:?}",
+        path.display(),
+        hits
+    );
+    hits[0]
+}
+
 /// Find the ct-native-replay binary.
 ///
 /// Search order:
@@ -2407,6 +2441,55 @@ fn record_ruby_trace_with_format(source_path: &Path, trace_dir: &Path, trace_for
     }
 
     Ok(())
+}
+
+/// Report a missing test prerequisite, honouring
+/// `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING`.
+///
+/// Why this exists: a `#[test]` that discovers a missing prerequisite and
+/// returns early is tallied by cargo/nextest as `1 passed`, with zero
+/// assertions executed. That is indistinguishable in the summary from a run
+/// that actually verified something, and it is exactly the failure mode
+/// catalogued in `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
+///
+/// Semantics (from
+/// `codetracer-specs/Testing/Native-CI-Test-Wiring-Audit-2026-07-06.md`, and
+/// matching the variable CI already exports in the headless-DAP job of
+/// `.github/workflows/codetracer.yml`):
+///
+/// - Unset, or any value other than `false`/`0`/`no`: graceful skipping is
+///   permitted. The message is printed prominently to stderr and the caller
+///   returns. This keeps a developer box without, say, a Ruby recorder usable.
+/// - `false` / `0` / `no`: the prerequisite is mandatory. Panic, so the run is
+///   red instead of a silent green.
+///
+/// Callers use it as `if X.is_none() { skip_or_fail_missing_prerequisite(..); return; }`
+/// — the panic path never returns, so the `return` only runs when skipping is
+/// genuinely allowed.
+pub fn skip_or_fail_missing_prerequisite(test_name: &str, what: &str, remedy: &str) {
+    let graceful = env::var("CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING")
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            !(v == "false" || v == "0" || v == "no")
+        })
+        .unwrap_or(true);
+
+    if !graceful {
+        panic!(
+            "{}: MISSING PREREQUISITE: {}. {}. \
+             CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING is set to a false value, so this \
+             prerequisite is mandatory and the test fails rather than silently passing.",
+            test_name, what, remedy
+        );
+    }
+
+    eprintln!(
+        "\n*** SKIPPED (NOT VERIFIED) *** {}: {}.\n\
+         *** Remedy: {}.\n\
+         *** This test asserted NOTHING. Set CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false \
+         to make a missing prerequisite fail instead.\n",
+        test_name, what, remedy
+    );
 }
 
 /// Find the JavaScript recorder CLI entry point via CARGO_MANIFEST_DIR.
