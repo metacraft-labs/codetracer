@@ -210,6 +210,7 @@ when defined(js):
       encoding: encoding,
       processClass: processClass,
       processText: processText,
+      stableBusy: self.state.stableBusy,
       showTestMovement: data.startOptions.inTest,
       testMovementText: $self.completeMoveId,
       showDisconnected: not self.data.connection.connected,

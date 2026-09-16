@@ -68,6 +68,7 @@ type
     encoding*: string
     processClass*: string
     processText*: string
+    stableBusy*: bool
     showTestMovement*: bool
     testMovementText*: string
     showDisconnected*: bool
@@ -211,6 +212,7 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   result.add("|tm:" & (if model.base.showTestMovement: "1" else: "0"))
   result.add("|dc:" & (if model.base.showDisconnected: "1" else: "0"))
   result.add("|fi:" & (if model.base.showFinished: "1" else: "0"))
+  result.add("|sb:" & (if model.base.stableBusy: "1" else: "0"))
   result.add("|lo:" & (if model.base.locationText.len > 0: "1" else: "0"))
   # THE WHOLE LABEL, not a presence bit. It is a deployment constant, so it
   # never changes within a page and can never cost a rebuild; including it in
@@ -322,8 +324,9 @@ template renderStatusShellImpl(
           tdiv(class = "separate-bar"):
             discard
           span(id = "operation-status"):
-            span(id = "stable-status", class = model.base.processClass):
-              text model.base.processText
+            if model.base.stableBusy:
+              span(id = "stable-status", class = model.base.processClass):
+                text model.base.processText
         tdiv(id = BottomStripHostId, class = BottomStripClass):
           discard
         if model.base.showTestMovement:
@@ -545,9 +548,10 @@ when defined(js):
     ## already resolved against them — in place.
     container.patchText(cstring".file-info-status-language", model.base.language)
     container.patchText(cstring".file-info-status-encoding", model.base.encoding)
-    container.patchText(cstring"#stable-status", model.base.processText)
-    container.patchAttribute(
-      cstring"#stable-status", cstring"class", model.base.processClass)
+    if model.base.stableBusy:
+      container.patchText(cstring"#stable-status", model.base.processText)
+      container.patchAttribute(
+        cstring"#stable-status", cstring"class", model.base.processClass)
     if model.base.showTestMovement:
       container.patchText(cstring".test-movement", model.base.testMovementText)
     if model.base.showDisconnected:
