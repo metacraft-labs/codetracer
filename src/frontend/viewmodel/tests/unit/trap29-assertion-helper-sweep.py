@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Trap-13 sweep, wrapper-aware, with a planted control.
+"""Trap-29 sweep, wrapper-aware, with a planted control.
 
-Verification-Harness-Traps §13: `unittest.check` inside a plain `proc`
+Verification-Harness-Traps §29: `unittest.check` inside a plain `proc`
 resolves to the module-level `testStatusIMPL` fallback, so the assertion
 cannot fail the test that called it and the case reports `[OK]` with the
 failed comparison printed directly above it.
@@ -43,14 +43,14 @@ guard's tally.
 
 Usage, from the repository root:
   # this pass's files
-  python3 src/frontend/viewmodel/tests/unit/trap13-assertion-helper-sweep.py \
+  python3 src/frontend/viewmodel/tests/unit/trap29-assertion-helper-sweep.py \
       src/common/plugin_distribution_test.nim ...
 
   # every suite in four lanes
   source ci/lib/test-lane-files.sh
   { test_lane_files vm-unit; test_lane_files common-units;
     test_lane_files ct-cli-units; test_lane_files tui; } | sort -u |
-    xargs python3 src/frontend/viewmodel/tests/unit/trap13-assertion-helper-sweep.py
+    xargs python3 src/frontend/viewmodel/tests/unit/trap29-assertion-helper-sweep.py
 
 The planted control runs FIRST on every invocation and the sweep refuses to
 report when it fails, so a scanner that has stopped reading Nim cannot produce
@@ -326,7 +326,7 @@ proc alsoFine(a, b: int) =
 
 def run_control() -> int:
     with tempfile.TemporaryDirectory() as d:
-        p = Path(d) / "trap13_control.nim"
+        p = Path(d) / "trap29_control.nim"
         p.write_text(CONTROL)
         findings, asserting = sweep([p])
         names = {f[2] for f in findings}
@@ -340,7 +340,7 @@ def run_control() -> int:
             if unwanted in names:
                 problems.append(f"the scan matched {why}: {unwanted}")
         # ---- THE SECOND CONTROL FILE: seeds are scoped, not global --------
-        q = Path(d) / "trap13_outside_unittest.nim"
+        q = Path(d) / "trap29_outside_unittest.nim"
         q.write_text(OUTSIDE_UNITTEST_CONTROL)
         outside, _ = sweep([q])
         outside_names = {f[2] for f in outside}
