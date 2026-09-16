@@ -1,8 +1,8 @@
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[test]
 fn reprobuild_hcr_in_codetracer_unsupported_platform_profile() {
-    eprintln!(
-        "SKIPPED: reprobuild_hcr_in_codetracer requires the macOS arm64 direct-HCR support profile; got {} {}",
+    panic!(
+        "UNSUPPORTED: reprobuild_hcr_in_codetracer requires macOS arm64 direct-HCR support profile; got {} {} (covered by macOS arm64 on aarch64-darwin)",
         std::env::consts::OS,
         std::env::consts::ARCH
     );

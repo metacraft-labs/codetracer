@@ -323,11 +323,11 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
   #!/usr/bin/env bash
   set -euo pipefail
 
-  # Platform precondition is an honest SKIP, not a hard error: a non-macOS
-  # (or non-arm64) CI run must skip cleanly rather than fail the job.
+  # Platform precondition is loudly UNSUPPORTED (exit 2) outside macOS arm64:
+  # a non-macOS (or non-arm64) CI run must fail loudly naming the supported host.
   if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "SKIP: test-reprobuild-hcr-mcr-dap requires macOS arm64 ($(uname -s) $(uname -m))." >&2
-    exit 0
+    echo "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64 (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
+    exit 2
   fi
 
   if ! command -v repro >/dev/null 2>&1; then
@@ -463,10 +463,10 @@ test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
   #!/usr/bin/env bash
   set -euo pipefail
 
-  # Platform precondition is an honest SKIP, not a hard error.
+  # Platform precondition is loudly UNSUPPORTED (exit 2) outside macOS arm64.
   if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "SKIP: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR ($(uname -s) $(uname -m))." >&2
-    exit 0
+    echo "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
+    exit 2
   fi
 
   if ! command -v repro >/dev/null 2>&1; then

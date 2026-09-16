@@ -69,3 +69,43 @@ jobs:
         run: |
           . ./env.ps1
           Write-Host "NIM phase completed without hanging."
+
+      - name: Install just
+        shell: pwsh
+        run: |
+          choco install just -y
+          just --version
+
+      - name: Verify test-reprobuild-hcr-mcr-dap fails loudly unsupported on Windows
+        shell: bash
+        run: |
+          set +e
+          output=$(just test-reprobuild-hcr-mcr-dap 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
+
+      - name: Verify test-reprobuild-hcr-in-codetracer fails loudly unsupported on Windows
+        shell: bash
+        run: |
+          set +e
+          output=$(just test-reprobuild-hcr-in-codetracer 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
