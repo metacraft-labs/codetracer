@@ -731,9 +731,10 @@ proc renderMessage[R](r: R; componentId: int;
                    onclick = proc() =
                      when defined(js):
                        showImageLightbox(cstring(capturedSrc))):
-                img(class = "agent-msg-thumb-img", alt = "attachment", src = imgData)
+                img(class = "agent-msg-thumb-img", alt = "attachment", src = capturedSrc)
         tdiv(class = AgentActivityMessageContentClass, id = contentId):
-          for seg in parseInlineCode(message.content):
+          for segLent in parseInlineCode(message.content):
+            let seg = segLent
             if seg.kind == mskText:
               text seg.content
             elif seg.kind == mskCode:
@@ -751,14 +752,17 @@ proc renderMessage[R](r: R; componentId: int;
                 tdiv(class = "agent-table"):
                   if seg.rows.len > 0:
                     tdiv(class = "agent-table-header-row"):
-                      for cell in seg.rows[0]:
+                      for cellLent in seg.rows[0]:
+                        let cell = cellLent
                         tdiv(class = "agent-table-header-cell"): text cell
                     for rowIdx in 1 ..< seg.rows.len:
                       let row = seg.rows[rowIdx]
                       tdiv(class = "agent-table-row"):
-                        for cell in row:
+                        for cellLent in row:
+                          let cell = cellLent
                           tdiv(class = "agent-table-cell"):
-                            for cellSeg in parseInlineCode(cell):
+                            for cellSegLent in parseInlineCode(cell):
+                              let cellSeg = cellSegLent
                               if cellSeg.kind == mskText:
                                 text cellSeg.content
                               elif cellSeg.kind == mskCode:
@@ -866,7 +870,8 @@ proc renderMessage[R](r: R; componentId: int;
               let grp = segGroups[grpIdx]
               if not grp.isTools:
                 # Text segment: parse markdown-like inline markup
-                for seg in parseInlineCode(grp.content):
+                for segLent in parseInlineCode(grp.content):
+                  let seg = segLent
                   if seg.kind == mskText:
                     text seg.content
                   elif seg.kind == mskCode:
@@ -884,14 +889,17 @@ proc renderMessage[R](r: R; componentId: int;
                       tdiv(class = "agent-table"):
                         if seg.rows.len > 0:
                           tdiv(class = "agent-table-header-row"):
-                            for cell in seg.rows[0]:
+                            for cellLent in seg.rows[0]:
+                              let cell = cellLent
                               tdiv(class = "agent-table-header-cell"): text cell
                           for rowIdx in 1 ..< seg.rows.len:
                             let row = seg.rows[rowIdx]
                             tdiv(class = "agent-table-row"):
-                              for cell in row:
+                              for cellLent in row:
+                                let cell = cellLent
                                 tdiv(class = "agent-table-cell"):
-                                  for cellSeg in parseInlineCode(cell):
+                                  for cellSegLent in parseInlineCode(cell):
+                                    let cellSeg = cellSegLent
                                     if cellSeg.kind == mskText:
                                       text cellSeg.content
                                     elif cellSeg.kind == mskCode:
@@ -965,7 +973,8 @@ proc renderMessage[R](r: R; componentId: int;
                     span(class = currentDotClass)
           else:
             # Fallback: no segments yet — render flat content (placeholder / old msgs)
-            for seg in parseInlineCode(message.content):
+            for segLent in parseInlineCode(message.content):
+              let seg = segLent
               if seg.kind == mskText:
                 text seg.content
               elif seg.kind == mskCode:
@@ -983,14 +992,17 @@ proc renderMessage[R](r: R; componentId: int;
                   tdiv(class = "agent-table"):
                     if seg.rows.len > 0:
                       tdiv(class = "agent-table-header-row"):
-                        for cell in seg.rows[0]:
+                        for cellLent in seg.rows[0]:
+                          let cell = cellLent
                           tdiv(class = "agent-table-header-cell"): text cell
                       for rowIdx in 1 ..< seg.rows.len:
                         let row = seg.rows[rowIdx]
                         tdiv(class = "agent-table-row"):
-                          for cell in row:
+                          for cellLent in row:
+                            let cell = cellLent
                             tdiv(class = "agent-table-cell"):
-                              for cellSeg in parseInlineCode(cell):
+                              for cellSegLent in parseInlineCode(cell):
+                                let cellSeg = cellSegLent
                                 if cellSeg.kind == mskText:
                                   text cellSeg.content
                                 elif cellSeg.kind == mskCode:
@@ -1014,7 +1026,8 @@ proc renderMessage[R](r: R; componentId: int;
         # Hidden via agent-final-message-hidden when the user expands the block.
         if finalTextContent.len > 0:
           tdiv(class = "agent-final-message msg-content", id = finalMsgId):
-            for mseg in parseInlineCode(finalTextContent):
+            for msegLent in parseInlineCode(finalTextContent):
+              let mseg = msegLent
               if mseg.kind == mskText:
                 text mseg.content
               elif mseg.kind == mskCode:
@@ -1047,7 +1060,7 @@ proc renderMessage[R](r: R; componentId: int;
                    onclick = proc() =
                      when defined(js):
                        showImageLightbox(cstring(capturedSrc))):
-                img(class = "agent-msg-thumb-img", alt = "agent image", src = imgData)
+                img(class = "agent-msg-thumb-img", alt = "agent image", src = capturedSrc)
         # "Agent is working" indicator: visible outside the collapsible block while
         # the agent is still producing output after the thinking phase ended.
         if message.isLoading and not stillThinking and not message.canceled:

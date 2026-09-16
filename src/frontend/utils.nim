@@ -197,7 +197,8 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
     liveDebugRows: @[],
     usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
-  data.registerComponent(result, Content.EventLog)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.EventLog)
 
 proc makeShellComponent*(data: Data, id: int): ShellComponent =
   result = ShellComponent(
@@ -214,7 +215,8 @@ proc makeShellComponent*(data: Data, id: int): ShellComponent =
       "default_dark": ShellTheme( background: "#1e1f26", foreground: "#8e8f92"),
     }
   )
-  data.registerComponent(result, Content.Shell)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Shell)
 
 proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
   result = WelcomeScreenComponent(
@@ -226,7 +228,8 @@ proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
     isUploading: JsAssoc[cstring, bool]{}
   )
   data.ui.welcomeScreen = result
-  data.registerComponent(result, Content.WelcomeScreen)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.WelcomeScreen)
 
 proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateComponent =
   result = StateComponent(
@@ -242,14 +245,16 @@ proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateC
     inExtension: inExtension,
     valueHistory: JsAssoc[cstring, ValueHistory]{},
   )
-  data.registerComponent(result, Content.State)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.State)
 
 proc makeBuildComponent*(data: Data): BuildComponent =
   result = BuildComponent(
     id: data.generateId(Content.Build),
     service: data.services.debugger,
     expanded: false)
-  data.registerComponent(result, Content.Build)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Build)
 
 proc makeErrorsComponent*(data: Data): ErrorsComponent =
   result = ErrorsComponent(
@@ -259,7 +264,8 @@ proc makeErrorsComponent*(data: Data): ErrorsComponent =
     errors: @[],
     filter: FilterAll,
     groupByFile: false)
-  data.registerComponent(result, Content.BuildErrors)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.BuildErrors)
 
 
 proc makeStatusComponent*(
@@ -291,22 +297,26 @@ proc makeStatusComponent*(
       operationCount: 0,
     ))
   data.ui.status = result
-  data.registerComponent(result, Content.Status)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Status)
 
 
 proc makeSearchResultsComponent*(data: Data): SearchResultsComponent =
   result = SearchResultsComponent(
     service: data.services.search)
   data.ui.searchResults = result
-  data.registerComponent(result, Content.SearchResults)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.SearchResults)
 
 proc makeTestResultsComponent*(data: Data, id: int): TestResultsComponent =
   result = TestResultsComponent(id: id)
-  data.registerComponent(result, Content.TestResults)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.TestResults)
 
 proc makeConstraintsComponent*(data: Data, id: int): ConstraintsComponent =
   result = ConstraintsComponent(id: id)
-  data.registerComponent(result, Content.Constraints)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Constraints)
 
 proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
   result = TraceLogComponent(
@@ -316,7 +326,8 @@ proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
     table: DataTableComponent(rowHeight: 35, autoScroll: true),
     traceSessionID: -1,
     traceUpdateId: -1)
-  data.registerComponent(result, Content.TraceLog)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.TraceLog)
 
 
 proc canonicalSourceRevisionPath*(path: cstring): cstring =
@@ -523,7 +534,8 @@ proc makeEditorViewComponent*(
     result.topLevelEditor = result
   # else: nil # will be assigned after
   data.ui.editors[editorName] = result
-  data.registerComponent(result, Content.EditorView)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.EditorView)
 
 proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): CalltraceComponent =
   result = CalltraceComponent(
@@ -554,7 +566,8 @@ proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): Ca
     asyncThreads: @[],
     continuationsByCallKey: JsAssoc[cstring, ContinuationLinkInfo]{},
   )
-  data.registerComponent(result, Content.Calltrace)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Calltrace)
 
 proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false): AgentActivityComponent =
   result = AgentActivityComponent(
@@ -591,26 +604,30 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     acpInitFailed: false,
     activeAgentMessageId: cstring""
   )
-  data.registerComponent(result, Content.AgentActivity)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.AgentActivity)
 
 proc makeDebugComponent*(data: Data): DebugComponent =
   result = DebugComponent(
     id: data.generateId(Content.Debug),
     message: LogMessage(message: "", level: MsgInfo, time: -1),
     service: data.services.debugger)
-  data.registerComponent(result, Content.Debug)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Debug)
 
 proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
   result = FilesystemComponent(
     id: id,
     service: data.services.editor,
     forceRedraw: true,)
-  data.registerComponent(result, Content.Filesystem)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Filesystem)
 
 proc makeVerificationComponent*(data: Data, id: int): VerificationComponent =
   ## VN-M5. See `VerificationComponent`: a carrier, with no state of its own.
   result = VerificationComponent(id: id)
-  data.registerComponent(result, Content.Verification)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Verification)
 
 proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
   ## One unified-diff editor tab.  ``diffTarget`` is filled in by
@@ -623,7 +640,8 @@ proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
     initialized: false,
     editorInitialized: false,
     lineLabels: @[])
-  data.registerComponent(result, Content.UnifiedDiff)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.UnifiedDiff)
 
 proc makeVCSComponent*(data: Data, id: int): VCSComponent =
   result = VCSComponent(
@@ -638,7 +656,8 @@ proc makeVCSComponent*(data: Data, id: int): VCSComponent =
     initialized: false,
     isGitRepo: false,
     errorMessage: cstring"")
-  data.registerComponent(result, Content.VCS)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.VCS)
 
 proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): ScratchpadComponent =
   result = ScratchpadComponent(
@@ -646,7 +665,8 @@ proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): S
     service: data.services.debugger,
     inExtension: inExtension,
   )
-  data.registerComponent(result, Content.Scratchpad)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Scratchpad)
 
 proc makeTimelineComponent*(data: Data, id: int): TimelineComponent =
   result = TimelineComponent(
@@ -654,7 +674,8 @@ proc makeTimelineComponent*(data: Data, id: int): TimelineComponent =
     active: TimelineVariables,
     service: data.services.flow,
   )
-  data.registerComponent(result, Content.Timeline)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Timeline)
 
 proc makeRequestPanelComponent*(data: Data, id: int, inExtension: bool = false): RequestPanelComponent =
   result = RequestPanelComponent(
@@ -668,7 +689,8 @@ proc makeRequestPanelComponent*(data: Data, id: int, inExtension: bool = false):
       searchText: cstring"",
     ),
   )
-  data.registerComponent(result, Content.RequestPanel)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.RequestPanel)
 
 func setId*(c: ChartComponent, id: int) =
   c.chartId = id
@@ -779,7 +801,8 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: 
     data.ui.editors[name].traces[line] = result
   else:
     result.chart.setId(id)
-  data.registerComponent(result, Content.Trace)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Trace)
 
 proc makeMenuComponent*(data: Data): MenuComponent =
   result = MenuComponent(
@@ -800,14 +823,16 @@ proc makeMenuComponent*(data: Data): MenuComponent =
     folderArrowCharWidth: 2,
     keyNavigation: false)
   data.ui.menu = result
-  data.registerComponent(result, Content.Menu)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Menu)
 
 proc makeReplComponent*(data: Data, id: int): ReplComponent =
   result = ReplComponent(
     id: id,
     service: data.services.debugger,
     history: @[])
-  data.registerComponent(result, Content.Repl)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.Repl)
 
 proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponent =
   result = CalltraceEditorComponent(
@@ -815,7 +840,8 @@ proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponen
     loading: JsAssoc[cstring, bool]{},
     service: data.services.editor,
     calltrace: data.services.calltrace)
-  data.registerComponent(result, Content.CalltraceEditor)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.CalltraceEditor)
 
 proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false): TerminalOutputComponent =
   result = TerminalOutputComponent(
@@ -828,7 +854,8 @@ proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false
     inExtension: inExtension,
     usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
-  data.registerComponent(result, Content.TerminalOutput)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.TerminalOutput)
 
 proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
   result = CommandPaletteComponent(
@@ -844,13 +871,15 @@ proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
     inputValue: cstring(""),
     inputPlaceholder: cstring(""))
   data.ui.commandPalette = result
-  data.registerComponent(result, Content.CommandPalette)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.CommandPalette)
 
 proc makeNoSourceComponent*(data: Data, id: int, noInfoMessage: cstring): NoSourceComponent =
   result = NoSourceComponent(
     id: id,
     message: noInfoMessage)
-  data.registerComponent(result, Content.NoInfo)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.NoInfo)
 
 proc makeLowLevelCodeComponent*(data: Data, id: int): LowLevelCodeComponent =
   let location = data.services.debugger.location
@@ -882,7 +911,8 @@ proc makeLowLevelCodeComponent*(data: Data, id: int): LowLevelCodeComponent =
     )
   )
 
-  data.registerComponent(result, Content.LowLevelCode)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.LowLevelCode)
 
 proc openLowLevelCode*(data: Data) =
   if data.ui.componentMapping[Content.LowLevelCode].len() > 0:
@@ -899,7 +929,8 @@ proc makeStepListComponent*(data: Data, id: int): StepListComponent =
     # totalStepsCount: 0,
     # lastScrollFireTime: 0,
     service: data.services.flow)
-  data.registerComponent(result, Content.StepList)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.StepList)
 
 proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent =
   ## Create a new AgentWorkspaceComponent.
@@ -937,7 +968,8 @@ proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent 
     notifications: @[],
     coverageOverlayEnabled: true
   )
-  data.registerComponent(result, Content.AgentWorkspace)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.AgentWorkspace)
 
 proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressComponent =
   ## Create a new CaptionBarProgressComponent.
@@ -962,7 +994,8 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
     expanded: false,
     lastUpdateMs: 0
   )
-  data.registerComponent(result, Content.CaptionBarProgress)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.CaptionBarProgress)
 
 ## ``makeFrameViewerComponent`` was retired in M3 — Content.FrameViewer is no
 ## longer a registered pane.  The Video Player pane now owns the rendered
@@ -972,15 +1005,18 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
 
 proc makePixelHistoryComponent*(data: Data, id: int): PixelHistoryComponent =
   result = PixelHistoryComponent(id: id)
-  data.registerComponent(result, Content.PixelHistory)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.PixelHistory)
 
 proc makeShaderDebugComponent*(data: Data, id: int): ShaderDebugComponent =
   result = ShaderDebugComponent(id: id)
-  data.registerComponent(result, Content.ShaderDebug)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.ShaderDebug)
 
 proc makeVideoPlayerComponent*(data: Data, id: int): VideoPlayerComponent =
   result = VideoPlayerComponent(id: id)
-  data.registerComponent(result, Content.VideoPlayer)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.VideoPlayer)
 
 proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
   ## Create the review's Agent Activity pillar pane.
@@ -991,23 +1027,25 @@ proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDe
   ## still constructs and renders an empty pane instead of raising out of
   ## ``makeComponent``.
   result = AgentActivityDeepReviewComponent(id: id)
-  data.registerComponent(result, Content.AgentActivityDeepReview)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.AgentActivityDeepReview)
 
-data.ui = Components(
-  editors: JsAssoc[cstring, EditorViewComponent]{},
-  idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
-  layoutSizes: LayoutSizes(startSize: true),
-  monacoEditors: @[],
-  traceMonacoEditors: @[],
-  fontSize: 16,
-  editModeHiddenPanels: @[],
-  editModeLayout: nil,
-  activeAgentSessionId: cstring"")
-  # mode: CalltraceMode)
+when defined(ctRenderer):
+  data.ui = Components(
+    editors: JsAssoc[cstring, EditorViewComponent]{},
+    idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
+    layoutSizes: LayoutSizes(startSize: true),
+    monacoEditors: @[],
+    traceMonacoEditors: @[],
+    fontSize: 16,
+    editModeHiddenPanels: @[],
+    editModeLayout: nil,
+    activeAgentSessionId: cstring"")
+    # mode: CalltraceMode)
 
-for content in Content:
-  data.ui.componentMapping[content] = JsAssoc[int, Component]{}
-  data.ui.openComponentIds[content] = @[]
+  for content in Content:
+    data.ui.componentMapping[content] = JsAssoc[int, Component]{}
+    data.ui.openComponentIds[content] = @[]
 
 proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", noInfoMessage: cstring = ""): Component =
   case content:
@@ -1060,19 +1098,20 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")
 
-data.services.eventLog.data = data
-data.services.debugger.data = data
-data.services.editor.data = data
-data.services.calltrace.data = data
-data.services.history.data = data
-data.services.flow.data = data
-data.services.eventLog.debugger = data.services.debugger
-data.services.search.data = data
-data.keyPlugins[Content.EditorView] = JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]{}
+when defined(ctRenderer):
+  data.services.eventLog.data = data
+  data.services.debugger.data = data
+  data.services.editor.data = data
+  data.services.calltrace.data = data
+  data.services.history.data = data
+  data.services.flow.data = data
+  data.services.eventLog.debugger = data.services.debugger
+  data.services.search.data = data
+  data.keyPlugins[Content.EditorView] = JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]{}
 
-block:
-  let emptyCache = JsAssoc[cstring, JsAssoc[cstring, Future[JsObject]]]{}
-  data.asyncSendCache = emptyCache
+  block:
+    let emptyCache = JsAssoc[cstring, JsAssoc[cstring, Future[JsObject]]]{}
+    data.asyncSendCache = emptyCache
 
 # example - if it is an event log component content will be set to 8 which coresponds to Content enumeration in types.nim
 proc openPanel*(
