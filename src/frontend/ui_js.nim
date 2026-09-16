@@ -5300,219 +5300,219 @@ proc installCollabInviteTestHooks() {.importjs: """
 installCollabInviteTestHooks()
 
 var actions*: array[ClientAction, ClientActionHandler] = [
-  proc(actionData: JsObject) =
+  forwardContinue: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"continue"):
       forwardContinue(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseContinue: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-continue"):
       reverseContinue(fromShortcut=true),
-  proc(actionData: JsObject) =
+  forwardNext: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"next"):
       next(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseNext: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-next"):
       reverseNext(fromShortcut=true),
-  proc(actionData: JsObject) =
+  forwardStep: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"step-in"):
       stepIn(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseStep: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-step-in"):
       reverseStepIn(fromShortcut=true),
-  proc(actionData: JsObject) =
+  forwardStepOut: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"step-out"):
       stepOut(fromShortcut=true),
-  proc(actionData: JsObject) =
+  reverseStepOut: proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"reverse-step-out"):
       reverseStepOut(fromShortcut=true),
-  proc(actionData: JsObject) = stopAction(),
-  proc(actionData: JsObject) = data.update(build=true),
-  proc(actionData: JsObject) = switchTab(change = -1),
-  proc(actionData: JsObject) = switchTab(change = 1),
-  proc(actionData: JsObject) = data.switchTabHistory(),
-  proc(actionData: JsObject) = openFile(),
-  proc(actionData: JsObject) = data.openNewTab(),
-  proc(actionData: JsObject) = data.reopenLastTab(),
-  proc(actionData: JsObject) = data.closeActiveTab(),
-  proc(actionData: JsObject) = data.switchToEdit(),
-  proc(actionData: JsObject) = data.switchToDebug(),
-  proc(actionData: JsObject) = data.commandSearch(),
-  proc(actionData: JsObject) = data.fileSearch(),
-  proc(actionData: JsObject) = data.fixedSearch(),
-  proc(actionData: JsObject) =
+  stop: proc(actionData: JsObject) = stopAction(),
+  build: proc(actionData: JsObject) = data.update(build=true),
+  switchTabLeft: proc(actionData: JsObject) = switchTab(change = -1),
+  switchTabRight: proc(actionData: JsObject) = switchTab(change = 1),
+  switchTabHistory: proc(actionData: JsObject) = data.switchTabHistory(),
+  openFile: proc(actionData: JsObject) = openFile(),
+  newTab: proc(actionData: JsObject) = data.openNewTab(),
+  reopenTab: proc(actionData: JsObject) = data.reopenLastTab(),
+  closeTab: proc(actionData: JsObject) = data.closeActiveTab(),
+  switchEdit: proc(actionData: JsObject) = data.switchToEdit(),
+  switchDebug: proc(actionData: JsObject) = data.switchToDebug(),
+  commandSearch: proc(actionData: JsObject) = data.commandSearch(),
+  fileSearch: proc(actionData: JsObject) = data.fileSearch(),
+  fixedSearch: proc(actionData: JsObject) = data.fixedSearch(),
+  del: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.delete(),
-  proc(actionData: JsObject) = discard data.onSelectFlow(),
-  proc(actionData: JsObject) = discard data.onSelectState(),
-  proc(actionData: JsObject) =
+  selectFlow: proc(actionData: JsObject) = discard data.onSelectFlow(),
+  selectState: proc(actionData: JsObject) = discard data.onSelectState(),
+  goUp: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onUp(),
-  proc(actionData: JsObject) =
+  goDown: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onDown(),
-  proc(actionData: JsObject) =
+  goRight: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onRight(),
-  proc(actionData: JsObject) =
+  goLeft: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onLeft(),
-  proc(actionData: JsObject) =
+  pageUp: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onPageUp(),
-  proc(actionData: JsObject) =
+  pageDown: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onPageDown(),
-  proc(actionData: JsObject) =
+  gotoStart: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onGotoStart(),
-  proc(actionData: JsObject) =
+  gotoEnd: proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onGotoEnd(),
-  proc(actionData: JsObject) = # aEnter
+  aEnter: proc(actionData: JsObject) = # aEnter
     # echo "global array map: enter"
     # affects only renderer, map manually editor differently
     if not data.ui.activeFocus.isNil and not data.isInputElementFocused():
       # echo "  => global array map: enter: activeFocus not nil, calling its method"
       discard data.ui.activeFocus.onEnter(),
-  proc(actionData: JsObject) = # goUp
+  aEscape: proc(actionData: JsObject) = # goUp
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onEscape(),
-  proc(actionData: JsObject) = data.zoomInEditors(),
-  proc(actionData: JsObject) = data.zoomOutEditors(),
-  (proc(actionData: JsObject) = echo "example"),
-  proc(actionData: JsObject) = discard data.exit(), # aExit
-  proc(actionData: JsObject) = data.openNewTab(), # NewFile
-  proc(actionData: JsObject) = data.openPreferences(), # TODO: fix bottom panels Preferences
-  nil,# TODO proc = data.openNewTab(folder=true), # NewFold
-  nil,# TODO OpenRecent
+  zoomIn: proc(actionData: JsObject) = data.zoomInEditors(),
+  zoomOut: proc(actionData: JsObject) = data.zoomOutEditors(),
+  example: (proc(actionData: JsObject) = echo "example"),
+  aExit: proc(actionData: JsObject) = discard data.exit(), newFile: # aExit
+  proc(actionData: JsObject) = data.openNewTab(), preferences: # NewFile
+  proc(actionData: JsObject) = data.openPreferences(), openFolder: # TODO: fix bottom panels Preferences
+  nil,openRecent: # TODO proc = data.openNewTab(folder=true), # NewFold
+  nil,aSave: # TODO OpenRecent
   # aSave
   proc(actionData: JsObject) = data.saveFiles(data.services.editor.active),
-  proc(actionData: JsObject) = data.saveFiles(data.services.editor.active, saveAs=true),
-  proc(actionData: JsObject) = data.saveFiles(),
-  proc(actionData: JsObject) = discard data.closeAllFiles(), # close all,
-  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), # aCut
-  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), # aCopy
-  (proc(actionData: JsObject) = data.clipboardPaste()), # aPaste
+  saveAs: proc(actionData: JsObject) = data.saveFiles(data.services.editor.active, saveAs=true),
+  saveAll: proc(actionData: JsObject) = data.saveFiles(),
+  closeAllDocuments: proc(actionData: JsObject) = discard data.closeAllFiles(), aCut: # close all,
+  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), aCopy: # aCut
+  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), aPaste: # aCopy
+  (proc(actionData: JsObject) = data.clipboardPaste()), findOrFilter: # aPaste
   proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onFindOrFilter(),
+  aReplace: nil,
+  findInFiles: proc(actionData: JsObject) = data.findInFiles(),
+  replaceInFiles: nil,
+  aToggleComment: nil,
+  aIncreaseIndentation: nil,
+  aDecreaseIndentation: nil,
+  aMakeUppercase: nil,
+  aMakeLowercase: nil,
+  aCollapseUnderCursor: nil,
+  aExpandUnderCursor: nil,
+  aExpandAll: proc(actionData: JsObject) = data.expandWholeSource(), aCollapseAll: # aExpandAll
+  proc(actionData: JsObject) = data.collapseWholeSource(), aUndo: # aCollapseAll
   nil,
-  proc(actionData: JsObject) = data.findInFiles(),
+  aRedo: nil,
+  aProgramCallTrace: nil,
+  aProgramStateExplorer: nil,
+  aFindResults: nil,
+  aBuildLog: nil,
+  aFileExplorer: nil,
+  aSaveLayout: nil,
+  aLoadLayout: nil,
+  switchDebugWide: nil,
+  switchEditNormal: nil,
+  aNewHorizontalTabGroup: nil,
+  aNewVerticalTabGroup: nil,
+  aNotifications: nil,
+  aStartWindow: nil,
+  aFullScreen: nil,
+  aTheme0: proc(actionData: JsObject) = loadThemeForIndex(0), aTheme1: # aTheme0
+  proc(actionData: JsObject) = loadThemeForIndex(1), aTheme2: # aTheme1
+  proc(actionData: JsObject) = loadThemeForIndex(2), aTheme3: # aTheme2
+  proc(actionData: JsObject) = loadThemeForIndex(3), aMonacoTheme0: # aTheme3
   nil,
+  aMultiline: nil,
+  aSingleLine: nil,
+  aNoPreview: nil,
+  aLowLevel0: nil,
+  aLowLevel1: proc(actionData: JsObject) = data.openLowLevelCode(), aShowMinimap: # aLowLevel1
+  proc(actionData: JsObject) = data.toggleMinimap(), aGotoFile: # aShowMinimap
   nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.expandWholeSource(), # aExpandAll
-  proc(actionData: JsObject) = data.collapseWholeSource(), # aCollapseAll
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = loadThemeForIndex(0), # aTheme0
-  proc(actionData: JsObject) = loadThemeForIndex(1), # aTheme1
-  proc(actionData: JsObject) = loadThemeForIndex(2), # aTheme2
-  proc(actionData: JsObject) = loadThemeForIndex(3), # aTheme3
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.openLowLevelCode(), # aLowLevel1
-  proc(actionData: JsObject) = data.toggleMinimap(), # aShowMinimap
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.openLayoutTab(Content.PointList),
-  nil,
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Calltrace),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.State),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.EventLog),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.TerminalOutput),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.StepList),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Scratchpad),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.AgentActivity),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Filesystem),
-  proc(actionData: JsObject) = data.openShellTab(),
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.addBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.removeBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.removeAllBreakpoints(),
-  proc(actionData: JsObject) = data.enableBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.enableAllBreakpoints(),
-  proc(actionData: JsObject) = data.disableBreakpointAtPosition(),
-  proc(actionData: JsObject) = data.disableAllBreakpoints(),
-  proc(actionData: JsObject) = data.addTracepointAtPosition(),
-  proc(actionData: JsObject) = data.removeTracepointAtPosition(),
-  proc(actionData: JsObject) = data.enableTracepointAtPosition(),
-  proc(actionData: JsObject) = data.enableAllTracepoints(),
-  proc(actionData: JsObject) = data.disableTracepointAtPosition(),
-  proc(actionData: JsObject) = data.disableAllTracepoints(),
-  proc(actionData: JsObject) = data.runTracepoints(),
-  nil,
-  nil,
-  nil,
-  nil,
-  proc(actionData: JsObject) = data.ui.menu.toggle(),
-  proc(actionData: JsObject) = data.zoomFlowLoopIn(),
-  proc(actionData: JsObject) = data.zoomFlowLoopOut(),
-  proc(actionData: JsObject) = data.switchFocusedLoopLevelUp(),
-  proc(actionData: JsObject) = data.switchFocusedLoopLevelDown(),
-  proc(actionData: JsObject) = data.switchFocusedLoopLevelAtPosition(),
-  proc(actionData: JsObject) = data.setFlowTypeToMultiline(),
-  proc(actionData: JsObject) = data.setFlowTypeToParallel(),
-  proc(actionData: JsObject) = data.setFlowTypeToInline(),
-  proc(actionData: JsObject) = data.restartCodetracer(),
-  proc(actionData: JsObject) = data.findSymbol(),
-  proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=false),
-  proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=true),
-  proc(actionData: JsObject) = data.restartSubsystem(name="replay-server"),
-  proc(actionData: JsObject) = data.restartSubsystem(name="session-manager"),
-  proc(actionData: JsObject) = data.openTraceDialog(),
-  proc(actionData: JsObject) =
+  aGotoSymbol: nil,
+  aGotoDefinition: nil,
+  aFindReferences: nil,
+  aGotoLine: nil,
+  aGotoPreviousCursorLocation: nil,
+  aGotoNextCursorLocation: nil,
+  aGotoPrevious: nil,
+  aGotoNextEditLocation: nil,
+  aGotoPreviousPointInTime: nil,
+  aGotoNextPointInTime: nil,
+  aGotoNextError: nil,
+  aGotoPreviousError: nil,
+  aGotoNextSearchResult: nil,
+  aGotoPreviousSearchResult: nil,
+  aBuild: nil,
+  aCompile: nil,
+  aRunStatic: nil,
+  aTrace: nil,
+  aLoadTrace: nil,
+  aNewState: nil,
+  aNewEventLog: nil,
+  aNewFullCalltrace: nil,
+  aNewTerminal: nil,
+  aPointList: proc(actionData: JsObject) = data.openLayoutTab(Content.PointList),
+  aLocalCalltrace: nil,
+  aFullCalltrace: proc(actionData: JsObject) = data.openLayoutTab(Content.Calltrace),
+  aState: proc(actionData: JsObject) = data.openLayoutTab(Content.State),
+  aEventLog: proc(actionData: JsObject) = data.openLayoutTab(Content.EventLog),
+  aTerminal: proc(actionData: JsObject) = data.openLayoutTab(Content.TerminalOutput),
+  aStepList: proc(actionData: JsObject) = data.openLayoutTab(Content.StepList),
+  aScratchpad: proc(actionData: JsObject) = data.openLayoutTab(Content.Scratchpad),
+  aAgentActivity: proc(actionData: JsObject) = data.openLayoutTab(Content.AgentActivity),
+  aFilesystem: proc(actionData: JsObject) = data.openLayoutTab(Content.Filesystem),
+  aShell: proc(actionData: JsObject) = data.openShellTab(),
+  aOptions: nil,
+  aDebug: nil,
+  aBreakpoint: proc(actionData: JsObject) = data.addBreakpointAtPosition(),
+  aDeleteBreakpoint: proc(actionData: JsObject) = data.removeBreakpointAtPosition(),
+  aDeleteAllBreakpoints: proc(actionData: JsObject) = data.removeAllBreakpoints(),
+  aEnableBreakpoint: proc(actionData: JsObject) = data.enableBreakpointAtPosition(),
+  aEnableAllBreakpoint: proc(actionData: JsObject) = data.enableAllBreakpoints(),
+  aDisableBreakpoint: proc(actionData: JsObject) = data.disableBreakpointAtPosition(),
+  aDisableAllBreakpoints: proc(actionData: JsObject) = data.disableAllBreakpoints(),
+  aTracepoint: proc(actionData: JsObject) = data.addTracepointAtPosition(),
+  aDeleteTracepoint: proc(actionData: JsObject) = data.removeTracepointAtPosition(),
+  aEnableTracepoint: proc(actionData: JsObject) = data.enableTracepointAtPosition(),
+  aEnableAllTracepoints: proc(actionData: JsObject) = data.enableAllTracepoints(),
+  aDisableTracepoint: proc(actionData: JsObject) = data.disableTracepointAtPosition(),
+  aDisableAllTracepoints: proc(actionData: JsObject) = data.disableAllTracepoints(),
+  aCollectEnabledTracepointResults: proc(actionData: JsObject) = data.runTracepoints(),
+  aUserManual: nil,
+  aReportProblem: nil,
+  aSuggestFeature: nil,
+  aAbout: nil,
+  aMenu: proc(actionData: JsObject) = data.ui.menu.toggle(),
+  zoomFlowLoopIn: proc(actionData: JsObject) = data.zoomFlowLoopIn(),
+  zoomFlowLoopOut: proc(actionData: JsObject) = data.zoomFlowLoopOut(),
+  switchFocusedLoopLevelUp: proc(actionData: JsObject) = data.switchFocusedLoopLevelUp(),
+  switchFocusedLoopLevelDown: proc(actionData: JsObject) = data.switchFocusedLoopLevelDown(),
+  switchFocusedLoopLevelAtPosition: proc(actionData: JsObject) = data.switchFocusedLoopLevelAtPosition(),
+  setFlowTypeToMultiline: proc(actionData: JsObject) = data.setFlowTypeToMultiline(),
+  setFlowTypeToParallel: proc(actionData: JsObject) = data.setFlowTypeToParallel(),
+  setFlowTypeToInline: proc(actionData: JsObject) = data.setFlowTypeToInline(),
+  aRestart: proc(actionData: JsObject) = data.restartCodetracer(),
+  findSymbol: proc(actionData: JsObject) = data.findSymbol(),
+  aReRecord: proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=false),
+  aReRecordProject: proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=true),
+  aRestartDbBackend: proc(actionData: JsObject) = data.restartSubsystem(name="replay-server"),
+  aRestartBackendManager: proc(actionData: JsObject) = data.restartSubsystem(name="session-manager"),
+  aOpenTrace: proc(actionData: JsObject) = data.openTraceDialog(),
+  aOpenTraceInNewTab: proc(actionData: JsObject) =
     # aOpenTraceInNewTab: create a new session then open the trace dialog
     # so the selected trace loads into the fresh session tab.
     createNewSession(data)
     data.openTraceInNewTab(),
-  proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
-  proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
-  proc(actionData: JsObject) = createNewSession(data), # aNewTraceTab
+  aRecordNewTrace: proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
+  aRecordFromLaunch: proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
+  aNewTraceTab: proc(actionData: JsObject) = createNewSession(data), aViewGeneratedCSource: # aNewTraceTab
   # Language-specific View items.  The real implementations live
   # behind the Nim langserver / sourcemap flow (S3/S6/S7) and are not
   # all wired up yet — for now they surface a non-fatal info toast so
@@ -5521,24 +5521,24 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # aViewGeneratedCSource
     data.viewsApi.successMessage(
       cstring"View Generated C Source is not yet wired up"),
-  proc(actionData: JsObject) = # aViewDisassembly
+  aViewDisassembly: proc(actionData: JsObject) = # aViewDisassembly
     data.viewsApi.successMessage(
       cstring"View Disassembly is not yet wired up"),
-  proc(actionData: JsObject) = # aTraceMacroAtCursor
+  aTraceMacroAtCursor: proc(actionData: JsObject) = # aTraceMacroAtCursor
     data.viewsApi.successMessage(
       cstring"Trace Macro at Cursor is not yet wired up"),
-  proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
+  aTraceStaticBlockAtCursor: proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
     data.viewsApi.successMessage(
       cstring"Trace Static Block at Cursor is not yet wired up"),
-  proc(actionData: JsObject) = # aCollabInvite
+  aCollabInvite: proc(actionData: JsObject) = # aCollabInvite
     openCollabInviteDialog(@[
       cstring(cgpViewer.presetName),
       cstring(cgpDriver.presetName),
       cstring(cgpHost.presetName)]),
-  proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), # aTimeline
+  aTimeline: proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), aStartAgenticWorktreeSession: # aTimeline
   proc(actionData: JsObject) = # aStartAgenticWorktreeSession
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
-  # --- M4 Visual Replay / Video Player handlers ----------------------------
+  videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------
   # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
   # VideoPlayerVM instance.  Focus scoping is enforced *by the Mousetrap
   # overlay* registered in ``ui/shortcuts.nim`` (``configureVideoPlayerShortcuts``)
@@ -5552,56 +5552,56 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # videoPlayerTogglePlay
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaTogglePlay),
-  proc(actionData: JsObject) = # videoPlayerRewind
+  videoPlayerRewind: proc(actionData: JsObject) = # videoPlayerRewind
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaRewind),
-  proc(actionData: JsObject) = # videoPlayerFastForward
+  videoPlayerFastForward: proc(actionData: JsObject) = # videoPlayerFastForward
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaFastForward),
-  proc(actionData: JsObject) = # videoPlayerStepFrameBack
+  videoPlayerStepFrameBack: proc(actionData: JsObject) = # videoPlayerStepFrameBack
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepFrameBack),
-  proc(actionData: JsObject) = # videoPlayerStepFrameForward
+  videoPlayerStepFrameForward: proc(actionData: JsObject) = # videoPlayerStepFrameForward
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepFrameForward),
-  proc(actionData: JsObject) = # videoPlayerStepDrawBack
+  videoPlayerStepDrawBack: proc(actionData: JsObject) = # videoPlayerStepDrawBack
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepDrawBack),
-  proc(actionData: JsObject) = # videoPlayerStepDrawForward
+  videoPlayerStepDrawForward: proc(actionData: JsObject) = # videoPlayerStepDrawForward
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepDrawForward),
-  proc(actionData: JsObject) = # videoPlayerJumpStart
+  videoPlayerJumpStart: proc(actionData: JsObject) = # videoPlayerJumpStart
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaJumpStart),
-  proc(actionData: JsObject) = # videoPlayerJumpEnd
+  videoPlayerJumpEnd: proc(actionData: JsObject) = # videoPlayerJumpEnd
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaJumpEnd),
-  proc(actionData: JsObject) = # videoPlayerTogglePicker
+  videoPlayerTogglePicker: proc(actionData: JsObject) = # videoPlayerTogglePicker
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaTogglePicker),
-  proc(actionData: JsObject) = # videoPlayerCancelPicker
+  videoPlayerCancelPicker: proc(actionData: JsObject) = # videoPlayerCancelPicker
     let vm = video_player.currentVideoPlayerVM()
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaCancelPicker),
-  proc(actionData: JsObject) = # aVerification
+  aVerification: proc(actionData: JsObject) = # aVerification
     data.openLayoutTab(Content.Verification),
-  # The five debug-toolbar controls that gained chords. Each one hands the
+  aHistoryBack: # The five debug-toolbar controls that gained chords. Each one hands the
   # toolbar's own action id to `ui/debug.nim`'s dispatcher — the same `case`
   # the button's `onAction` bridge reaches — so the chord cannot drift from
   # the click. Appended at the end, in enum order, matching the five members
   # added at the end of `ClientAction`.
   proc(actionData: JsObject) = # aHistoryBack
     debug.invokeDebugToolbarAction("history-back"),
-  proc(actionData: JsObject) = # aHistoryForward
+  aHistoryForward: proc(actionData: JsObject) = # aHistoryForward
     debug.invokeDebugToolbarAction("history-forward"),
-  proc(actionData: JsObject) = # aRunToEntry
+  aRunToEntry: proc(actionData: JsObject) = # aRunToEntry
     debug.invokeDebugToolbarAction("run-to-entry"),
-  proc(actionData: JsObject) = # aResetOperation
+  aResetOperation: proc(actionData: JsObject) = # aResetOperation
     debug.invokeDebugToolbarAction("reset-operation"),
-  proc(actionData: JsObject) = # aRunTests
+  aRunTests: proc(actionData: JsObject) = # aRunTests
     debug.invokeDebugToolbarAction("run-tests"),
-  proc(actionData: JsObject) = # aKeyboardShortcuts
+  aKeyboardShortcuts: proc(actionData: JsObject) = # aKeyboardShortcuts
     openShortcutsDialog(),
-  proc(actionData: JsObject) = # aToggleReadOnly
+  aToggleReadOnly: proc(actionData: JsObject) = # aToggleReadOnly
     ## `CTRL+E`. The same `toggleReadOnly` the two deleted hardcoded binds
     ## called, reached through the table so that the chord is rebindable and so
     ## that both delivery paths dispatch ONE action — `CTRL+E` is in
@@ -5609,7 +5609,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## `delegateShortcuts` calls this slot and with the caret outside
     ## `configureShortcuts`' Mousetrap bind does.
     data.toggleReadOnly(),
-  proc(actionData: JsObject) = # aApplyEditAndReload
+  aApplyEditAndReload: proc(actionData: JsObject) = # aApplyEditAndReload
     ## Apply a source/parameter edit to the running process through the HCR
     ## path, with no restart.
     ##
