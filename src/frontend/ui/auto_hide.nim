@@ -252,14 +252,15 @@ proc pinnedDocumentPath*(panel: AutoHidePanel): cstring =
 
   # The live component, when it is still registered, is the authoritative
   # source of an independent tab's key.
-  if not data.isNil and not data.ui.isNil:
-    let mapping = data.ui.componentMapping[panel.content]
-    if not mapping.isNil and mapping.hasKey(panel.componentId):
-      let component = mapping[panel.componentId]
-      if not component.isNil:
-        let independent = component.independentTabPath
-        if not independent.isNil and independent.len > 0:
-          return independent
+  when defined(ctRenderer):
+    if not data.isNil and not data.ui.isNil:
+      let mapping = data.ui.componentMapping[panel.content]
+      if not mapping.isNil and mapping.hasKey(panel.componentId):
+        let component = mapping[panel.componentId]
+        if not component.isNil:
+          let independent = component.independentTabPath
+          if not independent.isNil and independent.len > 0:
+            return independent
 
   if panel.config.isNil or panel.config.isUndefined:
     return cstring""
@@ -419,13 +420,15 @@ proc pinPanel*(
   # Detach from GL.  The parent is typically a Stack.
   let parent = contentItem.parent
   if not parent.isNil:
-    if not data.ui.isNil:
-      data.ui.isReparenting = true
+    when defined(ctRenderer):
+      if not data.ui.isNil:
+        data.ui.isReparenting = true
     try:
       parent.removeChild(contentItem)
     finally:
-      if not data.ui.isNil:
-        data.ui.isReparenting = false
+      when defined(ctRenderer):
+        if not data.ui.isNil:
+          data.ui.isReparenting = false
   else:
     console.warn cstring"auto_hide: contentItem has no parent, skipping removeChild"
 
@@ -546,8 +549,9 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   # Re-add to GL via addItem — this creates a new GL container + component
   # shell. We'll then swap the new container's content with our preserved
   # live DOM element.
-  if not data.ui.isNil:
-    data.ui.isReparenting = true
+  when defined(ctRenderer):
+    if not data.ui.isNil:
+      data.ui.isReparenting = true
 
   # Set isReparenting to true in the panel's component state so the GoldenLayout registration callback
   # knows it needs to reparent the live DOM element.
@@ -574,8 +578,9 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
     if not autoHideState.onChanged.isNil:
       autoHideState.onChanged()
   finally:
-    if not data.ui.isNil:
-      data.ui.isReparenting = false
+    when defined(ctRenderer):
+      if not data.ui.isNil:
+        data.ui.isReparenting = false
 
   cdebug fmt"auto_hide: unpinned panel '{panel.title}'"
 
