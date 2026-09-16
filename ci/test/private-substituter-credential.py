@@ -66,10 +66,20 @@ except ImportError:  # pragma: no cover - reported, never silently skipped
 # netrc nix reads.  metacraft-github-actions/setup-nix does it in
 # setup-nix/write-nix-netrc.sh; setup-dev-env and setup-reprobuild are thin
 # wrappers that forward `attic-token`/`attic-cache` into it.
+#
+# devops-modules/.github/setup-nix joined this set in that repo's `ec644f2`,
+# which taught its own `write-netrc.sh` to file `machine <attic host> password
+# <token>` in the netrc nix.conf's `netrc-file` names.  Before that commit its
+# `attic-token` input fed ONLY `attic login` -- the UPLOAD path, which writes
+# nothing nix reads -- so a token passed to it was inert and would have looked
+# like the fix.  `.github/install-nix` is a symlink to `.github/setup-nix` in
+# the same repo, so it is the same action and gained the same capability.
 FOREIGN_CAPABLE = {
     "metacraft-labs/metacraft-github-actions/setup-nix",
     "metacraft-labs/metacraft-github-actions/setup-dev-env",
     "metacraft-labs/metacraft-github-actions/setup-reprobuild",
+    "metacraft-labs/devops-modules/.github/setup-nix",
+    "metacraft-labs/devops-modules/.github/install-nix",
 }
 
 REGISTER = "ci/test/private-substituter-credential.known-dark.txt"
@@ -217,12 +227,29 @@ def main(argv):
     # ---- pass 3: the register of credential-incapable consumers ------------
     register_path = os.path.join(root, REGISTER)
     registered = {}
-    if os.path.isfile(register_path):
-        with open(register_path, encoding="utf-8") as handle:
-            for line in handle:
-                line = line.split("#", 1)[0].strip()
-                if line:
-                    registered[line] = True
+    # A MISSING REGISTER IS A BROKEN GUARD, not an empty one, and it is an error
+    # whatever the register would have contained.  Until 2026-09-16 the file was
+    # merely read if present, so "the register is gone" was caught only as a
+    # side effect of some consumer in it becoming unregistered.  That made the
+    # check evaporate at exactly the moment the register emptied -- which it now
+    # has, every consumer having become credential-capable -- leaving nothing to
+    # notice the file's deletion.  The arm of the suite that removes it says so
+    # by name.
+    if not os.path.isfile(register_path):
+        sys.stderr.write(
+            "FAIL: the register " + REGISTER + " is missing.\n"
+            "  It is read in both directions -- an unregistered dark consumer is a\n"
+            "  violation, and a registered consumer no step feeds any more is a\n"
+            "  violation -- so its absence disables half of this guard rather than\n"
+            "  meaning 'nothing is registered'. An empty register is spelled by a\n"
+            "  file with no entries, not by no file.\n"
+        )
+        return 1
+    with open(register_path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.split("#", 1)[0].strip()
+            if line:
+                registered[line] = True
     for ref in sorted(dark_seen):
         if ref not in registered:
             violations.append(

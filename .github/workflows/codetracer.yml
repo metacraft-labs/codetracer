@@ -1662,6 +1662,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -1733,6 +1734,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -1818,6 +1820,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -2127,6 +2130,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -2168,6 +2172,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -2366,6 +2371,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -2574,6 +2580,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -2805,6 +2812,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3465,6 +3473,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3531,6 +3540,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3583,6 +3593,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3661,6 +3672,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3712,6 +3724,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3964,6 +3977,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -4259,6 +4273,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -4510,6 +4525,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ github.token }}
 
@@ -4659,6 +4675,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ github.token }}
 
@@ -4774,6 +4791,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ github.token }}
 
@@ -5132,6 +5150,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -6843,6 +6862,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -7031,6 +7051,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -7231,6 +7252,7 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -7349,6 +7371,7 @@ jobs:
         uses: metacraft-labs/devops-modules/.github/install-nix@dev
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Configure Nix for private repos
@@ -7443,6 +7466,7 @@ jobs:
         uses: metacraft-labs/devops-modules/.github/install-nix@dev
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Configure Nix for private repos

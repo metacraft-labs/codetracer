@@ -57,8 +57,8 @@ readonly REGISTER_REL
 # register, because that one is the thing that must shrink to zero and must
 # never grow quietly.
 readonly MIN_SCANNED=40
-readonly MIN_CREDENTIALED=13
-readonly EXPECT_DARK_CONSUMERS=3
+readonly MIN_CREDENTIALED=40
+readonly EXPECT_DARK_CONSUMERS=0
 
 assertions=0
 failures=0
@@ -229,10 +229,15 @@ expect_reject "no-forward" "$root" "setup-db-backend-siblings"
 expect_reject "no-forward" "$root" "not credential-capable"
 
 echo "== Step 5: losing the register is rejected =="
+# The register is EMPTY now that every consumer is credential-capable, so
+# deleting it no longer unregisters anything, and this arm used to pass only as
+# a side effect of that. The scanner therefore refuses a MISSING register in its
+# own right -- absence disables the stale-entry direction of the check and is not
+# the same claim as "nothing is registered".
 root="$(make_tree no-register)"
 rm -f "$root/$REGISTER_REL"
-expect_reject "no-register" "$root" "devops-modules/.github/setup-nix"
-expect_reject "no-register" "$root" "is not named in"
+expect_reject "no-register" "$root" "the register"
+expect_reject "no-register" "$root" "An empty register is spelled by a"
 
 echo "== Step 6: a stale register entry is rejected =="
 root="$(make_tree stale-register)"
