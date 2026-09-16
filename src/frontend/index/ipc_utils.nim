@@ -40,13 +40,38 @@ proc applyEditArgs(edit: cstring, socketPath: cstring, driver: cstring,
     return a;
   })(#, #, #, #, #, #, #))
 """.}
-  ## The command line handed to the apply-edit command.
+  ## The command line handed to the apply-edit command, ONE-SHOT form: the
+  ## command opens a coordinator, the target dials it, one patch is served and
+  ## the connection closes.
   ##
   ## `--wait-for`/`--marker` are the command's own sequencing arguments: they
   ## make it publish once the target has *printed* a chosen line, rather than
   ## the instant the target connects. They are forwarded only when both are
   ## configured, because the command refuses the pair half-given — which is the
   ## right behaviour and not one to work around here.
+
+proc applyEditSessionArgs(edit: cstring, sessionDir: cstring,
+                          reportPath: cstring): JsObject {.importjs: """
+  ((function(edit, dir, report) {
+    return ["--edit", edit, "--session-dir", dir, "--json-out", report];
+  })(#, #, #))
+""".}
+  ## The command line handed to the apply-edit command, SESSION form.
+  ##
+  ## This is what makes the Scene-1 live-edit loop possible from the product,
+  ## and the difference is not a convenience. The in-target HCR agent DIALS OUT
+  ## exactly once, at process start, with a bounded retry and no later attempt.
+  ## So the one-shot form above can be used ONCE per target process: the
+  ## coordinator it spawns closes its connection after the patch, and there is
+  ## no second dial-out to accept a replacement. Typing a second value would
+  ## spawn a coordinator that waits forever for a target that has long since
+  ## stopped trying to connect.
+  ##
+  ## With `--session-dir` the coordinator is already running and already
+  ## connected — opened once when the target was launched — and each edit is a
+  ## request into it. Neither `--socket` nor `--driver` is passed, and the
+  ## command REFUSES them alongside `--session-dir` by name, because accepting
+  ## them would suggest it could open a second connection to the same process.
 
 proc readJsonReport(path: cstring): JsObject {.importjs: """
   ((function(p){
@@ -76,6 +101,10 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   ## whose target is a process this application did not start:
   ##
   ##   CODETRACER_HCR_APPLY_EDIT_CMD  the apply-edit command to run
+  ##   CODETRACER_HCR_SESSION_DIR     an ALREADY-OPEN live-edit session to
+  ##                                  publish into. This is the Scene-1 loop's
+  ##                                  path and is mutually exclusive with the
+  ##                                  two below; see `applyEditSessionArgs`.
   ##   CODETRACER_HCR_SOCKET          the running target's HCR agent socket
   ##   CODETRACER_HCR_DRIVER          the coordinator driver the command uses
   ##   CODETRACER_HCR_EDIT            the edit to apply, when the caller gave none
@@ -90,6 +119,7 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   ## and changed nothing — which is the exact confusion the whole HCR beat is
   ## built to avoid.
   let command = nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_CMD")
+  let sessionDir = nodeEnv(cstring"CODETRACER_HCR_SESSION_DIR")
   let socketPath = nodeEnv(cstring"CODETRACER_HCR_SOCKET")
   let driver = nodeEnv(cstring"CODETRACER_HCR_DRIVER")
   var edit = cstring""
@@ -106,14 +136,24 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
     refuse(cstring"not-configured",
       cstring"no apply-edit command is configured for this project; set CODETRACER_HCR_APPLY_EDIT_CMD")
     return
-  if socketPath.len == 0:
+  # A LIVE-EDIT SESSION takes precedence, and the two are mutually exclusive on
+  # purpose rather than by accident. Configuring both would leave it to this
+  # process to guess whether the caller meant "patch the running target once"
+  # or "add an edit to the open loop", and the wrong guess is not recoverable:
+  # the one-shot form consumes the target's single dial-out.
+  if sessionDir.len > 0 and (socketPath.len > 0 or driver.len > 0):
     refuse(cstring"not-configured",
-      cstring"no running HCR target is configured; set CODETRACER_HCR_SOCKET to the agent socket of the process to patch")
+      cstring"CODETRACER_HCR_SESSION_DIR is set together with CODETRACER_HCR_SOCKET/_DRIVER; those are two different publication paths and only one can own the target's single agent connection. Unset the ones you do not mean.")
     return
-  if driver.len == 0:
-    refuse(cstring"not-configured",
-      cstring"no HCR coordinator driver is configured; set CODETRACER_HCR_DRIVER")
-    return
+  if sessionDir.len == 0:
+    if socketPath.len == 0:
+      refuse(cstring"not-configured",
+        cstring"no running HCR target is configured; set CODETRACER_HCR_SESSION_DIR for a live-edit session, or CODETRACER_HCR_SOCKET to the agent socket of the process to patch")
+      return
+    if driver.len == 0:
+      refuse(cstring"not-configured",
+        cstring"no HCR coordinator driver is configured; set CODETRACER_HCR_DRIVER")
+      return
   if edit.len == 0:
     refuse(cstring"no-edit-given",
       cstring"no edit was given; pass one as the action's `edit` field or set CODETRACER_HCR_EDIT")
@@ -129,12 +169,18 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
     if tmpDir.len == 0:
       tmpDir = "/tmp"
     reportPath = tmpDir & "/ct-hcr-apply-edit-report.json"
-  let args = applyEditArgs(
-    edit, socketPath, driver, cstring(reportPath),
-    nodeEnv(cstring"CODETRACER_HCR_WAIT_FOR"),
-    nodeEnv(cstring"CODETRACER_HCR_MARKER"),
-    nodeEnv(cstring"CODETRACER_HCR_MARKER_TIMEOUT_MS"))
-  infoPrint "index: running the apply-edit command for edit " & $edit
+  let args =
+    if sessionDir.len > 0:
+      applyEditSessionArgs(edit, sessionDir, cstring(reportPath))
+    else:
+      applyEditArgs(
+        edit, socketPath, driver, cstring(reportPath),
+        nodeEnv(cstring"CODETRACER_HCR_WAIT_FOR"),
+        nodeEnv(cstring"CODETRACER_HCR_MARKER"),
+        nodeEnv(cstring"CODETRACER_HCR_MARKER_TIMEOUT_MS"))
+  infoPrint "index: running the apply-edit command for edit " & $edit &
+    (if sessionDir.len > 0: " into the live-edit session at " & $sessionDir
+     else: " through a one-shot coordinator on " & $socketPath)
   execFileJson(command, args) do (err: JsObject, stdout: cstring, stderr: cstring):
     # The command's EXIT CODE is not the answer and is not read here: 0 is
     # applied, 2 is a refusal and 1 is the command itself failing, and all three

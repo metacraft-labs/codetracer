@@ -22,6 +22,14 @@
  * the command was. Post-launch attach is its own piece of work
  * (`Recording-Backends/Multi-Core-Recorder/MCR-Post-Launch-Attach.md`) and is
  * not this milestone's.
+ *
+ * CLARIFIED 2026-09-16: that ordering is no longer a shortfall to apologise
+ * for. The demo LAUNCHES the target program under CodeTracer and live attach to
+ * an already-running process is out of scope
+ * (`codetracer-specs/Marketing/The-Flame-Demo-Spec.md` §2.5), so "the
+ * coordinator must exist before the process it patches" is what the demo
+ * requires rather than something it works around. The sequencing below is
+ * unchanged; only the reading of it is.
  */
 import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";

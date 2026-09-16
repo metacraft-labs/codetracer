@@ -48,6 +48,11 @@ import
   # as an arrival; it was implemented as a diff, and the two disagree exactly
   # when the flag and the editors have got out of step.
   ui/read_only_transition,
+  # THE SCENE-1 LIVE-EDIT PANEL. A leaf module — `std/jsffi` and `kdom` only —
+  # for `file_conflict_dialog.nim`'s reason: its markup is a constant and
+  # everything variable goes in as text, and that rule is worth being able to
+  # test without loading the renderer.
+  ui/hcr_live_edit_panel,
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm],
@@ -896,6 +901,10 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # command palette — `getCommands` walks this very tree — so the one
           # declaration buys both surfaces.
           element "Apply Edit & Hot-Reload", aApplyEditAndReload, true
+          # And the panel that lets you TYPE the edit rather than supply it as
+          # an action argument or an environment variable. Same tree, so the
+          # same one declaration buys the command-palette entry.
+          element "Live Edit (HCR)…", aToggleLiveEditPanel, true
           --sub
           # The chord beside each label comes for free: `menu.nim:424` fills
           # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
@@ -4459,6 +4468,15 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
 # is standing at the screen with a flame that did not change and no reason why.
 # ---------------------------------------------------------------------------
 
+var hcrLiveEditOverlay: kdom.Element = nil
+  ## The Scene-1 live-edit panel while it is open, or `nil`.
+  ##
+  ## Declared here, above `onHcrApplyEditResult`, because that proc writes the
+  ## provider's answer into it and Nim needs the declaration first. The panel's
+  ## own procs are below the result handler.
+var hcrLiveEditTimer: JsObject = nil
+  ## The pending debounced publication, or `nil`.
+
 proc applyEditAndReload*(actionData: JsObject) =
   ## Ask the main process to apply a source/parameter edit to the running
   ## process through the HCR path, with no restart.
@@ -4501,6 +4519,102 @@ proc onHcrApplyEditResult(sender: js, response: js) =
     data.viewsApi.errorMessage(text)
   if remedy.len > 0:
     data.viewsApi.warnMessage(cstring("Apply Edit & Hot-Reload remedy: " & $remedy))
+  # And into the live-edit panel, if it is open. The notifications above are
+  # TRANSIENT — a status notification auto-dismisses, which is the trap H4's own
+  # GUI arm walked into and recorded as §21 — so a panel that publishes on every
+  # pause needs a place where the LAST answer stays put. This is that place.
+  setHcrLiveEditStatus(hcrLiveEditOverlay, status,
+    cstring(
+      (if surfaceRow.len > 0: "(" & $surfaceRow & ") " else: "") & $message &
+      (if remedy.len > 0: "  REMEDY: " & $remedy else: "")))
+
+# ---------------------------------------------------------------------------
+# THE SCENE-1 LIVE-EDIT PANEL (`ClientAction.aToggleLiveEditPanel`)
+#
+# The input widget H4 deliberately did not build, and the reason it is a widget
+# at all rather than a better command line: Scene 1's claim is not "an edit can
+# be applied", which H4 already showed, but "the flame reshapes AS I TYPE".
+# That is a claim about a loop, and a loop needs somewhere to type.
+#
+# The renderer's job is unchanged from H4's and is deliberately small: collect
+# a string, send it, render the answer. It does not know what a knob is.
+# ---------------------------------------------------------------------------
+
+proc clearTimeoutJs(handle: JsObject) {.importjs: "clearTimeout(#)".}
+proc setTimeoutJs(callback: proc (), ms: int): JsObject {.importjs: "setTimeout(#, #)".}
+
+proc hcrLiveEditPublish() =
+  ## Publish whatever is currently in the field.
+  ##
+  ## An EMPTY field publishes nothing and says so in the panel. It is not routed
+  ## through the command, because the command would refuse it `no-edit-given` —
+  ## a correct answer to a question nobody meant to ask, and one that would
+  ## fill the panel with refusals every time the user cleared the box.
+  let edit = hcrLiveEditValue(hcrLiveEditOverlay)
+  if edit.len == 0:
+    setHcrLiveEditStatus(hcrLiveEditOverlay, cstring"waiting",
+      cstring"type a parameter edit, for example rise_speed=5.4")
+    return
+  setHcrLiveEditStatus(hcrLiveEditOverlay, cstring"applying…", edit)
+  applyEditAndReload(js{edit: edit})
+
+proc hcrLiveEditScheduleFromTyping() =
+  ## Debounce. Every keystroke cancels the pending publication and starts the
+  ## clock again, so a burst of typing produces ONE edit at the end of it.
+  ##
+  ## Without this, `rise_speed=5.4` is fourteen edits, each a clang++ invocation
+  ## and a publication into the running process, and the flame walks through
+  ## every prefix that happens to parse. That is not "reshapes as you type"; it
+  ## is a queue.
+  if not hcrLiveEditTimer.isNil:
+    clearTimeoutJs(hcrLiveEditTimer)
+  hcrLiveEditTimer = setTimeoutJs(proc () =
+    hcrLiveEditTimer = nil
+    hcrLiveEditPublish(), HcrLiveEditDebounceMs)
+
+proc closeHcrLiveEditPanel() =
+  if hcrLiveEditOverlay.isNil:
+    return
+  if not hcrLiveEditTimer.isNil:
+    clearTimeoutJs(hcrLiveEditTimer)
+    hcrLiveEditTimer = nil
+  hcrLiveEditOverlay.toJs.remove()
+  hcrLiveEditOverlay = nil
+
+proc toggleHcrLiveEditPanel*(actionData: JsObject) =
+  ## Open the panel, or close it if it is already open.
+  if not hcrLiveEditOverlay.isNil:
+    closeHcrLiveEditPanel()
+    return
+  let overlay = buildHcrLiveEditPanel()
+  hcrLiveEditOverlay = overlay
+  let input = overlay.toJs.querySelector(cstring"[data-hcr-live-edit-input]")
+  if not input.isNil:
+    input.addEventListener(cstring"input", proc (ev: JsObject) =
+      hcrLiveEditScheduleFromTyping())
+    # ENTER publishes immediately. Waiting out the debounce after a deliberate
+    # keypress reads as the tool having missed it.
+    input.addEventListener(cstring"keydown", proc (ev: JsObject) =
+      if cast[cstring](ev.key) == cstring"Enter":
+        if not hcrLiveEditTimer.isNil:
+          clearTimeoutJs(hcrLiveEditTimer)
+          hcrLiveEditTimer = nil
+        hcrLiveEditPublish()
+      elif cast[cstring](ev.key) == cstring"Escape":
+        closeHcrLiveEditPanel())
+  let applyButton = overlay.toJs.querySelector(cstring"[data-action='apply']")
+  if not applyButton.isNil:
+    applyButton.addEventListener(cstring"click", proc (ev: JsObject) =
+      hcrLiveEditPublish())
+  let closeButton = overlay.toJs.querySelector(cstring"[data-action='close']")
+  if not closeButton.isNil:
+    closeButton.addEventListener(cstring"click", proc (ev: JsObject) =
+      closeHcrLiveEditPanel())
+  kdom.document.body.appendChild(overlay)
+  setHcrLiveEditStatus(overlay, cstring"waiting",
+    cstring"type a parameter edit, for example rise_speed=5.4")
+  if not input.isNil:
+    input.focus()
 
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
@@ -5625,6 +5739,15 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## What is here is the command, its place in the menu and the palette, and
     ## the surfacing of every answer the provider can give.
     applyEditAndReload(actionData),
+  aToggleLiveEditPanel: proc(actionData: JsObject) = # aToggleLiveEditPanel
+    ## Open (or close) the Scene-1 live-edit panel — the input widget the
+    ## action above deliberately did not have.
+    ##
+    ## Appended at the END of this array, matching the enum member appended at
+    ## the end of `ClientAction`. The keyed form this array is now written in
+    ## makes a mismatch a build error rather than a silent re-pointing, but the
+    ## keys must still appear in enum order for it to compile at all.
+    toggleHcrLiveEditPanel(actionData),
 ]
 
 data.actions = actions

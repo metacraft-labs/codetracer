@@ -1,0 +1,88 @@
+// The Scene-1 live-edit panel (`ui/hcr_live_edit_panel.nim`).
+//
+// Deliberately NOT a modal backdrop, which is the one decision here worth
+// writing down. The whole point of the panel is that the running program
+// reshapes WHILE YOU TYPE, so whatever is showing that program must stay
+// visible and stay interactive. A full-screen scrim of the kind
+// `file_conflict_dialog.styl` uses would cover the thing the user is looking
+// at, and a live-edit surface that hides the live result is the same tool with
+// the feedback removed.
+
+.hcr-live-edit-backdrop
+  position fixed
+  right 24px
+  bottom 24px
+  z-index 10000
+
+.hcr-live-edit-panel
+  width 420px
+  max-width calc(100vw - 48px)
+  padding 16px
+  border 1px solid var(--border-color)
+  border-radius 6px
+  background var(--panel-background)
+  color var(--text-color)
+  box-shadow 0 12px 32px rgba(0, 0, 0, 0.35)
+
+.hcr-live-edit-panel h2
+  margin 0 0 6px
+  font-size 15px
+  font-weight 600
+
+.hcr-live-edit-hint
+  margin 0 0 12px
+  font-size 12px
+  line-height 1.4
+  opacity 0.75
+
+.hcr-live-edit-label
+  display block
+  margin 0 0 4px
+  font-size 12px
+  opacity 0.75
+
+.hcr-live-edit-input
+  width 100%
+  min-height 28px
+  padding 4px 8px
+  border 1px solid var(--border-color)
+  border-radius 4px
+  background var(--input-background, var(--panel-background))
+  color var(--text-color)
+  font-family monospace
+  font-size 13px
+
+.hcr-live-edit-row
+  display flex
+  gap 8px
+  justify-content flex-end
+  margin-top 10px
+
+.hcr-live-edit-row button
+  min-height 28px
+  padding 4px 10px
+  border 1px solid var(--border-color)
+  border-radius 4px
+  background var(--button-background)
+  color var(--text-color)
+  cursor pointer
+
+.hcr-live-edit-row button:hover
+  background var(--button-hover-background)
+
+// The status line is where the provider's answer STAYS. Notifications expire;
+// a panel that publishes on every pause needs somewhere the last named outcome
+// is still readable a minute later.
+.hcr-live-edit-status
+  margin 12px 0 0
+  font-family monospace
+  font-size 13px
+  font-weight 600
+  overflow-wrap anywhere
+
+.hcr-live-edit-detail
+  margin 4px 0 0
+  font-size 12px
+  line-height 1.4
+  opacity 0.8
+  overflow-wrap anywhere

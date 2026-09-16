@@ -548,6 +548,23 @@ assert(/buildFileConflictOverlay\(path\)/.test(sources.get('src/frontend/rendere
 assertEqual(filesMatching(/innerHTML = cstring\((&|fmt)"/), '',
   'no source interpolates a formatted string into innerHTML');
 
+// --- site 1b: the Scene-1 live-edit panel -----------------------------------
+//
+// Same shape as the dialog above and on the list for a stronger reason than
+// symmetry. The two variable things this panel shows are the apply-edit
+// command's `status`/`message` and the edit the user typed, and the message is
+// assembled from an agent refusal that quotes RELOCATION SYMBOL NAMES and
+// THREAD NAMES out of a process CodeTracer did not build. None of that is
+// markup.
+assertEqual(filesMatching(/const HcrLiveEditPanelMarkup\* = /),
+  'src/frontend/ui/hcr_live_edit_panel.nim',
+  'the scan finds the module that owns the live-edit panel markup');
+assertEqual(shippedMatching(/statusEl\.innerHTML|detailEl\.innerHTML/), '',
+  'the panel never writes the provider status or message as markup');
+assert(/statusEl\.textContent = status/.test(
+  sources.get('src/frontend/ui/hcr_live_edit_panel.nim')),
+  'and writes the provider status as text');
+
 // --- the two sites the scan above FOUND, in `ui/layout.nim` -----------------
 //
 // Neither was on the list this file was written for.  The GoldenLayout tab
@@ -733,6 +750,7 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/ui/event_log.nim', 1, 0],
   ['src/frontend/ui/file_conflict_dialog.nim', 0, 1],
   ['src/frontend/ui/flow.nim', 2, 0],
+  ['src/frontend/ui/hcr_live_edit_panel.nim', 0, 1],
   ['src/frontend/ui/layout.nim', 3, 0],
   ['src/frontend/ui/request_panel.nim', 1, 0],
   ['src/frontend/ui/scratchpad.nim', 1, 0],
@@ -763,6 +781,7 @@ const INNER_HTML_LIVE_WRITES = [
   'src/frontend/ui/datatable.nim: rowsCountField.innerHTML = cstring($(self.rowsCount))',
   'src/frontend/ui/editor.nim: el.innerHTML = frames[i]',
   'src/frontend/ui/file_conflict_dialog.nim: overlay.innerHTML = cstring(FileConflictDialogMarkup)',
+  'src/frontend/ui/hcr_live_edit_panel.nim: overlay.innerHTML = cstring(HcrLiveEditPanelMarkup)',
   'src/frontend/ui/trace.nim: self.kindSwitchButton.innerHTML =',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
@@ -937,7 +956,13 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 // the suite gained two contracts; it is raised here, in the same diff, rather
 // than the reconciliation being relaxed — this check caught the edit, which is
 // exactly what it is for.
-const EXPECTED_ASSERTIONS = 160;
+// 160 -> 163 on 2026-09-16, for the three assertions triaging the Scene-1
+// live-edit panel (`ui/hcr_live_edit_panel.nim`), which adds the tree's
+// fourteenth live `innerHTML` write. Raised in the same diff that adds them
+// and that adds the panel to `INNER_HTML_BY_FILE` / `INNER_HTML_LIVE_WRITES`,
+// rather than the reconciliation being relaxed — this check is what forced the
+// new sink to be triaged by name instead of appearing unnoticed.
+const EXPECTED_ASSERTIONS = 163;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

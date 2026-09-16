@@ -286,7 +286,20 @@ type
     # positional `array[ClientAction, ClientActionHandler]` written as a
     # literal, so inserting anywhere else silently re-points every handler
     # after the insertion.
-    aApplyEditAndReload           # Build > Apply Edit & Hot-Reload
+    aApplyEditAndReload,          # Build > Apply Edit & Hot-Reload
+    # THE SCENE-1 LIVE-EDIT PANEL — the input widget `aApplyEditAndReload`
+    # deliberately did not have. It opens a field you type a parameter edit
+    # into; typing publishes, debounced, into an already-open HCR session, so
+    # the running program reshapes as you type rather than once per invocation.
+    #
+    # Appended at the end for the reason every note above gives, and the reason
+    # has NOT gone away now that `actions` in `ui_js.nim` is written in Nim's
+    # KEYED array form: keyed entries must still appear in enum order, and the
+    # compiler enforces that with `invalid order in array constructor`. What
+    # the keyed form removes is the SILENT failure — an insertion in the middle
+    # now breaks the build instead of re-pointing every handler after it — not
+    # the need to keep the two in step.
+    aToggleLiveEditPanel          # Build > Live Edit (HCR)…
 
   InputShortcutMap* = TableLike[langstring, langstring]
 
