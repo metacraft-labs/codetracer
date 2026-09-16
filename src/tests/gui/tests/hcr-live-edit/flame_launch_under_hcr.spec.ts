@@ -9,25 +9,25 @@
  * WHAT THIS ADDS TO H5, which already proved the loop. H5's gate measures three
  * edits reshaping one running flame, and that verdict is SILENT ON WHO STARTED
  * THE FLAME — it is satisfied exactly as well by the shell harness starting the
- * coordinator and the engine, which is what H5 actually did and recorded as a
- * gap. This gate is about the other half: the product reads the project's own
- * `.vscode/launch.json`, starts the session coordinator, waits for it to be
- * LISTENING, and only then starts the program with its HCR agent pointed at it.
+ * coordinator and the engine. This gate is about the other half: the product
+ * reads the project's own `.vscode/launch.json` and follows the transport's
+ * required order. Linux is coordinator-first; Windows is target-first because
+ * its agent owns a named pipe derived from the new target PID.
  *
- * THE ORDER IS THE FEATURE, not an implementation detail. The in-target agent
- * dials OUT once, at process start (`repro_hcr_agent.c`, 500 × 10 ms and no
- * later attempt), so a coordinator that arrived after its target has nothing to
- * accept for the life of that process. That is why the arm in which the
- * coordinator fails to start requires the target NOT to have been launched.
+ * THE ORDER IS THE FEATURE, not an implementation detail. On Linux the
+ * in-target agent dials OUT once at process start, so its coordinator must
+ * already be listening. On Windows the agent owns a named pipe derived from
+ * the new target PID, so CodeTracer must start the target first and give that
+ * PID to the coordinator.
  *
  * HOW IT DISTINGUISHES "CODETRACER LAUNCHED IT" FROM "SOMETHING LAUNCHED IT".
  * Three witnesses, and the second is the one the product cannot author:
  *
  *   1. the product's own launch record (`hcr-launch.json`) naming its pid, the
  *      coordinator's pid, the target's pid and the two timestamps;
- *   2. a /proc sample taken while the target was ALIVE: the target's parent is
- *      the launcher, the launcher is a DESCENDANT of this test process, and the
- *      launcher is NOT this test process;
+ *   2. an OS process-table sample taken while the target was ALIVE: the target's
+ *      parent is the launcher, the launcher is a DESCENDANT of this test
+ *      process, and the launcher is NOT this test process;
  *   3. the coordinator's own `session.json`, so the session described is the
  *      session that served the patches.
  *
@@ -46,19 +46,24 @@
  * returns early when its subject is absent is counted as passed, which is the
  * whole subject of `Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
  *
- * LINUX ONLY, and it says so rather than passing vacuously elsewhere: the
- * product's launch path is implemented for the Linux dial-out wire (see
- * `index/hcr_launch.nim`), and the parentage witness is procfs.
+ * The independent parentage witness is procfs on Linux and Win32_Process CIM
+ * on Windows. It is never replaced by the product's own launch record.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test, expect } from "../../lib/fixtures";
-import { resolveFlamePaths, waitForFile, type FlamePaths } from "../hcr-apply-edit/flame-hcr-driver";
+import {
+  resolveFlamePaths,
+  waitForFile,
+  type FlamePaths,
+} from "../hcr-apply-edit/flame-hcr-driver";
 
 const CODETRACER_REPO = path.resolve(__dirname, "../../../../..");
 const WORKSPACE = path.dirname(CODETRACER_REPO);
+const IS_WINDOWS = process.platform === "win32";
+const PYTHON = IS_WINDOWS ? "python" : "python3";
 
 type Arm =
   | "green"
@@ -108,26 +113,85 @@ const PLATEAU = 120;
 // collection error nobody reads.
 // ---------------------------------------------------------------------------
 
-const IS_LINUX = process.platform === "linux";
-let unavailable: string | null = IS_LINUX
-  ? null
-  : `H6's launch path is implemented for Linux only; this is ${process.platform}`;
+const windowsFlameRepo =
+  process.env.CODETRACER_FLAME_DEMO_REPO ??
+  path.join(WORKSPACE, "codetracer-flame-demo");
+const windowsWork = path.join(
+  windowsFlameRepo,
+  "build",
+  "hcr-windows-live-edit-loop",
+);
+const WINDOWS_AGENT = path.join(windowsWork, "agent", "repro_hcr_agent.dll");
+const WINDOWS_EXTENSION = path.join(
+  windowsFlameRepo,
+  "bin",
+  "flamefield.windows.template_debug.dll",
+);
+const WINDOWS_EXTENSION_PDB = path.join(
+  windowsFlameRepo,
+  "bin",
+  "flamefield.windows.template_debug.pdb",
+);
 
-const resolved = IS_LINUX ? resolveFlamePaths(CODETRACER_REPO) : "not linux";
-if (unavailable === null && typeof resolved === "string") unavailable = resolved;
+let unavailable: string | null =
+  process.platform === "linux" || IS_WINDOWS
+    ? null
+    : `H6's launch path requires Linux or Windows; this is ${process.platform}`;
+const resolved = IS_WINDOWS
+  ? ({
+      workspace: WORKSPACE,
+      flameRepo: windowsFlameRepo,
+      engine: path.join(
+        WORKSPACE,
+        "codetracer-engine-godot",
+        "bin",
+        "godot.windows.template_debug.x86_64.hcrwin.exe",
+      ),
+      driver: path.join(windowsWork, "hcr_patch_driver_windows.exe"),
+      applyEdit: path.join(windowsFlameRepo, "scripts", "ct_hcr_apply_edit.py"),
+      verify: path.join(
+        windowsFlameRepo,
+        "scripts",
+        "verify_hcr2_flame_patch.py",
+      ),
+    } as FlamePaths)
+  : unavailable === null
+    ? resolveFlamePaths(CODETRACER_REPO)
+    : "unsupported platform";
+if (unavailable === null && typeof resolved === "string")
+  unavailable = resolved;
 const flame = typeof resolved === "string" ? null : (resolved as FlamePaths);
+if (IS_WINDOWS && flame !== null) {
+  for (const [what, where] of [
+    ["the patchable Windows Godot engine", flame.engine],
+    ["the patchable Windows FlameField DLL", WINDOWS_EXTENSION],
+    ["the matching Windows FlameField PDB", WINDOWS_EXTENSION_PDB],
+    ["the Windows HCR agent", WINDOWS_AGENT],
+    ["the Windows session coordinator", flame.driver],
+    ["the apply-edit command", flame.applyEdit],
+  ] as const) {
+    if (!fs.existsSync(where)) {
+      unavailable = `${what} is missing: ${where}`;
+      break;
+    }
+  }
+}
 
 /** The session-capable driver. One without `--session-dir` predates the loop. */
 const SESSION_DRIVER =
   flame !== null
-    ? path.join(flame.flameRepo, "artifacts", "h5-driver", "hcr_patch_driver")
+    ? IS_WINDOWS
+      ? flame.driver
+      : path.join(flame.flameRepo, "artifacts", "h5-driver", "hcr_patch_driver")
     : "";
 if (unavailable === null) {
   if (!fs.existsSync(SESSION_DRIVER)) {
     unavailable = `the session-capable HCR coordinator driver is missing: ${SESSION_DRIVER}`;
   } else {
     const usage = spawnSync(SESSION_DRIVER, ["--help"], { encoding: "utf8" });
-    if (!`${usage.stdout ?? ""}${usage.stderr ?? ""}`.includes("--session-dir")) {
+    if (
+      !`${usage.stdout ?? ""}${usage.stderr ?? ""}`.includes("--session-dir")
+    ) {
       unavailable = `${SESSION_DRIVER} does not support --session-dir; it predates the live-edit loop`;
     }
   }
@@ -142,7 +206,10 @@ if (unavailable === null && !fs.existsSync(CHECKED_IN_LAUNCH_JSON)) {
 const WORK =
   flame !== null
     ? path.join(flame.flameRepo, "artifacts", "h6-launch", ARM)
-    : path.join(process.env.TMPDIR ?? "/tmp", `ct-h6-${ARM}`);
+    : path.join(
+        process.env.TEMP ?? process.env.TMPDIR ?? "/tmp",
+        `ct-h6-${ARM}`,
+      );
 fs.mkdirSync(WORK, { recursive: true });
 
 const SCRATCH_WORKSPACE = path.join(WORK, "workspace");
@@ -183,9 +250,32 @@ function deriveLaunchJson(): DerivedConfig | null {
   if (flame === null) return null;
   const text = fs.readFileSync(CHECKED_IN_LAUNCH_JSON, "utf8");
   const sha = crypto.createHash("sha256").update(text).digest("hex");
-  const substituted = text.split("${workspaceFolder}").join(flame.flameRepo);
-  const parsed = JSON.parse(substituted);
-  const cfg = parsed.configurations[0];
+  const parsed = JSON.parse(text);
+  const substituteWorkspace = (value: any): any => {
+    if (typeof value === "string") {
+      return value.split("${workspaceFolder}").join(flame.flameRepo);
+    }
+    if (Array.isArray(value)) return value.map(substituteWorkspace);
+    if (value !== null && typeof value === "object") {
+      for (const key of Object.keys(value))
+        value[key] = substituteWorkspace(value[key]);
+    }
+    return value;
+  };
+  substituteWorkspace(parsed);
+  const wantedPlatform = IS_WINDOWS ? "win32" : "linux";
+  const cfg = parsed.configurations.find(
+    (candidate: any) => candidate.hcr?.platform === wantedPlatform,
+  );
+  if (cfg === undefined) {
+    throw new Error(
+      `checked-in launch.json has no HCR configuration for ${wantedPlatform}`,
+    );
+  }
+  // The scratch project contains just this host's real configuration. This
+  // makes the no-hcr-block arm remove the only HCR config rather than relying
+  // on the resolver to ignore another platform's entry.
+  parsed.configurations = [cfg];
   const overridden: string[] = [];
   cfg.env.CT_H2_TICKFILE = TICKS;
   cfg.env.CT_H2_OUT = path.join(WORK, "shots");
@@ -207,52 +297,78 @@ function deriveLaunchJson(): DerivedConfig | null {
       overridden.push("ARM:deleted hcr");
       break;
     case "coordinator-not-a-coordinator":
-      // A real, executable file that exits at once. The product must start it,
-      // notice it died, and — the load-bearing half — NOT start the target,
-      // whose single dial-out would otherwise be spent on nothing.
+      // A real executable that is not the protocol coordinator. The product
+      // must start it, notice negotiation cannot happen, and clean up according
+      // to the platform's startup order.
       //
       // Written here rather than pointed at `/bin/true`: this workspace is
       // Nix-managed and `/bin` holds only `sh`, so the arm would have tested
       // `hcr-coordinator-missing` — a different refusal entirely, and one the
       // arm does not claim. Measured on the first sweep.
-      cfg.hcr.coordinator = writeStub("not-a-coordinator.sh", "exit 3\n");
-      overridden.push("ARM:hcr.coordinator=a stub that exits 3");
+      cfg.hcr.coordinator = IS_WINDOWS
+        ? (process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe")
+        : writeStub("not-a-coordinator.sh", "exit 3\n");
+      overridden.push(
+        IS_WINDOWS
+          ? "ARM:hcr.coordinator=ComSpec (not an HCR coordinator)"
+          : "ARM:hcr.coordinator=a stub that exits 3",
+      );
       break;
     case "target-exits-immediately":
-      cfg.program = writeStub("exits-immediately.sh", "exit 7\n");
-      cfg.args = [];
+      if (IS_WINDOWS) {
+        cfg.program = process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe";
+        cfg.args = ["/d", "/c", "exit", "7"];
+      } else {
+        cfg.program = writeStub("exits-immediately.sh", "exit 7\n");
+        cfg.args = [];
+      }
       overridden.push("ARM:program=a stub that exits 7");
       break;
     case "agent-never-dials":
       // A real program that stays up and has no HCR agent in it. The product
       // must bound the wait and say the agent never connected — not spin.
-      cfg.program = writeStub("never-dials.sh", "sleep 45\n");
-      cfg.args = [];
+      if (IS_WINDOWS) {
+        cfg.program = process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe";
+        cfg.args = ["/d", "/s", "/c", "ping -n 46 127.0.0.1 > nul"];
+      } else {
+        cfg.program = writeStub("never-dials.sh", "sleep 45\n");
+        cfg.args = [];
+      }
       cfg.hcr.readyTimeoutMs = 8000;
-      overridden.push("ARM:program=a stub that sleeps", "ARM:hcr.readyTimeoutMs=8000");
+      overridden.push(
+        "ARM:program=a stub that sleeps",
+        "ARM:hcr.readyTimeoutMs=8000",
+      );
       break;
   }
   return { raw: parsed, sha256OfCheckedIn: sha, overridden };
 }
 
 let derived: DerivedConfig | null = null;
-if (unavailable === null) {
-  try {
+try {
+  fs.rmSync(SCRATCH_WORKSPACE, { recursive: true, force: true });
+  fs.mkdirSync(path.join(SCRATCH_WORKSPACE, ".vscode"), { recursive: true });
+  if (unavailable === null) {
     derived = deriveLaunchJson();
-    fs.rmSync(SCRATCH_WORKSPACE, { recursive: true, force: true });
-    fs.mkdirSync(path.join(SCRATCH_WORKSPACE, ".vscode"), { recursive: true });
     fs.writeFileSync(
       path.join(SCRATCH_WORKSPACE, ".vscode", "launch.json"),
       JSON.stringify(derived!.raw, null, 2),
     );
-    // Edit mode opens a folder; it needs something to show.
+  } else {
+    // The fixture still needs a real folder so the test body can report the
+    // NAMED missing prerequisite instead of Electron failing first on ENOENT.
     fs.writeFileSync(
-      path.join(SCRATCH_WORKSPACE, "README.md"),
-      "H6 scratch workspace — holds only the derived .vscode/launch.json.\n",
+      path.join(SCRATCH_WORKSPACE, ".vscode", "launch.json"),
+      JSON.stringify({ version: "0.2.0", configurations: [] }, null, 2),
     );
-  } catch (err) {
-    unavailable = `could not prepare the scratch workspace: ${String(err)}`;
   }
+  // Edit mode opens a folder; it needs something to show.
+  fs.writeFileSync(
+    path.join(SCRATCH_WORKSPACE, "README.md"),
+    "H6 scratch workspace — holds only the derived .vscode/launch.json.\n",
+  );
+} catch (err) {
+  unavailable = `could not prepare the scratch workspace: ${String(err)}`;
 }
 
 // The environment the Electron app is launched with. `makeCleanEnv` snapshots
@@ -272,10 +388,16 @@ delete process.env.CODETRACER_HCR_WAIT_FOR;
 delete process.env.CODETRACER_HCR_MARKER;
 delete process.env.CODETRACER_HCR_PLATFORM;
 delete process.env.CODETRACER_HCR_REPORT;
+delete process.env.CODETRACER_HCR_PID;
+delete process.env.CODETRACER_HCR_PID_FILE;
+delete process.env.CODETRACER_HCR_TARGET_IMAGE;
+delete process.env.CODETRACER_HCR_TARGET_PDB;
+delete process.env.CODETRACER_HCR_FIRST_INSTRUCTION_LENGTH;
 /** The socket the `harness-launches` arm's coordinator listens on. */
 const HARNESS_SOCKET = path.join("/tmp", `ct-h6-harness-${process.pid}.sock`);
 if (ARM === "harness-launches" && flame !== null) {
   process.env.CODETRACER_HCR_APPLY_EDIT_CMD = flame.applyEdit;
+  if (IS_WINDOWS) process.env.CODETRACER_HCR_APPLY_EDIT_INTERPRETER = "python";
   process.env.CODETRACER_HCR_SESSION_DIR = SESSION_DIR;
   process.env.CODETRACER_HCR_REPORT = path.join(WORK, "apply-edit-report.json");
 }
@@ -284,23 +406,31 @@ const LAUNCH_COMMAND_LABEL = "Launch Under Live Edit (HCR)…";
 const PANEL_COMMAND_LABEL = "Live Edit (HCR)…";
 
 // ---------------------------------------------------------------------------
-// Small helpers over the flame's own flushed tick file and over /proc.
+// Small helpers over the flame's flushed tick file and the host process table.
 // ---------------------------------------------------------------------------
 
 function currentFrame(tickFile: string): number {
   if (!fs.existsSync(tickFile)) return 0;
-  const matches = [...fs.readFileSync(tickFile, "utf8").matchAll(/frame=(\d+)/g)];
+  const matches = [
+    ...fs.readFileSync(tickFile, "utf8").matchAll(/frame=(\d+)/g),
+  ];
   return matches.length > 0 ? Number(matches[matches.length - 1][1]) : 0;
 }
 
-async function waitForFrame(tickFile: string, want: number, timeoutMs: number): Promise<number> {
+async function waitForFrame(
+  tickFile: string,
+  want: number,
+  timeoutMs: number,
+): Promise<number> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const last = currentFrame(tickFile);
     if (last >= want) return last;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`the flame never reached frame ${want} within ${timeoutMs} ms`);
+  throw new Error(
+    `the flame never reached frame ${want} within ${timeoutMs} ms`,
+  );
 }
 
 /** `/proc/<pid>/stat` field 4 — the parent pid — or -1 if the process is gone. */
@@ -317,12 +447,23 @@ function procPpid(pid: number): number {
 }
 
 function procAlive(pid: number): boolean {
-  return pid > 0 && fs.existsSync(`/proc/${pid}`);
+  if (pid <= 0) return false;
+  if (!IS_WINDOWS) return fs.existsSync(`/proc/${pid}`);
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function procCmdline(pid: number): string {
   try {
-    return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ").trim();
+    return fs
+      .readFileSync(`/proc/${pid}/cmdline`, "utf8")
+      .split("\0")
+      .join(" ")
+      .trim();
   } catch {
     return "";
   }
@@ -339,6 +480,82 @@ function procAncestors(pid: number): number[] {
   return chain;
 }
 
+interface ProcessRow {
+  ProcessId: number;
+  ParentProcessId: number;
+  CommandLine: string | null;
+}
+
+/** One independent OS process-tree observation for the provenance verdict. */
+function processWitness(pid: number): any {
+  if (!IS_WINDOWS) {
+    const ppid = procPpid(pid);
+    return {
+      source: "linux-procfs",
+      targetPid: pid,
+      ppid,
+      alive: procAlive(pid),
+      sampledAtMs: Date.now(),
+      testProcessPid: process.pid,
+      launcherAncestors: [ppid, ...procAncestors(ppid)],
+      launcherCmdline: procCmdline(ppid),
+    };
+  }
+
+  const query = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Get-CimInstance Win32_Process | " +
+        "Select-Object ProcessId,ParentProcessId,CommandLine | " +
+        "ConvertTo-Json -Compress",
+    ],
+    { encoding: "utf8", windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+  );
+  if (query.status !== 0) {
+    throw new Error(
+      `Win32_Process query failed: ${query.stderr ?? query.stdout}`,
+    );
+  }
+  const decoded = JSON.parse((query.stdout ?? "").trim());
+  const rows = (Array.isArray(decoded) ? decoded : [decoded]) as ProcessRow[];
+  const byPid = new Map(rows.map((row) => [Number(row.ProcessId), row]));
+  const target = byPid.get(pid);
+  if (target === undefined) {
+    return {
+      source: "windows-cim",
+      targetPid: pid,
+      ppid: -1,
+      alive: false,
+      sampledAtMs: Date.now(),
+      testProcessPid: process.pid,
+      launcherAncestors: [],
+      launcherCmdline: "",
+    };
+  }
+  const ppid = Number(target.ParentProcessId);
+  const ancestors: number[] = [];
+  let current = ppid;
+  for (let i = 0; i < 32 && current > 0; i += 1) {
+    ancestors.push(current);
+    const row = byPid.get(current);
+    if (row === undefined || Number(row.ParentProcessId) === current) break;
+    current = Number(row.ParentProcessId);
+  }
+  return {
+    source: "windows-cim",
+    targetPid: pid,
+    ppid,
+    alive: true,
+    sampledAtMs: Date.now(),
+    testProcessPid: process.pid,
+    launcherAncestors: ancestors,
+    launcherCmdline: byPid.get(ppid)?.CommandLine ?? "",
+  };
+}
+
 interface Observations {
   arm: Arm;
   startedAt: string;
@@ -352,8 +569,8 @@ interface Observations {
   record: any | null;
   targetAliveAtFailure: boolean | null;
   /**
-   * Did a /proc sample taken WHILE the launch was still in progress find the
-   * target alive?
+   * Did an OS process-table sample taken WHILE the launch was still in progress
+   * find the target alive?
    *
    * The independent half of the distinction between "the program exited before
    * its agent connected" and "the program is running and its agent never
@@ -386,7 +603,10 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
     ctPage,
   }) => {
     // NOT `test.skip`. A prerequisite that is missing is a failure here.
-    expect(unavailable, `H6 prerequisites are not present: ${unavailable ?? ""}`).toBeNull();
+    expect(
+      unavailable,
+      `H6 prerequisites are not present: ${unavailable ?? ""}`,
+    ).toBeNull();
     const paths = flame as FlamePaths;
     const started = Date.now();
 
@@ -428,7 +648,8 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
     let harnessCoordinator: ChildProcess | null = null;
     let harnessTarget: ChildProcess | null = null;
     let harnessTargetDone: Promise<number | null> | null = null;
-    let controlDone: Promise<{ code: number | null; stdout: string }> | null = null;
+    let controlDone: Promise<{ code: number | null; stdout: string }> | null =
+      null;
 
     // --- the CONTROL run, where a flame verdict is going to be asked for ----
     // The same scene, the same engine, the same environment, no agent. It is
@@ -440,7 +661,10 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
       controlDone = runProgram(
         paths.engine,
         cfg.args as string[],
-        { ...(cfg.env as Record<string, string>), CT_H2_TICKFILE: CONTROL_TICKS },
+        {
+          ...(cfg.env as Record<string, string>),
+          CT_H2_TICKFILE: CONTROL_TICKS,
+        },
         paths.flameRepo,
         null,
         600_000,
@@ -449,34 +673,80 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
 
     // --- the arm that BYPASSES the feature ----------------------------------
     if (ARM === "harness-launches") {
-      // H5's arrangement, reproduced exactly: the harness starts the
-      // coordinator, then the flame. Everything downstream works. The gate must
-      // still refuse it, and the only thing that can refuse it is provenance.
+      // H5's arrangement, reproduced exactly for this platform. Everything
+      // downstream works; the gate must still refuse it on provenance alone.
       fs.mkdirSync(SESSION_DIR, { recursive: true });
-      fs.rmSync(HARNESS_SOCKET, { force: true });
-      const driverLog = fs.openSync(path.join(WORK, "harness-coordinator.log"), "w");
-      harnessCoordinator = spawn(
-        SESSION_DRIVER,
-        [
-          "--socket", HARNESS_SOCKET,
-          "--target-symbol", "_ZN5flame8FlameSim15advanceExistingEv",
-          "--session",
-          "--session-dir", SESSION_DIR,
-          "--session-idle-timeout-ms", "600000",
-        ],
-        { stdio: ["ignore", driverLog, driverLog] },
+      const driverLog = fs.openSync(
+        path.join(WORK, "harness-coordinator.log"),
+        "w",
       );
-      await waitForFile(HARNESS_SOCKET, 60_000, "the harness coordinator's socket");
-      const spawned = spawnProgram(
-        paths.engine,
-        cfg.args as string[],
-        {
-          ...(cfg.env as Record<string, string>),
-          REPRO_HCR_AGENT_SOCKET: HARNESS_SOCKET,
-        },
-        paths.flameRepo,
-        path.join(WORK, "harness-target.log"),
-      );
+      let spawned: ReturnType<typeof spawnProgram>;
+      if (IS_WINDOWS) {
+        spawned = spawnProgram(
+          paths.engine,
+          cfg.args as string[],
+          {
+            ...(cfg.env as Record<string, string>),
+            REPRO_HCR_AGENT_DLL: cfg.hcr.agentDll,
+          },
+          paths.flameRepo,
+          path.join(WORK, "harness-target.log"),
+        );
+        expect(spawned.child.pid ?? 0).toBeGreaterThan(0);
+        harnessCoordinator = spawn(
+          SESSION_DRIVER,
+          [
+            "--pid",
+            String(spawned.child.pid),
+            "--target-image",
+            cfg.hcr.targetImage,
+            "--target-pdb",
+            cfg.hcr.targetPdb,
+            "--target-symbol",
+            cfg.hcr.targetSymbol,
+            "--first-instruction-length",
+            String(cfg.hcr.firstInstructionLength),
+            "--session",
+            "--session-dir",
+            SESSION_DIR,
+            "--session-idle-timeout-ms",
+            "600000",
+          ],
+          { stdio: ["ignore", driverLog, driverLog] },
+        );
+      } else {
+        fs.rmSync(HARNESS_SOCKET, { force: true });
+        harnessCoordinator = spawn(
+          SESSION_DRIVER,
+          [
+            "--socket",
+            HARNESS_SOCKET,
+            "--target-symbol",
+            cfg.hcr.targetSymbol,
+            "--session",
+            "--session-dir",
+            SESSION_DIR,
+            "--session-idle-timeout-ms",
+            "600000",
+          ],
+          { stdio: ["ignore", driverLog, driverLog] },
+        );
+        await waitForFile(
+          HARNESS_SOCKET,
+          60_000,
+          "the harness coordinator's socket",
+        );
+        spawned = spawnProgram(
+          paths.engine,
+          cfg.args as string[],
+          {
+            ...(cfg.env as Record<string, string>),
+            REPRO_HCR_AGENT_SOCKET: HARNESS_SOCKET,
+          },
+          paths.flameRepo,
+          path.join(WORK, "harness-target.log"),
+        );
+      }
       harnessTarget = spawned.child;
       harnessTargetDone = spawned.done;
       await waitForFile(
@@ -484,19 +754,11 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
         120_000,
         "the harness-opened session becoming ready",
       );
-      // The /proc sample for this arm is about the process the HARNESS started,
+      // This process-table sample is about the process the HARNESS started,
       // which is the honest subject: the question the gate asks is "whose child
       // is the thing that got patched".
       const pid = harnessTarget.pid ?? 0;
-      obs.ppidSample = {
-        targetPid: pid,
-        ppid: procPpid(pid),
-        alive: procAlive(pid),
-        sampledAtMs: Date.now(),
-        testProcessPid: process.pid,
-        launcherAncestors: procAncestors(pid),
-        launcherCmdline: procCmdline(procPpid(pid)),
-      };
+      obs.ppidSample = processWitness(pid);
       fs.writeFileSync(PPID_SAMPLE, JSON.stringify(obs.ppidSample, null, 2));
     }
 
@@ -514,7 +776,8 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
     } else {
       await runPaletteCommand(ctPage, "Launch Under", LAUNCH_COMMAND_LABEL);
       obs.launchInvoked = true;
-      // Sample /proc CONCURRENTLY with the launch, not afterwards. The product
+      // Sample the OS process table CONCURRENTLY with the launch, not afterwards.
+      // The product
       // kills a target whose agent never dialled — correctly, since it is a
       // process nobody can edit and nobody asked to keep — so by the time the
       // panel shows the refusal the subject is gone, and a sample taken then
@@ -527,7 +790,9 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
         while (sampling) {
           try {
             if (fs.existsSync(recordFile)) {
-              const pid = Number(JSON.parse(fs.readFileSync(recordFile, "utf8")).targetPid ?? 0);
+              const pid = Number(
+                JSON.parse(fs.readFileSync(recordFile, "utf8")).targetPid ?? 0,
+              );
               if (pid > 0) {
                 if (procAlive(pid)) {
                   obs.targetAliveSamples += 1;
@@ -572,7 +837,7 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
       obs.targetAliveAtFailure = targetPid > 0 ? procAlive(targetPid) : false;
     }
 
-    // --- the green arm: sample /proc while the target is ALIVE --------------
+    // --- the green arm: sample process ancestry while the target is ALIVE ----
     if (ARM === "green") {
       expect(
         obs.panelStatusAfterLaunch,
@@ -581,17 +846,11 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
       ).toBe("session-ready");
       expect(obs.record, "the product wrote no launch record").not.toBeNull();
       const targetPid = Number(obs.record.targetPid ?? 0);
-      expect(targetPid, "the launch record names no target pid").toBeGreaterThan(0);
-      const ppid = procPpid(targetPid);
-      obs.ppidSample = {
+      expect(
         targetPid,
-        ppid,
-        alive: procAlive(targetPid),
-        sampledAtMs: Date.now(),
-        testProcessPid: process.pid,
-        launcherAncestors: [ppid, ...procAncestors(ppid)],
-        launcherCmdline: procCmdline(ppid),
-      };
+        "the launch record names no target pid",
+      ).toBeGreaterThan(0);
+      obs.ppidSample = processWitness(targetPid);
       fs.writeFileSync(PPID_SAMPLE, JSON.stringify(obs.ppidSample, null, 2));
     }
 
@@ -602,7 +861,8 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
     if (ARM_EDITS_THREE) {
       for (let i = 0; i < ARMS_TABLE.length; i += 1) {
         const arm = ARMS_TABLE[i];
-        const due = i === 0 ? FIRST_EDIT_AT : appliedAt[i - 1] + SETTLE + PLATEAU;
+        const due =
+          i === 0 ? FIRST_EDIT_AT : appliedAt[i - 1] + SETTLE + PLATEAU;
         await waitForFrame(TICKS, due, 600_000);
         // Read BEFORE the keypress: the patch cannot have landed earlier than
         // this, so it is the conservative identity boundary (trap 23).
@@ -620,7 +880,9 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
       await input.fill(ARMS_TABLE[0].edit);
       await input.press("Enter");
       await expect
-        .poll(async () => (await status.textContent()) ?? "", { timeout: 120_000 })
+        .poll(async () => (await status.textContent()) ?? "", {
+          timeout: 120_000,
+        })
         .not.toBe("applying…");
       obs.editStatuses.push(((await status.textContent()) ?? "").trim());
     }
@@ -637,7 +899,9 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
         "the coordinator's session summary, written after the product tore the session down",
       );
       await expect
-        .poll(async () => (await status.textContent()) ?? "", { timeout: 120_000 })
+        .poll(async () => (await status.textContent()) ?? "", {
+          timeout: 120_000,
+        })
         .toBe("session-closed");
       obs.record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
     } else if (ARM === "harness-launches") {
@@ -659,21 +923,35 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
     // --- the two verdicts ---------------------------------------------------
     if (ARM_EDITS_THREE) {
       const provenance = spawnSync(
-        "python3",
+        PYTHON,
         [
-          path.join(paths.flameRepo, "scripts", "verify_hcr6_launch_provenance.py"),
-          "--record", recordPath,
-          "--ppid-sample", PPID_SAMPLE,
-          "--session", sessionPath,
-          "--expect-patches", String(ARMS_TABLE.length),
-          "--expect-launcher-cmdline", CODETRACER_REPO,
-          "--json-out", path.join(WORK, "provenance-verdict.json"),
+          path.join(
+            paths.flameRepo,
+            "scripts",
+            "verify_hcr6_launch_provenance.py",
+          ),
+          "--record",
+          recordPath,
+          "--ppid-sample",
+          PPID_SAMPLE,
+          "--session",
+          sessionPath,
+          "--expect-patches",
+          String(ARMS_TABLE.length),
+          "--expect-launcher-cmdline",
+          CODETRACER_REPO,
+          "--json-out",
+          path.join(WORK, "provenance-verdict.json"),
         ],
         { encoding: "utf8" },
       );
       obs.provenanceOutput = `${provenance.stdout ?? ""}\n${provenance.stderr ?? ""}`;
       obs.provenanceVerdict =
-        provenance.status === 0 ? "pass" : provenance.status === 1 ? "fail" : "unusable";
+        provenance.status === 0
+          ? "pass"
+          : provenance.status === 1
+            ? "fail"
+            : "unusable";
 
       const armsJson = path.join(WORK, "arms.json");
       const armArgs: string[] = [];
@@ -687,24 +965,40 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
         );
       });
       const written = spawnSync(
-        "python3",
-        [path.join(paths.flameRepo, "scripts", "hcr5_arms_json.py"), "--out", armsJson, ...armArgs],
+        PYTHON,
+        [
+          path.join(paths.flameRepo, "scripts", "hcr5_arms_json.py"),
+          "--out",
+          armsJson,
+          ...armArgs,
+        ],
         { encoding: "utf8" },
       );
       expect(written.status, `${written.stdout}${written.stderr}`).toBe(0);
       const control = await controlDone!;
       expect(control.code, "the control flame did not finish").toBe(0);
       const flameVerdict = spawnSync(
-        "python3",
+        PYTHON,
         [
-          path.join(paths.flameRepo, "scripts", "verify_hcr5_live_edit_loop.py"),
-          "--control", CONTROL_TICKS,
-          "--patched", TICKS,
-          "--arms", armsJson,
-          "--session", sessionPath,
-          "--frames", String(FRAMES),
-          "--settle", String(SETTLE),
-          "--json-out", path.join(WORK, "flame-verdict.json"),
+          path.join(
+            paths.flameRepo,
+            "scripts",
+            "verify_hcr5_live_edit_loop.py",
+          ),
+          "--control",
+          CONTROL_TICKS,
+          "--patched",
+          TICKS,
+          "--arms",
+          armsJson,
+          "--session",
+          sessionPath,
+          "--frames",
+          String(FRAMES),
+          "--settle",
+          String(SETTLE),
+          "--json-out",
+          path.join(WORK, "flame-verdict.json"),
         ],
         { encoding: "utf8" },
       );
@@ -756,10 +1050,14 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
       case "coordinator-not-a-coordinator":
         expect(obs.panelStatusAfterLaunch).toBe("hcr-coordinator-failed");
         expect(obs.launchRecordPresent).toBe(true);
-        // THE TARGET WAS NOT LAUNCHED. Without the coordinator there is nothing
-        // for its single dial-out to reach, so starting it would produce a
-        // process that can never be edited.
-        expect(Number(obs.record.targetPid ?? -1)).toBe(0);
+        // Linux can refuse before spending the target's one dial-out. Windows
+        // must create the target first because the coordinator needs its PID;
+        // the product then tears that now-unusable target down.
+        if (IS_WINDOWS) {
+          expect(Number(obs.record.targetPid ?? 0)).toBeGreaterThan(0);
+        } else {
+          expect(Number(obs.record.targetPid ?? -1)).toBe(0);
+        }
         expect(Number(obs.record.coordinatorPid ?? 0)).toBeGreaterThan(0);
         break;
       case "target-exits-immediately":
@@ -770,9 +1068,15 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
         // The STUB'S OWN exit code, which names the object this arm touched
         // rather than the class of thing that happened.
         expect(Number(obs.record.targetExitCode ?? -1)).toBe(7);
-        expect(Number(obs.record.coordinatorListeningAtMs ?? 0)).toBeLessThanOrEqual(
-          Number(obs.record.targetStartedAtMs ?? 0),
-        );
+        if (IS_WINDOWS) {
+          expect(Number(obs.record.targetStartedAtMs ?? 0)).toBeLessThanOrEqual(
+            Number(obs.record.coordinatorStartedAtMs ?? 0),
+          );
+        } else {
+          expect(
+            Number(obs.record.coordinatorListeningAtMs ?? 0),
+          ).toBeLessThanOrEqual(Number(obs.record.targetStartedAtMs ?? 0));
+        }
         break;
       case "agent-never-dials":
         expect(obs.panelStatusAfterLaunch).toBe("hcr-agent-never-dialled");
@@ -788,7 +1092,11 @@ test.describe("H6 — CodeTracer launches the flame under HCR", () => {
 });
 
 /** Open the command palette, type `query`, and click the entry labelled `label`. */
-async function runPaletteCommand(page: any, query: string, label: string): Promise<void> {
+async function runPaletteCommand(
+  page: any,
+  query: string,
+  label: string,
+): Promise<void> {
   await page.keyboard.press("Control+KeyP");
   const box = page.locator("#command-query-text");
   await expect(box).toBeVisible({ timeout: 30_000 });
@@ -812,6 +1120,10 @@ function spawnProgram(
 ): { child: ChildProcess; done: Promise<number | null> } {
   const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env };
   delete childEnv.CT_H2_CAPTURE;
+  if (childEnv.REPRO_HCR_AGENT_DLL !== undefined)
+    delete childEnv.REPRO_HCR_AGENT_SOCKET;
+  if (childEnv.REPRO_HCR_AGENT_SOCKET !== undefined)
+    delete childEnv.REPRO_HCR_AGENT_DLL;
   // STDOUT GOES TO A FILE, and that is not about keeping evidence. A child
   // spawned with a PIPE nobody reads stops when the pipe's 64 KB buffer fills:
   // the probe prints one ~70-byte line per frame, so this flame froze at frame
@@ -819,7 +1131,11 @@ function spawnProgram(
   // from a hang in the thing under test. The product's own launcher redirects
   // to files for the same reason.
   const fd = fs.openSync(logFile, "w");
-  const child = spawn(program, args, { env: childEnv, cwd, stdio: ["ignore", fd, fd] });
+  const child = spawn(program, args, {
+    env: childEnv,
+    cwd,
+    stdio: ["ignore", fd, fd],
+  });
   const done = new Promise<number | null>((resolve) => {
     child.on("close", (code) => {
       fs.closeSync(fd);
@@ -847,8 +1163,10 @@ function runProgram(
     // The control run must have NO agent. Inheriting one would make the control
     // the same run as the patched one and the identity comparison vacuous.
     delete childEnv.REPRO_HCR_AGENT_SOCKET;
+    delete childEnv.REPRO_HCR_AGENT_DLL;
   } else {
     childEnv.REPRO_HCR_AGENT_SOCKET = agentSocket;
+    delete childEnv.REPRO_HCR_AGENT_DLL;
   }
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { env: childEnv, cwd });

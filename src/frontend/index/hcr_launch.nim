@@ -5,20 +5,16 @@
 ## "How the flame client is started — the launch model".
 ##
 ## WHY THIS MODULE EXISTS, and why it is not a convenience wrapper around the
-## apply-edit command. The in-target HCR agent **dials out**: it connects to the
-## coordinator once, at process start, with a bounded retry
-## (`repro_hcr_agent.c`, 500 x 10 ms, and no later attempt). Two consequences,
-## and both are structural rather than incidental:
+## apply-edit command. The HCR transport must exist while the target is being
+## launched, but its ownership differs by platform:
 ##
-##   1. **The coordinator must already be listening when the target starts.**
-##      There is no second dial-out to catch up with a coordinator that arrived
-##      late, so "start the coordinator, then start the target" is the only
-##      order that can work. This module enforces that order and refuses to
-##      launch the target at all if the coordinator did not come up.
-##   2. **Attaching to an already-running target is out of scope** (§2.5). A
-##      process that has spent its dial-out cannot be reached by a coordinator
-##      started afterwards, so the product cannot offer attach as an alternative
-##      route to the same place. It launches, or it reports why it could not.
+##   1. On Linux the agent dials out once, at process start, so the coordinator
+##      must already be listening: coordinator first, target second.
+##   2. On Windows the agent is the named-pipe server and its endpoint contains
+##      the target PID: target first, coordinator second. The target loads the
+##      canonical agent DLL from `REPRO_HCR_AGENT_DLL` during startup.
+##   3. **Attaching to an already-running target is out of scope** (§2.5). This
+##      path owns both process creation and the complete HCR session lifetime.
 ##
 ## Until this module existed the SHELL HARNESS played the launcher's part: H5's
 ## gate started `hcr_patch_driver --session` itself, started the engine with
@@ -28,25 +24,21 @@
 ##
 ## WHAT IT DOES NOT DECIDE. Exactly as with `ipc_utils.onHcrApplyEdit`, nothing
 ## here forms an opinion about an EDIT. This module owns the session's
-## lifetime — coordinator up, target launched into it, ready, torn down — and
-## the apply-edit command owns everything about what an edit means.
+## lifetime — transport established, target and coordinator connected, ready,
+## torn down — and the apply-edit command owns everything about what an edit
+## means.
 ##
-## EVERY FAILURE IS NAMED AND BOUNDED. A launch can fail in five distinguishable
-## ways and each has its own status string, its own sentence and its own
-## deadline: there is no code path here that waits forever, and none that
-## returns quietly. A hot-reload tool whose target silently failed to start is
-## indistinguishable, from the screen, from one that started it and changed
-## nothing — the same confusion `onHcrApplyEdit` is written to avoid, one layer
-## further out.
+## EVERY FAILURE IS NAMED AND BOUNDED. Configuration, process startup,
+## transport negotiation and target-lifetime failures each have their own
+## status string and sentence; every wait has a deadline. A hot-reload tool
+## whose target silently failed to start is indistinguishable, from the screen,
+## from one that started it and changed nothing — the same confusion
+## `onHcrApplyEdit` is written to avoid, one layer further out.
 ##
-## PLATFORM. The launch path implemented here is **Linux-only**, and it refuses
-## by name elsewhere rather than half-working. The Linux agent dials out over an
-## `AF_UNIX` socket the coordinator creates, which is what makes
-## "coordinator first, target second" expressible. The Windows agent is a
-## named-pipe SERVER whose endpoint is derived from the target's PID, so the
-## Windows coordinator must be started with a PID that does not exist until the
-## target is running — the inverse order, a different state machine, and a
-## different set of failure modes. Writing it blind would be scaffolding.
+## PLATFORM. Both production transports are implemented here. The launch record
+## names which one was used and the order it requires, so a gate can assert the
+## platform's real process topology instead of treating one platform's order as
+## universal.
 
 import
   std / [ async, jsffi, os ],
@@ -149,6 +141,9 @@ type
     programArgs: seq[cstring]
     sessionDir: string
     socketPath: string
+    platform: string
+    transport: string
+    startupOrder: string
     applyEditCommand: string
     applyEditInterpreter: string
     coordinator: JsObject
@@ -157,11 +152,13 @@ type
     targetPid: int
     coordinatorStartedAtMs: float
     coordinatorListeningAtMs: float
+    coordinatorConnectedAtMs: float
     targetStartedAtMs: float
     readyAtMs: float
     targetExitCode: int
     targetExited: bool
     coordinatorExited: bool
+    targetSpawnError: string
     failureStatus: string
     failureMessage: string
     record: string
@@ -250,12 +247,16 @@ proc writeLaunchRecord(session: HcrSession) =
     configName: cstring(session.configName),
     configSource: cstring(session.configSource),
     program: cstring(session.program),
+    platform: cstring(session.platform),
+    transport: cstring(session.transport),
+    startupOrder: cstring(session.startupOrder),
     sessionDir: cstring(session.sessionDir),
     socket: cstring(session.socketPath),
     applyEditCommand: cstring(session.applyEditCommand),
     coordinatorPid: session.coordinatorPid,
     coordinatorStartedAtMs: session.coordinatorStartedAtMs,
     coordinatorListeningAtMs: session.coordinatorListeningAtMs,
+    coordinatorConnectedAtMs: session.coordinatorConnectedAtMs,
     targetPid: session.targetPid,
     targetStartedAtMs: session.targetStartedAtMs,
     targetExited: session.targetExited,
@@ -309,8 +310,8 @@ proc teardownAfterTargetExit(session: HcrSession) {.async.} =
   ## The target is gone; the session it owned is over.
   ##
   ## A session outliving its target is not merely untidy: the coordinator holds
-  ## a socket nothing will ever dial again, and the next edit typed into the
-  ## panel would be published into it and answered — by a state machine talking
+  ## a transport endpoint with no target behind it, and the next edit typed into
+  ## the panel would be published into it and answered — by a state machine talking
   ## to a closed connection — rather than refused. So the session dir is
   ## released here, which is what makes the next edit say "no session" instead.
   await shutDownSession(session)
@@ -323,7 +324,8 @@ proc teardownAfterTargetExit(session: HcrSession) {.async.} =
       $session.targetExitCode & "; the live-edit session is closed. Launch it " &
       "again to edit it live."))
 
-proc resolveHcrLaunchConfig(name: string, configs: seq[LaunchConfig]):
+proc resolveHcrLaunchConfig(name: string, configs: seq[LaunchConfig],
+                            platform: string):
     LaunchConfig =
   ## The configuration to launch: the one NAMED, or the first HCR-capable one.
   ##
@@ -336,12 +338,13 @@ proc resolveHcrLaunchConfig(name: string, configs: seq[LaunchConfig]):
     if name.len > 0:
       if $config.name == name:
         return config
-    elif not config.hcr.isNil:
+    elif not config.hcr.isNil and
+        (config.hcr.platform.len == 0 or $config.hcr.platform == platform):
       return config
 
 proc launchUnderHcr(configName: string) {.async.} =
-  ## Start a coordinator, launch the configured target into it, and open the
-  ## live-edit session.
+  ## Start the target and coordinator in the transport's required order, then
+  ## open the live-edit session.
   ##
   ## The whole sequence is here, in order, because the ORDER is the feature.
   if not activeSession.isNil and activeSession.phase == hcrReady:
@@ -351,14 +354,11 @@ proc launchUnderHcr(configName: string) {.async.} =
         "); close that program before launching another."))
     return
 
-  if $processPlatform() != "linux":
+  let platform = $processPlatform()
+  if platform != "linux" and platform != "win32":
     sendSessionStatus(hcrFailed, cstring"hcr-launch-unsupported-platform",
       cstring("launching a target under hot code reload is implemented for " &
-        "Linux only; this is " & $processPlatform() & ". The Linux agent dials " &
-        "out over a coordinator-created AF_UNIX socket, which is what makes " &
-        "`coordinator first, target second` expressible; the Windows agent is " &
-        "a named-pipe server keyed on the target's pid and needs the inverse " &
-        "order."))
+        "Linux and Windows; this host reports " & platform & "."))
     return
 
   # --- 1. the configuration ------------------------------------------------
@@ -405,7 +405,7 @@ proc launchUnderHcr(configName: string) {.async.} =
     return
   let configSource = workspaceFolder / ".vscode" / "launch.json"
   let configs = getLaunchConfigsForWorkspace(cstring(workspaceFolder))
-  let config = resolveHcrLaunchConfig(configName, configs)
+  let config = resolveHcrLaunchConfig(configName, configs, platform)
   if config.isNil:
     if configName.len > 0:
       sendSessionStatus(hcrFailed, cstring"hcr-launch-configuration-not-found",
@@ -426,11 +426,25 @@ proc launchUnderHcr(configName: string) {.async.} =
     return
 
   let settings = config.hcr
+  if settings.platform.len > 0 and $settings.platform != platform:
+    sendSessionStatus(hcrFailed,
+      cstring"hcr-launch-configuration-platform-mismatch",
+      cstring("the launch configuration `" & $config.name & "` is for " &
+        $settings.platform & ", but CodeTracer is running on " & platform & "."))
+    return
   if settings.coordinator.len == 0 or settings.targetSymbol.len == 0:
     sendSessionStatus(hcrFailed, cstring"hcr-launch-configuration-incomplete",
       cstring("the `hcr` block of `" & $config.name & "` in " & configSource &
         " must name both `coordinator` (the HCR patch driver) and " &
         "`targetSymbol` (the function patches are published into)."))
+    return
+  if platform == "win32" and (settings.agentDll.len == 0 or
+      settings.targetImage.len == 0 or settings.targetPdb.len == 0 or
+      settings.firstInstructionLength <= 0):
+    sendSessionStatus(hcrFailed, cstring"hcr-launch-configuration-incomplete",
+      cstring("the Windows `hcr` block of `" & $config.name & "` in " &
+        configSource & " must name `agentDll`, `targetImage`, `targetPdb` " &
+        "and a positive `firstInstructionLength`."))
     return
   if not fsExists(settings.coordinator):
     sendSessionStatus(hcrFailed, cstring"hcr-coordinator-missing",
@@ -442,6 +456,16 @@ proc launchUnderHcr(configName: string) {.async.} =
       cstring("the program named by `" & $config.name & "` does not exist: " &
         $config.program))
     return
+  if platform == "win32":
+    for required in [
+        (name: "agent DLL", path: settings.agentDll),
+        (name: "target image", path: settings.targetImage),
+        (name: "target PDB", path: settings.targetPdb)]:
+      if not fsExists(required.path):
+        sendSessionStatus(hcrFailed, cstring"hcr-windows-input-missing",
+          cstring("the Windows HCR " & required.name & " named by `" &
+            $config.name & "` does not exist: " & $required.path))
+        return
 
   # --- 2. the session directory --------------------------------------------
   var sessionDir = $settings.sessionDir
@@ -460,18 +484,30 @@ proc launchUnderHcr(configName: string) {.async.} =
 
   # AF_UNIX paths are capped at 108 bytes IN THE KERNEL, and a socket named
   # after a deep project path crosses it with a failure that names neither the
-  # cause nor the remedy. So the socket lives in the system temp dir under a
-  # short, pid-keyed name and never under the session dir.
-  let socketPath = "/tmp/ct-hcr-" & $nodePid() & ".sock"
+  # cause nor the remedy. So Linux uses the system temp dir. Windows fills this
+  # in after process creation because the named-pipe endpoint contains the PID.
+  var socketPath =
+    if platform == "linux": "/tmp/ct-hcr-" & $nodePid() & ".sock"
+    else: ""
+  let transport =
+    if platform == "linux": "unix-dialout"
+    else: "windows-pid-named-pipe"
+  let startupOrder =
+    if platform == "linux": "coordinator-first"
+    else: "target-first"
 
   let session = HcrSession(
-    phase: hcrCoordinatorStarting,
+    phase: (if platform == "linux": hcrCoordinatorStarting
+            else: hcrTargetLaunching),
     configName: $config.name,
     configSource: configSource,
     program: $config.program,
     programArgs: config.args,
     sessionDir: sessionDir,
     socketPath: socketPath,
+    platform: platform,
+    transport: transport,
+    startupOrder: startupOrder,
     applyEditCommand: $settings.applyEditCommand,
     applyEditInterpreter: $settings.applyEditInterpreter,
     coordinatorPid: 0,
@@ -481,88 +517,8 @@ proc launchUnderHcr(configName: string) {.async.} =
   activeSession = session
   writeLaunchRecord(session)
 
-  # --- 3. the coordinator, FIRST -------------------------------------------
-  sendSessionStatus(hcrCoordinatorStarting, cstring"launching",
-    cstring("starting the HCR coordinator for `" & $config.name & "`…"))
+  # --- 3. prepare both children --------------------------------------------
   let coordinatorLog = sessionDir / "coordinator.log"
-  let coordinatorArgs = newJsArray()
-  pushJs(coordinatorArgs, cstring"--socket")
-  pushJs(coordinatorArgs, cstring(socketPath))
-  pushJs(coordinatorArgs, cstring"--target-symbol")
-  pushJs(coordinatorArgs, settings.targetSymbol)
-  pushJs(coordinatorArgs, cstring"--session")
-  pushJs(coordinatorArgs, cstring"--session-dir")
-  pushJs(coordinatorArgs, cstring(sessionDir))
-  pushJs(coordinatorArgs, cstring"--session-idle-timeout-ms")
-  pushJs(coordinatorArgs, cstring($(
-    if settings.idleTimeoutMs > 0: settings.idleTimeoutMs
-    else: DefaultIdleTimeoutMs)))
-
-  let coordinatorFd = fsOpenAppend(cstring(coordinatorLog))
-  var coordinator: JsObject
-  session.coordinatorStartedAtMs = nowMs()
-  try:
-    coordinator = spawnChild(settings.coordinator, coordinatorArgs, js{
-      cwd: config.cwd,
-      stdio: @[cstring"ignore".toJs, coordinatorFd.toJs, coordinatorFd.toJs]})
-  except:
-    fsCloseQuietly(coordinatorFd)
-    session.fail("hcr-coordinator-failed",
-      "the HCR coordinator could not be started (" & $settings.coordinator &
-        "): " & getCurrentExceptionMsg())
-    activeSession = nil
-    return
-  session.coordinator = coordinator
-  session.coordinatorPid = childPid(coordinator)
-  onChildError(coordinator) do (error: JsObject):
-    session.coordinatorExited = true
-  onChildExit(coordinator) do (code: JsObject, signal: JsObject):
-    session.coordinatorExited = true
-  writeLaunchRecord(session)
-
-  # The coordinator is listening when its SOCKET EXISTS — which is the very
-  # thing the target will dial — rather than when a line appears in its log.
-  # A log line is printed before `accept`, so it is in the log of every driver
-  # that started at all; `Verification-Harness-Traps.md` §1b records exactly
-  # this substitution costing a falsifier arm its discrimination.
-  let listenDeadline = nowMs() + float(
-    if settings.coordinatorListenTimeoutMs > 0: settings.coordinatorListenTimeoutMs
-    else: DefaultCoordinatorListenTimeoutMs)
-  var listening = false
-  while nowMs() < listenDeadline:
-    if fsExists(cstring(socketPath)):
-      listening = true
-      break
-    if session.coordinatorExited:
-      break
-    await wait(PollIntervalMs)
-  fsCloseQuietly(coordinatorFd)
-  if not listening:
-    let tail = $fsTail(cstring(coordinatorLog), 600)
-    # THE TARGET IS NOT LAUNCHED IN THIS BRANCH, and that is the point rather
-    # than tidiness: a target started without a coordinator burns its single
-    # dial-out on nothing, and no later coordinator can reach it. Leaving it
-    # running would look like a working flame that can never be edited.
-    if session.coordinatorExited:
-      session.fail("hcr-coordinator-failed",
-        "the HCR coordinator exited before it began listening on " &
-          socketPath & ". Its last output was: " & tail)
-    else:
-      session.fail("hcr-coordinator-not-listening",
-        "the HCR coordinator did not create its socket " & socketPath &
-          " within " & $int(listenDeadline - session.coordinatorStartedAtMs) &
-          " ms. Its last output was: " & tail)
-    killChild(coordinator)
-    activeSession = nil
-    return
-  session.coordinatorListeningAtMs = nowMs()
-  session.phase = hcrCoordinatorListening
-  writeLaunchRecord(session)
-
-  # --- 4. the target, SECOND -----------------------------------------------
-  sendSessionStatus(hcrTargetLaunching, cstring"launching",
-    cstring("starting " & $config.program & " with the HCR agent pointed at " &
-      "the coordinator…"))
   let targetLog = sessionDir / "target.log"
   let targetArgs = newJsArray()
   for arg in config.args:
@@ -573,45 +529,168 @@ proc launchUnderHcr(configName: string) {.async.} =
   let socketEnvName =
     if settings.agentSocketEnv.len > 0: $settings.agentSocketEnv
     else: DefaultAgentSocketEnv
-  envSet(targetEnv, cstring(socketEnvName), cstring(socketPath))
+  if platform == "linux":
+    envSet(targetEnv, cstring(socketEnvName), cstring(socketPath))
+    envDelete(targetEnv, cstring"REPRO_HCR_AGENT_DLL")
+  else:
+    envSet(targetEnv, cstring"REPRO_HCR_AGENT_DLL", settings.agentDll)
+    envDelete(targetEnv, cstring(socketEnvName))
   # The session dir the panel publishes into is this process's business, not
   # the target's; leaving an inherited one in the target's environment would be
   # a second, stale answer to a question only one of them should answer.
   envDelete(targetEnv, cstring"CODETRACER_HCR_SESSION_DIR")
 
-  let targetFd = fsOpenAppend(cstring(targetLog))
+  var coordinator: JsObject
   var target: JsObject
-  session.targetStartedAtMs = nowMs()
-  try:
-    target = spawnChild(config.program, targetArgs, js{
-      cwd: config.cwd,
-      env: targetEnv,
-      stdio: @[cstring"ignore".toJs, targetFd.toJs, targetFd.toJs]})
-  except:
-    fsCloseQuietly(targetFd)
-    session.fail("hcr-target-launch-failed",
-      "could not start " & $config.program & ": " & getCurrentExceptionMsg())
-    await shutDownSession(session)
+  var coordinatorFd = -1
+  var targetFd = -1
+
+  proc startCoordinator(coordinatorArgs: JsObject): bool =
+    sendSessionStatus(hcrCoordinatorStarting, cstring"launching",
+      cstring("starting the HCR coordinator for `" & $config.name & "`…"))
+    session.phase = hcrCoordinatorStarting
+    coordinatorFd = fsOpenAppend(cstring(coordinatorLog))
+    session.coordinatorStartedAtMs = nowMs()
+    try:
+      coordinator = spawnChild(settings.coordinator, coordinatorArgs, js{
+        cwd: config.cwd,
+        stdio: @[cstring"ignore".toJs, coordinatorFd.toJs,
+          coordinatorFd.toJs]})
+    except:
+      fsCloseQuietly(coordinatorFd)
+      session.fail("hcr-coordinator-failed",
+        "the HCR coordinator could not be started (" & $settings.coordinator &
+          "): " & getCurrentExceptionMsg())
+      return false
+    session.coordinator = coordinator
+    session.coordinatorPid = childPid(coordinator)
+    onChildError(coordinator) do (error: JsObject):
+      session.coordinatorExited = true
+    onChildExit(coordinator) do (code: JsObject, signal: JsObject):
+      session.coordinatorExited = true
+    writeLaunchRecord(session)
+    true
+
+  proc startTarget(): bool =
+    sendSessionStatus(hcrTargetLaunching, cstring"launching",
+      cstring("starting " & $config.program & " with its HCR agent…"))
+    session.phase = hcrTargetLaunching
+    targetFd = fsOpenAppend(cstring(targetLog))
+    session.targetStartedAtMs = nowMs()
+    try:
+      target = spawnChild(config.program, targetArgs, js{
+        cwd: config.cwd,
+        env: targetEnv,
+        stdio: @[cstring"ignore".toJs, targetFd.toJs, targetFd.toJs]})
+    except:
+      fsCloseQuietly(targetFd)
+      session.fail("hcr-target-launch-failed",
+        "could not start " & $config.program & ": " & getCurrentExceptionMsg())
+      return false
+    session.target = target
+    session.targetPid = childPid(target)
+    onChildError(target) do (error: JsObject):
+      session.targetSpawnError = $errorText(error)
+      session.targetExited = true
+    onChildExit(target) do (code: JsObject, signal: JsObject):
+      session.targetExited = true
+      session.targetExitCode = childExitCode(target)
+      if session.phase == hcrReady:
+        # The only path where the session is torn down by the TARGET rather
+        # than by a failure: it ran, it was edited, it finished.
+        discard teardownAfterTargetExit(session)
+    writeLaunchRecord(session)
+    true
+
+  let coordinatorArgs = newJsArray()
+  if platform == "linux":
+    # Linux coordinator FIRST: the target's agent dials this socket once.
+    pushJs(coordinatorArgs, cstring"--socket")
+    pushJs(coordinatorArgs, cstring(socketPath))
+  else:
+    # Windows target FIRST: the target's agent owns a PID-keyed named pipe.
+    if not startTarget():
+      activeSession = nil
+      return
+    if session.targetPid <= 0:
+      session.fail("hcr-target-launch-failed",
+        "the Windows target started without publishing a process id")
+      killChild(target)
+      fsCloseQuietly(targetFd)
+      activeSession = nil
+      return
+    socketPath = "\\\\.\\pipe\\repro-hcr-" & $session.targetPid
+    session.socketPath = socketPath
+    writeLaunchRecord(session)
+    pushJs(coordinatorArgs, cstring"--pid")
+    pushJs(coordinatorArgs, cstring($session.targetPid))
+    pushJs(coordinatorArgs, cstring"--target-image")
+    pushJs(coordinatorArgs, settings.targetImage)
+    pushJs(coordinatorArgs, cstring"--target-pdb")
+    pushJs(coordinatorArgs, settings.targetPdb)
+    pushJs(coordinatorArgs, cstring"--first-instruction-length")
+    pushJs(coordinatorArgs, cstring($settings.firstInstructionLength))
+
+  pushJs(coordinatorArgs, cstring"--target-symbol")
+  pushJs(coordinatorArgs, settings.targetSymbol)
+  pushJs(coordinatorArgs, cstring"--session")
+  pushJs(coordinatorArgs, cstring"--session-dir")
+  pushJs(coordinatorArgs, cstring(sessionDir))
+  pushJs(coordinatorArgs, cstring"--session-idle-timeout-ms")
+  pushJs(coordinatorArgs, cstring($(
+    if settings.idleTimeoutMs > 0: settings.idleTimeoutMs
+    else: DefaultIdleTimeoutMs)))
+
+  if not startCoordinator(coordinatorArgs):
+    if platform == "win32" and not target.isNil:
+      killChild(target)
+      fsCloseQuietly(targetFd)
     activeSession = nil
     return
-  session.target = target
-  session.targetPid = childPid(target)
-  session.phase = hcrTargetLaunching
-  writeLaunchRecord(session)
-  infoPrint "hcr_launch: launched ", $config.program, " as pid ",
-    $session.targetPid, " under coordinator pid ", $session.coordinatorPid
 
-  var spawnError = ""
-  onChildError(target) do (error: JsObject):
-    spawnError = $errorText(error)
-    session.targetExited = true
-  onChildExit(target) do (code: JsObject, signal: JsObject):
-    session.targetExited = true
-    session.targetExitCode = childExitCode(target)
-    if session.phase == hcrReady:
-      # The only path where the session is torn down by the TARGET rather than
-      # by a failure: it ran, it was edited, it finished.
-      discard teardownAfterTargetExit(session)
+  if platform == "linux":
+    # The coordinator is listening when its SOCKET EXISTS — which is the very
+    # thing the target will dial — rather than when a line appears in its log.
+    let listenDeadline = nowMs() + float(
+      if settings.coordinatorListenTimeoutMs > 0:
+        settings.coordinatorListenTimeoutMs
+      else: DefaultCoordinatorListenTimeoutMs)
+    var listening = false
+    while nowMs() < listenDeadline:
+      if fsExists(cstring(socketPath)):
+        listening = true
+        break
+      if session.coordinatorExited:
+        break
+      await wait(PollIntervalMs)
+    fsCloseQuietly(coordinatorFd)
+    if not listening:
+      let tail = $fsTail(cstring(coordinatorLog), 600)
+      # A Linux target is deliberately NOT launched here: it would spend its
+      # only dial-out on nothing and could never be edited afterwards.
+      if session.coordinatorExited:
+        session.fail("hcr-coordinator-failed",
+          "the HCR coordinator exited before it began listening on " &
+            socketPath & ". Its last output was: " & tail)
+      else:
+        session.fail("hcr-coordinator-not-listening",
+          "the HCR coordinator did not create its socket " & socketPath &
+            " within " & $int(listenDeadline - session.coordinatorStartedAtMs) &
+            " ms. Its last output was: " & tail)
+      killChild(coordinator)
+      activeSession = nil
+      return
+    session.coordinatorListeningAtMs = nowMs()
+    session.phase = hcrCoordinatorListening
+    writeLaunchRecord(session)
+    if not startTarget():
+      await shutDownSession(session)
+      activeSession = nil
+      return
+
+  infoPrint "hcr_launch: launched ", $config.program, " as pid ",
+    $session.targetPid, " with ", transport, " coordinator pid ",
+    $session.coordinatorPid
 
   # --- 5. the handshake ----------------------------------------------------
   # `ready` is written by the driver AFTER the handshake, not after the accept.
@@ -619,7 +698,10 @@ proc launchUnderHcr(configName: string) {.async.} =
   # session that had not negotiated, which the state machine refuses — a
   # self-inflicted failure that reads like a broken agent.
   sendSessionStatus(hcrWaitingForAgent, cstring"launching",
-    cstring("waiting for the in-target HCR agent to dial the coordinator…"))
+    cstring(if platform == "linux":
+      "waiting for the in-target HCR agent to dial the coordinator…"
+    else:
+      "waiting for the HCR coordinator to connect to the target's named pipe…"))
   session.phase = hcrWaitingForAgent
   writeLaunchRecord(session)
   let readyPath = sessionDir / "ready"
@@ -637,9 +719,11 @@ proc launchUnderHcr(configName: string) {.async.} =
       break
     await wait(PollIntervalMs)
   fsCloseQuietly(targetFd)
+  fsCloseQuietly(coordinatorFd)
 
   if ready:
     session.readyAtMs = nowMs()
+    session.coordinatorConnectedAtMs = session.readyAtMs
     session.phase = hcrReady
     writeLaunchRecord(session)
     sendSessionStatus(hcrReady, cstring"session-ready",
@@ -652,9 +736,9 @@ proc launchUnderHcr(configName: string) {.async.} =
   # the process it did not happen in.
   if session.targetExited:
     let tail = $fsTail(cstring(targetLog), 600)
-    if spawnError.len > 0:
+    if session.targetSpawnError.len > 0:
       session.fail("hcr-target-launch-failed",
-        "could not start " & $config.program & ": " & spawnError)
+        "could not start " & $config.program & ": " & session.targetSpawnError)
     else:
       session.fail("hcr-target-exited-early",
         "the program you launched (" & $config.program & ", pid " &
@@ -663,22 +747,25 @@ proc launchUnderHcr(configName: string) {.async.} =
           "edit. Its last output was: " & tail)
   elif session.coordinatorExited:
     let tail = $fsTail(cstring(coordinatorLog), 600)
-    session.fail("hcr-coordinator-exited",
-      "the HCR coordinator exited while waiting for the target's agent. Its " &
-        "last output was: " & tail)
+    if platform == "win32":
+      session.fail("hcr-coordinator-failed",
+        "the Windows HCR coordinator exited before it connected to the " &
+          "target's named pipe " & socketPath & ". Its last output was: " & tail)
+    else:
+      session.fail("hcr-coordinator-exited",
+        "the HCR coordinator exited while waiting for the target's agent. Its " &
+          "last output was: " & tail)
   else:
-    # The target is ALIVE and did not dial. This is the case a bounded wait
-    # exists for: the agent tries once, for about five seconds, at process
-    # start, so a target that has been up for a minute without a `ready` file
-    # is never going to produce one and waiting longer only looks like work.
+    # The target is ALIVE and the platform transport did not negotiate. This is
+    # the case a bounded wait exists for; waiting longer only looks like work.
     session.fail("hcr-agent-never-dialled",
       "the program you launched (" & $config.program & ", pid " &
         $session.targetPid & ") is running but its HCR agent never connected " &
-        "to " & socketPath & ". The agent dials out ONCE at process start, so " &
-        "this will not resolve on its own.",
+        "through " & socketPath & ". This will not resolve on its own.",
       "check that the program was built with the patchable HCR profile and " &
-        "that it reads " & socketEnvName & ".")
-    killChild(target)
+        (if platform == "linux": "that it reads " & socketEnvName & "."
+         else: "that `agentDll` names its canonical Windows HCR agent."))
+  killChild(target)
   await shutDownSession(session)
   activeSession = nil
 
@@ -690,7 +777,8 @@ killSessionChildrenOnExit(proc () =
   ##
   ## Both are ordinary children, so nothing reaps them if CodeTracer is closed
   ## with a session open — the flame keeps rendering to a log nobody reads and
-  ## the coordinator keeps holding a socket nobody will dial. Node's `exit`
+  ## the coordinator keeps holding a transport endpoint with no target. Node's
+  ## `exit`
   ## handler may only do synchronous work, and `kill` is synchronous, so this is
   ## the one place the cleanup fits.
   ##

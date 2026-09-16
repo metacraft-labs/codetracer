@@ -920,21 +920,22 @@ test-event-log-static *args:
 #
 # `The-Flame-Demo-Spec.md` §2.5: the demo launches the flame client under
 # CodeTracer, and attaching to one that is already running is out of scope. The
-# order is the feature — the in-target agent dials out ONCE at process start, so
-# the coordinator has to exist before the process it patches — and this gate
-# drives the product's own Build-menu entry to do it: coordinator up, target
-# launched into it, session ready, three edits TYPED into the panel reshaping
-# the flame the product started.
+# order is transport-specific: Linux starts its Unix-socket coordinator before
+# the dial-out target; Windows starts its target first, then connects the
+# coordinator to the agent's PID-keyed named pipe. This gate drives the
+# product's own Build-menu entry through that order: session ready, then three
+# edits TYPED into the panel reshape the flame the product started.
 #
 # The provenance half is asserted against the KERNEL, not against the product's
-# own account of itself: the target's parent per /proc is the Electron main
-# process, which is itself a descendant of the test process and is not the test
-# process. That is what makes the gate able to refuse a run in which a harness
-# started the target — which is exactly what the `harness-launches` arm does.
+# own account of itself: procfs on Linux or Win32_Process CIM on Windows says
+# the target's parent is the Electron main process, which is itself a descendant
+# of the test process and is not the test process. That is what makes the gate
+# able to refuse a run in which a harness started the target — which is exactly
+# what the `harness-launches` arm does.
 #
 # Needs the flame demo's prerequisites (`just gdext-hcr` and a session-capable
 # `hcr_patch_driver` in `artifacts/h5-driver/`); it FAILS by name rather than
-# skipping if one is missing. Linux only.
+# skipping if one is missing. Runs on Linux and Windows.
 test-hcr-launch-under-hcr *args:
   just test-gui-prebuilt tests/hcr-live-edit/flame_launch_under_hcr.spec.ts {{args}}
 

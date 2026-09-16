@@ -34,9 +34,14 @@ type
     ##   "applyEditCommand": "${workspaceFolder}/scripts/ct_hcr_apply_edit.py"
     ## }
     ## ```
+    platform*: cstring
+      ## Optional Node platform (`linux` or `win32`). When several HCR launch
+      ## configurations exist, CodeTracer chooses the one for this host. An
+      ## empty value keeps older, platform-independent configurations valid.
     coordinator*: cstring
-      ## The HCR patch driver, which CodeTracer starts in `--session` mode
-      ## BEFORE the program. Required.
+      ## The HCR patch driver, which CodeTracer starts in `--session` mode.
+      ## Linux starts it before the program; Windows starts it after the target
+      ## PID exists. Required.
     targetSymbol*: cstring
       ## The function patches are published into. Required.
     applyEditCommand*: cstring
@@ -53,13 +58,23 @@ type
       ## collector — needs to find the session's own summary afterwards.
     agentSocketEnv*: cstring
       ## The environment variable the in-target agent reads the coordinator's
-      ## socket from. Optional; defaults to `REPRO_HCR_AGENT_SOCKET`.
+      ## socket from on Linux. Optional; defaults to
+      ## `REPRO_HCR_AGENT_SOCKET`.
+    agentDll*: cstring
+      ## Windows in-target agent DLL. CodeTracer passes it to the patchable
+      ## target as `REPRO_HCR_AGENT_DLL`. Required on Windows.
+    targetImage*: cstring
+      ## Windows PE image that contains `targetSymbol`. Required on Windows.
+    targetPdb*: cstring
+      ## Full PDB matching `targetImage`. Required on Windows.
+    firstInstructionLength*: int
+      ## Length of the target's first instruction, used by the Windows direct
+      ## patch profile. Required and positive on Windows.
     coordinatorListenTimeoutMs*: int
-      ## How long to wait for the coordinator's socket to appear. 0 = default.
+      ## Linux: how long to wait for the coordinator's socket. 0 = default.
     readyTimeoutMs*: int
-      ## How long to wait for the in-target agent to dial in and negotiate.
-      ## 0 = default. Bounded on purpose: the agent dials out ONCE, at process
-      ## start, so a target that has not connected by now never will.
+      ## How long to wait for the target and coordinator to negotiate.
+      ## 0 = default. Bounded because a failed startup cannot heal itself.
     idleTimeoutMs*: int
       ## How long the coordinator holds an idle session open. 0 = default.
 
@@ -172,12 +187,17 @@ proc parseLaunchJson*(launchJsonPath: cstring, workspaceFolder: cstring): seq[La
           else:
             cast[int](hcrObj[key])
         launchConfig.hcr = HcrLaunchSettings(
+          platform: hcrString(cstring"platform"),
           coordinator: hcrString(cstring"coordinator"),
           targetSymbol: hcrString(cstring"targetSymbol"),
           applyEditCommand: hcrString(cstring"applyEditCommand"),
           applyEditInterpreter: hcrString(cstring"applyEditInterpreter"),
           sessionDir: hcrString(cstring"sessionDir"),
           agentSocketEnv: hcrString(cstring"agentSocketEnv"),
+          agentDll: hcrString(cstring"agentDll"),
+          targetImage: hcrString(cstring"targetImage"),
+          targetPdb: hcrString(cstring"targetPdb"),
+          firstInstructionLength: hcrInt(cstring"firstInstructionLength"),
           coordinatorListenTimeoutMs: hcrInt(cstring"coordinatorListenTimeoutMs"),
           readyTimeoutMs: hcrInt(cstring"readyTimeoutMs"),
           idleTimeoutMs: hcrInt(cstring"idleTimeoutMs"))

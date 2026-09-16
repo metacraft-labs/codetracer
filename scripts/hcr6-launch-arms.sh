@@ -30,6 +30,13 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE="$(cd "$REPO/.." && pwd)"
 FLAME_REPO="${CODETRACER_FLAME_DEMO_REPO:-$WORKSPACE/codetracer-flame-demo}"
 SPEC="tests/hcr-live-edit/flame_launch_under_hcr.spec.ts"
+GUI_DIR="$REPO/src/tests/gui"
+export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+if command -v python >/dev/null 2>&1; then
+	PYTHON=python
+else
+	PYTHON=python3
+fi
 
 ALL_ARMS=(
 	green
@@ -59,7 +66,7 @@ failed=()
 for arm in "${ARMS[@]}"; do
 	log "=== arm $arm"
 	start=$(date +%s)
-	if CT_H6_ARM="$arm" just --justfile "$REPO/justfile" test-gui-prebuilt "$SPEC"; then
+	if (cd "$GUI_DIR" && CT_H6_ARM="$arm" npx playwright test "$SPEC"); then
 		log "arm $arm: the spec passed in $(($(date +%s) - start))s"
 	else
 		log "arm $arm: THE SPEC FAILED after $(($(date +%s) - start))s"
@@ -87,7 +94,7 @@ for arm in "${ALL_ARMS[@]}"; do
 done
 
 log "grading the set"
-python3 "$MATRIX" "${args[@]}" \
+"$PYTHON" "$MATRIX" "${args[@]}" \
 	--json-out "$FLAME_REPO/artifacts/h6-launch/discrimination.json" ||
 	die "the arms do not discriminate; see the matrix above"
 
