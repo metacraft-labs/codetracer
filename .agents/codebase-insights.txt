@@ -4513,3 +4513,21 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   The GDH-M7 falsifier arm in `get_source_line_v2` goes through the contained
   candidate too. Routing it around the guard would have made the arm test a
   code path the product does not ship.
+
+- `index/startup.nim`'s `init(dataArg: var ServerData, ...)` does `var data =
+  dataArg` and its comment claims "on the JS backend, ServerData is a reference
+  type, so mutations propagate back". IT DOES NOT. `ServerData` is an `object`,
+  and Nim's JS backend emits `nimCopy` for that assignment (see
+  `HEX3Aenv_*.data0 = nimCopy(...)` in `src/build-debug/index.js`), so every
+  write to `data` inside `init` lands in a COPY. The one that bites is the edit
+  branch's `data.workspaceFolder = folder`: after `ct edit <folder>` the global
+  `data.workspaceFolder` is still `nil`, so anything reading it — launch
+  configs (`getLaunchConfigsForWorkspace`, `onRecordWithLaunchConfig`),
+  `loadTrace`'s filesystem categorisation, `pathContentRootFor` — behaves as if
+  no folder were open. The Welcome-screen path is unaffected because
+  `traces.nim`'s `onInitEditMode` assigns the global directly, which is why the
+  same folder behaves differently depending on how it was opened. Measured
+  2026-09-16 while building the HCR launch path, which works around it by
+  reading `data.startOptions.folder` (never copied) in edit mode.
+  `loadTrace` in `traces.nim` carries the identical comment and the identical
+  assumption.

@@ -37,9 +37,13 @@
  * under CodeTracer (`The-Flame-Demo-Spec.md` §2.5, clarified 2026-09-16); live
  * attach to an already-running process is out of scope and is not what this
  * tests. In this spec the harness plays the launcher's part — it starts the
- * session coordinator and then the flame — because CodeTracer's own
- * launch-a-target-under-HCR path is not built yet. That gap is recorded in the
- * milestone; it is not papered over here.
+ * session coordinator and then the flame — and that is now a DELIBERATE
+ * separation of claims rather than a gap: since H6 the product can do the
+ * launching, and `flame_launch_under_hcr.spec.ts` is the gate for it, complete
+ * with a `harness-launches` falsifier arm that reproduces the arrangement below
+ * and REFUSES it on provenance. This spec keeps its own subject, which is the
+ * LOOP: three edits into one process over one session. Merging the two would
+ * leave neither failure attributable.
  *
  * GATED, and it skips LOUDLY, naming the first missing prerequisite.
  */

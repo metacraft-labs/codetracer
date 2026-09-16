@@ -299,7 +299,20 @@ type
     # the keyed form removes is the SILENT failure — an insertion in the middle
     # now breaks the build instead of re-pointing every handler after it — not
     # the need to keep the two in step.
-    aToggleLiveEditPanel          # Build > Live Edit (HCR)…
+    aToggleLiveEditPanel,         # Build > Live Edit (HCR)…
+    # LAUNCH THE TARGET UNDER HOT CODE RELOAD. The two actions above both need
+    # a process that is already running under an already-open HCR session, and
+    # until this one existed nothing in the product could produce one — a shell
+    # harness started the coordinator and the program, and CodeTracer published
+    # into a session somebody else had opened.
+    #
+    # It is a separate action rather than something the panel does on open
+    # because it is a different verb with different consequences: opening a
+    # panel shows a widget, and this starts two processes and owns them until
+    # the program exits.
+    #
+    # Appended at the end, for the reason every note above gives.
+    aLaunchUnderHcr               # Build > Launch Under Live Edit (HCR)…
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

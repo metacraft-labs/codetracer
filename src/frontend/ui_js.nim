@@ -905,6 +905,11 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # an action argument or an environment variable. Same tree, so the
           # same one declaration buys the command-palette entry.
           element "Live Edit (HCR)…", aToggleLiveEditPanel, true
+          # And the entry that produces the program the two above edit.
+          # CodeTracer starts the session coordinator, then starts the program
+          # with its HCR agent pointed at that coordinator — the only order the
+          # wire admits, since the agent dials out once at process start.
+          element "Launch Under Live Edit (HCR)…", aLaunchUnderHcr, true
           --sub
           # The chord beside each label comes for free: `menu.nim:424` fills
           # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
@@ -4581,10 +4586,14 @@ proc closeHcrLiveEditPanel() =
   hcrLiveEditOverlay.toJs.remove()
   hcrLiveEditOverlay = nil
 
-proc toggleHcrLiveEditPanel*(actionData: JsObject) =
-  ## Open the panel, or close it if it is already open.
+proc openHcrLiveEditPanel() =
+  ## Open the panel if it is not already open. IDEMPOTENT, deliberately.
+  ##
+  ## `aLaunchUnderHcr` opens the panel as a side effect of starting a session,
+  ## and a toggle used for that would CLOSE the panel of a user who had already
+  ## opened it — taking the surface the launch's own status line is about to be
+  ## written into with it.
   if not hcrLiveEditOverlay.isNil:
-    closeHcrLiveEditPanel()
     return
   let overlay = buildHcrLiveEditPanel()
   hcrLiveEditOverlay = overlay
@@ -4616,9 +4625,78 @@ proc toggleHcrLiveEditPanel*(actionData: JsObject) =
   if not input.isNil:
     input.focus()
 
+proc toggleHcrLiveEditPanel*(actionData: JsObject) =
+  ## Open the panel, or close it if it is already open.
+  if not hcrLiveEditOverlay.isNil:
+    closeHcrLiveEditPanel()
+  else:
+    openHcrLiveEditPanel()
+
+# ---------------------------------------------------------------------------
+# LAUNCH UNDER LIVE EDIT (`ClientAction.aLaunchUnderHcr`)
+#
+# The half of the Scene-1 loop the product did not have. The two actions above
+# publish edits into a session; this one CREATES the session, by starting the
+# coordinator and then starting the configured program with its HCR agent
+# pointed at it. The order is the feature: the in-target agent dials out once,
+# at process start, so a coordinator that arrives afterwards has nothing to
+# accept for the life of that process. See `index/hcr_launch.nim` and
+# `The-Flame-Demo-Spec.md` §2.5.
+#
+# What the program IS comes from the project's `.vscode/launch.json` — the same
+# file this product already reads for "record this program" — so the demo's
+# launch is checked in beside the demo rather than exported into one shell.
+# ---------------------------------------------------------------------------
+
+proc launchUnderHcr*(actionData: JsObject) =
+  ## Ask the main process to launch the configured target under HCR.
+  ##
+  ## The panel is opened FIRST and left open: it is where every answer this can
+  ## produce is going to be written, including the four named ways a launch can
+  ## fail, and a failure reported into a surface that does not exist yet is a
+  ## failure nobody reads.
+  var name = cstring""
+  if not actionData.isNil and not actionData.toJs.name.isNil:
+    name = cast[cstring](actionData.toJs.name)
+  openHcrLiveEditPanel()
+  setHcrLiveEditStatus(hcrLiveEditOverlay, cstring"launching",
+    cstring"starting the HCR coordinator and the program it patches…")
+  data.viewsApi.infoMessage(cstring"Launch Under Live Edit: starting the HCR session…")
+  data.ipc.send "CODETRACER::hcr-launch-target", js{name: name}
+
+proc onHcrSessionStatus(sender: js, response: js) =
+  ## Surface where the live-edit SESSION is — as distinct from where an EDIT is.
+  ##
+  ## Both land in the same status line, and that is on purpose: from the user's
+  ## side there is one question ("can I edit this program right now, and if not
+  ## why not"), and splitting its answer across two widgets would mean the
+  ## interesting half is always in the other one. The names are the main
+  ## process's own — `session-ready`, `hcr-agent-never-dialled`,
+  ## `hcr-target-exited-early` — and are shown verbatim for the same reason the
+  ## apply-edit command's are: they name which thing went wrong.
+  let status = if response.status.isNil: cstring"" else: cast[cstring](response.status)
+  let message = if response.message.isNil: cstring"" else: cast[cstring](response.message)
+  let remedy = if response.remedy.isNil: cstring"" else: cast[cstring](response.remedy)
+  let phase = if response.phase.isNil: cstring"" else: cast[cstring](response.phase)
+  if phase == cstring"ready":
+    data.viewsApi.successMessage(cstring("Live Edit: " & $message))
+  elif phase == cstring"failed":
+    data.viewsApi.errorMessage(cstring("Live Edit: " & $status & " — " & $message))
+  else:
+    data.viewsApi.infoMessage(cstring("Live Edit: " & $message))
+  if remedy.len > 0:
+    data.viewsApi.warnMessage(cstring("Live Edit remedy: " & $remedy))
+  # The panel may not be open — the action opens it, but a session can also end
+  # on its own, long afterwards, with the panel closed. `setHcrLiveEditStatus`
+  # is a no-op on `nil`, so this is the one place the two cases need no branch.
+  setHcrLiveEditStatus(hcrLiveEditOverlay, status,
+    cstring($message & (if remedy.len > 0: "  REMEDY: " & $remedy else: "")))
+
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
     "hcr-apply-edit-result"
+    # H6 — where the live-edit SESSION is: launching, ready, or failed by name.
+    "hcr-session-status"
     # "new-record-window"
     "record-path"
     "path-validated"
@@ -5748,6 +5826,14 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## makes a mismatch a build error rather than a silent re-pointing, but the
     ## keys must still appear in enum order for it to compile at all.
     toggleHcrLiveEditPanel(actionData),
+  aLaunchUnderHcr: proc(actionData: JsObject) = # aLaunchUnderHcr
+    ## Launch the project's configured target under hot code reload.
+    ##
+    ## Appended at the END of this array, matching the enum member appended at
+    ## the end of `ClientAction`, and the keyed form makes a mismatch a build
+    ## error (`invalid order in array constructor`) rather than a silent
+    ## re-pointing of every handler after it.
+    launchUnderHcr(actionData),
 ]
 
 data.actions = actions
