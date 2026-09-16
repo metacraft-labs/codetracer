@@ -87,6 +87,15 @@ proc onFragmentClick(vm: TerminalOutputVM; eventIndex: int): proc() =
   let idx = eventIndex
   result = proc() = vm.jumpToEvent(idx)
 
+when defined(js):
+  proc makeFragmentClickListener(vm: TerminalOutputVM;
+                                 eventIndex: int): proc(ev: isonim_dom.Event) =
+    ## Factory that bakes ``eventIndex`` into the DOM event listener so
+    ## Nim's JS backend doesn't capture the loop variable by reference
+    ## (which would make every listener fire with the last iteration's value).
+    let idx = eventIndex
+    result = proc(ev: isonim_dom.Event) = vm.jumpToEvent(idx)
+
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
@@ -182,9 +191,8 @@ when defined(js):
           contentNode.innerHTML = cstring(frag.htmlText)
           isonim_dom.appendChild(isonim_dom.Node(fragNode),
                                  isonim_dom.Node(contentNode))
-          let handler = onFragmentClick(vm, frag.eventIndex)
           isonim_dom.addEventListener(isonim_dom.Node(fragNode), cstring"click",
-                                      proc(ev: isonim_dom.Event) = handler())
+                                      makeFragmentClickListener(vm, frag.eventIndex))
           isonim_dom.appendChild(isonim_dom.Node(lineNode),
                                  isonim_dom.Node(fragNode))
         isonim_dom.appendChild(isonim_dom.Node(preNode),
