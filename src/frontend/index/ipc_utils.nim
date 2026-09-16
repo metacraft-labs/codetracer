@@ -27,18 +27,39 @@ proc execFileJson(
     callback: proc(err: JsObject, stdout: cstring, stderr: cstring)) {.
   importjs: "require('child_process').execFile(#, #, {maxBuffer: 8 * 1024 * 1024}, #)".}
 
+proc prependProcessArg(args: JsObject, value: cstring): JsObject {.
+  importjs: "((function(a, v) { a.unshift(v); return a; })(#, #))".}
+
 proc applyEditArgs(edit: cstring, socketPath: cstring, driver: cstring,
                    reportPath: cstring, waitFor: cstring, marker: cstring,
-                   markerTimeoutMs: cstring): JsObject {.importjs: """
-  ((function(edit, sock, drv, report, waitFor, marker, timeout) {
-    var a = ["--edit", edit, "--socket", sock, "--driver", drv,
-             "--json-out", report];
+                   markerTimeoutMs: cstring, platform: cstring,
+                   pid: cstring, pidFile: cstring, targetImage: cstring,
+                   targetPdb: cstring,
+                   firstInstructionLength: cstring,
+                   releaseFile: cstring): JsObject {.importjs: """
+  ((function(edit, sock, drv, report, waitFor, marker, timeout, platform,
+             pid, pidFile, targetImage, targetPdb, firstInstructionLength,
+             releaseFile) {
+    var a = ["--edit", edit, "--driver", drv, "--json-out", report];
+    if (platform === "windows") {
+      a.push("--platform", "windows");
+      if (pid) { a.push("--pid", pid); }
+      if (pidFile) { a.push("--pid-file", pidFile); }
+      a.push("--target-image", targetImage,
+             "--target-pdb", targetPdb,
+             "--first-instruction-length", firstInstructionLength);
+    } else {
+      a.push("--platform", "linux", "--socket", sock);
+    }
     if (waitFor && marker) {
       a.push("--wait-for", waitFor, "--marker", marker);
       if (timeout) { a.push("--marker-timeout-ms", timeout); }
     }
+    if (releaseFile) {
+      a.push("--release-file", releaseFile);
+    }
     return a;
-  })(#, #, #, #, #, #, #))
+  })(#, #, #, #, #, #, #, #, #, #, #, #, #, #))
 """.}
   ## The command line handed to the apply-edit command, ONE-SHOT form: the
   ## command opens a coordinator, the target dials it, one patch is served and
@@ -101,11 +122,19 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   ## whose target is a process this application did not start:
   ##
   ##   CODETRACER_HCR_APPLY_EDIT_CMD  the apply-edit command to run
+  ##   CODETRACER_HCR_APPLY_EDIT_INTERPRETER  optional executable used to run
+  ##                                  that script (needed for Python on Windows)
   ##   CODETRACER_HCR_SESSION_DIR     an ALREADY-OPEN live-edit session to
   ##                                  publish into. This is the Scene-1 loop's
   ##                                  path and is mutually exclusive with the
   ##                                  two below; see `applyEditSessionArgs`.
   ##   CODETRACER_HCR_SOCKET          the running target's HCR agent socket
+  ##   CODETRACER_HCR_PLATFORM        `windows` for the PID/named-pipe path
+  ##   CODETRACER_HCR_PID/_PID_FILE   the running Windows target identity
+  ##   CODETRACER_HCR_TARGET_IMAGE    the loaded patchable DLL
+  ##   CODETRACER_HCR_TARGET_PDB      that DLL's matching full PDB
+  ##   CODETRACER_HCR_FIRST_INSTRUCTION_LENGTH  measured entry instruction
+  ##   CODETRACER_HCR_RELEASE_FILE    optional target-side publication barrier
   ##   CODETRACER_HCR_DRIVER          the coordinator driver the command uses
   ##   CODETRACER_HCR_EDIT            the edit to apply, when the caller gave none
   ##   CODETRACER_HCR_WAIT_FOR        a file the command polls before publishing
@@ -119,9 +148,18 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   ## and changed nothing — which is the exact confusion the whole HCR beat is
   ## built to avoid.
   let command = nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_CMD")
+  let interpreter = nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_INTERPRETER")
   let sessionDir = nodeEnv(cstring"CODETRACER_HCR_SESSION_DIR")
   let socketPath = nodeEnv(cstring"CODETRACER_HCR_SOCKET")
   let driver = nodeEnv(cstring"CODETRACER_HCR_DRIVER")
+  let platform = nodeEnv(cstring"CODETRACER_HCR_PLATFORM")
+  let targetPid = nodeEnv(cstring"CODETRACER_HCR_PID")
+  let targetPidFile = nodeEnv(cstring"CODETRACER_HCR_PID_FILE")
+  let targetImage = nodeEnv(cstring"CODETRACER_HCR_TARGET_IMAGE")
+  let targetPdb = nodeEnv(cstring"CODETRACER_HCR_TARGET_PDB")
+  let firstInstructionLength =
+    nodeEnv(cstring"CODETRACER_HCR_FIRST_INSTRUCTION_LENGTH")
+  let windowsEndpoint = $platform == "windows"
   var edit = cstring""
   if not response.isNil and not response.edit.isNil:
     edit = cast[cstring](response.edit)
@@ -141,18 +179,37 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   # process to guess whether the caller meant "patch the running target once"
   # or "add an edit to the open loop", and the wrong guess is not recoverable:
   # the one-shot form consumes the target's single dial-out.
-  if sessionDir.len > 0 and (socketPath.len > 0 or driver.len > 0):
+  if sessionDir.len > 0 and
+      (socketPath.len > 0 or driver.len > 0 or windowsEndpoint):
     refuse(cstring"not-configured",
       cstring"CODETRACER_HCR_SESSION_DIR is set together with CODETRACER_HCR_SOCKET/_DRIVER; those are two different publication paths and only one can own the target's single agent connection. Unset the ones you do not mean.")
     return
   if sessionDir.len == 0:
-    if socketPath.len == 0:
-      refuse(cstring"not-configured",
-        cstring"no running HCR target is configured; set CODETRACER_HCR_SESSION_DIR for a live-edit session, or CODETRACER_HCR_SOCKET to the agent socket of the process to patch")
-      return
     if driver.len == 0:
       refuse(cstring"not-configured",
         cstring"no HCR coordinator driver is configured; set CODETRACER_HCR_DRIVER")
+      return
+    if windowsEndpoint:
+      if targetPid.len == 0 and targetPidFile.len == 0:
+        refuse(cstring"not-configured",
+          cstring"the Windows HCR endpoint needs CODETRACER_HCR_PID or CODETRACER_HCR_PID_FILE")
+        return
+      if targetPid.len > 0 and targetPidFile.len > 0:
+        refuse(cstring"not-configured",
+          cstring"CODETRACER_HCR_PID and CODETRACER_HCR_PID_FILE are mutually exclusive")
+        return
+      if targetImage.len == 0 or targetPdb.len == 0 or
+          firstInstructionLength.len == 0:
+        refuse(cstring"not-configured",
+          cstring"the Windows HCR endpoint needs CODETRACER_HCR_TARGET_IMAGE, CODETRACER_HCR_TARGET_PDB, and CODETRACER_HCR_FIRST_INSTRUCTION_LENGTH")
+        return
+      if socketPath.len > 0:
+        refuse(cstring"not-configured",
+          cstring"CODETRACER_HCR_SOCKET cannot be combined with the Windows PID/named-pipe endpoint")
+        return
+    elif socketPath.len == 0:
+      refuse(cstring"not-configured",
+        cstring"no running HCR target is configured; set CODETRACER_HCR_SESSION_DIR for a live-edit session, or CODETRACER_HCR_SOCKET to the agent socket of the process to patch")
       return
   if edit.len == 0:
     refuse(cstring"no-edit-given",
@@ -167,6 +224,8 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   if reportPath.len == 0:
     var tmpDir = $nodeEnv(cstring"TMPDIR")
     if tmpDir.len == 0:
+      tmpDir = $nodeEnv(cstring"TEMP")
+    if tmpDir.len == 0:
       tmpDir = "/tmp"
     reportPath = tmpDir & "/ct-hcr-apply-edit-report.json"
   let args =
@@ -177,11 +236,20 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
         edit, socketPath, driver, cstring(reportPath),
         nodeEnv(cstring"CODETRACER_HCR_WAIT_FOR"),
         nodeEnv(cstring"CODETRACER_HCR_MARKER"),
-        nodeEnv(cstring"CODETRACER_HCR_MARKER_TIMEOUT_MS"))
+        nodeEnv(cstring"CODETRACER_HCR_MARKER_TIMEOUT_MS"),
+        platform, targetPid, targetPidFile, targetImage, targetPdb,
+        firstInstructionLength,
+        nodeEnv(cstring"CODETRACER_HCR_RELEASE_FILE"))
   infoPrint "index: running the apply-edit command for edit " & $edit &
     (if sessionDir.len > 0: " into the live-edit session at " & $sessionDir
+     elif windowsEndpoint:
+       " through the Windows PID/named-pipe endpoint"
      else: " through a one-shot coordinator on " & $socketPath)
-  execFileJson(command, args) do (err: JsObject, stdout: cstring, stderr: cstring):
+  let executable = if interpreter.len > 0: interpreter else: command
+  let processArgs =
+    if interpreter.len > 0: prependProcessArg(args, command)
+    else: args
+  execFileJson(executable, processArgs) do (err: JsObject, stdout: cstring, stderr: cstring):
     # The command's EXIT CODE is not the answer and is not read here: 0 is
     # applied, 2 is a refusal and 1 is the command itself failing, and all three
     # arrive in `err` as "non-zero" with no way to tell them apart. The JSON

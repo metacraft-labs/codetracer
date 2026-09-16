@@ -1113,6 +1113,40 @@ jobs:
           CT_TEST_LANGS: all
         run: just test-origin-dap
 
+      - name: Verify test-reprobuild-hcr-mcr-dap fails loudly unsupported on Windows
+        shell: bash
+        run: |
+          set +e
+          output=$(just test-reprobuild-hcr-mcr-dap 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
+
+      - name: Verify test-reprobuild-hcr-in-codetracer fails loudly unsupported on Windows
+        shell: bash
+        run: |
+          set +e
+          output=$(just test-reprobuild-hcr-in-codetracer 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
+
   windows-named-pipe-tests:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     # See the timeout-minutes rationale on windows-rust-components. This job
@@ -2137,6 +2171,12 @@ jobs:
       - name: Run Reprobuild macOS smoke
         run: nix develop . --command just test-reprobuild-macos-smoke
 
+      - name: Run Reprobuild HCR MCR DAP test (macOS arm64)
+        run: nix develop . --command just test-reprobuild-hcr-mcr-dap
+
+      - name: Run Reprobuild HCR in CodeTracer test (macOS arm64)
+        run: nix develop . --command just test-reprobuild-hcr-in-codetracer
+
   reprobuild-linux-smoke:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window: 48 green, median 1.8m, max 5.1m. 15m is ~3x the slowest
@@ -2178,6 +2218,38 @@ jobs:
 
       - name: Run Reprobuild Linux smoke
         run: nix develop . --command just test-reprobuild-linux-smoke
+
+      - name: Verify test-reprobuild-hcr-mcr-dap fails loudly unsupported on Linux
+        run: |
+          set +e
+          output=$(nix develop . --command just test-reprobuild-hcr-mcr-dap 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
+
+      - name: Verify test-reprobuild-hcr-in-codetracer fails loudly unsupported on Linux
+        run: |
+          set +e
+          output=$(nix develop . --command just test-reprobuild-hcr-in-codetracer 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
 
   # M12: macOS verification pass for Value Origin Tracking.
   # The per-PR gate runs the seven materialized Python origin-DAP scenarios.

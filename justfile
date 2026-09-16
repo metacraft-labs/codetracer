@@ -338,11 +338,11 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
   #!/usr/bin/env bash
   set -euo pipefail
 
-  # Platform precondition is an honest SKIP, not a hard error: a non-macOS
-  # (or non-arm64) CI run must skip cleanly rather than fail the job.
+  # Platform precondition is loudly UNSUPPORTED (exit 2) outside macOS arm64:
+  # a non-macOS (or non-arm64) CI run must fail loudly naming the supported host.
   if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "SKIP: test-reprobuild-hcr-mcr-dap requires macOS arm64 ($(uname -s) $(uname -m))." >&2
-    exit 0
+    echo "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64 (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
+    exit 2
   fi
 
   if ! command -v repro >/dev/null 2>&1; then
@@ -401,6 +401,19 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
   fi
   export REPROBUILD_SOURCE_ROOT="$reprobuild_root"
   export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
+
+  repro_bin="$(command -v repro || true)"
+  if [ -z "${REPRO_MONITOR_SHIM_LIB:-}" ]; then
+    if [ -n "$repro_bin" ] && [ -f "$(dirname "$repro_bin")/../lib/librepro_monitor_shim.dylib" ]; then
+      export REPRO_MONITOR_SHIM_LIB="$(cd "$(dirname "$repro_bin")/../lib" && pwd)/librepro_monitor_shim.dylib"
+    elif [ -f "$reprobuild_root/build/lib/librepro_monitor_shim.dylib" ]; then
+      export REPRO_MONITOR_SHIM_LIB="$reprobuild_root/build/lib/librepro_monitor_shim.dylib"
+    fi
+  fi
+  if [ -z "${REPRO_PUBLIC_CLI_PATH:-}" ] && [ -n "$repro_bin" ]; then
+    export REPRO_PUBLIC_CLI_PATH="$repro_bin"
+  fi
+
 
   # --- ct-native-replay (codetracer-native-backend sibling) ---
   # Built on demand by the ensure-ct-native-replay prerequisite. Honest-SKIP
@@ -465,10 +478,10 @@ test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
   #!/usr/bin/env bash
   set -euo pipefail
 
-  # Platform precondition is an honest SKIP, not a hard error.
+  # Platform precondition is loudly UNSUPPORTED (exit 2) outside macOS arm64.
   if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "SKIP: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR ($(uname -s) $(uname -m))." >&2
-    exit 0
+    echo "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
+    exit 2
   fi
 
   if ! command -v repro >/dev/null 2>&1; then
@@ -4916,7 +4929,8 @@ ensure-ct-native-replay:
         # surfaces a clear "command not found" rather than a silent skip.
         cd "$sibling" && just build
     elif command -v nix >/dev/null 2>&1 && [ -f "$sibling/flake.nix" ] && \
-         ( cd "$sibling" && nix develop '.?submodules=1' --command true >/dev/null 2>&1 ); then
+         ( ( cd "$sibling" && nix develop '.?submodules=1' --command true >/dev/null 2>&1 ) || \
+           ( cd "$sibling" && nix develop '.' --command true >/dev/null 2>&1 ) ); then
         # Preferred path (CI + clean dev checkouts): build inside the
         # sibling's own Nix dev shell so its pinned LLVM/LLDB toolchain is
         # used and its shellHook runs. This is exactly the backend's own CI
@@ -4955,7 +4969,11 @@ ensure-ct-native-replay:
         # lldb-sys's build script failed with "unable to locate shared
         # library of liblldb" and ``just test-mcr-dap-flow`` could never
         # reach the flow tests.
-        ( cd "$sibling" && nix develop '.?submodules=1' --command bash -lc \
+        backend_flake_ref='.?submodules=1'
+        if ! ( cd "$sibling" && nix develop "$backend_flake_ref" --command true >/dev/null 2>&1 ); then
+            backend_flake_ref='.'
+        fi
+        ( cd "$sibling" && nix develop "$backend_flake_ref" --command bash -lc \
             "unset CXXFLAGS CC CXX; just $backend_target" )
     elif command -v just >/dev/null 2>&1; then
         # Fallback: the sibling dev shell could not be evaluated, but we are

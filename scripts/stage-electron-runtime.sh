@@ -62,7 +62,7 @@ if [ -z "${DEST}" ]; then
 	exit 2
 fi
 
-declared="$(node -p "require('${PIN_DIR}/package.json').dependencies.electron")"
+declared="$(cd "${PIN_DIR}" && node -p "require('./package.json').dependencies.electron")"
 
 echo "==========="
 echo "codetracer build: stage the Electron runtime"
@@ -82,7 +82,7 @@ cp "${PIN_DIR}/package.json" "${PIN_DIR}/package-lock.json" "${scratch}/"
 npm ci --omit=dev --prefix "${scratch}"
 
 pkg="${scratch}/node_modules/electron"
-resolved="$(node -p "require('${pkg}/package.json').version")"
+resolved="$(cd "${pkg}" && node -p "require('./package.json').version")"
 echo "electron: declared=${declared} resolved=${resolved}"
 
 if [ "${resolved}" != "${declared}" ]; then
