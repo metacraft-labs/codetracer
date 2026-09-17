@@ -294,6 +294,66 @@ proc programEventFromTableRow(row: TableRow; eventIndex: int; maxRRTicks: int): 
     sourceDigest: row.sourceDigest
   )
 
+func storeRowOf(event: ProgramEvent; absoluteIndex: int): vmtypes.EventLogRow =
+  ## One legacy `ProgramEvent` as the store's neutral row.
+  ##
+  ## THE DESKTOP'S ONLY BRIDGE INTO THE SHARED STORE, and it converts from
+  ## `ProgramEvent` rather than from the wire on purpose: this front-end's rows
+  ## do not arrive through `ct/event-load` at all. DataTables fetches them with
+  ## `ct/update-table`, whose response is a `TableData` of `TableRow`s, and
+  ## `programEventFromTableRow` above is the decoder for THAT shape. So the
+  ## desktop's rows reach `EventLogRow` one step later than the terminal's, and
+  ## there is still exactly one conversion per wire shape.
+  ##
+  ## `ProgramEvent` carries five fields `EventLogRow` does not — `metadata`,
+  ## `bytes`, `semanticKind`'s raw form, `base64Encoded` and
+  ## `tracepointResultIndex` — and they are NOT added to the neutral row. Four
+  ## of them are DataTables' business (a column's tooltip, a byte counter, a
+  ## decode that has already happened by the time this runs) and the fifth
+  ## belongs to the tracepoint results, which have their own signal. A shared
+  ## row that grew a field for each front-end's private needs would stop being
+  ## the thing three front-ends can agree on.
+  vmtypes.EventLogRow(
+    eventId:
+      if event.rrEventId > 0: uint64(event.rrEventId)
+      elif event.directLocationRRTicks > 0: uint64(event.directLocationRRTicks)
+      else: uint64(absoluteIndex + 1),
+    eventIndex: absoluteIndex,
+    kindId: ord(event.kind),
+    kind: eventKindLabel(ord(event.kind), event.stdout, $event.semanticKind),
+    file: $event.highLevelPath,
+    line: event.highLevelLine,
+    value: $event.content,
+    rrTicks:
+      if event.directLocationRRTicks > 0: uint64(event.directLocationRRTicks)
+      else: 0'u64,
+    maxRRTicks: if event.maxRRTicks > 0: uint64(event.maxRRTicks) else: 0'u64,
+    sourceGeneration: event.sourceGeneration,
+    sourceDigest: $event.sourceDigest,
+    stdout: event.stdout)
+
+proc publishEventsToStore(events: seq[ProgramEvent];
+                          start: int;
+                          recordsTotal = -1;
+                          recordsFiltered = -1) =
+  ## Mirror the component's current window into the shared `ReplayDataStore`.
+  ##
+  ## This is what gives the DESKTOP a filled `EventLogVM.eventRows`. Before it,
+  ## that signal was empty in every shipped build and *"no events have been
+  ## loaded"* was the correct output of every pane that read it — which is also
+  ## why this is safe to switch on: the rows the Karax Event Log draws come from
+  ## DataTables and not from this signal, so filling it changes what a store
+  ## consumer sees and nothing about what the desktop paints.
+  ##
+  ## `start` is the window's offset, which DataTables hands the component as
+  ## `data.start` and it keeps as `hiddenRows`.
+  if eventLogVMStore.isNil:
+    return
+  var rows: seq[vmtypes.EventLogRow] = @[]
+  for i, event in events:
+    rows.add storeRowOf(event, start + i)
+  eventLogVMStore.applyEventLogRows(rows, start, recordsTotal, recordsFiltered)
+
 proc equivalentTableRows(left, right: TableRow): bool =
   left.semanticKind == right.semanticKind and
     left.directLocationRRTicks == right.directLocationRRTicks and
@@ -1449,6 +1509,14 @@ proc loadEvents*(self: EventLogComponent, update: TableData) =
     self.receivedUpdates = true
   for i, row in update.data:
     self.programEvents.add(programEventFromTableRow(row, i, data.maxRRTicks))
+  # …and the same rows, once, into the shared store, so that every consumer of
+  # `ReplayDataStore.eventLog` — the IsoNim event-log view, a VS Code surface,
+  # BlockTracer — sees the desktop's event log instead of an empty signal.
+  # `recordsTotal` / `recordsFiltered` come from the engine here, so they are
+  # passed rather than inferred: a search that matched fewer rows has to be
+  # able to lower the count.
+  publishEventsToStore(self.programEvents, self.hiddenRows,
+                       update.recordsTotal, update.recordsFiltered)
 
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
@@ -1594,6 +1662,23 @@ method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.
 
   for element in response:
     self.programEvents.add(element)
+  # `ct/updated-events` is the SAME payload `ct/event-load` answers with —
+  # `Handler::event_load` sends the event and the response from one
+  # `page_events` — so the rows are published here too rather than waiting for
+  # the table round-trip the reload below will start. No count is supplied:
+  # this event carries none, and `applyEventLogRows` then raises the totals to
+  # what the window implies instead of inventing one.
+  #
+  # NAMED RATHER THAN HIDDEN: `programEvents` at this point is the DataTables
+  # window with this event's rows appended, so its rows are not necessarily one
+  # contiguous run from `hiddenRows` and the absolute indices this assigns can
+  # be off for the appended tail. That is a property of the component's own
+  # list, which mixes two producers and has done since before this call
+  # existed; the reload below replaces the whole list from one window and the
+  # indices settle. It is recorded because a reader who trusted
+  # `EventLogRow.eventIndex` on the desktop between those two moments would be
+  # trusting arithmetic nobody can guarantee.
+  publishEventsToStore(self.programEvents, self.hiddenRows)
 
   if not self.denseTable.isNil and not self.denseTable.context.isNil:
     self.denseTable.context.ajax.reload()
@@ -1619,6 +1704,11 @@ method clear*(self: EventLogComponent) =
   self.activeRowTicks = 0
   self.hiddenRows = 0
   self.liveDebugRows = @[]
+  # The store's copy goes with them. A restart that left the rows behind would
+  # let a new recording's Event Log open showing the previous one's events to
+  # every consumer that reads the store rather than DataTables.
+  if not eventLogVMStore.isNil:
+    eventLogVMStore.clearEventLog()
 
 method restart*(self: EventLogComponent) =
   self.clear()

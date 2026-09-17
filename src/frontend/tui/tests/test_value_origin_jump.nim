@@ -11,9 +11,10 @@
 ##
 ## ## FIRST: THE ORIGIN DATA IS REAL. HERE IS HOW THAT WAS ESTABLISHED
 ##
-## Four ViewModel fields in this layer have turned out to be filled by nothing —
+## Four ViewModel fields in this layer had turned out to be filled by nothing —
 ## `PointListVM.points` (CTUI-5), `store.locals.globals` (CTUI-7),
-## `TimelineVM.markers` and `EventLogVM.eventRows` (CTUI-8). So the first thing
+## `TimelineVM.markers` and `EventLogVM.eventRows` (CTUI-8); the first and the
+## fourth have store-side producers since 2026-09-17. So the first thing
 ## this suite does is prove `OriginChainVM` is not a fifth, and it proves it
 ## three ways rather than by finding one non-empty field:
 ##

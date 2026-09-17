@@ -52,21 +52,33 @@
 ##    so the day a host fills `store.timeline` the pane uses it — an
 ##    availability that were a constant would go on ignoring the signal.
 ##
-## 3. **`EventLogVM.eventRows` is filled by NOTHING from a `ct/event-load`
-##    response.** The auto-load effect in `viewmodels/event_log_vm.nim` sends
-##    `ct/event-load` and hands the answer to `applyMarkerRowsResponse`, which
-##    writes `markerRows` — the M25b correlation-marker projection — and never
-##    `eventRows`. The only writer of `eventRows` is `appendLiveDebuggerStop`,
-##    whose one product call site (`src/frontend/ui/event_log.nim`) is guarded
-##    by `liveEventLogSession()`. Measured: `eventRows.len == 0` and
-##    `markerRows.len == 0` on all three fixtures after a real `ct/event-load`
-##    that returned 6, 70 and 6 events respectively.
+## 3. **`EventLogVM.eventRows` IS filled from a `ct/event-load` response now —
+##    corrected 2026-09-17.** The sentence that stood here said it was *"filled
+##    by NOTHING"*, and it was true when it was written: the auto-load effect in
+##    `viewmodels/event_log_vm.nim` sent `ct/event-load` and handed the answer
+##    to `applyMarkerRowsResponse`, which writes `markerRows` — the M25b
+##    correlation-marker projection — and never `eventRows`; the only writer was
+##    `appendLiveDebuggerStop`. Measured then: `eventRows.len == 0` on all three
+##    fixtures after a real `ct/event-load` that returned 6, 70 and 6 events.
 ##
-##    So this binding takes the event page as a VALUE from the seam the host
-##    wires to `ct/event-load` — exactly as CTUI-5 takes its breakpoints and
-##    CTUI-6 its frames, and for the same class of reason. `EventLogVM` still
-##    owns what it really owns: the SELECTION (`selectedRow`), the page size and
-##    the page index, and `publishSelection` puts the pane's cursor there.
+##    `ReplayDataStore.applyEventLogResponse` is the producer, `eventRows` IS
+##    `store.eventLog.rows`, and both `headless_session.requestAndLoadEventLog`
+##    and that same auto-load effect feed it.
+##    `tui/tests/test_event_log_jump.nim` asserts the rows against the wire's
+##    own answer, row for row.
+##
+##    **`markerRows` is still empty on every fixture in this corpus**, which is
+##    the half of the old measurement that survives.
+##
+##    This binding nevertheless still takes the event page as a VALUE from the
+##    seam the host wires to `ct/event-load` — exactly as CTUI-5 takes its
+##    breakpoints and CTUI-6 its frames — and the reason is now about PAGING
+##    rather than about an empty signal: `store.eventLog.rows` holds ONE window
+##    (`loadedStart` says which), and a pane that scrolled by reading the store
+##    would be reading whichever window some other host asked for last.
+##    `EventLogVM` still owns what it really owns: the SELECTION
+##    (`selectedRow`), the page size and the page index, and `publishSelection`
+##    puts the pane's cursor there.
 ##
 ## 4. **Call boundaries are REAL and are the backend's own.**
 ##    `ct/load-calltrace-section` answers rows carrying `rrTicks` and `depth`.

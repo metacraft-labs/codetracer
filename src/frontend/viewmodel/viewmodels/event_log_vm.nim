@@ -187,12 +187,26 @@ type
     sortColumn*: Signal[int]
     sortAscending*: Signal[bool]
 
-    # -- Internal state for event log data --
-    # These are owned by the VM since ReplayDataStore does not yet
-    # have a dedicated event-log sub-store.
+    # -- Event log data — THE STORE'S OWN SIGNALS --
+    #
+    # These three fields are not the VM's. Each one IS the corresponding
+    # `ReplayDataStore.eventLog` signal (a `Signal[T]` is a ref, so this is
+    # aliasing and not copying), which is what makes the pattern
+    # `applyLocalsResponse` set up hold here too: the backend answer is decoded
+    # ONCE, into the store, and every front-end reads the same object.
+    #
+    # They stayed writable on purpose. Two producers legitimately write them —
+    # `ReplayDataStore.applyEventLogResponse` for persisted events and
+    # `appendLiveDebuggerStop` for the live debugger head — and the storybook
+    # and the unit suites seed them directly. A `Memo` would have made the
+    # ViewModel read-only and pushed all five callers into the store for no
+    # gain, since the signal they would then write is this same object.
     eventRows*: Signal[seq[EventLogRow]]
+      ## Alias of `store.eventLog.rows`.
     totalEventCount*: Signal[int]
+      ## Alias of `store.eventLog.recordsTotal`.
     loadingState*: Signal[LoadingState]
+      ## Alias of `store.eventLog.loadingState`.
 
     # -- M25b: Correlation-marker reactive surface --
     markerRows*: Signal[seq[MarkerEventRow]]
@@ -248,24 +262,18 @@ proc selectRow*(vm: EventLogVM; row: Option[int]) =
   vm.selectedRow.val = row
 
 proc appendLiveDebuggerStop*(vm: EventLogVM; row: EventLogRow) =
-  ## Add a semantic live debugger-stop row to the ViewModel state.
+  ## Add a semantic live debugger-stop row.
   ##
-  ## Persisted event rows still come from the backend; this covers the live
-  ## debugger head where each stop is visible immediately and may later be
-  ## mirrored by backend event loading.
-  var rows = vm.eventRows.val
-  for existing in rows:
-    if existing.eventId == row.eventId and
-       existing.kind == row.kind and
-       existing.sourceGeneration == row.sourceGeneration and
-       existing.sourceDigest == row.sourceDigest:
-      return
-
-  var nextRow = row
-  nextRow.eventIndex = rows.len
-  rows.add(nextRow)
-  vm.eventRows.val = rows
-  vm.totalEventCount.val = rows.len
+  ## Persisted event rows come from the backend through
+  ## `ReplayDataStore.applyEventLogResponse`; this covers the live debugger
+  ## head, where each stop is visible immediately and may later be mirrored by
+  ## a backend event load.
+  ##
+  ## The append itself is `ReplayDataStore.appendLiveEventRow` — the dedup rule
+  ## and the index assignment belong beside the rows, not on one of the
+  ## ViewModels that reads them, so a host with no `EventLogVM` (a VS Code
+  ## surface, BlockTracer) can add a live stop too.
+  discard vm.store.appendLiveEventRow(row)
 
 proc doubleClickRow*(vm: EventLogVM; row: int) =
   ## Navigate to the source location of the event at `row`.
@@ -797,10 +805,11 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let sortColumn = createSignal(0)
     let sortAscending = createSignal(true)
 
-    # Internal event log state (not yet in ReplayDataStore).
-    let eventRows = createSignal(newSeq[EventLogRow]())
-    let totalEventCount = createSignal(0)
-    let loadingState = createSignal(lsIdle)
+    # Event-log state, READ OFF THE STORE rather than created here. See the
+    # field declarations above for why these are aliases and not copies.
+    let eventRows = store.eventLog.rows
+    let totalEventCount = store.eventLog.recordsTotal
+    let loadingState = store.eventLog.loadingState
 
     # M25b — Marker reactive surface (spec §5).
     let markerRows = createSignal(newSeq[MarkerEventRow]())
@@ -961,8 +970,21 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         }
         let future = store.backend.send("ct/event-load", args)
         let vmRef = vm
+        let storeRef = store
         onComplete(future,
           proc(response: JsonNode) =
+            # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
+            # `events` and `markers`; this effect used to read only the second
+            # and the first was dropped on the floor, which is why
+            # `eventRows` had no producer at all and *"no events have been
+            # loaded"* was the CORRECT output of every front-end.
+            #
+            # The rows go through the store rather than into `vm.eventRows`
+            # directly, so this effect is one producer among several rather
+            # than a second decoder. `applyEventLogResponse` leaves the store
+            # alone when the payload has no `events` key, so a marker-only
+            # answer cannot empty the log.
+            storeRef.applyEventLogResponse(response)
             vmRef.applyMarkerRowsResponse(response),
           proc(message: string) =
             discard)

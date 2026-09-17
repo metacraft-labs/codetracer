@@ -19,43 +19,18 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../store/replay_data_store
+import ../store/types as store_types
+
+# `PointListEntry` MOVED TO `store/types.nim` and is re-exported here.
+#
+# It had to move for `points` to become the store's signal: the store is below
+# every ViewModel in the import graph and cannot name a type this module
+# declares. Re-exported so that the consumers which reach the type through
+# `point_list_vm` — the storybook, `pane_views`, `point_collection_source`, the
+# suites — are untouched.
+export store_types.PointListEntry
 
 type
-  PointListEntry* = object
-    kind*: string
-    label*: string
-    path*: string
-    line*: int
-      ## Where the point is, 1-based. **0 when it could not be located** —
-      ## see `resolution` below. A row with `line == 0` is a row a pane must
-      ## not offer as a jump target.
-    enabled*: bool
-
-    # -- PLAT-11 -----------------------------------------------------------
-    #
-    # Three fields added on 2026-09-11, when project definitions became the
-    # first producer of this signal. Every one of them has a zero value that
-    # is the pre-existing behaviour, so the two existing constructors — the
-    # storybook fixture and this file's own default — are unchanged.
-    collection*: string
-      ## The named collection (Project-Definitions.md §4) this point came
-      ## from, or "" for a point the user created. Collections "may be
-      ## enabled and disabled as a unit", which a pane cannot offer if the
-      ## unit is not on the row.
-    resolution*: string
-      ## What became of the point's anchor: `resolved`, `moved`,
-      ## `unresolvable`, `file absent` — `resolve.describe`'s own words, never
-      ## a second spelling of them.
-      ##
-      ## §4: "**A point whose location no longer resolves is reported, not
-      ## dropped.** A collection that silently loses half its points as a file
-      ## evolves is worse than one that says so." An unresolvable point is
-      ## therefore IN this list, with this field saying so, rather than
-      ## filtered out of it.
-    detail*: string
-      ## Why, for a point that did not resolve cleanly. What the user needs in
-      ## order to fix the definition; empty for `resolved`.
-
   PointListVM* = ref object of ViewModel
     ## Reactive state for the Point List panel.
     ##
@@ -70,7 +45,17 @@ type
     # -- Mutable state --
     selectedPoint*: Signal[Option[int]]
     editingPoint*: Signal[Option[int]]
+
     points*: Signal[seq[PointListEntry]]
+      ## Alias of `store.pointList.rows` — the store's own signal, not a copy
+      ## (a `Signal[T]` is a ref).
+      ##
+      ## This is what gives the pane TWO producers without a bridge between
+      ## them: `point_collection_source.applyCollections` writes the points a
+      ## project declares, and `ReplayDataStore.applyTracepointResults` writes
+      ## what a `ct/run-tracepoints` sweep found. Before the rows moved to the
+      ## store the second producer could not exist at all — a sweep is answered
+      ## on the DAP channel, which the store owns and the ViewModel does not.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -90,7 +75,21 @@ proc stopEditing*(vm: PointListVM) =
   vm.editingPoint.val = none(int)
 
 proc setPoints*(vm: PointListVM; points: openArray[PointListEntry]) =
-  vm.points.val = @points
+  ## Replace the declared point rows.
+  ##
+  ## Routed through `ReplayDataStore.applyPointRows` rather than assigning the
+  ## signal here, so that the definition-side producer and the engine-side one
+  ## meet in the store instead of in whichever ViewModel happened to be built.
+  ##
+  ## The storeless branch is not a fallback for a bug: a `PointListVM` built on
+  ## a `nil` store is a supported shape, and one suite uses it deliberately (see
+  ## `createPointListVM`). Both branches write the SAME signal object when a
+  ## store exists, so the only thing the store branch adds is settling
+  ## `loadingState` — which a storeless VM has no reader for.
+  if vm.store.isNil:
+    vm.points.val = @points
+  else:
+    vm.store.applyPointRows(@points)
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -101,11 +100,21 @@ proc createPointListVM*(store: ReplayDataStore): PointListVM =
   ## The reactive root is disposed via `vm.dispose()`.
   ##
   ## Sets up mutable signals with sensible defaults.
+  ##
+  ## `store` MAY BE NIL, and that is a supported shape rather than an
+  ## oversight. `test_point_collections_fill_the_point_list.nim` passes `nil`
+  ## on purpose — its claim is that the project-definitions producer talks to
+  ## no backend at all, and a `nil` store is the strongest available statement
+  ## of that. A VM built that way owns its own `points` signal; every other VM
+  ## shares the store's, which is what lets a sweep and a collection write one
+  ## list.
   withViewModel proc(dispose: proc()): PointListVM =
     PointListVM(
       store: store,
       selectedPoint: createSignal(none(int)),
       editingPoint: createSignal(none(int)),
-      points: createSignal(newSeq[PointListEntry]()),
+      points:
+        if store.isNil: createSignal(newSeq[PointListEntry]())
+        else: store.pointList.rows,
       disposeProc: dispose,
     )

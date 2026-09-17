@@ -25,7 +25,10 @@
 when defined(js):
   {.error: "headless_session.nim is native-only".}
 
-import std/[json, options, strutils, asyncdispatch, osproc, os, streams]
+# `strutils` went out with the parsing that moved to
+# `store/replay_data_store.eventLogRowFromJson`: the inline wire decode this
+# module used to carry was its last user here.
+import std/[json, options, asyncdispatch, osproc, os, streams]
 
 import isonim/core/[signals, computation, async_compat]
 
@@ -883,12 +886,85 @@ type
     eventIndex*: int
     maxRRTicks*: uint64
 
+func toEventLogEntry*(row: EventLogRow): EventLogEntry =
+  ## One store row in this module's legacy compatibility shape.
+  ##
+  ## A FIELD RENAME OVER AN ALREADY-DECODED ROW, and deliberately nothing more.
+  ## It is not a second decoder: the wire has been read exactly once, by
+  ## `ReplayDataStore.eventLogRowFromJson`, before this is called. See
+  ## `requestAndLoadEventLog`'s header for why `EventLogEntry` still exists.
+  EventLogEntry(
+    content: row.value,
+    rrTicks: row.rrTicks,
+    line: row.line,
+    file: row.file,
+    sourceGeneration: row.sourceGeneration,
+    sourceDigest: row.sourceDigest,
+    kind: row.kindId,
+    stdout: row.stdout,
+    eventIndex: row.eventIndex,
+    maxRRTicks: row.maxRRTicks)
+
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
                              count: int = 0): seq[EventLogEntry] =
-  ## Send ``ct/event-load`` to the backend and return the parsed event log
-  ## entries.  When ``count`` is 0 (default) the backend returns the first
-  ## 20 events (legacy behaviour); pass an explicit ``count`` for pagination.
+  ## Send ``ct/event-load``, feed the answer into the store, and return the
+  ## window that was loaded.
+  ##
+  ## When ``count`` is 0 (default) the backend returns the first 20 events
+  ## (legacy behaviour); pass an explicit ``count`` for pagination.
+  ##
+  ## ## THE STORE IS WRITTEN, AS `requestAndLoadLocals` DOES
+  ##
+  ## `s.session.store.applyEventLogResponse` is where the payload is decoded,
+  ## and it is the ONLY place in this repository that decodes it. This proc used
+  ## to do the decoding itself and hand a sequence back, which is how three
+  ## front-ends came to hold three different conversions of one payload —
+  ## `store/types.EventLogRow`'s own header names them.
+  ##
+  ## ## AND IT STILL RETURNS, WHICH `requestAndLoadLocals` DOES NOT
+  ##
+  ## A deliberate divergence, stated rather than left to be noticed.
+  ## `requestAndLoadLocals` returns nothing because it never had a caller that
+  ## wanted a value; this proc has twenty-five, across nine files, and all but
+  ## two of them read the returned sequence (`tui/host/tui_session.nim` and
+  ## `tui/tests/test_cross_renderer_panes.nim` `discard` it and read the store,
+  ## which is what this change made possible). Making it `void` would have
+  ## been a signature change those callers depend on, for no gain — the
+  ## invariant that matters is *one decoder*, and that holds either way.
+  ##
+  ## What the return value IS has changed, and that is the part worth knowing:
+  ## it is now a PROJECTION OF WHAT THE STORE HOLDS (`toEventLogEntry` over
+  ## `store.eventLog.rows`), not a parallel parse. A caller that reads the
+  ## sequence and a caller that reads the store are reading the same rows, so
+  ## the two cannot drift.
+  # SETTLE FIRST, and this is load-bearing rather than tidy.
+  #
+  # `EventLogVM`'s auto-load effect is a SECOND producer into
+  # `store.eventLog.rows`, and its answer lands on the async dispatcher:
+  # `DapStdioBackend.toBackendService` blocks for the reply and hands back an
+  # already-complete future, but `async_compat.onComplete` defers the callback
+  # regardless — a fact this repository has measured twice (see
+  # `tui_session.serveSourceWindow`). So the effect's window sits queued until
+  # something polls, and a poll AFTER this request would overwrite the window
+  # this caller just asked for with the one the effect asked for at
+  # construction — the first 20, since the effect sends no `start`/`count`.
+  #
+  # STATED AS A MECHANISM RATHER THAN AS A MEASUREMENT, because it was
+  # PREVENTED rather than observed: this flush was written before the first run
+  # on a fixture large enough to show it. The recording that would have shown
+  # it is `noir_space_ship`, which has 70 events against the effect's 20, and
+  # `tui/tests/test_event_log_jump.nim` asserts all 70 reach the ViewModel —
+  # so the case that would catch a regression here exists and is green.
+  #
+  # Flushing before the request puts the effect's write where it belongs — in
+  # the past — so the last writer is the caller. Bounded rather than looped to
+  # quiescence: `poll(0)` advances one round, the effect fires at most twice per
+  # session (once at construction, once when a position first exists), and an
+  # unbounded drain in a harness is a hang waiting for a producer that never
+  # stops.
+  for _ in 0 ..< 4:
+    drain()
   let args = %*{
     "start": start,
     "count": count,
@@ -898,32 +974,14 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
   discard s.backend.drainEvents()
   if resp.getOrDefault("success").getBool(false):
     let body = resp.getOrDefault("body")
-    if not body.isNil and body.kind == JObject:
-      let eventsNode = body.getOrDefault("events")
-      if not eventsNode.isNil and eventsNode.kind == JArray:
-        for ev in eventsNode:
-          var entry = EventLogEntry()
-          entry.content = ev.getOrDefault("content").getStr("")
-          # ProgramEvent fields use camelCase serde names:
-          #   high_level_path -> highLevelPath (or high_level_path)
-          #   high_level_line -> highLevelLine (or high_level_line)
-          #   directLocationRRTicks -> directLocationRRTicks
-          entry.file = ev.getOrDefault("high_level_path").getStr(
-            ev.getOrDefault("highLevelPath").getStr(""))
-          entry.line = ev.getOrDefault("high_level_line").getInt(
-            ev.getOrDefault("highLevelLine").getInt(0))
-          entry.rrTicks = ev.getOrDefault("directLocationRRTicks").getBiggestInt(0).uint64
-          entry.sourceGeneration = ev.getOrDefault("source_generation").getInt(
-            ev.getOrDefault("sourceGeneration").getInt(0))
-          entry.sourceDigest = ev.getOrDefault("source_digest").getStr(
-            ev.getOrDefault("sourceDigest").getStr(""))
-          entry.kind = ev.getOrDefault("kind").getInt(0)
-          entry.stdout = ev.getOrDefault("stdout").getBool(false)
-          entry.eventIndex = ev.getOrDefault("event_index").getInt(
-            ev.getOrDefault("eventIndex").getInt(0))
-          entry.maxRRTicks =
-            ev.getOrDefault("maxRRTicks").getBiggestInt(0).uint64
-          result.add(entry)
+    # `hasKey("events")` and not merely "the body is an object":
+    # `applyEventLogResponse` deliberately leaves the store ALONE for a payload
+    # that carries no events, so reading the store back unconditionally would
+    # answer with the PREVIOUS window on a response that had none of its own.
+    if not body.isNil and body.kind == JObject and body.hasKey("events"):
+      s.session.store.applyEventLogResponse(body, start)
+      for row in s.session.store.eventLog.rows.val:
+        result.add(toEventLogEntry(row))
 
 proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
   ## Jump to the location of an event log entry.
@@ -987,34 +1045,30 @@ proc gotoTick*(s: HeadlessDebugSession; tick: uint64) =
 # Post-hoc tracepoints (CTUI-8)
 # ---------------------------------------------------------------------------
 
-type
-  TracepointSweepSpec* = object
-    ## One tracepoint to run over the whole recording.
-    tracepointId*: int
-    path*: string
-    line*: int
-    expression*: string
-    lang*: int
-      ## ``Lang`` ordinal (``libs/ct-lang/src/lib.rs``).  Measured on ``calc``
-      ## with both 12 (``Python``) and 21 (``PythonDb``): the engine answered
-      ## identically and echoed ``lang: 0`` on every ``Stop``, so it does not
-      ## select the evaluator on a CTFS trace.  The field is still sent because
-      ## ``Tracepoint`` requires it.
-
-  TracepointSweepHit* = object
-    ## One ``Stop`` from a ``ct/tracepoint-results`` answer.
-    tracepointId*: int
-    rrTicks*: uint64
-    path*: string
-    line*: int
-    values*: seq[(string, string)]
-      ## The locals the expression named, as ``(name, rendered)``.
-    errorMessage*: string
+# BOTH TYPES MOVED TO `store/types.nim` and are re-exported here.
+#
+# They had to move for the store to be able to name a sweep's answer:
+# `ReplayDataStore` is below every ViewModel and below this module, and
+# `applyTracepointResults` is the one place a sweep becomes data. Re-exported so
+# that the suites which reach them through `headless_session` are untouched.
+export types.TracepointSweepSpec, types.TracepointSweepHit
 
 proc runTracepoints*(s: HeadlessDebugSession;
                      specs: seq[TracepointSweepSpec];
                      maxMessages = 40): seq[TracepointSweepHit] =
-  ## Run post-hoc tracepoints over the WHOLE recording and return every hit.
+  ## Run post-hoc tracepoints over the WHOLE recording, feed the answer into
+  ## the store, and return every hit.
+  ##
+  ## ## THE STORE IS WRITTEN, AS `requestAndLoadLocals` DOES
+  ##
+  ## `s.session.store.applyTracepointResults(specs, hits)` is where the answer
+  ## becomes data: the hits land on `store.pointList.tracepointHits` and each
+  ## spec becomes a row on `store.pointList.rows` — which is
+  ## `PointListVM.points`, and is the backend producer that signal did not have.
+  ## The return value is read back out of the store, for the reason
+  ## `requestAndLoadEventLog`'s header gives: existing callers depend on it and
+  ## the invariant that matters is that there is one conversion, not that the
+  ## proc is `void`.
   ##
   ## ``ct/run-tracepoints`` ANSWERS WITH NO DAP RESPONSE, and that is not a
   ## guess: ``Handler::run_tracepoints`` (``src/db-backend/src/dap_handler.rs``)
@@ -1065,6 +1119,7 @@ proc runTracepoints*(s: HeadlessDebugSession;
   let results = body.getOrDefault("results")
   if results.isNil or results.kind != JArray:
     return
+  var hits: seq[TracepointSweepHit] = @[]
   for stop in results:
     var hit = TracepointSweepHit(
       tracepointId: stop.getOrDefault("tracepointId").getInt(0),
@@ -1081,7 +1136,15 @@ proc runTracepoints*(s: HeadlessDebugSession;
         let name = pair.getOrDefault("Field0").getStr("")
         let value = pair.getOrDefault("Field1")
         hit.values.add (name, presentedValueText(value, TracepointBudget))
-    result.add hit
+    hits.add hit
+  # THE ONE PLACE THE SWEEP BECOMES DATA. The `Value` rendering above is
+  # PLAT-2's presenter and cannot move into the store — the store is below
+  # `value_presentation` and knows nothing of budgets — so the split is:
+  # this module turns wire `Value`s into text, the store turns the resulting
+  # hits into rows, and neither does the other's half twice.
+  s.session.store.applyTracepointResults(specs, hits)
+  drain()
+  result = s.session.store.pointList.tracepointHits.val
 
 # ---------------------------------------------------------------------------
 # Trace recording

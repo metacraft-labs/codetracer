@@ -146,6 +146,67 @@ type
       ## RR or Materialized.  Empty string means "no source" — the
       ## view falls back to the ``no-code`` class with a blank label.
 
+  EventLogStore* = object
+    ## Reactive state for the event-log panel.
+    ##
+    ## THE ROWS LIVE HERE AND NOT ON `EventLogVM`, for the reason
+    ## `applyLocalsResponse` states about the locals: a payload that three
+    ## front-ends each decode is a payload three front-ends can disagree
+    ## about. `applyEventLogResponse` is the one decoder; `EventLogVM.eventRows`
+    ## IS this signal, and the terminal, the desktop and any out-of-tree
+    ## consumer read the same object.
+    rows*: Signal[seq[EventLogRow]]
+      ## The rows of the window most recently applied — `loadedStart` says
+      ## which window that is. A page and not the whole log, because
+      ## `ct/event-load` is paginated (`start`/`count`) and a store that
+      ## pretended otherwise would have to decide what to do with the gap
+      ## between two non-adjacent pages.
+    recordsTotal*: Signal[int]
+      ## The largest number of rows this session has been told about. It is a
+      ## HIGH-WATER MARK rather than the engine's own count: `ct/event-load`'s
+      ## response body carries `events`, `content` and `markers` and no total
+      ## (`Handler::event_load`, `src/db-backend/src/dap_handler.rs`), so the
+      ## only honest total available here is derived from what has arrived.
+      ## The desktop's DataTables path has a real `recordsTotal` and publishes
+      ## it through `applyEventLogRows`.
+    recordsFiltered*: Signal[int]
+      ## The same count after the server-side search filter, for a host that
+      ## has one. Equal to `recordsTotal` when nothing filtered.
+    maxRRTicks*: Signal[uint64]
+      ## The recording's last step id, as reported by the events themselves.
+      ## CTUI-8 established that this is the ONLY surface in the workspace that
+      ## reports a completed replay's extent, which is why the terminal reads
+      ## a whole page at open just to learn it.
+    loadedStart*: Signal[int]
+      ## The `start` offset of the window `rows` holds.
+    loadingState*: Signal[LoadingState]
+
+  PointListStore* = object
+    ## Reactive state for the point list (tracepoints / breakpoints) and for
+    ## the answers a post-hoc tracepoint sweep produced.
+    ##
+    ## Both are here for the same reason the event log's rows are: a point row
+    ## is read by the terminal's list pane, the desktop's point list and the
+    ## vocabulary's `tracepointsPaneView`, and the sweep that produces the
+    ## engine-side ones has exactly one decoder — `applyTracepointResults`.
+    rows*: Signal[seq[PointListEntry]]
+      ## Every declared point, whatever became of it. `PointListVM.points` IS
+      ## this signal.
+      ##
+      ## TWO PRODUCERS, deliberately, and they do not fight: project
+      ## definitions (`point_collection_source.applyCollections`, which resolves
+      ## anchors against source text) and the engine
+      ## (`applyTracepointResults`, which reports what a sweep actually found).
+      ## The second MERGES by `(path, line)` rather than replacing, so running a
+      ## sweep over a collection's points annotates those rows instead of
+      ## deleting the ones the sweep did not name.
+    tracepointHits*: Signal[seq[TracepointSweepHit]]
+      ## Every `Stop` the last sweep answered, in the engine's own order
+      ## (ascending `rrTicks`). Cleared and replaced per sweep: a sweep is a
+      ## complete walk of the recording, so merging two of them would report a
+      ## history rather than a result.
+    loadingState*: Signal[LoadingState]
+
   RequestSpansStore* = object
     ## RS-M3 — reactive state for the HTTP Request panel's live tail.
     ##
@@ -193,6 +254,8 @@ type
     agentSessions*: Signal[AgentSessionsState]
     calltrace*: CalltraceStore
     locals*: LocalsStore
+    eventLog*: EventLogStore
+    pointList*: PointListStore
     requestSpans*: RequestSpansStore
     degraded*: DegradedStateStore
     backend*: BackendService
@@ -519,6 +582,10 @@ proc clearRequestSpans*(store: ReplayDataStore) =
   store.requestSpans.source.val = ""
   store.requestSpans.loadingState.val = lsIdle
 
+proc clearEventLog*(store: ReplayDataStore)
+  ## Forward-declared: the event-log appliers are grouped with the other
+  ## response handlers further down, and this is the one caller above them.
+
 proc resetForNewSession*(store: ReplayDataStore) =
   ## Forget the requests a previous session — or no session at all — left
   ## outstanding, now that there is a backend able to answer.
@@ -562,6 +629,19 @@ proc resetForNewSession*(store: ReplayDataStore) =
   ## never answered.
   store.requestTracker.clear()
   store.locals.loadingState.val = lsIdle
+  # AND THE PREVIOUS RECORDING'S EVENT ROWS GO WITH THEM. All three call sites
+  # in `ui_js.nim` run at the moment a backend first becomes reachable for a
+  # DIFFERENT trace — two immediately before `DapLaunch`, one on the web path
+  # once the replay worker exists — so
+  # from this instant every row held here is a row of a recording nobody is
+  # looking at any more. `EventLogComponent.clear` covers the desktop's own
+  # copy; this covers the store, which is what a second host reads.
+  #
+  # `pointList` is deliberately NOT cleared. A declared point is a property of
+  # the CHECKOUT — `applyCollections` resolves it against source text — and it
+  # is still true of the next recording of the same program. Only the sweep
+  # results are recording-specific, and the next sweep replaces them whole.
+  store.clearEventLog()
 
 proc requestRequestSpansSince*(store: ReplayDataStore) =
   ## Poll for spans committed since the stored cursor.
@@ -684,6 +764,23 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         loadingState: createSignal(lsIdle),
         loadedForRRTicks: createSignal(0'u64),
         codeStateLine: createSignal(""),
+      ),
+
+      # -- event log --
+      eventLog: EventLogStore(
+        rows: createSignal(newSeq[EventLogRow]()),
+        recordsTotal: createSignal(0),
+        recordsFiltered: createSignal(0),
+        maxRRTicks: createSignal(0'u64),
+        loadedStart: createSignal(0),
+        loadingState: createSignal(lsIdle),
+      ),
+
+      # -- point list + tracepoint sweep results --
+      pointList: PointListStore(
+        rows: createSignal(newSeq[PointListEntry]()),
+        tracepointHits: createSignal(newSeq[TracepointSweepHit]()),
+        loadingState: createSignal(lsIdle),
       ),
 
       # -- HTTP request spans (RS-M3 live tail) --
@@ -936,6 +1033,368 @@ proc applyLocalsResponse*(store: ReplayDataStore;
       locals.add(row)
   store.updateLocals(locals)
   store.updateWatches(watches)
+
+# ---------------------------------------------------------------------------
+# Event log — one decoder for `ct/event-load`
+# ---------------------------------------------------------------------------
+
+func eventKindLabel*(kindId: int; stdout: bool; semanticKind: string): string =
+  ## The row's DISPLAY kind, in one place.
+  ##
+  ## `ProgramEvent` carries two spellings of "what is this row": a numeric
+  ## `kind` (`EventLogKind`, `src/db-backend/src/task.rs`) and an optional
+  ## `semanticKind` string whose own doc comment says *"Empty means use
+  ## `kind`"*. A pane needs a word, so the choice between them has to be made
+  ## somewhere; making it here is what stops the terminal and the desktop from
+  ## choosing differently for the same recorded event.
+  ##
+  ## `kindId` is deliberately NOT turned into an enum name. The numeric value
+  ## is kept verbatim on `EventLogRow.kindId` and the terminal's
+  ## `categoryFor(kindId, stdout)` classifies from it, so a value this
+  ## function has never heard of stays visible as a number rather than being
+  ## flattened into a plausible-looking label.
+  if semanticKind.len > 0: semanticKind
+  elif stdout: "stdout"
+  else: "event"
+
+func isNumber(node: JsonNode): bool =
+  ## A JSON number in either of the two shapes `std/json` produces.
+  ##
+  ## `JFloat` is not hypothetical here: the Electron renderer hands this layer
+  ## objects that went through `JSON.parse`, where every number is a double,
+  ## and `getInt` answers its DEFAULT on a `JFloat` rather than truncating —
+  ## so a check that tested only `JInt` would silently read 0 for a line number
+  ## that was present.
+  (not node.isNil) and node.kind in {JInt, JFloat}
+
+func asInt(node: JsonNode): int =
+  ## A JSON number as an `int`, whichever shape it arrived in.
+  if node.isNil: 0
+  elif node.kind == JInt: node.getInt(0)
+  elif node.kind == JFloat: int(node.getFloat(0.0))
+  else: 0
+
+func firstTicks(node: JsonNode; names: varargs[string]): uint64 =
+  ## The first of `names` this object carries as a number, as a tick count.
+  ##
+  ## `BiggestInt` rather than `int` because a tick is a 64-bit quantity and
+  ## this module compiles for the JS backend too, where `int` is not one.
+  ## Negative is clamped to 0: `directLocationRRTicks` is an `i64` on the wire
+  ## and -1 is how some producers spell "no position".
+  if node.isNil or node.kind != JObject:
+    return 0'u64
+  for name in names:
+    let child = node.getOrDefault(name)
+    if child.isNil:
+      continue
+    if child.kind == JInt:
+      let raw = child.getBiggestInt(0)
+      return if raw > 0: uint64(raw) else: 0'u64
+    if child.kind == JFloat:
+      let raw = child.getFloat(0.0)
+      return if raw > 0.0: uint64(raw) else: 0'u64
+  0'u64
+
+func firstInt(node: JsonNode; names: varargs[string]): int =
+  ## The first of `names` this object carries as a number, or 0.
+  ##
+  ## The wire has BOTH spellings in circulation: `ProgramEvent` serialises
+  ## camelCase (`#[serde(rename_all(serialize = "camelCase"))]`) while the
+  ## legacy echo path and several fixtures carry snake_case. Reading one and
+  ## silently defaulting the other is how `line` came to be 0 on a payload
+  ## that had it.
+  if node.isNil or node.kind != JObject:
+    return 0
+  for name in names:
+    let child = node.getOrDefault(name)
+    if child.isNumber:
+      return child.asInt
+  0
+
+func firstStr(node: JsonNode; names: varargs[string]): string =
+  ## `firstInt` for strings.
+  if node.isNil or node.kind != JObject:
+    return ""
+  for name in names:
+    let child = node.getOrDefault(name)
+    if not child.isNil and child.kind == JString and child.getStr("").len > 0:
+      return child.getStr("")
+  ""
+
+proc eventLogRowFromJson*(node: JsonNode; positionIndex: int): EventLogRow =
+  ## ONE `ProgramEvent` off the wire as ONE `EventLogRow`.
+  ##
+  ## THE ONE PLACE THE `ct/event-load` WIRE SHAPE IS READ. Three front-ends
+  ## used to do this independently — the terminal built `EventRow`s in
+  ## `tui/host/tui_session.nim`, the desktop built `ProgramEvent`s in
+  ## `ui/event_log.nim`, and `headless_session` built a third shape for its
+  ## callers — which is three chances to disagree about which key holds the
+  ## line number and what an absent `semanticKind` means.
+  ##
+  ## `positionIndex` is the row's absolute position in the log (the request's
+  ## `start` plus its offset in the page) and is used only when the payload
+  ## omits `eventIndex`. It is not a substitute for the wire's value: a page
+  ## fetched at `start = 40` has page-local offsets 0..n and absolute indices
+  ## 40..n+40, and the cursor of every pane is in the absolute coordinate.
+  result = EventLogRow()
+  if node.isNil or node.kind != JObject:
+    return
+  result.value = node.getOrDefault("content").getStr("")
+  result.file = firstStr(node, "highLevelPath", "high_level_path")
+  result.line = firstInt(node, "highLevelLine", "high_level_line")
+  result.rrTicks = firstTicks(node, "directLocationRRTicks",
+                              "direct_location_rr_ticks")
+  result.sourceGeneration = firstInt(node, "sourceGeneration",
+                                     "source_generation")
+  result.sourceDigest = firstStr(node, "sourceDigest", "source_digest")
+  result.kindId = node.getOrDefault("kind").asInt
+  result.stdout = node.getOrDefault("stdout").getBool(false)
+  result.kind = eventKindLabel(result.kindId, result.stdout,
+                               firstStr(node, "semanticKind", "semantic_kind"))
+  let wireIndex = node.getOrDefault("eventIndex")
+  let snakeIndex = node.getOrDefault("event_index")
+  result.eventIndex =
+    if wireIndex.isNumber: wireIndex.asInt
+    elif snakeIndex.isNumber: snakeIndex.asInt
+    else: positionIndex
+  result.maxRRTicks = firstTicks(node, "maxRRTicks", "max_rr_ticks")
+  # `rrEventId` is the recorder's own id for the event and is what the jump
+  # payload echoes back; it is absent on some producers, and the tick is the
+  # next best stable identity. Falling back to the POSITION would make two
+  # different events in two different pages share an id.
+  let rrEventId = firstInt(node, "rrEventId", "rr_event_id")
+  result.eventId =
+    if rrEventId > 0: uint64(rrEventId)
+    elif result.rrTicks > 0'u64: result.rrTicks
+    else: uint64(result.eventIndex + 1)
+
+proc eventLogRowsFromJson*(payload: JsonNode; start: int = 0): seq[EventLogRow] =
+  ## Every row of a `ct/event-load` answer, tolerant of the three envelopes
+  ## this payload arrives in: the full DAP response (`{"body": {"events": …}}`),
+  ## the response body alone (`{"events": …}`), and the bare array the
+  ## `ct/updated-events` event carries.
+  result = @[]
+  if payload.isNil:
+    return
+  var eventsNode: JsonNode = nil
+  if payload.kind == JArray:
+    eventsNode = payload
+  elif payload.kind == JObject:
+    let body = payload.getOrDefault("body")
+    let container =
+      if not body.isNil and body.kind == JObject and body.hasKey("events"):
+        body
+      else:
+        payload
+    let events = container.getOrDefault("events")
+    if not events.isNil and events.kind == JArray:
+      eventsNode = events
+  if eventsNode.isNil:
+    return
+  for i in 0 ..< eventsNode.len:
+    result.add eventLogRowFromJson(eventsNode[i], start + i)
+
+proc applyEventLogRows*(store: ReplayDataStore;
+                        rows: seq[EventLogRow];
+                        start: int = 0;
+                        recordsTotal: int = -1;
+                        recordsFiltered: int = -1) =
+  ## Write ONE window of already-decoded event rows into the store.
+  ##
+  ## THE ONE PLACE EVERY PRODUCER ENDS. `applyEventLogResponse` decodes the
+  ## wire and calls this; the desktop's DataTables path, whose rows arrive
+  ## through `ct/update-table` in a different shape entirely, converts once and
+  ## calls this; the live debugger head appends through `appendLiveEventRow`,
+  ## which is this with one row.
+  ##
+  ## `recordsTotal` / `recordsFiltered` default to -1 meaning "the producer does
+  ## not know", in which case the totals are raised to at least what this window
+  ## implies and never lowered. A producer that DOES know (the desktop's table
+  ## update carries the engine's own count) passes it and it is taken verbatim,
+  ## including downwards — a filter that matched fewer rows has to be able to
+  ## say so.
+  store.eventLog.rows.val = rows
+  store.eventLog.loadedStart.val = start
+  if recordsTotal >= 0:
+    store.eventLog.recordsTotal.val = recordsTotal
+  else:
+    store.eventLog.recordsTotal.val =
+      max(store.eventLog.recordsTotal.val, start + rows.len)
+  if recordsFiltered >= 0:
+    store.eventLog.recordsFiltered.val = recordsFiltered
+  else:
+    store.eventLog.recordsFiltered.val = store.eventLog.recordsTotal.val
+  var maxTicks = store.eventLog.maxRRTicks.val
+  for row in rows:
+    if row.maxRRTicks > maxTicks:
+      maxTicks = row.maxRRTicks
+  store.eventLog.maxRRTicks.val = maxTicks
+  store.eventLog.loadingState.val = lsIdle
+
+proc applyEventLogResponse*(store: ReplayDataStore;
+                            payload: JsonNode;
+                            start: int = 0) =
+  ## Write ONE `ct/event-load` answer into the store.
+  ##
+  ## THE `applyLocalsResponse` OF THE EVENT LOG, and it exists for the same
+  ## reason: *"A single entry point is what stops the next host from inventing
+  ## a third behaviour."* Before it, `requestAndLoadEventLog` returned a
+  ## sequence and each caller converted it — the terminal into `EventRow`, the
+  ## desktop into `ProgramEvent`, and a cross-renderer suite into
+  ## `EventLogRow` by hand through a door meant for the live debugger stop.
+  ##
+  ## A payload with no `events` array leaves the store ALONE rather than
+  ## clearing it. "The answer had no events" and "the answer was not an event
+  ## load" are different facts and only one of them means the log is empty; the
+  ## marker-only answers `EventLogVM`'s own effect routes through here are the
+  ## second kind.
+  if payload.isNil:
+    return
+  var hasEvents = false
+  if payload.kind == JArray:
+    hasEvents = true
+  elif payload.kind == JObject:
+    let body = payload.getOrDefault("body")
+    hasEvents = payload.hasKey("events") or
+      (not body.isNil and body.kind == JObject and body.hasKey("events"))
+  if not hasEvents:
+    return
+  store.applyEventLogRows(eventLogRowsFromJson(payload, start), start)
+
+proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
+  ## Append one live debugger-stop row, and say whether it was new.
+  ##
+  ## Persisted event rows come from the backend through
+  ## `applyEventLogResponse`; this covers the live debugger head, where each
+  ## stop is visible immediately and may later be mirrored by a backend event
+  ## load. The duplicate test is the identity the live producer can supply —
+  ## `(eventId, kind, sourceGeneration, sourceDigest)` — because a live stop
+  ## has no `eventIndex` of its own until it is appended.
+  var rows = store.eventLog.rows.val
+  for existing in rows:
+    if existing.eventId == row.eventId and
+       existing.kind == row.kind and
+       existing.sourceGeneration == row.sourceGeneration and
+       existing.sourceDigest == row.sourceDigest:
+      return false
+  var nextRow = row
+  nextRow.eventIndex = store.eventLog.loadedStart.val + rows.len
+  rows.add(nextRow)
+  store.applyEventLogRows(rows, store.eventLog.loadedStart.val)
+  true
+
+proc clearEventLog*(store: ReplayDataStore) =
+  ## Drop every row and every count. Used when a session restarts, so a new
+  ## recording cannot inherit the previous one's log.
+  store.eventLog.rows.val = @[]
+  store.eventLog.recordsTotal.val = 0
+  store.eventLog.recordsFiltered.val = 0
+  store.eventLog.maxRRTicks.val = 0'u64
+  store.eventLog.loadedStart.val = 0
+  store.eventLog.loadingState.val = lsIdle
+
+# ---------------------------------------------------------------------------
+# Point list + tracepoint sweeps
+# ---------------------------------------------------------------------------
+
+proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
+  ## Replace the declared point rows.
+  ##
+  ## The definition-side producer (`point_collection_source.applyCollections`)
+  ## ends here, as does `PointListVM.setPoints`. Written unconditionally,
+  ## including with an empty seq: disabling every collection has to be able to
+  ## empty the pane.
+  store.pointList.rows.val = rows
+  store.pointList.loadingState.val = lsIdle
+
+proc applyTracepointResults*(store: ReplayDataStore;
+                             specs: seq[TracepointSweepSpec];
+                             hits: seq[TracepointSweepHit]) =
+  ## Write ONE `ct/tracepoint-results` answer into the store.
+  ##
+  ## THE ONE PLACE A SWEEP BECOMES DATA, and it produces two things because the
+  ## answer is two things:
+  ##
+  ##   * `tracepointHits` — every `Stop`, with its tick, its location and the
+  ##     locals the expression named. This is what a timeline draws diamonds
+  ##     from and what a trace pane lists.
+  ##   * `pointList.rows` — one row per SPEC, because the sweep is also the
+  ##     engine's answer to "where is this tracepoint and did it fire". A spec
+  ##     with hits resolves to the location the ENGINE reported (which is the
+  ##     authority — an anchor resolved against source text is a guess until
+  ##     the engine agrees); a spec with none keeps the location it asked for
+  ##     and says it found nothing.
+  ##
+  ## MERGED BY `(path, line)` RATHER THAN REPLACING. `applyCollections` is the
+  ## other producer of these rows and it names points a sweep may not have run,
+  ## so replacing would delete them. A spec that matches an existing row
+  ## annotates it in place, which is what lets a pane show a declared
+  ## collection and the engine's verdict on it as one list.
+  store.pointList.tracepointHits.val = hits
+
+  var hitCounts: seq[int] = @[]
+  var hitLines: seq[int] = @[]
+  var hitPaths: seq[string] = @[]
+  var errors: seq[string] = @[]
+  for _ in specs:
+    hitCounts.add 0
+    hitLines.add 0
+    hitPaths.add ""
+    errors.add ""
+  for hit in hits:
+    for i, spec in specs:
+      # `tracepointId` is the engine's echo of what the request supplied, so it
+      # is the identity to match on. A hit whose id names no spec is still in
+      # `tracepointHits`; it just annotates no row.
+      if spec.tracepointId == hit.tracepointId:
+        inc hitCounts[i]
+        if hitLines[i] == 0:
+          hitLines[i] = hit.line
+          hitPaths[i] = hit.path
+        if errors[i].len == 0 and hit.errorMessage.len > 0:
+          errors[i] = hit.errorMessage
+        break
+
+  var rows = store.pointList.rows.val
+  for i, spec in specs:
+    let located = hitCounts[i] > 0
+    let path = if located and hitPaths[i].len > 0: hitPaths[i] else: spec.path
+    let line = if located and hitLines[i] > 0: hitLines[i] else: spec.line
+    let resolution =
+      if errors[i].len > 0: "swept, errored"
+      elif located: "swept"
+      else: "swept, no hits"
+    let detail =
+      if errors[i].len > 0: errors[i]
+      elif located: $hitCounts[i] & " hit(s)"
+      else: "the sweep reached this line no times"
+    var replaced = false
+    for j in 0 ..< rows.len:
+      if rows[j].path == spec.path and rows[j].line == spec.line and
+         rows[j].line != 0:
+        rows[j].line = line
+        rows[j].path = path
+        rows[j].resolution = resolution
+        rows[j].detail = detail
+        replaced = true
+        break
+    if not replaced:
+      rows.add PointListEntry(
+        kind: "pkTracepoint",
+        label: (if spec.expression.len > 0: spec.expression
+                else: "tracepoint " & $spec.tracepointId),
+        path: path,
+        # 0 when the sweep found nothing and the request named no line: a row
+        # whose line is 0 is a row a pane must not offer as a jump target, and
+        # inventing one here would be the silent mislocation `rowOf`'s own
+        # comment refuses.
+        line: line,
+        enabled: true,
+        collection: "",
+        resolution: resolution,
+        detail: detail)
+  store.pointList.rows.val = rows
+  store.pointList.loadingState.val = lsIdle
 
 proc updateCodeStateLine*(store: ReplayDataStore;
                           line: int;

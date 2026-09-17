@@ -33,14 +33,24 @@
 ## then asserted to hold NO further `stopped`. A seek that issued two commands
 ## would leave a second pair behind and redden that count.
 ##
-## ## THREE FIELDS ARE ASSERTED TO BE EMPTY, AS EQUALITIES
+## ## TWO FIELDS ARE ASSERTED TO BE EMPTY, AND ONE IS NOW ASSERTED TO BE FULL
 ##
-## `EventLogVM.eventRows`, `EventLogVM.markerRows` and `TimelineVM.markers` are
-## filled by nothing on a replay session — see `app/timeline_binding.nim`'s
-## header for the grep and the measurements. Each is asserted as `== 0` beside
-## the surface that DOES answer, so the day a host starts filling one the suite
-## goes red and says the pane can stop working around it. The same shape CTUI-7
-## used for `store.locals.globals`.
+## `EventLogVM.markerRows` and `TimelineVM.markers` are filled by nothing on a
+## replay session — see `app/timeline_binding.nim`'s header for the grep and the
+## measurements. Each is asserted as `== 0` beside the surface that DOES answer,
+## so the day a host starts filling one the suite goes red and says the pane can
+## stop working around it. The same shape CTUI-7 used for
+## `store.locals.globals`.
+##
+## **`EventLogVM.eventRows` WAS THE THIRD, AND IT IS NOT ANY MORE.** It used to
+## be `== 0` for the same reason: the backend answered `ct/event-load` and
+## nothing wrote the answer into the ViewModel. `requestAndLoadEventLog` now
+## feeds `ReplayDataStore.applyEventLogResponse`, which IS that signal, so the
+## case that recorded the gap asserts the repair instead — **against the wire's
+## own answer**, row for row, rather than against a count. A count would be
+## satisfied by any 70 rows; `"no events have been loaded"` is what this pane
+## says when it is empty, and it is a well-formed apology that no shape check
+## can tell from a rendering.
 ##
 ## ## WHY THIS FILE IS NOT UNDER `app/tests/`
 ##
@@ -65,6 +75,11 @@ import isonim/core/[signals, computation]
 import isonim/viewmodel
 
 import headless_session
+# `wholeLog` below sends its OWN `ct/event-load` and decodes the answer itself,
+# which is what makes it an independent expectation rather than a copy of the
+# store — see its header. `headless_session` re-exports only part of this
+# module, and `sendDapRequest` is not in that part.
+import backend/stdio_backend
 import store/[replay_data_store, types]
 import viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm, source_vm,
                    state_vm, timeline_vm]
@@ -79,7 +94,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 147
+const ExpectedAssertions = 161
 
 var countedAssertions = 0
 
@@ -196,11 +211,65 @@ proc eventPagesOver(session: HeadlessDebugSession): EventPages =
     EventPage(rows: rows, atEnd: entries.len < limit)
 
 proc wholeLog(session: HeadlessDebugSession): seq[EventLogEntry] =
-  ## The recording's entire event log in ONE request — the GROUND TRUTH the
-  ## paged reads are compared against. Deliberately not the path the pane takes:
-  ## a paged pane compared against its own paging would be comparing a thing
-  ## with itself.
-  session.requestAndLoadEventLog(start = 0, count = 1_000_000)
+  ## The recording's entire event log in ONE request, **decoded here, from the
+  ## raw wire** — the GROUND TRUTH the paged reads and the ViewModel's rows are
+  ## compared against.
+  ##
+  ## ## WHY THIS DOES NOT CALL `requestAndLoadEventLog`, 2026-09-17
+  ##
+  ## It used to, and that stopped being a ground truth the moment the event log
+  ## moved into the store. `requestAndLoadEventLog` now feeds
+  ## `ReplayDataStore.applyEventLogResponse` and then reads its answer back OUT
+  ## of `store.eventLog.rows` — which IS `EventLogVM.eventRows`, the very signal
+  ## the case below checks. Comparing them was comparing the store against a
+  ## field-renamed copy of itself.
+  ##
+  ## **MEASURED, not reasoned about.** With the decoder mutated to read every
+  ## `highLevelLine` three higher than the wire says, this suite stayed green at
+  ## 5/5 while `test_cross_renderer_panes.nim` — which asserts against the
+  ## recorded source read off disk — went red. Both sides of the row-for-row
+  ## comparison were corrupted equally, so it could not fail.
+  ##
+  ## So this is a SECOND decoder, deliberately, and its duplication is the
+  ## point: an expectation re-derived independently is what makes the
+  ## production decoder falsifiable. Sharing `eventLogRowFromJson` here would
+  ## only assert that it agrees with itself. It writes nothing into the store,
+  ## so the pane's rows stay whatever the product's own path put there.
+  let resp = session.backend.sendDapRequest(
+    "ct/event-load", %*{"start": 0, "count": 1_000_000})
+  discard session.backend.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    return
+  let body = resp.getOrDefault("body")
+  if body.isNil or body.kind != JObject:
+    return
+  let events = body.getOrDefault("events")
+  if events.isNil or events.kind != JArray:
+    return
+  for i in 0 ..< events.len:
+    let ev = events[i]
+    var entry = EventLogEntry()
+    entry.content = ev.getOrDefault("content").getStr("")
+    # Both spellings, because both are in circulation on this wire — the
+    # camelCase `ProgramEvent` serialisation and the snake_case legacy echo.
+    entry.file = ev.getOrDefault("highLevelPath").getStr(
+      ev.getOrDefault("high_level_path").getStr(""))
+    entry.line = ev.getOrDefault("highLevelLine").getInt(
+      ev.getOrDefault("high_level_line").getInt(0))
+    entry.rrTicks =
+      ev.getOrDefault("directLocationRRTicks").getBiggestInt(0).uint64
+    entry.sourceGeneration = ev.getOrDefault("sourceGeneration").getInt(
+      ev.getOrDefault("source_generation").getInt(0))
+    entry.sourceDigest = ev.getOrDefault("sourceDigest").getStr(
+      ev.getOrDefault("source_digest").getStr(""))
+    entry.kind = ev.getOrDefault("kind").getInt(0)
+    entry.stdout = ev.getOrDefault("stdout").getBool(false)
+    # Absent `eventIndex` falls back to the row's POSITION in this answer,
+    # which is its absolute index because this request starts at 0.
+    entry.eventIndex = ev.getOrDefault("eventIndex").getInt(
+      ev.getOrDefault("event_index").getInt(i))
+    entry.maxRRTicks = ev.getOrDefault("maxRRTicks").getBiggestInt(0).uint64
+    result.add(entry)
 
 proc serveOne(h: JumpHarness; request: SourceLineRequest): SourceFetch =
   ## One request through the real provider, delivered. Seeded with a status
@@ -487,7 +556,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       # `app/tests/test_timeline_scrubber_quantization.nim`'s sibling suite.
       ck mutationTicks(rows).len == 0
 
-  test "the three ViewModel fields nothing fills are still empty":
+  test "the event log reaches the ViewModel, and the two markers still do not":
     inc examinedFixtures
     let resolution = resolveFixture(FixtureName)
     if resolution.outcome == foMissingPrereq:
@@ -503,23 +572,65 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       defer: closeHarness(h)
 
       # A REAL `ct/event-load` has been answered by the time this runs — the
-      # `EventLogVM`'s own auto-load effect fires on creation, and the request
-      # below is a second one through the harness. If anything filled these,
-      # they would be full.
+      # `EventLogVM`'s own auto-load effect fires on creation, and the requests
+      # below are further ones through the harness.
+      #
+      # TWO REQUESTS, FOR THE TWO SIDES, and they must stay two. The first is
+      # the PRODUCT's own path: it decodes through
+      # `ReplayDataStore.applyEventLogResponse` and fills `eventRows`, which is
+      # the thing under test. The second is `wholeLog`, which decodes the same
+      # window itself and writes nothing — see its header for the measurement
+      # that says why the expectation cannot come from the first.
+      discard h.session.requestAndLoadEventLog(start = 0, count = 1_000_000)
+      discard h.session.drainEvents()
       let truth = wholeLog(h.session)
       discard h.session.drainEvents()
       h.session.stepForward()
       discard h.session.drainEvents()
-      echo "CTUI-8 UNFILLED: EventLogVM.eventRows ", h.events.eventRows.val.len,
+      let rows = h.events.eventRows.val
+      echo "CTUI-8 EVENT ROWS: EventLogVM.eventRows ", rows.len,
            ", markerRows ", h.events.markerRows.val.len,
            ", TimelineVM.markers ", h.timeline.markers.val.len,
            ", store.timeline ", h.session.session.store.timeline.val,
            " — against ", truth.len, " event(s) the wire really returned"
-      # THE POSITIVE TWIN: the wire answered, so "empty" is a statement about
-      # the ViewModel and not about the recording.
+      # THE POSITIVE TWIN: the wire answered, so an assertion about the
+      # ViewModel is an assertion about the plumbing and not about the
+      # recording.
       ck truth.len > 0
-      ck h.events.eventRows.val.len == 0
-      ck h.events.totalEventCount.val == 0
+      # THE ROW SET IS THE WIRE'S, ROW FOR ROW. Not `rows.len > 0` and not
+      # `rows.len == truth.len`: `noir_space_ship` has seventy events, and
+      # seventy rows carrying anything at all would satisfy a count. What
+      # cannot be satisfied by an empty pane, by a repeated row, or by a
+      # decoder that lost a field is the CONTENT of each row matching the
+      # content the same wire answer carried.
+      ck rows.len == truth.len
+      var mismatched = 0
+      var empty = 0
+      for i, row in rows:
+        if i >= truth.len: break
+        if row.value != truth[i].content or row.file != truth[i].file or
+           row.line != truth[i].line or row.rrTicks != truth[i].rrTicks or
+           row.eventIndex != truth[i].eventIndex or
+           row.kindId != truth[i].kind or row.stdout != truth[i].stdout:
+          if mismatched == 0:
+            checkpoint("row " & $i & ": vm=(" & row.value & ", " & row.file &
+                       ":" & $row.line & ", tick " & $row.rrTicks & ")" &
+                       " wire=(" & truth[i].content & ", " & truth[i].file &
+                       ":" & $truth[i].line & ", tick " & $truth[i].rrTicks & ")")
+          inc mismatched
+        if row.value.len == 0:
+          inc empty
+      ck mismatched == 0
+      # …AND THE ROWS SAY SOMETHING. A decoder that answered seventy rows of
+      # empty strings would match a `truth` decoded the same wrong way, so the
+      # non-emptiness is asserted independently.
+      ck empty == 0
+      var distinctValues: seq[string] = @[]
+      for row in rows:
+        if row.value notin distinctValues:
+          distinctValues.add row.value
+      ck distinctValues.len > 1
+      ck h.events.totalEventCount.val >= rows.len
       ck h.events.markerRows.val.len == 0
       ck h.timeline.markers.val.len == 0
       ck h.session.session.store.timeline.val.maxRRTicks == 0'u64
@@ -650,6 +761,34 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
         if value notin distinctValues:
           distinctValues.add value
       ck distinctValues.len > 1
+
+      # ---- AND THE SWEEP REACHED THE STORE, WHICH IS THE POINT LIST -------
+      #
+      # `runTracepoints` feeds `ReplayDataStore.applyTracepointResults`, which
+      # writes both projections of the one answer: the hits, and one point row
+      # per SPEC. The second is `PointListVM.points`, and until this producer
+      # existed that signal had no backend writer at all — a sweep could report
+      # five hits and the pane listing the tracepoints stayed empty.
+      let storedHits = h.session.session.store.pointList.tracepointHits.val
+      ck storedHits.len == hits.len
+      # The SAME hits, not merely as many: the returned sequence is read back
+      # out of the store, so a store that held something else would differ
+      # here rather than only in a length.
+      ck storedHits[0].rrTicks == hits[0].rrTicks
+      ck storedHits[^1].rrTicks == hits[^1].rrTicks
+      let pointRows = h.session.session.store.pointList.rows.val
+      ck pointRows.len == 1
+      ck pointRows[0].kind == "pkTracepoint"
+      ck pointRows[0].label == SweepExpression
+      ck pointRows[0].path == programPath
+      # THE ENGINE'S LINE, not the request's — `applyTracepointResults` prefers
+      # what the sweep reported, and the two agree here because the request was
+      # composed from the recorded source. Asserted anyway, because a row that
+      # said 0 would be a row the pane refuses as a jump target.
+      ck pointRows[0].line == targetLine
+      ck pointRows[0].resolution == "swept"
+      ck pointRows[0].detail == $hits.len & " hit(s)"
+      ck pointRows[0].enabled
 
       # ---- THE HITS BECOME DIAMONDS, AND THE DIAMONDS ARE SEEKABLE --------
       var appHits: seq[TracepointHit] = @[]

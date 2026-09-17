@@ -12,6 +12,16 @@
 ## `variables_binding.nim`, `timeline_binding.nim`, `origin_binding.nim` and
 ## `views/variables.nim`. This file is the first producer.
 ##
+## ## AND THE SECOND, 2026-09-17: THE ENGINE
+##
+## `points` is `ReplayDataStore.pointList.rows` now, and
+## `ReplayDataStore.applyTracepointResults` writes a row per spec of a
+## `ct/run-tracepoints` sweep. The two producers do not fight: the sweep MERGES
+## by `(path, line)`, so running a sweep over a collection's points annotates
+## those rows with what the engine found instead of replacing the list with the
+## subset that was swept. `applyCollections` below routes through `setPoints`,
+## which routes through `applyPointRows`, so both ends meet in the store.
+##
 ## ## WHAT IT DOES AND WHAT IT REFUSES TO DO
 ##
 ## It turns resolved collections into rows. It performs no I/O, parses

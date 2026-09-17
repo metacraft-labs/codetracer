@@ -47,6 +47,15 @@ import std/[json, os, strutils]
 import codetracer_embed
 import headless_session
 
+# QUALIFIED, and the qualification is load-bearing: `EventLogRow` is declared
+# TWICE in this module's scope — `viewmodel/store/types.EventLogRow` is the
+# store's neutral row, and `tui/app/views/event_log.EventLogRow` is a rendered
+# row of the PANE (a `kind` + an index + an `EventRow`). Naming it bare
+# compiles in the files that import only one of the two and fails as
+# "ambiguous identifier" in the ones that import both, which is the shape a
+# reader meets as a compile error several modules away from either declaration.
+import ../../viewmodel/store/types as store_types
+
 import ../app/call_stack_binding
 import ../app/runtime
 import ../app/source_binding
@@ -198,17 +207,36 @@ proc stackBody(s: TuiSession): JsonNode =
   discard s.session.drainEvents()
   response.getOrDefault("body")
 
-proc eventRows(s: TuiSession; offset, limit: int): seq[EventRow] =
+func eventRowOf(row: store_types.EventLogRow): EventRow =
+  ## One store row as the pane's row.
+  ##
+  ## THE TERMINAL'S ONLY CONVERSION, and it converts from the STORE's row
+  ## rather than from the wire. What it adds is the one thing the store cannot
+  ## hold: `category`, which is `app/views/event_log.categoryFor`'s
+  ## classification of `(kindId, stdout)` into the five colours §3.3.5 names.
+  ## Everything else is carried across unchanged, so a pane row and a store row
+  ## cannot disagree about where an event was or what it said.
+  EventRow(
+    index: row.eventIndex,
+    tick: row.rrTicks,
+    file: row.file,
+    line: row.line,
+    content: row.value,
+    category: categoryFor(row.kindId, row.stdout),
+    kindId: row.kindId)
+
+proc loadedEventRows(s: TuiSession; offset, limit: int): seq[EventRow] =
+  ## Ask the backend for a window and read the answer OUT OF THE STORE.
+  ##
+  ## `requestAndLoadEventLog` decodes into `store.eventLog.rows` — see its
+  ## header — so the request is issued for its effect and the rows are read
+  ## from the one place they live. This used to convert the returned sequence
+  ## itself, which made the terminal one of three independent decoders of the
+  ## same payload.
+  discard s.session.requestAndLoadEventLog(start = offset, count = limit)
   result = @[]
-  for entry in s.session.requestAndLoadEventLog(start = offset, count = limit):
-    result.add EventRow(
-      index: entry.eventIndex,
-      tick: entry.rrTicks,
-      file: entry.file,
-      line: entry.line,
-      content: entry.content,
-      category: categoryFor(entry.kind, entry.stdout),
-      kindId: entry.kind)
+  for row in s.session.session.store.eventLog.rows.val:
+    result.add eventRowOf(row)
 
 proc learnExtent*(s: TuiSession) =
   ## Read the recording's extent and its seek targets ONCE, at open.
@@ -219,15 +247,12 @@ proc learnExtent*(s: TuiSession) =
   ## step latency CTUI-14 measures.
   var rows: seq[EventRow] = @[]
   try:
-    let entries = s.session.requestAndLoadEventLog(start = 0,
-                                                   count = MaxEventsForBounds)
-    for entry in entries:
-      rows.add EventRow(
-        index: entry.eventIndex, tick: entry.rrTicks, file: entry.file,
-        line: entry.line, content: entry.content,
-        category: categoryFor(entry.kind, entry.stdout), kindId: entry.kind)
-      if entry.maxRRTicks > s.maxRRTicks:
-        s.maxRRTicks = entry.maxRRTicks
+    rows = s.loadedEventRows(offset = 0, limit = MaxEventsForBounds)
+    # The extent comes off the STORE's own aggregate rather than by scanning
+    # the rows again. `applyEventLogRows` raises `maxRRTicks` to the largest
+    # any applied row reported and never lowers it, so a later page cannot
+    # shrink the recording.
+    s.maxRRTicks = s.session.session.store.eventLog.maxRRTicks.val
   except CatchableError:
     discard
   s.bounds = resolveBounds(s.timeline, rows, s.maxRRTicks)
@@ -271,16 +296,12 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # column mapping first.
   rt.app.tick = int(tick)
   rt.app.totalTicks = int(s.bounds.maxTick)
-  let sess = s.session
+  let sess = s
   rt.app.eventLog = eventLogModelFor(
     proc(offset, limit: int): EventPage =
       var rows: seq[EventRow] = @[]
       try:
-        for entry in sess.requestAndLoadEventLog(start = offset, count = limit):
-          rows.add EventRow(
-            index: entry.eventIndex, tick: entry.rrTicks, file: entry.file,
-            line: entry.line, content: entry.content,
-            category: categoryFor(entry.kind, entry.stdout), kindId: entry.kind)
+        rows = sess.loadedEventRows(offset, limit)
       except CatchableError:
         discard
       EventPage(rows: rows, atEnd: rows.len < limit),

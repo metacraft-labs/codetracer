@@ -52,7 +52,10 @@
 ##   * `Globals` — `store.locals.globals` EXISTS and nothing in this repository
 ##     writes it from a backend response (grep, 2026-09-06: one read in
 ##     `state_vm`, one test assignment, and the collab signal serialiser). The
-##     same shape CTUI-5 found in `PointListVM.points`. On Python the engine
+##     same shape CTUI-5 found in `PointListVM.points` — which stopped being
+##     an example of it on 2026-09-17, when that signal moved to
+##     `ReplayDataStore.pointList.rows` and gained a sweep as a producer;
+##     `store.locals.globals` is unchanged. On Python the engine
 ##     folds module-level names into the locals answer anyway, which is why
 ##     `__name__` and `main` appear under `Locals` on `calc`.
 ##   * `Arguments` — no ViewModel surface and no wire field. `ct/load-locals`

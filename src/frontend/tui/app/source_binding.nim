@@ -61,7 +61,16 @@
 ##     — so a gutter bound to `PointListVM` would
 ##     render nothing on every real session while looking correctly wired.
 ##     "There is no producer" and "the producer is reached by nothing a user
-##     runs" point at different work, and it is the second. This
+##     runs" point at different work, and it is the second.
+##
+##     **A BACKEND PRODUCER EXISTS SINCE 2026-09-17, and it narrows this
+##     paragraph rather than retiring it.** `points` is now
+##     `ReplayDataStore.pointList.rows`, and `applyTracepointResults` writes one
+##     row per spec of a `ct/run-tracepoints` sweep — so a session that RUNS a
+##     tracepoint fills the signal from the engine. What is still true is the
+##     part this binding depends on: nothing a user runs supplies a checkout's
+##     DECLARED points, and a gutter is about declared points rather than about
+##     a sweep that has already happened. This
 ##     binding therefore takes the points as a value, and
 ##     `test_source_stepping_forward_backward.nim` builds them from the
 ##     ENGINE's own `setBreakpoints` acknowledgement — the line the replay

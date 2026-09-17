@@ -137,6 +137,29 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["availability", "integrity", "capability", "sourceAvailability"],
     vscBackendAuthoritative,
     "The degraded-state catalogue's four axes are facts about the recording and the replay backend, not about a viewer.")
+  # The event log's rows moved onto the store so that one decoder
+  # (`applyEventLogResponse`) serves every front-end, and the classification
+  # follows the data rather than the move: every field here is a property of
+  # the RECORDING as the backend-owning peer read it. `loadedStart` is included
+  # deliberately — it is not a viewport, it is which window of the log the
+  # owning peer's last request fetched, and a participant who received rows
+  # without it would not know what the rows' indices mean.
+  entries.addMany("EventLogStore",
+    ["rows", "recordsTotal", "recordsFiltered", "maxRRTicks", "loadedStart",
+     "loadingState"],
+    vscBackendAuthoritative,
+    "Event rows, the counts, the recording's extent, the fetched window's offset and the load status are all backend answers about the recording.")
+  # The point list has TWO producers and both are the owning peer's:
+  # `applyCollections` reads the CHECKOUT's `points.toml` (which a remote
+  # participant does not have) and `applyTracepointResults` reads a sweep the
+  # backend ran. A participant's own toggle of a collection would be shared
+  # session view state, but that field does not exist yet — when it does it
+  # belongs beside `StateVM.watchExpressions`, not here.
+  entries.addMany("PointListStore",
+    ["rows", "tracepointHits", "loadingState"],
+    vscBackendAuthoritative,
+    "Declared point rows are resolved against the owning peer's checkout and annotated by a backend sweep; the hits are the sweep's own answer.")
+
   # RS-M3 HTTP request tail. The store owns the poll, not the panel: rows,
   # the opaque poll cursor, the producer label and the load status are all
   # values the backend-owning peer hands over. The cursor in particular is

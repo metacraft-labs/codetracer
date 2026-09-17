@@ -249,6 +249,11 @@ type
 
   EventLogRow* = object
     ## One row in the event-log panel.
+    ##
+    ## THE NEUTRAL SHAPE OF ONE RECORDED EVENT, and the only one any front-end
+    ## should hold. `ReplayDataStore.applyEventLogResponse` is the single place
+    ## a `ct/event-load` / `ct/updated-events` payload becomes one of these —
+    ## see that proc's header for why there is exactly one.
     eventId*: uint64
     eventIndex*: int
     kindId*: int
@@ -260,6 +265,87 @@ type
     maxRRTicks*: uint64
     sourceGeneration*: int
     sourceDigest*: string
+    stdout*: bool
+      ## Whether the recorded write went to stdout rather than to a file or to
+      ## program storage.
+      ##
+      ## `kindId` alone does not answer that: `ProgramEvent.kind` distinguishes
+      ## `Write` from `WriteFile` but a `Write` is a print only when `stdout` is
+      ## true, and the terminal's `categoryFor(kindId, stdout)` needs both. It
+      ## was on the wire all along (`ProgramEvent.stdout`,
+      ## `src/db-backend/src/task.rs`) and every consumer that needed it had to
+      ## go back to the wire because this row did not carry it.
+
+  PointListEntry* = object
+    ## One row in the point list (tracepoints / breakpoints).
+    ##
+    ## LIVES HERE RATHER THAN ON `PointListVM` because the store owns the rows
+    ## and the ViewModel reads them, the same way `Variable` and `EventLogRow`
+    ## do. `viewmodels/point_list_vm.nim` re-exports the type, so a consumer
+    ## that only knows the ViewModel is unaffected.
+    kind*: string
+    label*: string
+    path*: string
+    line*: int
+      ## Where the point is, 1-based. **0 when it could not be located** —
+      ## see `resolution` below. A row with `line == 0` is a row a pane must
+      ## not offer as a jump target.
+    enabled*: bool
+
+    # -- PLAT-11 -----------------------------------------------------------
+    #
+    # Three fields added on 2026-09-11, when project definitions became the
+    # first producer of this signal. Every one of them has a zero value that
+    # is the pre-existing behaviour, so the two existing constructors — the
+    # storybook fixture and this file's own default — are unchanged.
+    collection*: string
+      ## The named collection (Project-Definitions.md §4) this point came
+      ## from, or "" for a point the user created. Collections "may be
+      ## enabled and disabled as a unit", which a pane cannot offer if the
+      ## unit is not on the row.
+    resolution*: string
+      ## What became of the point's anchor: `resolved`, `moved`,
+      ## `unresolvable`, `file absent` — `resolve.describe`'s own words, never
+      ## a second spelling of them. A point that came from the ENGINE rather
+      ## than from a definition carries `swept` or `swept, no hits`, which
+      ## `ReplayDataStore.applyTracepointResults` is the one place that writes.
+      ##
+      ## §4: "**A point whose location no longer resolves is reported, not
+      ## dropped.** A collection that silently loses half its points as a file
+      ## evolves is worse than one that says so." An unresolvable point is
+      ## therefore IN this list, with this field saying so, rather than
+      ## filtered out of it.
+    detail*: string
+      ## Why, for a point that did not resolve cleanly. What the user needs in
+      ## order to fix the definition; empty for `resolved`.
+
+  TracepointSweepSpec* = object
+    ## One tracepoint to run over the whole recording.
+    ##
+    ## Declared beside the store's other wire-shaped rows rather than in
+    ## `headless_session` so that a host which is not that harness — the
+    ## desktop, a VS Code surface, BlockTracer — can name a sweep without
+    ## importing a process-spawning module. `headless_session` re-exports it.
+    tracepointId*: int
+    path*: string
+    line*: int
+    expression*: string
+    lang*: int
+      ## ``Lang`` ordinal (``libs/ct-lang/src/lib.rs``).  Measured on ``calc``
+      ## with both 12 (``Python``) and 21 (``PythonDb``): the engine answered
+      ## identically and echoed ``lang: 0`` on every ``Stop``, so it does not
+      ## select the evaluator on a CTFS trace.  The field is still sent because
+      ## ``Tracepoint`` requires it.
+
+  TracepointSweepHit* = object
+    ## One ``Stop`` from a ``ct/tracepoint-results`` answer.
+    tracepointId*: int
+    rrTicks*: uint64
+    path*: string
+    line*: int
+    values*: seq[(string, string)]
+      ## The locals the expression named, as ``(name, rendered)``.
+    errorMessage*: string
 
   TerminalEventFragment* = object
     ## One text fragment within a terminal-output line.

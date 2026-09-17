@@ -33,7 +33,11 @@
 ##    assignment and the collab signal serialiser. This is the shape CTUI-5
 ##    found in `PointListVM.points` — a signal a pane can bind to and that no
 ##    session ever fills — and it is why `views/variables.nim` renders that root
-##    with a reason instead of as an empty tree.
+##    with a reason instead of as an empty tree. (`PointListVM.points` is no
+##    longer an example of it: it has been `ReplayDataStore.pointList.rows`
+##    since 2026-09-17, with a sweep as its backend producer.
+##    `store.locals.globals`, which is what this paragraph is about, is
+##    unchanged.)
 ##
 ## 3. **The variable tree arrives whole, bounded by the request's `depthLimit`.**
 ##    `ct/load-locals` answers `depthLimit: 7` levels in one response, so

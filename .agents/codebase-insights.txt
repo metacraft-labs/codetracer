@@ -4513,3 +4513,69 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   The GDH-M7 falsifier arm in `get_source_line_v2` goes through the contained
   candidate too. Routing it around the guard would have made the arm test a
   code path the product does not ship.
+- 2026-09-17 (event-log / point-list store plumbing): **A CACHED FIXTURE UNDER
+  `test-logs/tui-fixtures/` GOES STALE SILENTLY WHEN THE TRACE FORMAT CHANGES,
+  AND THE SYMPTOM IS A HANG RATHER THAN AN ERROR.** The cache key
+  (`fixture_provider.fixtureCacheRoot` + a digest) is computed over the
+  PROGRAM'S OWN SOURCES plus a hand-maintained `FixtureCacheSchema` constant
+  (`fixture_provider.fixtureKey`), so nothing in it changes when a trace-format
+  writer or reader does — and adoption only checks that a `.ct` file EXISTS
+  (`isUsableTraceDir`), never that it opens. `test_fixture_corpus.nim`'s header
+  claims a fixture is re-recorded "whenever the recorder changes"; that half is
+  not implemented.
+
+  **THE CULPRIT COMMIT, corrected 2026-09-17 after verification.** This entry
+  first named `ac413d7` in `codetracer-trace-format` ("assemble events from the
+  split streams, and retire events.log"). That attribution is WRONG and the
+  breakage runs the other way: ac413d7 made the reader dispatch on the ABSENCE
+  of `events.log` and kept both legacy paths, so a container that HAS one still
+  opens. What it broke is newly-written legacy bundles (`cargo test --test
+  ctfs_split_only_full_db_test` fails on `events.log bundle must carry
+  events.log`).
+
+  The commit that actually strands cached containers is **`b891a0f` in
+  `codetracer-trace-format-nim`** ("funcs.dat and types.dat carry the spec's
+  record shape", 2026-09-15 16:34 — 27 minutes after ac413d7, which is how the
+  two got conflated). It moved those two interning tables from bare bytes to
+  varint-length-prefixed records in writer and reader together, so any
+  same-revision build is self-consistent and only PRE-EXISTING containers are
+  misread. The signature is
+  `funcs.dat record is truncated: declares a NNN-byte name with only N bytes
+  left` — measured on four of the five committed request-panel fixtures.
+
+  **THE SYMPTOM IS A HANG RATHER THAN AN ERROR** — verified by driving a real
+  `replay-server dap-server --stdio`. `CTFSTraceReader::open` fails, the failure
+  is logged at `info!` (`dap_server.rs:471`, invisible without `RUST_LOG`),
+  `setup` falls through to the rr replay-worker path (`dap_server.rs:641`),
+  the worker start fails `NotFound` — and `launch` has ALREADY answered
+  `success: true` unconditionally at `dap_server.rs:2643`, because setup runs
+  asynchronously on `task_thread`. The failure reaches only `error!` at
+  `dap_server.rs:3300`/`3459`; no DAP message is ever emitted and NO `stopped`
+  event arrives, so the client blocks for ever in `waitForEvent` at 0% CPU.
+  `dap_server.rs:2546-2553` documents this hazard class in its own words.
+
+  Cold-cache suites were never affected: the ~30 `*_dap_test.rs` flows and the
+  Playwright GUI suites re-record every run. The exposure is containers that
+  PREDATE b891a0f — committed `tests/fixtures/*.ct` (refreshed only by hand-run
+  `regenerate*.sh`) and any warm fixture cache. The worst case is
+  `src/tests/gui/tests/noir-space-ship/noir_space_ship_test.nim`, which adopts
+  any directory under `~/.local/share/codetracer/` whose NAME contains
+  `noir_space_ship`, with no content check at all.
+
+  The fix is `rm -rf test-logs/tui-fixtures/<name>-*` and let the corpus
+  re-record. If a real-stack suite hangs at `openLive`/`openHarness` with the
+  child idle, suspect this before anything else.
+- 2026-09-17: **THREE BINARIES MUST AGREE ABOUT `meta.dat`, AND TWO OF THEM ARE
+  NOT REBUILT BY `cargo build`.** `ct record` fails with
+  `meta.dat: unsupported version N` when the RECORDER writes a newer version
+  than the reader in the Nim half. The reader lives in
+  `src/ct/trace/ctfs_sources.nim` (`SupportedMetaDatVersion`) and is compiled
+  into BOTH `src/build-debug/bin/ct` AND `src/build-debug/bin/db-backend-record`
+  — `ct record` shells out to the second, so rebuilding only `ct` leaves the old
+  message coming from a binary whose name never appears in the error. `tup upd`
+  in `src/build-debug` currently dies on
+  `tup error: Unable to use files from another variant (/build-debug) in this
+  variant (/build-release)` after refreshing `replay-server`, so the Nim
+  binaries have to be built by hand with the flags in `src/Tuprules.tup`
+  (`NIM_COMMON_FLAGS` + `NIM_REPO_PATH_FLAGS` + `CODETRACER_FLAGS`; `ct` also
+  needs `-d:ctEntrypoint`, `db_backend_record.nim` does not).

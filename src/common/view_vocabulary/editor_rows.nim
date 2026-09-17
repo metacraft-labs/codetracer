@@ -95,18 +95,28 @@ type
     ## that the day something fills `PointListVM` from a backend the conversion
     ## is four field copies.
     ##
-    ## **NOTHING A USER RUNS FILLS IT TODAY — and the measurement that used to
-    ## stand here was wrong, corrected 2026-09-16.** It read *"`setPoints` still
-    ## has two call sites and neither is a backend response"*. There are THREE:
-    ## its own declaration, `storybook_components.nim`, and
-    ## `viewmodel/viewmodels/point_collection_source.applyCollections`, which
-    ## PLAT-11 wrote as that milestone's verification gate and whose own header
-    ## calls itself *"the first producer"*. The two-call-site sentence was true
-    ## when `tui/app/source_binding.nim` first wrote it on 2026-09-05 and was
-    ## re-asserted as "measured again" without being re-taken.
+    ## **NOTHING A USER RUNS FILLS IT WITH THE POINTS A GUTTER NEEDS — and the
+    ## measurement that used to stand here was wrong, corrected 2026-09-16 and
+    ## again 2026-09-17.** It read *"`setPoints` still has two call sites and
+    ## neither is a backend response"*. The correction is about the SIGNAL and
+    ## not about `setPoints`, which is where the first attempt at it went
+    ## wrong: `setPoints` has two invocations (the storybook fixture and
+    ## `applyCollections` — a third grep hit is its own declaration) and
+    ## neither of THOSE is a backend response, which still holds. What changed
+    ## on 2026-09-17 is that `PointListVM.points` became
+    ## `ReplayDataStore.pointList.rows`, which
+    ## `ReplayDataStore.applyTracepointResults` writes from a
+    ## `ct/run-tracepoints` sweep — **writing that signal directly, never
+    ## through `setPoints`**. So the signal gained a backend producer while
+    ## `setPoints` did not. That does not close this gap, because a sweep
+    ## says where a tracepoint FIRED and a gutter needs the lines that CARRY
+    ## one — which is `point_collection_source.applyCollections`, still with no
+    ## production caller.
     ##
     ## The GAP is still real and it is a different gap: `applyCollections` has
-    ## **no production caller** — all thirteen of its call sites are tests — so
+    ## **no production caller** — all twelve of its call sites are tests (the
+    ## thirteenth grep hit is its declaration; `source_binding.nim` says twelve
+    ## and is the one to trust) — so
     ## what is missing is a shipped path that calls the producer, not the
     ## producer. Saying "nothing writes it" points the next reader at work that
     ## is already done. Recorded beside the parameter in `editor_surface.nim`
@@ -245,13 +255,16 @@ const
       id: pgMarksHaveNoProducer,
       concern: ecLineStatus,
       subject: "viewmodel",
-      measurement: "`PointListVM.points` is a `Signal[seq[PointListEntry]]` " &
-        "that nothing fills from a backend response: measured 2026-09-16, " &
-        "`setPoints` has two call sites, its own declaration and " &
-        "`storybook_components.nim`. The terminal's own production caller " &
-        "(`tui/host/tui_session.nim`) therefore leaves `sourcePaneModelFor`'s " &
+      measurement: "`PointListVM.points` is `ReplayDataStore.pointList.rows` " &
+        "since 2026-09-17 and has TWO producers — " &
+        "`point_collection_source.applyCollections` (declared points) and " &
+        "`ReplayDataStore.applyTracepointResults` (a `ct/run-tracepoints` " &
+        "sweep). Neither reaches an editor gutter: `applyCollections` still " &
+        "has no production caller, a sweep reports where a tracepoint FIRED " &
+        "rather than which lines carry one, and the terminal's own production " &
+        "caller (`tui/host/tui_session.nim`) leaves `sourcePaneModelFor`'s " &
         "`points` parameter at its default, so the shipped terminal draws no " &
-        "mark either. This is PLAT-21 residue 3, unchanged and re-measured.",
+        "mark. This is PLAT-21 residue 3, narrowed rather than closed.",
       remedy: "a producer that writes the engine's own `setBreakpoints` " &
         "acknowledgement into `PointListVM`; then `editorSurfaceFor` reads it " &
         "instead of taking the points as a parameter, and both editors gain " &

@@ -185,20 +185,21 @@ proc openLive() =
     discard s.drainEvents()
   s.requestAndLoadLocals()
   s.requestAndLoadCalltrace()
-  # The event log's rows go in through `EventLogVM`'s OWN producer, from the
-  # backend's own `ct/event-load` answer. Recorded as a finding rather than
-  # papered over: NOTHING in this repository fills `EventLogVM.eventRows` from
-  # that response — `appendLiveDebuggerStop` is the only door, and it is the
-  # one used here. The DATA is the recording's; the plumbing is missing.
-  for e in s.requestAndLoadEventLog(0, 50):
-    s.session.eventLogVM.appendLiveDebuggerStop(store_types.EventLogRow(
-      eventId: uint64(e.eventIndex + 1),
-      eventIndex: e.eventIndex,
-      kindId: e.kind,
-      kind: (if e.stdout: "stdout" else: "event"),
-      file: e.file, line: e.line,
-      value: e.content.strip(),
-      rrTicks: e.rrTicks, maxRRTicks: e.maxRRTicks))
+  # THE EVENT LOG GOES IN THROUGH ITS OWN PRODUCER NOW, and this line is the
+  # whole of it. `requestAndLoadEventLog` sends `ct/event-load` and feeds the
+  # answer to `ReplayDataStore.applyEventLogResponse`, which is
+  # `EventLogVM.eventRows` — exactly as `requestAndLoadLocals` above feeds
+  # `applyLocalsResponse` and fills `StateVM.currentVariables`.
+  #
+  # **THIS USED TO BE A LOOP**, and the loop was the evidence that the plumbing
+  # did not exist: it took the sequence this call returns and pushed each row
+  # into the ViewModel by hand through `appendLiveDebuggerStop` — a door meant
+  # for the LIVE debugger head, not for persisted events — because nothing in
+  # the repository connected the backend's answer to the signal. The data was
+  # always the recording's; what was missing was the wire between them. The
+  # loop's disappearance, with the count below unchanged at six, is what says
+  # the wire is there.
+  discard s.requestAndLoadEventLog(0, 50)
   live.session = s
   live.sourcePath = s.getCurrentFile()
   live.sourceLines =
@@ -209,9 +210,19 @@ proc openLive() =
 proc publishTracepoints() =
   ## Fill `PointListVM` through PLAT-11's REAL producer.
   ##
-  ## `point_list_vm.setPoints` has two call sites and neither is a backend
-  ## response — `source_binding.nim`'s header says so and it is still true, so
-  ## the honest producer is the project-definitions one. `resolveCollection`
+  ## **The sentence here used to read "`point_list_vm.setPoints` has two call
+  ## sites and neither is a backend response". It was stale on both halves and
+  ## is corrected, 2026-09-17.** There are three call sites (PLAT-22's
+  ## verification found the third), and one of them IS a backend response since
+  ## `points` became `ReplayDataStore.pointList.rows`:
+  ## `applyTracepointResults` writes a row per spec of a `ct/run-tracepoints`
+  ## sweep, which `tui/tests/test_event_log_jump.nim` asserts on a real
+  ## recording.
+  ##
+  ## The project-definitions producer is still the right one for THIS file: a
+  ## sweep reports where a tracepoint fired, and what these cases need is a
+  ## list that deliberately contains a point which could NOT be located — which
+  ## only an anchor resolved against source text can produce. `resolveCollection`
   ## anchors each point against the RECORDING'S OWN SOURCE LINES, read off disk
   ## at the path the backend reported, so a resolved point is resolved against
   ## the program that was recorded rather than against a fixture.
@@ -434,6 +445,58 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     publishTracepoints()
     ck live.session.session.pointListVM.points.val.len == 3
     expectCount(9)
+
+  liveTest "the event rows are the recording's own output, not a well-formed absence":
+    # **THE COUNT ABOVE CANNOT TELL A RENDERING FROM AN APOLOGY**, and that is
+    # not a general worry about counts — it is this pane's specific one.
+    # `eventLogPaneView` answers *"no events have been loaded"* for an empty
+    # row set, which for every shipped front-end WAS the correct output until
+    # the producer this file now exercises existed. So `len == 6` is asserted
+    # above as a floor and the CONTENT is asserted here, against the program
+    # the recorder ran.
+    let rows = live.session.session.eventLogVM.eventRows.val
+    ck rows.len == 6
+    # THE STORE AND THE VIEWMODEL ARE THE SAME ROWS. Not "both have six":
+    # `EventLogVM.eventRows` IS `store.eventLog.rows`, so a ViewModel that had
+    # gone back to holding its own copy would show as a difference in the
+    # FIRST ROW'S BYTES rather than in a length.
+    let stored = live.session.session.store.eventLog.rows.val
+    ck stored.len == rows.len
+    ck stored.len > 0 and stored[0].value == rows[0].value
+    # `test-programs/calc/main.py` prints `"%s = %d" % (expression, value)` once
+    # per expression and then `"checksum = %d"`. Both halves are asserted, so a
+    # decoder that answered six rows of empty strings, or six copies of one
+    # row, fails here rather than passing a shape check.
+    var withEquals = 0
+    var distinctValues: seq[string] = @[]
+    for row in rows:
+      if "=" in row.value: inc withEquals
+      if row.value notin distinctValues: distinctValues.add row.value
+    ck withEquals == 6
+    ck distinctValues.len == 6
+    ck rows[^1].value.contains("checksum = ")
+    ck rows[0].value.contains(" = ")
+    # EVERY FIELD THE DECODER FILLS, asserted on the recording rather than on a
+    # zero value. `eventIndex` is the row's position in the WHOLE log, the tick
+    # is where selecting the row seeks, and `file` is the path the backend
+    # reported — the same one the source pane opened.
+    var wrongIndex = 0
+    var wrongFile = 0
+    var nonAscending = 0
+    for i, row in rows:
+      if row.eventIndex != i: inc wrongIndex
+      if row.file != live.sourcePath: inc wrongFile
+      if i > 0 and row.rrTicks <= rows[i - 1].rrTicks: inc nonAscending
+    ck wrongIndex == 0
+    ck wrongFile == 0
+    ck nonAscending == 0
+    ck rows[0].rrTicks > 0'u64
+    # …and the line is the `print` call's own, which the recorded source really
+    # contains at that line. Read off disk rather than written down here, so an
+    # edit to the program moves both sides together.
+    ck rows[0].line >= 1 and rows[0].line <= live.sourceLines.len
+    ck live.sourceLines[rows[0].line - 1].contains("print(")
+    expectCount(13)
 
   liveTest "four panes are expressible in the vocabulary and the source pane is not":
     for pane in PaneVocabularyPanes:
@@ -829,7 +892,7 @@ suite "PLAT-21: the session is closed":
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 240
+const ExpectedAssertions = 253
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

@@ -34,7 +34,10 @@
 ##
 ## So this pane takes its frames as a VALUE, exactly as CTUI-5's source pane
 ## takes its breakpoints as a value for the same class of reason
-## (`PointListVM.points` is never filled from a backend response), and
+## (`PointListVM.points` carried no backend producer at all when that was
+## written; since 2026-09-17 it is `ReplayDataStore.pointList.rows` and a
+## tracepoint SWEEP writes it, while a checkout's declared points still reach
+## it through nothing a user runs — see `app/source_binding.nim`'s header), and
 ## `call_stack_binding.framesFromStackTrace` converts the engine's own answer.
 ## `CalltraceVM` still owns what it really owns: the SELECTION
 ## (`selectedEntry`) and the expand/collapse set (`expandedNodes`), which is
