@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use once_cell::sync::OnceCell;
 
-use codetracer_trace_types::{CallKey, FullValueRecord, Line, PathId, StepId, TypeId, ValueRecord, VariableId};
+use codetracer_trace_types::{CallKey, FullValueRecord, Line, PathId, StepId, ValueRecord, VariableId};
 
 use crate::db::DbStep;
 
@@ -582,20 +582,11 @@ pub fn step_values_to_full_records(events: &[ValueStreamEvent]) -> Vec<FullValue
 /// An empty blob maps to `ValueRecord::None`; a decode error degrades to a
 /// `Raw` placeholder (mirroring `open_new_format_nim`) so one bad value never
 /// fails the whole step.
+///
+/// `calls.dat` arguments decode through the SAME function — see
+/// [`super::decode_interned_cbor_value`].
 fn decode_value(blob: &[u8]) -> ValueRecord {
-    if blob.is_empty() {
-        return ValueRecord::None { type_id: TypeId(0) };
-    }
-    match cbor4ii::serde::from_reader::<ValueRecord, _>(blob) {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!("values.dat: failed to decode StepValues CBOR ({e}); using Raw placeholder");
-            ValueRecord::Raw {
-                r: format!("<cbor decode error: {e}>"),
-                type_id: TypeId(0),
-            }
-        }
-    }
+    super::decode_interned_cbor_value("values.dat", blob)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1649,6 +1640,7 @@ impl LazyStepCache {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+    use codetracer_trace_types::TypeId;
 
     /// `split_disjoint_ranges` must TILE `[0, count)` exactly: no gaps, no
     /// overlaps, ascending, and the union is the whole range — the invariant the
@@ -1763,9 +1755,7 @@ mod tests {
         )
         .unwrap();
         let events = vec![
-            ValueStreamEvent::StepValues {
-                values: vec![(1, v0)],
-            },
+            ValueStreamEvent::StepValues { values: vec![(1, v0)] },
             ValueStreamEvent::Unknown {
                 tag: 10,
                 payload: vec![1, 2, 3, 4],
@@ -1777,4 +1767,3 @@ mod tests {
         assert!(matches!(records[0].value, ValueRecord::Int { i: 42, .. }));
     }
 }
-

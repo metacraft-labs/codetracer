@@ -1093,11 +1093,7 @@ fn nim_lib_from_executable() -> Option<PathBuf> {
     let bin_dir = nim_exe.parent()?;
     let nim_root = bin_dir.parent()?;
     let lib = nim_root.join("lib");
-    if nim_lib_dir_is_valid(&lib) {
-        Some(lib)
-    } else {
-        None
-    }
+    if nim_lib_dir_is_valid(&lib) { Some(lib) } else { None }
 }
 
 /// Locate the `nim` executable on PATH (cross-platform: tries `nim` and,

@@ -3,6 +3,7 @@ import
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
   review_dataset,
   ns9_panes,
+  hcr_launch,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -147,9 +148,25 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
   ## configured would be indistinguishable, from the screen, from one that ran
   ## and changed nothing — which is the exact confusion the whole HCR beat is
   ## built to avoid.
-  let command = nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_CMD")
-  let interpreter = nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_INTERPRETER")
-  let sessionDir = nodeEnv(cstring"CODETRACER_HCR_SESSION_DIR")
+  #
+  # A session this process LAUNCHED takes precedence over all of it, and there
+  # is no ambiguity to resolve: `hcr_launch` answers with a session dir only
+  # while a session it opened is `ready`, and that session's target is a
+  # process this application started and is watching. When it answers, the
+  # environment describes at best a different target and at worst one that no
+  # longer exists.
+  let launchedSessionDir = activeHcrSessionDir()
+  let launchedCommand = activeHcrApplyEditCommand()
+  let launchedInterpreter = activeHcrApplyEditInterpreter()
+  let command =
+    if launchedCommand.len > 0: launchedCommand
+    else: nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_CMD")
+  let interpreter =
+    if launchedSessionDir.len > 0: launchedInterpreter
+    else: nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_INTERPRETER")
+  let sessionDir =
+    if launchedSessionDir.len > 0: launchedSessionDir
+    else: nodeEnv(cstring"CODETRACER_HCR_SESSION_DIR")
   let socketPath = nodeEnv(cstring"CODETRACER_HCR_SOCKET")
   let driver = nodeEnv(cstring"CODETRACER_HCR_DRIVER")
   let platform = nodeEnv(cstring"CODETRACER_HCR_PLATFORM")
@@ -172,14 +189,19 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
 
   if command.len == 0:
     refuse(cstring"not-configured",
-      cstring"no apply-edit command is configured for this project; set CODETRACER_HCR_APPLY_EDIT_CMD")
+      cstring"no apply-edit command is configured for this project; name it as `hcr.applyEditCommand` in the project's .vscode/launch.json, or set CODETRACER_HCR_APPLY_EDIT_CMD")
     return
   # A LIVE-EDIT SESSION takes precedence, and the two are mutually exclusive on
   # purpose rather than by accident. Configuring both would leave it to this
   # process to guess whether the caller meant "patch the running target once"
   # or "add an edit to the open loop", and the wrong guess is not recoverable:
   # the one-shot form consumes the target's single dial-out.
-  if sessionDir.len > 0 and
+  #
+  # The check applies only when BOTH came from the environment. A session this
+  # process launched is not in competition with a leftover variable: it names a
+  # target this application started, is watching, and will tear down, so it
+  # wins outright rather than producing a refusal about someone else's target.
+  if launchedSessionDir.len == 0 and sessionDir.len > 0 and
       (socketPath.len > 0 or driver.len > 0 or windowsEndpoint):
     refuse(cstring"not-configured",
       cstring"CODETRACER_HCR_SESSION_DIR is set together with CODETRACER_HCR_SOCKET/_DRIVER; those are two different publication paths and only one can own the target's single agent connection. Unset the ones you do not mean.")
@@ -467,6 +489,12 @@ proc configureIpcMain* =
 
     # H4 — the in-app apply-edit -> HCR reload command.
     "hcr-apply-edit"
+
+    # H6 — launching a target UNDER hot code reload, which is the half of the
+    # Scene-1 loop the product did not have: the session coordinator, the target
+    # started into it, and the session's lifetime. See `index/hcr_launch.nim`
+    # and `The-Flame-Demo-Spec.md` §2.5.
+    "hcr-launch-target"
 
 
   when defined(ctmacos):

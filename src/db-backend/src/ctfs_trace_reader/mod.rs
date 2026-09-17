@@ -802,6 +802,46 @@ fn structural_presence_meta() -> [u8; 8] {
     buf
 }
 
+/// Decode one interned CBOR value payload — a `values.dat` `StepValues` entry or
+/// a `calls.dat` argument — back into a [`ValueRecord`].
+///
+/// ONE function for the two SEEKABLE consumers, because they encode a value the
+/// same way and a second copy of this decision is a place for them to drift
+/// (`Verification-Harness-Traps.md` §30). `stream` only names the caller in the
+/// log line.
+///
+/// Scope, so the next reader is not misled: this unifies the seekable
+/// `step_value_stream_source` and `call_stream_source` paths only. The
+/// fully-materialized readers in this file — `open_new_format_rust` and
+/// `open_new_format_nim`, which populate `db.calls`/`db.steps` and are what the
+/// default desktop open path uses — still carry their own inline copies of this
+/// same decode. Those copies are the behaviour this helper was written to MATCH,
+/// not dead code, so keep the three in step: empty → `None`, undecodable →
+/// `Raw`, never a dropped record.
+///
+/// The failure behaviour is deliberate and is the whole point of the helper: an
+/// empty payload maps to `ValueRecord::None`, and a payload that does not decode
+/// maps to a `ValueRecord::Raw` placeholder carrying the decoder's message.
+/// Neither case DROPS the record. The caller has already recovered the value's
+/// name from the interning id, and a named variable rendered as
+/// `<cbor decode error: …>` is a visible defect, where a silently discarded one
+/// is indistinguishable from a variable that was never captured.
+fn decode_interned_cbor_value(stream: &str, blob: &[u8]) -> ValueRecord {
+    if blob.is_empty() {
+        return ValueRecord::None { type_id: TypeId(0) };
+    }
+    match cbor4ii::serde::from_reader::<ValueRecord, _>(blob) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("{stream}: failed to decode value CBOR ({e}); using Raw placeholder");
+            ValueRecord::Raw {
+                r: format!("<cbor decode error: {e}>"),
+                type_id: TypeId(0),
+            }
+        }
+    }
+}
+
 fn build_step_call_maps(call_ranges: &[CallRange], step_count: usize) -> (Vec<CallKey>, Vec<CallKey>) {
     let mut step_to_call_key: Vec<CallKey> = vec![CallKey(-1); step_count];
     for (key_idx, range) in call_ranges.iter().enumerate() {

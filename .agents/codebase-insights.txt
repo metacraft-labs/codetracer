@@ -4579,3 +4579,72 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   binaries have to be built by hand with the flags in `src/Tuprules.tup`
   (`NIM_COMMON_FLAGS` + `NIM_REPO_PATH_FLAGS` + `CODETRACER_FLAGS`; `ct` also
   needs `-d:ctEntrypoint`, `db_backend_record.nim` does not).
+
+- `index/startup.nim`'s `init(dataArg: var ServerData, ...)` does `var data =
+  dataArg` and its comment claims "on the JS backend, ServerData is a reference
+  type, so mutations propagate back". IT DOES NOT. `ServerData` is an `object`,
+  and Nim's JS backend emits `nimCopy` for that assignment (see
+  `HEX3Aenv_*.data0 = nimCopy(...)` in `src/build-debug/index.js`), so every
+  write to `data` inside `init` lands in a COPY. The one that bites is the edit
+  branch's `data.workspaceFolder = folder`: after `ct edit <folder>` the global
+  `data.workspaceFolder` is still `nil`, so anything reading it — launch
+  configs (`getLaunchConfigsForWorkspace`, `onRecordWithLaunchConfig`),
+  `loadTrace`'s filesystem categorisation, `pathContentRootFor` — behaves as if
+  no folder were open. The Welcome-screen path is unaffected because
+  `traces.nim`'s `onInitEditMode` assigns the global directly, which is why the
+  same folder behaves differently depending on how it was opened. Measured
+  2026-09-16 while building the HCR launch path, which works around it by
+  reading `data.startOptions.folder` (never copied) in edit mode.
+  `loadTrace` in `traces.nim` carries the identical comment and the identical
+  assumption.
+
+- `calls.dat` stores call arguments ONE ENTRY PER ARGUMENT, each with its own
+  interned name — `CallStreamRecord.args: Vec<CallArg>` where
+  `CallArg { varname_id, value }` and `value` is streaming CBOR. The on-disk
+  framing is `args_count`, then per argument `varint varname_id, varint
+  value_len, value bytes`; the authority for that is the encoder/decoder pair
+  and module doc in `codetracer-trace-format`'s
+  `codetracer_trace_writer/src/call_stream.rs` (`CallStreamRecord::{encode,
+  decode}`). NOTE (verified 2026-09-17): the SPEC has not caught up —
+  `codetracer-trace-format-spec/trace-events.md` §"Call Stream Records
+  (`calls.dat`)" on `origin/dev` still describes `args` as a single
+  "streaming CBOR (or empty)" field, and the string `varname_id` appears
+  nowhere in that repo. Do not cite the spec for this layout; cite the code.
+  It did NOT always: before `codetracer-trace-format` a797cb8 the writer
+  collapsed the whole argument vector into ONE entry under a synthetic
+  `varname_id` of 0, and `ctfs_trace_reader/call_stream_source.rs` decoded that
+  blob as a `Vec<FullValueRecord>`. Against the Nim writer, which always filled
+  the framing per argument, that kept only the FIRST argument and threw away
+  every name.
+  The adaptation to `FullValueRecord` is the INTERNING ID, not a string lookup:
+  `FullValueRecord.variable_id` indexes the same `varnames.dat` table
+  `varname_id` does, and text is resolved much later by `Db::variable_name`. So
+  `variable_id: VariableId(arg.varname_id as usize)` is the whole of it — the
+  identical construction `mod.rs`'s `open_new_format_rust` /
+  `open_new_format_nim` already perform on `reader.call_arg(key, i)`. Do not
+  invent a second mechanism, and do not answer a CBOR decode failure with an
+  empty arg list: an argument dropped there is indistinguishable in the
+  Variables view from a call that captured nothing, which is exactly the loss
+  a797cb8 exists to end. `ctfs_trace_reader::decode_interned_cbor_value` is the
+  one decoder both `values.dat` step values and `calls.dat` args go through; its
+  failure answer is a visible `ValueRecord::Raw` placeholder under the real name.
+
+- TWO copies of the call-arg decode are live, and the tests do not cover them
+  equally (measured 2026-09-17 by planting a `panic!` in `decode_args` and
+  seeing which tests reddened):
+    * `call_stream_source::decode_args` serves the SEEKABLE call tree —
+      `TraceReader::seekable_call`, which `Calltrace::new` uses, plus
+      `follow_stream_source` (live/follow) and `from_bytes` →
+      `open_new_format_rust` (the browser/WASM replay path).
+    * `open_new_format_nim`'s INLINE copy (this file, in the `call_arg(key, i)`
+      loop) populates the materialized `db.calls`, which is what
+      `TraceReader::call`/`call_count` return on the default desktop open —
+      `open_new_format` dispatches to the Nim reader whenever the `nim-reader`
+      feature is on, and it is on by default.
+  Consequence for anyone trusting the integration suite here:
+  `tests/ctfs_call_args_roundtrip_test.rs` reads `reader.call(key)`, so it
+  exercises the MATERIALIZED copy and NOT `decode_args`. A `panic!` planted in
+  `decode_args` leaves that test green. The seekable copy's only coverage today
+  is the unit tests in `call_stream_source.rs`. If you change one copy, change
+  or re-measure the other; do not read a green roundtrip test as evidence about
+  the seekable path.
