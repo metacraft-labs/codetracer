@@ -4819,6 +4819,32 @@ build-tui-benchmarks: tui-prereqs build-tui
 bench *args: build-tui-benchmarks
   ./build/bin/tui-benchmarks {{args}}
 
+# PLAT-24 — the text-store measurement that decided what an editable source
+# document is stored in (Editor-ViewModel.md §4).
+#
+# `-d:release` is FORCED rather than optional, and the recipe says why:
+# Verification-Harness-Traps.md §28b — a timing quotes its build, and a figure
+# taken at a different optimisation level or under a different memory manager
+# is a figure about a different program. The binary prints the build it was
+# compiled with beside every number, so the two cannot come apart.
+#
+# It runs BOTH candidate stores in one process, interleaved round by round, and
+# prints both ratios against the same gate: a gate whose losing arm is never
+# executed is a gate nobody has seen fail. Corpus manifests land in
+# `test-logs/plat24/`.
+#
+#   just bench-text-store                       # 1K, 40K, 200K, two takes
+#   just bench-text-store --sizes=1000 --takes=1 --rounds=5      # quick
+bench-text-store *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p build/bin build/nimcache test-logs/plat24
+  nim c -d:release --hints:off \
+    --nimcache:build/nimcache/text-store-bench \
+    -o:build/bin/text-store-bench \
+    src/frontend/viewmodel/benchmarks/text_store_bench.nim
+  ./build/bin/text-store-bench {{args}} 2>&1 | tee test-logs/plat24/bench.log
+
 # Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
 #
 # Each target builds + drives the `ct-bench` CLI from

@@ -1,0 +1,4 @@
+1ec42d993801844fa009a642ae953658c5e151bce3f9641e5ffa49aeb4818b46  src/frontend/viewmodel/editor/rope.nim
+2a287e82856c2c58331c82c266c64cd2b2c2cf4992dca9d5c9bd7514b300a802  src/frontend/viewmodel/editor/text_store.nim
+129fa151c4b1901b4a9b2803a6aa19edd3953f7daf2815ad84d253d6192b9393  src/frontend/viewmodel/editor/seq_line_store.nim
+f538647f350c7710e49b16a2958629d59961064c396ea2c9139ff305103b0dd9  src/frontend/viewmodel/tests/unit/test_editor_text_store.nim
