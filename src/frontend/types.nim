@@ -651,6 +651,72 @@ type
     inputFieldChange*: bool
     footerDom*: kdom.Element
 
+  EventLogRowExtras* = object
+    ## The parts of a `ct/update-table` row that this front-end keeps for
+    ## itself, one entry per row of the window on screen.
+    ##
+    ## ## WHY THESE ARE HERE AND NOT ON `EventLogRow`
+    ##
+    ## `store/types.EventLogRow` is the neutral shape three front-ends agree
+    ## on, and "a shared row that grew a field for each front-end's private
+    ## needs would stop being the thing three front-ends can agree on". So the
+    ## five fields `ProgramEvent` carries and `EventLogRow` does not were
+    ## decided one at a time, on what reads them:
+    ##
+    ## * `bytes` — **no reader anywhere in `src/frontend`**, and
+    ##   `TableRow::new` drops it before the row reaches this host at all. It
+    ##   is not carried here either: it is dead, not private.
+    ## * `tracepointResultIndex` — likewise no reader; the desktop wrote the
+    ##   literal `0` into it. A sweep's results have their own store signal
+    ##   (`PointListStore.tracepointHits`), which is where that index's
+    ##   meaning lives. Dead here too.
+    ## * `metadata` — real recorded data (the path a read/write event touched)
+    ##   but read by exactly two desktop renderers,
+    ##   `eventLogDescriptionRepr` and `flow.nim`'s `-std` box, both of which
+    ##   are composing display text. Private.
+    ## * `semanticKind` in its RAW form — `EventLogRow.kind` already IS the
+    ##   semantic kind whenever the producer sent one (`eventKindLabel`), so
+    ##   what is kept here is only the distinction between "the producer sent
+    ##   none" and "the producer sent the word `event`". `datatable.rowSemanticKind`
+    ##   turns it into a CSS class and `eventLogDescriptionRepr` switches on
+    ##   it. Private.
+    ## * `base64Encoded` — by the time a row exists the flag is SPENT:
+    ##   `onUpdatedTable` decodes `content` in place before `loadEvents` runs.
+    ##   It is carried only so the row handed to DataTables is byte-identical
+    ##   to the one it used to receive. Its live reader,
+    ##   `terminal_output.nim`, is on the `ct/loaded-terminal` route and never
+    ##   sees these rows.
+    ##
+    ## The two path fields are here for a different reason: they are not on
+    ## `ProgramEvent` at all. DataTables names `fullPath` as a column's `data`
+    ## key, and `TableRow::new` composes it as `"<basename>:<line>"` by
+    ## splitting on `/` only — so recomposing it from `EventLogRow.file` and
+    ## `.line` would quietly differ from the backend's own answer on a Windows
+    ## path. It is echoed, not rebuilt.
+    fullPath*: cstring
+    lowLevelLocation*: cstring
+    metadata*: cstring
+    semanticKind*: cstring
+    base64Encoded*: bool
+    rawEventId*: int
+      ## `TableRow.rrEventId` verbatim.
+      ##
+      ## `EventLogRow.eventId` is the row's best available IDENTITY and falls
+      ## back to the tick, then to the position, for a producer that sends no
+      ## id — which is right for a store whose consumers need every row to be
+      ## distinguishable. This column, though, is titled *"rr event id"* and
+      ## shows the recorder's own number; substituting a synthesised one would
+      ## print a plausible id for an event that has none.
+    rawLocationRRTicks*: int
+      ## `TableRow.directLocationRRTicks` verbatim.
+      ##
+      ## `EventLogRow.rrTicks` is a `uint64` and stores 0 for anything not
+      ## positive, because a tick count is what a pane seeks to. The wire
+      ## field is an `i64` on which some producers spell "no position" as a
+      ## NEGATIVE value, and `findActiveRow` compares it for equality against
+      ## the debugger's own raw tick — so folding -1 to 0 would make a row
+      ## with no position compare equal to a debugger standing at tick 0.
+
   EventLogComponent* = ref object of Component
     init*:          bool
     denseTable*:     DataTableComponent
@@ -685,6 +751,18 @@ type
     started*: bool
     ignoreOutput*: bool
     programEvents*: seq[ProgramEvent]
+      ## The window currently on screen, as the legacy row shape.
+      ##
+      ## **A PROJECTION OF `ReplayDataStore.eventLog.rows`, NOT A SECOND COPY
+      ## OF THE WIRE.** `ui/event_log.nim:syncProgramEventsFromStore` is the
+      ## only writer: it reads the store's rows back out and pairs each with
+      ## the entry of `rowExtras` at the same offset. Everything a pane can
+      ## answer from a neutral row comes from the store; only the four fields
+      ## `EventLogRow` deliberately does not carry come from beside it.
+    rowExtras*: seq[EventLogRowExtras]
+      ## Per-row, index-aligned with `programEvents`: the parts of a
+      ## `ct/update-table` row that are this front-end's presentation and not
+      ## a fact about the recorded event. See `EventLogRowExtras`.
     liveDebugRows*: seq[TableRow]
     receivedUpdates*: bool
     pendingReloadRetries*: int

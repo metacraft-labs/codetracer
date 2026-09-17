@@ -4648,3 +4648,59 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   is the unit tests in `call_stream_source.rs`. If you change one copy, change
   or re-measure the other; do not read a green roundtrip test as evidence about
   the seekable path.
+
+- The Event Log has TWO backend routes for the SAME recorded events, and they
+  are not interchangeable (measured 2026-09-17 against a real `replay-server`
+  on `noir_space_ship`, 70 events):
+    * `ct/event-load` — `Handler::event_load` (`src/db-backend/src/dap_handler.rs`)
+      reads only `start`/`count` from the arguments and, when BOTH are absent or
+      zero, answers a fixed 20-row PREFIX. It applies no kind filter and no
+      search. It also has a side effect no other event-log route has (the only
+      other caller of it in the tree is `Handler::correlation_markers`, which
+      is a different feature): `ensure_events_loaded`
+      populates the `EventDb` that the other route pages over, so a
+      `ct/update-table` on a session that has never seen a `ct/event-load`
+      answers an empty table.
+    * `ct/update-table` — `EventDb::update_table` (`src/db-backend/src/event_db.rs`)
+      answers the window the pane asked for, applying `selectedKinds`, the
+      substring search and `start`/`length` SERVER-SIDE, and returns the real
+      `recordsTotal`/`recordsFiltered` the DataTables Scroller virtualises its
+      height from. This is why the route cannot be collapsed into the first one:
+      a client-side re-filter of a 20-row prefix is not the same pane.
+  `EventLogVM`'s auto-load effect sends `ct/event-load` with
+  `{page,pageSize,searchQuery,...}` — NONE of which that handler reads — so on
+  the desktop it is in effect "give me the first 20". Both routes write
+  `ReplayDataStore.eventLog.rows`; `EventLogWindowSource` is the precedence rule
+  that stops the prefix from replacing the page the user is scrolling.
+
+- `TableRow` and `ProgramEvent` are each TWO unrelated Nim types, not one.
+  `common/common_types/codetracer_features/events.nim` is `include`d (not
+  imported) into `common/types.nim`, which binds `langstring = string`, and into
+  `frontend/types.nim`, which binds `langstring = cstring`. So a decoder in
+  `viewmodel/store/` cannot be typed against either without picking a host. The
+  shared decoders (`eventLogRowFromTableRow`, `eventLogRowFromProgramEvent`) are
+  GENERIC over the row for exactly this reason — one source text, instantiated
+  by whichever host holds the value — and that is also why a test cannot import
+  the product's `TableRow` and has to pass a field-compatible carrier instead.
+
+- `EventDb::refresh_global` SORTS `global_table` by `(step_id, …)`, while
+  `ct/event-load` answers `cached_events` in the recorder's own order. The sort
+  is stable, and on `noir_space_ship` the two orders agree row for row (asserted
+  in `src/frontend/tui/tests/test_event_log_table_route.nim`). They are not
+  guaranteed to: a recording whose `direct_location_rr_ticks` is not
+  monotonically non-decreasing in recording order would make
+  `EventLogRow.eventIndex` mean a position in a different sequence depending on
+  which route produced the row. That suite is where it will be caught.
+
+- `ProgramEvent.source_digest` and `.source_generation` are ALWAYS EMPTY on
+  both event-log routes today. The two places a recorded event is built —
+  `Db::to_program_event` (`src/db-backend/src/db.rs`) for every CTFS/db-backed
+  trace, and the `to_program_event` beside `Handler::event_load`
+  (`src/db-backend/src/dap_handler.rs`) for the rr path — write
+  `source_digest: String::new()` and `source_generation: 0` as literals, and
+  `TableRow::new` copies whatever the event carries, so `ct/update-table`
+  inherits the same. Measured on the wire as well: `noir_space_ship`, `calc`
+  and `wide_state` each report one distinct value for each field (`""` and
+  `0`). Consequence for testing: no recording in this workspace can falsify a
+  decoder that drops either field, so a mutation on them SURVIVES by
+  construction rather than for want of a fixture.

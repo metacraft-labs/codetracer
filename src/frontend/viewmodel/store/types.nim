@@ -251,9 +251,34 @@ type
     ## One row in the event-log panel.
     ##
     ## THE NEUTRAL SHAPE OF ONE RECORDED EVENT, and the only one any front-end
-    ## should hold. `ReplayDataStore.applyEventLogResponse` is the single place
-    ## a `ct/event-load` / `ct/updated-events` payload becomes one of these —
-    ## see that proc's header for why there is exactly one.
+    ## should hold.
+    ##
+    ## ONE DECODER PER WIRE SHAPE. The backend answers the event log in TWO
+    ## shapes, and one of them reaches a host in two representations, so there
+    ## are three decoders — all of them in `store/replay_data_store.nim`, and
+    ## none of them anywhere else:
+    ##
+    ##   * `eventLogRowFromJson` — the `ct/event-load` / `ct/updated-events`
+    ##     shape as raw JSON, which is what a host reading the DAP channel
+    ##     gets. `applyEventLogResponse` is its entry point.
+    ##   * `eventLogRowFromProgramEvent` — the SAME shape after a typed event
+    ##     bus has already deserialised it, which is what the renderer's
+    ##     `EventLogComponent.onUpdatedEvents` is handed. The same mapping over
+    ##     fields instead of over keys.
+    ##   * `eventLogRowFromTableRow` — the `ct/update-table` shape, genuinely
+    ##     different (pre-joined path, no index, no extent) and carrying the
+    ##     same events, which is how a DataTables host pages.
+    ##
+    ## The first two are one mapping written twice, which is a real hazard —
+    ## one gets edited, the other does not, and two hosts silently disagree
+    ## about one recording. `tui/tests/test_event_log_table_route.nim` puts the
+    ## same bytes through both and requires the rows to be EQUAL, so the
+    ## duplication is checked rather than trusted.
+    ##
+    ## The rule that matters is the negative one: no FRONT-END converts a
+    ## payload into this type. Before it held, the terminal, the desktop and the
+    ## headless session each had their own conversion and could disagree about
+    ## which key holds the line number.
     eventId*: uint64
     eventIndex*: int
     kindId*: int

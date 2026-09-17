@@ -455,6 +455,32 @@ when defined(js):
     ## on the `<table>` elements. A microtask delay is **not** added
     ## here — the caller is responsible for ordering if DataTables
     ## requires the nodes to be already attached.
+    ##
+    ## ## WHY THIS SHELL DOES NOT `indexEach` OVER `vm.eventRows`
+    ##
+    ## `renderEventLogPanel` above does, and this one deliberately does not,
+    ## which used to mean the desktop — the only host that mounts this
+    ## overload — rendered no store row at all. That is no longer true, and the
+    ## difference is WHERE the store is read rather than WHETHER it is:
+    ##
+    ## The `<table>` below is a DataTables target with `serverSide: true` and
+    ## the Scroller extension, so its rows are owned by the widget: it asks for
+    ## a window, renders it into its own `<tbody>`, and virtualises the scroll
+    ## height from a `recordsTotal` no single window carries. A second
+    ## `indexEach` list beside it would not be the pane reading the store — it
+    ## would be a second visible copy of the same events, unpaged and
+    ## unfiltered, under the one the user is scrolling.
+    ##
+    ## So the desktop reads the store one layer further in:
+    ## `ui/event_log.nim:loadEvents` decodes each `ct/update-table` window into
+    ## `ReplayDataStore` and projects the rows back out, and
+    ## `dataTablePayload` is what the widget's ajax callback is handed. The
+    ## rows DataTables paints are the rows this VM's `eventRows` holds — the
+    ## binding is through the widget rather than around it.
+    ##
+    ## A host with no DataTables (the storybook, the mock renderer, a future
+    ## GPUI or web surface) mounts `mountIsoNimEventLog` and gets the
+    ## `indexEach` list, which reads the same signal directly.
     let r = WebRenderer()
     let panel = renderWebEventLogPanel(
       r, vm, componentId, denseTableId, detailedTableId, searchInputId)

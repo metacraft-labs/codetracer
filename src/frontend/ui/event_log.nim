@@ -253,106 +253,172 @@ proc locationSourceLine(location: types.Location): int =
   else:
     location.line
 
-proc parseTableRowLine(row: TableRow): int =
-  let fullPath = $row.fullPath
-  let colon = fullPath.rfind(":")
-  if colon < 0 or colon >= fullPath.len - 1:
-    return 0
-
-  try:
-    fullPath[colon + 1 .. ^1].parseInt
-  except ValueError:
-    0
-
-proc tableRowPath(row: TableRow): cstring =
-  if not row.lowLevelLocation.isNil and row.lowLevelLocation.len > 0:
-    row.lowLevelLocation
-  else:
-    let fullPath = $row.fullPath
-    let colon = fullPath.rfind(":")
-    if colon > 0:
-      cstring(fullPath[0 ..< colon])
-    else:
-      row.fullPath
-
-proc programEventFromTableRow(row: TableRow; eventIndex: int; maxRRTicks: int): ProgramEvent =
-  ProgramEvent(
-    kind: row.kind,
-    semanticKind: row.semanticKind,
-    content: row.content,
-    rrEventId: row.rrEventId,
+func extrasOf(row: TableRow): EventLogRowExtras =
+  ## The presentation-only half of one `ct/update-table` row.
+  ##
+  ## Its counterpart is `eventLogRowFromTableRow` in the store, which reads the
+  ## SAME row and produces everything a neutral consumer needs. Between them
+  ## every field of `TableRow` is accounted for exactly once, and the split is
+  ## the one `EventLogRowExtras`' own header argues for field by field.
+  EventLogRowExtras(
+    fullPath: row.fullPath,
+    lowLevelLocation: row.lowLevelLocation,
     metadata: row.metadata,
-    highLevelPath: tableRowPath(row),
-    highLevelLine: parseTableRowLine(row),
-    directLocationRRTicks: row.directLocationRRTicks,
-    eventIndex: eventIndex,
-    tracepointResultIndex: 0,
+    semanticKind: row.semanticKind,
     base64Encoded: row.base64Encoded,
-    maxRRTicks: maxRRTicks,
-    stdout: row.stdout,
-    sourceGeneration: row.sourceGeneration,
-    sourceDigest: row.sourceDigest
+    rawEventId: row.rrEventId,
+    rawLocationRRTicks: row.directLocationRRTicks,
   )
 
-func storeRowOf(event: ProgramEvent; absoluteIndex: int): vmtypes.EventLogRow =
-  ## One legacy `ProgramEvent` as the store's neutral row.
+func eventLogKindOf(kindId: int): EventLogKind =
+  ## `EventLogRow.kindId` back as the enum this front-end's `case` statements
+  ## switch on.
   ##
-  ## THE DESKTOP'S ONLY BRIDGE INTO THE SHARED STORE, and it converts from
-  ## `ProgramEvent` rather than from the wire on purpose: this front-end's rows
-  ## do not arrive through `ct/event-load` at all. DataTables fetches them with
-  ## `ct/update-table`, whose response is a `TableData` of `TableRow`s, and
-  ## `programEventFromTableRow` above is the decoder for THAT shape. So the
-  ## desktop's rows reach `EventLogRow` one step later than the terminal's, and
-  ## there is still exactly one conversion per wire shape.
-  ##
-  ## `ProgramEvent` carries five fields `EventLogRow` does not — `metadata`,
-  ## `bytes`, `semanticKind`'s raw form, `base64Encoded` and
-  ## `tracepointResultIndex` — and they are NOT added to the neutral row. Four
-  ## of them are DataTables' business (a column's tooltip, a byte counter, a
-  ## decode that has already happened by the time this runs) and the fifth
-  ## belongs to the tracepoint results, which have their own signal. A shared
-  ## row that grew a field for each front-end's private needs would stop being
-  ## the thing three front-ends can agree on.
-  vmtypes.EventLogRow(
-    eventId:
-      if event.rrEventId > 0: uint64(event.rrEventId)
-      elif event.directLocationRRTicks > 0: uint64(event.directLocationRRTicks)
-      else: uint64(absoluteIndex + 1),
-    eventIndex: absoluteIndex,
-    kindId: ord(event.kind),
-    kind: eventKindLabel(ord(event.kind), event.stdout, $event.semanticKind),
-    file: $event.highLevelPath,
-    line: event.highLevelLine,
-    value: $event.content,
-    rrTicks:
-      if event.directLocationRRTicks > 0: uint64(event.directLocationRRTicks)
-      else: 0'u64,
-    maxRRTicks: if event.maxRRTicks > 0: uint64(event.maxRRTicks) else: 0'u64,
-    sourceGeneration: event.sourceGeneration,
-    sourceDigest: $event.sourceDigest,
-    stdout: event.stdout)
+  ## RANGE-CHECKED, because the neutral row's `kindId` is deliberately an `int`
+  ## and not an enum: `eventLogRowFromJson` keeps whatever number the wire sent
+  ## so that a kind this build has never heard of stays VISIBLE as a number
+  ## instead of being flattened into a plausible-looking label. A bare
+  ## `EventLogKind(kindId)` would turn that design into a range-check
+  ## exception inside an event handler on the first such recording. The
+  ## out-of-range answer is `Error`, which is the one kind whose rendering says
+  ## "something is wrong here" rather than inventing a plausible category.
+  if kindId >= ord(EventLogKind.low) and kindId <= ord(EventLogKind.high):
+    EventLogKind(kindId)
+  else:
+    EventLogKind.Error
 
-proc publishEventsToStore(events: seq[ProgramEvent];
-                          start: int;
-                          recordsTotal = -1;
-                          recordsFiltered = -1) =
-  ## Mirror the component's current window into the shared `ReplayDataStore`.
+func programEventOf(row: vmtypes.EventLogRow;
+                    extras: EventLogRowExtras): ProgramEvent =
+  ## The store's neutral row, projected back into the legacy shape this
+  ## front-end's renderers and DataTables columns are written against.
   ##
-  ## This is what gives the DESKTOP a filled `EventLogVM.eventRows`. Before it,
-  ## that signal was empty in every shipped build and *"no events have been
-  ## loaded"* was the correct output of every pane that read it — which is also
-  ## why this is safe to switch on: the rows the Karax Event Log draws come from
-  ## DataTables and not from this signal, so filling it changes what a store
-  ## consumer sees and nothing about what the desktop paints.
+  ## **THE DIRECTION OF THIS ARROW IS THE POINT OF THE WHOLE CHANGE.** It used
+  ## to run the other way: `programEventFromTableRow` decoded the wire into a
+  ## `ProgramEvent`, the desktop rendered from that, and `storeRowOf` made a
+  ## SECOND row out of it for whoever else was reading the store. Two rows from
+  ## two conversions, only one of which anybody looked at — so a defect in the
+  ## shared one was invisible here, which is exactly how a signal comes to be
+  ## filled by a front-end that never reads it.
   ##
-  ## `start` is the window's offset, which DataTables hands the component as
-  ## `data.start` and it keeps as `hiddenRows`.
-  if eventLogVMStore.isNil:
-    return
-  var rows: seq[vmtypes.EventLogRow] = @[]
-  for i, event in events:
-    rows.add storeRowOf(event, start + i)
-  eventLogVMStore.applyEventLogRows(rows, start, recordsTotal, recordsFiltered)
+  ## Now there is one conversion (`eventLogRowFromTableRow`, in the store) and
+  ## this projection. Nine of the fourteen fields below come from `row`,
+  ## including every one a pane renders text or navigates by, so the rows the
+  ## desktop PAINTS are the rows the store holds: break the store's decoder and
+  ## this pane goes wrong with it.
+  ##
+  ## `tracepointResultIndex` and `bytes` are left at their zero values, which is
+  ## what the old decoder wrote into them too — see `EventLogRowExtras` for the
+  ## grep that found no reader for either.
+  ProgramEvent(
+    kind: eventLogKindOf(row.kindId),
+    semanticKind: extras.semanticKind,
+    content: cstring(row.value),
+    rrEventId: extras.rawEventId,
+    metadata: extras.metadata,
+    highLevelPath: cstring(row.file),
+    highLevelLine: row.line,
+    directLocationRRTicks: extras.rawLocationRRTicks,
+    eventIndex: row.eventIndex,
+    tracepointResultIndex: 0,
+    base64Encoded: extras.base64Encoded,
+    maxRRTicks: int(row.maxRRTicks),
+    stdout: row.stdout,
+    sourceGeneration: row.sourceGeneration,
+    sourceDigest: cstring(row.sourceDigest),
+  )
+
+proc syncProgramEventsFromStore(self: EventLogComponent;
+                                fallbackRows: seq[vmtypes.EventLogRow] = @[]) =
+  ## Rebuild `self.programEvents` from the rows the SHARED STORE is holding.
+  ##
+  ## THE ONLY WRITER of that field, and the moment the desktop stops keeping a
+  ## parallel list. It reads the signal back rather than reusing the seq it just
+  ## handed to `applyEventLogRows`, so a producer that replaced or cleared the
+  ## window — `EventLogComponent.clear`, `resetForNewSession`, the live
+  ## debugger-stop append — is reflected here instead of being silently
+  ## outvoted by a copy this component kept.
+  ##
+  ## `rowExtras` is index-aligned with the window `loadEvents` captured it from,
+  ## and that window is by definition the `elwsTable` one — so the extras are
+  ## applied ONLY while the store is still holding a table window. Pairing them
+  ## with an `elwsEventLoad` window would be worse than dropping them: the rows
+  ## would carry another window's metadata, semantic kind and recorder id, all
+  ## of them plausible and all of them describing a different event. What a row
+  ## with empty extras loses is display text — the metadata string, the raw
+  ## semantic kind — plus the two RAW numbers `EventLogRowExtras` keeps for
+  ## fidelity. The source location a pane opens is not among them: `file` and
+  ## `line` are on the neutral row. `directLocationRRTicks` IS from the extras
+  ## and is what `programEventJump` seeks to, but the only reader that can reach
+  ## a projected row is `onEnter`, and it needs the DataTables pane to be
+  ## holding rows — which is to say a table window has landed and the extras
+  ## apply.
+  ##
+  ## `fallbackRows` is what the caller decoded, used only when there is NO
+  ## store to read. That cannot happen in a shipped build — `registerEventLogComponent`
+  ## runs `initEventLogVM`, which creates a stub-backed store, long before any
+  ## `ct/update-table` reply can arrive — but "the store is missing" must
+  ## degrade to the rows this window actually brought rather than to an empty
+  ## pane. An Event Log that renders nothing is the one failure this whole
+  ## change must not be able to introduce.
+  let hasStore = not eventLogVMStore.isNil
+  let rows =
+    if hasStore: eventLogVMStore.eventLog.rows.val
+    else: fallbackRows
+  let extrasApply =
+    (not hasStore) or
+    eventLogVMStore.eventLog.windowSource.val == elwsTable
+  var events = newSeqOfCap[ProgramEvent](rows.len)
+  for i, row in rows:
+    let extras =
+      if extrasApply and i < self.rowExtras.len: self.rowExtras[i]
+      else: EventLogRowExtras()
+    events.add programEventOf(row, extras)
+  self.programEvents = events
+
+proc dataTableRowOf(event: ProgramEvent; extras: EventLogRowExtras): JsObject =
+  ## One row as DataTables will see it.
+  ##
+  ## A `ProgramEvent` plus the two path fields the widget's column definitions
+  ## name (`data: "fullPath"`) and `ProgramEvent` does not have. The widget used
+  ## to be handed raw `TableRow`s instead, which is the mirror image: it had the
+  ## paths and lacked `highLevelPath`, `highLevelLine`, `eventIndex` and
+  ## `maxRRTicks`, all four of which its own renderers read — so
+  ## `eventLogDescriptionRepr(event, event.eventIndex)` was reading `undefined`
+  ## off every row it drew. Every field either side of that seam is present now.
+  result = event.toJs
+  result.fullPath = extras.fullPath
+  result.lowLevelLocation = extras.lowLevelLocation
+
+proc dataTablePayload(self: EventLogComponent;
+                      draw, recordsTotal, recordsFiltered: int): JsObject =
+  ## The server-side-processing answer DataTables expects, built from the rows
+  ## this component projected out of the store.
+  ##
+  ## The three counters are passed through from the engine's own reply rather
+  ## than recomputed: `recordsTotal` and `recordsFiltered` drive the Scroller's
+  ## virtual height and the footer, and they describe the WHOLE log and the
+  ## whole filtered log, which a single window cannot know. `draw` is
+  ## DataTables' request/response correlation token and must be echoed exactly.
+  let extrasApply =
+    eventLogVMStore.isNil or
+    eventLogVMStore.eventLog.windowSource.val == elwsTable
+      ## The same condition `syncProgramEventsFromStore` applies, for the same
+      ## reason: the paths in `rowExtras` describe the table window and nothing
+      ## else. This call site only ever runs immediately after `loadEvents`, so
+      ## the condition holds — it is asserted rather than assumed because a
+      ## stale path is a row that offers the wrong file to open.
+  var rows = newSeq[JsObject](self.programEvents.len)
+  for i, event in self.programEvents:
+    let extras =
+      if extrasApply and i < self.rowExtras.len: self.rowExtras[i]
+      else: EventLogRowExtras()
+    rows[i] = dataTableRowOf(event, extras)
+  js{
+    draw: draw,
+    recordsTotal: recordsTotal,
+    recordsFiltered: recordsFiltered,
+    data: rows,
+  }
 
 proc equivalentTableRows(left, right: TableRow): bool =
   left.semanticKind == right.semanticKind and
@@ -398,19 +464,28 @@ proc syncLiveDebuggerRowToVM(row: TableRow) =
     else:
       uint64(row.rrEventId)
 
-  eventLogVMInstance.appendLiveDebuggerStop(vmtypes.EventLogRow(
-    eventId: eventId,
-    eventIndex: 0,
-    kindId: ord(row.kind),
-    kind: "debugger-stop",
-    file: $tableRowPath(row),
-    line: parseTableRowLine(row),
-    value: $row.metadata,
-    rrTicks: eventId,
-    maxRRTicks: eventId,
-    sourceGeneration: row.sourceGeneration,
-    sourceDigest: $row.sourceDigest,
-  ))
+  # THROUGH THE SHARED DECODER, like every other `TableRow` on this host. This
+  # used to be a third hand-written copy of that mapping — it read the row's
+  # path and line through two helpers of its own and spelled the display kind
+  # as a literal — so it could, and did, disagree with the rows beside it about
+  # what a row of this recording looks like.
+  #
+  # Two fields are then overridden, and both are properties of a LIVE stop
+  # rather than of the table shape:
+  #
+  # * the ticks. A stop at tick 0 is a real position on a db-backend trace
+  #   (every position is tick 0 there), so `eventId` — which falls back to the
+  #   synthetic `1_000_000_000 + n` that `makeDebuggerStopRow` minted — is the
+  #   only identity that distinguishes one stop from the next. The shared
+  #   decoder maps a non-positive tick to 0, which is right for a recorded
+  #   event and wrong for this one.
+  # * `maxRRTicks`. A live head IS the recording's current extent; the table
+  #   route carries no extent at all (see `eventLogRowFromTableRow`).
+  var liveRow = eventLogRowFromTableRow(row, 0)
+  liveRow.eventId = eventId
+  liveRow.rrTicks = eventId
+  liveRow.maxRRTicks = eventId
+  eventLogVMInstance.appendLiveDebuggerStop(liveRow)
 
 proc addLiveDebuggerStopRow(self: EventLogComponent; location: types.Location): bool =
   if not liveEventLogSession():
@@ -624,15 +699,11 @@ proc resizeEventLogHandler*(self: EventLogComponent) =
     self.denseTable.updateTableFooter()
   # self.detailedTable.resizeTable()
 
-proc filterEvents(self: EventLogComponent): seq[ProgramEvent] =
-  var events: seq[ProgramEvent] = @[]
-
-  for i in 0..<self.programEvents.len():
-    let event = self.programEvents[i]
-    if self.selectedKinds[event.kind]:
-      events.add(event)
-
-  return events
+# `filterEvents` used to sit here: a client-side re-filter of `programEvents`
+# by `selectedKinds`. It had no caller, and could not usefully acquire one —
+# `EventDb::update_table` applies `selected_kinds` server-side before it builds
+# the window, so every row this host receives has already passed that filter.
+# Removed with the parallel row list it was written against.
 
 # ---------------------------------------------------------------------------
 # Filter dropdown — event-kind / event-tag filter panel
@@ -1134,9 +1205,16 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
   var event: ProgramEvent
 
   if data.toJs != jsUndefined:
-    let row = cast[TableRow](data)
-    event = programEventFromTableRow(row, 0, self.data.maxRRTicks)
-    event.bytes = 0
+    # The row DataTables is holding IS this component's own projection of the
+    # store's row (`dataTableRowOf`), so the clicked row can be read straight
+    # back out instead of being decoded a third time. That third decode was
+    # not merely redundant: it ran `programEventFromTableRow(row, 0, …)` on a
+    # row object that carried no `highLevelPath`, no `highLevelLine` and no
+    # `maxRRTicks` — `ct/update-table` sends none of the three — and stamped
+    # `eventIndex` as the literal 0 for every row in the log. `ct/event-jump`
+    # deserialises a whole `ProgramEvent` on the Rust side with none of those
+    # three defaulted, so the jump payload was incomplete by construction.
+    event = cast[ProgramEvent](data)
   else:
     # DataTables emits placeholder rows while the table is empty; they are not real events.
     return
@@ -1503,20 +1581,41 @@ proc events(self: EventLogComponent) =
 
 
 proc loadEvents*(self: EventLogComponent, update: TableData) =
+  ## Take one `ct/update-table` window: decode it ONCE into the shared store,
+  ## then project the store's rows back out as this front-end's `ProgramEvent`s.
+  ##
+  ## THE ORDER IS THE WHOLE DESIGN. The store is written first and read second,
+  ## so the rows the desktop goes on to render are the rows every other consumer
+  ## of `ReplayDataStore.eventLog` — the IsoNim event-log view, the VS Code
+  ## surface built from the same `src/frontend`, the GPUI shell — is holding.
+  ## Before this, the desktop decoded the window into `ProgramEvent`s for
+  ## itself and published a SECOND conversion into the store that nothing here
+  ## read back, which is why the shared signal could be wrong for a whole
+  ## release without anyone seeing it.
+  ##
+  ## THE ABSOLUTE INDEX IS `hiddenRows`, not the page-local offset. DataTables
+  ## hands the component `data.start` on every ajax call and it is kept there;
+  ## a page fetched at start 40 holds absolute indices 40..n+40, and every
+  ## pane's cursor is in that coordinate.
+  ##
+  ## `recordsTotal` / `recordsFiltered` come from the engine here, so they are
+  ## passed rather than inferred: a search that matched fewer rows has to be
+  ## able to lower the count.
   console.log(cstring(fmt"event_log: loadEvents records={update.data.len} draw={update.draw}"))
-  self.programEvents = @[]
   if update.data.len() > 0:
     self.receivedUpdates = true
-  for i, row in update.data:
-    self.programEvents.add(programEventFromTableRow(row, i, data.maxRRTicks))
-  # …and the same rows, once, into the shared store, so that every consumer of
-  # `ReplayDataStore.eventLog` — the IsoNim event-log view, a VS Code surface,
-  # BlockTracer — sees the desktop's event log instead of an empty signal.
-  # `recordsTotal` / `recordsFiltered` come from the engine here, so they are
-  # passed rather than inferred: a search that matched fewer rows has to be
-  # able to lower the count.
-  publishEventsToStore(self.programEvents, self.hiddenRows,
-                       update.recordsTotal, update.recordsFiltered)
+
+  self.rowExtras = @[]
+  for row in update.data:
+    self.rowExtras.add extrasOf(row)
+
+  let decoded = eventLogRowsFromTableRows(update.data, self.hiddenRows,
+                                          int64(data.maxRRTicks))
+  if not eventLogVMStore.isNil:
+    eventLogVMStore.applyEventLogRows(
+      decoded, self.hiddenRows, update.recordsTotal, update.recordsFiltered,
+      source = elwsTable)
+  self.syncProgramEventsFromStore(decoded)
 
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
@@ -1552,7 +1651,16 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
     # disappearing after a jump — that was the refetch-on-move above — and it
     # was left alone deliberately rather than folded into a fix for a
     # different defect.
-    self.tableCallback(mutData.toJs)
+    #
+    # THE ROWS HANDED TO DATATABLES ARE THE STORE'S. `loadEvents` above wrote
+    # this window into `ReplayDataStore` and read it back as
+    # `self.programEvents`; `dataTablePayload` renders exactly those, so the
+    # widget the user is looking at is downstream of the shared decode rather
+    # than beside it. Handing `mutData` straight through — the raw
+    # `ct/update-table` body — is what made the store's copy unfalsifiable
+    # here.
+    self.tableCallback(self.dataTablePayload(
+      mutData.draw, mutData.recordsTotal, mutData.recordsFiltered))
     self.redraw()
 
     # Re-sync scroll-area dimensions after the first batch of real data lands.
@@ -1660,25 +1768,42 @@ method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.
   if self.ignoreOutput:
     return
 
-  for element in response:
-    self.programEvents.add(element)
   # `ct/updated-events` is the SAME payload `ct/event-load` answers with —
   # `Handler::event_load` sends the event and the response from one
-  # `page_events` — so the rows are published here too rather than waiting for
-  # the table round-trip the reload below will start. No count is supplied:
-  # this event carries none, and `applyEventLogRows` then raises the totals to
-  # what the window implies instead of inventing one.
+  # `page_events` — so it is published here too rather than waiting for the
+  # table round-trip the reload below will start. No count is supplied: this
+  # event carries none, and `applyEventLogRows` then raises the totals to what
+  # the window implies instead of inventing one.
   #
-  # NAMED RATHER THAN HIDDEN: `programEvents` at this point is the DataTables
-  # window with this event's rows appended, so its rows are not necessarily one
-  # contiguous run from `hiddenRows` and the absolute indices this assigns can
-  # be off for the appended tail. That is a property of the component's own
-  # list, which mixes two producers and has done since before this call
-  # existed; the reload below replaces the whole list from one window and the
-  # indices settle. It is recorded because a reader who trusted
-  # `EventLogRow.eventIndex` on the desktop between those two moments would be
-  # trusting arithmetic nobody can guarantee.
-  publishEventsToStore(self.programEvents, self.hiddenRows)
+  # ## THE MIXED-PRODUCER WINDOW, AND WHY IT IS GONE
+  #
+  # This used to append the answer's rows to `self.programEvents` — the
+  # DataTables window — and publish the concatenation at `start = hiddenRows`.
+  # The two halves came from different producers and were not one contiguous
+  # run, so `applyEventLogRows` stamped absolute indices onto the appended tail
+  # by an arithmetic nobody could guarantee: a reader who trusted
+  # `EventLogRow.eventIndex` between this moment and the reload that replaced
+  # the list was reading invented positions.
+  #
+  # The repair is to stop concatenating. This answer is a `ct/event-load`
+  # window and it is published AS ONE, decoded by the store's own
+  # `ct/event-load`-shape decoder, at the offset its rows' own `eventIndex`
+  # declares — which the backend sets from the absolute position in
+  # `cached_events`. `elwsEventLoad` then yields to the paged table window when
+  # there is one (see `EventLogWindowSource`), so on this host the publish
+  # keeps the totals and the recording's extent current without ever putting a
+  # second, differently-chosen window under the pane the user is reading.
+  if not eventLogVMStore.isNil:
+    var rows = newSeqOfCap[vmtypes.EventLogRow](response.len)
+    for i, element in response:
+      rows.add eventLogRowFromProgramEvent(element, i)
+    let windowStart = if rows.len > 0: rows[0].eventIndex else: 0
+    eventLogVMStore.applyEventLogRows(rows, windowStart,
+                                      source = elwsEventLoad)
+    # The projection follows the store, whichever window it ended up holding:
+    # a no-op recompute when the table owns it, and the rows this answer
+    # brought when nothing has paged yet.
+    self.syncProgramEventsFromStore()
 
   if not self.denseTable.isNil and not self.denseTable.context.isNil:
     self.denseTable.context.ajax.reload()
@@ -1699,6 +1824,10 @@ method clear*(self: EventLogComponent) =
       cerror "event_log: clear detailed: " & getCurrentExceptionMsg()
 
   self.programEvents = @[]
+  # The extras go with the rows they describe. Leaving them would pair the
+  # previous recording's metadata and paths with the next recording's first
+  # window, one index at a time.
+  self.rowExtras = @[]
   self.eventsIndex = 0
   self.rowSelected = 0
   self.activeRowTicks = 0
@@ -1994,6 +2123,15 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
     if component.ignoreOutput:
       return
 
+    # NOTE, since `programEvents` is now a projection of the store's rows
+    # rather than a list of its own: this overwrites `content` on the
+    # PROJECTION and not on the store, and that is unchanged behaviour rather
+    # than a new gap. The rows DataTables renders were already built before
+    # this handler runs, `redraw()` does not re-feed them, and the next
+    # `loadEvents` rebuilds the projection from the store — so the write has
+    # always been to a copy that nothing subsequently reads. It is left alone
+    # because repairing it means deciding what `ct/updated-events-content` is
+    # FOR, which is a question about that route and not about this one.
     let lines = response.split(jsNl)
     var lineIndex = 0
     var eventsIndex = 0

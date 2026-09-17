@@ -146,6 +146,47 @@ type
       ## RR or Materialized.  Empty string means "no source" — the
       ## view falls back to the ``no-code`` class with a blank label.
 
+  EventLogWindowSource* = enum
+    ## WHICH BACKEND ROUTE PRODUCED THE WINDOW `EventLogStore.rows` HOLDS.
+    ##
+    ## Two routes answer with the same underlying events in different shapes
+    ## and, crucially, with different WINDOWS:
+    ##
+    ##   * `ct/event-load` answers a slice of the log chosen by `start`/`count`
+    ##     — and, when the caller supplies neither, a fixed prefix of 20 rows
+    ##     (`Handler::event_load`, `src/db-backend/src/dap_handler.rs`). It
+    ##     applies no kind filter and no search.
+    ##   * `ct/update-table` answers the window the PANE asked for: the user's
+    ##     page (`start`/`length`), their kind filter (`selectedKinds`) and
+    ##     their search (`search.value`), all applied server-side by
+    ##     `EventDb::update_table`.
+    ##
+    ## A host that has both — the Electron desktop, whose DataTables widget
+    ## pages with the second while `EventLogVM`'s auto-load effect issues the
+    ## first — therefore has two producers writing one signal with two
+    ## different answers to "which rows are on screen". Before this enum
+    ## existed, whichever reply landed last won, so the shared rows flipped
+    ## between the pane's actual page and an unfiltered 20-row prefix
+    ## depending on network ordering.
+    ##
+    ## The precedence rule is in `applyEventLogRows`, and it is not arbitrary:
+    ## the window the user is LOOKING AT is the one the pane paged, filtered
+    ## and sorted to, so once a table window has been applied an event-load
+    ## window no longer replaces the rows. It still raises the totals and the
+    ## recording's extent, because those are facts about the recording rather
+    ## than about the window. A host with only `ct/event-load` (the terminal,
+    ## the GPUI shell, the storybook, an out-of-tree consumer) never sets
+    ## `elwsTable` and is completely unaffected.
+    elwsUnknown
+      ## No window has been applied yet, or the producer did not say. A
+      ## producer that passes this neither claims nor yields precedence: it is
+      ## what `appendLiveEventRow` uses to re-apply the window it just grew.
+    elwsEventLoad
+      ## `ct/event-load` / the `ct/updated-events` echo of the same answer.
+    elwsTable
+      ## `ct/update-table` — the paged, filtered, sorted window a DataTables
+      ## host renders.
+
   EventLogStore* = object
     ## Reactive state for the event-log panel.
     ##
@@ -179,6 +220,9 @@ type
       ## a whole page at open just to learn it.
     loadedStart*: Signal[int]
       ## The `start` offset of the window `rows` holds.
+    windowSource*: Signal[EventLogWindowSource]
+      ## Which route produced the window `rows` holds. See
+      ## `EventLogWindowSource` for why one signal needs to remember this.
     loadingState*: Signal[LoadingState]
 
   PointListStore* = object
@@ -773,6 +817,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         recordsFiltered: createSignal(0),
         maxRRTicks: createSignal(0'u64),
         loadedStart: createSignal(0),
+        windowSource: createSignal(elwsUnknown),
         loadingState: createSignal(lsIdle),
       ),
 
@@ -1194,11 +1239,154 @@ proc eventLogRowsFromJson*(payload: JsonNode; start: int = 0): seq[EventLogRow] 
   for i in 0 ..< eventsNode.len:
     result.add eventLogRowFromJson(eventsNode[i], start + i)
 
+# ---------------------------------------------------------------------------
+# `ct/update-table` — the OTHER wire shape the same events arrive in
+#
+# `EventDb::update_table` (src/db-backend/src/event_db.rs) answers with
+# `TableRow`s, which `TableRow::new(&ProgramEvent)` derives from exactly the
+# events `ct/event-load` serialises whole. The shape differs in three ways and
+# only three, so the mapping below is short and total:
+#
+#   * the location is pre-joined into `fullPath` (`"<basename>:<line>"`) with
+#     the unjoined path repeated in `lowLevelLocation`;
+#   * `maxRRTicks` and `eventIndex` are NOT on the row — a paged answer knows
+#     neither the recording's extent nor the absolute position of the slice it
+#     was asked for, so both are supplied by the caller, which does;
+#   * `bytes` and `tracepointResultIndex` are dropped by the backend before the
+#     row is built, which is the first piece of evidence that neither belongs
+#     on a shared row.
+#
+# WHY THIS IS GENERIC AND NOT TYPED AGAINST `TableRow`. There is no one
+# `TableRow` type to be typed against: `common_types/codetracer_features/
+# events.nim` is INCLUDED into two hosts that bind `langstring` differently —
+# `common/types.nim` (`string`) and `frontend/types.nim` (`cstring`) — so the
+# native and the renderer builds hold two unrelated Nim types with the same
+# field names. A generic proc is one decoder that both instantiate, which is
+# what keeps this store free of a `dom`-reaching import while still refusing to
+# let a second copy of this mapping exist.
+# ---------------------------------------------------------------------------
+
+func tableRowSourceLine*[R](row: R): int =
+  ## The line `TableRow.fullPath` carries after its final `:`.
+  ##
+  ## `TableRow::new` builds `fullPath` as `"<basename>:<high_level_line>"`, so
+  ## the line is recoverable and nothing else on the row carries it. A path
+  ## with no `:`, or a trailing `:` with nothing after it, yields 0 — the same
+  ## "no line" this layer uses everywhere else, and a row a pane must not offer
+  ## as a jump target.
+  let fullPath = $row.fullPath
+  let colon = fullPath.rfind(":")
+  if colon < 0 or colon >= fullPath.len - 1:
+    return 0
+  try:
+    fullPath[colon + 1 .. ^1].parseInt
+  except ValueError:
+    0
+
+func tableRowSourcePath*[R](row: R): string =
+  ## The row's source path.
+  ##
+  ## `lowLevelLocation` holds `ProgramEvent.high_level_path` verbatim and is
+  ## preferred for that reason; `fullPath`'s prefix is only a BASENAME and is
+  ## the fallback for a producer that left `lowLevelLocation` empty.
+  let lowLevel = $row.lowLevelLocation
+  if lowLevel.len > 0:
+    return lowLevel
+  let fullPath = $row.fullPath
+  let colon = fullPath.rfind(":")
+  if colon > 0: fullPath[0 ..< colon] else: fullPath
+
+func eventLogRowFromTableRow*[R](row: R; absoluteIndex: int;
+                                 maxRRTicks: int64 = 0): EventLogRow =
+  ## ONE `ct/update-table` row as ONE `EventLogRow`.
+  ##
+  ## THE ONE PLACE THE TABLE WIRE SHAPE IS READ, the way
+  ## `eventLogRowFromJson` is the one place the `ct/event-load` shape is. The
+  ## desktop used to read it twice over: `programEventFromTableRow` built a
+  ## legacy `ProgramEvent` for DataTables and `storeRowOf` then built a second
+  ## row out of that for the store, so the rows a user looked at and the rows a
+  ## second host read were two conversions that could drift apart. They are one
+  ## conversion now, and the desktop's own `ProgramEvent` is projected back OUT
+  ## of this row (`ui/event_log.nim:programEventOf`).
+  ##
+  ## `absoluteIndex` is the row's position in the WHOLE log — the request's
+  ## `start` plus its offset in the page. The row carries no index of its own
+  ## (see the header above), so unlike `eventLogRowFromJson` there is nothing
+  ## to prefer over it; every cursor in every pane is in this coordinate.
+  ##
+  ## `maxRRTicks` likewise comes from the caller, which learns the recording's
+  ## extent from the `ct/updated-events` echo. 0 means "not known here", and
+  ## `applyEventLogRows` only ever raises the store's own high-water mark, so
+  ## an unknown extent cannot lower one that is known.
+  let ticks = row.directLocationRRTicks
+  let rrEventId = row.rrEventId
+  result = EventLogRow(
+    eventId:
+      if rrEventId > 0: uint64(rrEventId)
+      elif ticks > 0: uint64(ticks)
+      else: uint64(absoluteIndex + 1),
+    eventIndex: absoluteIndex,
+    kindId: ord(row.kind),
+    kind: eventKindLabel(ord(row.kind), row.stdout, $row.semanticKind),
+    file: tableRowSourcePath(row),
+    line: tableRowSourceLine(row),
+    value: $row.content,
+    rrTicks: if ticks > 0: uint64(ticks) else: 0'u64,
+    maxRRTicks: if maxRRTicks > 0: uint64(maxRRTicks) else: 0'u64,
+    sourceGeneration: row.sourceGeneration,
+    sourceDigest: $row.sourceDigest,
+    stdout: row.stdout,
+  )
+
+func eventLogRowsFromTableRows*[R](rows: seq[R]; start: int = 0;
+                                   maxRRTicks: int64 = 0): seq[EventLogRow] =
+  ## One `ct/update-table` window as store rows, absolute indices assigned
+  ## from `start` — which is the `TableArgs.start` the request asked for.
+  result = newSeqOfCap[EventLogRow](rows.len)
+  for i, row in rows:
+    result.add eventLogRowFromTableRow(row, start + i, maxRRTicks)
+
+func eventLogRowFromProgramEvent*[E](event: E;
+                                     positionIndex: int): EventLogRow =
+  ## ONE already-deserialised `ProgramEvent` as ONE `EventLogRow`.
+  ##
+  ## The typed sibling of `eventLogRowFromJson`, for the host that receives
+  ## `ct/updated-events` through a typed event bus rather than as raw JSON —
+  ## which is every renderer build. It is the SAME mapping, expressed over
+  ## fields instead of over keys, and generic for the reason
+  ## `eventLogRowFromTableRow` is: `ProgramEvent` is two unrelated Nim types
+  ## depending on which host included `codetracer_features/events.nim`.
+  ##
+  ## `positionIndex` is used only when the event carries no `eventIndex` of its
+  ## own; the wire's value wins, exactly as in `eventLogRowFromJson`, because a
+  ## page fetched at `start = 40` has page-local offsets and absolute indices
+  ## and every pane's cursor is in the absolute one.
+  let ticks = event.directLocationRRTicks
+  let rrEventId = event.rrEventId
+  result = EventLogRow(
+    eventId:
+      if rrEventId > 0: uint64(rrEventId)
+      elif ticks > 0: uint64(ticks)
+      else: uint64(positionIndex + 1),
+    eventIndex: if event.eventIndex > 0: event.eventIndex else: positionIndex,
+    kindId: ord(event.kind),
+    kind: eventKindLabel(ord(event.kind), event.stdout, $event.semanticKind),
+    file: $event.highLevelPath,
+    line: event.highLevelLine,
+    value: $event.content,
+    rrTicks: if ticks > 0: uint64(ticks) else: 0'u64,
+    maxRRTicks: if event.maxRRTicks > 0: uint64(event.maxRRTicks) else: 0'u64,
+    sourceGeneration: event.sourceGeneration,
+    sourceDigest: $event.sourceDigest,
+    stdout: event.stdout,
+  )
+
 proc applyEventLogRows*(store: ReplayDataStore;
                         rows: seq[EventLogRow];
                         start: int = 0;
                         recordsTotal: int = -1;
-                        recordsFiltered: int = -1) =
+                        recordsFiltered: int = -1;
+                        source: EventLogWindowSource = elwsUnknown) =
   ## Write ONE window of already-decoded event rows into the store.
   ##
   ## THE ONE PLACE EVERY PRODUCER ENDS. `applyEventLogResponse` decodes the
@@ -1213,8 +1401,21 @@ proc applyEventLogRows*(store: ReplayDataStore;
   ## update carries the engine's own count) passes it and it is taken verbatim,
   ## including downwards — a filter that matched fewer rows has to be able to
   ## say so.
-  store.eventLog.rows.val = rows
-  store.eventLog.loadedStart.val = start
+  ##
+  ## `source` says WHICH ROUTE this window came from and decides one thing: an
+  ## `elwsEventLoad` window does not replace an `elwsTable` one. See
+  ## `EventLogWindowSource` for the whole rule and the reason. Everything below
+  ## the rows — the totals, the recording's extent, the loading flag — is
+  ## applied either way, because those are facts about the recording rather
+  ## than about which slice of it is on screen.
+  let yieldsToTableWindow =
+    source == elwsEventLoad and
+    store.eventLog.windowSource.val == elwsTable
+  if not yieldsToTableWindow:
+    store.eventLog.rows.val = rows
+    store.eventLog.loadedStart.val = start
+    if source != elwsUnknown:
+      store.eventLog.windowSource.val = source
   if recordsTotal >= 0:
     store.eventLog.recordsTotal.val = recordsTotal
   else:
@@ -1222,7 +1423,13 @@ proc applyEventLogRows*(store: ReplayDataStore;
       max(store.eventLog.recordsTotal.val, start + rows.len)
   if recordsFiltered >= 0:
     store.eventLog.recordsFiltered.val = recordsFiltered
-  else:
+  elif not yieldsToTableWindow:
+    # ONLY when this producer owns the window. `recordsFiltered` equals
+    # `recordsTotal` for a producer that filters nothing, which is true of
+    # `ct/event-load` and false of the table route — so letting an event-load
+    # answer infer it here would erase the smaller count a live search had
+    # just established and put the pane's footer back to "of <everything>"
+    # while it is showing a filtered page.
     store.eventLog.recordsFiltered.val = store.eventLog.recordsTotal.val
   var maxTicks = store.eventLog.maxRRTicks.val
   for row in rows:
@@ -1259,7 +1466,8 @@ proc applyEventLogResponse*(store: ReplayDataStore;
       (not body.isNil and body.kind == JObject and body.hasKey("events"))
   if not hasEvents:
     return
-  store.applyEventLogRows(eventLogRowsFromJson(payload, start), start)
+  store.applyEventLogRows(eventLogRowsFromJson(payload, start), start,
+                          source = elwsEventLoad)
 
 proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
   ## Append one live debugger-stop row, and say whether it was new.
@@ -1291,6 +1499,11 @@ proc clearEventLog*(store: ReplayDataStore) =
   store.eventLog.recordsFiltered.val = 0
   store.eventLog.maxRRTicks.val = 0'u64
   store.eventLog.loadedStart.val = 0
+  # AND THE WINDOW'S OWNER. A restart that left `elwsTable` behind would make
+  # the store refuse the next `ct/event-load` window for a table that no longer
+  # has any rows — the log would stay empty for every store consumer until the
+  # new session's first `ct/update-table` reply happened to land.
+  store.eventLog.windowSource.val = elwsUnknown
   store.eventLog.loadingState.val = lsIdle
 
 # ---------------------------------------------------------------------------
