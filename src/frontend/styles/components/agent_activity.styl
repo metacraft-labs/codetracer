@@ -115,6 +115,44 @@
     100%
       background-position: -200% 0
 
+  .agent-context-path-chip
+    display: flex
+    align-items: center
+    gap: 0.35em
+    padding: 0.25em 0.5em
+    border-radius: 0.375em
+    background: colors-ui-surface-primary-default
+    border: 1px solid colors-ui-border-default
+    max-width: 20em
+    flex-shrink: 0
+
+    &__label
+      font-size: 0.8em
+      overflow: hidden
+      text-overflow: ellipsis
+      white-space: nowrap
+      color: colors-ui-text-primary
+      min-width: 0
+
+    .agent-paste-remove
+      position: static
+      width: 1.1em
+      height: 1.1em
+      border-radius: 50%
+      background: rgba(0, 0, 0, 0.45)
+      display: flex
+      align-items: center
+      justify-content: center
+      cursor: pointer
+      font-size: 0.7em
+      color: #fff
+      line-height: 1
+      user-select: none
+      flex-shrink: 0
+
+      &:hover
+        background: rgba(0, 0, 0, 0.7)
+
   .agent-input-highlight
     position: absolute
     top: 0

@@ -9,6 +9,8 @@ type FileFilter = ref object
   name*: cstring
   extensions*: seq[cstring]
 
+proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
+
 let
   fileIcons = require("@exuanbo/file-icons-js")
   fsAsync = require("fs").promises
@@ -396,6 +398,42 @@ proc onChooseDir*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
     let dirExists = await pathExists(selection)
     mainWindow.webContents.send "CODETRACER::record-path",
       js{execPath: selection, fieldName: response.fieldName}
+
+proc onAcpPickFiles*(sender: js,
+                     response: jsobject(kind=cstring)) {.async.} =
+  ## Open a native file/folder picker for the agent activity + dropdown.
+  ## ``kind`` is one of: "files", "folders", "trace".
+  ## Responds with ``CODETRACER::acp-files-selected`` carrying ``{paths}``.
+  var selections: seq[cstring] = @[]
+  if response.kind == cstring"folders":
+    let sel = await selectDir(cstring"Select folder")
+    if sel.len > 0:
+      selections.add(sel)
+  else:
+    # "files" and "trace" both open a multi-file picker.
+    let options =
+      if response.kind == cstring"trace":
+        js{
+          properties: @[cstring"openFile", cstring"multiSelections"],
+          title: cstring"Select recording or trace file",
+          buttonLabel: cstring"Attach"
+        }
+      else:
+        js{
+          properties: @[cstring"openFile", cstring"multiSelections"],
+          title: cstring"Select files to attach",
+          buttonLabel: cstring"Attach"
+        }
+    let dialogResult = await electron.dialog.showOpenDialog(mainWindow, options)
+    let wasCanceled =
+      jsHasKey(dialogResult, cstring"canceled") and
+      dialogResult[cstring"canceled"].to(bool)
+    if not wasCanceled:
+      let filePaths = cast[seq[cstring]](dialogResult[cstring"filePaths"])
+      for p in filePaths:
+        selections.add(p)
+  mainWindow.webContents.send "CODETRACER::acp-files-selected",
+    js{paths: selections.toJs}
 
 proc onLoadPathContent*(
   sender: js,

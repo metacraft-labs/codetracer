@@ -205,6 +205,9 @@ when defined(js):
       locationText = fmt"{loc.path}:{loc.line}#{loc.rrTicks}"
       locationTitle = locationText
 
+    let editorFilePath =
+      if not activeKey.isNil and activeKey.len > 0: $activeKey else: ""
+
     StatusBaseModel(
       language: lang,
       encoding: encoding,
@@ -220,6 +223,9 @@ when defined(js):
       locationText: locationText,
       locationTitle: locationTitle,
       copyTooltipActive: self.copyMessageActive,
+      editorFilePath: editorFilePath,
+      editorCursorLine: self.editorCursorLine,
+      editorCursorCol: self.editorCursorCol,
       # WHAT THIS PAGE WAS BUILT FROM. Both are "" on the desktop and on any
       # web build whose entry document carries no `commit`, and the view then
       # renders no element — see `StatusBaseModel.buildLabel`. The value is

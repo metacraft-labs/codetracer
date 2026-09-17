@@ -15,7 +15,8 @@ from ../viewmodel/viewmodels/agent_activity_vm import
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
   setPermissionInfo, setSessionKey, setBranchState, traceOpen, reviewOpen,
   applyEvidenceDataset, retryPendingEvidenceInspections,
-  clearPastedImages, getPastedImages, toggleSettingsOpen
+  clearPastedImages, getPastedImages, toggleSettingsOpen,
+  addContextPath, removeContextPath, clearContextPaths, getContextPaths
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 from ../viewmodel/viewmodels/review_open import ReviewOpenService
@@ -540,12 +541,16 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
   console.log cstring(fmt"[agent-activity] sending prompt sessionKey={self.currentSessionKey()} sessionId={self.sessionId} pending={self.pendingSessionId} prompt={prompt}")
   let vm = ensureAgentActivityVM(self)
   let images = if not vm.isNil: vm.getPastedImages() else: newSeq[string]()
+  let ctxPaths = if not vm.isNil: vm.getContextPaths() else: newSeq[string]()
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "sessionId": self.sessionId,
     "clientSessionId": self.pendingSessionId,
     "text": prompt,
-    "images": images.toJs
+    "images": images.toJs,
+    "contextPaths": ctxPaths.toJs
   }
+  if not vm.isNil:
+    vm.clearContextPaths()
 
 proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
   self.setActiveAgent()
@@ -710,7 +715,13 @@ when defined(js):
         self.syncLegacyAgentActivityIntoVM(),
         10000)
     result.onAddFiles = proc() =
-      echo "#TODO: add a file"
+      data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"files"})
+    result.onAddFolders = proc() =
+      data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"folders"})
+    result.onAddEditorSelection = proc() =
+      data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"files"})
+    result.onAddTrace = proc() =
+      data.ipc.send("CODETRACER::acp-pick-files", js{"kind": cstring"trace"})
     result.onModelSelect = proc() =
       echo "#TODO: Open the model table"
     result.onSettingsSelect = proc() =
@@ -1246,3 +1257,26 @@ proc onAcpRequestPermission*(sender: js, response: JsObject) {.async.} =
   self.wantsPermission = true
   self.isLoading = true
   self.syncLegacyAgentActivityIntoVM()
+
+proc onAcpFilesSelected*(sender: js, response: JsObject) =
+  ## Receive file/folder paths from the native dialog opened by onAcpPickFiles.
+  ## Routes to the active agent component and appends each path to its VM
+  ## contextPaths signal so they appear as chips in the input area and get
+  ## included in the next prompt.
+  let activeId = data.ui.activeAgentSessionId
+  let self =
+    if activeId.len > 0:
+      componentBySessionId(activeId)
+    else:
+      nil
+  if self.isNil:
+    return
+  let vm = ensureAgentActivityVM(self)
+  if vm.isNil:
+    return
+  if not jsHasKey(response, cstring"paths"):
+    return
+  let paths = cast[seq[cstring]](response[cstring"paths"])
+  for p in paths:
+    if p.len > 0:
+      vm.addContextPath($p)

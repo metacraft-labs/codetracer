@@ -712,6 +712,26 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       color: colors-ui-text-warning-primary
       font-weight: 600
 
+    #editor-cursor-status
+      display: inline-flex
+      align-items: center
+      gap: 8px
+      max-width: 36em
+      overflow: hidden
+      white-space: nowrap
+      user-select: none
+
+      .editor-file-path
+        overflow: hidden
+        text-overflow: ellipsis
+        white-space: nowrap
+        flex-shrink: 1
+        min-width: 0
+
+      .editor-cursor-position
+        white-space: nowrap
+        flex-shrink: 0
+
     // DEAD, AND LEFT AT 1.51:1 DELIBERATELY — DO NOT "FIX" THE CONTRAST HERE.
     //
     // `colors-ui-border-secondary` is grey-600 `#3a3a3a`, which against this
@@ -1238,4 +1258,3 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     mask-position: center
     -webkit-mask-size: contain
     mask-size: contain
-
