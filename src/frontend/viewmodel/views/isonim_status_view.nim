@@ -200,7 +200,8 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   ## test.  Deliberately excluded — and therefore patched in place — are
   ## `language`, `encoding`, `processClass`, `processText`,
   ## `testMovementText`, `disconnectedText`, `disconnectedTitle`,
-  ## `locationText`, `locationTitle` and `copyTooltipActive`.  Those are
+  ## `locationText`, `locationTitle`, `copyTooltipActive`,
+  ## `editorFilePath`, `editorCursorLine` and `editorCursorCol`.  Those are
   ## exactly the fields that change on every debugger step, and keeping their
   ## nodes alive across a step is what makes `.location-path` a stable element
   ## rather than a new one 60+ times per trace open (Value-Origin-Tracking
@@ -221,7 +222,7 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   result.add("|fi:" & (if model.base.showFinished: "1" else: "0"))
   result.add("|sb:" & (if model.base.stableBusy: "1" else: "0"))
   result.add("|lo:" & (if model.base.locationText.len > 0: "1" else: "0"))
-  result.add("|ef:" & (if model.base.editorFilePath.len > 0: "1" else: "0"))
+  # editorFilePath, editorCursorLine, editorCursorCol: patched in-place; no structural effect.
   # THE WHOLE LABEL, not a presence bit. It is a deployment constant, so it
   # never changes within a page and can never cost a rebuild; including it in
   # full is the cheapest way to satisfy this proc's own rule — every field of
@@ -329,6 +330,11 @@ template renderStatusShellImpl(
             discard
           span(class = "file-info-status-encoding status-inline"):
             text model.base.encoding
+          span(class = "editor-cursor-position status-inline"):
+            text (if model.base.editorCursorLine > 0:
+                    "Ln " & $model.base.editorCursorLine & ", Col " &
+                    $model.base.editorCursorCol
+                  else: "")
           span(id = "operation-status"):
             if model.base.stableBusy:
               span(id = "stable-status", class = model.base.processClass):
@@ -394,14 +400,6 @@ template renderStatusShellImpl(
                 class = "build-identity status-inline",
                 title = model.base.buildTitle):
               text model.base.buildLabel
-          if model.base.editorFilePath.len > 0:
-            span(id = "editor-cursor-status", class = "status-inline"):
-              span(class = "editor-file-path"):
-                text model.base.editorFilePath
-              if model.base.editorCursorLine > 0:
-                span(class = "editor-cursor-position"):
-                  text "Ln " & $model.base.editorCursorLine & ", Col " &
-                       $model.base.editorCursorCol
           if model.base.showDisconnected:
             span(
                 class = "status-inline disconnected-status",
@@ -611,15 +609,12 @@ when defined(js):
       container.patchAttribute(
         cstring"#location-status .custom-tooltip", cstring"class",
         copyTooltipClass(model.base.copyTooltipActive))
-    if model.base.editorFilePath.len > 0:
-      container.patchText(cstring".editor-file-path", model.base.editorFilePath)
-      let lnCol =
-        if model.base.editorCursorLine > 0:
-          "Ln " & $model.base.editorCursorLine & ", Col " &
-            $model.base.editorCursorCol
-        else:
-          ""
-      container.patchText(cstring".editor-cursor-position", lnCol)
+    let lnCol =
+      if model.base.editorCursorLine > 0:
+        "Ln " & $model.base.editorCursorLine & ", Col " & $model.base.editorCursorCol
+      else:
+        ""
+    container.patchText(cstring".editor-cursor-position", lnCol)
 
   const
     ## Attribute stamped on the host so a later render can tell whether the

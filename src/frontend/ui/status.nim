@@ -206,7 +206,7 @@ when defined(js):
       locationTitle = locationText
 
     let editorFilePath =
-      if not activeKey.isNil and activeKey.len > 0: $activeKey else: ""
+      if not loc.path.isNil and loc.path.len > 0: $loc.path else: ""
 
     StatusBaseModel(
       language: lang,
