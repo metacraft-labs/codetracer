@@ -1803,7 +1803,8 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
   createRenderEffect proc() =
     r.clearChildren(imagesStrip)
     let images = vm.pastedImages.val
-    if images.len == 0:
+    let paths = vm.contextPaths.val
+    if images.len == 0 and paths.len == 0:
       r.setAttribute(imagesStrip, "class", "agent-paste-strip agent-paste-strip--empty")
     else:
       r.setAttribute(imagesStrip, "class", "agent-paste-strip")
@@ -1832,6 +1833,17 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
               text "×"
         setImgSrc(imgEl, imgData)
         r.appendRenderedChild(imagesStrip, thumb)
+    for i, p in paths:
+      let pathIdx = i
+      let capturedPath = p
+      let chip = ui(r):
+        tdiv(class = "agent-context-path-chip"):
+          span(class = "agent-context-path-chip__label"):
+            text capturedPath
+          tdiv(class = "agent-paste-remove",
+               onclick = proc() = vm.removeContextPath(pathIdx)):
+            text "×"
+      r.appendRenderedChild(imagesStrip, chip)
 
   createRenderEffect proc() =
     let ph = if vm.messages.val.len > 0 or vm.terminals.val.len > 0:

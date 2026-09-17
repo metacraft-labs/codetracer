@@ -120,6 +120,9 @@ type
       ## Base64 data URLs of images pasted by the user.  Each entry is either
       ## "loading" (FileReader not yet done) or a data: URL.  Cleared after
       ## submission.  Tracked here so the host can read them on submit.
+    contextPaths*: Signal[seq[string]]
+      ## File/folder paths added via the + dropdown (Upload attachment, Files &
+      ## folders, etc.).  Cleared after submission along with pastedImages.
     settingsOpen*: Signal[bool]
     settingsRuntime*: Signal[string]
     settingsCpu*: Signal[string]
@@ -450,6 +453,23 @@ proc clearPastedImages*(vm: AgentActivityVM) =
 proc getPastedImages*(vm: AgentActivityVM): seq[string] =
   vm.pastedImages.val
 
+proc addContextPath*(vm: AgentActivityVM; path: string) =
+  var paths = vm.contextPaths.val
+  paths.add(path)
+  vm.contextPaths.val = paths
+
+proc removeContextPath*(vm: AgentActivityVM; idx: int) =
+  var paths = vm.contextPaths.val
+  if idx >= 0 and idx < paths.len:
+    paths.delete(idx)
+    vm.contextPaths.val = paths
+
+proc clearContextPaths*(vm: AgentActivityVM) =
+  vm.contextPaths.val = @[]
+
+proc getContextPaths*(vm: AgentActivityVM): seq[string] =
+  vm.contextPaths.val
+
 proc setSelectedModel*(vm: AgentActivityVM; model: string) =
   vm.selectedModel.val = model
 
@@ -493,6 +513,7 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.permissionInfo.val = ""
   vm.sessionNotice.val = ""
   vm.pastedImages.val = @[]
+  vm.contextPaths.val = @[]
 
 proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
   withViewModel proc(dispose: proc()): AgentActivityVM =
@@ -518,6 +539,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let modelDropdownOpen = createSignal(false)
     let addContextDropdownOpen = createSignal(false)
     let pastedImages = createSignal(newSeq[string]())
+    let contextPaths = createSignal(newSeq[string]())
     let settingsOpen = createSignal(false)
     let settingsRuntime = createSignal("devcontainer")
     let settingsCpu = createSignal("2 cores")
@@ -565,6 +587,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       modelDropdownOpen: modelDropdownOpen,
       addContextDropdownOpen: addContextDropdownOpen,
       pastedImages: pastedImages,
+      contextPaths: contextPaths,
       settingsOpen: settingsOpen,
       settingsRuntime: settingsRuntime,
       settingsCpu: settingsCpu,

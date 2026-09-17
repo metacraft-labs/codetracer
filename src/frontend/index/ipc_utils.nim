@@ -452,6 +452,7 @@ proc configureIpcMain* =
     "acp-session-init"
     "acp-stop"
     "acp-cancel-prompt"
+    "acp-pick-files"
 
     "save-config"
     # Auto-hide (pinned panel) state.  It is persisted separately from the

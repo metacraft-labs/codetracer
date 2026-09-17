@@ -621,7 +621,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
     return
 
   let rawText = response[cstring"text"]
-  let text =
+  let userText =
     block:
       let tType = jsTypeof(rawText)
       if tType == cstring"string":
@@ -630,6 +630,22 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
         rawText[cstring"text"].to(cstring)
       else:
         stringify(rawText)
+
+  # Prepend any file/folder context paths as a readable header so Claude has
+  # the path information in-band without requiring read-file tool calls.
+  let text: cstring =
+    if jsHasKey(response, cstring"contextPaths"):
+      let rawPaths = cast[seq[cstring]](response[cstring"contextPaths"])
+      if rawPaths.len > 0:
+        var header = "Context paths:\n"
+        for p in rawPaths:
+          header.add("- " & $p & "\n")
+        header.add("\n")
+        cstring(header & $userText)
+      else:
+        userText
+    else:
+      userText
 
   echo fmt"[acp_ipc] prompt received clientSessionId={clientSessionId} sessionId={sessionId} text={text}"
 

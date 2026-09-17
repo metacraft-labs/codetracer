@@ -2604,6 +2604,10 @@ var editorSourceChangedHook*: proc(path: cstring)
 
 var editorCursorMovedHook*: proc(path: cstring; line: int)
   ## THE CURSOR MOVED IN `path`, to `line`.
+
+var editorStatusCursorHook*: proc(path: cstring; line: int; col: int)
+  ## FIRED FOR EVERY CURSOR EVENT so the status bar can display
+  ## the active editor path and Ln/Col without polling.
   ##
   ## `Generated-Code-Listing.md` §6: a generated-code listing is anchored to
   ## the cursor, and the two documents move together while both are readable.
@@ -3523,11 +3527,14 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   # for every build with nothing open, so the cost when nothing is listening
   # is one comparison per cursor event.
   tabInfo.monacoEditor.toJs.onDidChangeCursorPosition(proc(ev: js) =
-    if editorCursorMovedHook.isNil:
-      return
     if ev.isNil or ev.position.isNil:
       return
-    editorCursorMovedHook(self.name, cast[int](ev.position.lineNumber)))
+    let line = cast[int](ev.position.lineNumber)
+    let col  = cast[int](ev.position.column)
+    if not editorCursorMovedHook.isNil:
+      editorCursorMovedHook(self.name, line)
+    if not editorStatusCursorHook.isNil:
+      editorStatusCursorHook(self.name, line, col))
 
   console.log("DELEGATING SHORTCUTS")
 

@@ -4813,6 +4813,7 @@ proc configureIPC(data: Data) =
     "acp-clear-diffs"
     "acp-tool-call"
     "acp-tool-call-update"
+    "acp-files-selected"
 
     "reload-file"
 
@@ -6579,6 +6580,12 @@ when defined(ctWeb) and not defined(ctInExtension):
         # install block is how the previous version of that wiring managed to
         # not exist for as long as it did.
         editor.editorCursorMovedHook = generated_code.noteEditorCursorMoved
+        editor.editorStatusCursorHook =
+          proc(path: cstring; line: int; col: int) =
+            if not data.ui.status.isNil:
+              data.ui.status.editorCursorLine = line
+              data.ui.status.editorCursorCol = col
+              data.ui.status.requestStatusRender()
         editor.editorActiveTabChangedHook =
           generated_code.noteEditorTabActivated
 

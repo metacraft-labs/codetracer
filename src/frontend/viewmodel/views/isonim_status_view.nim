@@ -78,6 +78,13 @@ type
     locationText*: string
     locationTitle*: string
     copyTooltipActive*: bool
+    editorFilePath*: string
+      ## Path of the file open in the active Monaco editor tab, or "" when no
+      ## editor is open.  Shown on the right side of the status bar.
+    editorCursorLine*: int
+      ## 1-indexed cursor line in the active editor; 0 when unknown.
+    editorCursorCol*: int
+      ## 1-indexed cursor column; 0 when unknown.
     buildLabel*: string
       ## WHAT THIS PAGE WAS BUILT FROM, e.g. `cloud 7ae43783`, or "" when the
       ## build does not know — which is every desktop build, because Electron
@@ -214,6 +221,7 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   result.add("|fi:" & (if model.base.showFinished: "1" else: "0"))
   result.add("|sb:" & (if model.base.stableBusy: "1" else: "0"))
   result.add("|lo:" & (if model.base.locationText.len > 0: "1" else: "0"))
+  result.add("|ef:" & (if model.base.editorFilePath.len > 0: "1" else: "0"))
   # THE WHOLE LABEL, not a presence bit. It is a deployment constant, so it
   # never changes within a page and can never cost a rebuild; including it in
   # full is the cheapest way to satisfy this proc's own rule — every field of
@@ -321,8 +329,6 @@ template renderStatusShellImpl(
             discard
           span(class = "file-info-status-encoding status-inline"):
             text model.base.encoding
-          tdiv(class = "separate-bar"):
-            discard
           span(id = "operation-status"):
             if model.base.stableBusy:
               span(id = "stable-status", class = model.base.processClass):
@@ -388,6 +394,14 @@ template renderStatusShellImpl(
                 class = "build-identity status-inline",
                 title = model.base.buildTitle):
               text model.base.buildLabel
+          if model.base.editorFilePath.len > 0:
+            span(id = "editor-cursor-status", class = "status-inline"):
+              span(class = "editor-file-path"):
+                text model.base.editorFilePath
+              if model.base.editorCursorLine > 0:
+                span(class = "editor-cursor-position"):
+                  text "Ln " & $model.base.editorCursorLine & ", Col " &
+                       $model.base.editorCursorCol
           if model.base.showDisconnected:
             span(
                 class = "status-inline disconnected-status",
@@ -597,6 +611,15 @@ when defined(js):
       container.patchAttribute(
         cstring"#location-status .custom-tooltip", cstring"class",
         copyTooltipClass(model.base.copyTooltipActive))
+    if model.base.editorFilePath.len > 0:
+      container.patchText(cstring".editor-file-path", model.base.editorFilePath)
+      let lnCol =
+        if model.base.editorCursorLine > 0:
+          "Ln " & $model.base.editorCursorLine & ", Col " &
+            $model.base.editorCursorCol
+        else:
+          ""
+      container.patchText(cstring".editor-cursor-position", lnCol)
 
   const
     ## Attribute stamped on the host so a later render can tell whether the
