@@ -582,3 +582,10 @@ src/common/terminal_graphics/.plat15-visual-mutation.lock
 # harness in this directory mutates.
 src/frontend/viewmodel/tests/unit/.plat17-wasm-mutation.lock
 src/frontend/viewmodel/tests/unit/.plat18-marshalling-mutation.lock
+
+# Workspace-managed reference checkouts (declared in repos/codemirror-*.toml and
+# cloned by `repro`). Ignored here for the same reason `reprobuild/references/*`
+# is: the checkouts belong to the workspace, not to this repo's history. Left
+# untracked and unignored they make the pre-push gate see a dirty tree.
+refs/*
+!refs/README.md
