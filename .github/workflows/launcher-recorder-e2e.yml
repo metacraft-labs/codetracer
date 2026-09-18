@@ -266,6 +266,32 @@ on:
           the contract fixture.
         required: true
         type: string
+      extra-siblings:
+        description: >
+          Newline-separated BARE repo names to clone beside the four this gate
+          always spans, for an edge whose recording toolchain is larger than
+          one recorder.  Empty for every edge but the native one.
+
+
+          WHY IT EXISTS.  `ct record <extension-less binary>` does not reach
+          codetracer-native-recorder directly: the desktop core asks
+          `ct-native-replay recognize --format=json` what the target is and
+          then runs `ct-native-replay record --backend mcr`, and THAT spawns
+          `ct-mcr`.  `ct-native-replay` is built from codetracer-native-backend,
+          so the native edge spans five repos rather than four and cannot be
+          expressed by `recorder-repo` alone.  The alternative -- hardcoding a
+          `if recorder == native` branch in the planner -- would put a fact
+          about one recorder inside the shared workflow, which is the thing
+          this gate's fixture design exists to avoid.
+
+
+          Entries are BARE names for the same reason every other sibling is:
+          the revision comes from the per-commit workspace lock.  The planner
+          refuses an entry carrying `=<ref>`, and refuses one naming the
+          triggering repo, exactly as it does for the fixed four.
+        required: false
+        default: ""
+        type: string
       # NO `*-ref` INPUTS, deliberately (LRC-6).  There used to be four --
       # `codetracer-ref`, `launcher-ref`, `recorder-ref`,
       # `trace-format-nim-ref` -- and every one of them was redundant:
@@ -345,6 +371,7 @@ jobs:
           EDGE: ${{ inputs.edge }}
           RECORDER_REPO: ${{ inputs.recorder-repo }}
           RECORDER_LANG: ${{ inputs.recorder-lang }}
+          EXTRA_SIBLINGS: ${{ inputs.extra-siblings }}
           SELF_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -378,9 +405,30 @@ jobs:
             fi
           done
           if [ "${#SIB_ENTRIES[@]}" -ne 3 ]; then
-            echo "::error::expected exactly 3 siblings beside '${SELF}', got ${#SIB_ENTRIES[@]}. recorder-repo='${RECORDER_REPO}' probably collides with one of the fixed names."
+            echo "::error::expected exactly 3 siblings beside '${SELF}' from the four fixed repos, got ${#SIB_ENTRIES[@]}. recorder-repo='${RECORDER_REPO}' probably collides with one of the fixed names."
             exit 1
           fi
+
+          # Extra siblings for an edge whose recording toolchain is larger than
+          # one recorder (today: the native edge's codetracer-native-backend).
+          # Appended AFTER the count check above, so that check keeps meaning
+          # what it means -- "the four fixed repos minus the trigger" -- and a
+          # recorder-repo colliding with a fixed name is still caught.  Every
+          # invariant below applies to these entries too; nothing about them is
+          # exempt.
+          while IFS= read -r extra; do
+            extra="$(printf '%s' "${extra}" | tr -d '[:space:]')"
+            [ -n "${extra}" ] || continue
+            for existing in "${SIB_ENTRIES[@]}"; do
+              if [ "${existing}" = "${extra}" ]; then
+                echo "::error::extra-siblings entry '${extra}' is already one of this gate's four fixed repos. clone-siblings would clone it twice; drop it from extra-siblings."
+                exit 1
+              fi
+            done
+            SIB_ENTRIES+=("${extra}")
+          done <<EXTRA_SIBLINGS_EOF
+          ${EXTRA_SIBLINGS}
+          EXTRA_SIBLINGS_EOF
 
           # THE INVARIANT, RE-ASSERTED RATHER THAN ASSUMED. The filter above is
           # what keeps the triggering repo out of the sibling list, and the
@@ -841,6 +889,28 @@ jobs:
             exit 1
           fi
           ls -l "${CT_PRINT}"
+
+      - name: Check the gate's decoded-trace reasoning
+        # Runs HERE, and not in codetracer.yml's bash-only verdict lane, for one
+        # reason: it asserts against codetracer-trace-format-nim's real ct-print
+        # goldens rather than against documents it writes itself, and this is
+        # the workflow that has that sibling checked out.  A skip when the
+        # sibling is absent is exactly the vacuous pass this initiative exists
+        # to prevent, so the suite hard-fails instead -- which would make it a
+        # permanent red in a lane that provisions nothing.
+        #
+        # It is cheap (stock bash, no build) and it runs BEFORE the gate, so a
+        # break in the shape discrimination, the empty-recording guard, the
+        # functions/event-type lookups or the recorded-payload search is
+        # reported as itself rather than as a mysterious assertion failure
+        # forty minutes into a recording.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          bash ci/test/launcher-recorder-decode-test.sh
 
       - name: Run the launcher <-> recorder end-to-end gate
         # The recorder sibling itself is built by the driver's step 3
