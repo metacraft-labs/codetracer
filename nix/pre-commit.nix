@@ -17,6 +17,31 @@ in
     "\\.min\\.js$"
     "\\.min\\.css$"
 
+    # THE UNICODE CORPUS, where the bytes ARE the fixture.
+    #
+    # Nine classes of text chosen because they break naive editors, and three
+    # of the nine are made of exactly what a whitespace hook removes: class 8
+    # is tabs, class 9 is ASCII control codes, and class 6 is line
+    # terminators. `trim-trailing-whitespace` was measured against it on
+    # 2026-09-18 and rewrote FIVE of the eighteen documents, deleting 44
+    # bytes: c8-tabs-short (-6), c9-ascii-control-short (-1),
+    # c9-ascii-control-long (-13), c1-zwj-long (-9), c2-combining-long (-15).
+    #
+    # `.gitattributes` already marks the directory `-text`, and that is a
+    # different guard for a different attacker: `-text` stops GIT translating
+    # line endings on checkout and check-in, and stops nothing a hook does to
+    # the working tree. The corpus needs both, and a reader who sees one is
+    # likely to assume it covers the other.
+    #
+    # The suite would have caught the damage -- `manifest.tsv` is asserted per
+    # document against a fresh measurement, so the next run goes red naming
+    # the file -- which makes this a loud failure rather than a silent one.
+    # It is still the wrong place to find out: the hook fires on the commit
+    # that ADDS the corpus, so the bytes a reviewer approves and the bytes
+    # that land would differ, and the red would arrive attributed to whoever
+    # touched the suite next.
+    "^src/frontend/viewmodel/tests/corpus/unicode/"
+
     # A VENDORED COPY, and byte-identity IS the contract.
     #
     # tools/check-test-assertions.sh is a byte-for-byte copy of
