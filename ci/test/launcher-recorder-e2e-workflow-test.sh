@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Contract: the launcher <-> recorder E2E workflow and its four callers agree,
+# Contract: the launcher <-> recorder E2E workflow and its six callers agree,
 # the repo under test is pinned to the commit under test, the triggering repo is
 # never listed as its own sibling, and no sibling revision is pinned by anything
 # but the workspace lock.
@@ -71,7 +71,7 @@
 #      LRC-6 dropped the `*-ref` inputs.
 #   3. The (caller x recorder) combinations are DERIVED from the callers' own
 #      matrices rather than transcribed here, so a recorder added to a fan-out
-#      cannot escape the checks below; the known nine are a floor.
+#      cannot escape the checks below; the known twelve are a floor.
 #   4. For each derived combination: the planner emits exactly 3 siblings, the
 #      triggering repo is NOT among them, no entry carries `=<ref>`, and
 #      `ct-dir` points at the codetracer checkout.
@@ -253,9 +253,14 @@ plan_env_block() {
 }
 
 # ---------------------------------------------------------------------------
-# The four callers, discovered once.  The in-repo one is mandatory; the three
+# The six callers, discovered once.  The in-repo one is mandatory; the five
 # remote ones are read from their sibling checkouts, and a sibling that is
 # present but carries no caller is a failure rather than a silent pass.
+#
+# codetracer-beam-recorder joined this list on 2026-09-18, when LRC-4's beam
+# sub-deliverable wired the beam edge into all three trigger directions.  Before
+# that its caller existed but was never read here, so nothing checked that it
+# passed a declared input set or that its planner emitted a sane sibling list.
 #
 # Each entry is `<file>|<label>|<github.repository short name>`.
 # ---------------------------------------------------------------------------
@@ -263,7 +268,7 @@ declare -a CALLER_FILES=("$DESKTOP_EDGE")
 declare -a CALLER_LABELS=("codetracer/launcher-recorder-e2e-desktop-edge.yml")
 declare -a CALLER_REPOS=("codetracer")
 declare -a CALLER_ABSENT=()
-for sib in codetracer-launcher codetracer-python-recorder codetracer-ruby-recorder codetracer-js-recorder; do
+for sib in codetracer-launcher codetracer-python-recorder codetracer-ruby-recorder codetracer-js-recorder codetracer-beam-recorder; do
 	sib_wf="$PARENT_DIR/$sib/.github/workflows/launcher-recorder-e2e.yml"
 	if [ -f "$sib_wf" ]; then
 		CALLER_FILES+=("$sib_wf")
@@ -481,7 +486,7 @@ for i in "${!CALLER_FILES[@]}"; do
 	done <<<"$recs"
 done
 
-# Anti-vacuity for the derivation itself: the nine combinations this gate is
+# Anti-vacuity for the derivation itself: the twelve combinations this gate is
 # known to span are a FLOOR.  If the matrix parser regresses, the loop below
 # would run over a short list and every assertion in it would be weaker without
 # saying so.
@@ -489,12 +494,15 @@ KNOWN_FLOOR=(
 	"metacraft-labs/codetracer|codetracer-python-recorder"
 	"metacraft-labs/codetracer|codetracer-ruby-recorder"
 	"metacraft-labs/codetracer|codetracer-js-recorder"
+	"metacraft-labs/codetracer|codetracer-beam-recorder"
 	"metacraft-labs/codetracer-launcher|codetracer-python-recorder"
 	"metacraft-labs/codetracer-launcher|codetracer-ruby-recorder"
 	"metacraft-labs/codetracer-launcher|codetracer-js-recorder"
+	"metacraft-labs/codetracer-launcher|codetracer-beam-recorder"
 	"metacraft-labs/codetracer-python-recorder|codetracer-python-recorder"
 	"metacraft-labs/codetracer-ruby-recorder|codetracer-ruby-recorder"
 	"metacraft-labs/codetracer-js-recorder|codetracer-js-recorder"
+	"metacraft-labs/codetracer-beam-recorder|codetracer-beam-recorder"
 )
 floor_reachable=0
 for want in "${KNOWN_FLOOR[@]}"; do
@@ -502,7 +510,7 @@ for want in "${KNOWN_FLOOR[@]}"; do
 	caller_short="${caller_short##*/}"
 	# A caller whose repo is not checked out beside this one cannot contribute.
 	# That is the normal case in the `ci-verdict` lane, which checks out
-	# `codetracer` alone; the three remote callers are reported as unchecked
+	# `codetracer` alone; the five remote callers are reported as unchecked
 	# rather than silently dropped.
 	skip=0
 	for absent in ${CALLER_ABSENT[@]+"${CALLER_ABSENT[@]}"}; do
@@ -518,7 +526,7 @@ for want in "${KNOWN_FLOOR[@]}"; do
 done
 
 if [ "${#derive_bad[@]}" -eq 0 ] && [ "${#CALLER_CASES[@]}" -ge 1 ]; then
-	ok "derived ${#CALLER_CASES[@]} (caller x recorder) combination(s) from the callers' own matrices, covering all $floor_reachable of the known nine that are reachable here"
+	ok "derived ${#CALLER_CASES[@]} (caller x recorder) combination(s) from the callers' own matrices, covering all $floor_reachable of the known twelve that are reachable here"
 else
 	fail "derived the (caller x recorder) combinations from the callers' own matrices" \
 		"${derive_bad[@]:-no combination could be derived at all}"
@@ -1053,29 +1061,50 @@ else
 		mut_bad+=("M10 SURVIVED: the repo under test was checked out at a branch instead of github.sha")
 fi
 
-# M11 -- a fourth recorder added to a fan-out matrix without being added to the
-# clone-list.  The pre-review version of this file transcribed the nine
+# M11 -- a further recorder added to a fan-out matrix without being added to
+# the clone-list.  The pre-review version of this file transcribed the nine
 # combinations, so this mutation passed unnoticed; the derivation is what makes
 # it fail.
-awk '
-	/^          - recorder: codetracer-js-recorder$/ && !done {
-		print "          - recorder: codetracer-beam-recorder"
-		print "            lang: beam"
-		done=1
+#
+# THE MUTANT MUST BE A RECORDER THE CLONE-LIST DOES NOT DECLARE, and that is a
+# PRECONDITION, not a constant.  This mutation used to add
+# `codetracer-beam-recorder`, and on 2026-09-10 the beam edge was wired and that
+# name was declared in `.github/sibling-repos` -- whereupon M11 asserted nothing
+# at all and reported SURVIVED against an unchanged, correct checker.  So the
+# name is now CHOSEN at run time from the recorder repos this org has that the
+# clone-list does not carry, and the choice failing is itself a failure.  A day
+# when every candidate is declared is a day this mutation cannot be built, and
+# it must say so rather than pass.
+m11_victim=""
+for cand in codetracer-native-recorder codetracer-php-recorder codetracer-wasm-recorder; do
+	grep -qx -- "$cand" <<<"$clone_entries" || {
+		m11_victim="$cand"
+		break
 	}
-	{ print }
-' "$MUT/caller.yml" >"$MUT/m11-caller.yml"
-m11_recs="$(caller_recorders "$MUT/m11-caller.yml")"
-if ! grep -qx 'codetracer-beam-recorder' <<<"$m11_recs"; then
-	mut_bad+=("M11 was not applied (the added matrix row is not derived as a recorder)")
+done
+if [ -z "$m11_victim" ]; then
+	mut_bad+=("M11 could not be built: every candidate recorder is already declared in the clone-list, so this mutation asserts nothing. Pick a name the clone-list does not carry.")
 else
-	m11_uncovered=0
-	while IFS= read -r rec; do
-		[ -z "$rec" ] && continue
-		grep -qx -- "$rec" <<<"$clone_entries" || m11_uncovered=1
-	done <<<"$m11_recs"
-	[ "$m11_uncovered" -eq 1 ] ||
-		mut_bad+=("M11 SURVIVED: a recorder added to a fan-out matrix but absent from the clone-list was not detected")
+	awk -v victim="$m11_victim" '
+		/^          - recorder: codetracer-js-recorder$/ && !done {
+			print "          - recorder: " victim
+			print "            lang: m11"
+			done=1
+		}
+		{ print }
+	' "$MUT/caller.yml" >"$MUT/m11-caller.yml"
+	m11_recs="$(caller_recorders "$MUT/m11-caller.yml")"
+	if ! grep -qx -- "$m11_victim" <<<"$m11_recs"; then
+		mut_bad+=("M11 was not applied (the added matrix row is not derived as a recorder)")
+	else
+		m11_uncovered=0
+		while IFS= read -r rec; do
+			[ -z "$rec" ] && continue
+			grep -qx -- "$rec" <<<"$clone_entries" || m11_uncovered=1
+		done <<<"$m11_recs"
+		[ "$m11_uncovered" -eq 1 ] ||
+			mut_bad+=("M11 SURVIVED: a recorder added to a fan-out matrix but absent from the clone-list was not detected")
+	fi
 fi
 
 # M12 -- an unrelated call site stops passing `siblings:`, which would silently
