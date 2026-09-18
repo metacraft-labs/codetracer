@@ -4862,7 +4862,16 @@ bench-text-store *args:
 # It gates PLAT-24 and nothing else, deliberately: a generic lane mechanism would
 # change every lane's pass condition at once, and §10.1 assigns that elsewhere.
 plat24-case-floor:
-  bash ci/test/plat24-case-floor.sh
+  bash ci/test/editor-model-case-floor.sh PLAT-24
+
+# PLAT-25's COUNTED TARGET, gated by the SAME script.
+#
+# The gate also runs §7.1's two-way count over §3.1's `LAW-A*` table: ten ids
+# published, ten ids run, both directions, cardinality asserted, and a killer
+# cell that is empty or an em dash fails — because "an arm with no stated
+# killer is not admitted".
+plat25-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-25
 
 # Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
 #

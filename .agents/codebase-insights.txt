@@ -4704,3 +4704,62 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   `0`). Consequence for testing: no recording in this workspace can falsify a
   decoder that drops either field, so a mutation on them SURVIVES by
   construction rather than for want of a fixture.
+
+- PLAT-25's edit algebra lives in `src/frontend/viewmodel/editor/change_set.nim`
+  and `.../transaction.nim`. **The `before` flag of the rebase double mapping is
+  not a parameter of anything exported**: `mapOver` is private to
+  `change_set.nim` with exactly two call sites, both inside `rebase`, and
+  `test_editor_change_algebra.nim` scans the editor directory to assert that
+  (unexported, declared once, called twice, and no other module spelling
+  `before: bool`). If you need to move a change set over another — PLAT-26's
+  `changeByRange`, PLAT-32's `mapEvent`, PLAT-33's `receiveUpdates` /
+  `rebaseUpdates` — call `rebase(a, b)` and read the arm you want. Hand-writing
+  a copy makes that scan go red, which is the point.
+
+- Two things about that module that will surprise you if you read CodeMirror
+  first. (1) The `this.empty ? other` shortcut in `compose`/`map` is
+  deliberately NOT ported: it makes `LAW-A3` (`A ∘ id == A` as a VALUE) a test
+  of an `if`. (2) Composition is associative as a MAPPING and not as a value —
+  `(A∘B)∘C` and `A∘(B∘C)` can split one changed run differently, 933 times in
+  200,000 generated triples. CodeMirror's own associativity test compares
+  applied documents and never the values. Use `sameMapping`, not `==`, when you
+  mean "the same edit".
+
+- Nim's structural `==` REFUSES a `case` object outright ("parallel 'fields'
+  iterator does not work for 'case' objects"). Every object variant in this
+  tree that is compared needs a hand-written `==`; `change_set.nim` has three.
+
+- `std/random` is NOT usable in a suite that must draw the same population on
+  the C and JS backends: its state is two `uint64`, which `nim js` emulates.
+  `viewmodel/tests/generators/change_generator.nim` carries a 32-bit xorshift
+  for that reason, and pins its first draws in a case that runs on both lanes.
+
+- A generator that segments a corpus document per draw is the difference
+  between a 7-second suite and a 6-minute one. `change_generator` hoists every
+  corpus document's cluster boundaries into a module-level `let`
+  (`CorpusBoundaries`); before that the `vm-unit-js` run of
+  `test_editor_change_algebra.nim` took 5 m 55 s, after it 7.7 s, same output.
+
+- A cluster-aligned WINDOW of a corpus document is not automatically of that
+  document's class: the first window cut from `c7-illformed-long` contained no
+  ill-formed byte at all. `change_generator.classWitness` searches forward for a
+  window that witnesses its class, and the suite asserts every one does. If you
+  cut windows out of that corpus for anything else, do the same.
+
+- A `staticRead` source scan is only as WIDE as its subject list, and
+  `staticRead` takes a string literal — so the list is frozen and a NEW file in
+  the scanned directory is invisible. Measured: planting
+  `viewmodel/editor/rebase_copy.nim` with the exact forbidden spelling left
+  `test_editor_change_algebra.nim` at 130/130 green. The scan now also
+  enumerates the directory with a compile-time `walkDir` (which works on the JS
+  backend too, because it runs in the VM) and asserts the `.nim` set equals the
+  set it reads. Copy that pattern for any "no other module does X" check.
+
+- `git checkout -- <path>` on a file that was only `git add -N`'d TRUNCATES IT
+  TO ZERO BYTES: intent-to-add records the path with an empty blob, and the
+  checkout faithfully restores it. `git status --porcelain` shows such a file as
+  `" A"`; check `git cat-file -s :<path>` before reaching for a checkout. If you
+  lose one this way and it is a subject of a `staticRead` source scan, every
+  compiled test binary carries a verbatim copy — locate the file's first bytes
+  in the binary and grow the slice until its SHA-256 matches the recorded
+  control digest. That is how `change_set.nim` was recovered on 2026-09-18.
