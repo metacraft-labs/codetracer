@@ -157,6 +157,16 @@ BUILD_SIBLINGS="$ROOT_DIR/scripts/build-siblings.sh"
 DETECT_SIBLINGS="$ROOT_DIR/scripts/detect-siblings.sh"
 FIXTURE_SCHEMA="launcher-compat/v1"
 
+# Decoded-trace predicates.  They live in ci/lib because they are pure
+# functions of a `ct-print` document and are therefore testable on a host that
+# cannot run this gate -- see ci/test/launcher-recorder-decode-test.sh, which
+# drives exactly these functions against codetracer-trace-format-nim's real
+# `ct-print --full` goldens.  Sourced rather than duplicated so the tested code
+# and the shipped code are the same bytes.
+# shellcheck source=../lib/launcher-recorder-decode.sh
+# shellcheck disable=SC1091  # resolved at run time from $ROOT_DIR
+source "$ROOT_DIR/ci/lib/launcher-recorder-decode.sh"
+
 PASSED=0
 FAILED=0
 SCENARIOS=0
@@ -330,7 +340,23 @@ fixture_error() {
 }
 
 validate_fixture() {
-	local idx s id kind floor kinds=""
+	local idx s id kind floor shape kinds=""
+
+	# `recorder.version-prefix` was OPTIONAL, which made it the one expectation
+	# a fixture could switch off by saying nothing: `fx_get` returns empty and
+	# the `--version` banner check (Recorder-CLI-Conventions.md §7) simply does
+	# not run, with no trace of that in the output.  A recorder that genuinely
+	# does not implement `--version` has to SAY SO instead -- and the
+	# explanation becomes reviewable text in its own contract rather than an
+	# absence nobody can see.  Nothing is weakened: an absent key never
+	# asserted anything.
+	[[ -n $(fx_get recorder.version-prefix) || -n $(fx_get recorder.version-prefix-absent) ]] ||
+		fixture_error "'recorder.version-prefix' is not declared, and neither is 'recorder.version-prefix-absent'.
+  The driver checks the recorder's --version banner against that prefix
+  (Recorder-CLI-Conventions.md §7).  Omitting the key would silently turn that
+  check off.  Declare the prefix, or -- if this recorder really does not
+  implement --version -- declare 'recorder.version-prefix-absent' with the
+  reason, so the gap is a statement in the contract instead of a silence."
 	for idx in "${SCENARIO_IDX[@]}"; do
 		s="scenarios.$idx"
 		id="$(fx_get "$s.id")"
@@ -377,8 +403,43 @@ validate_fixture() {
 			fixture_error "record scenario '$id' declares 'expect.min-events: $floor'.
   A floor of 0 accepts an empty recording -- the exact vacuous pass this gate
   exists to prevent.  The floor must be at least 1."
-		[[ -n $(fx_list "$s.expect.function") ]] ||
-			fixture_error "record scenario '$id' declares no 'expect.function' -- the decode would be unchecked"
+		# The decoded document's shape decides which named-content key is
+		# required, and each shape REJECTS the other one rather than ignoring
+		# it: `expect.function` on a native-mcr fixture is unsatisfiable (the
+		# bundle has no function table), and a driver that merely skipped it
+		# would let a fixture declare an assertion that never runs.
+		shape="$(fx_get "$s.expect.trace-shape")"
+		[[ -n $shape ]] || shape="v4"
+		case $shape in
+		v4)
+			[[ -z $(fx_list "$s.expect.event-type") ]] ||
+				fixture_error "record scenario '$id' declares 'expect.event-type' on a 'v4' trace shape.
+  A v4 document's events carry a 'kind', not an 'event_type', so the assertion
+  could never hold.  Declare 'expect.function' for this shape, or say
+  'expect.trace-shape: native-mcr' if this recorder really writes an MCR bundle."
+			[[ -n $(fx_list "$s.expect.function") ]] ||
+				fixture_error "record scenario '$id' declares no 'expect.function' -- the decode would be unchecked"
+			;;
+		native-mcr)
+			[[ -z $(fx_list "$s.expect.function") ]] ||
+				fixture_error "record scenario '$id' declares 'expect.function' on a 'native-mcr' trace shape.
+  A native MCR bundle has no function table -- 'functions' is empty by
+  construction, because step/call/function structure for a native recording is
+  reconstructed at REPLAY time from the event stream plus DWARF.  The
+  assertion could only ever pass by accident, on the name turning up somewhere
+  else in the document.  Declare 'expect.event-type' instead."
+			[[ -n $(fx_list "$s.expect.event-type") ]] ||
+				fixture_error "record scenario '$id' declares no 'expect.event-type' -- the decode would be unchecked.
+  It is the native shape's counterpart to 'expect.function': the event kinds
+  the recorder must have captured, matched inside the decoded events."
+			;;
+		*)
+			fixture_error "record scenario '$id' declares 'expect.trace-shape: $shape'.
+  The driver implements two decoded-document shapes: 'v4' (the default, every
+  materialized-trace recorder) and 'native-mcr' (codetracer-native-recorder's
+  MCR bundle).  See ci/lib/launcher-recorder-decode.sh."
+			;;
+		esac
 		[[ -n $(fx_list "$s.expect.stdout-contains") ]] ||
 			fixture_error "record scenario '$id' declares no 'expect.stdout-contains' -- the recorded program's output would be unchecked"
 		# shellcheck disable=SC2016
@@ -651,6 +712,75 @@ step_build_recorder() {
 		echo "  WARNING: recorder artifact missing; continuing because ALLOW_MISSING=1" >&2
 	fi
 	echo "  recorder artifact: $artifact"
+
+	step_build_extra_siblings
+}
+
+# ---------------------------------------------------------------------------
+# Step 3b -- the OTHER repos a recorder's toolchain needs built, declared as
+# `build.also` in the fixture.
+#
+# WHY THIS EXISTS AT ALL, since four of the five edges do not use it.  A
+# recording toolchain is not always one repo.  On the NATIVE path the desktop
+# core does not spawn the recorder directly: `db_backend_record.nim`'s
+# `recordWithCtRrSupport` spawns `ct-native-replay` (codetracer-native-backend)
+# as `record --backend mcr -o <dir>/trace <program>`, and THAT process spawns
+# `ct-mcr` (codetracer-native-recorder's `ct_cli`) as
+# `record -o <dir>/trace.ct -- <program>`, which is what writes the CTFS
+# bundle.  The same binary also answers the `recognize --format=json` call that
+# classifies an extension-less argument in the first place
+# (src/ct/utilities/target_recognition.nim).  Two repos, both required, and an
+# unbuilt one fails deep inside the core with a message about a missing tool
+# rather than here with a remedy.
+#
+# Each entry names its own `sibling-key` (a scripts/build-siblings.sh key) and
+# the artifact that key is supposed to produce, exactly as the primary
+# `build.sibling-key` / `build.artifact` pair does, so nothing about a
+# particular repo is hardcoded in this driver.  A missing checkout, a failed
+# build or a missing artifact is a hard failure with the same no-skip rule as
+# the recorder's own build.
+# ---------------------------------------------------------------------------
+step_build_extra_siblings() {
+	local idx repo key art dir
+	while IFS= read -r idx; do
+		[[ -n $idx ]] || continue
+		repo="$(fx_get "build.also.$idx.repo")"
+		key="$(fx_get "build.also.$idx.sibling-key")"
+		art="$(fx_get "build.also.$idx.artifact")"
+		[[ -n $repo && -n $key && -n $art ]] ||
+			fixture_error "build.also[$idx] must declare 'repo', 'sibling-key' and 'artifact'.
+  Without all three the driver could neither build the sibling nor tell
+  whether the build produced anything."
+		dir="$WS_ROOT/$repo"
+		if [[ ! -d $dir ]]; then
+			[[ $ALLOW_MISSING == "1" ]] ||
+				die "the fixture declares build.also '$repo', which is not checked out at $dir.
+  This edge's recording toolchain spans more than one repository (see
+  build.also in $FIXTURE); a missing one is a HARD FAILURE, never a skip."
+			echo "  WARNING: build.also '$repo' absent; continuing because ALLOW_MISSING=1" >&2
+			continue
+		fi
+		echo "  also building: $key (for $repo)"
+		if [[ $SKIP_BUILDS != "1" ]]; then
+			if ! bash "$BUILD_SIBLINGS" --only "$key" >"$WORK_DIR/also-$idx-build.log" 2>&1; then
+				sed -n '1,80p' "$WORK_DIR/also-$idx-build.log" >&2
+				[[ $ALLOW_MISSING == "1" ]] ||
+					die "building the declared sibling '$key' failed
+  (log: $WORK_DIR/also-$idx-build.log).
+  It is part of this edge's recording toolchain, not an optional extra."
+				echo "  WARNING: '$key' build failed; continuing because ALLOW_MISSING=1" >&2
+			fi
+			grep -E '^\s+(PASS|SKIP|FAIL|MISSING)' "$WORK_DIR/also-$idx-build.log" | sed 's/^/  | /' || true
+		fi
+		if [[ ! -e "$dir/$art" ]]; then
+			[[ $ALLOW_MISSING == "1" ]] ||
+				die "building '$key' produced no '$art' under $dir.
+  That path comes from the contract fixture (build.also[$idx].artifact)."
+			echo "  WARNING: '$repo/$art' missing; continuing because ALLOW_MISSING=1" >&2
+		fi
+		echo "  also artifact: $dir/$art"
+	done < <(grep -o '^build\.also\.[0-9]\+\.repo=' "$FLAT" 2>/dev/null |
+		sed 's/^build\.also\.//; s/\.repo=$//')
 }
 
 # ---------------------------------------------------------------------------
@@ -873,6 +1003,12 @@ step_export_discovery() {
 				bad "recorder --version '$vout' does not start with '$FX_VERSION_PREFIX'"
 				;;
 			esac
+		else
+			# validate_fixture has already required one of the two keys, so
+			# reaching here means the fixture DECLARED the gap.  Print the
+			# declared reason: an unrun check that announces itself is a
+			# recorded debt; one that stays silent is a vacuous pass.
+			note "no --version check for '$FX_BINARY': $(fx_get recorder.version-prefix-absent)"
 		fi
 	fi
 }
@@ -925,12 +1061,29 @@ begin_scenario() {
 # this, renaming a sample to a different extension would quietly change which
 # routing rule the scenario exercises while the fixture still claimed the old
 # one.
+#
+# `noext` is a routing key too, and it is the ABSENCE of an extension rather
+# than one.  It is the capability file's reserved token for that case (rule
+# NTR-R1, codetracer-specs/Planned-Features/Native-Target-Recognition.md §4;
+# `NoextToken` / `classifySuffix` in codetracer-launcher/src/caps.nim), and it
+# is what carries `ct record <native binary>` to the desktop component.  The
+# `.${sample##*.}` form below is meaningless for such an argument -- for a
+# dot-less path it expands to `.` followed by the whole path -- so this arm
+# asserts the property the token actually names: the sample the scenario
+# records really has no extension.  Without it a native fixture could only ever
+# state its routing key by writing something false.
 assert_declared_extension() {
-	local id="$1" declared="$2" sample="$3"
+	local id="$1" declared="$2" sample="$3" base
 	[[ -n $declared ]] || {
 		bad "$id: the fixture declares no 'extension' — the routing key under test would be unstated"
 		return
 	}
+	if [[ $declared == "noext" ]]; then
+		base="$(basename -- "$sample")"
+		assert_true "$id: the sample '$base' carries no extension, which is what the 'noext' routing key names" \
+			test "$base" = "${base%%.*}"
+		return
+	fi
 	assert_eq "$id: the sample's extension is the declared routing key" \
 		"$declared" ".${sample##*.}"
 }
@@ -1072,28 +1225,98 @@ scenario_record() {
 			bad "$id: decoded only $event_count events, fixture requires >= $min_events"
 		fi
 	fi
+	# --- which document shape did we get, and is it the declared one? ------
+	#
+	# `ct-print --full` emits two different documents, and the emptiness guard
+	# and the named-content assertion below both depend on which: a
+	# materialized `v4` trace reports steps/calls/values and a `functions`
+	# table, while a `native-mcr` bundle reports thread/OS-event counts and has
+	# no function table at all (ci/lib/launcher-recorder-decode.sh explains
+	# why, and why that is honest rather than a decoder defect).
+	#
+	# The fixture DECLARES which shape its recorder produces and the driver
+	# checks the decode against that declaration, so neither direction can go
+	# unnoticed: a v4 recorder that started emitting a native document, or a
+	# native fixture pointed at a v4 recorder, fails here by name instead of
+	# silently taking the other branch's assertions.  `expect.trace-shape` is
+	# optional and defaults to `v4` -- the fail-safe default, because a native
+	# bundle read as v4 fails the guard on its hard-zero `steps`.
+	local want_shape got_shape
+	want_shape="$(fx_get "$s.expect.trace-shape")"
+	[[ -n $want_shape ]] || want_shape="v4"
+	got_shape="$(lrd_trace_shape "$full_f")"
+	assert_eq "$id: the decoded document has the declared '$want_shape' shape" \
+		"$want_shape" "$got_shape"
+
 	# The "0 events"/"0 steps" emptiness the design calls out (§5.5): a trace
-	# file can exist, decode cleanly, and still describe nothing.  ct-print
-	# prints an ABSENT stream as -1 (not 0), so a trace missing its
-	# step/call/event stream entirely slips past a check written only for 0 and
-	# yields a falsely reassuring pass (audit "Hole B").  Treat zero OR negative
-	# as empty; `expect.min-events` (>= 1, enforced in validate_fixture) is the
-	# positive floor that backs this up.
-	if grep -qE '"(steps|calls|events)"[[:space:]]*:[[:space:]]*(0|-[0-9]+)([,}]|$)' "$full_f" "$meta_f"; then
-		bad "$id: the decoded trace reports a zero or absent stream count -- an empty recording"
+	# file can exist, decode cleanly, and still describe nothing.
+	#
+	# v4: ct-print prints an ABSENT stream as -1 (not 0), so a trace missing
+	# its step/call/event stream entirely slips past a check written only for 0
+	# and yields a falsely reassuring pass (audit "Hole B").  Treat zero OR
+	# negative as empty; `expect.min-events` (>= 1, enforced in
+	# validate_fixture) is the positive floor that backs this up.
+	#
+	# native-mcr: the same PROPERTY, asserted over the count keys that carry it
+	# for that shape, and positively -- see lrd_native_empty_reason().  This is
+	# not a relaxation for the native edge: `steps`/`calls` are hard zeroes in
+	# every native bundle because the container has no step or call table to
+	# report, so reading them as "empty" would reject every correct recording
+	# while saying nothing about whether anything was recorded.
+	local empty_reason
+	case "$got_shape" in
+	v4)
+		empty_reason="$(lrd_v4_empty_reason "$full_f" "$meta_f")" && empty_reason=""
+		;;
+	native-mcr)
+		empty_reason="$(lrd_native_empty_reason "$full_f")" && empty_reason=""
+		;;
+	*)
+		empty_reason="the decoded document matches neither the v4 nor the native-mcr shape, so no emptiness check applies to it"
+		;;
+	esac
+	if [[ -n $empty_reason ]]; then
+		bad "$id: the decoded trace describes an empty recording -- $empty_reason"
 	else
-		ok "$id: the decoded trace reports no empty (zero or absent) stream"
+		ok "$id: the decoded trace reports no empty stream ($got_shape shape)"
 	fi
 
-	# --- the sample program's known functions -----------------------------
-	local fn found=0
-	while IFS= read -r fn; do
-		[[ -n $fn ]] || continue
-		found=1
-		assert_contains "$id: decoded trace contains function '$fn'" "\"$fn\"" "$full_f"
-	done < <(fx_list "$s.expect.function")
-	[[ $found -eq 1 ]] ||
-		bad "$id: the fixture declares no expected functions -- the decode would be unchecked"
+	# --- the named content the sample is supposed to have produced --------
+	#
+	# v4 declares `expect.function` and the names are looked up IN THE
+	# `functions` ARRAY.  This used to be a grep for the quoted name over the
+	# whole document, which `metadata.program`, a `paths[]` entry, a varname, a
+	# type name or a printable recorded payload could all satisfy -- so a
+	# fixture could go green on a function the trace never recorded.
+	#
+	# native-mcr declares `expect.event-type` instead, because a native bundle
+	# has no function table: its named content is the event kinds the recorder
+	# captured (`evOsWrite`, ...), matched as a key/value pair so it is scoped
+	# the same way.  validate_fixture requires exactly one of the two, chosen
+	# by the declared shape, so neither can be dropped.
+	local item found=0
+	case "$want_shape" in
+	native-mcr)
+		while IFS= read -r item; do
+			[[ -n $item ]] || continue
+			found=1
+			assert_true "$id: the decoded trace contains an event of type '$item'" \
+				lrd_event_type_present "$full_f" "$item"
+		done < <(fx_list "$s.expect.event-type")
+		[[ $found -eq 1 ]] ||
+			bad "$id: the fixture declares no expected event types -- the decode would be unchecked"
+		;;
+	*)
+		while IFS= read -r item; do
+			[[ -n $item ]] || continue
+			found=1
+			assert_true "$id: the decoded trace's functions table contains '$item'" \
+				lrd_functions_contains "$full_f" "$item"
+		done < <(fx_list "$s.expect.function")
+		[[ $found -eq 1 ]] ||
+			bad "$id: the fixture declares no expected functions -- the decode would be unchecked"
+		;;
+	esac
 
 	# --- the sample program's stdout, AS RECORDED -------------------------
 	#
@@ -1113,6 +1336,15 @@ scenario_record() {
 			b64="$(printf '%s' "$expanded" | base64 -w0 2>/dev/null || printf '%s' "$expanded" | base64 | tr -d '\n')"
 			if [[ -n $b64 ]] && grep -qF -- "$b64" "$full_f"; then
 				ok "$id: recorded stdout contains '$expanded' (base64 payload)"
+			elif lrd_payload_contains "$full_f" "$expanded"; then
+				# Third and most general form: decode the payload bytes and
+				# search THEM.  Required for a native recording and harmless
+				# for a v4 one -- see lrd_payload_contains() for the two
+				# measured reasons the first two forms miss an `evOsWrite`
+				# payload (a 16-byte binary header suppresses ct-print's
+				# printable `text` rendering, and base64 is not
+				# substring-preserving at a 16-byte offset).
+				ok "$id: recorded stdout contains '$expanded' (inside a decoded event payload)"
 			else
 				bad "$id: recorded stdout is missing '$expanded'"
 			fi

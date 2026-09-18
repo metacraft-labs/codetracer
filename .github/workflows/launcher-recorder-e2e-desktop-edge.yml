@@ -143,16 +143,33 @@
 # and NTR-4 in
 # codetracer-specs/Planned-Features/Native-Target-Recognition.milestones.org:
 #
-#   native.  ROUTING is solved and shipped -- rule NTR-R1's reserved `noext`
+#   native.  UPDATED 2026-09-19, and the reason is no longer the one below.
+#     ROUTING was already solved and shipped -- rule NTR-R1's reserved `noext`
 #     token on this repo's `record` line carries an extension-less argument, and
-#     `resources/codetracer-desktop-capabilities` declares it.  What is missing
-#     is the CONTRACT: codetracer-native-recorder has no
-#     `cross-repo/launcher-compat.yml`, the driver's `assert_declared_extension`
-#     has no `noext` arm, and `ct-print`'s native decoder emits `counts.steps`
-#     and `counts.calls` as hard-coded 0 with an always-empty `functions` array,
-#     so the driver's empty-recording guard would fire and `expect.function`
-#     could only pass by accident.  A fixture would fail before its first
-#     assertion, so none is checked in.
+#     `resources/codetracer-desktop-capabilities` declares it.  What used to be
+#     missing was the CONTRACT, and that is now landed: codetracer-native-recorder
+#     carries `cross-repo/launcher-compat.yml` and its compiled extension-less
+#     sample, `assert_declared_extension` has a `noext` arm, the
+#     empty-recording guard is shape-aware (a native bundle's `counts.steps` /
+#     `counts.calls` are hard zeroes and are no longer read as emptiness, while
+#     `counts.thread_streams` / `counts.thread_events` are asserted positively),
+#     the function assertion is answered from the `functions` array with
+#     `expect.event-type` as the native shape's counterpart, and the recorded
+#     stdout is found by decoding the event payloads.  All of that is pinned by
+#     ci/test/launcher-recorder-decode-test.sh against real ct-print goldens.
+#
+#     THE ROW IS STILL ABSENT HERE, DELIBERATELY, and this is a judgement rather
+#     than an oversight.  The native edge has never executed: no host available
+#     to this initiative can build BOTH the desktop core and the launcher, so
+#     the two hops between `ct record` and `ct-mcr` -- the launcher's execv, and
+#     the core's `ct-native-replay recognize` / `record --backend mcr` dispatch
+#     -- are unproven.  The recorder-side caller
+#     (codetracer-native-recorder/.github/workflows/launcher-recorder-e2e.yml)
+#     is landed so that first execution happens somewhere, in a repo that owns
+#     the outcome.  Adding the row HERE before it has gone green once would put
+#     a known-unknown arm into a gate that three green arms share, and turn this
+#     workflow red on every push to `dev` for a reason that has nothing to do
+#     with the commit under test.  Add the row the day the recorder edge passes.
 # =============================================================================
 
 name: launcher-recorder-e2e (desktop edge)

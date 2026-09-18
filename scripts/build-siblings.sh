@@ -300,6 +300,24 @@ build_sibling \
 	ct_cli/ct_cli \
 	"just build-ct-mcr"
 
+# The native edge's E2E sample: a compiled, EXTENSION-LESS binary.
+#
+# A separate key rather than a step inside `just build-ct-mcr`, because the two
+# are wanted independently: every consumer of the recorder wants ct_cli, and
+# only `ci/test/launcher-recorder-e2e.sh` wants the sample.  It is named by
+# that edge's contract fixture
+# (codetracer-native-recorder/cross-repo/launcher-compat.yml, `build.also`),
+# which is what makes the driver build it before any scenario runs.
+#
+# It cannot be checked in: the routing key the scenario exercises is the
+# ABSENCE of an extension, so the sample has to be a real executable, and a
+# committed binary would be unreviewable and host-specific.
+build_sibling \
+	codetracer-native-recorder \
+	cross-repo/samples/launcher_compat_sample \
+	"just build-launcher-compat-sample" \
+	codetracer-native-recorder/launcher-compat-sample
+
 # JavaScript recorder (Node CLI + napi-rs native addon).
 #
 # The canonical build is the recorder repo's own `just build` recipe, which

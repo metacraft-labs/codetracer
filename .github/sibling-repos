@@ -29,9 +29,19 @@
 # there) and drop the triggering repo (which cannot be one).  The same test
 # file asserts that every name that workflow can emit is declared here, so the
 # two cannot drift.
+#
+# `codetracer-native-backend` is here for the NATIVE edge, and it is the one
+# name that is not a recorder or an oracle.  `ct record <extension-less
+# binary>` does not reach codetracer-native-recorder directly: the desktop core
+# runs `ct-native-replay recognize --format=json` to classify the argument and
+# then `ct-native-replay record --backend mcr`, and only THAT spawns `ct-mcr`.
+# `ct-native-replay` is built from this repo, so the native edge spans five
+# repos.  The reusable workflow reaches it through its `extra-siblings:` input
+# rather than through `recorder-repo`.
 codetracer-launcher
 codetracer-trace-format-nim
 codetracer-python-recorder
 codetracer-ruby-recorder
 codetracer-js-recorder
 codetracer-beam-recorder
+codetracer-native-backend

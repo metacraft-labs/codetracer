@@ -1120,6 +1120,26 @@ test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
 test-launcher-recorder-e2e-wiring:
   bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
+# Verify the DECODED-TRACE reasoning of the gate above, which the gate itself
+# can only exercise after a launcher, a built core, a recorder and `ct-print`
+# are all in place.  The trace-shape discrimination, the empty-recording guard,
+# the `functions`/`event_type` lookups, the recorded-payload search and the
+# `noext` routing key are pure functions of a `ct-print` document, so this
+# drives them -- the shipped functions, extracted from the shipped files --
+# against codetracer-trace-format-nim's own REAL `ct-print --full` goldens for
+# both trace families.  It is what pins the two facts the shape-aware guard
+# exists for: `ct-print` reports a correct native MCR recording as
+# `counts.steps: 0` / `counts.calls: 0` (so the v4 predicate rejects it) and as
+# `counts.io_events: 0` (so a native predicate must NOT require that key).  It
+# also re-validates every recorder contract fixture checked out beside this
+# repo, so a schema change cannot silently invalidate a green edge's fixture.
+# Twelve internal mutations plus a positive control.  Needs the
+# codetracer-trace-format-nim sibling; a missing one is a hard failure.
+# Stock bash: no Nix, no dev shell, no network.
+# See ci/test/launcher-recorder-decode-test.sh.
+test-launcher-recorder-decode:
+  bash ci/test/launcher-recorder-decode-test.sh
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!

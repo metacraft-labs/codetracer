@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Contract: the launcher <-> recorder E2E workflow and its six callers agree,
+# Contract: the launcher <-> recorder E2E workflow and its seven callers agree,
 # the repo under test is pinned to the commit under test, the triggering repo is
 # never listed as its own sibling, and no sibling revision is pinned by anything
 # but the workspace lock.
@@ -72,9 +72,14 @@
 #   3. The (caller x recorder) combinations are DERIVED from the callers' own
 #      matrices rather than transcribed here, so a recorder added to a fan-out
 #      cannot escape the checks below; the known twelve are a floor.
-#   4. For each derived combination: the planner emits exactly 3 siblings, the
-#      triggering repo is NOT among them, no entry carries `=<ref>`, and
-#      `ct-dir` points at the codetracer checkout.
+#   4. For each derived combination: the planner emits the sibling set that
+#      combination's caller declares -- the three fixed repos minus the trigger,
+#      plus any `extra-siblings:` the caller passes -- the triggering repo is
+#      NOT among them, no entry carries `=<ref>`, and `ct-dir` points at the
+#      codetracer checkout.  The extras are held to every one of those
+#      invariants separately, because they reach `clone-siblings` by the same
+#      route and an entry naming the trigger would `rm -rf` the primary
+#      checkout just as readily.
 #   5. A caller that is none of the four repos is refused.
 #   6. `workflow_call` contract: every `with:` key a caller passes is a
 #      declared input; every REQUIRED input is passed; secrets are inherited.
@@ -208,6 +213,19 @@ caller_recorders() {
 	' | sort -u
 }
 
+# caller_extra_siblings FILE -> the value of `extra-siblings:` in this caller's
+# `with:`, or empty.  DERIVED for the same reason `caller_recorders` is: the
+# planner's sibling count depends on it, so transcribing it here would let a
+# caller add an extra sibling that this suite never simulates and never checks
+# against the clone-list.
+caller_extra_siblings() {
+	strip_cr "$1" | awk '
+		/^[[:space:]]*extra-siblings:[[:space:]]+[^ ]+[[:space:]]*$/ {
+			if ($2 !~ /\$\{\{/) print $2
+		}
+	' | sort -u | tr '\n' ' ' | sed 's/ *$//'
+}
+
 # checkout_ref FILE -> the `ref:` of the primary `actions/checkout` step, and
 # the `uses:` line it belongs to, as `<uses><TAB><ref>`.
 #
@@ -253,7 +271,7 @@ plan_env_block() {
 }
 
 # ---------------------------------------------------------------------------
-# The six callers, discovered once.  The in-repo one is mandatory; the five
+# The seven callers, discovered once.  The in-repo one is mandatory; the six
 # remote ones are read from their sibling checkouts, and a sibling that is
 # present but carries no caller is a failure rather than a silent pass.
 #
@@ -262,13 +280,19 @@ plan_env_block() {
 # that its caller existed but was never read here, so nothing checked that it
 # passed a declared input set or that its planner emitted a sane sibling list.
 #
+# codetracer-native-recorder joined on 2026-09-19 with LRC-4's native edge.  It
+# is the first caller to pass `extra-siblings:` (codetracer-native-backend,
+# which builds the `ct-native-replay` the desktop core actually spawns), so it
+# is also the case that proves the planner carries an extra sibling through
+# every invariant the fixed four go through.
+#
 # Each entry is `<file>|<label>|<github.repository short name>`.
 # ---------------------------------------------------------------------------
 declare -a CALLER_FILES=("$DESKTOP_EDGE")
 declare -a CALLER_LABELS=("codetracer/launcher-recorder-e2e-desktop-edge.yml")
 declare -a CALLER_REPOS=("codetracer")
 declare -a CALLER_ABSENT=()
-for sib in codetracer-launcher codetracer-python-recorder codetracer-ruby-recorder codetracer-js-recorder codetracer-beam-recorder; do
+for sib in codetracer-launcher codetracer-python-recorder codetracer-ruby-recorder codetracer-js-recorder codetracer-beam-recorder codetracer-native-recorder; do
 	sib_wf="$PARENT_DIR/$sib/.github/workflows/launcher-recorder-e2e.yml"
 	if [ -f "$sib_wf" ]; then
 		CALLER_FILES+=("$sib_wf")
@@ -393,8 +417,8 @@ _plan_siblings=""
 _plan_self=""
 _plan_ctdir=""
 
-run_plan() { # $1 = owner/repo, $2 = recorder repo
-	local repo_full="$1" recorder="$2"
+run_plan() { # $1 = owner/repo, $2 = recorder repo, $3 = extra siblings (optional)
+	local repo_full="$1" recorder="$2" extras="${3:-}"
 	local short="${repo_full##*/}"
 	local root ws out
 	root="$TMP/run.$$.$RANDOM"
@@ -410,6 +434,7 @@ run_plan() { # $1 = owner/repo, $2 = recorder repo
 			EDGE="simulated edge" \
 			RECORDER_REPO="$recorder" \
 			RECORDER_LANG="sim" \
+			EXTRA_SIBLINGS="${extras// /$'\n'}" \
 			SELF_SHA="0123456789abcdef0123456789abcdef01234567" \
 			bash "$PLAN" 2>&1
 	)"
@@ -424,14 +449,14 @@ run_plan() { # $1 = owner/repo, $2 = recorder repo
 # LAST run_plan result.  This is the real rule set; the mutation section drives
 # the same function so that neutralising a rule here cannot go unnoticed.
 plan_case_violations() {
-	local label="$1" short="$2" count sib
+	local label="$1" short="$2" want="${3:-3}" count sib
 	if [ "$_plan_rc" -ne 0 ]; then
 		echo "$label: planner exited $_plan_rc: $_plan_out"
 		return
 	fi
 	count="$(printf '%s\n' "$_plan_siblings" | grep -c '[^[:space:]]')"
-	if [ "$count" -ne 3 ]; then
-		echo "$label: emitted $count sibling(s), expected 3: $(printf '%s' "$_plan_siblings" | tr '\n' ' ')"
+	if [ "$count" -ne "$want" ]; then
+		echo "$label: emitted $count sibling(s), expected $want: $(printf '%s' "$_plan_siblings" | tr '\n' ' ')"
 	fi
 	while IFS= read -r sib; do
 		[ -z "$sib" ] && continue
@@ -480,9 +505,13 @@ for i in "${!CALLER_FILES[@]}"; do
 		derive_bad+=("${CALLER_LABELS[$i]}: no recorder repo could be derived from it (neither a matrix row nor a literal recorder-repo:)")
 		continue
 	fi
+	# Any `extra-siblings:` the caller declares travels with every case it
+	# contributes, so the planner is simulated with exactly what CI will pass
+	# it and the resulting sibling list is checked against the clone-list.
+	extras="$(caller_extra_siblings "$f")"
 	while IFS= read -r rec; do
 		[ -z "$rec" ] && continue
-		CALLER_CASES+=("metacraft-labs/${CALLER_REPOS[$i]}|$rec")
+		CALLER_CASES+=("metacraft-labs/${CALLER_REPOS[$i]}|$rec|$extras")
 	done <<<"$recs"
 done
 
@@ -520,7 +549,10 @@ for want in "${KNOWN_FLOOR[@]}"; do
 	floor_reachable=$((floor_reachable + 1))
 	found=0
 	for have in ${CALLER_CASES[@]+"${CALLER_CASES[@]}"}; do
-		[ "$have" = "$want" ] && found=1
+		# A case is `<caller>|<recorder>|<extras>`; the floor names the first
+		# two fields, because whether an edge needs extra siblings is the
+		# caller's business and not part of "this combination is reachable".
+		[ "${have%|*}" = "$want" ] && found=1
 	done
 	[ "$found" -eq 1 ] || derive_bad+=("the known combination '$want' was not derived from the caller workflows; the matrix parser regressed or a caller lost a row")
 done
@@ -539,14 +571,23 @@ EMITTED_SIBLINGS=""
 plan_bad=()
 for case_spec in ${CALLER_CASES[@]+"${CALLER_CASES[@]}"}; do
 	repo_full="${case_spec%%|*}"
-	recorder="${case_spec##*|}"
+	case_rest="${case_spec#*|}"
+	recorder="${case_rest%%|*}"
+	extras="${case_rest#*|}"
+	[ "$extras" = "$recorder" ] && extras=""
 	short="${repo_full##*/}"
-	run_plan "$repo_full" "$recorder"
-	label="$short + $recorder"
+	run_plan "$repo_full" "$recorder" "$extras"
+	# Three from the four fixed repos minus the trigger, plus whatever the
+	# caller declared as extra siblings.  Counted from the caller's own file,
+	# so an extra that is added without being cloned -- or cloned without being
+	# declared -- shows up as a violation rather than as a new normal.
+	want_count=3
+	for _e in $extras; do want_count=$((want_count + 1)); done
+	label="$short + $recorder${extras:+ (+$extras)}"
 
 	while IFS= read -r v; do
 		[ -n "$v" ] && plan_bad+=("$v")
-	done < <(plan_case_violations "$label" "$short")
+	done < <(plan_case_violations "$label" "$short" "$want_count")
 
 	while IFS= read -r sib; do
 		[ -z "$sib" ] && continue
@@ -555,10 +596,42 @@ for case_spec in ${CALLER_CASES[@]+"${CALLER_CASES[@]}"}; do
 done
 
 if [ "${#plan_bad[@]}" -eq 0 ]; then
-	ok "all ${#CALLER_CASES[@]} caller/recorder combinations emit 3 lock-resolved siblings, none of them the trigger"
+	ok "all ${#CALLER_CASES[@]} caller/recorder combinations emit the sibling set their caller declares, none of them the trigger"
 else
-	fail "all caller/recorder combinations emit 3 lock-resolved siblings, none of them the trigger" \
+	fail "all caller/recorder combinations emit the sibling set their caller declares, none of them the trigger" \
 		"${plan_bad[@]}"
+fi
+
+# `extra-siblings` carries the SAME invariants as the fixed four, and each one
+# is checked here rather than trusted.  An extra sibling reaches
+# `clone-siblings` exactly as any other entry does, so an entry naming the
+# triggering repo would `rm -rf` the primary checkout, an entry carrying
+# `=<ref>` would pin a branch tip instead of the workspace lock, and a
+# duplicate of a fixed name would be cloned twice.
+extras_bad=()
+run_plan "metacraft-labs/codetracer-native-recorder" "codetracer-native-recorder" "codetracer-native-backend"
+if [ "$_plan_rc" -ne 0 ]; then
+	extras_bad+=("a valid extra sibling was refused: $_plan_out")
+elif ! grep -qx 'codetracer-native-backend' <<<"$_plan_siblings"; then
+	extras_bad+=("the extra sibling was not emitted: $(printf '%s' "$_plan_siblings" | tr '\n' ' ')")
+fi
+run_plan "metacraft-labs/codetracer-native-recorder" "codetracer-native-recorder" "codetracer-native-recorder"
+if [ "$_plan_rc" -eq 0 ] || ! grep -q 'IS the triggering repo' <<<"$_plan_out"; then
+	extras_bad+=("an extra sibling naming the TRIGGERING repo was not refused (clone-siblings would rm -rf the primary checkout)")
+fi
+run_plan "metacraft-labs/codetracer-native-recorder" "codetracer-native-recorder" "codetracer-native-backend=dev"
+if [ "$_plan_rc" -eq 0 ] || ! grep -q "carries an explicit" <<<"$_plan_out"; then
+	extras_bad+=("an extra sibling carrying '=<ref>' was not refused; its revision must come from the workspace lock")
+fi
+run_plan "metacraft-labs/codetracer-native-recorder" "codetracer-native-recorder" "codetracer-launcher"
+if [ "$_plan_rc" -eq 0 ] || ! grep -q "already one of this gate" <<<"$_plan_out"; then
+	extras_bad+=("an extra sibling duplicating one of the four fixed repos was not refused")
+fi
+if [ "${#extras_bad[@]}" -eq 0 ]; then
+	ok "an extra sibling is emitted, and is held to every invariant the fixed four are"
+else
+	fail "an extra sibling is emitted, and is held to every invariant the fixed four are" \
+		"${extras_bad[@]}"
 fi
 
 run_plan "metacraft-labs/codetracer-beam-recorder" "codetracer-python-recorder"
@@ -1162,7 +1235,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=18
+readonly EXPECTED_ASSERTIONS=19
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
