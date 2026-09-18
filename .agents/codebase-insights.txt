@@ -4927,3 +4927,82 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   whose failures look like a mutation you have already fixed is a stale cache
   until proven otherwise. Clear the suite's nimcache before believing a red,
   and before believing a green you intend to publish a number from.
+
+- A PER-FILE `<module>.nim.cfg` IS THE WAY TO GIVE ONE SUITE A COMPILER FLAG
+  THE LANE SUPPLIES BUT A DIRECT `nim c -r` DOES NOT. Every `vm-*` lane passes
+  `--path:src/frontend/viewmodel` (`ci/lib/test-lane-files.sh`), because
+  `codetracer_embed` is imported by bare module name; `ci/test/editor-model-
+  case-floor.sh` runs `nim c -r` itself and carries no lane flags, so a suite
+  that imports `frontend/view_vocabulary/editor_surface.nim` compiles in the
+  lane and not in the gate. `test_editor_decoration_examples.nim.cfg` carries
+  the one switch, spelled `--path:"$config/../.."` so it resolves relative to
+  the cfg rather than to the working directory. Nim reads `<file>.nim.cfg` for
+  the main module only — `src/frontend/lsp.nim.cfg` is the same mechanism — and
+  a `nim.cfg` in `viewmodel/tests/unit/` would change every suite in the
+  directory at once. Verified 2026-09-18 on the C, JS and wasm32 backends.
+
+- `viewmodel/editor/` NOW HAS THIRTEEN MODULES AND *THREE* SUITES SCAN IT BY
+  COMPILE-TIME `walkDir`. Adding a module to that directory turns
+  `test_editor_change_algebra.nim`, `test_editor_wrap_laws.nim` and
+  `test_editor_decoration_laws.nim` red BY NAME on the next run, before the new
+  module's own suite exists. That is the mechanism working (Verification-
+  Harness-Traps §35) and the repair is one entry in each list plus each file's
+  `ExpectedAssertions`. Re-read the CLAIM as well as the list: PLAT-27's scan
+  said "no module other than `wrap.nim` mentions `WrapSettings`", which stopped
+  being the right claim when `inlay.nim` arrived taking the settings as a
+  PARAMETER — the repair was to split projection modules from state modules and
+  assert both halves, not to add a name.
+
+- AN INLINE WIDGET IS A `ClusterCell` OF ZERO BYTES AND W CELLS, and that is why
+  `wrap.nim` knows nothing about decorations. `inlay.inlayLineMetrics` injects
+  them and `wrap.wrapCacheOfMetrics` takes the metrics; `wrapLine`, `toDisplay`,
+  `toLogical` and the twelve display motions are untouched. Two things to know
+  before editing either: (1) the columns after a widget must be RE-DERIVED with
+  `cellsOf`, never shifted by W, because a tab re-grids — at `tabSize = 4` a
+  3-cell widget moves a following tab's END by 4; (2) the WRAP DECISION in
+  `wrapLine` accumulates each cluster's `cells` and never consults its
+  `column`, so zeroing a widget's column advance does NOT stop a line wrapping
+  — `wrapLine` does read `column`, at `wrap.nim:354`, but only to label a new
+  row's `startColumn` once the break has already been decided. Zeroing the
+  advance therefore moves where rows say they start, not whether they exist.
+  `updateWrapCache` refuses a
+  decorated cache outright, because the splice recomputes a touched line's
+  metrics from its TEXT.
+
+- `emcc` IS IN THE DEV SHELL, SO THE WASM32 LANE CAN BE VERIFIED LOCALLY —
+  WHICH THREE EARLIER MILESTONES RECORDED AS IMPOSSIBLE. Measured 2026-09-18:
+  `emscripten-4.0.12-git`, on `PATH` inside
+  `nix develop --override-input reprobuild path:../reprobuild`. The earlier
+  "emcc is absent" reports came from a PARTIALLY-RESOLVED shell — the check was
+  run somewhere the flake's inputs had not finished resolving, and the absence
+  was then carried forward as a property of the repo. `vm-unit-wasm` is
+  `vm-unit` minus six files and its build command is in
+  `ci/lib/run-nim-test-lane.sh`'s `wasm` branch: `nim c --cpu:wasm32 --os:linux
+  -d:emscripten --cc:clang --clang.exe:emcc --mm:orc`, run under node. If a
+  bare `node` is not on PATH in your shell, use the `nodejs-22.22.2` store path
+  from the repo's direnv profile.
+
+  **The rule this replaces a wrong bullet with: a backend you did not run is
+  not evidence, in EITHER direction.** The bullet that stood here claimed a
+  wasm32-only miscompilation in `wrap.wrapCacheOfMetrics` — that deriving rows
+  from the `seq[LineMetrics]` parameter rather than from `result.metrics` read
+  widget clusters as zero cells, and that eleven cases were red on that target.
+  Running the lane disproved every part of it: the wasm32 suites are 129/1,266
+  and 46/327 with ZERO failures, identical to C and JS; reverting to the
+  pre-fix spelling leaves the laws suite green on wasm32; a direct probe reads
+  the widget cluster as TEN cells with `rowsInLine(0) == 2`; and `--mm:orc` and
+  `--mm:arc` agree at debug, `-d:release` and `-d:danger`. `result.metrics[i]`
+  is kept as a neutral refactor and carries no defect claim.
+
+  Practically: the wasm lane is CHEAP now, so run it before publishing a "green
+  on both backends" number — and if you find it genuinely disagreeing with C
+  and JS, that is a real finding worth this much space. Do not write one you
+  have not seen.
+
+- A MUTATION HARNESS MAKES EVERY READ OF THE TREE UNTRUSTWORTHY, NOT JUST EVERY
+  COMPILE. The bullets above say this about builds; it is equally true of
+  `git diff`, `git status`, an editor and a reviewer. A `git diff` taken while
+  `run-plat27-coordinate-mutations.py` was running showed arm M12's edit to
+  `wrapLine` as though it were a local change. Check quiescence with
+  `fuser <subject files>` — no output and exit 1 means nobody holds them — and
+  re-read after.

@@ -208,6 +208,14 @@ type
     lineStart: seq[int]   ## len == metrics.len; the DOCUMENT offset each line begins at
     docLen: int
     lineCount: int
+    hasWidgets: bool
+      ## Whether any line's metrics carry a cluster of ZERO bytes and positive
+      ## cells — which is what PLAT-28's `inlay.nim` injects and what nothing
+      ## a segmenter produces can be. It exists for exactly one reason:
+      ## `updateWrapCache` recomputes a touched line's metrics FROM THE TEXT,
+      ## so splicing a decorated cache would silently drop the widgets on the
+      ## edited lines. It RAISES instead (§36a) and names the routine that
+      ## does it properly.
 
   GutterFacts* = object
     ## §9's *"which display rows of a wrapped logical line carry a line number
@@ -358,7 +366,7 @@ func wrapLine*(m: LineMetrics; line, wrapColumn: int): seq[DisplayRow] =
 # THE CACHE
 # ===========================================================================
 
-proc splitLines(doc: string): seq[string] =
+proc documentLines*(doc: string): seq[string] =
   ## `'\n'`-delimited, the same convention `TextStore` uses: `lineCount` is
   ## `newlineCount + 1` and a trailing newline means a final empty line. Spelled
   ## here rather than imported from `strutils.splitLines`, which also splits on
@@ -387,19 +395,89 @@ proc rebuildBase(c: var WrapCache) =
     off += c.metrics[i].byteLen + 1   # the terminating '\n'
   c.rowBase[^1] = acc
 
-proc initWrapCache*(doc: string; settings: WrapSettings): WrapCache =
-  ## The full computation. `LAW-C6`'s oracle is this function; the incremental
-  ## path below is the thing under test.
+func lineStartOffsetsOf*(doc: string): seq[int] =
+  ## The DOCUMENT offset each logical line begins at, derived from
+  ## `documentLines` so the line set is this module's rather than a second
+  ## `split` with a different idea of what a line terminator is.
+  ##
+  ## The same accumulation `rebuildBase` performs over the metrics
+  ## (`byteLen + 1` per line, the terminating newline included); exported
+  ## because PLAT-28's `inlay.nim` has to place a decoration's DOCUMENT offset
+  ## onto a line before it has a cache to ask.
+  let ls = documentLines(doc)
+  result = newSeq[int](ls.len)
+  var off = 0
+  for i in 0 ..< ls.len:
+    result[i] = off
+    off += ls[i].len + 1
+
+proc wrapCacheOfMetrics*(doc: string; settings: WrapSettings;
+                         metrics: seq[LineMetrics]): WrapCache =
+  ## **THE PROJECTION, FROM METRICS SOMEBODY ELSE COMPUTED.** PLAT-28's seam,
+  ## and it is one seam rather than a decoration parameter threaded through
+  ## this module.
+  ##
+  ## Editor-ViewModel.md §8.3 claims an inline value is *"ordinary line
+  ## content"* — it occupies columns, the wrap point moves, and the text after
+  ## it reflows. If that claim is right then wrapping needs no knowledge of
+  ## widgets at all: a widget is a cluster of zero bytes and W cells, and
+  ## everything below this line — `wrapLine`, `toDisplay`, `toLogical`,
+  ## `gutterFacts`, the twelve display motions — works on it unchanged.
+  ##
+  ## So this module gains a CONSTRUCTOR and not a feature, `viewmodel/editor/
+  ## inlay.nim` supplies the metrics with the widgets already in them, and
+  ## nothing here imports a decoration. **That is the architecture's claim
+  ## arriving as a diff of about fifteen lines**, which is the measurement
+  ## PLAT-28 exists to take.
+  ##
+  ## The metrics' byte lengths are CHECKED against the document rather than
+  ## assumed, and a mismatch RAISES (§36a): `lineStart` is derived from
+  ## `byteLen + 1` per line, so a metrics list that disagrees with the document
+  ## would move every slice in the module by a plausible amount.
+  let ls = documentLines(doc)
+  if metrics.len != ls.len:
+    raise newException(WrapError,
+      "wrapCacheOfMetrics: " & $metrics.len & " line metrics for a document " &
+      "of " & $ls.len & " line(s). Not repaired: the row index and the line " &
+      "start offsets are both derived from this list.")
+  for i in 0 ..< ls.len:
+    if metrics[i].byteLen != ls[i].len:
+      raise newException(WrapError,
+        "wrapCacheOfMetrics: line " & $i & "'s metrics claim " &
+        $metrics[i].byteLen & " bytes and the document has " & $ls[i].len &
+        ". A widget adds CELLS and never BYTES; a metrics list whose byte " &
+        "length moved is measuring a different document.")
   result.settings = settings
   result.docLen = doc.len
-  result.metrics = @[]
+  # The metrics are stored first and then read back from `result`, and the
+  # parameter is not named again below. A NEUTRAL REFACTOR, and recorded as one:
+  # `metrics[i]` and `result.metrics[i]` are the same value here, on every
+  # backend this tree builds — C, `nim js` and wasm32 through `emcc` were each
+  # measured saying so. Deriving the rows from the field they are stored beside
+  # is simply the shorter thing to read: the loop below and `result.metrics`
+  # then name one object rather than two that happen to be equal.
+  result.metrics = metrics
   result.rows = @[]
-  for i, line in splitLines(doc):
-    let m = lineMetrics(line, settings.policy)
-    result.metrics.add m
-    result.rows.add wrapLine(m, i, settings.wrapColumn)
+  for i in 0 ..< result.metrics.len:
+    result.rows.add wrapLine(result.metrics[i], i, settings.wrapColumn)
+    for cl in result.metrics[i].clusters:
+      if cl.startByte == cl.stopByte and cl.cells > 0:
+        result.hasWidgets = true
   result.lineCount = result.metrics.len
   result.rebuildBase()
+
+proc initWrapCache*(doc: string; settings: WrapSettings): WrapCache =
+  ## The full computation, with no decorations. `LAW-C6`'s oracle is this
+  ## function; the incremental path below is the thing under test.
+  ##
+  ## It is the undecorated ARM of `wrapCacheOfMetrics` rather than a second
+  ## copy of the loop — §30, and it is also `LAW-C7`'s negative control: *"with
+  ## the widget removed and nothing else changed"* has to be the same code path
+  ## or the two arms differ in more than the widget.
+  var ms: seq[LineMetrics] = @[]
+  for line in documentLines(doc):
+    ms.add lineMetrics(line, settings.policy)
+  wrapCacheOfMetrics(doc, settings, ms)
 
 proc rewrap*(c: WrapCache; wrapColumn: int): WrapCache =
   ## The same document at a DIFFERENT wrap column, reusing the cluster metrics.
@@ -514,6 +592,17 @@ proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
   ## The arm starts the recomputed span one line lower and that line keeps its
   ## stale rows.
   c.refuseStaleCache(oldDoc)
+  if c.hasWidgets:
+    # §36a AGAIN, AND THIS ONE IS A DROP RATHER THAN A CLAMP. A touched line's
+    # metrics are recomputed FROM ITS TEXT below, and a widget is not in the
+    # text — so splicing a decorated cache would quietly un-decorate exactly
+    # the lines the user is editing, which is the one place a missing inline
+    # value looks most like "there is nothing in scope here".
+    raise newException(WrapError,
+      "updateWrapCache: this cache carries inline widgets and the splice " &
+      "recomputes a touched line's metrics from its text, which has no " &
+      "widgets in it. Use `inlay.updateInlayCache`, which maps the decoration " &
+      "set through the change set first and then re-projects.")
   if cs.length != oldDoc.len:
     raise newException(WrapError,
       "wrap cache: the change set is over a document of " & $cs.length &
@@ -539,7 +628,7 @@ proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
     result.docLen = newDoc.len
     return
 
-  let newLines = splitLines(newDoc)
+  let newLines = documentLines(newDoc)
   let firstLine = lineOfOffset(oldDoc, loA)
   let lastOldLine = lineOfOffset(oldDoc, hiA)
   let lastNewLine = lineOfOffset(newDoc, hiB)

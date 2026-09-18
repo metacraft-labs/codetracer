@@ -7,6 +7,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-25
 #   bash ci/test/editor-model-case-floor.sh PLAT-26
 #   bash ci/test/editor-model-case-floor.sh PLAT-27
+#   bash ci/test/editor-model-case-floor.sh PLAT-28
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -79,6 +80,17 @@
 #    The alternative — writing `LAW_COUNT=6` and letting the seventh row fall
 #    out of the comparison — is the shape where a published law stops being
 #    published and nothing says so.
+#
+#    PLAT-28 EXPIRED THAT DEFERRAL AND THE MECHANISM THAT MADE THAT POSSIBLE IS
+#    THE SIXTH VARIABLE: `LAW_SUITES` is a LIST. `LAW-C7` belongs to §3.3's
+#    table and is implemented by PLAT-28's suite, not PLAT-27's, so PLAT-27's
+#    two-way count now reads the union of the ids declared by BOTH suites and
+#    `LAW_DEFERRED` for PLAT-27 is empty. A one-suite implementation side could
+#    only have expressed this as a permanent deferral, which is the state that
+#    cannot be told from "never". The deferral mechanism stays — it is how the
+#    NEXT published-but-unimplemented law is declared — and the count of
+#    declared deferrals is printed on every run, including when it is zero, so
+#    "no deferrals" is a statement rather than a silence.
 
 set -euo pipefail
 
@@ -97,7 +109,7 @@ PLAT-24)
 		src/frontend/viewmodel/tests/unit/test_editor_text_store.nim
 		src/frontend/viewmodel/tests/unit/test_editor_unicode_corpus.nim
 	)
-	LAW_SUITE=""
+	LAW_SUITES=()
 	;;
 PLAT-25)
 	MILESTONE="** PLAT-25: The edit algebra"
@@ -105,7 +117,7 @@ PLAT-25)
 		src/frontend/viewmodel/tests/unit/test_editor_change_algebra.nim
 		src/frontend/viewmodel/tests/unit/test_editor_change_examples.nim
 	)
-	LAW_SUITE=src/frontend/viewmodel/tests/unit/test_editor_change_algebra.nim
+	LAW_SUITES=(src/frontend/viewmodel/tests/unit/test_editor_change_algebra.nim)
 	LAW_PREFIX="LAW-A"
 	LAW_SECTION="3.1"
 	LAW_COUNT=10
@@ -116,7 +128,7 @@ PLAT-26)
 		src/frontend/viewmodel/tests/unit/test_editor_selection_laws.nim
 		src/frontend/viewmodel/tests/unit/test_editor_selection_examples.nim
 	)
-	LAW_SUITE=src/frontend/viewmodel/tests/unit/test_editor_selection_laws.nim
+	LAW_SUITES=(src/frontend/viewmodel/tests/unit/test_editor_selection_laws.nim)
 	LAW_PREFIX="LAW-S"
 	LAW_SECTION="3.2"
 	LAW_COUNT=6
@@ -127,21 +139,40 @@ PLAT-27)
 		src/frontend/viewmodel/tests/unit/test_editor_wrap_laws.nim
 		src/frontend/viewmodel/tests/unit/test_editor_wrap_examples.nim
 	)
-	LAW_SUITE=src/frontend/viewmodel/tests/unit/test_editor_wrap_laws.nim
+	# BOTH SUITES. §3.3 publishes seven `LAW-C` rows and the seventh —
+	# `LAW-C7`, the reflow — is implemented by PLAT-28, which owns widgets.
+	# PLAT-27 declared it DEFERRED; PLAT-28 implemented it and the deferral is
+	# expired here rather than left standing, which is why the implementation
+	# side is a list.
+	LAW_SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_wrap_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_decoration_laws.nim
+	)
 	LAW_PREFIX="LAW-C"
 	LAW_SECTION="3.3"
 	LAW_COUNT=7
-	LAW_DEFERRED="LAW-C7"
+	;;
+PLAT-28)
+	MILESTONE="** PLAT-28: Ranges, anchors, and the inlay that reflows"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_decoration_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_decoration_examples.nim
+	)
+	LAW_SUITES=(src/frontend/viewmodel/tests/unit/test_editor_decoration_laws.nim)
+	LAW_PREFIX="LAW-D"
+	LAW_SECTION="3.4"
+	LAW_COUNT=5
 	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24, PLAT-25, PLAT-26, PLAT-27. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-28. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1
 	;;
 esac
 LAW_DEFERRED="${LAW_DEFERRED:-}"
+LAW_SUITES=("${LAW_SUITES[@]:-}")
 
 if [ ! -f "${SPEC_REL}" ]; then
 	echo "FAIL: the milestone file is not here: ${SPEC_REL}"
@@ -180,7 +211,7 @@ echo "FLOOR, read from ${SPEC_REL}: ${floor} cases"
 # ---------------------------------------------------------------------------
 # THE LAW-TABLE ORACLE — §7.1's two-way count, for the milestones that have one
 # ---------------------------------------------------------------------------
-if [ -n "${LAW_SUITE}" ]; then
+if [ -n "${LAW_SUITES[0]:-}" ]; then
 	if [ ! -f "${LAWS_REL}" ]; then
 		echo "FAIL: the conformance suite spec is not here: ${LAWS_REL}"
 		echo "      §${LAW_SECTION}'s law table is an ORACLE and is read at run time."
@@ -243,8 +274,10 @@ if [ -n "${LAW_SUITE}" ]; then
 				exit 1
 			fi
 		done
-		echo "LAW TABLE: ${#deferred_ids[@]} row(s) declared deferred: ${LAW_DEFERRED}"
 	fi
+	# PRINTED EVEN WHEN IT IS ZERO. A deferral that is never mentioned when it
+	# is absent is indistinguishable from one nobody looked for.
+	echo "LAW TABLE: ${#deferred_ids[@]} row(s) declared deferred${LAW_DEFERRED:+: ${LAW_DEFERRED}}"
 	expected_impl=$((LAW_COUNT - ${#deferred_ids[@]}))
 	if [ "${#missing_killers[@]}" -ne 0 ]; then
 		echo "FAIL: ${#missing_killers[@]} law(s) in §${LAW_SECTION} carry no killing mutation:"
@@ -253,10 +286,25 @@ if [ -n "${LAW_SUITE}" ]; then
 		exit 1
 	fi
 
-	# The implementation's side, read out of the suite's own declaration.
-	mapfile -t impl_ids < <(sed -n '/^const LawName/,/\]/p' "${LAW_SUITE}" |
-		grep -oE "${LAW_PREFIX}[0-9]+" || true)
-	echo "LAW TABLE, read from ${LAW_SUITE}: ${#impl_ids[@]} ids"
+	# The implementation's side, read out of the suites' own declarations. Every
+	# `const LawName*` block of every named suite contributes; the union is what
+	# is compared, because one published table can be implemented by more than
+	# one milestone's suite and `LAW-C7` is the case that proved it.
+	impl_ids=()
+	for law_suite in "${LAW_SUITES[@]}"; do
+		if [ ! -f "${law_suite}" ]; then
+			echo "FAIL: the law suite ${law_suite} is not in the tree"
+			exit 1
+		fi
+		mapfile -t suite_ids < <(sed -n '/^const LawName/,/\]/p' "${law_suite}" |
+			grep -oE "${LAW_PREFIX}[0-9]+" || true)
+		echo "LAW TABLE, read from ${law_suite}: ${#suite_ids[@]} ${LAW_PREFIX} id(s)"
+		for id in "${suite_ids[@]:-}"; do
+			[ -z "${id}" ] && continue
+			impl_ids+=("${id}")
+		done
+	done
+	echo "LAW TABLE, implementation side: ${#impl_ids[@]} ids across ${#LAW_SUITES[@]} suite(s)"
 	if [ "${#impl_ids[@]}" -ne "${expected_impl}" ]; then
 		echo "FAIL: the suite declares ${#impl_ids[@]} ${LAW_PREFIX} ids, expected ${expected_impl}"
 		echo "      (${LAW_COUNT} published minus ${#deferred_ids[@]} declared deferred)."
@@ -264,7 +312,7 @@ if [ -n "${LAW_SUITE}" ]; then
 	fi
 	for d in "${deferred_ids[@]:-}"; do
 		[ -z "${d}" ] && continue
-		for id in "${impl_ids[@]}"; do
+		for id in "${impl_ids[@]:-}"; do
 			if [ "${id}" = "${d}" ]; then
 				echo "FAIL: ${d} is declared DEFERRED by this gate and the suite runs it."
 				echo "      A stale deferral hides the only difference between 'not yet'"

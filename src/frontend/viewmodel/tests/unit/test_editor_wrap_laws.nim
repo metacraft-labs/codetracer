@@ -107,7 +107,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2689
+const ExpectedAssertions = 2774
   ## Asserted by the last case against the runtime tally. Update it
   ## deliberately, in the same commit as the checks that moved it.
 
@@ -1135,8 +1135,23 @@ const
     ## suite MUST, and an asymmetry asserted on one side only is half a claim.
   RopeSource = staticRead("../../editor/rope.nim")
   SeqLineStoreSource = staticRead("../../editor/seq_line_store.nim")
+  AnchorSource = staticRead("../../editor/anchor.nim")
+  RangeSetSource = staticRead("../../editor/range_set.nim")
+  DecorationSource = staticRead("../../editor/decoration.nim")
+  InlaySource = staticRead("../../editor/inlay.nim")
+  RowProjectionSource = staticRead("../../editor/row_projection.nim")
+    ## **PLAT-28's FIVE, AND THE FOURTH TIME §35's ENUMERATION HAS PAID.** This
+    ## case went red by name when `viewmodel/editor/` grew from eight modules to
+    ## thirteen, before PLAT-28's own suites existed. `inlay.nim` is the one
+    ## worth reading in this context: it computes an inline widget's columns and
+    ## calls `wrap.wrapCacheOfMetrics`, and it is asserted below NOT to spell
+    ## the wrap algorithm itself — which is the claim "the model computes soft
+    ## wrap in exactly one module" surviving a milestone that moves the wrap
+    ## point.
 
-const ScannedModules = ["change_set.nim", "rope.nim", "selection.nim",
+const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
+                        "inlay.nim", "range_set.nim", "rope.nim",
+                        "row_projection.nim", "selection.nim",
                         "selection_ops.nim", "seq_line_store.nim",
                         "text_store.nim", "transaction.nim", "wrap.nim"]
 
@@ -1164,6 +1179,11 @@ const OtherModules = block:
   xs.add ("seq_line_store.nim", SeqLineStoreSource)
   xs.add ("text_store.nim", TextStoreSource)
   xs.add ("transaction.nim", TransactionSource)
+  xs.add ("anchor.nim", AnchorSource)
+  xs.add ("range_set.nim", RangeSetSource)
+  xs.add ("decoration.nim", DecorationSource)
+  xs.add ("inlay.nim", InlaySource)
+  xs.add ("row_projection.nim", RowProjectionSource)
   xs
 
 proc codeOnly(src: string): string =
@@ -1178,6 +1198,11 @@ proc codeOnly(src: string): string =
     let hash = raw.find(" #")
     lines.add(if hash >= 0: raw[0 ..< hash] else: raw)
   lines.join("\n")
+
+const ProjectionModules = ["wrap.nim", "inlay.nim"]
+  ## The modules that may name `WrapSettings`, because a projection is what it
+  ## is a parameter TO. Every other module in `viewmodel/editor/` is document
+  ## state and may not — §16's decision, with both halves asserted.
 
 const RendererSpellings = ["isonim_tui/widgets", "isonim_tui/renderer",
                            "isonim_tui/css", "isonim_tui/terminal",
@@ -1234,7 +1259,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 8
+    counted ScannedModules.len == 13
     counted OtherModules.len == ScannedModules.len - 1
 
   test "NO MODULE OF THE CORE REACHES A RENDERER — the dependency does not invert":
@@ -1265,6 +1290,26 @@ suite "PLAT-27 — the suite's own non-vacuity":
     # which is a width table and a segmenter, not a renderer.
     counted codeOnly(WrapSource).contains("import isonim_tui/text/width")
     counted codeOnly(SelectionSource).contains("import isonim_tui/text/width")
+    # PLAT-28's `row_projection.nim` reaches NEITHER, and that is load-bearing
+    # rather than tidy: it is callable from
+    # `frontend/view_vocabulary/editor_surface.nim`, which the `gpui-shell`
+    # lane compiles WITHOUT isonim_tui flags. An import there would put the
+    # terminal's width table into the GPUI front-end's compile.
+    # **CHECKED ON THE IMPORT LINES, NOT ON THE FILE.** `decoration.nim` NAMES
+    # `isonim_tui/text/width` inside a string literal — the measurement of its
+    # own filed gap `PLAT28-DG4` — and a substring scan over the module cannot
+    # tell a dependency from a sentence about one. Whether a module IMPORTS
+    # something is a question about its import lines.
+    for (name, src) in [("row_projection.nim", RowProjectionSource),
+                        ("decoration.nim", DecorationSource)]:
+      checkpoint(name)
+      var importLines = 0
+      for raw in codeOnly(src).splitLines():
+        let t = raw.strip()
+        if not t.startsWith("import "): continue
+        inc importLines
+        counted not t.contains("isonim_tui")
+      counted importLines > 0
 
   test "the model calls the PURE width func, never the threadvar overload":
     # Deliverable 1: *"`clusterDisplayWidth(cluster, ambiguous)` is already a
@@ -1423,9 +1468,21 @@ suite "PLAT-27 — the suite's own non-vacuity":
     counted rowsOf(rewrapped) == rowsOf(window)
     # NOTHING IN THE STATE CARRIES A WRAP COLUMN: the scan is the mechanical
     # half of the decision.
-    for (name, src) in OtherModules:
+    #
+    # **THE SCAN IS TWO-SIDED NOW, AND PLAT-28 IS WHY.** It used to read "no
+    # module other than `wrap.nim` mentions `WrapSettings`", which was true
+    # while `wrap.nim` was the only projection in the directory and became
+    # false when `inlay.nim` arrived — a module that takes the settings as a
+    # PARAMETER, which is precisely what the decision says is right. A scan
+    # that forbids the spelling everywhere cannot tell a parameter from a
+    # field, so the modules are split by what they ARE: a projection module may
+    # name the settings, a STATE module may not, and both halves are asserted
+    # or "nothing carries a wrap column" is satisfied by a list nobody keeps.
+    counted ProjectionModules.len == 2
+    for (name, src) in OtherModules & @[("wrap.nim", WrapSource)]:
       checkpoint(name)
-      counted not codeOnly(src).contains("WrapSettings")
+      let mentions = codeOnly(src).contains("WrapSettings")
+      counted mentions == (name in ProjectionModules)
 
 # ---------------------------------------------------------------------------
 # The tally

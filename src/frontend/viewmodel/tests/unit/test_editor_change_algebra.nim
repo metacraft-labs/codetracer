@@ -117,7 +117,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 874
+const ExpectedAssertions = 898
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
   ##
@@ -765,11 +765,18 @@ const
   SelectionSource = staticRead("../../editor/selection.nim")
   SelectionOpsSource = staticRead("../../editor/selection_ops.nim")
   WrapSource = staticRead("../../editor/wrap.nim")
+  AnchorSource = staticRead("../../editor/anchor.nim")
+  RangeSetSource = staticRead("../../editor/range_set.nim")
+  DecorationSource = staticRead("../../editor/decoration.nim")
+  InlaySource = staticRead("../../editor/inlay.nim")
+  RowProjectionSource = staticRead("../../editor/row_projection.nim")
 
-  ScannedModules = ["change_set.nim", "rope.nim", "selection.nim",
+  ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
+                    "inlay.nim", "range_set.nim", "rope.nim",
+                    "row_projection.nim", "selection.nim",
                     "selection_ops.nim", "seq_line_store.nim",
                     "text_store.nim", "transaction.nim", "wrap.nim"]
-    ## The eight names above, as data. It moves in the same edit as the
+    ## The thirteen names above, as data. It moves in the same edit as the
     ## `staticRead` list and the case below is what refuses the two to drift.
     ##
     ## **It grew by two when PLAT-26 landed and by one more when PLAT-27 did,
@@ -780,7 +787,13 @@ const
     ## first build of PLAT-26, and `wrap.nim` failed it BY NAME on the first
     ## run of PLAT-27's floor gate — before that milestone's own suite existed
     ## to say anything, and from a milestone that had been green for a day.
-    ## That is the mechanism paying for itself twice.
+    ## That is the mechanism paying for itself twice — and a THIRD time on
+    ## 2026-09-18, when PLAT-28 added `anchor.nim`, `range_set.nim`,
+    ## `decoration.nim`, `inlay.nim` and `row_projection.nim` and this case
+    ## went red by name on the first build of that milestone's floor gate.
+    ## `anchor.nim` is the one that matters: §8.2 says an anchor is mapped
+    ## through every change set that passes *"including remote ones"*, which is
+    ## exactly where a sixth hand-written double mapping would land.
 
   EditorModules = block:
     ## Every `.nim` file actually in `viewmodel/editor/`, sorted, read out of
@@ -850,8 +863,13 @@ suite "PLAT-25 — one function, one name":
                   "seq_line_store.nim": SeqLineStoreSource,
                   "selection.nim": SelectionSource,
                   "selection_ops.nim": SelectionOpsSource,
-                  "wrap.nim": WrapSource}.toTable
-    counted others.len == 7
+                  "wrap.nim": WrapSource,
+                  "anchor.nim": AnchorSource,
+                  "range_set.nim": RangeSetSource,
+                  "decoration.nim": DecorationSource,
+                  "inlay.nim": InlaySource,
+                  "row_projection.nim": RowProjectionSource}.toTable
+    counted others.len == 12
     counted others.len + 1 == ScannedModules.len
     for name, src in others:
       checkpoint(name)
@@ -882,6 +900,15 @@ suite "PLAT-25 — one function, one name":
     # rather than in PLAT-26's own suite, beside the four it was written for.
     counted not codeOnly(SelectionOpsSource).contains("before = true")
     counted not codeOnly(SelectionOpsSource).contains("before: bool")
+    # A FOURTH IN-TREE CALL SITE, ADDED BY PLAT-28: an anchor mapped through a
+    # REMOTE change set. §8.2 names that case explicitly, and it is the one
+    # place in this campaign where the reference's `receiveUpdates` shape
+    # arrives early — so the assertion is here, beside the other three, rather
+    # than in PLAT-28's own suite.
+    counted codeOnly(AnchorSource).contains("rebase(remote, local)")
+    counted codeOnly(AnchorSource).count("rebase(") == 1
+    counted not codeOnly(AnchorSource).contains("before = true")
+    counted not codeOnly(AnchorSource).contains("before: bool")
 
 # ===========================================================================
 # FUZZ-1 — the document is never corrupt, checked after EVERY step
