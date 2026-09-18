@@ -33,10 +33,18 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1238 bash ci/test/frontend-reachability.sh`, so 1239
-# findings fail `lint-nim` and 1238 do not.
+# `env CT_REACHABILITY_MAX=1245 bash ci/test/frontend-reachability.sh`, so 1246
+# findings fail `lint-nim` and 1245 do not.
 #
-# THE CEILING MOVED 1225 -> 1238 ON 2026-09-18, and the reason is in the
+# THE CEILING MOVED 1238 -> 1245 ON 2026-09-18 (PLAT-30), and 1225 -> 1238
+# earlier the same day (PLAT-29). Both reasons live in the setter beside the
+# invocation in `ci/lint/nim.sh`. PLAT-30's is the more interesting of the two,
+# because its GROSS is +13 and its NET is +7: the vocabulary became the first
+# PRODUCT reader of six exports of `wrap.nim`, `selection.nim`,
+# `selection_ops.nim` and `edit_binding.nim`, so it paid part of its own way.
+#
+# THE EARLIER MOVE, kept because a ceiling with one reason reads as a ceiling
+# that has only ever moved once: 1225 -> 1238 on 2026-09-18, and the reason is in the
 # setter beside the invocation: PLAT-29 built an asynchronous boundary whose
 # two modules are exercised by their suites and reached by no product module,
 # because wiring the four producers behind it is that milestone's declared

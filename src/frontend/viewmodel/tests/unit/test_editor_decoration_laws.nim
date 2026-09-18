@@ -85,16 +85,17 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1270
+const ExpectedAssertions = 1274
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run, and updated deliberately in the same commit as the checks that moved
   ## it.
   ##
-  ## 1266 -> 1270 on 2026-09-18, and the four are `ScannedModules` growing by
-  ## two: the §35 directory check is TWO-SIDED, so every module named there is
-  ## asserted twice. PLAT-29 added `document_version.nim` and `reconcile.nim`
-  ## to the directory this suite claims to cover and this suite went red until
-  ## they were named — which is the guard working rather than maintenance.
+  ## 1266 -> 1270 -> 1274 on 2026-09-18, and each step is four: the §35
+  ## directory check is TWO-SIDED, so every module named there is asserted
+  ## twice. PLAT-29 added `document_version.nim` and `reconcile.nim` and
+  ## PLAT-30 added `operations.nim` and `editor_state.nim` to the directory
+  ## this suite claims to cover; this suite went red by name each time until
+  ## they were named, which is the guard working rather than maintenance.
 
 const Seed = 0x28c0de00'u32
   ## Printed. Every population below is derived from it, and the suite is
@@ -1050,7 +1051,8 @@ const
   GeneratorSource = staticRead("../generators/decoration_generator.nim")
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                        "document_version.nim", "inlay.nim", "range_set.nim",
+                        "document_version.nim", "editor_state.nim",
+                        "inlay.nim", "operations.nim", "range_set.nim",
                         "reconcile.nim", "rope.nim", "row_projection.nim",
                         "selection.nim", "selection_ops.nim",
                         "seq_line_store.nim", "text_store.nim",
@@ -1196,13 +1198,13 @@ suite "PLAT-28 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    # THIRTEEN UNTIL 2026-09-18, FIFTEEN NOW. The literal is deliberate and is
-    # NOT redundant with the two-sided comparison above: without it, a
-    # directory walk that matched nothing and a list that had been emptied
-    # would agree with each other perfectly (§4). It moved because PLAT-29 put
-    # `document_version.nim` and `reconcile.nim` in the directory this suite
-    # claims to cover, which is the edit this literal exists to force.
-    counted ScannedModules.len == 15
+    # THIRTEEN, THEN FIFTEEN, AND SEVENTEEN SINCE PLAT-30 PUT
+    # `operations.nim` AND `editor_state.nim` IN THE SAME DIRECTORY — all three
+    # moves on 2026-09-18. The literal is deliberate and is NOT redundant with
+    # the two-sided comparison above: without it, a directory walk that matched
+    # nothing and a list that had been emptied would agree with each other
+    # perfectly (§4). Forcing this edit is the whole job it does.
+    counted ScannedModules.len == 17
     counted NewModules.len == 5
 
   test "NO CLAMP REPAIRS AN ANCHOR — every unreachable path RAISES":

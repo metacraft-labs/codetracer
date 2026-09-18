@@ -107,11 +107,15 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2804
-  ## 2774 -> 2804 on 2026-09-18: PLAT-29 added `document_version.nim` and
-  ## `reconcile.nim` to `viewmodel/editor/`, and the three renderer-reach
+const ExpectedAssertions = 2834
+  ## 2774 -> 2804 -> 2834 on 2026-09-18: PLAT-29 added `document_version.nim`
+  ## and `reconcile.nim` to `viewmodel/editor/` and PLAT-30 added
+  ## `operations.nim` and `editor_state.nim`, and the three renderer-reach
   ## scans below run over every module in that directory — plus the
-  ## two-sided §35 directory check, which asserts each name twice.
+  ## two-sided §35 directory check, which asserts each name twice, and the
+  ## `WrapSettings` split, which now has three projection modules and asserts
+  ## the classification of every module in the directory rather than of a
+  ## list that predates half of them.
   ## Asserted by the last case against the runtime tally. Update it
   ## deliberately, in the same commit as the checks that moved it.
 
@@ -1146,6 +1150,8 @@ const
   RowProjectionSource = staticRead("../../editor/row_projection.nim")
   DocumentVersionSource = staticRead("../../editor/document_version.nim")
   ReconcileSource = staticRead("../../editor/reconcile.nim")
+  EditorStateSource = staticRead("../../editor/editor_state.nim")
+  OperationsSource = staticRead("../../editor/operations.nim")
     ## **PLAT-28's FIVE, AND THE FOURTH TIME §35's ENUMERATION HAS PAID.** This
     ## case went red by name when `viewmodel/editor/` grew from eight modules to
     ## thirteen, before PLAT-28's own suites existed. `inlay.nim` is the one
@@ -1156,7 +1162,8 @@ const
     ## point.
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                        "document_version.nim", "inlay.nim", "range_set.nim",
+                        "document_version.nim", "editor_state.nim",
+                        "inlay.nim", "operations.nim", "range_set.nim",
                         "reconcile.nim", "rope.nim", "row_projection.nim",
                         "selection.nim", "selection_ops.nim",
                         "seq_line_store.nim", "text_store.nim",
@@ -1166,6 +1173,14 @@ const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
   ## `reconcile.nim` to the directory this list claims to cover, and THIS SUITE
   ## went red by name — from a milestone that had been green for a day — until
   ## they were named here and read below.
+  ##
+  ## **AND BY TWO MORE, LATER THE SAME DAY.** PLAT-30's `operations.nim` and
+  ## `editor_state.nim` did it again, and here the claim being defended is the
+  ## sharp one: *"the model computes soft wrap in exactly one module"*. The
+  ## vocabulary has twenty-four display-dependent operations and every one of
+  ## them reaches wrapping through `wrap.nim` — it spells no `wrapColumn`, no
+  ## `DisplayRow` and no `wrapLine` of its own, which is what the scan below
+  ## now says about it rather than what this comment claims.
 
 const EditorDirModules = block:
   ## **§35: THE SUBJECT LIST IS THE DIRECTORY, NOT A LIST SOMEBODY MAINTAINS.**
@@ -1198,6 +1213,8 @@ const OtherModules = block:
   xs.add ("row_projection.nim", RowProjectionSource)
   xs.add ("document_version.nim", DocumentVersionSource)
   xs.add ("reconcile.nim", ReconcileSource)
+  xs.add ("editor_state.nim", EditorStateSource)
+  xs.add ("operations.nim", OperationsSource)
   xs
 
 proc codeOnly(src: string): string =
@@ -1213,7 +1230,16 @@ proc codeOnly(src: string): string =
     lines.add(if hash >= 0: raw[0 ..< hash] else: raw)
   lines.join("\n")
 
-const ProjectionModules = ["wrap.nim", "inlay.nim"]
+const ProjectionModules = ["wrap.nim", "inlay.nim", "operations.nim"]
+  ## **THREE SINCE 2026-09-18, AND THE THIRD IS THE DECISION BEING CONFIRMED
+  ## RATHER THAN MAINTENANCE.** PLAT-30's `operations.nim` names `WrapSettings`
+  ## because twenty-four of its 224 operations TAKE it as a parameter — which
+  ## is exactly what §5-vs-§9 settled — and this case went red by name until it
+  ## was classified. Its sibling `editor_state.nim` is a STATE module and stays
+  ## out: it holds the document, the selection, the mode, the registers and the
+  ## marks, and names the settings nowhere in its code. That is the negative
+  ## half of this scan gaining a member that could have gone the other way,
+  ## which is the only kind of negative control worth having.
   ## The modules that may name `WrapSettings`, because a projection is what it
   ## is a parameter TO. Every other module in `viewmodel/editor/` is document
   ## state and may not — §16's decision, with both halves asserted.
@@ -1273,7 +1299,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 15
+    counted ScannedModules.len == 17
     counted OtherModules.len == ScannedModules.len - 1
 
   test "NO MODULE OF THE CORE REACHES A RENDERER — the dependency does not invert":
@@ -1492,7 +1518,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     # field, so the modules are split by what they ARE: a projection module may
     # name the settings, a STATE module may not, and both halves are asserted
     # or "nothing carries a wrap column" is satisfied by a list nobody keeps.
-    counted ProjectionModules.len == 2
+    counted ProjectionModules.len == 3
     for (name, src) in OtherModules & @[("wrap.nim", WrapSource)]:
       checkpoint(name)
       let mentions = codeOnly(src).contains("WrapSettings")

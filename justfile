@@ -4900,6 +4900,92 @@ plat28-case-floor:
 plat29-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-29
 
+# PLAT-30's COUNTED TARGET: 621 cases over the vocabulary's two suites. The
+# same script, the same `FLOOR:` parser, one more table entry — and a recipe in
+# the same commit as the entry, which is the gap the comment above records
+# PLAT-29 closing for three milestones at once.
+plat30-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-30
+
+# EVERY COUNTED TARGET IN THE CAMPAIGN, AND THIS IS THE RECIPE A LANE CALLS.
+#
+# WHAT WAS WRONG, MEASURED RATHER THAN ASSERTED
+# ---------------------------------------------
+# `ci/test/shell-gate-coverage.sh` has been reporting
+# `ci/test/editor-model-case-floor.sh` as an UNRECORDED DARK GATE — reachable
+# from no workflow lane, no recipe a lane calls, and no other reachable script.
+# The seven recipes above are all of the second kind: a person types them. So
+# every `FLOOR:` line published in `CodeTracer-Platform.milestones.org` for
+# PLAT-24 … PLAT-30, and every `LAW-*` two-way count this script performs for
+# five of them, proved nothing in CI — for six milestones, since PLAT-24.
+#
+# That is this campaign's signature defect (work goes into a gate, the gate goes
+# into the tree, nothing runs it), found in the mechanism built to catch it, by
+# the guard built to catch THAT. The guard was right and was being read as
+# noise.
+#
+# THE COST, BECAUSE "IT ADDS RUNTIME WHILE CAPACITY IS SHORT" IS A REAL
+# ARGUMENT AND HAS TO BE ANSWERED WITH A NUMBER
+# ---------------------------------------------------------------------
+# Measured 2026-09-19 on one host, `~/.cache/nim/test_editor_*_d` deleted first
+# so every suite is a cold compile, all seven milestones in one pass:
+#
+#     PLAT-24 11s   PLAT-25  7s   PLAT-26 20s   PLAT-27 18s
+#     PLAT-28  8s   PLAT-29 14s   PLAT-30  9s        TOTAL 92s
+#
+# Ninety-two seconds of gate, cold, for fourteen suites; `1m51s` measured
+# through THIS recipe end to end, which is the number CI actually pays and
+# includes `just`'s own start-up per invocation. It is not free — these suites
+# also compile in `vm-unit`, so this is a second compile of most of them — but
+# "prohibitive" it is not, and the runtime was the whole of the case for leaving
+# six milestones' floors unenforced. A cost argument that has not been measured
+# is an estimate, and this one was off by the margin between two minutes and a
+# reason. The recipe-level figure is the one quoted in the workflow step, because
+# quoting the smaller of two measurements you have taken is the same defect one
+# size down.
+#
+# WHY ONE RECIPE AND NOT SEVEN STEPS. `shell-gate-coverage.sh` walks from
+# workflow roots through recipes to scripts, so ONE recipe a lane calls is what
+# turns the script on; seven steps would be seven places for the next milestone
+# to be forgotten. The milestone ids are LITERAL here for the same reason the
+# `test` recipe keeps its lane names literal — the walk reaches a name it can
+# SEE, and a shell array element is not one.
+#
+# IT IS ALSO TWO-SIDED ABOUT ITSELF: the count of milestones it ran is asserted
+# against the count of entries in the script's own table, so a milestone added
+# to the script and not to this list fails here rather than passing silently —
+# which is the same defect one level up.
+editor-model-case-floors:
+  #!/usr/bin/env bash
+  set -uo pipefail
+  failed=0
+  ran=0
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30; do
+    echo "=== ${m} ==="
+    if bash ci/test/editor-model-case-floor.sh "${m}"; then
+      ran=$((ran + 1))
+    else
+      echo "FAIL: ${m}'s counted target did not hold"
+      failed=$((failed + 1))
+    fi
+  done
+  # The script's own table is the oracle for this list. `grep` for the `case`
+  # labels rather than for the usage comment, because a comment is prose.
+  known="$(grep -cE '^PLAT-[0-9]+\)$' ci/test/editor-model-case-floor.sh)"
+  echo "milestones gated: $((ran + failed)); entries in the gate's table: ${known}"
+  if [ "$((ran + failed))" -ne "${known}" ]; then
+    echo "FAIL: this recipe runs $((ran + failed)) milestones and"
+    echo "      ci/test/editor-model-case-floor.sh has a table entry for ${known}."
+    echo "      A milestone with an entry and no caller is the exact defect this"
+    echo "      recipe exists to have stopped."
+    exit 1
+  fi
+  if [ "${failed}" -ne 0 ]; then
+    echo "FAIL: ${failed} milestone(s) below their published floor"
+    exit 1
+  fi
+  echo "OK: ${ran} milestones meet the floors published in codetracer-specs."
+
 # PLAT-29's VERIFICATION GATE: the editor model's transitive import closure
 # contains no async, no I/O, no process, no socket and no clock.
 #

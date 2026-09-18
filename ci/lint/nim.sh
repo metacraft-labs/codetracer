@@ -353,8 +353,27 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # here is why"; an allow-list entry would say "this is permanently fine", which
 # is false. When the four producers are wired the number falls on its own and
 # the ratchet follows it down.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1238 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1238 bash ci/test/frontend-reachability.sh
+#
+# 1238 -> 1245 on 2026-09-18, PLAT-30, and the NET is smaller than the GROSS
+# because the vocabulary wires things. Measured both sides on one host, against
+# the same tree minus this milestone:
+#
+#   + 13  `viewmodel/editor/editor_state.nim` (7) and
+#         `viewmodel/editor/operations.nim` (6) — the 140-declaration table and
+#         the state its operations are pure over. Reached by their two suites
+#         and by no product module, because both front-ends still edit through
+#         `isonim_tui`'s TextArea; PLAT-31's resolver and PLAT-34's
+#         differential are what put a product caller behind them.
+#   -  6  `wrap.nim` (2), `selection.nim` (2), `selection_ops.nim` (1) and
+#         `tui/app/edit_binding.nim` (1) — exports that had NO product reader
+#         until `operations.nim` became one. PLAT-26's and PLAT-27's own
+#         backlog, paid down by a consumer rather than by an allow-list.
+#
+# Net +7. **NOT ALLOW-LISTED**, for the reason the paragraph above gives: an
+# allow-list entry claims a symbol is permanently unreachable by a Nim name,
+# and these are ordinary exports waiting for a caller.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1245 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1245 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

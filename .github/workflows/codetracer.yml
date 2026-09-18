@@ -3451,6 +3451,36 @@ jobs:
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
+      - name: Editor-model conformance — every milestone's published case floor
+        if: ${{ !cancelled() }}
+        # THE GATE THIS STEP RUNS HAD NO CALLER FOR SIX MILESTONES.
+        #
+        # `ci/test/editor-model-case-floor.sh` reads each milestone's `FLOOR: <n>
+        # cases` line out of the sibling codetracer-specs checkout, runs that
+        # milestone's suites, counts `[OK]` blocks, and for five of the seven
+        # also performs §7.1's two-way count over the published `LAW-*` table
+        # with the cardinality asserted. It had SEVEN `just` recipes and no
+        # workflow step, so `ci/test/shell-gate-coverage.sh` reported it as an
+        # UNRECORDED DARK GATE on every run — correctly, and for months.
+        #
+        # Every argument this campaign makes about unreachable capability
+        # applies to it unchanged, which is why it is wired rather than
+        # recorded: "nobody wired it yet" is not a reason, it is the defect.
+        #
+        # THE RUNTIME, MEASURED BEFORE IT WAS ACCEPTED: 1m51s for all seven
+        # milestones on one host with the Nim caches deleted first — 92s of gate
+        # plus `just`'s start-up per invocation (per-milestone figures are in the
+        # `editor-model-case-floors` recipe). These suites
+        # also compile in `test-vm` above, so this is a second compile of most of
+        # them; the price is a minute and a half and the thing bought is that six
+        # milestones' counted targets stop being claims.
+        #
+        # It lives in `viewmodel-tests`, which `ci/verdict/required-jobs.txt`
+        # already requires, rather than in a new job that file does not know
+        # about — and it carries `!cancelled()` like the lane steps below, so a
+        # failure in `test-vm` above cannot hide the floors' status.
+        run: nix develop .#devShells.x86_64-linux.default --command just editor-model-case-floors
+
       # ----------------------------------------------------------------
       # PLAT-17: the THIRD backend.
       #

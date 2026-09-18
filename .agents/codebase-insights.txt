@@ -5006,3 +5006,28 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   `wrapLine` as though it were a local change. Check quiescence with
   `fuser <subject files>` — no output and exit 1 means nobody holds them — and
   re-read after.
+
+- STASHING THE TREE WHILE A MUTATION HARNESS IS RUNNING KILLS ITS CONTROL RUN,
+  AND IT LOOKS LIKE A BROKEN HARNESS. The bullet above says a mutation run makes
+  every READ of the tree untrustworthy; this is the other direction and it cost
+  a forty-minute run. `git stash -u` during PLAT-30's harness took the subjects
+  out from under the control compile, the harness reported `CONTROL IS NOT
+  GREEN: rc=1 failed=[]` — an empty failure list, because nothing had compiled —
+  and exited before mutating anything. Nothing was corrupted, which is the
+  harness working; what was lost was the run. Treat a harness run as a lock on
+  the whole worktree, not only on `--enumerate-touched`, and re-record the
+  control digests after ANY edit to a subject (including a doc comment) because
+  `--record-control-hashes` is what the next run compares against.
+
+- THE EDITOR MODEL'S SUITES RUN ON THREE BACKENDS AND `std/os` IS NOT AVAILABLE
+  ON TWO OF THEM, SO AN ORACLE READ AT RUN TIME CANNOT BE COPIED FROM
+  `test_keymap_no_conflicts.nim`. That file reads its published table with
+  `os.readFile`; it is a `tui`-lane suite and compiles only on C. Anything under
+  `src/frontend/viewmodel/tests/unit/` is picked up by `vm-unit`, `vm-unit-js`
+  AND `vm-unit-wasm` by a glob, with no edit, so a `readFile` there does not
+  compile on the JS backend. Use `staticRead` with a path relative to the suite
+  file (`../../../../../../codetracer-specs/...` from `tests/unit/`): a missing
+  sibling checkout is then a compile error naming the path, which satisfies
+  "fails by name rather than skipping" more loudly than the run-time version.
+  `tests/corpus/unicode_corpus.nim` already had this reasoning; PLAT-30's oracle
+  is the second consumer of it.

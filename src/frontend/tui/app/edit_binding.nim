@@ -51,11 +51,17 @@ import isonim_tui
 
 import codetracer_embed
 
+import ../../../common/editing_key_bindings
+
 import ./source_binding
 import ./views/edit_pane
 
 export edit_pane
 export source_binding
+# The binding table is part of this module's contract now: a caller that wants
+# to know which operation a key performs asks the TABLE, and
+# `app/tests/test_edit_binding_vocabulary.nim` asks it exactly that.
+export editing_key_bindings
 
 type
   EditBuffer* = ref object
@@ -266,9 +272,48 @@ type
     ekMoved = "moved"
     ekChanged = "changed"
 
+proc performEditBehaviour(w: TextAreaWidget; b: EditBehaviour;
+                          character: string): EditKeyOutcome =
+  ## **A DISPATCH OVER THE BEHAVIOUR, NOT OVER THE KEY.** That distinction is
+  ## the whole of PLAT-30's retirement deliverable: `src/common/editing_key_bindings.nim`
+  ## holds which key performs which behaviour, as data, and this decides what
+  ## performing one MEANS on the substrate. Nothing here reads a key name, so
+  ## the question *"is this key bound twice"* is asked of the table rather than
+  ## of a `case` that cannot answer it.
+  case b
+  of ebMoveCharLeft: w.moveLeft(); ekMoved
+  of ebMoveCharRight: w.moveRight(); ekMoved
+  of ebMoveLineUp: w.moveUp(); ekMoved
+  of ebMoveLineDown: w.moveDown(); ekMoved
+  of ebMoveLineStart: w.moveLineStart(); ekMoved
+  of ebMoveLineEnd: w.moveLineEnd(); ekMoved
+  of ebDeleteCharBackward: w.backspace(); ekChanged
+  of ebDeleteCharForward: w.deleteRight(); ekChanged
+  of ebInsertNewline: w.splitLine(); ekChanged
+  of ebIndentSelection: w.indent(); ekChanged
+  of ebDedentSelection: w.dedent(); ekChanged
+  of ebUndo:
+    if w.undo(): ekChanged else: ekMoved
+  of ebRedo:
+    if w.redo(): ekChanged else: ekMoved
+  of ebInsertText:
+    w.insertText(character); ekChanged
+
 proc applyEditKey*(buf: EditBuffer; key, character: string): EditKeyOutcome =
   ## One canonical key name (`keymap.keyName`'s vocabulary) applied to the
   ## buffer.
+  ##
+  ## ## PLAT-30 RETIRED THE `case` OVER KEY NAMES THAT USED TO BE HERE
+  ##
+  ## It was *"thirteen `of` arms over key names plus an `else` that inserts the
+  ## character, fourteen behaviours, and the entire editing path today"*, and
+  ## Editing-Operations-And-Keymaps.md §1 names it as the one place the
+  ## product's own binding rule had never been applied. What replaces it is a
+  ## LOOKUP in `TuiEditBindings` — fourteen rows, each naming the §2.2
+  ## operation it performs — and a dispatch over the resulting behaviour. The
+  ## fourteen behaviours are unchanged, by name, which is what
+  ## `test_edit_binding_vocabulary.nim` and the ViewModel's oracle suite
+  ## assert from the two sides.
   ##
   ## `character` is `keymap.keyCharacter`'s answer and is what gets INSERTED —
   ## never `key`, which is `"Space"` for the space bar. That is the same
@@ -276,29 +321,19 @@ proc applyEditKey*(buf: EditBuffer; key, character: string): EditKeyOutcome =
   ## and getting it wrong here would type the word "Space" into a user's file.
   if buf.isNil or buf.widget.isNil:
     return ekIgnored
-  let w = buf.widget
-  case key
-  of "Left": w.moveLeft(); ekMoved
-  of "Right": w.moveRight(); ekMoved
-  of "Up": w.moveUp(); ekMoved
-  of "Down": w.moveDown(); ekMoved
-  of "Home": w.moveLineStart(); ekMoved
-  of "End": w.moveLineEnd(); ekMoved
-  of "Backspace": w.backspace(); ekChanged
-  of "Delete": w.deleteRight(); ekChanged
-  of "Enter": w.splitLine(); ekChanged
-  of "Tab": w.indent(); ekChanged
-  of "Shift+Tab": w.dedent(); ekChanged
-  of "Ctrl+z":
-    if w.undo(): ekChanged else: ekMoved
-  of "Ctrl+y":
-    if w.redo(): ekChanged else: ekMoved
-  else:
-    if character.len > 0:
-      w.insertText(character)
-      ekChanged
-    else:
-      ekIgnored
+  let idx = editBindingIndex(key)
+  if idx >= 0:
+    return performEditBehaviour(buf.widget, TuiEditBindings[idx].behaviour,
+                                character)
+  # The DEFAULT row, and it fires only for a key that stands for a character.
+  # A key the table does not bind and that is not a character is the keymap's,
+  # not the editor's — which is what `ekIgnored` means to the caller.
+  if character.len == 0:
+    return ekIgnored
+  let def = defaultEditBindingIndex()
+  if def < 0:
+    return ekIgnored
+  performEditBehaviour(buf.widget, TuiEditBindings[def].behaviour, character)
 
 # ---------------------------------------------------------------------------
 # The session

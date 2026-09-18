@@ -117,11 +117,15 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 906
-  ## 898 -> 906 on 2026-09-18: PLAT-29 added `document_version.nim` and
-  ## `reconcile.nim` to `viewmodel/editor/`, and the double-mapping scan
-  ## below runs FOUR assertions over every module in that directory. The
-  ## directory enumeration is what made this an edit rather than a silence.
+const ExpectedAssertions = 914
+  ## 898 -> 906 -> 914 on 2026-09-18: PLAT-29 added `document_version.nim` and
+  ## `reconcile.nim` to `viewmodel/editor/` and PLAT-30 added `operations.nim`
+  ## and `editor_state.nim`, and the double-mapping scan below runs FOUR
+  ## assertions over every module in that directory. The directory enumeration
+  ## is what made each of those an edit rather than a silence — and PLAT-30's
+  ## made the PRODUCT move too: a paste operation's natural parameter name is
+  ## this scan's own needle, `before: bool`, so `operations.nim` calls it
+  ## `atRangeStart` rather than the scan being widened to spare it.
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
   ##
@@ -776,9 +780,12 @@ const
   RowProjectionSource = staticRead("../../editor/row_projection.nim")
   DocumentVersionSource = staticRead("../../editor/document_version.nim")
   ReconcileSource = staticRead("../../editor/reconcile.nim")
+  EditorStateSource = staticRead("../../editor/editor_state.nim")
+  OperationsSource = staticRead("../../editor/operations.nim")
 
   ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                    "document_version.nim", "inlay.nim", "range_set.nim",
+                    "document_version.nim", "editor_state.nim", "inlay.nim",
+                    "operations.nim", "range_set.nim",
                     "reconcile.nim", "rope.nim", "row_projection.nim",
                     "selection.nim", "selection_ops.nim",
                     "seq_line_store.nim", "text_store.nim",
@@ -811,6 +818,18 @@ const
     ## and is exactly where a sixth hand-written double mapping would land. It
     ## calls `rebase` and takes `bOverA`; it spells no flag, because there is
     ## no flag to spell.
+    ##
+    ## **AND A FIFTH TIME, LATER THE SAME DAY**: PLAT-30 added
+    ## `operations.nim` and `editor_state.nim`, and this case went red by name
+    ## on the first run of the whole lane — from a suite that had been green
+    ## since the day before. `operations.nim` is the one that matters: it is
+    ## the 224-operation vocabulary, every editing operation in the model goes
+    ## through it, and it reaches the algebra through `changeByRange` alone. It
+    ## spells no flag either — and the scan made it RENAME one: a paste
+    ## operation's natural parameter name is `before: bool`, which is exactly
+    ## this scan's needle, so the module calls it `atRangeStart` and says why
+    ## (§5's sentinel collision, resolved in favour of keeping the tripwire
+    ## sharp).
 
   EditorModules = block:
     ## Every `.nim` file actually in `viewmodel/editor/`, sorted, read out of
@@ -887,8 +906,10 @@ suite "PLAT-25 — one function, one name":
                   "inlay.nim": InlaySource,
                   "row_projection.nim": RowProjectionSource,
                   "document_version.nim": DocumentVersionSource,
-                  "reconcile.nim": ReconcileSource}.toTable
-    counted others.len == 14
+                  "reconcile.nim": ReconcileSource,
+                  "editor_state.nim": EditorStateSource,
+                  "operations.nim": OperationsSource}.toTable
+    counted others.len == 16
     counted others.len + 1 == ScannedModules.len
     for name, src in others:
       checkpoint(name)

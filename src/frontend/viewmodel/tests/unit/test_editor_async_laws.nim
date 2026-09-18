@@ -89,10 +89,15 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1767
+const ExpectedAssertions = 1771
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run, and updated deliberately in the same commit as the checks that moved
   ## it.
+  ##
+  ## 1767 -> 1771 on 2026-09-18, and the four are §35's two-sided directory
+  ## check gaining two names: PLAT-30 put `operations.nim` and
+  ## `editor_state.nim` in `viewmodel/editor/`, and this suite went red by name
+  ## before that milestone's own suites existed.
 
 const Seed = 0x29c0de00'u32
   ## Printed. Every population below is derived from it, and the suite is
@@ -235,7 +240,8 @@ const
   GeneratorSource = staticRead("../generators/async_generator.nim")
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                        "document_version.nim", "inlay.nim", "range_set.nim",
+                        "document_version.nim", "editor_state.nim",
+                        "inlay.nim", "operations.nim", "range_set.nim",
                         "reconcile.nim", "rope.nim", "row_projection.nim",
                         "selection.nim", "selection_ops.nim",
                         "seq_line_store.nim", "text_store.nim",

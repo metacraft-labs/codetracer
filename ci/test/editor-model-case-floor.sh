@@ -9,6 +9,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-27
 #   bash ci/test/editor-model-case-floor.sh PLAT-28
 #   bash ci/test/editor-model-case-floor.sh PLAT-29
+#   bash ci/test/editor-model-case-floor.sh PLAT-30
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -182,9 +183,33 @@ PLAT-29)
 	LAW_SECTION="3.5"
 	LAW_COUNT=5
 	;;
+PLAT-30)
+	MILESTONE="** PLAT-30: The named operation vocabulary"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_vocabulary_oracle.nim
+		src/frontend/viewmodel/tests/unit/test_editor_vocabulary_laws.nim
+	)
+	# NO `LAW_SUITES`, AND THAT IS NOT AN OMISSION. PLAT-30 publishes no
+	# `LAW-*` row: its oracle is §2.2's own four tables, and the two-way
+	# count over them is asserted INSIDE `test_editor_vocabulary_oracle.nim`
+	# — ten cases, §7.1's five lines over two oracle tables — rather than by
+	# this script. The reason it lives there and not here is that the parse
+	# has to generate 224 names from 140 declarations by the categories' own
+	# form rules, which is a program rather than an `awk` over one column.
+	#
+	# THE THIRD SUITE IS DELIBERATELY ABSENT FROM THIS TOTAL.
+	# `src/frontend/tui/app/tests/test_edit_binding_vocabulary.nim` asserts
+	# the other half of the retirement — that `applyEditKey` dispatches
+	# through the table, on the real widget — and it links `isonim_tui`,
+	# which needs the tree-sitter archive and `-L` flags this script does not
+	# pass and should not learn. It runs in the `tui` lane, which globs its
+	# directory. Its twenty cases are NOT in the floor's derivation either,
+	# so the floor and this total count the same set.
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-29. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-30. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1
