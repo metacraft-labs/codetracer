@@ -48,18 +48,26 @@
 ##    the ids and the killers in both directions with the cardinality asserted.
 ##
 ## =========================================================================
-## THE ONE PLACE THIS PORT DIVERGES FROM THE REFERENCE, AND WHY
+## WHY `LAW-S1` ASSERTS CANONICAL FORM AND NOT "NON-OVERLAPPING"
 ## =========================================================================
 ##
-## `editorSelection` merges ranges that TOUCH as well as ranges that overlap;
-## CodeMirror merges a touching range only when it is empty. The reason is
-## `LAW-S1`'s published killer — *"drop the merge step for touching ranges"* —
-## which under the reference's rule is not observable at all: `[0,3)` and
-## `[3,6)` do not overlap, so an invariant that forbids only OVERLAP is
-## satisfied by the mutated output and the law cannot go red. A law whose
-## published killer cannot kill it is a law nobody has watched fail. The full
-## argument is in `selection.nim`'s header; the arm that shows it lands is
-## `M1`.
+## `editorSelection` merges on OVERLAP, and on mere contact only when one of
+## the two ranges is empty — CodeMirror's rule, symmetrised. Two abutting
+## non-empty selections therefore survive as two, because merging them turns a
+## multi-cursor insert into one insertion instead of two (measured, and pinned
+## in `test_editor_selection_examples.nim`).
+##
+## Under that rule `LAW-S1`'s published killer — *"drop the merge step for
+## touching ranges"* — is invisible to an invariant that forbids only OVERLAP,
+## since `[0,3)` and a caret at 3 do not overlap; and it is invisible to
+## IDEMPOTENCE as well, because a normaliser missing a merge step is still
+## idempotent. So the law asserts the stronger thing: the output is a FIXED
+## POINT of the constructor, with no adjacent pair mergeable under the declared
+## rule. That is `rangesInvariantViolation`'s canonical-form clause, it is what
+## `sel.invariantViolation.len == 0` reads, and the arm that shows it lands is
+## `M1`. Verification-Harness-Traps §36 is the general statement: when a
+## published killer cannot kill, the repair is to the ASSERTION or to the
+## DESIGN, and here it is to the assertion.
 ##
 ## ARMING: `run-plat26-selection-mutations.py`.
 
@@ -81,7 +89,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2764
+const ExpectedAssertions = 3453
   ## Asserted by the last case against the runtime tally. Update it
   ## deliberately, in the same commit as the checks that moved it.
 
@@ -90,7 +98,21 @@ const ExpectedAssertions = 2764
 # ---------------------------------------------------------------------------
 
 const Seed = 0x50a72600'u32
-const DrawsPerCell = 6
+const DrawsPerCell = SelClassCount
+  ## **ONE DRAW PER SELECTION CLASS, PER CELL, AND THAT IS THE POINT RATHER
+  ## THAN A COINCIDENCE.** It was a round number, and the class of each draw
+  ## was picked by the PRNG — so whether a given cell ever saw the class that
+  ## can kill a given arm depended on the seed. §36's third rule: *"an arm
+  ## whose kill depends on a draw is an arm that is sometimes a survivor, and
+  ## 'sometimes' is indistinguishable from 'wrong' in a table."* `M1` is
+  ## exactly such an arm — only `selCaretOnEdge` and the coincident-caret
+  ## shapes can observe a dropped touching merge — so the cell enumerates the
+  ## classes instead, and `card(o.classes) == SelClassCount` is asserted under
+  ## every cell so a cell that stopped covering them says so.
+  ##
+  ## It also closed a real defect: the randomised class meant no law cell
+  ## reliably drew `selCaretOnEdge` at K = 7, and `LAW-S2`'s primary-index
+  ## bookkeeping was wrong on exactly that shape.
 const HistogramDraws = 400
 
 # ---------------------------------------------------------------------------
@@ -133,11 +155,37 @@ type LawOutcome = object
   draws: int
   checks: int
   extra: int
+  classes: set[SelClass]   ## which classes this cell actually drew — asserted
   failures: seq[string]
 
 proc note(o: var LawOutcome; ok: bool; what: string) =
   inc o.checks
   if not ok and o.failures.len < 4: o.failures.add what
+
+proc mergeableAdjacentPair(rs: seq[SelectionRange]): int =
+  ## The index of the first range still mergeable with its predecessor under
+  ## §7's rule — overlapping, or touching with one of the two empty — or `-1`.
+  ##
+  ## **THIS IS THE LAW'S OWN DERIVATION OF CANONICAL FORM, AND IT IS
+  ## DELIBERATELY NEITHER OF THE PRODUCT'S TWO** (§30). It is not
+  ## `rangesInvariantViolation`, because that is the predicate `G13` arms and a
+  ## law calling it would be disarmed by the same edit; and it is not
+  ## `editorSelection` applied to the pair, because that is the function `M1`
+  ## arms and a law calling it would agree with the mutation instead of
+  ## noticing it. Three mechanisms, three subjects, one rule.
+  ##
+  ## Canonical form is what makes `LAW-S1`'s published killer observable.
+  ## "Ordered and non-overlapping" is satisfied by a normaliser that never
+  ## merged anything touching, and so is IDEMPOTENCE — which is why the law
+  ## needed a third clause rather than a different killer
+  ## (Verification-Harness-Traps §36).
+  result = -1
+  for i in 1 ..< rs.len:
+    let prev = rs[i - 1]
+    let cur = rs[i]
+    if cur.rangeFrom < prev.rangeTo: return i
+    if cur.rangeFrom == prev.rangeTo and (cur.isEmpty or prev.isEmpty):
+      return i
 
 proc shiftRange(r: SelectionRange; delta: int): SelectionRange =
   ## A range moved by a constant. **Arithmetic, and deliberately not
@@ -156,8 +204,13 @@ proc totalityControl(ctx: OpCtx; op: SelectionOp;
   ## start-document coordinates and merging"*.
   ##
   ## No rebase, no composition and no `changeByRange`. The per-range edits are
-  ## disjoint because the input selection is strictly separated, so applying
-  ## them BACK TO FRONT keeps every start-document offset valid, and each
+  ## disjoint because the input selection is CANONICAL — non-overlapping over
+  ## half-open intervals, which is exactly "no two edit sites share a byte" and
+  ## is all this argument needs. (It used to say *strictly separated*, which is
+  ## strictly stronger and is no longer the invariant: two abutting NON-EMPTY
+  ## ranges are a legal input now, and `[0,3)` beside `[3,6)` is still two
+  ## disjoint edits.) So applying them BACK TO FRONT keeps every
+  ## start-document offset valid, and each
   ## returned range moves by the arithmetic sum of the length deltas of the
   ## edits before it. The precondition that makes the second half exact — that
   ## an operation which edits returns its range at its own edit site — is
@@ -199,11 +252,15 @@ proc landsOnClusterBoundary(ctx: OpCtx; r: SelectionRange): bool =
 
 let docs = genDocs(Seed)
 
-proc drawFor(k: int; r: var Rng): SelDraw =
-  ## One draw, from a class chosen round-robin over the eight so that every
-  ## cell sees violating inputs rather than whichever class the PRNG favoured.
+proc drawFor(k: int; cls: SelClass; r: var Rng): SelDraw =
+  ## One draw of a NAMED class, on a document the PRNG picks.
+  ##
+  ## The class is a parameter rather than a draw. It used to be
+  ## `SelClass(r.rand(SelClassCount - 1))` under a doc comment that said
+  ## "round-robin over the eight" — the comment describing the intent and the
+  ## code doing something else, which is how a cell comes to miss the one class
+  ## that can falsify it.
   let d = docs[r.rand(docs.len - 1)]
-  let cls = SelClass(r.rand(SelClassCount - 1))
   genSelDraw(d, r, cls, k)
 
 # ===========================================================================
@@ -213,8 +270,10 @@ proc drawFor(k: int; r: var Rng): SelDraw =
 proc runLaw(law: LawId; k: int; r: var Rng): LawOutcome =
   result.failures = @[]
   for iter in 0 ..< DrawsPerCell:
-    let draw = drawFor(k, r)
+    let cls = SelClass(iter mod SelClassCount)
+    let draw = drawFor(k, cls, r)
     inc result.draws
+    result.classes.incl cls
     let why = describe(draw)
     let sel = editorSelection(draw.ranges, draw.primary)
     case law
@@ -231,6 +290,14 @@ proc runLaw(law: LawId; k: int; r: var Rng): LawOutcome =
                   "S1 range count " & $sel.rangeCount & " out of bounds: " & why)
       result.note(sel.primaryIndex >= 0 and sel.primaryIndex < sel.rangeCount,
                   "S1 primary out of range: " & why)
+      # **CANONICAL FORM — the clause the published killer lands on.** Derived
+      # here, by this file's own predicate, so that dropping the touching merge
+      # in the constructor reddens this and nothing repairs it.
+      let bad = mergeableAdjacentPair(sel.ranges)
+      result.note(bad < 0,
+                  "S1 output is not canonical: range " & $bad &
+                  " is still mergeable with its predecessor in " & $sel &
+                  " :: " & why)
     of lawS2:
       # THE PRIMARY SURVIVES — checked by CONTAINMENT of the pre-normalisation
       # primary's head, which is not how `editorSelection` tracks it (it
@@ -314,9 +381,17 @@ proc runLaw(law: LawId; k: int; r: var Rng): LawOutcome =
       result.note(mapped.rangeCount <= sel.rangeCount,
                   "S6 count rose from " & $sel.rangeCount & " to " &
                   $mapped.rangeCount & ": " & why)
+      # ORDER AND CANONICAL FORM. Two abutting NON-EMPTY ranges are a legal
+      # mapped result — that is the merge rule — so the claim is that nothing
+      # overlaps and nothing mergeable survived, not that everything is
+      # strictly separated.
+      let bad = mergeableAdjacentPair(mapped.ranges)
+      result.note(bad < 0,
+                  "S6 mapped set is not canonical at range " & $bad & ": " &
+                  $mapped & " :: " & why)
       for i in 1 ..< mapped.rangeCount:
-        result.note(mapped[i].rangeFrom > mapped[i - 1].rangeTo,
-                    "S6 order or separation lost: " & $mapped & " :: " & why)
+        result.note(mapped[i].rangeFrom >= mapped[i - 1].rangeTo,
+                    "S6 order lost: " & $mapped & " :: " & why)
 
 # ===========================================================================
 # THE GENERATOR IS EVIDENCE — §4
@@ -453,6 +528,11 @@ suite "PLAT-26 — LAW-S1 ... LAW-S6, at K in {1, 2, 3, 7}":
         # twice over.
         counted o.draws == DrawsPerCell
         counted o.checks > 0
+        # AND IT SAW EVERY CLASS. A cell that drew only the easy shapes
+        # satisfies every law written over it while being unable to observe the
+        # arms that need the awkward ones — §36's third rule, and the reason
+        # `M1` is a kill rather than a coin flip.
+        counted card(o.classes) == SelClassCount
 
 # ===========================================================================
 # LAW-S3's SWEEP — twelve primitives × four values of K
@@ -495,10 +575,20 @@ suite "PLAT-26 — LAW-S3: totality over N ranges, per primitive":
 # ===========================================================================
 
 const ViolationClasses = [selUnsorted, selOverlapping, selTouching,
-                          selDuplicated]
-  ## The four the milestone names: *"unsorted, overlapping, touching, and
+                          selDuplicated, selCaretOnEdge]
+  ## The four the milestone names — *"unsorted, overlapping, touching, and
   ## duplicate ranges, with the primary index's landing place checked in
-  ## each"*.
+  ## each"* — **and `selCaretOnEdge`, which is where the merge rule now lives.**
+  ##
+  ## Since two abutting non-empty ranges no longer merge, `selTouching` is the
+  ## class that asserts the SURVIVAL of a touching chain, and a caret on a
+  ## span's edge is the only drawn class in which a touching merge still
+  ## happens. A sweep that did not include it would assert the merge rule in
+  ## one direction only.
+  ##
+  ## It is also the class that found `LAW-S2`'s primary-index defect: a merged
+  ## GROUP followed by a SURVIVING range is the shape in which a wrong primary
+  ## index does not run off the end and get clamped back into looking right.
 
 suite "PLAT-26 — normalisation is asserted on inputs that violate it":
 
@@ -522,13 +612,33 @@ suite "PLAT-26 — normalisation is asserted on inputs that violate it":
           # THE PRIMARY'S LANDING PLACE.
           counted sel.mainRange.rangeFrom <= head
           counted head <= sel.mainRange.rangeTo
-          # THE MERGE ACTUALLY HAPPENED for the three classes that ask for one,
-          # and did NOT for the one that does not — two-sided, or "merging
-          # everything into one range" would satisfy the rows above.
+          # THE MERGE RULE, TWO-SIDED, PER CLASS. "Merge everything into one
+          # range" would satisfy every row above; so would "merge nothing".
+          # These pin which is which, over eighteen documents and four primary
+          # placements each.
           case cls
-          of selUnsorted: counted sel.rangeCount == 4
-          of selOverlapping, selTouching: counted sel.rangeCount == 1
-          of selDuplicated: counted sel.rangeCount == 2
+          of selUnsorted:
+            # Sorted, nothing merged.
+            counted sel.rangeCount == 4
+          of selOverlapping:
+            # A chain of strict overlaps collapses to one.
+            counted sel.rangeCount == 1
+          of selTouching:
+            # **A CHAIN OF ABUTTING NON-EMPTY RANGES SURVIVES AS FOUR**, which
+            # is the merge rule's whole content and the property a
+            # multi-cursor insert depends on. Under "merge on touch" this is
+            # 1, and this row is where that shows up at scale.
+            counted sel.rangeCount == 4
+            counted sel[3].rangeTo > sel[0].rangeFrom
+          of selDuplicated:
+            counted sel.rangeCount == 2
+          of selCaretOnEdge:
+            # A span with a caret on EACH of its edges, plus one caret with a
+            # gap before it: the two edge carets are absorbed, the far one is
+            # not. This is the touching merge that DOES happen.
+            counted sel.rangeCount == 2
+            counted not sel[0].isEmpty
+            counted sel[1].isEmpty
           else: counted false
           inc seen
         counted seen == docs.len
@@ -671,9 +781,12 @@ type FuzzOutcome = object
 
 proc runFuzz(clsIdx: int; r: var Rng; rounds, stepsPerRound: int): FuzzOutcome =
   ## §9's invariant set, for selections: after EVERY step the selection is
-  ## ordered, strictly separated, non-empty and its primary index is in range.
-  ## Seeded from the corpus, and the shortest breaking PREFIX is what gets
-  ## reported.
+  ## ordered, non-empty, its primary index is in range, and it is CANONICAL —
+  ## nothing overlapping and no mergeable adjacent pair left. That is
+  ## `invariantViolation` below, which is the canonical-form predicate; two
+  ## abutting NON-EMPTY ranges are a legal state and the sweep must not report
+  ## them. Seeded from the corpus, and the shortest breaking PREFIX is what
+  ## gets reported.
   result.problems = @[]
   for round in 0 ..< rounds:
     let text = genAlternatingDoc(r, clsIdx, 12, 7, 2)
@@ -999,18 +1112,30 @@ suite "PLAT-26 — the suite's own non-vacuity":
     counted rangesInvariantViolation([spanRange(6, 9), spanRange(0, 4)], 0).len > 0
     # OVERLAPPING
     counted rangesInvariantViolation([spanRange(0, 5), spanRange(3, 9)], 0).len > 0
-    # TOUCHING — the one LAW-S1's killer drops, and the one the reference does
-    # not refuse.
-    counted rangesInvariantViolation([spanRange(0, 4), spanRange(4, 9)], 0).len > 0
-    counted rangesInvariantViolation([spanRange(0, 4), spanRange(4, 9)], 0)
-      .contains("touches or overlaps")
+    counted rangesInvariantViolation([spanRange(0, 5), spanRange(3, 9)], 0)
+      .contains("overlaps")
+    # **TWO ABUTTING NON-EMPTY RANGES ARE ACCEPTED**, and that is the merge
+    # rule read back off the predicate: they cover disjoint text and are two
+    # edit sites. The predicate has to say YES here or `[0,3)` + `[3,6)` could
+    # not be a selection at all.
+    counted rangesInvariantViolation([spanRange(0, 4), spanRange(4, 9)], 0).len == 0
+    # **AND A TOUCHING PAIR WITH A CARET IN IT IS REFUSED**, because that pair
+    # is still mergeable — which is the canonical-form clause, the one thing
+    # that makes §3.2's killer for LAW-S1 observable. Both edges, and the
+    # coincident-caret case.
+    counted rangesInvariantViolation([spanRange(0, 4), caret(4)], 0).len > 0
+    counted rangesInvariantViolation([spanRange(0, 4), caret(4)], 0)
+      .contains("still mergeable")
+    counted rangesInvariantViolation([caret(0), spanRange(0, 4)], 0).len > 0
+    counted rangesInvariantViolation([caret(3), caret(3)], 0).len > 0
     # DUPLICATED
     counted rangesInvariantViolation([spanRange(0, 4), spanRange(0, 4)], 0).len > 0
-    # A CARET ON AN EDGE
-    counted rangesInvariantViolation([spanRange(0, 4), caret(4)], 0).len > 0
-    # And the predicate at the type is the SAME predicate, not a second copy.
+    # And the predicate at the type is the SAME predicate, not a second copy —
+    # asserted in both directions, so "it always says yes" is excluded.
     counted editorSelection([spanRange(0, 4), spanRange(4, 9)]).invariantViolation.len == 0
     counted isNormalised(editorSelection([spanRange(0, 4), spanRange(4, 9)]))
+    counted editorSelection([spanRange(0, 4), spanRange(4, 9)]).rangeCount == 2
+    counted editorSelection([spanRange(0, 4), caret(4)]).rangeCount == 1
 
 # ===========================================================================
 # THE SHRINKER REACHES A KNOWN MINIMUM — §4.5

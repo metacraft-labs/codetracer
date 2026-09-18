@@ -41,8 +41,9 @@
 ## Until PLAT-26 this file carried a `TransactionSelection` of one anchor and
 ## one head, labelled PROVISIONAL in this header, because §7's selection did
 ## not exist yet. It exists now: `editor/selection.nim`'s `EditorSelection` —
-## an ordered, strictly separated, non-empty sequence of ranges with a primary
-## index — and a transaction carries one of those or none.
+## an ordered, non-empty, CANONICAL sequence of ranges with a primary index,
+## meaning nothing overlaps and no adjacent pair is still mergeable under
+## `selection.nim`'s rule — and a transaction carries one of those or none.
 ##
 ## **The placeholder was replaced rather than kept beside the real type.** A
 ## one-range selection type that survives the milestone that was supposed to

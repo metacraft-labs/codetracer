@@ -32,7 +32,7 @@ attached so a reader of this file does not have to find the other two.
 
 WHY IT REACHES THE SUITE AND THE GENERATOR
 ------------------------------------------
-FOURTEEN of the twenty-four arms mutate the HARNESS rather than the product,
+FIFTEEN of the twenty-eight arms mutate the HARNESS rather than the product,
 and that is deliberate. This campaign's recurring defect is a gate that cannot
 fail: a generator that produced nothing, a population assertion over an empty
 set, a scanner whose sweep found nothing, a CONTROL that had become a second
@@ -61,6 +61,9 @@ they are armed is to break the harness and require it to notice:
       forty-eight totality rows stay green under it, so an arm on
       `changeByRange` would survive rather than kill, and what notices is the
       source scan over this file's subject's own `totalityControl` body
+  G15 THE LAW CELLS STOP SWEEPING EVERY SELECTION CLASS, so whether a cell
+      ever sees the shape that can falsify it goes back to being a property of
+      the seed — which is what `M1` needs and is why this gate exists
 
 FOUR VERDICTS, NOT TWO (Verification-Harness-Traps.md §1). An arm that never
 ran is not a kill:
@@ -178,6 +181,13 @@ X_DIR = "DIRECTION IS A FIELD, because extend-style motions need it"
 X_ROUND = ("the round trip is exact in COLUMN space and not in OFFSET space, "
            "measured")
 
+# THE FOUR CASES THIS PASS ADDED, and the arms that land on them.
+X_INSERT = "TWO ABUTTING SELECTIONS PRODUCE TWO INSERTIONS — the measurement"
+X_EXTEND = "EXTENDING TWO SELECTIONS INTO CONTACT does not cost a cursor"
+X_PRIMARY = ("the primary follows its range across a merge that is NOT the "
+             "last one")
+X_ZERO = "THE ZERO VALUE IS REACHABLE, IT IS NOT LEGAL, AND IT IS INERT BY NAME"
+
 NAMED_CASES = [
     L_S1_K7, L_S2_K7, L_S4_K7, L_S5_K2,
     T_INSERT_K7, T_DELETE_K7, T_SELLINE_K3,
@@ -185,6 +195,7 @@ NAMED_CASES = [
     C_HIST, C_REALISED, C_CLUSTER, C_DISCRIM, C_SCAN1, C_SCAN2, C_CONTROL,
     C_FALSIFY, C_SHRINK,
     X_MORE, X_ORACLE, X_DUP, X_DIR, X_ROUND,
+    X_INSERT, X_EXTEND, X_PRIMARY, X_ZERO,
 ]
 
 
@@ -206,15 +217,18 @@ ARMS = [
     # =======================================================================
     Arm(
         "M1", SELECTION,
-        "    if merged.len > 0 and r.rangeFrom <= merged[^1].rangeTo:\n",
-        "    if merged.len > 0 and r.rangeFrom < merged[^1].rangeTo:\n",
+        "      r.rangeFrom <= merged[^1].rangeTo and (r.isEmpty or merged[^1].isEmpty)\n",
+        "      r.rangeFrom < merged[^1].rangeTo and (r.isEmpty or merged[^1].isEmpty)\n",
         L_S1_K7,
-        "THE MERGE STEP FOR TOUCHING RANGES, DROPPED — and the arm the whole "
-        "touching-merge decision was taken for. Under CodeMirror's rule this "
-        "mutation is NOT OBSERVABLE, because `[0,3)` and `[3,6)` do not "
-        "overlap and an invariant forbidding only overlap is satisfied by the "
-        "mutated output. Strict separation is the weakest invariant under "
-        "which it lands",
+        "THE MERGE STEP FOR TOUCHING RANGES, DROPPED. `<=` becomes `<`, which "
+        "collapses the touching clause into the overlap clause and leaves it "
+        "dead: a caret on a span's edge, and two carets at one offset, come "
+        "back as two ranges. **It is killed by the CANONICAL-FORM clause and "
+        "by nothing else** — the output is still ordered, still "
+        "non-overlapping, still non-empty, and the mutated normaliser is still "
+        "IDEMPOTENT. That is §36's repair taken on the assertion instead of on "
+        "the design; the earlier port merged on touch to make this arm land "
+        "and paid for it with a multi-cursor insert (see `M11`)",
         law="drop the merge step for *touching* ranges",
         law_id="LAW-S1",
     ),
@@ -347,7 +361,70 @@ ARMS = [
     ),
 
     # =======================================================================
-    # THIRTEEN ON THE HARNESS — the gates that must be able to fail
+    # THREE MORE ON THE PRODUCT — the rule this pass decided, the defect it
+    # found, and the zero value it closed
+    # =======================================================================
+    Arm(
+        "M11", SELECTION,
+        "      r.rangeFrom <= merged[^1].rangeTo and (r.isEmpty or merged[^1].isEmpty)\n",
+        "      r.rangeFrom <= merged[^1].rangeTo\n",
+        X_INSERT,
+        "**THE REJECTED RULE, PERFORMED: MERGE ON TOUCH AS WELL AS ON "
+        "OVERLAP.** The emptiness test is dropped, so two abutting NON-EMPTY "
+        "selections merge — which is what this port did until this pass, on "
+        "the stated grounds that the two are indistinguishable to a user. They "
+        "are not, and this arm is that sentence made falsifiable: `\"Xghij\"` "
+        "where multi-cursor wants `\"XXghij\"`. The extend-into-contact case "
+        "goes red beside it, which is the reachability half — the state is "
+        "produced by two presses of a motion key, not by a constructor",
+    ),
+    Arm(
+        "M12", SELECTION,
+        "    if i == mainSorted: mainIndex = merged.len - 1\n"
+        "  if mainIndex < 0 or mainIndex >= merged.len:\n",
+        "    if i == 0: mainIndex = mainSorted\n"
+        "    if (overlaps or touchesAndOneIsEmpty) and i <= mainIndex:\n"
+        "      dec mainIndex\n"
+        "  if mainIndex >= merged.len: mainIndex = merged.len - 1\n"
+        "  if mainIndex < 0:\n",
+        X_PRIMARY,
+        "**THE PRIMARY-INDEX DEFECT THIS PASS FOUND, RESTORED.** Track the "
+        "primary by decrementing its index once per merge at or before it — "
+        "correct in CodeMirror, which splices the live array, and wrong here, "
+        "where `i` addresses the SORTED input and the index being decremented "
+        "addresses the MERGED output. **The clamp is restored with it, because "
+        "the clamp is the reason this survived a milestone**: without a merged "
+        "GROUP followed by a SURVIVING range, every wrong index runs off the "
+        "end and is put back on the only range there is.\n\n"
+        "**THE NEEDLE SPANS THE POST-LOOP GUARD, AND THAT IS THE WHOLE POINT "
+        "OF THE ARM.** An earlier spelling replaced only the in-loop "
+        "assignment and put the clamp INSIDE the loop, where it fires on the "
+        "first iteration — `mainIndex` is `mainSorted`, `merged.len` is 1 — "
+        "and pins the primary to 0 for the rest of the run. That is not this "
+        "defect; it is `M2` (*reset the primary index to 0*) spelled a second "
+        "way, so the arm killed its case while arming nothing `M2` did not "
+        "already arm. The clamp has to sit AFTER the loop, exactly where the "
+        "shipped code's `raise` sits, or the mutation is a different mutation. "
+        "Verified by probe: the faithful arm answers primary 0,1,0,1 over "
+        "`[0,2)`, `caret(2)`, `caret(0)`, `caret(8)` — the shipped code's "
+        "0,0,0,1 with the second one wrong — while the in-loop spelling "
+        "answered 0,0,0,0, which is `M2`'s signature",
+    ),
+    Arm(
+        "M13", SELECTION,
+        "  if s.ranges.len == 0: raise newException(SelectionError, ZeroValueMessage)\n"
+        "  s.ranges[s.primary]\n",
+        "  s.ranges[s.primary]\n",
+        X_ZERO,
+        "THE ZERO VALUE'S GUARD ON `mainRange`, REMOVED — restoring the "
+        "`IndexDefect` it used to raise. The value stays inert either way, "
+        "which is the point: the difference between inert-and-named and "
+        "inert-by-accident is not visible in any law, so it is a case, and the "
+        "case has an arm",
+    ),
+
+    # =======================================================================
+    # FOURTEEN ON THE HARNESS — the gates that must be able to fail
     # =======================================================================
     Arm(
         "G1", GENERATOR,
@@ -482,14 +559,16 @@ ARMS = [
     ),
     Arm(
         "G13", SELECTION,
-        "    if i > 0 and r.rangeFrom <= rs[i - 1].rangeTo:\n",
-        "    if i > 0 and r.rangeFrom < rs[i - 1].rangeTo:\n",
+        "    if i > 0 and r.rangeFrom == rs[i - 1].rangeTo and\n",
+        "    if i > 0 and r.rangeFrom < rs[i - 1].rangeTo and\n",
         C_FALSIFY,
         "§32a: A SECOND MECHANISM DISARMS AN ARM EXACTLY AS A MOVED NEEDLE "
-        "DOES. `M1` drops the touching merge; what NOTICES is the invariant "
-        "predicate refusing a touching pair. Weaken the predicate the same "
-        "way and `M1` survives — so the predicate has its own arm, and the "
-        "falsifiability case is what it lands on",
+        "DOES. THE CANONICAL-FORM CLAUSE IS DELETED from the invariant "
+        "predicate — `==` becomes `<`, which the overlap test two lines above "
+        "has already excluded, so the clause can never fire. `M1` drops the "
+        "touching merge; what NOTICES is this clause refusing the mergeable "
+        "pair that survives. Weaken it and `M1` survives, so it has its own "
+        "arm and the falsifiability case is what it lands on",
     ),
     Arm(
         "G14", LAWS,
@@ -506,6 +585,20 @@ ARMS = [
         "the source scan over this file's own `totalityControl` body, which is "
         "the one claim in the suite that no mutation of the product could "
         "establish",
+    ),
+    Arm(
+        "G15", LAWS,
+        "    let cls = SelClass(iter mod SelClassCount)\n",
+        "    let cls = SelClass(iter div DrawsPerCell)\n",
+        L_S1_K7,
+        "**THE LAW CELLS STOP SWEEPING EVERY CLASS** and draw `selDisjoint` "
+        "eight times instead — `div` where `mod` was meant, which is what this "
+        "line looked like before this pass in effect, since the class was "
+        "drawn from the PRNG under a doc comment claiming round-robin. Every "
+        "law still passes on the easy shape; what notices is `card(o.classes) "
+        "== SelClassCount` under each cell. §36's third rule: an arm whose "
+        "kill depends on a draw is an arm that is sometimes a survivor, and "
+        "`M1` is exactly such an arm",
     ),
 ]
 

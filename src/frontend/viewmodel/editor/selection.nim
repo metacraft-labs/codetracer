@@ -44,41 +44,90 @@
 ## because "no goal column" is an absence and not a very large number.
 ##
 ## =========================================================================
-## NORMALISATION MERGES RANGES THAT TOUCH, AND THAT DIVERGES FROM THE
-## REFERENCE DELIBERATELY
+## THE MERGE RULE: OVERLAP ALWAYS, TOUCH ONLY WHEN ONE OF THE TWO IS EMPTY
 ## =========================================================================
 ##
-## CodeMirror's `normalized` merges an EMPTY range into its predecessor when
-## `range.from <= prev.to` and a NON-EMPTY one only when `range.from <
-## prev.to`. So `[0,3)` and `[3,6)` survive as two ranges there.
+## Two ranges merge when they OVERLAP — `next.from < prev.to` — and when they
+## merely TOUCH — `next.from == prev.to` — only if one of the two is a caret.
+## So `[0,3)` and `[3,6)` survive as two, and `[0,3)` and a caret at 3 become
+## one, and two carets at the same offset become one.
 ##
-## Here both merge, and the invariant is strict separation — `ranges[i].from >
-## ranges[i-1].to`. The reason is not taste, it is that
-## Editor-Model-Conformance-Suite.md §3.2 names the killing mutation for
-## `LAW-S1` as *"drop the merge step for touching ranges"*, and under the
-## reference's rule that mutation is not observable: with half-open intervals
-## `[0,3)` and `[3,6)` do not overlap, so an invariant that only forbids
-## OVERLAP is satisfied by the mutated output and the law cannot go red. **A
-## law whose published killer cannot kill it is a law nobody has watched
-## fail.** Strict separation is the weakest invariant under which §3.2's own
-## arm lands, so it is the one taken, and `LAW-S1`'s arm in
-## `run-plat26-selection-mutations.py` is the evidence that it lands.
+## **The rule is stated as a question about what is DESTROYED by the merge.**
+## An empty range has no extent, so absorbing it removes nothing from the
+## document the selection covers and removes no distinct edit site: the
+## caret's insertion point is already an endpoint of the range that swallows
+## it. Two abutting NON-EMPTY ranges cover disjoint text and are two distinct
+## edit sites, and merging them destroys one of them.
 ##
-## **THE USER-VISIBLE COST IS REAL, AND THE FIRST VERSION OF THIS PARAGRAPH
-## UNDERSTATED IT.** Two adjacent non-empty selections with no gap become one.
-## They render as one contiguous highlight either way, and the ten motions and
-## `delete` produce the same document either way — but an INSERT does not.
-## Over `"abcdefghij"`, inserting `"X"` across `[0,3)` and `[3,6)` as two
-## ranges gives `"XXghij"`; across the merged `[0,6)` it gives `"Xghij"`. One
-## insertion instead of two, which is the behaviour multi-cursor exists for.
-##
-## It is reachable from the twelve primitives, not only from a constructor:
+## That is measurable and it was measured. Over `"abcdefghij"`, inserting
+## `"X"` across `[0,3)` and `[3,6)` as two ranges gives `"XXghij"`; across a
+## merged `[0,6)` it gives `"Xghij"` — **one insertion where multi-cursor
+## wants two**, which is the single operation multi-cursor exists for. And the
+## state is reachable from the twelve primitives, not only from a constructor:
 ## from `[0,2)` and `[4,6)`, two `extend-right` steps give `[0,4)` and
-## `[4,8)`, which abut and merge here. A user who extends two selections into
-## contact loses a cursor. That is taken at THIS milestone because the
-## alternative available here was a published killer that cannot kill; PLAT-30
-## is to revisit it against the other option — keep the reference's merge rule
-## and strengthen `LAW-S1`'s invariant in §3.2's WORDING instead.
+## `[4,8)`, which abut. A user who extends two selections into contact must
+## not silently lose a cursor. Both are pinned cases in
+## `test_editor_selection_examples.nim`, and both go red under the
+## merge-on-touch rule.
+##
+## This is CodeMirror's rule, with one accident of its implementation removed.
+## `codemirror-state/src/selection.ts` keys the `<=` on the emptiness of the
+## INCOMING range alone (`range.empty ? range.from <= prev.to : range.from <
+## prev.to`), so whether a caret sitting on a span's START edge is absorbed
+## depends on which of the two the sort happened to put first. Here the test
+## is symmetric — *either* range empty — so a caret on either edge is
+## absorbed, and the answer does not depend on the sort's tie-break.
+##
+## **Kakoune and Helix — the two editors whose whole model is
+## selections-as-the-primitive, and therefore the ones whose users hit this
+## case — both keep abutting selections separate, and both give two
+## insertions.** Checked in their sources and then by driving them:
+##
+## * Kakoune's `overlaps` (`src/selection.hh`) is
+##   `lhs.max() >= rhs.min()` on INCLUSIVE ranges, so it merges only what
+##   shares a character; abutting ranges do not. Its *touching* predicate is a
+##   different function, `SelectionList::merge_consecutive`
+##   (`src/selection.cc`), reached only from the user command `<a-_>`.
+## * Helix's `Range::overlaps` (`helix-core/src/selection.rs`) is
+##   `self.from() == other.from() || (self.to() > other.from() && other.to() >
+##   self.from())` on HALF-OPEN ranges — the same intervals as ours — and its
+##   own unit test asserts `!overlaps((0, 3), (3, 6))`, which is literally the
+##   pair §3.2 argues about. `Selection::normalize` merges on that predicate;
+##   `merge_consecutive_ranges`, which compares `prev.to() == curr.from()`, is
+##   a separate function behind the `A-_` binding.
+##
+## So in both editors "merge what merely touches" is **a thing the user asks
+## for by pressing a key**, never something normalisation does behind them —
+## which is the strongest available statement that doing it silently is wrong.
+## Typing `X` into two abutting three-character selections of `"abcdef"` gives
+## `"XabcXdef"` in Kakoune 2025.06.03 and in Helix 25.07.1 alike, and
+## `"Xabcdef"` only after `<a-_>` is pressed first.
+##
+## Note also Helix's first clause: two ranges with the SAME start always merge,
+## whatever their extents. That is the same instinct as the symmetrised test
+## here — it is what makes a caret on a span's start edge get absorbed — and
+## it is why this module does not reproduce CodeMirror's dependence on the
+## sort's tie-break.
+##
+## **AN EARLIER VERSION OF THIS MODULE MERGED ON TOUCH, AND IT WAS WRONG FOR A
+## TESTING REASON.** Editor-Model-Conformance-Suite.md §3.2 names `LAW-S1`'s
+## killing mutation as *"drop the merge step for touching ranges"*, and under
+## an invariant that forbids only OVERLAP that mutation is unobservable — with
+## half-open intervals `[0,3)` and `[3,6)` do not overlap, so the mutated
+## output satisfies the invariant and the law cannot go red. Merging on touch
+## made the arm land, at the price of the insert above.
+##
+## The repair belongs to the ASSERTION, not to the design
+## (Verification-Harness-Traps §36's own first rule, which the first pass did
+## not take). `rangesInvariantViolation` below asserts CANONICAL FORM: the
+## output is a fixed point of this constructor, meaning no adjacent pair is
+## mergeable under the rule just stated. Drop the touching clause and `[0,3)`
+## plus a caret at 3 comes back as two ranges that ARE mergeable — the
+## invariant says so by name, `LAW-S1` goes red, and the published killer
+## kills without the design having to move. Note that idempotence alone does
+## NOT see it: the mutated normaliser is still idempotent. Only the
+## canonical-form clause does, which is the same shape `LAW-A3` needed in
+## PLAT-25.
 ##
 ## =========================================================================
 ## POSITIONS ARE BYTE OFFSETS; CLUSTER AWARENESS COMPOSES ABOVE
@@ -148,8 +197,9 @@ type
       inverted*: bool         ## true when the head is at `lo`
 
   EditorSelection* = object
-    ## An ordered, strictly separated, non-empty SEQUENCE of ranges with a
-    ## primary index.
+    ## An ordered, non-overlapping, non-empty SEQUENCE of ranges with a primary
+    ## index, in which no adjacent pair is mergeable under the rule in the
+    ## header.
     ##
     ## Both fields are private and there is no field-by-field constructor:
     ## normalisation is part of building one (`editorSelection`), never
@@ -160,13 +210,25 @@ type
     ## "un-normalised is unrepresentable" — the difference was measured.** The
     ## type's ZERO VALUE is reachable from anywhere: `var s: EditorSelection`,
     ## `default(EditorSelection)` and `reset(s)` all produce one whose `ranges`
-    ## is empty, and `isNormalised` says false for it. It is the ONE
-    ## un-normalised inhabitant — no *sequence* of ranges can be assembled by
-    ## hand — and it is inert rather than silent: `mapSelection` over it raises
-    ## `SelectionError` by name (because `editorSelection` re-validates) and
-    ## `mainRange` raises `IndexDefect`. `{.requiresInit.}` would close
-    ## `var s:` but not `default`/`reset`, so it buys a third of the claim and
-    ## is not applied; the residual is documented here instead of overstated.
+    ## is empty. It is the ONE un-normalised inhabitant — no *sequence* of
+    ## ranges can be assembled by hand, because the fields are private.
+    ##
+    ## **A selection of zero ranges is NOT made legal, and that is a decision
+    ## rather than an omission.** §7's model has no state in which the editor
+    ## has no cursor: a caret is a range, one cursor is a set of one, and the
+    ## question "where does the next keystroke go" must have an answer. So the
+    ## zero value stays invalid — and it is made INERT BY NAME instead: every
+    ## accessor that would have to invent a range (`mainRange`, `[]`) and every
+    ## operation that consumes the set (`mapSelection`, `changeByRange`) raises
+    ## `SelectionError` and says which value it was handed. Nothing returns a
+    ## plausible answer for it.
+    ##
+    ## `{.requiresInit.}` was tried and closes `var s:` only, not
+    ## `default`/`reset`, so it buys a third of the claim at the cost of making
+    ## every `var` declaration in the tree an initialisation site; it is not
+    ## applied. The residual is documented here and pinned by
+    ## `test_editor_selection_examples.nim`'s zero-value case rather than
+    ## overstated.
     ranges: seq[SelectionRange]
     primary: int
 
@@ -270,7 +332,8 @@ func withGoal*(r: SelectionRange; goal: Option[int]): SelectionRange =
 # ===========================================================================
 
 func mergeTwo(prev, next: SelectionRange): SelectionRange =
-  ## The merged range of two that touch or overlap. The DIRECTION comes from
+  ## The merged range of two that overlap, or that touch with one of them
+  ## empty. The DIRECTION comes from
   ## the incoming range, which is the reference's rule
   ## (`range.anchor > range.head ? range(to, from) : range(from, to)`): the
   ## range a user just extended is the one whose direction the merge should
@@ -294,17 +357,16 @@ func mergeTwo(prev, next: SelectionRange): SelectionRange =
 proc editorSelection*(ranges: openArray[SelectionRange];
                       primary = 0): EditorSelection =
   ## **THE ONLY CONSTRUCTOR, AND IT NORMALISES.** Sort by start, merge every
-  ## pair that touches or overlaps, and carry the primary index onto the range
-  ## that absorbed it.
+  ## pair that overlaps — and every pair that merely touches with one of the
+  ## two empty — and carry the primary index onto the range that absorbed it.
   ##
   ## `LAW-S1` (idempotent and total) and `LAW-S2` (the primary survives) are
-  ## both about this function. Note how the primary is tracked: by the INDEX
-  ## of the range it started as, decremented once per merge that happens at or
-  ## before it — the structural bookkeeping the reference does. `LAW-S2` checks
-  ## the OTHER thing, that the surviving range contains the old primary's
-  ## head, and the two derivations are deliberately different, or the law would
-  ## be the implementation agreeing with itself
-  ## (Verification-Harness-Traps §30).
+  ## both about this function. Note how the primary is tracked: STRUCTURALLY,
+  ## by following the range it started as through the sort and then to whatever
+  ## output range consumed it. `LAW-S2` checks the OTHER thing, that the
+  ## surviving range contains the old primary's head, and the two derivations
+  ## are deliberately different, or the law would be the implementation
+  ## agreeing with itself (Verification-Harness-Traps §30).
   if ranges.len == 0:
     raise newException(SelectionError,
       "editorSelection: a selection is a NON-EMPTY sequence of ranges — §7. " &
@@ -338,23 +400,58 @@ proc editorSelection*(ranges: openArray[SelectionRange];
       cmp(a[1], b[1]))
 
   var sorted: seq[SelectionRange] = @[]
-  var mainIndex = 0
+  var mainSorted = 0
   for i, x in xs:
     sorted.add x[0]
-    if x[1] == primary: mainIndex = i
+    if x[1] == primary: mainSorted = i
 
   var merged: seq[SelectionRange] = @[]
+  var mainIndex = 0
   for i, r in sorted:
-    if merged.len > 0 and r.rangeFrom <= merged[^1].rangeTo:
-      # TOUCHING OR OVERLAPPING. `<=` rather than `<` is the divergence the
-      # header explains: it is what makes §3.2's published killer for LAW-S1
-      # observable.
+    # THE RULE, IN TWO CLAUSES, BECAUSE THEY ARE TWO DIFFERENT CLAIMS.
+    #
+    # OVERLAP always merges: two ranges covering the same byte are one
+    # selection however they were built.
+    let overlaps = merged.len > 0 and r.rangeFrom < merged[^1].rangeTo
+    # TOUCHING merges only when one of the two is EMPTY — a caret on a span's
+    # edge, or two carets at one offset. Nothing is destroyed: the caret has no
+    # extent and its insertion point is already an endpoint of the survivor.
+    # Two abutting NON-EMPTY ranges are two distinct edit sites and stay two;
+    # see the header for the insert that measures the difference.
+    let touchesAndOneIsEmpty = merged.len > 0 and
+      r.rangeFrom <= merged[^1].rangeTo and (r.isEmpty or merged[^1].isEmpty)
+    if overlaps or touchesAndOneIsEmpty:
       merged[^1] = mergeTwo(merged[^1], r)
-      if i <= mainIndex: dec mainIndex
     else:
       merged.add r
-  if mainIndex < 0: mainIndex = 0
-  if mainIndex >= merged.len: mainIndex = merged.len - 1
+    # **THE PRIMARY IS FOLLOWED TO WHICHEVER OUTPUT RANGE CONSUMED IT**, which
+    # is `merged[^1]` in both branches: the range it merged into, or the range
+    # it became. One assignment, at the step that consumes it.
+    #
+    # This replaced "decrement the index once per merge at or before it" — the
+    # reference's bookkeeping, which is correct THERE because CodeMirror
+    # splices the live array so `i` and the main index stay in the same
+    # coordinate system, and is wrong HERE because `i` indexes `sorted` while
+    # the index being decremented addresses `merged`. The two drift apart after
+    # the first merge, and the primary then lands on a later range. **It was a
+    # real defect and it was masked by a clamp**: the `mainIndex >= merged.len`
+    # guard that used to sit here made every wrong answer that ran off the end
+    # look right, so only a merged GROUP followed by a SURVIVING range could
+    # expose it — exactly the `selCaretOnEdge` shape, which the law cells did
+    # not sweep until they were made to sweep every class. See
+    # `test_editor_selection_examples.nim`, "the primary follows its range
+    # across a merge that is NOT the last one".
+    if i == mainSorted: mainIndex = merged.len - 1
+  if mainIndex < 0 or mainIndex >= merged.len:
+    # Unreachable by construction — `mainSorted` is a valid index into
+    # `sorted`, the loop visits every one, and `merged` is non-empty from the
+    # first iteration. It RAISES rather than clamping, because the clamp that
+    # used to be here is what hid the defect above for a whole milestone: a
+    # guard that silently repairs a wrong answer cannot be distinguished from
+    # one that never fires.
+    raise newException(SelectionError,
+      "editorSelection: the primary index escaped normalisation — " &
+      $mainIndex & " against " & $merged.len & " merged range(s)")
   EditorSelection(ranges: merged, primary: mainIndex)
 
 proc caretSelection*(pos: int; assoc = assocBefore): EditorSelection =
@@ -375,9 +472,27 @@ func rangeCount*(s: EditorSelection): int = s.ranges.len
 
 func primaryIndex*(s: EditorSelection): int = s.primary
 
-func mainRange*(s: EditorSelection): SelectionRange = s.ranges[s.primary]
+const ZeroValueMessage =
+  "EditorSelection: this is the type's ZERO VALUE — `var s: EditorSelection`, " &
+  "`default(EditorSelection)` or `reset(s)` — which holds no ranges and is " &
+  "the one un-normalised inhabitant. §7 has no state in which the editor has " &
+  "no cursor; build one with `caretSelection(pos)`, which is a set of one."
+  ## Spelled once, because a message that is written twice is a message that
+  ## disagrees with itself once.
 
-func `[]`*(s: EditorSelection; i: int): SelectionRange = s.ranges[i]
+func mainRange*(s: EditorSelection): SelectionRange =
+  ## **Refuses the zero value BY NAME.** It used to raise `IndexDefect` here,
+  ## which is a message about a sequence index rather than about the value the
+  ## caller actually has; see the type's doc comment for why the zero value is
+  ## kept invalid rather than made legal.
+  if s.ranges.len == 0: raise newException(SelectionError, ZeroValueMessage)
+  s.ranges[s.primary]
+
+func `[]`*(s: EditorSelection; i: int): SelectionRange =
+  ## The zero value is refused by name; on a real selection an out-of-range
+  ## index is an `IndexDefect` like any other, because that IS a bad index.
+  if s.ranges.len == 0: raise newException(SelectionError, ZeroValueMessage)
+  s.ranges[i]
 
 iterator items*(s: EditorSelection): SelectionRange =
   for r in s.ranges: yield r
@@ -402,6 +517,26 @@ func rangesInvariantViolation*(rs: openArray[SelectionRange];
   ## "" when `(rs, primary)` is what §7 says a selection is, otherwise the
   ## FIRST violation by name.
   ##
+  ## **THIS IS A CANONICAL-FORM PREDICATE, NOT MERELY A NON-OVERLAP ONE, AND
+  ## THE DIFFERENCE IS THE WHOLE OF `LAW-S1`'s KILLER.** "Ordered and
+  ## non-overlapping" is satisfied by output the merge step never ran on —
+  ## `[0,3)` and a caret at 3 do not overlap — so a law asserting only that
+  ## cannot see *"drop the merge step for touching ranges"*, and neither can
+  ## idempotence, because a normaliser missing a merge step is still
+  ## idempotent. What this asserts instead is that the sequence is a FIXED
+  ## POINT of `editorSelection`: no adjacent pair is mergeable under the rule
+  ## in the header. That is the repair Verification-Harness-Traps §36 asks for
+  ## — to the assertion, never to the killer — and it is the shape `LAW-A3`
+  ## needed in PLAT-25 when `A ∘ id == A` turned out to stay true under its own
+  ## killer until canonical form was asserted too.
+  ##
+  ## **The two clauses below are written out rather than shared with
+  ## `editorSelection`'s, and that is deliberate (§32a).** If one predicate fed
+  ## both, the arm that drops the merge step would weaken the predicate in the
+  ## same edit and would SURVIVE — a second mechanism disarming an arm exactly
+  ## as a moved needle does. Two derivations, and the predicate has its own arm
+  ## (`G13`).
+  ##
   ## **Written over a RAW sequence rather than over an `EditorSelection`, so
   ## that it is FALSIFIABLE.** A predicate that can only be handed values the
   ## normalising constructor produced is a predicate no test can watch say
@@ -418,8 +553,16 @@ func rangesInvariantViolation*(rs: openArray[SelectionRange];
       return "range " & $i & " is inverted as a pair of offsets: " & $r
     if r.kind == srNonEmpty and r.lo >= r.hi:
       return "range " & $i & " is srNonEmpty at a single point: " & $r
-    if i > 0 and r.rangeFrom <= rs[i - 1].rangeTo:
-      return "range " & $i & " touches or overlaps range " & $(i - 1) & ": " &
+    if i > 0 and r.rangeFrom < rs[i - 1].rangeFrom:
+      return "range " & $i & " starts before range " & $(i - 1) &
+        ", so the sequence is not ordered: " & $rs[i - 1] & " then " & $r
+    if i > 0 and r.rangeFrom < rs[i - 1].rangeTo:
+      return "range " & $i & " overlaps range " & $(i - 1) & ": " &
+        $rs[i - 1] & " then " & $r
+    if i > 0 and r.rangeFrom == rs[i - 1].rangeTo and
+       (r.isEmpty or rs[i - 1].isEmpty):
+      return "range " & $i & " touches range " & $(i - 1) &
+        " with one of them empty, so the pair is still mergeable: " &
         $rs[i - 1] & " then " & $r
   ""
 
@@ -479,6 +622,11 @@ proc mapSelection*(s: EditorSelection; cs: ChangeSet): EditorSelection =
   ## range** — never one per touched change section, which is `LAW-S6`'s
   ## published killer — and then `editorSelection` merges whatever collided.
   ## So the count can fall and can never rise.
+  ##
+  ## The zero value is refused by name rather than mapped to another zero
+  ## value: `editorSelection` re-validates below and an empty input reaches it
+  ## as an empty sequence.
+  if s.ranges.len == 0: raise newException(SelectionError, ZeroValueMessage)
   var xs = newSeqOfCap[SelectionRange](s.ranges.len)
   for r in s.ranges: xs.add mapRange(r, cs)
   editorSelection(xs, s.primary)

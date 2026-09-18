@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 179
+const ExpectedAssertions = 249
   ## Asserted by the last case against the runtime tally.
 
 const LadderTabSize = 4
@@ -119,21 +119,82 @@ suite "PLAT-26 — the range is a variant, and each field is where it means some
 
 suite "PLAT-26 — normalisation, with the answers written out":
 
-  test "two touching ranges become one, and that is the divergence from the reference":
-    # CodeMirror keeps `[0,3)` and `[3,6)` as two. Here they merge, because
-    # §3.2's published killer for LAW-S1 — "drop the merge step for touching
-    # ranges" — is otherwise not observable: with half-open intervals the two
-    # do not OVERLAP, so an invariant forbidding only overlap is satisfied by
-    # the mutated output and the law cannot go red.
+  test "two touching NON-EMPTY ranges stay two — the merge rule, pinned":
+    # `[0,3)` and `[3,6)` abut and do not overlap. They cover disjoint text and
+    # are two distinct edit sites, so they survive as two — CodeMirror's rule,
+    # Kakoune's rule (`overlaps` is `lhs.max() >= rhs.min()` on inclusive
+    # ranges) and Helix's rule, whose own unit test asserts
+    # `!overlaps((0, 3), (3, 6))` about this exact pair. The insert two cases
+    # below is the measurement that says why it matters.
     let s = editorSelection([spanRange(0, 3), spanRange(3, 6)])
-    counted s.rangeCount == 1
-    counted s[0].rangeFrom == 0
-    counted s[0].rangeTo == 6
+    counted s.rangeCount == 2
+    counted s[0].rangeFrom == 0 and s[0].rangeTo == 3
+    counted s[1].rangeFrom == 3 and s[1].rangeTo == 6
     counted s.invariantViolation.len == 0
-    # Two ranges with a ONE-BYTE gap are left alone, or "merge touching" would
-    # be "merge everything".
+    # A ONE-BYTE GAP is the same answer, so "abutting survives" is not an
+    # artefact of the gap.
     let t = editorSelection([spanRange(0, 3), spanRange(4, 6)])
     counted t.rangeCount == 2
+    # AND STRICT OVERLAP STILL MERGES, or "keep touching ranges" would have
+    # become "keep everything".
+    let u = editorSelection([spanRange(0, 4), spanRange(3, 6)])
+    counted u.rangeCount == 1
+    counted u[0].rangeFrom == 0 and u[0].rangeTo == 6
+
+  test "a touching pair merges when EITHER of the two is empty":
+    # The other side of the rule, and the reason it is not "merge only on
+    # overlap": an empty range has no extent, so absorbing it destroys nothing
+    # and leaves no distinct edit site behind. Both edges are checked, because
+    # CodeMirror keys its `<=` on the emptiness of the INCOMING range alone and
+    # therefore answers these two differently depending on the sort's
+    # tie-break; here the test is symmetric.
+    let atEnd = editorSelection([spanRange(0, 4), caret(4)])
+    counted atEnd.rangeCount == 1
+    counted not atEnd[0].isEmpty
+    counted atEnd[0].rangeFrom == 0 and atEnd[0].rangeTo == 4
+    let atStart = editorSelection([caret(0), spanRange(0, 4)])
+    counted atStart.rangeCount == 1
+    counted not atStart[0].isEmpty
+    counted atStart[0].rangeFrom == 0 and atStart[0].rangeTo == 4
+    # TWO CARETS AT ONE OFFSET ARE ONE CURSOR — the case that makes
+    # "merge only on overlap" wrong on its own, since a point overlaps nothing.
+    let coincident = editorSelection([caret(3), caret(3)])
+    counted coincident.rangeCount == 1
+    # AND A CARET ONE BYTE OFF THE EDGE IS NOT ABSORBED.
+    let apart = editorSelection([spanRange(0, 4), caret(5)])
+    counted apart.rangeCount == 2
+
+  test "the primary follows its range across a merge that is NOT the last one":
+    # **A DEFECT THIS SHAPE FOUND**, recorded as a case because a clamp used to
+    # hide it. The primary index was tracked by decrementing it once per merge
+    # at or before it — correct in CodeMirror, which splices the live array, and
+    # wrong here, where the loop index addresses the SORTED input while the
+    # index being decremented addresses the MERGED output. The two drift apart
+    # after the first merge.
+    #
+    # It needs a merged GROUP followed by a SURVIVING range to show: otherwise
+    # the wrong index runs off the end and an `if mainIndex >= merged.len`
+    # clamp puts it back on the only range there is, and every wrong answer
+    # looks right. That clamp is gone; it raises now.
+    #
+    # Here the group is `caret(0)`, `[0,2)` and `caret(2)` — three ranges that
+    # merge into `[0,2)` — followed by `caret(8)`, which does not.
+    let rs = @[spanRange(0, 2), caret(2), caret(0), caret(8)]
+    for p in 0 ..< rs.len:
+      let s = editorSelection(rs, p)
+      counted s.rangeCount == 2
+      # LAW-S2's property, at each of the four placements: the surviving
+      # primary contains the head the pre-normalisation primary had.
+      let head = rs[p].head
+      checkpoint("primary " & $p & " head " & $head & " -> " & $s)
+      counted s.mainRange.rangeFrom <= head
+      counted head <= s.mainRange.rangeTo
+    # And named exactly, so a future regression says which way it went: the
+    # three that merge land on range 0, the far caret lands on range 1.
+    counted editorSelection(rs, 0).primaryIndex == 0
+    counted editorSelection(rs, 1).primaryIndex == 0
+    counted editorSelection(rs, 2).primaryIndex == 0
+    counted editorSelection(rs, 3).primaryIndex == 1
 
   test "unsorted input comes back sorted, and the primary follows its range":
     let s = editorSelection([spanRange(20, 24), spanRange(0, 4), spanRange(10, 14)],
@@ -188,6 +249,51 @@ suite "PLAT-26 — normalisation, with the answers written out":
     counted caretSelection(7).rangeCount == 1
     counted caretSelection(7).mainRange.pos == 7
 
+  test "THE ZERO VALUE IS REACHABLE, IT IS NOT LEGAL, AND IT IS INERT BY NAME":
+    # **The claim the type enforces, written out, because the claim the spec
+    # used to make was stronger than the type.** "Normalisation cannot be
+    # skipped" is true — the fields are private and `editorSelection` is the
+    # only constructor. "Un-normalised is unrepresentable" is NOT: the zero
+    # value is reachable from three directions and holds no ranges.
+    #
+    # It stays illegal rather than being made a legal "no cursor" state,
+    # because §7 has no such state: a caret is a range, one cursor is a set of
+    # one, and "where does the next keystroke go" must have an answer. So every
+    # door out of it refuses BY NAME. `mainRange` used to raise `IndexDefect`
+    # — a message about a sequence index rather than about the value the caller
+    # is holding — and that was the one leak.
+    var viaVar: EditorSelection
+    let viaDefault = default(EditorSelection)
+    var viaReset = caretSelection(4)
+    reset(viaReset)
+    for z in [viaVar, viaDefault, viaReset]:
+      counted z.rangeCount == 0
+      counted not z.isNormalised
+      counted z.invariantViolation.len > 0
+      counted z.ranges.len == 0
+      var iterated = 0
+      for r in z: inc iterated
+      counted iterated == 0
+      var refusals = 0
+      try: discard z.mainRange
+      except SelectionError: inc refusals
+      try: discard z[0]
+      except SelectionError: inc refusals
+      try: discard mapSelection(z, changeSet(10, 2, 2, "ab"))
+      except SelectionError: inc refusals
+      try: discard changeByRange("0123456789", z,
+        proc (r: SelectionRange): RangeOutcome =
+          RangeOutcome(edits: @[], range: r, effects: @[]))
+      except SelectionError: inc refusals
+      counted refusals == 4
+    # AND THE SAME CALLS ON A REAL SELECTION DO NOT REFUSE, or "it raises" would
+    # be a statement about a function that always raises.
+    let real = caretSelection(4)
+    counted real.mainRange.pos == 4
+    counted real[0].pos == 4
+    counted mapSelection(real, changeSet(10, 2, 2, "ab")).rangeCount == 1
+    counted real.isNormalised
+
 # ===========================================================================
 # MULTI-CURSOR IS THE ABSENCE OF A SPECIAL CASE
 # ===========================================================================
@@ -212,6 +318,70 @@ suite "PLAT-26 — one cursor is a set of one":
     counted doc1 == "alpha ->beta gamma"
     counted sel1.rangeCount == 1
     counted sel1[0].pos == 8
+
+  test "TWO ABUTTING SELECTIONS PRODUCE TWO INSERTIONS — the measurement":
+    # **THE CASE THE MERGE RULE WAS DECIDED ON.** An earlier version of
+    # `editorSelection` merged ranges that merely touch, on the stated grounds
+    # that two abutting selections are "behaviourally indistinguishable to a
+    # user". They render alike, the ten motions agree and `delete` agrees — and
+    # an INSERT does not, which is the one operation multi-cursor exists for.
+    #
+    # Under "merge on touch" this case reads `"Xghij"` with ONE range. It is
+    # the red half of Verification-Harness-Traps §36's second rule: *"moving
+    # the design costs nothing" is itself a claim needing a measurement.*
+    let ctx = initOpCtx("abcdefghij", inserted = "X")
+    let two = editorSelection([spanRange(0, 3), spanRange(3, 6)])
+    counted two.rangeCount == 2
+    let (doc, sel) = applyOp(ctx, opInsertText, two)
+    counted doc == "XXghij"
+    counted sel.rangeCount == 2
+    counted sel[0].pos == 1
+    counted sel[1].pos == 2
+    # AND THE MERGED RANGE IS THE OTHER ANSWER, spelled out beside it rather
+    # than described — `[0,6)` is what the rejected rule would have produced,
+    # and it inserts once.
+    let merged = editorSelection([spanRange(0, 6)])
+    counted merged.rangeCount == 1
+    counted applyOp(ctx, opInsertText, merged)[0] == "Xghij"
+    counted applyOp(ctx, opInsertText, merged)[0] != doc
+    # `delete` agrees either way, which is why the divergence was missed: an
+    # operation set swept for agreement would have reported none.
+    counted applyOp(ctx, opDeleteRange, two)[0] ==
+            applyOp(ctx, opDeleteRange, merged)[0]
+    counted applyOp(ctx, opDeleteRange, two)[0] == "ghij"
+
+  test "EXTENDING TWO SELECTIONS INTO CONTACT does not cost a cursor":
+    # The reachability half. Nothing here constructs an abutting pair: it
+    # starts from an ordinary two-cursor selection with a gap and walks it into
+    # contact with the primitive a user actually presses.
+    #
+    # `[0,2)` and `[4,6)`, two `extend-right` steps each, give `[0,4)` and
+    # `[4,8)`. Under "merge on touch" the second step silently drops a cursor
+    # and the count here is 1.
+    let ctx = initOpCtx("abcdefghij", inserted = "X")
+    var sel = editorSelection([spanRange(0, 2), spanRange(4, 6)])
+    counted sel.rangeCount == 2
+    sel = applyOp(ctx, opExtendRight, sel)[1]
+    counted sel.rangeCount == 2
+    counted sel[0].rangeTo == 3 and sel[1].rangeFrom == 4
+    sel = applyOp(ctx, opExtendRight, sel)[1]
+    # THE STEP THAT BRINGS THEM INTO CONTACT.
+    counted sel.rangeCount == 2
+    counted sel[0].rangeFrom == 0 and sel[0].rangeTo == 4
+    counted sel[1].rangeFrom == 4 and sel[1].rangeTo == 8
+    counted sel[0].rangeTo == sel[1].rangeFrom
+    # The anchors did not move, so these really are two extended selections and
+    # not two ranges that happen to line up.
+    counted sel[0].anchor == 0 and sel[0].head == 4
+    counted sel[1].anchor == 4 and sel[1].head == 8
+    # AND THE CURSOR IS STILL THERE WHERE IT COUNTS: two insertions.
+    counted applyOp(ctx, opInsertText, sel)[0] == "XXij"
+    # ONE MORE STEP AND THEY DO MERGE, which is the other side of the rule:
+    # both heads advance, so the first range's head moves PAST the second's
+    # start and the two genuinely overlap. Contact is kept, overlap is not.
+    sel = applyOp(ctx, opExtendRight, sel)[1]
+    counted sel.rangeCount == 1
+    counted sel[0].rangeFrom == 0 and sel[0].rangeTo == 9
 
   test "an operator consumes whatever a motion produced, and does not know which":
     # Kakoune's argument, executable: `opDeleteRange` is written once, over one

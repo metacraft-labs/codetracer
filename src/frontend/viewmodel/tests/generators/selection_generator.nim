@@ -63,14 +63,24 @@ type
     ## §4.3's declared classes. Six of the eight are inputs that VIOLATE the
     ## invariant `editorSelection` establishes, because normalisation is only
     ## tested by inputs that violate it.
-    selDisjoint      ## sorted, strictly separated — nothing to merge
-    selUnsorted      ## the same ranges, presented out of order
-    selTouching      ## `from == prev.to`, the merge LAW-S1's killer drops
-    selOverlapping   ## strict partial overlap
-    selNested        ## one range strictly inside another
-    selDuplicated    ## the same range more than once
-    selCarets        ## every range empty, at distinct boundaries
-    selCaretOnEdge   ## a caret exactly on a non-empty range's boundary
+    ## **WHICH OF THESE NORMALISATION ACTUALLY CHANGES MOVED WITH THE MERGE
+    ## RULE.** Under the merge-on-touch rule this port briefly had, a chain of
+    ## abutting NON-EMPTY ranges collapsed; under the rule now in
+    ## `selection.nim`, it does not, so `selTouching` is the class that asserts
+    ## the merge does NOT happen and `selCaretOnEdge` is the one that asserts
+    ## it does. That is why the §10.1 violation sweep gained `selCaretOnEdge`
+    ## as a fifth class: without it the sweep would have pinned the rule in one
+    ## direction only.
+    selDisjoint      ## sorted, with a gap — nothing to merge
+    selUnsorted      ## the same ranges, presented out of order — reorders, never merges
+    selTouching      ## `from == prev.to`, both NON-EMPTY — stays as it is
+    selOverlapping   ## strict partial overlap — merges
+    selNested        ## one range strictly inside another — merges
+    selDuplicated    ## the same range more than once — merges
+    selCarets        ## every range empty, at distinct boundaries — nothing to merge
+    selCaretOnEdge   ## a caret exactly on a non-empty range's boundary — merges,
+                     ## and it is the only drawn class in which a TOUCHING pair
+                     ## does, which is what `LAW-S1`'s killer needs to see
 
   SelDraw* = object
     ## The generator's INPUT, which is what the shrinker shrinks.
@@ -298,6 +308,16 @@ proc shrinkCandidates*(d: SelDraw): seq[SelDraw] =
     if d.ranges.len > 1:
       var c = d
       c.ranges.delete(i)
+      # **A CLAMP, AND A DELIBERATELY BENIGN ONE — named because §36a's rule is
+      # that a silent index repair must either RAISE or be a behaviour with a
+      # name.** Deleting a range can leave `primary` past the end. It is put
+      # back on the last range rather than followed to the range it was, and
+      # that is correct HERE and would not be in `editorSelection`: a shrink
+      # candidate's whole contract is `isValidDraw` — non-empty, primary in
+      # range, ranges inside the document — and WHICH range is primary is not
+      # part of it. The shrinker proposes; `shrink` keeps only candidates that
+      # still fail the property. There is no right answer being masked, which
+      # is the exact thing that was not true of the clamp §36a is about.
       if c.primary >= c.ranges.len: c.primary = c.ranges.len - 1
       c.k = c.ranges.len
       result.add c
