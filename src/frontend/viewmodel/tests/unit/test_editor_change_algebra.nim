@@ -117,7 +117,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 870
+const ExpectedAssertions = 874
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
   ##
@@ -764,19 +764,23 @@ const
   SeqLineStoreSource = staticRead("../../editor/seq_line_store.nim")
   SelectionSource = staticRead("../../editor/selection.nim")
   SelectionOpsSource = staticRead("../../editor/selection_ops.nim")
+  WrapSource = staticRead("../../editor/wrap.nim")
 
   ScannedModules = ["change_set.nim", "rope.nim", "selection.nim",
                     "selection_ops.nim", "seq_line_store.nim",
-                    "text_store.nim", "transaction.nim"]
-    ## The seven names above, as data. It moves in the same edit as the
+                    "text_store.nim", "transaction.nim", "wrap.nim"]
+    ## The eight names above, as data. It moves in the same edit as the
     ## `staticRead` list and the case below is what refuses the two to drift.
     ##
-    ## **It grew by two when PLAT-26 landed, and that is the enumeration
-    ## working.** §35 is the trap that a hardcoded subject list cannot see a
-    ## new file in the directory it claims to cover; `EditorModules` below
-    ## enumerates the directory at compile time, so `selection.nim` and
-    ## `selection_ops.nim` failed this case BY NAME on the first build of
-    ## PLAT-26 rather than being quietly unscanned.
+    ## **It grew by two when PLAT-26 landed and by one more when PLAT-27 did,
+    ## and that is the enumeration working.** §35 is the trap that a hardcoded
+    ## subject list cannot see a new file in the directory it claims to cover;
+    ## `EditorModules` below enumerates the directory at compile time, so
+    ## `selection.nim` and `selection_ops.nim` failed this case BY NAME on the
+    ## first build of PLAT-26, and `wrap.nim` failed it BY NAME on the first
+    ## run of PLAT-27's floor gate — before that milestone's own suite existed
+    ## to say anything, and from a milestone that had been green for a day.
+    ## That is the mechanism paying for itself twice.
 
   EditorModules = block:
     ## Every `.nim` file actually in `viewmodel/editor/`, sorted, read out of
@@ -845,8 +849,9 @@ suite "PLAT-25 — one function, one name":
                   "text_store.nim": TextStoreSource,
                   "seq_line_store.nim": SeqLineStoreSource,
                   "selection.nim": SelectionSource,
-                  "selection_ops.nim": SelectionOpsSource}.toTable
-    counted others.len == 6
+                  "selection_ops.nim": SelectionOpsSource,
+                  "wrap.nim": WrapSource}.toTable
+    counted others.len == 7
     counted others.len + 1 == ScannedModules.len
     for name, src in others:
       checkpoint(name)

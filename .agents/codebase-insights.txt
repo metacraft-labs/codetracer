@@ -4846,3 +4846,84 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   cursor. PLAT-30 is to revisit it. Generally: "moving the design costs
   nothing" is a claim that needs the operations enumerated and checked, because
   the one that differs will be the one the feature exists for.
+
+- A DISPLAY COORDINATE `(row, column)` CANNOT DISTINGUISH TWO LOGICAL POSITIONS
+  AT ONE COLUMN, AND THE CORPUS HAS 7,352 OF THEM. A zero-width cluster — a C0
+  control, a lone combining mark, a stray ZWJ — occupies no cell, so it shares
+  its column with whatever follows. `viewmodel/editor/wrap.nim`'s round trip is
+  therefore NOT the identity at every position; it is the identity at every
+  position that has a column of its own, and `columnCanonical` names the rest.
+  33,465 cluster boundaries across PLAT-27's 90-cell population are in the
+  "rest". If you are about to write "the mapping is a bijection", say WHICH TWO
+  SETS, and assert their cardinalities — `boundaries + interior cells ==
+  canonical display positions` is arithmetic and needs neither mapping.
+
+- SCREEN-LINE `$` ON A WRAPPED ROW IS NOT THE ROW'S WIDTH. The position one past
+  the last cell of a row that CONTINUES is the same point as column 0 of the
+  next row, so returning it makes `g$` report the following row. Vim lands `g$`
+  ON the last character for this reason. `wrap.lastColumnOf` answers the width
+  only on the last row of a logical line. Found by running the twelve-cell
+  motion sweep, not by reasoning: nine of twelve cells went red.
+
+- A CORPUS CROSS PRODUCT IS A POPULATION AND NEEDS THE SAME HISTOGRAM A
+  GENERATOR DOES. `Editor-Model-Conformance-Suite.md` §6 declares "18 documents
+  x {20,40,80,120}", which reads like full coverage. Measured: 35 of those 72
+  cells have NO wrapped line, and six documents never wrap at any declared
+  column because their widest line is under 20 cells. Every coordinate law was
+  trivially true for a third of the corpus. A declared cross product is not
+  self-evidently a population — classify the cells and assert the counts as
+  EQUALITIES, exactly as for a random generator (Verification-Harness-Traps
+  §34).
+
+- `isonim-tui`'s `wrapLineToRows` TREATS A TAB AS ZERO CELLS, because
+  `clusterDisplayWidth` does — a tab is a control character, not a glyph. When
+  you diff a model's wrapping against the widget's, run the model at
+  `tabSize = 0` or the two disagree on every tab-bearing document for a reason
+  that has nothing to do with wrapping. Four of the eighteen corpus documents
+  carry a tab: c6-terminators-short, c8-tabs-short, c8-tabs-long,
+  c9-ascii-control-short. The widget can be driven WITHOUT a renderer —
+  `TextAreaWidget(lines: …, width: …, softWrap: true)` is enough for
+  `allDisplayRows` — and it compiles and runs on both the C and JS backends.
+
+- DO NOT RUN A MUTATION HARNESS'S `--record-control-hashes` WHILE THE HARNESS
+  ITSELF IS RUNNING. It records whichever bytes are on disk, and mid-arm those
+  are the MUTATED bytes: one of PLAT-27's four digests was recorded from a
+  mutated `wrap.nim` and looked like a legitimate control until it was compared
+  with the value from before the run. The harness restores the file when the
+  arm ends, so the corruption is invisible a minute later. Record digests only
+  against a tree you have just seen green.
+
+- A MUTATION ARM ON A COORDINATE HAS TO MOVE THE VALUE **OUT OF THE CLUSTER'S
+  OWN SPAN**. PLAT-27's first `LAW-C1` arm rounded a mid-cluster byte to the
+  cluster's SECOND cell — still inside the cluster, so the return leg resolved
+  back to the same cluster and the round trip was unchanged. It reported
+  MISDIRECTED. The arm that lands adds one cell PER BYTE, which runs a
+  three-byte two-cell ideograph off its own end.
+
+- A MUTATION HARNESS MAKES THE WHOLE TREE UNTRUSTWORTHY WHILE IT RUNS, NOT JUST
+  ITS OWN BUILD. It writes a mutated subject to disk, compiles, and restores —
+  so ANY other compile started in that window reads mutated sources. A `nim js`
+  verification run of PLAT-27's suites launched beside
+  `run-plat27-coordinate-mutations.py` came back with 28 red cases (all of
+  `LAW-C6` and all of `FUZZ-6`) — which is precisely arm `M6`'s kill set, not a
+  JS-backend divergence. The harness's own control digests protect the HARNESS;
+  they say nothing to a second reader. Either wait for it, or run your check
+  before you start it. `--nimcache:` to a private directory does NOT help: the
+  contamination is in the SOURCE, not the cache.
+
+- AND THE CONTAMINATION OUTLIVES THE RUN, IN THE NIMCACHE. The bullet above is
+  right that a private `--nimcache:` does not protect a reader DURING the run;
+  it is wrong to conclude the cache never matters. After
+  `run-plat27-coordinate-mutations.py` has finished and restored every subject
+  byte-for-byte, `~/.cache/nim/test_editor_wrap_laws_d` can still hold object
+  code built from a mutated (or simply older) `wrap.nim`, and `nim c -r`
+  happily links it. Measured on 2026-09-18: with all four control digests
+  verifying OK against a clean tree, the two suites reported 10 red cases —
+  nine `dispRowEnd` motion cells and the `goalColumn` example, which are
+  exactly the two defects `lastColumnOf` and `landingOf` were written to fix.
+  A probe built from the same sources into a DIFFERENT nimcache directory was
+  correct, and `rm -rf ~/.cache/nim/test_editor_wrap_{laws,examples}_d`
+  followed by the identical command was green at 276/0 and 30/0. So: a red run
+  whose failures look like a mutation you have already fixed is a stale cache
+  until proven otherwise. Clear the suite's nimcache before believing a red,
+  and before believing a green you intend to publish a number from.

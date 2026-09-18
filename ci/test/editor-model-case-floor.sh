@@ -6,6 +6,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-24
 #   bash ci/test/editor-model-case-floor.sh PLAT-25
 #   bash ci/test/editor-model-case-floor.sh PLAT-26
+#   bash ci/test/editor-model-case-floor.sh PLAT-27
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -66,6 +67,18 @@
 #    different cardinality; a second block would have been a second parser and
 #    a second place for the grammar to drift, which is the file-copy form of
 #    Verification-Harness-Traps §30. Four variables carry the difference.
+#
+#    PLAT-27 ADDED A FIFTH: `LAW_DEFERRED`. §3.3 publishes SEVEN `LAW-C` rows
+#    and says of the seventh that it *"lands in PLAT-28, which owns widgets,
+#    and is named here because it is a coordinate claim"*. A milestone that
+#    implements six of seven and a milestone that silently dropped one look
+#    identical to a two-way count, so the deferral is DECLARED here and
+#    CHECKED in both directions: every deferred id must be published in the
+#    table AND absent from the suite, and the two-way count then runs over
+#    `published − deferred` against the suite with the cardinality asserted.
+#    The alternative — writing `LAW_COUNT=6` and letting the seventh row fall
+#    out of the comparison — is the shape where a published law stops being
+#    published and nothing says so.
 
 set -euo pipefail
 
@@ -108,13 +121,27 @@ PLAT-26)
 	LAW_SECTION="3.2"
 	LAW_COUNT=6
 	;;
+PLAT-27)
+	MILESTONE="** PLAT-27: The coordinate model under soft wrap"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_wrap_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_wrap_examples.nim
+	)
+	LAW_SUITE=src/frontend/viewmodel/tests/unit/test_editor_wrap_laws.nim
+	LAW_PREFIX="LAW-C"
+	LAW_SECTION="3.3"
+	LAW_COUNT=7
+	LAW_DEFERRED="LAW-C7"
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24, PLAT-25, PLAT-26. A milestone gates its own"
-	echo "      floor; adding one here is a deliberate edit, which is the point."
+	echo "      Known: PLAT-24, PLAT-25, PLAT-26, PLAT-27. A milestone gates"
+	echo "      its own floor; adding one here is a deliberate edit, which is"
+	echo "      the point."
 	exit 1
 	;;
 esac
+LAW_DEFERRED="${LAW_DEFERRED:-}"
 
 if [ ! -f "${SPEC_REL}" ]; then
 	echo "FAIL: the milestone file is not here: ${SPEC_REL}"
@@ -196,6 +223,29 @@ if [ -n "${LAW_SUITE}" ]; then
 		echo "FAIL: §${LAW_SECTION} published ${#spec_ids[@]} ${LAW_PREFIX} rows, expected ${LAW_COUNT}."
 		exit 1
 	fi
+
+	# THE DECLARED DEFERRALS. Each must be PUBLISHED (or the deferral is about
+	# a row that no longer exists) and must be ABSENT from the suite (or the
+	# milestone implemented it and the deferral is stale). Both directions,
+	# because either alone is satisfied by an empty set.
+	deferred_ids=()
+	if [ -n "${LAW_DEFERRED}" ]; then
+		read -r -a deferred_ids <<<"${LAW_DEFERRED}"
+		for d in "${deferred_ids[@]}"; do
+			found=0
+			for id in "${spec_ids[@]}"; do
+				[ "${id}" = "${d}" ] && found=1
+			done
+			if [ "${found}" -ne 1 ]; then
+				echo "FAIL: ${d} is declared DEFERRED by this gate and is not published"
+				echo "      in §${LAW_SECTION}. A deferral about a row that does not exist"
+				echo "      is a deferral nothing can expire."
+				exit 1
+			fi
+		done
+		echo "LAW TABLE: ${#deferred_ids[@]} row(s) declared deferred: ${LAW_DEFERRED}"
+	fi
+	expected_impl=$((LAW_COUNT - ${#deferred_ids[@]}))
 	if [ "${#missing_killers[@]}" -ne 0 ]; then
 		echo "FAIL: ${#missing_killers[@]} law(s) in §${LAW_SECTION} carry no killing mutation:"
 		printf '      %s\n' "${missing_killers[@]}"
@@ -207,17 +257,36 @@ if [ -n "${LAW_SUITE}" ]; then
 	mapfile -t impl_ids < <(sed -n '/^const LawName/,/\]/p' "${LAW_SUITE}" |
 		grep -oE "${LAW_PREFIX}[0-9]+" || true)
 	echo "LAW TABLE, read from ${LAW_SUITE}: ${#impl_ids[@]} ids"
-	if [ "${#impl_ids[@]}" -ne "${LAW_COUNT}" ]; then
-		echo "FAIL: the suite declares ${#impl_ids[@]} ${LAW_PREFIX} ids, expected ${LAW_COUNT}."
+	if [ "${#impl_ids[@]}" -ne "${expected_impl}" ]; then
+		echo "FAIL: the suite declares ${#impl_ids[@]} ${LAW_PREFIX} ids, expected ${expected_impl}"
+		echo "      (${LAW_COUNT} published minus ${#deferred_ids[@]} declared deferred)."
 		exit 1
 	fi
+	for d in "${deferred_ids[@]:-}"; do
+		[ -z "${d}" ] && continue
+		for id in "${impl_ids[@]}"; do
+			if [ "${id}" = "${d}" ]; then
+				echo "FAIL: ${d} is declared DEFERRED by this gate and the suite runs it."
+				echo "      A stale deferral hides the only difference between 'not yet'"
+				echo "      and 'never'."
+				exit 1
+			fi
+		done
+	done
 	# Both directions, separately, and then the cardinality — the last line is
 	# the one usually omitted, and without it the two differences are both
 	# satisfied by two empty sets.
-	spec_sorted="$(printf '%s\n' "${spec_ids[@]}" | sort -u)"
+	# The published set MINUS the declared deferrals is what the suite is
+	# compared against. The subtraction is the only thing `LAW_DEFERRED`
+	# changes; both directions and the cardinality are unchanged.
+	expected_sorted="$(printf '%s\n' "${spec_ids[@]}" | sort -u)"
+	for d in "${deferred_ids[@]:-}"; do
+		[ -z "${d}" ] && continue
+		expected_sorted="$(grep -vxF "${d}" <<<"${expected_sorted}" || true)"
+	done
 	impl_sorted="$(printf '%s\n' "${impl_ids[@]}" | sort -u)"
-	only_spec="$(comm -23 <(echo "${spec_sorted}") <(echo "${impl_sorted}"))"
-	only_impl="$(comm -13 <(echo "${spec_sorted}") <(echo "${impl_sorted}"))"
+	only_spec="$(comm -23 <(echo "${expected_sorted}") <(echo "${impl_sorted}"))"
+	only_impl="$(comm -13 <(echo "${expected_sorted}") <(echo "${impl_sorted}"))"
 	if [ -n "${only_spec}" ]; then
 		echo "FAIL: published in §${LAW_SECTION} and not run by the suite: ${only_spec}"
 		exit 1
@@ -226,12 +295,12 @@ if [ -n "${LAW_SUITE}" ]; then
 		echo "FAIL: run by the suite and not published in §${LAW_SECTION}: ${only_impl}"
 		exit 1
 	fi
-	if [ "$(wc -l <<<"${spec_sorted}")" -ne "${LAW_COUNT}" ] ||
-		[ "$(wc -l <<<"${impl_sorted}")" -ne "${LAW_COUNT}" ]; then
-		echo "FAIL: the two law sets agree but are not ${LAW_COUNT} distinct ids."
+	if [ "$(wc -l <<<"${expected_sorted}")" -ne "${expected_impl}" ] ||
+		[ "$(wc -l <<<"${impl_sorted}")" -ne "${expected_impl}" ]; then
+		echo "FAIL: the two law sets agree but are not ${expected_impl} distinct ids."
 		exit 1
 	fi
-	echo "OK: ${LAW_COUNT} laws published, ${LAW_COUNT} laws run, both directions, no duplicates."
+	echo "OK: ${LAW_COUNT} laws published, ${#deferred_ids[@]} deferred, ${expected_impl} run, both directions, no duplicates."
 fi
 
 total=0
