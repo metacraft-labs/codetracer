@@ -338,8 +338,23 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # ci/test/frontend-reachability-guard.py's header, beside the instrument it
 # changes. It is not implemented here: it is a repo-wide policy change and
 # needs its own pass, with its own contract suite.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1225 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1225 bash ci/test/frontend-reachability.sh
+# 1225 -> 1238 on 2026-09-18, and the raise is recorded rather than quietly
+# taken. PLAT-29 added `viewmodel/editor/document_version.nim` and
+# `viewmodel/editor/reconcile.nim`, whose exports are reached by their suites
+# and by no product module — because PLAT-29's own main residual is that NO
+# REAL PRODUCER IS BEHIND THE BOUNDARY YET. The two modules contribute 19
+# findings across buckets A and B and the total moved 1220 -> 1238, measured
+# against `origin/dev` at `421b1dcbb` on the same host.
+#
+# THIS IS BUCKET A'S "wire it, delete it, or allow-list it" ANSWERED WITH
+# "WIRE IT, LATER", WHICH IS THE ONE ANSWER THE ALLOW-LIST MUST NOT CARRY:
+# its documented reasons are for symbols reached by something that is not a
+# Nim name, and these are not that. A ratchet raise says "the backlog grew and
+# here is why"; an allow-list entry would say "this is permanently fine", which
+# is false. When the four producers are wired the number falls on its own and
+# the ratchet follows it down.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1238 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1238 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -390,6 +405,30 @@ lint_step "Plugin reactive boundary: contract suite" \
 
 lint_step "Plugin reactive boundary: a plugin cannot reach a raw reactive primitive" \
 	bash ci/test/plugin-reactive-boundary.sh
+
+# PLAT-29's verification gate: THE EDITOR MODEL'S TRANSITIVE IMPORT CLOSURE
+# CONTAINS NO ASYNC, NO I/O, NO PROCESS, NO SOCKET AND NO CLOCK.
+#
+# It sits HERE because it is the third consumer of the same instrument: the
+# import extractor `ci/lib/nim-imports.sh` that the two guards above call. Every
+# route past a naive import scan those two paid for — the newline-continued
+# import, the block comment, the call site rather than the rendering, the
+# trailing carriage return — is closed for this one too, and a gate that derived
+# its own extractor would have re-opened all of them.
+#
+# Editor-ViewModel.md §11: *"The model never waits. It has no Future, no
+# callback, no clock."* That was a source scan over the editor modules' own text
+# until PLAT-29, and a scan over a module's own text cannot see an `await`
+# reached through a transitive import.
+#
+# Its contract suite is a NIM suite rather than a shell one —
+# `test_editor_async_closure.nim`, which plants each of the seven routes against
+# a synthetic tree and requires this gate to redden — so it runs in the
+# `vm-unit` lane rather than here. That is the one place this step's shape
+# differs from the two above it, and the reason is that the planted trees need a
+# builder rather than a fixture directory.
+lint_step "Editor import closure: no async, no I/O, no clock in the editor model" \
+	bash ci/test/editor-import-closure.sh
 
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.

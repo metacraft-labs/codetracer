@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 898
+const ExpectedAssertions = 906
+  ## 898 -> 906 on 2026-09-18: PLAT-29 added `document_version.nim` and
+  ## `reconcile.nim` to `viewmodel/editor/`, and the double-mapping scan
+  ## below runs FOUR assertions over every module in that directory. The
+  ## directory enumeration is what made this an edit rather than a silence.
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
   ##
@@ -770,12 +774,15 @@ const
   DecorationSource = staticRead("../../editor/decoration.nim")
   InlaySource = staticRead("../../editor/inlay.nim")
   RowProjectionSource = staticRead("../../editor/row_projection.nim")
+  DocumentVersionSource = staticRead("../../editor/document_version.nim")
+  ReconcileSource = staticRead("../../editor/reconcile.nim")
 
   ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                    "inlay.nim", "range_set.nim", "rope.nim",
-                    "row_projection.nim", "selection.nim",
-                    "selection_ops.nim", "seq_line_store.nim",
-                    "text_store.nim", "transaction.nim", "wrap.nim"]
+                    "document_version.nim", "inlay.nim", "range_set.nim",
+                    "reconcile.nim", "rope.nim", "row_projection.nim",
+                    "selection.nim", "selection_ops.nim",
+                    "seq_line_store.nim", "text_store.nim",
+                    "transaction.nim", "wrap.nim"]
     ## The thirteen names above, as data. It moves in the same edit as the
     ## `staticRead` list and the case below is what refuses the two to drift.
     ##
@@ -794,6 +801,16 @@ const
     ## `anchor.nim` is the one that matters: §8.2 says an anchor is mapped
     ## through every change set that passes *"including remote ones"*, which is
     ## exactly where a sixth hand-written double mapping would land.
+    ##
+    ## **AND A FOURTH TIME ON THE SAME DAY**: PLAT-29 added
+    ## `document_version.nim` and `reconcile.nim`, and this case went red by
+    ## name before that milestone's own suites existed. `reconcile.nim` is the
+    ## one that matters this time, for `anchor.nim`'s reason one layer up: it
+    ## moves an async producer's change set over the edits that landed while it
+    ## was in flight, which is the fifth of §6.1a's five reference call sites
+    ## and is exactly where a sixth hand-written double mapping would land. It
+    ## calls `rebase` and takes `bOverA`; it spells no flag, because there is
+    ## no flag to spell.
 
   EditorModules = block:
     ## Every `.nim` file actually in `viewmodel/editor/`, sorted, read out of
@@ -868,8 +885,10 @@ suite "PLAT-25 — one function, one name":
                   "range_set.nim": RangeSetSource,
                   "decoration.nim": DecorationSource,
                   "inlay.nim": InlaySource,
-                  "row_projection.nim": RowProjectionSource}.toTable
-    counted others.len == 12
+                  "row_projection.nim": RowProjectionSource,
+                  "document_version.nim": DocumentVersionSource,
+                  "reconcile.nim": ReconcileSource}.toTable
+    counted others.len == 14
     counted others.len + 1 == ScannedModules.len
     for name, src in others:
       checkpoint(name)

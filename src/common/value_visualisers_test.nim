@@ -484,7 +484,7 @@ summary = "{rows}x{cols}"
     ck detail.contains("To see more of it:")
     ck describeAttribution(p).contains("expansion-bounded=")
     # AND THE TREE STOPS TOO, which is a second mechanism and therefore needs
-    # evidence of its own (§16a). `renderNode` descends children after the
+    # evidence of its own (§32a). `renderNode` descends children after the
     # node's own line is built, and every `inlineText` below an exhausted
     # rendering returns the elision glyph for free — so without the guard the
     # walk continues, building 6^7 nodes whose text is all "…". The members are
@@ -498,11 +498,11 @@ summary = "{rows}x{cols}"
     ckEq p.root.totalMembers, 6
     ck p.root.expandable
     #
-    # ## DISJOINT EVIDENCE FOR THE RETURN ITSELF (§16a), AND THIS CASE NEEDED IT
+    # ## DISJOINT EVIDENCE FOR THE RETURN ITSELF (§32a), AND THIS CASE NEEDED IT
     #
     # The two lines above used to be the whole of the descent guard's evidence,
     # and a repair in this same pass took most of it away without moving a
-    # needle — §16a in its exact shape, found by re-running the arms rather
+    # needle — §32a in its exact shape, found by re-running the arms rather
     # than by re-recording the digests. Once the hidden-member walk is skipped
     # for an exhausted node, `visible` is EMPTY, so the record arm's child loop
     # runs `0 ..< min(cap, 0)` and adds nothing whether or not the return above
@@ -697,7 +697,7 @@ summary = "{rows}x{cols}"
     #
     # ## PART 2 — ONE byte of output, and thousands of units of work
     #
-    # The disjoint half (§16a). The same value under a rule whose whole summary
+    # The disjoint half (§32a). The same value under a rule whose whole summary
     # is `{{`, so every value it claims renders as a single `{`. The byte
     # charge therefore sees ONE unit per frame and can say almost nothing,
     # while the rendering still enters 401 frames and runs 402 visualiser scans
@@ -800,7 +800,7 @@ hide = ["pixels"]
     ck not far.expansion.reached
 
   test "the rule NAMED as exhausted is the deepest one, not the outermost":
-    # §16a, and the arm that survived without it. `exhaustedIn` is documented
+    # §32a, and the arm that survived without it. `exhaustedIn` is documented
     # FIRST-WRITER-WINS, and the first writer is the deepest frame because the
     # stack unwinds from the point the bound was reached — that is the rule
     # whose author has something to change. Every case in this file until now
@@ -942,7 +942,7 @@ hide = ["b"]
     ckEq p.root.children[1].label, "c"
 
   test "an EMPTY hide entry hides nothing, so no rule can erase a sequence":
-    # §16a's disjoint evidence for `isHidden`'s `label.len == 0` guard, which
+    # §32a's disjoint evidence for `isHidden`'s `label.len == 0` guard, which
     # had none: every other case in this file hides a NAMED field, and a rule
     # carrying an empty name is refused by `admit` — so the guard's only
     # reachable caller is a `Visualiser` that never came through `admit`.
@@ -1097,7 +1097,7 @@ summary = "exact"
       "over=project:.codetracer/visualisers.toml#0")
 
   test "the winner is chosen by RANK, not by position in the list":
-    # §16a's disjoint evidence, and it was earned: `visualisersFor` hands
+    # §32a's disjoint evidence, and it was earned: `visualisersFor` hands
     # `resolve` a list ALREADY ordered by §5.4, so a `winningVisualiser` that
     # simply took the first match agrees with it on every list this product
     # builds — and an arm removing the rank comparison survived exactly that
@@ -1121,7 +1121,7 @@ summary = "exact"
          "specific"
 
   test "SPECIFICITY decides on a list that reached `visualisersFor` unsorted":
-    # §16a's disjoint evidence for the THIRD term of `rankOf`, and it is V7's
+    # §32a's disjoint evidence for the THIRD term of `rankOf`, and it is V7's
     # and V8's defect on the same expression: `load.rankVisualisers` hands
     # `visualisersFor` a seq ALREADY ordered by §5.4, so a rank that had lost
     # its specificity term still agreed with the list's order on every input a
@@ -1242,7 +1242,7 @@ summary = "exact"
          @["in-program-fn", "plugin-rule", "project-rule", "builtin.record"]
 
   test "the user's origin outranks SPECIFICITY, not merely list order":
-    # §16a again: `visualisersFor` puts the user's rules first, so an arm that
+    # §32a again: `visualisersFor` puts the user's rules first, so an arm that
     # removed the origin's weight from the RANK survived on list order alone.
     # Disjoint evidence — the project's rule is the MORE specific one, so only
     # the origin can decide.
@@ -1266,7 +1266,7 @@ summary = "my own loose rule"
          "my own loose rule"
 
   test "a nearer package outranks a MORE SPECIFIC rule further away":
-    # §16a's disjoint evidence for the SCOPE term in the rank: `rankVisualisers`
+    # §32a's disjoint evidence for the SCOPE term in the rank: `rankVisualisers`
     # already sorts by scope depth, so an arm that dropped the term from the
     # number survived on the seq's order. Here the root's rule is the more
     # specific one, so nearness and specificity disagree and only the number
@@ -1459,7 +1459,7 @@ mediaFrom = "pixels"
     ck p.root.text.startsWith("Point(")
 
   test "a rule whose field is absent degrades even where the surface CAN draw":
-    # §16a's disjoint evidence for `surfaceDrawsMedia`'s THIRD condition, whose
+    # §32a's disjoint evidence for `surfaceDrawsMedia`'s THIRD condition, whose
     # own doc comment says "THREE CONDITIONS, ALL OF THEM NECESSARY" and which
     # had no case of its own. The other two have arms; this one's only existing
     # case (`a rule pointing at a field the value lacks is its own answer`)
@@ -1534,7 +1534,7 @@ mediaFrom = "pixels"
     ck p.root.text.startsWith("Image(")
 
   test "an unclassifiable type is refused even by a surface that claims it":
-    # §16a's disjoint evidence. `surfaceDrawsMedia` has two refusals, and every
+    # §32a's disjoint evidence. `surfaceDrawsMedia` has two refusals, and every
     # budget in the product narrows to the same eight classes — so the
     # budget-membership test alone answered for an unclassifiable type and an
     # arm removing the CLASS test survived. A budget can name `mcUnknown`: the
@@ -1631,7 +1631,7 @@ suite "PLAT-12: rendering does not reopen what parsing excluded":
       ckEq mediaClassOf(spelling), mcUnknown
 
   test "every bound PLAT-11 checks, `admit` checks again from the same number":
-    # §16a: two mechanisms guarding one property halve the older one's mutation
+    # §32a: two mechanisms guarding one property halve the older one's mutation
     # coverage unless each has evidence only it can satisfy. `admit`'s is a
     # `VisualiserRule` that never went through `parse.nim` — which is what
     # every rule below is.
@@ -1660,7 +1660,7 @@ suite "PLAT-12: rendering does not reopen what parsing excluded":
     # cannot BECOME one by someone else's edit: no member label in any
     # recording this workspace produces contains a separator.
     #
-    # SEPARATE FROM THE CONTROL-BYTE CASE BELOW, and the split is §16a's: two
+    # SEPARATE FROM THE CONTROL-BYTE CASE BELOW, and the split is §32a's: two
     # refusals in one predicate, asserted by one case, means an arm removing
     # either is graded against evidence the other also satisfies. One case per
     # refusal is what makes each arm's kill attributable to it.

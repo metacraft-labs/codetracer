@@ -4883,6 +4883,32 @@ plat25-case-floor:
 plat26-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-26
 
+# PLAT-27's, PLAT-28's and PLAT-29's COUNTED TARGETS, gated by the SAME script.
+#
+# THESE THREE WERE MISSING UNTIL 2026-09-18 and the gap is worth naming rather
+# than quietly filling: `ci/test/editor-model-case-floor.sh` grew table entries
+# for PLAT-27 and PLAT-28 when those milestones landed, and neither added the
+# recipe that runs it. A gate with an entry and no caller is a gate nobody runs,
+# which is the campaign's own recurring defect arriving through a `just` target
+# instead of through an assertion. PLAT-29 adds all three.
+plat27-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-27
+
+plat28-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-28
+
+plat29-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-29
+
+# PLAT-29's VERIFICATION GATE: the editor model's transitive import closure
+# contains no async, no I/O, no process, no socket and no clock.
+#
+# Also run by `ci/lint/nim.sh`, beside the two other consumers of the same
+# import extractor. This recipe exists so a developer can run it alone, in the
+# second or so it takes, rather than through a twenty-step lint.
+test-editor-import-closure:
+  bash ci/test/editor-import-closure.sh
+
 # Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
 #
 # Each target builds + drives the `ct-bench` CLI from

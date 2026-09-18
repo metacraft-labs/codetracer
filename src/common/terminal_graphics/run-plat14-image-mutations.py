@@ -118,7 +118,7 @@ TOUCHED = [TIERS, RENDER, ASPECT, OKLAB, EMIT, CAP, MEDIA, CLI]
 #     "which source pixels does this cell show?" is the RENDERER's own
 #     arithmetic rather than a second copy (§14). When it changes, BOTH
 #     harnesses' digests have to be re-recorded and BOTH harnesses' arms aimed
-#     at it re-run — §16a: a repair that tightens can disarm an arm whose
+#     at it re-run — §32a: a repair that tightens can disarm an arm whose
 #     needle still resolves.
 #   * `image_capability.nim` is ALSO a subject of that harness, for the same
 #     reason in the other direction: PLAT-15's pane is the first caller of
@@ -923,7 +923,7 @@ def write_control_hashes() -> None:
             "#",
             "# `surfaces.nim` is ALSO a PLAT-12 subject. When it changes, both",
             "# harnesses' digests have to be re-recorded and both harnesses'",
-            "# arms aimed at it re-run — §16a: a repair that tightens can",
+            "# arms aimed at it re-run — §32a: a repair that tightens can",
             "# disarm an arm whose needle still resolves.",
             ""]
     for p in TOUCHED:

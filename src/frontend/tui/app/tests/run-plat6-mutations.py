@@ -353,7 +353,7 @@ X_PLAN = ("the plan table: six cells, four reachable and two a session cannot "
 # also why nobody had noticed: the abort happens in the control phase and reads
 # like a broken tree rather than like a stale needle.
 #
-# It is Verification-Harness-Traps §16a arriving at a CASE TITLE rather than at
+# It is Verification-Harness-Traps §32a arriving at a CASE TITLE rather than at
 # a source needle: the thing the arm aims at moved, the arm still resolved, and
 # only the run refused. Found by PLAT-16's obligation to re-run the arms of
 # every harness whose `TOUCHED` its changed files reach.

@@ -160,7 +160,7 @@ func admit*(rule: VisualiserRule): bool =
   ## declaration before it renders" has one function to read.
   ##
   ## THIS IS DELIBERATELY A SECOND CHECK OF THINGS PLAT-11 ALREADY CHECKS, and
-  ## that needs the argument Verification-Harness-Traps §16a asks for, because
+  ## that needs the argument Verification-Harness-Traps §32a asks for, because
   ## two mechanisms guarding one property silently halve the mutation coverage
   ## of the older one unless each has evidence only it can satisfy. The
   ## evidence is disjoint here by construction: PLAT-11's parser is reachable

@@ -87,7 +87,7 @@ compilations. Every one below was taken from a real failure transcript; the
 
 THE NEEDLE SCAN GATES `--record-control-hashes` (Verification-Harness-Traps
 §16): re-recording is exactly the moment an arm's needle has just been moved by
-the repair that made the re-record necessary. And §16a: after a repair that
+the repair that made the re-record necessary. And §32a: after a repair that
 TIGHTENS anything, re-run the arms — a second mechanism disarms an arm exactly
 as a moved needle does, and no scan can see it.
 
@@ -850,9 +850,9 @@ MUTATIONS: list[Mutation] = [
     # -- THE LANDING PASS, 2026-09-12 -------------------------------------
     #
     # V36-V38 are the three arms that a verification pass planted UNDECLARED
-    # and that survived the whole 44-case suite. All three are §16a in its
+    # and that survived the whole 44-case suite. All three are §32a in its
     # exact shape — a guard whose every case is also satisfied by a second
-    # mechanism beside it — and all three are answered the way §16a asks: not
+    # mechanism beside it — and all three are answered the way §32a asks: not
     # by deleting a mechanism, but by giving each one evidence only it can
     # satisfy. V39-V41 are the work bound F1 added and its two halves; V42 is
     # the tier discriminator.
@@ -953,7 +953,7 @@ MUTATIONS: list[Mutation] = [
         "  if tally.exhausted:\n    # PLAT-12. The bound is on the PRESENTATION",
         "  if false:\n    # PLAT-12. The bound is on the PRESENTATION",
         P_WORKWIDE, NIM_PURE,
-        # RE-ATTRIBUTED 2026-09-12 (Verification-Harness-Traps §16a), by the
+        # RE-ATTRIBUTED 2026-09-12 (Verification-Harness-Traps §32a), by the
         # third verification, and it is that entry's own shape arriving in the
         # same pass that created it. This arm's `because` was
         # `p.root.children.len == 0` and its needle never moved — the needle
@@ -965,7 +965,7 @@ MUTATIONS: list[Mutation] = [
         # and the harness said so: MIS-ATTRIBUTED, the fourth verdict doing
         # exactly what §17 added it for.
         #
-        # The remedy is §16a's — disjoint evidence, not a deleted arm. A MAP is
+        # The remedy is §32a's — disjoint evidence, not a deleted arm. A MAP is
         # what only this return refuses: `renderNode`'s map arm iterates
         # `v.entries` and never consults `visible`, so the walk guard cannot
         # reach it. The `because` below is the map's, taken from a transcript.
@@ -1003,7 +1003,7 @@ MUTATIONS: list[Mutation] = [
     #
     # V39 grades the TEST of the bound and V40 its report; these grade what the
     # bound is a bound ON. They exist because a verification pass removed the
-    # per-frame charge and the 50-case suite stayed green (§16a in its exact
+    # per-frame charge and the 50-case suite stayed green (§32a in its exact
     # shape: the byte charge covered every case the frame charge had), and then
     # measured that neither charge covered the three O(n) walks a frame makes —
     # 19.5 seconds on one value, with `spent` reporting the same 1,048,582 it

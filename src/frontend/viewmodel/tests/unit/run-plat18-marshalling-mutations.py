@@ -31,7 +31,7 @@ that changes what either side charges for breaks the equality; an arm that
 changes what BOTH charge for would not, which is why the arms below also reach
 the probe's own floors.
 
-SIX VERDICTS, NOT TWO (§1, §1a, §16a, §17), and the count is SIX because that
+SIX VERDICTS, NOT TWO (§1, §1a, §32a, §33), and the count is SIX because that
 is how many this harness can actually emit — see the note below:
 
   killed                 the graded run went red AND its output carried the
@@ -198,7 +198,7 @@ G_SLICE = Grader("script", SLICE_SH,
 # of the run; the floor has to come down with it or contract 0 would fire for a
 # reason about this harness rather than about the arm. F3 inverts contract 0's
 # COMPARISON rather than moving its constant, so it kills under either value —
-# an arm that a harness's own env could disarm is §16a wearing an environment
+# an arm that a harness's own env could disarm is §32a wearing an environment
 # variable.
 # ONE REPETITION, because an arm needs the contract to fire and not a
 # distribution; the published figures are medians of three.
@@ -491,7 +491,7 @@ ARMS = [
             "clock's resolution). The arm inverts the COMPARISON rather than "
             "moving the constant, so this harness's own "
             "`CT_P18_MIN_WALL_MS` cannot disarm it — an arm an environment "
-            "variable can turn off is §16a wearing a `-e`",
+            "variable can turn off is §32a wearing a `-e`",
         control_name="the floor comparison is written with the operands swapped",
         control_find="\t\tif ! awk -v w=\"${w}\" -v m=\"${MIN_WALL_MS}\" 'BEGIN{exit !(w+0 >= m+0)}'; then\n",
         control_replace="\t\tif ! awk -v w=\"${w}\" -v m=\"${MIN_WALL_MS}\" 'BEGIN{exit !(m+0 <= w+0)}'; then\n",
@@ -553,7 +553,7 @@ BECAUSE: dict = {
     # --- the slice's refusals ------------------------------------------------
     # S1 and S2 produced the SAME string until the driver grew a second check.
     # "the panel reached the document" and "the rows are identifiable in it"
-    # are different properties, and one row count answered 0 for both — §16a,
+    # are different properties, and one row count answered 0 for both — §32a,
     # and the repair is in driver.js's `checkAttached`.
     'S1': 'js-crossing/MOUNT: the panel never reached the document — the container holds 0 child element(s)',
     'S2': 'js-crossing/MOUNT: core says 2 row(s), the document holds 0, expected 2',
@@ -712,7 +712,7 @@ def derived_because(text: str) -> str:
     problems = PROBE_PROBLEM.findall(text)
     if problems:
         # THE SET OF REFUSALS, NOT THE FIRST ONE — and this is the shape of
-        # §16a rather than a convenience.
+        # §32a rather than a convenience.
         #
         # The probe refuses per PHASE, so its first line names MOUNT whatever
         # the defect was. Derived from the first line alone, four of these arms

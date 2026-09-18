@@ -284,7 +284,7 @@ proc keyHandler(b: GpuiBinding; nodeId, event: string): proc() =
   ## both are `trCheck`, so firing Space and applying Enter produced the right
   ## answer for the wrong reason. `List` and `Input` both end their contracts
   ## with Enter, so Down did nothing and Left did nothing — and only running
-  ## them separated the three. Verification-Harness-Traps §16a, in the
+  ## them separated the three. Verification-Harness-Traps §32a, in the
   ## instrument rather than in an arm: the listener resolved, the dispatch
   ## crossed into Rust and back, the handler ran, and the EVIDENCE was never
   ## about the key.

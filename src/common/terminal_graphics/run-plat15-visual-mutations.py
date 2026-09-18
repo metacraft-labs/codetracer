@@ -38,7 +38,7 @@ COORDINATE and a DEGRADATION, and the two have different failure modes:
     paint. V24 collapses the two sets back together and restores that exception
     verbatim; V23 keeps the guard and loses only the REASON, so the tier-0
     report and the octant report each have evidence the other cannot satisfy
-    (§16a).
+    (§32a).
 
 FOUR ARMS WERE ADDED BY THAT LANDING PASS — V21 (the magnifier's opening cursor,
 which `(0, 0)` survived the whole nineteen-case suite), V22 (§5's hand-off, whose
@@ -56,7 +56,7 @@ exported), `tiers.nim` (whose `CellRenderableTiers` PLAT-15's landing pass
 extracted) and, through `test_frame_viewer_pane.nim`'s compile,
 `image_capability.nim` — so a
 PLAT-14 arm reddens this harness's unmutated control and vice versa. Run one
-harness at a time. §16a applies in both directions: when either file changes,
+harness at a time. §32a applies in both directions: when either file changes,
 BOTH harnesses' digests are re-recorded and BOTH harnesses' arms aimed at it
 re-run.
 
@@ -614,7 +614,7 @@ MUTATIONS: list = [
             "guard; this arm keeps it and loses the DISTINCTION, so a Kitty "
             "terminal is told its pinned tier has no glyph table and is "
             "offered sextants — a remedy for a problem it does not have, on "
-            "the terminal that draws the frame best. §16a: two branches of one "
+            "the terminal that draws the frame best. §32a: two branches of one "
             "guard need evidence each, or the newer one is graded only as "
             "collateral of an arm aimed at the older.",
         control_name="the two reasons, written as a negated equality",
@@ -796,7 +796,7 @@ def write_control_hashes() -> None:
             "# `cell_render.nim` and `tiers.nim` are ALSO PLAT-14 subjects.",
             "# When either changes, both harnesses' digests have to be",
             "# re-recorded and both harnesses' arms aimed at it re-run —",
-            "# §16a: a repair that tightens can disarm an arm whose needle",
+            "# §32a: a repair that tightens can disarm an arm whose needle",
             "# still resolves.",
             ""]
     for p in TOUCHED:

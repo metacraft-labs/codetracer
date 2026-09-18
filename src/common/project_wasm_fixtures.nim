@@ -285,7 +285,7 @@ func importingModule*(): string =
   # which skipped the import section would produce a module that decodes rather
   # than one refused for an incidental index error. An exploit fixture whose
   # refusal could come from somewhere else is an exploit that proves nothing
-  # about the mechanism it is aimed at (Verification-Harness-Traps §16a).
+  # about the mechanism it is aimed at (Verification-Harness-Traps §32a).
   m.add section(7, vec([uleb("ct_diff".len) & "ct_diff" & op(0x00) & uleb(0)]))
   let body = uleb(0) & i32Const(0) & opEndB()
   m.add section(10, vec([uleb(body.len) & body]))
@@ -339,7 +339,7 @@ func returnsNothingModule*(): string =
   ## Declares a result and leaves nothing on the stack. `ret`'s own underflow
   ## guard is the only thing between this and `stack[^1]` on an empty stack —
   ## a DIFFERENT guard from the `pop()` template the `Drop` fixture exercises,
-  ## so each has evidence only it can satisfy (Verification-Harness-Traps §16a).
+  ## so each has evidence only it can satisfy (Verification-Harness-Traps §32a).
   buildWasm([FixtureFunc(params: 0, results: 1, locals: 0, body: "",
                          exportName: "t")])
 

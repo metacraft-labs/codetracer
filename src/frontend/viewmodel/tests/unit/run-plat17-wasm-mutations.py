@@ -30,7 +30,7 @@ inside its own repo would have had to leave the milestone's three most
 important arms unarmed.
 
 
-SEVEN VERDICTS, NOT TWO (Verification-Harness-Traps.md §1, §1a, §16a, §17).
+SEVEN VERDICTS, NOT TWO (Verification-Harness-Traps.md §1, §1a, §32a, §33).
 An arm that never ran is not a kill; neither is one that died upstream of its
 subject; neither is one whose case never reached a verdict at all:
 
@@ -56,7 +56,7 @@ subject; neither is one whose case never reached a verdict at all:
   SURVIVED               the run produced result lines and the named case was
                          [OK]. After a repair this means "a second mechanism
                          now covers this" at least as often as it means "the
-                         code is fine" (§16a)
+                         code is fine" (§32a)
   HARNESS-FAILURE        the mutation did not apply, or the target did not
                          build/compile
 

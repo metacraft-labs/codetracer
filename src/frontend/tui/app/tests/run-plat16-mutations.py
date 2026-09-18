@@ -90,7 +90,7 @@ THE NEEDLE SCAN GATES THE BASELINE. Before anything is mutated, every arm's
 the run aborts and **records nothing**: a needle that stopped resolving means
 the subject moved, and the correct response is to re-point the arm and re-run
 it, never to accept a digest taken over a tree whose arms no longer aim at
-anything (Verification-Harness-Traps §16a — *"a repair that tightens can disarm
+anything (Verification-Harness-Traps §32a — *"a repair that tightens can disarm
 an arm whose needle still resolves — re-run arms, never only re-record
 digests"*).
 
@@ -461,7 +461,7 @@ MUTATIONS = [
         SOURCE,
         "a saved edit is still an edit the recording predates",
         "THE SAME DEFECT THROUGH THE OTHER END, and it is a separate arm "
-        "because it is a separate mechanism (§16a: two mechanisms guarding one "
+        "because it is a separate mechanism (§32a: two mechanisms guarding one "
         "property each need evidence only they can produce). `markSaved` moves "
         "the BASELINE instead of the disk copy, so a save makes the recording "
         "retroactively fresh — a repair to `refreshEditedPaths` alone would "
@@ -1049,7 +1049,7 @@ def main() -> int:
             print("  " + line)
         print("Re-point the arm at the moved subject and re-run it. Do NOT "
               "re-record digests over a tree whose arms no longer aim at "
-              "anything (Verification-Harness-Traps §16a).")
+              "anything (Verification-Harness-Traps §32a).")
         return 1
 
     baseline = {p: digest(p) for p in TOUCHED}

@@ -76,7 +76,7 @@
 ## `etaContentChanged`, whose remedy is to look at the new file and grant again.
 ##
 ## The three mechanisms are deliberately separable and each has evidence only it
-## can satisfy (Verification-Harness-Traps §16a, which exists because a second
+## can satisfy (Verification-Harness-Traps §32a, which exists because a second
 ## mechanism disarms an arm exactly as a moved needle does):
 ##
 ##   | mechanism | what only it refuses |

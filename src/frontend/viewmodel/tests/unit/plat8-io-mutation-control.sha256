@@ -11,7 +11,7 @@
 # SDK, the policy or a gate changes on purpose.
 
 0b557f84f1258e63f94e6c0695364693a39ea875c5322d60c0a693d36ead1290  src/common/plugin_model/capabilities.nim
-f2ce291ac5e450111ebb3b4897f04553af6f65926b46952672978b84af939916  src/common/plugin_model/manifest.nim
+107155c3f7343d0c81349764a5e260ed18f8e63a60eba5c4ac4161e0ad1e61af  src/common/plugin_model/manifest.nim
 dd176a320de76d026946eaec4520a771c5f45257c561b711b401b757947f70a5  src/frontend/viewmodel/plugin_host/plugin_io.nim
 70e75bb33b8899e7108e2ac5c327509b41d87c3338948d813415c0beb3a295d7  src/frontend/viewmodel/plugin_host/handles.nim
 007c4e9de2979f0c8c2ab5b5cc1c9c2d0bea0697b55af1eeae8b9575bda3e6ff  src/frontend/viewmodel/plugin_host/host.nim

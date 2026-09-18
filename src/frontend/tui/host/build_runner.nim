@@ -61,7 +61,7 @@
 ## now" is a RETURN and not a wait.
 ##
 ## ONE MECHANISM AND NOT TWO. A `select()` in front of the read would be a
-## second guard over the same property, and §16a prices that: two mechanisms
+## second guard over the same property, and §32a prices that: two mechanisms
 ## guarding one property silently halve the mutation coverage unless each gets
 ## evidence only it can produce. `O_NONBLOCK` is the whole guarantee, it is one
 ## line, and `tests/test_build_runner_process.nim` kills the arm that removes

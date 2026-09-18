@@ -219,7 +219,7 @@ ARMS = [
         "`data-ct-state` ATTRIBUTE from `not-launched` to `live` and the case "
         "stayed green — correctly, because the render plan carries no "
         "attribute map (see the note on `planLeafTexts`) and the case reads "
-        "the TEXT. Verification-Harness-Traps §16a's shape without a repair: "
+        "the TEXT. Verification-Harness-Traps §32a's shape without a repair: "
         "the arm pointed at live code, applied, compiled and ran, and its "
         "evidence was never about the thing. The re-aimed arm removes the "
         "branch that chooses the text."),

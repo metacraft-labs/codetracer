@@ -78,7 +78,7 @@
 ## rather than a rejoined note.
 ##
 ## THE PRODUCER REFUSES FIRST, AND THE TWO REFUSALS HAVE DISJOINT EVIDENCE
-## (Verification-Harness-Traps §16a). `manifest.parseManifest` refuses an `id`
+## (Verification-Harness-Traps §32a). `manifest.parseManifest` refuses an `id`
 ## outside `contributed_pane_id.segmentProblem`'s closed charset, so a hostile
 ## id never becomes a loaded plugin at all; this refusal is what stands between
 ## the ledger and a `record` reached any other way — a suite, a future call

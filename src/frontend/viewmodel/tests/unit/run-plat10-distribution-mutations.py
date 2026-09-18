@@ -415,7 +415,7 @@ MUTATIONS: list[Mutation] = [
         "the field separator collides with §8.1.2's own spellings: "
         "`socket:local` splits into two fields, so the two socket grants stop "
         "round-tripping and a saved ledger loses them. ITS EVIDENCE MOVED ON "
-        "2026-09-13 AND THE ARM SAID SO (Verification-Harness-Traps §16a, "
+        "2026-09-13 AND THE ARM SAID SO (Verification-Harness-Traps §32a, "
         "§17b): once `record` refuses a field carrying the separator, the "
         "mutated build writes NO rows at all, so `parsed.problems.len == 0` — "
         "this arm's `because` until that day — went GREEN and the arm scored "
@@ -470,7 +470,7 @@ MUTATIONS: list[Mutation] = [
         "newline, a tab, a space or a path separator loads as a plugin, so the "
         "hostile id reaches the acceptance step and `grant` is called with it. "
         "`record` still refuses the ROW — which is why this arm needs its own "
-        "case rather than borrowing L7's (§16a: two mechanisms guarding one "
+        "case rather than borrowing L7's (§32a: two mechanisms guarding one "
         "property silently halve the coverage unless each has evidence only it "
         "can satisfy). The evidence only this one has is `acme tool`: a "
         "perfectly writable ledger field, and not a plugin id",

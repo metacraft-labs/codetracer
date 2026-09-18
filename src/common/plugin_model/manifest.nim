@@ -468,7 +468,7 @@ proc parseManifest*(text, source: string): ParsedManifest =
   # about a DIFFERENT plugin — measured, with the victim holding `process`, the
   # capability PLAT-8 models as subsuming every other. The ledger refuses the
   # field; this refuses the ID, which is the producer, and the two have disjoint
-  # evidence (Verification-Harness-Traps §16a): only this one refuses `acme
+  # evidence (Verification-Harness-Traps §32a): only this one refuses `acme
   # tool`, which a ledger row would carry perfectly well, and only the ledger's
   # refuses an `at` or a `note` no manifest ever saw.
   #

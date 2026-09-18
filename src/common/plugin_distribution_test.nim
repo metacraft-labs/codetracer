@@ -684,7 +684,7 @@ suite "PLAT-10: a plugin id cannot forge a row in the grant ledger":
 
   test "a hostile id never becomes a plugin, which is the OTHER refusal":
     # THE PRODUCER, AND IT IS A SECOND MECHANISM WITH ITS OWN EVIDENCE
-    # (Verification-Harness-Traps §16a). `parseManifest` refuses an `id` outside
+    # (Verification-Harness-Traps §32a). `parseManifest` refuses an `id` outside
     # the closed charset, so the hostile plugin above never loads at all and
     # never reaches the acceptance step that would call `grant`. Each mechanism
     # has a case only it can satisfy, and both are in this test:

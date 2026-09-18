@@ -14,12 +14,12 @@
 # `cell_render.nim` and `tiers.nim` are ALSO PLAT-14 subjects.
 # When either changes, both harnesses' digests have to be
 # re-recorded and both harnesses' arms aimed at it re-run —
-# §16a: a repair that tightens can disarm an arm whose needle
+# §32a: a repair that tightens can disarm an arm whose needle
 # still resolves.
 
 df0ec4850d296b0db3fc09edbfcaad6e7436aee487a23824e41b4bfc178f2a89  src/common/terminal_graphics/magnifier.nim
 864c50b73580ec40c76d148b8ce30150252da5c7f17f62083514c411734f572f  src/common/terminal_graphics/tiers.nim
 e96b3b0b204123f5a9c6c7ce9f9bea289253cec1c2c122f48b3f030a41a693e4  src/common/terminal_graphics/raster.nim
 a500b01f40ac681c6d737ef7303c1959f254874e31e15f05ab0d3aaabf807c03  src/common/terminal_graphics/cell_render.nim
-d5ea92f6b4151dabbef4729b6f575da309a9071623453b081e2505b643fec9e8  src/frontend/tui/app/views/frame_viewer.nim
+d7808dcfaf479aa1f82d882fc0868922a6fb525bface82fba50543faef369f5c  src/frontend/tui/app/views/frame_viewer.nim
 ae46c02cef4a086cde9f1b43a3164ad7e8326c4fc6b9cb406c3b1a68fbec67c4  src/frontend/tui/app/frame_viewer_binding.nim

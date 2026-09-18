@@ -169,7 +169,7 @@ function report(arm, phaseName, samples) {
 // `appendChild` so the panel is never attached, and one that makes the host
 // read a `SetAttribute` operation and not perform it — different defects, one
 // symptom, and the harness refused the run because neither could be
-// attributed (Verification-Harness-Traps.md §16a: defence in depth costs a
+// attributed (Verification-Harness-Traps.md §32a: defence in depth costs a
 // test each, and the evidence has to be disjoint or the older arm is the one
 // that goes quiet).
 function checkAttached(arm, phaseName) {

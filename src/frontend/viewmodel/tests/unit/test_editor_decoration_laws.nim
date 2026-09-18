@@ -85,10 +85,16 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1266
+const ExpectedAssertions = 1270
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run, and updated deliberately in the same commit as the checks that moved
   ## it.
+  ##
+  ## 1266 -> 1270 on 2026-09-18, and the four are `ScannedModules` growing by
+  ## two: the §35 directory check is TWO-SIDED, so every module named there is
+  ## asserted twice. PLAT-29 added `document_version.nim` and `reconcile.nim`
+  ## to the directory this suite claims to cover and this suite went red until
+  ## they were named — which is the guard working rather than maintenance.
 
 const Seed = 0x28c0de00'u32
   ## Printed. Every population below is derived from it, and the suite is
@@ -1044,10 +1050,17 @@ const
   GeneratorSource = staticRead("../generators/decoration_generator.nim")
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                        "inlay.nim", "range_set.nim", "rope.nim",
-                        "row_projection.nim", "selection.nim",
-                        "selection_ops.nim", "seq_line_store.nim",
-                        "text_store.nim", "transaction.nim", "wrap.nim"]
+                        "document_version.nim", "inlay.nim", "range_set.nim",
+                        "reconcile.nim", "rope.nim", "row_projection.nim",
+                        "selection.nim", "selection_ops.nim",
+                        "seq_line_store.nim", "text_store.nim",
+                        "transaction.nim", "wrap.nim"]
+  ## GREW BY TWO ON 2026-09-18, and the growth is §35's guard doing its job
+  ## rather than maintenance: PLAT-29 added `document_version.nim` and
+  ## `reconcile.nim` to the directory this list claims to cover, and THIS
+  ## SUITE WENT RED until they were named here. A hardcoded subject list that
+  ## cannot see a new file in its own directory is the trap; a hardcoded list
+  ## compared against a directory walk in both directions is the remedy.
 
 const EditorDirModules = block:
   ## **§35: THE SUBJECT LIST IS THE DIRECTORY, NOT A LIST SOMEBODY MAINTAINS.**
@@ -1183,7 +1196,13 @@ suite "PLAT-28 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 13
+    # THIRTEEN UNTIL 2026-09-18, FIFTEEN NOW. The literal is deliberate and is
+    # NOT redundant with the two-sided comparison above: without it, a
+    # directory walk that matched nothing and a list that had been emptied
+    # would agree with each other perfectly (§4). It moved because PLAT-29 put
+    # `document_version.nim` and `reconcile.nim` in the directory this suite
+    # claims to cover, which is the edit this literal exists to force.
+    counted ScannedModules.len == 15
     counted NewModules.len == 5
 
   test "NO CLAMP REPAIRS AN ANCHOR — every unreachable path RAISES":

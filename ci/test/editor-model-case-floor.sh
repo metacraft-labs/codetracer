@@ -8,6 +8,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-26
 #   bash ci/test/editor-model-case-floor.sh PLAT-27
 #   bash ci/test/editor-model-case-floor.sh PLAT-28
+#   bash ci/test/editor-model-case-floor.sh PLAT-29
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -163,9 +164,27 @@ PLAT-28)
 	LAW_SECTION="3.4"
 	LAW_COUNT=5
 	;;
+PLAT-29)
+	MILESTONE="** PLAT-29: The asynchronous boundary and the document version"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_async_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_async_examples.nim
+		src/frontend/viewmodel/tests/unit/test_editor_async_closure.nim
+	)
+	# THREE SUITES, AND THE THIRD IS NATIVE-ONLY. `test_editor_async_closure`
+	# spawns the import-closure gate through `std/osproc`, so it is subtracted
+	# from `vm-unit-js` and `vm-unit-wasm` by name. It is summed here because
+	# the FLOOR is a claim about the milestone's cases, not about one backend's
+	# lane — and because seven of its nine cases are the seven routes past a
+	# text scan, which is a third of the floor's derivation.
+	LAW_SUITES=(src/frontend/viewmodel/tests/unit/test_editor_async_laws.nim)
+	LAW_PREFIX="LAW-V"
+	LAW_SECTION="3.5"
+	LAW_COUNT=5
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-28. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-29. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

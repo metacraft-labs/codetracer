@@ -281,7 +281,7 @@ suite "PLAT-13: the grant is recorded by IDENTITY, not by path":
     copyDir(w.root, copyRoot)
     # The bytes are identical, so the DIGEST cannot be what refuses this — only
     # the identity can, which is what makes this case disjoint from the
-    # content-changed one (Verification-Harness-Traps §16a).
+    # content-changed one (Verification-Harness-Traps §32a).
     ckEq contentDigest(readFile(copyRoot / definitionPath("", dfkVisualiserCode))),
          digest
     ck checkoutIdentity(copyRoot) != checkoutIdentity(w.root)
@@ -451,7 +451,7 @@ suite "PLAT-13: revocation stops the code running, not only the record":
 
     # A `git pull` brings code the user consented to nothing about. The identity
     # is unchanged and the ledger still says `grant`, so ONLY the digest can
-    # refuse this — which is what makes it disjoint evidence (§16a).
+    # refuse this — which is what makes it disjoint evidence (§32a).
     discard w.writeExecutable(dfkVisualiserCode, echoLengthModule())
     ck checkoutIdentity(w.root).len > 0
     ckEq loadProjectTrust(w.userRoot).ledger.stateOf(
@@ -695,7 +695,7 @@ suite "PLAT-13: a revoke reaches a definition that is ALREADY loaded":
     # And §7's comparison from a held handle, through the same re-read.
     #
     # THESE TWO ARE NOT THE EVIDENCE FOR THE RE-READ, AND SAYING SO IS THE
-    # POINT (§16a, §7a). The handle here is a `dfkVisualiserCode`, so
+    # POINT (§32a, §7a). The handle here is a `dfkVisualiserCode`, so
     # `diffWith`'s `entry != DiffExport` arm answers structurally and leaves
     # `fromDefinition` false for a reason that has nothing to do with the
     # revoke: a visualiser handle can never be `fromDefinition` through
@@ -761,7 +761,7 @@ suite "PLAT-13: a checkout path cannot write a second row into the ledger":
       # READ THROUGH A GUARD, so that a run in which NO row was recorded fails
       # this assertion instead of dying in the middle of it. A case that raises
       # here never reaches the two assertions below, and those are the only
-      # evidence `pathAnnotation` has that `representableField` does not (§16a).
+      # evidence `pathAnnotation` has that `representableField` does not (§32a).
       var recordedNote = "(no row was recorded at all)"
       if parse.ledger.entries.len > 0:
         recordedNote = parse.ledger.entries[0].note
@@ -774,7 +774,7 @@ suite "PLAT-13: a checkout path cannot write a second row into the ledger":
       ckRefusedWith victimScan, ".codetracer/visualisers.wasm", etcNoGrant
       ckNoNeedle victimScan, visualisedBy(victim, victimScan)
 
-      # THE TWIN, AND IT IS `pathAnnotation`'S OWN EVIDENCE (§16a). Two
+      # THE TWIN, AND IT IS `pathAnnotation`'S OWN EVIDENCE (§32a). Two
       # mechanisms stand between a hostile path and a forged row —
       # `representableField`, which refuses the FIELD, and `pathAnnotation`,
       # which substitutes a writable note — and `representableField` alone

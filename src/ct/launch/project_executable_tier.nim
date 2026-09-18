@@ -62,7 +62,7 @@
 ## elsewhere, and a bind mount in the middle all make the two strings differ
 ## while `pathIsUnder` would be satisfied. Calling `pathIsUnder` as well was
 ## considered and REFUSED: it would be a second mechanism with no case only it
-## can satisfy, and Verification-Harness-Traps §16a is that defence in depth
+## can satisfy, and Verification-Harness-Traps §32a is that defence in depth
 ## silently halves mutation coverage unless each mechanism gets evidence of its
 ## own. One rule, one arm, one case.
 ##
@@ -197,7 +197,7 @@ proc readExecutableDefinition*(root: string; scope: string;
   #    ONE TEST, NOT TWO. `dirExists("")` is false, so a separate
   #    `resolvedRoot.len == 0` arm would be a second mechanism with no case only
   #    it can satisfy — which is the redundancy `checkoutIdentity` had three of
-  #    and deleted two of, for §16a's reason.
+  #    and deleted two of, for §32a's reason.
   let resolvedRoot = resolvedRealPath(root)
   if not dirExists(resolvedRoot):
     scan.problems.add ExecutableTierProblem(

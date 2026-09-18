@@ -623,7 +623,7 @@ proc emitFrameViewerPicture*(model: FrameViewerModel;
   ## PANE's defect (see the module header), and with it repaired the second test
   ## is unreachable: `fdgProtocolNotPainted` returns above, carrying the same
   ## fact in `remedyFor`'s one string. A guard no case can reach is a row that
-  ## looks like coverage (Verification-Harness-Traps §16a), so it is gone rather
+  ## looks like coverage (Verification-Harness-Traps §32a), so it is gone rather
   ## than kept as defence in depth over a condition that cannot occur.
   let pictureHeight = max(0, height - 1)
   let gap = model.resolveGap(width, pictureHeight)

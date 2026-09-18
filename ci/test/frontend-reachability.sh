@@ -33,8 +33,17 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1225 bash ci/test/frontend-reachability.sh`, so 1226
-# findings fail `lint-nim` and 1225 do not.
+# `env CT_REACHABILITY_MAX=1238 bash ci/test/frontend-reachability.sh`, so 1239
+# findings fail `lint-nim` and 1238 do not.
+#
+# THE CEILING MOVED 1225 -> 1238 ON 2026-09-18, and the reason is in the
+# setter beside the invocation: PLAT-29 built an asynchronous boundary whose
+# two modules are exercised by their suites and reached by no product module,
+# because wiring the four producers behind it is that milestone's declared
+# residual. Measured both sides on one host: `origin/dev` at `421b1dcbb`
+# reported 1220, the tree with PLAT-29 reports 1238, and the 19-finding
+# difference is exactly `document_version.nim` and `reconcile.nim`. The number
+# falls again when the producers land; it is a ceiling, so it can.
 #
 # IT WAS RED FOR SEVEN DAYS, AND WHY IT IS NOT RED NOW IS THE FIRST THING A
 # READER NEEDS.

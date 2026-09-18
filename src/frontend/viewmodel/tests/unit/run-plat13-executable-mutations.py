@@ -50,7 +50,7 @@ it. Measured on 2026-09-13: D4 and S4 both quoted `visualisedBy(pulled) == ""`, 
 verification pass gave `visualisedBy` a second parameter, and both arms scored
 MIS-ATTRIBUTED over mutations that killed their cases exactly as intended — §17a's false
 negative in the mis-attribution detector, arriving through an ordinary rename. THE ONLY
-INSTRUMENT FOR THIS IS RUNNING THE ARM, which is §16a's own conclusion.
+INSTRUMENT FOR THIS IS RUNNING THE ARM, which is §32a's own conclusion.
 
 A `because` IS A QUOTATION OF THE FAILURE TEXT, NOT OF THE SOURCE
 (Verification-Harness-Traps §17a). `unittest.check` stringifies the AST it
@@ -65,7 +65,7 @@ ordinary text and is stable.
 PREFER A `because` THAT QUOTES THE EFFECT (§17a). Where an arm can be attributed
 either to a status or to the needle sweep, it is attributed to the needle.
 
-AND FOUR `{.cursor.}` ANNOTATIONS WERE DELETED RATHER THAN ARMED, WHICH IS §16a APPLIED
+AND FOUR `{.cursor.}` ANNOTATIONS WERE DELETED RATHER THAN ARMED, WHICH IS §32a APPLIED
 TO THIS HARNESS'S OWN OUTPUT. Arm W20 removed the annotation from `enter`'s `let fn` and
 SURVIVED. The reason is that Nim 2.2.8's ORC already infers a cursor there, so the explicit
 one was a second mechanism with no arm that could kill it — a row that looks like coverage.
@@ -131,7 +131,7 @@ at start-up reads a mutation a killed run left behind as the baseline.
 
 THE NEEDLE SCAN GATES `--record-control-hashes` (Verification-Harness-Traps
 §16): re-recording is exactly the moment an arm's needle has just been moved by
-the repair that made the re-record necessary. And §16a: re-recording is not the
+the repair that made the re-record necessary. And §32a: re-recording is not the
 last step — a repair that TIGHTENS can disarm an arm whose needle still
 resolves, so the arms are RE-RUN after every repair.
 
@@ -323,7 +323,7 @@ MUTATIONS: list[Mutation] = [
         "rather than to the needle (§17a's preference for the effect, and the "
         "effect here is a syscall that happened): the digest phase downstream "
         "still refuses the RUN, so removing this line alone leaks no bytes. "
-        "That is defence in depth and §16a's own shape — the two phases have "
+        "That is defence in depth and §32a's own shape — the two phases have "
         "disjoint evidence precisely so neither can be removed silently",
         control_name="the permission is tested through a named boolean",
         control_find="  if not permission.permitted:",
@@ -386,7 +386,7 @@ MUTATIONS: list[Mutation] = [
         "the digest stops binding the grant to the bytes at LOAD time, so a "
         "`git pull` that replaces the module produces a definition the user "
         "consented to nothing about. ATTRIBUTED TO THE DEFINITION EXISTING, "
-        "not to what it renders, and that is §16a rather than a preference: "
+        "not to what it renders, and that is §32a rather than a preference: "
         "the 2026-09-13 repair made `visualiseWith` re-ask the ledger before it "
         "runs, so the module is refused a SECOND time at run time and the "
         "needle never comes back — which disarmed this arm's original evidence "
@@ -968,7 +968,7 @@ MUTATIONS: list[Mutation] = [
         "asked to grant it twice — and learns to grant reflexively, which is "
         "the same as not having a gate. THIS ARM COULD NOT BE KILLED UNTIL THE "
         "REDUNDANT `expandFilename` WAS DELETED: two resolvers meant either one "
-        "could go (§16a)",
+        "could go (§32a)",
         control_name="the checkout path is bound before it is stat'ed",
         control_find="    let info = getFileInfo(root, followSymlink = true)",
         control_replace="    let named = root\n"
@@ -1145,7 +1145,7 @@ MUTATIONS.extend([
 
 # --- the arms this verification pass's repairs brought with them -----------
 #
-# Verification-Harness-Traps §16a: a repair that TIGHTENS is a reason to write
+# Verification-Harness-Traps §32a: a repair that TIGHTENS is a reason to write
 # arms, not only to re-record digests. Every guard below either did not exist
 # before 2026-09-13 or had no case that reached it, and five of them are the
 # difference between a REFUSAL and a Defect raised out of the host.
@@ -1231,7 +1231,7 @@ MUTATIONS.extend([
         "declares a result and leaves nothing takes the host down. It is a "
         "DIFFERENT guard from the `pop()` template — that one refuses a pop "
         "below the frame's base, this one a RETURN with nothing to return — and "
-        "each therefore needs a module only it refuses (§16a)",
+        "each therefore needs a module only it refuses (§32a)",
         control_name="the frame's base is compared through a named height",
         control_find="        if stack.len <= frames[^1].stackBase:\n"
                      "          result.trap = wtStackUnderflow\n"
@@ -1309,7 +1309,7 @@ MUTATIONS.extend([
         "  if representableField(path): path else: UnrepresentablePathNote",
         "  path",
         C_INJECT, NIM_CLI, "hostileScan.definitions.len was 0",
-        "`pathAnnotation`'S OWN EVIDENCE, WHICH IS NOT THE INJECTION (§16a). "
+        "`pathAnnotation`'S OWN EVIDENCE, WHICH IS NOT THE INJECTION (§32a). "
         "Two mechanisms stand between a hostile checkout path and a forged "
         "row, and `representableField` — graded by T13 — refuses the FIELD on "
         "its own. What only `pathAnnotation` does is keep the GRANT: without "
@@ -1470,7 +1470,7 @@ MUTATIONS.extend([
         "`value out of range: 34359738367 notin -2147483648 .. 2147483647 "
         "[RangeDefect]` at project_wasm.nim's `decodeBody`. It is a DIFFERENT "
         "guard from the five-byte bound and needs a module only it refuses "
-        "(§16a): the padded-LEB case asserts the length bound accepts exactly "
+        "(§32a): the padded-LEB case asserts the length bound accepts exactly "
         "this length",
         control_name="the range test is written against the same bound as a constant",
         control_find="  if value > uint64(high(int32)):",
@@ -1563,7 +1563,7 @@ DECLARED_SURVIVORS: list[Mutation] = []
 
 # --- MUTATIONS THAT ARE NOT ARMS, AND THE MEASUREMENT THAT SAYS SO ----------
 #
-# Verification-Harness-Traps §16a: "defence in depth silently halves mutation
+# Verification-Harness-Traps §32a: "defence in depth silently halves mutation
 # coverage unless each mechanism gets evidence of its own". The converse needs
 # recording too, or every pass re-derives it: a guard whose every input is
 # ALREADY refused by something else is not a coverage gap, and an arm on it
@@ -1746,7 +1746,7 @@ def write_control_hashes() -> None:
             "#",
             "# Rewrite with --record-control-hashes, deliberately, when one of",
             "# these files changes on purpose. The needle scan gates that step",
-            "# (Verification-Harness-Traps §16), and §16a is why re-recording",
+            "# (Verification-Harness-Traps §16), and §32a is why re-recording",
             "# is not the last step: RE-RUN THE ARMS afterwards.",
             ""]
     for p in TOUCHED:

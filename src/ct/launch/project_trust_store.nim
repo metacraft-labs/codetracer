@@ -121,7 +121,7 @@ proc checkoutIdentity*(root: string): RepositoryIdentity =
   ##
   ## This function first read `expandFilename(root)`, then `dirExists` on the
   ## result, then `getFileInfo(..., followSymlink = true)`, and it was WRONG in
-  ## the way Verification-Harness-Traps §16a describes rather than in its answer:
+  ## the way Verification-Harness-Traps §32a describes rather than in its answer:
   ## three mechanisms, two of them redundant, so two mutation arms aimed at real
   ## lines could not be killed.
   ##
@@ -135,7 +135,7 @@ proc checkoutIdentity*(root: string): RepositoryIdentity =
   ##
   ## Both are gone. What remains is ONE call that resolves and ONE test of what
   ## it found, each with an arm that kills — which is what §14 buys when there is
-  ## one predicate, and what §16a says you have to pay for the moment there are
+  ## one predicate, and what §32a says you have to pay for the moment there are
   ## deliberately two.
   if root.len == 0: return ""
   try:

@@ -217,7 +217,7 @@ suite "PLAT-13: the grant is per repository, per file, and revocable":
     ckEq led.grant(IdentityA, dfkVisualiserCode, DigestOne, AtTwo), troRecorded
     ckAdmits led, IdentityA, dfkVisualiserCode, DigestOne, etaAdmitted
     # AND `grantedDigest`'s REVOKED GUARD GETS EVIDENCE ONLY IT CAN SATISFY
-    # (Verification-Harness-Traps §16a). `revoke` records an EMPTY digest, so
+    # (Verification-Harness-Traps §32a). `revoke` records an EMPTY digest, so
     # every assertion above is equally satisfied by a `grantedDigest` that
     # returned the last entry's digest whatever the decision was — measured,
     # by arm T7, which SURVIVED until this was written. A hand-built ledger
@@ -906,7 +906,7 @@ suite "PLAT-13: one RETIRED INSTRUCTION is one unit, whatever the body's length"
   test "a CALL to a long-bodied function costs the same as a call to a short one":
     # `opCall` and `enter` copied the callee's whole `WasmFunction` — the same
     # defect one level up, and reached by a different route, so it needs a case
-    # of its own rather than sharing the one above (§16a).
+    # of its own rather than sharing the one above (§32a).
     let short = probeRun(paddedCalleeModule(0))
     let long = probeRun(paddedCalleeModule(LongBody))
     ckEq long.instrCount - short.instrCount, LongBody
@@ -1102,7 +1102,7 @@ suite "PLAT-13: withdrawing a grant stops a handle that is ALREADY loaded":
     ckEq after.offender, ".codetracer/visualisers.wasm#" & VisualiserExport
 
     # AND THE OTHER TWO MECHANISMS REACH THE HANDLE TOO, each with evidence
-    # only it can produce (§16a): forgetting the checkout, and re-granting the
+    # only it can produce (§32a): forgetting the checkout, and re-granting the
     # same file over DIFFERENT bytes.
     ckEq led.grant(IdentityA, dfkVisualiserCode, DigestTwo, AtTwo), troRecorded
     ckEq held.definition.stillAdmitted(led), etaContentChanged
@@ -1184,7 +1184,7 @@ suite "PLAT-13: the guards between a granted module and a Defect in the HOST":
   test "a function that declares a result and leaves nothing is a TRAP":
     # `ret`'s own underflow guard — a DIFFERENT guard from the `pop()` template
     # the `Drop` fixture drives, so each has evidence only it can satisfy
-    # (§16a). Without it the host reads `stack[^1]` on an empty seq.
+    # (§32a). Without it the host reads `stack[^1]` on an empty seq.
     let d = decodeModule(returnsNothingModule())
     ck d.ok
     let run = d.module.runExport("t", [])
@@ -1278,7 +1278,7 @@ suite "PLAT-13: the guards between a granted module and a Defect in the HOST":
 
   test "an immediate past 2^31-1 is refused, not narrowed into a RangeDefect":
     # `u32leb`'s RANGE test, which is a DIFFERENT guard from its five-byte
-    # length bound and needs a module only it refuses (§16a). `FF FF FF FF 7F`
+    # length bound and needs a module only it refuses (§32a). `FF FF FF FF 7F`
     # is five bytes — inside the length bound, and the case above says why that
     # is the spec's own rule — carrying 34,359,738,367. `decodeBody` narrows a
     # `local.get` immediate with `int32(...)`, so without this test the refusal
@@ -1322,7 +1322,7 @@ suite "PLAT-13: the guards between a granted module and a Defect in the HOST":
 
   test "every way a module can end early is a DISTINCT report":
     # `wpcTruncated` has six producers, and a mutation removing any one of them
-    # survives while another answers for it (§16a). Each gets a module only it
+    # survives while another answers for it (§32a). Each gets a module only it
     # refuses, asserted on the DETAIL rather than on the code.
     var seenDetails: seq[string] = @[]
     for (bytes, needle) in [

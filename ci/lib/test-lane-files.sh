@@ -826,6 +826,7 @@ test_lane_files() {
 		# each rejection says what breaks:
 		test_lane_files vm-unit |
 			_tlf_reject \
+				'/test_editor_async_closure\.nim$' \
 				'/test_editor_test_controls_m4\.nim$' \
 				'/test_test_explorer_vm\.nim$' \
 				'/test_sdk_facade_boundary\.nim$' \
@@ -838,6 +839,21 @@ test_lane_files() {
 				'/test_plugin_source_admission\.nim$' \
 				'/test_plugin_surfaces\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$'
+		# `test_editor_async_closure` (PLAT-29) SPAWNS the shell gate it grades
+		#     — `ci/test/editor-import-closure.sh`, once against the real tree
+		#     and once per planted route — through `std/osproc`. MEASURED rather
+		#     than assumed, 2026-09-18:
+		#
+		#         osproc.nim(24, 8) Error: cannot export: quoteShell
+		#
+		#     which is `std/osproc` failing to compile at all on this backend
+		#     rather than a routine failing at run time. The rejection is the fix
+		#     rather than a `when` guard for the reason the wasm list below
+		#     states at length: its central claim is *the gate refused this
+		#     tree*, and that claim is green for free on a target that could not
+		#     have run the gate at all. Its two sibling suites carry no process,
+		#     no filesystem and no clock, and DO run here — with the same case
+		#     and assertion counts as native, measured on both.
 		# `test_plugin_grant_lifecycle` (PLAT-10) measures a REVOKED capability
 		# as an effect: it spawns `touch` through PLAT-8's process primitive and
 		# asserts the sentinel file is or is not there, and it writes and reads
@@ -1032,12 +1048,26 @@ test_lane_files() {
 		# a wasm32 module cannot create a process.
 		test_lane_files vm-unit |
 			_tlf_reject \
+				'/test_editor_async_closure\.nim$' \
 				'/test_sdk_facade_boundary\.nim$' \
 				'/test_plugin_io_sdk\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
 				'/test_project_action_runner\.nim$'
+		# SEVEN entries since 2026-09-18. `test_editor_async_closure` (PLAT-29)
+		# joins the same `posix_spawnp` family as the five below, and the line it
+		# dies on is the same one, measured:
+		#
+		#     wasm-ld: error: @posproc.nim.c.o: undefined symbol: posix_spawnp
+		#
+		# It spawns `ci/test/editor-import-closure.sh` once against the real tree
+		# and once per planted route, and grades the gate's verdict. The other
+		# two PLAT-29 suites — the laws and the examples — carry no process, no
+		# filesystem and no clock, and run on all three backends with IDENTICAL
+		# counts: 37 and 17 cases, 1,767 and 143 assertions, on C, `nim js` under
+		# node, and wasm32 through Emscripten under node.
+		#
 		# Five of the six fail at the LINK step with the same one line:
 		#
 		#     wasm-ld: error: undefined symbol: posix_spawnp

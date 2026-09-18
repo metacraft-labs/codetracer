@@ -476,7 +476,7 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
     # is §3's named failure and must report `prMultiplexerUnproven`; if this arm
     # ran first it would answer for that row too, the tmux arm's own case would
     # be satisfied by a second mechanism, and the arm aimed at it could not be
-    # killed — Verification-Harness-Traps §16a, bought rather than inherited.
+    # killed — Verification-Harness-Traps §32a, bought rather than inherited.
     # The two refusals therefore have disjoint evidence: the row here has no
     # multiplexer, and the tmux rows are answered above.
     #

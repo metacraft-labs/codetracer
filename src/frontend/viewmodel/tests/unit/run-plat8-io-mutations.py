@@ -1132,7 +1132,7 @@ MUTATIONS: list[Mutation] = [
     # path containing '..' is refused rather than resolved"), which both
     # spellings satisfy; the thing worth grading is the DISTINCTION, so the
     # mutation is the old code and the killer is the case only the new code
-    # passes. Verification-Harness-Traps §16a's rule, applied forwards: two
+    # passes. Verification-Harness-Traps §32a's rule, applied forwards: two
     # mechanisms — here two readings of one rule — need disjoint evidence.
     Mutation(
         "V7", CAPS,

@@ -131,7 +131,7 @@
 ## and `ret` a smaller one (the frame's `FuncType`, two seqs, per return). The
 ## two load-bearing ones are `{.cursor.}` aliases now — the other three were
 ## DELETED rather than kept, because ORC already infers a cursor for them and an
-## annotation no arm can kill is a row that looks like coverage (§16a). The two
+## annotation no arm can kill is a row that looks like coverage (§32a). The two
 ## long-body cases in `project_trust_test` plus arms W18 and W19 are what keep
 ## it that way, because the only quantity a regression moves is TIME and `spent`
 ## goes on reporting the same number.
@@ -999,7 +999,7 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
     # see the two annotated bindings in `runExportIn` and the table at the
     # first of them. Nim 2.2.8's ORC infers a cursor for both of these, so an
     # explicit one is a second mechanism with no arm that can kill it, which
-    # Verification-Harness-Traps §16a says to delete rather than keep. The
+    # Verification-Harness-Traps §32a says to delete rather than keep. The
     # property is held by the CASES, which measure the cost per call and do not
     # care which mechanism delivers it.
     let fn = m.functions[fnIdx]
@@ -1062,7 +1062,7 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
     # `opCall`, which is what the 7,819.8 ms and 3,390.8 ms ORC rows are. So the
     # four redundant annotations were DELETED rather than kept: a mechanism
     # with no arm that can kill it is a row that looks like coverage
-    # (Verification-Harness-Traps §16a), and arm W20 — written for `enter`'s
+    # (Verification-Harness-Traps §32a), and arm W20 — written for `enter`'s
     # `fn` — SURVIVED, which is how this was found rather than argued.
     let body {.cursor.} = m.functions[fnIdx].body
     if frames[^1].pc < 0 or frames[^1].pc >= body.len:

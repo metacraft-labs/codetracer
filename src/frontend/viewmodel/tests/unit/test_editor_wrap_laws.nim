@@ -107,7 +107,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2774
+const ExpectedAssertions = 2804
+  ## 2774 -> 2804 on 2026-09-18: PLAT-29 added `document_version.nim` and
+  ## `reconcile.nim` to `viewmodel/editor/`, and the three renderer-reach
+  ## scans below run over every module in that directory — plus the
+  ## two-sided §35 directory check, which asserts each name twice.
   ## Asserted by the last case against the runtime tally. Update it
   ## deliberately, in the same commit as the checks that moved it.
 
@@ -1140,6 +1144,8 @@ const
   DecorationSource = staticRead("../../editor/decoration.nim")
   InlaySource = staticRead("../../editor/inlay.nim")
   RowProjectionSource = staticRead("../../editor/row_projection.nim")
+  DocumentVersionSource = staticRead("../../editor/document_version.nim")
+  ReconcileSource = staticRead("../../editor/reconcile.nim")
     ## **PLAT-28's FIVE, AND THE FOURTH TIME §35's ENUMERATION HAS PAID.** This
     ## case went red by name when `viewmodel/editor/` grew from eight modules to
     ## thirteen, before PLAT-28's own suites existed. `inlay.nim` is the one
@@ -1150,10 +1156,16 @@ const
     ## point.
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                        "inlay.nim", "range_set.nim", "rope.nim",
-                        "row_projection.nim", "selection.nim",
-                        "selection_ops.nim", "seq_line_store.nim",
-                        "text_store.nim", "transaction.nim", "wrap.nim"]
+                        "document_version.nim", "inlay.nim", "range_set.nim",
+                        "reconcile.nim", "rope.nim", "row_projection.nim",
+                        "selection.nim", "selection_ops.nim",
+                        "seq_line_store.nim", "text_store.nim",
+                        "transaction.nim", "wrap.nim"]
+  ## GREW BY TWO ON 2026-09-18, and the growth is §35's guard doing its job
+  ## rather than maintenance: PLAT-29 added `document_version.nim` and
+  ## `reconcile.nim` to the directory this list claims to cover, and THIS SUITE
+  ## went red by name — from a milestone that had been green for a day — until
+  ## they were named here and read below.
 
 const EditorDirModules = block:
   ## **§35: THE SUBJECT LIST IS THE DIRECTORY, NOT A LIST SOMEBODY MAINTAINS.**
@@ -1184,6 +1196,8 @@ const OtherModules = block:
   xs.add ("decoration.nim", DecorationSource)
   xs.add ("inlay.nim", InlaySource)
   xs.add ("row_projection.nim", RowProjectionSource)
+  xs.add ("document_version.nim", DocumentVersionSource)
+  xs.add ("reconcile.nim", ReconcileSource)
   xs
 
 proc codeOnly(src: string): string =
@@ -1259,7 +1273,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 13
+    counted ScannedModules.len == 15
     counted OtherModules.len == ScannedModules.len - 1
 
   test "NO MODULE OF THE CORE REACHES A RENDERER — the dependency does not invert":
