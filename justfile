@@ -4873,6 +4873,16 @@ plat24-case-floor:
 plat25-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-25
 
+# PLAT-26's COUNTED TARGET, gated by the SAME script.
+#
+# The law-table oracle is PARAMETERISED rather than copied: PLAT-26 needs the
+# same §7.1 two-way count over §3.2's `LAW-S*` table — six ids published, six
+# ids run, both directions, cardinality asserted, and a killer cell that is
+# empty or an em dash fails. A second script would have been a second parser
+# and a second place for the grammar to drift.
+plat26-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-26
+
 # Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
 #
 # Each target builds + drives the `ct-bench` CLI from

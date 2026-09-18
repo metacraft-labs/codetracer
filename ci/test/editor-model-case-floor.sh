@@ -5,6 +5,7 @@
 #
 #   bash ci/test/editor-model-case-floor.sh PLAT-24
 #   bash ci/test/editor-model-case-floor.sh PLAT-25
+#   bash ci/test/editor-model-case-floor.sh PLAT-26
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -52,12 +53,19 @@
 #    same unit §1.1 measured CodeMirror's 633 in. It is deliberately NOT the
 #    assertion count: a file of empty cases scores `OK (n tests)`, and that is
 #    what the OTHER number is for.
-#  * FOR PLAT-25 IT ALSO RUNS THE LAW-TABLE ORACLE (§7.1). The ten `LAW-A*`
-#    ids and their killers are published in §3.1 of the conformance suite; the
-#    suite file carries a transcription. The two are compared here, in BOTH
-#    directions, with the cardinality asserted — because two set differences
-#    are both satisfied by two empty sets — and a killer cell that is empty or
-#    an em dash fails, because "an arm with no stated killer is not admitted".
+#  * FOR PLAT-25 AND PLAT-26 IT ALSO RUNS THE LAW-TABLE ORACLE (§7.1). The ten
+#    `LAW-A*` ids are published in §3.1 of the conformance suite and the six
+#    `LAW-S*` ids in §3.2; each suite file carries a transcription. The two are
+#    compared here, in BOTH directions, with the cardinality asserted — because
+#    two set differences are both satisfied by two empty sets — and a killer
+#    cell that is empty or an em dash fails, because "an arm with no stated
+#    killer is not admitted".
+#
+#    THE ORACLE IS PARAMETERISED RATHER THAN COPIED. PLAT-26 needed the same
+#    two-way count over a different table, a different id prefix and a
+#    different cardinality; a second block would have been a second parser and
+#    a second place for the grammar to drift, which is the file-copy form of
+#    Verification-Harness-Traps §30. Four variables carry the difference.
 
 set -euo pipefail
 
@@ -85,11 +93,25 @@ PLAT-25)
 		src/frontend/viewmodel/tests/unit/test_editor_change_examples.nim
 	)
 	LAW_SUITE=src/frontend/viewmodel/tests/unit/test_editor_change_algebra.nim
+	LAW_PREFIX="LAW-A"
+	LAW_SECTION="3.1"
+	LAW_COUNT=10
+	;;
+PLAT-26)
+	MILESTONE="** PLAT-26: Selections as the primitive"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_selection_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_selection_examples.nim
+	)
+	LAW_SUITE=src/frontend/viewmodel/tests/unit/test_editor_selection_laws.nim
+	LAW_PREFIX="LAW-S"
+	LAW_SECTION="3.2"
+	LAW_COUNT=6
 	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24, PLAT-25. A milestone gates its own floor;"
-	echo "      adding one here is a deliberate edit, which is the point."
+	echo "      Known: PLAT-24, PLAT-25, PLAT-26. A milestone gates its own"
+	echo "      floor; adding one here is a deliberate edit, which is the point."
 	exit 1
 	;;
 esac
@@ -134,17 +156,17 @@ echo "FLOOR, read from ${SPEC_REL}: ${floor} cases"
 if [ -n "${LAW_SUITE}" ]; then
 	if [ ! -f "${LAWS_REL}" ]; then
 		echo "FAIL: the conformance suite spec is not here: ${LAWS_REL}"
-		echo "      §3.1's law table is an ORACLE and is read at run time."
+		echo "      §${LAW_SECTION}'s law table is an ORACLE and is read at run time."
 		exit 1
 	fi
-	# §3.1's table rows: `| \`LAW-A1\` | statement | population | killer |`
-	law_section="$(awk '
-		/^### 3\.1 / { inside = 1; next }
+	# The table rows: `| \`LAW-X1\` | statement | [population |] killer |`
+	law_section="$(awk -v sect="### ${LAW_SECTION} " '
+		index($0, sect) == 1 { inside = 1; next }
 		inside && /^### / { exit }
 		inside { print }
 	' "${LAWS_REL}")"
 	if [ -z "${law_section}" ]; then
-		echo "FAIL: §3.1 was not found in ${LAWS_REL}."
+		echo "FAIL: §${LAW_SECTION} was not found in ${LAWS_REL}."
 		echo "      A parser that matched nothing satisfies every check written"
 		echo "      over what it read (§4)."
 		exit 1
@@ -167,15 +189,15 @@ if [ -n "${LAW_SUITE}" ]; then
 			[ "${#killer}" -lt 15 ]; then
 			missing_killers+=("${id}: '${killer}'")
 		fi
-	done < <(grep -E "^\\| *${bt}LAW-A[0-9]+${bt} *\\|" <<<"${law_section}" || true)
+	done < <(grep -E "^\\| *${bt}${LAW_PREFIX}[0-9]+${bt} *\\|" <<<"${law_section}" || true)
 
-	echo "LAW TABLE, read from ${LAWS_REL} §3.1: ${#spec_ids[@]} rows"
-	if [ "${#spec_ids[@]}" -ne 10 ]; then
-		echo "FAIL: §3.1 published ${#spec_ids[@]} LAW-A rows, expected 10."
+	echo "LAW TABLE, read from ${LAWS_REL} §${LAW_SECTION}: ${#spec_ids[@]} rows"
+	if [ "${#spec_ids[@]}" -ne "${LAW_COUNT}" ]; then
+		echo "FAIL: §${LAW_SECTION} published ${#spec_ids[@]} ${LAW_PREFIX} rows, expected ${LAW_COUNT}."
 		exit 1
 	fi
 	if [ "${#missing_killers[@]}" -ne 0 ]; then
-		echo "FAIL: ${#missing_killers[@]} law(s) in §3.1 carry no killing mutation:"
+		echo "FAIL: ${#missing_killers[@]} law(s) in §${LAW_SECTION} carry no killing mutation:"
 		printf '      %s\n' "${missing_killers[@]}"
 		echo "      §3: 'an arm with no stated killer is not admitted'."
 		exit 1
@@ -183,10 +205,10 @@ if [ -n "${LAW_SUITE}" ]; then
 
 	# The implementation's side, read out of the suite's own declaration.
 	mapfile -t impl_ids < <(sed -n '/^const LawName/,/\]/p' "${LAW_SUITE}" |
-		grep -oE 'LAW-A[0-9]+' || true)
+		grep -oE "${LAW_PREFIX}[0-9]+" || true)
 	echo "LAW TABLE, read from ${LAW_SUITE}: ${#impl_ids[@]} ids"
-	if [ "${#impl_ids[@]}" -ne 10 ]; then
-		echo "FAIL: the suite declares ${#impl_ids[@]} LAW-A ids, expected 10."
+	if [ "${#impl_ids[@]}" -ne "${LAW_COUNT}" ]; then
+		echo "FAIL: the suite declares ${#impl_ids[@]} ${LAW_PREFIX} ids, expected ${LAW_COUNT}."
 		exit 1
 	fi
 	# Both directions, separately, and then the cardinality — the last line is
@@ -197,19 +219,19 @@ if [ -n "${LAW_SUITE}" ]; then
 	only_spec="$(comm -23 <(echo "${spec_sorted}") <(echo "${impl_sorted}"))"
 	only_impl="$(comm -13 <(echo "${spec_sorted}") <(echo "${impl_sorted}"))"
 	if [ -n "${only_spec}" ]; then
-		echo "FAIL: published in §3.1 and not run by the suite: ${only_spec}"
+		echo "FAIL: published in §${LAW_SECTION} and not run by the suite: ${only_spec}"
 		exit 1
 	fi
 	if [ -n "${only_impl}" ]; then
-		echo "FAIL: run by the suite and not published in §3.1: ${only_impl}"
+		echo "FAIL: run by the suite and not published in §${LAW_SECTION}: ${only_impl}"
 		exit 1
 	fi
-	if [ "$(wc -l <<<"${spec_sorted}")" -ne 10 ] ||
-		[ "$(wc -l <<<"${impl_sorted}")" -ne 10 ]; then
-		echo "FAIL: the two law sets agree but are not 10 distinct ids."
+	if [ "$(wc -l <<<"${spec_sorted}")" -ne "${LAW_COUNT}" ] ||
+		[ "$(wc -l <<<"${impl_sorted}")" -ne "${LAW_COUNT}" ]; then
+		echo "FAIL: the two law sets agree but are not ${LAW_COUNT} distinct ids."
 		exit 1
 	fi
-	echo "OK: ten laws published, ten laws run, both directions, no duplicates."
+	echo "OK: ${LAW_COUNT} laws published, ${LAW_COUNT} laws run, both directions, no duplicates."
 fi
 
 total=0

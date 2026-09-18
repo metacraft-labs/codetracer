@@ -4763,3 +4763,86 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   compiled test binary carries a verbatim copy — locate the file's first bytes
   in the binary and grow the slice until its SHA-256 matches the recorded
   control digest. That is how `change_set.nim` was recovered on 2026-09-18.
+
+- THE LINE INDEX AND THE GRAPHEME SEGMENTER DISAGREE ON A CRLF LINE.
+  `viewmodel/editor/text_store.nim` is `\n`-delimited (`lineCount` is
+  `newlineCount + 1`, `lineLen` excludes only the terminating `\n`), so the END
+  of a line ending `\r\n` is the offset BETWEEN the CR and the LF — and UAX #29
+  GB3 keeps CR LF together as ONE grapheme cluster, so that offset is INSIDE a
+  cluster. Any "go to end of line" or "land at column C of line L" built on the
+  store must clamp to the last cluster boundary at or below the answer;
+  `selection_ops.boundaryAtOrBefore` is that clamp. Found by a sweep over the
+  corpus (`c6-terminators-short`), not by a law — no property in
+  `Editor-Model-Conformance-Suite.md` §3.2 asks this question.
+
+- `offsetAtColumn(line, columnAt(line, b))` is NOT `b` for every cluster
+  boundary `b`, and it never will be: a combining mark is zero cells wide, so
+  the boundary before it and the boundary after it are the SAME column and a
+  column cannot name both. Measured over the 18-document corpus: 158,575 of
+  165,244 boundaries round-trip in offset space; 6,270 are displaced forward by
+  a zero-width cluster and 399 backward by class 7's ill-formed tails (where the
+  segmenter stops short of the line end and `clusterBoundariesOf` appends it).
+  State the round trip in COLUMN space — the offset a column resolves to is AT
+  that column — which is exact and is what a goal column actually needs.
+
+- A PUBLISHED KILLING MUTATION CAN BE UNOBSERVABLE UNDER THE INVARIANT THE CODE
+  CHOSE. `LAW-S1`'s killer is "drop the merge step for touching ranges"; under
+  CodeMirror's rule (merge a touching range only when it is empty) the mutated
+  output is still ordered, still non-overlapping, still non-empty — so the arm
+  SURVIVES and reads as "harmless". `viewmodel/editor/selection.nim` therefore
+  merges on touch as well as on overlap and the invariant is strict separation.
+  Read every published killer against the implementation before trusting the
+  law: the question is "which assertion goes red", and if the answer is "none",
+  repair the ASSERTION or the DESIGN, never the killer.
+  (Verification-Harness-Traps §36.)
+
+- A MUTATION HARNESS IS NOT SAFE UNDER A SHARED CHECKOUT — AND "ANOTHER SESSION
+  IS WRITING" IS EASY TO CONCLUDE WRONGLY. Every `run-plat*-mutations.py` writes
+  a MUTATED file to disk and restores it from memory afterwards, so a concurrent
+  writer can be clobbered by the restore and a concurrent reader can compile a
+  mutated subject. Verify the control digests BEFORE and AFTER (`sha256sum -c`),
+  twice and separated in time — a single clean reading of a tree under
+  concurrent mutation is indistinguishable from a clean tree.
+  **But attribute transient files before raising an alarm.** On 2026-09-18
+  during PLAT-26 the implementation agent saw `src/frontend/viewmodel/
+  zz_*_probe.nim` files appear and vanish within seconds and reported a foreign
+  session; they were the VERIFICATION agent's throwaway probes, created and
+  `rm`'d inside a single `bash -c`, and the one transient digest disagreement
+  was that same agent applying an arm by hand and restoring it. Two agents
+  working the same milestone look exactly like an intruder. Check with the
+  other agent before concluding the tree is contended.
+  Probes were deliberately placed OUTSIDE `viewmodel/editor/` so the
+  compile-time `walkDir` enumeration the source scans assert over was never
+  perturbed — do the same.
+
+- `pgrep -f <name>` MATCHES YOUR OWN WAIT LOOP. `until ! pgrep -f
+  run-plat26-selection; do sleep 30; done` never exits, because the shell
+  running it has that string in its own command line — so the wait reports
+  "still running" forever and any monitor armed on it times out instead of
+  firing. Match on the interpreter plus the script (`pgrep -f "python3.*
+  run-plat26"`), or exclude your own pid.
+
+- "PRIVATE FIELDS + ONE NORMALISING CONSTRUCTOR" IS NOT UNREPRESENTABILITY IN
+  NIM. `viewmodel/editor/selection.nim`'s `EditorSelection` has two private
+  fields and only `editorSelection()` builds one, which does stop a caller
+  ASSEMBLING a bad range sequence. It does not stop the type's ZERO VALUE:
+  `var s: EditorSelection`, `default(EditorSelection)` and `reset(s)` each give
+  an empty range sequence, and `isNormalised` returns false for it. That is the
+  one un-normalised inhabitant. `{.requiresInit.}` closes `var s:` only —
+  `default` and `reset` still compile — so it buys a third of the claim.
+  If you write "unrepresentable" about a value object, test those three first;
+  the honest claim is "normalisation cannot be skipped when building one".
+
+- MERGING TOUCHING SELECTION RANGES IS NOT FREE, THOUGH IT WAS FIRST RECORDED
+  AS FREE. `selection.nim` merges ranges that touch (see the §36 entry above).
+  The stated cost was "identical rendering, identical document under every
+  operation". The second half is FALSE: every motion and `delete` agree, but an
+  INSERT does not — over `"abcdefghij"`, inserting `"X"` across `[0,3)` and
+  `[3,6)` as two ranges gives `"XXghij"`, across the merged `[0,6)` it gives
+  `"Xghij"`. One insertion instead of two, which is what multi-cursor is for.
+  It is reachable from the twelve primitives, not just from a constructor: from
+  `[0,2)` and `[4,6)`, two `extend-right` steps give `[0,4)` and `[4,8)`, which
+  abut and merge — so extending two selections into contact silently drops a
+  cursor. PLAT-30 is to revisit it. Generally: "moving the design costs
+  nothing" is a claim that needs the operations enumerated and checked, because
+  the one that differs will be the one the feature exists for.

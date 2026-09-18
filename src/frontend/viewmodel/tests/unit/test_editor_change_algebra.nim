@@ -117,9 +117,14 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 858
+const ExpectedAssertions = 870
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
+  ##
+  ## It moved from 858 to 870 when PLAT-26 added `selection.nim` and
+  ## `selection_ops.nim` to `viewmodel/editor/`: the compile-time directory
+  ## enumeration below put them in the scan's subject set, which is §35's
+  ## mechanism doing exactly what it was added for.
 
 # ---------------------------------------------------------------------------
 # THE SEED. Printed, so a failure is reproducible without re-running anything.
@@ -757,11 +762,21 @@ const
   RopeSource = staticRead("../../editor/rope.nim")
   TextStoreSource = staticRead("../../editor/text_store.nim")
   SeqLineStoreSource = staticRead("../../editor/seq_line_store.nim")
+  SelectionSource = staticRead("../../editor/selection.nim")
+  SelectionOpsSource = staticRead("../../editor/selection_ops.nim")
 
-  ScannedModules = ["change_set.nim", "rope.nim", "seq_line_store.nim",
+  ScannedModules = ["change_set.nim", "rope.nim", "selection.nim",
+                    "selection_ops.nim", "seq_line_store.nim",
                     "text_store.nim", "transaction.nim"]
-    ## The five names above, as data. It moves in the same edit as the
+    ## The seven names above, as data. It moves in the same edit as the
     ## `staticRead` list and the case below is what refuses the two to drift.
+    ##
+    ## **It grew by two when PLAT-26 landed, and that is the enumeration
+    ## working.** §35 is the trap that a hardcoded subject list cannot see a
+    ## new file in the directory it claims to cover; `EditorModules` below
+    ## enumerates the directory at compile time, so `selection.nim` and
+    ## `selection_ops.nim` failed this case BY NAME on the first build of
+    ## PLAT-26 rather than being quietly unscanned.
 
   EditorModules = block:
     ## Every `.nim` file actually in `viewmodel/editor/`, sorted, read out of
@@ -828,8 +843,10 @@ suite "PLAT-25 — one function, one name":
     let others = {"transaction.nim": TransactionSource,
                   "rope.nim": RopeSource,
                   "text_store.nim": TextStoreSource,
-                  "seq_line_store.nim": SeqLineStoreSource}.toTable
-    counted others.len == 4
+                  "seq_line_store.nim": SeqLineStoreSource,
+                  "selection.nim": SelectionSource,
+                  "selection_ops.nim": SelectionOpsSource}.toTable
+    counted others.len == 6
     counted others.len + 1 == ScannedModules.len
     for name, src in others:
       checkpoint(name)
@@ -842,13 +859,24 @@ suite "PLAT-25 — one function, one name":
   test "the call sites that DO exist all call the primitive by name":
     counted codeOnly(TransactionSource).contains("rebase(a.changes, b.changes)")
     counted codeOnly(ChangeSetSource).contains("rebase(total, part).bOverA")
-    # Two in-tree call sites today: `mergeTransactions` (the reference's
-    # `mergeTransaction`) and `changeSetOrdered` (the reference's
-    # `ChangeSet.of`). The other four reference sites are PLAT-26, PLAT-32 and
-    # PLAT-33 features that do not exist yet, and the milestone's status says
-    # so rather than this comment claiming they are covered.
+    # THREE in-tree call sites now: `mergeTransactions` (the reference's
+    # `mergeTransaction`), `changeSetOrdered` (the reference's `ChangeSet.of`)
+    # and — since PLAT-26 — `changeByRange` (the reference's `state.ts:161`,
+    # the second of its five hand-written double mappings). The remaining
+    # three reference sites are `mapEvent` (PLAT-32), `receiveUpdates` and
+    # `rebaseUpdates` (PLAT-33), features that do not exist yet, and the
+    # milestone's status says so rather than this comment claiming they are
+    # covered.
+    counted codeOnly(SelectionOpsSource).contains("rebase(changes, newChanges)")
     counted codeOnly(TransactionSource).count("rebase(") == 1
     counted codeOnly(ChangeSetSource).count("rebase(") == 1
+    counted codeOnly(SelectionOpsSource).count("rebase(") == 1
+    # AND THE NEW MODULES CANNOT SPELL THE FLAG EITHER. `changeByRange` is the
+    # site PLAT-25 named as the risk — *"what keeps them from hand-writing
+    # their own copy when they arrive"* — so the check that it did not is here
+    # rather than in PLAT-26's own suite, beside the four it was written for.
+    counted not codeOnly(SelectionOpsSource).contains("before = true")
+    counted not codeOnly(SelectionOpsSource).contains("before: bool")
 
 # ===========================================================================
 # FUZZ-1 — the document is never corrupt, checked after EVERY step

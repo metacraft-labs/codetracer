@@ -574,12 +574,12 @@ suite "PLAT-25 — transactions, and the first of the five call sites":
 
   test "mergeTransactions(sequential) composes, and the second selection wins":
     let a = transaction(changeSet(10, 2, 2, "ab"),
-                        some(TransactionSelection(anchor: 3, head: 3)))
+                        some(caretSelection(3)))
     let b = transaction(changeSet(12, 6, 6, "cd"),
-                        some(TransactionSelection(anchor: 9, head: 9)))
+                        some(caretSelection(9)))
     let m = mergeTransactions(a, b, sequential = true)
     counted m.changes.apply("0123456789") == "01ab23cd456789"
-    counted m.selection.get.head == 9
+    counted m.selection.get.mainRange.head == 9
 
   test "mergeTransactions(concurrent) goes through the ONE primitive":
     # Both change sets are expressed against the SAME document, so they have
@@ -589,16 +589,16 @@ suite "PLAT-25 — transactions, and the first of the five call sites":
     # its own double mapping, this is where the two would part.
     let doc = "0123456789"
     let a = transaction(changeSet(10, 2, 2, "ab"),
-                        some(TransactionSelection(anchor: 2, head: 2)))
+                        some(caretSelection(2)))
     let b = transaction(changeSet(10, 6, 8, "Z"),
-                        some(TransactionSelection(anchor: 7, head: 7)))
+                        some(caretSelection(7)))
     let m = mergeTransactions(a, b, sequential = false)
     let r = rebase(a.changes, b.changes)
     counted m.changes == compose(a.changes, r.bOverA)
     counted m.changes.apply(doc) == compose(b.changes, r.aOverB).apply(doc)
     counted m.changes.apply(doc) == "01ab2345Z89"
     # `b`'s selection is mapped through `aOverB`, `a`'s through `bOverA`.
-    counted m.selection.get.head == 9
+    counted m.selection.get.mainRange.head == 9
 
   test "a concurrent merge carries both annotations and both effect lists":
     let a = transaction(changeSet(10, 2, 2, "ab"), effects = @[

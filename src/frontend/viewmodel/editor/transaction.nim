@@ -35,22 +35,29 @@
 ## call sites.
 ##
 ## =========================================================================
-## THE SELECTION HERE IS A PLACEHOLDER AND SAYS SO
+## THE SELECTION IS §7's, AND THE PLACEHOLDER IS GONE — PLAT-26
 ## =========================================================================
 ##
-## §7 makes the selection the primitive — an ordered, non-overlapping,
-## non-empty sequence of ranges with a primary index — and that is PLAT-26's
-## deliverable, not this one. A transaction needs *an optional selection*
-## today, so `TransactionSelection` is one anchor and one head and nothing
-## else. When PLAT-26 lands, this type is replaced by `EditorSelection` and
-## `mapSelection` becomes a call into it. Recorded here rather than left to be
-## discovered, because a one-range selection type that nobody labelled as
-## provisional is exactly how "multi-cursor is the absence of a special case"
-## turns into a special case.
+## Until PLAT-26 this file carried a `TransactionSelection` of one anchor and
+## one head, labelled PROVISIONAL in this header, because §7's selection did
+## not exist yet. It exists now: `editor/selection.nim`'s `EditorSelection` —
+## an ordered, strictly separated, non-empty sequence of ranges with a primary
+## index — and a transaction carries one of those or none.
+##
+## **The placeholder was replaced rather than kept beside the real type.** A
+## one-range selection type that survives the milestone that was supposed to
+## remove it is exactly how "multi-cursor is the absence of a special case"
+## turns into a special case: every caller that kept using it would be a
+## caller with a single-range assumption compiled in. `mapSelection` below is
+## one line and delegates to `selection.mapSelection`, so the biasing rule
+## (`LAW-S4`) is stated once, in the module that owns it.
 
 import std/options
 
 import ./change_set
+import ./selection
+
+export selection
 
 type
   UserEvent* = enum
@@ -106,16 +113,11 @@ type
     of efMoveCaretTo:
       caret*: int
 
-  TransactionSelection* = object
-    ## PROVISIONAL — see the header. PLAT-26 replaces this with §7's
-    ## `EditorSelection`.
-    anchor*, head*: int
-
   Transaction* = object
     ## §6: a change set, an optional selection, typed effects, typed
     ## annotations.
     changes*: ChangeSet
-    selection*: Option[TransactionSelection]
+    selection*: Option[EditorSelection]
     effects*: seq[Effect]
     annotations*: seq[Annotation]
 
@@ -173,12 +175,8 @@ proc mapEffects*(effects: seq[Effect]; cs: ChangeSet): seq[Effect] =
   result = newSeqOfCap[Effect](effects.len)
   for e in effects: result.add mapEffect(e, cs)
 
-proc mapSelection*(s: TransactionSelection; cs: ChangeSet): TransactionSelection =
-  TransactionSelection(anchor: cs.mapPosOr(s.anchor, sideBefore),
-                       head: cs.mapPosOr(s.head, sideBefore))
-
 proc transaction*(changes: ChangeSet;
-                  selection = none(TransactionSelection);
+                  selection = none(EditorSelection);
                   effects: seq[Effect] = @[];
                   annotations: seq[Annotation] = @[]): Transaction =
   Transaction(changes: changes, selection: selection, effects: effects,
@@ -220,7 +218,7 @@ proc mergeTransactions*(a, b: Transaction; sequential: bool): Transaction =
     mapForA = r.bOverA
     mapForB = r.aOverB
     changes = compose(a.changes, mapForA)
-  var selection = none(TransactionSelection)
+  var selection = none(EditorSelection)
   if b.selection.isSome:
     selection = some(mapSelection(b.selection.get, mapForB))
   elif a.selection.isSome:
