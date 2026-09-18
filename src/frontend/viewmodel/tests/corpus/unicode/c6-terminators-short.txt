@@ -1,0 +1,6 @@
+lf line one
+crlf line two
+lone cr: AB
+mixed: XY
+tab	and	tabs
+no final newline

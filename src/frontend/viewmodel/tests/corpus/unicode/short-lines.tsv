@@ -1,0 +1,106 @@
+# PLAT-24 corpus — the HAND AUDIT of the nine short documents.
+#
+# Editor-Model-Conformance-Suite.md §5.1: a short document carries
+# `each line's expected cluster count and display width recorded
+# beside it in the corpus manifest`. These three numbers per line
+# are the AUTHOR's, worked out from the line's composition. They
+# are not read back out of the segmenter, because a manifest
+# produced by the thing it grades is a self-comparison (§30).
+#
+# The one class with no audit column is class 7: what Nim's
+# `fastRuneAt` yields for a byte that is not text is an
+# implementation's answer and not a fact about Unicode, so it is
+# recorded as MEASURED, by name, rather than audited — and the
+# BYTE length of each of its lines is audited instead.
+#
+# id	line	clusters	widthNarrow	widthWide
+c1-zwj-short	0	9	10	10
+c1-zwj-short	1	9	10	10
+c1-zwj-short	2	9	10	10
+c1-zwj-short	3	9	10	10
+c1-zwj-short	4	9	10	10
+c1-zwj-short	5	9	10	10
+c1-zwj-short	6	9	10	10
+c1-zwj-short	7	9	10	10
+c1-zwj-short	8	9	10	10
+c1-zwj-short	9	13	13	13
+c1-zwj-short	10	12	12	12
+c1-zwj-short	11	12	11	11
+c2-combining-short	0	8	8	8
+c2-combining-short	1	9	9	9
+c2-combining-short	2	9	9	9
+c2-combining-short	3	10	10	10
+c2-combining-short	4	12	12	12
+c2-combining-short	5	11	11	11
+c2-combining-short	6	12	12	12
+c2-combining-short	7	1	0	0
+c2-combining-short	8	9	9	9
+c2-combining-short	9	10	10	10
+c3-regional-short	0	5	6	6
+c3-regional-short	1	5	6	6
+c3-regional-short	2	13	16	16
+c3-regional-short	3	13	15	15
+c3-regional-short	4	7	8	8
+c3-regional-short	5	8	11	11
+c3-regional-short	6	10	14	14
+c3-regional-short	7	17	18	18
+c3-regional-short	8	1	2	2
+c4-ambiguous-short	0	5	5	6
+c4-ambiguous-short	1	9	9	13
+c4-ambiguous-short	2	10	10	13
+c4-ambiguous-short	3	11	11	17
+c4-ambiguous-short	4	12	12	14
+c4-ambiguous-short	5	11	11	14
+c4-ambiguous-short	6	12	12	16
+c4-ambiguous-short	7	7	7	8
+c4-ambiguous-short	8	9	9	10
+c4-ambiguous-short	9	10	10	12
+c5-cjk-short	0	7	9	9
+c5-cjk-short	1	10	14	14
+c5-cjk-short	2	10	14	14
+c5-cjk-short	3	10	12	12
+c5-cjk-short	4	7	8	8
+c5-cjk-short	5	7	10	10
+c5-cjk-short	6	14	17	17
+c5-cjk-short	7	11	15	15
+c5-cjk-short	8	12	13	13
+c6-terminators-short	0	11	11	11
+c6-terminators-short	1	14	13	13
+c6-terminators-short	2	12	11	11
+c6-terminators-short	3	11	9	9
+c6-terminators-short	4	12	10	10
+c6-terminators-short	5	16	16	16
+c7-illformed-short	0	MEASURED	MEASURED	MEASURED	21
+c7-illformed-short	1	MEASURED	MEASURED	MEASURED	20
+c7-illformed-short	2	MEASURED	MEASURED	MEASURED	21
+c7-illformed-short	3	MEASURED	MEASURED	MEASURED	16
+c7-illformed-short	4	MEASURED	MEASURED	MEASURED	17
+c7-illformed-short	5	MEASURED	MEASURED	MEASURED	25
+c7-illformed-short	6	MEASURED	MEASURED	MEASURED	24
+c7-illformed-short	7	MEASURED	MEASURED	MEASURED	19
+c7-illformed-short	8	MEASURED	MEASURED	MEASURED	17
+c7-illformed-short	9	MEASURED	MEASURED	MEASURED	25
+c7-illformed-short	10	MEASURED	MEASURED	MEASURED	24
+c7-illformed-short	11	MEASURED	MEASURED	MEASURED	32
+c8-tabs-short	0	14	13	13
+c8-tabs-short	1	16	14	14
+c8-tabs-short	2	5	3	3
+c8-tabs-short	3	10	9	9
+c8-tabs-short	4	9	8	8
+c8-tabs-short	5	4	0	0
+c8-tabs-short	6	15	15	15
+c8-tabs-short	7	13	12	12
+c8-tabs-short	8	71	70	70
+c8-tabs-short	9	5	4	4
+c8-tabs-short	10	48	47	47
+c8-tabs-short	11	19	18	18
+c9-ascii-control-short	0	16	16	16
+c9-ascii-control-short	1	17	15	15
+c9-ascii-control-short	2	9	7	7
+c9-ascii-control-short	3	18	16	16
+c9-ascii-control-short	4	5	4	4
+c9-ascii-control-short	5	11	10	10
+c9-ascii-control-short	6	14	8	8
+c9-ascii-control-short	7	16	15	15
+c9-ascii-control-short	8	43	43	43
+c9-ascii-control-short	9	16	16	16

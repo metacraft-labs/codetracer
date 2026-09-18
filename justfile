@@ -4835,6 +4835,10 @@ bench *args: build-tui-benchmarks
 #
 #   just bench-text-store                       # 1K, 40K, 200K, two takes
 #   just bench-text-store --sizes=1000 --takes=1 --rounds=5      # quick
+#   just bench-text-store --grapheme-only --sizes=200000         # §4.5 alone,
+#       retaken against the eighteen-document Unicode corpus, with the ASCII arm
+#       and the cluster-dense arm sampled by ONE function and measured in the
+#       SAME round. See Editor-ViewModel.md §4.5a.
 bench-text-store *args:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -4844,6 +4848,21 @@ bench-text-store *args:
     -o:build/bin/text-store-bench \
     src/frontend/viewmodel/benchmarks/text_store_bench.nim
   ./build/bin/text-store-bench {{args}} 2>&1 | tee test-logs/plat24/bench.log
+
+# PLAT-24's COUNTED TARGET, gated.
+#
+# Editor-Model-Conformance-Suite.md §10.1 puts two numbers in two units in two
+# homes: the assertion count lives in each suite as `const ExpectedAssertions`
+# and is asserted by the suite against its own runtime tally, and the CASE FLOOR
+# lives in the milestone on a `FLOOR: <n> cases` line. This gate is the second
+# half — it reads that line out of the sibling `codetracer-specs` checkout at run
+# time (never transcribed), fails BY NAME when the checkout is absent rather than
+# skipping, and requires every named suite to contribute at least one `[OK]`.
+#
+# It gates PLAT-24 and nothing else, deliberately: a generic lane mechanism would
+# change every lane's pass condition at once, and §10.1 assigns that elsewhere.
+plat24-case-floor:
+  bash ci/test/plat24-case-floor.sh
 
 # Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
 #

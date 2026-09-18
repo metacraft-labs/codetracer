@@ -78,10 +78,30 @@ STORE = "src/frontend/viewmodel/editor/text_store.nim"
 SEQ = "src/frontend/viewmodel/editor/seq_line_store.nim"
 SUITE = "src/frontend/viewmodel/tests/unit/test_editor_text_store.nim"
 
-TOUCHED = [ROPE, STORE, SEQ, SUITE]
+# PLAT-24 deliverable 6 — the Unicode corpus, its loader, its manifest and the
+# suite that asserts it. A corpus is a subject like any other: its bytes decide
+# what every law downstream is quantified over, so a corpus that drifts has to
+# redden something, and an arm is how that is shown rather than claimed.
+CORPUS_LOADER = "src/frontend/viewmodel/tests/corpus/unicode_corpus.nim"
+CORPUS_SUITE = "src/frontend/viewmodel/tests/unit/test_editor_unicode_corpus.nim"
+CORPUS_DIR = "src/frontend/viewmodel/tests/corpus/unicode"
+CORPUS_TERMINATORS = CORPUS_DIR + "/c6-terminators-short.txt"
+CORPUS_AUDIT = CORPUS_DIR + "/short-lines.tsv"
+
+TOUCHED = [ROPE, STORE, SEQ, SUITE, CORPUS_LOADER, CORPUS_SUITE,
+           CORPUS_TERMINATORS, CORPUS_AUDIT]
 
 CONTROL_HASHES = HERE / "plat24-text-store-mutation-control.sha256"
 BINARY = os.environ.get("CT_P24_BIN", "/tmp/plat24-mutation-suite")
+CORPUS_BINARY = os.environ.get("CT_P24_CORPUS_BIN",
+                               "/tmp/plat24-mutation-corpus-suite")
+
+# BOTH SUITES RUN FOR EVERY ARM, and that is deliberate rather than thorough.
+# The corpus loader is imported by both, so an arm on `measure` or on `fnv1a`
+# can redden either; running only the suite an arm "belongs to" would be the
+# harness deciding in advance which case is allowed to notice, which is the
+# MISDIRECTED verdict's whole point made unavailable.
+SUITES = [(SUITE, BINARY), (CORPUS_SUITE, CORPUS_BINARY)]
 
 # The case names, spelled ONCE. A typo here surfaces as "the control did not
 # run this case" rather than as a silently unkillable arm.
@@ -111,12 +131,33 @@ C_PRIMITIVES = "the PRIMITIVES section exports exactly the seven named operation
 C_DERIVED = "the DERIVED section adds no capability the seven do not have"
 C_INTERCHANGE = "the two stores are interchangeable behind the seven operations"
 
+# The new contract cases, over the Unicode corpus (`DIFF-3` on real clusters).
+C_CORPUS_BYTES = "rope: every corpus document survives storage byte for byte"
+C_CORPUS_BACKSPACE = "rope: a backspace over a corpus cluster deletes exactly one"
+C_CORPUS_DIVERGE = "the two stores disagree about an edit inside ill-formed bytes"
+
+# The corpus suite's own cases. Spelled ONCE here, as the store suite's are:
+# a typo surfaces as "the control did not run this case" rather than as a
+# silently unkillable arm.
+X_SETS = "the manifest and the documents name the same set, in both directions"
+X_AUDIT = "every short document's per-line hand audit holds"
+X_ORACLE = "Unicode's own break data agrees with the segmenter, document by document"
+X_LAWC5_POS = "LAW-C5 first half: the ambiguous class MOVES with the width policy"
+X_LAWC5_NEG = "LAW-C5 second half: the ASCII-control class does NOT move"
+X_TABS = "class 8: tabs expand to tab stops, at more than one tab size"
+X_MANIFEST_ZWJ = "c1-zwj-short — the manifest row matches the bytes"
+X_MANIFEST_TERM = "c6-terminators-short — the manifest row matches the bytes"
+X_MANIFEST_TERM_LONG = "c6-terminators-long — the manifest row matches the bytes"
+
 NAMED_CASES = [
     C_EMPTY, C_TRAILING, C_FIRSTLAST, C_CLAMP, C_CRLF, C_TABS, C_ZWJ,
     C_MULTIBYTE, C_SPAN, C_ROUNDTRIP, C_BIGINDEX,
     Q_FIRSTLAST, Q_TABS, Q_SPAN, Q_ROUNDTRIP,
     C_DIFF, C_INVARIANTS, C_BALANCED, C_UTF8, C_SAMEFILE,
     C_PRIMITIVES, C_DERIVED, C_INTERCHANGE,
+    C_CORPUS_BYTES, C_CORPUS_BACKSPACE, C_CORPUS_DIVERGE,
+    X_SETS, X_AUDIT, X_ORACLE, X_LAWC5_POS, X_LAWC5_NEG, X_TABS,
+    X_MANIFEST_ZWJ, X_MANIFEST_TERM, X_MANIFEST_TERM_LONG,
 ]
 
 
@@ -324,6 +365,134 @@ ARMS = [
         "that finds nothing satisfies every 'must be exactly these' written "
         "over it. The non-vacuity checks on the scan are what refuse it",
     ),
+
+    # ------------------------------------------- the Unicode corpus (del. 6) --
+    #
+    # The corpus is the input every law in PLAT-25 ... PLAT-28 is quantified
+    # over. Editor-Model-Conformance-Suite.md §5.2 says a corpus dies by being
+    # silently rewritten, and that the manifest's job is to redden the suite
+    # when it is. These arms are how that claim stopped being a claim.
+    Arm(
+        "C1", CORPUS_LOADER,
+        "  for line in ls:\n"
+        "    for _ in runes(line): inc result.runes\n",
+        "  for line in ls:\n"
+        "    inc result.clusters\n"
+        "    for _ in runes(line): inc result.runes\n",
+        X_MANIFEST_TERM_LONG,
+        "the measurement counts the LINE SEPARATORS as clusters. Every "
+        "document's cluster count grows by its line count, which is the "
+        "commonest way a per-line sum and a per-document sum are confused",
+    ),
+    Arm(
+        "C2", CORPUS_LOADER,
+        "    result = result * 0x100000001b3'u64\n",
+        "    result = result + 0x100000001b3'u64\n",
+        X_MANIFEST_ZWJ,
+        "the corpus fingerprint stops being FNV-1a. Every other manifest "
+        "column can agree about a document whose bytes were permuted; the "
+        "fingerprint is the column that cannot, so it has to be the one that "
+        "is armed",
+    ),
+    Arm(
+        "C3", CORPUS_LOADER,
+        "      result = ((result div tabSize) + 1) * tabSize\n",
+        "      result = result + tabSize\n",
+        X_TABS,
+        "a tab ADVANCES BY the tab size instead of advancing TO the next tab "
+        "stop. The two agree whenever the column is already on a stop, which "
+        "is every leading indent in a real file — so only a tab in the middle "
+        "of a line can tell them apart, and the corpus carries those",
+    ),
+    Arm(
+        "C4", CORPUS_LOADER,
+        "    if d.id.len > 2 and d.id[0] == 'c' and parseInt($d.id[1]) == cls:\n",
+        "    if d.id.len > 2 and d.id[0] == 'z' and parseInt($d.id[1]) == cls:\n",
+        X_LAWC5_NEG,
+        "THE CLASS FILTER MATCHES NOTHING. §4's canonical shape one more time: "
+        "every law written over `docsOfClass` becomes a law about the empty "
+        "set, and every one of them passes. The `docs == 2` floor in each "
+        "class case is what refuses it, and this arm is what has seen it hold",
+    ),
+    Arm(
+        "C5", CORPUS_LOADER,
+        "      result.widthWide += clusterDisplayWidth(c.text, awWide)\n",
+        "      result.widthWide += clusterDisplayWidth(c.text, awNarrow)\n",
+        X_LAWC5_POS,
+        "THE WIDTH POLICY IS IGNORED — `LAW-C5`'s own stated killer, applied. "
+        "It kills the FIRST half only; the ASCII-control class still answers "
+        "identically under both settings and its case stays green, which is "
+        "exactly why §5.1 puts a class in the corpus that must not move",
+    ),
+    Arm(
+        "C6", CORPUS_LOADER,
+        "    if raw.len == 0 or raw.startsWith(\"#\"): continue\n",
+        "    if raw.len == 0 or raw.startsWith(\"#\") or result.len >= 5: continue\n",
+        X_SETS,
+        "THE MANIFEST PARSER STOPS PART-WAY. §7.3: a parser that silently "
+        "stopped at the first odd row satisfies every 'every row has a "
+        "document' written over what it did read. The row count and the "
+        "two-way set comparison are what refuse it",
+    ),
+    Arm(
+        "C7", CORPUS_TERMINATORS,
+        "crlf line two\r\n",
+        "crlf line two\n",
+        X_MANIFEST_TERM,
+        "A CORPUS FILE IS SILENTLY REWRITTEN BY SOMETHING THAT NORMALISES "
+        "LINE ENDINGS — §5.2's named cause of death for a corpus, performed. "
+        "The document still looks like a document and every law over it still "
+        "runs; what changes is the answer. The manifest row is the only thing "
+        "in the tree that can notice",
+    ),
+    Arm(
+        "C8", CORPUS_AUDIT,
+        "c3-regional-short\t2\t13\t16\t16\n",
+        "c3-regional-short\t2\t12\t16\t16\n",
+        X_AUDIT,
+        "THE HAND AUDIT IS EDITED TO THE ANSWER A NAIVE PAIR-CHUNKER WOULD "
+        "GIVE: twelve clusters for `pair+odd:` plus two flags plus an odd "
+        "trailing indicator, i.e. the odd one swallowed into the pair before "
+        "it. If the audit could be quietly reconciled with the segmenter it "
+        "would not be an independent oracle, and this arm is what says it is "
+        "read rather than recited",
+    ),
+    Arm(
+        "C9", CORPUS_SUITE,
+        "      if a.clusters == \"MEASURED\":\n",
+        "      if true:\n",
+        X_AUDIT,
+        "EVERY AUDITED LINE BECOMES A `MEASURED` ONE, so the per-line audit "
+        "asserts nothing and every comparison inside it is vacuously "
+        "satisfied. The floor on the audited-line count is the only thing "
+        "under it (§4b: a partial sweep is worse than an empty one, because "
+        "`at least one ran` is satisfied by the easy shape)",
+    ),
+
+    # ------------------------------- the new contract sweeps' own floors -----
+    Arm(
+        "N1", SUITE,
+        "    for d in CorpusDocs:\n      inc docs\n      checkpoint(d.id)\n"
+        "      let s = makeStore(d.text)\n",
+        "    for d in CorpusDocs:\n      if docs >= 1: break\n      inc docs\n"
+        "      checkpoint(d.id)\n      let s = makeStore(d.text)\n",
+        C_CORPUS_BYTES,
+        "THE CORPUS SWEEP STOPS AFTER ONE DOCUMENT. Seventeen classes of real "
+        "cluster stop being stored at all and every comparison the case makes "
+        "still passes. `docs == 18` is the floor, and 18 is the corpus's "
+        "asserted cardinality rather than a number somebody liked (§10.4)",
+    ),
+    Arm(
+        "N2", SUITE,
+        "        if runeCount > 1: inc multiRuneDeletions\n",
+        "        if runeCount > 99: inc multiRuneDeletions\n",
+        C_CORPUS_BACKSPACE,
+        "THE MULTI-RUNE POPULATION STOPS BEING COUNTED. A one-rune cluster is "
+        "the shape a byte-addressed store gets right by accident, so a "
+        "backspace sweep that only ever met that shape has demonstrated "
+        "nothing — §4b, and the separate floor on the multi-rune count is "
+        "what refuses it",
+    ),
 ]
 
 DECLARED_SURVIVORS = [
@@ -366,9 +535,36 @@ def digest(path: str) -> str:
     return hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
 
 
-def run_suite() -> RunResult:
+# EVERY READ AND EVERY WRITE IS BYTES, AND THAT IS NOT STYLE.
+#
+# `Path.read_text()` opens in TEXT mode, which applies universal-newline
+# translation: a `\r\n` in the file becomes a `\n` in the string. Three of
+# this harness's subjects are corpus documents, one of them is ABOUT CR and LF,
+# and `path.write_text(original)` would therefore have written a DIFFERENT file
+# back after every arm — silently normalising the very bytes class 6 exists to
+# pin, and doing it in the restore path where nothing would have looked at it.
+#
+# Found on 2026-09-18 by the needle scan, which reported C7's `\r\n` needle as
+# LOST in a file that plainly contains it. That is the scan doing exactly the
+# job §32 gives it: an arm whose needle cannot be found is reported before
+# anything is compiled, rather than reported as a HARNESS-FAILURE an hour in —
+# or, worse, never, because the restore had already removed the CR.
+def read_bytes_of(path: str) -> bytes:
+    return (ROOT / path).read_bytes()
+
+
+def read_source(path: str) -> str:
+    """Decode without touching line endings. Never `read_text()`."""
+    return read_bytes_of(path).decode("utf-8", errors="surrogateescape")
+
+
+def write_source(path: str, text: str) -> None:
+    (ROOT / path).write_bytes(text.encode("utf-8", errors="surrogateescape"))
+
+
+def run_one(path: str, binary: str, res: RunResult) -> None:
     proc = subprocess.run(
-        ["nim", "c", "-r", "--hints:off", "-o:" + BINARY, SUITE],
+        ["nim", "c", "-r", "--hints:off", "-o:" + binary, path],
         cwd=ROOT, capture_output=True, text=True, timeout=3600,
         # `errors="replace"`: a mutated store can emit raw bytes from a random
         # edit, and a UnicodeDecodeError in the READER would abort the harness
@@ -376,24 +572,88 @@ def run_suite() -> RunResult:
         encoding="utf-8", errors="replace",
     )
     out = proc.stdout + proc.stderr
-    res = RunResult(rc=proc.returncode)
+    if proc.returncode != 0:
+        res.rc = proc.returncode
+    before = res.total
     for line in out.splitlines():
         m = RESULT_LINE.match(line)
         if m:
             (res.passed if m.group(1) == "OK" else res.failed).append(m.group(2))
-    if res.total == 0:
+    if res.total == before:
+        # PER SUITE, not per run. A mutation that stops ONE of the two suites
+        # compiling while the other still prints 50 green cases would otherwise
+        # read as a clean survival — the exact shape the HARNESS-FAILURE
+        # verdict exists to keep distinct from a pass.
         res.ran = False
-        print("      ---- no result lines; last 20 lines of output ----")
+        print(f"      ---- {path}: no result lines; last 20 lines ----")
         for line in out.splitlines()[-20:]:
             print("      " + line)
+
+
+def run_suite() -> RunResult:
+    res = RunResult(rc=0)
+    for path, binary in SUITES:
+        run_one(path, binary, res)
     return res
+
+
+COUNT_CONSTANT = re.compile(
+    r"^\s*const\s+(ExpectedAssertions|ExpectedCases|ExpectedSpecRows|"
+    r"ExpectedOperations|ExpectedNames)\s*=\s*(\d+)", re.M)
+COUNT_NAMES = ("ExpectedAssertions", "ExpectedCases", "ExpectedSpecRows",
+               "ExpectedOperations", "ExpectedNames", "CHECKS:")
+
+
+def declared_counts() -> dict:
+    """{value: "file:Name"} for every declared count constant in the subjects.
+
+    Editor-Model-Conformance-Suite.md §10.3 applies
+    Verification-Harness-Traps.md §32 to the one class of needle that is
+    GUARANTEED to move: a count changes every time a test is added, which is the
+    most frequent edit a suite receives. An arm whose needle quotes one is an
+    arm that looks like coverage in the table and can never be applied.
+    """
+    found = {}
+    for path in TOUCHED:
+        try:
+            text = read_source(path)
+        except OSError:
+            continue
+        for m in COUNT_CONSTANT.finditer(text):
+            found[m.group(2)] = f"{path}:{m.group(1)}"
+    return found
 
 
 def needle_scan() -> int:
     """Every arm's needle occurs exactly once. No toolchain, about a second."""
     problems = 0
+
+    # §10.3, FIRST, because an arm that quotes a count is unkillable in a way
+    # the occurrence check cannot see: the needle is present today and gone on
+    # the next commit that adds a test.
+    counts = declared_counts()
+    print(f"declared count constants in the subjects: "
+          f"{', '.join(f'{v}={k}' for k, v in sorted(counts.items())) or 'none'}")
+    if not counts:
+        # A scan that found nothing satisfies every 'must not contain' written
+        # over it (§4). If no subject declares a count, this rule is asleep and
+        # says so rather than reporting a clean pass.
+        print("REFUSING: no declared count constant was found in any subject, "
+              "so §10.3's rule would pass vacuously")
+        problems += 1
     for arm in ARMS + DECLARED_SURVIVORS:
-        text = (ROOT / arm.path).read_text()
+        for name in COUNT_NAMES:
+            if name in arm.find or name in arm.replace:
+                print(f"{arm.id}: NEEDLE QUOTES A COUNT NAME ({name}) — §10.3")
+                problems += 1
+        for digits in re.findall(r"\d+", arm.find + arm.replace):
+            if digits in counts:
+                print(f"{arm.id}: NEEDLE QUOTES THE VALUE OF "
+                      f"{counts[digits]} ({digits}) — §10.3")
+                problems += 1
+
+    for arm in ARMS + DECLARED_SURVIVORS:
+        text = read_source(arm.path)
         n = text.count(arm.find)
         status = "ok" if n == 1 else "LOST" if n == 0 else "AMBIGUOUS"
         if n != 1:
@@ -408,7 +668,13 @@ def needle_scan() -> int:
     # scan that is wrong in the noisy direction. Check the two halves instead:
     # the store-name prefix must be one the suite actually instantiates, and
     # the remainder must appear literally.
-    suite_text = (ROOT / SUITE).read_text()
+    # The corpus suite's 18 manifest cases and 18 profile cases are composed the
+    # same way — `docId & " — the manifest row matches the bytes"` — from a
+    # template invoked with a LITERAL id, so both halves are in the source and
+    # both halves are checked.
+    suite_text = read_source(SUITE)
+    corpus_text = read_source(CORPUS_SUITE)
+    both = suite_text + "\n" + corpus_text
     instantiated = [m for m in ("rope", "seq[string]")
                     if f'storeContract(toTextStore, "{m}")' in suite_text
                     or f'storeContract(toSeqLineStore, "{m}")' in suite_text]
@@ -424,8 +690,16 @@ def needle_scan() -> int:
             elif f'": {rest}"' not in suite_text:
                 print(f"KILLER BODY NOT IN SUITE: {rest!r}")
                 problems += 1
-        elif name not in suite_text:
-            print(f"KILLER NAME NOT IN SUITE: {name!r}")
+        elif " — the manifest row matches the bytes" in name:
+            doc_id = name.split(" — ")[0]
+            if f'manifestCase("{doc_id}")' not in corpus_text:
+                print(f"KILLER DOCUMENT NOT INSTANTIATED: {doc_id!r}")
+                problems += 1
+            elif '" — the manifest row matches the bytes"' not in corpus_text:
+                print("KILLER BODY NOT IN THE CORPUS SUITE: the manifest row")
+                problems += 1
+        elif name not in both:
+            print(f"KILLER NAME NOT IN EITHER SUITE: {name!r}")
             problems += 1
     for arm in ARMS:
         if arm.killer not in NAMED_CASES:
@@ -502,19 +776,18 @@ def main() -> int:
     for arm in ARMS + DECLARED_SURVIVORS:
         if only and arm.id not in only:
             continue
-        path = ROOT / arm.path
-        original = path.read_text()
+        original = read_source(arm.path)
         occurrences = original.count(arm.find)
         if occurrences != 1:
             print(f"{arm.id:<5} HARNESS-FAILURE      needle occurs "
                   f"{occurrences} times in {arm.path}, expected 1")
             problems += 1
             continue
-        path.write_text(original.replace(arm.find, arm.replace))
+        write_source(arm.path, original.replace(arm.find, arm.replace))
         try:
             res = run_suite()
         finally:
-            path.write_text(original)
+            write_source(arm.path, original)
             for p in TOUCHED:
                 if digest(p) != baseline[p]:
                     print(f"{arm.id:<5} HARNESS-FAILURE      {p} did not "

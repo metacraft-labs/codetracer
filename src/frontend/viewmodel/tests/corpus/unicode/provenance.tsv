@@ -1,0 +1,31 @@
+# PLAT-24 corpus — the hand-maintained half of the manifest.
+#
+# `manifest.tsv` is EMITTED from these rows plus the documents'
+# bytes by `emit_manifest.nim`. This file is what a human writes;
+# that one is what a machine computes and the suite asserts.
+#
+# oracle: the expected cluster count from an INDEPENDENT source —
+#         hand audit for a short document, Unicode's own
+#         GraphemeBreakTest break data for a `ucd-oracle` one, and
+#         `-` where there is none, which is a fact the manifest
+#         states rather than hides.
+#
+# id	class	kind	oracle	audit	provenance
+c1-zwj-short	1	short	118	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c2-combining-short	2	short	91	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c3-regional-short	3	short	79	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c4-ambiguous-short	4	short	96	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c5-cjk-short	5	short	88	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c6-terminators-short	6	short	76	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c7-illformed-short	7	short	-	bytes-audited	hand-authored (bytes, for PLAT-24 deliverable 6)
+c8-tabs-short	8	short	229	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c9-ascii-control-short	9	short	165	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c1-zwj-long	1	long	16261	ucd-oracle	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/GraphemeBreakTest.txt (Unicode 16.0.0), sequences containing U+200D, packed to the line lengths of src/frontend/ui/editor.nim; 54 sequences excluded as unjoinable
+c2-combining-long	2	long	19404	ucd-oracle	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/GraphemeBreakTest.txt (Unicode 16.0.0), sequences carrying an Extend or SpacingMark and no ZWJ or regional indicator, packed to the line lengths of src/frontend/ui/editor.nim; 254 excluded as unjoinable
+c3-regional-long	3	long	14113	ucd-oracle	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/GraphemeBreakTest.txt (Unicode 16.0.0), sequences containing a regional indicator, packed to the line lengths of src/frontend/ui/editor.nim, each line given an ODD TRAILING indicator; 18 excluded as unjoinable
+c4-ambiguous-long	4	long	-	generated	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/EastAsianWidth.txt (Unicode 16.0.0), every `A` code point in U+00A1..U+2BFF and U+FFE0..U+FFE6 (744 of them), packed to the line lengths of src/frontend/ui/editor.nim
+c5-cjk-long	5	long	-	generated	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/EastAsianWidth.txt (Unicode 16.0.0), every `W`/`F` code point in the CJK, Hangul-syllable and fullwidth ranges (39911 of them), packed to the line lengths of src/frontend/ui/editor.nim
+c6-terminators-long	6	long	-	generated	workspace:codetracer@df61eaae0 src/ct_test/run_store.nim, terminators rewritten LF / CRLF / lone-CR in a fixed 3-cycle, with NO final newline
+c7-illformed-long	7	long	-	generated	workspace:codetracer@df61eaae0 src/frontend/viewmodel/editor/rope.nim, every 7th multi-byte sequence truncated to its lead byte, every 23rd space replaced by a bare continuation byte, a WTF-8 surrogate pair planted every 40 lines
+c8-tabs-long	8	long	-	verbatim	workspace:codetracer@df61eaae0 ci/lib/run-nim-test-lane.sh, VERBATIM — a genuinely tab-indented real file
+c9-ascii-control-long	9	long	-	generated	workspace:codetracer@df61eaae0 src/ct_test/contracts.nim (pure ASCII), with an ANSI colour escape around every 13th line, a form feed every 50 lines, VT+DEL every 31st and BEL every 71st

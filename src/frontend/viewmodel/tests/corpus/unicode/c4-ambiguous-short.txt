@@ -1,0 +1,10 @@
+pm: ±
+box: ┌──┐
+greek: αβγ
+cyr: Привет
+quotes: “hi”
+math: × ÷ ±
+arrows: ←→↑↓
+dots: …
+accent: é
+blocks: ■●

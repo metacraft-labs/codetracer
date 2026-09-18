@@ -88,6 +88,7 @@ import std/[algorithm, cpuinfo, math, monotimes, os, strformat, strutils,
 
 import ../editor/text_store
 import ../editor/seq_line_store
+import ../tests/corpus/unicode_corpus
 import isonim_tui/text/width as widthMod
 
 const
@@ -466,6 +467,19 @@ proc measureGraphemeProfile(corpus: Corpus; root: string; rounds: int) =
   if sample.len == 0:
     echo "  NOT MEASURED: the corpus yielded no non-empty lines"
     return
+  # PART OF THE INSTRUMENT WAS IN THE TIMED REGION, and the fix is one word.
+  #
+  # `sample` above is a `var seq[string]`, and `for line in sample` over a
+  # MUTABLE seq yields each element BY VALUE — one string copy per line, inside
+  # every timed block. Rebinding to a `let` makes the iteration borrow.
+  #
+  # MEASURED, not assumed, 2026-09-18 in one process at load 31: variant (c)
+  # moves from 144.6 to 117.0 ns/line and the published ratio from 20.1x to
+  # 23.0x. So the copy is real and worth removing, and it is NOT the whole of
+  # the 2x gap between this arm and `measureCorpusGraphemeProfile`'s arm over
+  # the same bytes — the rest is heap layout, and that is recorded at the top
+  # of that proc rather than left as a 2x nobody explained.
+  let lines = sample
 
   # Three variants over the SAME lines, so the profile separates what the
   # segmentation costs from what its allocations cost:
@@ -486,7 +500,7 @@ proc measureGraphemeProfile(corpus: Corpus; root: string; rounds: int) =
     block:
       var c = 0
       let t0 = getMonoTime()
-      for line in sample:
+      for line in lines:
         for _ in graphemeClusters(line):
           inc c
       segTimes.add float((getMonoTime() - t0).inNanoseconds) / float(sample.len)
@@ -494,7 +508,7 @@ proc measureGraphemeProfile(corpus: Corpus; root: string; rounds: int) =
     block:
       var c = 0
       let t0 = getMonoTime()
-      for line in sample:
+      for line in lines:
         var buf: seq[int32] = @[]
         for rn in runes(line): buf.add int32(rn)
         for _ in graphemeClusters(buf):
@@ -503,7 +517,7 @@ proc measureGraphemeProfile(corpus: Corpus; root: string; rounds: int) =
     block:
       var c = 0
       let t0 = getMonoTime()
-      for line in sample:
+      for line in lines:
         for _ in runes(line):
           inc c
       runeTimes.add float((getMonoTime() - t0).inNanoseconds) / float(sample.len)
@@ -535,6 +549,230 @@ proc measureGraphemeProfile(corpus: Corpus; root: string; rounds: int) =
     else:
       echo &"  {helper:<20} {n:>3} call sites in textarea.nim " &
            "(each re-walks the line)"
+
+# ---------------------------------------------------------------------------
+# §4.5 RE-MEASURED ON CLUSTER-DENSE TEXT — PLAT-24 deliverable 6's consequence
+# ---------------------------------------------------------------------------
+#
+# §4.5's first figures were taken on the SAME path-sorted `.nim` corpus as the
+# storage arms: 88,000 bytes carrying 87,786 runes, i.e. **99.8% ASCII**, with
+# one cluster per rune. That is a profile of segmenting ASCII-dominant source.
+# It is not wrong and it is not useless — it is the CHEAPEST possible input, so
+# the 18.1x it reports is a lower bound and the DIRECTION of the byte-offset
+# `column` decision follows from it. What it cannot say is the MAGNITUDE on the
+# text the model will actually meet, and the corpus (§5) exists to supply that.
+#
+# THE TWO ARMS ARE MEASURED IN THE SAME ROUND, ADJACENT IN TIME, for the same
+# reason the storage gate's two positions are: on a shared runner an absolute
+# nanosecond figure is a measurement of the scheduler, and a ratio between two
+# things measured back to back is not. Every headline below is a ratio.
+#
+# AND THE TWO SAMPLES ARE BUILT BY ONE FUNCTION, WHICH IS LOAD-BEARING.
+# `sampleLines` produces both, from a `string`, with the source document freed
+# before anything is timed. That is not tidiness either. Running this arm
+# beside the older `measureGraphemeProfile` in one process shows the two
+# disagreeing about ASCII by ~2x — (a) agrees within noise (2,690 against
+# 2,675 ns/line) and (c) does not (117.0 against 55.2) — and the reason is that
+# the older arm holds an 8 MB `SeqLineStore` alive while it measures, so its
+# 1,827 sample lines are scattered across a live heap and every line costs a
+# cache miss. At 2,700 ns/line variant (a) cannot see one; at 55 ns/line
+# variant (c) is made of them.
+#
+# THE CONSEQUENCE, STATED SO IT IS NOT REDISCOVERED: the (a)/(c) RATIO on ASCII
+# is not pinned by this instrument to better than about 2x, because its
+# denominator is the size of a cache miss. §4.5's published 18.1x is a LOWER
+# BOUND. The quantity this re-measurement exists to produce is not that ratio —
+# it is the ASCII-against-corpus comparison, and THAT one is sound, because
+# both sides go through one function over two samples built the same way,
+# adjacent in time, in two takes.
+#
+# THE UNIT IS PER RUNE, NOT PER LINE. A line of the ASCII corpus and a line of
+# the ZWJ corpus are not the same quantity of work, so ns/line compares two
+# different things and reports the difference as a speed. `graphemeClusters`
+# decodes every rune and builds three `seq`s sized by the rune count, so the
+# rune is the unit its cost is linear in — and the per-line figure is printed
+# beside it, because §4.5's published number is per line and a re-measurement
+# that changed the unit without saying so would be unreadable against it.
+
+proc sampleLines(text: string; want: int): seq[string] =
+  ## Non-empty lines, evenly spread through the document.
+  result = @[]
+  var all: seq[string] = @[]
+  for line in text.split('\n'):
+    if line.len > 0: all.add line
+  if all.len == 0: return
+  let step = max(1, all.len div want)
+  var i = 0
+  while i < all.len and result.len < want:
+    result.add all[i]
+    i += step
+
+type SegProfile = object
+  lines, bytes, runes, clusters: int
+  segNs, noStrNs, runeNs: float      ## medians, ns per LINE
+
+proc profileOf(sample: seq[string]; rounds: int): SegProfile =
+  ## THE SAME THREE VARIANTS, IN THE SAME ORDER, AS `measureGraphemeProfile`,
+  ## so the two arms differ in their INPUT and in nothing else.
+  ##
+  ## Variant (b) was first suspected of the gap between the two arms and
+  ## measured: adding it here changed the ASCII ratio from 45x to 47x, i.e. not
+  ## at all. It stays because matching the published body is the point, not
+  ## because it explained anything — the hypothesis is recorded as tested and
+  ## wrong rather than deleted, since the next reader will have it too.
+  ##
+  ##   (a) `graphemeClusters(string)` — what `textarea.nim` calls: three `seq`s
+  ##       before the first yield, plus a fresh substring PER CLUSTER;
+  ##   (b) the same UAX #29 work over a pre-decoded `seq[int32]` — same buffer,
+  ##       no per-cluster substring;
+  ##   (c) a plain `runes` walk — same decoding, no buffer, no break logic.
+  var segTimes: seq[float] = @[]
+  var noStrTimes: seq[float] = @[]
+  var runeTimes: seq[float] = @[]
+  for r in 0 ..< rounds:
+    var c = 0
+    block:
+      let t0 = getMonoTime()
+      for line in sample:
+        for _ in graphemeClusters(line): inc c
+      segTimes.add float((getMonoTime() - t0).inNanoseconds) / float(sample.len)
+    result.clusters = c
+    block:
+      var k = 0
+      let t0 = getMonoTime()
+      for line in sample:
+        var buf: seq[int32] = @[]
+        for rn in runes(line): buf.add int32(rn)
+        for _ in graphemeClusters(buf): inc k
+      noStrTimes.add float((getMonoTime() - t0).inNanoseconds) / float(sample.len)
+    var n = 0
+    block:
+      let t0 = getMonoTime()
+      for line in sample:
+        for _ in runes(line): inc n
+      runeTimes.add float((getMonoTime() - t0).inNanoseconds) / float(sample.len)
+    result.runes = n
+  result.lines = sample.len
+  result.bytes = 0
+  for line in sample: result.bytes += line.len
+  result.segNs = median(segTimes)
+  result.noStrNs = median(noStrTimes)
+  result.runeNs = median(runeTimes)
+
+proc measureCorpusGraphemeProfile(corpus: Corpus; rounds: int) =
+  ## The re-measurement. Prints the ASCII arm and the cluster-dense arm side by
+  ## side, both taken in this process at this load, and the per-document
+  ## distribution the deliverable asks for ("a distribution rather than one
+  ## number from whichever file was open").
+  const Want = 2000
+  let asciiSample = sampleLines(corpus.text, Want)
+  var corpusText = ""
+  for d in CorpusDocs:
+    corpusText.add d.text
+    corpusText.add '\n'
+  let denseSample = sampleLines(corpusText, Want)
+  if asciiSample.len == 0 or denseSample.len == 0:
+    echo "  NOT MEASURED: a sample came back empty"
+    return
+
+  # Interleaved: one round of ASCII, one round of cluster-dense, alternating,
+  # so a scheduler excursion lands on both sides of the division.
+  var asciiSeg: seq[float] = @[]
+  var asciiNoStr: seq[float] = @[]
+  var asciiRune: seq[float] = @[]
+  var denseSeg: seq[float] = @[]
+  var denseNoStr: seq[float] = @[]
+  var denseRune: seq[float] = @[]
+  var asciiRunes = 0
+  var asciiClusters = 0
+  var denseRunes = 0
+  var denseClusters = 0
+  for r in 0 ..< rounds:
+    let a = profileOf(asciiSample, 1)
+    let d = profileOf(denseSample, 1)
+    asciiSeg.add a.segNs
+    asciiNoStr.add a.noStrNs
+    asciiRune.add a.runeNs
+    denseSeg.add d.segNs
+    denseNoStr.add d.noStrNs
+    denseRune.add d.runeNs
+    asciiRunes = a.runes
+    asciiClusters = a.clusters
+    denseRunes = d.runes
+    denseClusters = d.clusters
+
+  # DIAGNOSTIC, and it is here rather than in a scratch file because the
+  # discrepancy it settles would otherwise go into the record as a 2x nobody
+  # explained. The same `profileOf` over the same ASCII sample, run 25 rounds
+  # BACK TO BACK instead of alternating with the corpus arm: if this matches
+  # the interleaved figure the difference is the sample or the proc, and if it
+  # matches `measureGraphemeProfile` the difference is the interleaving.
+  let asciiSolo = profileOf(asciiSample, rounds)
+  let denseSolo = profileOf(denseSample, rounds)
+
+  let aSeg = median(asciiSeg)
+  let aNoStr = median(asciiNoStr)
+  let aRune = median(asciiRune)
+  let dSeg = median(denseSeg)
+  let dNoStr = median(denseNoStr)
+  let dRune = median(denseRune)
+  let aPerRune = aSeg * float(asciiSample.len) / float(asciiRunes)
+  let dPerRune = dSeg * float(denseSample.len) / float(denseRunes)
+
+  echo &"  ASCII arm  : {asciiSample.len} real `.nim` lines, " &
+       &"{asciiRunes} runes, {asciiClusters} clusters " &
+       &"({float(asciiRunes) / float(asciiClusters):.3f} runes/cluster)"
+  echo &"  Corpus arm : {denseSample.len} corpus lines, " &
+       &"{denseRunes} runes, {denseClusters} clusters " &
+       &"({float(denseRunes) / float(denseClusters):.3f} runes/cluster)"
+  echo &"  (a) graphemeClusters   ASCII {aSeg:>9.1f} ns/line  " &
+       &"corpus {dSeg:>9.1f} ns/line"
+  echo &"      per rune           ASCII {aPerRune:>9.2f} ns/rune  " &
+       &"corpus {dPerRune:>9.2f} ns/rune"
+  echo &"  (b) no cluster string  ASCII {aNoStr:>9.1f} ns/line  " &
+       &"corpus {dNoStr:>9.1f} ns/line"
+  echo &"  (c) plain rune walk    ASCII {aRune:>9.1f} ns/line  " &
+       &"corpus {dRune:>9.1f} ns/line"
+  echo &"  RATIO (a)/(c)          ASCII {aSeg / aRune:>9.2f}x        " &
+       &"corpus {dSeg / dRune:>9.2f}x"
+  echo &"  the magnitude the corpus was built to supply: segmentation costs " &
+       &"{dPerRune / aPerRune:.2f}x as much PER RUNE on cluster-dense text " &
+       &"as on 99.8%-ASCII source"
+  echo &"  buffers before the first yield: ASCII " &
+       &"~{asciiRunes * 20 div asciiSample.len} B/line, corpus " &
+       &"~{denseRunes * 20 div denseSample.len} B/line " &
+       &"(seq[int32] runes + two seq[int] byte-offset arrays)"
+
+  echo &"  SOLO (25 rounds back to back, not interleaved):  " &
+       &"ASCII (a) {asciiSolo.segNs:.1f} ns/line (c) {asciiSolo.runeNs:.1f} " &
+       &"= {asciiSolo.segNs / asciiSolo.runeNs:.2f}x   " &
+       &"corpus (a) {denseSolo.segNs:.1f} (c) {denseSolo.runeNs:.1f} " &
+       &"= {denseSolo.segNs / denseSolo.runeNs:.2f}x"
+  echo &"  SOLO per rune: ASCII " &
+       &"{asciiSolo.segNs * float(asciiSolo.lines) / float(asciiSolo.runes):.2f}" &
+       &" ns/rune, corpus " &
+       &"{denseSolo.segNs * float(denseSolo.lines) / float(denseSolo.runes):.2f}" &
+       &" ns/rune"
+
+  # THE DISTRIBUTION, per document. One number from whichever file was open is
+  # what this deliverable exists to replace.
+  echo "  -- per document, (a)/(c), fewer rounds per document --"
+  let perDocRounds = max(3, rounds div 5)
+  var worst = 0.0
+  var best = 1e18
+  for d in CorpusDocs:
+    let s = sampleLines(d.text, 400)
+    if s.len == 0:
+      echo &"  {d.id:<26} NOT MEASURED: no non-empty lines"
+      continue
+    let p = profileOf(s, perDocRounds)
+    let ratio = p.segNs / p.runeNs
+    let perRune = p.segNs * float(p.lines) / float(p.runes)
+    if ratio > worst: worst = ratio
+    if ratio < best: best = ratio
+    echo &"  {d.id:<26} {p.lines:>4}L {p.runes:>6}r {p.clusters:>6}c  " &
+         &"{p.segNs:>9.1f} ns/line  {perRune:>7.2f} ns/rune  {ratio:>7.2f}x"
+  echo &"  across the eighteen: (a)/(c) from {best:.2f}x to {worst:.2f}x"
 
 # ---------------------------------------------------------------------------
 # Main
@@ -569,9 +807,15 @@ proc main() =
   var sizes = @[1000, 40000, 200000]
   var takes = 2
   var rounds = 25
+  var graphemeOnly = false
   for i in 1 .. paramCount():
     let a = paramStr(i)
-    if a.startsWith("--sizes="):
+    if a == "--grapheme-only":
+      # §4.5 alone: the storage arms are unchanged and re-running them to reach
+      # the segmentation figures would spend an hour to re-print numbers the
+      # milestone already carries.
+      graphemeOnly = true
+    elif a.startsWith("--sizes="):
       sizes = @[]
       for part in a[8 .. ^1].split(','):
         sizes.add parseInt(part.strip())
@@ -616,26 +860,36 @@ proc main() =
     echo "================================================================"
 
     for t in 1 .. takes:
-      let (sr, rr) = runTake(corpus, t, rounds)
-      if size == 200000:
-        gateSeq.add sr
-        gateRope.add rr
-        gateSize = size
-      # Deliverables 4 and 5 are inside the take, not after it: PLAT-24 asks
-      # for TWO takes of EVERY figure, and a figure taken once beside two
-      # takes of its neighbours is the one nobody can check.
-      echo "  -- deliverable 4: applyInsert copies the whole line, re-measured --"
-      measureLineLengthEffect(corpus, rounds)
-      echo "  -- deliverable 4: one seq.insert per inserted line, re-measured --"
-      measureMultiLineInsert(corpus, rounds)
+      if not graphemeOnly:
+        let (sr, rr) = runTake(corpus, t, rounds)
+        if size == 200000:
+          gateSeq.add sr
+          gateRope.add rr
+          gateSize = size
+        # Deliverables 4 and 5 are inside the take, not after it: PLAT-24 asks
+        # for TWO takes of EVERY figure, and a figure taken once beside two
+        # takes of its neighbours is the one nobody can check.
+        echo "  -- deliverable 4: applyInsert copies the whole line, re-measured --"
+        measureLineLengthEffect(corpus, rounds)
+        echo "  -- deliverable 4: one seq.insert per inserted line, re-measured --"
+        measureMultiLineInsert(corpus, rounds)
+      echo ""
+      echo &"-- take {t} --  load {loadAverage()}"
       echo "  -- deliverable 5: grapheme segmentation's allocation profile --"
       measureGraphemeProfile(corpus, root, rounds)
+      echo "  -- deliverable 6's consequence: §4.5 RE-MEASURED on the corpus --"
+      measureCorpusGraphemeProfile(corpus, rounds)
 
   echo ""
   echo "================================================================"
   echo "VERDICT"
   echo "================================================================"
   echo &"load at end: {loadAverage()}"
+  if graphemeOnly:
+    echo "NO STORAGE VERDICT: --grapheme-only was passed, so the gate's arms " &
+         "were not run. The storage decision is unchanged and its numbers are " &
+         "in Editor-ViewModel.md §4.3."
+    quit(0)
   if gateSeq.len == 0:
     echo "NO VERDICT: the 200,000-line corpus was not among the sizes run, " &
          "and the gate is stated on that size. Re-run without --sizes."

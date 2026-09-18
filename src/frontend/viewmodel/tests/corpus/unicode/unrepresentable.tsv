@@ -1,0 +1,25 @@
+# PLAT-24 corpus — cases recorded as UNREPRESENTABLE.
+#
+# Editor-Model-Conformance-Suite.md §5.1, class 7: *"If Nim's `string` makes a
+# case unrepresentable, the corpus manifest records that it is unrepresentable
+# rather than omitting it — an omitted row and an impossible row look identical
+# in a pass."*
+#
+# NOTHING NIM'S `string` CANNOT HOLD WAS FOUND. Measured 2026-09-18 on both
+# backends: a probe carrying bare continuation bytes, truncated 2/3/4-byte
+# sequences, an overlong encoding, invalid lead bytes F5/FF/FE, WTF-8 unpaired
+# high and low surrogates, a CESU-8 surrogate pair and an embedded NUL came back
+# byte-identical from `staticRead` under `nim c` AND under `nim js`, 21 of 21
+# bytes. So every byte-level case §5.1 names is IN the corpus as bytes, and none
+# of them is a row here.
+#
+# What IS unrepresentable is one level up: three things the STORAGE INTERFACE
+# cannot express about a document it can hold perfectly. Each row below is
+# asserted by a named case in test_editor_unicode_corpus.nim — a recorded
+# impossibility nobody has watched being impossible is the same shape as an
+# omitted one.
+#
+# id	document	case
+lone-cr-is-not-a-terminator	c6-terminators-long	a document whose lines are separated by a LONE CR is ONE line to this interface: both stores split on '\n' only, so a classic-Mac text file cannot be addressed by line at all. The manifest's `lines` column counts LF and says so.
+crlf-cluster-spans-a-line	c6-terminators-long	CRLF is ONE grapheme cluster under UAX #29 GB3, and no line of this model can contain it: the document splits on '\n', so the CR ends one line and the LF is consumed as the separator. Every per-line cluster count therefore charges the CR as a cluster of its own. This is §5.1's "CRLF counted as two clusters" as a property of the STORAGE MODEL rather than a defect of the segmenter.
+edit-at-a-bare-continuation-byte	c7-illformed-short	`replaceRange` refuses any offset whose byte is 10xxxxxx, because in well-formed text that byte is the interior of a code point. In ill-formed text it can be a standalone byte, so an edit at that offset is a legitimate edit the seven operations cannot express. The refusal is the right default and the cost is recorded rather than argued.

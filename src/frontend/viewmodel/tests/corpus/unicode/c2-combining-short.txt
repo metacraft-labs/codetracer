@@ -1,0 +1,10 @@
+NFD e: é
+stack:  à́̂̃
+deva:   क्ष
+deva2:  हिन्दी
+hebrew: שָׁלוֹם
+arabic: بِسْمِ
+viet:   Việt
+́̂
+zalgo:  x̴̴̴̴̴̴̴̴̴̴̴̴̴̴̴̴̴̴̴̴
+spacing:  ਃ

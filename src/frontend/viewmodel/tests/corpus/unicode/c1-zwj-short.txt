@@ -1,0 +1,12 @@
+family: 👨‍👩‍👧
+four:   👨‍👩‍👧‍👦
+astro:  👩‍🚀
+dev:    👨🏽‍💻
+rainbow:🏳️‍🌈
+hands:  🧑‍🤝‍🧑
+eye:    👁️‍🗨️
+judge:  👩‍⚖️
+kiss:   👩‍❤️‍💋‍👨
+plain ZWJ: a‍b
+tail ZWJ: ab‍
+‍leading ZWJ

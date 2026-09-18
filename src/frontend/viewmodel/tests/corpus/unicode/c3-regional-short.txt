@@ -1,0 +1,9 @@
+bg: 🇧🇬
+jp: 🇯🇵
+pair+odd: 🇧🇬🇯🇵🇺
+odd first: 🇺🇧🇬
+lone: 🇿
+six: 🇦🇧🇨🇩🇪🇫
+seven:🇦🇧🇨🇩🇪🇫🇬
+after text 🇧🇬 more
+🇽

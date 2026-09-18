@@ -1,0 +1,12 @@
+	indented once
+		indented twice
+a	b	c
+12345678	X
+1234567	X
+				
+mid	tab	with 日本
+trailing tab	
+	leading tab then forty chars: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+	日	本	
+xxxxxxxxxxxxxxxxxxx	crosses col 20 at tab size 8
+yyyyyyyyyyyyyyyyy	|

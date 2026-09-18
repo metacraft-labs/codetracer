@@ -1,0 +1,10 @@
+# PLAT-24's Unicode corpus. Editor-Model-Conformance-Suite.md §5.2: a corpus
+# file silently rewritten by something that normalises line endings is how a
+# corpus dies. One of these documents is ABOUT CR and LF and another is about
+# bytes that are not text at all, so nothing may touch them.
+*.txt -text -diff
+*.bin -text -diff
+# The manifest and the audit too: they are the corpus's identity, and a
+# checkout that rewrote their line endings would change the bytes the suite
+# fingerprints them by even though the parser would still read them.
+*.tsv -text

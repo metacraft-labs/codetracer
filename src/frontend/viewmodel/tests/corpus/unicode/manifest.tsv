@@ -1,0 +1,28 @@
+# PLAT-24 corpus manifest — EMITTED by emit_manifest.nim from
+# provenance.tsv plus the documents' bytes. Asserted, per document, by
+# src/frontend/viewmodel/tests/unit/test_editor_unicode_corpus.nim.
+#
+# runes, clusters and the two widths are PER-LINE SUMS: the '\n'
+# separators are not text and are counted in `lines` instead. `oracle` is
+# an INDEPENDENT expected cluster count — a hand audit, or Unicode's own
+# GraphemeBreakTest break data — and `-` where there is none.
+#
+# id	class	kind	bytes	lines	runes	clusters	widthNarrow	widthWide	fnv1a	oracle	audit	provenance
+c1-zwj-short	1	short	287	13	156	118	126	126	0xa6ba9a20f76c831d	118	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c2-combining-short	2	short	204	11	132	91	90	90	0xf474732dc475f75a	91	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c3-regional-short	3	short	187	10	91	79	96	96	0x67eb43c76d18c402	79	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c4-ambiguous-short	4	short	146	11	96	96	96	123	0x5e3d81029c987b0e	96	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c5-cjk-short	5	short	152	10	90	88	112	112	0x5841b9c3578b6bb6	88	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c6-terminators-short	6	short	81	6	76	76	70	70	0x729224ba43a05191	76	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c7-illformed-short	7	short	273	13	251	251	244	251	0xaec218c8a4cb483b	-	bytes-audited	hand-authored (bytes, for PLAT-24 deliverable 6)
+c8-tabs-short	8	short	249	13	229	229	213	213	0xf9c25f3d7070f647	229	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c9-ascii-control-short	9	short	175	11	165	165	150	150	0x48738867c203fe0d	165	hand-audited	hand-authored (for PLAT-24 deliverable 6)
+c1-zwj-long	1	long	66987	321	28562	16261	17800	17800	0x150c60358ef3261a	16261	ucd-oracle	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/GraphemeBreakTest.txt (Unicode 16.0.0), sequences containing U+200D, packed to the line lengths of src/frontend/ui/editor.nim; 54 sequences excluded as unjoinable
+c2-combining-long	2	long	60269	401	28714	19404	19549	19549	0x382d55132d69843e	19404	ucd-oracle	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/GraphemeBreakTest.txt (Unicode 16.0.0), sequences carrying an Extend or SpacingMark and no ZWJ or regional indicator, packed to the line lengths of src/frontend/ui/editor.nim; 254 excluded as unjoinable
+c3-regional-long	3	long	45550	301	17978	14113	19658	19658	0x9ba354aa4f1178d9	14113	ucd-oracle	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/GraphemeBreakTest.txt (Unicode 16.0.0), sequences containing a regional indicator, packed to the line lengths of src/frontend/ui/editor.nim, each line given an ODD TRAILING indicator; 18 excluded as unjoinable
+c4-ambiguous-long	4	long	46267	321	16895	16895	16895	33790	0xb62818e1da3d36ca	-	generated	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/EastAsianWidth.txt (Unicode 16.0.0), every `A` code point in U+00A1..U+2BFF and U+FFE0..U+FFE6 (744 of them), packed to the line lengths of src/frontend/ui/editor.nim
+c5-cjk-long	5	long	42410	321	14030	14022	28044	28044	0x8a2f234a944b73e4	-	generated	ucd:isonim-tui@06f8cb1ba tests/fixtures/unicode/EastAsianWidth.txt (Unicode 16.0.0), every `W`/`F` code point in the CJK, Hangul-syllable and fullwidth ranges (39911 of them), packed to the line lengths of src/frontend/ui/editor.nim
+c6-terminators-long	6	long	14803	296	14508	14508	14214	14214	0x628751cb20c5af2e	-	generated	workspace:codetracer@df61eaae0 src/ct_test/run_store.nim, terminators rewritten LF / CRLF / lone-CR in a fixed 3-cycle, with NO final newline
+c7-illformed-long	7	long	16997	464	16471	16471	16396	16449	0xc62bf3a043396f96	-	generated	workspace:codetracer@df61eaae0 src/frontend/viewmodel/editor/rope.nim, every 7th multi-byte sequence truncated to its lead byte, every 23rd space replaced by a bare continuation byte, a WTF-8 surrogate pair planted every 40 lines
+c8-tabs-long	8	long	25356	554	24738	24738	24102	24135	0x1faf576f8a54d7c4	-	verbatim	workspace:codetracer@df61eaae0 ci/lib/run-nim-test-lane.sh, VERBATIM — a genuinely tab-indented real file
+c9-ascii-control-long	9	long	24923	700	24224	24224	24061	24061	0x59cc4a3c3d3d38f2	-	generated	workspace:codetracer@df61eaae0 src/ct_test/contracts.nim (pure ASCII), with an ANSI colour escape around every 13th line, a form feed every 50 lines, VT+DEL every 31st and BEL every 71st

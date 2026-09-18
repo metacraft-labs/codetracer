@@ -1,0 +1,9 @@
+han: 漢字
+hira: ひらがな
+kata: カタカナ
+hangul: 한글
+jamo: 한
+fw: ＡＢＣ
+mixed: 日本語text
+punct: 。、「」
+emojiwide: 😀
