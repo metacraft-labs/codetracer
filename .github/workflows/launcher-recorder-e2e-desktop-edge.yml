@@ -118,29 +118,41 @@
 # break routing, and LRC-3's verification is precisely that a trivial commit
 # triggers the edge.
 #
-# FAN-OUT.  Three rows: python (the LRC-2 pilot) plus ruby and js, added by
-# LRC-4.  Each recorder carries its own `cross-repo/launcher-compat.yml`
-# contract fixture, without which the driver hard-fails rather than skipping,
-# and `fail-fast: false` keeps one broken recorder from hiding the state of the
-# others.
+# FAN-OUT.  Four rows: python (the LRC-2 pilot), ruby and js (added by LRC-4),
+# and beam (added 2026-09-10 once its blocker was fixed).  Each recorder carries
+# its own `cross-repo/launcher-compat.yml` contract fixture, without which the
+# driver hard-fails rather than skipping, and `fail-fast: false` keeps one broken
+# recorder from hiding the state of the others.
 #
-# TWO EDGES ARE DELIBERATELY ABSENT, each on a blocker recorded against
-# milestone LRC-4 in
-# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.milestones.org:
+# THE BEAM ROW'S BLOCKER WAS OURS AS MUCH AS THE RECORDER'S, and it is the
+# sharpest thing this gate has caught.  `recorder_dispatch.nim` in THIS repo
+# invokes codetracer-beam-recorder as `… -- elixir <program>` /
+# `… -- escript <program>`, and that recorder's `is_beam_target()` accepted only
+# `mix` / `erl` / `rebar3` -- so `ct record foo.ex` EXITED 0 having written a
+# 2-event, 0-function `"mode": "non_beam"` trace.  A silent non-recording; no
+# `ct --version` smoke test can see one.  The recorder gained real
+# `elixir`/`escript` launch targets on 2026-08-22
+# (codetracer-beam-recorder/docs/launch-targets.md), and the recorder-side edge
+# has since gone GREEN IN CI -- run 34449303438, 2026-09-10, runner
+# garm-eps5ywsqysrc: `scenarios: 4  assertions: 35  passed: 35  failed: 0`,
+# 362 decoded events, hop-1 `component-dir=` inside the trace.
 #
-#   native.  `ct record <native-binary>` carries no extension, so the launcher
-#     returns `mkNone` against a `record` line that declares only extensions and
-#     exits 1.  The routing rule has to be decided first.
+# ONE EDGE IS STILL DELIBERATELY ABSENT, on a blocker recorded against milestone
+# LRC-4 in
+# codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.milestones.org
+# and NTR-4 in
+# codetracer-specs/Planned-Features/Native-Target-Recognition.milestones.org:
 #
-#   beam.  Routing and dispatch both work, but this repo's
-#     `recorder_dispatch.nim` invokes codetracer-beam-recorder as
-#     `… -- elixir <program>` / `… -- escript <program>` and that recorder's
-#     `is_beam_target()` accepts only `mix` / `erl` / `rebar3`, so
-#     `ct record foo.ex` EXITS 0 having recorded a 2-event, 0-function trace.
-#     The contract fixture is checked in at
-#     codetracer-beam-recorder/cross-repo/launcher-compat.yml with the full
-#     diagnosis in its header.  Note this one is OURS as much as the recorder's:
-#     the invocation comes from this repo.
+#   native.  ROUTING is solved and shipped -- rule NTR-R1's reserved `noext`
+#     token on this repo's `record` line carries an extension-less argument, and
+#     `resources/codetracer-desktop-capabilities` declares it.  What is missing
+#     is the CONTRACT: codetracer-native-recorder has no
+#     `cross-repo/launcher-compat.yml`, the driver's `assert_declared_extension`
+#     has no `noext` arm, and `ct-print`'s native decoder emits `counts.steps`
+#     and `counts.calls` as hard-coded 0 with an always-empty `functions` array,
+#     so the driver's empty-recording guard would fire and `expect.function`
+#     could only pass by accident.  A fixture would fail before its first
+#     assertion, so none is checked in.
 # =============================================================================
 
 name: launcher-recorder-e2e (desktop edge)
@@ -170,8 +182,11 @@ on:
 # work, and cancelling a run that holds a self-hosted runner strands it offline
 # for ~5 minutes while it is reaped.
 #
-# This gate has never yet executed in CI (see the header), so there is no
-# in-flight result here that collapsing could destroy.
+# When this block was added this gate had never executed in CI.  That is no
+# longer true: it has run repeatedly on `garm-*` runners and went GREEN on
+# 2026-09-08 (run 34203243463, codetracer@37fe0a75, all three recorder arms of
+# the day).  Collapsing superseded runs is still the right tuning -- it destroys
+# only runs a newer commit has already superseded.
 #
 # KEPT IN STEP WITH `codetracer.yml`, which carries the byte-identical block and
 # points back here. Retune one and you must retune the other.

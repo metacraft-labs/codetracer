@@ -44,12 +44,8 @@ bin codetracer
 description CodeTracer desktop application -- launcher help delegate
 help-delegate
 
-# KNOWN GAP: `.ex` `.exs` `.erl` `.hrl` ROUTE but do not RECORD.
-#   `ct record foo.ex` exits 0 with a recordingId and a 2-event, 0-function
-#   trace: recorder_dispatch.nim sends `-- elixir <prog>`, which
-#   codetracer-beam-recorder's is_beam_target() rejects. Full diagnosis in
-#   codetracer-beam-recorder/cross-repo/launcher-compat.yml. Revisit these
-#   four extensions when it is fixed.
+# The `.ex` `.exs` `.erl` `.hrl` KNOWN GAP recorded here is CLOSED: the beam
+#   edge is CI-green (run 34449303438, 35/35, 362 decoded events).
 # `noext` and `known-extensions` are routing tokens, not file types.  Rule and
 # rationale: codetracer-specs/Planned-Features/Native-Target-Recognition.md §4.
 record .py .rb .js .mjs .ts .php .ex .exs .erl .hrl .sh .bash .zsh .nim .nims .nr .wasm .sol .masm .sw .move .cairo .circom .leo .tolk .ak .cdc noext
