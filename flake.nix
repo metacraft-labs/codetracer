@@ -199,7 +199,7 @@
       #   nix develop '.?submodules=1' <other overrides> --command repro build
       #
       # (`readlink -f "$(command -v repro)"` names which one you actually got.)
-      url = "github:metacraft-labs/reprobuild/69bb0a7dd8d8a0b17b94c4d8f364c4e9e986a6f7";
+      url = "github:metacraft-labs/reprobuild/35c5754a8fd3b9858508d61701199fab8e69ebda";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
