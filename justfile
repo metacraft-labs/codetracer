@@ -42,6 +42,18 @@ test-flake-pin-alignment:
 test-flake-lock-node-dates:
   bash scripts/test-flake-lock-node-dates.sh
 
+# Assert the GUI harness's `npm install` leaves `src/tests/gui/yarn.lock` alone.
+# npm >= 7 keeps an existing yarn.lock "up to date" by rewriting it from the
+# tree it installed, and on Linux that tree has no `fsevents` (playwright's
+# darwin-only optional), so every GUI run deleted the block and dirtied a
+# tracked file — which `yarn install --frozen-lockfile`, the Windows/DIY
+# bootstrap in env.sh, then cannot satisfy on macOS. `ci/lib/npm-install.sh`
+# wraps the install and reverts the rewrite; this guard drives it with a stub
+# npm so each rewrite shape (pure deletion, addition, failing install) is
+# stated rather than left to whichever platform happens to run it. No network.
+test-npm-install-yarn-lock:
+  bash ci/test/npm-install-yarn-lock-test.sh
+
 # Assert that every place a Python version can be observed still agrees with
 # the one place it is CHOSEN (nix/python.nix): the dev shell's exports and its
 # first `python3` on PATH, `.python-recorder-venv`'s interpreter, the ABI tag
@@ -855,6 +867,7 @@ test:
     test-build-alignment \
     test-flake-pin-alignment \
     test-flake-lock-node-dates \
+    test-npm-install-yarn-lock \
     test-python-version-alignment \
     test-sibling-backend-path \
     test-agent-api-contract \
@@ -1013,8 +1026,8 @@ test-gui-visible *args: build-once build-siblings
 test-css-contrast-guards *args:
   #!/usr/bin/env bash
   set -e
+  bash ci/lib/npm-install.sh src/tests/gui
   cd src/tests/gui && \
-    npm install --no-audit --no-fund && \
     npx playwright test tests/status-bar/footer-visibility-css-guard.spec.ts \
                         tests/status-bar/footer-contrast-guard.spec.ts \
                         tests/build/build-panel-contrast-guard.spec.ts {{args}}
@@ -1668,8 +1681,8 @@ test-e2e *args:
       ;;
   esac
   just ensure-storybook-static {{args}}
+  bash "${CODETRACER_REPO_ROOT_PATH}/ci/lib/npm-install.sh" "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui"
   cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
-    npm install --no-audit --no-fund && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
       {{args}}
 
@@ -2448,8 +2461,8 @@ test-wasm-replay *args:
     cd ../..
   fi
   echo "Running WASM client-side replay tests..."
+  bash ci/lib/npm-install.sh src/tests/gui
   cd src/tests/gui && \
-    npm install --no-audit --no-fund && \
     npx playwright test tests/wasm-replay/ {{args}}
 
 # WASM flow/omniscience integration test (DB-based, no rr required)
@@ -4764,8 +4777,8 @@ test-e2e-agentic-worktree:
 # already-running AgentFS/Agent Harbor setup, the Playwright test records a
 # precise runtime skip.
 test-e2e-agentic-agentfs-optional:
-  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
-    npm install --no-audit --no-fund && \
+  bash "${CODETRACER_REPO_ROOT_PATH}/ci/lib/npm-install.sh" "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
+    cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
     npx playwright test --workers=1 \
       tests/agentic-coding/agentic-agentfs-optional.spec.ts
 
