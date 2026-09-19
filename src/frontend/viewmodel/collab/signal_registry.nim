@@ -933,33 +933,239 @@ proc viewModelSourceFiles*(sourceRoot = "src/frontend/viewmodel"): seq[string] =
     result.add(file)
   result.sort(proc(a, b: string): int = cmp(a, b))
 
-proc parseObjectOwner(line: string): string =
-  let stripped = line.strip
-  if not stripped.contains("* ="):
-    return ""
-  if not (stripped.contains("= object") or
-      stripped.contains("= ref object")):
-    return ""
-  let star = stripped.find('*')
-  if star <= 0:
-    return ""
-  stripped[0 ..< star].strip
+# ---------------------------------------------------------------------------
+# Source scanning
+#
+# The inventory below is read out of the ViewModel sources with a small token
+# scanner rather than by matching formatting literals.  THAT DISTINCTION IS THE
+# WHOLE POINT OF THE GATE: an exported mutable `Signal` that this scanner does
+# not see is a field with no declared replication behaviour that `validateRegistry`
+# never gets the chance to refuse.  A scanner keyed on a literal is only
+# fail-closed against the formatting that happens to be dominant today.
+#
+# Concretely, the previous implementation searched for the literal `"*:"` and
+# for `"* ="`, so all of these legal Nim spellings were INVISIBLE to it, each
+# one silently admitting an unclassified field:
+#
+#   probeSpaced* : Signal[int]          # space before the colon
+#   fromMode*, toMode*: Signal[int]     # only the LAST name was recovered, and
+#                                       # then as the bogus name "fromMode*, toMode"
+#   tagged* {.used.}: Signal[int]       # a pragma between the `*` and the `:`
+#   SomeVM*= ref object                 # no space around `=`; the whole type,
+#                                       # and therefore EVERY field in it, vanished
+#   SomeVM*[T] = ref object             # a generic owner, same consequence
+#
+# Two more were found by probing the replacement rather than the predecessor,
+# and they are recorded here because a tolerant scanner earns its keep only if
+# its OWN blind spots have been looked for:
+#
+#   type SomeVM* = object               # the object on the section keyword's
+#                                       # line — `viewmodels/edit_mode_toolbar
+#                                       # .nim` and `viewmodels/
+#                                       # verification_report.nim` both do this
+#   `type`*: Signal[int]                # a stropped field name
+#
+# The scanner walks each line once, tracking bracket depth and string/char
+# literals, and answers three questions: where the code ends (i.e. where a `#`
+# comment begins), where the top-level `:` is, and where the top-level `=` is.
+# Both the owner parser and the field parser are expressed in terms of it, so
+# there is one place that knows how to read a Nim declaration.
+# ---------------------------------------------------------------------------
 
-proc parseField(line: string; owner, sourceFile: string; lineNo: int):
-    ViewModelField =
-  let code = line.split("##", maxsplit = 1)[0].strip
-  let marker = code.find("*:")
-  if marker < 0:
+const
+  identChars = {'A' .. 'Z', 'a' .. 'z', '0' .. '9', '_'}
+
+type
+  DeclScan = object
+    ## Structural landmarks of a single source line.
+    indent: int    ## number of leading whitespace characters
+    codeEnd: int   ## index one past the last code character (comment stripped)
+    colon: int     ## index of the `:` at bracket depth 0, or -1
+    assign: int    ## index of the `=` at bracket depth 0, or -1
+
+proc scanDecl(line: string): DeclScan =
+  ## Locate the top-level `:` and `=` of `line`, ignoring anything inside
+  ## brackets, string literals, char literals or a trailing comment.
+  ##
+  ## Bracket depth matters because a type is full of colons that are not the
+  ## field separator (`Table[string, int]`, `proc (x: int)`), and because a
+  ## pragma is spelled `{.foo: bar.}`.  Comments matter because a commented-out
+  ## declaration must not be inventoried as a live one.
+  result = DeclScan(indent: 0, codeEnd: line.len, colon: -1, assign: -1)
+  while result.indent < line.len and line[result.indent] in {' ', '\t'}:
+    inc result.indent
+
+  var depth = 0
+  var i = result.indent
+  while i < line.len:
+    let c = line[i]
+    case c
+    of '#':
+      # Both `#` and `##` end the code portion of the line.
+      result.codeEnd = i
+      break
+    of '"':
+      # Skip a string literal, honouring backslash escapes.  A triple-quoted
+      # string is not special-cased: it would have to open and close on the
+      # same line to matter here, and then this loop handles it as three
+      # empty/one-character strings, which leaves `depth` and the landmarks
+      # untouched.
+      inc i
+      while i < line.len and line[i] != '"':
+        if line[i] == '\\':
+          inc i
+        inc i
+    of '\'':
+      # A char literal — but ONLY when the apostrophe does not directly follow
+      # an identifier character, which is Nim's own rule for distinguishing
+      # `'a'` from the custom-numeric-literal suffix in `1'i64`.
+      if i > result.indent and line[i - 1] in identChars:
+        discard
+      else:
+        inc i
+        while i < line.len and line[i] != '\'':
+          if line[i] == '\\':
+            inc i
+          inc i
+    of '(', '[', '{':
+      inc depth
+    of ')', ']', '}':
+      if depth > 0:
+        dec depth
+    of ':':
+      if depth == 0 and result.colon < 0:
+        result.colon = i
+    of '=':
+      # `==`, `<=`, `>=`, `!=` and `=>` are comparisons/lambdas, not the
+      # definition operator that introduces an object body.
+      if depth == 0 and result.assign < 0 and
+          (i + 1 >= line.len or line[i + 1] != '=') and
+          (i == 0 or line[i - 1] notin {'=', '<', '>', '!'}):
+        result.assign = i
+    else:
+      discard
+    inc i
+
+  if result.codeEnd > line.len:
+    result.codeEnd = line.len
+
+proc splitTopLevel(s: string; sep: char): seq[string] =
+  ## Split `s` on `sep` at bracket depth 0, so a pragma such as `{.a, b.}` is
+  ## not mistaken for two names in a comma-separated declaration.
+  var depth = 0
+  var start = 0
+  for i, c in s:
+    case c
+    of '(', '[', '{': inc depth
+    of ')', ']', '}': (if depth > 0: dec depth)
+    else:
+      if c == sep and depth == 0:
+        result.add(s[start ..< i])
+        start = i + 1
+  result.add(s[start .. ^1])
+
+proc parseExportedName(spec: string): string =
+  ## The exported identifier declared by `spec`, or `""` when `spec` does not
+  ## declare exactly one exported name.
+  ##
+  ## Accepts `name*`, `name *`, `name*[T]`, `name* {.pragma.}` and the stropped
+  ## spelling `` `name`* ``; rejects anything that is not an identifier followed
+  ## by the export marker, which is what keeps a `proc` signature or a `case`
+  ## discriminator out of the field inventory.
+  var i = 0
+  while i < spec.len and spec[i] in {' ', '\t'}:
+    inc i
+
+  var name: string
+  if i < spec.len and spec[i] == '`':
+    # A STROPPED identifier: `` `type`*: Signal[int] ``.  Nim spells a field
+    # whose name collides with a keyword this way, and the declared name is the
+    # text BETWEEN the backticks.  Reading it matters because a field this
+    # scanner cannot name is a field `validateRegistry` is never asked about —
+    # the fail-OPEN direction, which is the one that costs something.
+    let quoteStart = i + 1
+    inc i
+    while i < spec.len and spec[i] != '`':
+      inc i
+    if i >= spec.len:
+      return ""  # unterminated on this line; not a declaration we can read
+    name = spec[quoteStart ..< i]
+    if name.len == 0:
+      return ""
+    inc i  # step past the closing backtick
+  else:
+    let nameStart = i
+    while i < spec.len and spec[i] in identChars:
+      inc i
+    if i == nameStart:
+      return ""
+    name = spec[nameStart ..< i]
+
+  while i < spec.len and spec[i] in {' ', '\t'}:
+    inc i
+  if i >= spec.len or spec[i] != '*':
+    return ""
+  name
+
+proc dropLeadingTypeKeyword(lhs: string): string =
+  ## `lhs` without a leading `type` SECTION KEYWORD.
+  ##
+  ## `type Foo* = ref object` puts the object on the same line as the keyword,
+  ## and that is ordinary Nim rather than an exotic spelling: the ViewModel tree
+  ## itself writes `type RunPlan* = object` (`viewmodels/edit_mode_toolbar.nim`)
+  ## and `type ParsedDiagnostic* = object` (`viewmodels/verification_report.nim`)
+  ## for one-off records.  Left unconsumed, the keyword is read as the type's
+  ## name, no owner is recognised, and EVERY field in such a type drops out of
+  ## the inventory unseen — so the day somebody adds a `Signal` to one of them,
+  ## the gate passes it.  A field the scanner cannot see is the one failure this
+  ## module has no second chance at.
+  ##
+  ## Only the keyword is consumed, never an identifier that merely starts with
+  ## it: `typeName* = object` declares a type called `typeName`.
+  let stripped = lhs.strip(leading = true, trailing = false)
+  if not stripped.startsWith("type"):
+    return lhs
+  if stripped.len == "type".len or stripped["type".len] notin {' ', '\t'}:
+    return lhs
+  stripped["type".len .. ^1]
+
+proc parseObjectOwner(line: string): string =
+  ## The name of the object type declared on `line`, or `""`.
+  let scan = scanDecl(line)
+  if scan.assign < 0 or scan.colon >= 0:
+    return ""
+  var rhs = line[scan.assign + 1 ..< scan.codeEnd].strip
+  if rhs.startsWith("ref "):
+    rhs = rhs[4 .. ^1].strip
+  # `object`, `object of Base`, `object {.pragma.}` — but not `objectish`.
+  if not rhs.startsWith("object"):
+    return ""
+  if rhs.len > "object".len and rhs["object".len] in identChars:
+    return ""
+  parseExportedName(dropLeadingTypeKeyword(line[0 ..< scan.assign]))
+
+proc parseFields(line: string; owner, sourceFile: string; lineNo: int):
+    seq[ViewModelField] =
+  ## Every exported `Signal`/`Memo` field declared on `line`.
+  ##
+  ## A sequence rather than a single field because `a*, b*: Signal[int]` is one
+  ## line and two fields; the literal-matching predecessor recovered neither of
+  ## them correctly.
+  let scan = scanDecl(line)
+  if scan.colon < 0 or scan.colon >= scan.codeEnd:
     return
 
-  let name = code[0 ..< marker].strip
-  let typePart = code[marker + 2 .. ^1].strip
-  if typePart.startsWith("Signal["):
-    return ViewModelField(owner: owner, field: name, kind: vfkSignal,
-      typeExpr: typePart, sourceFile: sourceFile, line: lineNo)
-  if typePart.startsWith("Memo["):
-    return ViewModelField(owner: owner, field: name, kind: vfkMemo,
-      typeExpr: typePart, sourceFile: sourceFile, line: lineNo)
+  let typeExpr = line[scan.colon + 1 ..< scan.codeEnd].strip
+  let kind =
+    if typeExpr.startsWith("Signal["): vfkSignal
+    elif typeExpr.startsWith("Memo["): vfkMemo
+    else: return
+
+  for spec in splitTopLevel(line[scan.indent ..< scan.colon], ','):
+    let name = parseExportedName(spec)
+    if name.len > 0:
+      result.add(ViewModelField(owner: owner, field: name, kind: kind,
+        typeExpr: typeExpr, sourceFile: sourceFile, line: lineNo))
 
 proc discoverViewModelFields*(sourceRoot = "src/frontend/viewmodel"):
     seq[ViewModelField] =
@@ -967,18 +1173,30 @@ proc discoverViewModelFields*(sourceRoot = "src/frontend/viewmodel"):
     if not fileExists(file):
       continue
     var owner = ""
+    var ownerIndent = 0
     var lineNo = 0
     for line in lines(file):
       inc lineNo
       let parsedOwner = parseObjectOwner(line)
       if parsedOwner.len > 0:
         owner = parsedOwner
+        ownerIndent = scanDecl(line).indent
         continue
       if owner.len == 0:
         continue
-      let field = parseField(line, owner, file, lineNo)
-      if field.owner.len > 0:
-        result.add(field)
+      # A field belongs to the object only while the source is still INDENTED
+      # under its declaration.  Without this the scanner would go on attributing
+      # everything below the `type` section — `proc` signatures, `let` bindings —
+      # to the last object it saw, which is exactly the false-positive risk that
+      # a tolerant parser takes on and a literal-matching one avoided by
+      # accident.
+      let scan = scanDecl(line)
+      if scan.indent >= scan.codeEnd:
+        continue  # blank or comment-only: says nothing about the body's extent
+      if scan.indent <= ownerIndent:
+        owner = ""
+        continue
+      result.add(parseFields(line, owner, file, lineNo))
   result.sort(proc(a, b: ViewModelField): int =
     let byPath = cmp(a.fieldPath, b.fieldPath)
     if byPath != 0: byPath else: cmp(a.sourceFile, b.sourceFile))
