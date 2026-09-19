@@ -60,6 +60,7 @@ import {
   allStripTabs,
   bottomStripTab,
   bottomStripTabs,
+  stripTab,
   dockedContainer,
   dockedContent,
   openDockedPanelFromTab,
@@ -251,8 +252,8 @@ test.describe("Auto-hide panes", () => {
     // which expands and takes space from GoldenLayout.  (Before commit
     // 03b787734 a click opened the floating overlay instead; this test used
     // to assert that, and could not have passed since.)
-    const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await openDockedPanelFromTab(ctPage, stripTab, "bottom", WAIT_TIMEOUT_MS);
+    const pinnedStripTab = stripTab(ctPage, pinnedTitle);
+    await openDockedPanelFromTab(ctPage, pinnedStripTab, "bottom", WAIT_TIMEOUT_MS);
 
     // The pinned panel's live element now lives in the docked content host.
     await expect(
@@ -263,7 +264,7 @@ test.describe("Auto-hide panes", () => {
     await expect(ctPage.locator(OVERLAY_SELECTOR)).not.toHaveClass(/\bvisible\b/);
 
     // Clicking the same tab again toggles the docked panel closed.
-    await stripTab.click();
+    await pinnedStripTab.click();
     await expect(dockedContainer(ctPage, "bottom")).not.toHaveClass(
       new RegExp(`\\b${DOCKED_OPEN_CLASS}\\b`),
       { timeout: WAIT_TIMEOUT_MS },
@@ -282,8 +283,8 @@ test.describe("Auto-hide panes", () => {
 
     // Hover the strip tab matching the pinned panel.  Hovering is what opens
     // the slide-in overlay of Auto-Hide-Panes.md §3.3.
-    const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
+    const pinnedStripTab = stripTab(ctPage, pinnedTitle);
+    await openOverlayFromTab(ctPage, pinnedStripTab, WAIT_TIMEOUT_MS);
 
     // The overlay title should match the previewed panel, and the panel's
     // live element should have been reparented into the overlay body.
@@ -312,8 +313,8 @@ test.describe("Auto-hide panes", () => {
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
     // Open the overlay by hovering the strip tab for the pinned panel.
-    const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
+    const pinnedStripTab = stripTab(ctPage, pinnedTitle);
+    await openOverlayFromTab(ctPage, pinnedStripTab, WAIT_TIMEOUT_MS);
 
     const overlay = ctPage.locator(OVERLAY_SELECTOR);
 
@@ -329,7 +330,7 @@ test.describe("Auto-hide panes", () => {
       });
     });
 
-    await unpinFromStripTabContextMenu(ctPage, stripTab, WAIT_TIMEOUT_MS);
+    await unpinFromStripTabContextMenu(ctPage, pinnedStripTab, WAIT_TIMEOUT_MS);
 
     await layoutUpdatedPromise;
 
@@ -362,8 +363,8 @@ test.describe("Auto-hide panes", () => {
     const pinnedTitle = await pinToEdge(ctPage, "Bottom", 0);
 
     // Open the overlay by hovering the pinned panel's strip tab.
-    const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
+    const pinnedStripTab = stripTab(ctPage, pinnedTitle);
+    await openOverlayFromTab(ctPage, pinnedStripTab, WAIT_TIMEOUT_MS);
 
     const overlay = ctPage.locator(OVERLAY_SELECTOR);
 
@@ -398,8 +399,8 @@ test.describe("Auto-hide panes", () => {
     // mouse-leave timer only on the overlay and the two SIDE strips — so
     // moving the pointer to the backdrop below cannot itself dismiss the
     // overlay, and the assertion still measures the backdrop click.
-    const stripTab = ctPage.locator(".auto-hide-strip-tab", { hasText: pinnedTitle });
-    await openOverlayFromTab(ctPage, stripTab, WAIT_TIMEOUT_MS);
+    const pinnedStripTab = stripTab(ctPage, pinnedTitle);
+    await openOverlayFromTab(ctPage, pinnedStripTab, WAIT_TIMEOUT_MS);
 
     const overlay = ctPage.locator(OVERLAY_SELECTOR);
 

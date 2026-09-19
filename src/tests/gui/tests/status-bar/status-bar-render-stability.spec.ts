@@ -66,6 +66,7 @@ import {
   DEFAULT_BOTTOM_TAB_COUNT,
   DEFAULT_BOTTOM_TAB_TITLES,
   RETIRED_BOTTOM_TABS_SELECTOR,
+  bottomStripTab,
   bottomStripTabs,
   waitForDefaultBottomTabs,
 } from "../../page-objects/auto-hide-strip";
@@ -261,7 +262,7 @@ test.describe("status bar render stability", () => {
     await waitForDefaultBottomTabs(ctPage);
     for (const title of DEFAULT_BOTTOM_TAB_TITLES) {
       await expect(
-        bottomStripTabs(ctPage).filter({ hasText: title }),
+        bottomStripTab(ctPage, title),
         `the ${title} pane must appear in the bottom strip`,
       ).toHaveCount(1);
     }

@@ -46,6 +46,7 @@ import {
   FIND_IN_FILES_TAB_TITLE,
   OVERLAY_SELECTOR,
   bottomStripTab,
+  stripTab,
   dockedContainer,
   openOverlayFromTab,
 } from "../../page-objects/auto-hide-strip";
@@ -123,7 +124,7 @@ async function bottomAutoHideTab(
   // fallback was not a fallback at all — the bottom locator matched nothing
   // on every call, so every click in this file went through it.
   if ((await tab.count()) > 0) return tab.first();
-  return page.locator(".auto-hide-strip-tab", { hasText: label }).first();
+  return stripTab(page, label).first();
 }
 
 /**

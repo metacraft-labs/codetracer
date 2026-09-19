@@ -27,7 +27,10 @@ import {
   ensureDefaultLayout,
   restoreUserLayout,
 } from "../../lib/layout-reset";
-import { FIND_IN_FILES_TAB_TITLE } from "../../page-objects/auto-hide-strip";
+import {
+  FIND_IN_FILES_TAB_TITLE,
+  stripTab,
+} from "../../page-objects/auto-hide-strip";
 
 const DIR = "/tmp/visual-review";
 
@@ -41,7 +44,7 @@ async function clickBottomTab(
   page: import("@playwright/test").Page,
   label: string,
 ): Promise<void> {
-  const tab = page.locator(".auto-hide-strip-tab", { hasText: label });
+  const tab = stripTab(page, label);
   await expect(tab.first()).toBeVisible({ timeout: 10_000 });
   await tab.first().click();
   await wait(OVERLAY_SETTLE_MS);

@@ -122,6 +122,14 @@ export const RETIRED_BOTTOM_TABS_SELECTOR = ".auto-hide-bottom-tabs";
  *
  * and every surviving hit must be prose, a test title, or a self-contained
  * fixture that builds its own DOM — never an argument to a locator helper.
+ *
+ * AND THAT GREP FINDS ONLY HALF OF WHAT THE RENAME BROKE.  It looks for the
+ * name that went away; the same rename also broke specs by what the new name
+ * ADDS — "FIND IN FILES" *contains* "FILES", which is a different pane — and
+ * none of those specs mentions either literal, because the title they match
+ * arrives at runtime from a GoldenLayout tab.  That class of breakage is now
+ * structurally impossible rather than greppable: every tab matcher here is
+ * exact.  See `exactTabText`.
  */
 export const BUILD_TAB_TITLE = "BUILD";
 export const PROBLEMS_TAB_TITLE = "PROBLEMS";
@@ -155,14 +163,62 @@ export function bottomStripTabs(page: Page): Locator {
   return page.locator(BOTTOM_STRIP_TAB_SELECTOR);
 }
 
-/** Bottom-strip tabs whose label contains `label` (e.g. "BUILD"). */
+/**
+ * A regex matching a strip tab's text EXACTLY, modulo surrounding whitespace.
+ *
+ * **Why every tab matcher here is exact and none is `hasText: string`.**
+ * Playwright's string `hasText` is a SUBSTRING match, and pane titles are not
+ * mutually prefix-free: "FIND IN FILES" contains "FILES", so a locator aimed
+ * at the FILESYSTEM pane resolved to two tabs and every strict-mode assertion
+ * on it failed with `Received: 2`.  That is the SECOND failure mode of the
+ * rename in `529c8dd1` ("SEARCH RESULTS" -> "FIND IN FILES"), and it is the
+ * one the note on `DEFAULT_BOTTOM_TAB_TITLES` cannot catch: the first mode
+ * broke by what the old name STOPPED matching, so grepping for the surviving
+ * literal found it; this one breaks by what the new name ADDS, in specs that
+ * never mention either name because the title arrives at runtime from a
+ * GoldenLayout tab.
+ *
+ * So substring is the wrong default for a tab matcher outright — it is a
+ * latent collision for every future pane name, not a fact about these four.
+ * A caller that genuinely wants a prefix or a fragment should pass its own
+ * `RegExp` to `filter()` and say why.
+ *
+ * The title reaching the DOM is `AutoHideBottomStripRecord.title`, which
+ * `pinPanel` in `ui/auto_hide.nim` copies verbatim out of
+ * `contentItem.tab.titleElement.textContent`, so it can carry the layout's
+ * incidental whitespace; the tab element itself holds nothing but the label
+ * span, so its `textContent` is the title alone.  Hence `\s*` at both ends and
+ * nothing else.
+ */
+export function exactTabText(label: string): RegExp {
+  // Titles are panel names today, but a path-derived title (see `showOverlay`'s
+  // note in `ui/auto_hide.nim`) can contain regex metacharacters.
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*${escaped}\\s*$`);
+}
+
+/** Bottom-strip tabs whose label is exactly `label` (e.g. "BUILD"). */
 export function bottomStripTab(page: Page, label: string): Locator {
-  return page.locator(BOTTOM_STRIP_TAB_SELECTOR, { hasText: label });
+  return page.locator(BOTTOM_STRIP_TAB_SELECTOR, {
+    hasText: exactTabText(label),
+  });
 }
 
 /** Every strip tab on the page — bottom strip plus both side strips. */
 export function allStripTabs(page: Page): Locator {
   return page.locator(`.${STRIP_TAB_CLASS}`);
+}
+
+/**
+ * A tab on ANY strip — bottom or either side — whose label is exactly `label`.
+ *
+ * Use this when the edge a panel ended up on is what the test is *observing*
+ * rather than what it is asserting (a pin that could land left, right or
+ * bottom), so the locator does not have to hard-code a strip selector.  It is
+ * exact for the same reason `bottomStripTab` is; see `exactTabText`.
+ */
+export function stripTab(page: Page, label: string): Locator {
+  return allStripTabs(page).filter({ hasText: exactTabText(label) });
 }
 
 /**
