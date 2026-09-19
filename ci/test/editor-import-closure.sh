@@ -544,5 +544,45 @@ else
 	detail "line is a line whose imports were NOT checked, so it is a finding."
 fi
 
+# ---------------------------------------------------------------------------
+# Check 7 — PLAT-31: NO KEYMAP MODULE IN THE EDITING CORE'S CLOSURE.
+#
+# `Editing-Operations-And-Keymaps.md` §1: *"An external keymap layer reads
+# input, resolves it against a loaded configuration, and executes a NAMED
+# OPERATION over the ViewModel."* **External** is the load-bearing word, and
+# the dependency it describes runs one way: the keymap imports the editor, the
+# editor knows nothing about keys.
+#
+# That is checked HERE rather than by a new scanner for PLAT-29's own stated
+# reason — *"writing a new scanner re-opens all six"* routes past a text scan.
+# The closure is already computed above, by the shared extractor, over the same
+# roots; this check is one grep over a list that exists.
+#
+# THE RULE IS THE PACKAGE, NOT A LIST OF FOUR FILES. A fifth keymap module
+# added next year is covered without an edit, which is the difference between
+# a rule and a transcription. `src/common/key_names.nim` is deliberately NOT
+# matched: it is a pure `string -> string` decoder in `src/common/`, shared by
+# both keymaps, and nothing in the editing core imports it either — but if the
+# core ever did, that would be admissible, because a canonical key NAME is not
+# a key TYPE and the milestone's gate is about the type.
+# ---------------------------------------------------------------------------
+KEYMAP_PACKAGE="${KEYMAP_PACKAGE:-src/frontend/viewmodel/keymap}"
+keymap_in_closure=()
+for m in "${closure[@]}"; do
+	case "${m}" in
+	*"${KEYMAP_PACKAGE}"/*) keymap_in_closure+=("${m}") ;;
+	esac
+done
+if [ "${#keymap_in_closure[@]}" -eq 0 ]; then
+	check_ok "editor-core-imports-no-keymap: no module of ${KEYMAP_PACKAGE}/ in ${#closure[@]} closure module(s)"
+else
+	check_failed "editor-core-imports-no-keymap: ${#keymap_in_closure[@]} keymap module(s) in the editing core's closure"
+	printf '              %s\n' "${keymap_in_closure[@]}"
+	detail "§1: the keymap layer is EXTERNAL. The dependency runs one way —"
+	detail "the keymap imports the editor, and the editor knows nothing about"
+	detail "keys. A module of the keymap package reached from the core means a"
+	detail "key type is now in the editing model's closure."
+fi
+
 echo "editor-import-closure: ${checks} check(s), ${failures} failing"
 [ "${failures}" -eq 0 ]

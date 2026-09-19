@@ -772,23 +772,30 @@ proc mSearchPrev(env: OpEnv; st: EditorState; r: SelectionRange;
 
 proc mMark(env: OpEnv; st: EditorState; r: SelectionRange;
            args: OpArgs): MotionLanding =
-  ## Vim's `'a`. §2.2 A calls a mark an anchor; see `EditorState.marks` for why
-  ## it is a byte offset at this milestone and what promoting it costs.
+  ## Vim's `'a`. §2.2 A calls a mark an anchor; `commitChange` gives it an
+  ## anchor's MAPPING and `EditorState.marks` records why not its type.
+  ##
+  ## **THE `clamp` THAT WAS HERE IS A REFUSAL NOW** — see `commitChange` for the
+  ## §36a argument and for why a refusal rather than a `raise`.
   if args.id.len == 0: return refusedLanding(r, rrMissingArgument)
   if not st.hasMark(args.id): return refusedLanding(r, rrNoMark)
-  landing(env.ctx.boundaryAtOrBefore(clamp(st.marks[args.id], 0, env.ctx.doc.len)))
+  let at = st.marks[args.id]
+  if at < 0 or at > env.ctx.doc.len: return refusedLanding(r, rrOutOfRange)
+  landing(env.ctx.boundaryAtOrBefore(at))
 
 proc mJumpBack(env: OpEnv; st: EditorState; r: SelectionRange;
                args: OpArgs): MotionLanding =
   if st.jumps.len == 0 or st.jumpIndex <= 0: return refusedLanding(r, rrNoMatch)
-  landing(env.ctx.boundaryAtOrBefore(
-    clamp(st.jumps[st.jumpIndex - 1], 0, env.ctx.doc.len)))
+  let at = st.jumps[st.jumpIndex - 1]
+  if at < 0 or at > env.ctx.doc.len: return refusedLanding(r, rrOutOfRange)
+  landing(env.ctx.boundaryAtOrBefore(at))
 
 proc mJumpForward(env: OpEnv; st: EditorState; r: SelectionRange;
                   args: OpArgs): MotionLanding =
   if st.jumpIndex + 1 >= st.jumps.len: return refusedLanding(r, rrNoMatch)
-  landing(env.ctx.boundaryAtOrBefore(
-    clamp(st.jumps[st.jumpIndex + 1], 0, env.ctx.doc.len)))
+  let at = st.jumps[st.jumpIndex + 1]
+  if at < 0 or at > env.ctx.doc.len: return refusedLanding(r, rrOutOfRange)
+  landing(env.ctx.boundaryAtOrBefore(at))
 
 # ===========================================================================
 # TEXT OBJECTS — 16 declarations, two forms each
@@ -980,14 +987,34 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
   ## PLAT-26's — and not a clamp: a clamp would put the range back in bounds
   ## while still naming the wrong text (Verification-Harness-Traps §36a).
   ##
-  ## **AND THE SAME CLAMP IS STILL THERE ONE FIELD OVER.** `marks` and `jumps`
-  ## are byte offsets (see `EditorState.marks`), this function does NOT map
-  ## them, and `mMark` / `mJumpBack` / `mJumpForward` reach them through
-  ## `clamp(..., 0, doc.len)` — §36a's shape, applied to a different field.
-  ## Bounded, stated, and not repaired here: promoting the two tables to
-  ## PLAT-28 anchors is what closes it, and it is a change to those two fields'
-  ## types. Said in the same paragraph as the repair so the milestone cannot be
-  ## read as having applied §36a everywhere it applies.
+  ## **AND THE SAME CLAMP WAS STILL THERE ONE FIELD OVER UNTIL PLAT-31, WHICH
+  ## CLOSED IT.** `marks` and `jumps` are byte offsets (see
+  ## `EditorState.marks`); this function did NOT map them and `mMark` /
+  ## `mJumpBack` / `mJumpForward` reached them through `clamp(..., 0, doc.len)`
+  ## — §36a's shape, one field over from the repair above, recorded by PLAT-30
+  ## as a residual rather than fixed. It is fixed here, and in the same two
+  ## halves the §36a rule asks for:
+  ##
+  ##   1. **THE MAPPING.** Every in-range mark and jump is advanced through the
+  ##      same change set, by `change_set.mapPosOr` — which is not a new
+  ##      derivation but the exact function `anchor.landingOf` is DEFINED as
+  ##      (`anchor.nim`: *"`change_set.mapPosOr` spelled through the anchor's
+  ##      own type"*). So marks got PLAT-28's mapping; what they did not get is
+  ##      PLAT-28's TYPE, and `EditorState.marks` records why.
+  ##   2. **THE CLAMP BECAME A REFUSAL, NOT A `raise`.** §36a's first rule says
+  ##      a silent repair must raise *"unless the repair is itself a specified
+  ##      behaviour with a name"*. A raise is the wrong answer HERE for a
+  ##      reason this milestone can point at rather than argue: `mMark` is a
+  ##      motion, `FUZZ-8`'s invariant is that no exception escapes and a
+  ##      refusal is a typed value, and §5.1 asks for *"a defined, reported
+  ##      outcome"*. So the offset that our own bookkeeping can no longer
+  ##      produce — it can now only arrive from a CALLER who wrote one — is
+  ##      `rrOutOfRange`, which is a named outcome a suite drives, rather than
+  ##      a plausible landing nobody sees being wrong.
+  ##
+  ## `sideAfter` and not `sideBefore`: a mark names the start of the text that
+  ## was there, so text inserted at exactly that offset is new text the mark
+  ## never named, and the mark moves to stay in front of what it did.
   result = st
   let newDoc = cs.apply(st.doc)
   if newDoc != st.doc:
@@ -996,6 +1023,17 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
       result.selUndo[i] = mapSelection(result.selUndo[i], cs)
     for i in 0 ..< result.selRedo.len:
       result.selRedo[i] = mapSelection(result.selRedo[i], cs)
+    # The marks and the jump list, through the same change set. Only offsets
+    # that ARE positions of the old document are mapped: mapping one that is
+    # not would be inventing an answer for an input the mapping is not defined
+    # over, which is the clamp wearing a different function's name.
+    for id, pos in st.marks:
+      if pos >= 0 and pos <= st.doc.len:
+        result.marks[id] = cs.mapPosOr(pos, sideAfter)
+    for i in 0 ..< result.jumps.len:
+      let pos = st.jumps[i]
+      if pos >= 0 and pos <= st.doc.len:
+        result.jumps[i] = cs.mapPosOr(pos, sideAfter)
     result.doc = newDoc
   if newSelection.isSome:
     result.selection = newSelection.get

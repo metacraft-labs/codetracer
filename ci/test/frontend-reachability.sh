@@ -33,8 +33,17 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1245 bash ci/test/frontend-reachability.sh`, so 1246
-# findings fail `lint-nim` and 1245 do not.
+# `env CT_REACHABILITY_MAX=1258 bash ci/test/frontend-reachability.sh`, so 1259
+# findings fail `lint-nim` and 1258 do not.
+#
+# THE CEILING MOVED 1245 -> 1258 ON 2026-09-19 (PLAT-31), and its reason is the
+# one worth reading first, because the GROSS was +16 and three of those were
+# DELETED instead of ratcheted past. The `nothing` bucket and the
+# `tested-only` bucket are not the same finding and PLAT-31 is the move that
+# treated them differently: three symbols reached by nothing at all were
+# removed (a public helper nobody calls is dead code, not a backlog item), and
+# thirteen ordinary exports with a suite and no product caller were ratcheted.
+# The full reason lives in the setter beside the invocation in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1238 -> 1245 ON 2026-09-18 (PLAT-30), and 1225 -> 1238
 # earlier the same day (PLAT-29). Both reasons live in the setter beside the

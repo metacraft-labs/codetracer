@@ -10,6 +10,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-28
 #   bash ci/test/editor-model-case-floor.sh PLAT-29
 #   bash ci/test/editor-model-case-floor.sh PLAT-30
+#   bash ci/test/editor-model-case-floor.sh PLAT-31
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -207,9 +208,25 @@ PLAT-30)
 	# so the floor and this total count the same set.
 	LAW_SUITES=()
 	;;
+PLAT-31)
+	MILESTONE="** PLAT-31: The keymap layer"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_keymap_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_keymap_differential.nim
+	)
+	# NO `LAW_SUITES`, FOR PLAT-30's REASON AND NOT BY OVERSIGHT.
+	# `Editor-Model-Conformance-Suite.md` §3 publishes `LAW-A*` … `LAW-X*` and
+	# none of them is PLAT-31's: this milestone's oracle is §8's `DIFF-4` row
+	# and §4.4's coverage equality, both of which are asserted INSIDE the
+	# suites, as set differences in both directions with the cardinality. A
+	# `LAW_PREFIX` here would make this gate parse a table that does not exist
+	# and, per §4, a parser that matches nothing satisfies everything written
+	# over it.
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-30. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-31. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

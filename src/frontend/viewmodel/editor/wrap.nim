@@ -835,21 +835,42 @@ func displayGoalOf(ctx: DisplayCtx; r: SelectionRange; at: DisplayPos): int =
   ## `wrapColumn <= 0` a display row IS a logical line and the two coincide
   ## exactly, which the suite asserts rather than asserting the wording.
   ##
-  ## The residual, recorded rather than hidden: a caret whose goal was set by
-  ## `opMoveLineUp` and then stepped with `gj` across a WRAPPED line reads a
-  ## line-relative column as a row-relative one. Making that impossible needs
-  ## the goal to carry its unit, which changes `SelectionRange` and therefore
-  ## PLAT-26's published shape; it is not taken here.
+  ## **THE RESIDUAL THIS HEADER CARRIED IS CLOSED, AND THE CLOSURE IS PLAT-30's
+  ## DESIGN DECISION RATHER THAN A CHANGE TO THIS FUNCTION.** Until 2026-09-19
+  ## the paragraph here read: *"a caret whose goal was set by `opMoveLineUp` and
+  ## then stepped with `gj` across a WRAPPED line reads a line-relative column
+  ## as a row-relative one … it is not taken here"*, and beneath it *"PLAT-28
+  ## inherits a worry, not a measurement"*. Both sentences were true when they
+  ## were written and both were **stale from the day PLAT-30 landed**.
   ##
-  ## **AND IT IS NOT MEASURED EITHER — SAID PLAINLY, BECAUSE THE ALTERNATIVE IS
-  ## A RESIDUAL THAT READS AS PRICED.** The suite's only comparison of the
-  ## display vocabulary against PLAT-26's logical one runs at `wrapColumn = 0`
-  ## ("at wrapColumn 0 a display motion IS its PLAT-26 logical counterpart"),
-  ## and that is the one setting at which a display row IS a logical line, so
-  ## the two units coincide and the residual provably cannot occur. A check
-  ## placed where the thing it is about is absent is §4b's shape, so no number
-  ## is claimed here: PLAT-28 inherits a worry, not a measurement, and the
-  ## measurement is the first thing it should take.
+  ## What closed it: the residual exists only if the two motion families carry
+  ## goal columns in two units. They do not. `operations.verticalLogical` —
+  ## which is what `move-line-up` / `move-line-down` are — takes its goal from
+  ## `cache.toDisplay(...).column`, and `operations.displayMotion` delegates to
+  ## `landingOf`, which takes its goal from THIS function. Both are a
+  ## `DisplayPos.column`: cells from the left edge of the caret's DISPLAY ROW.
+  ## A goal set by one family and read by the other is therefore in the unit the
+  ## reader expects, at every wrap column and not only at `0`.
+  ##
+  ## §2.2 A's rows for `line-up` / `line-down` are marked display-dependent AND
+  ## say *"logical lines"*, and that pair is only satisfiable under this
+  ## reading — which is why the decision was PLAT-30's to take and is recorded
+  ## in its status with the alternative it refused.
+  ##
+  ## **WHAT IS STILL TRUE AND IS NOT A RESIDUAL.** `SelectionRange.goalColumn`
+  ## does not carry its unit in its TYPE, so the units coincide by construction
+  ## rather than by construction being impossible to break. Making it
+  ## unbreakable changes PLAT-26's published shape and is still not taken here.
+  ## The difference between that sentence and the one it replaces is the
+  ## difference between "a type could say this" and "the two families disagree",
+  ## and only the second is a defect.
+  ##
+  ## **NO NUMBER IS CLAIMED FOR ANY OF IT** (§36b). The old paragraph was
+  ## careful to say the residual was unmeasured; this one does not replace an
+  ## unmeasured worry with an unmeasured reassurance. The claim above is a
+  ## SOURCE fact — two call sites, one unit — and `test_editor_keymap_laws.nim`
+  ## asserts it as one, by requiring both goal-producing sites to read a
+  ## `DisplayPos.column`.
   if r.goalColumn.isSome: r.goalColumn.get else: at.column
 
 proc initDisplayCtx*(doc: string; settings: WrapSettings): DisplayCtx =

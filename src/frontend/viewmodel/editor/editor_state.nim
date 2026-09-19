@@ -22,9 +22,17 @@
 ## editor rather than in a keymap: *"Counts, the pending register, the
 ## operator-pending state, the recording macro, the last change (for `.`), the
 ## mode itself and the pending-chord buffer are editor state that the keymap
-## consults"*. Every one of those except the pending-chord buffer is a field
-## below; the chord buffer belongs to PLAT-31's resolver, which does not exist,
-## and a field nothing writes is a field that looks like coverage.
+## consults"*. Every one of those is a field below.
+##
+## **THE SEVENTH ARRIVED WITH PLAT-31 AND THE DELAY WAS DELIBERATE.** Until the
+## resolver existed this header read *"the chord buffer belongs to PLAT-31's
+## resolver, which does not exist, and a field nothing writes is a field that
+## looks like coverage"*. The resolver exists now, it writes `pending`, and the
+## field is here rather than in the resolver for §3's own second reason: *"a
+## pending `d`, a pending count `12`, a recording macro and the active register
+## are all things the STATUS LINE shows"*, and a keymap-private field would
+## have to be surfaced through a second channel per front-end — one per keymap
+## model, since a second keymap would otherwise need a second copy.
 ##
 ## **THE HISTORY HERE IS A SNAPSHOT STACK AND PLAT-32 OWNS THE REAL ONE.** Said
 ## plainly rather than left to be discovered: `undo`, `redo`, `undo-selection`
@@ -111,6 +119,25 @@ type
     pfStale = "stale"
     pfFresh = "fresh"
 
+  PendingChords* = object
+    ## §3's seventh item: a partially typed chord sequence, as a value.
+    ##
+    ## THE TIMEOUT IS STORED AS THE MOMENT THE PREFIX STARTED rather than as a
+    ## countdown, so PLAT-31's resolver stays a pure function of
+    ## `(state, key, now)` and a suite drives it with a virtual clock instead
+    ## of sleeping. `tui/app/input/keymap.PendingState` records the same
+    ## decision for the debugger's prefixes; the two are the same shape for the
+    ## same reason and neither is derived from the other, because the editing
+    ## buffer is STATE (a status line reads it) and that one is the resolver's
+    ## own scratch.
+    ##
+    ## **A `seq[string]` OF CANONICAL KEY NAMES AND NOT A KEY TYPE.** The
+    ## import-closure gate refuses any keymap module in this directory's
+    ## closure, so what a chord IS cannot be named here — and does not need to
+    ## be: a chord's canonical name is a string on every front-end.
+    chords*: seq[string]
+    startedMs*: int64
+
   Snapshot* = object
     ## One undoable point. See the header on why this is a snapshot.
     doc*: string
@@ -132,6 +159,10 @@ type
     pendingOperator*: string
       ## `begin-operator(op)`'s argument, `""` when none. It names an entry of
       ## category C, which `operations.nim` checks rather than assumes.
+    pending*: PendingChords
+      ## §3's pending-chord buffer. PLAT-31's resolver reads it and returns the
+      ## next one; nothing in THIS module writes it, which is why there is no
+      ## `pushChord` beside `pushUndo`.
 
     recording*: string
       ## The macro id being recorded, `""` when none.
@@ -146,13 +177,25 @@ type
       ## most recent document-changing burst.
 
     marks*: Table[string, int]
-      ## `mark(id)`. **A byte offset and not an anchor, at this milestone**, and
-      ## the difference is real: PLAT-28's anchors survive an edit and these do
-      ## not. Recorded rather than glossed — `mark(id)` is a published motion
-      ## and it has to be executable; promoting the table to anchors is a
-      ## change to this field's type and to nothing else.
+      ## `mark(id)`. A byte offset, and **PLAT-31 gave it PLAT-28's MAPPING
+      ## without giving it PLAT-28's TYPE** — see `operations.commitChange`,
+      ## which now advances every in-range mark and jump through the change set
+      ## with `change_set.mapPosOr`, the same function `anchor.landingOf` is
+      ## defined as.
+      ##
+      ## **WHY NOT `Table[string, Anchor]`, WHICH IS WHAT PLAT-30's RESIDUAL
+      ## PROPOSED.** An `Anchor` carries four fields and a mark has a use for
+      ## one of them. `surface` is a decoration's kind and a mark is not a
+      ## decoration; `id` is a caller's handle and the mark's handle is the
+      ## table key; `side` is constant for every mark there will ever be. Three
+      ## unread fields would then be compared by `EditorState.==` — so two
+      ## states whose marks are at the same offsets would be unequal because
+      ## one recorded a different surface, and `settle` decides `ooActed` from
+      ## that comparison. What marks needed from PLAT-28 was the mapping, and
+      ## that is what they have.
     jumps*: seq[int]
-      ## The jump list `jump-back` / `jump-forward` walk.
+      ## The jump list `jump-back` / `jump-forward` walk. Mapped with the
+      ## marks, by the same call, for the same reason.
     jumpIndex*: int
       ## Where in `jumps` the cursor into the list currently sits.
 
@@ -179,6 +222,17 @@ const
 
   DefaultIndentUnit* = "    "
 
+  PendingTimeoutMsDefault* = 1000'i64
+    ## How long a pending chord sequence waits for its next chord. Vim's own
+    ## `timeoutlen` default, which is also what `tui/app/input/keymap.nim` uses
+    ## for the DEBUGGER's prefixes — a product that waited one length for
+    ## `Ctrl+w` and another for `d` would be one whose timeout is a per-table
+    ## accident. The number is named so a suite asserts the boundary at exactly
+    ## it and at one past it rather than somewhere plausible.
+    ##
+    ## It lives beside the buffer it bounds, because the buffer is state and
+    ## the bound is a property of the buffer rather than of one resolver.
+
 func defaultComments*(): LanguageComments =
   ## Nim's, because this repository's documents are Nim and a default that
   ## matches nothing would make `toggle-comment` a no-op everywhere.
@@ -201,6 +255,7 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     doc: doc, selection: sel, mode: emNormal,
     registers: initTable[string, Register](),
     activeRegister: "", count: 0, pendingOperator: "",
+    pending: PendingChords(chords: @[], startedMs: 0),
     recording: "", macros: initTable[string, seq[string]](), recorded: @[],
     lastChange: @[], marks: initTable[string, int](), jumps: @[], jumpIndex: 0,
     folded: @[], breakpoints: @[], tracepoints: @[], flowOverlay: false,
@@ -218,6 +273,9 @@ func `==`*(a, b: LanguageComments): bool =
   a.lineToken == b.lineToken and a.blockOpen == b.blockOpen and
     a.blockClose == b.blockClose
 
+func `==`*(a, b: PendingChords): bool =
+  a.chords == b.chords and a.startedMs == b.startedMs
+
 func `==`*(a, b: Snapshot): bool =
   a.doc == b.doc and a.selection == b.selection
 
@@ -227,10 +285,14 @@ func `==`*(a, b: EditorState): bool =
   ## equality for 200 of the 224; a comparison that read only the document and
   ## the selection would call two states equal that differ in their mode, their
   ## count or their registers, and 200 negative controls would then be 200
-  ## assertions about two of twenty-six fields.
+  ## assertions about two of twenty-seven fields. (Twenty-six until PLAT-31
+  ## added `pending`; the number is in prose and the FIELD LIST below is
+  ## what is executed, so a field added and not compared is a field this
+  ## comparison silently ignores — which is exactly what `M15` performs.)
   a.doc == b.doc and a.selection == b.selection and a.mode == b.mode and
     a.registers == b.registers and a.activeRegister == b.activeRegister and
     a.count == b.count and a.pendingOperator == b.pendingOperator and
+    a.pending == b.pending and
     a.recording == b.recording and a.macros == b.macros and
     a.recorded == b.recorded and a.lastChange == b.lastChange and
     a.marks == b.marks and a.jumps == b.jumps and a.jumpIndex == b.jumpIndex and

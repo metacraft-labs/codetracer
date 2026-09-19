@@ -372,8 +372,37 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # Net +7. **NOT ALLOW-LISTED**, for the reason the paragraph above gives: an
 # allow-list entry claims a symbol is permanently unreachable by a Nim name,
 # and these are ordinary exports waiting for a caller.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1245 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1245 bash ci/test/frontend-reachability.sh
+#
+# 1245 -> 1258 ON 2026-09-19 (PLAT-31), AND THE GROSS WAS +16 BEFORE THREE WERE
+# DELETED RATHER THAN RATCHETED PAST.
+# ----------------------------------------------------------------------------
+# PLAT-31 added `src/frontend/viewmodel/keymap/` — four modules, the resolver
+# and three keymap models — plus two symbols on `editor_state.nim`
+# (`PendingChords`'s `==` and `PendingTimeoutMsDefault`). The whole package is
+# exercised by its two suites and reached by NO product module, because the
+# shipped terminal binary still dispatches Edit mode through `TuiEditBindings`
+# against a `TextAreaWidget`. Wiring it is PLAT-34's substrate migration, and
+# the milestone is recorded `partial` for exactly that reason.
+#
+# THE TWO BUCKETS WERE TREATED DIFFERENTLY, WHICH IS THE POINT:
+#
+#   * **`nothing` — 3 findings, DELETED.** `editing_keymap.anyScope`,
+#     `editing_keymap.inModes` and `kakoune_keymap.kakouneFiled` were reached by
+#     nothing at all, not even a case. A public helper nobody calls is not a
+#     backlog item waiting for a caller; it is coverage-shaped dead code, and
+#     raising a ceiling past it would have preserved it forever. 1261 -> 1258.
+#   * **`tested-only` — 13 findings, RATCHETED.** `resolve`, `trieFor`,
+#     `driveKeys`, `conflictsIn`, `loadEditingKeymap`, `coverageGaps`,
+#     `vimKeymap`, `kakouneKeymap`, `productKeymap` and the rest are ordinary
+#     exports with a suite and no product caller yet — the same situation
+#     PLAT-29's move above describes, and the same remedy.
+#
+# It is a CEILING, so it falls again when PLAT-34 wires the layer in.
+# **NOT ALLOW-LISTED**: an allow-list entry claims a symbol is permanently
+# unreachable by name, and every one of these thirteen is waiting for a caller
+# that a named milestone will add.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1258 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1258 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

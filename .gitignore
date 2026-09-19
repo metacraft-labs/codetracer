@@ -63,7 +63,43 @@ tes?_py*
 testcache/
 .config.json
 .mypy*
-*map
+# Source maps only. This was once a bare `*map`, which matches ANY path
+# component ending in "map" — it silently swallowed
+# `src/frontend/viewmodel/keymap/` (1,743 lines across four modules, measured
+# at commit) so that `git status` never listed it and a commit would have
+# dropped the whole directory while every local test still compiled from disk.
+#
+# THAT NUMBER READ 1,660 UNTIL IT WAS RE-MEASURED HERE. It had been taken when
+# the directory was first found hidden and was never re-taken after the repairs
+# that followed grew it — which is `Verification-Harness-Traps` §36b's own
+# complaint ("a number rots precisely because nothing re-takes it") sitting
+# inside the comment block that exists because of a defect about what git can
+# see. Re-measure it or drop it; do not carry it forward unchecked.
+*.map
+
+# THE OTHER THING THE BARE `*map` WAS HIDING, and it turns out it was right to
+# hide it — for the wrong reason. `sourcemap` ends in "map", so the old pattern
+# ignored the whole `tests/fixtures/sourcemap/` tree; the two fixture INPUTS in
+# it (`lodash.min.js`, `lodash.min.js.map`) survived only because a file
+# already tracked stays tracked.
+#
+# This directory is not a fixture. `sourcemap_cache.rs` writes its translated
+# sidecars to `<cache_dir>/sourcemap-translate/`, and
+# `tests/sourcemap_lodash.rs::build_trace_into_fixture` points `cache_dir` at
+# the fixture directory itself — so running the db-backend suite GENERATES this
+# file into the source tree. It is test output, and committing it would commit
+# one run's artefact as though it were an input.
+src/db-backend/tests/fixtures/sourcemap/sourcemap-translate/
+
+# …and the fixture INPUT next to it is un-ignored by name, because `*.map`
+# above matches it. It is tracked today, so nothing is broken today — a file
+# git already tracks is unaffected by these patterns. But that is the exact
+# shape of the defect this whole block exists because of: the rule and the
+# reality agree only for as long as nobody removes and re-adds the file, and
+# the day somebody does, a hand-crafted source map that a Rust suite asserts
+# the existence of would vanish from `git status` instead of from the tree.
+# Verified matched with `git check-ignore -v` in a scratch repo before adding.
+!src/db-backend/tests/fixtures/sourcemap/lodash.min.js.map
 
 # layouts/
 testProject/t

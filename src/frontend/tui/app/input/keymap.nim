@@ -112,7 +112,7 @@
 ## text — never skipped silently, because a keymap that ignores what it cannot
 ## parse is a keymap that tells the user their binding works.
 
-import std/[os, strutils, tables]
+import std/[os, strutils]
 
 # PLAT-16. `ProductMode` from the CORE, through the sanctioned facade. See
 # `resolve`'s `product` parameter and `ActionScope` below: scoping a chord by
@@ -120,10 +120,20 @@ import std/[os, strutils, tables]
 # parameter rather than with a fifth `ModalMode` is §1.2's.
 import codetracer_embed
 
+# PLAT-31. `keyName`, `keyCharacter`, `isTextKey` and `isPrintableKey` WERE
+# HERE and are now one module both keymaps call — see `key_names.nim`'s header.
+# They are re-exported so every call site of this module is unchanged, and so
+# that "the editing keymap reuses `keymap.nim`'s existing `keyCharacter`
+# spelling" (Editing-Operations-And-Keymaps.md §4.3) is a fact about a shared
+# function rather than about two texts that happen to agree today
+# (Verification-Harness-Traps §30a).
+import ../../../../common/key_names
+
 import ./modal_state
 
 export modal_state
 export ProductMode
+export key_names
 
 type
   KeyAction* = enum
@@ -358,170 +368,20 @@ const
     ## distinguishable from a stray glyph in the status bar.
 
 # ---------------------------------------------------------------------------
-# Canonical key names
+# Canonical key names — MOVED, not deleted
 # ---------------------------------------------------------------------------
-
-const
-  FunctionKeyCodes = {
-    15: "F5", 17: "F6", 18: "F7", 19: "F8", 20: "F9", 21: "F10", 23: "F11",
-    24: "F12"}.toTable
-    ## xterm's `CSI <code> ~` function keys. F1-F4 use SS3 (`ESC O P..S`) and
-    ## are handled separately, which is xterm's own split rather than this
-    ## module's — https://invisible-island.net/xterm/ctlseqs/ctlseqs.html,
-    ## "PC-Style Function Keys".
-
-  ModifierNames = {2: "Shift", 3: "Alt", 4: "Shift+Alt", 5: "Ctrl",
-                   6: "Ctrl+Shift", 7: "Ctrl+Alt", 8: "Ctrl+Alt+Shift"}.toTable
-    ## xterm's modifier parameter: the value is `1 + (Shift=1 | Alt=2 | Ctrl=4)`.
-    ## Spelled in the order §4.2 writes them (`Shift+F10`, `Alt+F5`, `Ctrl+p`).
-
-proc isPrintableKey*(name: string): bool =
-  ## Whether a canonical key name is a single printable character.
-  ##
-  ## `Esc`, `Enter`, `Tab`, `F10` and `Ctrl+p` are all multi-character names,
-  ## so this needs no second list to know they are not characters. It is NOT
-  ## the whole of the text-entry shadowing rule — see `keyCharacter`.
-  name.len == 1 and name[0] >= ' ' and name[0] <= '~'
-
-proc keyCharacter*(name: string): string =
-  ## The CHARACTER a canonical key name inserts into a text field, or "".
-  ##
-  ## THE PREDICATE THE TEXT-ENTRY SHADOWING RULE ACTUALLY USES, and it is not
-  ## `isPrintableKey` because of exactly one key. `keyName` answers `"Space"`
-  ## for byte `0x20`, deliberately: §4.2 binds `Space` to "Toggle Breakpoint"
-  ## and a table cell reading ` ` would be unreadable. But `isPrintableKey`
-  ## answers false for a five-letter name, so under CTUI-9's rule a space typed
-  ## at a `:` prompt resolved to `krNone` AND WAS SILENTLY LOST — `:goto 4500`
-  ## could not be typed at all.
-  ##
-  ## CTUI-9 could not have seen it: its own header records that "§4.2's table
-  ## has no key that enters INSPECT mode and no way to run or edit the `:`
-  ## prompt", so there was no text field to lose a character into. CTUI-10 has
-  ## one, and `tests/real_terminal/test_real_command_mode.nim` types
-  ## `:goto 4500` as real bytes on a real pty, which is where this was measured.
-  ##
-  ## The fix is here rather than in the prompt because the SHADOWING DECISION is
-  ## here: a resolver that classified `Space` as "not text" and left the prompt
-  ## to notice would be two rules for one question, which is the thing this
-  ## module's header exists to prevent.
-  if name == "Space": " "
-  elif isPrintableKey(name): name
-  else: ""
-
-proc isTextKey*(name: string): bool =
-  ## Whether a text field owns this key. `keyCharacter` with the character
-  ## thrown away, named so `resolve` reads as a rule rather than as a length
-  ## test.
-  keyCharacter(name).len > 0
-
-proc keyName*(token: string): string =
-  ## The canonical name of one complete input token — a byte, or a whole escape
-  ## sequence as `testing/test_app_runtime.nim` frames them.
-  ##
-  ## Returns "" for anything unrecognised (an SGR-1006 mouse report, a runaway
-  ## sequence), so a caller can tell "not a key" from "a key nothing is bound
-  ## to".
-  if token.len == 0:
-    return ""
-  if token.len == 1:
-    let c = token[0]
-    case c
-    of '\t': return "Tab"
-    of '\r', '\n': return "Enter"
-    # `\b` is Ctrl+H on the wire and `\x7f` is what most terminals send for
-    # Backspace. Both spell Backspace here, which costs the product a `Ctrl+h`
-    # binding it does not have and buys a Backspace that works on every
-    # terminal.
-    of '\x7f', '\b': return "Backspace"
-    of ' ': return "Space"
-    of '\x1b': return "Esc"
-    else:
-      if c >= '\x01' and c <= '\x1a':
-        return "Ctrl+" & $char(ord('a') + ord(c) - 1)
-      if c >= ' ' and c <= '~':
-        return $c
-      return ""
-  # SS3: ESC O P..S — F1 to F4.
-  if token.len == 3 and token[0] == '\x1b' and token[1] == 'O':
-    case token[2]
-    of 'P': return "F1"
-    of 'Q': return "F2"
-    of 'R': return "F3"
-    of 'S': return "F4"
-    else: return ""
-  if token.len < 3 or token[0] != '\x1b' or token[1] != '[':
-    return ""
-  let body = token[2 .. ^1]
-  let final = body[^1]
-  let params = body[0 ..< body.len - 1]
-  case final
-  of 'A', 'B', 'C', 'D':
-    # Arrows, plain (`CSI A`) or modified (`CSI 1 ; m A`).
-    let name = case final
-               of 'A': "Up"
-               of 'B': "Down"
-               of 'C': "Right"
-               else: "Left"
-    if params.len == 0:
-      return name
-    let parts = params.split(';')
-    if parts.len == 2 and parts[0] == "1":
-      try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          return ModifierNames[m] & "+" & name
-      except ValueError:
-        return ""
-    return ""
-  of 'Z':
-    # `CSI Z` is xterm's back-tab, which is what `Shift+Tab` sends.
-    if params.len == 0: return "Shift+Tab"
-    return ""
-  of 'P', 'Q', 'R', 'S':
-    # Modified F1-F4: `CSI 1 ; m P`.
-    let parts = params.split(';')
-    if parts.len == 2 and parts[0] == "1":
-      try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          let name = case final
-                     of 'P': "F1"
-                     of 'Q': "F2"
-                     of 'R': "F3"
-                     else: "F4"
-          return ModifierNames[m] & "+" & name
-      except ValueError:
-        return ""
-    return ""
-  of '~':
-    let parts = params.split(';')
-    var code = 0
-    try:
-      code = parseInt(parts[0])
-    except ValueError:
-      return ""
-    var base = ""
-    if FunctionKeyCodes.hasKey(code):
-      base = FunctionKeyCodes[code]
-    else:
-      case code
-      of 2: base = "Insert"
-      of 3: base = "Delete"
-      of 5: base = "PageUp"
-      of 6: base = "PageDown"
-      else: return ""
-    if parts.len == 1:
-      return base
-    if parts.len == 2:
-      try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          return ModifierNames[m] & "+" & base
-      except ValueError:
-        return ""
-    return ""
-  else:
-    return ""
+#
+# `FunctionKeyCodes`, `ModifierNames`, `isPrintableKey`, `keyCharacter`,
+# `isTextKey` and `keyName` now live in `src/common/key_names.nim` and are
+# re-exported by the import above, so every call site here and in every
+# consumer of this module reads exactly as it did.
+#
+# WHY THEY MOVED, IN ONE SENTENCE: PLAT-31's editing keymap has to ask the same
+# text-entry question of the same key names, and the alternative to sharing the
+# function was writing it a second time — which is the shape
+# Verification-Harness-Traps §30a calls "the worst instance … a whole re-derived
+# module", over the one predicate in this file whose narrower spelling has
+# ALREADY cost the product a defect (`Space`, and `:goto 4500`).
 
 # ---------------------------------------------------------------------------
 # The published table, as data

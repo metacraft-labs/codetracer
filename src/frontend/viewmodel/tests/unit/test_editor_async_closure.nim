@@ -1,7 +1,7 @@
 ## PLAT-29 — THE IMPORT-CLOSURE CHECK, AND THE SEVEN ROUTES PAST A TEXT SCAN.
 ##
 ## Subject: `ci/test/editor-import-closure.sh`, driven against the REAL tree and
-## against seven synthetic trees, one per route.
+## against eight synthetic trees, one per route.
 ##
 ## =========================================================================
 ## WHY THIS SUITE IS SEPARATE FROM THE OTHER TWO, AND WHY IT IS NATIVE-ONLY
@@ -40,6 +40,17 @@
 ## | 6 | `export … except`, which narrows ONE path and cannot narrow a second one a module opens for itself | THE ALLOW-LIST, which refuses the module by spec and does not care what the export clause says |
 ## | 7 | nothing — a plain `import std/asyncdispatch`. The planted arm, which must redden before the control digests are re-recorded (§32) | the allow-list |
 ##
+## **AN EIGHTH TREE ARRIVED WITH PLAT-31 AND IT IS NOT AN ASYNC ROUTE.** The
+## gate grew a seventh CHECK — *"no module of the keymap package may appear in
+## the editing core's closure"* (`Editing-Operations-And-Keymaps.md` §1: the
+## keymap layer is EXTERNAL) — and PLAT-31's verification gate asks for it
+## *"by PLAT-29's instrument, with a planted import"*. `rtKeymapImport` is that
+## plant, and the case asserts not only that the gate reddened but that the
+## SEVENTH check is what reddened and the other three found nothing: the
+## planted keymap module is deliberately spotless, so a gate that failed it for
+## an allow-list reason would be the misdirected verdict route 3 already cost
+## this file once.
+##
 ## Routes 3 and 6 are refused by the ALLOW-LIST and route 4 by the PRAGMA
 ## TABLE, and they are kept apart deliberately: Verification-Harness-Traps §32a
 ## is that two mechanisms guarding one property silently halve the older one's
@@ -72,7 +83,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 43
+const ExpectedAssertions = 50
 
 const repoRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir
   .parentDir.parentDir
@@ -97,7 +108,14 @@ proc runGate(editorDir, searchRoot: string): GateRun =
   ## gate through a second copy of this could agree with itself while the rule's
   ## copy was broken.
   let (output, code) = execCmdEx(
-    "timeout " & $GateTimeoutSeconds & " bash " & quoteShell(Gate) &
+    # `KEYMAP_PACKAGE` names the directory the gate's seventh check matches.
+    # The synthetic tree is under `/tmp` and cannot carry the real path, so the
+    # rule is parameterised rather than the check being weakened to a bare
+    # `*keymap*` — which would match `src/common/key_names.nim` and make the
+    # rule about a name instead of about a package. The real run uses the
+    # default, and this is the only caller that overrides it.
+    "KEYMAP_PACKAGE=keymap timeout " & $GateTimeoutSeconds & " bash " &
+    quoteShell(Gate) &
     " --editor-dir=" & quoteShell(editorDir) &
     " --search-root=" & quoteShell(searchRoot),
     workingDir = repoRoot)
@@ -116,6 +134,17 @@ type Route = enum
   rtCallSiteConditional
   rtExportExcept
   rtPlainImport
+  rtKeymapImport
+    ## **PLAT-31's ROUTE, AND IT IS NOT AN ASYNC ROUTE AT ALL.** The gate grew
+    ## a seventh check — *"no module of the keymap package may appear in the
+    ## editing core's closure"* — and PLAT-31's verification gate asks for it
+    ## *"by PLAT-29's instrument, with a planted import"*. This is that plant.
+    ##
+    ## It lives here rather than in a second harness for the reason PLAT-29's
+    ## own header gives about the scanner: the seven routes past a text scan
+    ## are closed in `ci/lib/nim-imports.sh`, and a plant driven through a
+    ## second builder would be planted against a tree the real routes were
+    ## never proved over. One builder, one runner, one more parameter.
 
 const RouteCount = ord(high(Route)) - ord(low(Route)) + 1
 
@@ -161,6 +190,14 @@ proc coreBody(route: Route): string =
     # ROUTE 7 — the planted arm. Nothing clever; it is here so a gate that had
     # stopped working entirely would be caught by the simplest possible input.
     result.add "import ../lib/helper\nimport std/asyncdispatch\n"
+  of rtKeymapImport:
+    # PLAT-31 — the editing core reaching INTO the keymap package. The planted
+    # module is otherwise spotless: it imports nothing denied, binds no foreign
+    # function and names no async primitive, so the ONLY check that can fail is
+    # the seventh. A plant that also tripped the allow-list would redden the
+    # gate for a reason that has nothing to do with the rule being tested,
+    # which is the misdirected verdict route 3 already cost this file once.
+    result.add "import ../lib/helper\nimport ../keymap/editing_keymap\n"
   result.add "\nproc value*(): int = 41 + 1\n"
 
 proc helperBody(route: Route): string =
@@ -197,6 +234,19 @@ proc buildTree(base: string; route: Route): string =
   createDir(libDir)
   writeFile(editorDir / "core.nim", coreBody(route))
   writeFile(libDir / "helper.nim", helperBody(route))
+  if route == rtKeymapImport:
+    # The synthetic keymap package, BESIDE the editor directory and not inside
+    # it — for routes 3 and 6's reason, which the header above spends a
+    # paragraph on: a module in the root directory is a ROOT and is scanned
+    # whether or not anything walks to it, so a plant placed there would pass
+    # even if the closure walk were removed entirely.
+    let keymapDir = base / "keymap"
+    createDir(keymapDir)
+    writeFile(keymapDir / "editing_keymap.nim",
+              "## A synthetic keymap module. It is deliberately CLEAN —\n" &
+              "## nothing denied, no pragma, no std import at all — so the\n" &
+              "## only check it can trip is the keymap-package rule itself.\n" &
+              "proc resolveKey*(k: string): string = k\n")
   editorDir
 
 proc withTree(route: Route): GateRun =
@@ -334,6 +384,27 @@ suite "PLAT-29 — the seven routes past a text scan":
     counted run.output.contains("VIOLATION editor-core-imports-allow-listed")
     counted run.output.contains("core.nim: std/asyncdispatch")
 
+  test "PLAT-31 — A PLANTED KEYMAP IMPORT MUST REDDEN IT":
+    # PLAT-31's verification gate: *"NO KEY TYPE IN THE CORE'S IMPORT CLOSURE,
+    # by PLAT-29's instrument, with a planted import."* The instrument is this
+    # gate and the plant is `rtKeymapImport`.
+    let run = withTree(rtKeymapImport)
+    checkpoint(run.output.strip())
+    counted run.code != 0
+    # THE FAILURE IS NAMED, AND IT IS THE SEVENTH CHECK. A case that only
+    # asserted a non-zero exit would pass on a gate that reddened for any of
+    # the other six reasons — which is the misdirected verdict, and this file
+    # has paid for it once already.
+    counted run.output.contains("VIOLATION editor-core-imports-no-keymap")
+    counted run.output.contains("editing_keymap")
+    # …and NOTHING ELSE fired. The planted module is clean, so the allow-list,
+    # the pragma scan and the denied-name scan must all still pass: the plant
+    # is evidence about ONE rule.
+    counted not run.output.contains("VIOLATION editor-core-imports-allow-listed")
+    counted not run.output.contains("VIOLATION editor-core-binds-no-foreign-function")
+    counted not run.output.contains("VIOLATION editor-core-names-no-async-primitive")
+    counted run.output.contains("1 failing")
+
   test "THE CONTROL — the same tree with nothing planted is GREEN":
     # §7b. Without this, every case above is satisfied by a gate that refuses
     # every tree, by a temp directory that was never created and by a typo in
@@ -348,7 +419,7 @@ suite "PLAT-29 — the seven routes past a text scan":
     # modules rather than about zero.
     counted run.output.contains("1 root module(s)")
     counted run.output.contains("2 in the closure")
-    counted RouteCount == 8
+    counted RouteCount == 9
 
 # ===========================================================================
 suite "PLAT-29 — the tally":

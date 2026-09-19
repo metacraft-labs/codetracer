@@ -4973,7 +4973,7 @@ editor-model-case-floors:
   set -uo pipefail
   failed=0
   ran=0
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31; do
     echo "=== ${m} ==="
     if bash ci/test/editor-model-case-floor.sh "${m}"; then
       ran=$((ran + 1))
