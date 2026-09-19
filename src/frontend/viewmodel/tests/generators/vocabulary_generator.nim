@@ -63,7 +63,7 @@
 ## the suite, so a corpus edit that shortened one is red here rather than
 ## silently producing a scenario with an empty paren.
 
-import std/[strutils, tables]
+import std/[options, strutils, tables]
 
 import isonim_tui/text/width as widthMod
 
@@ -743,12 +743,46 @@ proc scenarioFor*(d: ScenarioDoc; spec: ScenarioSpec): Scenario =
     st.setRegister("", Register(text: "PASTED", kind: rkCharwise))
   if prMacro in spec.preps: st.macros["m"] = @["insert-newline"]
   if prLastChange in spec.preps: st.lastChange = @["insert-newline"]
+  # ==========================================================================
+  # THE FOUR HISTORY PREPS ARE BUILT BY RUNNING THE HISTORY, NOT BY ASSIGNING
+  # TO IT — PLAT-32
+  # ==========================================================================
+  # Until PLAT-32 these four lines pushed literal `Snapshot(doc: ...)` values
+  # onto four flat stacks. There is nothing to assign now: an event holds an
+  # INVERTED change set, so a hand-built event is a change set somebody wrote
+  # by hand, and an event whose inversion does not meet the document is exactly
+  # the state `history.pop` raises on. Each prep therefore drives a real
+  # transaction through `record` — which is also the only way the prep can be
+  # wrong in a way the suite notices.
   if prUndo in spec.preps:
-    st.undoStack = @[Snapshot(doc: d.text & "UNDONE", selection: caretSelection(0))]
+    # The user deleted a trailing `UNDONE`; the document is what remained.
+    let prev = d.text & "UNDONE"
+    st.history = record(st.history,
+      transaction(changeSet(prev.len, d.text.len, prev.len, ""),
+                  some(caretSelection(0)), @[],
+                  @[Annotation(kind: anUserEvent, userEvent: ueDelete)]),
+      prev, caretSelection(0))
   if prRedo in spec.preps:
-    st.redoStack = @[Snapshot(doc: d.text & "REDONE", selection: caretSelection(0))]
-  if prSelUndo in spec.preps: st.selUndo = @[caretSelection(0)]
-  if prSelRedo in spec.preps: st.selRedo = @[caretSelection(0)]
+    # The user inserted `REDONE` and undid it, so `redo` puts it back. The
+    # undone branch is reached the ONLY way it can be reached — by popping —
+    # which is "redo is generated rather than stored" holding for the fixture
+    # as well as for the product.
+    let withText = d.text & "REDONE"
+    var h = record(initHistory(),
+      transaction(changeSet(d.text.len, d.text.len, d.text.len, "REDONE"),
+                  some(caretSelection(0)), @[],
+                  @[Annotation(kind: anUserEvent, userEvent: ueInput)]),
+      d.text, caretSelection(0))
+    let step = popUndo(h, withText, caretSelection(0))
+    doAssert step.isSome, "the redo prep could not pop the event it just made"
+    st.history = recordStep(step.get, withText)
+  if prSelUndo in spec.preps:
+    st.history = recordSelectionChange(st.history, caretSelection(0), 0)
+  if prSelRedo in spec.preps:
+    let h = recordSelectionChange(initHistory(), caretSelection(0), 0)
+    let step = popUndoSelection(h, d.text, caretSelection(0))
+    doAssert step.isSome, "the redo-selection prep could not pop its entry"
+    st.history = recordStep(step.get, d.text)
   if prFolded in spec.preps: st.folded = @[1]
   if prPending in spec.preps:
     st.pendingOperator = "delete-selection"

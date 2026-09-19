@@ -85,7 +85,13 @@ import ../generators/vocabulary_generator
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
-const ExpectedAssertions = 8744
+const ExpectedAssertions = 8888
+  ## **+144 ON 2026-09-19**, and they are one case: PLAT-31's §36a repair —
+  ## the marks and the jump list mapped through the change set instead of
+  ## clamped — had NO case that could see it removed. The arm re-aimed onto
+  ## those two loops came back SURVIVED over 660 green cases, which is §36's
+  ## *'the repair is to the ASSERTION, never to the killer'* found by a
+  ## needle that moved rather than by a reviewer.
 
 var countedAssertions = 0
 
@@ -333,9 +339,15 @@ proc witnessFailures(sc: Scenario; op: Operation; res: OpResult;
       if after.activeRegister == before.activeRegister:
         fail "the active register did not change"
     of ckUndoGrew:
-      if after.undoStack.len <= before.undoStack.len: fail "the undo stack did not grow"
+      # PLAT-32: a DEPTH over the event branch, not a stack length. The two are
+      # not the same number — `undoDepth` subtracts a leading selection-only
+      # event, because one of those is not an undoable step — and reading the
+      # raw `done.len` would count a selection record as an edit.
+      if after.history.undoDepth <= before.history.undoDepth:
+        fail "the undo branch did not grow"
     of ckRedoGrew:
-      if after.redoStack.len <= before.redoStack.len: fail "the redo stack did not grow"
+      if after.history.redoDepth <= before.history.redoDepth:
+        fail "the redo branch did not grow"
     of ckSearchChanged:
       if after.search == before.search: fail "the search state did not change"
     of ckFoldChanged:
@@ -762,6 +774,55 @@ suite "PLAT-30: the sweeps' own counts, asserted as equalities":
       let down2 = applyOperation(down1.state, "move-line-down", OpArgs(), settings)
       ck down2.state.selection.mainRange.goalColumn == some(goal)
       ck down2.state.selection.mainRange.head == d.marks.line3Mid
+
+  test "A MARK AND THE JUMP LIST MOVE WITH THE DOCUMENT, through the same change set":
+    # **PLAT-31's §36a REPAIR, ASSERTED — AND IT WAS NOT, UNTIL 2026-09-19.**
+    # That milestone replaced a `clamp(..., 0, doc.len)` on `marks` and `jumps`
+    # with a real mapping through `change_set.mapPosOr`, and recorded the
+    # repair in `commitChange`'s header. Nothing executed it: the arm that was
+    # re-aimed onto those two loops came back SURVIVED, over 660 green cases.
+    #
+    # Neither 224-case sweep can see it — both run ONE operation against a
+    # fresh state — so what this needs is an edit BETWEEN a mark being set and
+    # it being jumped to. That is the same shape `FUZZ-8` found the selection
+    # history's version of, one field over.
+    let settings = wrapSettings(WrapA)
+    for d in docs:
+      checkpoint(d.id)
+      var st = initEditorState(d.text)
+      # A mark on the third line, and a jump list pointing at it.
+      st.selection = caretSelection(d.marks.line3Mid)
+      # The mark is SET ON THE STATE and not through an operation, because the
+      # published vocabulary has `mark(id)` as a MOTION and no operation that
+      # records one — whoever opened the document supplies it, exactly as
+      # `vocabulary_generator`'s `prMark` prep does.
+      var after = st
+      after.marks["a"] = d.marks.line3Mid
+      after.jumps = @[d.marks.line3Mid]
+      after.jumpIndex = 0
+      ck after.hasMark("a")
+      let markedAt = after.marks["a"]
+      # The text the mark names, so the assertion is about TEXT and not about
+      # an offset that happens to be plausible.
+      let named = after.doc[markedAt ..< min(markedAt + 4, after.doc.len)]
+      ck named.len > 0
+      # Somebody edits BEFORE it.
+      after.selection = caretSelection(0)
+      let edited = applyOperation(after, "insert-text", OpArgs(text: "XYZ"),
+                                  settings, ViewportRows).state
+      ck edited.doc.len == after.doc.len + 3
+      # The mark still names the same text — which a clamp cannot do and an
+      # unmapped offset cannot do either.
+      let moved = edited.marks["a"]
+      ck moved == markedAt + 3
+      ck edited.doc[moved ..< min(moved + named.len, edited.doc.len)] == named
+      ck edited.jumps[0] == markedAt + 3
+      # …and the MOTION lands there, through the published operation rather
+      # than by reading the field.
+      let jumped = applyOperation(edited, "move-mark", OpArgs(id: "a"), settings,
+                                  ViewportRows)
+      ck jumped.outcome == ooActed
+      ck jumped.state.selection.mainRange.head == moved
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

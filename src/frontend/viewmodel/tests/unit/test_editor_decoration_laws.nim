@@ -85,7 +85,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1274
+const ExpectedAssertions = 1276
+  ## **+2 ON 2026-09-19: PLAT-32 ADDED `history.nim` TO `viewmodel/editor/`,
+  ## AND THIS SUITE SAID SO BEFORE THAT MILESTONE'S OWN SUITES EXISTED.**
+  ## §35's enumeration firing for the sixth time, from a milestone that had
+  ## been green for a day. The repair is a list entry and this number.
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run, and updated deliberately in the same commit as the checks that moved
   ## it.
@@ -1052,6 +1056,7 @@ const
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
                         "document_version.nim", "editor_state.nim",
+                        "history.nim",
                         "inlay.nim", "operations.nim", "range_set.nim",
                         "reconcile.nim", "rope.nim", "row_projection.nim",
                         "selection.nim", "selection_ops.nim",
@@ -1204,7 +1209,7 @@ suite "PLAT-28 — the suite's own non-vacuity":
     # the two-sided comparison above: without it, a directory walk that matched
     # nothing and a list that had been emptied would agree with each other
     # perfectly (§4). Forcing this edit is the whole job it does.
-    counted ScannedModules.len == 17
+    counted ScannedModules.len == 18
     counted NewModules.len == 5
 
   test "NO CLAMP REPAIRS AN ANCHOR — every unreachable path RAISES":

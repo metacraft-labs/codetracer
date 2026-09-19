@@ -107,7 +107,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2834
+const ExpectedAssertions = 2849
+  ## **+15 ON 2026-09-19: PLAT-32 ADDED `history.nim` TO `viewmodel/editor/`,
+  ## AND THIS SUITE SAID SO BEFORE THAT MILESTONE'S OWN SUITES EXISTED.**
+  ## §35's enumeration firing for the sixth time, from a milestone that had
+  ## been green for a day. The repair is a list entry and this number.
   ## 2774 -> 2804 -> 2834 on 2026-09-18: PLAT-29 added `document_version.nim`
   ## and `reconcile.nim` to `viewmodel/editor/` and PLAT-30 added
   ## `operations.nim` and `editor_state.nim`, and the three renderer-reach
@@ -1152,6 +1156,7 @@ const
   ReconcileSource = staticRead("../../editor/reconcile.nim")
   EditorStateSource = staticRead("../../editor/editor_state.nim")
   OperationsSource = staticRead("../../editor/operations.nim")
+  HistorySource = staticRead("../../editor/history.nim")
     ## **PLAT-28's FIVE, AND THE FOURTH TIME §35's ENUMERATION HAS PAID.** This
     ## case went red by name when `viewmodel/editor/` grew from eight modules to
     ## thirteen, before PLAT-28's own suites existed. `inlay.nim` is the one
@@ -1163,6 +1168,7 @@ const
 
 const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
                         "document_version.nim", "editor_state.nim",
+                        "history.nim",
                         "inlay.nim", "operations.nim", "range_set.nim",
                         "reconcile.nim", "rope.nim", "row_projection.nim",
                         "selection.nim", "selection_ops.nim",
@@ -1215,6 +1221,7 @@ const OtherModules = block:
   xs.add ("reconcile.nim", ReconcileSource)
   xs.add ("editor_state.nim", EditorStateSource)
   xs.add ("operations.nim", OperationsSource)
+  xs.add ("history.nim", HistorySource)
   xs
 
 proc codeOnly(src: string): string =
@@ -1299,7 +1306,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 17
+    counted ScannedModules.len == 18
     counted OtherModules.len == ScannedModules.len - 1
 
   test "NO MODULE OF THE CORE REACHES A RENDERER — the dependency does not invert":

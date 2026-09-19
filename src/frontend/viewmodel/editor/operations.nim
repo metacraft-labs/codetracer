@@ -209,6 +209,14 @@ type
     display*: DisplayCtx
     settings*: WrapSettings
     viewportRows*: int
+    nowMs*: int64
+      ## **THE CLOCK IS A PARAMETER, FOR `settings`' OWN REASON.** PLAT-32's
+      ## grouping rule reads elapsed time, and an operation that read a clock
+      ## would not be a pure function of its arguments — which is the property
+      ## the whole vocabulary is built on and the one PLAT-29's import-closure
+      ## gate enforces (`std/times` is refused in this directory's closure).
+      ## So the caller supplies the reading, exactly as `PendingChords`
+      ## stores the moment a prefix started rather than counting down.
 
   MotionLanding* = object
     ## Where a motion puts the head, what goal column the result carries, and
@@ -534,7 +542,8 @@ proc findFrom(doc, pattern: string; start: int; forward: bool): int =
 # THE ENVIRONMENT
 # ===========================================================================
 
-proc initOpEnv*(doc: string; settings: WrapSettings; viewportRows = 20): OpEnv =
+proc initOpEnv*(doc: string; settings: WrapSettings; viewportRows = 20;
+                nowMs: int64 = 0): OpEnv =
   ## The per-call scratch. The wrap cache is built here rather than lazily so
   ## that a display-INDEPENDENT operation costs exactly what a dependent one
   ## does — a lazy cache would make the cost of an operation a signal for
@@ -542,7 +551,8 @@ proc initOpEnv*(doc: string; settings: WrapSettings; viewportRows = 20): OpEnv =
   ## suite can accidentally assert through.
   OpEnv(ctx: initOpCtx(doc, settings.policy),
         display: initDisplayCtx(doc, settings),
-        settings: settings, viewportRows: max(1, viewportRows))
+        settings: settings, viewportRows: max(1, viewportRows),
+        nowMs: nowMs)
 
 # ===========================================================================
 # MOTIONS — 34 declarations, three forms each
@@ -963,29 +973,34 @@ proc withSelection(st: EditorState; ranges: seq[SelectionRange];
   result.selection = editorSelection(ranges, primary)
 
 proc commitChange*(st: EditorState; cs: ChangeSet;
-                   newSelection = none(EditorSelection)): EditorState =
+                   newSelection = none(EditorSelection);
+                   userEvent = ueInput; nowMs: int64 = 0): EditorState =
   ## **THE ONE PLACE THE DOCUMENT MOVES.** Every operation that edits goes
   ## through here, and three things happen in one place rather than in fifty:
   ##
-  ##   1. an undo snapshot is taken, so "an edit is undoable" is a property of
-  ##      this function;
+  ##   1. the transaction is offered to PLAT-32's history, so "an edit is
+  ##      undoable" is a property of this function;
   ##   2. the new document is installed;
-  ##   3. **the SELECTION HISTORY is mapped forward through the same change
-  ##      set.**
+  ##   3. the marks and the jump list are mapped through the same change set.
   ##
-  ## The third was not here on the first run and `FUZZ-8` found it, on FOUR of
-  ## the nine corpus classes — 3, 4, 8 and 9: `undo-selection` restored a
-  ## selection recorded against a LONGER document and handed back a range
-  ## addressing bytes that no longer exist — `[96,182)` in a 114-byte document.
-  ## (The first write-up of this said three classes; re-measured 2026-09-19 by
-  ## re-applying `M4`, which removes exactly the two loops below and is
-  ## therefore the pre-repair state, it is four.) Nothing in the main
-  ## sweep could see it, because the main sweep runs one operation against a
-  ## fresh state; it needs an edit BETWEEN a `pushSelectionHistory` and an
-  ## `undo-selection`, which is what a random stream produces and a scenario
-  ## does not. The repair is the existing primitive — `selection.mapSelection`,
-  ## PLAT-26's — and not a clamp: a clamp would put the range back in bounds
-  ## while still naming the wrong text (Verification-Harness-Traps §36a).
+  ## **THE SELECTION-HISTORY MAPPING THAT USED TO BE STEP 3 IS GONE, AND IT IS
+  ## GONE BECAUSE THE DEFECT IT REPAIRED IS NOW STRUCTURALLY ABSENT.** Until
+  ## PLAT-32 this function walked `selUndo` and `selRedo` mapping every stored
+  ## selection forward, because those were FLAT STACKS: a selection recorded
+  ## three edits ago sat in a `seq` with nothing saying which document it was
+  ## expressed against, so it had to be dragged forward on every edit or it
+  ## named bytes that no longer existed. `FUZZ-8` found exactly that, on four
+  ## of the nine corpus classes — `[96,182)` in a 114-byte document.
+  ##
+  ## An event history has no flat stack. Every stored selection is ANCHORED TO
+  ## AN EVENT: `startSelection` is expressed against the document below its
+  ## event, `endSelection` and `selectionsAfter` against the document above it,
+  ## and the only thing that can move a document without adding an event is a
+  ## REMOTE change — which `history.mapEvent` maps, in one place, through the
+  ## same primitive. A local edit pushes a new event on top, so every selection
+  ## below it is still read in the coordinates it was written in, and is read
+  ## only once the events above it have been undone. The repair is not deleted;
+  ## it is relocated to the one case that still needs it, where it is `LAW-H6`.
   ##
   ## **AND THE SAME CLAMP WAS STILL THERE ONE FIELD OVER UNTIL PLAT-31, WHICH
   ## CLOSED IT.** `marks` and `jumps` are byte offsets (see
@@ -1018,11 +1033,14 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
   result = st
   let newDoc = cs.apply(st.doc)
   if newDoc != st.doc:
-    result.pushUndo()
-    for i in 0 ..< result.selUndo.len:
-      result.selUndo[i] = mapSelection(result.selUndo[i], cs)
-    for i in 0 ..< result.selRedo.len:
-      result.selRedo[i] = mapSelection(result.selRedo[i], cs)
+    let selBefore = st.selection
+    let selAfter = if newSelection.isSome: newSelection.get
+                   else: mapSelection(selBefore, cs)
+    result.recordTransaction(
+      transaction(cs, some(selAfter), @[],
+                  @[Annotation(kind: anUserEvent, userEvent: userEvent),
+                    Annotation(kind: anTime, timeMs: nowMs)]),
+      st.doc, selBefore)
     # The marks and the jump list, through the same change set. Only offsets
     # that ARE positions of the old document are mapped: mapping one that is
     # not would be inventing an answer for an input the mapping is not defined
@@ -1038,15 +1056,22 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
   if newSelection.isSome:
     result.selection = newSelection.get
 
-proc applyTransaction(st: EditorState; t: Transaction): EditorState =
-  commitChange(st, t.changes, t.selection)
+proc applyTransaction(st: EditorState; env: OpEnv; t: Transaction;
+                      userEvent = ueInput): EditorState =
+  commitChange(st, t.changes, t.selection, userEvent, env.nowMs)
 
-proc editByRange(st: EditorState;
-                 f: proc (r: SelectionRange): RangeOutcome): EditorState =
+proc editByRange(st: EditorState; env: OpEnv;
+                 f: proc (r: SelectionRange): RangeOutcome;
+                 userEvent = ueInput): EditorState =
   ## Every editing operation goes through PLAT-26's apply-across-ranges helper.
   ## *"Multi-cursor is the absence of a special case"* is inherited rather than
   ## re-established: nothing below asks how many ranges there are.
-  applyTransaction(st, changeByRange(st.doc, st.selection, f))
+  ##
+  ## `userEvent` is PLAT-32's grouping key — §13.1's *"by the transaction's own
+  ## KIND"*. It is a parameter of this helper rather than a lookup on the
+  ## operation's name, because the name is not available here and a second
+  ## table mapping names to kinds would be a second place for the two to drift.
+  applyTransaction(st, env, changeByRange(st.doc, st.selection, f), userEvent)
 
 func noEdit(r: SelectionRange): RangeOutcome =
   RangeOutcome(edits: @[], effects: @[], range: r)
@@ -1069,14 +1094,14 @@ proc selectedText(st: EditorState): string =
   parts.join("\n")
 
 proc cDeleteSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     if r.isEmpty: noEdit(r)
     else: replaceWith(r.rangeFrom, r.rangeTo, "", r.rangeFrom)))
 
 proc cChangeSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   ## *"delete and enter insert mode"* — the mode change is half the operation,
   ## which is why it is not `delete-selection` with a note.
-  var after = editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  var after = editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     if r.isEmpty: noEdit(r)
     else: replaceWith(r.rangeFrom, r.rangeTo, "", r.rangeFrom))
   after.mode = emInsert
@@ -1088,7 +1113,7 @@ proc cYankSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
                     Register(text: selectedText(st), kind: rkCharwise))
   settle(st, after)
 
-proc pasteInto(st: EditorState; atRangeStart: bool): EditorState =
+proc pasteInto(st: EditorState; env: OpEnv; atRangeStart: bool): EditorState =
   ## **THE PARAMETER IS NOT CALLED `before`, AND THAT IS NOT STYLE.**
   ## `test_editor_change_algebra.nim` scans every module of this directory for
   ## the spelling `before: bool` — PLAT-25's tripwire for a hand-written copy
@@ -1102,20 +1127,20 @@ proc pasteInto(st: EditorState; atRangeStart: bool): EditorState =
   let payload = if reg.kind == rkLinewise and not reg.text.endsWith("\n"):
                   reg.text & "\n"
                 else: reg.text
-  editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     let at = if atRangeStart: r.rangeFrom else: r.rangeTo
     replaceWith(at, at, payload, at + payload.len))
 
 proc cPasteBefore(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, pasteInto(st, true))
+  settle(st, pasteInto(st, env, true))
 
 proc cPasteAfter(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, pasteInto(st, false))
+  settle(st, pasteInto(st, env, false))
 
 proc cPasteReplace(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let reg = st.registerOf(st.activeRegister)
   if reg.text.len == 0: return settle(st, st)
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     replaceWith(r.rangeFrom, r.rangeTo, reg.text, r.rangeFrom + reg.text.len)))
 
 proc linesTouched(env: OpEnv; st: EditorState): seq[int] =
@@ -1214,7 +1239,7 @@ proc cBlockComment(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let o = st.comments.blockOpen
   let c = st.comments.blockClose
   if o.len == 0 or c.len == 0: return settle(st, st)
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     RangeOutcome(
       edits: @[Edit(fromPos: r.rangeFrom, toPos: r.rangeFrom, insert: o),
                Edit(fromPos: r.rangeTo, toPos: r.rangeTo, insert: c)],
@@ -1225,7 +1250,7 @@ proc cBlockUncomment(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let c = st.comments.blockClose
   if o.len == 0 or c.len == 0: return settle(st, st)
   let doc = st.doc
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     let body = doc[r.rangeFrom ..< min(r.rangeTo, doc.len)]
     if body.startsWith(o) and body.endsWith(c) and body.len >= o.len + c.len:
       let inner = body[o.len ..< body.len - c.len]
@@ -1233,8 +1258,9 @@ proc cBlockUncomment(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
     else:
       noEdit(r)))
 
-proc mapSelectionText(st: EditorState; f: proc (s: string): string): EditorState =
-  editByRange(st, proc (r: SelectionRange): RangeOutcome =
+proc mapSelectionText(st: EditorState; env: OpEnv;
+                      f: proc (s: string): string): EditorState =
+  editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     if r.isEmpty: return noEdit(r)
     let body = st.doc[r.rangeFrom ..< min(r.rangeTo, st.doc.len)]
     let out0 = f(body)
@@ -1242,13 +1268,13 @@ proc mapSelectionText(st: EditorState; f: proc (s: string): string): EditorState
                  effects: @[], range: spanRange(r.rangeFrom, r.rangeFrom + out0.len)))
 
 proc cUpperCase(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, mapSelectionText(st, proc (s: string): string = unicode.toUpper(s)))
+  settle(st, mapSelectionText(st, env, proc (s: string): string = unicode.toUpper(s)))
 
 proc cLowerCase(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, mapSelectionText(st, proc (s: string): string = unicode.toLower(s)))
+  settle(st, mapSelectionText(st, env, proc (s: string): string = unicode.toLower(s)))
 
 proc cSwapCase(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, mapSelectionText(st, proc (s: string): string =
+  settle(st, mapSelectionText(st, env, proc (s: string): string =
     var out0 = ""
     for r in s.runes:
       if r.isUpper(): out0.add unicode.toLower($r)
@@ -1279,7 +1305,7 @@ proc cReplaceChar(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   if args.ch.len == 0: return refused(st, rrMissingArgument)
   let repl = args.ch
   let boundaries = env.ctx.boundaries
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     var a = r.rangeFrom
     var b = r.rangeTo
     if r.isEmpty:
@@ -1311,15 +1337,15 @@ proc cPipeSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
 proc cInsertText(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   if args.text.len == 0: return refused(st, rrMissingArgument)
   let s = args.text
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     replaceWith(r.rangeFrom, r.rangeTo, s, r.rangeFrom + s.len)))
 
-proc insertAtCaret(st: EditorState; s: string): EditorState =
-  editByRange(st, proc (r: SelectionRange): RangeOutcome =
+proc insertAtCaret(st: EditorState; env: OpEnv; s: string): EditorState =
+  editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     replaceWith(r.rangeFrom, r.rangeTo, s, r.rangeFrom + s.len))
 
 proc cInsertNewline(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, insertAtCaret(st, "\n"))
+  settle(st, insertAtCaret(st, env, "\n"))
 
 proc cInsertNewlineAndIndent(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   ## The indent is the CURRENT line's, copied — which is the indentation rule
@@ -1355,11 +1381,11 @@ proc cInsertBlankLineBelow(env: OpEnv; st: EditorState; args: OpArgs): OpResult 
   settle(st, blankLine(env, st, false))
 
 proc cInsertTab(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  settle(st, insertAtCaret(st, st.indentUnit))
+  settle(st, insertAtCaret(st, env, st.indentUnit))
 
-proc deleteBy(st: EditorState;
+proc deleteBy(st: EditorState; env: OpEnv;
               bounds: proc (r: SelectionRange): (int, int)): EditorState =
-  editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     if not r.isEmpty:
       return replaceWith(r.rangeFrom, r.rangeTo, "", r.rangeFrom)
     let (a, b) = bounds(r)
@@ -1370,33 +1396,33 @@ proc cDeleteCharBackward(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   ## the conformance suite exists to stop it regressing; `prevBoundary` is
   ## UAX #29's answer and this operation does not have its own.
   let ctx = env.ctx
-  settle(st, deleteBy(st, proc (r: SelectionRange): (int, int) =
+  settle(st, deleteBy(st, env, proc (r: SelectionRange): (int, int) =
     (ctx.prevBoundary(r.pos), r.pos)))
 
 proc cDeleteCharForward(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let ctx = env.ctx
-  settle(st, deleteBy(st, proc (r: SelectionRange): (int, int) =
+  settle(st, deleteBy(st, env, proc (r: SelectionRange): (int, int) =
     (r.pos, ctx.nextBoundary(r.pos))))
 
 proc cDeleteGroupBackward(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let e = env
-  settle(st, deleteBy(st, proc (r: SelectionRange): (int, int) =
+  settle(st, deleteBy(st, env, proc (r: SelectionRange): (int, int) =
     (e.groupBackward(r.pos), r.pos)))
 
 proc cDeleteGroupForward(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let e = env
-  settle(st, deleteBy(st, proc (r: SelectionRange): (int, int) =
+  settle(st, deleteBy(st, env, proc (r: SelectionRange): (int, int) =
     (r.pos, e.groupForward(r.pos))))
 
 proc cDeleteToLineStart(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let e = env
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     let a = e.lineStartOf(e.lineOf(r.head))
     if a >= r.head: noEdit(r) else: replaceWith(a, r.head, "", a)))
 
 proc cDeleteToLineEnd(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let e = env
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     let b = e.lineEndOf(e.lineOf(r.head))
     if b <= r.head: noEdit(r) else: replaceWith(r.head, b, "", r.head)))
 
@@ -1477,7 +1503,7 @@ proc cSplitLine(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   ## IT.** That is the only difference between them, it is the difference Vim's
   ## `gJ`-inverse has, and two published names with identical behaviour would
   ## be one operation with two spellings.
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     RangeOutcome(edits: @[Edit(fromPos: r.rangeFrom, toPos: r.rangeTo, insert: "\n")],
                  effects: @[], range: caret(r.rangeFrom))))
 
@@ -1486,7 +1512,7 @@ proc cTransposeChars(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   ## moves the whole family.
   let doc = st.doc
   let ctx = env.ctx
-  settle(st, editByRange(st, proc (r: SelectionRange): RangeOutcome =
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     let b = ctx.boundaryAtOrBefore(r.head)
     let a = ctx.prevBoundary(b)
     let c = ctx.nextBoundary(b)
@@ -1495,7 +1521,7 @@ proc cTransposeChars(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
 
 proc cSelectAll(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = singleSelection(0, st.doc.len)
   settle(st, after)
 
@@ -1506,7 +1532,7 @@ proc cSelectLine(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
     let b = env.lineEndOf(env.lineOf(max(r.rangeTo - 1, r.rangeFrom)))
     ranges.add spanRange(a, b)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
@@ -1517,7 +1543,7 @@ proc cSelectParentSyntax(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
     let (a, b) = enclosingPair(st.doc, r.head, '(', ')')
     ranges.add (if a < 0: r else: spanRange(a, b + 1))
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
@@ -1526,7 +1552,7 @@ proc cSimplifySelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var ranges: seq[SelectionRange] = @[]
   for r in st.selection: ranges.add caret(r.head)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
@@ -1538,7 +1564,7 @@ proc cCollapseToCursors(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var ranges: seq[SelectionRange] = @[]
   for r in st.selection: ranges.add caret(r.anchor)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
@@ -1547,13 +1573,13 @@ proc cFlipSelections(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var ranges: seq[SelectionRange] = @[]
   for r in st.selection: ranges.add spanRange(r.head, r.anchor, r.goalColumn)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
 proc cKeepPrimarySelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(@[st.selection.mainRange], 0)
   settle(st, after)
 
@@ -1568,7 +1594,7 @@ proc addCursorVertically(env: OpEnv; st: EditorState; up: bool): EditorState =
   var ranges = st.selection.ranges
   ranges.add caret(landed)
   result = st
-  result.pushSelectionHistory()
+  result.pushSelectionHistory(env.nowMs)
   result.selection = editorSelection(ranges, st.selection.primaryIndex)
 
 proc cAddCursorAbove(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
@@ -1587,7 +1613,7 @@ proc cAddCursorAtNextMatch(env: OpEnv; st: EditorState; args: OpArgs): OpResult 
   var ranges = st.selection.ranges
   ranges.add spanRange(i, i + needle.len)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
@@ -1597,7 +1623,7 @@ proc cAddCursorAtEachLine(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
     ranges.add caret(env.lineStartOf(line))
   if ranges.len == 0: return settle(st, st)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, min(st.selection.primaryIndex,
                                                 ranges.len - 1))
   settle(st, after)
@@ -1610,7 +1636,7 @@ proc cRemovePrimaryCursor(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   var ranges = st.selection.ranges
   ranges.delete(st.selection.primaryIndex)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges,
     min(st.selection.primaryIndex, ranges.len - 1))
   settle(st, after)
@@ -1622,55 +1648,59 @@ proc cRotatePrimaryCursor(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
     (st.selection.primaryIndex + 1) mod st.selection.rangeCount)
   settle(st, after)
 
-proc restoreSnapshot(st: EditorState; snap: Snapshot;
-                     ontoRedo: bool): EditorState =
-  ## **THE SELECTION HISTORY IS DISCARDED, AND THAT IS A DECISION.** `undo`
-  ## replaces the document with a snapshot, and there is no change set from the
-  ## current document to that one — a snapshot stack does not keep one, which
-  ## is the cost `editor_state.nim`'s header records for choosing it over
-  ## PLAT-32's event history. The selection history is expressed in the
-  ## coordinates of the document being replaced, so carrying it across would
-  ## carry ranges that name bytes the restored document does not have. That is
-  ## the defect `FUZZ-8` found in `commitChange`, arriving by the other route,
-  ## and mapping is not available here. Clearing is the honest answer;
-  ## `undo-selection` then reports an empty history rather than a wrong range.
+proc applyHistoryStep(st: EditorState; step: HistoryStep): EditorState =
+  ## **ONE ROUTINE FOR ALL FOUR HISTORY OPERATIONS.** `undo`, `redo`,
+  ## `undo-selection` and `redo-selection` differ only in which `pop*` produced
+  ## the step; applying it is the same code, which is the operation-level half
+  ## of *"redo is generated rather than stored"*. A second `restoreRedo`
+  ## written beside `restoreUndo` is the shape that lets the two drift, and
+  ## PLAT-30's snapshot version had it as one `ontoRedo: bool` for the same
+  ## reason.
+  ##
+  ## **THE SELECTION HISTORY IS NO LONGER DISCARDED.** The routine this
+  ## replaces cleared `selUndo` and `selRedo` on every undo, and said why: *"a
+  ## snapshot stack does not keep a change set from the current document to the
+  ## restored one"*, so there was nothing to map the stored selections through.
+  ## An event history has one — `step.tr.changes` IS that change set — and the
+  ## selections it stores are anchored to their events, so nothing needs
+  ## clearing and `undo-selection` after an `undo` reports real history.
   result = st
-  if ontoRedo:
-    result.redoStack.add Snapshot(doc: st.doc, selection: st.selection)
-  else:
-    result.undoStack.add Snapshot(doc: st.doc, selection: st.selection)
-  result.doc = snap.doc
-  result.selection = snap.selection
-  result.selUndo.setLen(0)
-  result.selRedo.setLen(0)
+  let before = st.doc
+  result.doc = step.tr.changes.apply(before)
+  result.selection =
+    if step.tr.selection.isSome: step.tr.selection.get
+    else: mapSelection(st.selection, step.tr.changes)
+  result.history = recordStep(step, before)
+  # The marks and the jump list move with the document, through the same change
+  # set and the same call `commitChange` uses (PLAT-31's §36a repair, which an
+  # undo must not be a second route around).
+  for id, pos in st.marks:
+    if pos >= 0 and pos <= before.len:
+      result.marks[id] = step.tr.changes.mapPosOr(pos, sideAfter)
+  for i in 0 ..< result.jumps.len:
+    let pos = st.jumps[i]
+    if pos >= 0 and pos <= before.len:
+      result.jumps[i] = step.tr.changes.mapPosOr(pos, sideAfter)
 
 proc cUndo(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  if st.undoStack.len == 0: return refused(st, rrEmptyHistory)
-  var after = st
-  let snap = after.undoStack.pop()
-  settle(st, restoreSnapshot(after, snap, ontoRedo = true))
+  let step = popUndo(st.history, st.doc, st.selection)
+  if step.isNone: return refused(st, rrEmptyHistory)
+  settle(st, applyHistoryStep(st, step.get))
 
 proc cRedo(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  if st.redoStack.len == 0: return refused(st, rrEmptyHistory)
-  var after = st
-  let snap = after.redoStack.pop()
-  settle(st, restoreSnapshot(after, snap, ontoRedo = false))
+  let step = popRedo(st.history, st.doc, st.selection)
+  if step.isNone: return refused(st, rrEmptyHistory)
+  settle(st, applyHistoryStep(st, step.get))
 
 proc cUndoSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  if st.selUndo.len == 0: return refused(st, rrEmptyHistory)
-  var after = st
-  let sel = after.selUndo.pop()
-  after.selRedo.add st.selection
-  after.selection = sel
-  settle(st, after)
+  let step = popUndoSelection(st.history, st.doc, st.selection)
+  if step.isNone: return refused(st, rrEmptyHistory)
+  settle(st, applyHistoryStep(st, step.get))
 
 proc cRedoSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
-  if st.selRedo.len == 0: return refused(st, rrEmptyHistory)
-  var after = st
-  let sel = after.selRedo.pop()
-  after.selUndo.add st.selection
-  after.selection = sel
-  settle(st, after)
+  let step = popRedoSelection(st.history, st.doc, st.selection)
+  if step.isNone: return refused(st, rrEmptyHistory)
+  settle(st, applyHistoryStep(st, step.get))
 
 proc cSetRegister(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   if args.id.len == 0: return refused(st, rrMissingArgument)
@@ -2176,23 +2206,23 @@ proc applyObjectForm(env: OpEnv; st: EditorState; d: Declaration;
   if not found and refusal != rrNone:
     return refused(st, refusal)
   var after = st
-  after.pushSelectionHistory()
+  after.pushSelectionHistory(env.nowMs)
   after.selection = editorSelection(ranges, st.selection.primaryIndex)
   settle(st, after)
 
 proc applyOperationAt*(st: EditorState; index: int; args: OpArgs;
                        settings: WrapSettings; viewportRows = 20;
-                       depth = 0): OpResult
+                       depth = 0; nowMs: int64 = 0): OpResult
 
 proc runNamed(st: EditorState; name: string; settings: WrapSettings;
-              viewportRows: int; depth: int): OpResult =
+              viewportRows: int; depth: int; nowMs: int64): OpResult =
   let i = operationNamed(name)
   if i < 0: return refused(st, rrNoMatch)
-  applyOperationAt(st, i, OpArgs(), settings, viewportRows, depth + 1)
+  applyOperationAt(st, i, OpArgs(), settings, viewportRows, depth + 1, nowMs)
 
 proc applyOperationAt*(st: EditorState; index: int; args: OpArgs;
                        settings: WrapSettings; viewportRows = 20;
-                       depth = 0): OpResult =
+                       depth = 0; nowMs: int64 = 0): OpResult =
   ## **THE ONE ENTRY POINT.** Every operation is reached through this, and it
   ## is reached by INDEX or by NAME — never by synthesising a keystroke. §2.2's
   ## own words for why that matters: *"an operation a test can only reach
@@ -2206,7 +2236,7 @@ proc applyOperationAt*(st: EditorState; index: int; args: OpArgs;
     return refused(st, rrRecursionLimit)
   let op = OperationTable[index]
   let d = VocabularyTable[op.decl]
-  let env = initOpEnv(st.doc, settings, viewportRows)
+  let env = initOpEnv(st.doc, settings, viewportRows, nowMs)
 
   var res = case op.category
     of ocMotion:
@@ -2223,7 +2253,7 @@ proc applyOperationAt*(st: EditorState; index: int; args: OpArgs;
           var cur = st
           var acted = false
           for step in st.macros[args.id]:
-            let r = runNamed(cur, step, settings, viewportRows, depth)
+            let r = runNamed(cur, step, settings, viewportRows, depth, nowMs)
             if r.outcome == ooActed: acted = true
             cur = r.state
           if acted: settle(st, cur) else: settle(st, st)
@@ -2233,7 +2263,7 @@ proc applyOperationAt*(st: EditorState; index: int; args: OpArgs;
           var cur = st
           var acted = false
           for step in st.lastChange:
-            let r = runNamed(cur, step, settings, viewportRows, depth)
+            let r = runNamed(cur, step, settings, viewportRows, depth, nowMs)
             if r.outcome == ooActed: acted = true
             cur = r.state
           if acted: settle(st, cur) else: settle(st, st)
@@ -2252,7 +2282,8 @@ proc applyOperationAt*(st: EditorState; index: int; args: OpArgs;
   res
 
 proc applyOperation*(st: EditorState; name: string; args: OpArgs;
-                     settings: WrapSettings; viewportRows = 20): OpResult =
+                     settings: WrapSettings; viewportRows = 20;
+                     nowMs: int64 = 0): OpResult =
   ## By name, which is what a keymap, a script and a collaboration peer all
   ## have. An unknown name RAISES rather than refusing: a refusal is a
   ## statement about a document, and "this name is not in the vocabulary" is a
@@ -2262,4 +2293,4 @@ proc applyOperation*(st: EditorState; name: string; args: OpArgs;
     raise newException(OperationError,
       "no operation named '" & name & "' in a vocabulary of " &
       $OperationTable.len)
-  applyOperationAt(st, i, args, settings, viewportRows, 0)
+  applyOperationAt(st, i, args, settings, viewportRows, 0, nowMs)

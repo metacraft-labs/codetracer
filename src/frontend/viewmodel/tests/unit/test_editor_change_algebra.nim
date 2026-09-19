@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 914
+const ExpectedAssertions = 918
+  ## **+4 ON 2026-09-19: PLAT-32 ADDED `history.nim` TO `viewmodel/editor/`,
+  ## AND THIS SUITE SAID SO BEFORE THAT MILESTONE'S OWN SUITES EXISTED.**
+  ## §35's enumeration firing for the sixth time, from a milestone that had
+  ## been green for a day. The repair is a list entry and this number.
   ## 898 -> 906 -> 914 on 2026-09-18: PLAT-29 added `document_version.nim` and
   ## `reconcile.nim` to `viewmodel/editor/` and PLAT-30 added `operations.nim`
   ## and `editor_state.nim`, and the double-mapping scan below runs FOUR
@@ -782,9 +786,11 @@ const
   ReconcileSource = staticRead("../../editor/reconcile.nim")
   EditorStateSource = staticRead("../../editor/editor_state.nim")
   OperationsSource = staticRead("../../editor/operations.nim")
+  HistorySource = staticRead("../../editor/history.nim")
 
   ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                    "document_version.nim", "editor_state.nim", "inlay.nim",
+                    "document_version.nim", "editor_state.nim", "history.nim",
+                    "inlay.nim",
                     "operations.nim", "range_set.nim",
                     "reconcile.nim", "rope.nim", "row_projection.nim",
                     "selection.nim", "selection_ops.nim",
@@ -908,8 +914,9 @@ suite "PLAT-25 — one function, one name":
                   "document_version.nim": DocumentVersionSource,
                   "reconcile.nim": ReconcileSource,
                   "editor_state.nim": EditorStateSource,
-                  "operations.nim": OperationsSource}.toTable
-    counted others.len == 16
+                  "operations.nim": OperationsSource,
+                  "history.nim": HistorySource}.toTable
+    counted others.len == 17
     counted others.len + 1 == ScannedModules.len
     for name, src in others:
       checkpoint(name)

@@ -11,6 +11,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-29
 #   bash ci/test/editor-model-case-floor.sh PLAT-30
 #   bash ci/test/editor-model-case-floor.sh PLAT-31
+#   bash ci/test/editor-model-case-floor.sh PLAT-32
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -224,9 +225,25 @@ PLAT-31)
 	# over it.
 	LAW_SUITES=()
 	;;
+PLAT-32)
+	MILESTONE="** PLAT-32: Undo in a buffer with more than one writer"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_history_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_history_examples.nim
+	)
+	# THE LAW-TABLE ORACLE IS BACK, after two milestones without one.
+	# PLAT-30 and PLAT-31 publish no `LAW-*` row and said so here; §3.6
+	# publishes six `LAW-H` rows and this milestone implements all six, so
+	# the two-way count runs again — ids in both directions, the cardinality
+	# asserted, and a killer cell that is empty or an em dash fails.
+	LAW_SUITES=(src/frontend/viewmodel/tests/unit/test_editor_history_laws.nim)
+	LAW_PREFIX="LAW-H"
+	LAW_SECTION="3.6"
+	LAW_COUNT=6
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-31. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-32. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

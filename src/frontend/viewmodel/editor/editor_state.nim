@@ -34,15 +34,29 @@
 ## have to be surfaced through a second channel per front-end — one per keymap
 ## model, since a second keymap would otherwise need a second copy.
 ##
-## **THE HISTORY HERE IS A SNAPSHOT STACK AND PLAT-32 OWNS THE REAL ONE.** Said
-## plainly rather than left to be discovered: `undo`, `redo`, `undo-selection`
-## and `redo-selection` are four of the 224 published operations, so they have
-## to be executable at this milestone or the vocabulary is not executed at all.
-## What makes them executable here is a stack of (document, selection)
-## snapshots — not event coalescing, not a mapped-away event inheriting its
-## mapping, not `LAW-H1` … `LAW-H6`. Those are PLAT-32's deliverables and this
-## module does not pretend to them. The cost is bounded and stated: a snapshot
-## stack is O(document) per edit, which is why `HistoryLimit` exists.
+## **THE HISTORY WAS A SNAPSHOT STACK UNTIL PLAT-32, AND IT IS NOT ONE NOW.**
+## This header said, at PLAT-30: *"`undo`, `redo`, `undo-selection` and
+## `redo-selection` are four of the 224 published operations, so they have to be
+## executable at this milestone or the vocabulary is not executed at all. What
+## makes them executable here is a stack of (document, selection) snapshots —
+## not event coalescing, not a mapped-away event inheriting its mapping, not
+## `LAW-H1` … `LAW-H6`. Those are PLAT-32's deliverables and this module does
+## not pretend to them."*
+##
+## PLAT-32 landed them. **The four fields — `undoStack`, `redoStack`,
+## `selUndo`, `selRedo` — are gone**, replaced by one `history: HistoryState`
+## from `editor/history.nim`, and the four operations are the four `pop*`
+## routines there. The replacement is not an addition beside the old shape: a
+## snapshot stack that survived the milestone meant to remove it would be a
+## second history for the same four operations to disagree about, and the
+## per-operation sweep would then be asserting about whichever one
+## `commitChange` happened to write.
+##
+## What the old shape cost, recorded because it is what the replacement buys:
+## a snapshot is O(document) per edit, there is no change set from the current
+## document to a snapshot — so `restoreSnapshot` **discarded** the selection
+## history on every undo, in a comment that said so — and thirty keystrokes
+## were thirty undos.
 ##
 ## **THE WRAP CONFIGURATION IS NOT A FIELD AND THAT IS PLAT-27's DECISION.**
 ## `wrap.nim`'s header: *"the shared state is the document, the selection and
@@ -52,10 +66,13 @@
 ## ones that can answer differently at two wrap columns — which is §2.3's
 ## two-sided equality having something to be about.
 
-import std/tables
+import std/[options, tables]
 
+import ./history
 import ./selection
 import ./text_store
+
+export history
 
 type
   EditingMode* = enum
@@ -138,11 +155,6 @@ type
     chords*: seq[string]
     startedMs*: int64
 
-  Snapshot* = object
-    ## One undoable point. See the header on why this is a snapshot.
-    doc*: string
-    selection*: EditorSelection
-
   EditorState* = object
     ## **THE VALUE EVERY OPERATION IS PURE OVER.**
     doc*: string
@@ -210,16 +222,15 @@ type
     indentUnit*: string
     parse*: ParseFreshness
 
-    undoStack*: seq[Snapshot]
-    redoStack*: seq[Snapshot]
-    selUndo*: seq[EditorSelection]
-    selRedo*: seq[EditorSelection]
+    history*: HistoryState
+      ## PLAT-32's event history: two branches, each event holding an INVERTED
+      ## change set, the selection before it and the selections after it. One
+      ## field where there were four, because `undo-selection` is not a second
+      ## history — it is a walk over the selections hanging off the events of
+      ## the same branch `undo` pops from. Two stacks made the two operations
+      ## able to disagree about which edit came last.
 
 const
-  HistoryLimit* = 128
-    ## How many snapshots the stacks keep. A bound rather than a growth
-    ## policy, because the growth policy is PLAT-32's.
-
   DefaultIndentUnit* = "    "
 
   PendingTimeoutMsDefault* = 1000'i64
@@ -261,7 +272,7 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     folded: @[], breakpoints: @[], tracepoints: @[], flowOverlay: false,
     search: SearchState(pattern: "", direction: sdForward),
     comments: comments, indentUnit: indentUnit, parse: parse,
-    undoStack: @[], redoStack: @[], selUndo: @[], selRedo: @[])
+    history: initHistory())
 
 func `==`*(a, b: Register): bool =
   a.text == b.text and a.kind == b.kind
@@ -275,9 +286,6 @@ func `==`*(a, b: LanguageComments): bool =
 
 func `==`*(a, b: PendingChords): bool =
   a.chords == b.chords and a.startedMs == b.startedMs
-
-func `==`*(a, b: Snapshot): bool =
-  a.doc == b.doc and a.selection == b.selection
 
 func `==`*(a, b: EditorState): bool =
   ## **FIELD BY FIELD, AND EVERY FIELD.** The display-dependence sweep (§2.3)
@@ -300,8 +308,7 @@ func `==`*(a, b: EditorState): bool =
     a.tracepoints == b.tracepoints and a.flowOverlay == b.flowOverlay and
     a.search == b.search and a.comments == b.comments and
     a.indentUnit == b.indentUnit and a.parse == b.parse and
-    a.undoStack == b.undoStack and a.redoStack == b.redoStack and
-    a.selUndo == b.selUndo and a.selRedo == b.selRedo
+    a.history == b.history
 
 func primaryHead*(st: EditorState): int =
   ## The head of the primary range. Raises through `mainRange` on the zero
@@ -311,25 +318,27 @@ func primaryHead*(st: EditorState): int =
 proc lineOfOffset*(st: EditorState; offset: int): int =
   toTextStore(st.doc).posOf(offset).line
 
-proc pushUndo*(st: var EditorState) =
-  ## Snapshot the current document and selection, and clear the redo stack.
-  ## Called by every operation that changes the document, in one place, so
-  ## "an edit is undoable" is a property of the dispatcher rather than of each
-  ## of the fifty operations that edit.
-  st.undoStack.add Snapshot(doc: st.doc, selection: st.selection)
-  if st.undoStack.len > HistoryLimit:
-    st.undoStack.delete(0)
-  st.redoStack.setLen(0)
+proc recordTransaction*(st: var EditorState; t: Transaction;
+                        docBefore: string; selectionBefore: EditorSelection) =
+  ## Offer a transaction to the history. Called by `commitChange`, in one
+  ## place, so "an edit is undoable" stays a property of the dispatcher rather
+  ## than of each of the fifty operations that edit.
+  st.history = record(st.history, t, docBefore, selectionBefore)
 
-proc pushSelectionHistory*(st: var EditorState) =
-  ## The selection's own history, which `undo-selection` / `redo-selection`
-  ## walk. It is a SECOND stack and not the same one: the published vocabulary
-  ## has four history operations, two of which are about the selection alone,
-  ## and folding them into one stack would make two of the four unreachable.
-  st.selUndo.add st.selection
-  if st.selUndo.len > HistoryLimit:
-    st.selUndo.delete(0)
-  st.selRedo.setLen(0)
+proc pushSelectionHistory*(st: var EditorState; nowMs: int64 = 0) =
+  ## Record the selection the editor is ABOUT to leave. Called before the new
+  ## selection is assigned, which is where PLAT-30's `st.selUndo.add
+  ## st.selection` stood and where the reference records it too
+  ## (`history.ts:344` passes `tr.startState.selection`).
+  ##
+  ## **IT IS NO LONGER A SECOND STACK.** The recorded selection hangs off the
+  ## top event of the `done` branch, so `undo-selection` walks the SAME branch
+  ## `undo` pops from. PLAT-30 kept `selUndo` and `selRedo` beside `undoStack`
+  ## and `redoStack` on the stated grounds that *"folding them into one stack
+  ## would make two of the four unreachable"* — which was true of two flat
+  ## stacks and is not true of an event history, where a selection is not a
+  ## stack entry but a field of the event it belongs to.
+  st.history = recordSelectionChange(st.history, st.selection, nowMs)
 
 func hasMark*(st: EditorState; id: string): bool =
   st.marks.hasKey(id)

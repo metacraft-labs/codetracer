@@ -132,6 +132,8 @@ DISP_LINE_START = "display: move-line-start"
 DISP_LINE_UP = "display: move-line-up"
 DISP_ROW_START = "display: move-display-line-start"
 FUZZ3 = "FUZZ-8 x corpus class 3"
+MARKS_MOVE = ("A MARK AND THE JUMP LIST MOVE WITH THE DOCUMENT, through the "
+              "same change set")
 ORACLE_L3 = "§7.1 line 3 — names(T) - names(I) == {}"
 ORACLE_L4 = "§7.1 line 4 — names(I) - names(T) == {}"
 ORACLE_DD_L3 = "§7.1 line 3 — dependent(T) - dependent(I) == {}"
@@ -149,6 +151,7 @@ NAMED_CASES = [
     OP_CHAR_LEFT, OP_EXTEND_CHAR_RIGHT, OP_DELETE_BACK, OP_AROUND_PARENS,
     OP_DELETE_TO_LINE_START, OP_LINE_START_SMART,
     DISP_LINE_START, DISP_LINE_UP, DISP_ROW_START, FUZZ3,
+    MARKS_MOVE,
     ORACLE_L3, ORACLE_L4, ORACLE_DD_L3, ORACLE_PARSE, REFUSAL_ARM,
     POPULATION, CARDINALITY, BEHAVIOUR_DELETE, BINDING_TABLE, WIDGET_LEFT,
     WIDGET_HOME, OP_ENTER_VISUAL,
@@ -229,19 +232,37 @@ ARMS = [
     ),
     Arm(
         "M4", OPS,
-        "    for i in 0 ..< result.selUndo.len:\n"
-        "      result.selUndo[i] = mapSelection(result.selUndo[i], cs)\n"
-        "    for i in 0 ..< result.selRedo.len:\n"
-        "      result.selRedo[i] = mapSelection(result.selRedo[i], cs)\n",
+        "    for id, pos in st.marks:\n"
+        "      if pos >= 0 and pos <= st.doc.len:\n"
+        "        result.marks[id] = cs.mapPosOr(pos, sideAfter)\n"
+        "    for i in 0 ..< result.jumps.len:\n"
+        "      let pos = st.jumps[i]\n"
+        "      if pos >= 0 and pos <= st.doc.len:\n"
+        "        result.jumps[i] = cs.mapPosOr(pos, sideAfter)\n",
         "    discard\n",
-        FUZZ3,
-        "THE SELECTION HISTORY STOPS MOVING WITH THE DOCUMENT. **This arm "
-        "performs a defect the milestone actually had**, and `FUZZ-8` is what "
-        "found it: `undo-selection` restored a range recorded against a longer "
-        "document and handed back `[96,182)` in a 114-byte one. Nothing in "
-        "either 224-case sweep can see it — both run ONE operation against a "
-        "fresh state, and this needs an edit BETWEEN a selection being "
-        "recorded and it being restored",
+        MARKS_MOVE,
+        "A STORED OFFSET STOPS MOVING WITH THE DOCUMENT: the marks and the "
+        "jump list are no longer mapped through the change set that moved the "
+        "text under them. Nothing in either 224-case sweep can see it — both "
+        "run ONE operation against a fresh state — and this needs an edit "
+        "BETWEEN a mark being set and it being jumped to, which is what a "
+        "random stream produces and a scenario does not.\n\n"
+        "**THIS ARM'S SUBJECT MOVED ON 2026-09-19 AND THE NEEDLE MOVED WITH "
+        "IT** (§32, caught by `--needle-scan` reporting LOST before any digest "
+        "was re-recorded). It used to delete `commitChange`'s two "
+        "`selUndo` / `selRedo` mapping loops — *the* defect this milestone "
+        "actually shipped, `undo-selection` handing back `[96,182)` in a "
+        "114-byte document. **Those loops no longer exist.** PLAT-32 replaced "
+        "the four flat snapshot stacks with an event history in which every "
+        "stored selection is anchored to its event, so a local edit cannot "
+        "put one in the wrong coordinates and there is nothing to drag "
+        "forward. The CLASS is still armed, twice, and in the milestone that "
+        "owns it: `run-plat32-history-mutations.py`'s `M9` and `M11` perform "
+        "exactly this defect on the one path that can still reach it — a "
+        "REMOTE change, which moves the document without adding an event. "
+        "What is re-aimed here is this arm, onto the offsets that are STILL "
+        "dragged forward by this function: the marks and the jump list, which "
+        "are PLAT-31's own §36a repair",
     ),
     Arm(
         "M5", OPS,

@@ -33,8 +33,15 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1258 bash ci/test/frontend-reachability.sh`, so 1259
-# findings fail `lint-nim` and 1258 do not.
+# `env CT_REACHABILITY_MAX=1263 bash ci/test/frontend-reachability.sh`, so 1264
+# findings fail `lint-nim` and 1263 do not.
+#
+# THE CEILING MOVED 1258 -> 1263 ON 2026-09-19 (PLAT-32): gross +7, all seven
+# in the new `editor/history.nim`, against -2 that are NOT deletions — two
+# pre-existing findings that stopped being findings because this milestone
+# landed. NOTHING was deleted for this move, unlike PLAT-31's below. The
+# per-symbol account is a DIFF OF TWO RUNS of this script and lives in the
+# setter beside the invocation in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1245 -> 1258 ON 2026-09-19 (PLAT-31), and its reason is the
 # one worth reading first, because the GROSS was +16 and three of those were

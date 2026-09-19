@@ -34,7 +34,30 @@ proc driveRandomOperation(harness: CollabHeadlessHarness;
                           rng: var Rand;
                           peerId: string;
                           opIndex: int) =
-  case rng.rand(4)
+  # BOUND TO A NAME. `case <a call that draws>` evaluates its selector once
+  # per `of` arm on `nim js` and once under `nim c` (measured 2026-09-19: 12
+  # calls against 3, over three iterations of a four-arm case), so an inline
+  # PRNG selector draws a different number of times per round on the two
+  # backends. Found by PLAT-32 in `test_editor_history_laws.nim`'s `FUZZ-4`
+  # cells, where it IS live, and censused across `src/frontend` and
+  # `src/common`.
+  #
+  # **THIS SITE IS PROPHYLACTIC, NOT A FIX, AND SAYING SO IS THE POINT.** This
+  # suite's lane (`vm-collab-integration`) is C-only, and it is not merely a
+  # lane choice: its import closure reaches `std/nativesockets`, which does
+  # not compile under `nim js` at all — measured 2026-09-20,
+  # `nativesockets.nim(379, 16) Error: undeclared identifier:
+  # 'cstringArrayToSeq'`. There is no JS arm for this stream to diverge from,
+  # so the binding changed no observed behaviour and could not have. It is
+  # here because the spelling is the defect and the closure is not a
+  # guarantee. A comment claiming this one fixed a live divergence would be
+  # the §36b shape — a figure nothing re-takes — so it does not.
+  #
+  # The census found one further side-effecting selector, likewise latent:
+  # `viewmodel/plugin_host/plugin_io.nim`'s `case takeFrame(...)`, behind
+  # `when not defined(js)`. Everything else it matched is a pure function.
+  let action = rng.rand(4)
+  case action
   of 0:
     harness.selectCalltrace(peerId, some(int64(rng.rand(500))))
   of 1:
@@ -42,8 +65,9 @@ proc driveRandomOperation(harness: CollabHeadlessHarness;
   of 2:
     harness.toggleStatePath(peerId, "frame.locals.value" & $rng.rand(40))
   of 3:
+    let tabPick = rng.rand(2)
     let tab =
-      case rng.rand(2)
+      case tabPick
       of 0: stLocals
       of 1: stGlobals
       else: stWatches

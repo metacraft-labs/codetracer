@@ -401,8 +401,54 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # **NOT ALLOW-LISTED**: an allow-list entry claims a symbol is permanently
 # unreachable by name, and every one of these thirteen is waiting for a caller
 # that a named milestone will add.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1258 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1258 bash ci/test/frontend-reachability.sh
+#
+# 1258 -> 1263 ON 2026-09-19 (PLAT-32). NET +5, AND THE FOUR MOVEMENTS BEHIND
+# IT ARE ENUMERATED BECAUSE A NET IS NOT AN ACCOUNT.
+# ----------------------------------------------------------------------------
+# PLAT-32 added `src/frontend/viewmodel/editor/history.nim` — the event
+# history that replaced PLAT-30's snapshot undo stack. Its two branches, its
+# mapping and its four `pop*` routines ARE reached by the product: `undo`,
+# `redo`, `undo-selection` and `redo-selection` are four of the 224 published
+# operations and `operations.nim` calls them. What is not reached is the part
+# above that: the session surface a front-end will hold, and the two depth
+# queries a status line will read.
+#
+# THE ACCOUNT IS A DIFF OF TWO RUNS OF THIS SCRIPT — the tree at the merge
+# base and the tree with PLAT-32 in it — rather than a recollection, because
+# a ceiling's justification is the one number in this file nothing re-takes
+# (Verification-Harness-Traps §36b). Both runs report `allow-listed: 0`.
+#
+#   ADDED, +7, all of them in `history.nim`:
+#     * `[A]` tested-and-unreached, 5: `initSession`, `undoSelection`,
+#       `redoSelection`, `undoDepth`, `redoDepth` — the `HistorySession`
+#       surface and the branch-depth queries, exercised by both PLAT-32
+#       suites and reached by no product module because the front-ends still
+#       drive the vocabulary directly. PLAT-34 gives them a caller.
+#     * `[B]` reached-by-nothing, 2: the two `==` operators, on `HistEvent`
+#       and on `HistoryState`. This scanner does not see an operator reached
+#       through `a == b`, and `test_editor_history_examples.nim` does exactly
+#       that (`counted s.history == before`). They are in the same bucket and
+#       for the same reason as `editor_state.nim`'s five surviving `==`, and
+#       deleting them would delete a structural equality two suites use.
+#
+#   REMOVED, -2, NEITHER OF THEM A DELETION — both are findings that stopped
+#   being findings because this milestone landed:
+#     * `[A]` `change_set.sameMapping` — PLAT-25 exported it with a suite and
+#       no product caller. `history.nim`'s `==` on `HistEvent` is its FIRST
+#       product caller, so it left the bucket by being used.
+#     * `[B]` one `==` on `editor_state.nim` — it went with the snapshot
+#       stack, whose four fields are gone.
+#
+# NOTHING WAS DELETED TO MAKE THIS NUMBER, and nothing needed to be: the
+# gross is +7 and every one of the seven is either a named milestone's
+# backlog or an operator this scanner structurally cannot see.
+#
+# It is a CEILING, so it falls again when PLAT-34 wires the editing core into
+# the two front-ends. **NOT ALLOW-LISTED**: an allow-list entry claims a symbol
+# is permanently unreachable by name, and all five `[A]` findings are waiting
+# for a caller a named milestone will add.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1263 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1263 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
