@@ -1786,13 +1786,24 @@ as the segfault did. `unittest`'s `test` template wraps each case body in
 case and lets the rest run. `findByClass` / `findById` / `findByTag` in
 `views/isonim_views_test.nim` therefore RAISE `MockNodeNotFoundError`, and the
 handful of assertions whose subject is absence use the `…OrNil` spellings. Both
-lanes now report the same result over the same case count — 465 OK, 0 FAILED.
+lanes report the same result over the same case count.
 
 The 17 that used to fail were NOT a property of the raising lookups: they were
 cases still written against the pre-redesign Find in Files DOM (and one against
 a button size class that moved). They were re-expressed against what the view
 emits today, so "17 known-acceptable failures in `isonim_views_test.nim`" is no
-longer a thing; a failure here is a real one.
+longer a thing. A failure here is a real one — which is not the same as "a
+failure here is unexplained": two of today's are registered in
+`ci/lib/known-test-failures.tsv`, where a row means the test still asserts the
+CORRECT behaviour and the product does not yet deliver it.
+
+DO NOT READ A PASS/FAIL COUNT OUT OF THIS SECTION. It carried "465 OK, 0
+FAILED" for months after that stopped being true, and two later readers took
+the zero as a baseline and went looking for what they had broken. The count is
+whatever the file reports today (see the 2026-09-19 entry at the end of this
+file for the measurement and the six cases behind it); what this section
+records is only that a failing case now FAILS instead of taking the process
+with it.
 
 The runner half: `test-vm-native` tested `fails > 0` before it tested the exit
 code, so the SIGSEGV printed as `PARTIAL (212 OK, 4 FAILED)` — indistinguishable
@@ -4426,27 +4437,68 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   SWALLOWED and the remainder appended — `C:\Users\OBrien\review.json`, not a
   truncation. Pre-existing at HEAD and unchanged; fixing it needs a "`'` quotes
   only at a token boundary" rule that no reported case asks for.
-- 2026-09-14: `src/tests/gui/tests/views/isonim_views_test.nim` DOES NOT report
-  "465 OK, 0 FAILED" any more, contrary to the note above about the raising
-  mock-DOM lookups. Measured at 9aad6671 with the tree otherwise pristine, on
-  the JS backend: 465 OK and 3 FAILED — `loadStepLinesFor emits
-  ct/load-step-lines with location + count` and `loadStepLinesFor falls back to
-  default panel height when unset` (both `InvalidDapCommandDefect`: the engine
-  has no `ct/load-step-lines`) plus `diff previews and terminals preserve legacy
-  ids` (`MockNodeNotFoundError` for class `agent-editor`). They are unrelated to
-  anything in the AA-3 evidence chain; do not read them as a regression from an
-  evidence/agent-activity change.
-- 2026-09-14: To compile ANY test that reaches
-  `views/isonim_agent_activity_view.nim` by hand, you need BOTH `nim js` and
-  `-d:nimNoLentIterators`. Without the JS target it dies on an `importjs`
-  pragma; with the JS target but no define it dies on `'seg' is of type <lent
-  MsgSegment> which cannot be captured`. The define is in
-  `appimage-scripts/build_with_nim.sh`'s NIM_COMMON_FLAGS, so the real builds
-  have it and only a hand-typed `nim js` does not. Affects
-  `agent_activity_evidence_view_test.nim`, `agent_activity_test_run_view_test.nim`
-  AND `views/isonim_views_test.nim` — the `vm-js` lane is red today on all three,
-  because `ci/lib/test-lane-files.sh` passes only `--path:src/frontend/viewmodel`
-  for that lane. Tracked separately; not fixed here.
+- 2026-09-14, SUPERSEDED BY THE MEASUREMENT AT 195f9195 (2026-09-19):
+  `src/tests/gui/tests/views/isonim_views_test.nim` does not report "465 OK, 0
+  FAILED" and has not for some time. At 9aad6671 it was 465 OK / 3 FAILED; at
+  195f9195, pristine tree, JS backend, it is **462 OK / 6 FAILED**. THE COUNT
+  MOVES — take it yourself rather than from this file — but the disposition of
+  each case is the durable part, and it is NOT "a regression the last change
+  caused". Two are registered in `ci/lib/known-test-failures.tsv`; the other
+  four are tests that a deliberate product change left behind, none of which
+  touched this file in the same commit:
+    * `loadStepLinesFor emits ct/load-step-lines with location + count` and
+      `… falls back to default panel height when unset` —
+      `InvalidDapCommandDefect`. `ct/load-step-lines` is genuinely dead as a
+      command: absent from `VALID_DAP_COMMANDS_SEQ`, no arm in `dap_server.rs`.
+      `backend/dap_dialect.md` §7 records the disposition and says no spec
+      requires the panel. REGISTERED KNOWN FAILURES — do not allow-list the
+      string to go green; `test_mock_backend_validates_dap_commands.nim` pins
+      the §7 set on purpose.
+    * `diff previews and terminals preserve legacy ids` —
+      `MockNodeNotFoundError` for class `agent-editor`. `ecd864ed` ("feat: Diff
+      view redesign for agent activity") deleted the Monaco diff host AND the
+      code that consumed its id, symmetrically; the replacement is
+      `agent-diff-file-row` / `agent-diff-file-path`. The TERMINAL half of the
+      case is still live (`shell-container` / `shellContainerId`), so the case
+      needs splitting, not deleting. `diffEditorId`,
+      `AgentActivityDiffEditorPrefix`, `DIFF_EDITOR_DIV` and the `.agent-editor`
+      stylus rule now have zero product consumers.
+    * `error entries render with <error> marker + error class` and
+      `cellText branches on isLiteral / isError flags` — both expect
+      `"<error: boom>"` and get `"boom"`. `b723bde4c` ("feat(values): render
+      every value through one presenter") moved the wrapper OUT of
+      `isonim_scratchpad_view.cellText` and into
+      `common/value_presentation/presenter.nim`, so production `valueText`
+      already reads `<error: boom>` before the view sees it. The tests build
+      their entries by hand with `valueText: "boom"`, a value the producer can
+      no longer emit. Restoring the wrapper in `cellText` would double-wrap real
+      values.
+    * `test_terminal_click_navigation: fragment click dispatches ct/event-jump
+      via the backend` — expects `args["kind"].getStr == "Write"`, gets `""`.
+      `5e4de501b` ("fix: Terminal click to output") changed `jumpToEvent` in
+      `terminal_output_vm.nim` to send the integer discriminant, which is
+      CORRECT: `EventLogKind` in codetracer-trace-format derives
+      `Serialize_repr`/`Deserialize_repr`, so a string would fail
+      `load_args::<ProgramEvent>()` outright. The assertion is the stale half.
+  Four of the six are NOT in `known-test-failures.tsv`, whose own header says
+  the failing set must equal the registered set exactly — so either the ledger
+  or the lane is not being read. Worth a separate look.
+- 2026-09-14, HALF OF IT OVERTAKEN 2026-09-19 — read both halves: to compile
+  ANY test that reaches `views/isonim_agent_activity_view.nim` by hand you still
+  need `nim js` (without the JS target it dies on an `importjs` pragma). The
+  SECOND requirement is gone: it used to also need `-d:nimNoLentIterators` or it
+  died on `'seg' is of type <lent MsgSegment> which cannot be captured`, and
+  `0548ff436` ("fix: Guard renderer-only calls behind ctRenderer; fix lent
+  captures and image src") removed the capture. Measured at 195f9195 with the
+  tree otherwise pristine: all three of
+  `agent_activity_evidence_view_test.nim` (12 OK),
+  `agent_activity_test_run_view_test.nim` (9 OK) and
+  `views/isonim_views_test.nim` compile and run under plain
+  `nim js -d:nodejs --path:src/frontend/viewmodel`, and adding the define
+  changes NEITHER the compile NOR a single case result. So "the `vm-js` lane is
+  red because `test_lane_extra_flags` omits the define" is no longer the
+  diagnosis for anything; see the next entry for what that lane's red actually
+  is.
 - 2026-09-15: A `flake.lock` node can be INTERNALLY INCOHERENT — `lastModified`
   carrying one commit's date while `rev` names another — and nix rejects such an
   input outright ("mismatch in field 'lastModified'"), but ONLY when it actually
@@ -5031,3 +5083,101 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   "fails by name rather than skipping" more loudly than the run-time version.
   `tests/corpus/unicode_corpus.nim` already had this reasoning; PLAT-30's oracle
   is the second consumer of it.
+
+- 2026-09-19: THE `vm-collab-units` LANE IS RED AT 195f9195 WITH A PRISTINE
+  TREE, and it is the gate working rather than the gate broken.
+  `test_collab_signal_registry.nim`'s `validation.isValid()` fails naming 32
+  unclassified exported signals — 13 on `AgentActivityVM`, 18 on `SourceVM`,
+  plus `EventLogStore.windowSource`. `collab/signal_registry.nim`'s table is
+  HAND-WRITTEN on purpose: nothing grades the CHOICE of sync class, so the only
+  thing that makes a classification mean anything is a human having typed it
+  and being answerable for it. Auto-populating it from the inventory would flip
+  the gate from fail-closed to fail-open in one commit. Whoever added those
+  fields has to classify them; do not "fix" the lane by generating the rows.
+
+- 2026-09-19: `discoverViewModelFields` in `collab/signal_registry.nim` used to
+  find fields by searching for the LITERAL `"*:"` (and owners by `"* ="`), which
+  made the fail-closed gate above fail-closed only against today's dominant
+  formatting. `probeSpaced* : Signal[int]`, `tagged* {.used.}: Signal[int]`,
+  `a*, b*: Signal[int]` (only the last name was recovered, and as the bogus name
+  `a*, b`), `SomeVM*= ref object` and `SomeVM*[T] = ref object` were all legal
+  Nim that the scanner could not see — the last two hiding EVERY field in the
+  type. It is now a one-pass token scan (`scanDecl`) that tracks bracket depth,
+  string/char literals and the comment cut, plus an indentation rule so nothing
+  below the `type` section inherits the last owner. Verified against the real
+  tree: 525 fields before, the same 525 after, byte-identical — the tolerance
+  adds no false positives. `test_collab_signal_registry_discovers_unusual_field_spellings`
+  pins each spelling against a temp source root; restoring the literal scanner
+  fails it on eleven checks.
+  AND THE REPLACEMENT WAS PROBED FOR ITS OWN BLIND SPOTS, which is the half of
+  this job that is easy to skip: a rewrite is only an improvement if you go
+  looking for what IT cannot see, not just for what its predecessor could not.
+  Two shapes the literal scanner did see were missing from the first draft of
+  the token scan, both in the fail-OPEN direction:
+    * `type SomeVM* = object` — the object on the SECTION KEYWORD's own line.
+      `type` was read as the type's name, so no owner was recognised and every
+      field in it dropped out unseen. Not hypothetical: `viewmodels/
+      edit_mode_toolbar.nim` (`type RunPlan* = object`) and `viewmodels/
+      verification_report.nim` (`type ParsedDiagnostic* = object`) both spell a
+      one-off record this way today. Neither holds a `Signal` yet, which is why
+      the 525-field equality did not catch it — an inventory diff proves the
+      scanner agrees with its predecessor on the CURRENT tree, and says nothing
+      about the spellings the tree does not happen to contain. Only a fixture
+      does that.
+    * `` `type`*: Signal[int] `` — a stropped field name.
+  `dropLeadingTypeKeyword` and the backtick arm of `parseExportedName` close
+  both, the inventory is still the same 525, and all four spellings above are
+  in the fixture. Note the keyword arm consumes `type` ONLY as a whole token —
+  `typeNameProbeVM* = object` keeps its name, and the fixture pins that too,
+  because a four-character unconditional chop is the obvious wrong fix.
+
+- 2026-09-19: `npm install` IN `src/tests/gui` REWRITES THE TRACKED `yarn.lock`
+  ON EVERY RUN, including a 220 ms "up to date" no-op. npm >= 7 maintains an
+  EXISTING yarn.lock as a secondary lockfile and serialises it from the tree it
+  actually installed; on Linux that tree has no `fsevents@2.3.2` (playwright's
+  darwin-only optional), so the block is deleted and the worktree is dirty.
+  Several agents restored it by hand without finding the cause. Measured: it is
+  INHERENT — `--no-save` does not help (that flag governs package.json), and
+  `--no-package-lock` keeps the file clean only by making npm ignore both
+  lockfiles, i.e. by trading a reproducible install for a clean worktree. The
+  GUI recipes therefore go through `ci/lib/npm-install.sh`, which reverts the
+  rewrite on every exit path (npm rewrites BEFORE reporting a failure) and warns
+  loudly when npm wanted to ADD an entry, which means package.json has moved
+  past the lock and `yarn install` — the tool that owns the file, per `env.sh` —
+  has to regenerate it. Guard: `ci/test/npm-install-yarn-lock-test.sh`, wired
+  into `just test`, stubbed npm, no network.
+
+- 2026-09-19: A CARGO FAILURE THAT IS NOT ABOUT THE CODE. `just build-once`
+  died with `couldn't read /tmp/codetracer/db_backend_target/debug/build/
+  serde_core-<hash>/out/private.rs: No such file or directory` — and `cargo
+  clean -p serde_core` did NOT fix it. The build target lives under `/tmp`, and
+  systemd-tmpfiles ages out individual FILES while leaving the directories and
+  cargo's fingerprints behind, so cargo believes a build script is fresh and
+  rustc then cannot read its output. The fix is to make the build scripts
+  re-run: `rm -rf /tmp/codetracer/db_backend_target/debug/{build,.fingerprint}`.
+  Look for other `out/` directories that are present and EMPTY as the tell. And
+  note what this costs if unnoticed: tup aborts on the first failed job, so
+  webpack and the `nim js` renderer never ran, `src/build-debug/ui.js` silently
+  kept its content from the previous build, and a GUI test then grades a
+  fortnight-old renderer. ALWAYS read `build-once`'s real exit status.
+
+- 2026-09-19: `"FIND IN FILES"` CONTAINS `"FILES"`, AND PLAYWRIGHT'S STRING
+  `hasText` IS A SUBSTRING MATCH. `bottomStripTab(page, "FILES")` — the
+  FILESYSTEM pane, whose GoldenLayout title is `FILES` — therefore resolved to
+  TWO tabs and every strict-mode assertion on it failed with `Received: 2`;
+  `auto-hide-panes.spec.ts` was 4 passed / 8 failed for this reason, measured at
+  pristine 195f9195 under real Electron on Xvfb, and the substring mutation of
+  `exactTabText` reproduces that split exactly (the fix is 11 passed / 1 failed;
+  the remaining one is `editor unpin behavior`, which fails identically at
+  pristine HEAD — `div[id^='editorComponent']` count 0, no `editorComponent*` id
+  anywhere in the body — and is not about tab titles at all). This is the SECOND
+  failure mode of `529c8dd1`'s rename
+  ("SEARCH RESULTS" -> "FIND IN FILES"): the first broke by what the old name
+  stopped matching, and the grep in `page-objects/auto-hide-strip.ts` finds that
+  one; this one breaks by what the new name ADDS, in specs that mention neither
+  literal because the title arrives at runtime off a GL tab. No grep finds that.
+  Every tab matcher in `auto-hide-strip.ts` is now EXACT (`exactTabText`,
+  `bottomStripTab`, and `stripTab` for "whichever strip it landed on"), so the
+  class of collision is structurally impossible rather than greppable. Substring
+  is simply the wrong default for a matcher over a set of names nobody has
+  promised to keep prefix-free.
