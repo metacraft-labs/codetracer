@@ -113,3 +113,57 @@ suite "SUPPORTED_LANGS is derived, and the dropdown renders exactly LANG_PICKER_
     check html.count("value='python'") == 1
     check html.count("value='javascript'") == 1
     check "value='unknown'" notin html
+
+suite "the input spellings are one table (LRS-3, the asm unification), on the JS side":
+  ## `src/frontend/lang.nim` used to carry its own `toLang` (a `JsAssoc` of
+  ## extensions plus a few names) and a third table in `fromPath`.  Both now
+  ## resolve through `langSpellings` in `common_lang.nim`, and that CHANGED
+  ## what the front end detects; the native side's account is
+  ## `src/tests/cli/lang_spellings_test.nim`.
+
+  test "the front end gained `miden` for LangMasm (the core always had it)":
+    check toLang(cstring"miden") == LangMasm
+    check toLang(cstring"masm") == LangMasm
+    check fromPath(cstring"prog.masm") == LangMasm
+
+  test "`asm` and `s` both name LangAsm, as they always did here":
+    check toLang(cstring"asm") == LangAsm
+    check toLang(cstring"s") == LangAsm
+    check fromPath(cstring"boot.s") == LangAsm
+    check fromPath(cstring"boot.asm") == LangAsm
+    check toLangFromFilename(cstring"boot.s") == LangAsm
+
+  test "fromPath is toLangFromFilename: one answer per path, and no third table":
+    for path in [cstring"a/b.c", cstring"x.rs", cstring"x.nims", cstring"dir.v2/Makefile",
+                 cstring"noext", cstring"x.php", cstring"x.gd", cstring"x.S"]:
+      check fromPath(path) == toLangFromFilename(path)
+    check fromPath(cstring"x.nims") == LangNim       # the core's row, gained
+    check fromPath(cstring"x.gd") == LangGdScript    # the core's row, gained
+    check fromPath(cstring"dir.v2/Makefile") == LangUnknown
+    check fromPath(cstring"noext") == LangUnknown
+
+  test "the front end gained the core's `--lang` names and is case-insensitive":
+    check toLang(cstring"rust") == LangRust
+    check toLang(cstring"nims") == LangNim
+    check toLang(cstring"gdscript") == LangGdScript
+    check toLang(cstring"cpp-wasm") == LangCppWasm
+    check toLang(cstring"ruby(db)") == LangRubyDb
+    check toLang(cstring"RS") == LangRust
+    check toLang(cstring"Asm") == LangAsm
+
+  test "the rows the front end always had are unchanged":
+    check toLang(cstring"h") == LangC
+    check toLang(cstring"hpp") == LangCpp
+    check toLang(cstring"js") == LangJavascript
+    check toLang(cstring"py") == LangPythonDb
+    check toLang(cstring"python") == LangPythonDb
+    check toLang(cstring"rb") == LangRubyDb
+    check toLang(cstring"ruby") == LangRuby
+    check toLang(cstring"nope") == LangUnknown
+    check toLang(cstring"") == LangUnknown
+
+  test "the table is the same value on both backends: every spelling resolves to its member":
+    for (spelling, lang) in LANG_SPELLINGS:
+      check toLang(cstring(spelling)) == lang
+      check toLang(spelling) == lang
+    check LANG_SPELLINGS.len == 64

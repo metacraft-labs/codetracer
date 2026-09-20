@@ -5,6 +5,7 @@
 # use common/lang or frontend/lang instead.
 
 import os
+import std/strutils
 # Relative to THIS file, not to the module that includes it: Nim resolves a
 # relative import against the file the statement is written in, which is what
 # lets one include-d table reach the axes from both `src/common/lang.nim` and
@@ -675,8 +676,132 @@ func langWireName*(lang: Lang): string =
   of LangPhp: "php"
   of LangGdScript: "gdscript"
 
-proc toLang*(lang: string): Lang
-proc toLang*(lang: cstring): Lang
+func langSpellings*(lang: Lang): seq[string] =
+  ## Every INPUT spelling `toLang` resolves to `lang`: the `--lang` names and
+  ## the file extensions, lower-case, without the dot.  This is the one such
+  ## table since LRS-3.  Three hand-kept copies used to exist -- the core's
+  ## `toLang` (`src/common/lang.nim`, `--lang` names plus extensions), the
+  ## front end's `toLang` (`src/frontend/lang.nim`, extensions plus a few
+  ## names) and its `fromPath` (extensions again, for the editor) -- and they
+  ## had drifted exactly as the design's §2.5 recorded: the core knew `asm`
+  ## but not `s`, the front end knew `asm` and `s` but not `miden`, and no
+  ## comment anywhere said either gap was meant.  The rows below are the
+  ## UNION of the three (64 spellings, no two tables ever disagreed on a
+  ## shared one), and unifying them changed detection on both sides: the
+  ## core gained five spellings (`s`, and the extension rows `h`, `hpp`,
+  ## `pas`, `js` only the front end had), the front end gained the core's 23
+  ## `--lang` names (`miden`, `rust`, `nims`, `gdscript`, `ruby(db)`, the
+  ## `-wasm` forms, ...) and case-insensitive matching.
+  ## `src/tests/cli/lang_spellings_test.nim` and
+  ## `src/frontend/tests/frontend_lang_test.nim` pin the new behaviour.
+  ##
+  ## Written per `Lang` as an exhaustive `case` (milestone rule 4) rather
+  ## than as the string-keyed literal it used to be: a member added to the
+  ## enum does not compile until it has been given its spellings (an empty
+  ## list is a valid, deliberate answer), and `LANG_SPELLINGS` below is
+  ## built from this at compile time with every spelling checked for
+  ## uniqueness.
+  ##
+  ## Four members have NO spelling, each on purpose:
+  ## * `LangPython` -- unreachable from any input (design §3.1): `python` and
+  ##   `py` name `LangPythonDb`, the working recorder.  (`LangRuby` is NOT
+  ##   its twin here: `ruby` still names the retired backend, which is open
+  ##   question Q6 and not this table's to settle; `rb` and `ruby(db)` name
+  ##   `LangRubyDb`.)
+  ## * `LangUnknown` -- the sentinel; it is what a miss returns.
+  ## * `LangBash` / `LangZsh` -- reachable by `ct record` through `LANGS`
+  ##   (`src/ct/utilities/language_detection.nim`, `sh`/`bash`/`zsh`), which
+  ##   is the extension-routing table the desktop capability file is derived
+  ##   from, and NOT merged here for that reason: it must stay extension-only
+  ##   and it carries routing rows (`wasm`, `ts`, `mjs`) that are not
+  ##   spellings of a language.  Neither hand-kept `toLang` copy knew a shell
+  ##   spelling, so none is added; the gap is recorded, not closed.
+  case lang
+  of LangC: @["c", "h"]
+  of LangCpp: @["cpp", "hpp"]
+  of LangRust: @["rust", "rs"]
+  of LangNim: @["nim", "nims"]
+  of LangGo: @["go"]
+  of LangPascal: @["pascal", "pas"]
+  of LangFortran: @["fortran", "f90"]
+  of LangD: @["d", "dlang"]
+  of LangCrystal: @["crystal", "cr"]
+  of LangLean: @["lean"]
+  of LangJulia: @["julia", "jl"]
+  of LangAda: @["ada", "adb"]
+  of LangPython: @[]
+  of LangRuby: @["ruby"]
+  of LangRubyDb: @["rb", "ruby(db)"]   # `rb` is the default for Ruby for now
+  of LangJavascript: @["javascript", "js"]
+  of LangLua: @["lua"]
+  # `asm` AND `s`: the front end always mapped both, the core only `asm`.
+  of LangAsm: @["asm", "s"]
+  of LangNoir: @["noir", "nr"]
+  of LangRustWasm: @["rust-wasm", "rustwasm"]
+  of LangCppWasm: @["cpp-wasm", "cppwasm"]
+  of LangPythonDb: @["python", "py"]
+  of LangUnknown: @[]
+  of LangBash: @[]
+  of LangZsh: @[]
+  of LangSolidity: @["solidity", "sol"]
+  # `masm` AND `miden`: the core always accepted both, the front end only
+  # `masm`.  `miden` is the Miden-qualified spelling the design's §2.5 cites
+  # as the precedent for the `midenasm` storage slug.
+  of LangMasm: @["masm", "miden"]
+  of LangSway: @["sway", "sw"]
+  of LangMove: @["move"]
+  of LangPolkavm: @["polkavm"]
+  of LangCairo: @["cairo"]
+  of LangCircom: @["circom"]
+  of LangLeo: @["leo"]
+  of LangTolk: @["tolk"]
+  of LangAiken: @["aiken", "ak"]
+  of LangCadence: @["cadence", "cdc"]
+  of LangSolana: @["solana"]
+  of LangElixir: @["elixir", "ex", "exs"]
+  of LangErlang: @["erlang", "erl", "hrl"]
+  of LangPhp: @["php"]
+  of LangGdScript: @["gdscript", "gd"]
+
+const
+  LANG_SPELLINGS* = block:
+    ## `(spelling, Lang)` for every row of `langSpellings`, in `Lang`
+    ## declaration order -- the lookup `toLang` scans.  A `seq` rather than a
+    ## `Table`/`JsAssoc` because it must be built at compile time from the
+    ## exhaustive `case` and be the same value on both backends; at ~90 rows a
+    ## scan is not a cost anyone can measure.
+    var pairs: seq[(string, Lang)] = @[]
+    for lang in Lang:
+      for spelling in langSpellings(lang):
+        pairs.add((spelling, lang))
+    pairs
+
+static:
+  # A spelling claimed by two members would resolve to whichever is declared
+  # first -- an ordinal dependency of exactly the kind this series removes --
+  # so it is refused at compile time.  So is a spelling `toLang` could never
+  # match: it lower-cases its input before the scan.
+  var seen: seq[string] = @[]
+  for (spelling, lang) in LANG_SPELLINGS:
+    doAssert spelling.len > 0, $lang & " has an empty spelling"
+    doAssert spelling notin seen, "spelling `" & spelling & "` is claimed twice"
+    for ch in spelling:
+      doAssert ch notin {'A'..'Z'}, "spelling `" & spelling & "` is not lower-case"
+    seen.add(spelling)
+
+proc toLang*(lang: string): Lang =
+  ## The `Lang` a `--lang` name or a file extension (without the dot) names,
+  ## case-insensitively; `LangUnknown` for anything `langSpellings` does not
+  ## list.  One definition for both backends since LRS-3; see `langSpellings`
+  ## for the three tables it replaced.
+  let key = lang.toLowerAscii
+  for (spelling, value) in LANG_SPELLINGS:
+    if spelling == key:
+      return value
+  LangUnknown
+
+proc toLang*(lang: cstring): Lang =
+  toLang($lang)
 
 proc usesMaterializedTracesForExtension*(extension: string): bool =
   ## Return true if the file extension belongs to a language that produces
