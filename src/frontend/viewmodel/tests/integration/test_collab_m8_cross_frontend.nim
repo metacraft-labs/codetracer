@@ -7,7 +7,7 @@
 ##
 ##   nim c -r src/frontend/viewmodel/tests/integration/test_collab_m8_cross_frontend.nim
 
-import std/[json, os, options, sequtils, strutils, tables, unittest]
+import std/[json, os, options, sequtils, strutils, tables, times, unittest]
 
 import isonim/core/[async_compat, signals]
 import isonim_gpui/bindings as gpui_bindings
@@ -85,18 +85,78 @@ const TuiLocalFocusLeafKey = "isonim-tui:terminal:panel-state"
 const GpuiLocalFocusLeafKey = "gpui:leaf:panel-state"
 
 proc repoRoot(): string =
+  ## **THE LANDMARK WAS `nim.cfg` UNTIL PLAT-33, AND THERE IS NO `nim.cfg` IN
+  ## THIS REPOSITORY.** The root carries `config.nims`; `git ls-files` finds
+  ## no `nim.cfg` anywhere. So this walk reached the filesystem root and
+  ## raised on every invocation, and all four of this suite's cases died in
+  ## `findM8TraceFixture` before touching a front-end.
+  ##
+  ## That matters beyond the one-line repair, because the justfile recorded
+  ## this lane's red as *"`test_collab_m8_cross_frontend` needs
+  ## `libgpui_nim_shim.so`"* and `Editor-ViewModel.md` §12.1 repeated it. The
+  ## shim is built in this workspace, the trace fixture is present and
+  ## `replay-server` is present: every prerequisite the attribution named was
+  ## already satisfied, and the suite still could not start.
+  ## `Verification-Harness-Traps.md` §17 — *an attributed red whose named fix
+  ## has landed is due for re-measurement* — with the twist that nobody could
+  ## re-measure it, because no workflow ran the lane.
+  ##
+  ## Two landmarks and not one: `config.nims` alone appears in
+  ## `ci/hostfree/` and `src/ct_test/` as well, so a walk started deeper in
+  ## the tree could stop at the wrong one.
   var dir = currentSourcePath().parentDir
   while dir.len > 0:
-    if fileExists(dir / "nim.cfg") and dirExists(dir / "src" / "db-backend"):
+    if fileExists(dir / "config.nims") and dirExists(dir / "src" / "db-backend"):
       return dir
     let parent = dir.parentDir
     if parent == dir:
       break
     dir = parent
   raise newException(IOError,
-    "could not locate codetracer repo root from " & currentSourcePath())
+    "could not locate codetracer repo root from " & currentSourcePath() &
+    " (looking for a directory holding both config.nims and src/db-backend)")
+
+proc ensureEmulatorLibraryPath() =
+  ## **`replay-server` LINKS `libmcr_emulator.so` AND THE STAGED BINARY'S
+  ## RPATH DOES NOT REACH IT.**
+  ##
+  ## The library is built — cargo leaves it in
+  ## `src/db-backend/target/*/build/replay-server-*/out/` — and
+  ## `src/build-debug/bin/replay-server` cannot load it, so every DAP request
+  ## this suite makes dies with *"the debug adapter closed its output stream
+  ## mid-header"*: a message about a socket, produced by a missing `.so`.
+  ##
+  ## This is the same shape as the Chromium lookup repaired in
+  ## `test_collab_webrtc.nim` on the same day — the artefact is present and
+  ## the finder does not look where it lives — and it is repaired the same
+  ## way rather than left as a local-environment note. The newest matching
+  ## out-dir wins, which is cargo's own convention for a rebuilt crate; an
+  ## explicit `LD_LIBRARY_PATH` is never overridden, so a packaged build that
+  ## has staged the library properly is unaffected.
+  when defined(linux):
+    const LibName = "libmcr_emulator.so"
+    var newest = ""
+    var newestTime: Time
+    for target in ["debug", "release"]:
+      let buildDir = repoRoot() / "src" / "db-backend" / "target" / target /
+                     "build"
+      if not dirExists(buildDir): continue
+      for kind, dir in walkDir(buildDir):
+        if kind != pcDir: continue
+        let candidate = dir / "out" / LibName
+        if not fileExists(candidate): continue
+        let stamp = getLastModificationTime(candidate)
+        if newest.len == 0 or stamp > newestTime:
+          newest = dir / "out"
+          newestTime = stamp
+    if newest.len == 0: return
+    let existing = getEnv("LD_LIBRARY_PATH", "")
+    if existing.contains(newest): return
+    putEnv("LD_LIBRARY_PATH",
+           if existing.len == 0: newest else: newest & ":" & existing)
 
 proc findReplayServer(): string =
+  ensureEmulatorLibraryPath()
   let envBin = getEnv("REPLAY_SERVER_BIN", "")
   if envBin.len > 0 and fileExists(envBin):
     return envBin

@@ -529,23 +529,51 @@ ARMS = [
 # second copy of the code held where the compiler does not read it (§14), and
 # it goes stale exactly as §16's needle does with NO SCAN ABLE TO SEE IT
 # (§17b) — the only instrument is running the arm.
+#
+# **AND IT DID GO STALE, ON MAINLINE, UNDETECTED. REFRESHED 2026-09-20.** Six
+# arms — M1, M2, M3, M4, M6, M7 — were MIS-ATTRIBUTED: each still KILLED its
+# target, but the numbers it quotes had moved. Four constants drifted:
+# `payload_bytes` 5391 -> 5493, MOUNT `meter` 2181 -> 2341, MOUNT `wire`
+# 7572 -> 7834, and `frameBytesFor` disagreements 133 -> 140.
+#
+# **IT WAS NOT PLAT-33 AND IT WAS NOT THE MILESTONE THAT REFRESHED THIS.**
+# Measured on a clean `git worktree` of the then-`dev` tip carrying no
+# uncommitted work at all: the probe already printed `bytes=7834`,
+# `payload_bytes=5493`. So the drift was committed to mainline at some earlier
+# point and every run since has been mis-attributing.
+#
+# **NOTHING COULD HAVE REPORTED IT, WHICH IS THE POINT.** This harness's own
+# control digests had also been stale since 2026-09-16 — two files changed
+# after the last `--record-control-hashes` — so the harness REFUSED to start
+# and never reached the arms. One staleness hid the other, and the whole thing
+# sat on `dev` because nothing in any pipeline runs this harness.
+#
+# **THE STRUCTURAL FIX IS NOT THIS REFRESH.** `Verification-Harness-Traps.md`
+# §10.3 — *no arm may quote a count* — is exactly this failure, and the `F*`
+# and `D1` rows above already obey it by normalising digits to `N`. The `M*`
+# rows deliberately do not, because several arms are told apart ONLY by the
+# SIZE of the disagreement (M6 vs M7 print the same sentence). That tradeoff
+# is real, but it means these rows carry a standing staleness debt that only a
+# run can discharge — so **run `--collect-because` and diff it whenever a
+# ViewModel's wire shape changes**, and do not read a green `M*` row as
+# evidence the numbers are current unless the run that produced it is recent.
 BECAUSE: dict = {
     # --- the probe's refusals: COUNTS, quoted verbatim ----------------------
     # Several arms are told apart by WHICH refusals fired together and by the
     # SIZE of the disagreement, so the clauses are ` && `-joined and the
     # numbers are kept. See `derived_because` for why that is the opposite of
     # §17a's usual rule here and why it is right.
-    'M1': 'decode returned 237 byte(s) of 0 && decode returned 3802 byte(s) of 0 && decode returned 382719 byte(s) of 0 && decode returned 5391 byte(s) of 0 && wire/meter disagree on EXPAND: meter 440605 byte(s), wire 823324 && wire/meter disagree on MOUNT: meter 2181 byte(s), wire 7572',
-    'M2': 'frame size disagreed with frameBytesFor 133 time(s) && frame size disagreed with frameBytesFor 15 time(s) && frame size disagreed with frameBytesFor 16 time(s) && frame size disagreed with frameBytesFor 27016 time(s)',
+    'M1': 'decode returned 237 byte(s) of 0 && decode returned 3802 byte(s) of 0 && decode returned 382719 byte(s) of 0 && decode returned 5493 byte(s) of 0 && wire/meter disagree on EXPAND: meter 440605 byte(s), wire 823324 && wire/meter disagree on MOUNT: meter 2341 byte(s), wire 7834',
+    'M2': 'frame size disagreed with frameBytesFor 140 time(s) && frame size disagreed with frameBytesFor 15 time(s) && frame size disagreed with frameBytesFor 16 time(s) && frame size disagreed with frameBytesFor 27016 time(s)',
     # M3 is M2's set PLUS the cross-check's, and that is what separates them:
     # M2 breaks the size predicate alone, M3 stops measuring the bytes at all.
-    'M3': 'frame size disagreed with frameBytesFor 133 time(s) && frame size disagreed with frameBytesFor 15 time(s) && frame size disagreed with frameBytesFor 16 time(s) && frame size disagreed with frameBytesFor 27016 time(s) && wire/meter disagree on EXPAND: meter 440605 byte(s), wire 823324 && wire/meter disagree on MOUNT: meter 2181 byte(s), wire 7572',
-    'M4': 'decode returned 0 byte(s) of 237 && decode returned 0 byte(s) of 3802 && decode returned 0 byte(s) of 382719 && decode returned 0 byte(s) of 5391',
+    'M3': 'frame size disagreed with frameBytesFor 140 time(s) && frame size disagreed with frameBytesFor 15 time(s) && frame size disagreed with frameBytesFor 16 time(s) && frame size disagreed with frameBytesFor 27016 time(s) && wire/meter disagree on EXPAND: meter 440605 byte(s), wire 823324 && wire/meter disagree on MOUNT: meter 2341 byte(s), wire 7834',
+    'M4': 'decode returned 0 byte(s) of 237 && decode returned 0 byte(s) of 3802 && decode returned 0 byte(s) of 382719 && decode returned 0 byte(s) of 5493',
     'M5': 'structural figures not stable across samples (16/424 vs 16/425)',
     # M6 and M7 print the same SENTENCE and different totals: 36,000 bytes is
     # 9,000 element creations undercharged by four, 48,000 is 12,000 appends.
-    'M6': 'wire/meter disagree on EXPAND: meter 823324 byte(s), wire 787324 && wire/meter disagree on MOUNT: meter 7572 byte(s), wire 7392',
-    'M7': 'wire/meter disagree on EXPAND: meter 823324 byte(s), wire 775324 && wire/meter disagree on MOUNT: meter 7572 byte(s), wire 7332',
+    'M6': 'wire/meter disagree on EXPAND: meter 823324 byte(s), wire 787324 && wire/meter disagree on MOUNT: meter 7834 byte(s), wire 7642',
+    'M7': 'wire/meter disagree on EXPAND: meter 823324 byte(s), wire 775324 && wire/meter disagree on MOUNT: meter 7834 byte(s), wire 7574',
     # M8 counts two elements per row; M9 wires no rows at all.
     'M8': 'COLLAPSE drew 4 row(s), expected 2 && EXPAND drew 1204 row(s), expected 602 && MOUNT drew 4 row(s), expected 2 && STEP drew 1204 row(s), expected 602',
     'M9': 'COLLAPSE drew 0 row(s), expected 2 && EXPAND drew 0 row(s), expected 602 && MOUNT drew 0 row(s), expected 2 && STEP drew 0 row(s), expected 602',

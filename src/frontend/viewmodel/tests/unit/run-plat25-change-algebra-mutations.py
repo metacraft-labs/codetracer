@@ -101,7 +101,13 @@ GENERATOR = "src/frontend/viewmodel/tests/generators/change_generator.nim"
 ALG = "src/frontend/viewmodel/tests/unit/test_editor_change_algebra.nim"
 EX = "src/frontend/viewmodel/tests/unit/test_editor_change_examples.nim"
 
-TOUCHED = [CHANGESET, TRANSACTION, GENERATOR, ALG, EX]
+# PLAT-33: the scan in ALG sweeps EVERY production module under
+# `viewmodel/`, so a cross-directory call site is a subject of this
+# harness. `collab/text_ops.nim` is the module that sat outside the old
+# `editor/`-only subject set, which is why G15 plants its call there.
+TEXTOPS = "src/frontend/viewmodel/collab/text_ops.nim"
+
+TOUCHED = [CHANGESET, TRANSACTION, GENERATOR, ALG, EX, TEXTOPS]
 
 CONTROL_HASHES = HERE / "plat25-change-algebra-mutation-control.sha256"
 
@@ -163,7 +169,7 @@ C_WINDOWS = "every corpus window offers the boundaries a shared budget needs"
 C_UNICODE = "the population is real Unicode, not ASCII wearing a corpus's name"
 C_GATE = "THE IDENTITY, over 10,000 generated pairs from a stated distribution"
 C_SCAN1 = "the flag-taking routine is private, declared once, and called twice"
-C_SCAN2 = "no other module in the editor tree can spell the double mapping"
+C_SCAN2 = "no module anywhere in the ViewModel tree can spell the double mapping"
 C_SHRINK = "a planted always-failing property shrinks to its known counterexample"
 C_A2PIN = "LAW-A2: associativity holds as a mapping and NOT as a value"
 C_A6POP = "the refinement excludes a real population, not an empty one"
@@ -515,16 +521,17 @@ ARMS = [
     ),
     Arm(
         "G13", ALG,
-        "      if kind == pcFile and path.endsWith(\".nim\"):\n",
-        "      if kind == pcFile and path.endsWith(\".nimrod\"):\n",
+        "        if kind == pcFile and path.endsWith(\".nim\"):\n",
+        "        if kind == pcFile and path.endsWith(\".nimrod\"):\n",
         C_SCAN2,
-        "THE DIRECTORY ENUMERATION MATCHES NOTHING. The source scan reads "
-        "five `staticRead` literals, which cannot see a SIXTH module dropped "
-        "into the same directory — planting one leaves the suite green, which "
-        "was measured rather than supposed. The enumeration is what closes "
-        "that, and §4 applies to it exactly as it applies to the scan it "
-        "guards: a lister that finds no files satisfies 'the set is exactly "
-        "these five' only because there is nothing left to disagree with it",
+        "THE TREE ENUMERATION MATCHES NOTHING. The sweep derives its whole "
+        "subject set by walking `viewmodel/`; break the file filter and it "
+        "walks 252 modules and admits none of them, at which point every "
+        "'no module anywhere spells this' assertion is a claim about the "
+        "empty set. §4 applies to the lister exactly as it applies to the "
+        "scan it feeds. The non-vacuity floors — the module count, the "
+        "named directories, and every `RebaseSites` row having to be a "
+        "visited path — are what refuse it",
     ),
     Arm(
         "G14", ALG,
@@ -538,6 +545,40 @@ ARMS = [
         "only thing that changes is the number nobody was checking. A "
         "restatement whose unrefined form has never been watched fail is a "
         "law weakened to fit an implementation",
+    ),
+    Arm(
+        "G15", TEXTOPS,
+        "proc authorityOf*(doc: SharedTextDocument): TextAuthority =",
+        "proc rebaseCopyOutsideEditor*(a, b: ChangeSet): ChangeSet =\n"
+        "  ## A call site ONE DIRECTORY OVER from `editor/`.\n"
+        "  rebase(a, b).bOverA\n\n"
+        "proc authorityOf*(doc: SharedTextDocument): TextAuthority =",
+        C_SCAN2,
+        "**THE DOUBLE MAPPING IS CALLED FROM OUTSIDE `editor/`** — §35's "
+        "third and worst subject-list failure, performed. Until PLAT-33 the "
+        "scan's `walkDir` was hard-coded to `editor/`, so this exact routine "
+        "planted in `collab/` left the suite GREEN while the identical one in "
+        "`editor/` reddened — measured, not supposed, and `collab/` is where "
+        "the milestone had just added code. The subject set is derived from "
+        "the tree now, and this arm is what says the widening is armed rather "
+        "than merely written.\n\n"
+        "**IT EDITS AN EXISTING MODULE RATHER THAN ADDING ONE, AND THAT IS "
+        "MEASURED RATHER THAN ASSUMED.** A new file is not a `staticRead` "
+        "dependency of anything, so the compile-time `walkDir` never re-runs "
+        "and the planted file is invisible — unless something forces the "
+        "frontend to re-run. The lever is NOT a cold nimcache (that forces a "
+        "rebuild, but so do other things, and naming it made an earlier "
+        "revision of this rationale misleading). Measured 2026-09-20, one "
+        "variable at a time with the cache warm: an `-o:` naming a path that "
+        "does not yet exist rebuilds and reddens; an `-o:` naming the "
+        "existing up-to-date binary is skipped and stays green; an mtime "
+        "`touch` on a tracked module is NOT enough, because Nim keys on "
+        "content; a CONTENT edit to a tracked module rebuilds and reddens. "
+        "This harness compiles to FIXED `-o:` paths, so it is the content "
+        "edit that carries every arm — which every arm here makes, this one "
+        "included. A file-ADDING arm would be silently unkillable here. "
+        "See `Verification-Harness-Traps.md` §35a, which records both the "
+        "measurement and the attempt to withdraw it",
     ),
 ]
 
@@ -817,8 +858,23 @@ def check_control_hashes() -> bool:
         h, p = line.split(None, 1)
         recorded[p.strip()] = h
     ok = True
+    # `TOUCHED` is the whole subject set of this harness; `record_control_hashes`
+    # writes a digest for exactly these paths, so the comparator must read
+    # exactly these paths. The two iterating the same set is the property that
+    # makes "absent" mean something rather than being an accident of ordering.
     for p in TOUCHED:
-        if p in recorded and recorded[p] != digest(p):
+        # **A PATH THAT IS NOT IN THE FILE AT ALL IS A REFUSAL, NOT A SKIP.**
+        # The old one-sided test — a membership guard ANDed onto the digest
+        # comparison — made absence and agreement indistinguishable:
+        # a newly added subject passed the gate silently until somebody happened
+        # to re-record. That is the one-sided-check shape §32 exists to forbid,
+        # sitting inside the mechanism built to catch drift.
+        if p not in recorded:
+            print(f"CONTROL DIGEST ABSENT: {p} is compared by this harness "
+                  f"but has no recorded digest — run --needle-scan, review, "
+                  f"then --record-control-hashes (§32)")
+            ok = False
+        elif recorded[p] != digest(p):
             print(f"CONTROL DIGEST MOVED: {p} — re-run --needle-scan BEFORE "
                   f"--record-control-hashes (§32)")
             ok = False
@@ -845,7 +901,18 @@ def main() -> int:
     if needle_scan() != 0:
         print("REFUSING TO RUN: a needle is lost or ambiguous (§32)")
         return 1
-    check_control_hashes()
+    # **ITS VERDICT IS ACTED ON, NOT PRINTED.** This call used to discard the
+    # bool it returns, which made the one check standing between "the tree is
+    # the reviewed tree" and "the tree is whatever a previous run left behind"
+    # a gate that could not fail — §4's own shape, inside the harness that
+    # exists to find it. It matters because `baseline` below is snapshotted
+    # from the CURRENT tree: without this refusal a run started on an
+    # already-mutated file restores to the mutation and reports itself clean.
+    if not check_control_hashes():
+        print("REFUSING TO RUN: a control digest moved or is absent (§32). "
+              "Re-run --needle-scan, review the tree, then "
+              "--record-control-hashes.")
+        return 1
 
     baseline = {p: digest(p) for p in TOUCHED}
     install_restore_on_signal()

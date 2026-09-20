@@ -447,8 +447,71 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # the two front-ends. **NOT ALLOW-LISTED**: an allow-list entry claims a symbol
 # is permanently unreachable by name, and all five `[A]` findings are waiting
 # for a caller a named milestone will add.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1263 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1263 bash ci/test/frontend-reachability.sh
+# ----------------------------------------------------------------------------
+# 1263 -> 1276 ON 2026-09-20 (PLAT-33). NET +13, GROSS +15 AND -2, AND TWO
+# EXPORTS WERE DELETED RATHER THAN CARRIED.
+# ----------------------------------------------------------------------------
+# PLAT-33 added `editor/collab_text.nim` (§12.2's rebase-against-an-authority
+# algorithm) and `collab/text_ops.nim` (its bridge to the ViewOp stream). The
+# reducer's text arms, `applyRemoteChange`, `refusedBy` and
+# `mapPositionTables` are all reached by the product; what is not reached is
+# the surface a FRONT-END will hold, which is the same shape PLAT-32 recorded
+# one milestone ago and which PLAT-34 gives a caller.
+#
+# THE ACCOUNT IS A DIFF OF TWO RUNS OF THIS SCRIPT — a `git worktree` at the
+# merge base against the tree with PLAT-33 in it — rather than a recollection
+# (Verification-Harness-Traps §36b). Both runs report `allow-listed: 0`.
+#
+# *A note on HOW it was diffed, because the first attempt was wrong by one.* A
+# set difference keyed on `(file, symbol)` reported +14; the per-file COUNTS
+# reported +15. The missing one is an `==` operator, and `transaction.nim` now
+# has three of them: **a set keyed on a NAME cannot see a change in the
+# MULTIPLICITY of an overloaded one.** The per-file counts are the account.
+#
+#   ADDED, +15:
+#     * `editor/collab_text.nim`, 5: `initPeerSession`, `recordLocal`,
+#       `receiveInto`, `acceptConcurrent`, `divergenceMessage`. The peer
+#       surface a front-end will drive, plus the offline message a front-end
+#       will show. `acceptConcurrent` is the one worth naming twice: it
+#       carries the authority's stated tie-break, it is what `LAW-X3` is
+#       about, and nothing in the product batches submissions yet — recorded
+#       as a residual in PLAT-33's status rather than left to be found here.
+#     * `collab/text_ops.nim`, 4: `submitTextUpdateOp`, `setTextSelectionOp`,
+#       `mappedAnchors`, `canEditSharedText` — the envelope constructors a
+#       peer calls, the remote-caret reader a view renders, and the predicate
+#       a front-end greys an editor out with.
+#     * `collab/reducer.nim`, 5: `MergeFamily`, `MergeFamilyIds`,
+#       `PublishedMergeFamilyCount`, `mergeFamilyOf`, `committedVersion`. The
+#       first four exist to BE COMPARED against `Editor-ViewModel.md` §12.1a's
+#       published table — an oracle's implementation side has a suite for a
+#       caller by construction, and wiring it to a product module would be
+#       inventing a reader.
+#     * `editor/transaction.nim`, 1: a third `==`, on `TransactionFilter`.
+#       This scanner does not see an operator reached through `seq[T]`'s own
+#       `==`, and `EditorState.==` compares `a.filters == b.filters`. Same
+#       bucket and same reason as the two already there.
+#
+#   REMOVED, -2, AND NEITHER IS A DELETION — both stopped being findings
+#   because this milestone landed:
+#     * `change_set.encodeChangeSet` and `decodeChangeSet`. PLAT-25 wrote them
+#       under the comment *"because PLAT-33 puts change sets on a wire"* and
+#       they have sat tested-and-unreached ever since. PLAT-33 put them there.
+#
+#   DELETED, 2, RATHER THAN RATCHETED:
+#     * `collab_text.logEntries` and `transaction.FilterKindCount` were
+#       written, measured as reached by nothing at all, and removed. A derived
+#       cardinality earns its place by being a sweep's multiplier and no sweep
+#       runs over the two filter kinds; an accessor earns its place by having
+#       a reader. Carrying either would have been +2 for the shape of a
+#       neighbour rather than for a use.
+#
+# It is a CEILING, so it falls again when PLAT-34 wires the editing core into
+# the two front-ends — nine of the fifteen are waiting for exactly that.
+# **NOT ALLOW-LISTED**, for the reason PLAT-32 gave: an allow-list entry claims
+# a symbol is permanently unreachable by name, and these are waiting for a
+# caller a named milestone will add.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1276 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1276 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

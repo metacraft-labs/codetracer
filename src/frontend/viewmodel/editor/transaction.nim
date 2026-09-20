@@ -122,7 +122,45 @@ type
     effects*: seq[Effect]
     annotations*: seq[Annotation]
 
+  # =========================================================================
+  # TRANSACTION FILTERS — PLAT-33, and they exist so that §12.2's second
+  # "not incidental" property is a property of something
+  # =========================================================================
+  #
+  # `Editor-ViewModel.md` §12.2 requires a received remote transaction to
+  # **bypass the local transaction filters**, on the ground that *"a local
+  # read-only guard or protected-range filter that suppressed part of a remote
+  # change would silently break convergence."* Until this milestone there were
+  # no filters in the tree at all — so "remote changes bypass them" was a
+  # sentence about a mechanism that did not exist, and `LAW-X4`'s second arm
+  # would have been `Verification-Harness-Traps.md` §7c: *a green fixture
+  # describing a state no shipped route can reach*.
+  #
+  # So the two filters §12.2 names by name are built, and they are a CLOSED
+  # enum for the same reason the annotations are: a closed set is enumerable
+  # by a test and an open registry is not. They are the two the spec names and
+  # not a general extension point — an extension point would be a third thing
+  # to test whose members nobody can count.
+
+  FilterKind* = enum
+    tfReadOnly        ## the buffer refuses every LOCAL change
+    tfProtectedRange  ## local changes touching `[from, to)` are refused
+
+  TransactionFilter* = object
+    case kind*: FilterKind
+    of tfReadOnly: discard
+    of tfProtectedRange:
+      protectedFrom*, protectedTo*: int
+
 const
+  # **NO `FilterKindCount`, AND THE ABSENCE IS DELIBERATE.** The two counts
+  # below exist because a SWEEP multiplies by them (§10.4 rule 3: a sweep's
+  # multiplier must be an asserted cardinality). No sweep runs over the filter
+  # kinds — `LAW-X4` drives each of the two by name, under two scenarios —
+  # so a derived constant here would be an export nothing reads, which is a
+  # reachability finding carried for the shape of a neighbour rather than for
+  # a use. It was written, measured as dead by `ci/test/frontend-reachability.sh`,
+  # and deleted rather than ratcheted.
   AnnotationKindCount* = ord(high(AnnotationKind)) - ord(low(AnnotationKind)) + 1
   EffectKindCount* = ord(high(EffectKind)) - ord(low(EffectKind)) + 1
     ## Derived from the enums rather than written, so the sweep's multiplier
@@ -146,6 +184,59 @@ func `==`*(a, b: Effect): bool =
   of efSetLanguage: a.language == b.language
   of efAnnounce: a.message == b.message
   of efMoveCaretTo: a.caret == b.caret
+
+func `==`*(a, b: TransactionFilter): bool =
+  if a.kind != b.kind: return false
+  case a.kind
+  of tfReadOnly: true
+  of tfProtectedRange:
+    a.protectedFrom == b.protectedFrom and a.protectedTo == b.protectedTo
+
+func touchesRange(cs: ChangeSet; rangeFrom, rangeTo: int): bool =
+  ## Does `cs` change anything inside `[rangeFrom, rangeTo)`?
+  ##
+  ## An insertion exactly at either endpoint does NOT touch the range: it
+  ## lands outside it, which is the same edge convention `LAW-S4` gives a
+  ## selection and the same one `mapRange` implements. A guard that answered
+  ## otherwise would refuse the caret position a user types at when their
+  ## cursor sits against a protected region's edge.
+  var pos = 0
+  for section in cs.sections:
+    case section.kind
+    of skKeep:
+      pos += section.keep
+    of skReplace:
+      let changeFrom = pos
+      let changeTo = pos + section.delete
+      if section.delete == 0:
+        # A pure insertion: inside only if it is STRICTLY inside.
+        if changeFrom > rangeFrom and changeFrom < rangeTo:
+          return true
+      elif changeFrom < rangeTo and changeTo > rangeFrom:
+        return true
+      pos = changeTo
+  false
+
+func refusedBy*(filters: openArray[TransactionFilter];
+                cs: ChangeSet): bool =
+  ## **THE ONE PREDICATE**, called by the local commit path and by every case
+  ## that asserts a filter fired or did not. `Verification-Harness-Traps.md`
+  ## §30: a rule and its control that each spell the test out get to disagree
+  ## about it; one function they both call cannot.
+  ##
+  ## Note what is NOT here: there is no `remote` parameter and no bypass flag.
+  ## The remote path does not pass `true` to this — it does not CALL it, which
+  ## is a difference a source scan can see and a boolean argument is not.
+  if cs.isIdentity:
+    return false
+  for f in filters:
+    case f.kind
+    of tfReadOnly:
+      return true
+    of tfProtectedRange:
+      if cs.touchesRange(f.protectedFrom, f.protectedTo):
+        return true
+  false
 
 func carriesPositions*(e: Effect): bool =
   ## Which arms have to be mapped. Stated as a function rather than as a

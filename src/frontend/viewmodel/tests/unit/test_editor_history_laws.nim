@@ -82,7 +82,19 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 3286
+const ExpectedAssertions = 3288
+  ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
+  ## FIRING OF §35's ENUMERATION.** Five suites went red by name on the first
+  ## run of the floor gate — PLAT-25's, PLAT-27's, PLAT-28's, PLAT-29's and
+  ## PLAT-32's — before either of PLAT-33's own suites existed, and none of
+  ## them knew the milestone was happening. Every repair was a list entry and
+  ## this number, except PLAT-27's, which needed two lists because its scan
+  ## splits the directory by what a module IS.
+  ##
+  ## The new module is the one that would host a seventh hand-written double
+  ## mapping if one were ever written: `receiveUpdates` and `rebaseUpdates`
+  ## are the last two of the reference's five sites, and they are the two the
+  ## reference spells out by hand. It does not; it calls `rebase`.
   ## Asserted by the last case against the runtime tally. Written LAST, from
   ## a run, and updated deliberately in the same commit as the checks that
   ## moved it — §10.1's *"a static one cannot see a case that returned
@@ -193,7 +205,8 @@ proc codeOnly(src: string): string =
 # §35 — the directory this milestone's module lives in, enumerated
 # ---------------------------------------------------------------------------
 
-const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
+const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
+                    "decoration.nim",
                         "document_version.nim", "editor_state.nim",
                         "history.nim", "inlay.nim", "operations.nim",
                         "range_set.nim", "reconcile.nim", "rope.nim",
@@ -288,7 +301,7 @@ suite "PLAT-32 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name & " is in the directory and must be scanned")
       counted name in ScannedModules
-    counted ScannedModules.len == 18
+    counted ScannedModules.len == 19
     counted "history.nim" in EditorDirModules
 
   test "§30a — THE ORACLE IS NOT A SECOND CALL TO THE MODEL":

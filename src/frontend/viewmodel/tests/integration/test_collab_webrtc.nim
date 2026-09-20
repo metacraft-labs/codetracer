@@ -162,6 +162,57 @@ proc newM9Harness(): M9Harness =
   result.grantAll(result.tui.principalId, "grant-tui-m9")
   result.grantDriver(result.web.principalId, "lease-web")
 
+proc chromiumUnderPlaywright(): string =
+  ## **THE DEV SHELL'S CHROMIUM IS NOT ON `PATH` AND NEVER WAS.** It is
+  ## unpacked under `$PLAYWRIGHT_BROWSERS_PATH`, and this repository already
+  ## knew that in sixteen places before this suite was written.
+  ##
+  ## **FOUR OF THEM ARE SHELL GATES, NOT FIVE.** An earlier version of this
+  ## comment listed five files and called them all shell gates; the fifth,
+  ## `src/tests/gui/playwright.config.ts`, is TypeScript. The shell gates are
+  ## `ci/test/watch-expressions-in-browser.sh`, `low-level-code-browser.sh`,
+  ## `constraints-listing-browser.sh` and `state-values-in-browser.sh` — all
+  ## four via `find -L "${PLAYWRIGHT_BROWSERS_PATH:-/nonexistent}"`, macOS
+  ## bundle path first and bare `chrome` second.
+  ##
+  ## Counted rather than recalled (`git grep -l`, tracked files): **22 files
+  ## mention the variable**. Sixteen SEARCH it for a browser — the four shell
+  ## gates, seven TypeScript files under `src/tests/gui/`
+  ## (`playwright.config.ts`, `lib/fixtures.ts` and five specs), and five
+  ## `.mjs` drivers (`scripts/docs/capture-book-page-screenshot.mjs` and four
+  ## `src/db-backend/tests/fixtures/**/drive.mjs`). Two SET it
+  ## (`nix/shells/ci-base.nix`, `nix/shells/armShell.nix`), three mention it
+  ## only in prose, and the twenty-second is this file.
+  ##
+  ## `findChromium` below re-derived the lookup from `PATH` names alone and so
+  ## raised inside a dev shell that was holding a perfectly good Chromium the
+  ## whole time — `Verification-Harness-Traps.md` §30a, *"the problem was
+  ## solved, in this repository, in a file the second author had read"*. Two
+  ## of this suite's four cases were red on that and nothing ran the lane to
+  ## notice.
+  ## **THE WALK FOLLOWS SYMLINKS, WHICH IS THE WHOLE DIFFICULTY.** Under Nix
+  ## every entry of `$PLAYWRIGHT_BROWSERS_PATH` is a symlink into the store —
+  ## `chromium-1194 -> /nix/store/…-playwright-chromium` — and `walkDirRec`'s
+  ## default `followFilter = {pcDir}` does not descend a `pcLinkToDir`. So a
+  ## first repair that used the default walked a directory of five symlinks,
+  ## found nothing, and reported the same "no Chromium" as before with a
+  ## longer message. That is why the shell gates all spell `find -L`, and it
+  ## is the part of their idiom that is easy to copy without.
+  let root = getEnv("PLAYWRIGHT_BROWSERS_PATH", "")
+  if root.len == 0 or not dirExists(root):
+    return ""
+  const Follow = {pcDir, pcLinkToDir}
+  const Yield = {pcFile, pcLinkToFile}
+  # macOS first, matching the shell gates' order: on a Mac the bundle path
+  # exists and a bare `chrome` under it would be the helper, not the browser.
+  for path in walkDirRec(root, yieldFilter = Yield, followFilter = Follow):
+    if path.endsWith("Chromium.app/Contents/MacOS/Chromium"):
+      return path
+  for path in walkDirRec(root, yieldFilter = Yield, followFilter = Follow):
+    if path.lastPathPart == "chrome":
+      return path
+  ""
+
 proc findChromium(): string =
   for candidate in [
     getEnv("CHROMIUM_BIN", ""),
@@ -175,7 +226,14 @@ proc findChromium(): string =
     let found = findExe(candidate)
     if found.len > 0:
       return found
-  raise newException(IOError, "Chromium is required for real WebRTC DataChannel tests")
+  let playwright = chromiumUnderPlaywright()
+  if playwright.len > 0:
+    return playwright
+  raise newException(IOError,
+    "Chromium is required for real WebRTC DataChannel tests. Not on PATH, " &
+    "not in CHROMIUM_BIN, and not under PLAYWRIGHT_BROWSERS_PATH=" &
+    getEnv("PLAYWRIGHT_BROWSERS_PATH", "<unset>") &
+    ". Run inside the nix dev shell.")
 
 proc runRendezvousBackedWebRtc(frames: openArray[string];
                                reconnectFrames: openArray[string] = []): JsonNode =

@@ -728,8 +728,23 @@ def check_control_hashes() -> bool:
         h, p = line.split(None, 1)
         recorded[p.strip()] = h
     ok = True
+    # `TOUCHED` is the whole subject set of this harness; `record_control_hashes`
+    # writes a digest for exactly these paths, so the comparator must read
+    # exactly these paths. The two iterating the same set is the property that
+    # makes "absent" mean something rather than being an accident of ordering.
     for p in TOUCHED:
-        if p in recorded and recorded[p] != digest(p):
+        # **A PATH THAT IS NOT IN THE FILE AT ALL IS A REFUSAL, NOT A SKIP.**
+        # The old one-sided test — a membership guard ANDed onto the digest
+        # comparison — made absence and agreement indistinguishable:
+        # a newly added subject passed the gate silently until somebody happened
+        # to re-record. That is the one-sided-check shape §32 exists to forbid,
+        # sitting inside the mechanism built to catch drift.
+        if p not in recorded:
+            print(f"CONTROL DIGEST ABSENT: {p} is compared by this harness "
+                  f"but has no recorded digest — run --needle-scan, review, "
+                  f"then --record-control-hashes (§32)")
+            ok = False
+        elif recorded[p] != digest(p):
             print(f"CONTROL DIGEST MOVED: {p} — re-run --needle-scan BEFORE "
                   f"--record-control-hashes (§32)")
             ok = False
@@ -756,7 +771,18 @@ def main() -> int:
     if needle_scan() != 0:
         print("REFUSING TO RUN: a needle is lost or ambiguous (§32)")
         return 1
-    check_control_hashes()
+    # **ITS VERDICT IS ACTED ON, NOT PRINTED.** This call used to discard the
+    # bool it returns, which made the one check standing between "the tree is
+    # the reviewed tree" and "the tree is whatever a previous run left behind"
+    # a gate that could not fail — §4's own shape, inside the harness that
+    # exists to find it. It matters because `baseline` below is snapshotted
+    # from the CURRENT tree: without this refusal a run started on an
+    # already-mutated file restores to the mutation and reports itself clean.
+    if not check_control_hashes():
+        print("REFUSING TO RUN: a control digest moved or is absent (§32). "
+              "Re-run --needle-scan, review the tree, then "
+              "--record-control-hashes.")
+        return 1
 
     baseline = {p: digest(p) for p in TOUCHED}
 

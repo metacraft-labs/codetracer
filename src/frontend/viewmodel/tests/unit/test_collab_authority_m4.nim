@@ -417,3 +417,56 @@ suite "collaborative ViewModel M4 backend authority":
     check doc.state.backendSnapshots.len == 1
     check doc.state.backendSnapshots[0].backendEpoch == 2'u64
     check doc.state.backendSnapshots[0].payload["rrTicks"].getInt == 20
+
+  test "test_collab_capability_grant_without_id_is_refused_at_decode":
+    ## PLAT-33. **AN EMPTY GRANT ID IS A REFUSAL AT THE DECODER, AND THIS IS
+    ## THE CASE THAT SAYS SO** rather than leaving it to be rediscovered.
+    ##
+    ## `applyGrantCapabilities` and `applyRevokeCapabilities` both refuse
+    ## `id.len == 0`, so the reducer can neither create such a grant nor
+    ## retract one. `codec.parseCapabilityGrant` used to admit one anyway from
+    ## any snapshot that omitted the `"id"` key — a row in `capabilityGrants`
+    ## that no authority could ever remove. The decision is that a grant which
+    ## cannot be named is not a grant, and is dropped at the door.
+    ##
+    ## The second half of the case is the control: it is the MISSING ID that
+    ## is refused, not the grant, so the same snapshot with an id present must
+    ## survive and still confer the capability.
+    let user = "principal-user"
+    var doc = newDoc()
+    check doc.applyViewOp(grantOp(
+      "grant-watch", user, "grant-watch-op",
+      @[capManageWatches], @["statePane.watchExpressions"], 1)).status == asApplied
+    check doc.state.capabilityGrants.len == 1
+
+    let snapshot = toJson(doc.state)
+    check snapshot["capabilityGrants"].getElems(@[]).len == 1
+
+    # -- control: untouched round-trip keeps the grant and the capability ----
+    let roundTripped = parseSharedSessionViewState(snapshot)
+    check roundTripped.capabilityGrants.len == 1
+    check roundTripped.capabilityGrants[0].id == "grant-watch"
+    check roundTripped.hasLiveCapability(
+      user, capManageWatches, "statePane.watchExpressions")
+
+    # -- the "id" key omitted entirely ---------------------------------------
+    var omitted = toJson(doc.state)
+    omitted["capabilityGrants"].elems[0].delete("id")
+    check not omitted["capabilityGrants"].elems[0].hasKey("id")
+    let fromOmitted = parseSharedSessionViewState(omitted)
+    check fromOmitted.capabilityGrants.len == 0
+    check not fromOmitted.hasLiveCapability(
+      user, capManageWatches, "statePane.watchExpressions")
+
+    # -- the "id" key present but empty --------------------------------------
+    var blanked = toJson(doc.state)
+    blanked["capabilityGrants"].elems[0]["id"] = %""
+    let fromBlanked = parseSharedSessionViewState(blanked)
+    check fromBlanked.capabilityGrants.len == 0
+    check not fromBlanked.hasLiveCapability(
+      user, capManageWatches, "statePane.watchExpressions")
+
+    # -- and the authority is still the authority, grant or no grant ---------
+    # (the refusal drops a grant; it must not disturb the authority path)
+    check fromOmitted.hasLiveCapability(
+      AdminPrincipal, capManageWatches, "statePane.watchExpressions")

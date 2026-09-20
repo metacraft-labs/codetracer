@@ -146,9 +146,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # without it would not know what the rows' indices mean.
   entries.addMany("EventLogStore",
     ["rows", "recordsTotal", "recordsFiltered", "maxRRTicks", "loadedStart",
-     "loadingState"],
+     "loadingState", "windowSource"],
     vscBackendAuthoritative,
-    "Event rows, the counts, the recording's extent, the fetched window's offset and the load status are all backend answers about the recording.")
+    "Event rows, the counts, the recording's extent, the fetched window's offset, the load status and which route produced the window are all backend answers about the recording.")
   # The point list has TWO producers and both are the owning peer's:
   # `applyCollections` reads the CHECKOUT's `points.toml` (which a remote
   # participant does not have) and `applyTracepointResults` reads a sweep the
@@ -554,6 +554,35 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["isOpen", "describesActiveTab", "focus", "focusRows",
      "instantiationCount", "focusText", "tabTitle", "producerLine"])
 
+  # -------------------------------------------------------------------------
+  # `SourceVM` — CLASSIFIED BY PLAT-33, 2026-09-20. THE WHOLE TYPE WAS ABSENT.
+  # -------------------------------------------------------------------------
+  # Eighteen of the thirty-two unclassified fields were this one ViewModel,
+  # which had never had a row. It is worth classifying carefully rather than
+  # by bulk because it is the pane a shared editing session is ABOUT, and
+  # PLAT-34 will bind it to `editor/`.
+  #
+  # **THE VIEWPORT IS RENDERER-LOCAL AND THE HELD WINDOW IS NOT**, and that
+  # split is the interesting one. `EditorVM.scrollTop` is already classified
+  # renderer-local — two participants with different window heights must be
+  # able to look at different parts of one file, which is the whole reason
+  # follow-the-driver is a separate, opt-in feature rather than the default.
+  # What the pane has FETCHED, on the other hand, is a set of backend answers
+  # about the recording's source, and it is cached in signals rather than
+  # memos only because a projection cannot perform a request.
+  entries.addMany("SourceVM", ["viewportHeight", "overscan", "viewportTop"],
+    vscRendererLocal,
+    "Where this participant is looking and how much they render around it; the same call as `EditorVM.scrollTop`, and the reason follow-the-driver is opt-in.")
+  entries.addMany("SourceVM",
+    ["heldFirstLine", "heldLines", "heldRevision", "totalLineCount",
+     "pendingRequests"],
+    vscBackendAuthoritative,
+    "The fetched source window, the revision it was fetched at, the file's extent and the requests still in flight: backend answers, cached in signals because a projection cannot issue a request.")
+  entries.addDerived("SourceVM",
+    ["revision", "executionLine", "path", "sourceGeneration", "sourceDigest",
+     "visibleFirstLine", "visibleLastLine", "windowFirstLine", "windowLastLine",
+     "degradedState"])
+
   entries.addMany("NoSourceVM",
     ["message", "location", "history", "originatingAddress", "stopSignalText"],
     vscBackendAuthoritative,
@@ -836,6 +865,47 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Active model, working branch, available branches and the pending permission prompt's detail are agent-session facts the host reports.")
   entries.addEntry("AgentActivityVM", "branchDropdownOpen", vscRendererLocal,
     "Whether the branch selector is open; the same call as `VCSVM.branchDropdownOpen` — a dropdown is local UI state.")
+  # -------------------------------------------------------------------------
+  # CLASSIFIED BY PLAT-33, 2026-09-20, WITH THE COUNT RE-MEASURED
+  # -------------------------------------------------------------------------
+  # `vm-collab-units` was red on this table for having drifted behind the
+  # ViewModels, and the justfile recorded the drift as "30 unclassified, 1
+  # stale". Re-measured by running the suite: **32 unclassified and 0 stale**.
+  # The stale row had already been dealt with by whoever last touched the
+  # ViewModel; the two the figure was short of are `AgentActivityVM.
+  # settingsActiveDropdown` and `EventLogStore.windowSource`. A number in a
+  # comment that nothing re-takes is a number that drifts alongside the thing
+  # it describes, which is the defect this registry exists to prevent, one
+  # level up.
+  #
+  # The three dropdown flags follow `branchDropdownOpen` directly above: a
+  # dropdown is local UI state, and there is no reading of a shared session in
+  # which one participant's open menu belongs on another's screen.
+  entries.addMany("AgentActivityVM",
+    ["modelDropdownOpen", "addContextDropdownOpen", "settingsActiveDropdown"],
+    vscRendererLocal,
+    "Which selector menu is open; the same call as `branchDropdownOpen` — a dropdown is local UI state.")
+  # The composition draft follows `inputValue`, which is already classified
+  # renderer-local as "prompt draft is local typing state". These are the rest
+  # of the same draft: both are CLEARED on submit, and what survives the
+  # submit is a session fact the host reports back through `messages`.
+  entries.addMany("AgentActivityVM", ["pastedImages", "contextPaths"],
+    vscRendererLocal,
+    "Images pasted and context paths added for the next prompt; the rest of `inputValue`'s draft, cleared on submit.")
+  # The settings form is the same argument once more, and it is worth stating
+  # because the instinct is to call a runtime budget "shared": these nine
+  # fields are an UNSUBMITTED form. The moment they are submitted the session
+  # they configure reports its own runtime through the backend-authoritative
+  # fields above, so sharing the draft as well would give two sources for one
+  # fact — and the draft is the one that is wrong between the edit and the
+  # submit.
+  entries.addEntry("AgentActivityVM", "settingsOpen", vscRendererLocal,
+    "Whether the settings panel is expanded; local UI disclosure, like the dropdowns above.")
+  entries.addMany("AgentActivityVM",
+    ["settingsRuntime", "settingsCpu", "settingsMemory", "settingsNetworkAccess",
+     "settingsDeliveryMode", "settingsDeliveryBranch", "settingsPermissions"],
+    vscRendererLocal,
+    "The agent-session settings form before it is submitted; a draft, like `inputValue`. What the session actually runs with is reported back as a backend fact.")
   entries.addDerived("AgentActivityVM",
     ["messageCount", "terminalCount", "hasMessages", "hasSessionNotice",
      "testRunCount", "evidenceCallCount"])

@@ -85,7 +85,19 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1276
+const ExpectedAssertions = 1278
+  ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
+  ## FIRING OF §35's ENUMERATION.** Five suites went red by name on the first
+  ## run of the floor gate — PLAT-25's, PLAT-27's, PLAT-28's, PLAT-29's and
+  ## PLAT-32's — before either of PLAT-33's own suites existed, and none of
+  ## them knew the milestone was happening. Every repair was a list entry and
+  ## this number, except PLAT-27's, which needed two lists because its scan
+  ## splits the directory by what a module IS.
+  ##
+  ## The new module is the one that would host a seventh hand-written double
+  ## mapping if one were ever written: `receiveUpdates` and `rebaseUpdates`
+  ## are the last two of the reference's five sites, and they are the two the
+  ## reference spells out by hand. It does not; it calls `rebase`.
   ## **+2 ON 2026-09-19: PLAT-32 ADDED `history.nim` TO `viewmodel/editor/`,
   ## AND THIS SUITE SAID SO BEFORE THAT MILESTONE'S OWN SUITES EXISTED.**
   ## §35's enumeration firing for the sixth time, from a milestone that had
@@ -1054,7 +1066,8 @@ const
   WrapSource = staticRead("../../editor/wrap.nim")
   GeneratorSource = staticRead("../generators/decoration_generator.nim")
 
-const ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
+const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
+                    "decoration.nim",
                         "document_version.nim", "editor_state.nim",
                         "history.nim",
                         "inlay.nim", "operations.nim", "range_set.nim",
@@ -1209,7 +1222,7 @@ suite "PLAT-28 — the suite's own non-vacuity":
     # the two-sided comparison above: without it, a directory walk that matched
     # nothing and a list that had been emptied would agree with each other
     # perfectly (§4). Forcing this edit is the whole job it does.
-    counted ScannedModules.len == 18
+    counted ScannedModules.len == 19
     counted NewModules.len == 5
 
   test "NO CLAMP REPAIRS AN ANCHOR — every unreachable path RAISES":

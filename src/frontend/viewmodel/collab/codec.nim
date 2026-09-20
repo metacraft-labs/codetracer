@@ -14,9 +14,15 @@ import ./types
 
 const KnownEnvelopeFields = [
   "protocolVersion", "sessionId", "principalId", "actorId", "replicaId",
-  "actorSeq", "opId", "lamport", "capabilityIds", "targetPath", "kind",
-  "payload"
+  "actorSeq", "opId", "lamport", "authorityVersion", "capabilityIds",
+  "targetPath", "kind", "payload"
 ]
+  ## **A NAME ADDED HERE IS A NAME REMOVED FROM `unknownFields`.** The two
+  ## halves are the same list read in opposite directions, so a field decoded
+  ## into a typed slot and left off this list would ALSO be preserved as an
+  ## unknown, emitted twice, and shadow itself on the next round trip. The
+  ## envelope round-trip case in `test_collab_text_ops.nim` asserts the
+  ## cardinality in both directions for exactly that reason.
 
 proc parseEnumValue[T: enum](name: string; fallback: T): T =
   for value in T:
@@ -120,16 +126,43 @@ proc toJson*(grant: CapabilityGrant): JsonNode =
     "revokedByOpId": grant.revokedByOpId,
   }
 
-proc parseCapabilityGrant(node: JsonNode): CapabilityGrant =
-  result.id = node{"id"}.getStr("")
-  result.subject = node{"subject"}.getStr("")
-  result.issuer = node{"issuer"}.getStr("")
-  result.addOpId = node{"addOpId"}.getStr("")
-  result.revokedByOpId = node{"revokedByOpId"}.getStr("")
+proc parseCapabilityGrant(node: JsonNode; grant: var CapabilityGrant): bool =
+  ## **A GRANT WITH AN EMPTY `id` IS REFUSED HERE**, and the refusal is the
+  ## return value rather than a silently empty field, so no caller can decode
+  ## one by accident. Returns `false` and leaves `grant` unspecified when the
+  ## node carries no usable id.
+  ##
+  ## The rule is `reducer.nim`'s, moved to the second entry point that was
+  ## missing it. `applyGrantCapabilities` and `applyRevokeCapabilities` BOTH
+  ## already refuse `id.len == 0`, so an empty-id grant is not a value the
+  ## reducer can create — but until PLAT-33 this decoder admitted one anyway,
+  ## from any snapshot that merely omitted the `"id"` key. That asymmetry has
+  ## two consequences, and the second is the serious one:
+  ##
+  ## 1. `capabilities.hasLiveCapability` tests the grant id it finds with
+  ##    `.len > 0`, so an empty-id grant is found by the walk and then denied.
+  ##    Fail-closed, but silently — the grant is present and inert.
+  ## 2. **It could never be revoked.** Revocation is by id and
+  ##    `applyRevokeCapabilities` refuses an empty one, so there is no
+  ##    operation that can retract such a grant. Admitting it creates a row in
+  ##    `capabilityGrants` that no authority can ever remove.
+  ##
+  ## A grant that cannot be named is not a grant, so it is dropped at the door
+  ## rather than carried as state nothing can act on. Pinned by
+  ## `test_collab_capability_grant_without_id_is_refused_at_decode`.
+  grant = CapabilityGrant()
+  grant.id = node{"id"}.getStr("")
+  if grant.id.len == 0:
+    return false
+  grant.subject = node{"subject"}.getStr("")
+  grant.issuer = node{"issuer"}.getStr("")
+  grant.addOpId = node{"addOpId"}.getStr("")
+  grant.revokedByOpId = node{"revokedByOpId"}.getStr("")
   for capNode in node{"capabilities"}.getElems(@[]):
-    result.capabilities.add parseEnumValue(capNode.getStr(""), capObserve)
+    grant.capabilities.add parseEnumValue(capNode.getStr(""), capObserve)
   for pathNode in node{"targetPaths"}.getElems(@[]):
-    result.targetPaths.add pathNode.getStr("")
+    grant.targetPaths.add pathNode.getStr("")
+  true
 
 proc toJson*(principal: PrincipalDescriptor): JsonNode =
   %*{
@@ -371,8 +404,12 @@ proc parseSharedSessionViewState*(node: JsonNode): SharedSessionViewState =
   for leaseId in node{"closedDriverLeases"}.getElems(@[]):
     result.closedDriverLeases.add leaseId.getStr("")
   result.focusedPanelId = parseLwwStringRegister(node{"focusedPanelId"})
-  for grant in node{"capabilityGrants"}.getElems(@[]):
-    result.capabilityGrants.add parseCapabilityGrant(grant)
+  for grantNode in node{"capabilityGrants"}.getElems(@[]):
+    # The bool is the admission decision and there is nowhere to discard it:
+    # a refused grant is simply never added. See `parseCapabilityGrant`.
+    var grant: CapabilityGrant
+    if parseCapabilityGrant(grantNode, grant):
+      result.capabilityGrants.add grant
   for panel in node{"layout"}.getElems(@[]):
     result.layout.add parseLogicalPanel(panel)
   for entry in node{"calltrace"}{"expandedNodes"}.getElems(@[]):
@@ -411,6 +448,7 @@ proc toJson*(op: ViewOpEnvelope): JsonNode =
   result["actorSeq"] = %op.actorSeq
   result["opId"] = %op.opId
   result["lamport"] = %op.lamport
+  result["authorityVersion"] = %op.authorityVersion
   result["capabilityIds"] = jsonArray(op.capabilityIds)
   result["targetPath"] = %op.targetPath
   result["kind"] = %(
@@ -436,6 +474,7 @@ proc parseViewOpEnvelope*(node: JsonNode): ViewOpEnvelope =
     actorSeq: parseUint64(node{"actorSeq"}),
     opId: node{"opId"}.getStr(""),
     lamport: parseUint64(node{"lamport"}),
+    authorityVersion: node{"authorityVersion"}.getInt(0),
     targetPath: node{"targetPath"}.getStr(""),
     kind: kind,
     kindName: if kind == vokUnknown: kindName else: "",

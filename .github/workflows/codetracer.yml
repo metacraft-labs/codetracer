@@ -3482,6 +3482,44 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just editor-model-case-floors
 
       # ----------------------------------------------------------------
+      # PLAT-33: THE TWO COLLABORATION LANES, WHICH NO WORKFLOW NAMED.
+      # ----------------------------------------------------------------
+      #
+      # `vm-collab-units` and `vm-collab-integration` were declared in
+      # `ci/lib/test-lane-files.sh`, given recipes in the justfile, listed by
+      # the lane classifier — and named by NO workflow. Fourteen suites and
+      # 4,688 lines of collaboration tests were graded by nothing, and had
+      # been since they were written.
+      #
+      # That is why PLAT-33 makes this its FIRST deliverable rather than a
+      # note: a milestone that adds tests to a lane no pipeline executes has
+      # added nothing, and the milestone adds tests to exactly these two.
+      #
+      # Both were red when they were first run, for reasons that had nothing
+      # to do with the lanes and everything to do with nobody running them:
+      # a signal registry 32 classifications behind the ViewModels, a repo-root
+      # probe looking for a `nim.cfg` this repository does not have, and a
+      # Chromium lookup that searched `PATH` while the dev shell's Chromium
+      # sat under `$PLAYWRIGHT_BROWSERS_PATH` — where four shell gates in this
+      # same repository already knew to look, and twelve more non-shell files
+      # besides. All three are fixed; none of them was the reason the justfile
+      # recorded.
+      #
+      # `!cancelled()` for the same reason every lane step below carries it:
+      # the job short-circuits on the first red otherwise, and these two would
+      # report as skipped — which reads as "not broken".
+      - name: Run the collaboration ViewModel unit suites
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-units
+
+      - name: Run the collaboration integration and soak suites
+        if: ${{ !cancelled() }}
+        # Needs more than Nim: real localhost sockets, the GPUI Rust shim, a
+        # Chromium for the WebRTC DataChannel cases and `replay-server` with
+        # its emulator library for the cross-front-end DAP case.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-integration
+
+      # ----------------------------------------------------------------
       # PLAT-17: the THIRD backend.
       #
       # EVERY STEP BELOW CARRIES `if: ${{ !cancelled() }}`, AND THAT IS THE

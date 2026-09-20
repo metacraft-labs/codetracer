@@ -33,7 +33,16 @@ type
     capGrantCapabilities,
     capInvite,
     capExportSession,
-    capHostBackend
+    capHostBackend,
+    capEditSharedText
+      ## PLAT-33. **A capability of its own, not `capMutateSharedViewState`.**
+      ## Editing the buffer somebody is debugging is a different grant from
+      ## moving their focus or expanding a tree: a reviewer invited to watch
+      ## and annotate is exactly the principal who should have the second and
+      ## not the first. It is last in the enum deliberately — the codec
+      ## encodes capabilities by NAME (`codec.parseEnumValue`), so ordinal
+      ## position is not on the wire and appending cannot renumber an existing
+      ## grant.
 
   LogicalPanelKind* = enum
     lpkEditor,
@@ -75,7 +84,26 @@ type
     vokRemoveBreakpoint,
     vokDebugCommand,
     vokFollowParticipant,
-    vokUnfollowParticipant
+    vokUnfollowParticipant,
+    # =====================================================================
+    # PLAT-33 — TEXT, WHICH IS A FOURTH MERGE FAMILY AND NOT A FOURTH
+    # REGISTER
+    # =====================================================================
+    # Three kinds and not one, because the three do three different things
+    # and each needs its own capability answer and its own reducer arm:
+    #
+    #   * a peer SUBMITS a change at the authority version it saw;
+    #   * the authority ACCEPTS one, and what it broadcasts is the rebased
+    #     result in canonical log order — which is not the same change set
+    #     the peer sent and must not be confused with it;
+    #   * a caret MOVES, which is awareness rather than an edit.
+    #
+    # Folding the first two into one kind would make "did this peer edit, or
+    # did the authority tell me somebody edited?" a question about who sent
+    # the envelope, and the answer to that is a property of the transport.
+    vokSubmitTextUpdate,
+    vokAcceptTextUpdate,
+    vokSetTextSelection
 
   CollabStamp* = object
     lamport*: uint64
@@ -179,8 +207,67 @@ type
     expandedPaths*: seq[AddWinsSetEntry]
     watchExpressions*: seq[SharedWatch]
 
+  SharedTextUpdate* = object
+    ## One entry of the authority's append-only log (§12.2), as shared state.
+    ##
+    ## `changes` is PLAT-25's `"CS1|"` wire encoding of a `ChangeSet`
+    ## (`editor/change_set.nim`), carried as an opaque string so this module
+    ## keeps its single `std/json` import and the collab layer does not gain a
+    ## compile-time dependency on the editor. The decode happens in
+    ## `collab/text_ops.nim`, which is where the two layers meet.
+    producer*: PrincipalId
+    opId*: ViewOpId
+    changes*: string
+    version*: int
+      ## **THE INDEX THIS ENTRY OCCUPIES IN THE LOG**, assigned by the
+      ## authority, carried on the envelope as `authorityVersion`.
+      ##
+      ## It is stored rather than implied by position because delivery is
+      ## reordered in one of the five schedule classes this milestone is
+      ## graded over, and a log whose order is its arrival order does not
+      ## converge under reordering. With the index on the entry, an
+      ## out-of-order accept parks in its own slot and the document is the
+      ## fold of the longest GAP-FREE PREFIX (`committedLog`) — so a peer that
+      ## receives 0, 2, 1 shows the same document as one that receives 0, 1, 2
+      ## the moment the gap closes, and shows a shorter PREFIX rather than a
+      ## wrong document in between.
+
+  SharedCaretAnchor* = object
+    ## A remote caret, as an ANCHOR rather than as a register value.
+    ##
+    ## §12.2a: *"a remote collaborator's caret is an anchor mapped through
+    ## arriving change sets — not an LWW register, which would make two
+    ## people's carets fight."* `side` is a bool and not the reference's
+    ## signed magnitude, matching `change_set.Side`'s two values.
+    pos*: int
+    sideAfter*: bool
+
+  SharedTextSelection* = object
+    ## Where one actor's carets are, in one document, at one authority
+    ## version. Keyed by actor rather than by principal: one person with two
+    ## windows has two carets and they are not in conflict.
+    actorId*: ActorId
+    documentId*: string
+    anchors*: seq[SharedCaretAnchor]
+    atVersion*: int
+
+  SharedTextDocument* = object
+    ## §12.2's authority, as shared state. **The version IS `log.len`** and
+    ## there is no second counter here either: a `version` field beside the
+    ## log would be a field that can disagree with it.
+    id*: string
+    baseLength*: int
+    log*: seq[SharedTextUpdate]
+
   SharedEditorViewState* = object
     activeDocumentId*: LwwStringRegister
+    documents*: seq[SharedTextDocument]
+      ## PLAT-33. Resolved by REBASE AGAINST THE AUTHORITY — the fourth merge
+      ## family, and the first one in this file that is not a register, a set
+      ## or an ownership claim. See the merge table in
+      ## `Architecture/Editor-ViewModel.md` §12.1.
+    remoteSelections*: seq[SharedTextSelection]
+      ## MAPPED, never merged.
 
   BackendSnapshotRegister* = object
     family*: string
@@ -237,6 +324,18 @@ type
     actorSeq*: uint64
     opId*: ViewOpId
     lamport*: uint64
+    authorityVersion*: int
+      ## **PLAT-33: WHAT THE PRODUCER HAD ALREADY SEEN.**
+      ##
+      ## `lamport` does not substitute for this and the difference is the
+      ## whole of §12.2a: a Lamport stamp ORDERS events, and rebase needs to
+      ## know what a peer had already SEEN. `SharedSessionViewState.revision`
+      ## does not substitute either — it is a LOCAL counter incremented by
+      ## `markApplied` on every accepted op and it never travels.
+      ##
+      ## Zero on every operation that is not a text update, which is also the
+      ## decode default, so an envelope from a peer that predates this field
+      ## parses to a well-defined value rather than to a missing one.
     capabilityIds*: seq[CapabilityGrantId]
     targetPath*: string
     kind*: ViewOpKind

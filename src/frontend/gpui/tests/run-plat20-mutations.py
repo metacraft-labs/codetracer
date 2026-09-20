@@ -411,15 +411,42 @@ def check_control_hashes() -> bool:
     if not CONTROL_HASHES.exists():
         print("NO CONTROL DIGESTS — run --record-control-hashes first.")
         return False
-    ok = True
+    # **PARSE THE FILE FIRST, THEN COMPARE OVER THE UNION.** Walking the
+    # recorded file's lines alone made this check one-sided: a path in
+    # `TOUCHED` that had never been recorded was simply never visited, so a
+    # newly added subject — or a newly added suite, which is the half of
+    # `TOUCHED` that grows most often — passed the gate silently until somebody
+    # happened to re-record. `write_control_hashes` writes exactly `TOUCHED`,
+    # so the union of "what is recorded" and "what this harness compares" is
+    # the set over which BOTH directions of a disagreement are visible: a
+    # subject with no digest, and a digest for something that is no longer a
+    # subject. Either one means the file and the harness have drifted apart,
+    # and neither may pass.
+    recorded = {}
     for line in CONTROL_HASHES.read_text().splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         want, rel = line.split(None, 1)
-        rel = rel.strip()
+        recorded[rel.strip()] = want
+    subjects = set(TOUCHED)
+    ok = True
+    for rel in sorted(set(recorded) | subjects):
+        if rel not in recorded:
+            print(f"CONTROL DIGEST ABSENT: {rel} is compared by this harness "
+                  f"but has no recorded digest — run --needle-scan, review, "
+                  f"then --record-control-hashes (§16)")
+            ok = False
+            continue
+        if rel not in subjects:
+            print(f"CONTROL DIGEST STALE: {rel} is recorded but not compared "
+                  f"by this harness — re-run --record-control-hashes (§16)")
+            ok = False
+            continue
+        want = recorded[rel]
         have = digest(rel)
         if have != want:
-            print(f"TREE IS NOT AT THE CONTROL BYTES — nothing was mutated.")
+            print("CONTROL DIGEST MOVED — the tree is not at the control "
+                  "bytes; nothing was mutated.")
             print(f"  {rel}\n      recorded {want[:8]}…   on disk {have[:8]}…")
             ok = False
     return ok

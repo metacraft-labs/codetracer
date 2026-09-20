@@ -2939,13 +2939,22 @@ test-vm: test-vm-native test-vm-js
 # nothing compiles.
 #
 # ---------------------------------------------------------------------------
-# DEFERRED, AND SAY SO: ALL BUT ONE OF THE 13 RECIPES NAMED BELOW ARE IN NO
-# PIPELINE YET.
+# DEFERRED, AND SAY SO: TEN OF THE 13 RECIPES NAMED BELOW ARE IN NO PIPELINE
+# YET.
 # ---------------------------------------------------------------------------
-# "Picked up by its lane" is NOT the same as "runs in CI", and for twelve of
-# the thirteen the second is currently false: no workflow, no entry in
-# ci/verdict/required-jobs.txt, and no aggregate recipe invokes them.  The one
-# exception is `test-lane-coverage` — `ci/lint/nim.sh` runs its script
+# "Picked up by its lane" is NOT the same as "runs in CI", and for ten of the
+# thirteen the second is currently false: no workflow, no entry in
+# ci/verdict/required-jobs.txt, and no aggregate recipe invokes them.
+#
+# TWO MOVED OUT OF THIS LIST ON 2026-09-20 (PLAT-33): `test-vm-collab-units`
+# and `test-vm-collab-integration` are named by the `viewmodel-tests` job in
+# .github/workflows/codetracer.yml, each under `if: ${{ !cancelled() }}`, and
+# both are green.  See the correction below about the reasons this paragraph
+# used to give for their being red — not one of the three was right, which is
+# the lesson rather than the repair: a lane nobody runs is a lane whose
+# FAILURE REASONS also go stale.
+#
+# The remaining exception is `test-lane-coverage` — `ci/lint/nim.sh` runs its script
 # (`ci/test/test-lane-coverage.sh`) as part of the `lint-nim` job, and
 # `lint-nim` IS listed in ci/verdict/required-jobs.txt.  That is repeated in
 # the promotable list further down; both statements are meant to agree.
@@ -2972,11 +2981,23 @@ test-vm: test-vm-native test-vm-js
 #
 #   test-frontend-units          cross_process_origin_vm_test needs an
 #                                uncommitted rr/MCR cross-process recording
-#   test-vm-collab-units         the collab signal registry has drifted from
-#                                the ViewModels (30 unclassified, 1 stale) —
-#                                a real, pre-existing red
-#   test-vm-collab-integration   test_collab_m8_cross_frontend needs
-#                                libgpui_nim_shim.so
+#   (test-vm-collab-units)       FIXED, PLAT-33.  The drift was real and the
+#                                FIGURE was not: 32 unclassified and 0 stale,
+#                                not "30 unclassified, 1 stale".  Eighteen of
+#                                the thirty-two were `SourceVM`, which had
+#                                never had a registry row at all.
+#   (test-vm-collab-integration) FIXED, PLAT-33 — and NOT for the reason this
+#                                list gave.  `libgpui_nim_shim.so` was built;
+#                                all four of `test_collab_m8_cross_frontend`'s
+#                                cases died in a repo-root probe looking for a
+#                                `nim.cfg` this repository does not have.  A
+#                                second red nobody had recorded at all cost
+#                                `test_collab_webrtc` two of four cases: it
+#                                searched $PATH for Chromium while the dev
+#                                shell's sits under $PLAYWRIGHT_BROWSERS_PATH,
+#                                where FOUR ci/test/*.sh gates already look
+#                                (and twelve non-shell files besides; the
+#                                figure read "five" until it was counted).
 #   test-ct-test-incremental     test_io_mon_readfiles_materialized asserts an
 #                                insertion order the impl returns sorted
 #   test-vm-gui-headless         noir_space_ship_test: recorded traces come
@@ -4993,7 +5014,7 @@ editor-model-case-floors:
   set -uo pipefail
   failed=0
   ran=0
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33; do
     echo "=== ${m} ==="
     if bash ci/test/editor-model-case-floor.sh "${m}"; then
       ran=$((ran + 1))

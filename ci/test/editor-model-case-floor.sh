@@ -12,6 +12,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-30
 #   bash ci/test/editor-model-case-floor.sh PLAT-31
 #   bash ci/test/editor-model-case-floor.sh PLAT-32
+#   bash ci/test/editor-model-case-floor.sh PLAT-33
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -241,9 +242,24 @@ PLAT-32)
 	LAW_SECTION="3.6"
 	LAW_COUNT=6
 	;;
+PLAT-33)
+	MILESTONE="** PLAT-33: Collaborative text editing as ViewOps"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_collab_laws.nim
+		src/frontend/viewmodel/tests/unit/test_editor_collab_examples.nim
+	)
+	# §3.7 publishes five `LAW-X` rows and this milestone implements all
+	# five, so the two-way count runs: ids in both directions, the
+	# cardinality asserted, and a killer cell that is empty or an em dash
+	# fails.
+	LAW_SUITES=(src/frontend/viewmodel/tests/unit/test_editor_collab_laws.nim)
+	LAW_PREFIX="LAW-X"
+	LAW_SECTION="3.7"
+	LAW_COUNT=5
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-32. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-33. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

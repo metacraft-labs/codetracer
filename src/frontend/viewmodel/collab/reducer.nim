@@ -3,6 +3,7 @@
 import std/[algorithm, json, strutils]
 
 import ./types
+import ./capabilities
 
 type
   ApplyStatus* = enum
@@ -140,6 +141,25 @@ proc normalize(state: var SharedSessionViewState) =
   state.breakpoints.sort(proc(a, b: SharedBreakpoint): int = cmp(a.id, b.id))
   state.layout.sort(proc(a, b: LogicalPanel): int = cmp(a.id, b.id))
   state.followState.sort(proc(a, b: FollowRegister): int = cmp(a.actorId, b.actorId))
+  # ---------------------------------------------------------------------
+  # PLAT-33 — AND THE TEXT LOG IS SORTED BY A DIFFERENT KEY FOR A DIFFERENT
+  # REASON, WHICH IS WORTH SAYING WHERE IT IS DONE.
+  # ---------------------------------------------------------------------
+  # Every sort above imposes a canonical order on a SET so two replicas that
+  # accepted the same operations in different orders hold equal values. The
+  # text log is not a set: its order is its meaning, and the order is the
+  # AUTHORITY'S, carried on each entry as `version`. Sorting it by `opId` —
+  # the shape every line above has — would silently reorder the document.
+  state.editor.documents.sort(proc(a, b: SharedTextDocument): int = cmp(a.id, b.id))
+  for doc in state.editor.documents.mitems:
+    doc.log.sort(proc(a, b: SharedTextUpdate): int = cmp(a.version, b.version))
+  state.editor.remoteSelections.sort(proc(a, b: SharedTextSelection): int =
+    let actorCmp = cmp(a.actorId, b.actorId)
+    if actorCmp != 0: actorCmp else: cmp(a.documentId, b.documentId))
+  for sel in state.editor.remoteSelections.mitems:
+    sel.anchors.sort(proc(a, b: SharedCaretAnchor): int =
+      let posCmp = cmp(a.pos, b.pos)
+      if posCmp != 0: posCmp else: cmp(a.sideAfter, b.sideAfter))
   state.backendSnapshots.sort(proc(a, b: BackendSnapshotRegister): int =
     let familyCmp = cmp(a.family, b.family)
     if familyCmp != 0: familyCmp else: cmp(a.ownerId, b.ownerId))
@@ -322,58 +342,66 @@ proc applyPanelVisibility(state: var SharedSessionViewState; op: ViewOpEnvelope)
     state.layout[i].visibilityStamp = op.stamp
   true
 
-proc isAuthority(state: SharedSessionViewState; principalId: PrincipalId): bool =
-  if principalId.len > 0 and
-      (principalId == state.authority.principalId or
-       principalId == state.authority.backendOwnerId):
-    return true
-
-proc pathCovers(grantPath, targetPath: string): bool =
-  grantPath.len == 0 or grantPath == "*" or grantPath == targetPath or
-    targetPath.startsWith(grantPath & ".") or
-    targetPath.startsWith(grantPath & "[")
-
-proc targetPathsCover(targetPaths: openArray[string]; targetPath: string): bool =
-  if targetPaths.len == 0:
-    return true
-  for grantPath in targetPaths:
-    if grantPath.pathCovers(targetPath):
-      return true
-
-proc liveCapability(
-    state: SharedSessionViewState;
-    principalId: PrincipalId;
-    cap: CapabilityKind;
-    targetPath = "";
-    capabilityIds: openArray[CapabilityGrantId] = []): bool =
-  if state.isAuthority(principalId):
-    return true
-  for grant in state.capabilityGrants:
-    if grant.subject == principalId and grant.revokedByOpId.len == 0 and
-        (capabilityIds.len == 0 or capabilityIds.containsString(grant.id)) and
-        grant.targetPaths.targetPathsCover(targetPath):
-      for granted in grant.capabilities:
-        if granted == cap:
-          return true
-
-proc canGrantCapabilities(state: SharedSessionViewState; principalId: PrincipalId): bool =
-  liveCapability(state, principalId, capGrantCapabilities, "capabilityGrants")
-
-proc canDelegateCapabilities(state: SharedSessionViewState;
-                             principalId: PrincipalId;
-                             capabilities: openArray[CapabilityKind];
-                             targetPaths: openArray[string]): bool =
-  if state.isAuthority(principalId):
-    return true
-  for capability in capabilities:
-    if targetPaths.len == 0:
-      if not state.liveCapability(principalId, capability):
-        return false
-    else:
-      for targetPath in targetPaths:
-        if not state.liveCapability(principalId, capability, targetPath):
-          return false
-  true
+# ===========================================================================
+# THE CAPABILITY PREDICATES ARE `capabilities.nim`'s, NOT A SECOND COPY
+# ===========================================================================
+#
+# **SIX ROUTINES WERE WRITTEN OUT HERE A SECOND TIME UNTIL PLAT-33**, and
+# **NO REASON FOR IT IS RECORDED ANYWHERE.** An earlier version of this
+# comment said the duplication existed "to avoid an import cycle" and
+# attributed that to a comment in `capabilities.nim`. No such comment ever
+# existed — at the commit before this one `capabilities.nim` is a one-line
+# docstring — and `git log --all -S"cycle"` over both files returns nothing,
+# ever. The explanation was invented retroactively and is withdrawn; the
+# honest statement is that a duplicate existed and its reason is unrecorded.
+#
+# There is in fact no cycle — `capabilities.nim` imports `std/[algorithm,
+# strutils]` and `./types` and nothing else — so this module can import it and
+# does.
+#
+# **THE SUBSTITUTION IS NOT A PURE REFACTOR, AND SAYING SO WAS THE SECOND
+# UNRUN COMPARISON IN THIS COMMENT.** An earlier version claimed the two
+# copies "were line-for-line identical when they were compared, which is the
+# only reason the substitution below is a refactor rather than a behaviour
+# change". Nobody had compared them; the claim was read off a substitution
+# that compiled. The comparison, actually run:
+#
+#   - `pathCovers`, `targetPathsCover` — identical bodies. A refactor.
+#   - `isAuthority` — rewritten. The copy here inlined the conjunction;
+#     `capabilities.isAuthority` delegates to `isSessionAuthority` and
+#     `isBackendOwner`. Sound (the `len > 0` distributes over the `or`) but
+#     not the same lines.
+#   - `liveCapability` — **gone, not moved.** The predicate that replaces it
+#     is named `hasLiveCapability` and has a different body: the old one
+#     returned `true` from inside the grant walk, the new one asks
+#     `liveCapabilityGrant` for the matching grant's id and tests `.len > 0`.
+#     On a grant whose id is empty the two disagree — old `true`, new
+#     `false` — and `canGrantCapabilities` / `canDelegateCapabilities`
+#     inherit that through their callee.
+#
+# The disagreement was reachable: `codec.parseCapabilityGrant` decoded `id`
+# unguarded, so a snapshot omitting `"id"` produced exactly that grant, and a
+# compiled probe over it divided the two predicates. The new answer is the
+# fail-closed one, so it is kept; PLAT-33 also made the decoder refuse the
+# grant outright, since `applyGrantCapabilities` and `applyRevokeCapabilities`
+# below BOTH already refuse `id.len == 0` — an empty-id grant admitted by the
+# decoder was one no revoke operation could ever retract.
+#
+# The lesson is §38's, appearing inside the module §38's own milestone was
+# written against: an equivalence asserted from a change that worked, rather
+# than from a comparison run, is not evidence.
+#
+# This is `Verification-Harness-Traps.md` §30 — *one predicate, one function,
+# rule and control both calling it*. It matters here rather than in general:
+# PLAT-33 adds a capability rule, and with two copies in the tree the cheapest
+# way to add it is to add it twice. §30b's second bullet is the one that
+# applies — "count the copies before you believe the extraction is done" — so
+# the extraction is all six and not the one this milestone needed.
+#
+# The dividend is §30b's first bullet: `test_collab_reducer.nim` and
+# `test_collab_authority_m4.nim` now grade ONE implementation from two sides,
+# so a defect in the grant walk cannot be green in one suite and red in the
+# other.
 
 proc applyGrantCapabilities(state: var SharedSessionViewState; op: ViewOpEnvelope): bool =
   if not state.canGrantCapabilities(op.principalId):
@@ -501,10 +529,236 @@ proc applyTypedScalar(state: var SharedSessionViewState; op: ViewOpEnvelope): bo
   else:
     false
 
+# ===========================================================================
+# PLAT-33 — TEXT, THE FOURTH MERGE FAMILY
+# ===========================================================================
+#
+# The normative merge table is `Architecture/Editor-ViewModel.md` §12.1, and
+# its fourth row is this block. What makes text a FAMILY rather than a fourth
+# register is visible in what is absent below: there is no `isNewer`, no
+# stamp comparison, and no `applyRegister`. A text update is never resolved by
+# comparing two values and keeping one — both survive, in the authority's
+# order, and the loser of a race is REBASED rather than discarded.
+#
+# **THE AUTHORITY IS THE ONLY WRITER OF THE LOG**, which is what makes this
+# reducer deterministic without needing to be a CRDT. A peer's
+# `vokSubmitTextUpdate` is a REQUEST: every replica records it for dedup and
+# changes nothing, exactly as `vokDebugCommand` does. The session authority
+# runs `editor/collab_text.accept`, which rebases the submission over
+# `log[peerVersion..]`, and emits one `vokAcceptTextUpdate` per accepted
+# update carrying the index it was given. So every replica applies the same
+# accepts and folds the same document, and no replica ever has to decide an
+# order for itself.
+
+proc findTextDocument(docs: var seq[SharedTextDocument];
+                      id: string; baseLength: int): int =
+  for i, doc in docs.mpairs:
+    if doc.id == id:
+      return i
+  docs.add SharedTextDocument(id: id, baseLength: baseLength, log: @[])
+  docs.len - 1
+
+func committedLog*(doc: SharedTextDocument): seq[SharedTextUpdate] =
+  ## The longest GAP-FREE PREFIX of the log, from version 0.
+  ##
+  ## This is what makes the document converge under REORDERED delivery
+  ## without the reducer having to buffer anything: an accept for version 4
+  ## that overtakes version 3 is stored in its own slot and simply is not part
+  ## of the document yet. When 3 lands, both become visible in one step. A
+  ## replica therefore shows a SHORTER prefix than another, never a different
+  ## one — which is exactly the property `LAW-X1` quantifies over the reordered
+  ## schedule class.
+  ##
+  ## `log` is kept sorted by `version` by `normalize`, so this is a walk.
+  var expected = 0
+  for entry in doc.log:
+    if entry.version != expected:
+      break
+    result.add entry
+    inc expected
+
+func committedVersion*(doc: SharedTextDocument): int =
+  ## The authority version this replica has folded. **Not** `log.len`: an
+  ## entry parked beyond a gap is held and not counted.
+  doc.committedLog.len
+
+proc applyAcceptTextUpdate(state: var SharedSessionViewState;
+                           op: ViewOpEnvelope): bool =
+  ## Append one authority-assigned log entry.
+  let documentId = getStrField(op.payload, ["documentId", "id"])
+  if documentId.len == 0:
+    return false
+  let changes = getStrField(op.payload, ["changes"])
+  if changes.len == 0:
+    return false
+  if op.authorityVersion < 0:
+    return false
+  let i = state.editor.documents.findTextDocument(
+    documentId, getIntField(op.payload, ["baseLength"], 0))
+  # **IDEMPOTENT BY VERSION AS WELL AS BY `opId`.** `hasApplied` already stops
+  # the same envelope twice; this stops two DIFFERENT envelopes claiming one
+  # slot, which is not a duplicate but a conflicting authority — and silently
+  # taking the second would make the document a function of arrival order
+  # again. The first claim on a version wins and the second changes nothing.
+  for entry in state.editor.documents[i].log:
+    if entry.version == op.authorityVersion:
+      return false
+  state.editor.documents[i].log.add SharedTextUpdate(
+    producer: getStrField(op.payload, ["producer"], op.principalId),
+    opId: getStrField(op.payload, ["updateId"], op.opId),
+    changes: changes,
+    version: op.authorityVersion,
+  )
+  true
+
+proc applyTextSelection(state: var SharedSessionViewState;
+                        op: ViewOpEnvelope): bool =
+  ## A remote caret. **NOT A REGISTER**, and the difference is structural
+  ## rather than a matter of which comparison is used:
+  ##
+  ##   * what is stored is a set of ANCHORS plus the authority version they
+  ##     were expressed against, and a reader MAPS them forward through
+  ##     `log[atVersion..]` — the value is resolved by a change set, not by a
+  ##     stamp;
+  ##   * there is exactly ONE writer per `(actorId, documentId)`, so there is
+  ##     no conflict to resolve. Ordering one writer's own updates by the
+  ##     version they were produced against is sequencing, not merging, and it
+  ##     is why `isNewer` does not appear here.
+  ##
+  ## Two people's carets therefore cannot fight, which is the failure §12.2a
+  ## names when it says a caret must not be an LWW register.
+  let documentId = getStrField(op.payload, ["documentId"])
+  if documentId.len == 0 or op.actorId.len == 0:
+    return false
+  var anchors: seq[SharedCaretAnchor] = @[]
+  if not op.payload.isNil:
+    for item in op.payload{"anchors"}.getElems(@[]):
+      anchors.add SharedCaretAnchor(
+        pos: item{"pos"}.getInt(0),
+        sideAfter: item{"sideAfter"}.getBool(false))
+  var index = -1
+  for i, sel in state.editor.remoteSelections.mpairs:
+    if sel.actorId == op.actorId and sel.documentId == documentId:
+      index = i
+      break
+  if index < 0:
+    state.editor.remoteSelections.add SharedTextSelection(
+      actorId: op.actorId, documentId: documentId, atVersion: -1)
+    index = state.editor.remoteSelections.len - 1
+  if op.authorityVersion < state.editor.remoteSelections[index].atVersion:
+    return false
+  state.editor.remoteSelections[index].anchors = anchors
+  state.editor.remoteSelections[index].atVersion = op.authorityVersion
+  true
+
+# ===========================================================================
+# THE NORMATIVE MERGE TABLE, AS CODE
+# ===========================================================================
+#
+# `Architecture/Editor-ViewModel.md` §12.1a publishes four families and this
+# is their implementation side. The two are compared in both directions, with
+# the cardinality asserted, by `test_editor_collab_examples.nim` — a family
+# published and not implemented, or implemented and not published, fails by
+# name (Conformance Suite §7.1).
+#
+# The dispatch below is EXHAUSTIVE for the same reason `requiredCapability`
+# now is: a new op kind that belongs to no family is a kind whose conflict
+# behaviour nobody decided, and the compiler is the only reviewer that never
+# forgets to ask.
+
+type
+  MergeFamily* = enum
+    mfNone            ## the op mutates no shared field (a request, or unknown)
+    mfLww             ## `MF-LWW` — last-writer-wins register
+    mfAddWins         ## `MF-AddWins` — add-wins observed-remove set
+    mfOwnerEpoch      ## `MF-OwnerEpoch` — owner-locked epoch
+    mfTextRebase      ## `MF-TextRebase` — rebase against the authority
+
+const
+  MergeFamilyIds*: array[MergeFamily, string] = [
+    "", "MF-LWW", "MF-AddWins", "MF-OwnerEpoch", "MF-TextRebase"]
+    ## The published ids, in enum order. `mfNone` has none because it is not a
+    ## family — it is the absence of one, and giving it an id would put a
+    ## fifth row into a four-row comparison.
+
+  PublishedMergeFamilyCount* = 4
+    ## A NAMED CARDINALITY. Without it the two set differences in §7.1's
+    ## two-way count are both satisfied by two empty sets.
+
+func mergeFamilyOf*(kind: ViewOpKind): MergeFamily =
+  case kind
+  of vokSetRegister, vokSetFocusedPanel, vokSetCalltraceSelection,
+      vokSetCalltraceSearch, vokSetStateTab, vokFollowParticipant,
+      vokUnfollowParticipant:
+    mfLww
+  of vokToggleCalltraceExpansion, vokToggleStatePath, vokExpand, vokCollapse,
+      vokAddWatch, vokEditWatch, vokRemoveWatch, vokMoveWatch,
+      vokSetBreakpoint, vokRemoveBreakpoint, vokCreatePanel, vokClosePanel,
+      vokMovePanel, vokSetPanelVisibility, vokGrantCapabilities,
+      vokRevokeCapabilities:
+    mfAddWins
+  of vokRequestDriver, vokGrantDriver, vokReleaseDriver, vokRevokeDriver:
+    mfOwnerEpoch
+  of vokAcceptTextUpdate, vokSetTextSelection:
+    mfTextRebase
+  of vokSubmitTextUpdate:
+    # A REQUEST, not a mutation: it changes no shared field, so it belongs to
+    # no family. Classifying it `mfTextRebase` would say the reducer merges it,
+    # and the reducer does not — the authority does, and what the authority
+    # emits is `vokAcceptTextUpdate`.
+    mfNone
+  of vokDebugCommand, vokUnknown:
+    mfNone
+
 proc opTargetPath(op: ViewOpEnvelope; fallback: string): string =
   if op.targetPath.len > 0: op.targetPath else: fallback
 
 proc requiredCapability(op: ViewOpEnvelope): tuple[needed: bool, cap: CapabilityKind, targetPath: string] =
+  ## **THIS `case` IS EXHAUSTIVE, AND IT WAS NOT UNTIL PLAT-33.**
+  ##
+  ## It carried `else: (false, capObserve, "")` — a fail-OPEN default, because
+  ## `hasRequiredCapability` reads `not required.needed` as "allowed". An
+  ## operation kind added to the enum and to `applyViewOp`'s exhaustive
+  ## dispatch but not to this table therefore compiled, ran, and was
+  ## **ungated**: capability-checked as observe-only, which is no check at
+  ## all. The compiler covered the reducer half and nothing covered this one,
+  ## and `Architecture/Editor-ViewModel.md` §12.1 recorded it as the hazard to
+  ## carry into this milestone.
+  ##
+  ## The repair is not a run-time assertion — it is the removal of the
+  ## `else`. Every kind is now named, including the ones that need nothing
+  ## here, and a new enum member fails to COMPILE in **three** places instead
+  ## of one. That is the only form of this check that cannot itself be
+  ## forgotten.
+  ##
+  ## **THREE, AND IT IS MEASURED RATHER THAN COUNTED BY EYE.** Planting a
+  ## `vokProbeNewKindPLAT33` member on `ViewOpKind` and compiling with
+  ## `--errorMax` raised produces exactly three `not all cases are covered`
+  ## errors, in `mergeFamilyOf`, in this routine, and in `applyViewOp`. The
+  ## figure stood at "two" here and in the spec, and was reported as "four"
+  ## elsewhere; all three numbers disagreed, so none of them had been run.
+  ## `mergeFamilyOf` is the one an eye-count misses — it is new in PLAT-33 and
+  ## is a third exhaustive `case` over the same enum, not a second.
+  ##
+  ## Note that the mutation arm `M6` does NOT evidence this: it kills four
+  ## cases, but it rewrites an arm *body* rather than planting an enum
+  ## omission, and the `case` stays exhaustive under it.
+  ##
+  ## The kinds that answer `(false, …)` do so for a stated reason each, and
+  ## none of them is "no rule was written":
+  ##
+  ##   * `vokUnknown` is a forward-compatibility placeholder whose reducer arm
+  ##     changes nothing, so there is nothing to gate;
+  ##   * the four driver kinds are gated by `canApplyDriverOp`, which is a
+  ##     narrower rule than a single capability (it also accepts the lease's
+  ##     own holder releasing it);
+  ##   * the two capability kinds are gated by `canGrantCapabilities` plus
+  ##     `canDelegateCapabilities`, which is a rule about the grant's CONTENTS
+  ##     and cannot be expressed as one `(cap, path)` pair.
+  ##
+  ## Gating those a second time here would be two predicates for one rule —
+  ## `Verification-Harness-Traps.md` §30 — so they are named and delegated
+  ## rather than named and duplicated.
   case op.kind
   of vokSetRegister, vokSetFocusedPanel, vokSetCalltraceSelection,
       vokSetCalltraceSearch, vokSetStateTab, vokToggleCalltraceExpansion,
@@ -520,12 +774,26 @@ proc requiredCapability(op: ViewOpEnvelope): tuple[needed: bool, cap: Capability
     (true, capPublishAwareness, op.opTargetPath("followState"))
   of vokDebugCommand:
     (true, capControlDebugger, op.opTargetPath("debugger.commands"))
-  else:
+  of vokSubmitTextUpdate, vokAcceptTextUpdate:
+    ## PLAT-33. **A capability of its own** (§12.2a), on the documents path.
+    (true, capEditSharedText, op.opTargetPath("editor.documents"))
+  of vokSetTextSelection:
+    ## A caret is AWARENESS, not an edit: a reviewer who may watch and point
+    ## but not type is the principal this distinction exists for. It shares
+    ## `capPublishAwareness` with the follow ops for that reason, and the
+    ## two-sidedness — a text op refused for a principal whose caret op is
+    ## accepted — is asserted rather than assumed.
+    (true, capPublishAwareness, op.opTargetPath("editor.remoteSelections"))
+  of vokUnknown:
+    (false, capObserve, "")
+  of vokRequestDriver, vokGrantDriver, vokReleaseDriver, vokRevokeDriver:
+    (false, capObserve, "")
+  of vokGrantCapabilities, vokRevokeCapabilities:
     (false, capObserve, "")
 
 proc hasRequiredCapability(state: SharedSessionViewState; op: ViewOpEnvelope): bool =
   let required = op.requiredCapability
-  not required.needed or state.liveCapability(
+  not required.needed or state.hasLiveCapability(
     op.principalId, required.cap, required.targetPath, op.capabilityIds)
 
 proc driverPrincipalId(op: ViewOpEnvelope): PrincipalId =
@@ -534,14 +802,14 @@ proc driverPrincipalId(op: ViewOpEnvelope): PrincipalId =
 proc canApplyDriverOp(state: SharedSessionViewState; op: ViewOpEnvelope): bool =
   case op.kind
   of vokRequestDriver, vokGrantDriver:
-    state.liveCapability(op.principalId, capControlDebugger, "activeDriver",
+    state.hasLiveCapability(op.principalId, capControlDebugger, "activeDriver",
       op.capabilityIds)
   of vokReleaseDriver:
     op.principalId == op.driverPrincipalId or
-      state.liveCapability(op.principalId, capControlDebugger, "activeDriver",
+      state.hasLiveCapability(op.principalId, capControlDebugger, "activeDriver",
         op.capabilityIds)
   of vokRevokeDriver:
-    state.liveCapability(op.principalId, capControlDebugger, "activeDriver",
+    state.hasLiveCapability(op.principalId, capControlDebugger, "activeDriver",
       op.capabilityIds)
   else:
     false
@@ -574,6 +842,27 @@ proc applyViewOp*(document: var SharedSessionDocument; op: ViewOpEnvelope): Appl
   of vokUnknown:
     changed = false
   of vokSetRegister:
+    # =====================================================================
+    # `LAW-X5` — TEXT IS NEVER RESOLVED BY A REGISTER, AND THE REFUSAL IS
+    # EXPLICIT RATHER THAN A FALL-THROUGH
+    # =====================================================================
+    # `applyScalarRegister`'s `case op.targetPath` has an `else: false`, so a
+    # register op aimed at `editor.documents` would be *ignored* — "recorded
+    # but did not change shared state" — which is indistinguishable from a
+    # stale stamp losing a race. The milestone's verification gate asks for an
+    # explicit refusal for exactly that reason: the failure mode it exists to
+    # catch is text QUIETLY landing in the register path, and quiet is what an
+    # `ignored` is.
+    #
+    # It is checked before the capability, deliberately. A principal who holds
+    # `capMutateSharedViewState` and aims it at the text is the case this is
+    # for, and a capability refusal would tell them the wrong thing.
+    if op.targetPath.startsWith("editor.documents") or
+        op.targetPath.startsWith("editor.remoteSelections"):
+      return rejected(
+        "text is not a register: editor.documents and editor.remoteSelections " &
+        "are resolved by rebase against the authority (the fourth merge " &
+        "family), never by last-writer-wins")
     if not document.state.hasRequiredCapability(op):
       return rejected("principal lacks capability for scalar register mutation")
     changed = document.state.applyScalarRegister(op)
@@ -673,6 +962,40 @@ proc applyViewOp*(document: var SharedSessionDocument; op: ViewOpEnvelope): Appl
     if validation.status == asRejected:
       return validation
     changed = false
+  of vokSubmitTextUpdate:
+    # A REQUEST, not a mutation — the authority appends, every replica
+    # records for dedup and changes nothing. The capability is still checked
+    # here, so an ungated peer is refused at submission rather than at the
+    # authority, which is where a refusal is cheap and visible.
+    if not document.state.hasRequiredCapability(op):
+      return rejected("principal lacks capability for text update")
+    if getStrField(op.payload, ["documentId", "id"]).len == 0:
+      return rejected("text submission names no document")
+    document.markApplied(op)
+    return ignored("text submission accepted by the reducer; the authority appends it")
+  of vokAcceptTextUpdate:
+    if not document.state.hasRequiredCapability(op):
+      return rejected("principal lacks capability for text update")
+    # **ONLY THE SESSION AUTHORITY MAY EXTEND THE LOG.** Without this every
+    # replica could append at a version of its own choosing and the log's
+    # order would be a function of who spoke, which is the failure mode the
+    # whole rebase-with-an-authority design exists to avoid.
+    if not document.state.isSessionAuthority(op.principalId):
+      return rejected("only the session authority may append to the text log")
+    # `LAW-X5`'s other half: a text op wearing a REGISTER'S PAYLOAD — a
+    # `value` and a stamp, no change set — is refused by name rather than
+    # ignored. Without this the planted LWW-shaped update is "recorded but did
+    # not change shared state", which is what a legitimately-losing register
+    # write also reports, and the arm that plants it has nothing to land on.
+    if getStrField(op.payload, ["changes"]).len == 0:
+      return rejected(
+        "a text update carries a change set, not a value: this payload has " &
+        "no `changes` field and text is not resolved by a register")
+    changed = document.state.applyAcceptTextUpdate(op)
+  of vokSetTextSelection:
+    if not document.state.hasRequiredCapability(op):
+      return rejected("principal lacks capability for caret awareness")
+    changed = document.state.applyTextSelection(op)
 
   document.state.normalize()
   document.markApplied(op)

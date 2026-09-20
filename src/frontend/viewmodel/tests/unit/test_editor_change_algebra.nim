@@ -117,7 +117,33 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 918
+const ExpectedAssertions = 1666
+  ## **959 -> 1666 ON 2026-09-20: §35's SUBJECT SET STOPPED BEING A
+  ## DIRECTORY.** The double-mapping scan below used to run over the 19
+  ## modules of `viewmodel/editor/`; it now runs over all 252 production
+  ## modules under `viewmodel/`, derived from the tree at compile time. The
+  ## jump is that change and nothing else — no law, no population and no
+  ## example moved.
+  ##
+  ## It is here rather than in a footnote because the reason for the widening
+  ## is a measurement: a ninth `rebase(`-calling routine planted in a new
+  ## `editor/` module reddened this suite, and THE IDENTICAL ROUTINE PLANTED
+  ## IN `collab/` LEFT IT GREEN. `walkDir` was hard-coded to `"editor"`, so
+  ## the directory PLAT-33 had just added code to was not a subject. Both
+  ## defeat attempts were re-run after the widening and both are red.
+  ##
+  ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
+  ## FIRING OF §35's ENUMERATION.** Five suites went red by name on the first
+  ## run of the floor gate — PLAT-25's, PLAT-27's, PLAT-28's, PLAT-29's and
+  ## PLAT-32's — before either of PLAT-33's own suites existed, and none of
+  ## them knew the milestone was happening. Every repair was a list entry and
+  ## this number, except PLAT-27's, which needed two lists because its scan
+  ## splits the directory by what a module IS.
+  ##
+  ## The new module is the one that would host a seventh hand-written double
+  ## mapping if one were ever written: `receiveUpdates` and `rebaseUpdates`
+  ## are the last two of the reference's five sites, and they are the two the
+  ## reference spells out by hand. It does not; it calls `rebase`.
   ## **+4 ON 2026-09-19: PLAT-32 ADDED `history.nim` TO `viewmodel/editor/`,
   ## AND THIS SUITE SAID SO BEFORE THAT MILESTONE'S OWN SUITES EXISTED.**
   ## §35's enumeration firing for the sixth time, from a milestone that had
@@ -749,16 +775,91 @@ suite "PLAT-25 — the verification gate":
 #
 # WHAT THIS SCAN CAN AND CANNOT SEE, STATED BEFORE IT IS TRUSTED
 # ==============================================================
-# `staticRead` takes a STRING LITERAL, so the sources below are a hardcoded
-# list — and a hardcoded list is blind to a SIXTH module dropped into the same
-# directory. That is not hypothetical: planting
-# `viewmodel/editor/rebase_copy.nim`, exporting `mapOver(setA, setB:
-# ChangeSet; before: bool)` in the exact spelling the checks below forbid, and
-# importing it from `transaction.nim`, leaves this suite at 130 of 130 green.
-# `EditorModules` closes that: the directory is ENUMERATED at compile time
-# (which works on the C and the JS backend alike, because it happens in the
-# VM) and its `.nim` set is required to be exactly the set that is read, so a
-# new module fails by name until somebody adds it here.
+# **THE SUBJECT SET IS THE TREE, NOT A LIST — SINCE PLAT-33.** Until then this
+# scan read a hardcoded list of `staticRead` literals under `viewmodel/editor/`
+# and used `EditorModules` to enumerate THAT ONE DIRECTORY, so a sixth module
+# dropped beside them failed by name. That closed the file-level hole and left
+# the directory-level one open, and the gap was demonstrated rather than
+# supposed: planting a ninth `rebase(`-calling routine in a new `editor/`
+# module reddens correctly, and THE IDENTICAL ROUTINE IN `collab/` PASSED
+# GREEN. `walkDir` was hard-coded to `"editor"`, so PLAT-33's own
+# `collab/text_ops.nim` sat outside the subject set entirely.
+#
+# The scan's title did say "in the editor tree", which made this a
+# declared-scope residual rather than a false claim — but it was the THIRD
+# time the subject list had been the weak point, and the module the milestone
+# had just added was outside it. A declared scope that excludes the new code
+# is a scope that has stopped tracking the thing it guards.
+#
+# `ProductionModules` below derives the set: every `.nim` under `viewmodel/`,
+# at ANY depth, excluding `tests/`. There is no directory list left to be
+# wrong about, and **which directories call `rebase` is now an OUTPUT of the
+# scan** (`RebaseDirectories`) rather than an assumption baked into it.
+#
+# **AND `staticRead` DOES NOT REQUIRE A STRING LITERAL.** The text here used
+# to say it does — "`staticRead` takes a STRING LITERAL, so the sources below
+# are a hardcoded list" — and that sentence is the whole reason the list was
+# hardcoded. It is false, and was never tried: `staticRead` is evaluated in
+# the VM like any other compile-time call and accepts a path computed in the
+# same `const` block, which is how the sweep below reads 252 files whose names
+# it discovered a line earlier. One more equivalence asserted from the code
+# that worked instead of from the comparison.
+#
+# TWO PASSES, AND WHY THE CHEAP ONE IS SOUND
+# ------------------------------------------
+# Stripping comments can only DELETE text, so a file with no RAW `rebase(` hit
+# cannot have a real one: a raw zero is a proof of zero. Pass 1 therefore
+# counts the two structural needles on the raw bytes of all 252 files, and
+# only files that could possibly matter — plus every file in a directory that
+# raw-hits `rebase(` — get pass 2's comment-stripped analysis.
+#
+# That is not an optimisation for its own sake. `codeOnly` over the whole tree
+# (4.5 MB) blows `maxLoopIterationsVM` — measured, it aborts the compile — and
+# this suite must build on the C, JS and wasm32 lanes without a special flag.
+#
+# `staticRead`, never a runtime `readFile`: `std/os` has no `readFile` on the
+# JS backend, this directory is compiled by three lanes, and a scan that read
+# nothing would satisfy every "must be exactly these" written over it.
+#
+# **A NEW FILE IS SEEN ONLY IF SOMETHING FORCES THE FRONTEND TO RE-RUN, AND
+# THIS IS NOT A DETAIL.** Nim tracks the files a module `staticRead`s and
+# recompiles when one of them CHANGES — measured, and it is why the mutation
+# arms that edit `transaction.nim` work at all. It does NOT track the
+# DIRECTORY, so a file that did not exist at the last compile is not a
+# dependency of anything: the `walkDir` above never re-runs, and the existing
+# binary is re-executed unchanged. Planting a module in `collab/` or in
+# `editor/` and re-running leaves this suite GREEN at `CHECKS: 1666`.
+#
+# **THE LEVER IS NOT THE `nimcache` DIRECTORY, AND SAYING SO WAS THIS
+# COMMENT'S OWN DEFECT.** An earlier revision said the plant "needs a cold
+# `nimcache`". Clearing the cache does force a rebuild, so that was true — but
+# it names a sufficient condition as if it were the necessary one, and the
+# necessary one is different. Measured 2026-09-20, one variable at a time,
+# cache warm throughout:
+#
+#   * `-o:` naming a path that does NOT yet exist  -> rebuilds -> RED (1706)
+#   * `-o:` naming the existing, up-to-date binary -> skipped  -> green (1666)
+#   * ... plus `touch` on a tracked module (mtime) -> skipped  -> green (1666)
+#   * ... plus a CONTENT edit to a tracked module  -> rebuilds -> RED (1706)
+#
+# So the condition is whether Nim re-runs the frontend at all, which it skips
+# when the named output binary already exists and no tracked source's CONTENT
+# has changed. Nim keys on content, not mtime.
+#
+# §35's "a new module fails by name" is therefore conditional, and the
+# condition is written down here: any defeat attempt that ADDS a file must
+# force a rebuild before its verdict means anything, in EITHER direction —
+# and note that the trap runs both ways. A review pass that plants a module
+# with a fresh `-o:` will see it redden five times over and conclude the
+# condition does not exist; that withdrawal was proposed, measured and
+# refused on 2026-09-20 (`Verification-Harness-Traps.md` §35a).
+#
+# The standing arm for this case (`run-plat25-change-algebra-mutations.py`,
+# `G15`) therefore EDITS an existing module rather than adding one — every
+# production module under `viewmodel/` is a tracked `staticRead` dependency of
+# this file now, so an edit to any of them does invalidate the cache. That
+# harness compiles to FIXED `-o:` paths, so the content edit is what carries
+# it, and every arm it runs makes one.
 #
 # What the scan still cannot see is a RE-IMPLEMENTATION under another name:
 # `sections*` is an exported accessor, so another module can walk two change
@@ -767,86 +868,6 @@ suite "PLAT-25 — the verification gate":
 # nothing stronger. The guarantee that does not depend on spelling is the
 # compiler's: `mapOver` is unexported, so a copy has to be written from
 # scratch rather than pasted.
-
-const
-  ChangeSetSource = staticRead("../../editor/change_set.nim")
-  TransactionSource = staticRead("../../editor/transaction.nim")
-  RopeSource = staticRead("../../editor/rope.nim")
-  TextStoreSource = staticRead("../../editor/text_store.nim")
-  SeqLineStoreSource = staticRead("../../editor/seq_line_store.nim")
-  SelectionSource = staticRead("../../editor/selection.nim")
-  SelectionOpsSource = staticRead("../../editor/selection_ops.nim")
-  WrapSource = staticRead("../../editor/wrap.nim")
-  AnchorSource = staticRead("../../editor/anchor.nim")
-  RangeSetSource = staticRead("../../editor/range_set.nim")
-  DecorationSource = staticRead("../../editor/decoration.nim")
-  InlaySource = staticRead("../../editor/inlay.nim")
-  RowProjectionSource = staticRead("../../editor/row_projection.nim")
-  DocumentVersionSource = staticRead("../../editor/document_version.nim")
-  ReconcileSource = staticRead("../../editor/reconcile.nim")
-  EditorStateSource = staticRead("../../editor/editor_state.nim")
-  OperationsSource = staticRead("../../editor/operations.nim")
-  HistorySource = staticRead("../../editor/history.nim")
-
-  ScannedModules = ["anchor.nim", "change_set.nim", "decoration.nim",
-                    "document_version.nim", "editor_state.nim", "history.nim",
-                    "inlay.nim",
-                    "operations.nim", "range_set.nim",
-                    "reconcile.nim", "rope.nim", "row_projection.nim",
-                    "selection.nim", "selection_ops.nim",
-                    "seq_line_store.nim", "text_store.nim",
-                    "transaction.nim", "wrap.nim"]
-    ## The thirteen names above, as data. It moves in the same edit as the
-    ## `staticRead` list and the case below is what refuses the two to drift.
-    ##
-    ## **It grew by two when PLAT-26 landed and by one more when PLAT-27 did,
-    ## and that is the enumeration working.** §35 is the trap that a hardcoded
-    ## subject list cannot see a new file in the directory it claims to cover;
-    ## `EditorModules` below enumerates the directory at compile time, so
-    ## `selection.nim` and `selection_ops.nim` failed this case BY NAME on the
-    ## first build of PLAT-26, and `wrap.nim` failed it BY NAME on the first
-    ## run of PLAT-27's floor gate — before that milestone's own suite existed
-    ## to say anything, and from a milestone that had been green for a day.
-    ## That is the mechanism paying for itself twice — and a THIRD time on
-    ## 2026-09-18, when PLAT-28 added `anchor.nim`, `range_set.nim`,
-    ## `decoration.nim`, `inlay.nim` and `row_projection.nim` and this case
-    ## went red by name on the first build of that milestone's floor gate.
-    ## `anchor.nim` is the one that matters: §8.2 says an anchor is mapped
-    ## through every change set that passes *"including remote ones"*, which is
-    ## exactly where a sixth hand-written double mapping would land.
-    ##
-    ## **AND A FOURTH TIME ON THE SAME DAY**: PLAT-29 added
-    ## `document_version.nim` and `reconcile.nim`, and this case went red by
-    ## name before that milestone's own suites existed. `reconcile.nim` is the
-    ## one that matters this time, for `anchor.nim`'s reason one layer up: it
-    ## moves an async producer's change set over the edits that landed while it
-    ## was in flight, which is the fifth of §6.1a's five reference call sites
-    ## and is exactly where a sixth hand-written double mapping would land. It
-    ## calls `rebase` and takes `bOverA`; it spells no flag, because there is
-    ## no flag to spell.
-    ##
-    ## **AND A FIFTH TIME, LATER THE SAME DAY**: PLAT-30 added
-    ## `operations.nim` and `editor_state.nim`, and this case went red by name
-    ## on the first run of the whole lane — from a suite that had been green
-    ## since the day before. `operations.nim` is the one that matters: it is
-    ## the 224-operation vocabulary, every editing operation in the model goes
-    ## through it, and it reaches the algebra through `changeByRange` alone. It
-    ## spells no flag either — and the scan made it RENAME one: a paste
-    ## operation's natural parameter name is `before: bool`, which is exactly
-    ## this scan's needle, so the module calls it `atRangeStart` and says why
-    ## (§5's sentinel collision, resolved in favour of keeping the tripwire
-    ## sharp).
-
-  EditorModules = block:
-    ## Every `.nim` file actually in `viewmodel/editor/`, sorted, read out of
-    ## the filesystem at COMPILE TIME rather than transcribed.
-    var xs: seq[string] = @[]
-    for kind, path in walkDir(currentSourcePath().parentDir.parentDir.parentDir /
-                              "editor"):
-      if kind == pcFile and path.endsWith(".nim"):
-        xs.add path.extractFilename
-    sort(xs)
-    xs
 
 proc codeOnly(src: string): string =
   ## Comment lines dropped. The headers of these files DISCUSS `mapOver` and
@@ -859,6 +880,133 @@ proc codeOnly(src: string): string =
     let hash = raw.find(" #")
     lines.add(if hash >= 0: raw[0 ..< hash] else: raw)
   lines.join("\n")
+
+type
+  ModuleFact = object
+    ## One production module, as the scan sees it.
+    path: string           ## `viewmodel`-relative, `/`-separated
+    dir: string            ## its directory, `""` for `viewmodel/*.nim`
+    rawRebase: int         ## pass 1: `rebase(` including comments
+    rebaseCalls: int       ## pass 2: `rebase(` with comments stripped
+    mapOverHits: int       ## pass 2: `mapOver` with comments stripped
+    flagSig: int           ## pass 2: `before: bool`
+    flagTrue: int          ## pass 2: `before = true`
+    deepScanned: bool      ## did this module get pass 2 at all?
+
+const
+  ViewModelRoot = currentSourcePath().parentDir.parentDir.parentDir
+    ## `tests/unit` -> `tests` -> `viewmodel`.
+
+  ChangeSetPath = "editor/change_set.nim"
+    ## The primitive's own module: the ONE file allowed to spell `mapOver` and
+    ## the flag, and therefore the one exempted from those two needles. It is
+    ## NOT exempt from the `rebase(` count.
+
+  SkippedDirs = ["tests", "nimcache", "__pycache__"]
+    ## `tests/` is out because the suites legitimately call and discuss
+    ## `rebase` (~25 further hits under it); the subject of this scan is
+    ## PRODUCTION code. Everything else under `viewmodel/` is in.
+
+  ChangeSetSource = staticRead("../../editor/change_set.nim")
+  TransactionSource = staticRead("../../editor/transaction.nim")
+  SelectionOpsSource = staticRead("../../editor/selection_ops.nim")
+  AnchorSource = staticRead("../../editor/anchor.nim")
+  ReconcileSource = staticRead("../../editor/reconcile.nim")
+  HistorySource = staticRead("../../editor/history.nim")
+  CollabTextSource = staticRead("../../editor/collab_text.nim")
+    ## **THESE SEVEN ARE NOT THE SUBJECT SET.** They are spot reads for the
+    ## call-site case below, which quotes exact call spellings and needs the
+    ## text rather than a count. The subject set is `ProductionModules`.
+    ##
+    ## The twelve further consts that used to sit here, appearing nowhere but
+    ## the old hand-written `others` table, are gone: a second hand-maintained
+    ## list of the same files is the §35 trap with extra steps.
+
+  ProductionModules = block:
+    ## PASS 1 AND PASS 2. Every production `.nim` under `viewmodel/`, at any
+    ## depth, sorted by path.
+    var stack = @[ViewModelRoot]
+    var raws: seq[(string, string)] = @[]
+    while stack.len > 0:
+      let dir = stack.pop()
+      for kind, path in walkDir(dir):
+        if kind == pcDir and path.extractFilename notin SkippedDirs:
+          stack.add path
+        if kind == pcFile and path.endsWith(".nim"):
+          raws.add (path.relativePath(ViewModelRoot).replace('\\', '/'),
+                    staticRead(path))
+    # Pass 1: raw needle counts, and the set of directories that could hold a
+    # real call site.
+    var rawRebase: seq[int] = @[]
+    var hotDirs: seq[string] = @[]
+    for entry in raws:
+      let n = entry[1].count("rebase(")
+      rawRebase.add n
+      if n > 0:
+        let d = entry[0].parentDir
+        if d notin hotDirs: hotDirs.add d
+    # Pass 2: the comment-stripped analysis, for modules that can matter —
+    # anything with a raw hit, and everything sharing a directory with one,
+    # because the FLAG needles are independent of the `rebase(` count.
+    var xs: seq[ModuleFact] = @[]
+    for i, entry in raws:
+      let path = entry[0]
+      let dir = path.parentDir
+      var f = ModuleFact(path: path, dir: dir, rawRebase: rawRebase[i])
+      if rawRebase[i] > 0 or entry[1].count("mapOver") > 0 or dir in hotDirs:
+        let code = codeOnly(entry[1])
+        f.deepScanned = true
+        f.rebaseCalls = code.count("rebase(")
+        f.mapOverHits = code.count("mapOver")
+        f.flagSig = code.count("before: bool")
+        f.flagTrue = code.count("before = true")
+      xs.add f
+    sort(xs, proc(a, b: ModuleFact): int = cmp(a.path, b.path))
+    xs
+
+  RebaseDirectories = block:
+    ## **WHICH DIRECTORIES CALL THE PRIMITIVE — AN OUTPUT, NEVER A LIST.**
+    ## This is the value the old scan hard-coded to `editor/` and could
+    ## therefore never be wrong about out loud. Derived, it goes red by name
+    ## the moment a second directory acquires a call site.
+    var xs: seq[string] = @[]
+    for m in ProductionModules:
+      if m.rebaseCalls > 0 and m.dir notin xs:
+        xs.add m.dir
+    sort(xs)
+    xs
+
+  RebaseSites = {
+    "editor/change_set.nim": 1,
+    "editor/transaction.nim": 1,
+    "editor/selection_ops.nim": 1,
+    "editor/anchor.nim": 1,
+    "editor/history.nim": 1,
+    "editor/reconcile.nim": 1,
+    "editor/collab_text.nim": 4,
+  }.toTable
+    ## **HOW MANY `rebase(` CALLS EACH MODULE IN THE TREE IS ALLOWED, AND THE
+    ## ABSENT ONES ARE ZERO BY CONSTRUCTION.** Keyed by `viewmodel`-relative
+    ## path since PLAT-33, because a bare filename cannot distinguish two
+    ## directories — which was precisely the defect.
+    ##
+    ## `change_set.nim` is a row here now rather than an exception handled
+    ## elsewhere: the sweep visits every module, so the primitive's own home
+    ## is counted like everything else.
+    ##
+    ## **THIS TABLE EXISTS BECAUSE THE SCAN IT BELONGS TO COULD NOT SEE THE
+    ## MODULE IT OMITTED.** The enumerated table listed six of the seven
+    ## modules that call `rebase`; `reconcile.nim` was missing, and had been
+    ## since PLAT-29. The old loop asserted only the ABSENCE of `mapOver` and
+    ## `before: bool` and never counted `rebase(`, so no amount of running it
+    ## could have reported the omission. A scan that enumerates a positive
+    ## fact one place and checks only negative facts everywhere else is a scan
+    ## with exactly one blind spot, and it is the interesting one.
+    ##
+    ## The count is **two-sided**: every module in the tree is compared
+    ## against `RebaseSites.getOrDefault(path, 0)`, so a module that GAINS a
+    ## call without a row fails by name, a row whose count drifts fails by
+    ## name, and a row naming a file that no longer exists fails by name.
 
 suite "PLAT-25 — one function, one name":
 
@@ -888,55 +1036,122 @@ suite "PLAT-25 — one function, one name":
     counted code[atRebase .. ^1].count("before = true") == 1
     counted code[atRebase .. ^1].count("before = false") == 1
 
-  test "no other module in the editor tree can spell the double mapping":
-    # The four remaining reference call sites belong to PLAT-26, PLAT-32 and
+  test "no module anywhere in the ViewModel tree can spell the double mapping":
+    # The remaining reference call sites belong to PLAT-26, PLAT-32 and
     # PLAT-33. What stops them hand-writing their own copy is not a comment:
     # it is that the routine is unreachable from outside `change_set.nim`, and
     # this is the check that says so.
+    #
     # THE SUBJECT SET IS ITSELF ASSERTED, and this is the half a source scan
-    # usually omits: the checks below are exactly as good as the list of files
-    # they run over, and that list cannot be derived from `staticRead`. A
-    # sixth module in this directory is caught HERE and nowhere else.
-    counted EditorModules.len > 0            # the enumeration is not asleep
-    counted EditorModules == @ScannedModules
-    let others = {"transaction.nim": TransactionSource,
-                  "rope.nim": RopeSource,
-                  "text_store.nim": TextStoreSource,
-                  "seq_line_store.nim": SeqLineStoreSource,
-                  "selection.nim": SelectionSource,
-                  "selection_ops.nim": SelectionOpsSource,
-                  "wrap.nim": WrapSource,
-                  "anchor.nim": AnchorSource,
-                  "range_set.nim": RangeSetSource,
-                  "decoration.nim": DecorationSource,
-                  "inlay.nim": InlaySource,
-                  "row_projection.nim": RowProjectionSource,
-                  "document_version.nim": DocumentVersionSource,
-                  "reconcile.nim": ReconcileSource,
-                  "editor_state.nim": EditorStateSource,
-                  "operations.nim": OperationsSource,
-                  "history.nim": HistorySource}.toTable
-    counted others.len == 17
-    counted others.len + 1 == ScannedModules.len
-    for name, src in others:
+    # usually omits: the checks below are exactly as good as the set of files
+    # they run over. That set is now DERIVED FROM THE TREE rather than
+    # transcribed, so a sixth module in `editor/` is caught here — and so is
+    # the FIRST module in any other directory to call the primitive, which is
+    # the half this scan could not see at all until PLAT-33.
+    #
+    # The title of this case used to read "in the editor tree". That was an
+    # accurate description of a scope that had stopped covering the code, and
+    # renaming it is part of the repair: the scope no longer needs declaring
+    # because it is no longer chosen.
+    counted ProductionModules.len > 200      # the enumeration is not asleep
+    counted RebaseSites.len > 0
+
+    var visited: seq[string] = @[]
+    var dirs: seq[string] = @[]
+    var rawBytesSeen = 0
+    for m in ProductionModules:
+      visited.add m.path
+      rawBytesSeen += m.rawRebase            # cheap, but see the floor below
+      if m.dir notin dirs: dirs.add m.dir
+
+    # NON-VACUITY FOR THE SWEEP ITSELF. A walker that found one directory
+    # satisfies "no other directory calls it" for the same reason an empty
+    # scan satisfies everything (§4). These are the directories the old scan
+    # could not reach, named, so the widening cannot silently un-widen.
+    counted dirs.len > 10
+    for required in ["editor", "collab", "collab/transport", "views",
+                     "viewmodels", "platform", "keymap", "store"]:
+      checkpoint(required)
+      counted required in dirs
+    # PLAT-33's own module, the one that sat outside the old subject set.
+    counted "collab/text_ops.nim" in visited
+    counted ChangeSetPath in visited
+
+    # NON-VACUITY FOR THE COUNT TABLE: every row must name a module the sweep
+    # actually visits, or a row could name a file that does not exist and
+    # never be compared against anything.
+    for name, _ in RebaseSites:
       checkpoint(name)
-      counted src.len > 500                  # the file was actually read
-      let code = codeOnly(src)
-      counted not code.contains("mapOver")
-      counted not code.contains("before: bool")
-      counted not code.contains("before = true")
+      counted name in visited
+
+    # THE SWEEP. Every production module in the tree, every pass.
+    var deepScanned = 0
+    var strippedBytes = 0
+    for m in ProductionModules:
+      checkpoint(m.path)
+      if m.deepScanned: inc deepScanned
+      # THE TWO-SIDED `rebase(` COUNT, over the WHOLE TREE. Absent from
+      # `RebaseSites` means zero, so a module that starts calling the
+      # primitive cannot be silently missing from the table — which is how
+      # `reconcile.nim` came to be unlisted from PLAT-29 until PLAT-33, and
+      # how a `collab/` call site would have gone unseen indefinitely.
+      counted m.rebaseCalls == RebaseSites.getOrDefault(m.path, 0)
+      # A module that pass 1 cleared must have been cleared soundly: stripping
+      # comments only deletes text, so a raw zero forces a stripped zero.
+      if m.rawRebase == 0:
+        counted m.rebaseCalls == 0
+      if m.path != ChangeSetPath:
+        counted m.mapOverHits == 0
+        # The FLAG needles apply wherever the primitive is actually called —
+        # a set derived above, not a directory chosen here.
+        if m.dir in RebaseDirectories:
+          counted m.flagSig == 0
+          counted m.flagTrue == 0
+    counted deepScanned > 0
+    counted deepScanned >= 19            # all of `editor/` gets pass 2
+
+    # AND THE DERIVED ANSWER ITSELF IS PINNED. Today exactly one directory in
+    # the ViewModel tree calls the primitive. When that stops being true this
+    # line fails by name, which is the point: a second directory of call sites
+    # is a fact somebody must look at, not one the scan should absorb.
+    checkpoint("directories that call rebase: " & $RebaseDirectories)
+    counted RebaseDirectories == @["editor"]
 
   test "the call sites that DO exist all call the primitive by name":
     counted codeOnly(TransactionSource).contains("rebase(a.changes, b.changes)")
     counted codeOnly(ChangeSetSource).contains("rebase(total, part).bOverA")
-    # THREE in-tree call sites now: `mergeTransactions` (the reference's
-    # `mergeTransaction`), `changeSetOrdered` (the reference's `ChangeSet.of`)
-    # and — since PLAT-26 — `changeByRange` (the reference's `state.ts:161`,
-    # the second of its five hand-written double mappings). The remaining
-    # three reference sites are `mapEvent` (PLAT-32), `receiveUpdates` and
-    # `rebaseUpdates` (PLAT-33), features that do not exist yet, and the
-    # milestone's status says so rather than this comment claiming they are
-    # covered.
+    # **ALL SEVEN SITES ARE IN THE TREE NOW, SINCE PLAT-33, AND EVERY
+    # ONE OF THEM CALLS `rebase`.** The comment here used to read "the
+    # remaining three reference sites are `mapEvent` (PLAT-32),
+    # `receiveUpdates` and `rebaseUpdates` (PLAT-33), features that do not
+    # exist yet" — which was already stale on the day PLAT-32 landed
+    # `mapEvent`, because a prose list of what does not exist is a list that
+    # goes out of date by somebody else's work. It is a table now, and the
+    # table is executed:
+    #
+    #   | reference                              | here                |
+    #   |----------------------------------------|---------------------|
+    #   | `mergeTransaction` (transaction.ts:318)| transaction.nim     |
+    #   | `ChangeSet.of` (change.ts:319)         | change_set.nim      |
+    #   | `changeByRange` (state.ts:161)         | selection_ops.nim   |
+    #   | an anchor past a remote change         | anchor.nim          |
+    #   | `mapEvent` (history.ts:301)            | history.nim         |
+    #   | an async producer's change, re-flown    | reconcile.nim       |
+    #   | `receiveUpdates` (collab.ts:97,111)    | collab_text.nim     |
+    #   | `rebaseUpdates` (collab.ts:171,181)    | collab_text.nim     |
+    #
+    # Eight rows for SEVEN modules: `collab_text.nim` hosts two of them, which
+    # is why its `rebase(` count is the only one above one.
+    #
+    # **THE `reconcile.nim` ROW WAS MISSING UNTIL 2026-09-20, AND THE SCAN
+    # COULD NOT HAVE TOLD ANYBODY.** The module has called `rebase` since
+    # PLAT-29 and its own comment calls it "THE rebase primitive"; the table
+    # listed six of the seven modules, and `reconcile.nim` appeared only in
+    # the `others` loop above, which at the time asserted nothing but the
+    # ABSENCE of `mapOver` and the flag. An enumeration checked on one side
+    # only is an enumeration that cannot report what it left out. The
+    # `RebaseSites` table and the two-sided count above are the repair, and
+    # they are what makes this row's absence a red rather than a silence.
     counted codeOnly(SelectionOpsSource).contains("rebase(changes, newChanges)")
     counted codeOnly(TransactionSource).count("rebase(") == 1
     counted codeOnly(ChangeSetSource).count("rebase(") == 1
@@ -956,6 +1171,35 @@ suite "PLAT-25 — one function, one name":
     counted codeOnly(AnchorSource).count("rebase(") == 1
     counted not codeOnly(AnchorSource).contains("before = true")
     counted not codeOnly(AnchorSource).contains("before: bool")
+    # A FIFTH, ADDED BY PLAT-32: an undo event mapped past a remote change.
+    # It was in the tree and unasserted here for a day, which is what the
+    # table above replaces a prose list to stop.
+    counted codeOnly(HistorySource).contains("rebase(mapping, ev.changes)")
+    counted codeOnly(HistorySource).count("rebase(") == 1
+    counted not codeOnly(HistorySource).contains("before = true")
+    counted not codeOnly(HistorySource).contains("before: bool")
+    # A SIXTH, ADDED BY PLAT-29 AND ASSERTED HERE ONLY FROM PLAT-33: an async
+    # producer's change set moved over the edits that landed while it was in
+    # flight. It was in the tree, listed in `others`, and absent from the
+    # table above the whole time — see the note there. It takes `bOverA`, for
+    # the reason its own comment gives: `delta` is the one that came first.
+    counted codeOnly(ReconcileSource).contains("rebase(delta, r.change)")
+    counted codeOnly(ReconcileSource).count("rebase(") == 1
+    counted not codeOnly(ReconcileSource).contains("before = true")
+    counted not codeOnly(ReconcileSource).contains("before: bool")
+    # THE LAST TWO, ADDED BY PLAT-33, and they are the two the reference
+    # hand-writes inside `@codemirror/collab`. Four calls and not two: each of
+    # `rebaseUpdates` and `receiveUpdates` has a skip/confirm arm that
+    # advances the accumulated change past one of ITS OWN updates, and a
+    # rebase arm that produces both the moved update and the advanced
+    # accumulator from ONE call. The reference spells six `map`/`mapDesc`
+    # calls across those two functions; four `rebase`s is what that becomes
+    # when the flag is not a parameter of anything.
+    counted codeOnly(CollabTextSource).count("rebase(") == 4
+    counted codeOnly(CollabTextSource).contains("rebase(running, update.changes)")
+    counted not codeOnly(CollabTextSource).contains("before = true")
+    counted not codeOnly(CollabTextSource).contains("before = false")
+    counted not codeOnly(CollabTextSource).contains("before: bool")
 
 # ===========================================================================
 # FUZZ-1 — the document is never corrupt, checked after EVERY step

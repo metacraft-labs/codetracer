@@ -222,6 +222,17 @@ type
     indentUnit*: string
     parse*: ParseFreshness
 
+    filters*: seq[TransactionFilter]
+      ## PLAT-33. Local guards that refuse a LOCAL change — a read-only buffer
+      ## or a protected range. Empty by default, so nothing in the 224-operation
+      ## vocabulary changes behaviour when no filter is installed.
+      ##
+      ## **A REMOTE CHANGE DOES NOT CONSULT THEM** (§12.2): the authority's
+      ## changes are not negotiable, and a guard that suppressed part of one
+      ## would break convergence silently. `collab_text.applyRemoteChange` is
+      ## the path that does not call `refusedBy`, and `LAW-X4`'s second arm is
+      ## what makes that observable rather than stated.
+
     history*: HistoryState
       ## PLAT-32's event history: two branches, each event holding an INVERTED
       ## change set, the selection before it and the selections after it. One
@@ -272,6 +283,7 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     folded: @[], breakpoints: @[], tracepoints: @[], flowOverlay: false,
     search: SearchState(pattern: "", direction: sdForward),
     comments: comments, indentUnit: indentUnit, parse: parse,
+    filters: @[],
     history: initHistory())
 
 func `==`*(a, b: Register): bool =
@@ -308,6 +320,7 @@ func `==`*(a, b: EditorState): bool =
     a.tracepoints == b.tracepoints and a.flowOverlay == b.flowOverlay and
     a.search == b.search and a.comments == b.comments and
     a.indentUnit == b.indentUnit and a.parse == b.parse and
+    a.filters == b.filters and
     a.history == b.history
 
 func primaryHead*(st: EditorState): int =
@@ -324,6 +337,38 @@ proc recordTransaction*(st: var EditorState; t: Transaction;
   ## place, so "an edit is undoable" stays a property of the dispatcher rather
   ## than of each of the fifty operations that edit.
   st.history = record(st.history, t, docBefore, selectionBefore)
+
+proc mapPositionTables*(st: var EditorState; before: EditorState;
+                        cs: ChangeSet) =
+  ## Advance `marks` and `jumps` through `cs`.
+  ##
+  ## **ONE FUNCTION, TWO CALLERS, SINCE PLAT-33.** `operations.commitChange`
+  ## does this for a local edit and `collab_text.applyRemoteChange` does it
+  ## for a remote one, and the two must agree exactly: a mark that moved
+  ## differently under somebody else's edit than under your own is a mark that
+  ## drifts by one every time the other person types.
+  ## `Verification-Harness-Traps.md` §30 — extract the predicate, put the
+  ## mutation on the function, and both callers' cases go red together.
+  ##
+  ## Only offsets that ARE positions of the old document are mapped: mapping
+  ## one that is not would be inventing an answer for an input the mapping is
+  ## not defined over, which is the clamp wearing a different function's name.
+  ##
+  ## `sideAfter` and not `sideBefore`: a mark names the start of the text that
+  ## was there, so text inserted at exactly that offset is new text the mark
+  ## never named, and the mark moves to stay in front of what it did.
+  ## `st` is `var` and `before` is the pre-edit value; they are two values,
+  ## never two names for one. The parameter was called `result` in the first
+  ## draft — which SHADOWS Nim's magic identifier inside a proc that has its
+  ## own — and that is the kind of name that compiles and then means something
+  ## else in a context nobody re-read.
+  for id, pos in before.marks:
+    if pos >= 0 and pos <= before.doc.len:
+      st.marks[id] = cs.mapPosOr(pos, sideAfter)
+  for i in 0 ..< st.jumps.len:
+    let pos = before.jumps[i]
+    if pos >= 0 and pos <= before.doc.len:
+      st.jumps[i] = cs.mapPosOr(pos, sideAfter)
 
 proc pushSelectionHistory*(st: var EditorState; nowMs: int64 = 0) =
   ## Record the selection the editor is ABOUT to leave. Called before the new

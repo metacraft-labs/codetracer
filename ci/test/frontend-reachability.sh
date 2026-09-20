@@ -33,8 +33,17 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1263 bash ci/test/frontend-reachability.sh`, so 1264
-# findings fail `lint-nim` and 1263 do not.
+# `env CT_REACHABILITY_MAX=1276 bash ci/test/frontend-reachability.sh`, so 1277
+# findings fail `lint-nim` and 1276 do not.
+#
+# THE CEILING MOVED 1263 -> 1276 ON 2026-09-20 (PLAT-33): net +13 — gross +15
+# against -2 that are NOT deletions, plus 2 exports DELETED rather than
+# ratcheted past. The +15 are the peer surface of the new
+# `editor/collab_text.nim` and `collab/text_ops.nim`, the reducer's merge-family
+# oracle, and a third `==` on `transaction.nim`'s new `TransactionFilter`. The
+# per-symbol account is a DIFF OF TWO RUNS of this script — a worktree at the
+# merge base against the tree with PLAT-33 in it — and lives in the setter
+# beside the invocation in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1258 -> 1263 ON 2026-09-19 (PLAT-32): gross +7, all seven
 # in the new `editor/history.nim`, against -2 that are NOT deletions — two

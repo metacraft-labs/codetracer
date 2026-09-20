@@ -231,15 +231,15 @@ ARMS = [
         "rather than one question twice",
     ),
     Arm(
-        "M4", OPS,
-        "    for id, pos in st.marks:\n"
-        "      if pos >= 0 and pos <= st.doc.len:\n"
-        "        result.marks[id] = cs.mapPosOr(pos, sideAfter)\n"
-        "    for i in 0 ..< result.jumps.len:\n"
-        "      let pos = st.jumps[i]\n"
-        "      if pos >= 0 and pos <= st.doc.len:\n"
-        "        result.jumps[i] = cs.mapPosOr(pos, sideAfter)\n",
-        "    discard\n",
+        "M4", STATE,
+        "  for id, pos in before.marks:\n"
+        "    if pos >= 0 and pos <= before.doc.len:\n"
+        "      st.marks[id] = cs.mapPosOr(pos, sideAfter)\n"
+        "  for i in 0 ..< st.jumps.len:\n"
+        "    let pos = before.jumps[i]\n"
+        "    if pos >= 0 and pos <= before.doc.len:\n"
+        "      st.jumps[i] = cs.mapPosOr(pos, sideAfter)\n",
+        "  discard\n",
         MARKS_MOVE,
         "A STORED OFFSET STOPS MOVING WITH THE DOCUMENT: the marks and the "
         "jump list are no longer mapped through the change set that moved the "
@@ -262,7 +262,28 @@ ARMS = [
         "REMOTE change, which moves the document without adding an event. "
         "What is re-aimed here is this arm, onto the offsets that are STILL "
         "dragged forward by this function: the marks and the jump list, which "
-        "are PLAT-31's own §36a repair",
+        "are PLAT-31's own §36a repair.\n\n"
+        "**AND IT MOVED A SECOND TIME ON 2026-09-20, FOR THE OPPOSITE REASON** "
+        "(§32 again, caught the same way: `--needle-scan` reported `M4 LOST` "
+        "in `operations.nim` before any digest was re-recorded). PLAT-33 "
+        "extracted these eight lines out of `commitChange` into "
+        "`editor_state.mapPositionTables`, because `collab_text."
+        "applyRemoteChange` must map marks and jumps the same way a local "
+        "edit does. The BEHAVIOUR survived the extraction untouched — which "
+        "is exactly why the needle vanishing is the interesting event: the "
+        "arm had been aimed at a LOCATION, and the location is not the "
+        "property. The subject is therefore `editor_state.nim` and no longer "
+        "`operations.nim`, and the mutation now sits ON THE EXTRACTED "
+        "FUNCTION rather than on one caller's copy of it — which is §30's "
+        "*'extract the predicate, put the mutation on the function, and both "
+        "callers' cases go red together'* performed rather than merely cited. "
+        "The extraction's own docstring cited §30 while leaving the mutation "
+        "behind in the caller it had just been lifted out of; the citation "
+        "was the claim and this arm is the evidence. **The new site is "
+        "strictly stronger:** a defect placed here is reachable from the "
+        "local path (this suite) AND the remote path (plat33), so one needle "
+        "now guards both callers, where the old one guarded a copy that no "
+        "longer existed",
     ),
     Arm(
         "M5", OPS,
@@ -724,8 +745,23 @@ def check_control_hashes() -> bool:
         h, p = line.split(None, 1)
         recorded[p.strip()] = h
     ok = True
+    # `TOUCHED` is the whole subject set of this harness; `record_control_hashes`
+    # writes a digest for exactly these paths, so the comparator must read
+    # exactly these paths. The two iterating the same set is the property that
+    # makes "absent" mean something rather than being an accident of ordering.
     for p in TOUCHED:
-        if p in recorded and recorded[p] != digest(p):
+        # **A PATH THAT IS NOT IN THE FILE AT ALL IS A REFUSAL, NOT A SKIP.**
+        # The old one-sided test — a membership guard ANDed onto the digest
+        # comparison — made absence and agreement indistinguishable:
+        # a newly added subject passed the gate silently until somebody happened
+        # to re-record. That is the one-sided-check shape §32 exists to forbid,
+        # sitting inside the mechanism built to catch drift.
+        if p not in recorded:
+            print(f"CONTROL DIGEST ABSENT: {p} is compared by this harness "
+                  f"but has no recorded digest — run --needle-scan, review, "
+                  f"then --record-control-hashes (§32)")
+            ok = False
+        elif recorded[p] != digest(p):
             print(f"CONTROL DIGEST MOVED: {p} — re-run --needle-scan BEFORE "
                   f"--record-control-hashes (§32)")
             ok = False

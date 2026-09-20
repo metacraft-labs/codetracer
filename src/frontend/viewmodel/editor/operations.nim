@@ -1031,6 +1031,19 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
   ## was there, so text inserted at exactly that offset is new text the mark
   ## never named, and the mark moves to stay in front of what it did.
   result = st
+  # =====================================================================
+  # THE LOCAL TRANSACTION FILTERS — PLAT-33
+  # =====================================================================
+  # A read-only buffer or a protected range refuses a LOCAL change here, and
+  # the refusal is "the state did not move", which `settle` already reads as
+  # a non-act. `collab_text.applyRemoteChange` does NOT make this call, which
+  # is §12.2's *"it bypasses the local transaction filters"* — expressed as
+  # the absence of a call rather than as a flag passed to one, so a source
+  # scan can see it and a boolean cannot be got wrong.
+  if st.filters.refusedBy(cs):
+    if newSelection.isSome:
+      result.selection = newSelection.get
+    return
   let newDoc = cs.apply(st.doc)
   if newDoc != st.doc:
     let selBefore = st.selection
@@ -1041,17 +1054,7 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
                   @[Annotation(kind: anUserEvent, userEvent: userEvent),
                     Annotation(kind: anTime, timeMs: nowMs)]),
       st.doc, selBefore)
-    # The marks and the jump list, through the same change set. Only offsets
-    # that ARE positions of the old document are mapped: mapping one that is
-    # not would be inventing an answer for an input the mapping is not defined
-    # over, which is the clamp wearing a different function's name.
-    for id, pos in st.marks:
-      if pos >= 0 and pos <= st.doc.len:
-        result.marks[id] = cs.mapPosOr(pos, sideAfter)
-    for i in 0 ..< result.jumps.len:
-      let pos = st.jumps[i]
-      if pos >= 0 and pos <= st.doc.len:
-        result.jumps[i] = cs.mapPosOr(pos, sideAfter)
+    result.mapPositionTables(st, cs)
     result.doc = newDoc
   if newSelection.isSome:
     result.selection = newSelection.get
