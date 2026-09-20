@@ -51,7 +51,7 @@ permissions:
 
 jobs:
   mcr-dap-flow:
-    runs-on: [self-hosted, nixos]
+    runs-on: [self-hosted, linux, x64]
 
     steps:
       - name: Generate CI token
