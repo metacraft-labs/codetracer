@@ -427,7 +427,7 @@ jobs:
   # `ci/test/windows-runner-bootstrap-test.sh` pins this: it fails if any
   # eph-win-x64 job stops opening with the bootstrap.
   windows-bootstrap-smoke:
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     # See the timeout-minutes rationale on windows-rust-components: an omitted
     # value is GitHub's 360-minute default, and any eph-win-x64 job that reaches
     # it holds this workflow's per-branch concurrency group for six hours. This
@@ -740,7 +740,7 @@ jobs:
   #
   # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org §M13.
   origin-dap-windows:
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (materialized Python, Windows)
     # See the timeout-minutes rationale on windows-rust-components. This is the
     # other job that reaches `setup-dev-env` with the `windows-diy` flavor, and
@@ -918,7 +918,7 @@ jobs:
   # trigger is added deliberately.
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
     # See the timeout-minutes rationale on windows-rust-components. This job is
     # schedule/dispatch-gated so it has never run on this runner class, but it
@@ -1148,7 +1148,7 @@ jobs:
           fi
 
   windows-named-pipe-tests:
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     # See the timeout-minutes rationale on windows-rust-components. This job
     # does not call setup-dev-env and currently fails fast (~8 min) at
     # "Provision MSVC build environment", but it must not be able to inherit the
@@ -1254,7 +1254,7 @@ jobs:
         run: cargo test --bin simple-tui windows_named_pipe -- --nocapture
 
   windows-rust-components:
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     # WHY EVERY eph-win-x64 JOB NOW CARRIES AN EXPLICIT timeout-minutes.
     #
     # Omitting it does not mean "no limit", it means GitHub's DEFAULT limit,
@@ -1518,7 +1518,7 @@ jobs:
   # Installs all dependencies via env.ps1, builds ct-mcr from the
   # codetracer-native-recorder sibling, then runs the Rust DAP integration tests.
   windows-headless-test:
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: test (headless DAP, Windows)
     # See the timeout-minutes rationale on windows-rust-components. This job has
     # been `skipped` behind windows-rust-components throughout, so it has never
@@ -1660,7 +1660,7 @@ jobs:
             -E 'test(~dap) and not test(~bash_flow) and not test(~zsh_flow) and not test(~javascript_flow)'
 
   lint-bash:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window (2026-09-03..05): 22 green, median 2.8m, max 3.1m.
     # 15m is ~5x the slowest green; the floor this file uses for a job whose
     # whole body is one linter and whose variance is runner setup, not work.
@@ -1733,7 +1733,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/bash.sh"
 
   lint-nim:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 25 green, median 3.3m, max 3.7m. Same floor as lint-bash,
     # for the same reason: 15m is ~4x the slowest green ever observed.
     timeout-minutes: 15
@@ -1819,7 +1819,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/nim.sh"
 
   lint-nix:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 42 green, median 5.4m, max 7.2m. 25m is ~3.5x the slowest
     # green -- wider than the lint floor because this lane evaluates the flake.
     timeout-minutes: 25
@@ -1874,7 +1874,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
 
   lint-rust:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 40 green, median 8.5m, max 10.7m. 30m is ~2.8x the slowest
     # green; clippy over the whole workspace is the longest of the four lints.
     timeout-minutes: 30
@@ -2178,7 +2178,7 @@ jobs:
         run: nix develop . --command just test-reprobuild-hcr-in-codetracer
 
   reprobuild-linux-smoke:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window: 48 green, median 1.8m, max 5.1m. 15m is ~3x the slowest
     # green.
     timeout-minutes: 15
@@ -2678,7 +2678,7 @@ jobs:
   # envelope rejects missing prerequisites, ignored/skipped tests, count
   # drift, and any Playwright skip result.
   cross-process-linux:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # NO GREEN SAMPLE: 0 success in 50 records. Every failure dies at step 7 of 9
     # ("Build frontend"), skipping the two Playwright steps the green path runs,
     # so the 9.7m worst failure is a LOWER bound on green, not a duration.
@@ -2761,7 +2761,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process
 
   viewmodel-tests:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # NO GREEN SAMPLE: 0 success in 42 records. Failures stop at step 15 of 31
     # with 16 real steps skipped, so the 24.3m worst failure covers under half
     # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
@@ -3656,7 +3656,7 @@ jobs:
           retention-days: 30
 
   push-gpg-public-key:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 42 green, median 1.4m, max 5.7m. 15m is ~2.6x the slowest
     # green; the tail is the keyserver round trip.
     timeout-minutes: 15
@@ -3724,7 +3724,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.pub.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc
 
   push-install-script:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 43 green, median 1.3m, max 5.6m. As above (~2.7x max).
     timeout-minutes: 15
     steps:
@@ -3781,7 +3781,7 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp install-on-distributions.sh s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/install.sh
 
   dev-build:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window: 14 green, median 7.3m, max 8.0m. Very tight distribution,
     # so 30m is ~3.8x the slowest green -- headroom is for a cold Nix cache,
     # which this window never sampled.
@@ -3867,7 +3867,7 @@ jobs:
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
 
   nix-build:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 7 green, median 8.7m, max 10.9m. Only 7 greens, so the bound
     # is set wide (~3.2x max) rather than trusting a small sample's tail.
     timeout-minutes: 35
@@ -3908,7 +3908,7 @@ jobs:
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh"
 
   appimage-build:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window: 13 green, median 9.7m, max 18.8m. Set off the max (~2.1x);
     # the p90 of 17.0m shows the cold-cache arm is a normal outcome, not a fluke.
     timeout-minutes: 40
@@ -4477,7 +4477,7 @@ jobs:
     # create-release promotes to `-latest-`/`-<tag>-` — the exact shape as the
     # AppImage/dmg (CodeTracer-main-amd64.AppImage etc.). Runs on Linux so gpg,
     # aws and the imported release key all come from the proven nix path.
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: [self-hosted, linux, x64]  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     # Bounded for the same reason as windows-installer-build above, and with the
     # same dead `refs/heads/main` gate. This leg is signing + upload only, so it
     # needs far less headroom than the build.
@@ -4871,7 +4871,7 @@ jobs:
     # fusermount setuid wrapper / /dev/fuse, so we smoke-run the AppImage with
     # `APPIMAGE_EXTRACT_AND_RUN=1` (self-extract, no FUSE) — the same mode
     # nix/shells/ci-base.nix documents for AppImages on these runners.
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window: 5 green, median 1.1m, max 1.2m. 15m is ~12x the slowest
     # green; the floor dominates because the job itself is seconds of work.
     timeout-minutes: 15
@@ -4966,7 +4966,7 @@ jobs:
     # `vmh-linux-runner` image (security.nesting + nested KVM + docker/fuse3
     # baked), so nested Docker is no longer a separate class. aws-cli comes from
     # nixpkgs.
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, linux, x64]
     # 200-run window: 22 green across the five distro legs, median 9.9m,
     # slowest leg 12.5m (ubuntu:24.04). 40m is ~3.2x the slowest leg.
     # One bound covers the matrix, so it is set off the SLOWEST leg.
@@ -5077,7 +5077,7 @@ jobs:
       matrix:
         include:
           - platform: nixos
-            runner: eph-linux-x64-g1  # CIP-5 nix leg; H4: routed to GPU host gpu-server-001
+            runner: [self-hosted, linux, x64]  # CIP-5 nix leg; H4: routed to GPU host gpu-server-001
           # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
           # runner and drives the tests through codetracer's nix dev shell
           # (``nix develop . --command just test``), same as the nixos leg. The
@@ -5773,7 +5773,7 @@ jobs:
       matrix:
         include:
           - platform: nixos
-            runner: eph-linux-x64-g2  # CIP-5 nix leg; H4: routed to GPU host gpu-server-002
+            runner: [self-hosted, linux, x64]  # CIP-5 nix leg; H4: routed to GPU host gpu-server-002
           # CIP-5 Wave 4: the macOS leg now runs on the self-hosted nix-darwin
           # runner. The ct binary is built by codetracer's reprobuild recipe in
           # the nix dev shell (``nix develop . --command just build-once`` ->
@@ -6516,7 +6516,7 @@ jobs:
     # /sys/devices/cpu_core and cpu_atom, or cpu_groups() comes back empty and
     # the filter no-ops. Both GPU guests do expose them -- that was measured
     # when the hold was written.
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     timeout-minutes: 120
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -7056,7 +7056,7 @@ jobs:
     # landing on -g2 in this same commit; without it the always-on subset skews
     # 103.4 vs 122.2. Lands next to ct-test-providers, which it shares a closure
     # with, so the move is locality-positive as well as arithmetic.
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # 200-run window: 48 green, median 5.5m, max 8.6m. 25m is ~2.9x the slowest
     # green.
     timeout-minutes: 25
@@ -7111,7 +7111,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-m16-release-gate
 
   ct-test-providers:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # NO GREEN SAMPLE: 0 success in 46 records. Failures stop at step 6 of 11
     # (the provider gate itself), so 19.3m is a LOWER bound. 60m is ~3.1x it.
     timeout-minutes: 60
@@ -7243,7 +7243,7 @@ jobs:
           if-no-files-found: ignore
 
   push-to-attic:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # NO SAMPLE OF ANY KIND: 0 success, 0 failure, and 7 cancellations of zero
     # length -- this job is `refs/heads/main`-only and never started in the
     # window. There is nothing to measure. 60m is chosen structurally: the job
@@ -7358,7 +7358,7 @@ jobs:
 
   build-and-deploy-docs:
     needs: [ docs-scope ]
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 14 green, median 4.5m, max 5.3m. 20m is ~3.8x the slowest
     # green; headroom is for the gh-pages push, which contends with its own
     # `docs-gh-pages-*` group below.
@@ -7568,7 +7568,7 @@ jobs:
             "$PR_NUMBER" "https://docs.codetracer.com/pr/${PR_NUMBER}/" "$HEAD_SHA"
 
   push-tag:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: only 2 green (1.5m, 1.6m) -- a thin sample, but the job is a
     # single annotated-tag push. 15m is ~9x the slower of the two.
     timeout-minutes: 15
@@ -7663,7 +7663,7 @@ jobs:
           (git push origin "$YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
 
   create-release:
-    runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # NO SAMPLE OF ANY KIND: 0 success, 0 failure, 7 zero-length cancellations --
     # it is tag-gated and never started in the window. 30m is structural, not
     # measured: `gh release create` plus upload of the artefacts `push-tag`'s

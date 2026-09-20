@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   msys2-provision:
-    runs-on: eph-win-x64
+    runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
     steps:
       # `actions/checkout` needs a real git on PATH on these guests; without one
