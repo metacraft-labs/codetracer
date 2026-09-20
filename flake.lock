@@ -377,7 +377,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "97b0327aa8d3a7eabf5a7d4519b9abc8ac30aa3e",
+        "rev": "35ac8ef83c706e8536b74ab013955ff667ea0c37",
         "type": "github"
       },
       "original": {
@@ -454,7 +454,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-shell-recorders",
-        "rev": "252939de2f3998da4031ce1f76bbd72a343d4cb5",
+        "rev": "eb6aab4bd58c335f05784b78bb28302f042fbad1",
         "type": "github"
       },
       "original": {
@@ -528,7 +528,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "cf132be762d2b8de8874674088ea117a164feda7",
+        "rev": "801dfa2d3889986e8c7c5b350e38a60042db6baf",
         "type": "github"
       },
       "original": {
@@ -2608,7 +2608,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "1c41ba8ee9f012332ece9d3c0ca8ccab09ac1a3f",
+        "rev": "3b6196efc2021ba202add54a21b25f0268d70c79",
         "type": "github"
       },
       "original": {
@@ -2640,7 +2640,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "993208e60522dba8405b947070c4b11002cee4a4",
+        "rev": "172ce7fb5a530d610e13b3cd6939825280f96141",
         "type": "github"
       },
       "original": {
@@ -2655,7 +2655,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "619fa67bc4447901c388ef9c3d3df364e06ce71a",
+        "rev": "80fca975f6f5f028f4b0588a64471f3ce262d211",
         "type": "github"
       },
       "original": {
@@ -2670,7 +2670,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-tui",
-        "rev": "a37c4cb3a40ece69eef735b2f17fea31fbc944cd",
+        "rev": "a28e651f015135bcd6132dfafb1772784516f45d",
         "type": "github"
       },
       "original": {
@@ -2858,7 +2858,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-everywhere",
-        "rev": "5612aa87fa69c4b38e1fd29e95342e2b30e6439c",
+        "rev": "88f1a26180c5e00f41456c8df5d428d75f28a385",
         "type": "github"
       },
       "original": {
