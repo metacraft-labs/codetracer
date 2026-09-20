@@ -58,7 +58,7 @@ jobs:
     #
     # Placed on -g1 rather than -g2 to balance the split; see the routing
     # commit for the runtime figures.
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
 
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -238,7 +238,7 @@ jobs:
           if-no-files-found: ignore
 
   shell-recorder-tests:
-    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
 
     steps:
       - name: Mint installation token for cross-repo sibling access
