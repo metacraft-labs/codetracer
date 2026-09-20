@@ -41,11 +41,18 @@
 ## edge.
 
 import std/[strutils]
+import ../../common/target_axes
 
 const
-  BackendMcr* = "mcr"
-  BackendRr* = "rr"
-  BackendTtd* = "ttd"
+  BackendMcr* = token(raMcr)   ## "mcr"
+  BackendRr* = token(raRr)     ## "rr"
+  BackendTtd* = token(raTtd)   ## "ttd"
+    ## The three spellings are the `RecordingApproach` tokens, not a second
+    ## vocabulary: since LRS-2B the rule below is expressed over the enum and
+    ## these strings are its wire/CLI spellings.
+
+  NativeReplayApproaches* = [raMcr, raRr, raTtd]
+    ## The enum form of `NativeRecordingBackends`, in the same order.
 
   NativeRecordingBackends* = [BackendMcr, BackendRr, BackendTtd]
     ## Every value that names a native recording backend at all.  A value
@@ -86,7 +93,12 @@ type
   NativeBackendSelection* = object
     ok*: bool
     backend*: string
-      ## Meaningful only when `ok`.
+      ## Meaningful only when `ok`.  The CLI spelling of `approach`.
+    approach*: RecordingApproach
+      ## Meaningful only when `ok`: the resolved native replay approach, one
+      ## of `raMcr`, `raRr`, `raTtd`.  `raUnknown` on refusal.  This is what
+      ## the assessment carries (`src/ct/trace/record_assessment.nim`);
+      ## `backend` is kept for the callers that put it on a command line.
     errorLines*: seq[string]
       ## The refusal, already formatted.  Empty when `ok`.
     noteLines*: seq[string]
@@ -101,42 +113,59 @@ proc hostRecordingPlatform*(): string =
   elif defined(linux): HostLinux
   else: HostOther
 
-proc backendsValidOn*(host: string): seq[string] =
+proc approachesValidOn*(host: string): seq[RecordingApproach] =
   ## MCR is the default native recorder on every host.  Linux can additionally
   ## select rr and Windows TTD; macOS has only MCR.  Order matters: it is the
-  ## order the diagnostic lists them in, so it must be stable.
+  ## order the diagnostic lists them in, so it must be stable.  This is the
+  ## rule; `backendsValidOn` is its spelling.
   case host
-  of HostLinux: @[BackendMcr, BackendRr]
-  of HostWindows: @[BackendMcr, BackendTtd]
-  of HostMacos: @[BackendMcr]
-  else: @[BackendMcr]
+  of HostLinux: @[raMcr, raRr]
+  of HostWindows: @[raMcr, raTtd]
+  of HostMacos: @[raMcr]
+  else: @[raMcr]
+
+proc backendsValidOn*(host: string): seq[string] =
+  ## `approachesValidOn`, spelled for the command line and the diagnostic.
+  result = @[]
+  for approach in approachesValidOn(host):
+    result.add(token(approach))
+
+proc hostProviding*(approach: RecordingApproach): string =
+  ## Where an approach that is not available here *is* available.  `raMcr`
+  ## returns `""` because it is available everywhere and therefore never
+  ## appears in the "available elsewhere" parenthetical.
+  case approach
+  of raRr: HostLinux
+  of raTtd: HostWindows
+  of raMcr, raUnknown, raInstrumentedRuntime, raVmEmulation: ""
 
 proc hostProviding*(backend: string): string =
-  ## Where a backend that is not available here *is* available.  `mcr` returns
-  ## `""` because it is available everywhere and therefore never appears in the
-  ## "available elsewhere" parenthetical.
-  case backend
-  of BackendRr: HostLinux
-  of BackendTtd: HostWindows
+  ## The string form of `hostProviding`, for callers holding the CLI spelling.
+  var approach: RecordingApproach
+  if parseRecordingApproach(backend, approach): hostProviding(approach)
   else: ""
 
-proc defaultNativeRecordingBackend*(): string =
+proc defaultNativeRecordingApproach*(): RecordingApproach =
   ## The default when `--backend` is not given.  Stated once, here, so the
   ## `--backend mcr` *pin* can be asserted independently of it: a mutation that
   ## flips this default must leave the pin's assertion green.
-  BackendMcr
+  raMcr
+
+proc defaultNativeRecordingBackend*(): string =
+  ## `defaultNativeRecordingApproach`, spelled for the command line.
+  token(defaultNativeRecordingApproach())
 
 proc availableElsewhere(host: string): string =
   ## "rr is available on linux; ttd is available on windows" — every backend
   ## this host cannot honour, and where it can be.
-  let valid = backendsValidOn(host)
+  let valid = approachesValidOn(host)
   var parts: seq[string] = @[]
-  for backend in NativeRecordingBackends:
-    if backend in valid:
+  for approach in NativeReplayApproaches:
+    if approach in valid:
       continue
-    let provider = hostProviding(backend)
+    let provider = hostProviding(approach)
     if provider.len > 0:
-      parts.add(backend & " is available on " & provider)
+      parts.add(token(approach) & " is available on " & provider)
   parts.join("; ")
 
 proc resolveNativeRecordingBackend*(requested: string, host: string):
@@ -146,7 +175,9 @@ proc resolveNativeRecordingBackend*(requested: string, host: string):
   ## rather than a coincidence of the default; anything else is refused.
   let normalized = requested.strip.toLowerAscii
   if normalized.len == 0:
-    return NativeBackendSelection(ok: true, backend: defaultNativeRecordingBackend())
+    return NativeBackendSelection(
+      ok: true, backend: defaultNativeRecordingBackend(),
+      approach: defaultNativeRecordingApproach())
 
   if normalized in MaterializedBackendNames:
     # See `MaterializedBackendNames`.  This arm exists because the product
@@ -156,17 +187,25 @@ proc resolveNativeRecordingBackend*(requested: string, host: string):
     return NativeBackendSelection(
       ok: true,
       backend: defaultNativeRecordingBackend(),
+      approach: defaultNativeRecordingApproach(),
       noteLines: @[
         "note: --backend " & normalized &
           " names the materialized-trace recorder, and this target is native.",
         "      recording with " & defaultNativeRecordingBackend() &
           " instead; pass --lang to record it as a materialized-trace language."])
 
+  # Parsed onto the axis, then checked against the host's row.  A value that
+  # parses as an approach but is not a NATIVE REPLAY one (`instrumented`,
+  # `vm`) is not a native backend spelling and is refused as unrecognised,
+  # exactly as before: `--backend` selects among rr/MCR/TTD and nothing else.
+  var approach: RecordingApproach
+  let isNative = parseRecordingApproach(normalized, approach) and
+                 approach in NativeReplayApproaches
   let valid = backendsValidOn(host)
-  if normalized in valid:
-    return NativeBackendSelection(ok: true, backend: normalized)
+  if isNative and normalized in valid:
+    return NativeBackendSelection(ok: true, backend: normalized, approach: approach)
 
-  let known = normalized in NativeRecordingBackends
+  let known = isNative
   var lines: seq[string] = @[]
   if known:
     lines.add("error: --backend " & normalized &

@@ -1,6 +1,7 @@
 import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, options],
   multitrace,
   native_backend_selection,
+  record_assessment, recorder_dispatch,
   ../../common/[ lang, paths, types, trace_index, config, ct_logging ],
   ../utilities/[language_detection ],
   ../cli/build,
@@ -353,7 +354,29 @@ proc record*(lang: string,
     # which does not exist yet (see the NTR-2 report and §9 Q10).  This is a
     # trace of the carry, not the user-facing diagnostics display NTR-3 owes.
     debugPrint summary
-  # echo "DEBUG record: detectedLang=", detectedLang, " usesMaterializedTraces=", detectedLang.usesMaterializedTraces, " program=", program, " outputFolder=", outputFolder
+
+  # LRS-2B: the ROUTE — through the dispatch table in db-backend-record, or
+  # through the native `ct-native-replay` path — is decided by the assessment
+  # of the target, not by `usesMaterializedTraces(detectedLang)`.  That
+  # predicate is a replay-side summary over one `Lang` value and cannot see
+  # that a `.nims` and a `.nim` are two recorders, or that Lua has none; the
+  # assessment can, and `isDeclared` is the exact question this branch asks:
+  # "does the dispatch table have anything to say about this target?"
+  let assessment = assessRecordingTarget(
+    program, detectedLang, languageWasExplicit = lang != "")
+  if assessment.isAmbiguous:
+    # Rule K2: two facts that dispatch differently are named, never picked.
+    for line in assessment.diagnostics:
+      stderr.writeLine("error: " & line)
+    quit(1)
+  let recorderSel = recorderSelectorFor(assessment, detectedLang)
+  let viaDispatchTable = recorderToolFor(recorderSel).isDeclared
+  debugPrint "assessment: kind=" & assessment.kind.specificKinds.join(",") &
+    " family=" & token(assessment.kind.family) &
+    " isa=" & token(assessment.targetIsa) &
+    " approach=" & token(assessment.recordingApproach) &
+    " toolchain=" & token(assessment.toolchain) &
+    " via-dispatch-table=" & $viaDispatchTable
 
   # NTR-2 / Q6: resolve `--backend` HERE — after recognition, before any build,
   # any recorder spawn and any trace-folder creation — so a value this host
@@ -371,14 +394,17 @@ proc record*(lang: string,
   # there is a SEPARATE gap, recorded in the design document, not closed here.
   #
   # Scoping alone is NOT sufficient, which the NTR-2 review measured against
-  # the shipped binary: the GUI's classification and `usesMaterializedTraces`
-  # are different functions and they disagree, so `--backend db` also reaches
+  # the shipped binary: the GUI's classification and the core's routing are
+  # different functions and they disagree, so `--backend db` also reaches
   # the branch below for `myapp.bin` (`recordTargetAuto` in the GUI, `LangC`
-  # here) and for a `.lua` script.  The `db` sentinel is therefore handled
-  # inside `resolveNativeRecordingBackend` rather than being refused as a
-  # misspelling; see `MaterializedBackendNames`.
+  # here).  The `db` sentinel is therefore handled inside
+  # `resolveNativeRecordingBackend` rather than being refused as a
+  # misspelling; see `MaterializedBackendNames`.  A bare `.lua` script still
+  # reaches it too: `.lua` is not in `LANGS`, so it resolves to `LangUnknown`
+  # and takes the native path exactly as before LRS-2B.  Only `--lang lua`
+  # reaches the DECLARED-unsupported dispatch-table arm instead.
   let nativeBackend =
-    if detectedLang.usesMaterializedTraces:
+    if viaDispatchTable:
       ""
     else:
       nativeRecordingBackendForHost(recordBackend)
@@ -407,7 +433,8 @@ proc record*(lang: string,
   if server:
     pargs.add("--server")
 
-  if detectedLang == LangPythonDb:
+  if recorderSel.language == slPython and
+     recorderSel.approach == raInstrumentedRuntime:
     let (pythonInterpreter, resolverError) = resolvePythonInterpreter()
     if resolverError.len > 0:
       echo "error: " & resolverError
@@ -439,8 +466,11 @@ proc record*(lang: string,
     pargs.add("--python-interpreter")
     pargs.add(pythonInterpreter)
 
-  if detectedLang in {LangRustWasm, LangCppWasm} and dirExists(program):
-    # WASM Cargo project: build with wasm32-wasip1 target, then record the .wasm binary.
+  if KindWasmCargoProject in assessment.kind.specific:
+    # WASM Cargo project (the assessment read `wasm32` out of
+    # `.cargo/config.toml`): build with the wasm32-wasip1 target, then record
+    # the .wasm binary.  This used to key on `detectedLang in {LangRustWasm,
+    # LangCppWasm}` — the ISA welded onto the language.
     let buildProcess = osproc.execProcess(
       "cargo",
       workingDir = program,
@@ -465,7 +495,7 @@ proc record*(lang: string,
       echo buildProcess
       quit(1)
     programToRecord = wasmPath
-  elif not detectedLang.usesMaterializedTraces:
+  elif not viaDispatchTable:
     # Match `ct run` behavior for RR-based languages by building first.
     # M-REC-7: folder name is the bare ``recording_id`` (UUIDv7) — see paths.recordingFolder.
     if detectedLang == LangNim and outputFolderValue.len == 0:
@@ -499,14 +529,14 @@ proc record*(lang: string,
   if getEnv("CODETRACER_WRAPPER_PID", "").len == 0:
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
-  if detectedLang.usesMaterializedTraces:
+  if viaDispatchTable:
     if useInterpose:
       # The interpose recorder is graphics-API specific and lives in
-      # the MCR backend.  Materialized backends (e.g. Python's db
-      # backend) cannot honour --use-interpose, so fail fast rather
-      # than silently dropping the flag.
+      # the MCR backend.  A dedicated recorder (e.g. Python's) cannot honour
+      # --use-interpose, so fail fast rather than silently dropping the flag.
       echo "error: --use-interpose is only supported for native MCR recordings; "
-      echo "  the detected language (" & $detectedLang & ") uses a materialized-trace backend."
+      echo "  the detected language (" & $detectedLang & ") is recorded by a dedicated recorder (" &
+        token(recorderSel.approach) & ")."
       quit(1)
     return recordInternal(
       dbBackendRecordExe,
@@ -562,7 +592,8 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
   # TODO: not sure about wasm, for now not supported for tests
   let fullPath = expandFileName(expandTilde(path))
   let lang = detectLangFromPath(fullPath, isWasm=false)
-  if not lang.usesMaterializedTraces:
+  # Same route question as `record` above, asked of the same assessment.
+  if not recorderToolFor(assessedSelector(fullPath, lang)).isDeclared:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
       # assume `Lang<Name/Label>'

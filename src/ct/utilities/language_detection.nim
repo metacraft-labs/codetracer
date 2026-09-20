@@ -15,7 +15,10 @@ export target_recognition
 #   TODO: a project can have sources in multiple languages
 #   so the assumption it has a single one is not always valid
 #   but for now are not reforming that yet
-proc isWasmCargoProject(folder: string): bool =
+proc isWasmCargoProject*(folder: string): bool =
+  ## Exported for `src/ct/trace/record_assessment.nim`, which reads the same
+  ## marker to assert `wasm-cargo-project` as a target KIND instead of welding
+  ## the ISA onto a `Lang` value the way `detectFolderLang` still does below.
   let configPath = folder / ".cargo" / "config.toml"
   if fileExists(configPath):
     try:

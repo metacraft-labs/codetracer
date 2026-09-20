@@ -256,25 +256,6 @@ proc declaredTypeOf(defs: seq[(string, string)]; column: string): string =
       return def[1]
   ""
 
-proc langToColumnValue*(lang: Lang): string =
-  ## The persisted form of ``lang`` since schema version 1: the enum name.
-  $lang
-
-proc langFromColumnValue*(raw: string): Lang =
-  ## Inverse of ``langToColumnValue``.  Deliberately does **not** accept a
-  ## bare integer: accepting one would silently re-admit the ordinal format
-  ## this migration exists to retire, and would then decode it against
-  ## whatever the enum order happens to be today.
-  try:
-    parseEnum[Lang](raw)
-  except ValueError:
-    raise newException(TraceIndexSchemaError,
-      "trace_index: recordings.lang holds " & raw.escape() & ", which is not " &
-      "a Lang enum name.  Since trace_index schema version " &
-      $TRACE_INDEX_SCHEMA_VERSION & " this column stores names such as " &
-      "'LangRust', never ordinals.  An integer here means the database was " &
-      "written before the lang-name migration and was not migrated.")
-
 # ---------------------------------------------------------------------------
 # The frozen schema-version-0 ordinal → name table
 # ---------------------------------------------------------------------------
@@ -385,6 +366,104 @@ const
       if entry.ordinal > hi: hi = entry.ordinal
     hi
 
+proc langToColumnValue*(lang: Lang): string =
+  ## The persisted form of ``lang`` since schema version 1: the enum name.
+  $lang
+
+type
+  LangColumn* = object
+    ## What a ``recordings.lang`` cell decodes to.
+    lang*: Lang
+      ## The live member the stored name denotes — or ``LangUnknown`` when the
+      ## stored name is a RETIRED member (see ``retiredName``).
+    retiredName*: string
+      ## Non-empty exactly when the stored name was once a ``Lang`` member and
+      ## this build no longer has it.  Carried so the row is displayed by the
+      ## name it was recorded under and nothing is lost; ``lang`` is then the
+      ## sentinel, never a guess at a neighbour.
+
+# Retired-name policy (decided 2026-09-20, LRS-2B): a ``recordings.lang``
+# cell holding the name of a member that a later build REMOVED decodes to
+# ``LangUnknown`` with the name preserved in ``LangColumn.retiredName``.  It
+# does not raise.  Raising here would turn every recording made before the
+# removal into a hard failure the moment the index is opened — the frozen
+# ``langV0OrdinalNames`` table below exists precisely so that old rows stay
+# readable, and this is the same obligation one column-format later.
+#
+# The policy is scoped to names that WERE members: the decoder recognises a
+# retired name by its presence in ``langNamesEverPersisted``, a frozen,
+# append-only literal.  A string in neither the live enum nor that table was
+# never written by any CodeTracer build, and a bare integer means an
+# unmigrated version-0 database; both still raise, exactly as before, because
+# admitting them would silently re-admit the ordinal format this migration
+# retired (integers) or paper over corruption (arbitrary strings).
+#
+# Nothing rewrites the cell.  ``recordTrace`` inserts new rows only, and the
+# two ``UPDATE recordings SET`` statements in this file touch the remote-share
+# columns; a row decoded as retired therefore keeps its original name on disk
+# for the schema-version-2 remap (LRS-5) to give a lossless target.
+
+const
+  langNamesAddedSinceV0*: array[1, string] = ["LangGdScript"]
+    ## **Append-only.  Never regenerate this from ``Lang``.**  The names that
+    ## schema version 1 has written that were NOT in the version-0 enum.  A
+    ## member added to ``Lang`` is appended here when it lands (the test
+    ## ``every live Lang name has been recorded as persisted`` fails until it
+    ## is); a member REMOVED from ``Lang`` is never removed from here, which is
+    ## what lets the decoder recognise its name as retired rather than foreign.
+
+  # Every name a ``recordings.lang`` cell may legitimately hold: the frozen
+  # version-0 table plus the frozen additions.  Derived at compile time from
+  # two FROZEN literals and never from the live enum — rule 3 of the milestone
+  # series.  ``retired`` = in this list and not in ``Lang``.
+  langNamesEverPersisted*: seq[string] = static:
+    var names: seq[string] = @[]
+    for entry in langV0OrdinalNames:
+      names.add(entry.name)
+    for name in langNamesAddedSinceV0:
+      names.add(name)
+    names
+
+proc decodeLangColumn*(raw: string,
+                       everPersisted: openArray[string] = langNamesEverPersisted):
+    LangColumn =
+  ## Decode a ``recordings.lang`` cell.  Never raises for a name that was
+  ## ever a ``Lang`` member; see the policy block above for what still does.
+  ##
+  ## ``everPersisted`` is a parameter so the retired path can be exercised by
+  ## a test before any member has actually been retired; production callers
+  ## take the default.
+  try:
+    return LangColumn(lang: parseEnum[Lang](raw), retiredName: "")
+  except ValueError:
+    discard
+  for name in everPersisted:
+    if name == raw:
+      return LangColumn(lang: LangUnknown, retiredName: raw)
+  raise newException(TraceIndexSchemaError,
+    "trace_index: recordings.lang holds " & raw.escape() & ", which is not " &
+    "a Lang enum name.  Since trace_index schema version " &
+    $TRACE_INDEX_SCHEMA_VERSION & " this column stores names such as " &
+    "'LangRust', never ordinals.  An integer here means the database was " &
+    "written before the lang-name migration and was not migrated.")
+
+proc langFromColumnValue*(raw: string): Lang =
+  ## Inverse of ``langToColumnValue``, as a bare ``Lang``: a retired name is
+  ## ``LangUnknown`` (use ``decodeLangColumn`` to keep the name).  Deliberately
+  ## does **not** accept a bare integer: accepting one would silently re-admit
+  ## the ordinal format this migration exists to retire, and would then decode
+  ## it against whatever the enum order happens to be today.
+  decodeLangColumn(raw).lang
+
+proc langLabel*(trace: Trace): string =
+  ## The name to show for a recording's language: the live member's name, or
+  ## the retired name the row was recorded under.  Every listing that used to
+  ## print ``$trace.lang`` prints this, so a retired row keeps its label
+  ## instead of reading "LangUnknown".
+  if trace.langRetiredName.len > 0: $trace.langRetiredName
+  else: $trace.lang
+
+
 proc langV0NameForOrdinal*(ordinal: int): string =
   ## The version-0 name for ``ordinal``, or ``""`` if the frozen table has no
   ## entry for it.  Membership in the table — not ``low``/``high`` arithmetic
@@ -420,10 +499,12 @@ proc distinctLangValues(db: DBConn): seq[string] =
     result.add(row[0])
 
 proc parsesAsLangName(raw: string): bool =
+  ## Live OR retired: a retired name is a legitimate schema-version-1 cell
+  ## (see the retired-name policy above), not a defect for the verifier.
   try:
-    discard parseEnum[Lang](raw)
+    discard decodeLangColumn(raw)
     true
-  except ValueError:
+  except TraceIndexSchemaError:
     false
 
 proc countRecordings(db: DBConn): int =
@@ -1040,9 +1121,11 @@ proc loadTrace(trace: Row, test: bool): Trace =
     # Schema version 1: column 10 is the ``Lang`` enum *name*.  It used to be
     # ``trace[10].parseInt.Lang``, which reinterpreted whatever integer was
     # stored against today's enum order — the failure mode this migration
-    # exists to remove.  ``langFromColumnValue`` raises rather than guessing;
-    # the handler below surfaces its message.
-    let lang = langFromColumnValue(trace[10])
+    # exists to remove.  ``decodeLangColumn`` raises rather than guessing for
+    # anything that was never a name; a RETIRED name decodes to the sentinel
+    # with the name preserved (``langRetiredName``).
+    let column = decodeLangColumn(trace[10])
+    let lang = column.lang
     var expireTime = -1
     try:
       expireTime = trace[20].parseInt
@@ -1061,6 +1144,7 @@ proc loadTrace(trace: Row, test: bool): Trace =
       lowLevelFolder: trace[8],
       outputFolder: trace[9],
       lang: lang,
+      langRetiredName: column.retiredName,
       test: test,
       imported: trace[11].parseInt != 0,
       shellID: trace[12].parseInt,

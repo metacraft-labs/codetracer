@@ -70,7 +70,7 @@ proc localRecordingArtifacts(): seq[ArtifactListingRow] =
       recordingId = $trace.recordingId,
       tenantId = "",
       program = $trace.program,
-      langName = $trace.lang,
+      langName = trace.langLabel,
       byteSize = -1)
     # The locator is the recording id, which is what `ct replay` takes.
     result.add listingRow(artifact, locator = $trace.recordingId)

@@ -59,6 +59,7 @@ else:
   import impure/db_sqlite
 
 import ../../common/lang
+import ../../common/types
 import ../../common/trace_index
 
 # ---------------------------------------------------------------------------
@@ -716,6 +717,9 @@ suite "trace_index schema version 1 — lang ordinal to name":
   test "langFromColumnValue round-trips every Lang and rejects a bare ordinal":
     for lang in Lang:
       check langFromColumnValue(langToColumnValue(lang)) == lang
+      let column = decodeLangColumn(langToColumnValue(lang))
+      check column.lang == lang
+      check column.retiredName == ""
     for raw in ["37", "0", "", "Elixir", "LangNotAThing"]:
       var raised = false
       try:
@@ -724,6 +728,91 @@ suite "trace_index schema version 1 — lang ordinal to name":
         raised = true
         check "not a Lang enum name" in e.msg
       check raised
+
+  test "a RETIRED name decodes to LangUnknown with the name preserved, and never raises":
+    ## The retired-name policy (`src/common/trace_index.nim`, LRS-2B): a cell
+    ## holding the name of a member a later build removed must not turn every
+    ## recording made before the removal into a hard failure at open.  No
+    ## member has been retired yet, so the path is driven through the
+    ## `everPersisted` parameter with a name that is in the historical list
+    ## but not in the live enum — which is exactly what a retired name is.
+    const Retired = "LangRetiredForThisTest"
+    let historical = langNamesEverPersisted & @[Retired]
+    var raised = false
+    var column: LangColumn
+    try:
+      column = decodeLangColumn(Retired, historical)
+    except TraceIndexSchemaError:
+      raised = true
+    check(not raised)
+    check column.lang == LangUnknown
+    check column.retiredName == Retired
+    # The bare-`Lang` view is the sentinel, never a neighbour.
+    # The same string WITHOUT the historical entry is still foreign and still
+    # raises: the policy is scoped to names that were members, so it cannot
+    # silently admit corruption or an unmigrated integer column.
+    raised = false
+    try:
+      discard decodeLangColumn(Retired)
+    except TraceIndexSchemaError as e:
+      raised = true
+      check "not a Lang enum name" in e.msg
+    check raised
+    raised = false
+    try:
+      discard decodeLangColumn("37", historical)
+    except TraceIndexSchemaError:
+      raised = true
+    check raised
+    # A LIVE name is never reported as retired, even if it is also historical
+    # (every live name is).
+    let live = decodeLangColumn("LangElixir", historical)
+    check live.lang == LangElixir
+    check live.retiredName == ""
+
+  test "every name ever persisted decodes without raising, today and after a retirement":
+    ## Today every historical name is live, so each decodes to itself; the
+    ## assertion that matters for the future is the first one — no raise —
+    ## because that is what a member removal must not change.
+    for name in langNamesEverPersisted:
+      var raised = false
+      var column: LangColumn
+      try:
+        column = decodeLangColumn(name)
+      except TraceIndexSchemaError:
+        raised = true
+      checkpoint("historical name: " & name)
+      check(not raised)
+      if column.retiredName.len == 0:
+        check $column.lang == name
+      else:
+        check column.lang == LangUnknown
+        check column.retiredName == name
+
+  test "every live Lang name has been recorded as persisted (the list is append-only)":
+    ## A member added to `Lang` must be appended to `langNamesAddedSinceV0`
+    ## so that, if it is ever removed again, its name is recognised as retired
+    ## rather than foreign.  This is the assertion that forces the append.
+    for lang in Lang:
+      checkpoint("live member: " & $lang)
+      check ($lang) in langNamesEverPersisted
+    # And the frozen list is a superset built from two frozen literals, not
+    # from `Lang`: it has every version-0 name plus the additions, no repeats.
+    check langNamesEverPersisted.len == LANG_V0_ENTRY_COUNT + langNamesAddedSinceV0.len
+    var seen: seq[string] = @[]
+    for name in langNamesEverPersisted:
+      check name notin seen
+      seen.add(name)
+
+  test "a retired row keeps its label in a listing":
+    ## `langLabel` is what `ct list` and the upload listing print.  A retired
+    ## row shows the name it was recorded under, a live row its live name.
+    var t = Trace(lang: LangElixir)
+    check t.langLabel == "LangElixir"
+    t = Trace(lang: LangUnknown, langRetiredName: "LangRetiredForThisTest")
+    check t.langLabel == "LangRetiredForThisTest"
+    t = Trace(lang: LangUnknown)
+    check t.langLabel == "LangUnknown"
 
   test "verifyTraceIndexSchema names a surviving migration scratch table":
     ## The one shape a rollback failure would leave behind.  `verify` is what

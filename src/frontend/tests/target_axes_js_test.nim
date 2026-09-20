@@ -81,29 +81,40 @@ suite "the axis modules build and behave on the JS backend":
       else:
         check defaultRecordingApproach(v) != raUnknown
 
-  test "a kind chain round-trips through the protocol type":
+  test "a kind round-trips through the protocol type, as a set with its own family":
+    # Q10: `specific` is a set and the family is its own field.  The `seq`
+    # sort and dedup in `specificKinds` is one of the things that could
+    # plausibly differ between backends, so it is asserted here too.
     let original = TargetKind(
-      specific: @[KindCargoProject, "rust-project"],
+      specific: @["cmake-project", KindCargoProject, "cmake-project"],
       family: tfProjectDirectory)
-    let wire = original.chain()
-    check wire.len == 3
-    check wire[wire.high] == "project-directory"
+    check original.specificKinds() == @[KindCargoProject, "cmake-project"]
     var decoded: TargetKind
     var diag = ""
-    check parseKindChain(wire, decoded, diag)
+    check parseKind(original.specificKinds(), token(original.family),
+                    decoded, diag)
     check diag == ""
     check decoded.family == tfProjectDirectory
-    check decoded.specific == @[KindCargoProject, "rust-project"]
+    check decoded.specificKinds() == @[KindCargoProject, "cmake-project"]
 
-  test "an unknown family fails loudly, naming the chain and the vocabulary":
+  test "an unknown family fails loudly, naming the kinds and the vocabulary":
     var decoded: TargetKind
     var diag = ""
-    check(not parseKindChain(
-      @["cmake-project", "some-future-family"], decoded, diag))
+    check(not parseKind(@["cmake-project"], "some-future-family", decoded, diag))
     check "some-future-family" in diag
     check "cmake-project" in diag
     for v in TargetFamily:
       check token(v) in diag
+
+  test "K2 on this backend: two known kinds are an ambiguity, not a pick":
+    let k = TargetKind(specific: @[KindCargoProject, "cmake-project"],
+                       family: tfProjectDirectory)
+    let r = k.resolveKind(@["cmake-project", KindCargoProject])
+    check r.status == krAmbiguous
+    check r.token == ""
+    check r.candidates.len == 2
+    check KindCargoProject in r.ambiguityDiagnostic("p")
+    check k.resolveKind(@[KindCargoProject]).status == krExact
 
   test "version skew: a consumer that knows nothing lands on the family":
     let k = TargetKind(specific: @["cmake-project"],
@@ -140,6 +151,13 @@ suite "the axis modules build and behave on the JS backend":
     check projectKindForMarker("Cargo.toml", kind)
     check kind == KindCargoProject
     check(not projectKindForMarker("CMakeLists.txt", kind))
+    # Q10: every marker present is emitted.
+    let both = projectKindsForMarkers(@["foundry.toml", "Cargo.toml"])
+    check both.len == 2
+    check KindCargoProject in both
+    check KindFoundryProject in both
+    check toolchainForKind(TargetKind(specific: both,
+                                      family: tfProjectDirectory)) == tcUnknown
 
   test "the schema constant is present":
     check TargetAssessmentSchema == "codetracer.target-assessment.v1"

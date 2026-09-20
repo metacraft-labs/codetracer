@@ -68,6 +68,21 @@ type
     date*: langstring # TODO: why not DateTime
     duration*: langstring
     lang*: Lang
+      ## A SUMMARY of a per-file fact, not an authority.  A language is a
+      ## property of a file, and a recording spans as many languages as it
+      ## spans files: the Call Trace Pane re-derives the language on every move
+      ## from the active location's path (`src/frontend/ui/calltrace.nim`,
+      ## `toLangFromFilename(self.location.path)`) and the Event Log does the
+      ## same.  This field gives a recording list one label per row and picks
+      ## the replay-side defaults (`usesMaterializedTraces`); new code that
+      ## needs the language of a FILE asks the path, not this field.
+      ## `codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.md`
+      ## §0.0 R1/R2 and §4.1.
+    langRetiredName*: langstring
+      ## Empty unless the trace index row named a `Lang` member that this build
+      ## no longer has.  Then `lang` is `LangUnknown` and this is the name the
+      ## recording was made under, kept for display (`trace_index.langLabel`).
+      ## See the retired-name policy in `src/common/trace_index.nim`.
     imported*: bool
     calltrace*: bool
     events*: bool

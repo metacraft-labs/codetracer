@@ -98,25 +98,27 @@ const
   TraceFolder = "/tmp/ct-caps-dispatch-check/out"
 
 proc recordDispatches(lang: Lang): bool =
-  ## `ct record <program>` — src/ct/db_backend_record.nim, proc `record`:
+  ## `ct record <program>` — src/ct/db_backend_record.nim, proc `record`,
+  ## since LRS-2B a function of the ASSESSMENT's selector rather than of the
+  ## `Lang`.  For an extension-detected single file the per-`Lang` projection
+  ## `selectorOfLang` is that selector (the assessment only departs from it
+  ## for a `.nims`, a directory, or an explicit `--lang`), so it is what this
+  ## transcription uses:
   ##
-  ##   * :386  `lang == LangUnknown`                   -> error, quit 1
-  ##   * :390  `not lang.usesMaterializedTraces`       -> error, quit 1
+  ##   * `lang == LangUnknown`                          -> error, quit 1
+  ##   * `not recorderToolFor(sel).isDeclared`         -> error, quit 1
   ##           (the rr/native family is the separate commercial
   ##            codetracer-rr-backend component's territory, per
   ##            CodeTracer-Launcher.md §2.3's second example file)
-  ##   * :410  `lang in {LangNoir, LangRustWasm, LangCppWasm}` -> recordDb
-  ##   * :418  `lang == LangNim`                       -> recordNim
-  ##   * :424  `lang == LangPythonDb`                  -> recordDb
-  ##   * :444  `recorderToolFor(lang).supported`       -> recordDb
-  ##   * :465  otherwise                               -> error, quit 1
+  ##   * Nim, wasm/ACIR, Python arms, then `tool.supported` -> recordDb / recordNim
+  ##   * otherwise (declared, unsupported: Lua, GDScript, the
+  ##     retired rr pair)                              -> error, quit 1
   if lang == LangUnknown:
     return false
-  if not lang.usesMaterializedTraces:
+  let tool = recorderToolFor(selectorOfLang(lang))
+  if not tool.isDeclared:
     return false
-  if lang in {LangNoir, LangRustWasm, LangCppWasm, LangNim, LangPythonDb}:
-    return true
-  recorderToolFor(lang).supported
+  tool.supported
 
 proc runDispatches(lang: Lang): bool =
   ## `ct run <program>` — src/ct/trace/run.nim:121 detects the language
@@ -132,16 +134,18 @@ proc runDispatches(lang: Lang): bool =
 proc recordTestDispatches(lang: Lang): bool =
   ## `ct record-test` — src/ct/trace/record.nim, proc `recordTest`:
   ##
-  ##   * :485  `not lang.usesMaterializedTraces` -> the rr-backend path
-  ##           (a different component)
-  ##   * :529  `elif lang == LangPythonDb`       -> the real pytest arm
-  ##   * :589  `else` -> "currently `ct record-test` not supported for
+  ##   * `not recorderToolFor(assessedSelector(path, lang)).isDeclared`
+  ##           -> the rr-backend path (a different component); since LRS-2B
+  ##           the route is asked of the assessment, not of
+  ##           `usesMaterializedTraces`
+  ##   * `elif lang == LangPythonDb`       -> the real pytest arm
+  ##   * `else` -> "currently `ct record-test` not supported for
   ##           this db-based language", quit 1
   ##
   ## So the ONLY extension codetracer-desktop can honestly declare for
   ## `record-test` is Python's. `.rb` and `.nr` were declared before
-  ## LRC-1 and both land on :589.
-  lang.usesMaterializedTraces and lang == LangPythonDb
+  ## LRC-1 and both land on the `else`.
+  recorderToolFor(selectorOfLang(lang)).isDeclared and lang == LangPythonDb
 
 proc dispatches(command: string, lang: Lang): bool =
   case command
@@ -327,11 +331,11 @@ proc checkCommand(capsPath, command: string) =
       # `recordNim` (it compiles first, then hands off to ct-mcr) rather
       # than by the shared table, so the table is empty for it by design.
       if lang == LangNim:
-        expect(recorderToolFor(lang).recorderLabel.len > 0,
+        expect(recorderToolFor(selectorOfLang(lang)).recorderLabel.len > 0,
           "`" & command & " " & extension &
           "` : Nim names its recorder (argv is built by recordNim)")
       else:
-        let invocation = recorderInvocation(lang, Program, TraceFolder)
+        let invocation = recorderInvocation(selectorOfLang(lang), Program, TraceFolder)
         expect(invocation.args.len > 0,
           "`" & command & " " & extension &
           "` : recorder_dispatch builds a non-empty invocation")

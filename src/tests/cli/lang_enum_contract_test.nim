@@ -129,6 +129,20 @@
 ## The complement of property 4: the three sites are checked positively, so
 ## "the duplicate is gone" cannot be satisfied by deleting the consumer.
 ##
+## ## 6. The four axes are the same lists in Nim and in Rust, name for name
+##
+## LRS-2B added `SourceLanguage`, `TargetIsa`, `Toolchain` and
+## `RecordingApproach` to `libs/ct-lang` beside `Lang`, mirroring
+## `src/common/target_axes.nim`.  Unlike `Lang` they carry NO ordinal: every
+## value crosses every boundary as its `wire_name`, which is the Nim
+## `token(v)`.  So the pin is by NAME and by TOKEN — each Rust variant must be
+## the Nim member with its two-letter prefix stripped, in the same position,
+## with the same token — and the sweep additionally asserts that the axis
+## enums never acquire `#[repr(...)]` or a `serde_repr` derive, which is what
+## would turn their position into a wire value and reintroduce the `Lang`
+## defect one axis over.  The Rust side is parsed out of the `axis_enum!`
+## invocations, strictly: a block that cannot be found fails the run.
+##
 ## Mocking justification (workspace policy on mock objects): none.  There is no
 ## mock in this file.  Property 1 calls the production proc; properties 2–5
 ## read the production source files.
@@ -138,6 +152,7 @@
 
 import std/[algorithm, os, sets, strutils, tables, unittest]
 import ../../common/lang
+import ../../common/target_axes
 import ../../ct/utilities/language_detection
 
 const
@@ -793,3 +808,162 @@ suite "the deleted Lang copies stay deleted and their sites use ct-lang":
         checkpoint(
           manifest & " no longer declares a `ct-lang` dependency, so it is " &
           "no longer sharing the canonical Lang enum.")
+
+# ---------------------------------------------------------------------------
+# Property 6 — the four axes match between Nim and Rust, name for name
+# ---------------------------------------------------------------------------
+
+type RustAxisVariant = tuple[variant: string, token: string]
+
+proc parseRustAxis(source: string, path: string, name: string):
+    seq[RustAxisVariant] =
+  ## Extract `Variant => "token",` rows from the `axis_enum!` invocation that
+  ## declares `name` in `libs/ct-lang/src/lib.rs`, in declaration order.
+  ##
+  ## Deliberately strict, like the other parsers in this file: a block that
+  ## cannot be located raises rather than returning an empty list, because an
+  ## anti-drift check that silently compares nothing reports a pass.
+  result = @[]
+  let header = "\n    " & name & ", ALL, Unknown {"
+  let startIdx = source.find(header)
+  if startIdx < 0:
+    raise newException(ValueError,
+      "could not find the `axis_enum!` block for `" & name & "` in " & path &
+      ".  The axis enum moved or was renamed; this check must be updated " &
+      "to follow it, not deleted — it is what pins the Rust axis against " &
+      "`src/common/target_axes.nim`.")
+  let bodyStart = startIdx + header.len
+  let endIdx = source.find("\n    }", bodyStart)
+  if endIdx < 0:
+    raise newException(ValueError,
+      "found the `" & name & "` axis block in " & path &
+      " but no closing brace after it.")
+  for rawLine in source[bodyStart ..< endIdx].splitLines():
+    var line = rawLine.strip()
+    let commentIdx = line.find("//")
+    if commentIdx >= 0:
+      line = line[0 ..< commentIdx].strip()
+    if line.len == 0:
+      continue
+    let arrow = line.find("=>")
+    if arrow < 0:
+      raise newException(ValueError,
+        "unparsable row in the `" & name & "` axis block: `" & line & "`")
+    let variant = line[0 ..< arrow].strip()
+    var tok = line[arrow + 2 .. ^1].strip(chars = {' ', ','})
+    if tok.len < 2 or tok[0] != '"' or tok[^1] != '"':
+      raise newException(ValueError,
+        "row `" & line & "` in the `" & name & "` axis block has no quoted token")
+    tok = tok[1 ..< tok.high]
+    result.add((variant, tok))
+
+proc nimAxisRows[T: enum](): seq[RustAxisVariant] =
+  ## The Nim side in the same shape: `slC` -> ("C", "c").  The two-letter
+  ## prefix is the Nim naming convention (`sl`, `ti`, `tc`, `ra`); the Rust
+  ## variant is what follows it, capitalisation included.
+  result = @[]
+  for v in T:
+    let full = $v
+    result.add((full[2 .. ^1], token(v)))
+
+template checkAxis(nimRowsExpr, rustRowsExpr: seq[RustAxisVariant],
+                   name: string) =
+  ## A TEMPLATE, not a proc, on purpose: `check` inside a proc has no
+  ## `testStatusIMPL` in scope, so `fail()` only sets `programResult = 1` and
+  ## the enclosing test still prints `[OK]`.  Found by the LRS-2B mutation
+  ## run (a reordered axis exited 1 with 32 OK and no `[FAILED]` line); a
+  ## template expands into the test body, where the failure belongs.
+  let nimRows = nimRowsExpr
+  let rustRows = rustRowsExpr
+  check:
+    rustRows.len == nimRows.len
+  if rustRows.len != nimRows.len:
+    checkpoint(
+      "the Nim `" & name & "` has " & $nimRows.len & " members but the Rust " &
+      "one in " & CtLangPath & " has " & $rustRows.len & ".")
+  for i in 0 ..< min(nimRows.len, rustRows.len):
+    check:
+      nimRows[i].variant == rustRows[i].variant
+      nimRows[i].token == rustRows[i].token
+    if nimRows[i].variant != rustRows[i].variant or
+       nimRows[i].token != rustRows[i].token:
+      checkpoint(
+        "position " & $i & " of `" & name & "` is `" & nimRows[i].variant &
+        "` => \"" & nimRows[i].token & "\" in Nim but `" & rustRows[i].variant &
+        "` => \"" & rustRows[i].token & "\" in " & CtLangPath & ".")
+
+suite "the four axes in libs/ct-lang are the Nim axes, name for name and token for token":
+
+  setup:
+    check fileExists(CtLangPath)
+
+  test "each axis parses out of the Rust source and is not empty":
+    let source = readFile(CtLangPath)
+    for name in ["SourceLanguage", "TargetIsa", "Toolchain", "RecordingApproach"]:
+      let rows = parseRustAxis(source, CtLangPath, name)
+      check rows.len > 0
+      checkpoint("parsed " & $rows.len & " variants of " & name)
+
+  test "SourceLanguage: same members, same order, same tokens":
+    checkAxis(nimAxisRows[SourceLanguage](),
+              parseRustAxis(readFile(CtLangPath), CtLangPath, "SourceLanguage"),
+              "SourceLanguage")
+
+  test "TargetIsa: same members, same order, same tokens":
+    checkAxis(nimAxisRows[TargetIsa](),
+              parseRustAxis(readFile(CtLangPath), CtLangPath, "TargetIsa"),
+              "TargetIsa")
+
+  test "Toolchain: same members, same order, same tokens":
+    checkAxis(nimAxisRows[Toolchain](),
+              parseRustAxis(readFile(CtLangPath), CtLangPath, "Toolchain"),
+              "Toolchain")
+
+  test "RecordingApproach: same members, same order, same tokens":
+    checkAxis(nimAxisRows[RecordingApproach](),
+              parseRustAxis(readFile(CtLangPath), CtLangPath, "RecordingApproach"),
+              "RecordingApproach")
+
+  test "the axis enums carry no ordinal contract":
+    # What keeps them from becoming a second `Lang`: no `#[repr(...)]`, no
+    # `serde_repr` derive, anywhere in the macro that declares them.  The
+    # position of a variant is then never a serialised value, so reordering an
+    # axis is a name-level change the pin above catches, not a silent wire
+    # break.
+    #
+    # The region scanned is the macro AND its four invocations, up to the
+    # axis tests: the macro's `$(#[$meta])*` slot passes any attribute written
+    # on an invocation straight onto the enum, so a `#[repr(u8)]` placed on
+    # `RecordingApproach, ALL, Unknown {` compiles and is an ordinal contract
+    # just the same.  The review's mutation run put one there and the earlier
+    # version of this test -- which scanned only the `macro_rules!` body --
+    # stayed green; scanning to `mod axis_tests` closes that hole.
+    let source = readFile(CtLangPath)
+    let macroStart = source.find("macro_rules! axis_enum")
+    check macroStart >= 0
+    let regionEnd = source.find("mod axis_tests", macroStart)
+    check regionEnd > macroStart
+    if regionEnd <= macroStart:
+      checkpoint(
+        "`mod axis_tests` was not found after `macro_rules! axis_enum` in " &
+        CtLangPath & "; this scan bounds the axis region by it and must be " &
+        "updated to follow, not deleted.")
+    let body = source[macroStart ..< max(regionEnd, macroStart)]
+    check:
+      not body.contains("#[repr(")
+      not body.contains("Serialize_repr")
+      not body.contains("Deserialize_repr")
+    if body.contains("#[repr(") or body.contains("_repr"):
+      checkpoint(
+        "`axis_enum!` in " & CtLangPath & " gained a repr or a serde_repr " &
+        "derive.  The axes travel as names; giving them an ordinal " &
+        "contract recreates exactly the defect ct-lang's `Lang` has.")
+
+  test "every Rust axis variant is the Nim member with its prefix stripped":
+    # The name convention is what makes the pin readable; assert it holds
+    # for every member of every axis so a Rust rename cannot hide behind a
+    # coincidental token match.
+    for v in SourceLanguage: check ($v).startsWith("sl")
+    for v in TargetIsa: check ($v).startsWith("ti")
+    for v in Toolchain: check ($v).startsWith("tc")
+    for v in RecordingApproach: check ($v).startsWith("ra")

@@ -5,6 +5,13 @@
 # use common/lang or frontend/lang instead.
 
 import os
+# Relative to THIS file, not to the module that includes it: Nim resolves a
+# relative import against the file the statement is written in, which is what
+# lets one include-d table reach the axes from both `src/common/lang.nim` and
+# `src/frontend/lang.nim`.  `target_axes` has no `std/jsffi` and compiles on
+# both backends (`target_axes_test.nim`, `target_axes_js_test.nim`).
+import ./target_axes
+export target_axes
 
 type
   Lang* = enum ## Identifies a programming language implementation
@@ -81,64 +88,160 @@ proc isVMLang*(lang: Lang): bool =
   ## return true if programming language implementation runs in a virtual machine
   false # lang in {LangRuby, LangPython, LangPythonDb, LangLua, LangJavascript, LangUnknown}
 
-func usesMaterializedTraces*(lang: Lang): bool =
-  ## Return true if ``lang`` produces materialized (self-contained) traces
-  ## via a dedicated recorder, as opposed to rr/gdb-based replay traces.
+type
+  LangAxes* = object
+    ## One `Lang` value, decomposed onto the artefact axes it conflates.
+    ##
+    ## `Lang` is a per-file notation, a per-artefact ISA and a per-artefact
+    ## recording approach welded into one value; this is the projection back
+    ## out.  The toolchain axis is deliberately absent: no `Lang` value names a
+    ## toolchain (`LangNim` is `nim c` + `ct-mcr` for a `.nim` and the script VM
+    ## for a `.nims`), so it is derived from the assessed KIND alone
+    ## (`src/ct/trace/record_assessment.nim`).
+    language*: SourceLanguage
+    targetIsa*: TargetIsa
+    approach*: RecordingApproach
+
+func axesOfLang*(lang: Lang): LangAxes =
+  ## Every one of the 41 `Lang` values, on the axes.  **The production
+  ## decomposition** — it used to live only in `target_axes_test.nim` as the
+  ## safety net for this migration, and it must not survive in both places, so
+  ## the test now reads this one.
   ##
-  ## This used to be a mutable ``var USES_MATERIALIZED_TRACES*: array[Lang, bool]``
-  ## literal of 40 ``false`` entries followed by 29 statement-level assignments
-  ## that switched 24 of them on.  Two independent hazards came with that shape:
+  ## An exhaustive `case`, so a new `Lang` member is a compile error here until
+  ## someone states which language, ISA and approach it stands for.
   ##
-  ## * The literal was indexed by enum *position*.  Nim checks an
-  ##   ``array[Lang, T]`` literal's LENGTH, not the order of its entries, so
-  ##   removing or reordering a ``Lang`` member left the literal compiling while
-  ##   every lookup past the edit silently returned a neighbour's answer.
-  ## * It was a ``var``, and an exported one, so the table was writable by any
-  ##   importer for the life of the process.
+  ## Two things this table cannot say, both by design:
   ##
-  ## As an exhaustive ``case`` it is a compiler-checked total function: adding a
-  ## ``Lang`` member fails to compile here until someone states its answer, and
-  ## no caller can mutate it.  The 24 ``true`` answers below are exactly the 24
-  ## the assignments produced; nothing referenced the array itself, so removing
-  ## it changed no call site.
-  ##
-  ## **This proc is itself an instance of the defect the four axes remove**, and
-  ## converting it to a ``case`` does not fix that — it only makes the table
-  ## checkable.  "Does this produce a materialized trace?" is a property of the
-  ## ARTEFACT and of how it was recorded; ``lang`` is a property of a FILE.  The
-  ## successor is ``producesMaterializedTrace(approach)``
-  ## (``src/common/target_axes.nim``), which asks the question of the axis that
-  ## actually decides it.  See ``LangNim`` below for the case where one bit
-  ## demonstrably cannot answer.
+  ## * It answers per `Lang` VALUE, so it cannot separate `.nim` from `.nims`
+  ##   (both `LangNim`) or a plain crate from a wasm one (both `LangRust` until
+  ##   `isWasmCargoProject` says otherwise).  Those are decided by the
+  ##   assessment, which overrides the ISA below when the target kind says so.
+  ##   The answer for `LangNim` is therefore the per-language FALLBACK
+  ##   (`fallbackTargetIsaForLanguage(slNim) == tiNative`), not a claim that
+  ##   every Nim recording is native.
+  ## * `LangSolana` and `LangPolkavm` have NO source language: they name a
+  ##   chain and a VM, which is why their `getExtensionName` is empty.  The
+  ##   language of a program recorded under either is unknown until a file is
+  ##   looked at.  `target_axes_test.nim` asserts these are exactly the two.
   case lang
-  # LangNim answers for TWO recorders at once, which is why this single bit
-  # cannot be right for both:
-  #   * ``.nim``  -> ``nim c`` then ct-mcr (``db_backend_record.nim:143-188``),
-  #                  which is NATIVE REPLAY and not a materialized trace;
-  #   * ``.nims`` -> ``nim e --trace:<...>/trace.ct`` (``:119-141``), where the
-  #                  Nim VM emits the container itself -- an instrumented
-  #                  runtime, and genuinely materialized.
-  # Both call ``importTrace(..., LangNim, ...)``, so `Lang` cannot tell them
-  # apart.  ``true`` is kept here because it is what the tree does today and
-  # this milestone changes no behaviour; the split lives on the axes, where the
-  # pair is `tiNative`/`raMcr` versus `tiNimVm`/`raInstrumentedRuntime`.
-  of LangNim: true
-  of LangRubyDb, LangPythonDb: true
-  of LangNoir: true
-  of LangRustWasm, LangCppWasm: true
-  of LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm, LangCairo,
-     LangCircom, LangLeo, LangTolk, LangAiken, LangCadence, LangSolana: true
-  of LangBash, LangZsh: true
-  of LangJavascript: true
-  of LangElixir, LangErlang, LangPhp: true
-  # LangGdScript: the patched Godot engine recorder links the CTFS writer and
-  # emits a self-contained materialized .ct (GDScript-Recorder.md); it is not an
-  # rr/gdb replay trace.
-  of LangGdScript: true
-  of LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran, LangD,
-     LangCrystal, LangLean, LangJulia, LangAda: false
-  of LangPython, LangRuby, LangLua, LangAsm: false
-  of LangUnknown: false
+  of LangC: LangAxes(language: slC, targetIsa: tiNative, approach: raMcr)
+  of LangCpp: LangAxes(language: slCpp, targetIsa: tiNative, approach: raMcr)
+  of LangRust: LangAxes(language: slRust, targetIsa: tiNative, approach: raMcr)
+  of LangNim: LangAxes(language: slNim, targetIsa: tiNative, approach: raMcr)
+  of LangGo: LangAxes(language: slGo, targetIsa: tiNative, approach: raMcr)
+  of LangPascal: LangAxes(language: slPascal, targetIsa: tiNative, approach: raMcr)
+  of LangFortran: LangAxes(language: slFortran, targetIsa: tiNative, approach: raMcr)
+  of LangD: LangAxes(language: slD, targetIsa: tiNative, approach: raMcr)
+  of LangCrystal: LangAxes(language: slCrystal, targetIsa: tiNative, approach: raMcr)
+  of LangLean: LangAxes(language: slLean, targetIsa: tiNative, approach: raMcr)
+  of LangJulia: LangAxes(language: slJulia, targetIsa: tiNative, approach: raMcr)
+  of LangAda: LangAxes(language: slAda, targetIsa: tiNative, approach: raMcr)
+  # `LangPython` and `LangRuby` are the retired rr/gdb backends.  On these axes
+  # they are the SAME LANGUAGE as their `Db` siblings with a different recording
+  # approach, which is the whole point: the pair was never two languages.
+  of LangPython: LangAxes(language: slPython, targetIsa: tiInterpreted, approach: raRr)
+  of LangRuby: LangAxes(language: slRuby, targetIsa: tiInterpreted, approach: raRr)
+  of LangRubyDb: LangAxes(language: slRuby, targetIsa: tiInterpreted,
+                          approach: raInstrumentedRuntime)
+  of LangJavascript: LangAxes(language: slJavaScript, targetIsa: tiInterpreted,
+                              approach: raInstrumentedRuntime)
+  of LangLua: LangAxes(language: slLua, targetIsa: tiInterpreted,
+                       approach: raInstrumentedRuntime)
+  of LangAsm: LangAxes(language: slAsm, targetIsa: tiNative, approach: raMcr)
+  of LangNoir: LangAxes(language: slNoir, targetIsa: tiAcir, approach: raVmEmulation)
+  # The wasm pair: same language, different ISA.
+  of LangRustWasm: LangAxes(language: slRust, targetIsa: tiWasm, approach: raVmEmulation)
+  of LangCppWasm: LangAxes(language: slCpp, targetIsa: tiWasm, approach: raVmEmulation)
+  of LangPythonDb: LangAxes(language: slPython, targetIsa: tiInterpreted,
+                            approach: raInstrumentedRuntime)
+  of LangUnknown: LangAxes(language: slUnknown, targetIsa: tiUnknown, approach: raUnknown)
+  of LangBash: LangAxes(language: slBash, targetIsa: tiInterpreted,
+                        approach: raInstrumentedRuntime)
+  of LangZsh: LangAxes(language: slZsh, targetIsa: tiInterpreted,
+                       approach: raInstrumentedRuntime)
+  of LangSolidity: LangAxes(language: slSolidity, targetIsa: tiEvm, approach: raVmEmulation)
+  of LangMasm: LangAxes(language: slMidenAsm, targetIsa: tiMidenVm, approach: raVmEmulation)
+  of LangSway: LangAxes(language: slSway, targetIsa: tiFuelVm, approach: raVmEmulation)
+  of LangMove: LangAxes(language: slMove, targetIsa: tiMoveVm, approach: raVmEmulation)
+  of LangPolkavm: LangAxes(language: slUnknown, targetIsa: tiPolkaVm, approach: raVmEmulation)
+  of LangCairo: LangAxes(language: slCairo, targetIsa: tiCairoVm, approach: raVmEmulation)
+  of LangCircom: LangAxes(language: slCircom, targetIsa: tiCircomWitness,
+                          approach: raVmEmulation)
+  of LangLeo: LangAxes(language: slLeo, targetIsa: tiAleoVm, approach: raVmEmulation)
+  of LangTolk: LangAxes(language: slTolk, targetIsa: tiTonVm, approach: raVmEmulation)
+  of LangAiken: LangAxes(language: slAiken, targetIsa: tiPlutus, approach: raVmEmulation)
+  of LangCadence: LangAxes(language: slCadence, targetIsa: tiFlowVm, approach: raVmEmulation)
+  of LangSolana: LangAxes(language: slUnknown, targetIsa: tiSolanaSbf, approach: raVmEmulation)
+  of LangElixir: LangAxes(language: slElixir, targetIsa: tiBeam,
+                          approach: raInstrumentedRuntime)
+  of LangErlang: LangAxes(language: slErlang, targetIsa: tiBeam,
+                          approach: raInstrumentedRuntime)
+  of LangPhp: LangAxes(language: slPhp, targetIsa: tiInterpreted,
+                       approach: raInstrumentedRuntime)
+  # GDScript: a real per-file language (`slGdScript`), running on Godot's own
+  # bytecode VM (`tiGdScriptVm`), recorded by the patched engine instrumenting
+  # itself (`raInstrumentedRuntime`).  See `target_axes.nim` for each choice.
+  of LangGdScript: LangAxes(language: slGdScript, targetIsa: tiGdScriptVm,
+                            approach: raInstrumentedRuntime)
+
+func sourceLanguageOf*(lang: Lang): SourceLanguage =
+  ## The per-file axis of a `Lang` value.  `slUnknown` for the sentinel and
+  ## for the two platform pseudo-languages (`LangSolana`, `LangPolkavm`).
+  axesOfLang(lang).language
+
+const
+  MaterializedSummaryExceptions* = [
+    (lang: LangNim, materialized: true),
+    (lang: LangLua, materialized: false),
+  ]
+    ## The two `Lang` values whose replay-side "is this a materialized trace?"
+    ## answer is NOT `producesMaterializedTrace(axesOfLang(lang).approach)`.
+    ## Each is a deliberate decision, not an average:
+    ##
+    ## * **`LangNim` — `true`.**  The decomposition says `tiNative` / `raMcr`,
+    ##   and MCR is native replay for C, C++ and Rust.  For Nim it is not: BOTH
+    ##   Nim flows — `nim e --trace:` for `.nims` AND `nim c` + `ct-mcr` for
+    ##   `.nim` — hand their container to `importTrace(..., traceKind = "db")`
+    ##   (`src/ct/db_backend_record.nim`, `recordNim`), so every Nim recording
+    ##   in the index IS opened as a materialized trace.  The per-value
+    ##   decomposition cannot see the extension; the record-side dispatch uses
+    ##   the assessment instead (`record_assessment.nim`), which does.
+    ## * **`LangLua` — `false`.**  The decomposition says an interpreted
+    ##   language is recorded by instrumenting its runtime, which is how Lua
+    ##   WOULD be recorded and is unavailable: no Lua recorder exists anywhere
+    ##   (`recorderToolFor` declares it unsupported).  No materialized Lua trace
+    ##   can therefore exist, and the replay-side answer stays `false`.  The gap
+    ##   is made visible on the RECORD side instead: `ct record --lang lua
+    ##   foo.lua` now reaches the "no recorder for Lua" diagnostic through the
+    ##   assessment rather than attempting a native build of a script.  (`.lua`
+    ##   is not in `LANGS` -- `src/ct/utilities/language_detection.nim` -- so a
+    ##   bare `ct record foo.lua` still resolves to `LangUnknown` and never
+    ##   reaches the arm; that missing registration is a separate gap in the
+    ##   extension table, the same kind `.gd` had, and it is recorded, not
+    ##   closed, here.)
+
+func usesMaterializedTraces*(lang: Lang): bool =
+  ## Does a recording summarised as ``lang`` open as a self-contained,
+  ## materialized (CTFS) trace rather than a native replay recording?
+  ##
+  ## **Derived**, since LRS-2B: `producesMaterializedTrace(axesOfLang(lang).approach)`
+  ## for 39 of the 41 values, with the two exceptions in
+  ## `MaterializedSummaryExceptions` stated and reasoned individually.  It used
+  ## to be a hand-kept 41-arm `case` (and before LRS-3 a mutable positional
+  ## `array[Lang, bool]`) whose 24 `true` answers had to be kept in agreement
+  ## with `recorderToolFor`'s `supported` arms by hand.
+  ##
+  ## **This is a replay-side SUMMARY over a per-recording fact.**  `Trace.lang`
+  ## summarises a recording by one `Lang`, and this predicate answers for that
+  ## summary — which is why `LangNim` cannot be right for both of its flows and
+  ## needs an exception.  The record side does not use it to decide anything
+  ## any more: `ct record` derives the approach from the assessment and asks
+  ## `producesMaterializedTrace` of that.
+  for exception in MaterializedSummaryExceptions:
+    if exception.lang == lang:
+      return exception.materialized
+  producesMaterializedTrace(axesOfLang(lang).approach)
 
 func toCLang*(lang: Lang): string =
   ## convert Lang_ to string

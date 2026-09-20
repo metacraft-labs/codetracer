@@ -3,7 +3,8 @@
 ## The dispatch table of `ct record`, asserted as data.
 ##
 ## `ct record <program>` detects a language (src/common/lang.nim,
-## src/ct/utilities/language_detection.nim) and then has to reach the recorder
+## src/ct/utilities/language_detection.nim), assesses the target
+## (src/ct/trace/record_assessment.nim) and then has to reach the recorder
 ## that can actually record it.  Language detection and dispatch were two
 ## unconnected tables: detection mapped ``.php`` → ``LangPhp``, ``.ex``/``.exs``
 ## → ``LangElixir`` and ``.erl`` → ``LangErlang``, and ``USES_MATERIALIZED_TRACES``
@@ -16,21 +17,33 @@
 ## exercises is the PURE half of ``src/ct/trace/recorder_dispatch.nim``, which
 ## exists precisely so the selection can be asserted without a toolchain.
 ##
+## ## The table is a function of the SELECTOR, not of `Lang` (LRS-2B)
+##
+## Every entry point takes a ``RecorderSelector`` — source language, target
+## ISA, recording approach — because one ``Lang`` value cannot say which of two
+## recorders a target needs.  The canonical case is Nim: ``a.nim`` is
+## ``(slNim, tiNative, raMcr)`` and records through ``nim c`` + ``ct-mcr``;
+## ``a.nims`` is ``(slNim, tiNimVm, raInstrumentedRuntime)`` and is recorded by
+## the compiler's own script VM, which needs no ``ct-mcr`` at all.  Both were
+## ``recorderToolFor(LangNim)``, and ``requireRecorder(LangNim)`` demanded
+## ``ct-mcr`` for a script that never uses it.  The suite "one language, two
+## recorders" below is that case, asserted on the real table.
+##
 ## Three properties, in increasing order of strength:
 ##
-## 1. Per-language rows: a ``.php`` program selects the PHP extension, a
+## 1. Per-selector rows: a ``.php`` program selects the PHP extension, a
 ##    ``.rb`` program selects codetracer-ruby-recorder, and so on — with the
 ##    exact argv each recorder is invoked with, so a silently-changed flag
 ##    name is a test failure rather than a runtime one.
 ## 2. The invariant that closes the gap: EVERY language marked
 ##    ``usesMaterializedTraces`` must have a supported recorder AND a
 ##    non-empty invocation.  A future language added to the ``Lang`` enum and
-##    to ``USES_MATERIALIZED_TRACES`` but not to the dispatch table fails
-##    here, at the table, instead of at a user's terminal.  The single
-##    exception is ``RecorderPendingLanguages`` — a language whose recorder
-##    does not EXIST yet, as opposed to existing and not being wired up — and
-##    it is an exception only to the *selection* half: a pending language is
-##    still required by (3) to name its recorder and its remedy.
+##    marked materialized but not added to the dispatch table fails here, at
+##    the table, instead of at a user's terminal.  The single exception is
+##    ``RecorderPendingLanguages`` — a language whose recorder does not EXIST
+##    yet, as opposed to existing and not being wired up — and it is an
+##    exception only to the *selection* half: a pending language is still
+##    required by (3) to name its recorder and its remedy.
 ## 3. Every language reachable from a file extension by ``detectLangFromPath``
 ##    either dispatches or is explicitly declared unsupported with a remedy —
 ##    there is no third, silent outcome.
@@ -45,8 +58,10 @@
 
 import std/[os, strutils, unittest]
 import ../../common/lang
+import ../../common/target_assessment
 import ../../ct/utilities/language_detection
 import ../../ct/trace/recorder_dispatch
+import ../../ct/trace/record_assessment
 
 const
   Program = "/tmp/ct-dispatch-test/app"
@@ -175,10 +190,15 @@ const RecorderPendingLanguages = {LangGdScript}
   ## `loadCalltraceMode` (`src/common/trace_index.nim`) would default a stored
   ## GDScript trace to `NoInstrumentation`, `DebuggerService.lineStepJump`
   ## (`src/frontend/services/debugger_service.nim`) would degrade a jump into
-  ## repeated `step-in`, and `ct record` itself would stop sending
-  ## `--trace-kind db` (`src/ct/trace/record.nim`) and try to record a `.gd`
-  ## file through the native rr/MCR path.  Flipping the flag to make this file
-  ## green would break opening the very traces the language was added to open.
+  ## repeated `step-in`, and the Call Trace / Event Log panes read it too.
+  ## Flipping the flag to make this file green would break opening the very
+  ## traces the language was added to open.
+  ##
+  ## Lua is deliberately NOT here even though it, too, has a declared
+  ## unsupported arm: Lua is not a materialized-trace language
+  ## (`MaterializedSummaryExceptions` in `common_lang.nim` says why), so the
+  ## invariant below never reaches it, and the "declared, never silent" suite
+  ## covers it directly by selector.
   ##
   ## WHAT FLIPS A LANGUAGE OUT OF THIS SET: its recorder becomes something `ct`
   ## can resolve and spawn — for GDScript, the patched engine is published and
@@ -186,15 +206,22 @@ const RecorderPendingLanguages = {LangGdScript}
   ## real invocation, and the entry is deleted from here; the invariant below
   ## goes back to being unconditional for it with no other change.
 
-proc joinedArgs(lang: Lang): string =
-  recorderInvocation(lang, Program, TraceFolder).args.join(" ")
+proc joinedArgs(sel: RecorderSelector): string =
+  recorderInvocation(sel, Program, TraceFolder).args.join(" ")
+
+func sel(lang: Lang): RecorderSelector =
+  ## The per-`Lang` projection.  It is what a stored `Trace.lang` can offer;
+  ## the assessment (`assessedSelector`) is what `ct record` actually uses.
+  selectorOfLang(lang)
+
+func label(lang: Lang): string = displayName(sel(lang))
 
 suite "ct record dispatch table":
 
   test "each language selects its own recorder":
     for row in DispatchRows:
       checkpoint("language: " & row.lang.toName)
-      let tool = recorderToolFor(row.lang)
+      let tool = recorderToolFor(sel(row.lang))
       check tool.supported
       check tool.recorderLabel == row.recorderLabel
       check tool.sibling == row.sibling
@@ -217,7 +244,7 @@ suite "ct record dispatch table":
       if row.argsContain.len == 0:
         continue
       checkpoint("language: " & row.lang.toName)
-      let args = joinedArgs(row.lang)
+      let args = joinedArgs(sel(row.lang))
       for fragment in row.argsContain:
         checkpoint("  expected argv fragment: " & fragment)
         check fragment in args
@@ -225,7 +252,7 @@ suite "ct record dispatch table":
   test "server support is declared per language":
     for row in DispatchRows:
       checkpoint("language: " & row.lang.toName)
-      check serverSupport(row.lang) == row.server
+      check serverSupport(sel(row.lang)) == row.server
 
   test "PHP server mode selects the worker-directory environment":
     # The PHP extension picks its output layout from the environment:
@@ -234,9 +261,9 @@ suite "ct record dispatch table":
     # write its own `worker_<pid>/` beneath it, which is what a recorded
     # `php -S` server needs.  Getting this backwards silently produces a
     # container in the wrong place, so it is asserted rather than assumed.
-    let plain = recorderInvocation(LangPhp, Program, TraceFolder)
+    let plain = recorderInvocation(sel(LangPhp), Program, TraceFolder)
     let server = recorderInvocation(
-      LangPhp, Program, TraceFolder, RecorderOptions(server: true))
+      sel(LangPhp), Program, TraceFolder, RecorderOptions(server: true))
 
     var plainKeys, serverKeys: seq[string]
     for (name, _) in plain.env: plainKeys.add(name)
@@ -251,29 +278,31 @@ suite "ct record dispatch table":
     check "CODETRACER_ENABLED" in serverKeys
 
   test "every materialized-trace language has a recorder and an invocation":
-    # THE invariant.  `usesMaterializedTraces` is the flag that routes a
-    # language to the recorder side of `ct record`; a language that claims it
-    # but has no dispatch arm is exactly the PHP/Elixir/Erlang bug.
+    # THE invariant.  `usesMaterializedTraces` is the flag that says a
+    # recording summarised as this language opens as a materialized trace; a
+    # language that claims it but has no dispatch arm is exactly the
+    # PHP/Elixir/Erlang bug.
     for lang in Lang:
       if not lang.usesMaterializedTraces:
         continue
       checkpoint("materialized language: " & lang.toName)
+      let s = sel(lang)
       if lang in RecorderPendingLanguages:
         # There is no recorder to select yet, so there is nothing to assert an
         # invocation against.  The requirement that survives is the other one:
         # the language must still be declared rather than silent, which the
-        # two tests below assert for exactly this set.  Pinning
-        # `not supported` here is deliberate — it means a recorder that DOES
-        # get wired up fails this line until it is removed from the set, so
-        # the set cannot quietly outlive the gap it records.
-        check(not recorderToolFor(lang).supported)
+        # tests below assert for exactly this set.  Pinning `not supported`
+        # here is deliberate — it means a recorder that DOES get wired up fails
+        # this line until it is removed from the set, so the set cannot quietly
+        # outlive the gap it records.
+        check(not recorderToolFor(s).supported)
         continue
-      check recorderToolFor(lang).supported
-      let invocation = recorderInvocation(lang, Program, TraceFolder)
+      check recorderToolFor(s).supported
+      let invocation = recorderInvocation(s, Program, TraceFolder)
       if lang == LangNim:
         # recordNim owns its argv (it compiles first, then hands off to
         # ct-mcr), so the table only has to name the tool for it.
-        check recorderToolFor(lang).recorderLabel.len > 0
+        check recorderToolFor(s).recorderLabel.len > 0
       else:
         check invocation.args.len > 0
         # The recorder has to be TOLD where to write, one way or another:
@@ -296,15 +325,36 @@ suite "ct record dispatch table":
       if not lang.usesMaterializedTraces:
         continue
       checkpoint("materialized language: " & lang.toName)
-      let tool = recorderToolFor(lang)
+      let tool = recorderToolFor(sel(lang))
       check tool.recorderLabel.len > 0
       check tool.sibling.len > 0
       check tool.installHint.len > 0
 
+  test "the summary predicate and the table agree on the materialized set":
+    # `usesMaterializedTraces` is derived from the same axes the table
+    # dispatches on, with two named exceptions.  Pin the relationship from
+    # the table's side: a language whose per-value selector has a SUPPORTED
+    # recorder that produces a materialized trace is flagged, and one that
+    # is flagged has a declared arm.  The two exceptions are asserted by name
+    # in `target_axes_test.nim`; here only their consequence shows.
+    for lang in Lang:
+      let s = sel(lang)
+      let tool = recorderToolFor(s)
+      if tool.supported and producesMaterializedTrace(s.approach):
+        check lang.usesMaterializedTraces
+      if lang.usesMaterializedTraces:
+        check tool.isDeclared
+
   test "an unsupported language is declared, never silent":
-    # LangRuby and LangPython are the retired rr/gdb backends: they are still
-    # reachable through an explicit `--lang ruby` / `--lang python`, and the
-    # only correct answer is to say so and point at the working spelling.
+    # LangRuby and LangPython are the retired rr/gdb backends.  On the axes
+    # they are `(slRuby, tiInterpreted, raRr)` and `(slPython, tiInterpreted,
+    # raRr)`: a native-replay approach asked of a runtime-hosted language, and
+    # the only correct answer is to say so and point at the working recorder.
+    # `LangRuby` is still reachable through an explicit `--lang ruby`;
+    # `LangPython` is NOT reachable from any input (`--lang python` maps to
+    # `LangPythonDb`, `src/common/lang.nim`), so its arm answers only for a
+    # value decoded out of old data.  An earlier version of this comment
+    # claimed both were reachable through `--lang`; the python half was wrong.
     #
     # `RecorderPendingLanguages` is held to the SAME bar, from the other
     # direction.  GDScript is reachable today through an explicit
@@ -320,16 +370,43 @@ suite "ct record dispatch table":
     # (`src/ct/utilities/language_detection.nim`), so a bare
     # `ct record foo.gd` reaches this message instead of resolving to
     # `LangUnknown` and taking the native build path.
-    const DeclaredUnsupported = {LangRuby, LangPython} + RecorderPendingLanguages
+    const DeclaredUnsupported = {LangRuby, LangPython, LangLua} +
+                                RecorderPendingLanguages
     for lang in DeclaredUnsupported:
       checkpoint("declared-unsupported language: " & lang.toName)
-      let tool = recorderToolFor(lang)
+      let tool = recorderToolFor(sel(lang))
       check not tool.supported
+      check tool.isDeclared
       check tool.installHint.len > 0
-      let message = missingRecorderMessage(lang, @[]).join("\n")
+      let message = missingRecorderMessage(sel(lang), @[]).join("\n")
       check "error:" in message
       check "help:" in message
-      check lang.toName in message
+      check label(lang) in message
+
+  test "the retired rr pair points at the working recorder, as ONE rule":
+    # The two hand-written `LangRuby` / `LangPython` arms became one cell
+    # rule: `(lang, tiInterpreted, raRr)` has no recorder and the remedy names
+    # the instrumented one.  Assert the rule, not the two instances.
+    for language in [slRuby, slPython]:
+      for approach in [raRr, raMcr, raTtd]:
+        let s = selector(language, tiInterpreted, approach)
+        let tool = recorderToolFor(s)
+        checkpoint(displayName(s) & " under " & token(approach))
+        check(not tool.supported)
+        check tool.isDeclared
+        check token(approach) in tool.recorderLabel
+        # …and the working recorder is the instrumented one, named in the
+        # remedy so the user learns where it lives.
+        let working = recorderToolFor(
+          selector(language, tiInterpreted, raInstrumentedRuntime))
+        check working.supported
+        check tool.sibling == working.sibling
+        check tool.installHint.join(" ").contains(working.recorderLabel)
+    # The spellings the user has to type are the ones the old arms gave.
+    check "`--lang ruby(db)`" in
+      recorderToolFor(sel(LangRuby)).installHint.join(" ")
+    check "`--lang py`" in
+      recorderToolFor(sel(LangPython)).installHint.join(" ")
 
   test "a declared-unsupported language is reachable from a FILE, not just --lang":
     # The arm above is only worth having if a user reaches it the way a user
@@ -357,39 +434,56 @@ suite "ct record dispatch table":
       let reached = detectLangFromPath("program." & extension, isWasm = false)
       check reached == lang
       # …and what it reaches is the declaration, not silence.
-      check recorderToolFor(reached).installHint.len > 0
+      check recorderToolFor(sel(reached)).installHint.len > 0
     # Both spellings of the explicit flag keep working, unchanged.
     check toLang("gd") == LangGdScript
     check toLang("gdscript") == LangGdScript
+
+  test "the native family is the ONLY thing the table has nothing to say about":
+    # `isDeclared` is what `ct record` routes on, so its complement must be
+    # exactly the set `ct-native-replay` records: every `Lang` whose selector
+    # is `tiNative` under a native replay approach, except Nim (ct-mcr).
+    for lang in Lang:
+      let s = sel(lang)
+      let tool = recorderToolFor(s)
+      checkpoint(lang.toName & " -> " & displayName(s) & "/" &
+        token(s.targetIsa) & "/" & token(s.approach))
+      if lang == LangUnknown:
+        check(not tool.isDeclared)
+      elif s.targetIsa == tiNative and s.approach in {raMcr, raRr, raTtd} and
+           s.language != slNim:
+        check(not tool.isDeclared)
+      else:
+        check tool.isDeclared
 
   test "the missing-recorder message names the language and the remedy":
     for row in DispatchRows:
       checkpoint("language: " & row.lang.toName)
       # Simulate every artifact of this language being absent.
       var absent: seq[RecorderArtifact] = @[]
-      for artifact in recorderRequirements(row.lang):
+      for artifact in recorderRequirements(sel(row.lang)):
         absent.add(RecorderArtifact(
           kind: artifact.kind, label: artifact.label,
           envVar: artifact.envVar, path: ""))
-      let message = missingRecorderMessage(row.lang, absent).join("\n")
+      let message = missingRecorderMessage(sel(row.lang), absent).join("\n")
       check message.startsWith("error:")
-      check row.lang.toName in message
+      check label(row.lang) in message
       check row.sibling in message
       # The remedy has to be actionable: either an env var to set or a
       # command to run.
       check ("help:" in message)
 
   test "the server-unsupported message names the flag and the alternatives":
-    let message = serverUnsupportedMessage(LangNim).join("\n")
+    let message = serverUnsupportedMessage(sel(LangNim)).join("\n")
     check "--server" in message
-    check LangNim.toName in message
+    check label(LangNim) in message
     check "Python" in message
     check "PHP" in message
 
   test "server guidance tells the user where to watch the recording":
     for lang in [LangPhp, LangRubyDb, LangJavascript, LangElixir]:
       checkpoint("language: " & lang.toName)
-      let guidance = serverGuidance(lang, TraceFolder).join("\n")
+      let guidance = serverGuidance(sel(lang), TraceFolder).join("\n")
       check TraceFolder in guidance
       check "ct replay -t " & TraceFolder in guidance
 
@@ -409,7 +503,7 @@ suite "ct record dispatch table":
     }
     for (lang, envVar) in Expected:
       checkpoint("language: " & lang.toName)
-      check recorderToolFor(lang).recorderEnvVar == envVar
+      check recorderToolFor(sel(lang)).recorderEnvVar == envVar
 
     let detectSiblings = currentSourcePath.parentDir.parentDir.parentDir
       .parentDir / "scripts" / "detect-siblings.sh"
@@ -425,3 +519,200 @@ suite "ct record dispatch table":
                    "CODETRACER_NATIVE_SERVER_RECORDER_PATH"]:
       checkpoint("detect-siblings.sh must export " & envVar)
       check envVar in script
+
+# ---------------------------------------------------------------------------
+# The ISA selects, the language is advisory
+# ---------------------------------------------------------------------------
+
+suite "the ISA selects the recorder; the language does not":
+
+  test "wasm is one arm for every language, where it used to be two Lang members":
+    # `LangRustWasm` and `LangCppWasm` welded the ISA onto the language.  On
+    # the axes both are `(<lang>, tiWasm, raVmEmulation)` and select `wazero`;
+    # so does a C wasm module, which had no `Lang` value at all.
+    for language in [slRust, slCpp, slC, slUnknown]:
+      let s = selector(language, tiWasm, raVmEmulation)
+      checkpoint("wasm from " & displayName(s))
+      let tool = recorderToolFor(s)
+      check tool.supported
+      check tool.recorderLabel == "wazero"
+      check "--out-dir" in joinedArgs(s)
+    check sel(LangRustWasm) == selector(slRust, tiWasm, raVmEmulation)
+    check sel(LangCppWasm) == selector(slCpp, tiWasm, raVmEmulation)
+
+  test "the platform pseudo-languages select by ISA with no language at all":
+    # `LangSolana` and `LangPolkavm` have no source language (`slUnknown`) and
+    # the recorder is still selected, because for a VM ISA the recorder is a
+    # property of the ISA.
+    for lang in [LangSolana, LangPolkavm]:
+      let s = sel(lang)
+      checkpoint(lang.toName)
+      check s.language == slUnknown
+      check recorderToolFor(s).supported
+      check recorderToolFor(s).recorderLabel == blockchainRecorderName(s.targetIsa)
+      # …and the diagnostic still has something to call it.
+      check displayName(s) == token(s.targetIsa)
+      check displayName(s) in missingRecorderMessage(s, @[]).join("\n")
+
+  test "every blockchain ISA names a recorder, an override and a sibling":
+    for isa in BlockchainIsas:
+      checkpoint(token(isa))
+      check blockchainRecorderName(isa).len > 0
+      check blockchainRecorderEnvVar(isa).len > 0
+      check blockchainRecorderSibling(isa) == blockchainRecorderName(isa)
+      let tool = recorderToolFor(selector(slUnknown, isa, raVmEmulation))
+      check tool.supported
+      check tool.recorderEnvVar == blockchainRecorderEnvVar(isa)
+
+# ---------------------------------------------------------------------------
+# One language, two recorders: `.nim` versus `.nims`
+# ---------------------------------------------------------------------------
+
+suite "one language, two recorders: .nim versus .nims":
+  ## The canonical proof that the dispatch is a function of the assessment
+  ## and not of the language.  Both files are `LangNim`; the assessment tells
+  ## them apart on three axes and the table then selects two different
+  ## recorders with two different requirement sets.
+
+  let scratch = getTempDir() / "ct-dispatch-test-nim"
+  removeDir(scratch)
+  createDir(scratch)
+  let nimFile = scratch / "a.nim"
+  let nimsFile = scratch / "a.nims"
+  writeFile(nimFile, "echo 1\n")
+  writeFile(nimsFile, "echo 1\n")
+
+  let sourceSel = assessedSelector(nimFile, LangNim)
+  let scriptSel = assessedSelector(nimsFile, LangNim)
+
+  test "the assessment separates them on ISA and approach, not on language":
+    check sourceSel.language == slNim
+    check scriptSel.language == slNim
+    check sourceSel.targetIsa == tiNative
+    check scriptSel.targetIsa == tiNimVm
+    check sourceSel.approach == raMcr
+    check scriptSel.approach == raInstrumentedRuntime
+    check sourceSel != scriptSel
+    # The per-`Lang` projection cannot make this distinction — which is why
+    # it is a fallback and the assessment is the production path.
+    check selectorOfLang(LangNim) == sourceSel
+    check selectorOfLang(LangNim) != scriptSel
+
+  test "the assessment names the kind and the toolchain the Lang value could not":
+    let source = assessRecordingTarget(nimFile, LangNim)
+    let script = assessRecordingTarget(nimsFile, LangNim)
+    check KindNimSource in source.kind.specific
+    check KindNimScript in script.kind.specific
+    check source.kind.family == tfSingleFile
+    check script.kind.family == tfSingleFile
+    check source.toolchain == tcNimC
+    check script.toolchain == tcNimScriptVm
+    check(not source.isAmbiguous)
+    check(not script.isAmbiguous)
+
+  test "they select two different recorders":
+    let source = recorderToolFor(sourceSel)
+    let script = recorderToolFor(scriptSel)
+    check source.supported
+    check script.supported
+    check source.recorderLabel == "ct-mcr"
+    check source.sibling == "codetracer-native-recorder"
+    check "nim e --trace:" in script.recorderLabel
+    check script.sibling == "codetracer-nim"
+    check source.recorderLabel != script.recorderLabel
+
+  test "a .nims does NOT require ct-mcr; a .nim does":
+    # The defect the axes fix: `requireRecorder(LangNim)` demanded `ct-mcr` for
+    # both flows.  The requirement sets are read off the table, so this holds
+    # with or without the tools installed.
+    var sourceLabels, scriptLabels: seq[string]
+    for artifact in recorderRequirements(sourceSel): sourceLabels.add(artifact.label)
+    for artifact in recorderRequirements(scriptSel): scriptLabels.add(artifact.label)
+    check "ct-mcr" in sourceLabels
+    check "nim" in sourceLabels
+    check "ct-mcr" notin scriptLabels
+    for label in scriptLabels:
+      check "nim" in label
+    # And both route through the dispatch table rather than the native path.
+    check recorderToolFor(sourceSel).isDeclared
+    check recorderToolFor(scriptSel).isDeclared
+
+  test "the replay-side summary is one bit for both, and says so":
+    # `usesMaterializedTraces(LangNim)` is `true` for BOTH flows because both
+    # import their container as a materialized trace — the exception recorded
+    # in `MaterializedSummaryExceptions`.  The record side does not consult
+    # it; the assessment's approach is what differs.
+    check usesMaterializedTraces(LangNim)
+    check producesMaterializedTrace(scriptSel.approach)
+    check(not producesMaterializedTrace(sourceSel.approach))
+
+# ---------------------------------------------------------------------------
+# The assessment refuses what it may not decide (rule K2)
+# ---------------------------------------------------------------------------
+
+suite "the assessment is loud about two facts it may not choose between":
+
+  let scratch = getTempDir() / "ct-dispatch-test-ambiguous"
+  removeDir(scratch)
+  createDir(scratch)
+  writeFile(scratch / "Cargo.toml", "[package]\nname = \"x\"\n")
+  writeFile(scratch / "foundry.toml", "[profile.default]\n")
+
+  test "a crate that is also a Foundry project is BOTH, not Foundry":
+    # The defect Q10 was decided against: `detectFolderLang` answers Solidity
+    # here by first match and discards the Cargo fact.  The assessment keeps
+    # both and refuses to pick.
+    let a = assessRecordingTarget(scratch, detectLang(scratch, LangUnknown))
+    check KindCargoProject in a.kind.specific
+    check KindFoundryProject in a.kind.specific
+    check a.isAmbiguous
+    check a.toolchain == tcUnknown
+    check a.recordingApproach == raUnknown
+    let text = a.diagnostics.join("\n")
+    check KindCargoProject in text
+    check KindFoundryProject in text
+    check "nothing may pick one silently" in text
+    # …and the selector it yields supports nothing, so a caller that ignores
+    # `isAmbiguous` still cannot record by accident.
+    check(not recorderToolFor(recorderSelectorFor(a, LangSolidity)).supported)
+
+  test "an explicit --lang resolves it without refusing, and says so":
+    let a = assessRecordingTarget(scratch, LangSolidity, languageWasExplicit = true)
+    check(not a.isAmbiguous)
+    check KindCargoProject in a.kind.specific
+    check KindFoundryProject in a.kind.specific
+    check a.targetIsa == tiEvm
+    check a.recordingApproach == raVmEmulation
+    check a.toolchain == tcUnknown            # left undetermined, not guessed
+    check "--lang" in a.diagnostics.join("\n")
+    check recorderToolFor(recorderSelectorFor(a, LangSolidity)).recorderLabel ==
+      "codetracer-evm-recorder"
+
+  test "a plain crate is one kind and is not ambiguous":
+    let crate = getTempDir() / "ct-dispatch-test-crate"
+    removeDir(crate)
+    createDir(crate)
+    writeFile(crate / "Cargo.toml", "[package]\nname = \"x\"\n")
+    let a = assessRecordingTarget(crate, detectLang(crate, LangUnknown))
+    check a.kind.specific == @[KindCargoProject]
+    check(not a.isAmbiguous)
+    check a.toolchain == tcCargo
+    check a.targetIsa == tiNative
+    check a.recordingApproach == raMcr
+    # Native Rust: not the dispatch table's business.
+    check(not recorderToolFor(recorderSelectorFor(a, LangRust)).isDeclared)
+
+  test "a wasm crate is assessed as wasm, from the marker and not from a Lang member":
+    let crate = getTempDir() / "ct-dispatch-test-wasm-crate"
+    removeDir(crate)
+    createDir(crate / ".cargo")
+    writeFile(crate / "Cargo.toml", "[package]\nname = \"x\"\n")
+    writeFile(crate / ".cargo" / "config.toml", "[build]\ntarget = \"wasm32-wasip1\"\n")
+    let a = assessRecordingTarget(crate, detectLang(crate, LangUnknown))
+    check KindWasmCargoProject in a.kind.specific
+    check KindCargoProject in a.kind.specific
+    check(not a.isAmbiguous)                  # one toolchain: cargo
+    check a.toolchain == tcCargo
+    check a.targetIsa == tiWasm
+    check a.recordingApproach == raVmEmulation
+    check recorderToolFor(recorderSelectorFor(a, LangRust)).recorderLabel == "wazero"

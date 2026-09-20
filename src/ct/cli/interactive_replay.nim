@@ -50,7 +50,8 @@ func traceInText*(trace: Trace): string =
   alignLeft(idColumn, TRACE_ID_SHORT_WIDTH + 2) & " | " &
   alignLeft(displayCmd, TRACE_CMD_COLUMN_WIDTH) & " | " &
   alignLeft(displayWorkdir, TRACE_WORKDIR_COLUMN_WIDTH) & " | " &
-  alignLeft(toName(trace.lang), 15) & " | " & alignLeft(trace.date, 15) & " | " &
+  alignLeft((if trace.langRetiredName.len > 0: trace.langLabel
+             else: toName(trace.lang)), 15) & " | " & alignLeft(trace.date, 15) & " | " &
   trace.recordingId
 
 

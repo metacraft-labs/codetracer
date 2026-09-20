@@ -4,7 +4,7 @@ import std/[os, osproc, strformat, sequtils, options],
   ../utilities/[ env, language_detection ],
   ../cli/[logging, build],
   ../globals,
-  record
+  record, record_assessment, recorder_dispatch
 
 # run a recorded trace based on args, a saving project for it in the process
 # Note: This function does not return on POSIX (launchElectron uses execv)
@@ -70,7 +70,13 @@ proc runWithRestart(
         createDir(outputFolder)
         nimcachePath = outputFolder / "nimcache"
 
-      let program = if lang.usesMaterializedTraces:
+      # Same route question `ct record` asks (src/ct/trace/record.nim): a
+      # target the dispatch table describes is handed over as-is; the native
+      # family is built first.  Asked of the ASSESSMENT rather than of
+      # `usesMaterializedTraces(lang)`, which is a replay-side summary.
+      let viaDispatchTable =
+        recorderToolFor(assessedSelector(recordArgs[0], lang)).isDeclared
+      let program = if viaDispatchTable:
           recordArgs[0]
         else:
           let binary = build(recordArgs[0], "", nimcachePath)

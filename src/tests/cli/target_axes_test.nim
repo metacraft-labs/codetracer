@@ -12,26 +12,26 @@
 ## "reports success while doing nothing" defects in the product and as many again
 ## in its verification tooling, and a skip is how they hide.
 ##
-## ## What the last suite pins, and why it is the important one
+## ## What the decomposition suite pins, and why it is the important one
 ##
 ## The four axes are only worth having if the 41 values of `Lang` genuinely
-## decompose onto them.  The last suite writes that decomposition out as an
-## exhaustive `case` — so a new `Lang` member is a compile error here — and then
-## checks it against `usesMaterializedTraces`, the one-bit projection the tree
-## carries today.  It agrees on 39 of 41 values.  The two disagreements are
-## named, explained and asserted individually, because each is a fact about the
-## tree rather than an error in the decomposition:
+## decompose onto them.  Until LRS-2B that decomposition lived HERE, in the
+## test, as the safety net for the migration; it is now `axesOfLang` in
+## `src/common/common_lang.nim` — the production table `recorder_dispatch.nim`
+## selects on — and it must not survive in both places, so this file reads
+## the production one and pins what it says.  `usesMaterializedTraces` is now
+## DERIVED from it, with exactly two exceptions recorded in
+## `MaterializedSummaryExceptions`, and this suite asserts that the exception
+## list is exactly those two and that each is the deliberate decision the
+## production comment claims:
 ##
-## * `LangNim` is flagged materialized (`src/common/common_lang.nim:96`) while
-##   its recorder is `ct-mcr` (`src/ct/trace/recorder_dispatch.nim:309-318`).
-## * `LangLua` is flagged *not* materialized and has no recorder arm at all, so
-##   the default relation's answer for an interpreted language is one the tree
-##   cannot honour.  `src/ct/trace/native_backend_selection.nim:66-78` already
-##   records this exact case: the GUI sends `--backend db` for a `.lua` script
-##   and the core resolves it to `LangLua`, which does not use a materialized
-##   trace.
+## * `LangNim` is `true` although its per-value axes are `tiNative` / `raMcr`,
+##   because BOTH Nim flows import their container as a materialized trace.
+## * `LangLua` is `false` although its axes say instrumented runtime, because
+##   no Lua recorder exists — the table declares it unsupported — so no
+##   materialized Lua trace can exist.
 
-import std/[os, sets, strutils, unittest]
+import std/[algorithm, os, sets, strutils, unittest]
 import ../../common/target_axes
 import ../../common/target_assessment
 import ../../common/lang
@@ -260,7 +260,7 @@ suite "the default relations are total and say something":
 # The assessment protocol
 # ---------------------------------------------------------------------------
 
-suite "the kind chain obeys K1..K4":
+suite "the kind set obeys K1..K4":
 
   test "TargetFamily tokens are distinct and round-trip":
     var seen = initHashSet[string]()
@@ -273,77 +273,92 @@ suite "the kind chain obeys K1..K4":
       check parseTargetFamily(t, got)
       check got == v
 
-  test "K1: a chain is never empty and always ends in the family token":
+  test "K1: the family is its own typed field, and the specific set never contains one":
+    # Q10: the family is not "the last element" of anything.  The wire
+    # spelling of the specific set is sorted and deduplicated, and a family
+    # token among the specific kinds is refused at the parse boundary.
     let bare = TargetKind(specific: @[], family: tfSingleFile)
-    check bare.chain() == @["single-file"]
-    let deep = TargetKind(
-      specific: @[KindCargoProject, "rust-project"],
+    check bare.specificKinds() == newSeq[string]()
+    let both = TargetKind(
+      specific: @[KindFoundryProject, KindCargoProject, KindCargoProject],
       family: tfProjectDirectory)
-    check deep.chain() ==
-      @[KindCargoProject, "rust-project", "project-directory"]
-    for v in TargetFamily:
-      let k = TargetKind(specific: @["x"], family: v)
-      let c = k.chain()
-      check c.len == 2
-      check c[c.high] == token(v)
-
-  test "K1 round-trips through parseKindChain":
-    let original = TargetKind(
-      specific: @[KindCargoProject, "rust-project"],
-      family: tfProjectDirectory)
+    check both.specificKinds() == @[KindCargoProject, KindFoundryProject]
     var decoded: TargetKind
     var diag = ""
-    check parseKindChain(original.chain(), decoded, diag)
-    check diag == ""
-    check decoded.family == original.family
-    check decoded.specific == original.specific
-
-  test "K3: an empty chain fails loudly":
-    var decoded: TargetKind
-    var diag = ""
-    let empty: seq[string] = @[]
-    check(not parseKindChain(empty, decoded, diag))
-    check diag.len > 0
-    check "empty" in diag
+    check(not parseKind([KindCargoProject, "project-directory"],
+                        "project-directory", decoded, diag))
+    check "project-directory" in diag
     check "K1" in diag
 
-  test "K3: a chain that does not end in a family token fails loudly, and the diagnostic names the chain and the known families":
+  test "a kind round-trips through parseKind, as a SET":
+    # Order in `specific` carries no meaning: a producer that spells the same
+    # facts in another order decodes to an equal set.
+    let original = TargetKind(
+      specific: @[KindCargoProject, "cmake-project"],
+      family: tfProjectDirectory)
     var decoded: TargetKind
     var diag = ""
-    check(not parseKindChain(
-      [KindCargoProject, "some-future-family"], decoded, diag))
+    check parseKind(["cmake-project", KindCargoProject, "cmake-project"],
+                    token(original.family), decoded, diag)
+    check diag == ""
+    check decoded.family == original.family
+    check decoded.specificKinds() == original.specificKinds()
+
+  test "K3: an unknown family fails loudly, naming the token, the kinds and the known families":
+    var decoded: TargetKind
+    var diag = ""
+    check(not parseKind([KindCargoProject], "some-future-family", decoded, diag))
     check "some-future-family" in diag
     check KindCargoProject in diag
     check "project-directory" in diag   # the known-family list is quoted back
     check "unassessable" in diag
 
-  test "K3 is not silently repaired when the family is present but misplaced":
-    # A producer that puts the family anywhere other than last has violated K1.
-    # Searching the chain for *any* recognisable family would turn a protocol
-    # bug into an invisible behaviour change, so the decoder refuses.
-    var decoded: TargetKind
+  test "K3: an empty family token is not silently the unknown family":
+    var decoded = TargetKind(specific: @["x"], family: tfSingleFile)
     var diag = ""
-    check(not parseKindChain(
-      ["project-directory", KindCargoProject], decoded, diag))
+    check(not parseKind([KindCargoProject], "", decoded, diag))
     check diag.len > 0
+    check decoded.family == tfSingleFile   # untouched on failure
 
-  test "K2: a consumer that knows the specific kind gets it exactly":
+  test "K2: a consumer that knows exactly one specific kind gets it exactly":
     let k = TargetKind(
-      specific: @[KindCargoProject, "rust-project"],
+      specific: @[KindCargoProject, "cmake-project"],
       family: tfProjectDirectory)
     let r = k.resolveKind([KindCargoProject, KindNoirProject])
     check r.status == krExact
     check r.token == KindCargoProject
-    check r.skipped.len == 0
+    check r.candidates.len == 0
+    check r.skipped == @["cmake-project"]
 
-  test "K2: a consumer that knows only the general kind degrades explicitly":
+  test "K2: a consumer that knows TWO specific kinds is told so, loudly, and picks nothing":
+    # The decision Q10 was about: a crate that is also a CMake project is
+    # both.  A consumer with code for both is not handed the first one — it
+    # is handed both names and an empty token.
     let k = TargetKind(
-      specific: @[KindCargoProject, "rust-project"],
+      specific: @[KindCargoProject, "cmake-project"],
       family: tfProjectDirectory)
-    let r = k.resolveKind(["rust-project"])
-    check r.status == krDegraded
-    check r.token == "rust-project"
-    check r.skipped == @[KindCargoProject]
+    let r = k.resolveKind(["cmake-project", KindCargoProject])
+    check r.status == krAmbiguous
+    check r.token == ""
+    check r.candidates == @[KindCargoProject, "cmake-project"]   # producer order
+    check r.skipped.len == 0
+    let text = r.ambiguityDiagnostic("ct-native-replay/0.6.3")
+    check KindCargoProject in text
+    check "cmake-project" in text
+    check "ct-native-replay/0.6.3" in text
+    check "silently" in text
+    # …and an unambiguous resolution has no diagnostic to print.
+    check k.resolveKind([KindCargoProject]).ambiguityDiagnostic("p") == ""
+
+  test "K2: the answer does not depend on the producer's spelling order":
+    let ab = TargetKind(specific: @[KindCargoProject, "cmake-project"],
+                        family: tfProjectDirectory)
+    let ba = TargetKind(specific: @["cmake-project", KindCargoProject],
+                        family: tfProjectDirectory)
+    for understood in [@[KindCargoProject], @["cmake-project"],
+                       @[KindCargoProject, "cmake-project"]]:
+      check ab.resolveKind(understood).status == ba.resolveKind(understood).status
+      check ab.resolveKind(understood).token == ba.resolveKind(understood).token
 
   test "version skew: a consumer that knows nothing still lands on the family":
     # This is the deployment state the protocol exists for.  The launcher and
@@ -427,17 +442,21 @@ suite "the project-marker kinds match the algorithm they were read from":
     check(not projectKindForMarker("CMakeLists.txt", kind))
     check kind == ""
 
-  test "the marker list is `detectFolderLang`'s list, in `detectFolderLang`'s order":
+  test "the marker SET is `detectFolderLang`'s marker set; order is not a property":
     # `detectFolderLang` (`src/ct/utilities/language_detection.nim:28-65`) is
     # the assessment algorithm in embryo, and it throws its answer away by
     # returning a `Lang`: `Cargo.toml` becomes `LangRust` and the fact that the
     # target is a *cargo project* -- the fact that decides whether to build
     # before recording -- is lost at the return statement.
     #
-    # Order is load-bearing there: the first marker that exists wins, so a
-    # crate that is also a Foundry project is a Foundry project.  This test
-    # reads the markers out of the source so the constant cannot drift away
-    # from the algorithm it was derived from.
+    # This test used to pin the ORDER of the two lists as well, because
+    # `detectFolderLang`'s first-match precedence was being reproduced.  Q10
+    # (decided 2026-09-20) makes `specific` a set and `projectKindsForMarkers`
+    # emit every marker present, so the precedence is no longer a property of
+    # the table and is deliberately not asserted.  What must still hold is
+    # MEMBERSHIP: the table and the algorithm read the same ten markers, so a
+    # marker added to one and not the other is caught here.  The markers are
+    # read out of the source so the constant cannot drift.
     let source = readTreeFile(LanguageDetectionPath,
       "extracting detectFolderLang's project markers")
     let startIdx = source.find("proc detectFolderLang")
@@ -461,11 +480,60 @@ suite "the project-marker kinds match the algorithm they were read from":
     var expected: seq[string] = @[]
     for row in ProjectMarkerKinds:
       expected.add(row.marker)
-
+    found.sort()
+    expected.sort()
+    check found.len == 10
     if found != expected:
       checkpoint("markers read from detectFolderLang: " & found.join(", "))
       checkpoint("markers in ProjectMarkerKinds:      " & expected.join(", "))
     check found == expected
+
+  test "projectKindsForMarkers emits EVERY kind whose marker is present (Q10)":
+    # The defect the set model removes: a crate that also carries a
+    # `foundry.toml` is BOTH a cargo project and a foundry project.  Nothing
+    # here picks; `ProjectMarkerKinds`'s order is not consulted for meaning.
+    let both = projectKindsForMarkers(["foundry.toml", "src", "Cargo.toml"])
+    check both.len == 2
+    check KindCargoProject in both
+    check KindFoundryProject in both
+    check projectKindsForMarkers(["README.md"]).len == 0
+    check projectKindsForMarkers(["Cargo.toml", "Cargo.toml"]) == @[KindCargoProject]
+    # Every marker in the table is found when present, none is invented.
+    var names: seq[string] = @[]
+    for row in ProjectMarkerKinds: names.add(row.marker)
+    let all = projectKindsForMarkers(names)
+    check all.len == ProjectMarkerKinds.len
+    for row in ProjectMarkerKinds:
+      check row.kind in all
+
+  test "toolchainForKind is one toolchain, or unknown with the collision named":
+    check toolchainForKind(TargetKind(specific: @[KindCargoProject],
+                                      family: tfProjectDirectory)) == tcCargo
+    # cargo-project beside wasm-cargo-project is ONE toolchain, not two.
+    let wasmCrate = TargetKind(specific: @[KindCargoProject, KindWasmCargoProject],
+                               family: tfProjectDirectory)
+    check toolchainForKind(wasmCrate) == tcCargo
+    check toolchainAmbiguity(wasmCrate).len == 0
+    # Two manifests, two toolchains: unknown, and both are named.
+    let clash = TargetKind(specific: @[KindCargoProject, KindFoundryProject],
+                           family: tfProjectDirectory)
+    check toolchainForKind(clash) == tcUnknown
+    check toolchainAmbiguity(clash).sorted == @[KindCargoProject, KindFoundryProject].sorted
+    # A kind that names no toolchain names none.
+    check toolchainForKind(TargetKind(specific: @["cmake-project"],
+                                      family: tfProjectDirectory)) == tcUnknown
+    check toolchainForKind(TargetKind(specific: @[KindNimScript],
+                                      family: tfSingleFile)) == tcNimScriptVm
+    check toolchainForKind(TargetKind(specific: @[KindNimSource],
+                                      family: tfSingleFile)) == tcNimC
+
+  test "targetIsaForAssessment refuses two ISA-deciding kinds (K2), and names them":
+    let clash = TargetKind(specific: @[KindNimScript, KindNimSource],
+                           family: tfSingleFile)
+    check targetIsaForAssessment(clash, slNim) == tiUnknown
+    check targetIsaAmbiguity(clash).sorted == @[KindNimScript, KindNimSource].sorted
+    check targetIsaAmbiguity(TargetKind(specific: @[KindNimScript],
+                                        family: tfSingleFile)).len == 0
 
 # ---------------------------------------------------------------------------
 # The decomposition of `Lang`
@@ -476,103 +544,38 @@ type
                         approach: RecordingApproach]
 
 func decompose(lang: Lang): Decomposition =
-  ## Every one of the 41 current `Lang` values, on the four axes.
-  ##
-  ## This lives in the test, not in production, on purpose: this increment
-  ## lands the types alongside `Lang` and migrates nothing.  Its job is to
-  ## prove the decomposition is total and consistent, and to be the safety net
-  ## for the increment that does migrate.
-  ##
-  ## An exhaustive `case`, so a new `Lang` member is a compile error here.
-  case lang
-  of LangC: (slC, tiNative, raMcr)
-  of LangCpp: (slCpp, tiNative, raMcr)
-  of LangRust: (slRust, tiNative, raMcr)
-  of LangNim: (slNim, tiNative, raMcr)
-  of LangGo: (slGo, tiNative, raMcr)
-  of LangPascal: (slPascal, tiNative, raMcr)
-  of LangFortran: (slFortran, tiNative, raMcr)
-  of LangD: (slD, tiNative, raMcr)
-  of LangCrystal: (slCrystal, tiNative, raMcr)
-  of LangLean: (slLean, tiNative, raMcr)
-  of LangJulia: (slJulia, tiNative, raMcr)
-  of LangAda: (slAda, tiNative, raMcr)
-  # `LangPython` and `LangRuby` are the retired rr/gdb backends.  On these axes
-  # they are the *same language* as their `Db` siblings with a different
-  # recording approach, which is the whole point: the pair was never two
-  # languages.
-  of LangPython: (slPython, tiInterpreted, raRr)
-  of LangRuby: (slRuby, tiInterpreted, raRr)
-  of LangRubyDb: (slRuby, tiInterpreted, raInstrumentedRuntime)
-  of LangJavascript: (slJavaScript, tiInterpreted, raInstrumentedRuntime)
-  of LangLua: (slLua, tiInterpreted, raInstrumentedRuntime)
-  of LangAsm: (slAsm, tiNative, raMcr)
-  of LangNoir: (slNoir, tiAcir, raVmEmulation)
-  # The wasm pair: same language, different ISA.
-  of LangRustWasm: (slRust, tiWasm, raVmEmulation)
-  of LangCppWasm: (slCpp, tiWasm, raVmEmulation)
-  of LangPythonDb: (slPython, tiInterpreted, raInstrumentedRuntime)
-  of LangUnknown: (slUnknown, tiUnknown, raUnknown)
-  of LangBash: (slBash, tiInterpreted, raInstrumentedRuntime)
-  of LangZsh: (slZsh, tiInterpreted, raInstrumentedRuntime)
-  of LangSolidity: (slSolidity, tiEvm, raVmEmulation)
-  of LangMasm: (slMidenAsm, tiMidenVm, raVmEmulation)
-  of LangSway: (slSway, tiFuelVm, raVmEmulation)
-  of LangMove: (slMove, tiMoveVm, raVmEmulation)
-  # `LangPolkavm` and `LangSolana` name a VM and a chain.  Neither is a
-  # notation anyone writes a file in -- which is exactly why they are the two
-  # `Lang` members with an empty `getExtension` entry
-  # (`src/common/lang.nim:113,120`).  Their source language is genuinely
-  # unknown until a file is looked at; the target ISA is what they were
-  # standing in for.
-  of LangPolkavm: (slUnknown, tiPolkaVm, raVmEmulation)
-  of LangCairo: (slCairo, tiCairoVm, raVmEmulation)
-  of LangCircom: (slCircom, tiCircomWitness, raVmEmulation)
-  of LangLeo: (slLeo, tiAleoVm, raVmEmulation)
-  of LangTolk: (slTolk, tiTonVm, raVmEmulation)
-  of LangAiken: (slAiken, tiPlutus, raVmEmulation)
-  of LangCadence: (slCadence, tiFlowVm, raVmEmulation)
-  of LangSolana: (slUnknown, tiSolanaSbf, raVmEmulation)
-  of LangElixir: (slElixir, tiBeam, raInstrumentedRuntime)
-  of LangErlang: (slErlang, tiBeam, raInstrumentedRuntime)
-  of LangPhp: (slPhp, tiInterpreted, raInstrumentedRuntime)
-  # GDScript, decided from the recorder spec rather than by copying a
-  # neighbouring scripting language:
-  #
-  # * `slGdScript` — `.gd` is a notation people write files in, so it is a real
-  #   member of the language axis.  `slUnknown` is reserved for the two platform
-  #   pseudo-languages (asserted below), and GDScript is not one of them.
-  # * `tiGdScriptVm` — `.gd` is compiled to bytecode and executed by
-  #   `GDScriptFunction::call` in `modules/gdscript/gdscript_vm.cpp`
-  #   (GDScript-Recorder.md, "The interpreter is a single, well-bounded
-  #   function" / "The blocked single-step route"), which is a VM with its own
-  #   opcodes and not one of the seven runtimes `tiInterpreted` closes over.
-  #   The ISA axis has to separate it from the Godot HOST for the mixed-trace
-  #   design to be expressible at all: Mixed-Trace-GDScript.md §1 makes the
-  #   native altitude the patched Godot recorded by `ct-mcr` and the VM altitude
-  #   the GDScript trace the engine emits.
-  # * `raInstrumentedRuntime` — the recorder IS the runtime.  The patched engine
-  #   links `libcodetracer_trace_writer.a` and calls the writer's chokepoints
-  #   itself (Mixed-Trace-GDScript.md §2; GDScript-Recorder.md "The writer
-  #   (link, do not reimplement)").  Nothing emulates the artefact, so this is
-  #   not `raVmEmulation`.
-  #
-  # This makes `producesMaterializedTrace` agree with
-  # `usesMaterializedTraces(LangGdScript)`, which is why GDScript is NOT a third
-  # member of `MaterializedFlagExceptions` below.  That CodeTracer does not ship
-  # the patched engine yet is a fact about the RECORDER's availability, not
-  # about these axes, and it is asserted where it belongs: `recorderToolFor`'s
-  # `LangGdScript` arm (`src/ct/trace/recorder_dispatch.nim`), pinned by
-  # `record_dispatch_test.nim`.
-  of LangGdScript: (slGdScript, tiGdScriptVm, raInstrumentedRuntime)
+  ## The PRODUCTION decomposition, `axesOfLang` (`src/common/common_lang.nim`),
+  ## in the tuple shape the assertions below were written against.  This used
+  ## to be a second, test-local exhaustive `case` over all 41 values; LRS-2B
+  ## moved it into production so the dispatch table could select on it, and
+  ## it must not survive in both places.  Everything the local copy asserted
+  ## is asserted of the production one.
+  let a = axesOfLang(lang)
+  (a.language, a.targetIsa, a.approach)
 
 const
   MaterializedFlagExceptions = {LangNim, LangLua}
-    ## The only two `Lang` values whose `usesMaterializedTraces` flag disagrees
-    ## with `producesMaterializedTrace(decompose(lang).approach)`.  Both
-    ## disagreements are facts about the tree, asserted individually below.
+    ## The only two `Lang` values whose `usesMaterializedTraces` answer is
+    ## not `producesMaterializedTrace(decompose(lang).approach)`.  Since
+    ## LRS-2B the predicate is DERIVED from the decomposition and these two
+    ## are its stated exceptions (`MaterializedSummaryExceptions` in
+    ## production); this set is the test's independent statement of which
+    ## two, so the production list cannot quietly grow.
 
 suite "all 41 Lang values decompose onto the four axes":
+
+  test "the production exception list is exactly the two this file expects":
+    var listed: set[Lang] = {}
+    for exception in MaterializedSummaryExceptions:
+      check exception.lang notin listed   # no duplicates
+      listed.incl(exception.lang)
+    check listed == MaterializedFlagExceptions
+    # …and each exception genuinely disagrees with the derivation; an entry
+    # that agreed would be dead and would hide a later real drift.
+    for exception in MaterializedSummaryExceptions:
+      check exception.materialized !=
+        producesMaterializedTrace(decompose(exception.lang).approach)
+      check usesMaterializedTraces(exception.lang) == exception.materialized
 
   test "the decomposition agrees with usesMaterializedTraces on 39 of 41":
     var disagreements: seq[string] = @[]
@@ -594,25 +597,27 @@ suite "all 41 Lang values decompose onto the four axes":
         disagreeing.incl(lang)
     check disagreeing == MaterializedFlagExceptions
 
-    # LangNim: flagged materialized (`common_lang.nim:96`) while its recorder
-    # is `ct-mcr` (`recorder_dispatch.nim:309-318`).  Under one bit that is a
-    # contradiction; on these axes Nim is `tiNative` and therefore `raMcr`, and
-    # the CTFS container MCR writes is a property of MCR, not of Nim.
+    # LangNim: `true` while its per-value axes are `tiNative` / `raMcr`.  The
+    # decision (`MaterializedSummaryExceptions`): both Nim flows import their
+    # container with `traceKind = "db"`, so every Nim recording in the index
+    # opens as a materialized trace, and the per-value decomposition cannot
+    # see the extension that separates them -- the record-side assessment can.
     check usesMaterializedTraces(LangNim)
     check decompose(LangNim).approach == raMcr
     check(not producesMaterializedTrace(raMcr))
 
-    # LangLua: flagged NOT materialized, and it has no recorder arm anywhere in
-    # `recorder_dispatch.nim`.  The default relation answers "an interpreted
-    # language is recorded by instrumenting its runtime", which is right in
-    # general and unavailable for Lua in particular -- a gap the axes make
-    # visible instead of hiding behind a `false`.
-    # `native_backend_selection.nim:66-78` records the same case from the other
-    # side: the GUI sends `--backend db` for a `.lua` script and the core
-    # resolves it to `LangLua`, which does not use a materialized trace.
+    # LangLua: `false` while its axes say instrumented runtime.  The decision:
+    # no Lua recorder exists -- the table now DECLARES that rather than
+    # falling to a silent `else` -- so no materialized Lua trace can exist and
+    # the replay-side answer stays false.  The record side reaches the
+    # declared arm through the assessment instead of attempting a native
+    # build of a script, which is the gap the axes make visible.
     check(not usesMaterializedTraces(LangLua))
     check decompose(LangLua).approach == raInstrumentedRuntime
-    check(not recorderToolFor(LangLua).supported)
+    let lua = recorderToolFor(selectorOfLang(LangLua))
+    check(not lua.supported)
+    check lua.isDeclared
+    check "Lua" in lua.recorderLabel
 
   test "the four conflated pairs collapse to one language each":
     check decompose(LangRust).language == decompose(LangRustWasm).language
@@ -636,6 +641,16 @@ suite "all 41 Lang values decompose onto the four axes":
     check getExtension(LangSolana).len == 0
     for lang in languageless:
       check decompose(lang).isa != tiUnknown
+
+  test "the dispatch selector of a Lang value IS its decomposition":
+    # `selectorOfLang` is the per-value projection the dispatch table accepts
+    # as a fallback; it must be the same three axes, not a fourth table.
+    for lang in Lang:
+      let d = decompose(lang)
+      let s = selectorOfLang(lang)
+      check s.language == d.language
+      check s.targetIsa == d.isa
+      check s.approach == d.approach
 
   test "every SourceLanguage member is reachable from some Lang value":
     # The axis was derived from `Lang` and must not have grown a member that
@@ -666,6 +681,29 @@ suite "all 41 Lang values decompose onto the four axes":
           checkpoint($lang & ": default " & token(fallbackTargetIsaForLanguage(d.language)) &
             " but decomposed " & token(d.isa))
         check fallbackTargetIsaForLanguage(d.language) == d.isa
+
+  test "every decomposed approach is the ISA's default, except by design":
+    # The approach axis, pinned the same way as the ISA axis above.  Since
+    # LRS-2B `axesOfLang` is production (the dispatch table selects on it),
+    # so a wrong approach for one value is a routing change, not a test-local
+    # slip -- and the review's mutation run found that `LangC -> raRr`
+    # survived every suite: the native family is "not declared" under raMcr
+    # and under raRr alike, so nothing downstream noticed.  The only `Lang`
+    # values that exist to name a NON-default approach are the retired rr
+    # pair; everything else must decompose to `defaultRecordingApproach` of
+    # its own ISA.
+    const NonDefaultApproachByDesign = {LangPython, LangRuby}
+    for lang in Lang:
+      let d = decompose(lang)
+      if lang in NonDefaultApproachByDesign:
+        check d.approach == raRr
+        check d.approach != defaultRecordingApproach(d.isa)
+      else:
+        if defaultRecordingApproach(d.isa) != d.approach:
+          checkpoint($lang & ": ISA " & token(d.isa) & " defaults to " &
+            token(defaultRecordingApproach(d.isa)) & " but decomposed " &
+            token(d.approach))
+        check defaultRecordingApproach(d.isa) == d.approach
 
 # ---------------------------------------------------------------------------
 # The `.nim` / `.nims` pair: the canonical proof that the axes are independent

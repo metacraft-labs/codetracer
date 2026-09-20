@@ -7,6 +7,7 @@ import std/[ os, osproc, strutils, strformat, sequtils, json ],
   globals,
   trace/storage_and_import,
   trace/recorder_dispatch,
+  trace/record_assessment,
   trace/shell
 
 
@@ -214,7 +215,9 @@ proc recordNativeServer(
     quit(1)
 
   createDir(traceFolder)
-  for line in serverGuidance(LangC, traceFolder):
+  # Any native language; the guidance text is the same for all of them and
+  # `selectorOfLang(LangC)` is the native family's representative.
+  for line in serverGuidance(selectorOfLang(LangC), traceFolder):
     echo "codetracer: " & line
   flushFile(stdout)
 
@@ -234,10 +237,14 @@ proc recordNativeServer(
   importTrace(traceFolder, recordingId, recordPid, LangUnknown,
               DB_SELF_CONTAINED_DEFAULT, traceKind = "rr")
 
-proc requireRecorder(lang: Lang) =
-  ## Fail with a precise, actionable message when a language's recording
+proc requireRecorder(sel: RecorderSelector) =
+  ## Fail with a precise, actionable message when a target's recording
   ## toolchain is not installed — never fall through to a different backend
   ## and never spawn the empty string.
+  ##
+  ## Takes the SELECTOR, not a `Lang`: a `.nims` (`tiNimVm`) needs only the
+  ## Nim compiler, a `.nim` (`tiNative` / `raMcr`) needs it AND `ct-mcr`.  With
+  ## one `LangNim` arm this demanded `ct-mcr` for both.
   ##
   ## Before this check the recorder path was resolved out of ``paths.nim``
   ## and passed straight to ``startProcess``.  When the lookup failed the exe
@@ -247,15 +254,16 @@ proc requireRecorder(lang: Lang) =
   ## already modelled the right behaviour (``checkPythonRecorder`` → "install
   ## it with …"); this brings every other language up to that bar, using the
   ## per-language remedy table in ``trace/recorder_dispatch.nim``.
-  let missing = missingArtifacts(lang)
-  let tool = recorderToolFor(lang)
+  let missing = missingArtifacts(sel)
+  let tool = recorderToolFor(sel)
   if tool.supported and missing.len == 0:
     return
-  for line in missingRecorderMessage(lang, missing):
+  for line in missingRecorderMessage(sel, missing):
     errorMessage line
   quit(1)
 
 proc recordDb(
+    sel: RecorderSelector,
     lang: Lang,
     program: string, args: seq[string],
     backend: string, traceFolder: string, stylusTrace: string,
@@ -263,9 +271,12 @@ proc recordDb(
     recordingId: string, pythonActivationPath: string = "",
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
     server: bool = false): Trace =
+  ## `sel` selects the recorder; `lang` is the summary the recording is
+  ## registered under (`Trace.lang`, a per-file fact summarised per recording
+  ## — see `src/common/common_types/debugger_features/trace.nim`).
 
-  requireRecorder(lang)
-  if lang == LangNoir and backend.len > 0 and backend != "plonky2":
+  requireRecorder(sel)
+  if sel.targetIsa == tiAcir and backend.len > 0 and backend != "plonky2":
     echo fmt"error: unsupported backend: {backend}"
     quit(1)
 
@@ -279,7 +290,7 @@ proc recordDb(
   # so it can be asserted by a test without recording anything.  See that
   # module's header for why it is not inlined here any more.
   let invocation = recorderInvocation(
-    lang, program, traceFolder,
+    sel, program, traceFolder,
     RecorderOptions(
       backend: backend,
       stylusTrace: stylusTrace,
@@ -290,14 +301,14 @@ proc recordDb(
 
   if invocation.exe.len == 0:
     # Unreachable via ``requireRecorder`` above; kept as a hard stop so a
-    # future language added to the Lang enum but not to the dispatch table
-    # fails loudly instead of spawning "".
-    errorMessage fmt"error: no recorder invocation is defined for {lang.toName}."
+    # future selector added to the table but given no invocation fails loudly
+    # instead of spawning "".
+    errorMessage fmt"error: no recorder invocation is defined for {displayName(sel)}."
     errorMessage "help: add it to src/ct/trace/recorder_dispatch.nim."
     quit(1)
 
   if server:
-    for line in serverGuidance(lang, traceFolder):
+    for line in serverGuidance(sel, traceFolder):
       echo "codetracer: " & line
     flushFile(stdout)
 
@@ -387,8 +398,24 @@ proc record(
     if traceKind == "db":
       errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
       quit(1)
-  elif not lang.usesMaterializedTraces:
-    # TODO integrate with rr/gdb backend
+
+  # LRS-2B: the recorder is selected by the ASSESSMENT of the target, not by
+  # the `Lang` summary.  `lang` still names what the recording is registered
+  # under; the selector — source language, target ISA, recording approach —
+  # is what the dispatch table is a function of, and it is what tells a
+  # `.nims` (Nim VM, instrumented) from a `.nim` (native, ct-mcr).
+  let assessment = assessRecordingTarget(
+    executable, lang, languageWasExplicit = langArg != LangUnknown)
+  if assessment.isAmbiguous:
+    # Rule K2: two facts that dispatch differently are named, never picked.
+    for line in assessment.diagnostics:
+      errorMessage "error: " & line
+    quit(1)
+  let sel = recorderSelectorFor(assessment, lang)
+  let tool = recorderToolFor(sel)
+  if lang != LangUnknown and not tool.isDeclared:
+    # The native family: nothing in the dispatch table describes it, so a
+    # `--trace-kind db` request for it has nowhere to go.
     if traceKind == "db":
       errorMessage fmt"error: {lang} not supported currently with db: maybe you need a rr trace for it?"
       quit(1)
@@ -401,27 +428,32 @@ proc record(
   # except now fatal, the locals it consumed (exitCode / calltrace /
   # sourceFolders / shellID / calltraceMode / traceDir / env) are dead too.
 
-  if server and serverSupport(lang) == ssUnsupported:
-    for line in serverUnsupportedMessage(lang):
+  if server and serverSupport(sel) == ssUnsupported:
+    for line in serverUnsupportedMessage(sel):
       errorMessage line
     quit(1)
 
   try:
-    if lang in {LangNoir, LangRustWasm, LangCppWasm}:
-      if lang == LangNoir:
+    if sel.language == slNim and sel.targetIsa in {tiNative, tiNimVm} and
+       tool.supported:
+      # ``.nim`` / ``.nims`` files dispatch into recordNim, which runs the MCR
+      # native-binary flow or the M-nim VM tracer.  The SELECTOR already says
+      # which (`tiNative` / `raMcr` versus `tiNimVm` / `raInstrumentedRuntime`),
+      # and `requireRecorder(sel)` therefore demands `ct-mcr` only for the
+      # compiled flow.  recordNim re-reads the extension for the argv it owns.
+      requireRecorder(sel)
+      return recordNim(executable, args, outputFolder, traceId)
+    elif sel.approach == raVmEmulation and sel.targetIsa in {tiAcir, tiWasm} and
+         tool.supported:
+      if sel.targetIsa == tiAcir:
         # TODO: base the first arg: source folder for record symbols on
         #   debuginfo or the CTFS meta.dat paths block
         # for noir for now "executable" is the noir folder
         recordSymbols(executable, outputFolder, lang)
-      return recordDb(lang, executable, args, backend, outputFolder,
+      return recordDb(sel, lang, executable, args, backend, outputFolder,
                       stylusTrace, traceId, server = server)
-    elif lang == LangNim:
-      # ``.nim`` / ``.nims`` files dispatch into recordNim, which decides
-      # between the MCR native-binary flow and the M-nim VM tracer based on
-      # the source extension.  See src/ct/db_backend_record.nim:recordNim.
-      requireRecorder(LangNim)
-      return recordNim(executable, args, outputFolder, traceId)
-    elif lang == LangPythonDb:
+    elif sel.language == slPython and sel.approach == raInstrumentedRuntime and
+         tool.supported:
       var activationPathResolved = pythonActivationPath
       if activationPathResolved.len > 0:
         try:
@@ -430,7 +462,8 @@ proc record(
           discard
 
       return recordDb(
-        LangPythonDb,
+        sel,
+        lang,
         executable,
         args,
         backend,
@@ -441,15 +474,15 @@ proc record(
         pythonTestFramework = pythonTestFramework,
         pythonTestArgs = pythonTestArgs,
         server = server)
-    elif recorderToolFor(lang).supported:
-      # Every remaining materialized-trace language goes through the one
-      # dispatch table in trace/recorder_dispatch.nim: Ruby, JavaScript, PHP,
-      # Elixir, Erlang, bash, zsh and the twelve blockchain / VM recorders.
-      # PHP, Elixir and Erlang had no arm here at all before this change even
-      # though language detection produced them and they are marked
+    elif tool.supported:
+      # Every remaining recorder goes through the one dispatch table in
+      # trace/recorder_dispatch.nim: Ruby, JavaScript, PHP, Elixir, Erlang,
+      # bash, zsh and the twelve blockchain / VM recorders.  PHP, Elixir and
+      # Erlang had no arm here at all before the table existed even though
+      # language detection produced them and they are marked
       # ``usesMaterializedTraces``, so `ct record app.php` fell through to
       # "ERROR: unsupported trace kind db" and exited 0.
-      return recordDb(lang, executable, args, backend, outputFolder,
+      return recordDb(sel, lang, executable, args, backend, outputFolder,
                       stylusTrace, traceId, server = server)
     elif traceKind == "rr" or traceKind == "ttd":
       if server:
@@ -463,13 +496,13 @@ proc record(
         traceKind,
         backend)
     else:
-      # ``lang`` is a language CodeTracer knows about but has no recorder
-      # for (or an explicitly-requested retired backend such as
-      # ``--lang ruby``).  Say which one and what to do instead, rather than
-      # blaming the trace kind — "ERROR: unsupported trace kind db" was the
-      # message `ct record app.php` used to print, and it named neither the
-      # language nor a remedy.
-      for line in missingRecorderMessage(lang, missingArtifacts(lang)):
+      # The selector is one CodeTracer knows about but has no recorder for
+      # (Lua, GDScript's not-yet-shipped engine, or an explicitly-requested
+      # retired backend such as ``--lang ruby``).  Say which one and what to
+      # do instead, rather than blaming the trace kind — "ERROR: unsupported
+      # trace kind db" was the message `ct record app.php` used to print, and
+      # it named neither the language nor a remedy.
+      for line in missingRecorderMessage(sel, missingArtifacts(sel)):
         errorMessage line
       quit(1)
   except CatchableError as recordError:

@@ -29,33 +29,40 @@
 ## So the result is versioned, extensible, forward-compatible, and has an
 ## explicit answer for *"the producer sent a kind this consumer does not know"*.
 ##
-## ## The kind chain, and the must-understand rule
+## ## The kind set, and the must-understand rule
 ##
-## A kind is not a single token.  It is an **ordered chain, most specific
-## first**, whose last element is drawn from a vocabulary frozen for the life of
-## the major version:
+## A kind is not a single token, and it is not an ordered chain either.  It is
+## a **set of specific kinds** plus a **family** carried in its own field:
 ##
 ## ```text
-##   ["cargo-project", "rust-project", "project-directory"]
-##                                     ^^^^^^^^^^^^^^^^^^^  a TargetFamily
+##   specific: {"cargo-project", "cmake-project"}    open vocabulary, unordered
+##   family:   project-directory                     closed vocabulary, frozen
 ## ```
 ##
 ## | Rule | Statement |
 ## | --- | --- |
-## | **K1** | The last element of the chain is always a `TargetFamily` token. |
-## | **K2** | A consumer takes the **first** element it understands. |
-## | **K3** | If it understands none, K1 was violated — that is a protocol error and it fails loudly, naming the chain and the producer. |
-## | **K4** | A producer that must *not* be degraded ends its chain at `tfUnassessable`, which is itself a family and therefore satisfies K1 while forbidding any general handling. |
+## | **K1** | The family is always present, as its own typed field, and is drawn from a vocabulary frozen for the life of the major version. |
+## | **K2** | A consumer acts on the specific kinds it knows.  If it knows **two** of them, that is a loud **ambiguity** naming both — never a silent choice.  If it knows none, it acts on the family. |
+## | **K3** | A family token this build does not know is a protocol error: fail loudly, naming the token, the producer and the family vocabulary this build knows.  Never silently. |
+## | **K4** | A producer that must *not* be degraded sets the family to `tfUnassessable`, which is itself a family and therefore satisfies K1 while forbidding any general handling. |
 ##
-## The degradation path is written by the **producer**, which knows what a
-## `cargo-project` may safely be treated as; it is never guessed by the
-## consumer.  That is the whole difference between "degrade explicitly" and
-## "degrade silently".
+## **Why a set and not a chain (design question Q10, decided 2026-09-20).**
+## An earlier revision made `specific` an ordered specificity chain — "a cargo
+## project is a rust project is a project directory" — with the family as its
+## last element and K2 reading "take the first element you understand".  A
+## chain cannot say that a directory is *both* a Cargo workspace *and* a CMake
+## project: it forces the producer to invent a precedence, which is exactly the
+## defect `detectFolderLang` has today, where a crate that also carries a
+## `foundry.toml` silently becomes a Foundry project and the Cargo fact is
+## discarded at the return statement.  A set carries both facts; the consumer,
+## which is the only party that knows whether two kinds *dispatch differently*,
+## either resolves the pair itself or refuses — and it never guesses.
+## Degradation therefore has exactly one target, the family, and the family
+## lives in its own field rather than being "the last element".
 ##
 ## `TargetKind` below makes **K1 unrepresentable-if-violated**: the family is a
-## typed field, not the chain's last string, so a producer cannot emit a chain
-## that ends anywhere else.  K3 can therefore only fire at the parse boundary,
-## which is where `parseKindChain` puts it.
+## typed field, so a producer cannot emit a kind without one.  K3 can therefore
+## only fire at the parse boundary, which is where `parseKind` puts it.
 ##
 ## ## Versioning
 ##
@@ -141,12 +148,18 @@
 ##
 ## ## Scope
 ##
-## This module is **additive**: it defines the type and its conversions.  No
-## producer emits one yet and no consumer reads one yet; wiring it into
-## `recognize` and into `detectTarget` is a later increment, sequenced in
+## This module defines the type and its conversions.  Nothing emits or reads
+## one across a process boundary yet — wiring it into `recognize` and into
+## `detectTarget` is LRS-2P.  Since LRS-2B, `ct record` builds one LOCALLY from
+## what it already knows about the target (`src/ct/trace/record_assessment.nim`)
+## and dispatches its recorder on the result, so the shape below is exercised
+## in production even before it crosses a wire.  Because no producer has ever
+## emitted `codetracer.target-assessment.v1`, the Q10 change from chain to set
+## redefines v1 rather than minting a v2: there is no installed consumer of the
+## chain shape to skew against.  Sequenced in
 ## `codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.milestones.org`.
 
-import std/strutils
+import std/[algorithm, strutils]
 import ./target_axes
 
 export target_axes
@@ -175,8 +188,8 @@ type
       ## Nothing could be decided.  Refuse, and say what was tried.
     tfUnassessable
       ## The producer knows what this is and no version-1 consumer can act on
-      ## it.  Refuse, naming `kind.specific[0]` and the producer, so the user is
-      ## told *which* component to update.  This is rule K4's landing site: it
+      ## it.  Refuse, naming the specific kinds and the producer, so the user
+      ## is told *which* component to update.  This is rule K4's landing site: it
       ## is how a producer forbids degradation without violating K1.
     tfSingleFile
       ## One source file, potentially stand-alone.  Compile it or interpret it,
@@ -196,15 +209,17 @@ type
       ## detects this today.
 
   TargetKind* = object
-    ## An assessment's answer.  See "the kind chain" above.
+    ## An assessment's answer.  See "the kind set" above.
     specific*: seq[string]
-      ## Open vocabulary, most specific first.  May be empty, which means the
+      ## Open vocabulary, and a **set**: order carries no meaning and a
+      ## consumer must not read one into it.  May be empty, which means the
       ## producer had nothing more specific than the family.  Tokens are
-      ## lowercase ASCII with `-` as the word separator.
+      ## lowercase ASCII with `-` as the word separator.  `specificKinds`
+      ## returns the canonical (sorted, deduplicated) spelling for the wire.
     family*: TargetFamily
-      ## Closed vocabulary; the guaranteed floor of the chain.  Typed rather
-      ## than "the last string" so that rule K1 cannot be violated by
-      ## construction.
+      ## Closed vocabulary; the guaranteed floor and the only degradation
+      ## target.  Typed, and its own field, so that rule K1 cannot be violated
+      ## by construction.
 
   AssessedLanguage* = object
     ## One row of the **advisory** per-file language census.
@@ -250,10 +265,12 @@ type
     diagnostics*: seq[string]
 
   KindResolutionStatus* = enum
-    ## What happened when a consumer resolved a kind chain.
-    krExact       ## the consumer understood the most specific token
-    krDegraded    ## it understood a less specific one; `token` says which
-    krFamilyOnly  ## it understood no specific token and fell back to the family
+    ## What happened when a consumer resolved a kind set.
+    krExact       ## the consumer understood exactly one specific kind
+    krAmbiguous   ## it understood TWO OR MORE; `candidates` names them all and
+                  ## the consumer must refuse or resolve the pair itself — the
+                  ## protocol never picks one for it (rule K2)
+    krFamilyOnly  ## it understood no specific kind and fell back to the family
     krRefused     ## the family is `tfUnassessable`: the producer forbade
                   ## degradation and the consumer must refuse
 
@@ -261,11 +278,16 @@ type
     status*: KindResolutionStatus
     token*: string
       ## The token the consumer will act on.  For `krFamilyOnly` and
-      ## `krRefused` this is the family token.
+      ## `krRefused` this is the family token; for `krAmbiguous` it is empty,
+      ## because there is nothing the consumer may act on yet.
+    candidates*: seq[string]
+      ## `krAmbiguous` only: every specific kind the consumer knows, in the
+      ## producer's order.  A refusal must name all of them.
     skipped*: seq[string]
-      ## The more specific tokens that were passed over, in order.  A consumer
-      ## that degrades should say so using this; that is what makes the
-      ## degradation *explicit* rather than silent.
+      ## The specific kinds the consumer did NOT know, in the producer's
+      ## order.  A consumer that falls back to the family should say so using
+      ## this; that is what makes the degradation *explicit* rather than
+      ## silent.
 
 # ---------------------------------------------------------------------------
 # Family tokens
@@ -307,72 +329,104 @@ func parseTargetFamily*(s: string, value: var TargetFamily): bool =
   false
 
 # ---------------------------------------------------------------------------
-# The chain
+# The kind set on the wire
 # ---------------------------------------------------------------------------
 
-func chain*(k: TargetKind): seq[string] =
-  ## The wire form: the specific tokens, then the family token.  Never empty,
-  ## because the family is always present — which is rule K1, enforced by the
-  ## type rather than by the encoder.
+func specificKinds*(k: TargetKind): seq[string] =
+  ## The canonical wire spelling of the specific-kind set: sorted and
+  ## deduplicated.  Canonical so that two producers naming the same facts in
+  ## a different order emit the same document, and so that equality of two
+  ## kinds is equality of two sequences.
   result = @[]
   for s in k.specific:
-    result.add(s)
-  result.add(token(k.family))
+    if s notin result:
+      result.add(s)
+  result.sort()
 
-func parseKindChain*(wire: openArray[string], value: var TargetKind,
-                     diagnostic: var string): bool =
-  ## Decode a wire chain.  Rule K3 lives here and nowhere else.
+func parseKind*(specific: openArray[string], family: string,
+                value: var TargetKind, diagnostic: var string): bool =
+  ## Decode a wire kind.  Rule K3 lives here and nowhere else.
   ##
-  ## Fails, loudly and with a named diagnostic, when the chain is empty or its
-  ## last element is not a family token of this major version.  It deliberately
-  ## does **not** search the chain for *any* recognisable family: a producer
-  ## that put the family somewhere other than last has violated K1, and quietly
-  ## repairing that would turn a protocol bug into an invisible behaviour
-  ## change.
-  if wire.len == 0:
-    diagnostic = "target-assessment: the kind chain is empty; rule K1 requires " &
-      "at least the family token"
-    return false
+  ## Fails, loudly and with a named diagnostic, when `family` is not a family
+  ## token of this major version, or when a family token appears among the
+  ## specific kinds — a producer that put a family there has confused the two
+  ## vocabularies, and quietly accepting it would turn a protocol bug into an
+  ## invisible behaviour change.  Duplicates in `specific` are collapsed; order
+  ## is not preserved as meaning, only as the producer's spelling.
   var fam: TargetFamily
-  let last = wire[wire.high]
-  if not parseTargetFamily(last, fam):
-    diagnostic = "target-assessment: the kind chain ends in '" & last &
+  if not parseTargetFamily(family, fam):
+    diagnostic = "target-assessment: the kind's family is '" & family &
       "', which is not a target family this build knows. Known families: " &
-      knownFamilyTokens() & ". The chain was: " & wire.join(" -> ") & "."
+      knownFamilyTokens() & ". The specific kinds were: " &
+      (if specific.len == 0: "(none)" else: specific.join(", ")) & "."
     return false
-  var specific: seq[string] = @[]
-  for i in 0 ..< wire.high:
-    specific.add(wire[i])
-  value = TargetKind(specific: specific, family: fam)
+  var kinds: seq[string] = @[]
+  for s in specific:
+    var asFamily: TargetFamily
+    if parseTargetFamily(s, asFamily):
+      diagnostic = "target-assessment: '" & s & "' is a family token and " &
+        "was sent among the specific kinds; the family travels in its own " &
+        "field (rule K1). The specific kinds were: " & specific.join(", ") &
+        "; the family was: " & family & "."
+      return false
+    if s notin kinds:
+      kinds.add(s)
+  value = TargetKind(specific: kinds, family: fam)
   true
 
 func resolveKind*(k: TargetKind, understood: openArray[string]): KindResolution =
-  ## Rule K2: take the first token the consumer understands.
+  ## Rule K2: act on the specific kinds the consumer knows — one of them
+  ## exactly, two or more loudly, none by falling back to the family.
   ##
   ## `understood` is the consumer's own vocabulary — the specific kinds it has
   ## code for.  It is passed in rather than read from a registry so that a test
   ## can drive a consumer that knows nothing, which is the version-skew case
   ## that has to work.
   ##
+  ## The library never breaks a tie.  Whether two known kinds dispatch the same
+  ## way or differently is a fact about the CONSUMER's code, not about the
+  ## protocol, so `krAmbiguous` hands both names back and the consumer either
+  ## resolves them itself or refuses naming both.  A silent pick here would be
+  ## the `detectFolderLang` precedence defect reintroduced one layer up.
+  ##
   ## The family is never in `understood`: falling back to it is `krFamilyOnly`,
-  ## which is a distinct outcome from understanding a specific token, and a
+  ## which is a distinct outcome from understanding a specific kind, and a
   ## caller that logs the difference is what makes the degradation visible.
+  var known: seq[string] = @[]
   var skipped: seq[string] = @[]
   if k.family == tfUnassessable:
     return KindResolution(status: krRefused, token: token(k.family),
                           skipped: k.specific)
-  for i, s in k.specific:
-    var known = false
+  for s in k.specific:
+    var isKnown = false
     for u in understood:
       if u == s:
-        known = true
+        isKnown = true
         break
-    if known:
-      return KindResolution(
-        status: (if i == 0: krExact else: krDegraded),
-        token: s, skipped: skipped)
-    skipped.add(s)
-  KindResolution(status: krFamilyOnly, token: token(k.family), skipped: skipped)
+    if isKnown:
+      if s notin known: known.add(s)
+    else:
+      skipped.add(s)
+  case known.len
+  of 0:
+    KindResolution(status: krFamilyOnly, token: token(k.family), skipped: skipped)
+  of 1:
+    KindResolution(status: krExact, token: known[0], skipped: skipped)
+  else:
+    KindResolution(status: krAmbiguous, token: "", candidates: known,
+                   skipped: skipped)
+
+func ambiguityDiagnostic*(r: KindResolution, producer: string): string =
+  ## The refusal a consumer prints for `krAmbiguous`: names every candidate
+  ## and the producer, so the user is told which facts collided and which
+  ## component asserted them.  Empty for any other status.
+  if r.status != krAmbiguous:
+    return ""
+  "target-assessment: the target is more than one kind this build handles " &
+    "differently — " & r.candidates.join(" and ") & " — and nothing may " &
+    "pick one silently. Producer: " &
+    (if producer.len == 0: "(unnamed)" else: producer) &
+    ". Name the intended kind explicitly."
 
 # ---------------------------------------------------------------------------
 # Composition with `codetracer.target-recognition.v1`
@@ -459,42 +513,28 @@ const
     ("lakefile.lean", KindLeanProject),
     ("shard.yml", KindCrystalProject),
     ("program.json", KindLeoProject)]
-    ## In `detectFolderLang`'s own order, which is load-bearing there: the first
-    ## marker that exists wins, so `Cargo.toml` is tested *after* the six
-    ## chain-specific manifests.  A crate that is also a Foundry project is a
-    ## Foundry project.  Recorded in order so that a later implementation
-    ## reproduces the existing precedence rather than reinventing one.
+    ## The ten markers `detectFolderLang` reads, and the specific kind each
+    ## one asserts.  **The order of this table carries no meaning.**  It is
+    ## the order `detectFolderLang` happens to test them in, kept only so a
+    ## reader can compare the two lists side by side; `projectKindsForMarkers`
+    ## below emits EVERY kind whose marker is present, so a crate that is also
+    ## a Foundry project is reported as both, and the consumer decides
+    ## (rule K2) rather than the table deciding for it.
     ##
-    ## ## OPEN QUESTION — chain versus set.  NEEDS A USER DECISION.
+    ## ## Q10 — chain versus set: DECIDED (set), 2026-09-20
     ##
-    ## `TargetKind.specific` is an ordered **specificity chain**: each element is
-    ## assumed to degrade into the next, and rule K2 takes the first element the
-    ## consumer understands.  That models "a cargo project is a rust project is
-    ## a project directory" correctly.
-    ##
-    ## It does **not** model two independent kinds at the same level.  A
-    ## directory can be simultaneously a Cargo workspace **and** a CMake
-    ## project; neither degrades into the other, and a chain forces an
-    ## arbitrary choice of which one to put first.  The array above inherits
-    ## exactly such an arbitrary order from `detectFolderLang`, where a crate
-    ## that also has a `foundry.toml` silently becomes a Foundry project and the
-    ## Cargo fact is discarded at the return statement.
-    ##
-    ## The two candidate shapes are:
-    ##
-    ## * **chain** (today) — `specific: seq[string]`, ordered, first-understood
-    ##   wins.  Cheap, already specified by K1..K4, cannot express co-equal
-    ##   kinds.
-    ## * **set** — `specific: seq[string]` unordered plus a separate degradation
-    ##   relation, or a `seq[seq[string]]` of alternatives.  Expresses co-equal
-    ##   kinds, and makes K2 ambiguous unless the consumer is given a tie-break
-    ##   rule, which is a new protocol requirement.
-    ##
-    ## This is recorded and NOT decided.  It only bites once a producer emits
-    ## more than one specific kind, and **this increment creates no producer**,
-    ## so nothing here depends on the answer.  Deciding it later is a schema
-    ## question (the family vocabulary is frozen within a major; the specific
-    ## vocabulary is open), so a set-shaped `specific` would be a `…v2` change.
+    ## An earlier revision recorded this as an open question and kept the
+    ## table "in `detectFolderLang`'s own order, which is load-bearing there:
+    ## the first marker that exists wins, so a crate that is also a Foundry
+    ## project is a Foundry project."  That precedence is arbitrary with
+    ## respect to the model and it silently discards a fact.  The user named
+    ## the defect ("a crate that is also a Foundry project silently becomes
+    ## Foundry") and decided: `TargetKind.specific` is an unordered SET, the
+    ## family has its own field, and two known kinds are a loud ambiguity.
+    ## `detectFolderLang` itself still returns a single `Lang` by first match;
+    ## replacing it with an assessment is LRS-2P.  `target_axes_test.nim`
+    ## asserts that this table and `detectFolderLang` read the same SET of
+    ## markers — membership, not order.
 
 func projectKindForMarker*(marker: string, kind: var string): bool =
   ## Total lookup over `ProjectMarkerKinds`.
@@ -503,6 +543,19 @@ func projectKindForMarker*(marker: string, kind: var string): bool =
       kind = row.kind
       return true
   false
+
+func projectKindsForMarkers*(present: openArray[string]): seq[string] =
+  ## Every specific kind whose marker is among `present` — the file names in
+  ## a target directory.  Pure, so it compiles on both backends; the caller
+  ## lists the directory.  Emits ALL matches: this is the set model of Q10,
+  ## and the point at which "first marker wins" stops being how the facts are
+  ## produced.  Returned in `ProjectMarkerKinds` order for determinism only;
+  ## the order means nothing (`specificKinds` canonicalises).
+  result = @[]
+  for row in ProjectMarkerKinds:
+    for name in present:
+      if name == row.marker and row.kind notin result:
+        result.add(row.kind)
 
 # ---------------------------------------------------------------------------
 # Deriving the artefact axes from the assessment
@@ -544,15 +597,83 @@ func targetIsaForAssessment*(kind: TargetKind,
   ## | `nim-source` | `slNim` | `tiNative` | ditto, from the other side |
   ## | `wasm-cargo-project` | `slRust` | `tiWasm` | a plain crate is also `slRust` and is `tiNative` |
   ##
-  ## Rule K2 applies as everywhere else: the FIRST token this build understands
-  ## wins, so a producer's more specific token is preferred over its degradation
-  ## targets.  A kind this build does not know is not an error here — it simply
-  ## does not override, and the language fallback answers.
+  ## Rule K2 applies as everywhere else: this derivation knows three kinds,
+  ## and they name three different ISAs, so TWO of them in one set is an
+  ## ambiguity that must not be resolved silently — `targetIsaForAssessment`
+  ## answers `tiUnknown` for it, which no caller may mistake for a decision,
+  ## and `targetIsaAmbiguity` says which kinds collided.  A kind this build
+  ## does not know is not an error here — it simply does not override, and the
+  ## language fallback answers.
+  var found: seq[TargetIsa] = @[]
   for specific in kind.specific:
-    if specific == KindNimScript: return tiNimVm
-    if specific == KindNimSource: return tiNative
-    if specific == KindWasmCargoProject: return tiWasm
-  fallbackTargetIsaForLanguage(lang)
+    if specific == KindNimScript and tiNimVm notin found: found.add(tiNimVm)
+    if specific == KindNimSource and tiNative notin found: found.add(tiNative)
+    if specific == KindWasmCargoProject and tiWasm notin found: found.add(tiWasm)
+  case found.len
+  of 0: fallbackTargetIsaForLanguage(lang)
+  of 1: found[0]
+  else: tiUnknown
+
+func targetIsaAmbiguity*(kind: TargetKind): seq[string] =
+  ## The ISA-deciding kinds present in `kind` when there is more than one of
+  ## them — the names a refusal must print.  Empty when the ISA is decided.
+  const IsaDecidingKinds = [KindNimScript, KindNimSource, KindWasmCargoProject]
+  var hits: seq[string] = @[]
+  for specific in kind.specific:
+    if specific in IsaDecidingKinds and specific notin hits:
+      hits.add(specific)
+  if hits.len >= 2: hits else: @[]
+
+func toolchainForKind*(kind: TargetKind): Toolchain =
+  ## The toolchain the assessed KIND implies — the one axis no `Lang` value
+  ## can name (`LangNim` is `nim c` for a `.nim` and the script VM for a
+  ## `.nims`), so it is derived from the kind alone.  `tcUnknown` when the kind
+  ## names none, AND when it names more than one: two project manifests in one
+  ## directory are two toolchains, and rule K2 forbids picking one silently.
+  ## `toolchainAmbiguity` says which ones collided.
+  var found: seq[Toolchain] = @[]
+  for specific in kind.specific:
+    let tc =
+      case specific
+      of KindCargoProject, KindWasmCargoProject: tcCargo
+      of KindNoirProject: tcNargo
+      of KindCairoProject: tcScarb
+      of KindAikenProject: tcAikenCli
+      of KindMoveProject: tcMoveCli
+      of KindSwayProject: tcForc
+      of KindFoundryProject: tcFoundry
+      of KindLeanProject: tcLake
+      of KindCrystalProject: tcShards
+      of KindLeoProject: tcLeoCli
+      of KindNimScript: tcNimScriptVm
+      of KindNimSource: tcNimC
+      else: tcUnknown
+    if tc != tcUnknown and tc notin found:
+      found.add(tc)
+  if found.len == 1: found[0] else: tcUnknown
+
+func toolchainAmbiguity*(kind: TargetKind): seq[string] =
+  ## The kinds in `kind` that each imply a toolchain, when there are two or
+  ## more DIFFERENT ones — the names a refusal must print.  Empty otherwise.
+  ## (`cargo-project` beside `wasm-cargo-project` is one toolchain, not two,
+  ## and is not an ambiguity.)
+  var byToolchain: seq[tuple[tc: Toolchain, kinds: seq[string]]] = @[]
+  for specific in kind.specific:
+    let probe = TargetKind(specific: @[specific], family: kind.family)
+    let tc = toolchainForKind(probe)
+    if tc == tcUnknown: continue
+    var placed = false
+    for entry in byToolchain.mitems:
+      if entry.tc == tc:
+        if specific notin entry.kinds: entry.kinds.add(specific)
+        placed = true
+    if not placed:
+      byToolchain.add((tc, @[specific]))
+  if byToolchain.len < 2:
+    return @[]
+  for entry in byToolchain:
+    for k in entry.kinds:
+      result.add(k)
 
 func recordingApproachForAssessment*(kind: TargetKind,
                                      lang: SourceLanguage): RecordingApproach =

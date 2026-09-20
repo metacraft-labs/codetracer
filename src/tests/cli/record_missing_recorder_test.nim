@@ -185,8 +185,12 @@ suite "ct record missing-recorder diagnostics":
       #    exit 0, which no caller could detect.
       check exitCode != 0
 
-      # 2. The message names the language.
-      check missing.lang.toName in output
+      # 2. The message names the language — the SOURCE language, on its own
+      #    axis (`displayName(slRuby) == "Ruby"`), not `toName(LangRubyDb) ==
+      #    "Ruby(db)"`, which spells a language and a recording mode by hand
+      #    in one string.  Since LRS-2B the diagnostic is built from the
+      #    selector, so this is what a user reads.
+      check displayName(sourceLanguageOf(missing.lang)) in output
 
       # 3. The message names the remedy.
       for fragment in missing.remedyFragments:
@@ -234,4 +238,4 @@ suite "ct record missing-recorder diagnostics":
     checkpoint("ct output:\n" & output)
     check exitCode != 0
     check "--server" in output
-    check LangNoir.toName in output
+    check displayName(sourceLanguageOf(LangNoir)) in output

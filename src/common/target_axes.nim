@@ -46,9 +46,13 @@
 ##
 ## ## Scope
 ##
-## This module is **additive**.  It does not replace `Lang`, no production code
-## dispatches on it yet, and no `Lang` member is removed or renumbered by its
-## existence.  The migration is sequenced in
+## This module does not replace `Lang`, and no `Lang` member is removed or
+## renumbered by its existence.  Since LRS-2B, production code DOES dispatch on
+## these types: `src/ct/trace/recorder_dispatch.nim` selects a recorder from a
+## `(SourceLanguage, TargetIsa, RecordingApproach)` triple that
+## `src/ct/trace/record_assessment.nim` derives from the assessed target, and
+## `common_lang.nim`'s `axesOfLang` is the production decomposition of every
+## `Lang` value onto these axes.  The remaining migration is sequenced in
 ## `codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.milestones.org`.
 
 import std/strutils
@@ -255,10 +259,11 @@ type
     ## This is the axis that `usesMaterializedTraces`
     ## (`src/common/common_lang.nim`) is a one-bit projection of: a *backend*
     ## property answered from a *language* enum.  It was a mutable 40-slot
-    ## `array[Lang, bool]` named `USES_MATERIALIZED_TRACES` plus 29
-    ## statement-level assignments; LRS-3 made it an exhaustive `case`, which
-    ## makes it checkable but does not make it right — the question is still
-    ## being asked of the wrong axis, which is what this enum fixes.
+    ## `array[Lang, bool]` named `USES_MATERIALIZED_TRACES` plus 25
+    ## statement-level assignments; LRS-3 made it an exhaustive `case`, and
+    ## LRS-2B made it DERIVED — `producesMaterializedTrace(axesOfLang(lang).approach)`
+    ## with two named exceptions — so the question is now asked of this axis
+    ## and the `Lang`-indexed predicate is a replay-side summary over it.
     ##
     ## **`wasm` is not here.**  An earlier two-axis design put `rtWasm` on the
     ## recording-mode axis because `usesMaterializedTraces(LangRustWasm)` is
@@ -357,6 +362,52 @@ func token*(v: SourceLanguage): string =
   # from `libs/tree-sitter-masm`; do not "fix" it back.
   of slMidenAsm: "midenasm"
   of slGdScript: "gdscript"
+
+func displayName*(v: SourceLanguage): string =
+  ## The human-facing name of a source language, for diagnostics.
+  ##
+  ## This is the third vocabulary beside `token` (wire/CLI) and `Lang.toName`,
+  ## and it exists because `toName` spells four of its answers as
+  ## *language(mode)* by hand — `"Ruby(db)"`, `"Python(db)"`, `"Rust(wasm)"`,
+  ## `"C++(wasm)"` — which is the conflation this axis removes.  A diagnostic
+  ## about a recorder names the language the file is written in; the mode is
+  ## a separate fact and is spelled separately when it matters.
+  case v
+  of slUnknown: "unknown"
+  of slC: "C"
+  of slCpp: "C++"
+  of slRust: "Rust"
+  of slNim: "Nim"
+  of slGo: "Go"
+  of slPascal: "Pascal"
+  of slFortran: "Fortran"
+  of slD: "D"
+  of slCrystal: "Crystal"
+  of slLean: "Lean"
+  of slJulia: "Julia"
+  of slAda: "Ada"
+  of slPython: "Python"
+  of slRuby: "Ruby"
+  of slJavaScript: "JavaScript"
+  of slLua: "Lua"
+  of slPhp: "PHP"
+  of slBash: "Bash"
+  of slZsh: "Zsh"
+  of slElixir: "Elixir"
+  of slErlang: "Erlang"
+  of slSolidity: "Solidity"
+  of slMove: "Move"
+  of slSway: "Sway"
+  of slCairo: "Cairo"
+  of slCircom: "Circom"
+  of slLeo: "Leo"
+  of slTolk: "Tolk"
+  of slAiken: "Aiken"
+  of slCadence: "Cadence"
+  of slNoir: "Noir"
+  of slAsm: "assembly"
+  of slMidenAsm: "Miden assembly"
+  of slGdScript: "GDScript"
 
 func token*(v: TargetIsa): string =
   ## The wire spelling of a target ISA.

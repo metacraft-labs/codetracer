@@ -44,6 +44,7 @@
 ##   nim c -r src/tests/cli/record_backend_selection_test.nim
 
 import std/[strutils, unittest]
+import ../../common/target_axes
 import ../../ct/trace/native_backend_selection
 
 type
@@ -106,6 +107,37 @@ const RefusalRows = [
 ]
 
 suite "NTR-2 / Q6: --backend refuses what the host cannot honour":
+
+  test "the selection resolves to a RecordingApproach, and it is the backend's own token":
+    # LRS-2B: `--backend` parses onto the axis.  The string is kept for the
+    # command line; the enum is what the assessment carries.  Refusals carry
+    # the sentinel so nothing downstream can read a decision out of one.
+    for row in HonourableRows:
+      let selection = resolveNativeRecordingBackend(row.requested, row.host)
+      checkpoint(row.host & " <- " & row.requested)
+      check selection.ok
+      check selection.approach in {raMcr, raRr, raTtd}
+      check token(selection.approach) == selection.backend
+    for row in RefusalRows:
+      let selection = resolveNativeRecordingBackend(row.requested, row.host)
+      check(not selection.ok)
+      check selection.approach == raUnknown
+    check defaultNativeRecordingApproach() == raMcr
+    check token(defaultNativeRecordingApproach()) == defaultNativeRecordingBackend()
+    # The non-native approach tokens are NOT backend spellings: `--backend vm`
+    # and `--backend instrumented` are refused as unrecognised, exactly as any
+    # other string that is not rr/mcr/ttd.
+    for host in [HostLinux, HostMacos, HostWindows]:
+      for notNative in ["vm", "instrumented", "unknown"]:
+        let selection = resolveNativeRecordingBackend(notNative, host)
+        check(not selection.ok)
+        check selection.errorLines.len > 0
+        check "not a recognized recording backend" in selection.errorLines[0]
+    # The per-host rule is stated over the enum and spelled by the string.
+    for host in [HostLinux, HostMacos, HostWindows, HostOther]:
+      var spelled: seq[string] = @[]
+      for approach in approachesValidOn(host): spelled.add(token(approach))
+      check spelled == backendsValidOn(host)
 
   test "every value a host can honour is used as given":
     for row in HonourableRows:
