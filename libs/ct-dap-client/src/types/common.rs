@@ -1,16 +1,21 @@
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-/// The `repr(u8)` language tag, re-exported from the canonical definition in
+/// The language tag, re-exported from the canonical definition in
 /// `libs/ct-lang`.
 ///
 /// This crate used to hand-write its own 21-variant copy, which diverged from
 /// db-backend's list at ordinal 6 (`Fortran` there, `Python` here).  The
-/// divergence was never observed because the only value any test constructs is
-/// `Lang::C`, which is 0 on both sides — but the ordinal is not private to this
-/// crate: `types::tracepoint`'s requests carry it over DAP to db-backend, which
-/// reads it back with `serde_repr`.  Any other value would have decoded as a
-/// different language there.
+/// divergence was never observed because the only value any test constructed
+/// was `Lang::C`, which is 0 on both sides — but at the time the ordinal was
+/// not private to this crate: `types::tracepoint`'s requests carried it over
+/// DAP to db-backend, which read it back with `serde_repr`.  Any other value
+/// would have decoded as a different language there.
+///
+/// Since LRS-1 no request or event of this crate carries the ordinal at all:
+/// `ct/load-locals` sends `Lang::wire_name()` and the tracepoint structs have
+/// no `lang` field.  `Lang` derives no serde implementation of its own — a
+/// field that needs one uses `ct_lang::lang_wire`, by name.
 ///
 /// `ct-lang` is a leaf crate (no build script, no path dependencies), so taking
 /// the canonical definition costs this crate nothing.  Depending on db-backend

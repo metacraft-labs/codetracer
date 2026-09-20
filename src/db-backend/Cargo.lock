@@ -493,7 +493,6 @@ dependencies = [
  "num-traits",
  "schemars 0.8.22",
  "serde",
- "serde_repr",
 ]
 
 [[package]]

@@ -5,7 +5,6 @@ use serde_repr::*;
 use std::collections::HashMap;
 
 use crate::value::Value;
-use ct_lang::Lang;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,7 +30,10 @@ pub struct CoreTrace {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ConfigureArg {
-    pub lang: Lang,
+    // `lang: Lang` was deleted here in LRS-1: it serialised the `Lang`
+    // ordinal (via a derive `ct-lang` no longer provides) on a `configure`
+    // task no backend handles.  The struct itself stays only because
+    // `send_configure` still emits it; this crate is being retired.
     pub trace: CoreTrace,
 }
 

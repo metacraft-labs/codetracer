@@ -1539,6 +1539,46 @@ proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
 
+proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
+                             stopAfter = -1): JsonNode =
+  ## The ``ct/run-tracepoints`` arguments for ``specs``: THE ONE PLACE THE
+  ## WIRE SHAPE OF A ``Tracepoint`` IS SPELLED on this side, so that a
+  ## reader of the Rust ``task::Tracepoint`` has exactly one Nim builder to
+  ## hold it against.  ``headless_session.runTracepoints`` sends this
+  ## verbatim; ``store_test.nim`` pins the key set.
+  ##
+  ## Every key is one the Rust struct declares.  There is NO ``lang`` key --
+  ## since LRS-1 neither side has the field.  Until then a ``Lang`` ORDINAL
+  ## was sent here (``spec.lang``, ``TracepointSweepSpec.lang: int``) because
+  ## the Rust struct required the key, while the engine never read it; it was
+  ## measured dead on ``calc`` (12 and 21 answered identically) and deleted on
+  ## both sides rather than moved to a name.
+  var tracepoints = newJArray()
+  for spec in specs:
+    tracepoints.add %*{
+      "tracepointId": spec.tracepointId,
+      "mode": 0,
+      "line": spec.line,
+      "offset": 0,
+      "name": spec.path,
+      "expression": spec.expression,
+      "lastRender": 0,
+      "isDisabled": false,
+      "isChanged": true,
+      "results": newJArray(),
+      "tracepointError": "",
+    }
+  %*{
+    "session": {
+      "tracepoints": tracepoints,
+      "found": newJArray(),
+      "lastCount": 0,
+      "results": newJObject(),
+      "id": 0,
+    },
+    "stopAfter": stopAfter,
+  }
+
 proc applyTracepointResults*(store: ReplayDataStore;
                              specs: seq[TracepointSweepSpec];
                              hits: seq[TracepointSweepHit]) =

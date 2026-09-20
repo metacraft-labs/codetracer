@@ -24,7 +24,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut schema = merge_schemas(
         vec![
             schema_for!(task::CoreTrace),
-            schema_for!(task::ConfigureArg),
             schema_for!(task::CtLoadLocalsArguments),
             schema_for!(task::CtLoadLocalsResponseBody),
             schema_for!(task::UpdateTableArgs),

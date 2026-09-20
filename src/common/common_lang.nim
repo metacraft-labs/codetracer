@@ -16,17 +16,22 @@ export target_axes
 type
   Lang* = enum ## Identifies a programming language implementation
     ## Ordinals MUST match the canonical Rust `Lang` enum in
-    ## libs/ct-lang/src/lib.rs, which uses `#[repr(u8)]` with `serde_repr`.
+    ## libs/ct-lang/src/lib.rs (`#[repr(u8)]`), which
+    ## `src/tests/cli/lang_enum_contract_test.nim` pins ordinal for ordinal.
     ##
-    ## The `ct/load-locals` DAP hop no longer carries the ordinal (LRS-1):
-    ## every sender writes `langWireName(lang)` -- the same spelling as the
-    ## Rust `Lang::wire_name` -- and the receiver decodes it with `ct-lang`'s
-    ## `lang_wire` adapter, refusing a bare integer.  What still carries the
-    ## integer is the tracepoint pair: `Tracepoint.lang` on
-    ## `ct/run-tracepoints` (Nim -> Rust, which never reads it) and
-    ## `Stop.lang` on `ct/tracepoint-results` (Rust -> Nim, always the Rust
-    ## `Lang::default()`); `src/tests/cli/lang_enum_contract_test.nim` pins
-    ## those sites by name so the list cannot grow unnoticed.
+    ## NO wire carries the ordinal any more (LRS-1, both tranches).  The
+    ## `ct/load-locals` DAP hop carries `langWireName(lang)` -- the same
+    ## spelling as the Rust `Lang::wire_name` -- decoded by `ct-lang`'s
+    ## `lang_wire` adapter, which refuses a bare integer.  The tracepoint pair
+    ## that used to carry it (`Tracepoint.lang` on `ct/run-tracepoints`,
+    ## `Stop.lang` on `ct/tracepoint-results`) was DELETED on both sides:
+    ## neither field was ever read by its receiver or set by its sender.  On
+    ## the Rust side `Lang` derives no serde implementation at all, so a new
+    ## `lang: Lang` field on a wire struct does not compile without the
+    ## name-carrying adapter.  The persisted `recordings.lang` column holds
+    ## the enum NAME (trace_index schema version 1).  What keeps the two
+    ## declarations pinned in lockstep until LRS-4 renumbers is the contract
+    ## test, not a wire.
     ##
     ## This used to name src/db-backend/src/lang.rs.  That file now only
     ## re-exports the enum (`pub use ct_lang::{lang_wire, Lang}`); the

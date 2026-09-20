@@ -136,11 +136,6 @@ const
     ## followed.
   SweepExpression = "log(left)"
   SweepLocalName = "left"
-  PythonDbLangOrdinal = 21
-    ## `Lang.PythonDb` (`libs/ct-lang/src/lib.rs`). Measured on `calc` with 12
-    ## (`Python`) as well: the engine answered identically and echoed `lang: 0`
-    ## on every `Stop`, so the field does not select the evaluator on a CTFS
-    ## trace. It is sent because `Tracepoint` requires it.
 
 var
   examinedFixtures = 0
@@ -725,7 +720,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       # established it. This call synchronises on the event.
       let hits = h.session.runTracepoints(@[TracepointSweepSpec(
         tracepointId: 0, path: request.path, line: request.line,
-        expression: request.expression, lang: PythonDbLangOrdinal)])
+        expression: request.expression)])
       var hitTicks: seq[uint64] = @[]
       var values: seq[string] = @[]
       for hit in hits:

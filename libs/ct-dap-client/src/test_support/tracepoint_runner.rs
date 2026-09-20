@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::client::DapStdioClient;
-use crate::types::common::Lang;
 use crate::types::launch::LaunchRequestArguments;
 use crate::types::tracepoint::{RunTracepointsArg, TraceSession, Tracepoint, TracepointMode};
 
@@ -118,7 +117,6 @@ impl TracepointTestRunner {
                 last_render: 0,
                 is_disabled: false,
                 is_changed: true,
-                lang: Lang::C,
                 results: vec![],
                 tracepoint_error: String::new(),
             })

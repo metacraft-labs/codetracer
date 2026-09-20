@@ -1,5 +1,4 @@
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
-use db_backend::lang::Lang;
 use db_backend::task::{
     EVENT_KINDS_COUNT, RunTracepointsArg, SearchValue, Stop, TableArgs, TraceSession, Tracepoint, TracepointMode,
     UpdateTableArgs,
@@ -599,7 +598,6 @@ fn build_tracepoint_session(
         last_render: 0,
         is_disabled: false,
         is_changed: true,
-        lang: Lang::C,
         results: Vec::new(),
         tracepoint_error: String::new(),
         column: None,

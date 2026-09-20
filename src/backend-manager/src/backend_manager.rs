@@ -4357,7 +4357,9 @@ impl BackendManager {
                             "lastRender": 0,
                             "isDisabled": false,
                             "isChanged": false,
-                            "lang": 0,
+                            // No `lang` (LRS-1): the db-backend's `Tracepoint`
+                            // has no such field any more; it never read the
+                            // ordinal that used to be sent here.
                             "results": [],
                             "tracepointError": ""
                         })

@@ -339,6 +339,11 @@ DataTables server-side parameters:
 
 ### TraceSession
 
+A `Tracepoint` and a `Stop` carry **no `lang` field** since LRS-1: the one
+each used to have was the `Lang` ordinal, never read by the backend (which
+takes the language from each stop's path) and never set by it. A request
+that still sends the key is tolerated and the key ignored.
+
 | Field | Type |
 | --- | --- |
 | `tracepoints` | `Vec<Tracepoint>` |

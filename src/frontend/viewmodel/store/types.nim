@@ -355,20 +355,13 @@ type
     path*: string
     line*: int
     expression*: string
-    lang*: int
-      ## ``Lang`` ordinal (``libs/ct-lang/src/lib.rs``).  Measured on ``calc``
-      ## with both 12 (``Python``) and 21 (``PythonDb``): the engine answered
-      ## identically and echoed ``lang: 0`` on every ``Stop``, so it does not
-      ## select the evaluator on a CTFS trace.  The field is still sent because
-      ## ``Tracepoint`` requires it.
-      ##
-      ## STILL AN ORDINAL, deliberately, after LRS-1 took the ordinal off
-      ## ``ct/load-locals``: ``Tracepoint.lang`` on ``ct/run-tracepoints`` is
-      ## read by the Rust side through ``Lang``'s ``serde_repr`` derive, so a
-      ## name would be refused here until that struct moves too.  This is one
-      ## of the two remaining ordinal-carrying payload fields (the other is
-      ## ``Stop.lang`` coming back), and
-      ## ``src/tests/cli/lang_enum_contract_test.nim`` names the site.
+    # No ``lang`` field (LRS-1).  There used to be a ``lang: int`` here -- a
+    # ``Lang`` ORDINAL, sent because the Rust ``Tracepoint`` required the key.
+    # It was measured dead on ``calc`` (12 ``Python`` and 21 ``PythonDb``
+    # answered identically; the engine takes the language from each stop's
+    # path) and the Rust field is gone, so the request no longer spells one.
+    # ``tracepointSweepRequest`` in ``replay_data_store.nim`` is the one place
+    # the ``ct/run-tracepoints`` shape is written on this side.
 
   TracepointSweepHit* = object
     ## One ``Stop`` from a ``ct/tracepoint-results`` answer.

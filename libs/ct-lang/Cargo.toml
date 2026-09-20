@@ -14,8 +14,12 @@ license = "MIT OR Apache-2.0"
 num-derive = "0.4"
 num-traits = "0.2"
 serde = { version = "1.0", features = ["derive"] }
-serde_repr = "0.1"
 schemars = { version = "0.8.2", optional = true }
+
+[dev-dependencies]
+# Only for the `lang_wire` doc-tests, which show the adapter writing a name
+# and the bare `lang: Lang` field failing to compile.
+serde_json = "1.0"
 
 [features]
 default = []

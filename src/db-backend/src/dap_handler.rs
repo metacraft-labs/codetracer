@@ -615,14 +615,6 @@ impl Handler {
     //TaskKind::LoadLocals
     //TaskResult::LoadLocals(HashMap<..>) -> load-locals
 
-    // pub fn configure(&mut self, arg: ConfigureArg, task: Task) -> Result<(), Box<dyn Error>> {
-    //     self.trace = arg.trace.clone();
-    //     self.expr_loader.trace = arg.trace.clone();
-    //     self.flow_preloader.expr_loader.trace = arg.trace;
-    //     self.return_void(task)?;
-    //     Ok(())
-    // }
-
     fn load_location(&self, step_id: StepId) -> Location {
         let step_id_int = step_id.0;
         let step_record = self.reader.step(step_id).expect("load_location: invalid step_id");
@@ -6978,7 +6970,6 @@ mod tests {
     use super::*;
     // use crate::event_db;
     use crate::ctfs_trace_reader::CTFSTraceReader;
-    use crate::lang;
     use crate::task;
     use crate::task::{GlobalCallLineIndex, gen_task_id};
     use crate::trace_processor::TraceProcessor;
@@ -6991,7 +6982,6 @@ mod tests {
     };
     use codetracer_trace_writer::non_streaming_trace_writer::NonStreamingTraceWriter;
     use codetracer_trace_writer::trace_writer::TraceWriter;
-    use lang::Lang;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
 
@@ -8299,7 +8289,6 @@ mod tests {
                     expression: "log(test)".to_string(),
                     last_render: 0,
                     is_disabled: false,
-                    lang: Lang::Unknown,
                     results: vec![],
                     tracepoint_error: "".to_string(),
                     column: None,
@@ -8328,7 +8317,6 @@ mod tests {
                 expression: "log(test)".to_string(),
                 last_render: 0,
                 is_disabled: false,
-                lang: Lang::Unknown,
                 results: vec![],
                 tracepoint_error: "".to_string(),
                 column: None,
@@ -8366,7 +8354,6 @@ mod tests {
                 expression: expression.to_string(),
                 last_render: 0,
                 is_disabled: false,
-                lang: Lang::Unknown,
                 results: vec![],
                 tracepoint_error: "".to_string(),
                 column: None,

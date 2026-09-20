@@ -17,14 +17,15 @@ type
     lastRender*: int
     isDisabled*: bool
     isChanged*: bool
-    lang*: Lang
-      ## Crosses ``ct/run-tracepoints`` as ``ord(Lang)`` (this record goes
-      ## through ``toJs``, where a Nim enum is its ordinal), and the Rust
-      ## ``Tracepoint.lang`` reads it with ``serde_repr`` and never consults
-      ## it -- the backend takes the language from each stop's path.  One of
-      ## the two ordinal-carrying payload fields LRS-1 left in place when it
-      ## moved ``ct/load-locals`` to names (the other is ``Stop.lang``);
-      ## ``src/tests/cli/lang_enum_contract_test.nim`` pins the sites.
+    # There is deliberately no ``lang`` field.  Until LRS-1 a ``lang: Lang``
+    # sat here and crossed ``ct/run-tracepoints`` as ``ord(Lang)`` -- this
+    # record goes through ``toJs``, where a Nim enum IS its ordinal -- while
+    # nothing set it (``utils.nim`` left it at the default) and the Rust side
+    # never read it (the backend takes the language from each stop's path).
+    # A dead field that spells the enum's layout onto a wire is deleted, not
+    # converted; the Rust ``Tracepoint`` mirrors the deletion and tolerates a
+    # legacy sender's key.  ``src/tests/cli/lang_enum_contract_test.nim``
+    # asserts the field stays absent on both sides.
     results*: seq[Stop]
     tracepointError*: langstring
 
@@ -104,7 +105,10 @@ type
     rrTicks*: int
     functionName*: langstring
     key*: langstring
-    lang*: Lang
+    # No ``lang`` field, deliberately (LRS-1): the Rust ``Stop::new`` never
+    # set the one this mirrored, so every ``ct/tracepoint-results`` event
+    # carried the ordinal of ``Lang::default()`` and no reader here looked at
+    # it.  Deleted on both sides; see ``Tracepoint`` above.
 
   Helpers* = TableLike[langstring, Helper]
 

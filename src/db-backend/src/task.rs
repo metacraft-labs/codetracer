@@ -313,18 +313,13 @@ pub struct CoreTrace {
     //   pub base: String
 }
 
-// #[derive(schemars::JsonSchema)]
-// pub struct Definitions {
-//     CoreTrace: CoreTrace,
-//     ConfigureArg: ConfigureArg,
-// }
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigureArg {
-    pub lang: Lang,
-    pub trace: CoreTrace,
-}
+// `ConfigureArg { lang: Lang, trace: CoreTrace }` used to be declared here.
+// It was DELETED in LRS-1: no handler read it (`DapHandler::configure` had
+// been commented out), the only remaining mentions were the schema generator
+// and the retiring Rust TUI's `send_configure`, and its `lang` field carried
+// the `Lang` ordinal through the `serde_repr` derive that `ct-lang` no longer
+// has.  A dead field that spells an enum's layout onto a wire is deleted, not
+// converted.
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1455,7 +1450,13 @@ pub struct Tracepoint {
     pub last_render: usize,
     pub is_disabled: bool,
     pub is_changed: bool,
-    pub lang: Lang,
+    // There is deliberately no `lang` field.  One existed until LRS-1 and
+    // crossed `ct/run-tracepoints` as the `Lang` ORDINAL (the Nim record went
+    // through `toJs`, where an enum is its integer); nothing on this side ever
+    // read it — `run_tracepoints` evaluates with `lang_from_context(path,
+    // trace_kind)` per stop — so it was deleted rather than moved to a name.
+    // A sender that still writes `"lang"` is tolerated: this struct does not
+    // deny unknown fields, and `task::tests` pins that the key is ignored.
     pub results: Vec<Stop>,
     pub tracepoint_error: String,
     /// M10 — 1-indexed column the tracepoint is anchored at, or `None`
@@ -1724,7 +1725,10 @@ pub struct Stop {
     pub rr_ticks: usize,
     pub function_name: String,
     pub key: String,
-    pub lang: Lang,
+    // No `lang` field, deliberately (LRS-1).  `Stop::new` never set the one
+    // that used to be here, so every `ct/tracepoint-results` event carried
+    // `Lang::default()`'s ordinal and no reader consulted it.  Deleted, not
+    // converted; the Nim `Stop` mirrors the deletion.
 }
 
 impl Stop {
@@ -3292,6 +3296,123 @@ mod tests {
         let err = serde_json::from_str::<CtLoadLocalsArguments>(text)
             .expect_err("the Nim enum member name is not the wire name");
         assert!(err.to_string().contains("LangLeo"), "error does not name it: {err}");
+    }
+
+    // -----------------------------------------------------------------------
+    // LRS-1, second tranche: the tracepoint hop carries NO `lang` at all.
+    //
+    // `Tracepoint.lang` (Nim -> Rust) and `Stop.lang` (Rust -> Nim) were the
+    // last two payload fields spelling the `Lang` ordinal.  Both were dead --
+    // never read here, never set here -- so they were deleted rather than
+    // moved to a name.  These pin the wire: no `lang` key in either direction,
+    // and a legacy sender's `lang` (integer OR name) is ignored, not decoded.
+    // The Nim half is `src/tests/gui/tests/store/store_test.nim`
+    // ("tracepointSweepRequest spells a Tracepoint with no lang key").
+    // -----------------------------------------------------------------------
+
+    fn a_tracepoint() -> Tracepoint {
+        Tracepoint {
+            tracepoint_id: 7,
+            mode: TracepointMode::TracInlineCode,
+            line: 12,
+            offset: -1,
+            name: "/w/main.nim".to_string(),
+            expression: "log(x)".to_string(),
+            last_render: 0,
+            is_disabled: false,
+            is_changed: true,
+            results: vec![],
+            tracepoint_error: String::new(),
+            column: None,
+            log_message: None,
+        }
+    }
+
+    /// The request the Nim side builds, rendered: every key of a
+    /// `Tracepoint`, and `lang` is not among them.
+    #[test]
+    fn run_tracepoints_payload_carries_no_lang() {
+        let args = RunTracepointsArg {
+            session: TraceSession {
+                tracepoints: vec![a_tracepoint()],
+                found: vec![],
+                last_count: 0,
+                results: Default::default(),
+                id: 1,
+            },
+            stop_after: -1,
+        };
+        let json = serde_json::to_string(&args).expect("serialise");
+        assert!(
+            !json.contains("\"lang\""),
+            "a `lang` key is back on `ct/run-tracepoints`: {json}"
+        );
+        let tracepoint = &serde_json::to_value(&args).expect("value")["session"]["tracepoints"][0];
+        let mut keys: Vec<&str> = tracepoint
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "expression",
+                "isChanged",
+                "isDisabled",
+                "lastRender",
+                "line",
+                "mode",
+                "name",
+                "offset",
+                "results",
+                "tracepointError",
+                "tracepointId",
+            ]
+        );
+    }
+
+    /// What `run_tracepoints` sends back on `ct/tracepoint-results`: no
+    /// `lang` key on a `Stop` either.
+    #[test]
+    fn tracepoint_results_stops_carry_no_lang() {
+        let stop = Stop::new("/w/main.nim".to_string(), 12, vec![], 3, 7, 0, StopType::Trace);
+        let json = serde_json::to_string(&stop).expect("serialise");
+        assert!(
+            !json.contains("\"lang\""),
+            "a `lang` key is back on `ct/tracepoint-results`: {json}"
+        );
+        let aggregate = TracepointResultsAggregate {
+            session_id: 1,
+            results: vec![stop],
+            errors: Default::default(),
+        };
+        let json = serde_json::to_string(&aggregate).expect("serialise");
+        assert!(!json.contains("\"lang\""), "{json}");
+    }
+
+    /// A frontend built before this change still sends `"lang": <ordinal>`
+    /// on every tracepoint; one built after LRS-1's first tranche but
+    /// speaking a name would send a string.  Neither is read, so neither is
+    /// refused: the key is ignored and the rest of the request decodes.
+    #[test]
+    fn a_legacy_lang_key_on_a_tracepoint_is_ignored_not_decoded() {
+        for legacy in ["0", "33", "\"c\"", "\"leo\"", "null"] {
+            let text = format!(
+                r#"{{"session":{{"tracepoints":[{{"tracepointId":7,"mode":0,"line":12,"offset":-1,"name":"/w/main.nim","expression":"log(x)","lastRender":0,"isDisabled":false,"isChanged":true,"lang":{legacy},"results":[],"tracepointError":""}}],"found":[],"lastCount":0,"results":{{}},"id":1}},"stopAfter":-1}}"#
+            );
+            let decoded: Result<RunTracepointsArg, _> = serde_json::from_str(&text);
+            assert!(
+                decoded.is_ok(),
+                "`lang: {legacy}` must be ignored, got {:?}",
+                decoded.as_ref().err()
+            );
+            let decoded = decoded.expect("checked above");
+            assert_eq!(decoded.session.tracepoints.len(), 1);
+            assert_eq!(decoded.session.tracepoints[0].tracepoint_id, 7);
+            assert_eq!(decoded.session.tracepoints[0].expression, "log(x)");
+        }
     }
 
     /// An argument type that denies unknown fields rejects a typo rather

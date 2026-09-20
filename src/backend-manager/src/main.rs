@@ -1468,8 +1468,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                                 "description": "",
                                 "rrTicks": 100 + iteration * 50,
                                 "functionName": "main",
-                                "key": "",
-                                "lang": 0
+                                "key": ""
+                                // No `lang` (LRS-1): a real db-backend's
+                                // `Stop` no longer carries one.
                             }));
                         }
                     }

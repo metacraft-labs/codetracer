@@ -48,14 +48,16 @@
 ## Until LRS-1, `ct/load-locals` sent `CtLoadLocalsArguments.lang` as an
 ## **integer**: the Nim side wrote `ord(Lang)` and the Rust side read it with
 ## `serde_repr` into the `Lang` declared in `libs/ct-lang/src/lib.rs`.  That
-## hop now carries the language's NAME (properties 7-9 below).  What still
-## carries the ordinal is the tracepoint pair — `Tracepoint.lang` on
+## hop now carries the language's NAME (properties 7-9 below), and the
+## tracepoint pair that also carried the ordinal — `Tracepoint.lang` on
 ## `ct/run-tracepoints` (Nim → Rust) and `Stop.lang` on
-## `ct/tracepoint-results` (Rust → Nim) — so the two enums are still
-## hand-maintained copies whose declaration order is a wire contract, and a
-## variant inserted in the middle of either one silently re-points every
-## ordinal above it.  This property is what makes the pending renumber (LRS-4)
-## a lockstep change rather than a wire break.
+## `ct/tracepoint-results` (Rust → Nim) — was DELETED on both sides in LRS-1's
+## second tranche (property 10), because neither field was ever read by its
+## receiver or set by its sender.  **No wire carries the ordinal any more.**
+## The two enums are nevertheless still hand-maintained copies, pinned here
+## ordinal for ordinal, so that the pending renumber (LRS-4) is a visible
+## lockstep change and not a silent divergence between two lists that other
+## tables (`array[Lang, …]`, LRS-3) still index by position.
 ##
 ## The Rust definition used to live in `src/db-backend/src/lang.rs`; that file
 ## now re-exports it (`pub use ct_lang::{lang_wire, Lang}`) so that
@@ -78,8 +80,9 @@
 ##
 ## **Correction (LRS-1).**  The sentence that followed said the `ct/load-locals`
 ## hop "is now the **only** place an ordinal survives".  It was not the only
-## one — `Tracepoint.lang` and `Stop.lang` carry it on the tracepoint hop and
-## always did — and it no longer carries one at all: see properties 7-9.
+## one — `Tracepoint.lang` and `Stop.lang` carried it on the tracepoint hop
+## and always had — and it no longer carries one at all: see properties 7-9.
+## The tracepoint pair is gone as well (property 10).
 ##
 ## The test below parses the `pub enum Lang { … }` block out of the Rust source
 ## and compares it to `Lang`, name by name and ordinal by ordinal.
@@ -123,7 +126,12 @@
 ## test failure rather than a silent divergence that surfaces years later as a
 ## mislabelled trace.  The allowlist's non-canonical entries are additionally
 ## checked to carry no `#[repr(...)]` and no `serde_repr` derive, which are what
-## turn an enum's ordinal into a wire value in the first place.  That attribute
+## turn an enum's ordinal into a wire value in the first place.  Since LRS-1's
+## second tranche the CANONICAL enum is held to the second half of that too:
+## it keeps `#[repr(u8)]` (the ordinals are still pinned, property 3) but must
+## carry NO `serde_repr` derive, so that a `Lang` can only be serialised through
+## the name-carrying `lang_wire` adapter and a bare `lang: Lang` field on a
+## serde struct does not compile.  That attribute
 ## check anchors its look-back on the previous top-level item rather than on a
 ## fixed character count, because an attribute padded far enough above its
 ## declaration by doc comments would otherwise escape the window and be read as
@@ -182,20 +190,39 @@
 ## (a string literal, `.wire_name()`, `langWireName(...)`, or one of the two
 ## pinned literal constants `LoadLocalsDefaultLang` / `LOAD_LOCALS_DEFAULT_LANG`)
 ## or OPAQUE (an identifier the sweep cannot type).
-## It then requires: no ordinal outside a frozen, positively-checked list of
-## the tracepoint-hop remnants; every opaque site on a list a human has
-## classified; the fixed sites' REPLACEMENTS present as names; and the
-## classifier itself proven on a positive-control fixture of the exact shapes
-## that were wrong — so an empty or mis-parsed scan cannot pass.
+## It then requires: NO ordinal anywhere (the frozen list of tracepoint-hop
+## remnants LRS-1's first tranche kept is now EMPTY and must stay so); every
+## opaque site on a list a human has classified; the fixed sites' REPLACEMENTS
+## present as names; and the classifier itself proven on a positive-control
+## fixture of the exact shapes that were wrong — so an empty or mis-parsed
+## scan cannot pass.
+##
+## ## 10. The tracepoint hop carries no `lang`, and no serde struct carries a bare `Lang`
+##
+## LRS-1's second tranche DELETED `Tracepoint.lang` and `Stop.lang` on both
+## sides (Rust `task.rs` and `ct-dap-client`; Nim `tracepoints.nim` and
+## `TracepointSweepSpec`) rather than converting them, because both were dead:
+## the db-backend evaluates with `lang_from_context(path, …)` and never read
+## the first, `Stop::new` never set the second, and no Nim reader consulted
+## either.  Two checks keep them deleted: (a) the Nim `Tracepoint` and `Stop`
+## declarations have no `lang` field and the Rust structs have none either;
+## (b) a sweep over every `.rs` file in the crates that speak DAP finds every
+## `lang: Lang` FIELD on a struct with a `Serialize` / `Deserialize` derive
+## and requires its attribute block to carry the `lang_wire` adapter — so the
+## mutation "re-add `pub lang: Lang` to `Tracepoint`" fails here even when
+## `cargo` is not run (with `cargo` it does not compile at all, because the
+## canonical `Lang` no longer derives serde; property 4 asserts that).  The
+## field sweep is proven on a positive-control fixture and has an anti-vacuity
+## floor of the two adapter-carrying fields that exist today.
 ##
 ## Mocking justification (workspace policy on mock objects): none.  There is no
-## mock in this file.  Property 1 calls the production proc; properties 2–9
+## mock in this file.  Property 1 calls the production proc; properties 2–10
 ## read the production source files.
 ##
 ## Compile and run:
 ##   nim c -r src/tests/cli/lang_enum_contract_test.nim
 
-import std/[algorithm, os, sets, strutils, tables, unittest]
+import std/[algorithm, os, sequtils, sets, strutils, tables, unittest]
 import ../../common/lang
 import ../../common/target_axes
 import ../../ct/utilities/language_detection
@@ -714,17 +741,31 @@ suite "libs/ct-lang holds the only ordinal-carrying Rust `Lang`":
         " but the sweep found " & $canonical.len & ".  Every other property " &
         "in this file compares against that declaration.")
     else:
+      # `#[repr(u8)]` stays: the ordinals are still pinned against the Nim
+      # enum (property 3) and `FromPrimitive` still decodes them.  The
+      # `serde_repr` derive must be GONE: since LRS-1's second tranche no
+      # wire carries the ordinal, and the way that stays true is that `Lang`
+      # has no serde implementation except the explicit, name-carrying
+      # `lang_wire` adapter -- a bare `lang: Lang` field on a serde struct
+      # then fails to compile instead of silently writing the integer.
+      # (Until that tranche this assertion required the derive to be PRESENT,
+      # because `Tracepoint.lang` / `Stop.lang` still went through it; those
+      # fields were deleted.)
+      if not canonical[0].isRepr:
+        checkpoint(
+          CanonicalRustLang & "'s `Lang` lost its `#[repr(...)]`.  The " &
+          "ordinals are still a pinned contract with the Nim enum until " &
+          "LRS-4 renumbers both in lockstep.")
+      if canonical[0].isSerdeRepr:
+        checkpoint(
+          CanonicalRustLang & "'s `Lang` has a `serde_repr` derive again.  " &
+          "That gives every `lang: Lang` field on a serde struct a silent " &
+          "integer encoding, which is exactly the wire contract LRS-1 " &
+          "removed (last from `Tracepoint.lang` / `Stop.lang`).  Serialise " &
+          "a `Lang` only through `ct_lang::lang_wire`, by name.")
       check:
         canonical[0].isRepr
-        canonical[0].isSerdeRepr
-      if not canonical[0].isRepr or not canonical[0].isSerdeRepr:
-        checkpoint(
-          CanonicalRustLang & "'s `Lang` lost its `#[repr(...)]` or its " &
-          "`serde_repr` derive.  Both are still load-bearing: " &
-          "`Tracepoint.lang` and `Stop.lang` go through that derive on the " &
-          "tracepoint hop.  (`ct/load-locals` and the persisted " &
-          "`recordings.lang` column no longer do; when the tracepoint pair " &
-          "moves to names as well, this assertion is the one to revisit.)")
+        not canonical[0].isSerdeRepr
 
   test "no `enum Lang` exists outside the canonical file and the allowlist":
     let decls = sweepRustLangDecls(RepoRoot)
@@ -1402,8 +1443,9 @@ const
 
   MinLangPayloadSites = 12
     ## Anti-vacuity floor on the number of `"lang":` payload keys found.
-    ## There were 20 when this was written.  A sweep that sees none of them
-    ## is not a sweep that found no defects.
+    ## There were 20 when this was written and 17 after LRS-1's second
+    ## tranche deleted the three tracepoint-hop keys.  A sweep that sees none
+    ## of them is not a sweep that found no defects.
 
   # The fixed sites, and what their REPLACEMENT must look like: each of these
   # files must contain at least one `"lang":` key classified as a NAME.  This
@@ -1445,29 +1487,24 @@ const
     # `metadata.langName`: the shared-artifact metadata, a `string`; not a
     # `Lang` at all.
     ("src/ct/online_sharing/artifact.nim", 1),
-    # `spec.lang` is `TracepointSweepSpec.lang: int` — a `Lang` ORDINAL on
-    # the `ct/run-tracepoints` payload.  This is the tracepoint-hop remnant
-    # LRS-1 did not move (see `RemainingOrdinalLangPayloads`); it is opaque
-    # to the sweep because the ordinal hides behind a field name.
-    ("src/frontend/viewmodel/headless_session.nim", 1),
+    # (`headless_session.nim`'s `"lang": spec.lang` — `TracepointSweepSpec.lang:
+    # int`, a `Lang` ORDINAL hiding behind a field name — was on this list
+    # until LRS-1's second tranche deleted the field and the key.)
   ]
 
-  # The payload sites that STILL carry a `Lang` ordinal, frozen: file and the
-  # exact number of ordinal-classified `"lang":` keys in it.  These are the
-  # `Tracepoint.lang` / `Stop.lang` fields of the tracepoint hop, which LRS-1
-  # left on `serde_repr` (the Rust side never reads `Tracepoint.lang` and
-  # always sends `Lang::default()` for `Stop.lang`, so they are inert — but
-  # they are still an ordinal on a wire).  Exact counts, not upper bounds, so
-  # a new ordinal in one of these files fails just like one anywhere else,
-  # and a moved remnant must be removed from this list rather than left to
-  # widen it.
-  RemainingOrdinalLangPayloads = [
-    # a `Tracepoint` built for `ct/run-tracepoints` in the Python bridge
-    ("src/backend-manager/src/backend_manager.rs", 1),
-    # a `Stop` synthesised for a `ct/tracepoint-results` event in a test
-    # harness arm
-    ("src/backend-manager/src/main.rs", 1),
-  ]
+  # The payload sites that still carry a `Lang` ordinal: NONE, and this list
+  # exists so that the property below says so explicitly rather than by
+  # omission.  LRS-1's first tranche froze two here — the `Tracepoint` the
+  # Python bridge builds for `ct/run-tracepoints` in
+  # `src/backend-manager/src/backend_manager.rs` and the `Stop` the mock
+  # backend in `src/backend-manager/src/main.rs` synthesises for
+  # `ct/tracepoint-results`, each `"lang": 0` — because the Rust
+  # `Tracepoint.lang` / `Stop.lang` fields still went through `serde_repr`.
+  # The second tranche DELETED those fields on both sides (they were never
+  # read and never set), so the keys are gone and the list is empty.  It must
+  # stay empty: an ordinal `"lang":` anywhere in the tree is a defect, and
+  # the way to make the sweep pass is to remove it, not to list it here.
+  RemainingOrdinalLangPayloads: seq[(string, int)] = @[]
 
 proc classifyLangPayloadValue(value: string): LangPayloadClass =
   ## Lexical classification of the text after `"lang":`.  Deliberately
@@ -1691,7 +1728,12 @@ suite "no .rs or .nim payload spells lang as a bare integer":
       store.contains("lang: string = LoadLocalsDefaultLang)")
       not store.contains("lang: int = 0)")
 
-  test "no ordinal `lang` outside the frozen tracepoint-hop remnants":
+  test "no ordinal `lang` anywhere (the frozen tracepoint-hop remnants are gone)":
+    # `RemainingOrdinalLangPayloads` is empty since LRS-1's second tranche,
+    # so this is now "zero ordinal `"lang":` keys in the tree" — the
+    # positive-control test above is what keeps that from being vacuous, and
+    # the anti-vacuity floor is what keeps it from passing on an empty walk.
+    check RemainingOrdinalLangPayloads.len == 0
     let sites = sweepLangPayloadSites(RepoRoot)
     var counts = initTable[string, int]()
     var offenders: seq[string] = @[]
@@ -1711,11 +1753,17 @@ suite "no .rs or .nim payload spells lang as a bare integer":
         "found " & $offenders.len & " `\"lang\":` payload key(s) spelled as " &
         "an integer:\n  " & offenders.join("\n  ") & "\n  Send " &
         "`langWireName(lang)` (Nim) or `Lang::X.wire_name()` (Rust) " &
-        "instead.  The `ct/load-locals` receiver refuses an integer, and " &
-        "the enum's declaration order is not a number to be spelled by " &
-        "hand — that is how `gui_ops.rs` came to say Cairo = 32.")
+        "instead — or, on the tracepoint hop, send nothing: `Tracepoint` " &
+        "and `Stop` have no `lang` field since LRS-1.  The `ct/load-locals` " &
+        "receiver refuses an integer, and the enum's declaration order is " &
+        "not a number to be spelled by hand — that is how `gui_ops.rs` came " &
+        "to say Cairo = 32.")
     check:
       offenders.len == 0
+    var ordinalSites = 0
+    for site in sites:
+      if site.class == lpcOrdinal: inc ordinalSites
+    check ordinalSites == 0
     # The frozen list is exact and positively checked: each remnant must
     # still exist with exactly its count, or the list is rotting.
     for (path, expected) in RemainingOrdinalLangPayloads:
@@ -1768,3 +1816,442 @@ suite "no .rs or .nim payload spells lang as a bare integer":
           "not raise the count without saying what the identifier is.")
       check:
         actual == expected
+
+# ---------------------------------------------------------------------------
+# Property 10 — the tracepoint hop carries no `lang`, and no serde struct
+# carries a bare `Lang`
+# ---------------------------------------------------------------------------
+
+type
+  RustLangField = object
+    ## One `lang: Lang` (or `Option<Lang>`) FIELD declaration on a Rust
+    ## struct — a function parameter of the same shape is not one.
+    relPath: string     ## repo-relative, `/`-separated ("<fixture>" in tests)
+    line: int           ## 1-based line of the field
+    structName: string  ## the enclosing `struct`
+    isSerde: bool       ## the struct derives `Serialize` and/or `Deserialize`
+    hasAdapter: bool    ## the field's own attributes name `lang_wire`
+
+const
+  # The crates whose `Lang` IS `ct_lang::Lang` (property 5's dependents) plus
+  # `src/backend-manager`, which cannot name the type at all.  Restricting the
+  # sweep to these is what makes "`lang: Lang`" unambiguous: `origin-classifier`
+  # has its own name-only `Lang` (property 4) and is not a DAP speaker.
+  LangFieldSweepRoots = [
+    "src/db-backend", "libs/ct-dap-client", "src/tui", "src/codetracer-bench",
+    "src/backend-manager",
+  ]
+
+  # The adapter-carrying fields that exist today.  The sweep must find at
+  # least these — the positive half, so a walk that sees nothing cannot pass.
+  ExpectedLangWireFields = [
+    ("src/db-backend/src/task.rs", "CtLoadLocalsArguments"),
+    ("src/db-backend/src/query.rs", "WireLoadLocalsArguments"),
+  ]
+
+  # The wire structs that used to carry `lang` and must not again, as
+  # (file, struct header, kind).  The Rust pair is also covered by the field
+  # sweep; naming them here is what ties the sweep to the deletion that
+  # motivated it, and the Nim declarations have no sweep of their own.
+  TracepointHopStructs = [
+    ("src/db-backend/src/task.rs", "pub struct Tracepoint {", "rust"),
+    ("src/db-backend/src/task.rs", "pub struct Stop {", "rust"),
+    ("libs/ct-dap-client/src/types/tracepoint.rs", "pub struct Tracepoint {", "rust"),
+    ("libs/ct-dap-client/src/types/tracepoint.rs", "pub struct Stop {", "rust"),
+    ("src/common/common_types/debugger_features/tracepoints.nim", "Tracepoint* = ref object", "nim"),
+    ("src/common/common_types/debugger_features/tracepoints.nim", "Stop* = ref object", "nim"),
+    ("src/frontend/viewmodel/store/types.nim", "TracepointSweepSpec* = object", "nim"),
+  ]
+
+proc isRustItemHeader(stripped: string): bool =
+  ## Does this line open a Rust item that could enclose a `lang: Lang,` line?
+  for kw in ["pub struct ", "pub(crate) struct ", "struct ", "pub fn ", "pub(crate) fn ",
+             "fn ", "pub async fn ", "async fn ", "impl ", "impl<", "pub enum ", "enum ",
+             "pub trait ", "trait ", "mod ", "pub mod ", "macro_rules! ", "pub union ",
+             "union "]:
+    if stripped.startsWith(kw):
+      return true
+  false
+
+proc isRustLangType(typeText: string): bool =
+  ## Is `typeText` the canonical `Lang`, or an `Option` of it, under any of
+  ## the paths the DAP-speaking crates spell it by?  `Lang`, `ct_lang::Lang`,
+  ## `crate::lang::Lang`, `lang::Lang`, `Option<Lang>`, `Option<ct_lang::Lang>`.
+  ## Anything else (`Option<String>`, `LangName`, a generic parameter) is not.
+  var t = typeText.strip()
+  if t.startsWith("Option<") and t.endsWith(">"):
+    t = t["Option<".len ..< t.len - 1].strip()
+  if t == "Lang":
+    return true
+  if not t.endsWith("::Lang"):
+    return false
+  # Every path segment before `::Lang` must be an identifier: this refuses
+  # `Vec<X>::Lang`-shaped nonsense without trying to parse Rust.
+  for segment in t[0 ..< t.len - "::Lang".len].split("::"):
+    if segment.len == 0:
+      return false
+    for ch in segment:
+      if ch notin {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+        return false
+  true
+
+proc analyseRustLangFields(source: string, relPath: string): seq[RustLangField] =
+  ## Every `lang: Lang,` / `lang: Option<Lang>,` FIELD in `source`, with
+  ## whether its struct is a serde struct and whether the field carries the
+  ## `lang_wire` adapter.  Lexical, on purpose: this runs in a lane with no
+  ## `cargo`, and the shapes it must recognise are the ones in this tree —
+  ## plus the ones a careless re-addition would take: a trailing `//` comment
+  ## on the field line and a path-qualified type (`ct_lang::Lang`), both of
+  ## which an exact-string match let through when this was first written
+  ## (found at review by mutation; the positive-control fixture pins them).
+  result = @[]
+  let lines = source.splitLines()
+  for i, rawLine in lines:
+    var t = rawLine.strip()
+    # A line comment is not part of the declaration: `pub lang: Lang, // x`
+    # is a field.  (A whole-line `//` comment is skipped: it starts with `//`
+    # and so cannot start with `lang:` after the visibility strip below.)
+    let slashes = t.find("//")
+    if slashes >= 0:
+      t = t[0 ..< slashes].strip()
+    if t.startsWith("pub(crate) "): t = t["pub(crate) ".len .. ^1]
+    if t.startsWith("pub(super) "): t = t["pub(super) ".len .. ^1]
+    if t.startsWith("pub "): t = t["pub ".len .. ^1]
+    # `<name>: <type>` where the type is the canonical `Lang`.  The field's
+    # NAME is not what makes it a wire hazard — `source_lang: Lang` on a
+    # serde struct writes the ordinal exactly as `lang: Lang` would — so any
+    # identifier is accepted here; the enclosing-item walk below is what
+    # separates a field from a `fn` parameter of the same spelling.
+    let colon = t.find(':')
+    if colon <= 0 or (colon + 1 < t.len and t[colon + 1] == ':'):
+      continue
+    let fieldName = t[0 ..< colon]
+    var nameOk = fieldName.len > 0
+    for ch in fieldName:
+      if ch notin {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+        nameOk = false
+    if not nameOk:
+      continue
+    var typeText = t[colon + 1 .. ^1].strip()
+    if typeText.endsWith(","):
+      typeText = typeText[0 ..< typeText.len - 1].strip()
+    if not isRustLangType(typeText):
+      continue
+    # The enclosing item: the nearest preceding item header.  A field sits
+    # under a `struct`; a parameter of the same spelling sits under a `fn`.
+    var headerIdx = -1
+    var k = i - 1
+    while k >= 0:
+      if isRustItemHeader(lines[k].strip()):
+        headerIdx = k
+        break
+      dec k
+    if headerIdx < 0:
+      continue
+    let header = lines[headerIdx].strip()
+    if not (header.contains("struct ")):
+      continue
+    var structName = header
+    structName = structName[structName.find("struct ") + "struct ".len .. ^1]
+    var e = 0
+    while e < structName.len and structName[e] notin {' ', '<', '{', '(', ';'}: inc e
+    structName = structName[0 ..< e]
+    # The struct's attribute block: contiguous attribute / comment / open
+    # multi-line-derive lines directly above the header.  Then look only
+    # INSIDE `#[derive(...)]` spans, so a doc comment that mentions
+    # `Serialize` is not a derive.
+    var attrLines: seq[string] = @[]
+    k = headerIdx - 1
+    while k >= 0:
+      let a = lines[k].strip()
+      if a.len == 0 or a.endsWith("}") or a.endsWith(";") or a.endsWith("{"):
+        break
+      attrLines.insert(a, 0)
+      dec k
+    let attrText = attrLines.join("\n")
+    var isSerde = false
+    var searchFrom = 0
+    while true:
+      let d = attrText.find("derive(", searchFrom)
+      if d < 0: break
+      let close = attrText.find(")]", d)
+      let span = if close < 0: attrText[d .. ^1] else: attrText[d .. close]
+      if span.contains("Serialize") or span.contains("Deserialize"):
+        isSerde = true
+      searchFrom = d + "derive(".len
+    if attrText.contains("#[serde("):
+      isSerde = true
+    # The field's own attribute block: `#[...]` / `///` lines directly above.
+    var fieldAttrs = ""
+    k = i - 1
+    while k >= 0:
+      let a = lines[k].strip()
+      if a.startsWith("#[") or a.startsWith("///"):
+        fieldAttrs = a & "\n" & fieldAttrs
+        dec k
+      else:
+        break
+    var hasAdapter = false
+    for a in fieldAttrs.splitLines():
+      if a.startsWith("#[") and a.contains("lang_wire"):
+        hasAdapter = true
+    result.add(RustLangField(
+      relPath: relPath, line: i + 1, structName: structName,
+      isSerde: isSerde, hasAdapter: hasAdapter))
+
+proc sweepRustLangFields(root: string): seq[RustLangField] =
+  ## `analyseRustLangFields` over every `.rs` file under `LangFieldSweepRoots`,
+  ## skipping the sweep's usual directories and the name-only `Lang` files.
+  result = @[]
+  var swept = 0
+  for sweepRoot in LangFieldSweepRoots:
+    var pending = @[sweepRoot]
+    while pending.len > 0:
+      let relDir = pending.pop()
+      for kind, entry in walkDir(root / relDir, relative = true, checkDir = true):
+        let rel = relDir & "/" & entry
+        case kind
+        of pcDir:
+          if entry notin SweepSkipDirs:
+            pending.add(rel)
+        of pcFile:
+          if not entry.endsWith(".rs"):
+            continue
+          let relPath = rel.replace('\\', '/')
+          if relPath in NameOnlyLangDecls:
+            continue
+          inc swept
+          result.add(analyseRustLangFields(readFile(root / rel), relPath))
+        else:
+          discard
+  if swept < 100:
+    raise newException(ValueError,
+      "the `lang: Lang` field sweep visited only " & $swept & " `.rs` files " &
+      "under " & $LangFieldSweepRoots & "; the floor is 100.  Fix the walk — " &
+      "do not lower the floor.")
+
+proc describe(f: RustLangField): string =
+  f.relPath & ":" & $f.line & " `" & f.structName & "`" &
+    (if f.isSerde: " (serde struct" else: " (plain struct") &
+    (if f.hasAdapter: ", lang_wire)" else: ", NO adapter)")
+
+proc structBody(source, header, path: string): string =
+  ## The text between `header` and the next line that is only a closing brace
+  ## (Rust) or the next declaration at the header's indentation (Nim).
+  let idx = source.find(header)
+  if idx < 0:
+    raise newException(ValueError,
+      "could not find `" & header & "` in " & path & ".  If the struct moved " &
+      "or was renamed, follow it here — do not drop the entry.")
+  let bodyStart = idx + header.len
+  if header.endsWith("{"):
+    let e = source.find("\n}", bodyStart)
+    if e < 0:
+      raise newException(ValueError, "`" & header & "` in " & path & " has no closing brace.")
+    return source[bodyStart ..< e]
+  # Nim: the body is every following line indented deeper than the header.
+  let lineStart = source.rfind('\n', 0, idx) + 1
+  let headerIndent = idx - lineStart
+  var e = bodyStart
+  var body = ""
+  for line in source[bodyStart .. ^1].splitLines()[1 .. ^1]:
+    if line.strip().len > 0:
+      var indent = 0
+      while indent < line.len and line[indent] == ' ': inc indent
+      if indent <= headerIndent:
+        break
+    body.add(line & "\n")
+    e += line.len + 1
+  body
+
+proc declaresLangField(body: string, kind: string): bool =
+  ## Is there a `lang` FIELD (not a comment mentioning one) in this body?
+  for rawLine in body.splitLines():
+    var t = rawLine.strip()
+    if kind == "rust":
+      if t.startsWith("//"): continue
+      if t.startsWith("pub(crate) "): t = t["pub(crate) ".len .. ^1]
+      if t.startsWith("pub "): t = t["pub ".len .. ^1]
+      if t.startsWith("lang:"):
+        return true
+    else:
+      if t.startsWith("#"): continue
+      if t.startsWith("lang*:") or t.startsWith("lang:"):
+        return true
+  false
+
+suite "the tracepoint hop carries no lang, and no serde struct carries a bare Lang":
+
+  test "the field classifier sees the shapes that matter (positive control)":
+    let fixture = """
+/// A doc comment that mentions Serialize is not a derive.
+#[derive(Debug, Clone)]
+pub struct PlainHolder {
+    pub lang: Lang,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BareOnTheWire {
+    pub tracepoint_id: usize,
+    pub lang: Lang,
+    pub results: Vec<Stop>,
+}
+
+#[derive(
+    Debug,
+    Serialize,
+)]
+pub struct MultiLineDerive {
+    lang: Option<Lang>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WithAdapter {
+    /// By name (LRS-1).
+    #[serde(with = "crate::lang::lang_wire")]
+    #[schemars(with = "String")]
+    pub lang: Lang,
+}
+
+#[derive(Deserialize)]
+pub struct WithOptionAdapter {
+    #[serde(default, with = "ct_lang::lang_wire::option")]
+    pub lang: Option<Lang>,
+}
+
+#[derive(Serialize)]
+pub struct TrailingComment {
+    pub lang: Lang, // an old ordinal field, re-added with a comment
+}
+
+#[derive(Serialize)]
+pub struct PathQualified {
+    pub(crate) lang: ct_lang::Lang,
+}
+
+#[derive(Deserialize)]
+pub struct OtherName {
+    pub source_lang: Option<crate::lang::Lang>,
+}
+
+#[derive(Serialize)]
+pub struct NotALang {
+    pub lang: LangName,
+    pub other: Option<String>,
+    pub name: lang::Name,
+}
+
+impl Thing {
+    pub fn load_value(
+        &mut self,
+        name: &str,
+        lang: Lang,
+        _lang: crate::lang::Lang,
+    ) -> Result<(), Error> {
+        let t = Tracepoint { lang: Lang::C, ..Default::default() };
+        let lang: Lang = Lang::default();
+        match lang {
+            Lang::C => {}
+            _ => {}
+        }
+        Ok(())
+    }
+}
+"""
+    let fields = analyseRustLangFields(fixture, "<fixture>")
+    var byStruct = initTable[string, RustLangField]()
+    for f in fields:
+      byStruct[f.structName] = f
+    check fields.len == 8
+    # The three shapes a re-addition could take that an exact-string match
+    # missed (found at review): a trailing `//` comment on the field line, a
+    # path-qualified type, a field of type `Lang` under another name.  Each
+    # is a serde struct field with NO adapter, and each must be reported.
+    check "TrailingComment" in byStruct and byStruct["TrailingComment"].isSerde and
+      not byStruct["TrailingComment"].hasAdapter
+    check "PathQualified" in byStruct and byStruct["PathQualified"].isSerde and
+      not byStruct["PathQualified"].hasAdapter
+    check "OtherName" in byStruct and byStruct["OtherName"].isSerde and
+      not byStruct["OtherName"].hasAdapter
+    # ...and a field whose type merely mentions `lang` is not a `Lang`.
+    check "NotALang" notin byStruct
+    check "PlainHolder" in byStruct and not byStruct["PlainHolder"].isSerde
+    check "BareOnTheWire" in byStruct and byStruct["BareOnTheWire"].isSerde and
+      not byStruct["BareOnTheWire"].hasAdapter
+    check "MultiLineDerive" in byStruct and byStruct["MultiLineDerive"].isSerde and
+      not byStruct["MultiLineDerive"].hasAdapter
+    check "WithAdapter" in byStruct and byStruct["WithAdapter"].isSerde and
+      byStruct["WithAdapter"].hasAdapter
+    check "WithOptionAdapter" in byStruct and byStruct["WithOptionAdapter"].isSerde and
+      byStruct["WithOptionAdapter"].hasAdapter
+    # The function parameter and the struct LITERAL are not fields.
+    check "Thing" notin byStruct
+    for f in fields:
+      check f.structName != "load_value"
+    if fields.len != 8:
+      checkpoint("classified: " & fields.mapIt(describe(it)).join("; "))
+
+  test "the field sweep sees the tree (anti-vacuity floor: the adapter-carrying fields exist)":
+    let fields = sweepRustLangFields(RepoRoot)
+    var found = initHashSet[(string, string)]()
+    for f in fields:
+      if f.isSerde and f.hasAdapter:
+        found.incl((f.relPath, f.structName))
+    for expected in ExpectedLangWireFields:
+      if expected notin found:
+        checkpoint(
+          "`" & expected[1] & "` in `" & expected[0] & "` was not found as a " &
+          "serde struct field carrying `lang_wire`.  It is one of the two " &
+          "the sweep was written against; if it moved, follow it.  Found: " &
+          fields.mapIt(describe(it)).join("; "))
+      check expected in found
+
+  test "every `lang: Lang` field on a serde struct carries the lang_wire adapter":
+    # With `cargo` this is a compile error (property 4: the canonical `Lang`
+    # derives no serde impl).  This is the same fact, checkable in the Nim
+    # lane, and it names the site.
+    let fields = sweepRustLangFields(RepoRoot)
+    var offenders: seq[string] = @[]
+    for f in fields:
+      if f.isSerde and not f.hasAdapter:
+        offenders.add(describe(f))
+    offenders.sort()
+    if offenders.len > 0:
+      checkpoint(
+        "found " & $offenders.len & " serde struct field(s) typed `Lang` " &
+        "without `#[serde(with = \"…lang_wire\")]`:\n  " &
+        offenders.join("\n  ") & "\n  Without the adapter the field would " &
+        "need `Lang`'s own serde impl, which no longer exists — and if one " &
+        "were re-added it would write the ORDINAL, the contract LRS-1 " &
+        "removed.  Either carry the name with `lang_wire`, or, if nothing " &
+        "reads the field (as with `Tracepoint.lang` / `Stop.lang`), delete it.")
+    check offenders.len == 0
+
+  test "Tracepoint, Stop and TracepointSweepSpec declare no lang field on either side":
+    for (rel, header, kind) in TracepointHopStructs:
+      let path = RepoRoot / rel
+      check fileExists(path)
+      if not fileExists(path): continue
+      let body = structBody(readFile(path), header, path)
+      if declaresLangField(body, kind):
+        checkpoint(
+          "`" & header & "` in " & rel & " declares a `lang` field again.  " &
+          "LRS-1 deleted it on both sides because the receiver never read " &
+          "it and the sender never set it; a `lang` here is either an " &
+          "ordinal on the wire (a Nim enum through `toJs`, a Rust `Lang` " &
+          "through a derive `ct-lang` no longer has) or dead weight.  If a " &
+          "language is genuinely needed on this hop, carry it by name " &
+          "(`langWireName` / `lang_wire`) and update this list with why.")
+      check not declaresLangField(body, kind)
+
+  test "ConfigureArg is gone from the db-backend and its schema":
+    # Dead on the wire (no handler), it carried `lang: Lang` through the
+    # derive.  Deleted, not converted: the type, the `schema_for!` entry and
+    # the unused Nim twin.
+    let task = readFile(DbBackendTaskPath)
+    let schemaGen = readFile(RepoRoot / "src" / "db-backend" / "src" / "bin" / "schema_generator.rs")
+    let nimTrace = readFile(RepoRoot / "src" / "common" / "common_types" / "debugger_features" / "trace.nim")
+    check not task.contains("pub struct ConfigureArg")
+    check not schemaGen.contains("ConfigureArg")
+    check not nimTrace.contains("ConfigureArg")

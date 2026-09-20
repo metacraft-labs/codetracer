@@ -4,10 +4,6 @@ type
     error*: bool
     errorMessage*: langstring
 
-  ConfigureArg* = object
-    lang*: Lang
-    trace*: CoreTrace
-
   DebugGdbArg* = object
     expression*: langstring
     process*: langstring

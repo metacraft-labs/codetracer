@@ -316,7 +316,6 @@ impl App {
         let mut program = vec![self.trace.program.clone()];
         program.extend(self.trace.args.clone());
         let configure_arg = task::ConfigureArg {
-            lang: self.trace.lang,
             trace: task::CoreTrace {
                 replay: true,
                 binary: PathBuf::from(self.trace.program.clone())

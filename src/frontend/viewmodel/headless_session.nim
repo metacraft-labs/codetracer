@@ -1090,32 +1090,12 @@ proc runTracepoints*(s: HeadlessDebugSession;
   ## arrive within the message budget, rather than returning an empty sequence:
   ## "the sweep found nothing" and "the sweep never answered" are different
   ## facts and only one of them is a result.
-  var tracepoints = newJArray()
-  for spec in specs:
-    tracepoints.add %*{
-      "tracepointId": spec.tracepointId,
-      "mode": 0,
-      "line": spec.line,
-      "offset": 0,
-      "name": spec.path,
-      "expression": spec.expression,
-      "lastRender": 0,
-      "isDisabled": false,
-      "isChanged": true,
-      "lang": spec.lang,
-      "results": newJArray(),
-      "tracepointError": "",
-    }
-  s.backend.sendDapRequestNoResponse("ct/run-tracepoints", %*{
-    "session": {
-      "tracepoints": tracepoints,
-      "found": newJArray(),
-      "lastCount": 0,
-      "results": newJObject(),
-      "id": 0,
-    },
-    "stopAfter": -1,
-  })
+  # The request body is `store/replay_data_store.tracepointSweepRequest`, the
+  # one place this side spells a `Tracepoint`'s keys (and, since LRS-1, does
+  # NOT spell a `lang`: the ordinal that used to ride here was dead on both
+  # sides and is gone from both).
+  s.backend.sendDapRequestNoResponse("ct/run-tracepoints",
+                                     tracepointSweepRequest(specs))
   let event = s.backend.waitForEvent("ct/tracepoint-results",
                                      maxMessages = maxMessages)
   let body = event.getOrDefault("body")

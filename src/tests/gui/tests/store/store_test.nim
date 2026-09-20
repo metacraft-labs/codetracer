@@ -15,7 +15,7 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_store.nim
 
-import std/[json, strutils, unittest]
+import std/[algorithm, json, strutils, unittest]
 import vm_test_helpers
 # `Lang` and `langWireName` for the `ct/load-locals` wire-shape cases below.
 # The store itself does NOT import this module (it is in the Embed SDK's
@@ -178,6 +178,48 @@ suite "ReplayDataStore requests":
     # of representation is not also a change of behaviour.
     check LoadLocalsDefaultLang == langWireName(LangC)
     check LoadLocalsDefaultLang == "c"
+
+  test "tracepointSweepRequest spells a Tracepoint with no lang key":
+    # LRS-1, second tranche.  `Tracepoint.lang` (Nim -> Rust) and `Stop.lang`
+    # (Rust -> Nim) were the last two payload fields spelling the `Lang`
+    # ORDINAL, and both were dead: the db-backend never read the first and
+    # never set the second.  They were DELETED on both sides, so the request
+    # this side builds must carry no `lang` at all -- not an integer, not a
+    # name.  `tracepointSweepRequest` is the one place the shape is written
+    # (`headless_session.runTracepoints` sends it verbatim); the Rust twin is
+    # `task::tests::run_tracepoints_payload_carries_no_lang`, which pins the
+    # same key set from the receiver's struct.
+    let specs = @[
+      TracepointSweepSpec(tracepointId: 3, path: "/w/main.nim", line: 12,
+                          expression: "log(x)"),
+      TracepointSweepSpec(tracepointId: 4, path: "/w/util.nim", line: 7,
+                          expression: "log(y)"),
+    ]
+    let request = tracepointSweepRequest(specs)
+    check request["stopAfter"].getInt == -1
+    check request["session"]["id"].getInt == 0
+    let tracepoints = request["session"]["tracepoints"]
+    check tracepoints.len == 2
+    for i, spec in specs:
+      let tp = tracepoints[i]
+      check not tp.hasKey("lang")
+      var keys: seq[string] = @[]
+      for key, _ in tp.pairs: keys.add key
+      keys.sort()
+      # Exactly the keys the Rust `task::Tracepoint` declares, minus the two
+      # `#[serde(default)]` optionals (`column`, `logMessage`) it does not
+      # require; `lang` is on neither list any more.
+      check keys == @["expression", "isChanged", "isDisabled", "lastRender",
+                      "line", "mode", "name", "offset", "results",
+                      "tracepointError", "tracepointId"]
+      check tp["tracepointId"].getInt == spec.tracepointId
+      check tp["name"].getStr == spec.path
+      check tp["line"].getInt == spec.line
+      check tp["expression"].getStr == spec.expression
+    # Rendered, byte for byte where the field is concerned.
+    let rendered = $request
+    check not rendered.contains("\"lang\"")
+    check rendered.contains("\"tracepointId\":3")
 
   test "requestLocals deduplicates identical requests":
     createRoot proc(dispose: proc()) =

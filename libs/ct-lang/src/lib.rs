@@ -39,9 +39,10 @@
 //! the *logic* (`lang_from_context` and its tests); this crate holds only the
 //! ordinal contract and the things that are pure functions of it.
 //!
-//! # The ordinals are still a wire contract — do not reorder yet
+//! # No wire carries the ordinal any more — the layout is still pinned, not yet free
 //!
-//! What the integer value of a `Lang` is and is not carried by, as of LRS-1:
+//! What the integer value of a `Lang` is and is not carried by, as of LRS-1
+//! (both tranches):
 //!
 //! * **no longer** the `lang` column of the persisted
 //!   `~/.local/share/codetracer/trace_index.db` `recordings` table — it holds
@@ -50,15 +51,31 @@
 //! * **no longer** the `ct/load-locals` DAP request: its `lang` field is the
 //!   [`Lang::wire_name`] on both sides — the Nim frontend writes
 //!   `langWireName(lang)` and `db_backend::task::CtLoadLocalsArguments` reads
-//!   it through [`lang_wire`], refusing a bare integer (LRS-1);
-//! * **still** the tracepoint pair on the DAP hop: `Tracepoint.lang` on
-//!   `ct/run-tracepoints` (Nim -> Rust; the db-backend never reads it, it
-//!   takes the language from the stop's path) and `Stop.lang` on
-//!   `ct/tracepoint-results` (Rust -> Nim; always `Lang::default()`), in
-//!   `db_backend::task` and mirrored in `ct-dap-client`'s tracepoint types.
-//!   Inert, but an ordinal on a wire is a contract on this enum's layout
-//!   until it is moved; `src/tests/cli/lang_enum_contract_test.nim` pins
-//!   those sites by name so the list cannot grow.
+//!   it through [`lang_wire`], refusing a bare integer;
+//! * **no longer** the tracepoint hop: `Tracepoint.lang` (`ct/run-tracepoints`)
+//!   and `Stop.lang` (`ct/tracepoint-results`) were DELETED rather than
+//!   converted, because both were dead — the db-backend never read the first
+//!   (it takes the language from each stop's path) and always sent
+//!   `Lang::default()` for the second, and no Nim reader consulted either.
+//!   A receiver still tolerates a legacy `lang` key from an older sender and
+//!   ignores it.
+//!
+//! Accordingly `Lang` derives **no serde implementation at all**: the only
+//! way to put one on a wire is the explicit [`lang_wire`] adapter, which
+//! writes and reads the name.  A struct field `lang: Lang` without
+//! `#[serde(with = "…lang_wire")]` does not compile in a `Serialize` /
+//! `Deserialize` derive — that is deliberate, and
+//! `src/tests/cli/lang_enum_contract_test.nim` asserts the derive stays
+//! absent and that every `lang: Lang` field on a serde struct carries the
+//! adapter.
+//!
+//! The `#[repr(u8)]`, `FromPrimitive` and the explicit ordinals remain: the
+//! Nim enum and this one are still pinned ordinal for ordinal by the contract
+//! test (a lockstep renumber is now a test-visible refactor, not a wire
+//! break), and the retiring Rust TUI still decodes an integer `lang` column
+//! with `FromPrimitive` from a table that no longer exists.  Renumbering is
+//! milestone LRS-4's, gated on LRS-3 (the positional tables), not on any
+//! wire.
 //!
 //! It is **not** carried to `codetracer-native-backend`.  That repository has
 //! its own, deliberately different `Lang` (the languages the native backend
@@ -80,7 +97,6 @@
 //! [`Lang::wire_name`] is: a new variant must not compile until it is named.
 
 use num_derive::FromPrimitive;
-use serde_repr::*;
 
 /// Identifies a programming language implementation.
 ///
@@ -88,18 +104,11 @@ use serde_repr::*;
 /// `src/tests/cli/lang_enum_contract_test.nim` asserts that mechanically, name
 /// for name and ordinal for ordinal, and fails rather than silently comparing
 /// nothing if it cannot locate either list.
-#[derive(
-    Debug,
-    Default,
-    Copy,
-    Clone,
-    FromPrimitive,
-    Serialize_repr,
-    Deserialize_repr,
-    PartialEq,
-    Eq,
-    Hash,
-)]
+///
+/// Deliberately NO `Serialize` / `Deserialize` derive (it used to be
+/// `serde_repr`'s, which wrote the ordinal): a `Lang` crosses a wire only
+/// through [`lang_wire`], by name.  See the module doc.
+#[derive(Debug, Default, Copy, Clone, FromPrimitive, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[repr(u8)]
 pub enum Lang {
@@ -301,9 +310,42 @@ impl Lang {
 /// Applied to the native replay worker socket
 /// (`db_backend::query::ReplayQuery`) and, since LRS-1, to the
 /// `ct/load-locals` DAP request (`db_backend::task::CtLoadLocalsArguments`),
-/// whose Nim sender writes the same spelling via `langWireName`.  The
-/// tracepoint structs (`Tracepoint.lang`, `Stop.lang`) still go through the
-/// `serde_repr` derive; see the module doc.
+/// whose Nim sender writes the same spelling via `langWireName`.  It is the
+/// ONLY serde path a `Lang` has: the enum derives no `Serialize` /
+/// `Deserialize` of its own, so a field that forgets this adapter fails to
+/// compile rather than silently writing the ordinal.
+///
+/// With the adapter, a `Lang` field serialises as its name:
+///
+/// ```
+/// #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+/// struct Args {
+///     #[serde(with = "ct_lang::lang_wire")]
+///     lang: ct_lang::Lang,
+/// }
+/// let json = serde_json::to_string(&Args { lang: ct_lang::Lang::Leo }).unwrap();
+/// assert_eq!(json, r#"{"lang":"leo"}"#);
+/// assert_eq!(serde_json::from_str::<Args>(&json).unwrap(), Args { lang: ct_lang::Lang::Leo });
+/// assert!(serde_json::from_str::<Args>(r#"{"lang":32}"#).is_err(), "an ordinal is refused");
+/// ```
+///
+/// Without it, the struct does not compile — there is no `Serialize` for
+/// `Lang` to fall back on, so the ordinal cannot leak onto a wire by
+/// omission (this is the mutation "re-add a bare `lang: Lang` field"):
+///
+/// ```compile_fail
+/// #[derive(serde::Serialize)]
+/// struct Args {
+///     lang: ct_lang::Lang,
+/// }
+/// ```
+///
+/// ```compile_fail
+/// #[derive(serde::Deserialize)]
+/// struct Args {
+///     lang: ct_lang::Lang,
+/// }
+/// ```
 pub mod lang_wire {
     use super::Lang;
     use serde::{Deserialize, Deserializer, Serializer};
