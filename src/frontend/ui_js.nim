@@ -3921,7 +3921,7 @@ proc onNoTrace(
       cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
         "the restored tabs were left unpopulated (" &
         $restoredEditorTabs.len & ")"
-  let ext = $toJsLang(response.lang)
+  let ext = toCLang(response.lang)
   # for i, file in data.save.files:
     # if i < TAB_LIMIT:
       # if ($file.path).endsWith(ext):

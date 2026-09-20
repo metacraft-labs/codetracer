@@ -589,9 +589,11 @@ suite "EMT anti-drift and exclusion — the controls":
     expectCount(9)
 
   test "the Lang enum is the closed set, and it has 41 members":
-    ## §10's premise. `SUPPORTED_LANGS` must NOT be used for this — two
-    ## divergent hand-maintained lists, 30 vs 29 members, both omitting Python
-    ## and JavaScript, feeding only an HTML dropdown. Derived from the enum's
+    ## §10's premise. `SUPPORTED_LANGS` must NOT be used for this: it is the
+    ## RECORDABLE subset (since LRS-3 one list, derived from `isSupportedLang`
+    ## in `common_lang.nim` -- it used to be two divergent hand-maintained
+    ## lists, 30 vs 29 members, both omitting Python and JavaScript), and the
+    ## closed set this premise needs is the whole enum. Derived from the enum's
     ## own declaration, which is ordinal-pinned to Rust and contract-tested.
     ##
     ## The first spelling of this check counted any line starting with `Lang`

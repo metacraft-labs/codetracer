@@ -72,15 +72,6 @@ proc toLang*(lang: string): Lang =
 proc toLang*(lang: cstring): Lang =
   result = toLang($lang)
 
-let SUPPORTED_LANGS* = @[
-  LangC, LangCpp, LangRust, LangNim, LangGo,
-  LangPascal, LangFortran, LangD, LangCrystal, LangLean, LangAda,
-  LangRubyDb, LangNoir,
-  LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
-  LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
-  LangSolana, LangElixir, LangErlang, LangPhp, LangGdScript
-]
-
 proc getExtension*(lang: Lang): string =
   ## The native-backend spelling.  The table itself is the exhaustive ``case``
   ## ``getExtensionName`` in ``common_lang.nim``, shared with the JS front end

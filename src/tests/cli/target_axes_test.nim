@@ -856,3 +856,99 @@ suite "one source language, two artefacts: .nim versus .nims":
     for reserved in ReservedSourceLanguageTokens:
       check token(slGdScript) != reserved
       check token(tiGdScriptVm) != reserved
+
+# ---------------------------------------------------------------------------
+# SUPPORTED_LANGS: derived from the axes, pinned against the dispatch table
+# ---------------------------------------------------------------------------
+
+suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3)":
+  ## The design's derivation for the language list (§6.3) is "every language
+  ## with a supported (language, defaultMode) pair, which is `recorderToolFor`'s
+  ## domain plus the native family".  `isSupportedLang` (`common_lang.nim`)
+  ## states that on the AXES so the JS front end can evaluate it; this suite
+  ## is what keeps it honest: `recorderToolFor` is the authority on which
+  ## recorders exist, and the two are compared member for member over all 41
+  ## values.  A recorder that lands (`supported: false` -> `true`) without
+  ## `DeclaredUnsupportedLangs` losing the member fails here, as does the
+  ## reverse.
+
+  proc derivedFromDispatch(lang: Lang): bool =
+    ## The derivation, evaluated on the dispatch table itself: supported by a
+    ## declared recorder, OR in the native family (a selector the table does
+    ## not describe at all) -- less the sentinel, which is also undeclared.
+    let tool = recorderToolFor(selectorOfLang(lang))
+    if lang == LangUnknown: false
+    elif tool.supported: true
+    else: not tool.isDeclared
+
+  test "isSupportedLang agrees with recorderToolFor on every one of the 41 values":
+    var disagreements: seq[string] = @[]
+    for lang in Lang:
+      if isSupportedLang(lang) != derivedFromDispatch(lang):
+        disagreements.add($lang & " (axes say " & $isSupportedLang(lang) &
+          ", dispatch table says " & $derivedFromDispatch(lang) & ")")
+    if disagreements.len > 0:
+      checkpoint("disagreements: " & disagreements.join("; "))
+    check disagreements.len == 0
+
+  test "the declared-unsupported set is exactly the table's non-retired `supported: false` arms":
+    # Members whose axes name a recorder the table DECLARES but does not
+    # support.  `LangPython`/`LangRuby` are declared-unsupported too, but by
+    # `retiredNativeReplayTool` on the approach axis, which `isSupportedLang`
+    # already excludes as `raRr` -- so they must NOT be in the set, or an
+    # entry would be dead and would hide a later real drift.
+    var expected: set[Lang] = {}
+    for lang in Lang:
+      let tool = recorderToolFor(selectorOfLang(lang))
+      if tool.isDeclared and not tool.supported and
+         axesOfLang(lang).approach notin {raRr, raTtd}:
+        expected.incl(lang)
+    check expected == DeclaredUnsupportedLangs
+    check DeclaredUnsupportedLangs == {LangLua, LangGdScript}
+
+  test "the native family is exactly the undeclared, non-sentinel members":
+    var native: set[Lang] = {}
+    for lang in Lang:
+      let tool = recorderToolFor(selectorOfLang(lang))
+      if not tool.isDeclared and lang != LangUnknown:
+        native.incl(lang)
+    for lang in native:
+      check axesOfLang(lang).approach == raMcr
+      check axesOfLang(lang).targetIsa == tiNative
+      check isSupportedLang(lang)
+    check LangNim notin native     # Nim IS declared: ct-mcr
+    check LangUnknown notin native
+
+  test "the list is the predicate over the enum, in declaration order, 36 long":
+    var expected: seq[Lang] = @[]
+    for lang in Lang:
+      if isSupportedLang(lang):
+        expected.add(lang)
+    check SUPPORTED_LANGS == expected
+    check SUPPORTED_LANGS.len == 36
+    # The three defects of the two hand-kept lists (design §1.2(e)), closed:
+    check LangPythonDb in SUPPORTED_LANGS
+    check LangJavascript in SUPPORTED_LANGS
+    check LangGdScript notin SUPPORTED_LANGS   # the old core list offered it
+    check LangUnknown notin SUPPORTED_LANGS
+
+  test "the picker folds same-name members and is order-blind":
+    # One entry per `toCLang` name, each in SUPPORTED_LANGS, and the
+    # representative of a conflated pair is the plain member.
+    var names: seq[string] = @[]
+    for lang in LANG_PICKER_LANGS:
+      check lang in SUPPORTED_LANGS
+      check toCLang(lang) notin names
+      names.add(toCLang(lang))
+    for lang in SUPPORTED_LANGS:
+      check toCLang(lang) in names
+    check LANG_PICKER_LANGS.len == 34
+    check LangRust in LANG_PICKER_LANGS
+    check LangRustWasm notin LANG_PICKER_LANGS
+    check LangCpp in LANG_PICKER_LANGS
+    check LangCppWasm notin LANG_PICKER_LANGS
+    # The representative rule reads the fallback ISA, never the ordinal.
+    for lang in LANG_PICKER_LANGS:
+      let a = axesOfLang(lang)
+      if lang in {LangRust, LangCpp}:
+        check a.targetIsa == fallbackTargetIsaForLanguage(a.language)

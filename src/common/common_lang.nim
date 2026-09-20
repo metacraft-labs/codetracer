@@ -73,8 +73,11 @@ type
     LangCppWasm,  # 20
     LangPythonDb, # 21
     LangUnknown,  # 22
-    LangBash,     # 23 — internal only (tree-sitter support in db-backend)
-    LangZsh,      # 24 — internal only (tree-sitter support in db-backend)
+    LangBash,     # 23 — tree-sitter support in db-backend; recorded by
+                  # codetracer-shell-recorders (`recorderToolFor`, `slBash`),
+                  # reachable as `.sh`/`.bash` via `LANGS`
+    LangZsh,      # 24 — as LangBash: tree-sitter in db-backend, recorded by
+                  # codetracer-shell-recorders (`slZsh`), `.zsh` via `LANGS`
     LangSolidity, # 25
     LangMasm,     # 26
     LangSway,     # 27
@@ -256,7 +259,44 @@ func usesMaterializedTraces*(lang: Lang): bool =
   producesMaterializedTrace(axesOfLang(lang).approach)
 
 func toCLang*(lang: Lang): string =
-  ## convert Lang_ to string
+  ## The NAME of the language a ``Lang`` value stands for -- the one such
+  ## table for both backends since LRS-3 (``src/frontend/lang.nim`` used to
+  ## carry a second copy, ``toJsLang``, which agreed with this one on 39 of the
+  ## 41 members and is gone).  It feeds the Monaco ``language:``
+  ## field (``ui/editor.nim``), the LSP ``languageId`` (``lsp_router.nim``),
+  ## the language dropdown (``LANG_PICKER_LANGS`` below) and the CI recording
+  ## event's ``langName``.
+  ##
+  ## It answers per LANGUAGE, not per recording artefact: the four conflated
+  ## pairs fold onto one name each (``LangRuby``/``LangRubyDb`` -> ``ruby``,
+  ## ``LangPython``/``LangPythonDb`` -> ``python``, ``LangRust``/``LangRustWasm``
+  ## -> ``rust``, ``LangCpp``/``LangCppWasm`` -> ``cpp``), exactly as
+  ## ``axesOfLang`` gives each pair one ``SourceLanguage``.  That is why this is
+  ## NOT a wire name: ``langWireName`` is the one that round-trips.
+  ##
+  ## The two slots the two copies disagreed on, and how each was decided:
+  ##
+  ## * ``LangAsm`` -> ``"assembly"`` (design question Q4b, decided 2026-09-20
+  ##   against what Monaco registers rather than by averaging).  The vendored
+  ##   monaco-editor 0.54.0 registers NEITHER ``assembly`` NOR ``assembler`` --
+  ##   its 90 ids (``esm/vs/basic-languages/monaco.contribution.js`` plus the
+  ##   language services) contain one assembly-family tokenizer, ``mips``, and
+  ##   CodeTracer registers exactly one id of its own, ``nim``
+  ##   (``src/frontend/languages/nimLanguage.js``) -- so neither spelling buys
+  ##   highlighting and both fall to Monaco's tokenize-nothing path.  The tie
+  ##   is broken by which spelling the tree's own consumers already handle:
+  ##   every live Monaco and LSP site reads THIS function, so ``"assembly"`` is
+  ##   what has always reached them; ``"assembler"`` reached nothing (the sole
+  ##   ``toJsLang`` caller assigned a variable nobody read), and the axes'
+  ##   ``displayName(slAsm)`` also says ``"assembly"``.  Monaco ids for files
+  ##   that DO have a tokenizer are ``diff_document.DiffLanguageByExtension``'s
+  ##   business, not this table's.
+  ## * ``LangCppWasm`` -> ``"cpp"``, the same name as ``LangCpp``.  The old
+  ##   ``"c++"`` made this table say C++ is ``cpp`` and C++-compiled-to-wasm
+  ##   is ``c++`` (design §1.2(a)); it is the same language, and ``cpp`` is
+  ##   also the id Monaco registers where ``c++`` is not.  The duplicate
+  ##   ``<option>`` this used to threaten is closed by ``LANG_PICKER_LANGS``,
+  ##   which folds same-name members before the dropdown is rendered.
   ##
   ## Exhaustive ``case`` rather than a positional ``array[Lang, string]``: the
   ## array form is checked for length only, so a member removed or reordered
@@ -282,7 +322,7 @@ func toCLang*(lang: Lang): string =
   of LangAsm: "assembly"
   of LangNoir: "noir"
   of LangRustWasm: "rust"
-  of LangCppWasm: "c++"
+  of LangCppWasm: "cpp"
   of LangPythonDb: "python"
   of LangUnknown: "unknown"
   of LangBash: "bash"
@@ -303,6 +343,117 @@ func toCLang*(lang: Lang): string =
   of LangErlang: "erlang"
   of LangPhp: "php"
   of LangGdScript: "gdscript"
+
+const
+  DeclaredUnsupportedLangs* = {LangLua, LangGdScript}
+    ## The `Lang` values whose axes name a real recording approach but whose
+    ## recorder `recorderToolFor` (`src/ct/trace/recorder_dispatch.nim`)
+    ## DECLARES `supported: false` -- the same shape as
+    ## `MaterializedSummaryExceptions`: each is a stated decision, and
+    ## `target_axes_test.nim` pins this set against the dispatch table member
+    ## for member, so an arm that flips there without this set following it
+    ## is a red test rather than a stale dropdown.
+    ##
+    ## * **`LangLua`** -- no Lua recorder exists anywhere; the table's `slLua`
+    ##   arm says so and names what would have to exist.
+    ## * **`LangGdScript`** -- the recorder IS a patched Godot engine, which
+    ##   CodeTracer does not ship; the `tiGdScriptVm` arm prints how to record
+    ##   with one you already have.
+    ##
+    ## NOT here, because they are excluded by their AXES rather than by a
+    ## declaration: `LangPython` and `LangRuby` (`raRr`, the retired native
+    ## replay backends) and `LangUnknown` (`raUnknown`, the sentinel).
+
+func isSupportedLang*(lang: Lang): bool =
+  ## Can `ct record` record something summarised as `lang` -- is there a
+  ## working recorder for the selector `axesOfLang(lang)` projects to, or is
+  ## it the native family that `ct-native-replay` records?  This is the
+  ## design's derivation for the language list (§6.3: "recorderToolFor's
+  ## domain plus the native family"), written on the axes so that it compiles
+  ## on both backends -- `recorderToolFor` itself lives beside `std/os` and
+  ## cannot be reached from the JS front end.  The native side pins the two
+  ## against each other over all 41 members (`target_axes_test.nim`).
+  ##
+  ## An exhaustive `case` over the approach (milestone rule 4): an approach
+  ## added to the axis does not compile until it says whether it is
+  ## recordable.
+  if lang in DeclaredUnsupportedLangs:
+    return false
+  case axesOfLang(lang).approach
+  of raUnknown:
+    false   # the sentinel; the only value with no approach is `LangUnknown`
+  of raRr, raTtd:
+    false   # the retired native-replay backends (`LangPython`, `LangRuby`)
+  of raMcr:
+    true    # the native family (`ct-native-replay`) and Nim's `ct-mcr`
+  of raInstrumentedRuntime, raVmEmulation:
+    true    # every declared recorder, less the exceptions above
+
+const
+  SUPPORTED_LANGS* = block:
+    ## The languages `ct record` can record, in `Lang` declaration order.
+    ## DERIVED at compile time from `isSupportedLang`, which is why there is
+    ## one of it: `src/common/lang.nim` and `src/frontend/lang.nim` used to
+    ## carry a 29- and a 30-entry hand-kept list each, disagreeing by three
+    ## members and both omitting Python and JavaScript, whose recorders have
+    ## existed for as long as the lists have.
+    var langs: seq[Lang] = @[]
+    for lang in Lang:
+      if isSupportedLang(lang):
+        langs.add(lang)
+    langs
+
+func langPickerRepresentative(lang: Lang): bool =
+  ## Is `lang` the member that stands for its `toCLang` NAME in the language
+  ## dropdown?  `toCLang` folds each conflated pair onto one name, so a
+  ## dropdown keyed by that name must offer each name ONCE and must choose
+  ## which member's label to show.  The choice is order-blind (milestone
+  ## Class B: two members swapped in the enum change nothing here): among the
+  ## supported members sharing a name, the representative is the one whose
+  ## ISA is the language's own fallback -- the plain `LangRust` over the
+  ## wasm `LangRustWasm`, `LangCpp` over `LangCppWasm` -- and a member that
+  ## shares its name with no other supported member represents itself
+  ## (`LangSolana` and `LangPolkavm` have no source language, so they could
+  ## never satisfy the ISA rule and must not have to).
+  if not isSupportedLang(lang):
+    return false
+  let name = toCLang(lang)
+  var alone = true
+  for other in Lang:
+    if other != lang and isSupportedLang(other) and toCLang(other) == name:
+      alone = false
+  if alone:
+    return true
+  let axes = axesOfLang(lang)
+  axes.targetIsa == fallbackTargetIsaForLanguage(axes.language)
+
+const
+  LANG_PICKER_LANGS* = block:
+    ## `SUPPORTED_LANGS` with the same-name members folded: exactly one entry
+    ## per distinct `toCLang` name, so the dropdown `renderer.langs` builds
+    ## (`<option value='toCLang(z)'>toName(z)</option>`) carries no duplicate
+    ## `value` -- it used to emit `rust` twice (design §1.2(c)) and, with
+    ## `LangCppWasm` now spelled `cpp`, would have emitted `cpp` twice.  The
+    ## ISA and the recording approach are the assessment's to decide
+    ## (LRS-2B), not a dropdown's, so folding the wasm siblings loses nothing
+    ## a user could have asked for here.
+    var langs: seq[Lang] = @[]
+    for lang in Lang:
+      if langPickerRepresentative(lang):
+        langs.add(lang)
+    langs
+
+static:
+  # A picker that is not a fold of the supported list is a bug in the fold,
+  # and one that offers a name twice is the defect this exists to remove;
+  # both are caught while compiling rather than in a lane.
+  var seen: seq[string] = @[]
+  for lang in LANG_PICKER_LANGS:
+    doAssert lang in SUPPORTED_LANGS, $lang & " is offered but not supported"
+    doAssert toCLang(lang) notin seen, "duplicate picker value " & toCLang(lang)
+    seen.add(toCLang(lang))
+  for lang in SUPPORTED_LANGS:
+    doAssert toCLang(lang) in seen, $lang & " is supported but has no picker entry"
 
 func toName*(lang: Lang): string =
   ## convert Lang_ to string

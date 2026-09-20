@@ -66,69 +66,26 @@ proc toLangFromFilename*(location: cstring): Lang =
   except:
     result = LangUnknown
 
-proc toJsLang*(lang: Lang): cstring =
-  ## Exhaustive ``case`` rather than a positional ``array[Lang, cstring]``.
+proc langPickerOptions*(): string =
+  ## The `<option>` list of the language dropdown, rendered from
+  ## `LANG_PICKER_LANGS` (`common_lang.nim`) and nothing else -- one option per
+  ## distinct `toCLang` name, labelled by `toName`.  It lives here, in a leaf
+  ## the `test-frontend-js` lane can import, rather than in `renderer.nim`
+  ## where `langs` used to build it inline: no runnable lane can import the
+  ## renderer (`nim js` on it pulls the Karax/Monaco tree), so the rendering
+  ## is asserted on THIS proc and the renderer is a one-line caller.
   ##
-  ## Deliberately NOT folded into ``toCLang``: the two disagree on two members
-  ## (``LangAsm`` is ``assembler`` here and ``assembly`` there, ``LangCppWasm``
-  ## is ``cpp`` here and ``c++`` there), so they are two mappings that happen to
-  ## agree 38 times, not one mapping written twice.
-  case lang
-  of LangC: cstring"c"
-  of LangCpp: cstring"cpp"
-  of LangRust: cstring"rust"
-  of LangNim: cstring"nim"
-  of LangGo: cstring"go"
-  of LangPascal: cstring"pascal"
-  of LangFortran: cstring"fortran"
-  of LangD: cstring"d"
-  of LangCrystal: cstring"crystal"
-  of LangLean: cstring"lean"
-  of LangJulia: cstring"julia"
-  of LangAda: cstring"ada"
-  of LangPython: cstring"python"
-  of LangRuby: cstring"ruby"
-  of LangRubyDb: cstring"ruby"
-  of LangJavascript: cstring"javascript"
-  of LangLua: cstring"lua"
-  of LangAsm: cstring"assembler"
-  of LangNoir: cstring"noir"
-  of LangRustWasm: cstring"rust"
-  of LangCppWasm: cstring"cpp"
-  of LangPythonDb: cstring"python"
-  of LangUnknown: cstring"unknown"
-  of LangBash: cstring"bash"
-  of LangZsh: cstring"zsh"
-  of LangSolidity: cstring"solidity"
-  of LangMasm: cstring"masm"
-  of LangSway: cstring"sway"
-  of LangMove: cstring"move"
-  of LangPolkavm: cstring"polkavm"
-  of LangCairo: cstring"cairo"
-  of LangCircom: cstring"circom"
-  of LangLeo: cstring"leo"
-  of LangTolk: cstring"tolk"
-  of LangAiken: cstring"aiken"
-  of LangCadence: cstring"cadence"
-  of LangSolana: cstring"solana"
-  of LangElixir: cstring"elixir"
-  of LangErlang: cstring"erlang"
-  of LangPhp: cstring"php"
-  of LangGdScript: cstring"gdscript"
+  ## `SUPPORTED_LANGS` is deliberately not iterated directly: it holds both
+  ## members of each conflated pair, and `toCLang` folds a pair onto one
+  ## name, which is how the old loop emitted `<option value='rust'>` twice.
+  result = ""
+  for lang in LANG_PICKER_LANGS:
+    result.add("<option value='" & toCLang(lang) & "'>" & toName(lang) & "</option>")
 
 proc toSet(names: seq[cstring]): JsAssoc[cstring, bool] =
   result = JsAssoc[cstring, bool]{}
   for name in names:
     result[name] = true
-
-let SUPPORTED_LANGS* = @[
-  LangC, LangCpp, LangRust, LangNim, LangGo,
-  LangPascal, LangFortran, LangD, LangCrystal, LangLean, LangAda,
-  LangRubyDb, LangNoir, LangRustWasm, LangCppWasm,
-  LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
-  LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
-  LangSolana, LangElixir, LangErlang, LangPhp
-]
 
 let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = block:
   ## Built at module init from `reservedNames` in `common_lang.nim`, which is

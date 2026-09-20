@@ -429,9 +429,11 @@ proc redrawLegacyRendererInstance*(label: cstring): bool =
 #   return text
 
 proc langs*: string =
-  result = ""
-  for z in SUPPORTED_LANGS:
-    result.add("<option value='$1'>$2</option>" % [toCLang(z), toName(z)])
+  ## The language dropdown's options.  Rendered by `lang.langPickerOptions`
+  ## from the derived `LANG_PICKER_LANGS`, which this used to build inline
+  ## from the frontend's own `SUPPORTED_LANGS` -- one of two hand-kept lists,
+  ## and the one that emitted `<option value='rust'>` twice.
+  langPickerOptions()
 
 
 var traceTime = Date.now() # per-replay
