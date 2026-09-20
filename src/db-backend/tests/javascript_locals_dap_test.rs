@@ -142,7 +142,8 @@ fn load_locals_as_ints(client: &mut DapStdioTestClient, context: &str) -> HashMa
             "rrTicks": 0,
             "countBudget": 1000,
             "minCountLimit": 0,
-            "lang": 0,
+            // The wire NAME, never the ordinal (LRS-1): the receiver refuses an integer.
+            "lang": Lang::Javascript.wire_name(),
             "watchExpressions": [],
             "depthLimit": -1,
         }),
@@ -409,7 +410,7 @@ fn load_locals_at(handler: &mut Handler, step: StepId) -> HashMap<String, i64> {
         "rrTicks": step.0,
         "countBudget": 1000,
         "minCountLimit": 0,
-        "lang": Lang::Javascript as u8,
+        "lang": Lang::Javascript.wire_name(),
         "watchExpressions": [],
         "depthLimit": -1,
     });

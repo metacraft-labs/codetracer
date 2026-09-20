@@ -644,7 +644,12 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
     "minCountLimit": 50,
     "depthLimit": 7,
     "watchExpressions": watches,
-    "lang": 0,  # auto-detect
+    # The language's wire name (LRS-1).  This used to be `"lang": 0` with the
+    # comment "auto-detect", which it never was: 0 is `LangC`, the Rust
+    # `Lang::default()`.  The same value, spelled so that a renumbered enum
+    # cannot change what it means; `Db::load_locals` does not read it for a
+    # materialized trace.
+    "lang": LoadLocalsDefaultLang,
   }
   let resp = s.backend.sendDapRequest("ct/load-locals", args)
   if resp.getOrDefault("success").getBool(false):

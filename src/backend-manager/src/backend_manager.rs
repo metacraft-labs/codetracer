@@ -44,6 +44,25 @@ use crate::{
     trace_metadata,
 };
 
+/// The `lang` this process puts on a `ct/load-locals` request when its client
+/// did not say: the `Lang::wire_name` of `Lang::C`, spelled as a literal.
+///
+/// A NAME, never an ordinal (LRS-1).  The db-backend decodes the field with
+/// `ct-lang`'s `lang_wire` adapter and refuses a bare integer, and `"c"` is
+/// what the integer `0` this process used to send decoded to (`Lang::default()`).
+///
+/// A literal rather than `ct_lang::Lang::C.wire_name()` because this crate
+/// must stay free of path dependencies: the `backend-manager` nix derivation
+/// (`nix/packages/default.nix`) takes the CRATE directory as its source, not
+/// the repository, so `../../libs/ct-lang` does not exist in its sandbox and
+/// `nix build .#codetracer` would fail to resolve the manifest.  The literal
+/// is pinned against the production table by
+/// `src/tests/cli/lang_enum_contract_test.nim` (property 7, "the
+/// backend-manager's literal default is langWireName(LangC)"), so it cannot
+/// drift silently; if it ever did, the request would be REFUSED and named,
+/// not decoded as a different language.
+const LOAD_LOCALS_DEFAULT_LANG: &str = "c";
+
 /// Write handle for a single connected daemon client, together with its
 /// unique identifier.  Used by the daemon-mode response router.
 struct ClientHandle {
@@ -2868,10 +2887,18 @@ impl BackendManager {
             .and_then(|a| a.get("minCountLimit"))
             .and_then(Value::as_i64)
             .unwrap_or(0);
+        // The language by its `Lang::wire_name` (LRS-1).  The db-backend
+        // decodes this field with `ct-lang`'s `lang_wire` adapter and refuses
+        // an integer, so an ordinal is not passed through even if a client
+        // sends one; the default is `LOAD_LOCALS_DEFAULT_LANG` (`"c"`, the
+        // name of `Lang::C`), which is what the integer `0` this used to
+        // forward decoded to.  The Python client does not send the field at
+        // all (`python-api/codetracer/trace.py`).
         let lang = args
             .and_then(|a| a.get("lang"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
+            .and_then(Value::as_str)
+            .unwrap_or(LOAD_LOCALS_DEFAULT_LANG)
+            .to_owned();
 
         // Get a unique seq for the DAP command sent to the backend.
         let dap_seq = match self.daemon_state.as_mut() {
@@ -3042,7 +3069,8 @@ impl BackendManager {
                 "rrTicks": 0,
                 "countBudget": 3000,
                 "minCountLimit": 0,
-                "lang": 0,
+                // By name, never an ordinal (LRS-1); `"c"` is what `0` meant.
+                "lang": LOAD_LOCALS_DEFAULT_LANG,
                 "watchExpressions": [expression],
                 "depthLimit": 3,
             },

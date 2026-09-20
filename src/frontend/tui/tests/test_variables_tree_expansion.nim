@@ -511,7 +511,9 @@ suite "CTUI-7: a real compound value expands, shows its fields, and is " &
       let rawLocals = session.sendRawDapRequest("ct/load-locals", %*{
         "rrTicks": session.getCurrentRRTicks().int64,
         "countBudget": 3000, "minCountLimit": 50, "depthLimit": 7,
-        "watchExpressions": newSeq[string](), "lang": 0,
+        "watchExpressions": newSeq[string](),
+        # the wire NAME, never the ordinal (LRS-1)
+        "lang": LoadLocalsDefaultLang,
       }).getOrDefault("body").getOrDefault("locals")
       discard session.drainEvents()
       var addressed = 0

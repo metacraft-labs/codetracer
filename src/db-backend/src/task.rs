@@ -34,6 +34,27 @@ pub struct CtLoadLocalsArguments {
     pub rr_ticks: i64,
     pub count_budget: i64,
     pub min_count_limit: i64,
+    /// The language by its [`Lang::wire_name`] — `"c"`, `"leo"`, `"pythondb"`
+    /// — and never by its ordinal (LRS-1).
+    ///
+    /// This field used to be read straight through `Lang`'s `serde_repr`
+    /// derive, so the Nim frontend sent `ord(Lang)` and the enum's declaration
+    /// order was a wire contract.  Two hand-written senders had already
+    /// drifted from it unnoticed (`src/codetracer-bench/src/gui_ops.rs` said
+    /// Cairo = 32 and Solana = 35 where the canonical ordinals are 30 and 36;
+    /// `tests/leo_search_calltrace_test.rs` said Leo = 33 where it is 32), and
+    /// nothing could tell, because a wrong integer decodes as a *plausible*
+    /// language.  A wrong name is refused with the name in the error.
+    ///
+    /// The adapter is the same one the native replay worker socket has used
+    /// since the two enums diverged (`crate::query::WireLoadLocalsArguments`);
+    /// `schemars` is told the schema type separately because it would
+    /// otherwise read the serde `with` path as a type.  The Nim side is
+    /// `langWireName` in `src/common/common_lang.nim`;
+    /// `src/tests/cli/lang_enum_contract_test.nim` pins the two spellings
+    /// member for member and asserts this attribute is present.
+    #[serde(with = "crate::lang::lang_wire")]
+    #[schemars(with = "String")]
     pub lang: Lang,
     pub watch_expressions: Vec<String>,
     pub depth_limit: i64, // for easier compat with our nim code: NO_DEPTH_LIMIT = -1 for None for now
@@ -3195,6 +3216,83 @@ mod tests {
     //! contract.  The matching Nim consumer renames are M-REC-5 wire
     //! format work.
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // LRS-1: `ct/load-locals` carries the language by name.
+    //
+    // These four are the Rust half of the evidence that no `Lang` ordinal
+    // crosses the `ct/load-locals` hop; the Nim half is
+    // `src/tests/gui/tests/store/store_test.nim` ("requestLocals sends lang
+    // as the language's wire NAME") and the cross-language pin is
+    // `src/tests/cli/lang_enum_contract_test.nim` property 7.
+    // -----------------------------------------------------------------------
+
+    /// The exact request the Nim `ReplayDataStore.requestLocals` builds, as
+    /// JSON text: the field is a string, and it is the wire name.
+    #[test]
+    fn load_locals_arguments_carry_the_language_by_name() {
+        let args = CtLoadLocalsArguments {
+            rr_ticks: 42,
+            count_budget: 3000,
+            min_count_limit: 50,
+            lang: Lang::Leo,
+            watch_expressions: vec![],
+            depth_limit: 7,
+        };
+        let json = serde_json::to_string(&args).expect("serialise");
+        assert_eq!(
+            json,
+            r#"{"rrTicks":42,"countBudget":3000,"minCountLimit":50,"lang":"leo","watchExpressions":[],"depthLimit":7}"#
+        );
+        assert!(
+            !json.contains(r#""lang":32"#),
+            "the Leo ordinal leaked onto the wire: {json}"
+        );
+    }
+
+    /// What the Nim side sends is parsed back to the same variant, for every
+    /// variant — including the ones with no `ct/load-locals` traffic today,
+    /// because the sender may not know that.
+    #[test]
+    fn every_language_name_decodes_on_the_load_locals_hop() {
+        for lang in Lang::ALL {
+            let text = format!(
+                r#"{{"rrTicks":0,"countBudget":1,"minCountLimit":0,"lang":"{}","watchExpressions":[],"depthLimit":-1}}"#,
+                lang.wire_name()
+            );
+            let decoded: CtLoadLocalsArguments = serde_json::from_str(&text).expect("decode");
+            assert_eq!(decoded.lang, lang, "{text}");
+        }
+    }
+
+    /// A bare integer is REFUSED.  Accepting `32` as Leo is the contract this
+    /// milestone removes; a sender that still writes an ordinal must get an
+    /// error naming the shape, not a silently decoded language.
+    #[test]
+    fn a_bare_integer_lang_is_refused_on_the_load_locals_hop() {
+        for ordinal in [0, 12, 30, 32, 33, 35, 36, 40] {
+            let text = format!(
+                r#"{{"rrTicks":0,"countBudget":1,"minCountLimit":0,"lang":{ordinal},"watchExpressions":[],"depthLimit":-1}}"#
+            );
+            let err = serde_json::from_str::<CtLoadLocalsArguments>(&text)
+                .expect_err("an ordinal must not decode as a language");
+            assert!(
+                err.to_string().contains("string"),
+                "unhelpful error for {ordinal}: {err}"
+            );
+        }
+    }
+
+    /// An unknown name is refused AND named, so a frontend that spells a
+    /// language differently learns which spelling it sent.
+    #[test]
+    fn an_unknown_language_name_is_refused_and_named_on_the_load_locals_hop() {
+        let text =
+            r#"{"rrTicks":0,"countBudget":1,"minCountLimit":0,"lang":"LangLeo","watchExpressions":[],"depthLimit":-1}"#;
+        let err = serde_json::from_str::<CtLoadLocalsArguments>(text)
+            .expect_err("the Nim enum member name is not the wire name");
+        assert!(err.to_string().contains("LangLeo"), "error does not name it: {err}");
+    }
 
     /// An argument type that denies unknown fields rejects a typo rather
     /// than silently ignoring it — the point of the whole exercise.

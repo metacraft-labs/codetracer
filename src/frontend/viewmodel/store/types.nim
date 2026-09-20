@@ -361,6 +361,14 @@ type
       ## identically and echoed ``lang: 0`` on every ``Stop``, so it does not
       ## select the evaluator on a CTFS trace.  The field is still sent because
       ## ``Tracepoint`` requires it.
+      ##
+      ## STILL AN ORDINAL, deliberately, after LRS-1 took the ordinal off
+      ## ``ct/load-locals``: ``Tracepoint.lang`` on ``ct/run-tracepoints`` is
+      ## read by the Rust side through ``Lang``'s ``serde_repr`` derive, so a
+      ## name would be refused here until that struct moves too.  This is one
+      ## of the two remaining ordinal-carrying payload fields (the other is
+      ## ``Stop.lang`` coming back), and
+      ## ``src/tests/cli/lang_enum_contract_test.nim`` names the site.
 
   TracepointSweepHit* = object
     ## One ``Stop`` from a ``ct/tracepoint-results`` answer.

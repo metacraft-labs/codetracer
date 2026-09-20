@@ -39,15 +39,26 @@
 //! the *logic* (`lang_from_context` and its tests); this crate holds only the
 //! ordinal contract and the things that are pure functions of it.
 //!
-//! # The ordinals are a wire and storage contract — do not reorder
+//! # The ordinals are still a wire contract — do not reorder yet
 //!
-//! The integer value of a `Lang` is carried by:
+//! What the integer value of a `Lang` is and is not carried by, as of LRS-1:
 //!
-//! * the `lang` column of the persisted `~/.local/share/codetracer/trace_index.db`
-//!   `recordings` table, written by Nim (`src/common/trace_index.nim`);
-//! * the `ct/load-locals` DAP request, whose `lang` field the Nim frontend
-//!   sends as `ord(Lang)` and this side reads with `serde_repr`;
-//! * `ct-dap-client`'s tracepoint requests.
+//! * **no longer** the `lang` column of the persisted
+//!   `~/.local/share/codetracer/trace_index.db` `recordings` table — it holds
+//!   the enum *name* since trace_index schema version 1
+//!   (`src/common/trace_index.nim`);
+//! * **no longer** the `ct/load-locals` DAP request: its `lang` field is the
+//!   [`Lang::wire_name`] on both sides — the Nim frontend writes
+//!   `langWireName(lang)` and `db_backend::task::CtLoadLocalsArguments` reads
+//!   it through [`lang_wire`], refusing a bare integer (LRS-1);
+//! * **still** the tracepoint pair on the DAP hop: `Tracepoint.lang` on
+//!   `ct/run-tracepoints` (Nim -> Rust; the db-backend never reads it, it
+//!   takes the language from the stop's path) and `Stop.lang` on
+//!   `ct/tracepoint-results` (Rust -> Nim; always `Lang::default()`), in
+//!   `db_backend::task` and mirrored in `ct-dap-client`'s tracepoint types.
+//!   Inert, but an ordinal on a wire is a contract on this enum's layout
+//!   until it is moved; `src/tests/cli/lang_enum_contract_test.nim` pins
+//!   those sites by name so the list cannot grow.
 //!
 //! It is **not** carried to `codetracer-native-backend`.  That repository has
 //! its own, deliberately different `Lang` (the languages the native backend
@@ -287,10 +298,12 @@ impl Lang {
 /// `#[serde(with = "...")]` adapter that carries a [`Lang`] as its
 /// [`Lang::wire_name`] instead of its ordinal.
 ///
-/// Applied only to the native replay worker socket
-/// (`db_backend::query::ReplayQuery`).  The DAP-facing structs keep
-/// `serde_repr` because the Nim frontend still sends `lang` as an integer
-/// there.
+/// Applied to the native replay worker socket
+/// (`db_backend::query::ReplayQuery`) and, since LRS-1, to the
+/// `ct/load-locals` DAP request (`db_backend::task::CtLoadLocalsArguments`),
+/// whose Nim sender writes the same spelling via `langWireName`.  The
+/// tracepoint structs (`Tracepoint.lang`, `Stop.lang`) still go through the
+/// `serde_repr` derive; see the module doc.
 pub mod lang_wire {
     use super::Lang;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -303,7 +316,7 @@ pub mod lang_wire {
         let name = String::deserialize(deserializer)?;
         Lang::from_wire_name(&name).ok_or_else(|| {
             serde::de::Error::custom(format!(
-                "unknown language name `{name}` on the replay worker wire"
+                "unknown language name `{name}` on the wire: expected a `Lang::wire_name` spelling such as `c` or `pythondb`, never an ordinal"
             ))
         })
     }
@@ -331,7 +344,7 @@ pub mod lang_wire {
                 None => Ok(None),
                 Some(name) => Lang::from_wire_name(&name).map(Some).ok_or_else(|| {
                     serde::de::Error::custom(format!(
-                        "unknown language name `{name}` on the replay worker wire"
+                        "unknown language name `{name}` on the wire: expected a `Lang::wire_name` spelling such as `c` or `pythondb`, never an ordinal"
                     ))
                 }),
             }

@@ -861,12 +861,23 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
 # Request procs
 # ---------------------------------------------------------------------------
 
+const
+  LoadLocalsDefaultLang* = "c"
+    ## What ``requestLocals`` sends for ``lang`` when the caller does not know
+    ## the language: the wire name of ``LangC``, which is the Rust
+    ## ``Lang::default()`` and is what the integer ``0`` this field used to
+    ## carry decoded to.  Spelled as a literal here because this module is in
+    ## the Embed SDK's package graph and deliberately does not import
+    ## ``common_lang`` (see ``FlowTokenLanguage`` in ``flow_layout.nim``);
+    ## ``store_test.nim`` pins it against ``langWireName(LangC)`` so the two
+    ## cannot drift.
+
 proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
                     countBudget: int = 3000;
                     minCountLimit: int = 50;
                     depthLimit: int = 7;
                     watchExpressions: seq[string] = @[];
-                    lang: int = 0) =
+                    lang: string = LoadLocalsDefaultLang) =
   ## Request locals/globals from the backend for the given rrTicks.
   ## Skipped if an identical request is already in flight.
   ##
@@ -876,9 +887,17 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   ## ``loadLocals`` in state.nim so callers that only know the
   ## tick position still produce a valid request.
   ##
-  ## ``lang`` is the ordinal of the ``Lang`` enum (matching the Rust
-  ## backend's ``#[repr(u8)]`` Lang which uses ``serde_repr``).
-  ## 0 = C (the Rust-side default).
+  ## ``lang`` is the language's WIRE NAME -- ``langWireName(lang)`` on the Nim
+  ## side, ``Lang::wire_name`` on the Rust side, decoded by ``ct-lang``'s
+  ## ``lang_wire`` adapter -- never the ``Lang`` ordinal.  Until LRS-1 this
+  ## field was ``lang: int = 0`` and the doc here said "the ordinal of the
+  ## ``Lang`` enum (matching the Rust backend's ``#[repr(u8)]`` Lang which
+  ## uses ``serde_repr``)"; that made the enum's declaration order a wire
+  ## contract, and two hand-written senders had already got it wrong
+  ## (``gui_ops.rs`` said Cairo = 32 and Solana = 35; the canonical ordinals
+  ## were 30 and 36).  A name cannot be off by two.  The receiver refuses a
+  ## bare integer, so a caller that still passes one gets an error rather
+  ## than a silently wrong language.
   let key = "load-locals"
   # Include watch expressions in the dedup key so that adding a new
   # watch at the same rrTicks position still triggers a fresh request.

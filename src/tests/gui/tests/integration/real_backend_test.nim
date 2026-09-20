@@ -48,7 +48,7 @@
 import std/[json, os, unittest, strutils]
 import isonim/core/[signals, computation]
 import headless_session
-import store/types
+import store/[replay_data_store, types]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -573,7 +573,7 @@ suite "Real backend: full debugging workflow":
       "minCountLimit": 50,
       "depthLimit": 7,
       "watchExpressions": [],
-      "lang": 0,
+      "lang": LoadLocalsDefaultLang,  # the wire NAME, never the ordinal (LRS-1)
     })
     let rawLocalsCount = rawResp["body"]["locals"].len
 

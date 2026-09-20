@@ -76,7 +76,15 @@ type
     # NO_DEPTH_LIMIT = -1 for None for now
     depthLimit*: int
     watchExpressions*: seq[langstring]
-    lang*: Lang
+    lang*: langstring
+      ## The language's wire name -- ``langWireName(lang)``, which is the Rust
+      ## ``Lang::wire_name`` spelling -- NOT a ``Lang``.  This record is
+      ## handed to ``toJs`` and serialised as-is on the JS backend, where a
+      ## Nim enum is its ordinal at runtime; typing the field ``Lang`` is how
+      ## ``ct/load-locals`` came to carry ``ord(Lang)`` on the wire (LRS-1).
+      ## The Rust receiver (``CtLoadLocalsArguments`` in
+      ## ``src/db-backend/src/task.rs``) decodes it with ``ct-lang``'s
+      ## ``lang_wire`` adapter and refuses an integer.
 
   CtLoadLocalsResponseBody* = ref object
     locals*: seq[Variable]

@@ -472,6 +472,11 @@ impl DapStdioClient {
     }
 
     /// Load locals at the current stop using CodeTracer's DAP extension.
+    ///
+    /// `lang` travels by its [`Lang::wire_name`] (LRS-1); the db-backend
+    /// refuses an ordinal.  `Lang::C` is what the integer `0` this used to
+    /// send decoded to, and `Db::load_locals` does not read the field for a
+    /// materialized trace, so the flow runners' behaviour is unchanged.
     pub fn load_locals(&mut self) -> Result<Value, BoxError> {
         self.send_request(
             "ct/load-locals",
@@ -479,7 +484,7 @@ impl DapStdioClient {
                 "rrTicks": 0,
                 "countBudget": 1000,
                 "minCountLimit": 0,
-                "lang": 0,
+                "lang": Lang::C.wire_name(),
                 "watchExpressions": [],
                 "depthLimit": -1,
             }),

@@ -21,6 +21,7 @@ use crate::dap_driver::{DapError, DapSession};
 use crate::{
     BenchReport, BenchRow, FixtureRecorder, Language, RecorderError, ct_binary, ct_cli_binary,
 };
+use ct_lang::Lang;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -684,23 +685,29 @@ impl DapMeasurementDriver {
             "d".to_string(),
             "e".to_string(),
         ];
-        // The dap-server's `Lang` enum is `#[repr(u8)]` with
-        // `serde_repr` — values serialise as integers, not names.
-        // Discriminants match `codetracer/src/db-backend/src/lang.rs`:
-        // C=0, Cpp=1, Rust=2, Nim=3, Go=4, …, Python=12, Ruby=13,
-        // Javascript=15, Cairo=32, Solana=35.
+        // `ct/load-locals` carries `lang` by NAME — `ct_lang::Lang::wire_name`,
+        // decoded by the dap-server's `lang_wire` adapter (LRS-1).  This
+        // used to be a hand-written `match` onto `u8` ordinals with a comment
+        // attributing them to `src/db-backend/src/lang.rs`, and two of the
+        // ten were wrong against the canonical enum: `Cairo => 32` (32 is
+        // `Leo`; Cairo is 30) and `Solana => 35` (35 is `Cadence`; Solana is
+        // 36), so a Cairo bench told the backend "Leo" and a Solana bench
+        // "Cadence", and nothing could tell because a wrong ordinal decodes
+        // as a plausible language.  Naming the variant of the shared enum
+        // leaves no number to get wrong; the receiver refuses an integer.
         let lang_wire = match language {
-            Language::C => 0u8,
-            Language::CPlusPlus => 1,
-            Language::Rust => 2,
-            Language::Nim => 3,
-            Language::Go => 4,
-            Language::Python => 12,
-            Language::Ruby => 13,
-            Language::JavaScript => 15,
-            Language::Cairo => 32,
-            Language::Solana => 35,
-        };
+            Language::C => Lang::C,
+            Language::CPlusPlus => Lang::Cpp,
+            Language::Rust => Lang::Rust,
+            Language::Nim => Lang::Nim,
+            Language::Go => Lang::Go,
+            Language::Python => Lang::Python,
+            Language::Ruby => Lang::Ruby,
+            Language::JavaScript => Lang::Javascript,
+            Language::Cairo => Lang::Cairo,
+            Language::Solana => Lang::Solana,
+        }
+        .wire_name();
         Ok(DapBenchContext {
             thread_id,
             frame_id,
@@ -840,9 +847,10 @@ pub(crate) struct DapBenchContext {
     pub function_name: String,
     pub target_variable: String,
     pub summary_tokens: Vec<String>,
-    /// Numeric `Lang` ordinal expected by the dap-server's
-    /// `CtLoadLocalsArguments::lang` (#[repr(u8)] + serde_repr).
-    pub lang_wire: u8,
+    /// The language's `ct_lang::Lang::wire_name`, which is what the
+    /// dap-server's `CtLoadLocalsArguments::lang` decodes (LRS-1).  Not an
+    /// ordinal: see the note where it is computed.
+    pub lang_wire: &'static str,
     pub rr_ticks: i64,
 }
 

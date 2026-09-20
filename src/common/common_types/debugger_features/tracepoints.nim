@@ -18,6 +18,13 @@ type
     isDisabled*: bool
     isChanged*: bool
     lang*: Lang
+      ## Crosses ``ct/run-tracepoints`` as ``ord(Lang)`` (this record goes
+      ## through ``toJs``, where a Nim enum is its ordinal), and the Rust
+      ## ``Tracepoint.lang`` reads it with ``serde_repr`` and never consults
+      ## it -- the backend takes the language from each stop's path.  One of
+      ## the two ordinal-carrying payload fields LRS-1 left in place when it
+      ## moved ``ct/load-locals`` to names (the other is ``Stop.lang``);
+      ## ``src/tests/cli/lang_enum_contract_test.nim`` pins the sites.
     results*: seq[Stop]
     tracepointError*: langstring
 

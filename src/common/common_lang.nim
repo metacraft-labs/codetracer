@@ -17,9 +17,16 @@ type
   Lang* = enum ## Identifies a programming language implementation
     ## Ordinals MUST match the canonical Rust `Lang` enum in
     ## libs/ct-lang/src/lib.rs, which uses `#[repr(u8)]` with `serde_repr`.
-    ## That is the enum on the other side of the `ct/load-locals` DAP hop,
-    ## where `lang` is still sent as an integer (see
-    ## `frontend/viewmodel/store/replay_data_store.nim`).
+    ##
+    ## The `ct/load-locals` DAP hop no longer carries the ordinal (LRS-1):
+    ## every sender writes `langWireName(lang)` -- the same spelling as the
+    ## Rust `Lang::wire_name` -- and the receiver decodes it with `ct-lang`'s
+    ## `lang_wire` adapter, refusing a bare integer.  What still carries the
+    ## integer is the tracepoint pair: `Tracepoint.lang` on
+    ## `ct/run-tracepoints` (Nim -> Rust, which never reads it) and
+    ## `Stop.lang` on `ct/tracepoint-results` (Rust -> Nim, always the Rust
+    ## `Lang::default()`); `src/tests/cli/lang_enum_contract_test.nim` pins
+    ## those sites by name so the list cannot grow unnoticed.
     ##
     ## This used to name src/db-backend/src/lang.rs.  That file now only
     ## re-exports the enum (`pub use ct_lang::{lang_wire, Lang}`); the
@@ -453,6 +460,64 @@ func flowKeywords*(lang: Lang): seq[string] =
      LangLeo, LangTolk, LangAiken, LangCadence, LangSolana, LangElixir,
      LangErlang, LangPhp, LangGdScript:
     @[]
+
+func langWireName*(lang: Lang): string =
+  ## The ordinal-independent spelling of ``lang`` on a wire: what the
+  ## ``ct/load-locals`` request's ``lang`` field carries since LRS-1.
+  ##
+  ## Byte-for-byte the Rust ``Lang::wire_name`` in ``libs/ct-lang/src/lib.rs``
+  ## -- the receiver decodes it with that crate's ``lang_wire`` adapter, so a
+  ## spelling that differs here is a refused request, not a wrong language.
+  ## ``src/tests/cli/lang_enum_contract_test.nim`` pins the two tables member
+  ## for member.  Not ``toCLang``: that one folds ``LangRubyDb`` into
+  ## ``"ruby"`` and ``LangRustWasm`` into ``"rust"``, which is a display
+  ## choice, and a wire name must round-trip.
+  ##
+  ## Exhaustive ``case`` on purpose (milestone rule 4): a member added to
+  ## ``Lang`` does not compile until it has been given a name here, exactly as
+  ## on the Rust side.
+  case lang
+  of LangC: "c"
+  of LangCpp: "cpp"
+  of LangRust: "rust"
+  of LangNim: "nim"
+  of LangGo: "go"
+  of LangPascal: "pascal"
+  of LangFortran: "fortran"
+  of LangD: "d"
+  of LangCrystal: "crystal"
+  of LangLean: "lean"
+  of LangJulia: "julia"
+  of LangAda: "ada"
+  of LangPython: "python"
+  of LangRuby: "ruby"
+  of LangRubyDb: "rubydb"
+  of LangJavascript: "javascript"
+  of LangLua: "lua"
+  of LangAsm: "asm"
+  of LangNoir: "noir"
+  of LangRustWasm: "rustwasm"
+  of LangCppWasm: "cppwasm"
+  of LangPythonDb: "pythondb"
+  of LangUnknown: "unknown"
+  of LangBash: "bash"
+  of LangZsh: "zsh"
+  of LangSolidity: "solidity"
+  of LangMasm: "masm"
+  of LangSway: "sway"
+  of LangMove: "move"
+  of LangPolkavm: "polkavm"
+  of LangCairo: "cairo"
+  of LangCircom: "circom"
+  of LangLeo: "leo"
+  of LangTolk: "tolk"
+  of LangAiken: "aiken"
+  of LangCadence: "cadence"
+  of LangSolana: "solana"
+  of LangElixir: "elixir"
+  of LangErlang: "erlang"
+  of LangPhp: "php"
+  of LangGdScript: "gdscript"
 
 proc toLang*(lang: string): Lang
 proc toLang*(lang: cstring): Lang

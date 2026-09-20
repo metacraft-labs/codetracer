@@ -281,7 +281,7 @@ fn load_locals_with_watches(handler: &mut Handler, watches: &[&str]) -> Rows {
         "rrTicks": 0,
         "countBudget": 1000,
         "minCountLimit": 0,
-        "lang": Lang::Noir as u8,
+        "lang": Lang::Noir.wire_name(),
         "watchExpressions": watches,
         "depthLimit": -1,
     });

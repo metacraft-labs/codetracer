@@ -7,13 +7,15 @@ use crate::value::ValueRecordWithType;
 /// [`crate::task::CtLoadLocalsArguments`] as it travels the native replay
 /// worker socket.
 ///
-/// Field-for-field identical to the DAP-facing struct except that `lang` is
-/// carried as its [`Lang::wire_name`] rather than as its `#[repr(u8)]`
-/// ordinal.  The DAP-facing struct cannot simply change representation: the
-/// Nim frontend sends `lang` as an integer on the `ct/load-locals` hop
-/// (`src/frontend/viewmodel/store/replay_data_store.nim` builds it by hand),
-/// and that hop is out of scope here.  The worker socket is a different hop
-/// between two Rust crates and is de-ordinalised.
+/// Field-for-field identical to the DAP-facing struct, `lang` carried as its
+/// [`Lang::wire_name`] on both.  When this type was written the DAP-facing
+/// struct still read `lang` as a `#[repr(u8)]` ordinal — the Nim frontend
+/// sent an integer on the `ct/load-locals` hop — so the worker socket was
+/// de-ordinalised separately, here.  LRS-1 moved the DAP hop onto the same
+/// `lang_wire` adapter, so the two shapes now agree; this type stays because
+/// `codetracer-native-backend` pins its exact byte string
+/// (`query::tests::parses_the_codetracer_cores_load_locals_wire_shape`) and a
+/// worker-socket contract should not change because a DAP struct did.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WireLoadLocalsArguments {

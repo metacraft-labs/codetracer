@@ -528,7 +528,7 @@ fn test_m2_contract_load_locals_per_variable_origin_summary_for_view_model() {
             "rrTicks": 3,
             "countBudget": 1000,
             "minCountLimit": 0,
-            "lang": Lang::Python as u8,
+            "lang": Lang::Python.wire_name(),
             "watchExpressions": [],
             "depthLimit": -1,
         }),

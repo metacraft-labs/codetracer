@@ -818,7 +818,9 @@ proc loadLocals*(self: StateComponent) =
     minCountLimit: minCountLimit,
     depthLimit: LOCALS_RR_DEPTH_LIMIT,
     watchExpressions: self.activeWatchExpressions(),
-    lang: toLangFromFilename(self.location.path),
+    # The wire name, not the enum: this object goes through `toJs`, where a
+    # `Lang` would serialise as its ordinal (LRS-1).
+    lang: cstring(langWireName(toLangFromFilename(self.location.path))),
   )
   self.api.emit(CtLoadLocals, arguments)
 

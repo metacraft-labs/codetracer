@@ -15,8 +15,13 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_store.nim
 
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 import vm_test_helpers
+# `Lang` and `langWireName` for the `ct/load-locals` wire-shape cases below.
+# The store itself does NOT import this module (it is in the Embed SDK's
+# package graph); the test may, and that is what lets it pin the store's
+# literal default against the production table.
+import ../../../../common/lang
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
@@ -135,6 +140,44 @@ suite "ReplayDataStore requests":
       check mock.receivedCommands[0].command == "ct/load-locals"
       check mock.receivedCommands[0].args["rrTicks"].getBiggestInt == 42
       dispose()
+
+  test "requestLocals sends lang as the language's wire NAME, never an ordinal":
+    # LRS-1.  This field used to be `lang: int = 0`, "the ordinal of the
+    # `Lang` enum", and the Rust receiver read it with `serde_repr`.  That
+    # made the enum's declaration order a wire contract and let two
+    # hand-written senders be wrong by two ordinals without any test
+    # noticing.  Pin the SHAPE: a JSON string equal to `langWireName`, for
+    # the default and for an explicit language, and never a JSON integer.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+
+      store.requestLocals(42'u64)
+      drain()
+      store.requestLocals(43'u64, lang = langWireName(LangLeo))
+      drain()
+
+      check mock.receivedCommands.len == 2
+      for i in 0 ..< mock.receivedCommands.len:
+        check mock.receivedCommands[i].command == "ct/load-locals"
+        check mock.receivedCommands[i].args.hasKey("lang")
+        check mock.receivedCommands[i].args["lang"].kind == JString
+      check mock.receivedCommands[0].args["lang"].getStr == langWireName(LangC)
+      check mock.receivedCommands[1].args["lang"].getStr == "leo"
+      # The rendered request, byte for byte where the field is concerned:
+      # this is the string the Rust `lang_wire` adapter parses.
+      check ($mock.receivedCommands[1].args).contains("\"lang\":\"leo\"")
+      check not ($mock.receivedCommands[1].args).contains("\"lang\":32")
+      dispose()
+
+  test "the store's literal default lang is langWireName(LangC)":
+    # The store spells the default as a literal because it must not import
+    # `common_lang` (SDK graph).  A literal can drift; this is what stops it.
+    # `LangC` and not `LangUnknown` because that is what the integer `0` this
+    # replaces decoded to on the Rust side (`Lang::default()`), so the change
+    # of representation is not also a change of behaviour.
+    check LoadLocalsDefaultLang == langWireName(LangC)
+    check LoadLocalsDefaultLang == "c"
 
   test "requestLocals deduplicates identical requests":
     createRoot proc(dispose: proc()) =

@@ -134,7 +134,7 @@ Types live in `src/db-backend/src/task.rs` unless noted.
 | `rrTicks` | `i64` | Step id / rr tick to sample. |
 | `countBudget` | `i64` | Budget for value expansion. |
 | `minCountLimit` | `i64` | Minimum expansion limit. |
-| `lang` | `Lang` | Language enum. |
+| `lang` | `String` | The language's wire name (`Lang::wire_name`: `"c"`, `"leo"`, `"javascript"`, ...), decoded through `ct-lang`'s `lang_wire` adapter. A bare integer (the enum ordinal this field used to carry) is refused; an unknown name is refused and named. Since LRS-1. |
 | `watchExpressions` | `Vec<String>` | User-entered watch expressions. See below. |
 | `depthLimit` | `i64` | `-1` means no depth limit. |
 

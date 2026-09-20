@@ -31,6 +31,12 @@ serde_json = "1"
 # directly from the CLI flag.
 rayon = "1.10"
 walkdir = "2"
+# The canonical `Lang` and its `wire_name`: what the `ct/load-locals` request's
+# `lang` field carries (LRS-1).  This crate used to hand-write the ordinals
+# instead and two of its ten were wrong (Cairo 32 for 30, Solana 35 for 36);
+# a name taken from the one shared table cannot be off by two.  Leaf crate, no
+# build script, no path dependencies of its own.
+ct-lang = { path = "../../libs/ct-lang" }
 
 [dev-dependencies]
 tempfile = "3"

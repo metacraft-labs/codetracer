@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use ct_dap_client::test_support::FlowTestRunner;
+use db_backend::lang::Lang;
 use serde_json::json;
 
 mod test_harness;
@@ -101,7 +102,10 @@ fn leo_search_calltrace_returns_compute_call() {
             "ct/load-locals",
             json!({
                 "rrTicks": 0, "countBudget": 100, "minCountLimit": 10,
-                "lang": 33, "watchExpressions": [], "depthLimit": 3,
+                // By NAME (LRS-1).  This used to read `"lang": 33`, which is
+                // `LangTolk`, not `LangLeo` (32): a hand-written ordinal for a
+                // Leo fixture that told the backend "Tolk" and nothing noticed.
+                "lang": Lang::Leo.wire_name(), "watchExpressions": [], "depthLimit": 3,
             }),
         )
         .expect("send load-locals");
