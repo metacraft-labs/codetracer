@@ -510,8 +510,55 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # **NOT ALLOW-LISTED**, for the reason PLAT-32 gave: an allow-list entry claims
 # a symbol is permanently unreachable by name, and these are waiting for a
 # caller a named milestone will add.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1276 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1276 bash ci/test/frontend-reachability.sh
+# ----------------------------------------------------------------------------
+# 1276 -> 1274 ON 2026-09-20 (PLAT-34). **THE FIRST TIME THIS NUMBER HAS GONE
+# DOWN ON A FEATURE MILESTONE**, and it went down because three milestones
+# predicted in this file that it would.
+# ----------------------------------------------------------------------------
+# PLAT-31, PLAT-32 and PLAT-33 each closed with the same sentence — *"it is a
+# CEILING, so it falls again when PLAT-34 wires the editing core into the two
+# front-ends"* — and each ratcheted UP to carry a layer that had a suite and no
+# product caller. PLAT-34 is the caller.
+#
+# THE ACCOUNT IS A DIFF OF TWO RUNS OF THIS SCRIPT — a `git worktree` at the
+# merge base against the tree with PLAT-34 in it — rather than a recollection
+# (Verification-Harness-Traps §36b). GROSS +8 and -10.
+#
+#   -10, ALL OF THEM PREDICTED, AND ALL OF THEM BY THE SAME ROUTE:
+#       `editor_state.initEditorState` and `editor_state.primaryHead`, reached
+#       through `editing_core`; `vimKeymap`, `kakouneKeymap` and
+#       `productKeymap`, reached through `editing_core.keymapOf`;
+#       `EditingScope`, built by `tui/app/edit_binding.editingScope`;
+#       `collab_text.initPeerSession`, `receiveInto` and `recordLocal`,
+#       reached by `collab/projection`'s editor arm — which is PLAT-33's
+#       second residual closing.
+#
+#   +8: the editing core's own surface (`applyKey`, `applyNamed`,
+#       `folded=` on both the core and the binding) and the editor
+#       projection's (`newEditorProjection`, `installEditorProjection`,
+#       `commitLocalChange`, `appliedVersion`).
+#
+# FOUR EXPORTS WERE DELETED RATHER THAN CARRIED, and the reason is PLAT-31's
+# rule quoted back: *"a public helper nobody calls is not a backlog item
+# waiting for a caller; it is coverage-shaped dead code, and a raised ceiling
+# would have preserved it indefinitely."* They were `editing_core.applyKeys`
+# (a fold of `applyKey` nothing folded), `editing_core.caretDisplayColumn` (a
+# real distinction, recorded in `caretColumn`'s docstring instead),
+# `editing_core.editingScopeOf` (a second spelling of the scope the front-end
+# builds — §30 in eight lines) and `projection.sendableSubmission`. Without
+# the deletions the net would have been +2 and the ceiling would have risen
+# for four symbols nothing reaches.
+#
+# WHAT IS STILL TESTED-AND-UNREACHED, NAMED RATHER THAN ALLOW-LISTED:
+# `installEditorProjection` and `commitLocalChange`. The projection is
+# graded — `tests/unit/test_collab_editor_projection.nim` drives it against
+# the real authority and the real reducer — and no shipped route INSTALLS one,
+# because installing it is a session-layer decision the collaboration campaign
+# owns. It is the same shape PLAT-33 recorded for `acceptConcurrent` and it is
+# recorded the same way. **NOT ALLOW-LISTED**: an allow-list entry claims a
+# symbol is permanently unreachable by name, and this is waiting for a caller.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1274 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1274 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

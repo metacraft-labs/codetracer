@@ -2,33 +2,52 @@
 ## See `app/cli.nim`'s header for the rule and
 ## `src/frontend/tui/tests/test_tui_facade_boundary.nim` for the walk that
 ## enforces it. This module reaches `codetracer_embed` — the sanctioned facade
-## — and `isonim_tui`, and never `viewmodel/*` directly and never `host/`.
+## — and never `viewmodel/*` directly and never `host/`.
 ##
 ## app/edit_binding.nim — PLAT-16. The editing session: buffers, the caret, the
 ## mode register, and what a mode switch preserves.
 ##
-## ## THE SUBSTRATE IS `isonim-tui`'s TextArea, AND IT IS THE REAL ONE
+## ## THE SUBSTRATE IS THE MODEL, AND `TextAreaWidget` IS GONE FROM THIS PATH
 ##
-## CodeTracer-TUI-Edit-Mode.md §3: *"`isonim-tui` already ships the substrate: a
-## TextArea with tree-sitter syntax highlighting, undo/redo, grapheme-aware word
-## wrap, and selection keybindings — all covered by that repo's own suites."*
+## **PLAT-34 retired `EditBuffer` as the source of truth.** Until this
+## milestone this module held an `isonim-tui` `TextAreaWidget` and delegated
+## every mutation to it through a fourteen-arm `case` over `EditBehaviour`.
+## That widget was a SECOND mutable text buffer beside
+## `viewmodel/editor/editor_state.EditorState`, and while it existed:
 ##
-## `EditBuffer` holds a `TextAreaWidget` and delegates every mutation to it:
-## `insertText`, `backspace`, `deleteRight`, `splitLine`, `undo`, `redo`,
-## `indent`, `dedent`, the eight cursor motions. **Not one of those operations
-## is reimplemented here**, which is the point — grapheme-cluster columns,
-## undo coalescing and the delta stack are exactly the parts a second
-## implementation gets subtly wrong, and the sibling repository's suites are
-## what cover them.
+##   * PLAT-31's Vim and Kakoune models were *reachable from no key the
+##     shipped binary accepts* — the terminal resolved keys through
+##     `TuiEditBindings` directly, so the resolver had no caller;
+##   * PLAT-32's history was not the history the terminal undid through —
+##     `Ctrl+z` popped the WIDGET's delta stack;
+##   * PLAT-33's collaborative rebase had nothing to rebase against, because
+##     the bytes a user was typing were not in the model at all;
+##   * and the operation name in `TuiEditBindings` was a JOIN between two
+##     suites rather than a call: the ViewModel oracle ran the operation, this
+##     module ran a widget method, and nothing executed the edge between them.
 ##
-## THE WIDGET IS GIVEN A `TerminalRenderer` AND ITS NODE TREE IS NEVER
-## COMPOSITED. Every public mutator on `TextAreaWidget` ends in `renderTree()`,
-## which needs a renderer to build children into; `host/terminal_driver.nim`
-## constructs one the same way (`TerminalRenderer()` is a plain object, no
-## driver, no terminal, no I/O). This front-end paints through `StyledGrid`,
-## so what reaches the screen is `views/edit_pane.paintEditPane` reading the
-## widget's `lines` — the same bytes, through this front-end's own compositor,
-## which is what keeps a Tier-1 cell read and a Tier-2 `cellAt` comparable.
+## `EditBuffer` now holds an `EditingDocument` — `codetracer_embed`'s
+## `editing_core` — and every mutation is one of PLAT-30's 224 named
+## operations, reached through PLAT-31's resolver. There is no second buffer
+## and `test_editor_front_end_differential.nim`'s mutable-buffer scan is what
+## says so, with a planted positive control rather than an absence grep.
+##
+## ## WHAT THE WIDGET WAS DOING THAT THE MODEL NOW DOES, NAMED
+##
+## PLAT-16's header claimed the substrate for *"grapheme-cluster columns, undo
+## coalescing and the delta stack — exactly the parts a second implementation
+## gets subtly wrong"*. That was the right reason in 2026-09 and each of the
+## three has since been built, graded and published in the model:
+##
+##   * grapheme-cluster columns — PLAT-24's corpus and PLAT-27's
+##     `wrap.lineMetrics`, which `editing_core.caretColumn` calls;
+##   * undo coalescing — PLAT-32's `history.mayGroup`, one predicate with the
+##     rule and every control calling it;
+##   * the delta stack — PLAT-25's `ChangeSet`, with ten published laws.
+##
+## So this is not a reimplementation of the widget; it is the migration onto
+## the layer the campaign built to replace it. The widget's own suites still
+## cover the widget, in its own repository, for the front-ends that use it.
 ##
 ## ## WHICH SOURCE THIS BINDING READS, AND WHY IT IS NOT `SourceVM`
 ##
@@ -41,13 +60,10 @@
 ##
 ## ## No mocks
 ##
-## Nothing here constructs a backend, a session or a fake editor. The
-## `TextAreaWidget` is the shipping widget from `isonim-tui`, and the text it
-## holds is whatever `host/` read off the disk.
+## Nothing here constructs a backend, a session or a fake editor. The text is
+## whatever `host/` read off the disk and the editor is the shipped model.
 
 import std/[algorithm, strutils]
-
-import isonim_tui
 
 import codetracer_embed
 
@@ -68,9 +84,17 @@ type
     ## One open file.
     path*: string
       ## The working-tree path, as the host resolved it.
-    widget*: TextAreaWidget
-      ## The substrate. Public because `app/tests/` asserts against the real
-      ## widget's state rather than against a summary this module computed.
+    doc*: EditingDocument
+      ## **THE BUFFER, AND IT IS THE MODEL.** `codetracer_embed.editing_core`'s
+      ## `EditingDocument` — one `EditorState`, the keymap model it resolves
+      ## keys through, and the wrap settings this medium reads its display
+      ## geometry at.
+      ##
+      ## Public for the reason the widget was public: `app/tests/` asserts
+      ## against the real editor's state rather than against a summary this
+      ## module computed. What changed is that the real editor is now the one
+      ## the ViewModel suites grade, so the two sides of `TuiEditBindings` are
+      ## a call rather than a join.
     loadedText*: string
       ## What is on disk, as far as this session knows — the bytes that were
       ## read, and then the bytes that were last WRITTEN (`markSaved`).
@@ -105,18 +129,21 @@ type
       ## so the two questions now read two fields, and `outrunsRecording` is
       ## the one function both the notice and its arms go through.
     viewportTop*: int
-      ## 1-based first line the pane shows. Held here and not in the widget
-      ## because the pane's height is the shell's business and the widget's
-      ## `scrollY` counts DISPLAY rows (wrapped), which is a different quantity.
-    folded*: seq[int]
-      ## 1-based lines whose folds are closed.
+      ## 1-based first line the pane shows. Held here and not on the MODEL
+      ## because the pane's height is the shell's business and a viewport is
+      ## per renderer — the same reason PLAT-27 keeps `WrapSettings` out of
+      ## `EditorState`. Two front-ends looking at one document scroll
+      ## independently and must.
       ##
-      ## CARRIED AND NOT YET PRODUCED, stated rather than implied: no gesture in
-      ## this front-end closes a fold today. The field exists because
-      ## Mode-Transitions.md §5 names fold state among what a transition
-      ## preserves, and a preservation the session has no place to put is a
-      ## preservation that cannot be asserted. `test_mode_transition_oracle.nim`
-      ## sets one directly and requires the switch to return it.
+      ## **FOLD STATE MOVED THE OTHER WAY AND IS NOT A FIELD HERE.** It was
+      ## `EditBuffer.folded` until PLAT-34 and it is `EditorState.folded` now,
+      ## reached through the `folded` accessors below. A fold is a property of
+      ## the DOCUMENT rather than of a viewport: the collaboration stream and
+      ## the GPUI front-end have the same claim on it this pane has, and a
+      ## per-front-end copy is a second value for them to disagree about. The
+      ## carried-and-not-yet-produced note PLAT-16 attached to it still holds
+      ## — no gesture in this front-end closes a fold today, and
+      ## `test_mode_transition_oracle.nim` sets one directly.
 
   EditSession* = ref object
     ## Everything Edit mode holds across a mode switch.
@@ -156,35 +183,36 @@ type
 const
   NoBuffer* = -1
 
-proc newEditBuffer*(path, text: string; viewportHeight = 20): EditBuffer =
-  ## A buffer over `text`, named `path`.
+proc newEditBuffer*(path, text: string;
+                    viewportHeight = 20;
+                    model = kmProductDefault): EditBuffer =
+  ## A buffer over `text`, named `path`, with the caret at the top.
   ##
-  ## `softWrap` is OFF. §3 names grapheme-aware word wrap as part of the
-  ## substrate, and it is; but this pane sits in a column beside a file tree and
-  ## a wrapped line would make the gutter's line numbers stop lining up with the
-  ## rows they number, which is the one thing a debugger's source column may
-  ## not do. The widget still owns the wrapping; this asks it not to.
+  ## SOFT WRAP IS OFF, and it is off in `editing_core.terminalWrapSettings`
+  ## rather than here, so the terminal's wrap configuration is one value with
+  ## one reader instead of a flag passed at a construction site. The reason is
+  ## unchanged from PLAT-16: this pane sits in a column beside a file tree and
+  ## a wrapped line would make the gutter's line numbers stop lining up with
+  ## the rows they number, which is the one thing a debugger's source column
+  ## may not do.
   ##
-  ## `border` is `bsNone`: the shell's projection owns pane separators
-  ## (`views/shell.PaneSeparatorGlyph`) and a widget drawing its own box would
-  ## be a second frame inside the first.
-  let w = newTextArea(TerminalRenderer(), text = text, width = 80,
-                      viewportHeight = max(1, viewportHeight),
-                      border = bsNone, softWrap = false)
-  # `newTextArea` leaves the caret at the END of the document; an editor opens
-  # at the top. Moving it here rather than letting the pane show the tail is
-  # what makes "open a file and the first line is line 1" true.
-  w.moveCursorTo(Caret(line: 0, column: 0))
-  EditBuffer(path: path, widget: w, loadedText: text, recordedText: text,
-             viewportTop: 1, folded: @[])
+  ## `model` IS A PARAMETER AND ITS DEFAULT IS THE PRODUCT'S. PLAT-31 shipped
+  ## Vim and Kakoune as `KeymapDefinition`s and left them reachable from no
+  ## key the binary accepts, because the terminal dispatched through
+  ## `TuiEditBindings` directly. This parameter is the caller a model needs;
+  ## §4.4's *"the default does not move"* is what its default says.
+  EditBuffer(path: path,
+             doc: initEditingDocument(path, text, model,
+                                      viewportRows = max(1, viewportHeight)),
+             loadedText: text, recordedText: text, viewportTop: 1)
 
 proc text*(buf: EditBuffer): string =
-  if buf.isNil or buf.widget.isNil: "" else: buf.widget.text
+  if buf.isNil: "" else: buf.doc.text
 
 proc isDirty*(buf: EditBuffer): bool =
   ## Whether the buffer differs from the bytes that were loaded. See
   ## `loadedText` on why this is a comparison and not a flag.
-  not buf.isNil and not buf.widget.isNil and buf.widget.text != buf.loadedText
+  not buf.isNil and buf.doc.text != buf.loadedText
 
 proc outrunsRecording*(buf: EditBuffer): bool =
   ## Whether this session has moved the file away from the bytes it opened.
@@ -206,9 +234,9 @@ proc outrunsRecording*(buf: EditBuffer): bool =
   ## comparison, and they are the arms that make the negative half falsifiable
   ## (§7a): row five would be green under a predicate that only looked at the
   ## buffer, and row six would be red under one that only looked at the disk.
-  if buf.isNil or buf.widget.isNil:
+  if buf.isNil:
     return false
-  buf.widget.text != buf.recordedText or buf.loadedText != buf.recordedText
+  buf.doc.text != buf.recordedText or buf.loadedText != buf.recordedText
 
 proc markSaved*(buf: EditBuffer) =
   ## The buffer was written to disk. `host/` does the writing; this records it.
@@ -216,23 +244,47 @@ proc markSaved*(buf: EditBuffer) =
   ## `recordedText` IS DELIBERATELY NOT TOUCHED. Writing a file does not make a
   ## recording newer, so a save must not be able to clear a staleness notice —
   ## which is exactly what it did before `recordedText` existed.
-  if not buf.isNil and not buf.widget.isNil:
-    buf.loadedText = buf.widget.text
+  if not buf.isNil:
+    buf.loadedText = buf.doc.text
 
 proc caretLine*(buf: EditBuffer): int =
-  ## 1-BASED, because the gutter, the pane and every message a user reads are
-  ## 1-based and the widget's `Caret.line` is 0-based. Converted in exactly one
-  ## place, which is here.
-  if buf.isNil or buf.widget.isNil: 0 else: buf.widget.cursor.line + 1
+  ## 1-BASED. The conversion from the model's 0-based line is
+  ## `editing_core.caretLine`'s, in one place, for every front-end — this
+  ## module used to do it here for one.
+  if buf.isNil: 0 else: buf.doc.caretLine
 
 proc caretColumn*(buf: EditBuffer): int =
-  if buf.isNil or buf.widget.isNil: 0 else: buf.widget.cursor.column
+  ## 0-based GRAPHEME-CLUSTER column. See `editing_core.caretColumn` for why
+  ## the cluster and the CELL are two published numbers rather than one.
+  if buf.isNil: 0 else: buf.doc.caretColumn
 
 proc lineCount*(buf: EditBuffer): int =
-  if buf.isNil or buf.widget.isNil: 0 else: buf.widget.lineCount
+  if buf.isNil: 0 else: buf.doc.lineCount
 
 proc lines*(buf: EditBuffer): seq[string] =
-  if buf.isNil or buf.widget.isNil: @[] else: buf.widget.lines
+  if buf.isNil: @[] else: buf.doc.lines
+
+proc moveCaretTo*(buf: EditBuffer; line, column: int) =
+  ## Place the caret at a 0-based (line, cluster column).
+  ##
+  ## The replacement for `buf.widget.moveCursorTo(Caret(...))`, which every
+  ## caller of this module used to reach past the binding for. It is the
+  ## model's `editing_core.moveCaretTo`, so a caret placed by a mouse click, by
+  ## a build-error jump and by a test arranging a starting position all go
+  ## through `selection.caretSelection` and all satisfy `FUZZ-3`.
+  if buf.isNil:
+    return
+  buf.doc.moveCaretTo(line, column)
+
+proc folded*(buf: EditBuffer): seq[int] =
+  ## Folded logical lines. Held on the MODEL (`EditorState.folded`) rather
+  ## than on this object, because a fold is editor state that the collaboration
+  ## stream and the GPUI front-end have the same claim on as this pane does.
+  if buf.isNil: @[] else: buf.doc.folded
+
+proc `folded=`*(buf: EditBuffer; lines: seq[int]) =
+  if not buf.isNil:
+    buf.doc.folded = lines
 
 proc followCaret*(buf: EditBuffer; rows: int) =
   ## Scroll the pane so the caret is visible, and no further.
@@ -272,68 +324,70 @@ type
     ekMoved = "moved"
     ekChanged = "changed"
 
-proc performEditBehaviour(w: TextAreaWidget; b: EditBehaviour;
-                          character: string): EditKeyOutcome =
-  ## **A DISPATCH OVER THE BEHAVIOUR, NOT OVER THE KEY.** That distinction is
-  ## the whole of PLAT-30's retirement deliverable: `src/common/editing_key_bindings.nim`
-  ## holds which key performs which behaviour, as data, and this decides what
-  ## performing one MEANS on the substrate. Nothing here reads a key name, so
-  ## the question *"is this key bound twice"* is asked of the table rather than
-  ## of a `case` that cannot answer it.
-  case b
-  of ebMoveCharLeft: w.moveLeft(); ekMoved
-  of ebMoveCharRight: w.moveRight(); ekMoved
-  of ebMoveLineUp: w.moveUp(); ekMoved
-  of ebMoveLineDown: w.moveDown(); ekMoved
-  of ebMoveLineStart: w.moveLineStart(); ekMoved
-  of ebMoveLineEnd: w.moveLineEnd(); ekMoved
-  of ebDeleteCharBackward: w.backspace(); ekChanged
-  of ebDeleteCharForward: w.deleteRight(); ekChanged
-  of ebInsertNewline: w.splitLine(); ekChanged
-  of ebIndentSelection: w.indent(); ekChanged
-  of ebDedentSelection: w.dedent(); ekChanged
-  of ebUndo:
-    if w.undo(): ekChanged else: ekMoved
-  of ebRedo:
-    if w.redo(): ekChanged else: ekMoved
-  of ebInsertText:
-    w.insertText(character); ekChanged
+proc editingScope*(buf: EditBuffer): EditingScope =
+  ## **THE FIVE DIMENSIONS §4.3 NAMES, AS THIS FRONT-END SETS THEM.**
+  ##
+  ## `pmEdit` and `epEditor` because this function is only reached when
+  ## `runtime.editorOwnsToken` has already established both — Edit product
+  ## mode, NORMAL input mode, the editor pane focused, a buffer open. Those
+  ## four conditions are already-modelled state and the scope is where they
+  ## become the resolver's argument rather than a comment at a call site.
+  ##
+  ## `textEntry = true` IS THE TERMINAL'S EDIT MODE, and it is not a
+  ## shortcut. §4.3's text-entry dimension means *"a printable key stands for
+  ## itself"*, which is exactly what Edit mode is: `CodeTracer-TUI-Edit-Mode.md`
+  ## §1.2 refuses to collapse the product mode into the pane mode, and the
+  ## pane's NORMAL/COMMAND/SEARCH are navigation modes over PANES. A
+  ## document opened under the Vim or Kakoune model opens in `emNormal` and
+  ## `editing_core.initEditingDocument` is what decides that; this flag is
+  ## about whether the medium is a text field, which it is.
+  EditingScope(model: buf.doc.model, product: pmEdit, pane: epEditor,
+               mode: buf.doc.state.mode, textEntry: true)
 
-proc applyEditKey*(buf: EditBuffer; key, character: string): EditKeyOutcome =
-  ## One canonical key name (`keymap.keyName`'s vocabulary) applied to the
-  ## buffer.
+proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
+  ## One canonical key name (`key_names.keyName`'s vocabulary) applied to the
+  ## buffer, **through PLAT-31's resolver and PLAT-30's vocabulary**.
   ##
-  ## ## PLAT-30 RETIRED THE `case` OVER KEY NAMES THAT USED TO BE HERE
+  ## ## PLAT-34 RETIRED THE `case` OVER BEHAVIOURS THAT USED TO BE HERE
   ##
-  ## It was *"thirteen `of` arms over key names plus an `else` that inserts the
-  ## character, fourteen behaviours, and the entire editing path today"*, and
-  ## Editing-Operations-And-Keymaps.md §1 names it as the one place the
-  ## product's own binding rule had never been applied. What replaces it is a
-  ## LOOKUP in `TuiEditBindings` — fourteen rows, each naming the §2.2
-  ## operation it performs — and a dispatch over the resulting behaviour. The
-  ## fourteen behaviours are unchanged, by name, which is what
-  ## `test_edit_binding_vocabulary.nim` and the ViewModel's oracle suite
-  ## assert from the two sides.
+  ## PLAT-30 retired a `case` over KEY NAMES and replaced it with a lookup in
+  ## `TuiEditBindings` plus a fourteen-arm `case` over `EditBehaviour` against
+  ## an `isonim-tui` `TextAreaWidget`. That left the operation column of the
+  ## table a JOIN rather than a call — the ViewModel oracle ran the named
+  ## operation, this module ran a widget method, and `DIFF-1` is the axis
+  ## PLAT-34 added because nothing executed the edge between them.
   ##
-  ## `character` is `keymap.keyCharacter`'s answer and is what gets INSERTED —
-  ## never `key`, which is `"Space"` for the space bar. That is the same
-  ## distinction `keymap.keyCharacter`'s docstring records CTUI-10 measuring,
-  ## and getting it wrong here would type the word "Space" into a user's file.
-  if buf.isNil or buf.widget.isNil:
+  ## What replaces it is ONE CALL. `product_keymap` LIFTS the same fourteen
+  ## rows into the resolver's table (it does not transcribe them), the
+  ## resolver walks the trie, and the operation that comes out is applied to
+  ## the model. The table still decides which key does what; there is no
+  ## longer a second implementation of what doing it MEANS.
+  ##
+  ## ## `character` IS GONE FROM THE SIGNATURE, AND THAT IS A REPAIR
+  ##
+  ## It used to be a second parameter the caller computed with
+  ## `keyCharacter(name)` and handed back. Every call site therefore had the
+  ## chance to hand back the wrong one — which is CTUI-10's measured defect
+  ## (`keyName(" ")` is `"Space"`, and inserting the KEY types five letters
+  ## into a user's file) sitting one argument away at every caller forever.
+  ## `resolve` asks `key_names.keyCharacter` itself, under the text-entry
+  ## dimension, so the answer is derived once from the key rather than passed
+  ## alongside it. `Space` still inserts a space and never the word, and the
+  ## case that asserts it is unchanged.
+  ##
+  ## ## `nowMs` IS REQUIRED
+  ##
+  ## PLAT-32's undo grouping reads elapsed time and PLAT-31 never supplied a
+  ## clock, so every keystroke reached the model at time zero and grouping
+  ## could not break. The runtime already threads `nowMs` through
+  ## `handleToken`; this is the parameter that carries it the last step.
+  if buf.isNil:
     return ekIgnored
-  let idx = editBindingIndex(key)
-  if idx >= 0:
-    return performEditBehaviour(buf.widget, TuiEditBindings[idx].behaviour,
-                                character)
-  # The DEFAULT row, and it fires only for a key that stands for a character.
-  # A key the table does not bind and that is not a character is the keymap's,
-  # not the editor's — which is what `ekIgnored` means to the caller.
-  if character.len == 0:
-    return ekIgnored
-  let def = defaultEditBindingIndex()
-  if def < 0:
-    return ekIgnored
-  performEditBehaviour(buf.widget, TuiEditBindings[def].behaviour, character)
+  let applied = buf.doc.applyKey(buf.editingScope, key, nowMs)
+  case applied.outcome
+  of eoIgnored: ekIgnored
+  of eoMoved: ekMoved
+  of eoChanged: ekChanged
 
 # ---------------------------------------------------------------------------
 # The session
@@ -460,11 +514,20 @@ proc preservedValue*(s: EditSession; concern: PreservedConcern): string =
       parts.add b.path & "=" & (if b.isDirty: "dirty:" else: "clean:") & b.text
     parts.join("\x1f")
   of pcCaretAndSelection:
+    # **READ OFF THE MODEL'S SELECTION, WHICH IS MORE THAN THE WIDGET COULD
+    # SAY.** The widget carried one caret and one anchor; `EditorSelection`
+    # carries N ranges with a primary index, so a multi-cursor edit survives a
+    # mode switch or it does not, and this witness is what can tell. Rendered
+    # as `anchor-head` per range, primary first in the count, because §5's
+    # comparison is a string equality and a shape that dropped the extra
+    # ranges would call two different selections preserved.
     var parts: seq[string] = @[]
     for b in s.buffers:
-      let w = b.widget
-      parts.add b.path & "@" & $w.cursor.line & "," & $w.cursor.column &
-        "~" & $w.selection.anchor.line & "," & $w.selection.anchor.column
+      let sel = b.doc.state.selection
+      var ranges: seq[string] = @[]
+      for i in 0 ..< sel.rangeCount:
+        ranges.add $sel[i].anchor & "-" & $sel[i].head
+      parts.add b.path & "@" & $sel.primaryIndex & ":" & ranges.join(",")
     parts.join("|")
   of pcScrollPosition:
     var parts: seq[string] = @[]
@@ -524,7 +587,7 @@ proc editPaneModelFor*(s: EditSession; buf: EditBuffer): EditPaneModel =
     viewportTop = buf.viewportTop,
     caretLine = buf.caretLine,
     caretColumn = buf.caretColumn,
-    selectionActive = (not buf.widget.isNil and buf.widget.hasSelection),
+    selectionActive = buf.doc.hasSelection,
     dirty = buf.isDirty,
     marks = (if s.isNil: @[] else: marksForFile(s.points, buf.path)),
     language = "")

@@ -92,6 +92,16 @@ import std/strutils
 import codetracer_embed
 
 import ./views/source_pane
+# QUALIFIED BECAUSE `Annotation` IS NOW TWO TYPES IN THIS FILE'S SCOPE, AND
+# THE SECOND ONE ARRIVED THROUGH THE FACADE (PLAT-34). `codetracer_embed` now
+# re-exports the editing core, which reaches `editor/transaction.Annotation` —
+# a transaction's typed metadata — while `views/inline_annotations.Annotation`
+# is an inline value beside a source line and has been since CTUI-5. Neither
+# name is wrong and neither type moved; what changed is that one file can see
+# both. Importing the module explicitly is what lets the two uses below say
+# WHICH, and it is preferred to renaming a five-year-old type to make a new
+# export fit.
+import ./views/inline_annotations
 # PLAT-22's shared editor row model and the derivation both front-ends' editors
 # go through.
 #
@@ -206,7 +216,8 @@ proc marksForFile*(points: openArray[SourcePoint];
       result.add (p.line, (if p.enabled: gmBreakpoint
                            else: gmBreakpointDisabled))
 
-proc annotationsFrom*(variables: seq[Variable]): seq[Annotation] =
+proc annotationsFrom*(variables: seq[Variable]):
+                     seq[inline_annotations.Annotation] =
   ## `StateVM.currentVariables`, as `name: value` pairs.
   ##
   ## A variable with no rendered value is DROPPED rather than shown as
@@ -218,7 +229,7 @@ proc annotationsFrom*(variables: seq[Variable]): seq[Annotation] =
     let value = v.value.strip()
     if v.name.len == 0 or value.len == 0:
       continue
-    result.add Annotation(name: v.name, value: value)
+    result.add inline_annotations.Annotation(name: v.name, value: value)
 
 proc sourcePaneModelFor*(vm: SourceVM;
                          availability: SourceAvailability;

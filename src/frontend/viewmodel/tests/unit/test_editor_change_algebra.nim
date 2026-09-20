@@ -117,7 +117,17 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1666
+const ExpectedAssertions = 1669
+  ## *1666 -> 1669 on 2026-09-20: §35's enumeration firing for an EIGHTH time,
+  ## and the first time over `viewmodel/` rather than over `viewmodel/editor/`.
+  ## PLAT-34 added `viewmodel/editing_core.nim`, `ProductionModules` walks
+  ## every `.nim` under `viewmodel/` at any depth, and the per-module sweep
+  ## contributes three assertions for a module that calls no `rebase(` and
+  ## spells no `mapOver` — which this one does not. The gate said so by name on
+  ## the first floor-gate run of that milestone, before either of its own
+  ## suites existed. No list moved, because there is no list: the repair for
+  ## this scan was to derive the subject set, and this is that repair being
+  ## cheap.*
   ## **959 -> 1666 ON 2026-09-20: §35's SUBJECT SET STOPPED BEING A
   ## DIRECTORY.** The double-mapping scan below used to run over the 19
   ## modules of `viewmodel/editor/`; it now runs over all 252 production

@@ -148,11 +148,16 @@ proc populatedSession(): EditSession =
   discard result.openFile(FileB, TextB)
   let a = result.buffers[0]
   let b = result.buffers[1]
-  a.widget.moveCursorTo(Caret(line: 2, column: 4))
+  # PLAT-34: the caret and the edit go through the BINDING rather than through
+  # a widget this suite reached past. `moveCaretTo` is the model's, and the
+  # edit is a real keystroke resolved through the product keymap — which is
+  # what makes "the dirty buffer is dirty" a statement about the path the
+  # product takes rather than about a widget method.
+  a.moveCaretTo(2, 4)
   a.viewportTop = 2
   a.folded = @[1]
-  b.widget.moveCursorTo(Caret(line: 1, column: 2))
-  b.widget.insertText("!")      # dirty, and only this one
+  b.moveCaretTo(1, 2)
+  discard b.applyEditKey("!", 0)      # dirty, and only this one
   b.viewportTop = 1
   result.active = 0
   result.points = @[

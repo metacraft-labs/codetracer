@@ -4961,6 +4961,16 @@ plat29-case-floor:
 plat30-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-30
 
+# PLAT-34's COUNTED TARGET: 58 cases over `DIFF-1`'s two halves.
+#
+# The second of its two suites is NATIVE-ONLY and needs the `tui` lane's link
+# flags — it paints the terminal's editor into a real `StyledGrid` and renders
+# the GPUI editor into the real Rust shadow tree, so it links `isonim_tui` AND
+# `isonim_gpui`. The gate reads those flags out of `ci/lib/test-lane-files.sh`
+# rather than carrying a second copy of them; see its table entry.
+plat34-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-34
+
 # EVERY COUNTED TARGET IN THE CAMPAIGN, AND THIS IS THE RECIPE A LANE CALLS.
 #
 # WHAT WAS WRONG, MEASURED RATHER THAN ASSERTED
@@ -5014,7 +5024,7 @@ editor-model-case-floors:
   set -uo pipefail
   failed=0
   ran=0
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34; do
     echo "=== ${m} ==="
     if bash ci/test/editor-model-case-floor.sh "${m}"; then
       ran=$((ran + 1))

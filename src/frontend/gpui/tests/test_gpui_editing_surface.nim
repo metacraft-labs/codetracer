@@ -845,9 +845,36 @@ suite "PLAT-22: the GPUI editing surface":
     ck s.report.len == 0
     # The working tree is never the recording's copy, so it is never verified.
     ck s.provenance == epUnverified
+    # **FOUR ROWS, UNCHANGED BY PLAT-34, AND THE REASON IS NOW A NAMED
+    # POLICY RATHER THAN A `splitLines` IN THIS FUNCTION.** This document ends
+    # in a terminator, so it holds five line POSITIONS and four lines of text,
+    # and PLAT-28's `TrailingLinePolicy` is the enum that says which is being
+    # asked for. `editorSurfaceForProject` is handed a STRING — a file — so it
+    # passes `tlpDropFinalEmpty` and `showCaret = false`, which is exactly the
+    # answer it has always given. What changed is that the policy is applied
+    # by `row_projection.projectionLinesFor` rather than by a third splitter
+    # of this module's own; the case below asserts the BUFFER entry point's
+    # different answer beside it.
     ck s.totalLineCount == 4
     ck s.rowAt(2).text == "    return 1"
     ck s.rowAt(2).pointer == eptNone
+    # A FILE HAS NO CURSOR. The caret in the document `editorSurfaceForProject`
+    # opens is an artefact of the delegation, not a fact about the bytes.
+    ck s.rowAt(1).pointer == eptNone
+
+    # **THE BUFFER ENTRY POINT ANSWERS THE OTHER QUESTION, AND THAT IS WHAT
+    # THE GPUI FRONT-END ACTUALLY CALLS.** `main.editSurfaceFor` opens a
+    # document and derives from it (PLAT-34), so what this front-end draws is
+    # the five line positions the model has and a caret on the row the model's
+    # caret is on. A read-only editor that does not re-render is not a
+    # consumer (PLAT-28), and text alone would only move when the document
+    # moved — every motion in the 224-operation vocabulary would be invisible
+    # to this medium.
+    let buffer = editorSurfaceForDocument(
+      initEditingDocument("src/a.py", "def f():\n    return 1\n\nf()\n"),
+      GpuiMedium, mutableHere = false)
+    ck buffer.totalLineCount == 5
+    ck buffer.rowAt(1).pointer == eptInspection
 
     # A DEBUG-mode surface answers the OTHER row of the same table, from the
     # same function, so the two modes cannot be read as one.
@@ -869,7 +896,7 @@ suite "PLAT-22: the GPUI editing surface":
     # by an undeclared arm on 2026-09-16 (§4d). Arm E14 is that mutation and
     # this is the only line that reddens.
     ck exactTextNodes(root, contract.statement) == 1
-    expectCount(22)
+    expectCount(25)
 
   test "THE SHIPPED BINARY draws the editor — Tier 2, through --report-plan":
     resetCount()
@@ -935,7 +962,7 @@ suite "PLAT-22: the GPUI editing surface":
 # for the edit-mode statement, both added by the verification pass after two
 # undeclared arms survived the 307.
 
-const ExpectedAssertions = 321
+const ExpectedAssertions = 324
 
 suite "PLAT-22: the assertion count":
   test "every case in this file ran":

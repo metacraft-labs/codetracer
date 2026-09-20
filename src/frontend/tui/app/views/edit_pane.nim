@@ -50,10 +50,15 @@
 ##
 ## ## A PURE FUNCTION OF A VALUE, exactly as `source_pane.nim` is
 ##
-## `app/edit_binding.nim` owns the `TextAreaWidget` and produces one of these
+## `app/edit_binding.nim` owns the editing document and produces one of these
 ## per frame. Nothing here mutates a buffer, and nothing here knows a widget
 ## exists — which is what lets the whole pane be asserted with no editor and no
 ## terminal.
+##
+## *This sentence read "owns the `TextAreaWidget`" until the editing core
+## landed, and by then that module held no widget at all — a claim in a comment
+## is a claim nothing re-takes. The second half was true the whole time and is
+## more true now: there is no widget on this front-end's editing path.*
 
 import ../layout/profile
 import ../syntax/highlighter

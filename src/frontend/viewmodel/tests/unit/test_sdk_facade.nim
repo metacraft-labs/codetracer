@@ -95,7 +95,22 @@ suite "Embed SDK facade — ReplayDataStore and types (spec §3.1 rows 1, 8)":
     check ord(lsIdle) < ord(lsError)
     check ord(csDisconnected) < ord(csConnected)
     check ord(dsIdle) < ord(dsFinished)
-    check ord(sdForward) < ord(sdBackward)
+    # **`sdForward` IS TWO SYMBOLS SINCE PLAT-34 AND BOTH ARE THE FACADE'S.**
+    # `StepDirection` is the debugger's direction and `SearchDirection` is the
+    # editor's, and the editing core brought the second one into this module's
+    # scope. Neither name is wrong and neither type moved; what changed is that
+    # one consumer can see both, which is what a facade is FOR.
+    #
+    # **THE QUALIFIER IS THE ENUM AND NOT A MODULE IMPORT**, which is the whole
+    # point: a module qualifier would have been two imports past the facade and
+    # `ci/test/sdk-facade-boundary.sh` reported exactly that — *"VIOLATION
+    # consumer-facade-only: 2 import(s) past the facade"* — on the first run of
+    # the spelling that tried it. `EnumType.member` needs no import at all, so
+    # this file still reaches the SDK through one module. Both lines are here
+    # because a test that quietly dropped to one of the two would stop
+    # asserting that the other is exported.
+    check ord(StepDirection.sdForward) < ord(StepDirection.sdBackward)
+    check ord(SearchDirection.sdForward) < ord(SearchDirection.sdBackward)
 
 # ---------------------------------------------------------------------------
 # §3.1 row 3 — the BackendService seam

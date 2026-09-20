@@ -360,9 +360,17 @@ ARMS = [
     # ------------------------------------------------------------------
     # UNDECLARED — planted against this milestone's own evidence
     # ------------------------------------------------------------------
+    # RE-POINTED BY PLAT-34 ON 2026-09-20 (§32). The needle was the trailing
+    # -line trim written out in `editorSurfaceForProject`'s own body, and that
+    # body no longer has one: PLAT-28 had already declared the decision as
+    # `row_projection.TrailingLinePolicy`, and PLAT-34 removed the third
+    # spelling by having this function PASS the policy instead of applying it.
+    # The arm is aimed at the argument now — the same defect (a four-line file
+    # reports five), decided at the site that now decides it, still in this
+    # harness's own subject.
     Arm("U1", SURFACE,
-        "  if lines.len > 1 and lines[^1].len == 0 and text.len > 0 and\n     text[^1] in {'\\n', '\\r'}:\n    lines.setLen(lines.len - 1)",
-        "  if false:\n    lines.setLen(lines.len - 1)",
+        "                           trailing = tlpDropFinalEmpty, showCaret = false)",
+        "                           trailing = tlpKeep, showCaret = false)",
         SUITE_EDIT,
         "EDIT mode reaches this front-end, reads the CORE's contract, and says what it cannot do",
         CTL[SURFACE][0], CTL[SURFACE][1],

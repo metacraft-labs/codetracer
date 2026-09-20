@@ -162,8 +162,16 @@ G_BP = ("A BREAKPOINT ON A DELETED LINE IS NOT A BREAKPOINT ON THE LINE THAT "
         "TOOK ITS PLACE")
 G_REMOTE = "A REMOTE EDIT GOES THROUGH THE ONE REBASE PRIMITIVE"
 G_FIELDS = "the seven fields and the four scenarios are asserted cardinalities"
-G_DG3 = ("PLAT28-DG3 — THE TWO PRODUCERS DISAGREE ABOUT WHAT A LINE TERMINATOR "
-         "IS, measured")
+# RENAMED BY PLAT-34 ON 2026-09-20, BECAUSE ITS SUBJECT CLOSED. The case
+# measured `PLAT28-DG3` — `editorSurfaceForProject` splitting with
+# `strutils.splitLines` while the model splits on `'\n'` only — and PLAT-34
+# took the decision that gap's own remedy asked for and moved the SURFACE. The
+# case now measures the AGREEMENT, with the old numbers kept in its comment.
+# The name is updated here rather than the case being dropped from
+# `NAMED_CASES`: a killer that names a case nobody wrote is a row that can
+# never be a kill (§32), and this harness refuses on exactly that.
+G_DG3 = ("PLAT28-DG3 — THE TWO PRODUCERS AGREED ABOUT A LINE TERMINATOR AFTER "
+         "PLAT-34, measured")
 
 NAMED_CASES = [
     D1_INSERT, D1_COLLAPSE, D2_COLLAPSED, D2_DELETED, D2_REFUSAL,

@@ -261,6 +261,20 @@ func projectionLineStarts*(doc: string): seq[int] =
     result[i] = off
     off += ls[i].len + 1
 
+proc projectionLinesFor*(doc: string; trailing: TrailingLinePolicy):
+                        seq[string] =
+  ## **THE ONE PLACE `TrailingLinePolicy` IS APPLIED** (PLAT-34 extracted it;
+  ## §30b). `editorRowsOf` below calls it, and so does
+  ## `view_vocabulary/editor_surface.editorSurfaceForDocument`, which used to
+  ## carry its own `splitLines`-and-drop — a THIRD spelling of a decision this
+  ## enum exists to make once. One function, two callers, and the mutation
+  ## goes on the function, so an edit to the policy reddens both consumers at
+  ## once rather than letting one of them go on agreeing with itself.
+  result = projectionLines(doc)
+  if trailing == tlpDropFinalEmpty and result.len > 1 and
+     result[^1].len == 0 and doc.len > 0 and doc[^1] in {'\n', '\r'}:
+    result.setLen(result.len - 1)
+
 proc editorRowsOf*(p: RowProjection): seq[EditorRow] =
   ## **THE PROJECTION.** One pass over the viewport's lines, reading the
   ## decoration set for the four vocabulary fields.
@@ -269,11 +283,8 @@ proc editorRowsOf*(p: RowProjection): seq[EditorRow] =
   ## which is `LAW-D5`'s total order applied (`sortedAtPosition`). Two inline
   ## values on one line therefore appear in a declared order rather than in
   ## whichever order a producer happened to add them.
-  var ls = projectionLines(p.doc)
+  let ls = projectionLinesFor(p.doc, p.trailing)
   let starts = projectionLineStarts(p.doc)
-  if p.trailing == tlpDropFinalEmpty and ls.len > 1 and ls[^1].len == 0 and
-     p.doc.len > 0 and p.doc[^1] in {'\n', '\r'}:
-    ls.setLen(ls.len - 1)
   let lastLine = if p.viewportHeight <= 0: high(int)
                  else: p.viewportTop + p.viewportHeight - 1
   result = @[]

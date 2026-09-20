@@ -432,7 +432,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
                          mode: emInsert, textEntry: true)
     let st = initEditorState("ab")
     let r = resolve(trieFor(vim.keymap, s), st, s, "Space", 0)
-    let (after, ops) = applyResolution(st, r, settings)
+    let (after, ops) = applyResolution(st, r, settings, 0)
     ck ops == @["insert-text"]
     ck after.doc == " ab"
 
@@ -791,7 +791,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
       # The resolution carries no count of its own — the trie entry holds the
       # DIGIT as a published argument and the accumulation is the editor's.
       ck r.pending.chords.len == 0
-      let (after, _) = applyResolution(st, r, settings)
+      let (after, _) = applyResolution(st, r, settings, 0)
       st = after
     ck st.count == 37
 
@@ -802,13 +802,13 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     var st = initEditorState(ProbeDoc)
     var s = scopeFor(kmVim, emNormal)
     let (afterD, _) = applyResolution(st,
-      resolve(trieFor(vim.keymap, s), st, s, "d", 0), settings)
+      resolve(trieFor(vim.keymap, s), st, s, "d", 0), settings, 0)
     st = afterD
     ck st.pendingOperator == "delete-selection"
     ck st.mode == emOperatorPending
     s = scopeFor(kmVim, emOperatorPending)
     let (after2, _) = applyResolution(st,
-      resolve(trieFor(vim.keymap, s), st, s, "2", 0), settings)
+      resolve(trieFor(vim.keymap, s), st, s, "2", 0), settings, 0)
     ck after2.count == 2
     ck after2.pendingOperator == "delete-selection"
 
@@ -886,7 +886,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     let s = scopeFor(kmVim, emNormal)
     let st = initEditorState(ProbeDoc)
     let r = resolve(trieFor(vim.keymap, s), st, s, "g", 100)
-    let (after, ops) = applyResolution(st, r, settings)
+    let (after, ops) = applyResolution(st, r, settings, 100)
     ck after.pending.chords == @["g"]
     ck after.pending.startedMs == 100
     # A PENDING PREFIX PERFORMS NO OPERATION. The user is part-way through

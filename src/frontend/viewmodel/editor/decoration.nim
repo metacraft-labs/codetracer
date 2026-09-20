@@ -195,21 +195,30 @@ const
     dgLineTerminatorsDiverge: DecorationGap(
       id: dgLineTerminatorsDiverge,
       subject: "front-end",
-      measurement: "`editor_surface.editorSurfaceForProject` splits its text " &
+      measurement: "CLOSED BY PLAT-34 ON 2026-09-20; the measurement is kept " &
+        "because it is what the decision was taken on. As filed: " &
+        "`editor_surface.editorSurfaceForProject` split its text " &
         "with `strutils.splitLines`, which breaks on a LONE CR and on CRLF. " &
         "The model splits on '\\n' only — `text_store`, `wrap` and " &
         "`row_projection` must agree about how many lines a document has or " &
         "LAW-C4's partition is false, and PLAT-24's `unrepresentable.tsv` " &
         "row 1 is the same fact from the store's side. On a document " &
-        "carrying a CRLF and then a lone CR the two answer THREE rows and " &
+        "carrying a CRLF and then a lone CR the two answered THREE rows and " &
         "TWO. Measured by a " &
         "named case in `test_editor_decoration_examples.nim` rather than " &
         "avoided by choosing documents that cannot show it.",
-      remedy: "decide, in a GUI spec, what a line terminator is for EDIT " &
-        "mode, and move whichever side is wrong. It is the reason " &
-        "`editor_surface.nim` is not rewired onto `row_projection` by " &
-        "PLAT-28: rewiring would change edit-mode line counting in " &
-        "production for every file containing a CR."),
+      remedy: "TAKEN. The decision PLAT-28's remedy asked for — what a line " &
+        "terminator is for EDIT mode — is that a LONE CR is not one, because " &
+        "the caret cannot be placed on a row the store does not have, so a " &
+        "surface drawing more rows than the buffer has positions is the same " &
+        "defect as one drawing fewer. The SURFACE moved: " &
+        "`editorSurfaceForProject` goes through " &
+        "`row_projection.projectionLinesFor` and both producers answer TWO. " &
+        "The entry is kept rather than deleted so the register's cardinality " &
+        "stays a claim about what was FILED, and it is recorded in " &
+        "`Architecture/Editor-ViewModel.md` §3.2 rather than in a GUI spec " &
+        "because what a line IS is a contract question every medium " &
+        "inherits — a departure from the remedy's wording, named here."),
     dgValueWidthIsBytes: DecorationGap(
       id: dgValueWidthIsBytes,
       subject: "viewmodel",

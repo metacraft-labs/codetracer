@@ -33,8 +33,19 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1276 bash ci/test/frontend-reachability.sh`, so 1277
-# findings fail `lint-nim` and 1276 do not.
+# `env CT_REACHABILITY_MAX=1274 bash ci/test/frontend-reachability.sh`, so 1275
+# findings fail `lint-nim` and 1274 do not.
+#
+# THE CEILING MOVED 1276 -> 1274 ON 2026-09-20 (PLAT-34), AND IT IS THE FIRST
+# TIME IT HAS GONE DOWN ON A FEATURE MILESTONE. Gross +8 and -10: the editing
+# core and the editor projection are the +8, and the -10 are the three
+# milestones' worth of layers that had a suite and no product caller — the
+# editor state's constructor, the three keymap models, the peer session's
+# three routines and `EditingScope` — every one of which PLAT-31, PLAT-32 and
+# PLAT-33 predicted, in this file, would fall when this milestone wired them
+# in. FOUR exports were DELETED rather than carried; without them the net
+# would have been +2. The per-symbol account is a DIFF OF TWO RUNS of this
+# script and lives in the setter beside the invocation in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1263 -> 1276 ON 2026-09-20 (PLAT-33): net +13 — gross +15
 # against -2 that are NOT deletions, plus 2 exports DELETED rather than

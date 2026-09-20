@@ -1,5 +1,5 @@
 ## test_edit_binding_vocabulary.nim — PLAT-30, the terminal side of the
-## retirement.
+## retirement. **MIGRATED BY PLAT-34, AND THE MIGRATION IS THE POINT.**
 ##
 ## ## What was retired, and what this asserts survived
 ##
@@ -9,10 +9,34 @@
 ## `codetracer-specs/GUI/Editing-Operations-And-Keymaps.md` §1 names as the one
 ## place the product's own binding rule had never been applied.
 ##
-## It is now a LOOKUP in `src/common/editing_key_bindings.TuiEditBindings`
-## followed by a dispatch over `EditBehaviour`. This suite asserts, **through
-## the real `TextAreaWidget`**, that the fourteen behaviours are unchanged —
-## each one by name, each one driven the way a user drives it.
+## PLAT-30 made it a LOOKUP in `src/common/editing_key_bindings.TuiEditBindings`
+## followed by a dispatch over `EditBehaviour` against an `isonim-tui`
+## `TextAreaWidget`. **PLAT-34 removed the second half.** The lookup is now
+## PLAT-31's resolver — `product_keymap` LIFTS the same fourteen rows into its
+## table — and the dispatch is PLAT-30's own named operations against
+## `EditorState`. There is no widget on this path and no `case` over
+## `EditBehaviour` anywhere in the product.
+##
+## ## WHAT THAT DOES TO THIS SUITE, SAID PLAINLY RATHER THAN LEFT TO A DIFF
+##
+## The suite's SUBJECT is unchanged and its cases are the same fourteen: one
+## per row of the table, each driven the way a user drives it, each asserting
+## what the behaviour's NAME claims about the caret (§36 — *"something
+## changed" is never a witness for an operation whose name says which way*).
+##
+## What changed is where the arrangement comes from. `buf.widget.moveCursorTo`
+## is `buf.moveCaretTo`, which is the model's `caretSelection`; the `Ctrl+z`
+## arming edit is a real keystroke rather than a widget `insertText`; and
+## `applyEditKey` takes the key name alone, because the resolver derives the
+## character from it (see that proc's header on why the second parameter was a
+## standing invitation to CTUI-10's defect).
+##
+## **Two of PLAT-30's mutation arms were re-aimed rather than dropped**, which
+## is §32's rule rather than a courtesy: `M14` pointed at
+## `of ebMoveCharLeft: w.moveLeft()` and `U4` at the widget caret placement,
+## and both of those lines are gone. An arm whose needle a later repair moved
+## is silently unkillable, so `run-plat30-vocabulary-mutations.py` carries the
+## re-aim, its reason, and the re-run.
 ##
 ## ## The two sides, and why both are needed
 ##
@@ -21,18 +45,17 @@
 ##     running that operation over the ViewModel produces the effect the row
 ##     declares. It cannot reach `applyEditKey` — `tui/app/`'s layer rule and
 ##     the ViewModel lanes' file set both forbid it.
-##   * This file asserts that `applyEditKey` DISPATCHES through the table, on
-##     the substrate, for every row. It cannot reach the vocabulary — same
-##     rule, from the other side.
+##   * This file asserts that `applyEditKey` DISPATCHES through the table, for
+##     every row, from the front-end's side of the facade.
 ##
-## Between them the table is a join rather than a label. Neither alone is:
-## a table nothing dispatches through is documentation, and a dispatch through
-## a table whose names mean nothing is the third orphan vocabulary this
-## milestone exists to avoid.
+## Between them the table was a JOIN and is now a CALL, which is PLAT-34's
+## deliverable stated from the test side: before this milestone the oracle ran
+## the operation and this file ran a widget method, and nothing anywhere
+## executed the edge between them.
 ##
 ## ## No mocks
-## `newEditBuffer` builds the shipped `isonim-tui` `TextAreaWidget`. The text
-## is a real multi-line document with a grapheme cluster in it.
+## `newEditBuffer` builds the shipped editing core over a real multi-line
+## document with a grapheme cluster in it.
 
 import std/[strutils, unittest]
 
@@ -59,7 +82,7 @@ proc freshBuffer(): EditBuffer =
 proc placeMidDocument(buf: EditBuffer) =
   ## Line 1 (`    indented`), four clusters in — so a motion in either
   ## direction has somewhere to go and `Home` has an indent to skip.
-  buf.widget.moveCursorTo(Caret(line: 1, column: 8))
+  buf.moveCaretTo(1, 8)
 
 suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
 
@@ -70,7 +93,7 @@ suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
     ck defaultEditBindingIndex() >= 0
 
   for row in TuiEditBindings:
-    test "behaviour through the widget: " & $row.behaviour:
+    test "behaviour through the model: " & $row.behaviour:
       let buf = freshBuffer()
       placeMidDocument(buf)
       let before = buf.text
@@ -80,14 +103,13 @@ suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
       # entry point, which is what makes the arrangement real rather than
       # constructed.
       if row.behaviour in {ebUndo, ebRedo}:
-        ck applyEditKey(buf, "", "Q") == ekChanged
+        ck applyEditKey(buf, "Q", 0) == ekChanged
       if row.behaviour == ebRedo:
-        ck applyEditKey(buf, "Ctrl+z", "") == ekChanged
+        ck applyEditKey(buf, "Ctrl+z", 0) == ekChanged
       let armed = buf.text
       let key = if row.key.len > 0: row.key else: "Space"
-      let character = if row.key.len > 0: "" else: " "
-      let outcome = applyEditKey(buf, key, character)
-      checkpoint("key '" & key & "' char '" & character & "' -> " & $outcome)
+      let outcome = applyEditKey(buf, key, 0)
+      checkpoint("key '" & key & "' -> " & $outcome)
       case row.effect
       of eeMoved:
         ck outcome == ekMoved
@@ -134,11 +156,11 @@ suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
     let before = buf.text
     # `F10` is the debugger's, and the editor must hand it back rather than
     # swallow it — §1.1's resolution order, at the one place it is decided.
-    ck applyEditKey(buf, "F10", "") == ekIgnored
-    ck applyEditKey(buf, "Ctrl+w", "") == ekIgnored
+    ck applyEditKey(buf, "F10", 0) == ekIgnored
+    ck applyEditKey(buf, "Ctrl+w", 0) == ekIgnored
     ck buf.text == before
     # …and the DEFAULT row fires for anything that stands for a character.
-    ck applyEditKey(buf, "z", "z") == ekChanged
+    ck applyEditKey(buf, "z", 0) == ekChanged
     ck buf.text != before
 
   test "`Space` inserts a space and never the word `Space`":
@@ -147,8 +169,8 @@ suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
     # that inserted `key` would type five letters into a user's file, and the
     # `case` this replaced got it right — so the replacement has to.
     let buf = freshBuffer()
-    buf.widget.moveCursorTo(Caret(line: 0, column: 0))
-    ck applyEditKey(buf, "Space", " ") == ekChanged
+    buf.moveCaretTo(0, 0)
+    ck applyEditKey(buf, "Space", 0) == ekChanged
     ck buf.text.startsWith(" alpha")
     ck "Space" notin buf.text
 
@@ -157,9 +179,9 @@ suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
     # line is a Devanagari cluster: `नो` is a base plus a vowel sign, and a
     # backspace that removed a code point would leave half of it.
     let buf = freshBuffer()
-    buf.widget.moveCursorTo(Caret(line: 2, column: 1))
+    buf.moveCaretTo(2, 1)
     let before = buf.lines[2]
-    ck applyEditKey(buf, "Backspace", "") == ekChanged
+    ck applyEditKey(buf, "Backspace", 0) == ekChanged
     let after = buf.lines[2]
     checkpoint("line 2: '" & before & "' -> '" & after & "'")
     ck after.len < before.len
@@ -169,8 +191,8 @@ suite "PLAT-30: `applyEditKey` dispatches through the table, row by row":
 
   test "a nil buffer is ignored rather than raising":
     var nilBuf: EditBuffer
-    ck applyEditKey(nilBuf, "Left", "") == ekIgnored
-    ck applyEditKey(nilBuf, "", "x") == ekIgnored
+    ck applyEditKey(nilBuf, "Left", 0) == ekIgnored
+    ck applyEditKey(nilBuf, "x", 0) == ekIgnored
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

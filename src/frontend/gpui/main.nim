@@ -49,6 +49,11 @@ import std/[os, strutils]
 import isonim_gpui/renderer
 import isonim_gpui/window
 
+# PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
+# below OPENS a document rather than handing a string to a derivation, so the
+# GPUI editor and the terminal editor hold one value of one type.
+import codetracer_embed
+
 import ./app/shell
 import ./app/leaves
 import ./host/gpui_host
@@ -180,17 +185,33 @@ proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
   ## mode does not use `SourceVM`"*), so nothing here opens a recording, spawns
   ## a `replay-server` or constructs a source window.
   ##
-  ## **THIS FRONT-END CANNOT YET MUTATE, AND IT SAYS SO RATHER THAN PRETENDING
-  ## EITHER WAY.** PLAT-16's editing substrate is `isonim-tui`'s
-  ## `TextAreaWidget` — grapheme-aware columns, undo coalescing, a delta stack,
-  ## all covered by that repository's own suites — and it is a TERMINAL widget:
-  ## the `gpui-shell` lane links no `isonim_tui` at all, deliberately, and
-  ## `test_gpui_shell_split.nim` asserts that it does not. So `mutableHere` is
-  ## `false`, `editorSurfaceForProject` carries the disagreement between the
-  ## contract and the medium as a REPORT naming both, and the milestone's status
-  ## marks this deliverable partial for exactly that reason. A front-end that
-  ## answered `mutable = true` over a buffer nobody can type into would be the
-  ## worse of the two failures available here.
+  ## **THIS FRONT-END DERIVES FROM THE EDITING CORE AND CANNOT WRITE TO IT —
+  ## AND THE REASON CHANGED UNDER PLAT-34, WHICH IS WORTH READING.**
+  ##
+  ## PLAT-22 gave the reason as the SUBSTRATE: *"PLAT-16's editing substrate is
+  ## `isonim-tui`'s `TextAreaWidget` … and it is a TERMINAL widget: the
+  ## `gpui-shell` lane links no `isonim_tui` at all."* That reason is now
+  ## **retired rather than still true**. There is no widget on the editing
+  ## path in either front-end; the buffer is `editing_core.EditingDocument`,
+  ## which is pure Nim over `viewmodel/editor/` and links nothing this lane
+  ## refuses. The document below is a real one and this surface is derived
+  ## from it — not from a string this function read and split.
+  ##
+  ## **WHAT STILL MAKES IT READ-ONLY IS `isonim-gpui`, MEASURED BY PLAT-21:**
+  ##
+  ##   * `PLAT21-VG1` — `addEventListener` takes a `proc()` with no parameter
+  ##     and `gpui_dispatch_event` carries no payload, so no key can be
+  ##     delivered to a view at all;
+  ##   * `PLAT21-VG3` — focus is per WINDOW; there is no element focus, so
+  ##     there is nothing for a key to be delivered TO.
+  ##
+  ## Those are gaps in the renderer binding, not in this model, and no amount
+  ## of work on this side closes them. So `mutableHere` is `false`,
+  ## `editorSurfaceForDocument` carries the disagreement between the contract
+  ## and the medium as a NOTICE naming both, and PLAT-34's deliverable 3 says
+  ## "read-only" in the box. A front-end that answered `mutable = true` over a
+  ## buffer nobody can type into would be the worse of the two failures
+  ## available here.
   let problem = editProjectProblem(cmd.traceFolder)
   if problem.len > 0:
     return EditorSurface(medium: GpuiMedium, productMode: pmEdit,
@@ -205,9 +226,14 @@ proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
                          report: "no source files under " & cmd.traceFolder &
                                  " (" & $listing.scanned & " entries scanned)")
   let relative = listing.files[0]
-  editorSurfaceForProject(
-    path = relative,
-    text = readProjectFile(cmd.traceFolder, relative),
+  # THE DOCUMENT IS OPENED, NOT THE TEXT PASSED ON. One `EditingDocument`,
+  # which is the same value the terminal's `EditBuffer` holds, and the surface
+  # is a derivation of it. That is the whole of PLAT-34's deliverable 3 on
+  # this side, and it is one line.
+  let doc = initEditingDocument(relative,
+                                readProjectFile(cmd.traceFolder, relative))
+  editorSurfaceForDocument(
+    d = doc,
     medium = GpuiMedium,
     mutableHere = false,
     viewportHeight = editorRowsForViewport(cmd.height))

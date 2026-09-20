@@ -143,8 +143,8 @@ POPULATION = "the scenario table is one row per declaration, in the vocabulary's
 CARDINALITY = "the vocabulary's own cardinalities, asserted before anything is swept"
 BEHAVIOUR_DELETE = "behaviour: delete-cluster-before"
 BINDING_TABLE = "the binding table answers the three questions a `case` could not"
-WIDGET_LEFT = "behaviour through the widget: move-caret-left"
-WIDGET_HOME = "behaviour through the widget: move-caret-line-start"
+MODEL_LEFT = "behaviour through the model: move-caret-left"
+MODEL_HOME = "behaviour through the model: move-caret-line-start"
 OP_ENTER_VISUAL = "operation: enter-visual"
 
 NAMED_CASES = [
@@ -153,8 +153,8 @@ NAMED_CASES = [
     DISP_LINE_START, DISP_LINE_UP, DISP_ROW_START, FUZZ3,
     MARKS_MOVE,
     ORACLE_L3, ORACLE_L4, ORACLE_DD_L3, ORACLE_PARSE, REFUSAL_ARM,
-    POPULATION, CARDINALITY, BEHAVIOUR_DELETE, BINDING_TABLE, WIDGET_LEFT,
-    WIDGET_HOME, OP_ENTER_VISUAL,
+    POPULATION, CARDINALITY, BEHAVIOUR_DELETE, BINDING_TABLE, MODEL_LEFT,
+    MODEL_HOME, OP_ENTER_VISUAL,
 ]
 
 
@@ -386,17 +386,38 @@ ARMS = [
         "is empty; a row bound to a real key instead leaves typing itself "
         "unbound, which is the entire editing path",
     ),
+    # M14 WAS RE-AIMED BY PLAT-34 AND WAS NOT DROPPED (§32).
+    #
+    # It pointed at `of ebMoveCharLeft: w.moveLeft(); ekMoved` — one arm of the
+    # fourteen-arm `case` over `EditBehaviour` that dispatched onto an
+    # `isonim-tui` `TextAreaWidget`. PLAT-34 retired that widget as the source
+    # of truth, so the line is GONE from the tree and the old needle occurs
+    # zero times. An arm whose needle a later repair moved is silently
+    # unkillable, and the interpretation that costs nothing is "the path is
+    # dead, drop the arm" — which would have deleted the ONLY arm on the
+    # terminal's dispatch on the day that dispatch became load-bearing.
+    #
+    # THE CLAIM IS UNCHANGED AND THE SITE MOVED. "The terminal's dispatch
+    # performs the wrong thing, and only the third suite can see it" is now
+    # expressible one field over: `applyEditKey` builds an `EditingScope`, and
+    # the PANE dimension is what admits the product keymap's thirteen rows
+    # (`BindingScope(panes: {epEditor})`). Resolving under `epOtherPane` leaves
+    # every bound key unresolved, so `Left` stops moving the caret while
+    # typing still works through the text-entry arm — which is precisely a
+    # dispatch that is wrong in a way no ViewModel suite can reach, because no
+    # ViewModel suite builds this front-end's scope.
     Arm(
         "M14", DISPATCH,
-        "  of ebMoveCharLeft: w.moveLeft(); ekMoved\n",
-        "  of ebMoveCharLeft: w.moveRight(); ekMoved\n",
-        WIDGET_LEFT,
-        "THE DISPATCH PERFORMS THE WRONG BEHAVIOUR. `applyEditKey` is now a "
-        "lookup plus a `case` over `EditBehaviour`, and the `case` is still a "
-        "place a wrong answer can live — it is simply a place that can be "
-        "asked the three questions CTUI-9 names. This is the only arm the "
-        "ViewModel suites cannot reach, which is why the third suite is in the "
-        "run",
+        "  EditingScope(model: buf.doc.model, product: pmEdit, pane: epEditor,\n",
+        "  EditingScope(model: buf.doc.model, product: pmEdit, pane: epOtherPane,\n",
+        MODEL_LEFT,
+        "THE TERMINAL DISPATCHES UNDER THE WRONG SCOPE. `applyEditKey` is one "
+        "call to the editing core now, and what this front-end still decides "
+        "for itself is the five-dimensional scope the resolver walks. A pane "
+        "dimension that says another pane has focus admits none of the "
+        "product keymap's rows, so every non-printable key is handed back to "
+        "the debugger. This is the only arm the ViewModel suites cannot "
+        "reach, which is why the third suite is in the run",
     ),
 
     Arm(
@@ -495,11 +516,16 @@ ARMS = [
         "guard is the 'no row is witnessless' assertion, and this is the arm "
         "that proves it is a guard",
     ),
+    # U4 WAS RE-AIMED BY PLAT-34, same reason as M14 and the same rule: the
+    # caret placement it mutated was `buf.widget.moveCursorTo(Caret(...))` and
+    # the widget is gone. `buf.moveCaretTo` is the model's, and the defect it
+    # performs — the suite's caret starts where no motion has anywhere to go —
+    # is the identical §34 defect at the identical place in the arrangement.
     Arm(
         "U4", TUI,
-        "  buf.widget.moveCursorTo(Caret(line: 1, column: 8))\n",
-        "  buf.widget.moveCursorTo(Caret(line: 0, column: 0))\n",
-        WIDGET_HOME,
+        "  buf.moveCaretTo(1, 8)\n",
+        "  buf.moveCaretTo(0, 0)\n",
+        MODEL_HOME,
         "THE DISPATCH SUITE'S CARET MOVES TO THE DOCUMENT'S FIRST POSITION — "
         "§34 on the third suite. From `(0, 0)` neither `Left` nor `Home` has "
         "anywhere to go, so both report `ekMoved` and move nothing, and the "
@@ -645,12 +671,12 @@ CASE_TEMPLATES = [
     ('test "FUZZ-8 x corpus class " & $cls:', LAWS, "THE FUZZ-8 CELL"),
     ('test "row: " & specDecl.name:', ORACLE, "THE ORACLE ROW CELL"),
     ('test "behaviour: " & $row.behaviour:', ORACLE, "THE BINDING-ROW CELL"),
-    ('test "behaviour through the widget: " & $row.behaviour:', TUI,
+    ('test "behaviour through the model: " & $row.behaviour:', TUI,
      "THE DISPATCH CELL"),
 ]
 
 COMPOSED_PREFIXES = ("operation: ", "display: ", "FUZZ-8 x corpus class ",
-                     "row: ", "behaviour: ", "behaviour through the widget: ")
+                     "row: ", "behaviour: ", "behaviour through the model: ")
 
 
 def check_killer_names(problems: int) -> int:

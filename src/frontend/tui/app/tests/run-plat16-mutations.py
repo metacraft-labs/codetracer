@@ -328,9 +328,10 @@ MUTATIONS = [
         "column does not move",
         "§3's 'minus the execution pointer' goes: `-->` on every line."),
     Mutation(
+        # RE-POINTED BY PLAT-34 (§32a): `buf.widget.text` is `buf.doc.text`.
         "M17", EDITBIND,
-        "buf.widget.text != buf.loadedText",
-        'buf.widget.text != ""',
+        "buf.doc.text != buf.loadedText",
+        'buf.doc.text != ""',
         SOURCE,
         "an edit that was undone is not a staleness",
         "`isDirty` stops comparing against WHAT WAS LOADED, so every non-empty "
@@ -454,10 +455,11 @@ MUTATIONS = [
         "`isDirty`, so saving silences the notice — §5a's two questions merged "
         "back into one `bool`, with the dangerous one read as the benign one."),
     Mutation(
+        # RE-POINTED BY PLAT-34 (§32a): `buf.widget.text` is `buf.doc.text`.
         "M29", EDITBIND,
-        "    buf.loadedText = buf.widget.text",
-        "    buf.loadedText = buf.widget.text\n"
-        "    buf.recordedText = buf.widget.text",
+        "    buf.loadedText = buf.doc.text",
+        "    buf.loadedText = buf.doc.text\n"
+        "    buf.recordedText = buf.doc.text",
         SOURCE,
         "a saved edit is still an edit the recording predates",
         "THE SAME DEFECT THROUGH THE OTHER END, and it is a separate arm "
@@ -467,10 +469,15 @@ MUTATIONS = [
         "retroactively fresh — a repair to `refreshEditedPaths` alone would "
         "leave this route open."),
     Mutation(
+        # RE-POINTED BY PLAT-34 (§32a). `buf.widget` is gone — the terminal's
+        # buffer is `EditingDocument` now and `buf.doc.text` is the same
+        # question asked of the model. The DEFECT is unchanged; only the
+        # spelling of the left-hand operand moved, and this harness refused to
+        # run until it was re-pointed, which is the guard working.
         "M30", EDITBIND,
-        "  buf.widget.text != buf.recordedText or "
+        "  buf.doc.text != buf.recordedText or "
         "buf.loadedText != buf.recordedText",
-        "  buf.widget.text != buf.recordedText",
+        "  buf.doc.text != buf.recordedText",
         SOURCE,
         "a save that restores the recorded bytes IS fresh again",
         "The DISK half of the disjunction goes. edit + `:w` + undo then reads "
@@ -478,8 +485,9 @@ MUTATIONS = [
         "holds the edit. This is the arm that makes the second half of "
         "`outrunsRecording` load-bearing rather than decorative."),
     Mutation(
+        # RE-POINTED BY PLAT-34 (§32a), same reason as M30.
         "M31", EDITBIND,
-        "  buf.widget.text != buf.recordedText or ",
+        "  buf.doc.text != buf.recordedText or ",
         "  ",
         SOURCE,
         "edit, toggle to Debug on an existing trace, and the user is told",
@@ -638,12 +646,17 @@ DECLARED_SURVIVORS = [
         "since a child that will not start looks the same as one that starts "
         "and misbehaves."),
     Mutation(
+        # RE-POINTED BY PLAT-34 (§32a). The nil guard lost its second
+        # conjunct with the widget — there is no second object to be nil — and
+        # the operands are `buf.doc.text` now. This is a NEVER-MUTATED
+        # CONTROL: it must still survive, and re-pointing it is what keeps it
+        # able to.
         "S9", EDITBIND,
-        "  if buf.isNil or buf.widget.isNil:\n    return false\n"
-        "  buf.widget.text != buf.recordedText or "
+        "  if buf.isNil:\n    return false\n"
+        "  buf.doc.text != buf.recordedText or "
         "buf.loadedText != buf.recordedText",
-        "  if buf.isNil or buf.widget.isNil:\n    return false\n"
-        "  (buf.widget.text != buf.recordedText) or "
+        "  if buf.isNil:\n    return false\n"
+        "  (buf.doc.text != buf.recordedText) or "
         "(buf.loadedText != buf.recordedText)",
         SOURCE, "",
         "Redundant parentheses around the two operands of an `or`. Pairs "

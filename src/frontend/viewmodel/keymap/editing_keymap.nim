@@ -511,7 +511,8 @@ proc repeatFormIndex(opIndex: int): int =
   opIndex
 
 proc applyResolution*(st: EditorState; res: EditingResolution;
-                      settings: WrapSettings; viewportRows = 20):
+                      settings: WrapSettings; nowMs: int64;
+                      viewportRows = 20):
                      (EditorState, seq[string]) =
   ## Execute a resolution. Returns the new state and **the sequence of named
   ## operations that produced it** — which is `DIFF-4`'s compared artefact.
@@ -520,12 +521,30 @@ proc applyResolution*(st: EditorState; res: EditingResolution;
   ## `applyOperation` call, which is what makes the returned sequence the whole
   ## of the effect rather than a log beside it. `test_editor_keymap_laws.nim`
   ## scans this body and asserts exactly that.
+  ##
+  ## ## `nowMs` IS REQUIRED, AND IT IS REQUIRED BECAUSE IT WAS DEFAULTED
+  ##
+  ## PLAT-34's inherited residual. Until this milestone the `applyOperation`
+  ## call below took `applyOperation`'s own `nowMs: int64 = 0` default, so
+  ## every operation reached through the keymap layer ran at time zero — and
+  ## `history.mayGroup` asks `nowMs - h.prevTime >= NewGroupDelayMs`, which at
+  ## `0 - 0` is `0 >= 500`, false, *group*. **Undo grouping could therefore
+  ## never break on the keymap path**: thirty keystrokes minutes apart were one
+  ## undo, and no case could see it because no case supplied a clock.
+  ##
+  ## The parameter is positional and **has no default**, which is the fix
+  ## rather than a stylistic preference: a defaulted clock is
+  ## indistinguishable, at every call site, from a clock somebody passed — and
+  ## that is precisely how the residual survived a milestone whose own suite
+  ## drove this function six times. `M14` in `run-plat31-keymap-mutations.py`
+  ## restores the defect by dropping the argument here, and the grouping case
+  ## in `test_editor_front_end_differential.nim` is where it dies.
   var state = st
   state.pending = res.pending
   var performed: seq[string] = @[]
 
   template run(name: string; args: OpArgs) =
-    let r = applyOperation(state, name, args, settings, viewportRows)
+    let r = applyOperation(state, name, args, settings, viewportRows, nowMs)
     performed.add name
     state = r.state
 
@@ -562,24 +581,63 @@ proc applyResolution*(st: EditorState; res: EditingResolution;
           run("cancel-operator", OpArgs())
   (state, performed)
 
+type
+  KeyStep* = object
+    ## What ONE key did, as a value.
+    ##
+    ## **THE RESOLUTION KIND IS PART OF THE ANSWER AND NOT ONLY THE STATE.** A
+    ## front-end has to distinguish *"this key is not the editor's"* from
+    ## *"this key did nothing to this document"* — the first is handed back to
+    ## the product keymap, the second is swallowed — and those two are the
+    ## SAME `(state, operations)` pair: `erNothing` executes no operation and a
+    ## bound motion at the end of the document executes one that moves nothing.
+    ## `edit_binding.EditKeyOutcome`'s three-valued answer has depended on that
+    ## distinction since PLAT-16 and derived it from a `case` over key names;
+    ## it reads this field now.
+    state*: EditorState
+    operations*: seq[string]
+    kind*: EditingResolutionKind
+    timedOut*: bool
+
+proc applyKey*(st: EditorState; km: EditingKeymap; scope: EditingScope;
+               key: string; settings: WrapSettings; nowMs: int64;
+               viewportRows = 20): KeyStep =
+  ## **ONE KEY: RESOLVE, THEN EXECUTE.** The whole of what this layer does to
+  ## an editor, for one canonical key name.
+  ##
+  ## `driveKeys` is a fold of this and `editing_core.applyKey` is one call to
+  ## it, which is §30b applied before the second copy exists rather than after:
+  ## PLAT-34 needed the resolution KIND that `driveKeys` discards, and the
+  ## available shapes were to widen `driveKeys`' return (which moves a
+  ## published signature every PLAT-31 case reads) or to write the same three
+  ## steps again in the core. The third shape is this one — extract the step,
+  ## fold it — and it is the only one in which the rule and its two callers
+  ## cannot disagree.
+  ##
+  ## The scope's EDITING MODE is re-read from the state here rather than taken
+  ## from `scope`, so a caller cannot hand a stale mode in: a chord that
+  ## entered insert mode changes which trie the NEXT chord resolves through,
+  ## and that is the entire reason the mode is state rather than a resolver
+  ## argument.
+  var sc = scope
+  sc.mode = st.mode
+  let t = trieFor(km, sc)
+  let res = resolve(t, st, sc, key, nowMs)
+  let (next, ops) = applyResolution(st, res, settings, nowMs, viewportRows)
+  KeyStep(state: next, operations: ops, kind: res.kind, timedOut: res.timedOut)
+
 proc driveKeys*(st: EditorState; km: EditingKeymap; scope: EditingScope;
                 keys: seq[string]; settings: WrapSettings;
                 viewportRows = 20; nowMs: int64 = 0):
                (EditorState, seq[string]) =
-  ## Resolve and execute a whole key sequence. The scope's EDITING MODE is
-  ## re-read from the state after every key, because a chord that entered
-  ## insert mode changes which trie the next chord resolves through — which is
-  ## the entire reason the mode is state rather than a resolver argument.
+  ## Resolve and execute a whole key sequence — **a fold of `applyKey`**, which
+  ## is where the mode re-read and the resolution now live.
   var state = st
   var performed: seq[string] = @[]
-  var sc = scope
   for key in keys:
-    sc.mode = state.mode
-    let t = trieFor(km, sc)
-    let res = resolve(t, state, sc, key, nowMs)
-    let (next, ops) = applyResolution(state, res, settings, viewportRows)
-    state = next
-    performed.add ops
+    let step = applyKey(state, km, scope, key, settings, nowMs, viewportRows)
+    state = step.state
+    performed.add step.operations
   (state, performed)
 
 # ===========================================================================

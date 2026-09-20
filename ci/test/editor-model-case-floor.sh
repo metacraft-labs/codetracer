@@ -13,6 +13,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-31
 #   bash ci/test/editor-model-case-floor.sh PLAT-32
 #   bash ci/test/editor-model-case-floor.sh PLAT-33
+#   bash ci/test/editor-model-case-floor.sh PLAT-34
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -257,9 +258,48 @@ PLAT-33)
 	LAW_SECTION="3.7"
 	LAW_COUNT=5
 	;;
+PLAT-34)
+	MILESTONE="** PLAT-34: One editing core, two front-ends"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_front_end_differential.nim
+		src/frontend/tui/tests/test_editor_front_end_observed.nim
+	)
+	# TWO SUITES, AND THE SECOND ONE NEEDS THE `tui` LANE'S LINK FLAGS.
+	#
+	# `DIFF-1` has two halves (PLAT-34, and §8 of the conformance suite): the
+	# model states agree — cheap, and true by construction once the milestone
+	# lands — and both front-ends' OBSERVED OUTPUT changes when the model
+	# changes, read from a run. The first half plus the scans that keep it
+	# from being vacuous is the `vm-unit` suite above, which links neither
+	# renderer and runs on C, JS and wasm32. The second half paints the
+	# terminal's editor into a real `StyledGrid` and renders the GPUI editor
+	# into the real Rust shadow tree, so it links `isonim_tui` AND
+	# `isonim_gpui` and is native-only — PLAT-29's third suite is the same
+	# shape and the reason is the same: the FLOOR is a claim about the
+	# milestone's cases, not about one backend's lane.
+	#
+	# The flags are READ FROM `ci/lib/test-lane-files.sh`, never transcribed.
+	# That file already answers "what does a `tui`-lane file need to build"
+	# and a second spelling here would be a second place for the tree-sitter
+	# archive path and the two `-L` flags to drift (§30). `SUITE_FLAGS` is
+	# indexed by the same subscript as `SUITES`.
+	SUITE_FLAGS=("" "$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)")
+	# NO `LAW_SUITES`, for PLAT-30's and PLAT-31's reason and not by
+	# oversight. §3 publishes `LAW-A` … `LAW-X` and none of them is
+	# PLAT-34's; this milestone's oracle is §8's `DIFF-1` row, whose two
+	# halves are asserted inside the two suites — the operation-sequence
+	# corpus's cardinality and per-family counts in the first, the
+	# transaction-kind enum's span and the renderer-less control in the
+	# second.
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-33. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-34. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1
@@ -267,6 +307,13 @@ PLAT-33)
 esac
 LAW_DEFERRED="${LAW_DEFERRED:-}"
 LAW_SUITES=("${LAW_SUITES[@]:-}")
+# PER-SUITE COMPILE FLAGS, defaulted to empty for every milestone that
+# declares none. Added by PLAT-34, whose second suite links two renderers; it
+# is an ARRAY PARALLEL TO `SUITES` rather than one string for the milestone,
+# because a milestone with one native-only suite beside portable ones is the
+# shape PLAT-29 already has and a single string would have applied the
+# renderer's link flags to a file that links neither.
+SUITE_FLAGS=("${SUITE_FLAGS[@]:-}")
 
 if [ ! -f "${SPEC_REL}" ]; then
 	echo "FAIL: the milestone file is not here: ${SPEC_REL}"
@@ -446,13 +493,18 @@ if [ -n "${LAW_SUITES[0]:-}" ]; then
 fi
 
 total=0
-for suite in "${SUITES[@]}"; do
+for i in "${!SUITES[@]}"; do
+	suite="${SUITES[$i]}"
 	if [ ! -f "${suite}" ]; then
 		echo "FAIL: ${suite} is not in the tree"
 		exit 1
 	fi
 	bin="${TMPDIR:-/tmp}/editor-model-floor-$(basename "${suite}" .nim)"
-	out="$(nim c -r --hints:off -o:"${bin}" "${suite}" 2>&1)" || {
+	# Word-splitting on the flag string is intended: `test_lane_extra_flags`
+	# emits a whitespace-separated flag list and each element has to reach
+	# `nim` as its own argument.
+	# shellcheck disable=SC2086
+	out="$(nim c -r --hints:off ${SUITE_FLAGS[$i]:-} -o:"${bin}" "${suite}" 2>&1)" || {
 		echo "FAIL: ${suite} did not run green"
 		printf '%s\n' "${out}" | tail -30
 		exit 1

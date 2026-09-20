@@ -371,6 +371,31 @@ export trace_source
 import plugin_host/plugin_api
 export plugin_api
 
+# ---------------------------------------------------------------------------
+# THE EDITING CORE (PLAT-34)
+#
+# `editing_core` is the pairing of PLAT-30's operation vocabulary, PLAT-31's
+# keymap layer and PLAT-32's history into the ONE mutable text buffer the
+# product has. It is here for the same reason `source_vm` is, one milestone
+# on: a front-end that cannot see it reimplements it.
+#
+# Before PLAT-34 the terminal held an `isonim-tui` `TextAreaWidget` and drove
+# it from a private `case` over `EditBehaviour`; the GPUI front-end held a
+# string it had read off the disk. Those were two buffers, neither of them the
+# model, and PLAT-22's deliverable — *"the two existing editors are not wired
+# to the same ViewModels as each other"* — could not be satisfied while they
+# existed. Exporting the core is what makes "the same editing core" a thing a
+# consumer CAN reach rather than a thing a milestone claims.
+#
+# WHAT IT COSTS THIS FACADE'S GRAPH: nothing `ci/test/sdk-facade-boundary.sh`
+# forbids. `viewmodel/editor/` is `ci/test/editor-import-closure.sh`'s own
+# subject — no async, no I/O, no process, no socket, no clock, asserted over
+# the transitive closure by the shared extractor — and `viewmodel/keymap/`
+# adds three tables and a trie over it. There is no renderer, no DOM, no
+# Monaco and no `osproc` anywhere in either.
+import editing_core
+export editing_core
+
 # PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
 # whole of §8's argument.
 #

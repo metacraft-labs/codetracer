@@ -78,7 +78,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 327
+const ExpectedAssertions = 329
 
 const Policy = ColumnPolicy(tabSize: 4, ambiguous: awNarrow)
 const NoWrap = WrapSettings(wrapColumn: 0, policy: Policy)
@@ -536,16 +536,32 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
     counted FiledEditorGaps[pgMarksHaveNoProducer].concern == ecLineStatus
     counted FiledEditorGaps[pgFlowHasNoPerLineFact].concern == ecFlowOverlay
 
-  test "PLAT28-DG3 — THE TWO PRODUCERS DISAGREE ABOUT WHAT A LINE TERMINATOR IS, measured":
-    # `editorSurfaceForProject` splits with `strutils.splitLines`, which breaks
-    # on a lone CR and on CRLF. The model splits on `'\n'` only — `wrap.nim`'s
-    # own comment says why: *"`strutils.splitLines` also splits on a lone CR
-    # and would give this module a different line count from the store it must
-    # agree with (PLAT-24's `unrepresentable.tsv`, row 1)"*.
+  test "PLAT28-DG3 — THE TWO PRODUCERS AGREED ABOUT A LINE TERMINATOR AFTER PLAT-34, measured":
+    # **THIS CASE MEASURED A DIVERGENCE AND NOW MEASURES ITS CLOSURE, AND THE
+    # OLD NUMBERS ARE KEPT IN THE COMMENT SO THE CHANGE IS READABLE.**
+    #
+    # As PLAT-28 wrote it: `editorSurfaceForProject` split with
+    # `strutils.splitLines`, which breaks on a lone CR and on CRLF, while the
+    # model splits on `'\n'` only — `wrap.nim`'s own comment says why:
+    # *"`strutils.splitLines` also splits on a lone CR and would give this
+    # module a different line count from the store it must agree with
+    # (PLAT-24's `unrepresentable.tsv`, row 1)"*. On `crlf` below the two
+    # answered **THREE rows and TWO**.
+    #
+    # PLAT-28 filed that as `PLAT28-DG3` rather than fixing it, and said why:
+    # *"rewiring would change edit-mode line counting in production for every
+    # file containing a CR"*, with the remedy *"decide what a line terminator
+    # is for EDIT mode, and move whichever side is wrong."* **PLAT-34 took the
+    # decision and moved the SURFACE** — a lone CR is not a line terminator in
+    # this editor, because the caret cannot be placed on a row the store does
+    # not have — so `editorSurfaceForProject` now goes through
+    # `row_projection.projectionLinesFor` and both producers answer TWO. The
+    # reason is in `editorSurfaceForProject`'s own header and in
+    # `Architecture/Editor-ViewModel.md` §3.2.
     #
     # **THE ROW COUNTS BELOW ARE MEASURED ON A HAND-BUILT STRING, AND THE
     # ATTRIBUTION MATTERS.** `crlf` is the smallest input carrying both halves
-    # of the divergence — a CRLF and a lone CR — and 3-versus-2 is ITS
+    # of the old divergence — a CRLF and a lone CR — and the numbers are ITS
     # measurement, not the corpus terminator class's. The corpus contributes a
     # separate and weaker fact, asserted at the end of this case: the class does
     # contain CR-bearing documents, so the shape this measures is one the corpus
@@ -558,9 +574,14 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
       doc: crlf, decorations: decorationSet(@[]), viewportTop: 1,
       viewportHeight: 0, trailing: tlpDropFinalEmpty))
     checkpoint("control rows: " & $control.len & ", model rows: " & $model.len)
-    counted control.len == 3          # one / two / three
-    counted model.len == 2            # "one\r" / "two\rthree"
-    counted control.len != model.len
+    counted control.len == 2          # "one\r" / "two\rthree" — was 3
+    counted model.len == 2            # unchanged: the model never moved
+    counted control.len == model.len
+    # AND THE TEXTS AGREE, NOT ONLY THE COUNT. Two producers can agree about
+    # how many rows there are and disagree about where the breaks fell, and a
+    # count-only assertion would be satisfied by that.
+    for i in 0 ..< model.len:
+      counted control[i].text == model[i].text
     # AND THE MODEL'S ANSWER IS THE STORE'S. That is the reason the divergence
     # is filed rather than repaired in the model: the coordinate model, the
     # text store and the wrap projection all count lines this way, and moving

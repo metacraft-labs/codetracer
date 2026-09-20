@@ -696,7 +696,8 @@ proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
     return false
   name in EditorOwnedKeys or isTextKey(name)
 
-proc routeTokenToEditor*(rt: TuiRuntime; token: string): EditKeyOutcome =
+proc routeTokenToEditor*(rt: TuiRuntime; token: string;
+                         nowMs: int64): EditKeyOutcome =
   ## Apply one token to the open buffer and keep the session's bookkeeping
   ## honest.
   ##
@@ -705,9 +706,21 @@ proc routeTokenToEditor*(rt: TuiRuntime; token: string): EditKeyOutcome =
   ## the caret, and nothing else. A caller that recorded an edit for an arrow
   ## key would declare a recording stale because somebody scrolled — see
   ## `edit_binding.EditKeyOutcome` on why the outcome is three-valued.
+  ##
+  ## **`nowMs` IS THE CLOCK PLAT-32's UNDO GROUPING NEEDS, AND IT WAS ALREADY
+  ## HERE.** `handleToken` has taken it since CTUI-2 so the debugger keymap's
+  ## prefix timeout is assertable at its bound without a sleep; the editing
+  ## path simply never asked for it, and `editing_keymap.applyResolution`'s
+  ## `applyOperation` call therefore ran at time zero on every keystroke. The
+  ## parameter carries it the last step, and `applyEditKey` will not compile
+  ## without it.
+  ##
+  ## `keyCharacter` IS NO LONGER CALLED HERE. `applyEditKey` takes the key
+  ## name only and the resolver derives the character from it — one derivation
+  ## instead of one per call site, which is CTUI-10's defect removed rather
+  ## than re-avoided.
   let buf = rt.app.editSession.activeBuffer()
-  let name = keyName(token)
-  result = buf.applyEditKey(name, keyCharacter(name))
+  result = buf.applyEditKey(keyName(token), nowMs)
   if result == ekChanged:
     rt.app.editSession.recordEdit(buf.path)
     rt.app.editSession.refreshEditedPaths()
@@ -1012,7 +1025,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # reached by tabbing off the editor first. That is an ergonomic hole and it
   # is named in PLAT-16's status note.
   if rt.editorOwnsToken(token):
-    let outcome = rt.routeTokenToEditor(token)
+    let outcome = rt.routeTokenToEditor(token, nowMs)
     if outcome != ekIgnored:
       result.repaint = true
       return

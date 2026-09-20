@@ -77,6 +77,14 @@ import codetracer_embed
 import viewmodels/product_mode
 export product_mode
 
+# PLAT-28's trailing-line policy and the one function that applies it, by the
+# same bare-module spelling `viewmodels/product_mode` above uses. The enum is
+# re-exported because it appears in this module's published signature: a caller
+# choosing `tlpKeep` over `tlpDropFinalEmpty` is making PLAT-28's decision, and
+# a decision a caller cannot spell is one it cannot make.
+import editor/row_projection
+export row_projection.TrailingLinePolicy
+
 import ../../common/view_vocabulary
 import ../../common/value_presentation
 
@@ -374,12 +382,159 @@ proc followAndRequest*(vm: SourceVM): seq[SourceLineRequest] =
   vm.followExecutionPointer()
   vm.requestMissing()
 
+proc editorSurfaceForDocument*(d: EditingDocument; medium: string;
+                               mutableHere: bool;
+                               viewportTop = 1; viewportHeight = 0;
+                               points: openArray[EditorPoint] = [];
+                               trailing = tlpKeep;
+                               showCaret = true): EditorSurface =
+  ## **THE EDIT-MODE SURFACE, DERIVED FROM THE EDITING CORE (PLAT-34).**
+  ##
+  ## This is the function that makes "one editing core, two front-ends" a
+  ## thing a source scan can check rather than a claim. Its input is an
+  ## `EditingDocument` — the model — and every field below is read off it.
+  ## Nothing here reads a file, splits a string it was handed, or takes a
+  ## front-end's word for how long the document is.
+  ##
+  ## **THE TERMINAL DOES NOT CALL THIS ONE**, and that is deliberate rather
+  ## than an omission. `tui/app/views/edit_pane.EditPaneModel` predates the
+  ## shared row model by two milestones, carries a gutter mode, a syntax
+  ## highlighter and a fold column that `EditorRow` has no fields for, and is
+  ## graded by four suites in a lane this file's other callers do not run in.
+  ## Collapsing the two row models is real work with its own risk and it is
+  ## not PLAT-34's; what PLAT-34 owns is that both derivations read ONE
+  ## buffer, which they now do. The residual is named in the milestone rather
+  ## than rounded up into "both front-ends share a row model".
+  ##
+  ## `product_mode.sourceContractFor(pmEdit)` is read rather than re-decided,
+  ## and it says three things this function obeys: the origin is the working
+  ## tree, the text is `mutable`, and `windowed` is FALSE — §2.1's *"Edit mode
+  ## does not use `SourceVM`"*.
+  ##
+  ## **`mutableHere` IS THE MEDIUM'S ANSWER AND THE CONTRACT'S IS NOT
+  ## OVERRIDDEN — IT IS REPORTED AGAINST.** See the note on `notice`. A
+  ## front-end that cannot yet mutate must not answer `mutable = true` (it
+  ## would be claiming a capability) and must not quietly rewrite the
+  ## contract to `false` (the contract is the core's).
+  let contract = sourceContractFor(pmEdit)
+  result.medium = medium
+  result.productMode = pmEdit
+  result.sourceStatement = contract.statement
+  result.mutable = contract.mutable and mutableHere
+  result.path = d.path
+  result.revisionLabel = ""
+  # THE WORKING TREE IS `epUnverified` BY CONSTRUCTION, and that is not a
+  # degradation — it is the truth about which copy this is. CTUI-5's rule is
+  # that a working-tree read must not look identical to the recording's own
+  # copy, and edit mode shows the working tree ALWAYS.
+  result.provenance = epUnverified
+  result.executionLine = 0
+  # **`showCaret` IS A SECOND PARAMETER AND NOT A SECOND MEANING FOR
+  # `trailing`** (§5a). Both answer "is this a BUFFER or a FILE", and they
+  # answer it about different things — how many rows there are, and whether
+  # one of them carries a cursor — so a caller that wanted one and got the
+  # other would have no way to say so. `editorSurfaceForProject` is handed a
+  # string and passes `false`: the caret in the document that wrapper opens is
+  # an artefact of the delegation, not a fact about the bytes, and PLAT-28's
+  # `EditorRow.pointer x edit-mode` cases are what said so.
+  #
+  # **THE CARET IS THE INSPECTION CURSOR, AND IT IS WHY THIS SURFACE
+  # RE-RENDERS.** PLAT-34's gate is that a change in the model changes what
+  # BOTH front-ends draw, read from a run. A read-only medium draws no
+  # keystroke, so without this the GPUI shadow tree would only move when the
+  # TEXT moved — and every motion in the 224-operation vocabulary would be
+  # invisible to it. `EditorPointer` already distinguishes the debugger's stop
+  # from an inspection cursor (CTUI-6's contract), and a caret in a buffer
+  # nobody is stopped in is exactly the second one.
+  result.inspectionLine = if showCaret: d.caretLine else: 0
+  result.flowOverlayVisible = false
+  result.gutterVisible = true
+  # Three of the four concerns belong to a RECORDING and edit mode has none.
+  # `esAbsent` and not `esDegraded`: a degradation is a thing the medium could
+  # not draw, and there is nothing here to draw — the debugger is not running.
+  result.support = [ecExecutionPointer: esAbsent,
+                    ecLineStatus: esRendered,
+                    ecInlineValues: esAbsent,
+                    ecFlowOverlay: esAbsent]
+  if points.len == 0:
+    result.support[ecLineStatus] = esDegraded
+  if contract.mutable and not mutableHere:
+    result.notice = "this is " & contract.statement & ", read-only: the '" &
+      medium & "' front-end has no text buffer yet, so EDIT mode reaches it " &
+      "and cannot change it"
+  result.rows = @[]
+  # **THE TRAILING-LINE POLICY IS PLAT-28's, APPLIED BY PLAT-28's FUNCTION.**
+  #
+  # `row_projection.projectionLinesFor` is the one place `TrailingLinePolicy`
+  # is applied; this function carried its own `splitLines`-and-drop until
+  # PLAT-34, which was a third spelling of a decision that enum exists to make
+  # once — and PLAT-28's case "THE TRAILING-LINE POLICY IS A NAMED DECISION
+  # AND BOTH ARMS ARE REACHED" is what said so, by name, on the first
+  # floor-gate run of the milestone that added the third.
+  #
+  # **THE DEFAULT IS `tlpKeep` AND `editorSurfaceForProject` OVERRIDES IT**,
+  # which is the whole of the distinction PLAT-28's two arms encode: this
+  # entry point is handed a BUFFER, whose caret can reach the empty final
+  # line, and that one is handed a FILE, whose length is the number a user
+  # counts. Neither answer moved; which question each is asked is now said out
+  # loud.
+  let ls = projectionLinesFor(d.text, trailing)
+  let lastLine =
+    if viewportHeight <= 0: high(int)
+    else: viewportTop + viewportHeight - 1
+  for idx, lineText in ls:
+    let line = idx + 1
+    if line < viewportTop: continue
+    if line > lastLine: break
+    # **`result.inspectionLine` AND NOT `d.caretLine`, AND THE DIFFERENCE IS
+    # §30 IN EIGHT WORDS.** The first spelling of this loop read the document
+    # a second time, so the surface's own `inspectionLine` field and the
+    # pointer its rows carry were two answers to one question — and PLAT-34's
+    # arm `M3`, which blanks the field, SURVIVED: the field moved and the rows
+    # did not, because nothing downstream read the field. One value, one
+    # reader, and the arm lands.
+    result.rows.add EditorRow(line: line, text: lineText, held: true,
+                              pointer: pointerFor(line, result.executionLine,
+                                                  result.inspectionLine),
+                              mark: markFor(points, d.path, line),
+                              flow: efsUnknown)
+  result.totalLineCount = ls.len
+  result.viewportTop = viewportTop
+
 proc editorSurfaceForProject*(path, text: string; medium: string;
                               mutableHere: bool;
                               viewportTop = 1; viewportHeight = 0;
                               points: openArray[EditorPoint] = []):
                               EditorSurface =
-  ## **The EDIT-mode surface: the WORKING TREE, and not through `SourceVM`.**
+  ## **The EDIT-mode surface over raw TEXT — one line, and it opens a
+  ## document.**
+  ##
+  ## Kept as the entry point a caller that has bytes rather than a model comes
+  ## through, and it is now a wrapper: open the document, derive the surface,
+  ## with the two parameters that say a string is a FILE — its length is the
+  ## number a user counts, and it has no cursor.
+  ##
+  ## ## THIS CLOSES `PLAT28-DG3`, AND PLAT-28 ASKED FOR THE DECISION FIRST
+  ##
+  ## Until PLAT-34 this function split its text with `strutils.splitLines`,
+  ## which breaks on a LONE CR and on CRLF, while `text_store`, `wrap` and
+  ## `row_projection` split on `'\n'` only — they must agree or `LAW-C4`'s
+  ## partition is false. PLAT-28 measured the divergence (three rows against
+  ## two on `"one\r\ntwo\rthree\n"`), filed it as `PLAT28-DG3`, and said
+  ## exactly why it did not fix it: *"rewiring would change edit-mode line
+  ## counting in production for every file containing a CR"*, with the remedy
+  ## *"decide what a line terminator is for EDIT mode, and move whichever side
+  ## is wrong."*
+  ##
+  ## **THE DECISION IS TAKEN AND THE SURFACE IS THE SIDE THAT MOVED.** A lone
+  ## CR is not a line terminator in this editor, because the buffer's
+  ## coordinate model says it is not: the caret cannot be placed on a row the
+  ## store does not have, and a surface that drew more rows than the buffer
+  ## has positions is the same defect as one that drew fewer. It is recorded
+  ## in `Architecture/Editor-ViewModel.md` §3.2 rather than in a GUI spec,
+  ## because *what a line is* is a contract question that document owns and
+  ## every medium inherits; PLAT-28's remedy said "a GUI spec" and the
+  ## departure is named rather than taken quietly.
   ##
   ## `product_mode.sourceContractFor(pmEdit)` is read rather than re-decided,
   ## and it says three things this function obeys: the origin is the working
@@ -399,62 +554,9 @@ proc editorSurfaceForProject*(path, text: string; medium: string;
   ## contract's answer decides `productMode` and `sourceStatement`, the medium's
   ## answer decides `mutable`, and when they DISAGREE the surface carries a
   ## report saying so by name. PLAT-9's rule: degrade out loud.
-  let contract = sourceContractFor(pmEdit)
-  result.medium = medium
-  result.productMode = pmEdit
-  result.sourceStatement = contract.statement
-  result.mutable = contract.mutable and mutableHere
-  result.path = path
-  result.revisionLabel = ""
-  # THE WORKING TREE IS `epUnverified` BY CONSTRUCTION, and that is not a
-  # degradation — it is the truth about which copy this is. CTUI-5's rule is
-  # that a working-tree read must not look identical to the recording's own
-  # copy, and edit mode shows the working tree ALWAYS, so it is always the
-  # unverified one. A surface that reported `epVerified` here would be
-  # certifying bytes nobody recorded.
-  result.provenance = epUnverified
-  result.executionLine = 0
-  result.inspectionLine = 0
-  result.flowOverlayVisible = false
-  result.gutterVisible = true
-  # Three of the four concerns belong to a RECORDING and edit mode has none.
-  # `esAbsent` and not `esDegraded`: a degradation is a thing the medium could
-  # not draw, and there is nothing here to draw — the debugger is not running.
-  result.support = [ecExecutionPointer: esAbsent,
-                    ecLineStatus: esRendered,
-                    ecInlineValues: esAbsent,
-                    ecFlowOverlay: esAbsent]
-  if points.len == 0:
-    result.support[ecLineStatus] = esDegraded
-  if contract.mutable and not mutableHere:
-    result.notice = "this is " & contract.statement & ", read-only: the '" &
-      medium & "' front-end has no text buffer yet, so EDIT mode reaches it " &
-      "and cannot change it"
-  result.rows = @[]
-  var lines = text.splitLines()
-  # `splitLines` on text ending in a newline yields a final empty element, and
-  # a file of four lines that ends the way every text file ends would report
-  # five. Dropping it is what makes `totalLineCount` the number a user counts,
-  # and it is done HERE rather than at each medium so three editors cannot
-  # disagree about how long a file is. A file NOT ending in a newline keeps its
-  # last line, which is the same rule `wc -l` gets wrong and an editor must
-  # not.
-  if lines.len > 1 and lines[^1].len == 0 and text.len > 0 and
-     text[^1] in {'\n', '\r'}:
-    lines.setLen(lines.len - 1)
-  let lastLine =
-    if viewportHeight <= 0: high(int)
-    else: viewportTop + viewportHeight - 1
-  for idx, lineText in lines:
-    let line = idx + 1
-    if line < viewportTop: continue
-    if line > lastLine: break
-    result.rows.add EditorRow(line: line, text: lineText, held: true,
-                              pointer: eptNone,
-                              mark: markFor(points, path, line),
-                              flow: efsUnknown)
-  result.totalLineCount = lines.len
-  result.viewportTop = viewportTop
+  editorSurfaceForDocument(initEditingDocument(path, text), medium,
+                           mutableHere, viewportTop, viewportHeight, points,
+                           trailing = tlpDropFinalEmpty, showCaret = false)
 
 proc reportedConcerns*(s: EditorSurface): set[EditorConcern] =
   ## The concerns this surface DEGRADED, read back out of the value.

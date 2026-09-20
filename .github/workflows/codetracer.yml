@@ -3475,6 +3475,15 @@ jobs:
         # them; the price is a minute and a half and the thing bought is that six
         # milestones' counted targets stop being claims.
         #
+        # **RE-TAKEN 2026-09-20 (PLAT-34), BECAUSE THE FIGURE ABOVE IS ABOUT
+        # SEVEN MILESTONES AND THERE ARE ELEVEN.** Same host, same method —
+        # `~/.cache/nim/test_editor_*` deleted first, timed through this recipe:
+        # **2m12s**. Four more milestones for twenty-one more seconds, which is
+        # what it costs when most of the added suites are small; the argument
+        # above is unchanged and the number it rests on is no longer stale.
+        # §36b: a figure nothing re-takes is free to be wrong, and the tell here
+        # would have been the word "seven" beside a loop over eleven.
+        #
         # It lives in `viewmodel-tests`, which `ci/verdict/required-jobs.txt`
         # already requires, rather than in a new job that file does not know
         # about — and it carries `!cancelled()` like the lane steps below, so a
