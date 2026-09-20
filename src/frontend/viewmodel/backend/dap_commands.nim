@@ -17,6 +17,12 @@
 ## already present in ``EVENT_KIND_TO_DAP_MAPPING`` — because a hand-maintained
 ## mirror of a machine-readable fact always does.
 ##
+## There are FOUR such tables, not three. The fourth is
+## ``commandToCtResponseEventKind`` (``src/common/ct_event.nim``), which routes
+## a DAP *response* to a ``CtEventKind``; it was the one nothing read, which is
+## how issue #690 happened. The same guard reconciles it now — see
+## ``dap_dialect.md`` §7c.
+##
 ## Note what this list is NOT: a subset of the engine's requests. It is the
 ## union of three things — requests the engine dispatches, events the engine
 ## EMITS (``stopped``, ``ct/updated-*``, ``ct/notification`` …, which are

@@ -318,40 +318,16 @@ func toDapCommandOrEvent(kind: CtEventKind): cstring =
 
 
 func commandToCtResponseEventKind(command: cstring): CtEventKind =
-  # based on parseEnum[CtEventKind](command) and toCtDapResponseEventKind?
-  # or some common mapping?
-  case $command:
-  of "ct/load-locals": CtLoadLocalsResponse
-  of "initialize": DapInitializeResponse
-  of "launch": DapLaunchResponse
-  of "configurationDone": DapConfigurationDoneResponse
-  of "stepIn": DapStepInResponse
-  of "stepOut": DapStepOutResponse
-  of "next": DapNextResponse
-  of "continue": DapContinueResponse
-  of "stepBack": DapStepBackResponse
-  of "reverseContinue": DapReverseContinueResponse
-  of "ct/reverseStepIn": CtReverseStepInResponse
-  of "ct/reverseStepOut": CtReverseStepOutResponse
-  of "ct/load-asm-function": CtLoadAsmFunctionResponse
-  of "ct/update-expansion": CtUpdateExpansionResponse
-  of "ct/mcr-get-recording-head": CtMcrGetRecordingHead
-  of "ct/mcr-restore-at": CtMcrRestoreAt
-  of "ct/live-restore-at": CtLiveRestoreAt
-  of "ct/mcr-live-step": CtMcrLiveStep
-  of "ct/seek-to-geid": CtSeekToGeid
-  # Value Origin Tracking (M4)
-  of "ct/originChain": CtOriginChainResponse
-  of "ct/originSummary": CtOriginSummaryResponse
-  # Column-Aware Replay Navigation (M3)
-  of "ct/set-active-source-view": CtSetActiveSourceViewResponse
-  of "ct/install-source-view": CtInstallSourceViewResponse
-  # Multi-process sessions (M42 §14.8)
-  of "ct/listProcesses": CtListProcessesResponse
-  of "ct/pairIndexLookup": CtPairIndexLookupResponse
-  else: raise newException(
-    ValueError,
-    "no ct event kind response for command: \"" & $command & "\" defined")
+  ## The response table used to live here, as a hand-written `case` no guard
+  ## read — which is how `ct/load-request-spans-since` came to be present in
+  ## the other three command tables and absent from this one (#690). It is now
+  ## `ct_event.commandToCtResponseEventKind`: pure Nim, so a headless ViewModel
+  ## test running on the native (C) lane can call it — this module cannot be
+  ## compiled there at all, because it imports `std/jsffi` unconditionally —
+  ## and reconciled against the other three by `ci/test/dap-command-sync.py`.
+  ## This wrapper only bridges the `cstring` the DAP wire hands us to the
+  ## `string` the shared table takes.
+  ct_event.commandToCtResponseEventKind($command)
 
 
 proc dapEventToCtEventKind*(event: cstring): CtEventKind =

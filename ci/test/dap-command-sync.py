@@ -52,8 +52,22 @@ engine dispatches, and everything the event mapping names, must appear in the
 allow-list. That closes the class rather than the instance — the next command
 added to `dap_server.rs` reddens this guard by name.
 
-The three checks
-----------------
+The FOURTH table, and why it took issue #690 to find it
+-------------------------------------------------------
+There are four command tables, not three. The fourth is
+`commandToCtResponseEventKind` — the `case` that decides which `CtEventKind` a
+DAP **response** fans out as. It lived in `src/frontend/dap.nim` behind the JS
+FFI, nothing read it, and `ct/load-request-spans-since` was correctly present in
+all three tables above and absent from it. Every response to the Request
+Panel's poll therefore raised `ValueError`, was caught in
+`src/frontend/ui_js.nim::onDapReceiveResponse`, and logged
+`dap: ignoring response for unmapped command: …` — the line issue #690 pasted.
+
+The table is now `src/common/ct_event.nim::commandToCtResponseEventKind` (pure
+Nim, so the headless ViewModel tests can call it too) and is reconciled here.
+
+The four checks
+---------------
   ENGINE   every command the engine dispatches is in `VALID_DAP_COMMANDS`.
            A command the engine implements but the allow-list omits is traffic
            `isValidDapCommand` would reject although it works.
@@ -69,6 +83,19 @@ The three checks
            stops it growing silently, since nothing else in the tree would
            notice.
 
+  RESPONSE every command that a `BackendService` caller CAN send AND that the
+           engine dispatches must have an arm in
+           `commandToCtResponseEventKind`, or be named in one of the two
+           residue maps below with a reason.
+
+           "can send" is `EVENT_KIND_TO_DAP_MAPPING`: `RealBackendService`
+           translates a command string through `dapCommandToEventKind` before
+           it reaches the wire, so a command with no `CtEventKind` cannot be
+           sent at all and cannot come back. "the engine dispatches" is the
+           ENGINE set: a command no engine answers produces no response frame.
+           The intersection is exactly the traffic that can reach
+           `receiveResponse`.
+
 Deliberately NOT checked: the reverse of ENGINE. The allow-list legitimately
 contains strings the engine never dispatches — every emitted event, and the one
 frontend-internal command — so "in the allow-list but not in `dap_server.rs`" is
@@ -78,7 +105,8 @@ Usage:
   ci/test/dap-command-sync.py
   ci/test/dap-command-sync.py --root DIR
   ci/test/dap-command-sync.py --commands-from F --mapping-from F --engine-from F
-                              --residue a,b,c
+                              --response-from F
+                              --residue a,b,c --response-residue a,b,c
 
 The overrides exist so ci/test/dap-command-sync-test.sh can drive the checks
 against synthetic inputs. They are not used in CI.
@@ -95,6 +123,7 @@ import sys
 COMMANDS_NIM = "src/frontend/viewmodel/backend/dap_commands.nim"
 MAPPING_NIM = "src/frontend/dap.nim"
 ENGINE_RS = "src/db-backend/src/dap_server.rs"
+RESPONSE_NIM = "src/common/ct_event.nim"
 
 # Allow-list entries with no CtEventKind. See RESIDUE above. Every one is a
 # command the ENGINE dispatches (so it belongs in the allow-list) that no
@@ -126,12 +155,122 @@ EXPECTED_RESIDUE = {
     "source",
 }
 
+# ---------------------------------------------------------------------------
+# RESPONSE residue, in two maps, because the reasons are not the same kind of
+# reason and collapsing them would hide the second one.
+#
+# The check's source set is `EVENT_KIND_TO_DAP_MAPPING ∩ engine-dispatch`: the
+# commands a `BackendService` caller can put on the wire that an engine answers.
+# Anything in it without an arm in `commandToCtResponseEventKind` must be named
+# below, WITH ITS REASON. A bare set would have let #690 be "fixed" by adding
+# one name to a list nobody could audit.
+# ---------------------------------------------------------------------------
+
+# (1) The engine sends NO DAP Response for these, so no response frame ever
+#     bears the command and `receiveResponse` is never called with it. An arm
+#     here would be dead code. Each reason names the handler and what it does
+#     with its `sender` instead; all of them were read, not assumed.
+RESPONSE_RESIDUE_NO_RESPONSE = {
+    "ct/collapse-calls": (
+        "dap_handler.rs::collapse_calls mutates `self.calltrace` and returns; "
+        "the arm passes no `sender` at all."
+    ),
+    "ct/expand-calls": (
+        "dap_handler.rs::expand_calls — same shape as collapse_calls, no "
+        "`sender` in the arm."
+    ),
+    "ct/history-jump": (
+        "dap_handler.rs::history_jump jumps and calls `complete_move`, which "
+        "emits the `ct/complete-move` EVENT. No respond_dap."
+    ),
+    "ct/local-step-jump": (
+        "dap_handler.rs::local_step_jump — same: the outcome is the "
+        "`ct/complete-move` event, not a response body."
+    ),
+    "ct/run-to-entry": (
+        "dap_handler.rs::run_to_entry — same: `complete_move` event only."
+    ),
+    "ct/run-tracepoints": (
+        "dap_handler.rs::run_tracepoints answers with the `ct/updated-trace` "
+        "EVENT via `sender`; it never calls respond_dap."
+    ),
+    "ct/setup-trace-session": (
+        "dap_handler.rs::setup_trace_session takes `_sender` — underscored, "
+        "i.e. deliberately unused. It allocates event tables and returns."
+    ),
+    "ct/tracepoint-delete": (
+        "dap_handler.rs::tracepoint_delete sends `updated_trace_event` — an "
+        "EVENT — and returns."
+    ),
+    "ct/tracepoint-toggle": (
+        "dap_handler.rs::tracepoint_toggle — same as tracepoint_delete."
+    ),
+}
+
+# (2) KNOWN GAPS. The engine DOES respond to these — every handler named here
+#     calls `respond_dap` — so each one logs
+#     `dap: ignoring response for unmapped command: …` in the product today,
+#     exactly as `ct/load-request-spans-since` did before #690 was fixed. They
+#     are pinned, not excused: this set may SHRINK freely and may not grow, and
+#     the run prints its size so it cannot be forgotten.
+#
+#     They are not fixed here because each needs its own decision that #690's
+#     does not: which `CtEventKind` the body should fan out as, and whether the
+#     resulting second delivery (several of these also emit a `ct/updated-*`
+#     event carrying the same data) is idempotent at the receiving VM. Adding
+#     an arm that double-applies a calltrace or an event-log page is a worse
+#     bug than the log line. See the M45 report.
+RESPONSE_RESIDUE_KNOWN_GAPS = {
+    "ct/calltrace-jump": "dap_handler.rs::calltrace_jump calls respond_dap.",
+    "ct/event-jump": "dap_handler.rs::event_jump calls respond_dap.",
+    "ct/event-load": (
+        "dap_handler.rs::event_load calls respond_dap; ui_js.nim's own comment "
+        "already names this command as one the fan-out raises on."
+    ),
+    "ct/goto-ticks": "dap_handler.rs::goto_ticks calls respond_dap.",
+    "ct/load-calltrace-section": (
+        "dap_handler.rs::load_calltrace_section calls respond_dap AND emits "
+        "`ct/updated-calltrace`; the double-delivery question is live here."
+    ),
+    "ct/load-flow": (
+        "dap_handler.rs::load_flow calls respond_dap AND emits "
+        "`ct/updated-flow`."
+    ),
+    "ct/load-history": (
+        "dap_handler.rs::load_history calls respond_dap AND emits "
+        "`ct/updated-history`."
+    ),
+    "ct/load-terminal": "dap_handler.rs::load_terminal calls respond_dap.",
+    "ct/search-calltrace": (
+        "dap_handler.rs::calltrace_search calls respond_dap; the results also "
+        "travel as `ct/calltrace-search-res`."
+    ),
+    "ct/source-call-jump": "dap_handler.rs::source_call_jump calls respond_dap.",
+    "ct/source-line-jump": "dap_handler.rs::source_line_jump calls respond_dap.",
+    "ct/timeline-seek": (
+        "the arm routes to dap_handler.rs::goto_ticks, which calls respond_dap "
+        "— and respond_dap echoes the REQUEST's command, so the frame comes "
+        "back labelled `ct/timeline-seek`, not `ct/goto-ticks`."
+    ),
+    "ct/trace-jump": "dap_handler.rs::trace_jump calls respond_dap.",
+    "ct/update-table": (
+        "dap_handler.rs::update_table calls respond_dap AND emits "
+        "`ct/updated-table`."
+    ),
+    "setBreakpoints": "dap_handler.rs::set_breakpoints calls respond_dap.",
+}
+
+EXPECTED_RESPONSE_RESIDUE = (
+    set(RESPONSE_RESIDUE_NO_RESPONSE) | set(RESPONSE_RESIDUE_KNOWN_GAPS)
+)
+
 # Below these, an extractor has silently stopped matching and every subset check
 # would pass vacuously. Universal quantification over an empty set is the
 # failure mode these floors exist to remove.
 MIN_COMMANDS = 60
 MIN_MAPPING = 60
 MIN_ENGINE = 40
+MIN_RESPONSE = 20
 
 
 def fail(msg: str) -> None:
@@ -176,6 +315,36 @@ def extract_mapping(text: str) -> set[str]:
     return {v for _, v in re.findall(r'(\w+):\s*"([^"]*)"', block) if v}
 
 
+RESPONSE_SIGNATURE = "func commandToCtResponseEventKind*(command: string): CtEventKind ="
+
+
+def extract_response(text: str) -> set[str]:
+    """The command strings `commandToCtResponseEventKind` has an arm for.
+
+    The function body is taken as "everything indented under the signature",
+    which ends at the next top-level declaration. Only lines whose first
+    non-space token is `of` are read, so a command name quoted inside a comment
+    in the body is not mistaken for an arm.
+    """
+    if RESPONSE_SIGNATURE not in text:
+        # Loud rather than empty: an empty set would make the RESPONSE check
+        # pass vacuously, which is the one thing these extractors must not do.
+        raise ValueError(
+            f"{RESPONSE_SIGNATURE!r} not found — the response table has moved "
+            f"or been renamed, and the RESPONSE check cannot read it"
+        )
+    body_lines: list[str] = []
+    for line in text.split(RESPONSE_SIGNATURE, 1)[1].split("\n")[1:]:
+        if line.strip() and not line[0].isspace():
+            break
+        body_lines.append(line)
+    found: set[str] = set()
+    for line in body_lines:
+        if re.match(r"\s*of\s+\"", line):
+            found |= set(re.findall(r'"([^"]+)"', line))
+    return found
+
+
 def extract_engine(text: str) -> set[str]:
     """Every command the engine dispatches, from all four constructs.
 
@@ -212,10 +381,19 @@ def main() -> int:
     parser.add_argument("--commands-from", default=None)
     parser.add_argument("--mapping-from", default=None)
     parser.add_argument("--engine-from", default=None)
+    parser.add_argument("--response-from", default=None)
     parser.add_argument(
         "--residue",
         default=None,
         help="comma-separated expected residue; overrides EXPECTED_RESIDUE",
+    )
+    parser.add_argument(
+        "--response-residue",
+        default=None,
+        help=(
+            "comma-separated expected RESPONSE residue; overrides "
+            "EXPECTED_RESPONSE_RESIDUE"
+        ),
     )
     args = parser.parse_args()
 
@@ -228,15 +406,22 @@ def main() -> int:
     commands_path = pathlib.Path(args.commands_from or root / COMMANDS_NIM)
     mapping_path = pathlib.Path(args.mapping_from or root / MAPPING_NIM)
     engine_path = pathlib.Path(args.engine_from or root / ENGINE_RS)
+    response_path = pathlib.Path(args.response_from or root / RESPONSE_NIM)
 
     allow = extract_commands(read(commands_path))
     mapping = extract_mapping(read(mapping_path))
     engine = extract_engine(read(engine_path))
+    response = extract_response(read(response_path))
 
     residue_expected = (
         {s for s in (x.strip() for x in args.residue.split(",")) if s}
         if args.residue is not None
         else EXPECTED_RESIDUE
+    )
+    response_residue_expected = (
+        {s for s in (x.strip() for x in args.response_residue.split(",")) if s}
+        if args.response_residue is not None
+        else EXPECTED_RESPONSE_RESIDUE
     )
 
     # Synthetic runs are small by construction; the floors are about the real
@@ -247,6 +432,7 @@ def main() -> int:
     print(f"VALID_DAP_COMMANDS:        {len(allow)}")
     print(f"EVENT_KIND_TO_DAP_MAPPING: {len(mapping)}")
     print(f"engine dispatches:         {len(engine)}")
+    print(f"response arms:             {len(response)}")
     print("")
 
     status = 0
@@ -256,6 +442,7 @@ def main() -> int:
             ("VALID_DAP_COMMANDS", len(allow), MIN_COMMANDS),
             ("EVENT_KIND_TO_DAP_MAPPING", len(mapping), MIN_MAPPING),
             ("engine dispatch", len(engine), MIN_ENGINE),
+            ("commandToCtResponseEventKind", len(response), MIN_RESPONSE),
         ):
             if got < floor:
                 status = 1
@@ -310,6 +497,50 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    # RESPONSE — the fourth table. See the header: the source set is the
+    # traffic that can actually reach `receiveResponse`.
+    response_source = mapping & engine
+    response_residue = sorted(response_source - response)
+    unexpected = sorted(set(response_residue) - response_residue_expected)
+    vanished = sorted(response_residue_expected - set(response_residue))
+
+    if unexpected:
+        status = 1
+        fail(
+            f"{len(unexpected)} command(s) a BackendService caller can send, and "
+            f"the engine answers, have NO arm in commandToCtResponseEventKind:"
+        )
+        for c in unexpected:
+            print(f"  {c}", file=sys.stderr)
+        print(
+            "\n  A response bearing one of these raises ValueError in\n"
+            f"  {RESPONSE_NIM}, which ui_js.nim swallows as\n"
+            '  "dap: ignoring response for unmapped command: …" — issue #690.\n'
+            "  Add the arm, or name the command in RESPONSE_RESIDUE_NO_RESPONSE\n"
+            "  (with the handler that proves the engine sends no response) in\n"
+            "  this file.\n",
+            file=sys.stderr,
+        )
+
+    if vanished:
+        status = 1
+        fail(
+            f"{len(vanished)} RESPONSE residue entry/entries no longer apply:"
+        )
+        for c in vanished:
+            print(
+                f"  {c}  (gained an arm, lost its CtEventKind, or the engine "
+                f"stopped dispatching it)",
+                file=sys.stderr,
+            )
+        print(
+            "\n  This is the good direction — delete the entry from\n"
+            "  RESPONSE_RESIDUE_NO_RESPONSE / RESPONSE_RESIDUE_KNOWN_GAPS in the\n"
+            "  same commit. The pin is an equality so that the known-gap set can\n"
+            "  only shrink on purpose.\n",
+            file=sys.stderr,
+        )
+
     if status == 0:
         print(
             "OK: every engine-dispatched command and every mapped event kind is "
@@ -318,6 +549,15 @@ def main() -> int:
         print(
             f"    and the {len(residue)} allow-listed command(s) without a "
             "CtEventKind are the expected ones."
+        )
+        known_gaps = sorted(set(response_residue) & set(RESPONSE_RESIDUE_KNOWN_GAPS))
+        print(
+            f"    Every sendable command the engine answers has a response arm, "
+            f"except {len(response_residue)} named ones"
+        )
+        print(
+            f"    — of which {len(known_gaps)} are KNOWN GAPS that still log "
+            f"#690's line. That number must only fall."
         )
     return status
 

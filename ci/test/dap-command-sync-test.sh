@@ -25,6 +25,13 @@
 #                 allow-list must be named and must fail the run.
 #   3. RESIDUE  — an allow-list entry that gains/loses its CtEventKind must
 #                 fail, so the untranslatable set cannot grow silently.
+#   3b. RESPONSE — a command a BackendService caller can send, and the engine
+#                 answers, with no arm in `commandToCtResponseEventKind` must be
+#                 named and must fail the run; naming it in the response-residue
+#                 pin must make it pass; and a pinned entry that stops applying
+#                 must fail too. This is the check issue #690 had no equivalent
+#                 of: the response table was the fourth table and nothing read
+#                 it.
 #   4. the all-green case still reports green.
 #   5. each of the FOUR engine dispatch constructs is actually extracted —
 #      the `match` arms, the `_` fallthrough specials, the step-action match,
@@ -48,10 +55,15 @@ checks=0
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 
-# run_guard COMMANDS MAPPING ENGINE RESIDUE
+# run_guard COMMANDS MAPPING ENGINE RESIDUE [RESPONSE_FILE] [RESPONSE_RESIDUE]
+#
+# The response table is a fourth input. It defaults to ${R}, the synthetic
+# response file written by `mk_response`, so the cases that predate the RESPONSE
+# check keep reading as they did; the two RESPONSE cases pass their own.
 run_guard() {
 	python3 "${guard}" --commands-from "$1" --mapping-from "$2" \
-		--engine-from "$3" --residue "$4" 2>&1
+		--engine-from "$3" --residue "$4" \
+		--response-from "${5:-${R}}" --response-residue "${6:-}" 2>&1
 }
 
 # expect NAME EXPECTED_STATUS ACTUAL_STATUS OUTPUT [MUST_CONTAIN...]
@@ -154,9 +166,30 @@ mod tests {
 RUST
 }
 
+# A synthetic ct_event.nim carrying the response table, in the shape
+# `extract_response` reads: the real signature, `of "…":` arms indented under
+# it, and a top-level declaration afterwards to close the body. The trailing
+# `of "in-a-comment"` line is deliberate — it proves the extractor reads arms
+# and not every quoted string in the function.
+mk_response() { # mk_response FILE cmd...
+	local f="$1"
+	shift
+	{
+		echo 'func commandToCtResponseEventKind*(command: string): CtEventKind ='
+		echo '  case command:'
+		local c
+		for c in "$@"; do printf '  of "%s": SomeKind\n' "${c}"; done
+		echo '  # a comment mentioning of "in-a-comment" must not count'
+		echo '  else: raise newException(ValueError, "nope")'
+		echo ''
+		echo 'type Unrelated* = object'
+	} >"${f}"
+}
+
 C="${work}/commands.nim"
 M="${work}/mapping.nim"
 E="${work}/engine.rs"
+R="${work}/response.nim"
 mk_engine "${E}"
 
 # The synthetic engine dispatches exactly these six.
@@ -165,6 +198,10 @@ mk_engine "${E}"
 # command name containing a glob character would have been silently replaced by
 # whatever filenames happened to match in the cwd.
 ENGINE_SET=(stepIn ct/reverseStepIn scopes ct/originMode next disconnect)
+
+# The default response table answers every one of them, so the RESPONSE check
+# is silent in the cases that are about the other three.
+mk_response "${R}" "${ENGINE_SET[@]}"
 
 # ---------------------------------------------------------------------------
 # 1. ENGINE — engine dispatches it, allow-list does not name it
@@ -218,6 +255,71 @@ status=$?
 expect "a residue entry that vanished fails the pin too" \
 	1 "${status}" "${out}" \
 	"ct/emitted-event"
+
+# ---------------------------------------------------------------------------
+# 3b. RESPONSE — the fourth table, the one issue #690 fell through.
+#
+# `ct/originMode` is sendable (it is in the mapping) and the engine answers it,
+# so a response bearing it reaches `receiveResponse`. Drop its arm and the
+# guard must name it.
+# ---------------------------------------------------------------------------
+mk_commands "${C}" "${ENGINE_SET[@]}"
+mk_mapping "${M}" "${ENGINE_SET[@]}"
+RNOARM="${work}/response-missing-arm.nim"
+kept=()
+for c in "${ENGINE_SET[@]}"; do
+	[ "${c}" = "ct/originMode" ] || kept+=("${c}")
+done
+mk_response "${RNOARM}" "${kept[@]}"
+
+out="$(run_guard "${C}" "${M}" "${E}" "" "${RNOARM}" "")"
+status=$?
+expect "a sendable, engine-answered command with no response arm fails, by name" \
+	1 "${status}" "${out}" \
+	"ct/originMode" \
+	"NO arm in commandToCtResponseEventKind"
+
+# ... and naming it in the response pin makes it pass, so that pin is a real
+# allow-list rather than "any missing arm is fine".
+out="$(run_guard "${C}" "${M}" "${E}" "" "${RNOARM}" "ct/originMode")"
+status=$?
+expect "the response-residue pin accepts exactly the command it names" \
+	0 "${status}" "${out}" \
+	"OK: every engine-dispatched command"
+
+# A pinned entry that stops applying — here because the arm came back — must
+# fail too, so the known-gap set can only shrink deliberately.
+out="$(run_guard "${C}" "${M}" "${E}" "" "${R}" "ct/originMode")"
+status=$?
+expect "a response-residue entry that gained an arm fails the pin too" \
+	1 "${status}" "${out}" \
+	"ct/originMode" \
+	"no longer apply"
+
+# A command the engine does NOT dispatch needs no arm however sendable it is:
+# nothing answers it, so no response frame can bear it. `ct/install-source-view`
+# is in the mapping here and absent from the synthetic engine.
+mk_commands "${C}" "${ENGINE_SET[@]}" ct/install-source-view
+mk_mapping "${M}" "${ENGINE_SET[@]}" ct/install-source-view
+out="$(run_guard "${C}" "${M}" "${E}" "" "${R}" "")"
+status=$?
+expect "a mapped command the engine never dispatches needs no response arm" \
+	0 "${status}" "${out}" \
+	"OK: every engine-dispatched command"
+
+# The extractor must read ARMS, not every quoted string in the function body.
+# `mk_response` plants `of "in-a-comment"` inside a comment line, and the
+# printed arm count is the only place a miscount would show: a command counted
+# as an arm but named nowhere else fails no subset check, so it would otherwise
+# be invisible. ${R} has exactly ${#ENGINE_SET[@]} arms.
+checks=$((checks + 1))
+response_n="$(printf '%s' "${out}" | sed -n 's/^response arms: *//p')"
+if [ "${response_n}" = "${#ENGINE_SET[@]}" ]; then
+	echo "  [OK] a command quoted inside a comment is not read as an arm"
+else
+	failures=$((failures + 1))
+	echo "  [FAILED] response arm count is '${response_n}', expected ${#ENGINE_SET[@]}"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. the all-green case
@@ -296,10 +398,22 @@ else
 	echo "  [FAILED] real engine extraction returned '${engine_n}', expected >= 40"
 fi
 
+# Same floor for the response table. Its extractor keys on one signature line;
+# if that signature is edited, `extract_response` raises rather than returning
+# an empty set, but a body that stopped matching `of "…"` would go quiet.
+checks=$((checks + 1))
+response_n="$(printf '%s' "${out}" | sed -n 's/^response arms: *//p')"
+if [ -n "${response_n}" ] && [ "${response_n}" -ge 20 ]; then
+	echo "  [OK] real response-table extraction returned ${response_n} arms"
+else
+	failures=$((failures + 1))
+	echo "  [FAILED] real response extraction returned '${response_n}', expected >= 20"
+fi
+
 echo ""
 # The count itself is asserted: a suite that returned early, or a loop over a
 # list that turned out empty, must not be able to report success.
-expected_checks=16
+expected_checks=22
 if [ "${checks}" -ne "${expected_checks}" ]; then
 	echo "dap-command-sync contract: ran ${checks} check(s), expected ${expected_checks}" >&2
 	exit 1

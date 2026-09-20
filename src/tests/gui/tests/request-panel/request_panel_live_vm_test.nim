@@ -45,6 +45,8 @@ import store/types
 import store/replay_data_store
 import viewmodels/request_panel_vm
 import views/isonim_request_panel_view
+from ../../../../common/ct_event import
+  CtEventKind, CtLoadRequestSpansSince, commandToCtResponseEventKind
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -449,6 +451,46 @@ suite "ReplayDataStore request-span tail":
       check store.requestSpans.requests.val[0].url == "/from-response"
       check store.requestSpans.cursor.val == 11'i64
       check store.requestSpans.source.val == "legacy-jsonl"
+
+      dispose()
+
+  test "the poll's response round-trips through the DAP response table":
+    ## Issue #690. The poll below is the one the case above drives; what this
+    ## one asserts is what happens to the response *frame* rather than to the
+    ## body a mock hands back.
+    ##
+    ## In the Electron renderer a response is routed by its `command` string
+    ## through `commandToCtResponseEventKind`, and that table — the fourth of
+    ## the four, and until #690 the only one no guard read — had no arm for
+    ## this command. It raised `ValueError` on every poll, which
+    ## `ui_js.nim::onDapReceiveResponse` caught and logged as
+    ## `dap: ignoring response for unmapped command: ct/load-request-spans-since`.
+    ##
+    ## The command is taken from the mock's recording rather than written out
+    ## as a literal here on purpose: a literal would still pass if
+    ## `requestRequestSpansSince` started sending something else, which is the
+    ## drift the whole check is about.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+
+      store.requestRequestSpansSince()
+      drain()
+
+      let sent = mock.findCommand("ct/load-request-spans-since")
+      check sent.isSome
+
+      var raised = false
+      var kind = CtLoadRequestSpansSince
+      try:
+        kind = commandToCtResponseEventKind(sent.get.command)
+      except ValueError:
+        raised = true
+
+      check not raised
+      # And it resolves to the kind the store's backend-event handler already
+      # branches on (`LoadRequestSpansSinceEventKind`), so the response body
+      # reaches `applyRequestSpanDelta` by the same route the event does.
+      check kind == CtLoadRequestSpansSince
 
       dispose()
 

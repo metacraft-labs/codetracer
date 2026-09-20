@@ -2416,6 +2416,15 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
   # mapping for. The two paths are independent: legacy subscribers keep
   # receiving exactly what they received before.
   #
+  # WHICH commands can still land in the `except` below is no longer a
+  # question anyone has to answer by reading the table. It is pinned, by
+  # name and with a reason each, as `RESPONSE_RESIDUE_KNOWN_GAPS` in
+  # `ci/test/dap-command-sync.py`; anything not on that list and not in
+  # `RESPONSE_RESIDUE_NO_RESPONSE` reddens the guard. Issue #690 —
+  # `ct/load-request-spans-since` logging here on every Request-Panel
+  # poll — was reachable because this was the one command table nothing
+  # reconciled.
+  #
   # The continuation is settled on the `DapApi` that *sent* the request,
   # which is not necessarily `data.dapApi`. Every replay session owns its
   # own `DapApi` with its own `seq` counter, while `data.dapApi` forwards

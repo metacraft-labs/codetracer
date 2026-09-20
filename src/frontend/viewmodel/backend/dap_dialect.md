@@ -685,7 +685,7 @@ as `_req` — deliberately unused — and ends at `complete_move(...)` without t
 | `ct/collapse-calls` | `collapse_calls` | silent — dispatched without a `sender` at all, so it *cannot* respond |
 | `ct/expand-calls` | `expand_calls` | silent — same |
 | `ct/history-jump` | `history_jump` | silent |
-| `ct/trace-jump` | `trace_jump` | silent |
+| `ct/trace-jump` | `trace_jump` | **fixed** — now responds (`dap_handler.rs:5274`). This row read "silent" until 2026-09-21; the fix and the comment explaining it were already in the file, and only the table had not been updated |
 | `ct/tracepoint-delete` | `tracepoint_delete` | silent |
 | `ct/tracepoint-toggle` | `tracepoint_toggle` | silent |
 | `ct/local-step-jump` | `local_step_jump` | silent |
@@ -700,6 +700,71 @@ awaits them before their response shape is decided.
 **For consumers:** do not `await` any command in the "silent" rows above without
 your own deadline. `hydrate.nim` is unaffected today only because it uses
 `ct/goto-ticks` — which does respond — for call-trace row clicks.
+
+---
+
+### 7c. The FOURTH command table — the one nothing read until #690
+
+§7b's guard reconciles three tables. There is a fourth:
+`commandToCtResponseEventKind`, the `case` that decides which `CtEventKind` a
+DAP **response** fans out as. It is the inverse of §7a's category — those are
+requests that get no response; this is responses that get no route.
+
+Issue #690 is what that looks like from a console.
+`ct/load-request-spans-since` was correctly present in all three of the tables
+the guard read, and absent from the fourth, so every Request-Panel poll's
+response raised `ValueError`, was caught in
+`src/frontend/ui_js.nim::onDapReceiveResponse`, and logged
+`dap: ignoring response for unmapped command: ct/load-request-spans-since`.
+The panel still worked — the body reaches the store through the
+`ct/updated-http-requests` event and through `resolvePendingDapResponse` — so
+the symptom was noise, and the defect was a table with no guard.
+
+Two things changed:
+
+- the table moved to `src/common/ct_event.nim`, next to the enum it returns.
+  It needs nothing from the JS FFI, and `dap.nim` imports `std/jsffi`
+  unconditionally, so nothing behind it can be reached from a headless
+  ViewModel test that must also run on the native (C) lane — and the one table
+  with no guard therefore also had no test that could name it. It now has one:
+  *the poll's response round-trips through the DAP response table* in
+  `src/tests/gui/tests/request-panel/request_panel_live_vm_test.nim`, which
+  runs in both `just test-vm-native` and `just test-vm-js`. (The JS lane *does*
+  compile `dap.nim`, through `scenarios/process_tree_view_test.nim` and
+  `views/isonim_views_test.nim`, both of which reach it via
+  `src/frontend/types.nim`; the native lane cannot.) The case asserts the
+  `CtEventKind` the command resolves to, not merely that resolving it does not
+  raise — the guard below reconciles which commands have an arm and says
+  nothing about which kind an arm returns;
+- `ci/test/dap-command-sync.py` gained a fourth check. Every command that is in
+  `EVENT_KIND_TO_DAP_MAPPING` (so a `BackendService` caller can put it on the
+  wire) **and** in the engine's dispatch (so something answers it) must have an
+  arm, or be named in one of two residue maps with a reason.
+
+The two maps are separate because the reasons are not the same kind of reason,
+and that distinction is the useful output of the exercise:
+
+- `RESPONSE_RESIDUE_NO_RESPONSE` — **9 commands**, every one of them a §7a
+  "silent" row. The engine sends no response, so no frame can bear the command
+  and an arm would be dead code. Legitimate.
+- `RESPONSE_RESIDUE_KNOWN_GAPS` — **15 commands** whose handlers *do* call
+  `respond_dap`: `ct/calltrace-jump`, `ct/event-jump`, `ct/event-load`,
+  `ct/goto-ticks`, `ct/load-calltrace-section`, `ct/load-flow`,
+  `ct/load-history`, `ct/load-terminal`, `ct/search-calltrace`,
+  `ct/source-call-jump`, `ct/source-line-jump`, `ct/timeline-seek`,
+  `ct/trace-jump`, `ct/update-table`, `setBreakpoints`. **Each of these logs
+  #690's line today.** They are pinned, not excused: the set may shrink and may
+  not grow.
+
+They are not fixed along with #690 because each needs a decision #690's did
+not. `ct/load-request-spans-since` has an obvious kind to fan out as — the
+request's own, which the store was already branching on — and a merge that is
+idempotent by construction and tested as such. Several of the fifteen
+(`ct/load-flow`, `ct/load-history`, `ct/update-table`,
+`ct/load-calltrace-section`) emit a `ct/updated-*` event carrying the same
+data, so giving their response a kind delivers that data **twice**, and whether
+the receiving VM tolerates that has to be established per command. An arm that
+double-applies a calltrace is a worse bug than a log line.
 
 ---
 
