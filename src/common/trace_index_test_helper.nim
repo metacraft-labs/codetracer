@@ -373,7 +373,13 @@ proc scenarioRecentFolderTrailingSeparators() =
   echo "PASS"
 
 # ---------------------------------------------------------------------------
-# trace_index schema version 1 — recordings.lang stores the Lang enum NAME
+# trace_index schema versions 1 and 2 — what recordings.lang holds
+#
+# Version 1 stored the ``Lang`` enum NAME (``'LangElixir'``).  Version 2
+# (LRS-5) stores the FOUR-AXIS TOKEN (``'ex-beam-unknown-instrumented'``), or
+# the bare sentinel ``'unknown'``.  The two steps compose: a version-0
+# database written with ordinals runs 0 -> 1 -> 2 on the next open, which is
+# what ``scenarioMigrateLegacyDb`` below drives through the real ``ensureDB``.
 # ---------------------------------------------------------------------------
 
 const LEGACY_LANG_ORDINAL_DDL = """CREATE TABLE IF NOT EXISTS recordings (
@@ -405,13 +411,15 @@ const LEGACY_LANG_ORDINAL_DDL = """CREATE TABLE IF NOT EXISTS recordings (
   ## would stop testing the migration the moment the current source changed.
 
 proc scenarioLangNameRoundTrip() =
-  ## The production write path stores a name, the production read path reads
-  ## it back as the same ``Lang``, and the freshly-created database is
-  ## stamped at the current schema version.
+  ## The production write path stores the four-axis TOKEN, the production
+  ## read path reads it back as the same ``Lang``, and the freshly-created
+  ## database is stamped at the current schema version.
   ##
   ## ``LangElixir`` is used on purpose: it is ordinal 37, a value the live
   ## developer database actually holds, and one that any reordering of the
-  ## enum would re-point.
+  ## enum would re-point.  The scenario keeps its name (the suite refers to
+  ## it by that string); what it asserts moved from the NAME to the token
+  ## when schema version 2 landed.
   let id = trace_index.newID(test = false)
   discard trace_index.recordTrace(
     id,
@@ -437,9 +445,12 @@ proc scenarioLangNameRoundTrip() =
 
   let raw = db.getValue(
     sql"SELECT lang FROM recordings WHERE recording_id = ?", id)
-  if raw != "LangElixir":
-    fail("recordings.lang should hold the enum name 'LangElixir'; got " &
-         raw.escape())
+  # Written as a LITERAL rather than as `langToColumnValue(LangElixir)`: a
+  # test that asked the production encoder what the production writer should
+  # have written would agree with it by construction.
+  if raw != "ex-beam-unknown-instrumented":
+    fail("recordings.lang should hold the four-axis token " &
+         "'ex-beam-unknown-instrumented'; got " & raw.escape())
   let version = db.getValue(sql"PRAGMA user_version")
   if version != $TRACE_INDEX_SCHEMA_VERSION:
     fail("fresh DB should be stamped at schema version " &
@@ -466,6 +477,11 @@ proc scenarioRetiredLangRows() =
   ## (design §5.6; `decodeLangColumn`).  The rows are written with raw SQL
   ## because no production writer can spell a retired name any more -- that
   ## is what "retired" means.
+  ##
+  ## Still true, and deliberately unchanged, after schema version 2: a
+  ## version-1 NAME is still decoded by ``decodeLangColumn``'s legacy branch,
+  ## because a row written by an older build must not become a hard failure
+  ## at open just because the column's live format moved on.
   let live = trace_index.newID(test = false)
   insertRecording(live)
   let retiredRuby = trace_index.newID(test = false)
@@ -573,10 +589,13 @@ proc scenarioMigrateLegacyDb() =
   if db.getValue(sql"PRAGMA user_version") != $TRACE_INDEX_SCHEMA_VERSION:
     fail("legacy DB not stamped after ensureDB; PRAGMA user_version = " &
          db.getValue(sql"PRAGMA user_version"))
+  # 0 -> 1 -> 2 composed: the ordinals became names and the names became
+  # four-axis tokens, in one `ensureDB` open.  `LangUnknown` becomes the BARE
+  # sentinel, not `unknown-unknown-unknown-unknown` (design Q3).
   for (id, expected) in [
-      ("01949fcc-7d92-7e9c-aaaa-00000000ex01", "LangElixir"),
-      ("01949fcc-7d92-7e9c-aaaa-00000000c001", "LangC"),
-      ("01949fcc-7d92-7e9c-aaaa-0000000unk22", "LangUnknown")]:
+      ("01949fcc-7d92-7e9c-aaaa-00000000ex01", "ex-beam-unknown-instrumented"),
+      ("01949fcc-7d92-7e9c-aaaa-00000000c001", "c-native-unknown-mcr"),
+      ("01949fcc-7d92-7e9c-aaaa-0000000unk22", "unknown")]:
     let raw = db.getValue(
       sql"SELECT lang FROM recordings WHERE recording_id = ?", id)
     if raw != expected:
@@ -588,9 +607,15 @@ proc scenarioMigrateLegacyDb() =
   if found.lang != LangElixir:
     fail("migrated row decoded as " & $found.lang & ", expected LangElixir")
 
+  # Both steps ran, so BOTH snapshots are on disk: restoring the first gives
+  # back the original version-0 file, restoring the second a working
+  # version-1 one.
   if not fileExists(dbPath & langNameMigrationBakSuffix):
     fail("expected a pre-migration snapshot at " &
          dbPath & langNameMigrationBakSuffix)
+  if not fileExists(dbPath & langTokenMigrationBakSuffix):
+    fail("expected a pre-remap snapshot at " &
+         dbPath & langTokenMigrationBakSuffix)
 
   echo "PASS"
 

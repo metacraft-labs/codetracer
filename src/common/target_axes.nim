@@ -653,3 +653,254 @@ func isNativeReplay*(approach: RecordingApproach): bool =
   case approach
   of raMcr, raRr, raTtd: true
   of raUnknown, raInstrumentedRuntime, raVmEmulation: false
+
+# ---------------------------------------------------------------------------
+# The persisted encoding — design §5.2/§5.3/§5.4, milestone LRS-5
+#
+# `recordings.lang` (`src/common/trace_index.nim`) stores ONE TEXT cell per
+# recording.  Since trace_index schema version 2 that cell is a token over all
+# FOUR axes, joined by `AxisSeparator`:
+#
+#     cell ::= "unknown" | slug "-" isa "-" toolchain "-" approach
+#
+# and nothing else.  The grammar is stated in full, with its reasoning, in
+# `codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.md` §5.2-§5.4
+# and in `codetracer-specs/Architecture/Language-Enum-Ordinal-Contracts.md`.
+# Three decisions are load-bearing and each has a test in
+# `src/tests/cli/target_axes_test.nim`:
+#
+# **All four axes, always (design Q9, option A, decided by the user).**  With
+# four axes, storing fewer than four means a reader must *imply* defaults for
+# the missing ones -- and the rule this whole series turns on is *a default may
+# be applied at parse time; a default may never be IMPLIED by a persisted
+# value*.  A stored `rs` that meant `(tiNative, tcCargo, raMcr)` through
+# `fallbackTargetIsaForLanguage` / `defaultRecordingApproach` would make those
+# two tables a persisted contract, which is the ordinal defect with different
+# letters: changing Nim's default recording approach would silently re-point
+# every stored `nim` row.  So every axis is spelled out, including the ones
+# that are "usually derivable", because "usually derivable" is exactly what
+# the rule forbids relying on.
+#
+# **The sentinel is the bare token `unknown` (design Q3, decided by the
+# user).**  One documented exception to the grammar and the only one.  It is
+# matched as a LITERAL, before any split is attempted -- never fallen into by a
+# parser that failed to find a separator.  `parseAxesToken` accepts exactly one
+# hyphen-free token, and `target_axes_test.nim` asserts that no other bare word
+# -- no slug, no ISA token, no toolchain token, no approach token -- decodes at
+# all.  That assertion is the one that keeps the exception from generalising
+# into the persisted-default contract the paragraph above forbids, and it is
+# the one most easily lost: a decoder that "helpfully" applies the default
+# tables to a bare slug passes every other obligation on the list.
+#
+# **`unknown` is the canonical spelling of the all-sentinel tuple, and the only
+# one.**  `encodeAxesToken` emits the bare form for
+# `(slUnknown, tiUnknown, tcUnknown, raUnknown)`, and `parseAxesToken` REFUSES
+# the long `unknown-unknown-unknown-unknown` spelling of the same value.  One
+# value, one spelling, in both directions: `decode(encode(v)) == v` over the
+# whole four-axis product, and `encode(decode(s)) == s` over every `s` that
+# decodes.  The long all-sentinel form is therefore the combination that has
+# no spelling *by decision* -- the four-axis analogue of the two-axis
+# `(Unknown, rtMcr)` the design's §5.3 names -- and a round-trip test must not
+# assert it.
+#
+# The separator is `-` (design §5.3).  It is safe because no token on any axis
+# contains one: that is asserted over every member of every axis and over
+# every slug, so `split` always yields exactly four parts.
+# ---------------------------------------------------------------------------
+
+const
+  AxisSeparator* = '-'
+    ## The one character that joins the four axis tokens in a persisted cell.
+    ## No axis token and no slug may contain it; that is what makes the split
+    ## unambiguous, and it is asserted rather than assumed.
+
+  AxisTokenCount* = 4
+    ## How many axis tokens a non-sentinel cell carries.  Named so the decoder
+    ## and its test cannot disagree about the arity design question Q9 settled.
+
+func storageSlug*(v: SourceLanguage): string =
+  ## The **persisted** spelling of a source language — design §5.2, question
+  ## Q2, confirmed by the coordinator on 2026-09-21.
+  ##
+  ## This is deliberately a different vocabulary from `token` above, and the
+  ## difference is the answer to Q2 rather than an accident:
+  ##
+  ## * `token` is the **wire and CLI** spelling (`python`, `javascript`,
+  ##   `rust`).  It is the Nim twin of Rust's `Lang::wire_name` and it is
+  ##   retained unchanged for the replay-worker socket and for
+  ##   `codetracer.target-recognition.v1`.
+  ## * `storageSlug` is the **storage** spelling: the primary file extension
+  ##   where that extension is unique and non-empty (`py`, `rs`, `cpp`, `js`),
+  ##   a hand-assigned name where no extension exists, and a *disambiguated*
+  ##   name where the extension would claim a broader namespace than the
+  ##   language occupies (`midenasm`, see below).
+  ##
+  ## Two coexisting vocabularies is a real cost and it is accepted, for the
+  ## reason §5.2 gives: `wire_name`'s spellings are exactly the length the
+  ## encoding was asked to reduce, and a namespace that must hold
+  ## `gas`/`nasm`/`masm` beside `midenasm` is a *designed* namespace rather
+  ## than a mechanical projection of either table.  The seed table is
+  ## `getExtensionName` (`common_lang.nim`); this one is written out in full
+  ## rather than derived from it, because the persisted encoding must not move
+  ## when an editor-facing extension table does — that coupling is what §5.1
+  ## rejected when it refused to use `getExtension` as the encoder outright.
+  ##
+  ## The two folder-based entries the design's §5.2 table hand-assigned —
+  ## `solana` and `polkavm` — are NOT here, and their absence is the four-axis
+  ## revision rather than a regression: neither names a notation anyone writes
+  ## a file in, so both moved to `TargetIsa` (`token(tiSolanaSbf)` is
+  ## `solanasbf`, `token(tiPolkaVm)` is `polkavm` verbatim).  A recording under
+  ## either stores `unknown` on *this* axis and the substrate on the ISA axis,
+  ## which is exactly what `axesOfLang(LangSolana)` already says.
+  case v
+  of slUnknown: UnknownToken
+  of slC: "c"
+  of slCpp: "cpp"
+  of slRust: "rs"
+  of slNim: "nim"
+  of slGo: "go"
+  of slPascal: "pas"
+  of slFortran: "f90"
+  of slD: "d"
+  of slCrystal: "cr"
+  of slLean: "lean"
+  of slJulia: "jl"
+  of slAda: "adb"
+  of slPython: "py"
+  of slRuby: "rb"
+  of slJavaScript: "js"
+  of slLua: "lua"
+  of slPhp: "php"
+  of slBash: "sh"
+  of slZsh: "zsh"
+  of slElixir: "ex"
+  of slErlang: "erl"
+  of slSolidity: "sol"
+  of slMove: "move"
+  of slSway: "sw"
+  of slCairo: "cairo"
+  of slCircom: "circom"
+  of slLeo: "leo"
+  of slTolk: "tolk"
+  of slAiken: "ak"
+  of slCadence: "cdc"
+  of slNoir: "nr"
+  # `slAsm` keeps the unqualified `asm` as the explicit DIALECT-UNSPECIFIED
+  # token — not as a claim about any dialect.
+  of slAsm: "asm"
+  # `slMidenAsm` is deliberately NOT `masm`, even though `masm` is exactly
+  # what `getExtensionName(LangMasm)` answers and exactly what this table
+  # otherwise seeds from.  Assembler DIALECT is a distinction on this axis
+  # (design Q4a, decided by the user: "assemblers are just different types of
+  # compilers after all"), so the namespace is expected to grow a GNU `gas`, a
+  # Netwide `nasm` and a Microsoft `masm`; letting Miden hold the unqualified
+  # name would strand the obvious spelling for a dialect that might later be
+  # supported, in a table that is PERSISTED and therefore cannot be renamed
+  # afterwards.  `masm`, `gas` and `nasm` are RESERVED AND UNALLOCATED
+  # (`ReservedSourceLanguageTokens` above); `target_axes_test.nim` asserts no
+  # axis and no slug spends one.  This token intentionally differs from the
+  # `Lang` member name (`LangMasm`), from `getExtensionName(LangMasm)` and
+  # from the grammar directory `libs/tree-sitter-masm`; read design §2.5
+  # before "fixing" it back.
+  of slMidenAsm: "midenasm"
+  of slGdScript: "gd"
+
+type
+  TargetAxes* = object
+    ## The four axes of one recording, as a value — what a `recordings.lang`
+    ## cell holds since trace_index schema version 2.
+    ##
+    ## `LangAxes` (`common_lang.nim`) is the THREE-axis projection of a `Lang`
+    ## value and is a different thing: `Lang` names no toolchain, so nothing
+    ## can be projected onto that axis from it.  This object is what a cell
+    ## decodes to and what a cell is encoded from.
+    language*: SourceLanguage
+    targetIsa*: TargetIsa
+    toolchain*: Toolchain
+    approach*: RecordingApproach
+
+const
+  UnknownTargetAxes* = TargetAxes(language: slUnknown, targetIsa: tiUnknown,
+                                  toolchain: tcUnknown, approach: raUnknown)
+    ## The all-sentinel tuple, whose one spelling is the bare `unknown` token.
+
+func encodeAxesToken*(axes: TargetAxes): string =
+  ## The persisted spelling of `axes`.  Total over the whole four-axis
+  ## product; see the section comment above for why the all-sentinel tuple
+  ## gets the bare form and nothing else does.
+  if axes == UnknownTargetAxes:
+    return UnknownToken
+  storageSlug(axes.language) & AxisSeparator &
+    token(axes.targetIsa) & AxisSeparator &
+    token(axes.toolchain) & AxisSeparator &
+    token(axes.approach)
+
+func parseStorageSlug*(s: string, value: var SourceLanguage): bool =
+  ## Parse a persisted source-language slug.  Total; returns `false` and
+  ## leaves `value` untouched for a token this build does not know.
+  ##
+  ## Derived from `storageSlug` by iterating the enum, so the two cannot
+  ## drift.  That is safe because both sides of this parse are written by
+  ## THIS build's grammar; the historical `$lang` names a schema-version-1
+  ## database holds are a different problem and are decoded from a frozen
+  ## literal (`langV1NameToV2Token`, `trace_index.nim`) that never touches the
+  ## live enum — milestone rule 3.
+  for v in SourceLanguage:
+    if storageSlug(v) == s:
+      value = v
+      return true
+  false
+
+func parseAxesToken*(raw: string, dest: var TargetAxes): bool =
+  ## Decode a persisted cell.  Total: never raises, never quits, and leaves
+  ## `dest` untouched when it returns `false`.
+  ##
+  ## The order of the three steps is the decision, not an implementation
+  ## detail:
+  ##
+  ## 1. the literal `unknown` — matched BEFORE any split is attempted, so the
+  ##    Q3 exception is a single equality test rather than something a failed
+  ##    split falls into;
+  ## 2. exactly four `-`-separated parts, each parsed against its own axis;
+  ## 3. everything else is refused, INCLUDING every other hyphen-free token
+  ##    and including the long `unknown-unknown-unknown-unknown` spelling of
+  ##    the value step 1 already names.
+  ##
+  ## Step 3's first half is the obligation the design's §5.4 calls the one
+  ## most likely to be lost: a decoder that treated a bare `py` as "slug with
+  ## the default mode" would pass every other round-trip obligation and would
+  ## reintroduce the persisted-default contract Q1 exists to forbid.  There is
+  ## no defaulting anywhere in this function, and no path from a short token
+  ## to a populated `dest` other than step 1.
+  ##
+  ## Deliberately NOT case-folding and NOT stripping whitespace, unlike the
+  ## per-axis parsers above: those read a token a HUMAN or another program
+  ## typed, this one reads a cell THIS module wrote.  A cell that differs from
+  ## what the encoder emits was not written by any CodeTracer build, and
+  ## accepting it would be guessing.
+  if raw == UnknownToken:
+    dest = UnknownTargetAxes
+    return true
+  let parts = raw.split(AxisSeparator)
+  if parts.len != AxisTokenCount:
+    return false
+  var decoded: TargetAxes
+  if not parseStorageSlug(parts[0], decoded.language): return false
+  if not parseTargetIsa(parts[1], decoded.targetIsa): return false
+  if not parseToolchain(parts[2], decoded.toolchain): return false
+  if not parseRecordingApproach(parts[3], decoded.approach): return false
+  # The three axis parsers above strip whitespace and lower-case, because
+  # they read tokens a human or another program typed.  This one does not:
+  # re-checking each part against the canonical spelling is how the leniency
+  # is undone without a second copy of the three tables.
+  if token(decoded.targetIsa) != parts[1]: return false
+  if token(decoded.toolchain) != parts[2]: return false
+  if token(decoded.approach) != parts[3]: return false
+  if decoded == UnknownTargetAxes:
+    # `unknown-unknown-unknown-unknown` is well-formed and is still refused:
+    # the value it spells already has a spelling (step 1), and admitting a
+    # second one would mean `encode` is no longer the inverse of `decode`.
+    # Nothing produces it — see the section comment.
+    return false
+  dest = decoded
+  true

@@ -196,21 +196,45 @@ const
     ## no other way to observe a mid-transaction abort from outside the
     ## process, and "the rollback works" is the single claim this change most
     ## needs to demonstrate rather than assert.
-    ## Recognised points, in execution order:
+    ## Recognised points, in execution order.  **Version 0 → 1** (the table
+    ## rebuild):
     ##   ``after-table-rewrite`` — scratch table filled, original untouched.
     ##   ``after-table-swap``    — original dropped, scratch renamed over it,
     ##                             indexes rebuilt.  Mid-transaction the
     ##                             database *is* migrated; a rollback here is
     ##                             the strongest available proof.
     ##   ``after-version-stamp`` — ``user_version`` written, not yet committed.
+    ## **Version 1 → 2** (the value remap), added by LRS-5 so the newer step
+    ## carries the same proof rather than inheriting the older step's:
+    ##   ``after-token-remap``        — every cell rewritten from the name to
+    ##                                  the four-axis token, not yet committed.
+    ##                                  This is the 1 → 2 analogue of
+    ##                                  ``after-table-swap``: mid-transaction
+    ##                                  the column IS migrated.
+    ##   ``after-token-version-stamp`` — ``user_version`` written to 2, not yet
+    ##                                  committed.
+    ##
+    ## A step-specific name rather than a shared one on purpose: the 0 → 1 and
+    ## 1 → 2 steps run back to back in the same call for a version-0 database,
+    ## and a fault point named ``after-version-stamp`` for both would fire in
+    ## the first step and never exercise the second.
 
   langNameMigrationBakSuffix* = ".pre-lang-name-migration.bak"
-    ## Snapshot taken with ``VACUUM INTO`` immediately before the rebuild.
-    ## The transaction already makes the migration all-or-nothing against a
-    ## crash or an error; the snapshot covers the case the transaction cannot
-    ## — a migration that *succeeds* atomically while being logically wrong.
-    ## SQLite refuses to overwrite an existing ``VACUUM INTO`` target, so the
-    ## suffix is bumped rather than a previous snapshot clobbered.
+    ## Snapshot taken with ``VACUUM INTO`` immediately before the 0 → 1
+    ## rebuild.  The transaction already makes the migration all-or-nothing
+    ## against a crash or an error; the snapshot covers the case the
+    ## transaction cannot — a migration that *succeeds* atomically while being
+    ## logically wrong.  SQLite refuses to overwrite an existing
+    ## ``VACUUM INTO`` target, so the suffix is bumped rather than a previous
+    ## snapshot clobbered.
+
+  langTokenMigrationBakSuffix* = ".pre-lang-token-migration.bak"
+    ## The same, for the 1 → 2 value remap, and with its own suffix so a
+    ## version-0 database that runs 0 → 1 → 2 in one call leaves **two**
+    ## snapshots — one per step — rather than one step's snapshot being
+    ## mistaken for the other's.  Restoring the 1 → 2 snapshot gives back a
+    ## working version-1 database; restoring the 0 → 1 one gives back the
+    ## original version-0 file.
 
 proc migrationFault(point: string) =
   ## See ``traceIndexMigrationFaultEnv``.
@@ -411,20 +435,30 @@ const
 serializesAsTextInJson(Lang)
 
 proc langToColumnValue*(lang: Lang): string =
-  ## The persisted form of ``lang`` since schema version 1: the enum name.
-  $lang
+  ## The persisted form of ``lang`` since schema version **2**: the four-axis
+  ## token (``target_axes.encodeAxesToken``).
+  ##
+  ## Version 1 wrote ``$lang``.  That is still what the frozen 1 → 2 map
+  ## below decodes, and it is deliberately NOT what this proc produces any
+  ## more: the enum name is one value answering four questions, and the column
+  ## is the replay side's only per-recording fact.
+  ##
+  ## The toolchain axis is written as ``unknown`` on this path, because a
+  ## ``Lang`` names no toolchain; see ``storageAxesOfLang``.
+  encodeAxesToken(storageAxesOfLang(lang))
 
 type
   LangColumn* = object
     ## What a ``recordings.lang`` cell decodes to.
     lang*: Lang
-      ## The live member the stored name denotes — or ``LangUnknown`` when the
-      ## stored name is a RETIRED member (see ``retiredName``).
+      ## The live member the stored cell denotes — or ``LangUnknown`` when no
+      ## live member summarises it (see ``retiredName``).
     retiredName*: string
-      ## Non-empty exactly when the stored name was once a ``Lang`` member and
-      ## this build no longer has it.  Carried so the row is displayed by the
-      ## name it was recorded under and nothing is lost; ``lang`` is then the
-      ## sentinel, never a guess at a neighbour.
+      ## Non-empty exactly when the cell was a legitimate persisted value that
+      ## this build has no live ``Lang`` for: a four-axis token no member
+      ## summarises, or the name of a member a later build removed.  Carried
+      ## so the row is displayed by what it was recorded under and nothing is
+      ## lost; ``lang`` is then the sentinel, never a guess at a neighbour.
 
 # Retired-name policy (decided 2026-09-20, LRS-2B): a ``recordings.lang``
 # cell holding the name of a member that a later build REMOVED decodes to
@@ -468,15 +502,162 @@ const
       names.add(name)
     names
 
+# ---------------------------------------------------------------------------
+# The frozen schema-version-1 name → schema-version-2 token table
+# ---------------------------------------------------------------------------
+#
+# **A snapshot of a retired encoding.  Never regenerate this from ``Lang``.**
+#
+# Milestone rule 3: *any mapping from a historical encoding — an ordinal
+# written by an older build, or a ``$lang`` name written by schema version 1 —
+# must be a frozen literal annotated as a snapshot of a retired enum, and must
+# never be generated from the live enum by iterating it.*  This is the second
+# such table; ``langV0OrdinalNames`` above is the first, and its comment
+# carries the full reasoning.
+#
+# The force of the rule here is not theoretical.  Two of the 41 names below —
+# ``LangPython`` and ``LangRuby`` — were DELETED from ``Lang`` by LRS-4 on
+# 2026-09-21, so ``parseEnum[Lang]("LangPython")`` *raises* in this build where
+# it used to succeed.  A 1 → 2 map written as ``for lang in Lang: …`` would
+# therefore not merely drift: it would silently omit both, the ``CASE`` would
+# have no branch for their cells, the NULL would hit the column's ``NOT NULL``
+# and the migration of any database holding one would abort.  A map written as
+# ``parseEnum[Lang](storedName)`` would raise outright.  Neither name can be
+# reached through the live enum at any point, and neither is.
+#
+# The set is exactly ``langNamesEverPersisted``: the 40 frozen version-0 names
+# plus ``langNamesAddedSinceV0``.  That is 41, not the 40 the design and the
+# milestone entry both say — corrected here (milestone rule 7): those two
+# documents were counting the PRE-SPLIT enum, and ``LangGdScript`` was added to
+# ``Lang`` while schema version 1 was the live format, so version 1 could and
+# can write it.  ``trace_index_migration_test.nim`` asserts the two lists are
+# the same set, so a member appended to ``langNamesAddedSinceV0`` without a
+# token here is a test failure rather than a migration that maps it to NULL.
+#
+# Every target is DISTINCT — obligation 6 of the design's §5.4, the
+# lossless-history obligation — and the four that are easiest to get wrong are
+# called out in the milestone entry:
+#
+#   * ``LangUnknown`` → ``unknown``, the bare sentinel, NOT
+#     ``unknown-unknown-unknown-unknown`` (design Q3);
+#   * ``LangMasm``    → the ``midenasm`` form, NOT ``masm`` (design Q4a);
+#   * ``LangPython`` / ``LangRuby``  → the ``rr`` approach, which is what those
+#     two retired backends were, recorded as a fact rather than lost;
+#   * ``LangRustWasm`` / ``LangCppWasm`` → ``tiWasm`` / ``raVmEmulation``,
+#     re-derived under the four-axis grammar rather than copied from the
+#     two-axis ``rs-wasm`` the design's §5.4 table still shows.  Under four
+#     axes wasm is an ISA and the approach is VM emulation — the same approach
+#     ``nargo`` and every blockchain recorder uses — so the token is
+#     ``rs-wasm-unknown-vm``, not ``rs-wasm``.
+#
+# The toolchain axis is ``unknown`` in all 41 rows, and that is the honest
+# answer rather than a gap: a schema-version-1 cell recorded no toolchain, so
+# there is nothing to migrate onto that axis.  Inventing one — ``cargo`` for
+# ``LangRust``, ``none`` for ``LangPythonDb`` — would be writing a DEFAULT into
+# persisted data, which is precisely what design question Q1's rule forbids and
+# what this whole encoding exists to stop.
+const
+  langV1NameToV2Token*: array[41, tuple[name: string, token: string]] = [
+    ("LangC",          "c-native-unknown-mcr"),
+    ("LangCpp",        "cpp-native-unknown-mcr"),
+    ("LangRust",       "rs-native-unknown-mcr"),
+    ("LangNim",        "nim-native-unknown-mcr"),
+    ("LangGo",         "go-native-unknown-mcr"),
+    ("LangPascal",     "pas-native-unknown-mcr"),
+    ("LangFortran",    "f90-native-unknown-mcr"),
+    ("LangD",          "d-native-unknown-mcr"),
+    ("LangCrystal",    "cr-native-unknown-mcr"),
+    ("LangLean",       "lean-native-unknown-mcr"),
+    ("LangJulia",      "jl-native-unknown-mcr"),
+    ("LangAda",        "adb-native-unknown-mcr"),
+    # The two LRS-4 deleted.  `parseEnum[Lang]` cannot reach either name.
+    ("LangPython",     "py-interpreted-unknown-rr"),
+    ("LangRuby",       "rb-interpreted-unknown-rr"),
+    ("LangRubyDb",     "rb-interpreted-unknown-instrumented"),
+    ("LangJavascript", "js-interpreted-unknown-instrumented"),
+    ("LangLua",        "lua-interpreted-unknown-instrumented"),
+    ("LangAsm",        "asm-native-unknown-mcr"),
+    ("LangNoir",       "nr-acir-unknown-vm"),
+    # The wasm pair, re-derived: wasm is an ISA, the approach is emulation.
+    ("LangRustWasm",   "rs-wasm-unknown-vm"),
+    ("LangCppWasm",    "cpp-wasm-unknown-vm"),
+    ("LangPythonDb",   "py-interpreted-unknown-instrumented"),
+    # The sentinel: the bare token, the one documented exception (Q3).
+    ("LangUnknown",    "unknown"),
+    ("LangBash",       "sh-interpreted-unknown-instrumented"),
+    ("LangZsh",        "zsh-interpreted-unknown-instrumented"),
+    ("LangSolidity",   "sol-evm-unknown-vm"),
+    # `midenasm`, not `masm`: `masm` is reserved and unallocated (Q4a).
+    ("LangMasm",       "midenasm-midenvm-unknown-vm"),
+    ("LangSway",       "sw-fuelvm-unknown-vm"),
+    ("LangMove",       "move-movevm-unknown-vm"),
+    # The platform pair: a chain and a VM, with no source language at all.
+    ("LangPolkavm",    "unknown-polkavm-unknown-vm"),
+    ("LangCairo",      "cairo-cairovm-unknown-vm"),
+    ("LangCircom",     "circom-circomwitness-unknown-vm"),
+    ("LangLeo",        "leo-aleovm-unknown-vm"),
+    ("LangTolk",       "tolk-tonvm-unknown-vm"),
+    ("LangAiken",      "ak-plutus-unknown-vm"),
+    ("LangCadence",    "cdc-flowvm-unknown-vm"),
+    ("LangSolana",     "unknown-solanasbf-unknown-vm"),
+    ("LangElixir",     "ex-beam-unknown-instrumented"),
+    ("LangErlang",     "erl-beam-unknown-instrumented"),
+    ("LangPhp",        "php-interpreted-unknown-instrumented"),
+    ("LangGdScript",   "gd-gdscriptvm-unknown-instrumented"),
+  ]
+
+proc langV2TokenForV1Name*(name: string): string =
+  ## The schema-version-2 token for a schema-version-1 ``$lang`` name, or
+  ## ``""`` when the frozen table has no entry.  Membership in the table — not
+  ## anything about the live enum — is the definition of "a legal
+  ## schema-version-1 cell".
+  for entry in langV1NameToV2Token:
+    if entry.name == name:
+      return entry.token
+  ""
+
 proc decodeLangColumn*(raw: string,
                        everPersisted: openArray[string] = langNamesEverPersisted):
     LangColumn =
-  ## Decode a ``recordings.lang`` cell.  Never raises for a name that was
-  ## ever a ``Lang`` member; see the policy block above for what still does.
+  ## Decode a ``recordings.lang`` cell.  Never raises for a value any
+  ## CodeTracer build ever wrote; see the policy block above for what still
+  ## does.
+  ##
+  ## Two formats are accepted and the ORDER IS THE DECISION:
+  ##
+  ## 1. **The schema-version-2 four-axis token** — the live format, decoded by
+  ##    ``parseAxesToken``, which accepts exactly one hyphen-free token
+  ##    (``unknown``) and otherwise requires all four axes spelled out.  A
+  ##    token no live ``Lang`` summarises is the sentinel plus the token
+  ##    itself as ``retiredName``: the cell already says everything the
+  ##    summary cannot, so nothing is lost.
+  ## 2. **A schema-version-1 ``Lang`` NAME** — the legacy branch, kept for
+  ##    the same reason the retired-name policy exists: a row written by an
+  ##    older build must not become a hard failure at open.  A live name
+  ##    decodes to its member; a name in the frozen ``everPersisted`` list
+  ##    that this build no longer has decodes to the sentinel plus the name.
+  ##
+  ## Everything else raises, including a bare integer (an unmigrated
+  ## version-0 database) and a bare slug.  **A bare slug is the case this
+  ## ordering is written for**: step 1 refuses it because the grammar has no
+  ## hyphen-free token but ``unknown``, and step 2 refuses it because it is
+  ## not a ``Lang`` name, so there is no path by which ``py`` acquires a
+  ## default ISA, toolchain and approach.  That is design question Q1's rule
+  ## — *a default may be applied at parse time; a default may never be
+  ## IMPLIED by a persisted value* — enforced at the only place a persisted
+  ## value is read.
   ##
   ## ``everPersisted`` is a parameter so the retired path can be exercised by
-  ## a test before any member has actually been retired; production callers
-  ## take the default.
+  ## a test independently of which members happen to be retired today;
+  ## production callers take the default.
+  var axes: TargetAxes
+  if parseAxesToken(raw, axes):
+    let summary = langForStorageAxes(axes)
+    if summary.found:
+      return LangColumn(lang: summary.lang, retiredName: "")
+    return LangColumn(lang: LangUnknown, retiredName: raw)
+
+  # --- the schema-version-1 legacy branch -----------------------------------
   try:
     return LangColumn(lang: parseEnum[Lang](raw), retiredName: "")
   except ValueError:
@@ -485,25 +666,37 @@ proc decodeLangColumn*(raw: string,
     if name == raw:
       return LangColumn(lang: LangUnknown, retiredName: raw)
   raise newException(TraceIndexSchemaError,
-    "trace_index: recordings.lang holds " & raw.escape() & ", which is not " &
-    "a Lang enum name.  Since trace_index schema version " &
-    $TRACE_INDEX_SCHEMA_VERSION & " this column stores names such as " &
-    "'LangRust', never ordinals.  An integer here means the database was " &
-    "written before the lang-name migration and was not migrated.")
+    "trace_index: recordings.lang holds " & raw.escape() & ", which is " &
+    "neither a four-axis token nor a Lang enum name.  Since trace_index " &
+    "schema version " & $TRACE_INDEX_SCHEMA_VERSION & " this column stores " &
+    "tokens such as 'rs-native-unknown-mcr' (or the bare sentinel " &
+    "'unknown'); version " & $TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES &
+    " stored names such as 'LangRust' and those are still read.  An integer " &
+    "here means the database was written before the lang-name migration and " &
+    "was not migrated.  A bare slug such as 'py' is refused on purpose: a " &
+    "stored value never implies a default for the axes it left out.")
 
 proc langFromColumnValue*(raw: string): Lang =
-  ## Inverse of ``langToColumnValue``, as a bare ``Lang``: a retired name is
-  ## ``LangUnknown`` (use ``decodeLangColumn`` to keep the name).  Deliberately
-  ## does **not** accept a bare integer: accepting one would silently re-admit
-  ## the ordinal format this migration exists to retire, and would then decode
-  ## it against whatever the enum order happens to be today.
+  ## Inverse of ``langToColumnValue``, as a bare ``Lang``: a cell no live
+  ## member summarises is ``LangUnknown`` (use ``decodeLangColumn`` to keep
+  ## what it said).  Deliberately does **not** accept a bare integer:
+  ## accepting one would silently re-admit the ordinal format the version-1
+  ## migration exists to retire, and would then decode it against whatever
+  ## the enum order happens to be today.
   decodeLangColumn(raw).lang
 
 proc langLabel*(trace: Trace): string =
   ## The name to show for a recording's language: the live member's name, or
-  ## the retired name the row was recorded under.  Every listing that used to
-  ## print ``$trace.lang`` prints this, so a retired row keeps its label
-  ## instead of reading "LangUnknown".
+  ## — when no live member summarises the cell — what the cell itself said.
+  ## Every listing that used to print ``$trace.lang`` prints this, so such a
+  ## row keeps a meaningful label instead of reading "LangUnknown".
+  ##
+  ## Since schema version 2 that second case prints the four-axis token
+  ## (``py-interpreted-unknown-rr`` for a recording made by the retired Python
+  ## rr backend) where it used to print the retired enum name
+  ## (``LangPython``).  That is a deliberate consequence of the column
+  ## becoming self-describing: the token says more than the name did, and it
+  ## says it without this build needing a member for it.
   if trace.langRetiredName.len > 0: $trace.langRetiredName
   else: $trace.lang
 
@@ -543,13 +736,31 @@ proc distinctLangValues(db: DBConn): seq[string] =
     result.add(row[0])
 
 proc parsesAsLangName(raw: string): bool =
-  ## Live OR retired: a retired name is a legitimate schema-version-1 cell
-  ## (see the retired-name policy above), not a defect for the verifier.
+  ## A legitimate schema-version-**1** cell: a ``Lang`` name, live or retired
+  ## (see the retired-name policy above).  Deliberately does NOT go through
+  ## ``decodeLangColumn``, which since LRS-5 also accepts a version-2 token:
+  ## this predicate is what the 0 → 1 step's pre- and post-conditions are
+  ## written in terms of, and it has to keep meaning "a name", or the
+  ## half-migrated detection at both ends stops detecting anything.
+  if langV2TokenForV1Name(raw).len > 0:
+    return true
+  for name in langNamesEverPersisted:
+    if name == raw:
+      return true
+  # A live member added to `Lang` but not yet appended to the frozen lists
+  # would otherwise be reported as corruption by the verifier rather than by
+  # the test that exists to force the append.
   try:
-    discard decodeLangColumn(raw)
+    discard parseEnum[Lang](raw)
     true
-  except TraceIndexSchemaError:
+  except ValueError:
     false
+
+proc parsesAsLangToken(raw: string): bool =
+  ## A legitimate schema-version-**2** cell: the four-axis grammar, and
+  ## nothing else.  A bare slug is not one; see ``parseAxesToken``.
+  var axes: TargetAxes
+  parseAxesToken(raw, axes)
 
 proc countRecordings(db: DBConn): int =
   db.getValue(sql("SELECT count(*) FROM " & RECORDINGS_TABLE)).parseInt
@@ -632,8 +843,8 @@ proc validateLangNames(db: DBConn) =
       "trace_index migration: after the rebuild recordings.lang still holds " &
       "value(s) that are not Lang enum names: " & bad.join(", "))
 
-proc migrationBackupPath(dbPath: string): string =
-  result = dbPath & langNameMigrationBakSuffix
+proc migrationBackupPath(dbPath, bakSuffix: string): string =
+  result = dbPath & bakSuffix
   if not fileExists(result):
     return
   var suffix = 1
@@ -641,11 +852,11 @@ proc migrationBackupPath(dbPath: string): string =
     inc suffix
   result = result & "." & $suffix
 
-# Forward-declared so the rebuild below can run it as its *last*
+# Forward-declared so each rebuild below can run it as its *last*
 # in-transaction post-condition.  Its definition stays after
 # ``applyLangNameMigration``, next to ``migrateTraceIndex``, because that is
 # also where the tests reach for it.
-proc verifyTraceIndexSchema*(db: DBConn): seq[string]
+proc verifyTraceIndexSchemaAt*(db: DBConn; version: int): seq[string]
 
 proc applyLangNameMigration(db: DBConn; dbPath: string) =
   ## Schema version 0 → 1: rewrite ``recordings`` so ``lang`` is declared
@@ -705,7 +916,7 @@ proc applyLangNameMigration(db: DBConn; dbPath: string) =
   let recordingsBefore = countRecordings(db)
   let foreignKeyViolationsBefore = foreignKeyViolationCount(db)
 
-  let backupPath = migrationBackupPath(dbPath)
+  let backupPath = migrationBackupPath(dbPath, langNameMigrationBakSuffix)
   db.exec(sql"VACUUM INTO ?", backupPath)
 
   # Foreign-key enforcement must be off across a table rebuild, and cannot be
@@ -772,7 +983,11 @@ proc applyLangNameMigration(db: DBConn; dbPath: string) =
         " new foreign-key violation(s) (" & $foreignKeyViolationsBefore &
         " before, " & $foreignKeyViolationsAfter & " after).")
 
-    writeSchemaVersion(db, TRACE_INDEX_SCHEMA_VERSION)
+    # Stamps **1**, not `TRACE_INDEX_SCHEMA_VERSION`.  This step brings a
+    # database to version 1 and no further; since LRS-5 the latest version is
+    # 2 and the 1 -> 2 step below runs next.  Stamping "the latest" here would
+    # declare the database fully migrated before the second step had run.
+    writeSchemaVersion(db, TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES)
     migrationFault("after-version-stamp")
 
     # The full schema post-condition, as the last thing before COMMIT.  It
@@ -781,7 +996,7 @@ proc applyLangNameMigration(db: DBConn; dbPath: string) =
     # that could not roll back the write it was judging — the same shape as
     # the bug this comment block warns about, one level up.  Running it here
     # costs a handful of reads against pages already in cache.
-    let problems = verifyTraceIndexSchema(db)
+    let problems = verifyTraceIndexSchemaAt(db, TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES)
     if problems.len > 0:
       raise newException(TraceIndexMigrationError,
         "trace_index migration: post-condition failed for " & dbPath &
@@ -817,23 +1032,31 @@ proc applyLangNameMigration(db: DBConn; dbPath: string) =
   # for why that was wrong twice over.
   stderr.writeLine(
     "[codetracer] trace_index.db migrated to schema version " &
-    $TRACE_INDEX_SCHEMA_VERSION & " (recordings.lang now stores language " &
+    $TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES &
+    " (recordings.lang now stores language " &
     "names, not enum ordinals). Pre-migration snapshot: " & backupPath)
 
-proc verifyTraceIndexSchema*(db: DBConn): seq[string] =
-  ## Return every way ``db`` fails to be a fully-migrated recordings
-  ## database.  An empty result is the post-condition of ``migrateTraceIndex``
-  ## and the thing tests assert on.  Returns problems rather than raising so
-  ## a caller can report all of them at once.
+proc verifyTraceIndexSchemaAt*(db: DBConn; version: int): seq[string] =
+  ## Return every way ``db`` fails to be a recordings database at schema
+  ## version ``version``.  An empty result is the post-condition of each
+  ## migration step and the thing tests assert on.  Returns problems rather
+  ## than raising so a caller can report all of them at once.
+  ##
+  ## Parameterised on the version since LRS-5, because the 0 → 1 and 1 → 2
+  ## steps run back to back and each must be able to judge ITSELF from inside
+  ## its own transaction.  A verifier that only knew the latest version would
+  ## fail the intermediate state the first step legitimately produces, and the
+  ## first step would then have to check nothing at all.  What "a valid cell"
+  ## means is the part that moves: version 1 says a ``Lang`` NAME, version 2
+  ## says a four-axis TOKEN.
   result = @[]
-  var version = -1
+  var stored = -1
   try:
-    version = readSchemaVersion(db)
+    stored = readSchemaVersion(db)
   except TraceIndexMigrationError as e:
     result.add(e.msg)
-  if version != TRACE_INDEX_SCHEMA_VERSION:
-    result.add("PRAGMA user_version is " & $version & ", expected " &
-               $TRACE_INDEX_SCHEMA_VERSION)
+  if stored != version:
+    result.add("PRAGMA user_version is " & $stored & ", expected " & $version)
   if not tableExistsIn(db, RECORDINGS_TABLE):
     result.add("table '" & RECORDINGS_TABLE & "' is missing")
     return
@@ -846,17 +1069,201 @@ proc verifyTraceIndexSchema*(db: DBConn): seq[string] =
                (if declared.len == 0: "<missing>" else: declared) &
                ", expected TEXT")
   for raw in distinctLangValues(db):
-    if not parsesAsLangName(raw):
-      result.add("recordings.lang holds " & raw.escape() &
-                 ", which is not a Lang enum name")
+    if version >= TRACE_INDEX_SCHEMA_VERSION:
+      if not parsesAsLangToken(raw):
+        result.add("recordings.lang holds " & raw.escape() &
+                   ", which is not a four-axis language token")
+    else:
+      if not parsesAsLangName(raw):
+        result.add("recordings.lang holds " & raw.escape() &
+                   ", which is not a Lang enum name")
+
+proc verifyTraceIndexSchema*(db: DBConn): seq[string] =
+  ## ``verifyTraceIndexSchemaAt`` at the version this build writes.
+  verifyTraceIndexSchemaAt(db, TRACE_INDEX_SCHEMA_VERSION)
+
+proc langTokenRemapCaseSql(column: string): string =
+  ## ``CASE lang WHEN 'LangC' THEN 'c-native-unknown-mcr' ... END``, built
+  ## from the **frozen** ``langV1NameToV2Token`` literal and never from the
+  ## live ``Lang`` enum.  Milestone rule 3, and here the rule has teeth: two
+  ## of the names this table must map (``LangPython``, ``LangRuby``) are not
+  ## members of ``Lang`` any more, so a generator over the enum would emit no
+  ## branch for them at all.
+  ##
+  ## There is deliberately **no ``ELSE``**.  A cell the table does not cover
+  ## falls through to NULL, which the column's ``NOT NULL`` rejects, which
+  ## aborts the whole transaction — the same backstop the 0 → 1 ``CASE`` uses.
+  ## ``validateLangV1Names`` below catches that case earlier and with a better
+  ## message; this is what catches anything it did not think of.
+  result = "CASE " & column
+  for entry in langV1NameToV2Token:
+    result.add(" WHEN '" & entry.name & "' THEN '" & entry.token & "'")
+  result.add(" END")
+
+proc validateLangV1Names(db: DBConn) =
+  ## Pre-flight for the 1 → 2 remap: every stored ``lang`` must be a name the
+  ## frozen ``langV1NameToV2Token`` table has a token for.  Runs *before* any
+  ## write, so a database this rejects is left exactly as it was found.  All
+  ## offending values are collected, not just the first.
+  var alreadyTokens: seq[string] = @[]
+  var unmappable: seq[string] = @[]
+  for raw in distinctLangValues(db):
+    if langV2TokenForV1Name(raw).len > 0:
+      continue
+    if parsesAsLangToken(raw):
+      alreadyTokens.add(raw)
+    else:
+      unmappable.add(raw.escape())
+
+  if alreadyTokens.len > 0:
+    raise newException(TraceIndexMigrationError,
+      "trace_index migration: recordings.lang already holds four-axis " &
+      "token(s) (" & alreadyTokens.join(", ") & ") but PRAGMA user_version " &
+      "is below " & $TRACE_INDEX_SCHEMA_VERSION & ".  That combination " &
+      "cannot be produced by this code path and means the database is " &
+      "half-migrated.  Refusing to rewrite it; restore the snapshot written " &
+      "beside it (*" & langTokenMigrationBakSuffix & ").")
+  if unmappable.len > 0:
+    raise newException(TraceIndexMigrationError,
+      "trace_index migration: recordings.lang holds value(s) that are not " &
+      "schema-version-1 Lang names: " & unmappable.join(", ") & ".  " &
+      "Refusing to migrate: the frozen version-1 name table has no token " &
+      "for them and inventing one would mislabel the recording.")
+
+proc applyLangAxesTokenMigration(db: DBConn; dbPath: string) =
+  ## Schema version 1 → 2: remap every ``recordings.lang`` cell from the
+  ## ``Lang`` enum NAME to the four-axis TOKEN (``target_axes.nim``).
+  ##
+  ## Unlike 0 → 1 this is **not** a table rebuild.  The column is already
+  ## ``TEXT`` and stays ``TEXT``; only the values change.  So it is one
+  ## ``UPDATE ... SET lang = CASE ... END`` inside a single ``BEGIN
+  ## IMMEDIATE`` transaction, with the same ``VACUUM INTO`` snapshot and the
+  ## same ``PRAGMA user_version`` stamp version 1 uses.  Everything the 0 → 1
+  ## step's long comment says about ``IMMEDIATE``, about two processes
+  ## migrating at once, and about every failable check living *inside* the
+  ## transaction applies here verbatim and is not repeated.
+  ##
+  ## One difference worth naming: the loser of a concurrent race resolves
+  ## here by the same mechanism but through a different door.  Its
+  ## pre-flight scan runs before it takes the lock, so it may pass; by the
+  ## time it holds the lock the winner has committed tokens, its ``CASE``
+  ## matches no branch, the NULL hits ``NOT NULL`` and its whole transaction
+  ## rolls back.  Loud, lossless, self-correcting on the next run.
+  if not tableExistsIn(db, RECORDINGS_TABLE):
+    # Nothing to remap; the caller stamps the version.
+    return
+
+  let liveDefs = columnDefs(db, RECORDINGS_TABLE)
+  let liveLangType = declaredTypeOf(liveDefs, "lang")
+  if liveLangType != "TEXT":
+    raise newException(TraceIndexMigrationError,
+      "trace_index migration: the version 1 -> 2 remap needs recordings.lang " &
+      "declared TEXT and found " &
+      (if liveLangType.len == 0: "<missing>" else: liveLangType) &
+      ".  The version 0 -> 1 rebuild is what makes it TEXT and it did not run.")
+
+  let storedValues = distinctLangValues(db)
+  if storedValues.len == 0:
+    # A database with no recordings — typically a fresh one.  There is
+    # nothing to remap and nothing to validate; the caller stamps.
+    return
+
+  validateLangV1Names(db)
+
+  # Baselines for the post-conditions.  Captured *before* the write and
+  # re-checked inside the transaction, so the step is judged on what it
+  # changed rather than on the absolute state of a database it did not
+  # create.  See ``foreignKeyViolationCount``: that number is normally
+  # non-zero, and an earlier version of the 0 -> 1 step aborted a successful
+  # run by asserting otherwise.
+  let recordingsBefore = countRecordings(db)
+  let foreignKeyViolationsBefore = foreignKeyViolationCount(db)
+
+  let backupPath = migrationBackupPath(dbPath, langTokenMigrationBakSuffix)
+  db.exec(sql"VACUUM INTO ?", backupPath)
+
+  var inTransaction = false
+  try:
+    db.exec(sql"BEGIN IMMEDIATE")
+    inTransaction = true
+
+    db.exec(sql("UPDATE " & RECORDINGS_TABLE & " SET lang = " &
+                langTokenRemapCaseSql("lang")))
+    migrationFault("after-token-remap")
+
+    # Post-conditions, all *inside* the transaction, for the reason the
+    # 0 -> 1 step records: a check that runs after COMMIT can only report a
+    # problem it is powerless to undo.
+    var stillNames: seq[string] = @[]
+    for raw in distinctLangValues(db):
+      if not parsesAsLangToken(raw):
+        stillNames.add(raw.escape())
+    if stillNames.len > 0:
+      raise newException(TraceIndexMigrationError,
+        "trace_index migration: after the remap recordings.lang still holds " &
+        "value(s) that are not four-axis tokens: " & stillNames.join(", "))
+
+    let recordingsAfter = countRecordings(db)
+    if recordingsAfter != recordingsBefore:
+      raise newException(TraceIndexMigrationError,
+        "trace_index migration: the remap changed the recording count from " &
+        $recordingsBefore & " to " & $recordingsAfter &
+        ".  The 1 -> 2 migration rewrites one column's VALUES and must not " &
+        "add or drop a row.")
+
+    let foreignKeyViolationsAfter = foreignKeyViolationCount(db)
+    if foreignKeyViolationsAfter > foreignKeyViolationsBefore:
+      raise newException(TraceIndexMigrationError,
+        "trace_index migration: the remap introduced " &
+        $(foreignKeyViolationsAfter - foreignKeyViolationsBefore) &
+        " new foreign-key violation(s) (" & $foreignKeyViolationsBefore &
+        " before, " & $foreignKeyViolationsAfter & " after).")
+
+    writeSchemaVersion(db, TRACE_INDEX_SCHEMA_VERSION)
+    migrationFault("after-token-version-stamp")
+
+    let problems = verifyTraceIndexSchemaAt(db, TRACE_INDEX_SCHEMA_VERSION)
+    if problems.len > 0:
+      raise newException(TraceIndexMigrationError,
+        "trace_index migration: post-condition failed for " & dbPath &
+        " after the version 1 -> 2 remap: " & problems.join("; "))
+
+    db.exec(sql"COMMIT")
+    inTransaction = false
+  except CatchableError as e:
+    if inTransaction:
+      try:
+        db.exec(sql"ROLLBACK")
+      except DbError:
+        discard
+    raise newException(TraceIndexMigrationError,
+      "trace_index migration: rolled back the lang name->token remap of " &
+      dbPath & "; the database is unchanged and a snapshot of it is at " &
+      backupPath & ".  Cause: " & e.msg, e)
+
+  # Nothing that can fail belongs after this point.
+  stderr.writeLine(
+    "[codetracer] trace_index.db migrated to schema version " &
+    $TRACE_INDEX_SCHEMA_VERSION & " (recordings.lang now stores four-axis " &
+    "language tokens such as 'ex-beam-unknown-instrumented', not enum " &
+    "names). Pre-migration snapshot: " & backupPath)
 
 proc migrateTraceIndex*(db: DBConn; dbPath: string) =
   ## Bring ``db`` up to ``TRACE_INDEX_SCHEMA_VERSION``.
   ##
   ## Idempotent by construction: the only thing that decides whether any work
-  ## happens is ``PRAGMA user_version``, and the step that does the work
-  ## stamps that value inside the same transaction.  A second call therefore
-  ## reads version 1 and returns without touching a page.
+  ## happens is ``PRAGMA user_version``, and each step that does work stamps
+  ## that value inside the same transaction.  A second call therefore reads
+  ## the current version and returns without touching a page.
+  ##
+  ## The steps **compose** rather than replace one another: a version-0
+  ## database runs 0 → 1 → 2 in this one call, each step gated on the version
+  ## the previous one stamped, each with its own snapshot, its own fault
+  ## points and its own in-transaction post-conditions.  Version 1 was
+  ## deliberately not rewritten to emit the final token directly; databases
+  ## already at version 1 exist, and code claiming version 1 meant tokens
+  ## would meet a database the gate reports as done, holding values it cannot
+  ## parse.
   let version = readSchemaVersion(db)
   if version == TRACE_INDEX_SCHEMA_VERSION:
     return
@@ -867,20 +1274,27 @@ proc migrateTraceIndex*(db: DBConn; dbPath: string) =
       " this build understands.  Refusing to open it: a downgrade cannot " &
       "know what a newer release changed.  Use a codetracer at least as new " &
       "as the one that wrote it, or move the file aside.")
-  if version < 1:
+  if version < TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES:
     applyLangNameMigration(db, dbPath)
+  # Re-read rather than reusing `version`: the step above stamps 1 from
+  # inside its own transaction when it rebuilds, and returns without stamping
+  # on the two paths that have nothing to rebuild (no `recordings` table, and
+  # a database already created in the version-1 TEXT shape).  Both of those
+  # still have to reach the remap below.
+  if readSchemaVersion(db) < TRACE_INDEX_SCHEMA_VERSION:
+    applyLangAxesTokenMigration(db, dbPath)
 
   # The stamp, and the post-condition, in a transaction of their own.
   #
-  # ``applyLangNameMigration`` stamps and verifies inside *its* transaction
-  # whenever it rebuilds.  It also has two paths that return without one — a
-  # database with no ``recordings`` table at all, and a database already
-  # created in the version-1 shape (the ordinary fresh-database case) — and
-  # those are what this stamps.  Wrapping it keeps one invariant true with no
-  # exceptions: **no check that can fail this migration ever runs outside a
-  # transaction able to undo the write it is checking.**  This block used to
-  # sit bare after the commit, which made its raise the only one in the module
-  # that could report a problem it was powerless to do anything about.
+  # Each step stamps and verifies inside *its* transaction whenever it does
+  # work.  Each also has paths that return without one — a database with no
+  # ``recordings`` table at all, and a database with no rows (the ordinary
+  # fresh-database case) — and those are what this stamps.  Wrapping it keeps
+  # one invariant true with no exceptions: **no check that can fail this
+  # migration ever runs outside a transaction able to undo the write it is
+  # checking.**  This block used to sit bare after the commit, which made its
+  # raise the only one in the module that could report a problem it was
+  # powerless to do anything about.
   #
   # Reached only on a run that actually did work — the steady-state path
   # returned at the version check above — so it costs nothing after the first
@@ -905,6 +1319,7 @@ proc migrateTraceIndex*(db: DBConn; dbPath: string) =
         db.exec(sql"ROLLBACK")
       except DbError:
         discard
+
 
 proc ensureDB(test: bool): DBConn =
   # useful when debugging where it is called from: writeStackTrace()
@@ -963,9 +1378,13 @@ proc ensureDB(test: bool): DBConn =
     stderr.writeLine(
       "[codetracer] refusing to serve the local recording index at " &
       DB_PATHS[test.int] & " in an unknown state.  The line above says what " &
-      "failed and what state the database is in.  Whenever a rebuild was " &
-      "attempted, a pre-migration snapshot is written beside it as " &
-      "*" & langNameMigrationBakSuffix & "; restore that to recover, or run " &
+      "failed and what state the database is in, INCLUDING the exact path " &
+      "of the snapshot it took.  Each migration step writes one beside the " &
+      "database before it touches a page: the version 0 -> 1 rebuild as " &
+      "*" & langNameMigrationBakSuffix & " and the version 1 -> 2 remap as " &
+      "*" & langTokenMigrationBakSuffix & " (a step that had nothing to do " &
+      "writes neither, which is why the line above is the one to read and " &
+      "not this one).  Restore the snapshot it names to recover, or run " &
       "`just reset-db` to discard the index (recordings stay replayable via " &
       "`ct replay <folder>`).")
     quit(1)

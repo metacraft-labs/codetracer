@@ -29,7 +29,7 @@ const
   NO_RECORDING_ID* = ""
 
 const
-  TRACE_INDEX_SCHEMA_VERSION* = 1
+  TRACE_INDEX_SCHEMA_VERSION* = 2
     ## Value stamped into SQLite's ``PRAGMA user_version`` for a database
     ## that matches the schema in this file.  History:
     ##
@@ -40,10 +40,35 @@ const
     ##   so version 0 needs no backfill to be correct.
     ## - **1** — ``recordings.lang`` is declared ``TEXT`` and holds the
     ##   ``Lang`` enum *name* (``'LangElixir'``), not its ordinal.
+    ## - **2** — ``recordings.lang`` is still ``TEXT`` and holds the
+    ##   **four-axis token** (``'ex-beam-unknown-instrumented'``), or the
+    ##   bare sentinel ``'unknown'``.  A value remap inside a column whose
+    ##   type does not change, so it needs no table rebuild; see
+    ##   ``applyLangAxesTokenMigration`` in ``trace_index.nim`` and the
+    ##   grammar in ``target_axes.nim``.  The reason the enum NAME was not
+    ##   good enough is that it is one value answering four questions: it
+    ##   cannot say "this Rust recording is a wasm one" without a dedicated
+    ##   ``LangRustWasm`` member, which is the conflation milestone LRS-5
+    ##   removes.
+    ##
+    ## The steps COMPOSE: a version-0 database runs 0 → 1 → 2 in one call.
+    ## Version 1 is kept exactly as it was written rather than being
+    ## rewritten to emit the final token directly, because databases already
+    ## at ``user_version = 1`` exist — code claiming version 1 meant tokens
+    ## would meet a database the gate reports as done, holding values it
+    ## cannot parse.
     ##
     ## A database whose ``user_version`` is *greater* than this constant was
     ## written by a newer codetracer; ``migrateTraceIndex`` refuses to touch
     ## it rather than guessing.
+
+  TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES* = 1
+    ## The version the 0 → 1 step stamps.  Written as its own constant
+    ## because that step must keep stamping **1** now that
+    ## ``TRACE_INDEX_SCHEMA_VERSION`` is 2: a step that stamped "whatever the
+    ## latest version happens to be" would claim a database was fully
+    ## migrated the moment a later step was added, which is the same class of
+    ## defect as deriving a historical decode table from the live enum.
 
   RECORDINGS_TABLE = "recordings"
     ## Live name of the recordings table.

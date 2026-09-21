@@ -241,6 +241,52 @@ func sourceLanguageOf*(lang: Lang): SourceLanguage =
   ## for the two platform pseudo-languages (`LangSolana`, `LangPolkavm`).
   axesOfLang(lang).language
 
+func storageAxesOfLang*(lang: Lang): TargetAxes =
+  ## The four-axis value a `Lang` summary is PERSISTED as — milestone LRS-5.
+  ##
+  ## Three of the four come straight from `axesOfLang`.  The fourth,
+  ## `toolchain`, is `tcUnknown`, and that is a statement rather than a gap:
+  ## **no `Lang` value names a toolchain** (`LangNim` is `nim c` + `ct-mcr`
+  ## for a `.nim` and the script VM for a `.nims`), so there is nothing to
+  ## project onto that axis from this side.  `tcUnknown` means "the
+  ## assessment did not determine the toolchain", which is exactly true of
+  ## every write that goes through a `Lang`.
+  ##
+  ## Writing a GUESS here instead would be the defect this whole series is
+  ## about: a persisted `cargo` that came from a default table rather than
+  ## from an observation makes that table a persisted contract.  Threading
+  ## the assessed toolchain through `Trace` and into `recordTrace` is the
+  ## precondition LRS-5's second deletion round calls (b), and it is what
+  ## will start filling this axis with something observed.
+  let axes = axesOfLang(lang)
+  TargetAxes(language: axes.language, targetIsa: axes.targetIsa,
+             toolchain: tcUnknown, approach: axes.approach)
+
+func langForStorageAxes*(axes: TargetAxes): tuple[found: bool, lang: Lang] =
+  ## The `Lang` summary of a decoded cell, or `found: false` when no live
+  ## member summarises it.
+  ##
+  ## Derived by iterating `Lang` against the exhaustive `axesOfLang` `case`,
+  ## so it cannot drift from the decomposition and needs no second table
+  ## (milestone rule 4: a `const` or a derivation from an exhaustive `case`,
+  ## never a positional literal).  `found` is a separate field rather than a
+  ## `LangUnknown` return, because `LangUnknown` is itself a legitimate answer
+  ## — the all-sentinel cell — and "no member summarises this" must not be
+  ## confused with it.
+  ##
+  ## The **toolchain is deliberately not consulted**: `Lang` has no toolchain
+  ## axis, so `rs-native-cargo-mcr` and `rs-native-rustc-mcr` both summarise
+  ## as `LangRust`.  That is lossy in the SUMMARY and lossless on disk, which
+  ## is the whole point of storing four axes — the cell keeps what the summary
+  ## cannot hold.
+  for lang in Lang:
+    let candidate = axesOfLang(lang)
+    if candidate.language == axes.language and
+       candidate.targetIsa == axes.targetIsa and
+       candidate.approach == axes.approach:
+      return (true, lang)
+  (false, LangUnknown)
+
 const
   MaterializedSummaryExceptions* = [
     (lang: LangNim, materialized: true),

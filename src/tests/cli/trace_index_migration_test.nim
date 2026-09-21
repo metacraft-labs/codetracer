@@ -1,8 +1,11 @@
 ## trace_index_migration_test.nim
 ##
-## Acceptance tests for trace_index schema version 1: `recordings.lang` stores
-## the `Lang` enum NAME rather than `ord(Lang)`, and the database carries a
-## schema version in SQLite's `PRAGMA user_version`.
+## Acceptance tests for the trace_index schema versions: version 1, where
+## `recordings.lang` stores the `Lang` enum NAME rather than `ord(Lang)`, and
+## version 2 (LRS-5), where it stores the FOUR-AXIS TOKEN rather than the
+## name.  The database carries its version in SQLite's `PRAGMA user_version`
+## and the two steps COMPOSE — a version-0 database runs 0 -> 1 -> 2 on one
+## open.
 ##
 ## ## Why this is tested harder than a normal change
 ##
@@ -12,13 +15,16 @@
 ## migration that half-applies leaves a database no release can read and no
 ## rebuild can repair.  So the properties below are not "the happy path works":
 ##
-##   1. an **old** database is remapped correctly, value for value, for all 41
-##      `Lang` variants;
+##   1. an **old** database is remapped correctly, value for value: all 40
+##      schema-version-0 ordinals through the 0 -> 1 step, and all 41
+##      schema-version-1 names through the 1 -> 2 step, each to a DISTINCT
+##      target;
 ##   2. a **new** database is not touched;
 ##   3. running the migration **twice** is a no-op;
 ##   4. a **partial** application cannot be observed — the failure is
-##      constructed at three separate points inside the transaction, and the
-##      rollback is proved rather than asserted;
+##      constructed at five separate points inside the transactions (three in
+##      0 -> 1, two in 1 -> 2), and the rollback is proved rather than
+##      asserted;
 ##   5. the **version gate** gates in both directions.
 ##
 ## ## Why `PRAGMA user_version`
@@ -197,9 +203,12 @@ proc makeLegacyDb(dir: string; rows: seq[(string, string)]): string =
   for row in rows:
     insertRecording(db, row[0], row[1])
 
-proc makeCurrentDb(dir: string; rows: seq[(string, string)]): string =
-  ## A schema-version-1 database, built the way `ensureDB` builds a fresh one:
-  ## current DDL, then stamped.
+proc makeTextLangDb(dir: string; rows: seq[(string, string)];
+                    stampedAt: int): string =
+  ## A database with `lang` declared TEXT, stamped at `stampedAt`.  Two
+  ## versions have that shape and differ only in what the cells say, so one
+  ## builder serves both: version 1 holds `Lang` NAMES, version 2 holds
+  ## four-axis TOKENS.
   result = dir / "trace_index.db"
   let db = openFixture(result)
   defer: db.close()
@@ -209,7 +218,18 @@ proc makeCurrentDb(dir: string; rows: seq[(string, string)]): string =
     db.exec(sql(statement))
   for row in rows:
     insertRecording(db, row[0], row[1])
-  db.exec(sql("PRAGMA user_version = " & $TRACE_INDEX_SCHEMA_VERSION))
+  db.exec(sql("PRAGMA user_version = " & $stampedAt))
+
+proc makeCurrentDb(dir: string; rows: seq[(string, string)]): string =
+  ## A database at the version this build writes: TEXT `lang`, four-axis
+  ## tokens, stamped at `TRACE_INDEX_SCHEMA_VERSION`.
+  makeTextLangDb(dir, rows, TRACE_INDEX_SCHEMA_VERSION)
+
+proc makeV1Db(dir: string; rows: seq[(string, string)]): string =
+  ## A schema-version-1 database: TEXT `lang` holding `Lang` NAMES, stamped
+  ## at 1.  This is the input to the 1 -> 2 remap, and it is the shape the
+  ## live developer database was in before LRS-5.
+  makeTextLangDb(dir, rows, TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES)
 
 proc rowsSnapshot(path: string): string =
   ## Every row of `recordings`, every column, in a stable order.
@@ -249,15 +269,25 @@ proc declaredLangType(path: string): string =
   db.getValue(
     sql"SELECT type FROM pragma_table_info('recordings') WHERE name = 'lang'")
 
-proc backupsBeside(path: string): seq[string] =
-  ## Every `*.pre-lang-name-migration.bak*` file next to `path`.  A second
-  ## entry appearing is direct evidence that the rebuild ran a second time,
-  ## which is what "idempotent" forbids: `VACUUM INTO` refuses to overwrite,
-  ## so a re-run has to write a *new* suffixed file.
+proc backupsBeside(path, bakSuffix: string): seq[string] =
+  ## Every `*<bakSuffix>*` file next to `path`.  A second entry appearing is
+  ## direct evidence that the step ran a second time, which is what
+  ## "idempotent" forbids: `VACUUM INTO` refuses to overwrite, so a re-run has
+  ## to write a *new* suffixed file.
+  ##
+  ## The suffix is a parameter since LRS-5: the two steps take one snapshot
+  ## each, under different suffixes, so that restoring one gives back the
+  ## original version-0 file and restoring the other a working version-1 one.
   result = @[]
   for kind, entry in walkDir(path.parentDir):
-    if kind == pcFile and langNameMigrationBakSuffix in entry.lastPathPart:
+    if kind == pcFile and bakSuffix in entry.lastPathPart:
       result.add(entry.lastPathPart)
+
+proc nameBackupsBeside(path: string): seq[string] =
+  backupsBeside(path, langNameMigrationBakSuffix)
+
+proc tokenBackupsBeside(path: string): seq[string] =
+  backupsBeside(path, langTokenMigrationBakSuffix)
 
 proc migrateAt(path: string) =
   let db = open(path, "", "", "")
@@ -269,6 +299,20 @@ proc verifyAt(path: string): seq[string] =
   let db = open(path, "", "", "")
   defer: db.close()
   verifyTraceIndexSchema(db)
+
+proc verifyTraceIndexSchemaAtPath(path: string; version: int): seq[string] =
+  ## `verifyTraceIndexSchemaAt` against a path.  The version is a parameter
+  ## since LRS-5, because the intermediate state the 0 -> 1 step leaves is a
+  ## legitimate database that the latest version's verifier must reject and
+  ## version 1's must accept.
+  let db = open(path, "", "", "")
+  defer: db.close()
+  verifyTraceIndexSchemaAt(db, version)
+
+proc readSchemaVersionAt(path: string): int =
+  let db = open(path, "", "", "")
+  defer: db.close()
+  readSchemaVersion(db)
 
 proc migrateExpectingError(path: string): string =
   ## Run the migration, require it to raise `TraceIndexMigrationError`, and
@@ -366,11 +410,17 @@ compileHelper()
 
 suite "trace_index schema version 1 — lang ordinal to name":
 
-  test "TRACE_INDEX_SCHEMA_VERSION is 1 and an unstamped DB reads back as 0":
+  test "TRACE_INDEX_SCHEMA_VERSION is 2 and an unstamped DB reads back as 0":
     ## The whole gate rests on SQLite reporting 0 for a database nobody
     ## stamped.  Were that untrue, every existing user database would need a
     ## backfill before the gate meant anything.
-    check TRACE_INDEX_SCHEMA_VERSION == 1
+    ##
+    ## Both version numbers are written as LITERALS.  The 0 -> 1 step must go
+    ## on stamping 1 now that the latest version is 2, and a test that said
+    ## `TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES == TRACE_INDEX_SCHEMA_VERSION - 1`
+    ## would agree with a step that stamped the wrong thing.
+    check TRACE_INDEX_SCHEMA_VERSION == 2
+    check TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES == 1
     let path = makeLegacyDb(workDir("unstamped"), @[])
     let db = open(path, "", "", "")
     defer: db.close()
@@ -435,10 +485,14 @@ suite "trace_index schema version 1 — lang ordinal to name":
     check langV0NameForOrdinal(-1) == ""
     check langV0NameForOrdinal(LANG_V0_ENTRY_COUNT) == ""
 
-  test "an old database is remapped: every Lang ordinal becomes its name":
-    ## The anti-drift check.  All 40 variants, not a sample: the failure this
-    ## migration exists to prevent is precisely a single variant landing on
-    ## the wrong side of a renumber.
+  test "an old database is remapped: every Lang ordinal becomes its own token":
+    ## The anti-drift check, COMPOSED.  All 40 version-0 ordinals, not a
+    ## sample: the failure this migration exists to prevent is precisely a
+    ## single variant landing on the wrong side of a renumber.  Since LRS-5
+    ## one `migrateTraceIndex` call runs 0 -> 1 -> 2, so the observable result
+    ## is the four-axis token, and the assertion walks BOTH frozen tables --
+    ## ordinal to name, then name to token -- which is exactly the composition
+    ## a version-0 user gets.
     let pairs = langOrdinalsAndNames()
     check pairs.len == LANG_V0_ENTRY_COUNT
     var rows: seq[(string, string)] = @[]
@@ -450,8 +504,14 @@ suite "trace_index schema version 1 — lang ordinal to name":
 
     check verifyAt(path).len == 0
     check declaredLangType(path) == "TEXT"
+    var targets: seq[string] = @[]
     for pair in pairs:
-      check langCell(path, "id-" & pair[0]) == pair[1]
+      checkpoint("ordinal " & pair[0] & " (" & pair[1] & ")")
+      let expected = langV2TokenForV1Name(pair[1])
+      check expected.len > 0
+      check langCell(path, "id-" & pair[0]) == expected
+      check expected notin targets
+      targets.add(expected)
 
   test "the remap preserves every other column verbatim":
     ## A rebuild that copied the columns in the wrong order, or dropped one,
@@ -463,9 +523,9 @@ suite "trace_index schema version 1 — lang ordinal to name":
     migrateAt(path)
 
     let after = rowsSnapshot(path)
-    check "| LangElixir |" in after
+    check "| ex-beam-unknown-instrumented |" in after
     check before.replace("| 37 |", "| LANG |") ==
-          after.replace("| LangElixir |", "| LANG |")
+          after.replace("| ex-beam-unknown-instrumented |", "| LANG |")
 
   test "the rebuilt table keeps both recordings indexes":
     ## `DROP TABLE recordings` takes its indexes with it; forgetting to
@@ -515,8 +575,8 @@ suite "trace_index schema version 1 — lang ordinal to name":
     migrateAt(path)
 
     check verifyAt(path).len == 0
-    check langCell(path, "id-elixir") == "LangElixir"
-    check langCell(path, "id-c") == "LangC"
+    check langCell(path, "id-elixir") == "ex-beam-unknown-instrumented"
+    check langCell(path, "id-c") == "c-native-unknown-mcr"
     let db = open(path, "", "", "")
     defer: db.close()
     # The orphans are carried through untouched: the migration rewrites one
@@ -540,8 +600,8 @@ suite "trace_index schema version 1 — lang ordinal to name":
     let db = open(path, "", "", "")
     defer: db.close()
     check db.getValue(sql"SELECT count(*) FROM recordings") == "10"
-    check db.getValue(
-      sql"SELECT count(*) FROM recordings WHERE lang = 'LangElixir'") == "10"
+    check db.getValue(sql"""SELECT count(*) FROM recordings
+      WHERE lang = 'ex-beam-unknown-instrumented'""") == "10"
 
   test "a pre-migration snapshot is written beside the database":
     ## The transaction makes the migration atomic against a crash or an
@@ -553,20 +613,34 @@ suite "trace_index schema version 1 — lang ordinal to name":
 
     let bak = path & langNameMigrationBakSuffix
     check fileExists(bak)
-    let bakDb = open(bak, "", "", "")
-    defer: bakDb.close()
-    check bakDb.getValue(
-      sql"SELECT lang FROM recordings WHERE recording_id = 'id-elixir'") == "37"
-    check bakDb.getValue(sql"PRAGMA user_version") == "0"
+    block:
+      let bakDb = open(bak, "", "", "")
+      defer: bakDb.close()
+      check bakDb.getValue(
+        sql"SELECT lang FROM recordings WHERE recording_id = 'id-elixir'") == "37"
+      check bakDb.getValue(sql"PRAGMA user_version") == "0"
+    # The 1 -> 2 step takes its own, under its own suffix: restoring this one
+    # gives back a working version-1 database rather than the version-0 file.
+    let tokenBak = path & langTokenMigrationBakSuffix
+    check fileExists(tokenBak)
+    let tokenBakDb = open(tokenBak, "", "", "")
+    defer: tokenBakDb.close()
+    check tokenBakDb.getValue(
+      sql"SELECT lang FROM recordings WHERE recording_id = 'id-elixir'") ==
+      "LangElixir"
+    check tokenBakDb.getValue(sql"PRAGMA user_version") ==
+      $TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES
 
   test "a new database is left untouched — no rebuild, no snapshot":
-    let path = makeCurrentDb(workDir("already-new"), @[("id-elixir", "LangElixir")])
+    let path = makeCurrentDb(
+      workDir("already-new"), @[("id-elixir", "ex-beam-unknown-instrumented")])
     let before = snapshot(path)
 
     migrateAt(path)
 
     check snapshot(path) == before
-    check backupsBeside(path).len == 0
+    check nameBackupsBeside(path).len == 0
+    check tokenBackupsBeside(path).len == 0
     check verifyAt(path).len == 0
 
   test "running the migration twice is a no-op":
@@ -577,13 +651,17 @@ suite "trace_index schema version 1 — lang ordinal to name":
 
     migrateAt(path)
     let afterFirst = snapshot(path)
-    let backupsAfterFirst = backupsBeside(path)
+    let nameBackupsAfterFirst = nameBackupsBeside(path)
+    let tokenBackupsAfterFirst = tokenBackupsBeside(path)
 
     migrateAt(path)
 
     check snapshot(path) == afterFirst
-    check backupsAfterFirst.len == 1
-    check backupsBeside(path) == backupsAfterFirst
+    # One snapshot per STEP, not per run: a version-0 database runs both.
+    check nameBackupsAfterFirst.len == 1
+    check tokenBackupsAfterFirst.len == 1
+    check nameBackupsBeside(path) == nameBackupsAfterFirst
+    check tokenBackupsBeside(path) == tokenBackupsAfterFirst
     check verifyAt(path).len == 0
 
   test "the version gate detects an unmigrated DB and clears a migrated one":
@@ -601,7 +679,8 @@ suite "trace_index schema version 1 — lang ordinal to name":
     ## The downgrade direction.  Reading a future database with today's
     ## assumptions is the same class of mistake as reading an ordinal against
     ## the wrong enum order.
-    let path = makeCurrentDb(workDir("newer"), @[("id-elixir", "LangElixir")])
+    let path = makeCurrentDb(
+      workDir("newer"), @[("id-elixir", "ex-beam-unknown-instrumented")])
     block:
       let db = open(path, "", "", "")
       defer: db.close()
@@ -624,7 +703,8 @@ suite "trace_index schema version 1 — lang ordinal to name":
     check "not schema-version-0 Lang ordinals" in msg
     check "999" in msg
     check snapshot(path) == before
-    check backupsBeside(path).len == 0
+    check nameBackupsBeside(path).len == 0
+    check tokenBackupsBeside(path).len == 0
 
   test "all out-of-range ordinals are reported, not just the first":
     ## The upper bound comes from the frozen snapshot, not from
@@ -716,7 +796,7 @@ suite "trace_index schema version 1 — lang ordinal to name":
 
     migrateAt(path)
     check verifyAt(path).len == 0
-    check langCell(path, "id-elixir") == "LangElixir"
+    check langCell(path, "id-elixir") == "ex-beam-unknown-instrumented"
 
   test "langFromColumnValue round-trips every Lang and rejects a bare ordinal":
     for lang in Lang:
@@ -730,7 +810,11 @@ suite "trace_index schema version 1 — lang ordinal to name":
         discard langFromColumnValue(raw)
       except TraceIndexSchemaError as e:
         raised = true
-        check "not a Lang enum name" in e.msg
+        # The diagnostic moved with the column format (LRS-5): it now names
+        # BOTH accepted formats, because both are read.  What is asserted is
+        # unchanged -- a bare ordinal, an empty cell and a foreign string are
+        # refused loudly rather than guessed at.
+        check "neither a four-axis token nor a Lang enum name" in e.msg
       check raised
 
   test "the two names LRS-4 retired decode as retired through the PRODUCTION list":
@@ -797,7 +881,7 @@ suite "trace_index schema version 1 — lang ordinal to name":
       discard decodeLangColumn(Retired)
     except TraceIndexSchemaError as e:
       raised = true
-      check "not a Lang enum name" in e.msg
+      check "neither a four-axis token nor a Lang enum name" in e.msg
     check raised
     raised = false
     try:
@@ -893,7 +977,7 @@ suite "trace_index schema version 1 — lang ordinal to name":
     ## The one shape a rollback failure would leave behind.  `verify` is what
     ## a diagnostic would call, so it has to see it.
     let path = makeCurrentDb(
-      workDir("scratch-survivor"), @[("id-elixir", "LangElixir")])
+      workDir("scratch-survivor"), @[("id-elixir", "ex-beam-unknown-instrumented")])
     block:
       let db = open(path, "", "", "")
       defer: db.close()
@@ -940,4 +1024,503 @@ suite "trace_index schema version 1 — lang ordinal to name":
       echo "stderr: ", errp
     check ok
     check "PASS" in outp
+    # Both steps announce themselves: the composition is visible to a user,
+    # not just to the version gate.
     check "migrated to schema version 1" in errp
+    check "migrated to schema version 2" in errp
+
+# ---------------------------------------------------------------------------
+# Schema version 2 — the Lang NAME becomes the four-axis TOKEN (LRS-5)
+# ---------------------------------------------------------------------------
+#
+# Everything above is version 1 and is unchanged in intent.  What follows is
+# the second step, held to the same bar: all 41 names, each to a DISTINCT
+# target, from a FROZEN literal, with the rollback proved at every fault point
+# rather than asserted, and with the foreign-key claim stated as a DELTA.
+
+const LANG_V1_NAME_COUNT = 41
+  ## Written as a literal on purpose, and it is **41, not the 40** the design
+  ## document and the milestone entry both say.  Corrected here under
+  ## milestone rule 7: those two were counting the PRE-SPLIT `Lang`, and
+  ## `LangGdScript` was appended to the enum while schema version 1 was the
+  ## live column format — so version 1 could, and can, write it.  The set is
+  ## therefore the 40 frozen version-0 names plus `langNamesAddedSinceV0`,
+  ## which is what `langNamesEverPersisted` already is.
+  ##
+  ## `ord(high(Lang)) + 1` is 39 and is NOT this number: two of the 41
+  ## (`LangPython`, `LangRuby`) are names LRS-4 deleted from the enum, which
+  ## is exactly why rule 3 applies here with full force.
+
+proc v1NamesAndTokens(): seq[(string, string)] =
+  ## The frozen schema-version-1 name -> schema-version-2 token pairs, taken
+  ## from the **frozen** `langV1NameToV2Token` literal in `trace_index.nim`
+  ## and never from `Lang`.  A generator over the live enum could not produce
+  ## two of these rows at all.
+  result = @[]
+  for entry in langV1NameToV2Token:
+    result.add((entry.name, entry.token))
+
+suite "trace_index schema version 2 — lang name to four-axis token":
+
+  test "the frozen 1 -> 2 table is 41 entries, no repeated name, no repeated target":
+    ## Obligation 6 of the design's §5.4, the lossless-history obligation:
+    ## every legacy value has a DISTINCT target, so the mapping is injective
+    ## and no two recordings that were distinguishable become the same.
+    ##
+    ## Not one assertion below mentions `Lang`, `ord`, `low` or `high`, so the
+    ## whole test still holds and still means the same thing after the enum is
+    ## renumbered, reordered or shrunk again — which LRS-5's own second
+    ## deletion round will do to four more members.
+    check langV1NameToV2Token.len == LANG_V1_NAME_COUNT
+    var names: seq[string] = @[]
+    var tokens: seq[string] = @[]
+    for entry in langV1NameToV2Token:
+      checkpoint(entry.name & " -> " & entry.token)
+      check entry.name.startsWith("Lang")
+      check entry.name notin names
+      check entry.token notin tokens
+      check entry.token.len > 0
+      names.add(entry.name)
+      tokens.add(entry.token)
+
+  test "every entry's target is a legal token, and decodes back":
+    ## A frozen literal can be mistyped.  Each target is parsed with the
+    ## production decoder, so a typo is a failure here rather than a database
+    ## nothing can read.
+    for entry in langV1NameToV2Token:
+      checkpoint(entry.name & " -> " & entry.token)
+      var axes: TargetAxes
+      check parseAxesToken(entry.token, axes)
+      check encodeAxesToken(axes) == entry.token
+
+  test "the four targets that are easy to get wrong are the ones decided":
+    ## Named individually in the milestone entry because each is a decision
+    ## rather than a derivation, and each has an obvious wrong answer.
+    # Q3: the sentinel is the BARE token.  `unknown-unknown-unknown-unknown`
+    # is the mutation this line kills.
+    check langV2TokenForV1Name("LangUnknown") == "unknown"
+    # Q4a: `midenasm`, not `masm` — `masm` is reserved and unallocated.
+    check langV2TokenForV1Name("LangMasm") == "midenasm-midenvm-unknown-vm"
+    check "masm" notin langV2TokenForV1Name("LangMasm").split('-')
+    # The two LRS-4 deleted, recorded as the fact they were: an rr backend.
+    check langV2TokenForV1Name("LangPython") == "py-interpreted-unknown-rr"
+    check langV2TokenForV1Name("LangRuby") == "rb-interpreted-unknown-rr"
+    # The wasm pair, RE-DERIVED under four axes rather than copied from the
+    # two-axis `rs-wasm` / `cpp-wasm` the design's §5.4 table still shows:
+    # wasm is an ISA and the approach is VM emulation, the same approach
+    # `nargo` and every blockchain recorder uses.
+    check langV2TokenForV1Name("LangRustWasm") == "rs-wasm-unknown-vm"
+    check langV2TokenForV1Name("LangCppWasm") == "cpp-wasm-unknown-vm"
+    # And each of those four is distinguishable from its surviving partner.
+    check langV2TokenForV1Name("LangPython") != langV2TokenForV1Name("LangPythonDb")
+    check langV2TokenForV1Name("LangRuby") != langV2TokenForV1Name("LangRubyDb")
+    check langV2TokenForV1Name("LangRustWasm") != langV2TokenForV1Name("LangRust")
+    check langV2TokenForV1Name("LangCppWasm") != langV2TokenForV1Name("LangCpp")
+    # Membership, not arithmetic, is what "a legal version-1 cell" means.
+    check langV2TokenForV1Name("LangNotAThing") == ""
+    check langV2TokenForV1Name("") == ""
+
+  test "the frozen table covers exactly the names version 1 could write":
+    ## The assertion that forces the append.  `langNamesEverPersisted` is
+    ## itself built from two frozen literals (rule 3) and is the definition of
+    ## "a name a CodeTracer build ever put in this column"; a member added to
+    ## `Lang` and appended there, but given no token here, would migrate to
+    ## NULL and abort the transaction on somebody's real database.  It fails
+    ## here instead.
+    check langNamesEverPersisted.len == LANG_V1_NAME_COUNT
+    for name in langNamesEverPersisted:
+      checkpoint("ever persisted: " & name)
+      check langV2TokenForV1Name(name).len > 0
+    for entry in langV1NameToV2Token:
+      checkpoint("frozen target for: " & entry.name)
+      check entry.name in langNamesEverPersisted
+
+  test "the frozen table agrees with the live encoder on every LIVE member":
+    ## The frozen literal and `langToColumnValue` must say the same thing
+    ## today — otherwise a row migrated from version 1 and a row written fresh
+    ## would disagree about the same recording.  Asserting the agreement is
+    ## not the same as deriving one from the other: the table stays a literal,
+    ## and the two names it covers that the enum no longer has are checked
+    ## against literals in the test above.
+    var liveCovered = 0
+    for lang in Lang:
+      checkpoint("live member: " & $lang)
+      check langV2TokenForV1Name($lang) == langToColumnValue(lang)
+      inc liveCovered
+    # Exactly two of the 41 are unreachable from the live enum, and that is
+    # the whole reason rule 3 exists.
+    check LANG_V1_NAME_COUNT - liveCovered == 2
+
+  test "a version-1 database holding ALL 41 legacy names migrates, each to its own target":
+    ## The milestone's stated bar.  Not a sample: the failure this step exists
+    ## to prevent is precisely one name landing on another's target, and the
+    ## two names that cannot be reached through `parseEnum[Lang]` are in the
+    ## fixture on purpose — a 1 -> 2 map routed through the live enum fails
+    ## here, on `LangPython`, and nowhere else.
+    let entries = v1NamesAndTokens()
+    check entries.len == LANG_V1_NAME_COUNT
+    var rows: seq[(string, string)] = @[]
+    for i in 0 ..< entries.len:
+      rows.add(("id-" & $i, entries[i][0]))
+    let path = makeV1Db(workDir("v2-all-names"), rows)
+
+    # Orphan pid rows, so the foreign-key claim is made against a database
+    # that is not artificially clean.  `PRAGMA foreign_key_check` is normally
+    # non-zero and an earlier version of the 0 -> 1 step aborted a successful
+    # run by asserting the absolute number was zero.
+    var fkBefore = 0
+    block:
+      let db = open(path, "", "", "")
+      defer: db.close()
+      for i in 1 .. 7:
+        db.exec(sql"""INSERT INTO record_pid_recording_map (pid, recording_id)
+                      VALUES (?, ?)""", $i, "no-such-recording-" & $i)
+      db.exec(sql"""INSERT INTO record_pid_recording_map (pid, recording_id)
+                    VALUES (?, ?)""", "99", "id-0")
+      fkBefore = db.getAllRows(sql"PRAGMA foreign_key_check").len
+    check fkBefore == 7
+
+    migrateAt(path)
+
+    check verifyAt(path).len == 0
+    check declaredLangType(path) == "TEXT"
+    var targets: seq[string] = @[]
+    for i in 0 ..< entries.len:
+      checkpoint("legacy name: " & entries[i][0])
+      check langCell(path, "id-" & $i) == entries[i][1]
+      check entries[i][1] notin targets
+      targets.add(entries[i][1])
+    check targets.len == LANG_V1_NAME_COUNT
+
+    let db = open(path, "", "", "")
+    defer: db.close()
+    # **The DELTA, not the absolute value.**
+    let fkAfter = db.getAllRows(sql"PRAGMA foreign_key_check").len
+    checkpoint("foreign_key_check before " & $fkBefore & ", after " & $fkAfter)
+    check fkAfter - fkBefore == 0
+    check db.getValue(sql"SELECT count(*) FROM recordings") ==
+      $LANG_V1_NAME_COUNT
+    check db.getValue(sql"SELECT count(*) FROM record_pid_recording_map") == "8"
+
+  test "every migrated row reads back through the production decoder":
+    ## The target being distinct is necessary and not sufficient: it also has
+    ## to mean something to `loadTrace`.  A row whose token no live `Lang`
+    ## summarises decodes to the sentinel with the token preserved, which is
+    ## the retired-name policy one column format later.
+    let entries = v1NamesAndTokens()
+    var rows: seq[(string, string)] = @[]
+    for i in 0 ..< entries.len:
+      rows.add(("id-" & $i, entries[i][0]))
+    let path = makeV1Db(workDir("v2-decode-back"), rows)
+    migrateAt(path)
+
+    var unsummarised: seq[string] = @[]
+    for i in 0 ..< entries.len:
+      checkpoint("legacy name: " & entries[i][0])
+      let column = decodeLangColumn(langCell(path, "id-" & $i))
+      if column.retiredName.len > 0:
+        check column.lang == LangUnknown
+        check column.retiredName == entries[i][1]
+        unsummarised.add(entries[i][0])
+      else:
+        check $column.lang == entries[i][0]
+    unsummarised.sort()
+    # Exactly the two members LRS-4 deleted: their recordings are still
+    # readable, still distinguishable from the surviving Python and Ruby, and
+    # still labelled by what they say rather than by "unknown".
+    check unsummarised == @["LangPython", "LangRuby"]
+
+  test "a version-0 database runs 0 -> 1 -> 2 in one call":
+    ## The composition, end to end, through the public entry point.  A 1 -> 2
+    ## step that did not compose with the existing gate would leave this
+    ## database at version 1 holding names.
+    let path = makeLegacyDb(
+      workDir("compose"),
+      @[("id-elixir", "37"), ("id-c", "0"), ("id-unknown", "22"),
+        ("id-python", "12")])
+
+    migrateAt(path)
+
+    let db = open(path, "", "", "")
+    defer: db.close()
+    check db.getValue(sql"PRAGMA user_version") == $TRACE_INDEX_SCHEMA_VERSION
+    check langCell(path, "id-elixir") == "ex-beam-unknown-instrumented"
+    check langCell(path, "id-c") == "c-native-unknown-mcr"
+    # Ordinal 22 was `LangUnknown` in the version-0 enum: it becomes the BARE
+    # sentinel, not `unknown-unknown-unknown-unknown`.
+    check langCell(path, "id-unknown") == "unknown"
+    # Ordinal 12 was `LangPython`, a member this build does not have.  Both
+    # frozen tables carry it and neither consults the live enum.
+    check langCell(path, "id-python") == "py-interpreted-unknown-rr"
+    check nameBackupsBeside(path).len == 1
+    check tokenBackupsBeside(path).len == 1
+
+  test "a version-1 database is migrated even when the 0 -> 1 step has nothing to do":
+    ## The gate that makes the composition work: 1 -> 2 is reached because
+    ## the stored version is below 2, not because the 0 -> 1 step ran.
+    let path = makeV1Db(
+      workDir("v1-only"), @[("id-js", "LangJavascript")])
+    migrateAt(path)
+    check verifyAt(path).len == 0
+    check langCell(path, "id-js") == "js-interpreted-unknown-instrumented"
+    # 0 -> 1 had nothing to rebuild, so it took no snapshot; 1 -> 2 did.
+    check nameBackupsBeside(path).len == 0
+    check tokenBackupsBeside(path).len == 1
+
+  test "a version-1 database already holding tokens is refused as half-migrated":
+    ## The state the design makes unreachable.  If it is reached anyway it
+    ## must be named, not papered over: a second remap pass over tokens would
+    ## map every one of them to NULL.
+    let path = makeV1Db(
+      workDir("v2-half"), @[("id-js", "js-interpreted-unknown-instrumented")])
+    let before = snapshot(path)
+
+    let msg = migrateExpectingError(path)
+    check "already holds four-axis token" in msg
+    check "half-migrated" in msg
+    check snapshot(path) == before
+    check tokenBackupsBeside(path).len == 0
+
+  test "a version-1 cell that was never a Lang name is refused before anything is written":
+    ## Pre-flight validation.  There is no token to map it to, and inventing
+    ## one would mislabel the recording rather than lose it.  A **bare slug**
+    ## is in the fixture on purpose: `py` is exactly what a decoder that
+    ## "helpfully" applied the default tables would have accepted.
+    let path = makeV1Db(
+      workDir("v2-foreign"),
+      @[("id-ok", "LangRust"), ("id-bad", "Elixir"), ("id-slug", "py"),
+        ("id-int", "37")])
+    let before = snapshot(path)
+
+    let msg = migrateExpectingError(path)
+    check "not schema-version-1 Lang names" in msg
+    check "Elixir" in msg
+    check "py" in msg
+    check "37" in msg
+    check snapshot(path) == before
+    check tokenBackupsBeside(path).len == 0
+
+  test "a pre-remap snapshot is written beside the database":
+    ## The transaction makes the remap atomic against a crash or an error.
+    ## It cannot protect against a remap that commits successfully while
+    ## being logically wrong, which is why a snapshot is taken first.  Its
+    ## absence is what makes the rollback proof below unprovable.
+    let path = makeV1Db(workDir("v2-snapshot"), @[("id-elixir", "LangElixir")])
+    migrateAt(path)
+
+    let bak = path & langTokenMigrationBakSuffix
+    check fileExists(bak)
+    let bakDb = open(bak, "", "", "")
+    defer: bakDb.close()
+    check bakDb.getValue(
+      sql"SELECT lang FROM recordings WHERE recording_id = 'id-elixir'") ==
+      "LangElixir"
+    check bakDb.getValue(sql"PRAGMA user_version") ==
+      $TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES
+
+  test "a failure after the token remap rolls the whole step back":
+    ## The 1 -> 2 analogue of `after-table-swap`, and the strongest of the
+    ## two: at this fault point every cell has already been rewritten, so
+    ## mid-transaction the column IS migrated.  All of it must come back —
+    ## values and version.
+    let path = makeV1Db(
+      workDir("v2-fault-remap"),
+      @[("id-elixir", "LangElixir"), ("id-python", "LangPython")])
+    let before = snapshot(path)
+
+    putEnv(traceIndexMigrationFaultEnv, "after-token-remap")
+    let msg = migrateExpectingError(path)
+    delEnv(traceIndexMigrationFaultEnv)
+
+    check "injected fault at fault-point 'after-token-remap'" in msg
+    check "the database is unchanged and a snapshot of it is at" in msg
+    check snapshot(path) == before
+    check langCell(path, "id-elixir") == "LangElixir"
+    check langCell(path, "id-python") == "LangPython"
+    check readSchemaVersionAt(path) == TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES
+
+  test "a failure after the token version stamp rolls the version back too":
+    ## Values and version are stamped in the same transaction; neither may
+    ## outlive the other.
+    let path = makeV1Db(
+      workDir("v2-fault-stamp"), @[("id-elixir", "LangElixir")])
+    let before = snapshot(path)
+
+    putEnv(traceIndexMigrationFaultEnv, "after-token-version-stamp")
+    let msg = migrateExpectingError(path)
+    delEnv(traceIndexMigrationFaultEnv)
+
+    check "injected fault at fault-point 'after-token-version-stamp'" in msg
+    check snapshot(path) == before
+    check readSchemaVersionAt(path) == TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES
+    check verifyAt(path).anyIt("user_version is 1" in it)
+
+  test "a rolled-back remap still migrates cleanly on the next attempt":
+    ## "Version 1" has to be a resting state you can leave, not a corner you
+    ## are stuck in.
+    let path = makeV1Db(
+      workDir("v2-fault-retry"), @[("id-elixir", "LangElixir")])
+
+    putEnv(traceIndexMigrationFaultEnv, "after-token-remap")
+    discard migrateExpectingError(path)
+    delEnv(traceIndexMigrationFaultEnv)
+
+    migrateAt(path)
+    check verifyAt(path).len == 0
+    check langCell(path, "id-elixir") == "ex-beam-unknown-instrumented"
+    # A second snapshot, because `VACUUM INTO` refuses to overwrite: the
+    # aborted attempt's residue, exactly as the 0 -> 1 step documents.
+    check tokenBackupsBeside(path).len == 2
+
+  test "a fault in 1 -> 2 leaves a WORKING version-1 database, not a wreck":
+    ## The step that already committed is not undone by the step that failed,
+    ## and that is correct: 0 -> 1 is a complete, self-consistent migration
+    ## whose result a version-1 build reads.  This is also the only place the
+    ## intermediate shape is observable, so it is where "the 0 -> 1 step still
+    ## writes NAMES" is asserted now that one call runs both.
+    let path = makeLegacyDb(
+      workDir("v2-fault-intermediate"), @[("id-elixir", "37"), ("id-c", "0")])
+
+    putEnv(traceIndexMigrationFaultEnv, "after-token-remap")
+    discard migrateExpectingError(path)
+    delEnv(traceIndexMigrationFaultEnv)
+
+    check readSchemaVersionAt(path) == TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES
+    check declaredLangType(path) == "TEXT"
+    check langCell(path, "id-elixir") == "LangElixir"
+    check langCell(path, "id-c") == "LangC"
+    check verifyTraceIndexSchemaAtPath(path, TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES).len == 0
+    # And it is not stuck: the next open finishes the job.
+    migrateAt(path)
+    check verifyAt(path).len == 0
+    check langCell(path, "id-elixir") == "ex-beam-unknown-instrumented"
+
+  test "the remap preserves every other column verbatim":
+    ## A remap that touched a second column, or dropped a row, would still
+    ## pass the `lang` assertions above.
+    let path = makeV1Db(workDir("v2-cols"), @[("id-elixir", "LangElixir")])
+    let before = rowsSnapshot(path)
+    check "| LangElixir |" in before
+
+    migrateAt(path)
+
+    let after = rowsSnapshot(path)
+    check "| ex-beam-unknown-instrumented |" in after
+    check before.replace("| LangElixir |", "| LANG |") ==
+          after.replace("| ex-beam-unknown-instrumented |", "| LANG |")
+
+  test "the remapped table keeps both recordings indexes":
+    ## The 1 -> 2 step is an UPDATE and drops nothing, so this should be free
+    ## — which is exactly why it is asserted: a future author who reached for
+    ## the 0 -> 1 rebuild machinery here would break it silently.
+    let path = makeV1Db(workDir("v2-indexes"), @[("id-elixir", "LangElixir")])
+    migrateAt(path)
+    let db = open(path, "", "", "")
+    defer: db.close()
+    let names = db.getAllRows(sql"""SELECT name FROM sqlite_master
+        WHERE type='index' AND tbl_name='recordings' ORDER BY name""").mapIt(it[0])
+    check "idx_recordings_program" in names
+    check "idx_recordings_recorded_at" in names
+
+  test "langToColumnValue writes a token, and the column decoder refuses a bare slug":
+    ## Design question Q1's rule at the only place a persisted value is read:
+    ## *a default may be applied at parse time; a default may never be
+    ## IMPLIED by a persisted value.*  `target_axes_test.nim` asserts it of
+    ## the grammar decoder over a wide sweep; this asserts it of the COLUMN
+    ## decoder, which is the one a database actually reaches.
+    check langToColumnValue(LangPythonDb) == "py-interpreted-unknown-instrumented"
+    check langToColumnValue(LangUnknown) == "unknown"
+    check langToColumnValue(LangRustWasm) == "rs-wasm-unknown-vm"
+    for bare in ["py", "rs", "js", "nim", "c", "cpp", "midenasm", "mcr",
+                 "native", "interpreted", "instrumented", "cargo",
+                 "unknown-unknown-unknown-unknown"]:
+      checkpoint("bare cell: " & bare)
+      var raised = false
+      try:
+        discard decodeLangColumn(bare)
+      except TraceIndexSchemaError as e:
+        raised = true
+        check "neither a four-axis token nor a Lang enum name" in e.msg
+      check raised
+    # The sentinel, and only the sentinel, is hyphen-free and accepted.
+    check decodeLangColumn("unknown") == LangColumn(lang: LangUnknown, retiredName: "")
+
+  test "a version-1 NAME still decodes after version 2, and keeps its label":
+    ## The legacy branch of `decodeLangColumn`.  A row written by an older
+    ## build must not become a hard failure at open just because the column's
+    ## live format moved on — the same obligation the retired-name policy
+    ## states, one format later.
+    check decodeLangColumn("LangElixir") ==
+      LangColumn(lang: LangElixir, retiredName: "")
+    let retired = decodeLangColumn("LangPython")
+    check retired.lang == LangUnknown
+    check retired.retiredName == "LangPython"
+    var t = Trace(lang: LangUnknown, langRetiredName: "LangPython")
+    check t.langLabel == "LangPython"
+    # And a token no live member summarises labels by what the cell says,
+    # which is strictly more than the name it replaced.
+    let unsummarised = decodeLangColumn("py-interpreted-unknown-rr")
+    check unsummarised.lang == LangUnknown
+    check unsummarised.retiredName == "py-interpreted-unknown-rr"
+    t = Trace(lang: LangUnknown, langRetiredName: "py-interpreted-unknown-rr")
+    check t.langLabel == "py-interpreted-unknown-rr"
+
+  test "verifyTraceIndexSchemaAt judges each version by ITS OWN cell format":
+    ## The parameterised verifier is what lets each step check itself from
+    ## inside its own transaction.  A verifier that only knew the latest
+    ## version would fail the intermediate state the first step legitimately
+    ## produces.
+    let v1 = makeV1Db(workDir("v2-verify-v1"), @[("id-elixir", "LangElixir")])
+    check verifyTraceIndexSchemaAtPath(v1, TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES).len == 0
+    let atLatest = verifyTraceIndexSchemaAtPath(v1, TRACE_INDEX_SCHEMA_VERSION)
+    check atLatest.anyIt("user_version is 1" in it)
+    check atLatest.anyIt("not a four-axis language token" in it)
+
+    let v2 = makeCurrentDb(
+      workDir("v2-verify-v2"), @[("id-elixir", "ex-beam-unknown-instrumented")])
+    check verifyTraceIndexSchemaAtPath(v2, TRACE_INDEX_SCHEMA_VERSION).len == 0
+    let atNames = verifyTraceIndexSchemaAtPath(v2, TRACE_INDEX_SCHEMA_VERSION_LANG_NAMES)
+    check atNames.anyIt("user_version is 2" in it)
+    check atNames.anyIt("not a Lang enum name" in it)
+
+  test "the two accepted cell formats are disjoint, so the decode ORDER cannot matter":
+    ## `decodeLangColumn`'s doc comment calls the order of its two branches
+    ## "the decision".  It is a safe decision only because the two languages
+    ## do not overlap — and that is asserted here rather than argued, because
+    ## a reader who swaps the branches to "try the cheap check first" must be
+    ## able to see, from a test, that nothing observable changes.
+    ##
+    ## *Direction 1 — no schema-version-1 `Lang` NAME is a legal four-axis
+    ## token.*  A Nim enum member name cannot contain the separator, and none
+    ## of them is the bare `unknown`, so the grammar refuses every one.
+    for name in langNamesEverPersisted:
+      checkpoint("legacy name: " & name)
+      check AxisSeparator notin name
+      check name != UnknownToken
+      var axes: TargetAxes
+      check(not parseAxesToken(name, axes))
+
+    ## *Direction 2 — no token the grammar can produce is a `Lang` name, live
+    ## or retired.*  Swept over the WHOLE product rather than over the frozen
+    ## map, because the claim has to hold for every cell a future writer can
+    ## emit, not only for the ones the migration writes today.
+    var swept = 0
+    var overlaps: seq[string] = @[]
+    for language in SourceLanguage:
+      for targetIsa in TargetIsa:
+        for toolchain in Toolchain:
+          for approach in RecordingApproach:
+            let cell = encodeAxesToken(
+              TargetAxes(language: language, targetIsa: targetIsa,
+                         toolchain: toolchain, approach: approach))
+            inc swept
+            for lang in Lang:
+              if $lang == cell and overlaps.len < 5:
+                overlaps.add(cell & " is a LIVE Lang name")
+            for name in langNamesEverPersisted:
+              if name == cell and overlaps.len < 5:
+                overlaps.add(cell & " is a RETIRED Lang name")
+    checkpoint("tokens swept: " & $swept)
+    checkpoint("first overlaps: " & $overlaps)
+    check swept == 35 * 20 * 24 * 6
+    check overlaps.len == 0

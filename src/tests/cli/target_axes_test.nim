@@ -990,3 +990,317 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
       let a = axesOfLang(lang)
       if lang in {LangRust, LangCpp}:
         check a.targetIsa == fallbackTargetIsaForLanguage(a.language)
+
+# ---------------------------------------------------------------------------
+# The persisted four-axis encoding — milestone LRS-5, design §5.2-§5.4
+# ---------------------------------------------------------------------------
+#
+# `recordings.lang` holds ONE of these tokens per recording since trace_index
+# schema version 2.  It is user data with no fixture and no rebuild, so the
+# obligations below are asserted rather than argued.  Design §5.4 lists six;
+# they are restated here for four axes, and the numbering is kept so a reader
+# can match them up:
+#
+#   1. the slugs are pairwise distinct          -> "slugs are ... pairwise distinct"
+#   2. each axis's tokens are pairwise distinct -> already asserted, first suite
+#   3. no slug and no axis token contains `-`   -> "no slug contains the separator"
+#   4. decode(encode(v)) == v over the legal domain
+#   5. decode("unknown") is the sentinel and NO OTHER hyphen-free token decodes
+#   6. every legacy `$lang` name has a distinct target
+#      -> `trace_index_migration_test.nim`, which is where the frozen map lives
+#
+# Obligation 5 is the one design §5.4 calls "most likely to be lost in
+# implementation, because a decoder that 'helpfully' applies the default table
+# to a bare slug passes every other obligation on this list".  It gets its own
+# test and the widest sweep of any assertion in this file.
+
+suite "the persisted four-axis encoding (LRS-5)":
+
+  test "slugs are non-empty, lowercase and pairwise distinct (obligation 1)":
+    var seen = initHashSet[string]()
+    for v in SourceLanguage:
+      let slug = storageSlug(v)
+      checkpoint($v & " -> " & slug)
+      check slug.len > 0
+      check slug == slug.toLowerAscii
+      check slug notin seen
+      seen.incl(slug)
+
+  test "no slug contains the separator (obligation 3)":
+    ## Load-bearing, not cosmetic: the grammar joins four tokens with `-` and
+    ## decodes by splitting on it, so a token containing one would make the
+    ## split ambiguous and a four-axis cell unparseable.  The three other axes
+    ## are covered by "no axis token contains a hyphen" in the first suite.
+    for v in SourceLanguage:
+      checkpoint($v & " -> " & storageSlug(v))
+      check AxisSeparator notin storageSlug(v)
+
+  test "the slug table is seeded from the extensions, and says where it is not":
+    ## Design question Q2, confirmed by the coordinator 2026-09-21: the slug
+    ## is the primary file extension where that extension is unique and
+    ## non-empty, and something else — stated, not silent — where it is not.
+    ## Spot-checked against `getExtensionName`, which is the seed table.
+    check storageSlug(slPython) == "py"
+    check storageSlug(slRust) == "rs"
+    check storageSlug(slJavaScript) == "js"
+    check storageSlug(slBash) == "sh"        # `.sh`, not `bash`
+    check storageSlug(slFortran) == "f90"
+    check storageSlug(slAda) == "adb"
+    check storageSlug(slGdScript) == "gd"
+    check storageSlug(slAiken) == "ak"
+    check storageSlug(slCadence) == "cdc"
+    # And the storage vocabulary is NOT the wire/CLI one — that is the cost
+    # Q2 accepts, and it is asserted so nobody "unifies" them by accident.
+    check storageSlug(slPython) != token(slPython)
+    check token(slPython) == "python"
+
+  test "`midenasm` is the Miden slug, and `masm`/`gas`/`nasm` stay unspent":
+    ## Design Q4a, decided by the user.  `getExtensionName(LangMasm)` IS
+    ## `masm`, so this is the one row where the seed table is deliberately
+    ## overridden — the reason is in the inline comment beside the entry in
+    ## `target_axes.nim` and in design §2.5.  Assembler DIALECT is a language
+    ## distinction, the axis is expected to grow `gas` / `nasm` / a Microsoft
+    ## `masm`, and a PERSISTED token cannot be renamed afterwards.
+    check storageSlug(slMidenAsm) == "midenasm"
+    check storageSlug(slMidenAsm) != "masm"
+    check storageSlug(slAsm) == "asm"        # dialect-unspecified, on purpose
+    for reserved in ReservedSourceLanguageTokens:
+      checkpoint("reserved: " & reserved)
+      for v in SourceLanguage:
+        check storageSlug(v) != reserved
+        check token(v) != reserved
+      for v in TargetIsa: check token(v) != reserved
+      for v in Toolchain: check token(v) != reserved
+      for v in RecordingApproach: check token(v) != reserved
+    check "masm" in ReservedSourceLanguageTokens
+    check "gas" in ReservedSourceLanguageTokens
+    check "nasm" in ReservedSourceLanguageTokens
+
+  test "only the sentinel language spells its slug `unknown`":
+    for v in SourceLanguage:
+      if v == slUnknown:
+        check storageSlug(v) == UnknownToken
+      else:
+        checkpoint($v)
+        check storageSlug(v) != UnknownToken
+
+  test "decode(encode(v)) == v over the whole four-axis domain (obligation 4)":
+    ## The legal domain, stated precisely, because design §5.4 warns that a
+    ## round-trip written over the wrong domain "asserts something false".
+    ##
+    ## Under the TWO-axis grammar the encoder was not total: `(Unknown, rtMcr)`
+    ## and its four siblings had no spelling, so the test had to be written
+    ## over 35 x 6 + 1 rather than over 36 x 6.  Under FOUR axes the encoder
+    ## IS total — every tuple has a spelling, because the sentinel is a value
+    ## on each axis rather than a combination that cannot occur — so the legal
+    ## domain for `encode` is the whole product and this test says so.
+    ##
+    ## What has no spelling by decision is on the DECODE side instead, and it
+    ## is exactly one string: the long `unknown-unknown-unknown-unknown` form
+    ## of the value the bare `unknown` already names.  The next two tests
+    ## cover it.
+    var checked = 0
+    var failures: seq[string] = @[]
+    var encodings = initHashSet[string]()
+    var collisions: seq[string] = @[]
+    for language in SourceLanguage:
+      for targetIsa in TargetIsa:
+        for toolchain in Toolchain:
+          for approach in RecordingApproach:
+            let value = TargetAxes(language: language, targetIsa: targetIsa,
+                                   toolchain: toolchain, approach: approach)
+            let encoded = encodeAxesToken(value)
+            if encoded in encodings:
+              if collisions.len < 5: collisions.add(encoded)
+            encodings.incl(encoded)
+            var decoded: TargetAxes
+            if not parseAxesToken(encoded, decoded):
+              if failures.len < 5:
+                failures.add(encoded & " did not decode at all")
+            elif decoded != value:
+              if failures.len < 5:
+                failures.add(encoded & " decoded to " & encodeAxesToken(decoded))
+            inc checked
+    checkpoint("first failures: " & $failures)
+    check failures.len == 0
+    # Obligations 1 and 2 again, but over the JOINED token rather than per
+    # axis: distinct tokens per axis would still be useless if the join could
+    # collide.  A `HashSet` the same size as the product is that property.
+    checkpoint("first collisions: " & $collisions)
+    check collisions.len == 0
+    check encodings.len == checked
+    # 35 languages x 20 ISAs x 24 toolchains x 6 approaches.  Written out so
+    # a member added to any axis without a thought about storage shows up
+    # here as an arithmetic failure rather than as silence.
+    check checked == 35 * 20 * 24 * 6
+
+  test "the all-sentinel tuple is the bare token, and nothing else is":
+    ## Design Q3, decided by the user: the sentinel is stored as the bare
+    ## `unknown`, never `unknown-unknown-unknown-unknown`, and this is the ONE
+    ## documented exception to the grammar.
+    check encodeAxesToken(UnknownTargetAxes) == UnknownToken
+    check encodeAxesToken(UnknownTargetAxes) == "unknown"
+    var bareCount = 0
+    for language in SourceLanguage:
+      for targetIsa in TargetIsa:
+        for toolchain in Toolchain:
+          for approach in RecordingApproach:
+            let encoded = encodeAxesToken(
+              TargetAxes(language: language, targetIsa: targetIsa,
+                         toolchain: toolchain, approach: approach))
+            if AxisSeparator notin encoded:
+              inc bareCount
+              check encoded == UnknownToken
+    check bareCount == 1
+
+  test "the long all-sentinel spelling is refused — one value, one spelling":
+    ## The combination that has no spelling BY DECISION, and therefore the
+    ## one a round-trip test must not assert.  `unknown-unknown-unknown-unknown`
+    ## is well-formed under the grammar and still refused, because the value
+    ## it names already has a spelling and admitting a second would mean
+    ## `encode` is no longer the inverse of `decode`.  Nothing produces it.
+    var decoded: TargetAxes
+    check(not parseAxesToken("unknown-unknown-unknown-unknown", decoded))
+    check decoded == UnknownTargetAxes   # untouched: the default is all-sentinel
+    # Every OTHER token that mentions the sentinel on some axis is fine.
+    check parseAxesToken("unknown-polkavm-unknown-vm", decoded)
+    check decoded.language == slUnknown
+    check decoded.targetIsa == tiPolkaVm
+    check decoded.toolchain == tcUnknown
+    check decoded.approach == raVmEmulation
+    check parseAxesToken("py-unknown-unknown-unknown", decoded)
+    check decoded.language == slPython
+
+  test "decode accepts NO hyphen-free token other than `unknown` (obligation 5)":
+    ## **The assertion design §5.4 says is most likely to be lost**, and the
+    ## milestone entry names it as such too: a decoder that "helpfully"
+    ## applied the per-language default tables to a bare slug would pass every
+    ## other obligation on the list, and would reintroduce exactly the
+    ## persisted-default contract question Q1 exists to forbid — *a default
+    ## may be applied at parse time; a default may never be IMPLIED by a
+    ## persisted value*.
+    ##
+    ## The sweep is deliberately wide: every slug, every token of every axis,
+    ## every `Lang` member's file extension, and a hand-written list of the
+    ## shapes a well-meaning decoder would most plausibly admit.  If any of
+    ## them decodes, the exception has generalised.
+    var candidates = initHashSet[string]()
+    for v in SourceLanguage:
+      candidates.incl(storageSlug(v))
+      candidates.incl(token(v))
+    for v in TargetIsa: candidates.incl(token(v))
+    for v in Toolchain: candidates.incl(token(v))
+    for v in RecordingApproach: candidates.incl(token(v))
+    for lang in Lang:
+      candidates.incl(getExtensionName(lang))
+      candidates.incl($lang)
+      candidates.incl(langWireName(lang))
+    for extra in ["", " ", "py ", " py", "PY", "Py", "rs", "c", "cpp", "js",
+                  "rb", "nim", "go", "sh", "midenasm", "masm", "gas", "nasm",
+                  "python", "javascript", "mcr", "rr", "ttd", "db", "wasm",
+                  "native", "interpreted", "vm", "instrumented", "cargo",
+                  "0", "20", "37", "LangPythonDb", "LangRust", "unknwon"]:
+      candidates.incl(extra)
+
+    var admitted: seq[string] = @[]
+    var sweptHyphenFree = 0
+    for candidate in candidates:
+      if AxisSeparator in candidate:
+        continue
+      inc sweptHyphenFree
+      var decoded: TargetAxes
+      if parseAxesToken(candidate, decoded):
+        admitted.add(candidate)
+    checkpoint("hyphen-free tokens swept: " & $sweptHyphenFree)
+    checkpoint("admitted: " & $admitted)
+    # Anti-vacuity: the sweep must actually contain a lot of bare words, or
+    # "nothing was admitted" would be true because nothing was tried.
+    check sweptHyphenFree > 100
+    check admitted == @[UnknownToken]
+
+  test "a bare slug does not acquire defaults, stated for the obvious cases":
+    ## The same property as the sweep above, written out for the four tokens
+    ## a reader would most expect to "just work" — because the sweep proves it
+    ## in aggregate and this proves it readably.  `py` must NOT become
+    ## `(slPython, tiInterpreted, tcNone, raInstrumentedRuntime)` through
+    ## `fallbackTargetIsaForLanguage` / `defaultRecordingApproach`, even
+    ## though both of those functions exist and would answer.
+    var decoded: TargetAxes
+    for bare in ["py", "rs", "nim", "js"]:
+      checkpoint("bare slug: " & bare)
+      check(not parseAxesToken(bare, decoded))
+    # The default tables DO exist and DO answer — which is the point: they
+    # are applied at parse time by the CLI, never implied by storage.
+    check fallbackTargetIsaForLanguage(slPython) == tiInterpreted
+    check defaultRecordingApproach(tiInterpreted) == raInstrumentedRuntime
+
+  test "wrong arity, unknown parts and stray case are all refused":
+    var decoded: TargetAxes
+    for bad in [
+        "py-interpreted",                        # two axes: the old grammar
+        "py-interpreted-none",                   # three
+        "py-interpreted-none-instrumented-x",    # five
+        "py-interpreted-none-",                  # empty trailing part
+        "-py-interpreted-none",                  # empty leading part
+        "py--interpreted-none",                  # empty middle part
+        "zz-interpreted-none-instrumented",      # unknown slug
+        "py-zzz-none-instrumented",              # unknown ISA
+        "py-interpreted-zzz-instrumented",       # unknown toolchain
+        "py-interpreted-none-zzz",               # unknown approach
+        "PY-interpreted-none-instrumented",      # a cell is not case-folded
+        "py-INTERPRETED-none-instrumented",
+        " py-interpreted-none-instrumented",     # nor whitespace-stripped
+        "py-interpreted-none-instrumented ",
+        "python-interpreted-none-instrumented",  # the WIRE spelling, not the slug
+        "LangPythonDb",                          # a schema-version-1 cell
+        "21"]:                                   # a schema-version-0 cell
+      checkpoint("refused: " & bad.escape())
+      check(not parseAxesToken(bad, decoded))
+
+  test "the four axes a Lang summarises round-trip through the column form":
+    ## `storageAxesOfLang` / `langForStorageAxes` are the bridge between the
+    ## `Lang` summary and the four-axis cell.  Every live member must survive
+    ## the trip, and the toolchain must be the honest `tcUnknown` rather than
+    ## a guess — a `Lang` names no toolchain.
+    for lang in Lang:
+      checkpoint($lang)
+      let axes = storageAxesOfLang(lang)
+      check axes.toolchain == tcUnknown
+      let encoded = encodeAxesToken(axes)
+      var decoded: TargetAxes
+      check parseAxesToken(encoded, decoded)
+      check decoded == axes
+      let summary = langForStorageAxes(decoded)
+      check summary.found
+      check summary.lang == lang
+
+  test "the Lang summary is injective on the three axes Lang has":
+    ## What makes the round-trip above possible: no two `Lang` members
+    ## decompose to the same (language, ISA, approach).  If two ever did, one
+    ## of them would be unreachable from a stored cell and the column would
+    ## silently relabel it.
+    var seen = initHashSet[string]()
+    for lang in Lang:
+      let axes = axesOfLang(lang)
+      let key = token(axes.language) & "/" & token(axes.targetIsa) & "/" &
+                token(axes.approach)
+      checkpoint($lang & " -> " & key)
+      check key notin seen
+      seen.incl(key)
+
+  test "a token no live Lang summarises decodes, and is not mistaken for one":
+    ## The shape LRS-5's second deletion round will make ordinary: a cell that
+    ## says more than any `Lang` member can. `py-interpreted-unknown-rr` is
+    ## the retired Python rr backend, whose member LRS-4 deleted.
+    var decoded: TargetAxes
+    check parseAxesToken("py-interpreted-unknown-rr", decoded)
+    check decoded.language == slPython
+    check decoded.approach == raRr
+    check(not langForStorageAxes(decoded).found)
+    # And a toolchain the summary cannot carry does not stop it resolving.
+    var withToolchain: TargetAxes
+    check parseAxesToken("rs-native-cargo-mcr", withToolchain)
+    check withToolchain.toolchain == tcCargo
+    let summary = langForStorageAxes(withToolchain)
+    check summary.found
+    check summary.lang == LangRust
