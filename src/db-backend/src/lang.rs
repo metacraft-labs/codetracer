@@ -259,8 +259,9 @@ mod tests {
             (Lang::Lean, "lean"),
             (Lang::Julia, "julia"),
             (Lang::Ada, "ada"),
-            (Lang::Python, "python"),
-            (Lang::Ruby, "ruby"),
+            // `python` / `ruby` were the retired rr backends' names; LRS-4
+            // deleted the variants, so the shared list shrank by two and the
+            // native backend's own `python` / `ruby` now name nothing here.
             (Lang::RubyDb, "rubydb"),
             (Lang::Javascript, "javascript"),
             (Lang::Lua, "lua"),

@@ -164,13 +164,14 @@ const WireLanguageOverrides = {
   "pythondb": LangPythonDb,
   "rubydb": LangRubyDb,
   # `python` and `ruby` are the spellings a *shebang* produces, which is what
-  # NTR-3 adds, and `toLang` is ASYMMETRIC about them: `"python"` already gives
-  # `LangPythonDb` but `"ruby"` gives `LangRuby`, which does NOT use
-  # materialized traces and would therefore send a Ruby script down the NATIVE
-  # path.  Both are pinned here so the wire mapping is uniformly
-  # recorder-selecting and the asymmetry cannot leak in when the producer starts
-  # emitting interpreter languages.  (`--lang ruby` is a different road and
-  # still goes through `toLang`; this table is only for the wire.)
+  # NTR-3 adds.  `toLang` used to be ASYMMETRIC about them: `"python"` gave
+  # `LangPythonDb` but `"ruby"` gave `LangRuby`, the retired rr backend, which
+  # did NOT use materialized traces and would have sent a Ruby script down the
+  # NATIVE path.  LRS-4 deleted `LangRuby` and `toLang("ruby")` is
+  # `LangRubyDb` too (design Q6), so the two rows below are now REDUNDANT with
+  # `toLang` -- kept so the wire table stays explicit about the two values
+  # that select a recorder, and `target_recognition_test.nim` pins that they
+  # agree with `toLang` rather than shadowing it.
   "python": LangPythonDb,
   "ruby": LangRubyDb,
 }.toTable()

@@ -31,8 +31,8 @@ type
     ## `lang: Lang` field on a wire struct does not compile without the
     ## name-carrying adapter.  The persisted `recordings.lang` column holds
     ## the enum NAME (trace_index schema version 1).  What keeps the two
-    ## declarations pinned in lockstep until LRS-4 renumbers is the contract
-    ## test, not a wire.
+    ## declarations pinned in lockstep is the contract test, not a wire --
+    ## which is what let LRS-4 renumber (below) as a visible refactor.
     ##
     ## This used to name src/db-backend/src/lang.rs.  That file now only
     ## re-exports the enum (`pub use ct_lang::{lang_wire, Lang}`); the
@@ -43,66 +43,99 @@ type
     ## asserts that no second ordinal-carrying `Lang` exists in the Rust tree.
     ##
     ## It is NOT `codetracer-native-backend/src/lang.rs`, which this comment
-    ## used to name: that enum has a `Small` variant at ordinal 21, so the two
-    ## diverge from 21 onwards (`PythonDb` is 21 here and 22 there) and have
-    ## different lengths.  Nothing carries an ordinal between this enum and
+    ## used to name: that enum has a `Small` variant at ordinal 21 and its
+    ## `Unknown` at 26, while this one starts with `LangUnknown` at 0 since
+    ## LRS-4 (before that the two happened to agree below ordinal 21) and the
+    ## two have different lengths.  Nothing carries an ordinal between this enum and
     ## that one; the replay worker socket between the two Rust crates now
     ## carries language *names*.
     ##
     ## Historical context (pre-M-REC-1.5): the integer previously appeared
     ## inside the retired trace_db_metadata.json sidecar.
-    LangC,        # 0
-    LangCpp,      # 1
-    LangRust,     # 2
-    LangNim,      # 3
-    LangGo,       # 4
-    LangPascal,   # 5
-    LangFortran,  # 6
-    LangD,        # 7
-    LangCrystal,  # 8
-    LangLean,     # 9
-    LangJulia,    # 10
-    LangAda,      # 11
-    LangPython,   # 12
-    LangRuby,     # 13
-    LangRubyDb,   # 14
-    LangJavascript, # 15
-    LangLua,      # 16
-    LangAsm,      # 17
-    LangNoir,     # 18
-    LangRustWasm, # 19
-    LangCppWasm,  # 20
-    LangPythonDb, # 21
-    LangUnknown,  # 22
-    LangBash,     # 23 — tree-sitter support in db-backend; recorded by
+    ## **Ordinal 0 is the sentinel** (LRS-4, 2026-09-21).  Nim zero-initialises
+    ## `result` to the enum's first member, so a proc over `Lang` that falls
+    ## off its end used to answer "C" (`LangC` was 0) -- the defect the 22-line
+    ## comment on `detectLangFromPath` (`src/ct/utilities/language_detection.nim`)
+    ## records, measured on seven real paths.  With `LangUnknown` first the
+    ## same slip answers "unknown", which every caller already handles.  The
+    ## reorder was possible only once no wire or storage boundary carried the
+    ## ordinal (LRS-0, LRS-1) and every `Lang`-indexed table was an exhaustive
+    ## `case` (LRS-3); the Rust `Lang` moved in lockstep (`Unknown = 0`,
+    ## `#[default]`), pinned by the contract test.
+    ##
+    ## **Retired in LRS-4:** `LangPython` (was 12) and `LangRuby` (was 13), the
+    ## rr/gdb backends that no longer exist.  `LangPythonDb` / `LangRubyDb` are
+    ## THE Python and Ruby identity; `--lang ruby` now names the working
+    ## recorder (design Q6).  Their names still occur in `recordings.lang`
+    ## cells written by older builds and decode to `LangUnknown` with the name
+    ## preserved (`trace_index.decodeLangColumn`, design §5.6).
+    ##
+    ## **Deliberately NOT retired yet:** `LangRustWasm` / `LangCppWasm` (the
+    ## wasm pair) and `LangPolkavm` / `LangSolana` (the platform pair).  All
+    ## four are the persisted `recordings.lang` column's only way of saying
+    ## what it must say about a recording until LRS-5 stores the axes: the
+    ## wasm pair is how `Trace.lang` -- a SUMMARY, and the replay side's only
+    ## per-recording fact -- says "this Rust/C++ recording is a materialized
+    ## wasm one" (`usesMaterializedTraces(trace.lang)` in the call trace, the
+    ## event log, the REPL, `lineStepJump` and the re-record path), and the
+    ## platform pair name a target with no source language at all.  Deleting
+    ## them before the column can carry the ISA would register every new wasm
+    ## recording as native Rust/C++ -- the silent mislabel this series exists
+    ## to prevent.  They go in LRS-5, with the column.
+    LangUnknown,  # 0 -- the sentinel, at the zero position (see above)
+    LangC,        # 1
+    LangCpp,      # 2
+    LangRust,     # 3
+    LangNim,      # 4
+    LangGo,       # 5
+    LangPascal,   # 6
+    LangFortran,  # 7
+    LangD,        # 8
+    LangCrystal,  # 9
+    LangLean,     # 10
+    LangJulia,    # 11
+    LangAda,      # 12
+    LangRubyDb,   # 13 -- Ruby, recorded by codetracer-ruby-recorder (the
+                  # `Db` suffix is historical: it was the pair partner of the
+                  # retired rr backend `LangRuby`)
+    LangJavascript, # 14
+    LangLua,      # 15
+    LangAsm,      # 16
+    LangNoir,     # 17
+    LangRustWasm, # 18 -- kept until LRS-5, see above
+    LangCppWasm,  # 19 -- kept until LRS-5, see above
+    LangPythonDb, # 20 -- Python, recorded by codetracer-python-recorder (the
+                  # `Db` suffix is historical, as for LangRubyDb)
+    LangBash,     # 21 — tree-sitter support in db-backend; recorded by
                   # codetracer-shell-recorders (`recorderToolFor`, `slBash`),
                   # reachable as `.sh`/`.bash` via `LANGS`
-    LangZsh,      # 24 — as LangBash: tree-sitter in db-backend, recorded by
+    LangZsh,      # 22 — as LangBash: tree-sitter in db-backend, recorded by
                   # codetracer-shell-recorders (`slZsh`), `.zsh` via `LANGS`
-    LangSolidity, # 25
-    LangMasm,     # 26
-    LangSway,     # 27
-    LangMove,     # 28
-    LangPolkavm,  # 29
-    LangCairo,    # 30
-    LangCircom,   # 31
-    LangLeo,      # 32
-    LangTolk,     # 33
-    LangAiken,    # 34
-    LangCadence,  # 35
-    LangSolana,   # 36
-    LangElixir,   # 37
-    LangErlang,   # 38
-    LangPhp,      # 39
-    LangGdScript  # 40 — GDScript (Godot); materialized trace from the patched
-                  # engine recorder. MUST stay ordinal 40 to match the db-backend
-                  # Rust `Lang::GDScript` (codetracer/src/db-backend/src/lang.rs).
+    LangSolidity, # 23
+    LangMasm,     # 24
+    LangSway,     # 25
+    LangMove,     # 26
+    LangPolkavm,  # 27 -- kept until LRS-5, see above
+    LangCairo,    # 28
+    LangCircom,   # 29
+    LangLeo,      # 30
+    LangTolk,     # 31
+    LangAiken,    # 32
+    LangCadence,  # 33
+    LangSolana,   # 34 -- kept until LRS-5, see above
+    LangElixir,   # 35
+    LangErlang,   # 36
+    LangPhp,      # 37
+    LangGdScript  # 38 — GDScript (Godot); materialized trace from the patched
+                  # engine recorder.  Pinned against the Rust `Lang::GDScript`
+                  # (libs/ct-lang/src/lib.rs) by the contract test, like every
+                  # other member.
 
 var CURRENT_LANG*: Lang = LangUnknown ## The current lang in the codetraces session
 
 proc isVMLang*(lang: Lang): bool =
   ## return true if programming language implementation runs in a virtual machine
-  false # lang in {LangRuby, LangPython, LangPythonDb, LangLua, LangJavascript, LangUnknown}
+  false # lang in {LangRubyDb, LangPythonDb, LangLua, LangJavascript, LangUnknown}
 
 type
   LangAxes* = object
@@ -119,7 +152,7 @@ type
     approach*: RecordingApproach
 
 func axesOfLang*(lang: Lang): LangAxes =
-  ## Every one of the 41 `Lang` values, on the axes.  **The production
+  ## Every one of the 39 `Lang` values, on the axes.  **The production
   ## decomposition** — it used to live only in `target_axes_test.nim` as the
   ## safety net for this migration, and it must not survive in both places, so
   ## the test now reads this one.
@@ -141,6 +174,7 @@ func axesOfLang*(lang: Lang): LangAxes =
   ##   language of a program recorded under either is unknown until a file is
   ##   looked at.  `target_axes_test.nim` asserts these are exactly the two.
   case lang
+  of LangUnknown: LangAxes(language: slUnknown, targetIsa: tiUnknown, approach: raUnknown)
   of LangC: LangAxes(language: slC, targetIsa: tiNative, approach: raMcr)
   of LangCpp: LangAxes(language: slCpp, targetIsa: tiNative, approach: raMcr)
   of LangRust: LangAxes(language: slRust, targetIsa: tiNative, approach: raMcr)
@@ -153,11 +187,13 @@ func axesOfLang*(lang: Lang): LangAxes =
   of LangLean: LangAxes(language: slLean, targetIsa: tiNative, approach: raMcr)
   of LangJulia: LangAxes(language: slJulia, targetIsa: tiNative, approach: raMcr)
   of LangAda: LangAxes(language: slAda, targetIsa: tiNative, approach: raMcr)
-  # `LangPython` and `LangRuby` are the retired rr/gdb backends.  On these axes
-  # they are the SAME LANGUAGE as their `Db` siblings with a different recording
-  # approach, which is the whole point: the pair was never two languages.
-  of LangPython: LangAxes(language: slPython, targetIsa: tiInterpreted, approach: raRr)
-  of LangRuby: LangAxes(language: slRuby, targetIsa: tiInterpreted, approach: raRr)
+  # `LangRubyDb` / `LangPythonDb` are Ruby and Python.  Until LRS-4 each had a
+  # pair partner (`LangRuby`, `LangPython`: the retired rr/gdb backends) that
+  # decomposed to the SAME language with `raRr`; the pair was never two
+  # languages, and the retired half is gone.  A native-replay approach asked
+  # of an interpreted language is still a cell of the dispatch table
+  # (`retiredNativeReplayTool`), reached by constructing the selector, not by
+  # any `Lang` value.
   of LangRubyDb: LangAxes(language: slRuby, targetIsa: tiInterpreted,
                           approach: raInstrumentedRuntime)
   of LangJavascript: LangAxes(language: slJavaScript, targetIsa: tiInterpreted,
@@ -171,7 +207,6 @@ func axesOfLang*(lang: Lang): LangAxes =
   of LangCppWasm: LangAxes(language: slCpp, targetIsa: tiWasm, approach: raVmEmulation)
   of LangPythonDb: LangAxes(language: slPython, targetIsa: tiInterpreted,
                             approach: raInstrumentedRuntime)
-  of LangUnknown: LangAxes(language: slUnknown, targetIsa: tiUnknown, approach: raUnknown)
   of LangBash: LangAxes(language: slBash, targetIsa: tiInterpreted,
                         approach: raInstrumentedRuntime)
   of LangZsh: LangAxes(language: slZsh, targetIsa: tiInterpreted,
@@ -242,9 +277,9 @@ func usesMaterializedTraces*(lang: Lang): bool =
   ## materialized (CTFS) trace rather than a native replay recording?
   ##
   ## **Derived**, since LRS-2B: `producesMaterializedTrace(axesOfLang(lang).approach)`
-  ## for 39 of the 41 values, with the two exceptions in
+  ## for 37 of the 39 values, with the two exceptions in
   ## `MaterializedSummaryExceptions` stated and reasoned individually.  It used
-  ## to be a hand-kept 41-arm `case` (and before LRS-3 a mutable positional
+  ## to be a hand-kept 41-arm `case` (41 members then) (and before LRS-3 a mutable positional
   ## `array[Lang, bool]`) whose 24 `true` answers had to be kept in agreement
   ## with `recorderToolFor`'s `supported` arms by hand.
   ##
@@ -268,11 +303,12 @@ func toCLang*(lang: Lang): string =
   ## the language dropdown (``LANG_PICKER_LANGS`` below) and the CI recording
   ## event's ``langName``.
   ##
-  ## It answers per LANGUAGE, not per recording artefact: the four conflated
-  ## pairs fold onto one name each (``LangRuby``/``LangRubyDb`` -> ``ruby``,
-  ## ``LangPython``/``LangPythonDb`` -> ``python``, ``LangRust``/``LangRustWasm``
-  ## -> ``rust``, ``LangCpp``/``LangCppWasm`` -> ``cpp``), exactly as
-  ## ``axesOfLang`` gives each pair one ``SourceLanguage``.  That is why this is
+  ## It answers per LANGUAGE, not per recording artefact: the conflated pairs
+  ## fold onto one name each (``LangRust``/``LangRustWasm`` -> ``rust``,
+  ## ``LangCpp``/``LangCppWasm`` -> ``cpp``; ``LangRubyDb`` is ``ruby`` and
+  ## ``LangPythonDb`` ``python`` -- their retired pair partners ``LangRuby`` /
+  ## ``LangPython`` folded onto the same names until LRS-4 deleted them),
+  ## exactly as ``axesOfLang`` gives each pair one ``SourceLanguage``.  That is why this is
   ## NOT a wire name: ``langWireName`` is the one that round-trips.
   ##
   ## The two slots the two copies disagreed on, and how each was decided:
@@ -303,6 +339,7 @@ func toCLang*(lang: Lang): string =
   ## array form is checked for length only, so a member removed or reordered
   ## above shifted every answer after it without any diagnostic.
   case lang
+  of LangUnknown: "unknown"
   of LangC: "c"
   of LangCpp: "cpp"
   of LangRust: "rust"
@@ -315,8 +352,6 @@ func toCLang*(lang: Lang): string =
   of LangLean: "lean"
   of LangJulia: "julia"
   of LangAda: "ada"
-  of LangPython: "python"
-  of LangRuby: "ruby"
   of LangRubyDb: "ruby"
   of LangJavascript: "javascript"
   of LangLua: "lua"
@@ -325,7 +360,6 @@ func toCLang*(lang: Lang): string =
   of LangRustWasm: "rust"
   of LangCppWasm: "cpp"
   of LangPythonDb: "python"
-  of LangUnknown: "unknown"
   of LangBash: "bash"
   of LangZsh: "zsh"
   of LangSolidity: "solidity"
@@ -361,9 +395,10 @@ const
     ##   CodeTracer does not ship; the `tiGdScriptVm` arm prints how to record
     ##   with one you already have.
     ##
-    ## NOT here, because they are excluded by their AXES rather than by a
-    ## declaration: `LangPython` and `LangRuby` (`raRr`, the retired native
-    ## replay backends) and `LangUnknown` (`raUnknown`, the sentinel).
+    ## NOT here, because it is excluded by its AXES rather than by a
+    ## declaration: `LangUnknown` (`raUnknown`, the sentinel).  Until LRS-4
+    ## `LangPython` and `LangRuby` (`raRr`, the retired native replay
+    ## backends) were excluded the same way; they are gone.
 
 func isSupportedLang*(lang: Lang): bool =
   ## Can `ct record` record something summarised as `lang` -- is there a
@@ -384,7 +419,9 @@ func isSupportedLang*(lang: Lang): bool =
   of raUnknown:
     false   # the sentinel; the only value with no approach is `LangUnknown`
   of raRr, raTtd:
-    false   # the retired native-replay backends (`LangPython`, `LangRuby`)
+    false   # no `Lang` value decomposes to these since LRS-4 retired
+            # `LangPython` / `LangRuby`; a selector can still name them
+            # (`retiredNativeReplayTool`), and it has no recorder
   of raMcr:
     true    # the native family (`ct-native-replay`) and Nim's `ct-mcr`
   of raInstrumentedRuntime, raVmEmulation:
@@ -462,6 +499,7 @@ func toName*(lang: Lang): string =
   ## Exhaustive ``case``; see ``toCLang`` for why the positional array form was
   ## unsafe.
   case lang
+  of LangUnknown: "unknown"
   of LangC: "C"
   of LangCpp: "C++"
   of LangRust: "Rust"
@@ -474,17 +512,17 @@ func toName*(lang: Lang): string =
   of LangLean: "Lean"
   of LangJulia: "Julia"
   of LangAda: "Ada"
-  of LangPython: "Python"
-  of LangRuby: "Ruby"
-  of LangRubyDb: "Ruby(db)"
+  # "Ruby" and "Python", not "Ruby(db)" / "Python(db)": since LRS-4 these are
+  # the only Ruby and Python members, and the parenthesised recording mode
+  # was the conflation spelled into a display name (design §1.2).
+  of LangRubyDb: "Ruby"
   of LangJavascript: "Javascript"
   of LangLua: "Lua"
   of LangAsm: "assembly language"
   of LangNoir: "Noir"
   of LangRustWasm: "Rust(wasm)"
   of LangCppWasm: "C++(wasm)"
-  of LangPythonDb: "Python(db)"
-  of LangUnknown: "unknown"
+  of LangPythonDb: "Python"
   of LangBash: "Bash"
   of LangZsh: "Zsh"
   of LangSolidity: "Solidity"
@@ -508,7 +546,7 @@ func getExtensionName*(lang: Lang): string =
   ## The canonical source-file extension for ``lang``, without the dot.
   ##
   ## Lives here, in the backend-agnostic half, because ``src/common/lang.nim``
-  ## and ``src/frontend/lang.nim`` each held a byte-identical 40-entry
+  ## and ``src/frontend/lang.nim`` each held a byte-identical 40-entry (then)
   ## positional copy of this table.  Two hand-maintained copies of one mapping,
   ## neither checked against the other, is the drift this enum has already
   ## suffered elsewhere; the wrappers now differ only in whether they return a
@@ -520,6 +558,7 @@ func getExtensionName*(lang: Lang): string =
   ## the tree says "the only two"; it means the only two NON-SENTINEL members,
   ## and has been corrected to say so.
   case lang
+  of LangUnknown: ""            # sentinel
   of LangC: "c"
   of LangCpp: "cpp"
   of LangRust: "rs"
@@ -532,8 +571,6 @@ func getExtensionName*(lang: Lang): string =
   of LangLean: "lean"
   of LangJulia: "jl"
   of LangAda: "adb"
-  of LangPython: "py"
-  of LangRuby: "rb"
   of LangRubyDb: "rb"
   of LangJavascript: "js"
   of LangLua: "lua"
@@ -542,7 +579,6 @@ func getExtensionName*(lang: Lang): string =
   of LangRustWasm: "rs"
   of LangCppWasm: "cpp"
   of LangPythonDb: "py"
-  of LangUnknown: ""            # sentinel
   of LangBash: "sh"
   of LangZsh: "zsh"
   of LangSolidity: "sol"
@@ -589,10 +625,10 @@ func reservedNames*(lang: Lang): seq[string] =
   # Listed exhaustively rather than with an `else`, because an `else` would
   # restore exactly the property this conversion removes: a member added later
   # silently acquiring an answer nobody chose for it.
-  of LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran, LangD,
-     LangCrystal, LangLean, LangJulia, LangAda, LangPython, LangRuby,
+  of LangUnknown, LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran,
+     LangD, LangCrystal, LangLean, LangJulia, LangAda,
      LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir, LangRustWasm,
-     LangCppWasm, LangPythonDb, LangUnknown, LangBash, LangZsh, LangSolidity,
+     LangCppWasm, LangPythonDb, LangBash, LangZsh, LangSolidity,
      LangMasm, LangSway, LangMove, LangPolkavm, LangCairo, LangCircom,
      LangLeo, LangTolk, LangAiken, LangCadence, LangSolana, LangElixir,
      LangErlang, LangPhp, LangGdScript:
@@ -609,10 +645,10 @@ func flowKeywords*(lang: Lang): seq[string] =
   case lang
   of LangNim:
     @["func", "proc", "int", "seq", "for", "in", "var"]
-  of LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran, LangD,
-     LangCrystal, LangLean, LangJulia, LangAda, LangPython, LangRuby,
+  of LangUnknown, LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran,
+     LangD, LangCrystal, LangLean, LangJulia, LangAda,
      LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir, LangRustWasm,
-     LangCppWasm, LangPythonDb, LangUnknown, LangBash, LangZsh, LangSolidity,
+     LangCppWasm, LangPythonDb, LangBash, LangZsh, LangSolidity,
      LangMasm, LangSway, LangMove, LangPolkavm, LangCairo, LangCircom,
      LangLeo, LangTolk, LangAiken, LangCadence, LangSolana, LangElixir,
      LangErlang, LangPhp, LangGdScript:
@@ -626,14 +662,18 @@ func langWireName*(lang: Lang): string =
   ## -- the receiver decodes it with that crate's ``lang_wire`` adapter, so a
   ## spelling that differs here is a refused request, not a wrong language.
   ## ``src/tests/cli/lang_enum_contract_test.nim`` pins the two tables member
-  ## for member.  Not ``toCLang``: that one folds ``LangRubyDb`` into
-  ## ``"ruby"`` and ``LangRustWasm`` into ``"rust"``, which is a display
-  ## choice, and a wire name must round-trip.
+  ## for member.  Not ``toCLang``: that one folds ``LangRustWasm`` into
+  ## ``"rust"``, which is a display choice, and a wire name must round-trip.
+  ## (``LangRubyDb`` / ``LangPythonDb`` keep ``rubydb`` / ``pythondb`` on the
+  ## wire after LRS-4 retired their pair partners: the spelling is a contract
+  ## with ``codetracer-native-backend``'s ``Lang::from_str`` and is not
+  ## renamed for tidiness.)
   ##
   ## Exhaustive ``case`` on purpose (milestone rule 4): a member added to
   ## ``Lang`` does not compile until it has been given a name here, exactly as
   ## on the Rust side.
   case lang
+  of LangUnknown: "unknown"
   of LangC: "c"
   of LangCpp: "cpp"
   of LangRust: "rust"
@@ -646,8 +686,6 @@ func langWireName*(lang: Lang): string =
   of LangLean: "lean"
   of LangJulia: "julia"
   of LangAda: "ada"
-  of LangPython: "python"
-  of LangRuby: "ruby"
   of LangRubyDb: "rubydb"
   of LangJavascript: "javascript"
   of LangLua: "lua"
@@ -656,7 +694,6 @@ func langWireName*(lang: Lang): string =
   of LangRustWasm: "rustwasm"
   of LangCppWasm: "cppwasm"
   of LangPythonDb: "pythondb"
-  of LangUnknown: "unknown"
   of LangBash: "bash"
   of LangZsh: "zsh"
   of LangSolidity: "solidity"
@@ -686,8 +723,8 @@ func langSpellings*(lang: Lang): seq[string] =
   ## had drifted exactly as the design's §2.5 recorded: the core knew `asm`
   ## but not `s`, the front end knew `asm` and `s` but not `miden`, and no
   ## comment anywhere said either gap was meant.  The rows below are the
-  ## UNION of the three (64 spellings, no two tables ever disagreed on a
-  ## shared one), and unifying them changed detection on both sides: the
+  ## UNION of the three (64 spellings at LRS-3, no two tables ever disagreed
+  ## on a shared one), and unifying them changed detection on both sides: the
   ## core gained five spellings (`s`, and the extension rows `h`, `hpp`,
   ## `pas`, `js` only the front end had), the front end gained the core's 23
   ## `--lang` names (`miden`, `rust`, `nims`, `gdscript`, `ruby(db)`, the
@@ -702,12 +739,18 @@ func langSpellings*(lang: Lang): seq[string] =
   ## built from this at compile time with every spelling checked for
   ## uniqueness.
   ##
-  ## Four members have NO spelling, each on purpose:
-  ## * `LangPython` -- unreachable from any input (design §3.1): `python` and
-  ##   `py` name `LangPythonDb`, the working recorder.  (`LangRuby` is NOT
-  ##   its twin here: `ruby` still names the retired backend, which is open
-  ##   question Q6 and not this table's to settle; `rb` and `ruby(db)` name
-  ##   `LangRubyDb`.)
+  ## **LRS-4 (2026-09-21, design Q6, decided by the coordinator):** `ruby`
+  ## names `LangRubyDb`, the working Ruby recorder -- the member it used to
+  ## name, `LangRuby` (the retired rr backend, whose only content was a
+  ## diagnostic), is gone.  `--lang ruby foo.rb` therefore records instead of
+  ## erroring.  `ruby(db)` is KEPT as a deprecated alias of the same member
+  ## (`DeprecatedLangSpellings`): `ct record` prints one note on stderr when
+  ## it is used and records anyway, so no invocation breaks; the alias is
+  ## slated for removal one release later.  `LangPython` had no spelling at
+  ## all (`python` and `py` always named `LangPythonDb`, design §3.1), so its
+  ## deletion removed no row here.
+  ##
+  ## Three members have NO spelling, each on purpose:
   ## * `LangUnknown` -- the sentinel; it is what a miss returns.
   ## * `LangBash` / `LangZsh` -- reachable by `ct record` through `LANGS`
   ##   (`src/ct/utilities/language_detection.nim`, `sh`/`bash`/`zsh`), which
@@ -717,6 +760,7 @@ func langSpellings*(lang: Lang): seq[string] =
   ##   spellings of a language.  Neither hand-kept `toLang` copy knew a shell
   ##   spelling, so none is added; the gap is recorded, not closed.
   case lang
+  of LangUnknown: @[]
   of LangC: @["c", "h"]
   of LangCpp: @["cpp", "hpp"]
   of LangRust: @["rust", "rs"]
@@ -729,9 +773,9 @@ func langSpellings*(lang: Lang): seq[string] =
   of LangLean: @["lean"]
   of LangJulia: @["julia", "jl"]
   of LangAda: @["ada", "adb"]
-  of LangPython: @[]
-  of LangRuby: @["ruby"]
-  of LangRubyDb: @["rb", "ruby(db)"]   # `rb` is the default for Ruby for now
+  # `ruby` since LRS-4 (Q6); `ruby(db)` is the deprecated alias, see
+  # `DeprecatedLangSpellings` below.
+  of LangRubyDb: @["ruby", "rb", "ruby(db)"]
   of LangJavascript: @["javascript", "js"]
   of LangLua: @["lua"]
   # `asm` AND `s`: the front end always mapped both, the core only `asm`.
@@ -740,7 +784,6 @@ func langSpellings*(lang: Lang): seq[string] =
   of LangRustWasm: @["rust-wasm", "rustwasm"]
   of LangCppWasm: @["cpp-wasm", "cppwasm"]
   of LangPythonDb: @["python", "py"]
-  of LangUnknown: @[]
   of LangBash: @[]
   of LangZsh: @[]
   of LangSolidity: @["solidity", "sol"]
@@ -789,6 +832,43 @@ static:
       doAssert ch notin {'A'..'Z'}, "spelling `" & spelling & "` is not lower-case"
     seen.add(spelling)
 
+const
+  DeprecatedLangSpellings* = [
+    (spelling: "ruby(db)", lang: LangRubyDb, preferred: "ruby"),
+  ]
+    ## Input spellings `toLang` still accepts but that `ct record` announces
+    ## as deprecated (one line on stderr, then it records exactly as the
+    ## preferred spelling would).  Design question Q6, decided 2026-09-21 by
+    ## the coordinator: `--lang ruby` selects the working Ruby backend, and
+    ## `ruby(db)` -- a spelling with parentheses in it that no shell likes,
+    ## which existed only because `ruby` was taken by the retired rr backend
+    ## -- stays for one release so no script breaks, then goes.  Each row
+    ## MUST also be a row of `langSpellings` for the same member; the
+    ## `static:` block below refuses one that is not, so the alias cannot
+    ## silently stop resolving while still being announced as merely
+    ## deprecated.
+
+static:
+  for row in DeprecatedLangSpellings:
+    doAssert row.spelling in langSpellings(row.lang),
+      "deprecated spelling `" & row.spelling & "` is not a spelling of " & $row.lang
+    doAssert row.preferred in langSpellings(row.lang),
+      "preferred spelling `" & row.preferred & "` is not a spelling of " & $row.lang
+    doAssert row.spelling != row.preferred
+
+func deprecatedLangSpellingNote*(spelling: string): string =
+  ## The one-line note `ct record` prints on stderr when `--lang` was given a
+  ## deprecated spelling; `""` for every other input.  Case-insensitive like
+  ## `toLang`.  Kept beside the table so the wording and the alias list
+  ## cannot drift apart; `record_backend_selection_test.nim` pins both.
+  let key = spelling.toLowerAscii
+  for row in DeprecatedLangSpellings:
+    if row.spelling == key:
+      return "note: `--lang " & spelling & "` is deprecated and will be " &
+        "removed in a later release; it selects " & toName(row.lang) &
+        " exactly as `--lang " & row.preferred & "` does -- use that instead."
+  ""
+
 proc toLang*(lang: string): Lang =
   ## The `Lang` a `--lang` name or a file extension (without the dot) names,
   ## case-insensitively; `LangUnknown` for anything `langSpellings` does not
@@ -802,6 +882,27 @@ proc toLang*(lang: string): Lang =
 
 proc toLang*(lang: cstring): Lang =
   toLang($lang)
+
+proc decodeLangName*(name: string): tuple[lang: Lang, retiredName: string] =
+  ## ``$lang`` back to a ``Lang``, by the enum's own member names, for a
+  ## reader that must NEVER raise: the Electron renderer decoding
+  ## ``ct trace-metadata``'s ``"lang": "LangPythonDb"``
+  ## (``src/frontend/trace_metadata.nim``).  A name this build does not have
+  ## is the sentinel with the name preserved in ``retiredName`` -- the
+  ## retired-name policy of design §5.6, as ``trace_index.decodeLangColumn``
+  ## applies it to the persisted column, minus that decoder's refusal of
+  ## foreign strings: there the string came off THIS build's own disk and a
+  ## foreign one is corruption worth raising about, here it came from a
+  ## possibly newer ``ct`` and refusing it would take the whole trace down
+  ## with it.  ``parseEnum`` reads the ordinal from the enum, so there is no
+  ## second hand-written list of ordinals to keep in step (LRS-4 deleted the
+  ## one the renderer had).  Works on both backends;
+  ## ``src/frontend/tests/frontend_lang_test.nim`` pins it on JS.
+  let lang = parseEnum[Lang](name, LangUnknown)
+  if lang == LangUnknown and name.len > 0 and name != $LangUnknown:
+    (lang: LangUnknown, retiredName: name)
+  else:
+    (lang: lang, retiredName: "")
 
 proc usesMaterializedTracesForExtension*(extension: string): bool =
   ## Return true if the file extension belongs to a language that produces

@@ -104,11 +104,9 @@ impl Language {
             // language_detection table accepts "cpp"/"c++"/"c_plus_plus"
             // but the dispatcher canonicalises to "cpp".
             Language::CPlusPlus => "cpp",
-            // IMPORTANT: ct record's --lang "ruby" maps to LangRuby (the
-            // gdb/rr legacy variant) which is NOT a materialized-traces
-            // lang.  We need the materialized variant: pass "rb" so
-            // toLang() returns LangRubyDb (materialized via
-            // codetracer-ruby-recorder).  See common/lang.nim line 27.
+            // `rb` and `ruby` both name LangRubyDb since LRS-4 deleted the
+            // retired rr backend LangRuby that `ruby` used to select (design
+            // Q6); `rb` is kept because it also worked before.
             Language::Ruby => "rb",
             Language::JavaScript => "javascript",
             Language::C => "c",

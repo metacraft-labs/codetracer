@@ -140,7 +140,8 @@ proc detectLangFromPath*(path: string, isWasm: bool): Lang =
   ## ## Why the final `return LangUnknown` is written out
   ##
   ## It used to be absent.  Nim initialises `result` to the enum's **zero
-  ## value**, and `LangC` is ordinal 0, so every path whose extension was not
+  ## value**, and `LangC` was ordinal 0 until LRS-4 moved `LangUnknown` there
+  ## (2026-09-21; `LangC` is 1 now), so every path whose extension was not
   ## in `LANGS` fell off the end of this proc and was reported as **C**.  That
   ## is not a hypothetical: `a.out`, `my.project`, `python3.11`, `libfoo.so.1`,
   ## `data.json`, `notes.txt` and `archive.tar.gz` all resolved to `LangC`.

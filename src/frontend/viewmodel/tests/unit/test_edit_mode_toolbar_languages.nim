@@ -588,7 +588,7 @@ suite "EMT anti-drift and exclusion — the controls":
         pending("`projectKinds` — the smart-* exclusion over the corpus")
     expectCount(9)
 
-  test "the Lang enum is the closed set, and it has 41 members":
+  test "the Lang enum is the closed set, and it has 39 members":
     ## §10's premise. `SUPPORTED_LANGS` must NOT be used for this: it is the
     ## RECORDABLE subset (since LRS-3 one list, derived from `isSupportedLang`
     ## in `common_lang.nim` -- it used to be two divergent hand-maintained
@@ -601,9 +601,13 @@ suite "EMT anti-drift and exclusion — the controls":
     ## asserted `"LangGdScript" in CommonLangSrc`. Mutation arm M3 renamed the
     ## member to `LangGdScriptRenamed` and the check **survived** — both
     ## predicates are prefix-satisfied by the longer name. The count was
-    ## therefore not measuring membership at all. Tightened below: the 40
-    ## comma-terminated members are counted, and the 41st is pinned by name
+    ## therefore not measuring membership at all. Tightened below: the 38
+    ## comma-terminated members are counted, and the 39th is pinned by name
     ## AND ordinal, which is the form the Rust contract test also uses.
+    ##
+    ## 39 since LRS-4 (2026-09-21): 41 less the two retired rr backends
+    ## `LangPython` and `LangRuby`, and `LangUnknown` moved to ordinal 0, so
+    ## the 0th member pinned below is the sentinel, not `LangC`.
     startCount()
     var members = 0
     var inEnum = false
@@ -618,10 +622,11 @@ suite "EMT anti-drift and exclusion — the controls":
       if t.startsWith("LangGdScript"): break
       if t.startsWith("Lang") and t.contains(","):
         inc members
-    ck members == 40                      # every member but the last
-    ck "LangGdScript  # 40" in CommonLangSrc   # the 41st, by name and ordinal
-    ck "LangC," in CommonLangSrc               # and the 0th
-    expectCount(3)
+    ck members == 38                      # every member but the last
+    ck "LangGdScript  # 38" in CommonLangSrc   # the 39th, by name and ordinal
+    ck "LangUnknown,  # 0" in CommonLangSrc    # and the 0th: the sentinel
+    ck "LangC,        # 1" in CommonLangSrc    # C is no longer the zero value
+    expectCount(4)
 
   test "EMT-A22 a provider's DECLARED capability is not its availability":
     ## §2.4 hazard 3, and the trap this campaign was warned about by name.

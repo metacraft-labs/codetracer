@@ -65,10 +65,10 @@ suite "SUPPORTED_LANGS is derived, and the dropdown renders exactly LANG_PICKER_
     check LangPythonDb in SUPPORTED_LANGS
     check LangJavascript in SUPPORTED_LANGS
 
-  test "the sentinel, the retired backends and the declared-unsupported members are out":
+  test "the sentinel and the declared-unsupported members are out":
+    # (The retired backends `LangPython` / `LangRuby` were out too, until
+    # LRS-4 deleted them; there is nothing left to exclude.)
     check LangUnknown notin SUPPORTED_LANGS
-    check LangPython notin SUPPORTED_LANGS
-    check LangRuby notin SUPPORTED_LANGS
     for lang in DeclaredUnsupportedLangs:
       check lang notin SUPPORTED_LANGS
     check DeclaredUnsupportedLangs == {LangLua, LangGdScript}
@@ -158,7 +158,7 @@ suite "the input spellings are one table (LRS-3, the asm unification), on the JS
     check toLang(cstring"py") == LangPythonDb
     check toLang(cstring"python") == LangPythonDb
     check toLang(cstring"rb") == LangRubyDb
-    check toLang(cstring"ruby") == LangRuby
+    check toLang(cstring"ruby") == LangRubyDb   # the working recorder since LRS-4 (Q6)
     check toLang(cstring"nope") == LangUnknown
     check toLang(cstring"") == LangUnknown
 
@@ -167,3 +167,45 @@ suite "the input spellings are one table (LRS-3, the asm unification), on the JS
       check toLang(cstring(spelling)) == lang
       check toLang(spelling) == lang
     check LANG_SPELLINGS.len == 64
+
+suite "the renderer decodes `lang` by the enum's names on the JS backend (LRS-4)":
+  ## `src/frontend/trace_metadata.nim` used to rewrite `ct trace-metadata`'s
+  ## `"lang": "LangPythonDb"` into the JS-runtime ordinal through a hand-written
+  ## `var LANG = {…}` map, pinned entry for entry by
+  ## `lang_enum_contract_test.nim`.  LRS-4 deleted the map: the renderer calls
+  ## `decodeLangName`, which is `parseEnum[Lang]` over the live enum.  This is
+  ## the JS-backend proof that the mechanism works where the renderer runs --
+  ## `trace_metadata.nim` itself is Electron-only and no lane can import it.
+
+  test "every member round-trips through its own name, on the JS backend":
+    for lang in Lang:
+      let decoded = decodeLangName($lang)
+      check decoded.lang == lang
+      check decoded.retiredName == ""
+      # And the value the renderer stores IS the JS-runtime ordinal, which is
+      # what `cast[Trace]` reinterprets: assigning it and reading it back as
+      # an int agrees with `ord`.
+      check ord(decoded.lang) == ord(lang)
+
+  test "the sentinel is ordinal 0 on this backend too":
+    check ord(LangUnknown) == 0
+    check Lang(0) == LangUnknown
+    var zero: Lang
+    check zero == LangUnknown
+
+  test "a retired name is the sentinel with the name kept, never a throw":
+    # The two members LRS-4 deleted; a `trace_index.db` written before it
+    # can still hold either.
+    for name in ["LangPython", "LangRuby"]:
+      let decoded = decodeLangName(name)
+      checkpoint(name)
+      check decoded.lang == LangUnknown
+      check decoded.retiredName == name
+    check decodeLangName("LangUnknown") == (lang: LangUnknown, retiredName: "")
+    check decodeLangName("") == (lang: LangUnknown, retiredName: "")
+    check decodeLangName("LangNotAThing") ==
+      (lang: LangUnknown, retiredName: "LangNotAThing")
+
+  test "Ruby and Python display without the historical (db) suffix":
+    check toName(LangRubyDb) == "Ruby"
+    check toName(LangPythonDb) == "Python"

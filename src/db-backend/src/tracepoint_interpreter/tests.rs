@@ -27,7 +27,7 @@ fn log_array() -> Result<(), Box<dyn Error>> {
 
     let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
 
-    check_tracepoint_evaluate(src, 3, "array", Lang::Ruby, &expected)?;
+    check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected)?;
     run_noir_variant(src, 3, "array", &expected)?;
 
     Ok(())
@@ -45,7 +45,7 @@ log(arr[2])";
         var("arr[2]", int_val(5)),
     ];
 
-    check_tracepoint_evaluate(src, 3, "array", Lang::Ruby, &expected)?;
+    check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected)?;
     run_noir_variant(src, 3, "array", &expected)?;
 
     Ok(())
@@ -240,7 +240,7 @@ fn load_reader_for_trace(path: &Path) -> Result<CTFSTraceReader, Box<dyn Error>>
 
 fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
     match lang {
-        Lang::Ruby | Lang::RubyDb => Ok("ruby".to_string()),
+        Lang::RubyDb => Ok("ruby".to_string()),
         Lang::Noir => Ok("noir".to_string()),
         Lang::RustWasm => Ok("rust(wasm)".to_string()),
         _ => Err("Unsupported language".into()),
@@ -322,7 +322,7 @@ fn record_rust_wasm_trace(_program_dir: &Path, _target_dir: &Path) {
 
 fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(), Box<dyn Error>> {
     match lang {
-        Lang::Ruby | Lang::RubyDb => record_ruby_trace(program_dir, target_dir)?,
+        Lang::RubyDb => record_ruby_trace(program_dir, target_dir)?,
         Lang::Noir => record_noir_trace(program_dir, target_dir)?,
         Lang::RustWasm => record_rust_wasm_trace(program_dir, target_dir),
         _ => return Err("Unsupported language".into()),

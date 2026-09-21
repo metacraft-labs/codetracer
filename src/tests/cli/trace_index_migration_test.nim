@@ -36,7 +36,9 @@
 ##
 ## ## Why names, not renumbered ordinals
 ##
-## The trigger for all of this is a pending move of `LangUnknown` to ordinal 0.
+## The trigger for all of this was a then-pending move of `LangUnknown` to
+## ordinal 0, which LRS-4 made on 2026-09-21 — against a column that by then
+## held names, which is exactly why this migration came first.
 ## Storing the ordinal makes the *declaration order of a Nim enum* a persisted
 ## user-data format.  Storing the name ends that: afterwards the reorder
 ## touches no persisted data, and this is the last migration the column needs.
@@ -50,7 +52,7 @@
 ## scratch in a temp directory; the two subprocess scenarios run with `HOME`
 ## and `XDG_DATA_HOME` redirected into one.
 
-import std/[exitprocs, os, osproc, sequtils, streams, strtabs, strutils,
+import std/[algorithm, exitprocs, os, osproc, sequtils, streams, strtabs, strutils,
             tempfiles, unittest]
 
 when NimMajor >= 2:
@@ -61,6 +63,7 @@ else:
 import ../../common/lang
 import ../../common/types
 import ../../common/trace_index
+import json_serialization
 
 # ---------------------------------------------------------------------------
 # Loader bootstrap
@@ -282,9 +285,10 @@ proc migrateExpectingError(path: string): string =
     "raise TraceIndexMigrationError")
 
 const LANG_V0_ENTRY_COUNT = 40
-  ## Written as a literal on purpose.  `ord(high(Lang)) + 1` is 40 today and
-  ## would be whatever the live enum happens to be tomorrow, which is the very
-  ## substitution these tests exist to forbid.
+  ## Written as a literal on purpose.  `ord(high(Lang)) + 1` was 40 when this
+  ## was written, is 39 since LRS-4, and would be whatever the live enum
+  ## happens to be tomorrow — which is the very substitution these tests exist
+  ## to forbid, and which LRS-4's renumber would have silently broken.
 
 proc langOrdinalsAndNames(): seq[(string, string)] =
   ## The schema-version-0 ordinal → name pairs, taken from the **frozen**
@@ -729,13 +733,50 @@ suite "trace_index schema version 1 — lang ordinal to name":
         check "not a Lang enum name" in e.msg
       check raised
 
+  test "the two names LRS-4 retired decode as retired through the PRODUCTION list":
+    ## `LangPython` (v0 ordinal 12) and `LangRuby` (13) were deleted from
+    ## `Lang` on 2026-09-21.  Both are in the frozen `langV0OrdinalNames`
+    ## snapshot and therefore in `langNamesEverPersisted` with no edit -- the
+    ## append-only list already covered them, which is what it was for.  With
+    ## the DEFAULT `everPersisted` (production callers take it) each decodes
+    ## to the sentinel with the name, never raises, and is not a live member.
+    for name in ["LangPython", "LangRuby"]:
+      checkpoint("retired name: " & name)
+      check name in langNamesEverPersisted
+      var raised = false
+      var column: LangColumn
+      try:
+        column = decodeLangColumn(name)
+      except TraceIndexSchemaError:
+        raised = true
+      check(not raised)
+      check column.lang == LangUnknown
+      check column.retiredName == name
+      check langFromColumnValue(name) == LangUnknown
+      var live = false
+      for lang in Lang:
+        if $lang == name: live = true
+      check(not live)
+    # The frozen v0 ordinals still carry the retired names, so a version-0
+    # database with rows at 12 and 13 remaps to those names and then decodes
+    # as retired -- the two policies compose.
+    check langV0NameForOrdinal(12) == "LangPython"
+    check langV0NameForOrdinal(13) == "LangRuby"
+    check decodeLangColumn(langV0NameForOrdinal(12)).retiredName == "LangPython"
+    # `LangRustWasm` / `LangCppWasm` are NOT retired (kept until LRS-5), so
+    # their v0 names still decode to themselves.
+    check decodeLangColumn("LangRustWasm") == LangColumn(lang: LangRustWasm, retiredName: "")
+    check decodeLangColumn("LangCppWasm") == LangColumn(lang: LangCppWasm, retiredName: "")
+
   test "a RETIRED name decodes to LangUnknown with the name preserved, and never raises":
     ## The retired-name policy (`src/common/trace_index.nim`, LRS-2B): a cell
     ## holding the name of a member a later build removed must not turn every
-    ## recording made before the removal into a hard failure at open.  No
-    ## member has been retired yet, so the path is driven through the
-    ## `everPersisted` parameter with a name that is in the historical list
-    ## but not in the live enum — which is exactly what a retired name is.
+    ## recording made before the removal into a hard failure at open.  This
+    ## case predates the first real retirement (LRS-4, the case above) and
+    ## drives the path through the `everPersisted` parameter with a name that
+    ## is in the historical list but not in the live enum — which is exactly
+    ## what a retired name is; kept because it pins the mechanism
+    ## independently of which members happen to be retired today.
     const Retired = "LangRetiredForThisTest"
     let historical = langNamesEverPersisted & @[Retired]
     var raised = false
@@ -771,9 +812,11 @@ suite "trace_index schema version 1 — lang ordinal to name":
     check live.retiredName == ""
 
   test "every name ever persisted decodes without raising, today and after a retirement":
-    ## Today every historical name is live, so each decodes to itself; the
-    ## assertion that matters for the future is the first one — no raise —
-    ## because that is what a member removal must not change.
+    ## Every historical name that is still live decodes to itself, and the
+    ## two LRS-4 retired decode as retired; the assertion that matters is the
+    ## first one — no raise — because that is what a member removal must not
+    ## change.  (Until LRS-4 every historical name was live.)
+    var retired: seq[string] = @[]
     for name in langNamesEverPersisted:
       var raised = false
       var column: LangColumn
@@ -788,14 +831,23 @@ suite "trace_index schema version 1 — lang ordinal to name":
       else:
         check column.lang == LangUnknown
         check column.retiredName == name
+        retired.add(name)
+    retired.sort()
+    check retired == @["LangPython", "LangRuby"]
 
   test "every live Lang name has been recorded as persisted (the list is append-only)":
     ## A member added to `Lang` must be appended to `langNamesAddedSinceV0`
     ## so that, if it is ever removed again, its name is recognised as retired
     ## rather than foreign.  This is the assertion that forces the append.
+    ## (A member REMOVED from `Lang` is never removed from the list -- LRS-4's
+    ## two are still in it, asserted above -- so the list is a superset of
+    ## the enum, never equal to it.)
     for lang in Lang:
       checkpoint("live member: " & $lang)
       check ($lang) in langNamesEverPersisted
+    var liveCount = 0
+    for _ in Lang: inc liveCount
+    check langNamesEverPersisted.len == liveCount + 2   # + LangPython, LangRuby
     # And the frozen list is a superset built from two frozen literals, not
     # from `Lang`: it has every version-0 name plus the additions, no repeats.
     check langNamesEverPersisted.len == LANG_V0_ENTRY_COUNT + langNamesAddedSinceV0.len
@@ -803,6 +855,29 @@ suite "trace_index schema version 1 — lang ordinal to name":
     for name in langNamesEverPersisted:
       check name notin seen
       seen.add(name)
+
+  test "ct trace-metadata encodes lang as its NAME, and a retired row as the sentinel plus the name":
+    ## `trace_index.nim` opts `Lang` into text (`serializesAsTextInJson`), so
+    ## the JSON the Electron main process receives from `ct trace-metadata`
+    ## says `"lang":"LangPythonDb"`, which `decodeLangName` on the JS side
+    ## turns back into the member.  It used to say `"lang":21` (the ordinal),
+    ## unnoticed because the renderer's old map only ran for a string.  The
+    ## rule is pinned from the same module `ct trace-metadata` imports it
+    ## from; the first draft put it in `metadata.nim` and THIS test showed it
+    ## ignored.  The placement is load-bearing, and the reason is narrower
+    ## than "the first module to encode a `Trace` wins": measured at review,
+    ## a rule declared in ANY module downstream of `trace_index.nim` is
+    ## ignored -- including the first such module and including the very
+    ## module doing the `Json.encode`.  See the comment beside the rule.
+    let live = Json.encode(Trace(lang: LangPythonDb, recordingId: "r1"))
+    check "\"lang\":\"LangPythonDb\"" in live
+    check "\"lang\":20" notin live
+    let retired = Json.encode(Trace(lang: LangUnknown, langRetiredName: "LangRuby",
+                                    recordingId: "r2"))
+    check "\"lang\":\"LangUnknown\"" in retired
+    check "\"langRetiredName\":\"LangRuby\"" in retired
+    for lang in Lang:
+      check ("\"lang\":\"" & $lang & "\"") in Json.encode(Trace(lang: lang))
 
   test "a retired row keeps its label in a listing":
     ## `langLabel` is what `ct list` and the upload listing print.  A retired
@@ -836,6 +911,19 @@ suite "trace_index schema version 1 — lang ordinal to name":
   test "e2e: recordTrace writes a language NAME and find reads it back":
     require helperBin.len > 0
     let (ok, outp, errp) = runHelper("lang-name-roundtrip")
+    if not ok or "PASS" notin outp:
+      echo "stdout: ", outp
+      echo "stderr: ", errp
+    check ok
+    check "PASS" in outp
+
+  test "e2e: a trace_index row holding a RETIRED name loads through find/all/findRecentTraces":
+    ## The fixture the retired-name policy was written for, through the
+    ## production loader rather than the decoder alone: rows whose `lang`
+    ## cell says `LangRuby` / `LangPython` -- names LRS-4 deleted from the
+    ## enum -- beside a live row, in a real database opened by `ensureDB`.
+    require helperBin.len > 0
+    let (ok, outp, errp) = runHelper("retired-lang-rows")
     if not ok or "PASS" notin outp:
       echo "stdout: ", outp
       echo "stderr: ", errp

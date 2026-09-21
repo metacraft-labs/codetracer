@@ -116,9 +116,11 @@ proc warnAndArchiveOldSchemaDb(dbPath: string) =
 # the *declaration order* of a Nim enum into a persisted user-data format:
 # inserting a variant anywhere but at the end silently re-pointed every stored
 # row above it, with no error and no way for either side to notice.  The
-# concrete trigger was the pending move of ``LangUnknown`` to ordinal 0 (it is
-# 22 today, while ``LangC`` is 0 — so Nim's zero-initialised ``result`` means
-# "C", not "unknown", in any proc that falls off its end).
+# concrete trigger was the then-pending move of ``LangUnknown`` to ordinal 0
+# (it was 22, while ``LangC`` was 0 — so Nim's zero-initialised ``result``
+# meant "C", not "unknown", in any proc that fell off its end).  That move
+# LANDED in LRS-4 on 2026-09-21, against a column that by then held names:
+# which is the whole point of having done this first.
 #
 # This is not hypothetical.  A live developer database read (read-only, from a
 # copy) on 2026-08-25 held 247 rows at exactly five ordinals: ``0`` ×3
@@ -365,6 +367,48 @@ const
     for entry in langV0OrdinalNames:
       if entry.ordinal > hi: hi = entry.ordinal
     hi
+
+# `Lang` is TEXT in every `json_serialization` encoding, not only in the
+# persisted column (LRS-4, 2026-09-21).
+#
+# The vendored `json_serialization` writes an enum as `ord(value)` unless the
+# type opts into text with `serializesAsTextInJson`.  Until this line
+# `ct trace-metadata` (`src/ct/trace/metadata.nim`, `Json.encode(trace)`) put
+# the INTEGER ordinal of `Trace.lang` on the hop to the Electron main process
+# -- while the renderer's own comment, the inventory in
+# Language-Enum-Ordinal-Contracts.md and the LRS series all believed that hop
+# carried the name (the renderer's old `var LANG = {…}` map only ran for
+# `typeof t.lang === 'string'`; the integer fell through `cast[Trace]`
+# unchecked).  Found while collecting LRS-4's replay evidence:
+# `ct trace-metadata --id=…` printed `"lang": 20`.  The two ends are one
+# build, so a lockstep renumber never mislabelled a trace through it, but an
+# ordinal on a subprocess boundary is exactly the contract this series exists
+# to remove.
+#
+# It lives HERE, and not in `metadata.nim`, and the placement is LOAD-BEARING:
+# `json_serialization`'s generic writer binds its `writeValue` overload set
+# once, no later than this module, and a `serializesAsTextInJson(Lang)`
+# declared in any module DOWNSTREAM of it is simply ignored.  Measured
+# (2026-09-21, at review) with three scratch programs, each two encoder
+# modules over this same `Trace`:
+#
+#   rule only here                          -> both encoders write "LangPythonDb"
+#   rule removed here, declared in the 2nd  -> both write 20, the declaring
+#     encoder module (the `metadata.nim` shape)  module included
+#   rule removed here, declared in the 1st  -> both write 20
+#     encoder module
+#
+# So the rule is NOT "whichever module encodes a `Trace` first" (the third
+# arm refutes that): it has to be visible in THIS module, which every `Trace`
+# encoder imports because it is where a `Trace` comes from.  The first draft
+# of this change put it in `metadata.nim` and `trace_index_migration_test`
+# showed it ignored.  The renderer decodes the name with
+# `decodeLangName` (`parseEnum[Lang]`); a retired name -- which `loadTrace`
+# already reports as `LangUnknown` beside `langRetiredName` -- reaches it as
+# such.  `json_serialization`'s reader accepts an enum as int OR string, so
+# nothing that reads an encoded `Trace` back had to change.  `calltraceMode`
+# still crosses as an integer (its renderer map is LRS-6's).
+serializesAsTextInJson(Lang)
 
 proc langToColumnValue*(lang: Lang): string =
   ## The persisted form of ``lang`` since schema version 1: the enum name.

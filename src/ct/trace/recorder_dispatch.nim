@@ -35,7 +35,8 @@
 ## questions with one value (``src/common/target_axes.nim``).  That is why it
 ## needed ``LangRustWasm`` beside ``LangRust`` (same language, different ISA),
 ## ``LangPython`` beside ``LangPythonDb`` (same language, different recording
-## approach), and why ``LangNim`` — one value — had to describe TWO recorders
+## approach; LRS-4 deleted ``LangPython`` and ``LangRuby``, the retired
+## halves), and why ``LangNim`` — one value — had to describe TWO recorders
 ## at once: ``nim c`` + ``ct-mcr`` for a ``.nim`` and the compiler's script VM
 ## for a ``.nims``.  ``requireRecorder(LangNim)`` therefore demanded ``ct-mcr``
 ## for a ``.nims`` that never uses it.
@@ -381,16 +382,20 @@ proc retiredNativeReplayTool(sel: RecorderSelector): RecorderTool =
   ## The ``(language, non-native ISA, raRr | raMcr | raTtd)`` cells: a native
   ## replay approach asked of a target that is not native code.
   ##
-  ## This is where ``LangRuby`` and ``LangPython`` — the retired rr/gdb
-  ## backends — land, and the advice they used to carry as two hand-written
-  ## arms is now ONE rule over the triple: no native-replay recorder exists
-  ## for a runtime-hosted language, and the working recorder is the
-  ## instrumented one.  ``supported: false`` and declared, never silent.
+  ## This is where the retired rr/gdb backends land -- until LRS-4 the
+  ## ``Lang`` members ``LangRuby`` and ``LangPython`` decomposed here; since
+  ## LRS-4 no ``Lang`` value does, and the cell is reached only by a selector
+  ## that names a native-replay approach for an interpreted language
+  ## outright.  The advice the two deleted members used to carry as two
+  ## hand-written arms is ONE rule over the triple: no native-replay
+  ## recorder exists for a runtime-hosted language, and the working recorder
+  ## is the instrumented one.  ``supported: false`` and declared, never
+  ## silent.
   let working = instrumentedRuntimeTool(sel.language)
   let name = displayName(sel)
   let spelling =
     case sel.language
-    of slRuby: "`--lang ruby(db)`"
+    of slRuby: "`--lang ruby`"    # names the working recorder since LRS-4 (Q6)
     of slPython: "`--lang py`"
     else: "the file's own extension"
   RecorderTool(

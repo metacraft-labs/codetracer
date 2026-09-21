@@ -22,26 +22,34 @@
 ## that is correct only because of which constant happens to be ordinal 0 is
 ## not correct.
 ##
-## ## 2. The hand-written JS ordinal map is the same list as the `Lang` enum
+## ## 2. The renderer decodes `lang` by the enum's own names — no second ordinal list
 ##
-## `src/frontend/trace_metadata.nim` carries a **complete second copy** of every
-## `Lang` ordinal, written out by hand inside a JS string literal in an
-## `importjs` block (`var LANG = { LangC:0, ... }`).  It exists because
+## `src/frontend/trace_metadata.nim` used to carry a **complete second copy**
+## of every `Lang` ordinal, written out by hand inside a JS string literal in
+## an `importjs` block (`var LANG = { LangC:0, ... }`).  It existed because
 ## `ct trace-metadata` serialises the enum with `json_serialization`, which
 ## writes enum *names*, while the renderer reconstructs the record with
-## `cast[Trace](JSON.parse(...))`, a reinterpret that needs the integer ordinal
-## Nim's JS backend uses at runtime.
+## `cast[Trace](JSON.parse(...))`, a reinterpret that needs the integer
+## ordinal Nim's JS backend uses at runtime.  No compiler checked that copy;
+## its lookup miss fell back to `LANG.LangUnknown`, so a forgotten entry
+## silently loaded every trace in that language as "unknown", and a *stale*
+## entry silently mislabelled them with a real, wrong language.  Until LRS-4
+## this file pinned the map against the enum entry for entry, which is how it
+## stayed right.
 ##
-## No compiler checks that copy.  Its lookup miss falls back to
-## `LANG.LangUnknown`, so a language added to `Lang` but forgotten here does not
-## error anywhere — every trace recorded in that language silently loads as
-## "unknown".  A *stale* entry is worse: it silently mislabels loaded traces
-## with a real, wrong language.
-##
-## The test below parses the JS block out of the source file and compares it to
-## `Lang` itself: every enum value present, every ordinal equal, and no extra
-## keys.  Adding a language without updating the JS map now fails here, at the
-## table, instead of in a renderer that shows the wrong syntax highlighting.
+## LRS-4 (2026-09-21) deleted the map: the renderer now calls
+## `decodeLangName` (`src/common/common_lang.nim`), which is
+## `parseEnum[Lang](name, LangUnknown)` — the ordinal is read from the enum
+## itself, on the JS backend as on C, so there is no second list to renumber
+## and LRS-4's own renumber did not touch the renderer.  A name this build
+## does not have becomes `LangUnknown` with the name kept in
+## `langRetiredName` (the retired-name policy of design §5.6, as the
+## persisted column already applies it).  What this property now pins: the
+## hand-written map is GONE and stays gone; the renderer's normalisation
+## goes through `decodeLangName`; and `decodeLangName` round-trips every
+## member and treats the two names LRS-4 retired as retired.  The JS-backend
+## half of the same check is in `src/frontend/tests/frontend_lang_test.nim`,
+## which the `test-frontend-js` lane runs.
 ##
 ## ## 3. The Nim `Lang` enum is the same list as the canonical Rust `Lang`
 ##
@@ -243,6 +251,9 @@ const
     ## Deleted.  Must stay deleted.
   DbBackendTaskPath = RepoRoot / "src" / "db-backend" / "src" / "task.rs"
     ## Declares the DAP-facing `CtLoadLocalsArguments` (property 8).
+  TraceIndexPath = RepoRoot / "src" / "common" / "trace_index.nim"
+    ## Where `Lang` opts into TEXT for every `json_serialization` encoding
+    ## (property 2); `ct trace-metadata` is one such encoder.
 
 # ---------------------------------------------------------------------------
 # Property 1 — detectLangFromPath returns LangUnknown for what it does not know
@@ -345,135 +356,97 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
 # Property 2 — the JS ordinal map in trace_metadata.nim matches `Lang`
 # ---------------------------------------------------------------------------
 
-proc parseJsLangMap(source: string): Table[string, int] =
-  ## Extract `var LANG = { LangC:0, ... };` from `trace_metadata.nim`'s
-  ## `importjs` string literal.
-  ##
-  ## Deliberately strict: if the block cannot be located, this raises rather
-  ## than returning an empty table.  An anti-drift check that silently finds
-  ## nothing to compare is the exact failure mode it exists to prevent.
-  result = initTable[string, int]()
-  let startMarker = "var LANG = {"
-  let startIdx = source.find(startMarker)
-  if startIdx < 0:
-    raise newException(ValueError,
-      "could not find `" & startMarker & "` in " & TraceMetadataPath &
-      ".  The JS ordinal map moved or was renamed; this check must be " &
-      "updated to follow it, not deleted — it is the only thing standing " &
-      "between a forgotten enum entry and silently mislabelled traces.")
+const
+  RetiredLangNames = ["LangPython", "LangRuby"]
+    ## The two members LRS-4 deleted.  Their names still occur in
+    ## `recordings.lang` cells written before 2026-09-21 and must decode to
+    ## the sentinel WITH the name, never raise, never a neighbour.
 
-  let bodyStart = startIdx + startMarker.len
-  let endIdx = source.find("}", bodyStart)
-  if endIdx < 0:
-    raise newException(ValueError,
-      "found `" & startMarker & "` in " & TraceMetadataPath &
-      " but no closing `}` after it.")
+proc codeLinesOnly(source: string): string =
+  ## `source` with every Nim comment line (`#...`, `##...`) dropped, so a
+  ## check for a code shape is not satisfied or defeated by prose about it.
+  var lines: seq[string] = @[]
+  for line in source.splitLines():
+    if not line.strip().startsWith("#"):
+      lines.add(line)
+  lines.join("\n")
 
-  let body = source[bodyStart ..< endIdx]
-  for rawEntry in body.split(','):
-    let entry = rawEntry.strip()
-    if entry.len == 0:
-      continue
-    let colon = entry.find(':')
-    if colon < 0:
-      raise newException(ValueError,
-        "unparsable entry in the JS LANG map: `" & entry & "`")
-    let name = entry[0 ..< colon].strip()
-    let ordinalText = entry[colon + 1 .. ^1].strip()
-    var ordinal: int
-    try:
-      ordinal = ordinalText.parseInt()
-    except ValueError:
-      raise newException(ValueError,
-        "entry `" & name & "` in the JS LANG map has a non-integer ordinal `" &
-        ordinalText & "`")
-    if result.hasKey(name):
-      raise newException(ValueError,
-        "entry `" & name & "` appears twice in the JS LANG map")
-    result[name] = ordinal
-
-suite "trace_metadata.nim's JS LANG map is the Lang enum, entry for entry":
+suite "trace_metadata.nim decodes lang by the enum's names, not a hand-written ordinal map":
 
   setup:
     check fileExists(TraceMetadataPath)
 
-  test "the map parses and is not empty":
-    let jsMap = parseJsLangMap(readFile(TraceMetadataPath))
-    check jsMap.len > 0
-    checkpoint("parsed " & $jsMap.len & " entries from the JS LANG map")
-
-  test "every Lang value is present in the JS map with the same ordinal":
-    let jsMap = parseJsLangMap(readFile(TraceMetadataPath))
-    for value in Lang:
-      let name = $value
-      check:
-        jsMap.hasKey(name)
-      if not jsMap.hasKey(name):
-        checkpoint(
-          "`" & name & "` (ordinal " & $ord(value) & ") is missing from the " &
-          "JS LANG map in " & TraceMetadataPath & ".  The map's lookup miss " &
-          "falls back to LANG.LangUnknown, so this does not error at " &
-          "runtime: every trace recorded in " & name & " would silently load " &
-          "as unknown.")
-        continue
-      check:
-        jsMap[name] == ord(value)
-      if jsMap[name] != ord(value):
-        checkpoint(
-          "`" & name & "` is ordinal " & $ord(value) & " in the Lang enum " &
-          "but " & $jsMap[name] & " in the JS LANG map in " &
-          TraceMetadataPath & ".  A stale ordinal here does not error " &
-          "anywhere; it silently relabels every loaded trace.")
-
-  test "the JS map has no entries that are not Lang values":
-    let jsMap = parseJsLangMap(readFile(TraceMetadataPath))
-    var enumNames = initHashSet[string]()
-    for value in Lang:
-      enumNames.incl($value)
-    var extras: seq[string] = @[]
-    for name in jsMap.keys:
-      if name notin enumNames:
-        extras.add(name)
-    extras.sort()
-    check:
-      extras.len == 0
-    if extras.len > 0:
+  test "the hand-written JS LANG map is gone and stays gone":
+    # The file's block comment is allowed to NAME the deleted map (it
+    # explains why it is gone); the check is over code lines only.
+    let source = codeLinesOnly(readFile(TraceMetadataPath))
+    check(not source.contains("var LANG = {"))
+    if source.contains("var LANG = {"):
       checkpoint(
-        "the JS LANG map in " & TraceMetadataPath & " declares " &
-        $extras.len & " name(s) that are not values of the Lang enum: " &
-        extras.join(", ") & ".  These are dead at best and, if a Lang value " &
-        "was renamed, a silent mislabel at worst.")
+        "`var LANG = {` is back in " & TraceMetadataPath & ".  LRS-4 deleted " &
+        "the hand-written ordinal map in favour of `decodeLangName` " &
+        "(`parseEnum[Lang]`), which reads the ordinal from the enum; a second " &
+        "list is exactly what silently mislabels a trace when the enum moves.")
+    # No JS object literal keyed by a `Lang` member name is left in the file
+    # either: `LangC:` / `LangUnknown:` inside the importjs block would be a
+    # re-grown copy under another variable name.
+    for value in Lang:
+      check(not source.contains($value & ":"))
 
-  test "the two lists are the same length":
-    let jsMap = parseJsLangMap(readFile(TraceMetadataPath))
-    var enumCount = 0
-    for _ in Lang:
-      inc enumCount
-    check:
-      jsMap.len == enumCount
-    if jsMap.len != enumCount:
-      checkpoint(
-        "the Lang enum has " & $enumCount & " values but the JS LANG map in " &
-        TraceMetadataPath & " has " & $jsMap.len & " entries.")
+  test "the renderer's normalisation goes through decodeLangName":
+    let source = codeLinesOnly(readFile(TraceMetadataPath))
+    check source.contains("decodeLangName(")
+    # …and the MODE map is still there, deliberately: pinning or deleting it is
+    # LRS-6's (recorded in Language-Enum-Ordinal-Contracts.md as unpinned).
+    check source.contains("var MODE = {")
 
-  test "the JS map's ordinals are exactly 0 .. n-1 with no gaps or repeats":
-    # `cast[Trace](JSON.parse(...))` reinterprets the integer as a Lang, so a
-    # gap or an out-of-range value is an out-of-range enum in the renderer.
-    let jsMap = parseJsLangMap(readFile(TraceMetadataPath))
-    var seen = initHashSet[int]()
-    for name, ordinal in jsMap.pairs:
-      check:
-        ordinal >= 0 and ordinal < jsMap.len
-      if ordinal < 0 or ordinal >= jsMap.len:
-        checkpoint(
-          "`" & name & "` has ordinal " & $ordinal & ", outside 0 .. " &
-          $(jsMap.len - 1) & " for a " & $jsMap.len & "-entry map.")
-      check:
-        ordinal notin seen
-      if ordinal in seen:
-        checkpoint("ordinal " & $ordinal & " is used twice; `" & name &
-          "` collides with an earlier entry.")
-      seen.incl(ordinal)
+  test "ct trace-metadata puts the NAME on the hop, so the renderer's decoder is what runs":
+    # Found while collecting LRS-4's replay evidence: the vendored
+    # json_serialization writes an enum as `ord(value)` unless the type opts
+    # into text, so `ct trace-metadata --id=…` printed `"lang": 20` and the
+    # renderer's string branch never ran -- the integer fell through
+    # `cast[Trace]` unchecked.  `serializesAsTextInJson(Lang)` in
+    # `trace_index.nim` (the module every `Trace` encoder imports; the
+    # comment there says why it cannot sit in `metadata.nim`) is what makes
+    # the hop carry the name; the behavioural half (`Json.encode(Trace(...))`
+    # spells the name) is in `trace_index_migration_test.nim`.
+    let source = codeLinesOnly(readFile(TraceIndexPath))
+    check source.contains("serializesAsTextInJson(Lang)")
+
+  test "decodeLangName is parseEnum over the live enum (C backend; the JS half is frontend_lang_test)":
+    let source = readFile(RepoRoot / "src" / "common" / "common_lang.nim")
+    check source.contains("parseEnum[Lang](name, LangUnknown)")
+    for value in Lang:
+      let decoded = decodeLangName($value)
+      check decoded.lang == value
+      check decoded.retiredName == ""
+
+  test "a retired name decodes to the sentinel with the name kept, and never raises":
+    for name in RetiredLangNames:
+      var raised = false
+      var decoded: tuple[lang: Lang, retiredName: string]
+      try:
+        decoded = decodeLangName(name)
+      except CatchableError:
+        raised = true
+      checkpoint("retired name: " & name)
+      check(not raised)
+      check decoded.lang == LangUnknown
+      check decoded.retiredName == name
+      # The retired name is not a live member any more -- if it were, the
+      # "retired" entry above would be lying.
+      var live = false
+      for value in Lang:
+        if $value == name:
+          live = true
+      check(not live)
+    # The sentinel's own name and an empty name carry no retired name.
+    check decodeLangName("LangUnknown") == (lang: LangUnknown, retiredName: "")
+    check decodeLangName("") == (lang: LangUnknown, retiredName: "")
+    # A foreign string (never a member) is kept too: the renderer must not
+    # crash on a newer `ct`'s vocabulary, and the label is what the user sees.
+    check decodeLangName("LangNotAThing") ==
+      (lang: LangUnknown, retiredName: "LangNotAThing")
 
 # ---------------------------------------------------------------------------
 # Property 3 — the Nim Lang enum matches the canonical Rust Lang enum
@@ -576,12 +549,35 @@ suite "the Nim Lang enum is the canonical Rust Lang enum, ordinal for ordinal":
 
   test "the divergence from codetracer-native-backend is not re-introduced here":
     # The Nim enum's doc comment used to name the *native backend's* Lang as
-    # its partner.  Pin the two facts that made that wrong, so the comment
-    # cannot drift back: `LangPythonDb` is 21 here (it is 22 there, because
-    # that enum has a `Small` at 21), and `LangUnknown` is 22 here (26 there).
-    check ord(LangPythonDb) == 21
-    check ord(LangUnknown) == 22
-    check ord(LangC) == 0
+    # its partner.  Pin the facts that make that wrong, so the comment cannot
+    # drift back: that enum has `C` at 0, a `Small` at 21 and `Unknown` at
+    # 26; this one has had `LangUnknown` at 0 and `LangC` at 1 since LRS-4,
+    # and `LangPythonDb` at 20 (it was 21 here and is 22 there).
+    check ord(LangPythonDb) == 20
+    check ord(LangUnknown) == 0
+    check ord(LangC) == 1
+
+  test "LangUnknown is ordinal 0: the zero value IS the sentinel (LRS-4)":
+    # The renumber this series existed to make safe, pinned as a decision.
+    # `LangC` at 0 meant a proc over `Lang` that fell off its end answered
+    # "C" (property 1's defect, measured on seven real paths); with the
+    # sentinel at 0 the same slip answers "unknown".  The Rust side pins the
+    # same fact (`the_sentinel_is_ordinal_zero_and_the_default` in ct-lang)
+    # and property 3 above pins the two enums against each other, so moving
+    # the sentinel on one side is red twice and moving it on both is red
+    # here.
+    check Lang(0) == LangUnknown
+    check low(Lang) == LangUnknown
+    var zeroInitialised: Lang
+    check zeroInitialised == LangUnknown
+    check default(Lang) == LangUnknown
+    # And the two retired members are not in the enum under any spelling.
+    for value in Lang:
+      check ($value) notin RetiredLangNames
+    var count = 0
+    for _ in Lang:
+      inc count
+    check count == 39   # 41 (40 + the GDScript append) - LangPython - LangRuby
 
 # ---------------------------------------------------------------------------
 # Property 4 — exactly one ordinal-carrying `Lang` exists in the Rust tree

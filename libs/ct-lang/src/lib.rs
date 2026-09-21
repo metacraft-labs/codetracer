@@ -69,13 +69,21 @@
 //! absent and that every `lang: Lang` field on a serde struct carries the
 //! adapter.
 //!
-//! The `#[repr(u8)]`, `FromPrimitive` and the explicit ordinals remain: the
+//! The `#[repr(u8)]`, `FromPrimitive` and the explicit ordinal remain: the
 //! Nim enum and this one are still pinned ordinal for ordinal by the contract
-//! test (a lockstep renumber is now a test-visible refactor, not a wire
-//! break), and the retiring Rust TUI still decodes an integer `lang` column
-//! with `FromPrimitive` from a table that no longer exists.  Renumbering is
-//! milestone LRS-4's, gated on LRS-3 (the positional tables), not on any
-//! wire.
+//! test (a lockstep renumber is a test-visible refactor, not a wire break),
+//! and the retiring Rust TUI still decodes an integer `lang` column with
+//! `FromPrimitive` from a table that no longer exists.  LRS-4 (2026-09-21)
+//! made the first such renumber: `Unknown` moved to ordinal 0 -- so that
+//! `Lang::default()` and Nim's zero-initialised `result` both say "unknown"
+//! rather than "C" -- and `Python` / `Ruby`, the retired rr/gdb backends
+//! whose only content was a diagnostic, were deleted (`PythonDb` / `RubyDb`
+//! are the Python and Ruby identity; their wire names `pythondb` / `rubydb`
+//! are unchanged because `codetracer-native-backend`'s `Lang::from_str`
+//! knows them by those spellings).  `RustWasm` / `CppWasm` and `PolkaVM` /
+//! `Solana` stay until LRS-5 stores the axes: they are the persisted
+//! `recordings.lang` column's only way of saying "wasm" and "no source
+//! language" until then.
 //!
 //! It is **not** carried to `codetracer-native-backend`.  That repository has
 //! its own, deliberately different `Lang` (the languages the native backend
@@ -103,7 +111,8 @@ use num_derive::FromPrimitive;
 /// Ordinals MUST match the Nim `Lang` enum in `src/common/common_lang.nim`.
 /// `src/tests/cli/lang_enum_contract_test.nim` asserts that mechanically, name
 /// for name and ordinal for ordinal, and fails rather than silently comparing
-/// nothing if it cannot locate either list.
+/// nothing if it cannot locate either list.  `Unknown` is ordinal 0 and the
+/// `Default` (LRS-4): a `Lang` nobody set is the sentinel, never C.
 ///
 /// Deliberately NO `Serialize` / `Deserialize` derive (it used to be
 /// `serde_repr`'s, which wrote the ordinal): a `Lang` crosses a wire only
@@ -112,8 +121,11 @@ use num_derive::FromPrimitive;
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[repr(u8)]
 pub enum Lang {
+    /// The sentinel, at ordinal 0 (LRS-4) so that a zero-initialised or
+    /// defaulted `Lang` is "unknown" and not a plausible language.
     #[default]
-    C = 0,
+    Unknown = 0,
+    C,
     Cpp,
     Rust,
     Nim,
@@ -125,38 +137,42 @@ pub enum Lang {
     Lean,
     Julia,
     Ada,
-    Python,
-    Ruby,
+    /// Ruby, recorded by `codetracer-ruby-recorder`.  The `Db` suffix is
+    /// historical: it was the pair partner of the retired rr backend `Ruby`,
+    /// deleted in LRS-4.
     RubyDb,
     Javascript,
     Lua,
     Asm,
     Noir,
+    /// Kept until LRS-5 (with `CppWasm`): the persisted `recordings.lang`
+    /// column's only way of saying a Rust/C++ recording is a wasm one.
     RustWasm,
     CppWasm,
+    /// Python, recorded by `codetracer-python-recorder`; `Db` suffix as for
+    /// `RubyDb` (the retired `Python` was deleted in LRS-4).
     PythonDb,
-    Unknown,
-    // Ordinals 23+ have no `ct/load-locals` traffic: they are the shell and
-    // blockchain-VM languages, whose traces are materialized and read by the
-    // db-backend rather than stepped through a native frame.  They are NOT
-    // absent from the Nim frontend enum — `src/common/common_lang.nim`
-    // declares all 40 of these variants at the same ordinals, and
+    // The shell and blockchain-VM languages, whose traces are materialized
+    // and read by the db-backend rather than stepped through a native frame.
+    // They are NOT absent from the Nim frontend enum — `src/common/common_lang.nim`
+    // declares all 39 of these variants at the same ordinals, and
     // `src/tests/cli/lang_enum_contract_test.nim` asserts the two lists are
     // the same length, name for name.
     //
     // Shell languages, kept here for expr_loader tree-sitter support.
     Bash,
     Zsh,
-    // EVM/Solidity support (ordinal 25).
+    // EVM/Solidity support.
     Solidity,
-    // Blockchain VM languages (ordinals 26+).
+    // Blockchain VM languages.
     /// Miden MASM assembly (Polygon Miden zkVM)
     Masm,
     /// FuelVM Sway language
     Sway,
     /// Sui/Aptos Move language
     Move,
-    /// PolkaVM RISC-V (Polkadot smart contracts)
+    /// PolkaVM RISC-V (Polkadot smart contracts).  Kept until LRS-5 (with
+    /// `Solana`): names a target with no source language.
     PolkaVM,
     /// Cairo/StarkNet (zero-knowledge smart contracts)
     Cairo,
@@ -170,7 +186,7 @@ pub enum Lang {
     Aiken,
     /// Cadence/Flow (Flow smart contracts)
     Cadence,
-    /// Solana (Solana programs/smart contracts)
+    /// Solana (Solana programs/smart contracts).  Kept until LRS-5, as `PolkaVM`.
     Solana,
     /// Elixir/BEAM materialized traces
     Elixir,
@@ -178,9 +194,9 @@ pub enum Lang {
     Erlang,
     /// PHP materialized traces
     Php,
-    // GDScript (Godot). Ordinal 40, after Php. Materialized trace produced by the
-    // patched Godot engine recorder (GDScript-Recorder.md); also the VM sub-trace
-    // in a mixed native<->GDScript recording. Kept in sync with the Nim
+    // GDScript (Godot), last.  Materialized trace produced by the patched
+    // Godot engine recorder (GDScript-Recorder.md); also the VM sub-trace in a
+    // mixed native<->GDScript recording. Kept in sync with the Nim
     // src/common/common_lang.nim enum (lang_enum_contract_test asserts it).
     GDScript,
 }
@@ -205,6 +221,7 @@ impl Lang {
     /// `src/db-backend/src/lang.rs` pins down.
     pub fn wire_name(self) -> &'static str {
         match self {
+            Lang::Unknown => "unknown",
             Lang::C => "c",
             Lang::Cpp => "cpp",
             Lang::Rust => "rust",
@@ -217,8 +234,6 @@ impl Lang {
             Lang::Lean => "lean",
             Lang::Julia => "julia",
             Lang::Ada => "ada",
-            Lang::Python => "python",
-            Lang::Ruby => "ruby",
             Lang::RubyDb => "rubydb",
             Lang::Javascript => "javascript",
             Lang::Lua => "lua",
@@ -227,7 +242,6 @@ impl Lang {
             Lang::RustWasm => "rustwasm",
             Lang::CppWasm => "cppwasm",
             Lang::PythonDb => "pythondb",
-            Lang::Unknown => "unknown",
             Lang::Bash => "bash",
             Lang::Zsh => "zsh",
             Lang::Solidity => "solidity",
@@ -253,7 +267,8 @@ impl Lang {
     ///
     /// Used by the wire-name round-trip tests; kept next to [`Lang::wire_name`]
     /// so the two are updated together.
-    pub const ALL: [Lang; 41] = [
+    pub const ALL: [Lang; 39] = [
+        Lang::Unknown,
         Lang::C,
         Lang::Cpp,
         Lang::Rust,
@@ -266,8 +281,6 @@ impl Lang {
         Lang::Lean,
         Lang::Julia,
         Lang::Ada,
-        Lang::Python,
-        Lang::Ruby,
         Lang::RubyDb,
         Lang::Javascript,
         Lang::Lua,
@@ -276,7 +289,6 @@ impl Lang {
         Lang::RustWasm,
         Lang::CppWasm,
         Lang::PythonDb,
-        Lang::Unknown,
         Lang::Bash,
         Lang::Zsh,
         Lang::Solidity,
@@ -617,30 +629,48 @@ mod tests {
     use super::*;
 
     /// The three variants `src/tui/src/lang.rs` was missing before it was
-    /// deleted, at the ordinals the persisted `trace_index.db.lang` column
-    /// already contains.  A truncated copy of this enum answered `None` for
-    /// all three, and the TUI's `.expect("expected valid lang")` turned that
-    /// into a panic.
+    /// deleted.  A truncated copy of this enum answered `None` for all three
+    /// and the TUI's `.expect("expected valid lang")` turned that into a
+    /// panic.  The ordinals were 37, 38, 39 when the persisted column still
+    /// held integers; the column holds NAMES since trace_index schema
+    /// version 1, so the assertion that survives is that all three decode
+    /// as the last three before `GDScript`, whatever their number.
     #[test]
-    fn the_three_ordinals_the_tui_copy_was_missing_decode() {
+    fn the_three_variants_the_tui_copy_was_missing_decode() {
         use num_traits::FromPrimitive;
-        assert_eq!(<Lang as FromPrimitive>::from_i64(37), Some(Lang::Elixir));
-        assert_eq!(<Lang as FromPrimitive>::from_i64(38), Some(Lang::Erlang));
-        assert_eq!(<Lang as FromPrimitive>::from_i64(39), Some(Lang::Php));
+        let php = Lang::Php as u8;
+        assert_eq!(<Lang as FromPrimitive>::from_u8(php - 2), Some(Lang::Elixir));
+        assert_eq!(<Lang as FromPrimitive>::from_u8(php - 1), Some(Lang::Erlang));
+        assert_eq!(<Lang as FromPrimitive>::from_u8(php), Some(Lang::Php));
+        assert_eq!(<Lang as FromPrimitive>::from_u8(php + 1), Some(Lang::GDScript));
     }
 
-    /// The ordinals nothing may move without a data migration of the
-    /// `recordings.lang` column.
+    /// The layout LRS-4 chose, pinned on this side too (the Nim contract test
+    /// pins the two enums against each other; this pins the DECISION, so a
+    /// lockstep move of `Unknown` off zero is a red test here as well).
     #[test]
-    fn the_pinned_ordinals_are_where_the_persisted_column_expects_them() {
-        assert_eq!(Lang::C as u8, 0);
-        assert_eq!(Lang::PythonDb as u8, 21);
-        assert_eq!(Lang::Unknown as u8, 22);
-        // 41 since `GDScript` was appended at ordinal 40.  This read 40 for
-        // a while after that append and the failure went unnoticed, which is
-        // the drift the Nim contract test exists to catch on the other side.
-        assert_eq!(Lang::ALL.len(), 41);
-        assert_eq!(Lang::GDScript as u8, 40);
+    fn the_sentinel_is_ordinal_zero_and_the_default() {
+        assert_eq!(Lang::Unknown as u8, 0);
+        assert_eq!(Lang::default(), Lang::Unknown);
+        assert_eq!(Lang::ALL[0], Lang::Unknown);
+        assert_eq!(Lang::C as u8, 1);
+        // 39 since LRS-4 deleted `Python` and `Ruby` from the 41 (40 plus the
+        // `GDScript` append).  This length read 40 for a while after that
+        // append and the failure went unnoticed, which is the drift the Nim
+        // contract test exists to catch on the other side.
+        assert_eq!(Lang::ALL.len(), 39);
+        assert_eq!(Lang::GDScript as u8, 38);
+    }
+
+    /// The retired members' wire names are gone with them, and nothing else
+    /// took the spellings: a `python` or `ruby` on the worker socket is a
+    /// refused request, not a silently re-pointed one.
+    #[test]
+    fn the_retired_wire_names_resolve_to_nothing() {
+        assert_eq!(Lang::from_wire_name("python"), None);
+        assert_eq!(Lang::from_wire_name("ruby"), None);
+        assert_eq!(Lang::from_wire_name("pythondb"), Some(Lang::PythonDb));
+        assert_eq!(Lang::from_wire_name("rubydb"), Some(Lang::RubyDb));
     }
 
     /// `Lang::ALL` must be exactly the enum, in order, with nothing past the

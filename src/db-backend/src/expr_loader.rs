@@ -35,7 +35,7 @@ pub struct NodeNames {
 static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     let mut m = HashMap::new();
     m.insert(
-        Lang::Ruby,
+        Lang::RubyDb,
         NodeNames {
             if_conditions: vec!["if".to_string()],
             else_conditions: vec!["elsif".to_string(), "else".to_string()],
@@ -650,7 +650,9 @@ impl ExprLoader {
             if extension == "nr" {
                 Lang::Noir
             } else if extension == "rb" {
-                Lang::Ruby
+                // `RubyDb` is THE Ruby member since LRS-4 deleted the retired
+                // rr backend `Ruby`, which this used to answer.
+                Lang::RubyDb
             } else if extension == "c" {
                 Lang::C
             } else if extension == "cpp" || extension == "cc" {
@@ -714,7 +716,7 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_cpp::LANGUAGE.into())?;
         } else if lang == Lang::Pascal {
             parser.set_language(&tree_sitter_pascal::LANGUAGE.into())?;
-        } else if lang == Lang::Ruby {
+        } else if lang == Lang::RubyDb {
             parser.set_language(&tree_sitter_ruby::LANGUAGE.into())?;
         } else if lang == Lang::PythonDb {
             parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
@@ -1425,7 +1427,7 @@ impl ExprLoader {
 
                 true
             }
-            Lang::Ruby | Lang::RubyDb => {
+            Lang::RubyDb => {
                 // Filter out non-variable identifiers in Ruby code.
                 //
                 // In tree-sitter-ruby, we want only actual variable references.
@@ -2163,7 +2165,7 @@ impl ExprLoader {
             }
         } else if NODE_NAMES[&lang].loops.contains(&node.kind().to_string()) && start != end {
             self.register_loop(start, end, path)
-        } else if lang == Lang::Ruby && node.kind() == "call" {
+        } else if lang == Lang::RubyDb && node.kind() == "call" {
             if let Some(block_node) = node.child_by_field_name("block")
                 && let Some(method_node) = node.child_by_field_name("method")
             {
@@ -2406,7 +2408,7 @@ impl ExprLoader {
 
     pub fn register_loop(&mut self, start: Position, end: Position, path: &PathBuf) {
         let lang = self.get_current_language(path);
-        let offset = if lang == Lang::Ruby || lang == Lang::RustWasm {
+        let offset = if lang == Lang::RubyDb || lang == Lang::RustWasm {
             1
         } else {
             0
@@ -2508,7 +2510,7 @@ impl ExprLoader {
             }
             if updated_location.function_name.is_empty() {
                 let lang = self.get_current_language(path_buf);
-                if lang == Lang::Javascript || lang == Lang::PythonDb || lang == Lang::Ruby {
+                if lang == Lang::Javascript || lang == Lang::PythonDb || lang == Lang::RubyDb {
                     updated_location.function_name = "<module>".to_string();
                     updated_location.high_level_function_name = "<module>".to_string();
                     updated_location.function_first = 1;

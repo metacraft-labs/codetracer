@@ -14,7 +14,7 @@
 ##
 ## ## What the decomposition suite pins, and why it is the important one
 ##
-## The four axes are only worth having if the 41 values of `Lang` genuinely
+## The four axes are only worth having if the 39 values of `Lang` genuinely
 ## decompose onto them.  Until LRS-2B that decomposition lived HERE, in the
 ## test, as the safety net for the migration; it is now `axesOfLang` in
 ## `src/common/common_lang.nim` — the production table `recorder_dispatch.nim`
@@ -35,6 +35,7 @@ import std/[algorithm, os, sets, strutils, unittest]
 import ../../common/target_axes
 import ../../common/target_assessment
 import ../../common/lang
+import ../../common/types   # tokenTextsFor / TOKEN_TEXTS (common_types)
 import ../../ct/trace/recorder_dispatch
 
 const
@@ -126,10 +127,11 @@ suite "every axis token is present, distinct and well-formed":
       if v != raUnknown: check token(v) != UnknownToken
 
   test "the sentinel is ordinal 0 on every axis":
-    # `Lang` puts `LangC` at ordinal 0, so a proc that falls off its end answers
-    # "C" -- the defect documented at
-    # `src/ct/utilities/language_detection.nim:125-146`.  A zero-initialised
-    # value on these axes says "not determined".
+    # `Lang` used to put `LangC` at ordinal 0, so a proc that fell off its end
+    # answered "C" -- the defect documented on `detectLangFromPath` in
+    # `src/ct/utilities/language_detection.nim`.  LRS-4 put `LangUnknown` at 0
+    # (pinned by `lang_enum_contract_test`); these axes had the property from
+    # the start.  A zero-initialised value on them says "not determined".
     check ord(slUnknown) == 0
     check ord(tiUnknown) == 0
     check ord(tcUnknown) == 0
@@ -546,7 +548,7 @@ type
 func decompose(lang: Lang): Decomposition =
   ## The PRODUCTION decomposition, `axesOfLang` (`src/common/common_lang.nim`),
   ## in the tuple shape the assertions below were written against.  This used
-  ## to be a second, test-local exhaustive `case` over all 41 values; LRS-2B
+  ## to be a second, test-local exhaustive `case` over all 41 (then) values; LRS-2B
   ## moved it into production so the dispatch table could select on it, and
   ## it must not survive in both places.  Everything the local copy asserted
   ## is asserted of the production one.
@@ -562,7 +564,7 @@ const
     ## production); this set is the test's independent statement of which
     ## two, so the production list cannot quietly grow.
 
-suite "all 41 Lang values decompose onto the four axes":
+suite "all 39 Lang values decompose onto the four axes":
 
   test "the production exception list is exactly the two this file expects":
     var listed: set[Lang] = {}
@@ -577,7 +579,7 @@ suite "all 41 Lang values decompose onto the four axes":
         producesMaterializedTrace(decompose(exception.lang).approach)
       check usesMaterializedTraces(exception.lang) == exception.materialized
 
-  test "the decomposition agrees with usesMaterializedTraces on 39 of 41":
+  test "the decomposition agrees with usesMaterializedTraces on 37 of 39":
     var disagreements: seq[string] = @[]
     for lang in Lang:
       let d = decompose(lang)
@@ -619,15 +621,44 @@ suite "all 41 Lang values decompose onto the four axes":
     check lua.isDeclared
     check "Lua" in lua.recorderLabel
 
-  test "the four conflated pairs collapse to one language each":
+  test "the two surviving conflated pairs collapse to one language each":
+    # Four pairs until LRS-4; the Python and Ruby pairs lost their retired
+    # half (`LangPython`, `LangRuby`), so `LangPythonDb` / `LangRubyDb` stand
+    # alone as the language and there is nothing left to collapse.  The wasm
+    # pair stays until LRS-5 (see the `Lang` doc comment) and still collapses.
     check decompose(LangRust).language == decompose(LangRustWasm).language
     check decompose(LangRust).isa != decompose(LangRustWasm).isa
     check decompose(LangCpp).language == decompose(LangCppWasm).language
     check decompose(LangCpp).isa != decompose(LangCppWasm).isa
-    check decompose(LangPython).language == decompose(LangPythonDb).language
-    check decompose(LangPython).approach != decompose(LangPythonDb).approach
-    check decompose(LangRuby).language == decompose(LangRubyDb).language
-    check decompose(LangRuby).approach != decompose(LangRubyDb).approach
+    # Each source language that had a retired partner is now reached by
+    # exactly one Lang value.
+    for language in [slPython, slRuby]:
+      var members: seq[Lang] = @[]
+      for lang in Lang:
+        if decompose(lang).language == language:
+          members.add(lang)
+      checkpoint(token(language) & " members: " & $members)
+      check members.len == 1
+    check decompose(LangPythonDb).approach == raInstrumentedRuntime
+    check decompose(LangRubyDb).approach == raInstrumentedRuntime
+
+  test "the value renderer's bracket vocabulary follows the source language, not the ISA (LRS-4)":
+    # `tokenTextsFor` used to put `LangRustWasm` / `LangCppWasm` in the
+    # generic `[`/`]` row while `LangRust` got `vec![` and `LangCpp`
+    # `vector[`: a wasm-recorded Rust sequence rendered with the wrong
+    # brackets because the ISA had been welded onto the language.  Two
+    # members that decompose to the same source language must spell the
+    # same brackets, and the wasm members must equal their plain siblings.
+    check tokenTextsFor(LangRustWasm) == tokenTextsFor(LangRust)
+    check tokenTextsFor(LangCppWasm) == tokenTextsFor(LangCpp)
+    check tokenTextsFor(LangRust)[SeqOpen] == "vec!["
+    check TOKEN_TEXTS[LangRustWasm][SeqOpen] == "vec!["
+    for a in Lang:
+      for b in Lang:
+        if a != b and decompose(a).language == decompose(b).language and
+           decompose(a).language != slUnknown:
+          checkpoint($a & " vs " & $b)
+          check tokenTextsFor(a) == tokenTextsFor(b)
 
   test "exactly the two platform pseudo-languages have no source language":
     var languageless: set[Lang] = {}
@@ -691,8 +722,11 @@ suite "all 41 Lang values decompose onto the four axes":
     # and under raRr alike, so nothing downstream noticed.  The only `Lang`
     # values that exist to name a NON-default approach are the retired rr
     # pair; everything else must decompose to `defaultRecordingApproach` of
-    # its own ISA.
-    const NonDefaultApproachByDesign = {LangPython, LangRuby}
+    # its own ISA.  Since LRS-4 deleted that pair the exception set is EMPTY
+    # and every value decomposes to its ISA's default -- which is also what
+    # makes `record_assessment.nim`'s non-default-approach branch a rule with
+    # no current instance.
+    const NonDefaultApproachByDesign: set[Lang] = {}
     for lang in Lang:
       let d = decompose(lang)
       if lang in NonDefaultApproachByDesign:
@@ -704,6 +738,9 @@ suite "all 41 Lang values decompose onto the four axes":
             token(defaultRecordingApproach(d.isa)) & " but decomposed " &
             token(d.approach))
         check defaultRecordingApproach(d.isa) == d.approach
+    # No Lang value names the retired native-replay approaches at all.
+    for lang in Lang:
+      check decompose(lang).approach notin {raRr, raTtd}
 
 # ---------------------------------------------------------------------------
 # The `.nim` / `.nims` pair: the canonical proof that the axes are independent
@@ -867,7 +904,7 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
   ## domain plus the native family".  `isSupportedLang` (`common_lang.nim`)
   ## states that on the AXES so the JS front end can evaluate it; this suite
   ## is what keeps it honest: `recorderToolFor` is the authority on which
-  ## recorders exist, and the two are compared member for member over all 41
+  ## recorders exist, and the two are compared member for member over all 39
   ## values.  A recorder that lands (`supported: false` -> `true`) without
   ## `DeclaredUnsupportedLangs` losing the member fails here, as does the
   ## reverse.
@@ -881,7 +918,7 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
     elif tool.supported: true
     else: not tool.isDeclared
 
-  test "isSupportedLang agrees with recorderToolFor on every one of the 41 values":
+  test "isSupportedLang agrees with recorderToolFor on every one of the 39 values":
     var disagreements: seq[string] = @[]
     for lang in Lang:
       if isSupportedLang(lang) != derivedFromDispatch(lang):
@@ -893,10 +930,11 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
 
   test "the declared-unsupported set is exactly the table's non-retired `supported: false` arms":
     # Members whose axes name a recorder the table DECLARES but does not
-    # support.  `LangPython`/`LangRuby` are declared-unsupported too, but by
-    # `retiredNativeReplayTool` on the approach axis, which `isSupportedLang`
-    # already excludes as `raRr` -- so they must NOT be in the set, or an
-    # entry would be dead and would hide a later real drift.
+    # support.  (Until LRS-4 `LangPython`/`LangRuby` were declared-unsupported
+    # too, but by `retiredNativeReplayTool` on the approach axis, which
+    # `isSupportedLang` excludes as `raRr`; the filter below is kept so a
+    # member that ever decomposes to a retired approach again is excluded the
+    # same way rather than landing in this set.)
     var expected: set[Lang] = {}
     for lang in Lang:
       let tool = recorderToolFor(selectorOfLang(lang))

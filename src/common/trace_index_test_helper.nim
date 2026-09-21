@@ -457,6 +457,76 @@ proc scenarioLangNameRoundTrip() =
 
   echo "PASS"
 
+proc scenarioRetiredLangRows() =
+  ## LRS-4 deleted `LangPython` and `LangRuby`; a `trace_index.db` written by
+  ## an older build can still hold either NAME in `recordings.lang`.  Through
+  ## the PRODUCTION loader (`find`, `all`, `findRecentTraces`) such a row must
+  ## decode to `LangUnknown` with the name kept in `langRetiredName`, must
+  ## keep its label, and must not stop the rows beside it from loading
+  ## (design §5.6; `decodeLangColumn`).  The rows are written with raw SQL
+  ## because no production writer can spell a retired name any more -- that
+  ## is what "retired" means.
+  let live = trace_index.newID(test = false)
+  insertRecording(live)
+  let retiredRuby = trace_index.newID(test = false)
+  insertRecording(retiredRuby)
+  let retiredPython = trace_index.newID(test = false)
+  insertRecording(retiredPython)
+  block:
+    var db = open(traceIndexDbPath(), "", "", "")
+    defer: db.close()
+    db.exec(sql"UPDATE recordings SET lang = ? WHERE recording_id = ?",
+            "LangRuby", retiredRuby)
+    db.exec(sql"UPDATE recordings SET lang = ? WHERE recording_id = ?",
+            "LangPython", retiredPython)
+    for (id, expected) in [(retiredRuby, "LangRuby"), (retiredPython, "LangPython")]:
+      let raw = db.getValue(
+        sql"SELECT lang FROM recordings WHERE recording_id = ?", id)
+      if raw != expected:
+        fail("fixture: recordings.lang should hold " & expected & "; got " & raw.escape())
+
+  for (id, name) in [(retiredRuby, "LangRuby"), (retiredPython, "LangPython")]:
+    let found = trace_index.find(id, test = false)
+    if found.isNil:
+      fail("find returned nil for the retired row " & id)
+    if found.lang != LangUnknown:
+      fail("retired row " & name & " decoded to " & $found.lang & ", expected LangUnknown")
+    if found.langRetiredName != name:
+      fail("retired row " & name & " kept langRetiredName " &
+           found.langRetiredName.escape() & ", expected " & name)
+    if found.langLabel != name:
+      fail("retired row " & name & " labels as " & found.langLabel & ", expected " & name)
+
+  let liveTrace = trace_index.find(live, test = false)
+  if liveTrace.isNil or liveTrace.lang != LangNoir or liveTrace.langRetiredName.len > 0:
+    fail("the live row beside the retired ones must still decode as LangNoir")
+
+  # The listings that a retired row used to be able to take down.
+  let everything = trace_index.all(test = false)
+  var seen = 0
+  for t in everything:
+    if t.recordingId in [live, retiredRuby, retiredPython]:
+      inc seen
+  if seen != 3:
+    fail("all() returned " & $seen & " of the 3 rows; a retired name must not hide a row")
+  let recent = trace_index.findRecentTraces(10, test = false)
+  var labels: seq[string] = @[]
+  for t in recent:
+    labels.add(t.langLabel)
+  if "LangRuby" notin labels or "LangPython" notin labels or "LangNoir" notin labels:
+    fail("findRecentTraces labels were " & $labels &
+         "; expected LangRuby, LangPython and LangNoir among them")
+
+  # Nothing rewrote the cells: the raw names stay on disk for LRS-5's remap.
+  block:
+    var db = open(traceIndexDbPath(), "", "", "")
+    defer: db.close()
+    if db.getValue(sql"SELECT lang FROM recordings WHERE recording_id = ?",
+                   retiredRuby) != "LangRuby":
+      fail("the retired cell was rewritten; it must stay LangRuby on disk")
+
+  echo "PASS"
+
 proc scenarioMigrateLegacyDb() =
   ## The end-to-end gate on ``ensureDB``: a hand-built schema-version-0
   ## database sitting at the real path is migrated on the next open, without
@@ -539,5 +609,6 @@ when isMainModule:
   of "recent-folder-trailing-separators": scenarioRecentFolderTrailingSeparators()
   of "lang-name-roundtrip": scenarioLangNameRoundTrip()
   of "migrate-legacy-db": scenarioMigrateLegacyDb()
+  of "retired-lang-rows": scenarioRetiredLangRows()
   else:
     fail("unknown scenario: " & paramStr(1))

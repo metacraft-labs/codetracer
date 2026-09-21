@@ -379,14 +379,17 @@ suite "NTR-2: the core delegates recognition to ct-native-replay":
     check langFromWireName("no-such-language") == LangUnknown
 
     # The plain interpreter spellings, which are what NTR-3's shebang signal
-    # will produce.  `toLang` is ASYMMETRIC about these — `"python"` gives
-    # `LangPythonDb` but `"ruby"` gives `LangRuby`, which does NOT use
-    # materialized traces and would therefore send a Ruby script down the
-    # NATIVE path.  Both are pinned to the recorder-selecting value so the wire
-    # mapping is uniform; without the second line, `recognize` reporting
-    # `interpreter: ruby` would silently change which recorder runs.
+    # will produce.  `toLang` used to be ASYMMETRIC about these — `"python"`
+    # gave `LangPythonDb` but `"ruby"` gave `LangRuby`, the retired rr
+    # backend, which did NOT use materialized traces and would have sent a
+    # Ruby script down the NATIVE path.  LRS-4 deleted `LangRuby` (design
+    # Q6), so `toLang` and the wire table now AGREE on both; the wire rows
+    # stay explicit and this pins that they select the recorder AND that
+    # they no longer shadow `toLang`.
     check langFromWireName("python") == LangPythonDb
     check langFromWireName("ruby") == LangRubyDb
+    check toLang("ruby") == LangRubyDb
+    check toLang("python") == LangPythonDb
     check langFromWireName("PythonDb") == LangPythonDb   # case-insensitive
     check langFromWireName("  ruby  ") == LangRubyDb     # and whitespace
     # Every value this table maps must select a recorder that actually uses a

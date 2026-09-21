@@ -2,6 +2,13 @@ import std/strutils,
   ../../common/[trace_index],
   json_serialization
 
+# `Trace.lang` crosses the `ct trace-metadata` -> Electron main process hop
+# as the enum's NAME, never its ordinal (LRS-4, 2026-09-21).  The rule that
+# makes `Json.encode(trace)` below spell the name is `serializesAsTextInJson(Lang)`
+# in `src/common/trace_index.nim` (imported here), beside the persisted
+# column's own name-only rule; see the comment there for the finding that
+# put it in.
+
 # Returns a number of types of info from trace_index in JSON format
 proc traceMetadata*(
     # M-REC-2: ``idArg`` is a UUIDv7 recording-id string.  Proc/param

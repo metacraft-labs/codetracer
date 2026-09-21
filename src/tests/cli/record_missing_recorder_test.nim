@@ -186,10 +186,11 @@ suite "ct record missing-recorder diagnostics":
       check exitCode != 0
 
       # 2. The message names the language — the SOURCE language, on its own
-      #    axis (`displayName(slRuby) == "Ruby"`), not `toName(LangRubyDb) ==
-      #    "Ruby(db)"`, which spells a language and a recording mode by hand
-      #    in one string.  Since LRS-2B the diagnostic is built from the
-      #    selector, so this is what a user reads.
+      #    axis (`displayName(slRuby) == "Ruby"`), not the `toName` of the
+      #    member, which until LRS-4 spelled a language and a recording mode
+      #    by hand in one string (`"Ruby(db)"`; it is `"Ruby"` now that the
+      #    retired pair partner is gone).  Since LRS-2B the diagnostic is
+      #    built from the selector, so this is what a user reads.
       check displayName(sourceLanguageOf(missing.lang)) in output
 
       # 3. The message names the remedy.
@@ -239,3 +240,61 @@ suite "ct record missing-recorder diagnostics":
     check exitCode != 0
     check "--server" in output
     check displayName(sourceLanguageOf(LangNoir)) in output
+
+  test "--lang ruby names the working Ruby recorder, and --lang ruby(db) is announced as deprecated (LRS-4, Q6)":
+    require fileExists(ct)
+    # Before LRS-4 `--lang ruby` named `LangRuby`, the retired rr backend, and
+    # `ct record --lang ruby foo.rb` printed "CodeTracer has no recorder for
+    # Ruby" with advice to "pass `--lang ruby(db)`".  Now both spellings reach
+    # the Ruby recorder -- which is absent here, so the diagnostic is the
+    # MISSING-RECORDER one naming `codetracer-ruby-recorder`, not the retired
+    # one -- and only the deprecated spelling gets a note.
+    let dir = scratch / "lang-ruby-q6"
+    removeDir(dir)
+    createDir(dir)
+    let program = dir / "program.rb"
+    writeFile(program, "puts 1\n")
+    let note = deprecatedLangSpellingNote("ruby(db)")
+    check note.len > 0
+
+    let (plain, plainExit) = runWithoutRecorders(
+      ct, program, dir / "out-ruby", emptyDir, extra = @["--lang", "ruby"])
+    checkpoint("ct --lang ruby output:\n" & plain)
+    check plainExit != 0
+    check "codetracer-ruby-recorder" in plain
+    check "retired" notin plain
+    check "no recorder for Ruby" notin plain
+    check note notin plain
+
+    let (aliased, aliasedExit) = runWithoutRecorders(
+      ct, program, dir / "out-rubydb", emptyDir, extra = @["--lang", "ruby(db)"])
+    checkpoint("ct --lang ruby(db) output:\n" & aliased)
+    check aliasedExit != 0
+    check "codetracer-ruby-recorder" in aliased
+    check note in aliased
+    check aliased.count(note) == 1     # once: ct prints it, db-backend-record does not
+
+    # WHAT THIS CASE CAN AND CANNOT SEE (test-integrity note, LRS-4 review).
+    # `ct` here is whatever `src/build-debug/bin/ct` currently is, and no lane
+    # in this file builds it (`test-cli-record` depends on `vm-test-prereqs`,
+    # which only runs the tailwind extract).  A ct built BEFORE LRS-4 is
+    # caught: it prints "no recorder for Ruby" / "retired" and the three
+    # `notin` checks above go red.  A ct built from a tree where only the
+    # `stderr.writeLine(deprecationNote)` call was removed is NOT caught —
+    # the stale binary still prints the note and this case still passes.  The
+    # guard for that mutation is therefore NOT here but in
+    # `record_backend_selection_test.nim`, which pins the call site in
+    # `src/ct/trace/record.nim`'s source and needs no binary at all; if the
+    # note's production call site is ever asserted only through a shipped
+    # binary again, the assertion becomes conditional on a rebuild nobody
+    # scheduled.  An mtime freshness gate — the shape
+    # `ci/test/desktop-capabilities-dispatch.sh` uses, where a core older
+    # than `help_delegate.nim` is a HARD failure — is deliberately NOT added
+    # here: that lane documents `just build-once` as a prerequisite, while
+    # `just test-cli-record` never builds `ct` at all (it depends only on
+    # `vm-test-prereqs`, the tailwind extract), so the same gate would fail
+    # the lane for every developer who edits `record.nim` and runs the tests,
+    # which is this lane's normal flow.  Mtime is a poor proxy here for a
+    # second reason: the verification workflow copies sources in after
+    # building, so a current binary routinely looks older than the
+    # byte-identical sources it was built from.

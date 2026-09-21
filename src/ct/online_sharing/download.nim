@@ -171,7 +171,7 @@ proc importDownloadedRecording(downloaded: DownloadedArtifact,
   var lang = detectLang(programFilename, LangUnknown, isWasm)
   if downloaded.hasRecord and downloaded.record.kind == akRecording and
       downloaded.record.metadata.langName.len > 0:
-    # `langName` is `$Lang` as the uploader wrote it (`LangNoir`, `LangRuby`,
+    # `langName` is `$Lang` as the uploader wrote it (`LangNoir`, `LangRubyDb`,
     # …).  An unparseable value is ignored rather than fatal: a wrong guess at
     # the language costs a syntax-highlighting mode, and refusing an otherwise
     # complete download over it would be the wrong trade.

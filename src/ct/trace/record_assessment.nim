@@ -23,9 +23,10 @@
 ## * The KIND decides where it can (`.nims` → `nimscript`, `Cargo.toml` +
 ##   `wasm32` → `wasm-cargo-project`, every project marker present → every
 ##   project kind, per Q10), and the `Lang` value's own axes answer where it
-##   cannot.  A `Lang` that exists precisely to name a non-default ISA or
-##   approach (`LangRustWasm`, the retired `LangPython`/`LangRuby`) keeps
-##   that answer.
+##   cannot.  A `Lang` that exists precisely to name a non-default ISA
+##   (`LangRustWasm`, kept until LRS-5) keeps that answer.  (Until LRS-4 the
+##   retired `LangPython`/`LangRuby` did the same for a non-default
+##   APPROACH; no `Lang` value names one any more.)
 ## * Two facts that would dispatch differently are a REFUSAL, never a pick
 ##   (rule K2): two project manifests implying two toolchains, or two kinds
 ##   implying two ISAs, land in `diagnostics` and the caller refuses — unless
@@ -140,10 +141,13 @@ proc assessRecordingTarget*(program: string, lang: Lang,
          fromKind != fallbackTargetIsaForLanguage(axes.language): fromKind
       else: axes.targetIsa
     if axes.approach != defaultRecordingApproach(axes.targetIsa):
-      # The `Lang` value names a non-default approach: `LangPython` /
-      # `LangRuby` are `raRr` on an interpreted ISA whose default is the
-      # instrumented runtime.  That IS the fact the user stated with `--lang`,
-      # so it is kept and the dispatch table gets to say what it thinks of it.
+      # The `Lang` value names a non-default approach.  Since LRS-4 deleted
+      # `LangPython` / `LangRuby` (`raRr` on an interpreted ISA whose default
+      # is the instrumented runtime) no `Lang` value does, and
+      # `target_axes_test.nim` pins that; the branch is kept because it is
+      # the rule -- a value that DID name one would be the fact the user
+      # stated with `--lang`, kept for the dispatch table to judge -- and a
+      # rule with no current instance is not a dead rule.
       result.recordingApproach = axes.approach
     else:
       result.recordingApproach = defaultRecordingApproach(result.targetIsa)

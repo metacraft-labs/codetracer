@@ -701,8 +701,11 @@ impl DapMeasurementDriver {
             Language::Rust => Lang::Rust,
             Language::Nim => Lang::Nim,
             Language::Go => Lang::Go,
-            Language::Python => Lang::Python,
-            Language::Ruby => Lang::Ruby,
+            // `PythonDb` / `RubyDb` are the Python and Ruby members; the
+            // retired rr backends `Python` / `Ruby` this used to name were
+            // deleted in LRS-4.
+            Language::Python => Lang::PythonDb,
+            Language::Ruby => Lang::RubyDb,
             Language::JavaScript => Lang::Javascript,
             Language::Cairo => Lang::Cairo,
             Language::Solana => Lang::Solana,

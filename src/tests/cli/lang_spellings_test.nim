@@ -26,6 +26,8 @@ suite "the spellings table is one exhaustive case, built once":
       for spelling in langSpellings(lang):
         expected.add((spelling, lang))
     check LANG_SPELLINGS == expected
+    # 64 at LRS-3; LRS-4 deleted `LangRuby`'s one row (`ruby`) and gave the
+    # spelling to `LangRubyDb`, so the count is unchanged: the row MOVED.
     check LANG_SPELLINGS.len == 64
 
   test "no spelling is claimed twice, and every one is lower-case and non-empty":
@@ -47,16 +49,34 @@ suite "the spellings table is one exhaustive case, built once":
                  "ts", "mjs", "sh", "bash", "zsh", "pythondb", "rubydb"]:
       check toLang(miss) == LangUnknown
 
-  test "exactly four members have no spelling, each for a recorded reason":
+  test "exactly three members have no spelling, each for a recorded reason":
     var silent: set[Lang] = {}
     for lang in Lang:
       if langSpellings(lang).len == 0:
         silent.incl(lang)
-    # LangPython: unreachable from any input (design §3.1); `python`/`py`
-    # name LangPythonDb.  LangUnknown: the sentinel.  LangBash/LangZsh: reach
-    # `ct record` through `LANGS`, which is not this table (see the
-    # `langSpellings` doc comment).
-    check silent == {LangPython, LangUnknown, LangBash, LangZsh}
+    # LangUnknown: the sentinel.  LangBash/LangZsh: reach `ct record` through
+    # `LANGS`, which is not this table (see the `langSpellings` doc comment).
+    # Until LRS-4 `LangPython` was the fourth -- unreachable from any input
+    # (design §3.1) because `python`/`py` always named LangPythonDb -- and it
+    # is gone.
+    check silent == {LangUnknown, LangBash, LangZsh}
+
+  test "the deprecated aliases are spellings of their member and name a preferred one (Q6)":
+    ## `DeprecatedLangSpellings` is the alias table `ct record` announces
+    ## from.  Each row must still RESOLVE (or the note would announce a
+    ## deprecation of something that already broke), to the same member the
+    ## preferred spelling names.
+    check DeprecatedLangSpellings.len == 1
+    for row in DeprecatedLangSpellings:
+      checkpoint("deprecated: " & row.spelling)
+      check toLang(row.spelling) == row.lang
+      check toLang(row.preferred) == row.lang
+      check row.spelling in langSpellings(row.lang)
+      check row.preferred in langSpellings(row.lang)
+      check row.spelling != row.preferred
+    check DeprecatedLangSpellings[0].spelling == "ruby(db)"
+    check DeprecatedLangSpellings[0].lang == LangRubyDb
+    check DeprecatedLangSpellings[0].preferred == "ruby"
 
 suite "the asm rows are unified (design §2.5): asm AND s, masm AND miden, on the core side":
 
@@ -98,9 +118,9 @@ suite "the asm rows are unified (design §2.5): asm AND s, masm AND miden, on th
     check toLang("dlang") == LangD
     check toLang("python") == LangPythonDb
     check toLang("py") == LangPythonDb
-    check toLang("ruby") == LangRuby          # the retired backend, still (Q6)
+    check toLang("ruby") == LangRubyDb        # the working recorder since LRS-4 (Q6)
     check toLang("rb") == LangRubyDb
-    check toLang("ruby(db)") == LangRubyDb
+    check toLang("ruby(db)") == LangRubyDb    # deprecated alias, still resolves
     check toLang("rust-wasm") == LangRustWasm
     check toLang("cppwasm") == LangCppWasm
     check toLang("gd") == LangGdScript
@@ -112,34 +132,36 @@ suite "the spellings agree with the other tables over Lang":
 
   test "a member's canonical extension names the member, except the conflations and the shells":
     ## `toLang(getExtensionName(lang)) == lang` for every member with an
-    ## extension, except: the four conflated members whose extension resolves
-    ## to the working/plain sibling (`py` -> LangPythonDb, `rb` -> LangRubyDb,
-    ## `rs` -> LangRust, `cpp` -> LangCpp), and the two shells, which have no
-    ## spelling here.  Pinned as an exact set so a new member cannot join it
-    ## unnoticed.
+    ## extension, except: the two wasm members whose extension resolves to
+    ## the plain sibling (`rs` -> LangRust, `cpp` -> LangCpp), and the two
+    ## shells, which have no spelling here.  Pinned as an exact set so a new
+    ## member cannot join it unnoticed.  (`LangPython` / `LangRuby` were two
+    ## more exceptions -- `py` -> LangPythonDb, `rb` -> LangRubyDb -- until
+    ## LRS-4 deleted them.)
     var exceptions: set[Lang] = {}
     for lang in Lang:
       let ext = getExtensionName(lang)
       if ext.len > 0 and toLang(ext) != lang:
         exceptions.incl(lang)
-    check exceptions == {LangPython, LangRuby, LangRustWasm, LangCppWasm,
-                         LangBash, LangZsh}
+    check exceptions == {LangRustWasm, LangCppWasm, LangBash, LangZsh}
 
   test "a member's name (toCLang) names the member, except the folded, the shells and asm":
     ## `toLang(toCLang(lang)) == lang` except where the name is shared and
-    ## resolves to the other member (`python` -> LangPythonDb so LangPython
-    ## fails; `ruby` -> LangRuby so LangRubyDb fails; `rust`/`cpp` -> the plain
-    ## members), where the member has no spelling (the shells), and
-    ## `assembly`, which has never been an input spelling of LangAsm on either
-    ## side.  The sentinel is NOT an exception: `unknown` is a miss, and a
-    ## miss is LangUnknown.
+    ## resolves to the other member (`rust`/`cpp` -> the plain members), where
+    ## the member has no spelling (the shells), and `assembly`, which has
+    ## never been an input spelling of LangAsm on either side.  The sentinel
+    ## is NOT an exception: `unknown` is a miss, and a miss is LangUnknown.
+    ## Since LRS-4 `ruby` and `python` round-trip too: `toCLang(LangRubyDb)`
+    ## is `ruby` and `toLang("ruby")` is LangRubyDb (it used to be the retired
+    ## LangRuby, which put LangRubyDb in this set), and LangPython is gone.
     var exceptions: set[Lang] = {}
     for lang in Lang:
       if toLang(toCLang(lang)) != lang:
         exceptions.incl(lang)
-    check exceptions == {LangPython, LangRubyDb, LangAsm, LangRustWasm,
-                         LangCppWasm, LangBash, LangZsh}
+    check exceptions == {LangAsm, LangRustWasm, LangCppWasm, LangBash, LangZsh}
     check toLang("unknown") == LangUnknown
+    check toLang(toCLang(LangRubyDb)) == LangRubyDb
+    check toLang(toCLang(LangPythonDb)) == LangPythonDb
 
   test "the spellings do not disagree with `LANGS`, the ct record routing table":
     ## `LANGS` (`language_detection.nim`) is deliberately a separate,

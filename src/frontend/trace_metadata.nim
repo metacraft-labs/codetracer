@@ -1,7 +1,7 @@
 import
   std / [jsffi, jsconsole, asyncjs, strformat],
   results,
-  types, paths,
+  types, paths, lang,
   lib/[ jslib, electron_lib ],
   ../common/ct_logging
 
@@ -10,56 +10,92 @@ import
 # ---------------------------------------------------------------------------
 #
 # ``ct trace-metadata`` serializes the ``Trace`` record with
-# ``json_serialization``'s ``Json.encode``, which writes enum fields as
-# their *string names* (e.g. ``"lang": "LangPythonDb"``,
-# ``"calltraceMode": "FullRecord"``).  The renderer/Electron side, however,
-# reconstructs the trace with a raw ``cast[Trace](JSON.parse(...))`` — a
-# reinterpret that expects every enum field to already hold the integer
-# ordinal that Nim's JS backend uses for enum values at runtime.
+# ``json_serialization``'s ``Json.encode``, which writes ``lang`` as its
+# *string name* (``"lang": "LangPythonDb"``) since LRS-4 (2026-09-21).  The
+# renderer/Electron side, however, reconstructs the trace with a raw
+# ``cast[Trace](JSON.parse(...))`` — a reinterpret that expects every enum
+# field to already hold the integer ordinal that Nim's JS backend uses for
+# enum values at runtime.
 #
-# Left unconverted, ``trace.lang`` is a JS *string*.  Any later
+# **Correction (LRS-4).**  This comment used to say ``Json.encode`` writes
+# enum fields as their string names, ``calltraceMode`` included.  It did
+# not: the vendored ``json_serialization`` writes an enum as ``ord(value)``
+# unless the type opts in with ``serializesAsTextInJson``, and none had.  So
+# ``"lang"`` arrived here as the INTEGER, the string branch below never ran,
+# and the integer went straight through ``cast[Trace]`` — an ordinal on the
+# ``ct`` -> Electron hop that every document in the Lang series believed
+# carried the name.  ``src/common/trace_index.nim`` now opts ``Lang`` in,
+# so the name is what arrives and the decoder below is what runs;
+# ``calltraceMode`` STILL arrives as an integer (its map is LRS-6's) and the
+# string branch of the ``MODE`` block is, today, dead code kept for the day
+# it opts in too.
+#
+# Left unconverted, a string ``trace.lang`` would break the renderer: any
 # ``lang in {…}`` set-membership test compiles (because ``set[Lang]``
 # exceeds 32 bits) to ``BigInt(ord(lang))`` — and ``BigInt("LangPythonDb")``
 # throws ``Cannot convert LangPythonDb to a BigInt``, an uncaught renderer
 # exception that aborts trace loading before the editor panel mounts.
 #
 # ``normalizeTraceEnums`` rewrites the string enum fields on the parsed JS
-# object to the integer ordinals the frontend's ``cast[Trace]`` assumes.
-# The ordinals mirror ``Lang`` / ``CalltraceMode`` in
-# ``common/common_lang.nim`` and ``common_types/debugger_features/call.nim``
-# (kept in lockstep with the Rust ``Lang`` enum's ``#[repr(u8)]`` order).
+# object to the values the frontend's ``cast[Trace]`` assumes.
+#
+# **The ``lang`` half is ``parseEnum[Lang]`` (LRS-4, 2026-09-21).**  It used
+# to be a hand-written JS object literal, ``var LANG = { LangC:0, … }``, a
+# complete second copy of every ``Lang`` ordinal that no compiler checked
+# (``lang_enum_contract_test.nim`` pinned it against the enum, entry for
+# entry, which is how it stayed right).  ``parseEnum`` compiles and runs on
+# Nim's JS backend and reads the ordinal from the enum itself, so there is
+# no second list to renumber -- LRS-4 renumbered the enum and this file did
+# not have to change with it.  The lookup-miss policy is the retired-name
+# policy of ``src/common/trace_index.nim`` (design §5.6): a name this build
+# does not have -- ``"LangRuby"`` from an older index, or a value ``ct`` was
+# handed that it does not know -- becomes ``LangUnknown``, and the name the
+# recording was made under is kept in ``langRetiredName`` if ``ct`` did not
+# already fill it, so nothing displays as "unknown" that was recorded under
+# a name.  ``ct trace-metadata`` itself already decodes a retired row that
+# way and sends ``"lang": "LangUnknown"`` beside ``langRetiredName``.  The
+# decoder is ``decodeLangName`` in ``src/common/common_lang.nim`` -- pure,
+# backend-agnostic, and pinned on the JS backend by
+# ``src/frontend/tests/frontend_lang_test.nim`` (this module is
+# Electron-only and no lane can import it).
+#
+# The ``calltraceMode`` half is still the hand-written ``MODE`` map; pinning
+# or replacing it is milestone LRS-6's (it has the same silent-fallback
+# shape this ``LANG`` map had and no test).
 
-proc normalizeTraceEnumsJs(trace: JsObject) {.importjs: """
+proc jsTypeOfLang(trace: JsObject): cstring {.importjs: "(typeof #.lang)".}
+proc jsLangString(trace: JsObject): cstring {.importjs: "(#.lang)".}
+proc jsLangRetiredName(trace: JsObject): cstring {.importjs: "(#.langRetiredName)".}
+
+proc normalizeCalltraceModeJs(trace: JsObject) {.importjs: """
 (function(t) {
   if (!t) return;
-  var LANG = {
-    LangC:0, LangCpp:1, LangRust:2, LangNim:3, LangGo:4, LangPascal:5,
-    LangFortran:6, LangD:7, LangCrystal:8, LangLean:9, LangJulia:10,
-    LangAda:11, LangPython:12, LangRuby:13, LangRubyDb:14, LangJavascript:15,
-    LangLua:16, LangAsm:17, LangNoir:18, LangRustWasm:19, LangCppWasm:20,
-    LangPythonDb:21, LangUnknown:22, LangBash:23, LangZsh:24, LangSolidity:25,
-    LangMasm:26, LangSway:27, LangMove:28, LangPolkavm:29, LangCairo:30,
-    LangCircom:31, LangLeo:32, LangTolk:33, LangAiken:34, LangCadence:35,
-    LangSolana:36, LangElixir:37, LangErlang:38, LangPhp:39,
-    LangGdScript:40
-  };
   var MODE = {
     NoInstrumentation:0, CallKeyOnly:1, RawRecordNoValues:2, FullRecord:3
   };
-  if (typeof t.lang === 'string') {
-    t.lang = (t.lang in LANG) ? LANG[t.lang] : LANG.LangUnknown;
-  }
   if (typeof t.calltraceMode === 'string') {
     t.calltraceMode = (t.calltraceMode in MODE) ? MODE[t.calltraceMode] : MODE.FullRecord;
   }
 })(#)
 """.}
-  ## Rewrite string-encoded ``lang`` / ``calltraceMode`` enum fields on a
-  ## parsed trace JS object into their integer ordinals.
+  ## Rewrite the string-encoded ``calltraceMode`` enum field on a parsed
+  ## trace JS object into its integer ordinal.  See the block comment above
+  ## for why ``lang`` is no longer done this way.
 
 proc normalizeTraceEnums(trace: Trace) =
-  if not trace.isNil:
-    normalizeTraceEnumsJs(cast[JsObject](trace))
+  if trace.isNil:
+    return
+  let obj = cast[JsObject](trace)
+  if jsTypeOfLang(obj) == cstring"string":
+    let decoded = decodeLangName($jsLangString(obj))
+    # Assigning a ``Lang`` to the field stores the JS-backend ordinal, which
+    # is exactly what ``cast[Trace]`` reinterprets it as.
+    trace.lang = decoded.lang
+    let alreadyNamed = jsLangRetiredName(obj)
+    if decoded.retiredName.len > 0 and
+        (alreadyNamed.isNil or alreadyNamed.len == 0):
+      trace.langRetiredName = cstring(decoded.retiredName)
+  normalizeCalltraceModeJs(obj)
 
 proc findRawTraceWithCodetracer(app: ElectronApp, traceId: cstring): Future[cstring] {.async.} =
   ## M-REC-2: ``traceId`` is a UUIDv7 recording-id string.

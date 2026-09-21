@@ -43,7 +43,8 @@
 ## Compile and run:
 ##   nim c -r src/tests/cli/record_backend_selection_test.nim
 
-import std/[strutils, unittest]
+import std/[os, strutils, unittest]
+import ../../common/lang
 import ../../common/target_axes
 import ../../ct/trace/native_backend_selection
 
@@ -303,3 +304,61 @@ suite "NTR-2 / Q6: --backend refuses what the host cannot honour":
         let first = resolveNativeRecordingBackend(requested, host)
         let second = resolveNativeRecordingBackend(requested, host)
         check first == second
+
+# ---------------------------------------------------------------------------
+# --lang ruby(db): the deprecated alias on the CLI path (LRS-4, design Q6)
+# ---------------------------------------------------------------------------
+
+suite "--lang ruby(db) is accepted, announced once on stderr, and means --lang ruby":
+  ## Design question Q6, decided 2026-09-21 by the coordinator: `--lang ruby`
+  ## selects the working Ruby recorder (the retired rr backend it used to name,
+  ## `LangRuby`, is deleted), and `ruby(db)` -- the spelling that existed only
+  ## because `ruby` was taken -- is KEPT as a deprecated alias for one
+  ## release: it resolves to the same member and `ct record` prints one note
+  ## on stderr.  Nothing a user typed before LRS-4 stops working; the note is
+  ## the fix-forward.  The table is `DeprecatedLangSpellings` and the wording
+  ## `deprecatedLangSpellingNote`, both in `src/common/common_lang.nim`; this
+  ## suite pins them and the one production call site
+  ## (`src/ct/trace/record.nim`), beside the other `--lang` / `--backend` CLI
+  ## checks.  The end-to-end run through the shipped `ct` is in
+  ## `record_missing_recorder_test.nim`.
+
+  test "the note names the deprecated spelling, what it selects and the spelling to use":
+    let note = deprecatedLangSpellingNote("ruby(db)")
+    check note.len > 0
+    check note.startsWith("note: ")
+    check "deprecated" in note
+    check "`--lang ruby(db)`" in note
+    check "`--lang ruby`" in note
+    check toName(LangRubyDb) in note
+    # The alias and the preferred spelling are one member.
+    check toLang("ruby(db)") == toLang("ruby")
+    check toLang("ruby") == LangRubyDb
+
+  test "case-insensitive like toLang, and silent for every live spelling":
+    check deprecatedLangSpellingNote("RUBY(DB)").len > 0
+    check deprecatedLangSpellingNote("Ruby(Db)").len > 0
+    for (spelling, lang) in LANG_SPELLINGS:
+      var deprecated = false
+      for row in DeprecatedLangSpellings:
+        if row.spelling == spelling: deprecated = true
+      if not deprecated:
+        checkpoint("live spelling: " & spelling)
+        check deprecatedLangSpellingNote(spelling) == ""
+    check deprecatedLangSpellingNote("") == ""
+    check deprecatedLangSpellingNote("nonsense") == ""
+
+  test "ct record prints the note on STDERR, once, before detection (the production call site)":
+    # `ct record`'s stdout carries the `recordingId:` marker that other parts
+    # of the product parse, so the note must go to stderr; and only `ct`
+    # itself prints it -- the forwarded `--lang` also reaches
+    # `db-backend-record`, whose stderr is relayed onto `ct`'s STDOUT, so a
+    # second site there would put the note in the wrong stream.  Pinned on
+    # the source because no unit can spawn the CLI; the shipped-binary run is
+    # `record_missing_recorder_test.nim`.
+    let repoRoot = currentSourcePath.parentDir.parentDir.parentDir.parentDir
+    let recordSource = readFile(repoRoot / "src" / "ct" / "trace" / "record.nim")
+    check recordSource.contains("deprecatedLangSpellingNote(lang)")
+    check recordSource.contains("stderr.writeLine(deprecationNote)")
+    let dbRecordSource = readFile(repoRoot / "src" / "ct" / "db_backend_record.nim")
+    check(not dbRecordSource.contains("deprecatedLangSpellingNote"))

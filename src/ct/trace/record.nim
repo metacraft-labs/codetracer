@@ -339,6 +339,17 @@ proc record*(lang: string,
   # `components` / `format` / `interpreter` / `debug_info` as "not computed",
   # never as "the target had none".  Recording those into trace metadata is
   # NTR-3; NTR-2 carries them and does not swallow them.
+  # LRS-4 / design Q6: `--lang ruby` names the working Ruby recorder, and the
+  # spelling that used to be the only way to reach it, `ruby(db)`, is a
+  # deprecated alias -- accepted, announced once on stderr (stdout carries
+  # the `recordingId:` marker other parts of the product parse), recorded
+  # exactly as `ruby` would be.  Only THIS process prints the note: the
+  # forwarded `--lang` reaches `db-backend-record` too, whose stderr is
+  # relayed onto our stdout, so a second note there would land in the wrong
+  # stream.
+  let deprecationNote = deprecatedLangSpellingNote(lang)
+  if deprecationNote.len > 0:
+    stderr.writeLine(deprecationNote)
   let recognized = detectTarget(program, toLang(lang))
   let detectedLang = recognized.lang
   if recognized.recognitionRan and recognized.recognition.isSome:

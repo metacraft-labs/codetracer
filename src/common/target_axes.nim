@@ -61,11 +61,13 @@ type
   SourceLanguage* = enum
     ## What notation a **file** is written in.
     ##
-    ## The sentinel is ordinal 0 on purpose.  `Lang` puts `LangC` at ordinal 0,
-    ## and a proc that falls off its end therefore answers "C" — a defect that
+    ## The sentinel is ordinal 0 on purpose.  `Lang` used to put `LangC` at
+    ## ordinal 0, so a proc that fell off its end answered "C" — a defect that
     ## really happened and cost `ct record ./a.out` its recognizer delegation
-    ## (the 22-line post-mortem at
-    ## `src/ct/utilities/language_detection.nim:125-146`).  A zero-initialised
+    ## (the 22-line post-mortem on `detectLangFromPath` in
+    ## `src/ct/utilities/language_detection.nim`).  LRS-4 (2026-09-21) moved
+    ## `LangUnknown` to ordinal 0 for exactly this reason, so `Lang` now has
+    ## the property these axes were given from the start.  A zero-initialised
     ## `SourceLanguage` says "I do not know", which is the honest answer for a
     ## value nobody assigned.
     ##

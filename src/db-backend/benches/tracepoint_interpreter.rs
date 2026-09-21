@@ -332,7 +332,7 @@ fn drive_stream(compiled: &Compiled, session: &mut SyntheticReplaySession, strea
     for i in 0..stream_size {
         let tp_idx = i % TRACEPOINTS.len();
         let step = session.step_id;
-        let _ = compiled.interpreter.evaluate(tp_idx, step, session, Lang::Python);
+        let _ = compiled.interpreter.evaluate(tp_idx, step, session, Lang::PythonDb);
         session.advance();
     }
 }

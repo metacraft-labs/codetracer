@@ -36,7 +36,7 @@ func tokenTextsFor*(lang: Lang): array[TokenText, string] =
   ## with.
   ##
   ## Exhaustive ``case``.  This was a positional
-  ## ``array[Lang, array[TokenText, string]]`` of 40 rows, most of them
+  ## ``array[Lang, array[TokenText, string]]`` of 40 rows (then), most of them
   ## identical, which made it the worst-case shape for a silent shift: a member
   ## removed anywhere above ``LangPhp`` would have moved Nim's ``@[`` or Rust's
   ## ``vec![`` onto a neighbouring language and left 37 look-alike rows in which
@@ -44,19 +44,27 @@ func tokenTextsFor*(lang: Lang): array[TokenText, string] =
   ##
   ## Order within each row is ``TokenText``'s own declaration order:
   ## InstanceOpen, InstanceClose, ArrayOpen, ArrayClose, SeqOpen, SeqClose.
+  ##
+  ## The vocabulary is a property of the SOURCE LANGUAGE, not of the target
+  ## ISA: a Rust value is spelled `vec![` whether the program ran natively or
+  ## as a wasm module.  Until LRS-4 `LangRustWasm` / `LangCppWasm` sat in the
+  ## generic bracket row below and a wasm-recorded Rust sequence rendered as
+  ## `[` while the same program recorded natively rendered `vec![` -- the
+  ## conflation of language and ISA showing through the value renderer
+  ## (design §1.2).  Each wasm member now shares its language's row.
   case lang
-  of LangRust:
+  of LangRust, LangRustWasm:
     ["{", "}", "[", "]", "vec![", "]"]
   of LangNim:
     ["(", ")", "[", "]", "@[", "]"]
-  of LangC, LangCpp, LangGo, LangPascal:  # LangPascal TODO
+  of LangC, LangCpp, LangCppWasm, LangGo, LangPascal:  # LangPascal TODO
     ["{", "}", "[", "]", "vector[", "]"]
-  of LangPython, LangRuby, LangRubyDb, LangPythonDb:
+  of LangRubyDb, LangPythonDb:
     ["(", ")", "[", "]", "[", "]"]
   of LangUnknown, LangBash, LangZsh:
     ["", "", "", "", "", ""]
   of LangFortran, LangD, LangCrystal, LangLean, LangJulia, LangAda,
-     LangJavascript, LangLua, LangAsm, LangNoir, LangRustWasm, LangCppWasm,
+     LangJavascript, LangLua, LangAsm, LangNoir,
      LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm, LangCairo,
      LangCircom, LangLeo, LangTolk, LangAiken, LangCadence, LangSolana,
      LangElixir, LangErlang, LangPhp,

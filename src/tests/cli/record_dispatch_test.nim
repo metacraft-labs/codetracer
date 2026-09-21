@@ -346,15 +346,22 @@ suite "ct record dispatch table":
         check tool.isDeclared
 
   test "an unsupported language is declared, never silent":
-    # LangRuby and LangPython are the retired rr/gdb backends.  On the axes
-    # they are `(slRuby, tiInterpreted, raRr)` and `(slPython, tiInterpreted,
-    # raRr)`: a native-replay approach asked of a runtime-hosted language, and
-    # the only correct answer is to say so and point at the working recorder.
-    # `LangRuby` is still reachable through an explicit `--lang ruby`;
-    # `LangPython` is NOT reachable from any input (`--lang python` maps to
-    # `LangPythonDb`, `src/common/lang.nim`), so its arm answers only for a
-    # value decoded out of old data.  An earlier version of this comment
-    # claimed both were reachable through `--lang`; the python half was wrong.
+    # The retired rr/gdb backends used to be `Lang` members -- `LangRuby` and
+    # `LangPython` -- that decomposed to `(slRuby, tiInterpreted, raRr)` and
+    # `(slPython, tiInterpreted, raRr)`: a native-replay approach asked of a
+    # runtime-hosted language, whose only correct answer is to say so and
+    # point at the working recorder.  LRS-4 (2026-09-21) DELETED both
+    # members; the cell survives as a rule over the selector and is asserted
+    # in the next test by constructing the selector, since no `Lang` value
+    # reaches it any more.
+    #
+    # Correction history, kept because it is the claim this comment used to
+    # make: an earlier version said both were "still reachable through an
+    # explicit `--lang ruby` / `--lang python`".  The python half was always
+    # wrong (`--lang python` mapped to `LangPythonDb`, so `LangPython` was
+    # unreachable from any input, design §3.1); the ruby half was true until
+    # LRS-4, when `--lang ruby` started naming `LangRubyDb`, the working
+    # recorder (design Q6).  Neither is reachable now, and neither exists.
     #
     # `RecorderPendingLanguages` is held to the SAME bar, from the other
     # direction.  GDScript is reachable today through an explicit
@@ -370,8 +377,7 @@ suite "ct record dispatch table":
     # (`src/ct/utilities/language_detection.nim`), so a bare
     # `ct record foo.gd` reaches this message instead of resolving to
     # `LangUnknown` and taking the native build path.
-    const DeclaredUnsupported = {LangRuby, LangPython, LangLua} +
-                                RecorderPendingLanguages
+    const DeclaredUnsupported = {LangLua} + RecorderPendingLanguages
     for lang in DeclaredUnsupported:
       checkpoint("declared-unsupported language: " & lang.toName)
       let tool = recorderToolFor(sel(lang))
@@ -386,7 +392,11 @@ suite "ct record dispatch table":
   test "the retired rr pair points at the working recorder, as ONE rule":
     # The two hand-written `LangRuby` / `LangPython` arms became one cell
     # rule: `(lang, tiInterpreted, raRr)` has no recorder and the remedy names
-    # the instrumented one.  Assert the rule, not the two instances.
+    # the instrumented one.  Assert the rule, not the two instances -- and
+    # since LRS-4 deleted the two members there ARE no instances: the
+    # selectors below are constructed, which is the only way to reach the
+    # cell now (`target_axes_test.nim` pins that no `Lang` value decomposes
+    # to a non-default approach).
     for language in [slRuby, slPython]:
       for approach in [raRr, raMcr, raTtd]:
         let s = selector(language, tiInterpreted, approach)
@@ -402,11 +412,34 @@ suite "ct record dispatch table":
         check working.supported
         check tool.sibling == working.sibling
         check tool.installHint.join(" ").contains(working.recorderLabel)
-    # The spellings the user has to type are the ones the old arms gave.
-    check "`--lang ruby(db)`" in
-      recorderToolFor(sel(LangRuby)).installHint.join(" ")
+    # The spellings the remedy names are the working recorders' -- `--lang
+    # ruby` since LRS-4 made it name `LangRubyDb` (Q6), not the deprecated
+    # `ruby(db)` the old arm advertised.
+    let rubyHint = recorderToolFor(
+      selector(slRuby, tiInterpreted, raRr)).installHint.join(" ")
+    check "`--lang ruby`" in rubyHint
+    check "ruby(db)" notin rubyHint
     check "`--lang py`" in
-      recorderToolFor(sel(LangPython)).installHint.join(" ")
+      recorderToolFor(selector(slPython, tiInterpreted, raRr)).installHint.join(" ")
+
+  test "--lang ruby names the working recorder (Q6), and ruby(db) is its deprecated alias":
+    # Through the same `toLang` that `ct record --lang` calls
+    # (`src/ct/trace/record.nim`): `ruby`, `rb` and the deprecated `ruby(db)`
+    # are ONE member with a supported instrumented-runtime recorder, so
+    # `ct record --lang ruby foo.rb` records where it used to print "no
+    # recorder for Ruby".  The deprecation note itself is pinned in
+    # `record_backend_selection_test.nim` beside the other `--lang` /
+    # `--backend` CLI-path checks.
+    for spelling in ["ruby", "rb", "ruby(db)", "RUBY"]:
+      checkpoint("--lang " & spelling)
+      let lang = toLang(spelling)
+      check lang == LangRubyDb
+      let tool = recorderToolFor(sel(lang))
+      check tool.supported
+      check tool.recorderLabel == "codetracer-ruby-recorder"
+    check deprecatedLangSpellingNote("ruby(db)").len > 0
+    check deprecatedLangSpellingNote("ruby") == ""
+    check deprecatedLangSpellingNote("rb") == ""
 
   test "a declared-unsupported language is reachable from a FILE, not just --lang":
     # The arm above is only worth having if a user reaches it the way a user
@@ -529,7 +562,10 @@ suite "the ISA selects the recorder; the language does not":
   test "wasm is one arm for every language, where it used to be two Lang members":
     # `LangRustWasm` and `LangCppWasm` welded the ISA onto the language.  On
     # the axes both are `(<lang>, tiWasm, raVmEmulation)` and select `wazero`;
-    # so does a C wasm module, which had no `Lang` value at all.
+    # so does a C wasm module, which had no `Lang` value at all.  (The two
+    # members still exist -- LRS-4 kept them until LRS-5 stores the axes,
+    # because they are the persisted `recordings.lang` column's only way of
+    # saying "wasm"; the dispatch table has not read them since LRS-2B.)
     for language in [slRust, slCpp, slC, slUnknown]:
       let s = selector(language, tiWasm, raVmEmulation)
       checkpoint("wasm from " & displayName(s))
@@ -539,6 +575,43 @@ suite "the ISA selects the recorder; the language does not":
       check "--out-dir" in joinedArgs(s)
     check sel(LangRustWasm) == selector(slRust, tiWasm, raVmEmulation)
     check sel(LangCppWasm) == selector(slCpp, tiWasm, raVmEmulation)
+
+  test "a prebuilt .wasm module dispatches to wazero, and the route rides on the Lang member":
+    # The three roads to a wasm recording today, and where each one's ISA
+    # comes from -- recorded here because it is WHY `LangRustWasm` survives
+    # LRS-4 (see the `Lang` doc comment in `src/common/common_lang.nim`):
+    #
+    # 1. a Cargo crate whose `.cargo/config.toml` names `wasm32`: the
+    #    assessment reads the MARKER (`wasm-cargo-project`) and the ISA is
+    #    `tiWasm` from the kind -- "a wasm crate is assessed as wasm, from the
+    #    marker and not from a Lang member", below;
+    # 2. `--lang rust-wasm` / `cpp-wasm`: the user names the member;
+    # 3. a prebuilt `foo.wasm` handed to `ct record` (and what road 1 hands
+    #    to `db-backend-record` after `cargo build`): `LANGS["wasm"]` is
+    #    `LangRustWasm`, `assessKind` says `prebuilt-artefact` with NO
+    #    ISA-deciding kind, and the ISA therefore comes from
+    #    `axesOfLang(LangRustWasm).targetIsa` -- the member.  Delete the
+    #    member before the assessment reads the `.wasm` extension as an ISA
+    #    and this road resolves `.wasm` to the native path.
+    let dir = getTempDir() / "ct-dispatch-test-wasm-module"
+    removeDir(dir)
+    createDir(dir)
+    let module = dir / "app.wasm"
+    writeFile(module, "stand-in for a wasm module; only the extension is read")
+    let lang = detectLang(module, LangUnknown)
+    check lang == LangRustWasm
+    let a = assessRecordingTarget(module, lang)
+    check a.kind.family == tfPrebuiltArtefact
+    check a.kind.specific.len == 0                # nothing decides the ISA
+    check a.targetIsa == tiWasm                   # ...so the member does
+    check a.recordingApproach == raVmEmulation
+    let s = recorderSelectorFor(a, lang)
+    check s == selector(slRust, tiWasm, raVmEmulation)
+    check recorderToolFor(s).recorderLabel == "wazero"
+    # The replay-side summary must say "materialized" for what this records,
+    # which is the other half of why the member is kept: `LangRust` cannot.
+    check usesMaterializedTraces(lang)
+    check(not usesMaterializedTraces(LangRust))
 
   test "the platform pseudo-languages select by ISA with no language at all":
     # `LangSolana` and `LangPolkavm` have no source language (`slUnknown`) and
