@@ -833,8 +833,7 @@ package codeTracer:
       definesValue = CommonNimDefines & HmrRendererDefines,
       outputPath = buildDebugPath("ui.js"),
       sourcePath = "src/frontend/ui_js.nim",
-      debugInfoOnValue = true,
-      hotCodeReloadingOnValue = false)
+      debugInfoOnValue = true)
     target("frontend-ui-js", frontendUiJs)
 
     let frontendPublicUiJs = fs.copyFile(
@@ -869,16 +868,7 @@ package codeTracer:
       extraOutputsValue = @[buildDebugPath("subwindow.js.map")],
       sourcePath = "src/frontend/subwindow.nim",
       debugInfoOnValue = true,
-      sourcemapOnValue = true,
-      # Off for the same reason as `frontend-ui-js` above: under
-      # `--hotCodeReloading` jsgen names non-inline routines with a
-      # module-local counter, so one generic's anonymous closures collide
-      # across modules in a single bundle.  This bundle has not grown
-      # enough isonim-instantiating modules to collide yet — but it is the
-      # same trap armed, and it does not even build with `-d:ctHmr`
-      # (`RendererDefines`, not `HmrRendererDefines`), so the flag bought
-      # it nothing.
-      hotCodeReloadingOnValue = false)
+      sourcemapOnValue = true)
     target("frontend-subwindow-js", frontendSubwindowJs)
 
     let frontendSrcSubwindowJs = fs.copyFile(
