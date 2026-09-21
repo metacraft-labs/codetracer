@@ -33,6 +33,16 @@
 ## standard as the rest (std only, no renderer, compiles with no `isonim-tui`
 ## checkout), and it is a SEPARATE module because it is deliberately outside the
 ## closed set: nothing in it is a `ViewKind`, and `checkPortable` never sees it.
+##
+## **PLAT-35 added `view_vocabulary/layout_questions.nim`**, and it is the
+## OBSERVATION side of the same idea one more time: `editor_rows` says what a
+## row IS on any medium, and this says what may be ASKED about a rendered
+## screen on any medium. It holds the eight questions
+## `Testing/Cross-Renderer-Visual-Alignment.md` §3 publishes, the canonical
+## spelling of an answer, and the comparator — and deliberately not a producer,
+## because a producer shared by both front-ends would make every question agree
+## and compare nothing (Verification-Harness-Traps §30a). It belongs to the
+## same purity standard as the rest: `std` only, no renderer, no FFI.
 
 import ./view_vocabulary/vocabulary
 import ./view_vocabulary/behaviour
@@ -41,6 +51,7 @@ import ./view_vocabulary/mappings
 import ./view_vocabulary/admission
 import ./view_vocabulary/gpui_gaps
 import ./view_vocabulary/editor_rows
+import ./view_vocabulary/layout_questions
 
 export vocabulary, behaviour, portability, mappings, admission, gpui_gaps
-export editor_rows
+export editor_rows, layout_questions

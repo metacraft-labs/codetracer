@@ -1,0 +1,51 @@
+{
+  "frontEnd": "electron",
+  "scenario": "advanced-state",
+  "answers": [
+    {
+      "question": "pane-rectangles",
+      "value": "calltrace=61,8,20,42;commandPalette=44,1,26,3;constraints=81,55,18,42;editor=15,8,25,89;eventLog=40,55,41,42;filesystem=0,8,15,88;state=40,8,20,42;testResults=81,8,18,42",
+      "tier": "captured"
+    },
+    {
+      "question": "which-panes-are-present",
+      "value": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "tier": "captured"
+    },
+    {
+      "question": "editor-row-count",
+      "value": "rows=38;first=37;last=74",
+      "tier": "captured"
+    },
+    {
+      "question": "gutter-marks-by-line",
+      "value": "56=execution",
+      "tier": "captured"
+    },
+    {
+      "question": "inline-value-runs-by-line",
+      "value": "",
+      "tier": "captured"
+    },
+    {
+      "question": "text-metrics-per-role",
+      "value": "editor-code=mono/md/regular;gutter-line-number=mono/md/regular;pane-title=proportional/md/regular;value-name=mono/md/regular;value-text=mono/md/regular",
+      "tier": "captured"
+    },
+    {
+      "question": "token-colour-per-role",
+      "value": "editor-code=editor.executionLine.background;gutter-line-number=editor.lineNumber.foreground;pane-title=pane.title.foreground;value-name=value.name.foreground;value-text=value.text.foreground",
+      "tier": "captured"
+    },
+    {
+      "question": "focus-order",
+      "value": "editor,commandPalette,filesystem,state,calltrace,eventLog,testResults,constraints",
+      "tier": "captured"
+    }
+  ],
+  "provenance": {
+    "capturedAt": "2026-09-21T14:20:01.434Z",
+    "uiBundleBytes": 26460495,
+    "uiBundleMtime": "2026-09-20T14:17:14.529Z"
+  }
+}

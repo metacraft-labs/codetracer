@@ -42,6 +42,31 @@
   works around it via `extract_var_value_at_stop` which locates the step
   matching the stop's `rr_ticks` and walks forward to the first changed
   `before_values[var_name]`.
+- 2026-09-21: **`direnv exec .` CAN SILENTLY HAND YOU A DIFFERENT SHELL THAN THE
+  ONE THE FLAKE DESCRIBES, and the line that says so scrolls past in the
+  preamble.** On this tree `codetracer-python-recorder` fails to build in the
+  dev shell — `ImportError: ... codetracer_python_recorder.cpython-312-*.so:
+  undefined symbol: trace_writer_register_drop_variables` — so
+  `nix-shell-env.drv` fails and nix-direnv prints
+  `Evaluating current devShell failed. Falling back to previous environment!`
+  and proceeds with the LAST GOOD profile. Everything then works, which is the
+  trap: every measurement taken that way is taken in an environment nothing in
+  the tree pins. `grep -c "Falling back to previous environment"` over a lane's
+  own log before quoting a number from it. Both the PLAT-35 Electron captures
+  and the PLAT-35 mutation harness ran in that fallback on 2026-09-21, and so
+  did the whole 2026-09-22 landing pass — it is still failing.
+
+  **THE CAUSE IS NOT A REVISION SKEW, AND THIS ENTRY SAID IT WAS.** It read
+  *"the built extension and the `codetracer-trace-format` it links against are
+  at different revisions"*, which sends you off to align two pins. Measured at
+  the current revision of both:
+  `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs` DECLARES
+  `trace_writer_register_drop_variables` as an `extern` and calls it, and
+  `codetracer-trace-format/codetracer_trace_writer_ffi/src/lib.rs` exports
+  twenty-four `#[unsafe(no_mangle)]` functions, **none of them that one**. The
+  symbol is absent, not skewed. No pairing of revisions fixes it; the export has
+  to be written. A wrong cause in an insights entry is worse than no entry,
+  because it is the thing the next reader acts on.
 - 2026-05-04: `nix develop` and direnv can disagree when `.direnv/flake-profile-*`
   is stale. The current dev shell includes `ourPkgs.sui`; an older cached
   direnv profile may still enter successfully because it references forc/miden/
@@ -5317,3 +5342,118 @@ evidence the renderer is broken. To type-check the Electron-side Nim by hand:
 (the defines are the ones `src/Tuprules.tup`'s `!nim_js` / `!nim_node_index`
 macros use; `-d:nimNoLentIterators` is only there to step past the unrelated
 `ui/unified_diff.nim` compile error.)
+
+## The Playwright `electronApp` fixture handed `null` to EVERY test (fixed 2026-09-21)
+
+`src/tests/gui/lib/fixtures.ts` declared it as
+
+    electronApp: [
+      async ({}, use) => {
+        // Populated by ctPage fixture. Default null for direct use.
+        await use(null);
+      },
+      { scope: "test" },
+    ],
+
+and **nothing populated it** — a Playwright fixture cannot be written from
+another fixture's body. So every spec that asked for `electronApp` got `null`,
+in every launch mode, including `trace-folder`, whose launcher returns a
+non-null app on every path. Any spec written as
+
+    if (electronApp !== null) { ...resize the window / drive the main process... }
+
+was a block that never ran and never said so. PLAT-35's viewport matrix was
+exactly that: six captures came out at one size for a whole milestone while a
+`laptop` row was declared beside them.
+
+It now depends on `ctPage` and reads a `pageElectronApps` WeakMap the launcher
+fills — the same arrangement `pageConsoleErrors` already used. If you need the
+main process, `electronApp` works; if you need the window the PAGE lives in,
+use `electronApp.browserWindow(page)` rather than `BrowserWindow.getAllWindows()[0]`.
+
+**Fixing the fixture did NOT make the one assertion that most needed it live,
+and that was measured rather than assumed.** `tests/welcome-screen/
+edit_mode.spec.ts`'s #574 cover attaches two stream listeners to
+`electronApp?.process()` and ends with `expect(mainProcessFailures)
+.toEqual([])`. With the fixture returning `null` those listeners never
+attached, so the assertion compared `[]` to `[]` forever. With the fixture
+repaired the test still fails — **twenty-five lines earlier**, at
+`await expect(label("db").first()).toBeVisible()`, on a `src/db` the spec's own
+fixture creates. The control was run: with the repair stashed, it fails at the
+same line with the same locator, so this is a PRE-EXISTING red and the fixture
+repair neither caused nor surfaced it. The assertion moved from *vacuous* to
+*unreached*, which is not an improvement you can claim. If you are looking at
+this test, the depth-limited folder tree is the thing to fix first.
+
+## A screenshot is in DEVICE pixels, and `test-gui-prebuilt`'s Xvfb is not at dpr 1
+
+`Xvfb :N -screen 0 1920x1080x24` with no `-dpi` makes the X server report about
+100.5 dpi, and Chromium derives `devicePixelRatio = 1.046875` from it. So
+`page.screenshot()` writes an image 1.046875x the CSS viewport in each axis: a
+1837x1034 window lands on disk as 1923x1082, and a 1440x900 viewport as
+1508x943. Add `-dpi 96` when the image's pixel dimensions have to mean
+something (`just plat35-capture-electron` does).
+
+Two more measured facts from the same lane:
+
+* a window asked for a 1920x1080 CONTENT area on a 1920x1080 screen gets a
+  1919x1079 CSS viewport — the screen has to hold the frame as well, so the
+  widest viewport in a matrix cannot equal the widest screen;
+* `Emulation.setDeviceMetricsOverride` over CDP changes `window.innerWidth` and
+  `devicePixelRatio` but does NOT change what `page.screenshot()` captures on
+  Electron: the image stays the real window's size at the real scale factor.
+
+## `LayoutPage.clickDebugButton` can deliver TWO clicks
+
+It tries `button.click({timeout: 5000})` and falls through to
+`dispatchEvent('click')` on ANY throw — including a throw that arrives after
+the pointer event was already delivered, which the toolbar's re-render under
+the cursor produces routinely. The debugger then takes two steps for one
+operation. Visible only if you watch `window.data.services.debugger.location.rrTicks`
+rather than a line number: a step is exactly one tick, and a doubled click
+shows up as a skipped one (`34@4` followed by `44@6`).
+
+`window.data.status.stableBusy === false` plus a changed `rrTicks` is the
+reliable "the step finished" signal. Do NOT poll `#stable-status`: it is
+removed from the DOM entirely when the debugger is idle (commit `74caaa788`),
+so every `getAttribute` on it burns the full locator timeout.
+
+## "The program moved" is NOT "the editor finished drawing", and the difference
+## moves the rendered row count
+
+Waiting on `window.data.services.debugger.location.rrTicks` (above) tells you
+the debugger arrived. It tells you nothing about the editor, which reveals the
+new line and re-lays-out its view zones asynchronously afterwards. Issue the
+next click into the middle of that and the editor's final scroll position
+depends on how far the previous move's render had got.
+
+Measured 2026-09-21 on `calc`, twenty-one step-ins and a step-out at a
+1440x900 viewport, nine captures: Monaco came to rest at `scrollTop` 1788 six
+times and 1809 three times, which moved the first rendered line between 82 and
+83 and the `.view-line` count between 36 and 35. The 21px between them is a
+**`flow-view-zone flow-content-widget`** — the flow overlay's loop-iteration
+control for `main.py`'s loop at line 108 — at `top: 2354px; height: 21px`.
+With it counted the editor's content height is `117 x 22 + 21 + 12 = 2607` (the
+12 is the horizontal scrollbar) and line 117's own offset is `116 x 22 + 21 =
+2573`; both were read off the live DOM. `2607 - 798` and `2574 + 12 - 798` are
+exactly the two observed resting positions.
+
+Two readings that sound right and are FALSE, both tested: it is not a race with
+the horizontal scrollbar (its 12px is in the content height of all nine runs),
+and it is not a race with the window resize (holding the editor's box and
+Monaco's `layoutInfo` to agreement before driving still split 4/1 over five
+runs — though it IS worth doing, because two of four probed runs had been
+driving the debugger with a 1298px-tall editor inside a 900px-tall window).
+
+What fixes it is settling the rendered frame BETWEEN operations: read
+`(scrollTop, contentHeight, layoutHeight, rendered row count, min row offset,
+view-zone boxes)` as one signature and wait for two consecutive identical
+reads. Five consecutive captures then agreed byte-for-byte. See
+`waitForEditorFrameSettled` and `waitForEditorRelayout` in
+`src/tests/gui/tests/visual/visual-alignment-capture.spec.ts`.
+
+One state worth recognising when you see it: a frame whose view zone is laid
+out at `top: 0px; height: 0px` while the content height still counts its 21px,
+and whose rendered rows sit at offsets that are not multiples of the line
+height. That is a half-rendered editor, and it persisted for three seconds in
+one run rather than resolving.

@@ -1,0 +1,11 @@
+{
+  "M1": "RESIDUAL PLAT35-VG2: one side is silent; a gap does not license silence",
+  "M2": "RESIDUAL PLAT35-VG9: the GPUI arm reports inline runs on 45 lines; an inline value is drawn beside the stopped row, so at most one line carries one",
+  "M3": "RESIDUAL PLAT35-VG8: role `gutter-line-number` resolved to `#8b949e`, which is not in the published token alphabet",
+  "M4": "RESIDUAL PLAT35-VG4: one side is silent; a gap does not license silence",
+  "M5": "RESIDUAL PLAT35-VG3: one side is silent; a gap does not license silence",
+  "M6": "Check failed: compareAnswer(lqGutterMarks, a, b).verdict == cvDiffers",
+  "M7": "Check failed: compareAnswer(lqPaneRectangles, near, far).verdict == cvDiffers",
+  "M8": "Check failed: bullets >= 3",
+  "M9": "Check failed: distinctGpui.len == scenarios.len"
+}

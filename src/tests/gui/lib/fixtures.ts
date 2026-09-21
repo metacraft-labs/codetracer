@@ -981,6 +981,32 @@ function attachMainProcessCapture(
  */
 const pageConsoleErrors = new WeakMap<Page, string[]>();
 
+/**
+ * The `ElectronApplication` a page belongs to, so the `electronApp` fixture can
+ * hand a spec the real main-process handle.
+ *
+ * **The same WeakMap-keyed-by-page arrangement as `pageConsoleErrors`, and for
+ * the same reason**: every launch mode builds its own `LaunchResult`, and a
+ * spec asking for the app should not have to know which mode it is under.
+ *
+ * WHY THIS EXISTS AT ALL. The `electronApp` fixture used to be
+ * `async ({}, use) => { await use(null); }` with the comment *"populated by
+ * ctPage fixture"*. Nothing populated it: a Playwright fixture cannot be
+ * written from another fixture's body, so it handed `null` to every spec in
+ * the suite, in every launch mode, always. That is not a cosmetic defect —
+ * a spec written as `if (electronApp !== null) { …resize the window… }` is a
+ * block that never runs and never says so, and PLAT-35's viewport matrix was
+ * exactly that block. Measured 2026-09-21: a probe under `launchMode:
+ * "trace-folder"` — a mode whose launcher returns a non-null app on every
+ * path — printed `electronApp is NULL`.
+ *
+ * The fixture below now DEPENDS on `ctPage`, which is what makes this
+ * well-defined: Playwright resolves `ctPage` first, its launcher registers the
+ * page here, and the `electronApp` fixture reads it back. It stays `null` for
+ * the web deployment mode, which genuinely has no Electron main process.
+ */
+const pageElectronApps = new WeakMap<Page, ElectronApplication>();
+
 function attachErrorCollectors(page: Page, bucket: string[]): void {
   pageConsoleErrors.set(page, bucket);
 
@@ -1824,9 +1850,11 @@ export const test = base.extend<
   ],
 
   electronApp: [
-    async ({}, use) => {
-      // Populated by ctPage fixture. Default null for direct use.
-      await use(null);
+    async ({ ctPage }, use) => {
+      // DEPENDS ON `ctPage` ON PURPOSE — see `pageElectronApps`. Resolving
+      // `ctPage` first is what runs the launcher that registers the page, and
+      // is the difference between this fixture and the `use(null)` it replaced.
+      await use(pageElectronApps.get(ctPage) ?? null);
     },
     { scope: "test" },
   ],
@@ -1986,6 +2014,11 @@ export const test = base.extend<
 
       try {
         if (result.electronApp !== null) {
+          // REGISTER BEFORE `use`. The `electronApp` fixture depends on this
+          // one, so Playwright resolves this body to its `use` call first and
+          // reads the map afterwards; registering later would hand `null` to
+          // the spec that asked for it.
+          pageElectronApps.set(result.page, result.electronApp);
           await assertCoreElectronStylesLoaded(result.page);
         }
 

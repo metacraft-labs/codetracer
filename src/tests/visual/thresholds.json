@@ -1,0 +1,97 @@
+{
+  "_comment": [
+    "PLAT-35 — TIER 2. THE PERCEPTUAL THRESHOLDS, ONE PER NAMED VIEW.",
+    "",
+    "Cross-Renderer-Visual-Alignment.md §2: tier 2 covers what structure cannot",
+    "express — rendered colour, weight, spacing, density — and its thresholds",
+    "between two renderers are necessarily looser than between two commits of",
+    "one. The methodology's ratchet rule carries across UNCHANGED:",
+    "",
+    "  **A THRESHOLD RAISED TWICE IS A DEFECT IN THE CAPTURE, NOT IN THE",
+    "  THRESHOLD.** Ratcheting a limit to keep a gate green converts the gate",
+    "  into decoration; the second raise triggers an investigation of what is",
+    "  non-deterministic instead.",
+    "",
+    "That rule is enforced rather than quoted: every threshold carries its own",
+    "`history`, and `test_cross_renderer_visual_alignment.nim` fails when any",
+    "entry's history holds two increases. A rule with no reader is a sentence.",
+    "",
+    "THRESHOLDS ARE PER VIEW AND NOT GLOBAL. A dense table tolerates far less",
+    "drift than a mostly-empty shell, and one global number is either too loose",
+    "for the former or permanently red on the latter.",
+    "",
+    "WHAT TIER 2 CAN AND CANNOT DO TODAY, SAID PLAINLY RATHER THAN IMPLIED BY A",
+    "GREEN RUN.",
+    "",
+    "The Electron side captures pixels: `visual-alignment-capture.spec.ts` writes",
+    "a PNG per named view under `src/tests/visual/captures/electron/`, and its",
+    "tier-1 canary asserts two captures of one settled frame are byte-identical.",
+    "",
+    "The GPUI side captures NO PIXELS. isonim-gpui's Rust shim is built in this",
+    "workspace WITHOUT `--features gpui-backend`, so `createWindow` opens nothing",
+    "— `src/frontend/gpui/main.nim`'s own header says so, and",
+    "`src/frontend/gpui/tests/test_gpui_editing_surface.nim` records that this",
+    "host has no display server for it either. So the CROSS-RENDERER arm of tier",
+    "2 is BLOCKED on `PLAT35-VG1`, and the thresholds below are declared, gated",
+    "for integrity, and not yet applied to a GPUI image.",
+    "",
+    "They are declared NOW rather than when the blocker clears, for one reason",
+    "that is not tidiness: a threshold chosen after seeing the first diff is a",
+    "threshold chosen to make that diff pass. These were chosen from what the two",
+    "rasterisers are known to differ by — text shaping and subpixel policy on",
+    "dense text, blending on tinted overlays — before either image existed.",
+    "",
+    "`maxDifferingPixelRatio` is the fraction of pixels allowed to differ",
+    "perceptually, in per-mille, against the paired capture of the SAME scenario",
+    "in the other front-end."
+  ],
+
+  "schemaVersion": 1,
+  "expectedViews": 6,
+  "crossRendererArmBlockedBy": "PLAT35-VG1",
+
+  "views": {
+    "shell": {
+      "maxDifferingPixelRatioPerMille": 60,
+      "why": "Mostly flat surfaces and a toolbar; the text that is present is short. The loosest number in the set would be wrong here.",
+      "history": [
+        { "date": "2026-09-20", "value": 60, "change": "introduced" }
+      ]
+    },
+    "editor": {
+      "maxDifferingPixelRatioPerMille": 140,
+      "why": "Dense monospaced text across three quarters of the window. Two text shapers disagree on nearly every glyph edge, and this is the view where that costs the most pixels.",
+      "history": [
+        { "date": "2026-09-20", "value": 140, "change": "introduced" }
+      ]
+    },
+    "state": {
+      "maxDifferingPixelRatioPerMille": 120,
+      "why": "Dense text plus inline value chips, whose tinted backgrounds are blended differently by the two renderers.",
+      "history": [
+        { "date": "2026-09-20", "value": 120, "change": "introduced" }
+      ]
+    },
+    "calltrace": {
+      "maxDifferingPixelRatioPerMille": 90,
+      "why": "A list: fewer glyphs than the editor, more than the shell.",
+      "history": [
+        { "date": "2026-09-20", "value": 90, "change": "introduced" }
+      ]
+    },
+    "eventLog": {
+      "maxDifferingPixelRatioPerMille": 110,
+      "why": "A data table. Column rules are one-pixel features and are exactly what a subpixel policy moves.",
+      "history": [
+        { "date": "2026-09-20", "value": 110, "change": "introduced" }
+      ]
+    },
+    "editorWithMark": {
+      "maxDifferingPixelRatioPerMille": 150,
+      "why": "The editor's density plus a gutter glyph and a line highlight, which is the one place in the set where a tinted overlay sits under text. The loosest number in the set, and it is the loosest for a named reason rather than by default.",
+      "history": [
+        { "date": "2026-09-20", "value": 150, "change": "introduced" }
+      ]
+    }
+  }
+}

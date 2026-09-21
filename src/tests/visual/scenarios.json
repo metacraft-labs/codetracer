@@ -1,0 +1,128 @@
+{
+  "_comment": [
+    "PLAT-35 — THE SCENARIO DEFINITION. IT NAMES NO RENDERER.",
+    "",
+    "Cross-Renderer-Visual-Alignment.md §4: 'A scenario names a recording, a",
+    "sequence of debugger operations, a viewport and a view name; it does not",
+    "name a renderer.' One definition, two capture paths.",
+    "",
+    "WHY JSON AND NOT A NIM CONST. The two capture paths are written in two",
+    "languages: the GPUI side is Nim and the Electron side is TypeScript under",
+    "Playwright. A Nim const would have to be transcribed into TypeScript, and a",
+    "transcription is a second copy of one definition — Verification-Harness-Traps",
+    "§30 arriving through a file copy. One file, two readers, no copy.",
+    "",
+    "THE SCENARIO SET IS PINNED AND ITS CARDINALITY IS ASSERTED, the same way",
+    "PLAT-31's task set and PLAT-34's sequence corpus are. `expectedScenarios`",
+    "below is read by both readers and compared against the parsed length, so a",
+    "parser that stopped early cannot pass.",
+    "",
+    "STEPPED BEFORE CAPTURE. PLAT-23 measured why: a Python program at line 1",
+    "genuinely has no locals, and its pane census moved from locals=0 to locals=8",
+    "on that one change — two empty screens compare equal. Five of the six",
+    "scenarios are stepped. The sixth, `entry-shell`, is deliberately NOT, and it",
+    "is the POPULATION CONTROL rather than an oversight: the suite asserts that",
+    "its answers DIFFER from every other scenario's.",
+    "",
+    "THE SIX REACH SIX DIFFERENT PROGRAM STATES, AND THAT IS THE WHOLE POINT OF",
+    "THE SET. Verification-Harness-Traps §34 is the trap this is written against:",
+    "a scenario set whose members are structurally identical makes the comparison",
+    "vacuous — eight questions times six copies of one screen is eight cases",
+    "wearing a multiplier. So no two scenarios share an operation sequence: one",
+    "is unstepped, one is six frames in, one is six frames in and three",
+    "statements along, one has returned a frame, one has run to completion, and",
+    "one carries a gutter mark. The suite asserts the six answer sets are",
+    "PAIRWISE DISTINCT and fails if they are not.",
+    "",
+    "THE OPERATION VOCABULARY IS CLOSED. Five members, every one of which both",
+    "drivers can perform: the GPUI driver through `HeadlessDebugSession`, the",
+    "Electron driver through the product's own debug-toolbar buttons. An op no",
+    "driver can perform is a scenario that silently captures a different state on",
+    "one side.",
+    "",
+    "THE VIEWPORT MATRIX IS EXERCISED BY THE SET RATHER THAN DECLARED BESIDE IT.",
+    "Two of the six sit at `laptop`, so the normalised-coordinate claim in",
+    "question one — that a rectangle is reported in hundredths of the viewport —",
+    "has scenarios at two viewports to be wrong at."
+  ],
+
+  "schemaVersion": 1,
+  "expectedScenarios": 6,
+  "expectedViews": 6,
+  "expectedViewports": 2,
+  "expectedOperationKinds": 5,
+  "expectedCanaries": 4,
+
+  "operationKinds": ["stepIn", "next", "stepOut", "continueForward", "setBreakpoint"],
+
+  "viewports": {
+    "wide": { "width": 1920, "height": 1080 },
+    "laptop": { "width": 1440, "height": 900 }
+  },
+
+  "scenarios": [
+    {
+      "id": "entry-shell",
+      "view": "shell",
+      "recording": "calc",
+      "viewport": "wide",
+      "operations": [],
+      "tier1Canary": true,
+      "why": "The population control. Not stepped, so the panes hold what a session holds at entry. Without it nothing says the five stepped scenarios are not five copies of one screen."
+    },
+    {
+      "id": "stepped-editor",
+      "view": "editor",
+      "recording": "calc",
+      "viewport": "wide",
+      "operations": [{ "kind": "stepIn", "times": 6 }],
+      "tier1Canary": true,
+      "why": "Dense text, six frames in. Six steps is the stop `test_cross_renderer_panes.nim` measured as the one that fills all four panes."
+    },
+    {
+      "id": "advanced-state",
+      "view": "state",
+      "recording": "calc",
+      "viewport": "laptop",
+      "operations": [
+        { "kind": "stepIn", "times": 6 },
+        { "kind": "next", "times": 3 }
+      ],
+      "tier1Canary": true,
+      "why": "The same frame three statements along: a different line, different locals, different inline values. It is at the laptop viewport so the normalised-rectangle claim has a second width to be wrong at."
+    },
+    {
+      "id": "returned-calltrace",
+      "view": "calltrace",
+      "recording": "calc",
+      "viewport": "laptop",
+      "operations": [
+        { "kind": "stepIn", "times": 21 },
+        { "kind": "stepOut", "times": 1 }
+      ],
+      "tier1Canary": false,
+      "why": "A frame entered and RETURNED FROM, which needs the debugger to be TWO frames deep before `stepOut` can land anywhere but the end of the program. MEASURED, 2026-09-21, on the recording itself rather than chosen: `calc`'s module level is a prologue of nine `def` statements and two constants, so step-ins 1..16 never leave `<__main__>`; #17 enters `main` at line 99; #18..#20 walk to the call at line 109; #21 enters `evaluate` at line 72. `stepOut` there returns to `main` at LINE 110, TICK 37. Stepping out one frame shallower — from inside `main` — lands on line 113 at tick 171, which is byte-identical to where `continueForward` lands, and that is what the previous three spellings all did. THE PREVIOUS SPELLING WAS `next x1, stepIn x1, stepOut x1` AND IT COLLIDED: it was validated against a capture that counted CLICKS rather than MOVES, so the recorded corpus was one operation behind and the collision was invisible. Once the capture asserted effect, `returned-calltrace` and `continued-event-log` both reported line 113 at tick 171 — the same screen, reached two ways, which is the population defect (Verification-Harness-Traps §34) this set exists to prevent. The `laptop` viewport is kept as belt and braces but is no longer what carries the distinctness: the two answer sets differed in only two of eight questions when the program state was shared, and both of those two were differences in WINDOW SIZE rather than in anything the debugger did."
+    },
+    {
+      "id": "continued-event-log",
+      "view": "eventLog",
+      "recording": "calc",
+      "viewport": "wide",
+      "operations": [{ "kind": "continueForward", "times": 1 }],
+      "tier1Canary": true,
+      "why": "Run forward rather than stepped. The recorded event set is the one the program produced, which is the fourth distinct rendering path the methodology asks a tier-1 canary set to cover: a data table."
+    },
+    {
+      "id": "breakpoint-editor",
+      "view": "editorWithMark",
+      "recording": "calc",
+      "viewport": "laptop",
+      "operations": [
+        { "kind": "stepIn", "times": 6 },
+        { "kind": "setBreakpoint", "line": 1 }
+      ],
+      "tier1Canary": false,
+      "why": "The only scenario in which the gutter-marks question has a non-empty answer. `line` is relative to the first drawn row and is resolved by each driver against the recording's own source, never against a literal."
+    }
+  ]
+}

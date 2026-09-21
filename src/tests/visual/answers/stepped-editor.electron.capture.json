@@ -1,0 +1,24 @@
+{
+  "scenario": "stepped-editor",
+  "view": "editor",
+  "viewport": "wide",
+  "frontEnd": "electron",
+  "operationsMoved": 6,
+  "stoppedLine": 44,
+  "stoppedPath": "main.py",
+  "rrTicks": 6,
+  "trajectory": [
+    "entry=1@0",
+    "stepIn=1@1",
+    "stepIn=2@2",
+    "stepIn=29@3",
+    "stepIn=34@4",
+    "stepIn=39@5",
+    "stepIn=44@6"
+  ],
+  "viewportCss": "1920x1080",
+  "capturePixels": "1920x1080",
+  "capture": "src/tests/visual/captures/electron/stepped-editor.png",
+  "settleAttempts": 2,
+  "tier1": "identical"
+}

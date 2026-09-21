@@ -158,6 +158,53 @@ const
     ## the ViewModel and are asserted against it, so a rendering that drifts
     ## from the model fails"*.
 
+  EditorValuesAttribute* = "data-ct-values"
+    ## **PLAT-35.** The row's inline values in STRUCTURED form —
+    ## `name=value|name=value`, in draw order — beside `inlineValueText`'s
+    ## glyph form.
+    ##
+    ## It is not a duplicate of the annotation span and the distinction is the
+    ## same one every other attribute here rests on: the span is what a user
+    ## sees, this is what the row SAID. `Cross-Renderer-Visual-Alignment.md`
+    ## §3 asks for *"inline value runs by line — count, order, and the text of
+    ## each"*, and a count alone is satisfied by two front-ends that draw the
+    ## same number of different values. Parsing them back out of `/* x: 1, y: 2
+    ## */` would make the comparison a test of the annotation formatter.
+
+  TextRoleAttribute* = "data-ct-text-role"
+  TextMetricAttribute* = "data-ct-text-metric"
+  TokenAttribute* = "data-ct-token"
+    ## **PLAT-35's tier-3 rows for text metrics and token colour.**
+    ##
+    ## `TokenAttribute` carries a design-system TOKEN ID and never a hex value
+    ## — §3.1: a token comparison is exact and survives rasterisation, a hex
+    ## comparison does not, because the two renderers blend and gamma-correct
+    ## differently.
+    ##
+    ## `TextMetricAttribute` carries `family/size/weight` in the bucket
+    ## alphabet `layout_questions.nim` publishes. **On this front-end it is a
+    ## DECLARED metric and not a measured one**, and that is filed as
+    ## `PLAT35-VG1` rather than left implicit: the Rust shim in this workspace
+    ## is built without `--features gpui-backend`, so `createWindow` opens
+    ## nothing and there is no shaped glyph to measure. The Electron arm's
+    ## answer to the same question IS measured, out of `getComputedStyle`, so
+    ## the row is labelled `source reading` on this side and `captured` on the
+    ## other — PLAT-23's tiering rule, per row.
+
+  FocusIndexAttribute* = "data-ct-focus-index"
+    ## **PLAT-35's focus-order row.** The position this leaf occupies in the
+    ## front-end's focus order, stamped by `renderLeaves` from the projected
+    ## document's own order.
+    ##
+    ## **DECLARED, NOT ENFORCED**, and filed as `PLAT35-VG4`. `PLAT21-VG3`
+    ## measured that isonim-gpui has focus at the WINDOW level only — `grep -n
+    ## focus` over the shim's `tree.rs` and `render_sync.rs` returns nothing —
+    ## so no element can hold or refuse focus and nothing makes this order
+    ## happen. It is still the right thing to publish: the Electron arm's
+    ## answer is also a declaration (`tabindex` on the pane roots), so the two
+    ## are comparable, and a front-end whose declared order drifts from the
+    ## other's is a defect whether or not either enforces it.
+
   ExecutionPointerGlyph* = "▶"
   InspectionPointerGlyph* = "▷"
   BreakpointGlyph* = "●"
@@ -256,6 +303,68 @@ func inlineValueText*(values: openArray[EditorValue]): string =
     parts.add v.name & ": " & v.value
   "/* " & parts.join(", ") & " */"
 
+func structuredValues*(values: openArray[EditorValue]): string =
+  ## `name=value|name=value`, in DRAW ORDER, for `EditorValuesAttribute`.
+  ##
+  ## Deliberately not sorted: `Cross-Renderer-Visual-Alignment.md` §3 asks for
+  ## *"count, order, and the text of each"*, and sorting here would answer two
+  ## thirds of the question while looking like all of it.
+  var parts: seq[string] = @[]
+  for v in values:
+    parts.add v.name & "=" & v.value
+  parts.join("|")
+
+func gpuiMetricFor*(role: TextRole): string =
+  ## **THIS FRONT-END'S DECLARED TEXT METRIC for a role**, in the bucket
+  ## alphabet `layout_questions.nim` publishes.
+  ##
+  ## Declared, and `PLAT35-VG1` is where that is filed rather than glossed: the
+  ## shim in this workspace is built without `--features gpui-backend`, so
+  ## nothing here has ever asked a text system how tall a glyph is. The Electron
+  ## arm answers the same question out of `getComputedStyle` — measured — which
+  ## is why the two rows carry different tiers and the comparison still runs.
+  ##
+  ## An exhaustive `case`, so a sixth role does not compile until it has a
+  ## metric. A default arm would give a new role the editor's metric and the
+  ## comparison would agree about a value nobody chose.
+  ## **THE BUCKETS ARE THE ELECTRON FRONT-END'S MEASURED ONES**, and three of
+  ## the five were changed on 2026-09-20 because the cross-renderer gate said
+  ## so. Before that this front-end declared the gutter at `sm` and the pane
+  ## title at `sm/medium`; `getComputedStyle` on the shipped Electron renderer
+  ## measures `mono/md/regular` and `proportional/md/regular`. The Electron
+  ## front-end is the reference (§6), so the declaration moved — which is the
+  ## whole of what "visual alignment" means for a fact a GPU surface cannot yet
+  ## measure for itself.
+  case role
+  of trEditorCode: $fcMono & "/" & $sbBody & "/" & $wbRegular
+  of trGutterLineNumber: $fcMono & "/" & $sbBody & "/" & $wbRegular
+  of trPaneTitle: $fcProportional & "/" & $sbBody & "/" & $wbRegular
+  of trValueName: $fcProportional & "/" & $sbBody & "/" & $wbRegular
+  of trValueText: $fcMono & "/" & $sbBody & "/" & $wbRegular
+
+func gpuiTokenFor*(role: TextRole; row: EditorRow): string =
+  ## **THE DESIGN-SYSTEM TOKEN ID this front-end resolves a role to**, given
+  ## what the row says about itself. Never a hex value (§3.1).
+  ##
+  ## The row matters for exactly one role: a gutter on a line carrying a mark
+  ## resolves to that mark's token rather than to the line-number token, which
+  ## is the difference the `breakpoint-editor` scenario exists to make
+  ## observable. Making it depend on the row is also what gives the token
+  ## question something a mutation can move.
+  case role
+  of trEditorCode:
+    if row.pointer == eptExecution: "editor.executionLine.background"
+    else: "editor.code.foreground"
+  of trGutterLineNumber:
+    case row.mark
+    of emBreakpoint: "gutter.breakpoint.enabled"
+    of emBreakpointDisabled: "gutter.breakpoint.disabled"
+    of emTracepoint: "gutter.tracepoint"
+    of emNone: "editor.lineNumber.foreground"
+  of trPaneTitle: "pane.title.foreground"
+  of trValueName: "value.name.foreground"
+  of trValueText: "value.text.foreground"
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
   ## One row of the source editor.
   ##
@@ -270,14 +379,21 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
   r.setAttribute(el, EditorMarkAttribute, $row.mark)
   r.setAttribute(el, EditorFlowAttribute, $row.flow)
   r.setAttribute(el, EditorHeldAttribute, (if row.held: "true" else: "false"))
+  r.setAttribute(el, EditorValuesAttribute, structuredValues(row.values))
   r.setStyle(el, "display", "flex")
 
   let gutter = r.createElement("span")
+  r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
+  r.setAttribute(gutter, TextMetricAttribute, gpuiMetricFor(trGutterLineNumber))
+  r.setAttribute(gutter, TokenAttribute, gpuiTokenFor(trGutterLineNumber, row))
   r.appendChild(gutter,
     r.createTextNode(markGlyph(row.mark) & $row.line & pointerGlyph(row.pointer)))
   r.appendChild(el, gutter)
 
   let code = r.createElement("span")
+  r.setAttribute(code, TextRoleAttribute, $trEditorCode)
+  r.setAttribute(code, TextMetricAttribute, gpuiMetricFor(trEditorCode))
+  r.setAttribute(code, TokenAttribute, gpuiTokenFor(trEditorCode, row))
   r.appendChild(code,
     r.createTextNode(if row.held: row.text else: EditorLoadingText))
   r.appendChild(el, code)
@@ -285,6 +401,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
   let annotation = inlineValueText(row.values)
   if annotation.len > 0:
     let ann = r.createElement("span")
+    r.setAttribute(ann, TextRoleAttribute, $trValueText)
+    r.setAttribute(ann, TextMetricAttribute, gpuiMetricFor(trValueText))
+    r.setAttribute(ann, TokenAttribute, gpuiTokenFor(trValueText, row))
     r.appendChild(ann, r.createTextNode(annotation))
     r.appendChild(el, ann)
   el
@@ -350,6 +469,21 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
   r.appendChild(parent, binding.root)
   pv.report.len == 0
 
+proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
+  ## A leaf's title, carrying its TEXT ROLE, its metric and its token.
+  ##
+  ## PLAT-35. ONE function rather than the two identical spellings that stood
+  ## here — the editor branch and the generic branch built the same heading two
+  ## screens apart, which is §30's shape inside one `case`, and is the reason
+  ## the role was about to be stamped on one of them and not the other.
+  result = r.createElement("div")
+  r.setAttribute(result, TextRoleAttribute, $trPaneTitle)
+  r.setAttribute(result, TextMetricAttribute, gpuiMetricFor(trPaneTitle))
+  r.setAttribute(result, TokenAttribute, gpuiTokenFor(trPaneTitle,
+                                                      EditorRow()))
+  r.appendChild(result, r.createTextNode(
+    if leaf.title.len > 0: leaf.title else: leaf.paneId))
+
 proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
                 surface: EditorSurface): (GpuiElement, bool) =
   ## One leaf's subtree, and whether it is a REPORT rather than a live pane.
@@ -392,9 +526,7 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
     if leaf.kind == glkBuiltin and leaf.builtin == paneEditor:
       r.setAttribute(node, StateAttribute,
                      if surface.report.len > 0: "editor-report" else: "live")
-      let heading = r.createElement("div")
-      r.appendChild(heading, r.createTextNode(
-        if leaf.title.len > 0: leaf.title else: leaf.paneId))
+      let heading = paneTitleElement(r, leaf)
       r.appendChild(node, heading)
       let drewRows = renderEditor(r, node, sourcePaneView(GpuiMedium).root,
                                   surface)
@@ -420,9 +552,7 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
     # child means the arrangement assertions PLAT-20 wrote — which read the
     # plan's text nodes in plan order — still have something to read, and the
     # pane's own tree follows it.
-    let heading = r.createElement("div")
-    r.appendChild(heading, r.createTextNode(
-      if leaf.title.len > 0: leaf.title else: leaf.paneId))
+    let heading = paneTitleElement(r, leaf)
     r.appendChild(node, heading)
     if leaf.kind == glkBuiltin:
       let drewData = renderPaneView(r, node, leaf, GpuiPanelBudget)
@@ -476,6 +606,12 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
     return
   for leaf in leafSet.leaves:
     let (node, reported) = renderLeaf(r, leaf, surface)
+    # PLAT-35's focus-order row. The index is the leaf's position in the
+    # projected document's own order — the order this front-end would move
+    # focus in — stamped so the question can be answered from the RENDERED
+    # tree rather than re-derived from `leafSet`, which would be reading the
+    # input and calling it an observation (Verification-Harness-Traps §4a).
+    r.setAttribute(node, FocusIndexAttribute, $result.drawn)
     r.appendChild(root, node)
     inc result.drawn
     if reported:

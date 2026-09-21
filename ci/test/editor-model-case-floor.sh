@@ -14,6 +14,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-32
 #   bash ci/test/editor-model-case-floor.sh PLAT-33
 #   bash ci/test/editor-model-case-floor.sh PLAT-34
+#   bash ci/test/editor-model-case-floor.sh PLAT-35
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -297,9 +298,51 @@ PLAT-34)
 	# second.
 	LAW_SUITES=()
 	;;
+PLAT-35)
+	MILESTONE="** PLAT-35: Visual alignment of the GPUI front-end"
+	SUITES=(
+		src/frontend/gpui/tests/test_cross_renderer_visual_alignment.nim
+	)
+	# ONE SUITE, AND IT NEEDS THE `gpui-shell` LANE'S FLAGS.
+	#
+	# The flags are READ FROM `ci/lib/test-lane-files.sh`, never transcribed —
+	# the same arrangement PLAT-34 established and for the same reason: that
+	# file already answers "what does a `gpui-shell`-lane file need to build",
+	# and a second spelling here would be a second place for it to drift (§30).
+	#
+	# NOT the `tui` lane's: this suite links `isonim_gpui` and not
+	# `isonim_tui`, and handing it the tree-sitter archive and the two `-L`
+	# flags would hide the dependency split `test_gpui_shell_split.nim`
+	# asserts from the inside.
+	#
+	# WHY ONE SUITE RATHER THAN TWO. PLAT-34 has two because `DIFF-1`'s two
+	# halves link different renderers. PLAT-35's halves are not two link
+	# targets: the Electron arm is a RECORDED CAPTURE produced by a Playwright
+	# lane (`just plat35-capture-electron`) and read here as JSON, so there is
+	# nothing for a second Nim binary to link. The Electron half's own
+	# execution is gated by that lane and by the tier-1 verdict this suite
+	# reads out of the capture manifest, which is how a capture that never ran
+	# fails here rather than passing quietly.
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags gpui-shell
+	)")
+	# NO `LAW_SUITES`, for PLAT-30's, PLAT-31's and PLAT-34's reason and not by
+	# oversight. `Editor-Model-Conformance-Suite.md` §3 publishes `LAW-A` …
+	# `LAW-X` and none of them is PLAT-35's. This milestone's oracle is a
+	# DIFFERENT table — `Testing/Cross-Renderer-Visual-Alignment.md` §3's eight
+	# layout questions — and §7.1's two-way count over it is asserted INSIDE
+	# the suite, in four cases, because the parse has to apply §3.1a's
+	# canonical-key grammar to a prose column rather than read an id out of a
+	# backticked cell. A `LAW_PREFIX` here would make this gate parse a table
+	# that does not exist, and per §4 a parser that matches nothing satisfies
+	# everything written over it.
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-34. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-35. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

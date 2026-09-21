@@ -4597,6 +4597,103 @@ test-gpui-shell:
   exec > >(tee test-logs/test-gpui-shell.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh gpui-shell
 
+# ─── PLAT-35: cross-renderer visual alignment ───────────────────────────────
+#
+# "The GPUI front-end looks like the Electron one", as a check that can fail.
+# THREE recipes, because the three things they do fail for different reasons
+# and one must not mask another.
+#
+#   plat35-capture-electron   drives the REAL Electron front-end under Xvfb
+#                             through the shared scenario definition, writes a
+#                             PNG per named view and the eight layout answers
+#                             per scenario, and asserts the tier-1 determinism
+#                             canary WITHIN that renderer.
+#   plat35-answer-independence  the §30a source scan: neither producer may read
+#                             the other's medium, and the shared vocabulary may
+#                             hold no reader at all. Carries its own positive
+#                             control, so an absence grep that has stopped
+#                             matching cannot pass.
+#   test-plat35-visual-alignment  the GATE: §3's oracle table parsed at run
+#                             time, the two-direction set equality with the
+#                             cardinality on both sides, and eight questions
+#                             times six scenarios compared as values.
+#
+# THE ORDER MATTERS AND IS NOT ENFORCED HERE ON PURPOSE. The Nim gate reads the
+# Electron arm's recorded answers and FAILS BY NAME when they are absent,
+# naming the capture recipe — rather than skipping, and rather than this recipe
+# silently re-capturing. A gate that regenerates its own input is a gate that
+# can never be stale and can never be wrong.
+
+# Capture the Electron front-end's named views and layout answers.
+# Needs a built frontend (`just build-once`) and a recorded `calc` fixture
+# (`just test-tui` once).
+#
+# ITS OWN Xvfb, AT `-dpi 96`, AND THAT IS THE WHOLE REASON THIS RECIPE DOES NOT
+# DELEGATE TO `test-gui-prebuilt`.
+#
+# Measured 2026-09-21. `test-gui-prebuilt` starts `Xvfb :N -screen 0
+# 1920x1080x24` with no `-dpi`, the X server then reports about 100.5 dpi, and
+# Chromium derives a device scale factor of 1.046875 from it. A screenshot is
+# in DEVICE pixels, so a 1440x900 CSS viewport lands on disk as 1508x943 and
+# the default 1837x1034 window lands as 1923x1082 — which is exactly the size
+# all six committed captures had, including the three declared 1440x900.
+#
+# At `-dpi 96` the factor is exactly 1, the window's content size, the page's
+# CSS viewport and the PNG's IHDR all carry the same two numbers, and the
+# capture can assert them against the scenario's declared viewport instead of
+# against nothing. The spec asserts `devicePixelRatio == 1` and names this
+# recipe when it does not hold, so running the lane the other way fails rather
+# than quietly writing 1.046875x images again.
+#
+# AND A 2560x1440 SCREEN, WHICH IS LARGER THAN THE LARGEST DECLARED VIEWPORT.
+# Measured 2026-09-21, by the new assertion catching it on its first run: on a
+# 1920x1080 screen a window asked for a 1920x1080 CONTENT area gets a
+# 1919x1079 CSS viewport — the screen has to hold the window's frame as well as
+# its content, so the widest viewport in the matrix cannot equal the widest
+# screen. The three `wide` scenarios failed by name with
+# `Expected "1920x1080" / Received "1919x1079"`, which is the assertion doing
+# the job the declaration could not: the same three had been silently captured
+# at 1923x1082 for the whole milestone.
+#
+# The screen is therefore sized from the matrix rather than from the host, with
+# headroom. A viewport added to `scenarios.json` that does not fit here will
+# fail the same way, by name, in the same place.
+plat35-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/visual-alignment-capture.spec.ts {{args}}
+      ;;
+    *)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/visual-alignment-capture.spec.ts {{args}}
+      ;;
+  esac
+
+# The §30a arm: the two answer producers are independent readers.
+plat35-answer-independence:
+  bash ci/test/plat35-answer-independence.sh
+
+# The gate. Runs the GPUI arm live (real recording, real replay-server, real
+# shadow tree) and compares it against the recorded Electron arm.
+test-plat35-visual-alignment:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat35-visual-alignment.log) 2>&1
+  bash ci/test/plat35-answer-independence.sh
+  bash ci/test/editor-model-case-floor.sh PLAT-35
+
 test-ui-selection: build-once build-tui
   #!/usr/bin/env bash
   set -euo pipefail
@@ -5029,7 +5126,7 @@ editor-model-case-floors:
   set -uo pipefail
   failed=0
   ran=0
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35; do
     echo "=== ${m} ==="
     if bash ci/test/editor-model-case-floor.sh "${m}"; then
       ran=$((ran + 1))

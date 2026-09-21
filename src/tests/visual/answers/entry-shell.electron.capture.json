@@ -1,0 +1,18 @@
+{
+  "scenario": "entry-shell",
+  "view": "shell",
+  "viewport": "wide",
+  "frontEnd": "electron",
+  "operationsMoved": 0,
+  "stoppedLine": 1,
+  "stoppedPath": "main.py",
+  "rrTicks": 0,
+  "trajectory": [
+    "entry=1@0"
+  ],
+  "viewportCss": "1920x1080",
+  "capturePixels": "1920x1080",
+  "capture": "src/tests/visual/captures/electron/entry-shell.png",
+  "settleAttempts": 2,
+  "tier1": "identical"
+}

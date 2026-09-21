@@ -1,0 +1,165 @@
+{
+  "_comment": [
+    "PLAT-35 — THE PINNED CORPUS. WHAT MAKES A SHIFTED CORPUS REDDEN.",
+    "",
+    "WHY THIS FILE EXISTS, MEASURED RATHER THAN ASSUMED.",
+    "",
+    "ALL EIGHT layout questions carry a filed gap, so ALL FORTY-EIGHT tier-3",
+    "cells in `test_cross_renderer_visual_alignment.nim` take the",
+    "`residualHolds` branch. What those forty-eight assert is that EIGHT NAMED",
+    "divergences have not grown past their filed shapes. That is a real claim.",
+    "It is not the claim 'the two front-ends agree'. The `gaps.len == 0`",
+    "branch — the alignment claim itself — is NOT REACHABLE by any cell.",
+    "",
+    "That count was SEVEN for one day and the day is worth recording. On",
+    "2026-09-21 `PLAT35-VG7` was retired because the morning's run showed both",
+    "arms answering an EMPTY `inline-value-runs-by-line` set, which made six",
+    "cells take the alignment branch — live, and vacuous, since two empty",
+    "answers compare equal. Re-running the same binary on the same tree six",
+    "times showed FIVE runs reporting the GPUI values and one not: the gap had",
+    "been retired against the minority run. It is re-filed as `PLAT35-VG9`,",
+    "the intermittency is `PLAT35-PD3`, and no cell is on the alignment branch",
+    "again. None of the residuals below changed; what changed is that the",
+    "suite now asserts the GPUI locals ARRIVED rather than merely that nothing",
+    "raised while fetching them.",
+    "",
+    "The consequence was measured on 2026-09-21: the gate was re-run against a",
+    "corpus in which FOUR OF SIX scenarios had reached a different program",
+    "state, and it stayed GREEN at 90 cases and 309 assertions. The residual",
+    "for `gutter-marks-by-line` compares mark KINDS as a sorted multiset —",
+    "both sides said `execution`, so it held — and never looks at the line.",
+    "The residual for `which-panes-are-present` asks only that `editor`,",
+    "`state` and `calltrace` appear on both sides. Neither can see a corpus",
+    "move, and nothing else in the suite was reading these numbers at all.",
+    "",
+    "So the numbers the findings rest on are PINNED here and compared. A",
+    "re-run that lands somewhere else now fails by name, with both figures in",
+    "the message, instead of being absorbed by a residual that was describing",
+    "a different property.",
+    "",
+    "WHY THESE THREE MEASUREMENTS AND NOT OTHERS.",
+    "",
+    "  * THE STOPPED LINE is what `PLAT35-VG6` is entirely a claim about, and",
+    "    it is the single number an operation that lands in the wrong place",
+    "    moves. It is read back out of each front-end's own",
+    "    `gutter-marks-by-line` answer by `executionLineIn`, so both arms are",
+    "    read by ONE function over the data the gate already compares — not by",
+    "    two extractors that could disagree about what they mean.",
+    "  * THE PANE CENSUS is what `PLAT35-VG5`'s four-against-eight is a claim",
+    "    about. A front-end that stopped drawing four of its panes would still",
+    "    satisfy that question's residual.",
+    "  * THE EDITOR ROW COUNT, WHICH THIS FILE WAS BLIND TO, AND THAT BLINDNESS",
+    "    IS HOW A DRIFT SURVIVED THE MECHANISM BUILT TO CATCH ONE. Measured",
+    "    2026-09-21: `returned-calltrace`'s Electron answer flipped between",
+    "    `rows=36;first=82;last=117` and `rows=35;first=83;last=117` across runs",
+    "    of the identical specification — four and three of seven captures. The",
+    "    two pins above cannot see a scrolled editor, and `editor-row-count`'s",
+    "    own residual (it carries `PLAT35-VG2`) asks only that both sides drew",
+    "    rows numbered ascending from a real line. The capture is repaired; this",
+    "    is what makes the NEXT one visible.",
+    "",
+    "    THE WHOLE ANSWER STRING IS PINNED, not the count alone: `first` and",
+    "    `last` are what say which window the editor holds, and a scroll that",
+    "    moved the window while keeping the count is exactly what a bare count",
+    "    would absorb.",
+    "",
+    "THIS FILE NAMES RENDERERS AND `scenarios.json` DOES NOT. That is why it is",
+    "a separate file: the scenario definition names a recording, an operation",
+    "sequence, a viewport and a view, and naming a front-end in it would make",
+    "one definition into two. A pin is a measurement OF a front-end and belongs",
+    "with the other measurements.",
+    "",
+    "WHEN A PIN CHANGES, THAT IS A DELIBERATE EDIT AND THE POINT. If a product",
+    "change moves where a front-end stops, this file is where somebody has to",
+    "say so, in the same commit, with the new number visible in the diff."
+  ],
+  "schemaVersion": 1,
+  "expectedPinnedScenarios": 6,
+  "scenarios": {
+    "entry-shell": {
+      "_why": "Not stepped. The session sits at its entry point, line 1.",
+      "electronStoppedLine": 1,
+      "gpuiStoppedLine": 1,
+      "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "gpuiEditorRows": [
+        "rows=54;first=1;last=54"
+      ],
+      "electronEditorRows": [
+        "rows=45;first=1;last=45"
+      ]
+    },
+    "stepped-editor": {
+      "_why": "Six step-ins. Measured 2026-09-21, FIVE identical runs (the trajectory, the tick count, the operations moved, the settle attempts and the tier-1 verdict are byte-identical in all five): ticks 1..6 visit lines 1, 2, 29, 34, 39, 44, so the stop is line 44 — `calc`'s `def div` — and every one of those six is a module-level `def` statement.",
+      "electronStoppedLine": 44,
+      "gpuiStoppedLine": 44,
+      "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "gpuiEditorRows": [
+        "rows=54;first=1;last=54"
+      ],
+      "electronEditorRows": [
+        "rows=46;first=21;last=66"
+      ]
+    },
+    "advanced-state": {
+      "_why": "Six step-ins and three nexts: 44 -> 54 -> 55 -> 56, the entries of the OPERATIONS dispatch table.",
+      "electronStoppedLine": 56,
+      "gpuiStoppedLine": 56,
+      "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "gpuiEditorRows": [
+        "rows=45;first=12;last=56"
+      ],
+      "electronEditorRows": [
+        "rows=38;first=37;last=74"
+      ]
+    },
+    "returned-calltrace": {
+      "_why": "Twenty-one step-ins reach `evaluate` TWO frames deep (step 17 enters `main`, step 21 enters `evaluate`); the step-out returns to `main` at line 110, tick 37. Stepping out one frame shallower lands on line 113 at tick 171, which is byte-identical to where `continueForward` lands — that collision is what the previous three-operation spelling produced once the capture began asserting effect.",
+      "electronStoppedLine": 110,
+      "gpuiStoppedLine": 110,
+      "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "gpuiEditorRows": [
+        "rows=45;first=66;last=110"
+      ],
+      "electronEditorRows": [
+        "rows=36;first=82;last=117",
+        "rows=35;first=83;last=117"
+      ],
+      "electronEditorRowsDefect": "PLAT35-PD4",
+      "_whyEditorRowsIsASet": "THE EDITOR IS BOTTOM-ANCHORED HERE, which is the only place `PLAT35-PD4` can act. Measured 2026-09-21 at the 798px editor height: the resting scroll is 1788 (= 2574 + 12 - 798, the bound before the flow overlay's 21px view zone is counted) in 9 of 9 captures taken after the per-move frame settle landed, and was 1809 (= 2607 - 798, the bound with it) in 3 of 7 taken before. BOTH ARE PINNED rather than only the current one: PD4 is unfixed, the settle reduces its probability rather than removing it, and a pin that depends on a probability is a pin that flakes on a slower machine — in a lane shared with eleven other milestones. Tighten this to one member on the day PD4 is closed."
+    },
+    "continued-event-log": {
+      "_why": "Run forward to completion: line 113, tick 171, the last statement of `main`.",
+      "electronStoppedLine": 113,
+      "gpuiStoppedLine": 113,
+      "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "gpuiEditorRows": [
+        "rows=54;first=60;last=113"
+      ],
+      "electronEditorRows": [
+        "rows=45;first=73;last=117",
+        "rows=44;first=74;last=117",
+        "rows=43;first=75;last=117"
+      ],
+      "electronEditorRowsDefect": "PLAT35-PD4",
+      "_whyEditorRowsIsASet": "THE EDITOR IS BOTTOM-ANCHORED HERE TOO, and this is the scenario `PLAT35-PD4` was measured on: ONE operation, so a settle between operations has nothing to work with. At the 978px editor height the three bounds are 1596 (= 2574 - 978), 1608 (= 2586 - 978, the horizontal scrollbar counted) and 1629 (= 2607 - 978, the 21px view zone counted too), which put the first rendered line at 73, 74 and 75. ALL THREE WERE OBSERVED, in ten captures. They are not a list somebody collected: each is the arithmetic consequence of one content-height stage, so a corpus that moves — a different line, a different file, a different viewport — leaves the set entirely."
+    },
+    "breakpoint-editor": {
+      "_why": "Six step-ins, then a gutter mark. The mark does NOT move the program, which the capture asserts: the stop stays at line 44, tick 6, exactly `stepped-editor`'s, and the two scenarios are told apart by the breakpoint and by the viewport.",
+      "electronStoppedLine": 44,
+      "gpuiStoppedLine": 44,
+      "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "gpuiEditorRows": [
+        "rows=45;first=1;last=45"
+      ],
+      "electronEditorRows": [
+        "rows=38;first=25;last=62"
+      ]
+    }
+  }
+}

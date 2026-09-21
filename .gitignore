@@ -632,3 +632,55 @@ src/frontend/viewmodel/tests/unit/.plat18-marshalling-mutation.lock
 # untracked and unignored they make the pre-push gate see a dirty tree.
 refs/*
 !refs/README.md
+
+# PLAT-35's Electron PNG baselines. NOT IGNORED FOR SIZE — they are about
+# 330 KB each and the six together are smaller than a single icon set in this
+# tree. They are ignored because **they are not reproducible**, and a baseline
+# that cannot be regenerated pins one lucky run as the truth.
+#
+# The three reasons, stated so the decision can be revisited rather than
+# inherited:
+#
+#   * TIER 2 CANNOT CONSUME THEM. The cross-renderer threshold arm is blocked
+#     (`thresholds.json`'s `crossRendererArmBlockedBy`) because the GPUI shim in
+#     this workspace is built without `--features gpui-backend` and opens no
+#     window, so there is no second image to compare one against.
+#   * TIER 1 IS WITHIN-RUN. The determinism canary takes a third screenshot in
+#     the same run and compares it with the two the settle loop already agreed
+#     on. A committed file from a previous run buys no part of that.
+#   * THEY ARE CHEAP TO REGENERATE — `just plat35-capture-electron`, measured
+#     over the same five runs at 2.8, 3.0, 3.1, 3.2 and 4.3 minutes for the
+#     whole six-scenario corpus.
+#
+# REVISIT WHEN THE CAPTURE IS DETERMINISTIC ACROSS RUNS, which as of 2026-09-21
+# it is not. **MEASURED, over five consecutive full-corpus runs**, because this
+# paragraph previously said only that the pixels "have not been shown to"
+# reproduce — which reads as an absence of evidence and is not: there is
+# evidence, and it is that they do not.
+#
+#   scenario              pairs differing   worst pair (of the whole image)
+#   entry-shell               7 of 10        18,763 of 2,073,600 px  (0.90%)
+#   stepped-editor            9 of 10             82 of 2,073,600 px  (0.004%)
+#   advanced-state            4 of 10             51 of 1,296,000 px  (0.004%)
+#   returned-calltrace        8 of 10          3,143 of 1,296,000 px  (0.24%)
+#   continued-event-log       4 of 10         78,960 of 2,073,600 px  (3.81%)
+#   breakpoint-editor         0 of 10        identical in all five
+#
+# FIVE OF SIX, not three, and the worst is 78,960 pixels rather than the "19 to
+# 61" an earlier pass recorded. One of the causes is named — `PLAT35-PD4`, the
+# editor's scroll not being re-normalised when its content height grows, which
+# is what moves `continued-event-log` by two rows and `returned-calltrace`'s
+# editor by part of one. **The others are NOT established**, and `entry-shell`
+# is the one that says so loudest: it is the unstepped scenario, its eight
+# answers were byte-identical across all five runs, and 0.9% of its pixels
+# still moved.
+#
+# WITHIN a run the capture IS stable — all four tier-1 canaries report
+# `identical` in every run, and the settle loop converges in two attempts — so
+# this is a cross-run property, which is exactly the one a committed baseline
+# would be asserting. Commit one and it pins whichever run happened to produce
+# it.
+#
+# When that is no longer true, a committed baseline starts buying regression
+# detection and this entry should go.
+src/tests/visual/captures/

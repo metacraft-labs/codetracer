@@ -1,0 +1,19 @@
+{
+  "scenario": "continued-event-log",
+  "view": "eventLog",
+  "viewport": "wide",
+  "frontEnd": "electron",
+  "operationsMoved": 1,
+  "stoppedLine": 113,
+  "stoppedPath": "main.py",
+  "rrTicks": 171,
+  "trajectory": [
+    "entry=1@0",
+    "continueForward=113@171"
+  ],
+  "viewportCss": "1920x1080",
+  "capturePixels": "1920x1080",
+  "capture": "src/tests/visual/captures/electron/continued-event-log.png",
+  "settleAttempts": 2,
+  "tier1": "identical"
+}
