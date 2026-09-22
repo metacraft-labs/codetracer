@@ -1,0 +1,8 @@
+# PLAT-36's Vim-configuration corpus. These are UPSTREAM BYTES, pinned by
+# SHA-256 in `provenance.tsv`, and the partition law's denominator is a
+# property of them. A checkout that normalised their line endings would change
+# every digest and would silently change `mapLines` for any file whose
+# continuation lines the rewrite touched — so nothing may touch them. This is
+# PLAT-24's `.gitattributes` one directory over, for the same reason.
+*.vim -text -diff
+*.tsv -text

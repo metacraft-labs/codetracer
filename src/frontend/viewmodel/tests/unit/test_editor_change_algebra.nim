@@ -117,7 +117,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1669
+const ExpectedAssertions = 1672
   ## *1666 -> 1669 on 2026-09-20: §35's enumeration firing for an EIGHTH time,
   ## and the first time over `viewmodel/` rather than over `viewmodel/editor/`.
   ## PLAT-34 added `viewmodel/editing_core.nim`, `ProductionModules` walks

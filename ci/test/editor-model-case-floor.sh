@@ -15,6 +15,7 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-33
 #   bash ci/test/editor-model-case-floor.sh PLAT-34
 #   bash ci/test/editor-model-case-floor.sh PLAT-35
+#   bash ci/test/editor-model-case-floor.sh PLAT-36
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -340,9 +341,37 @@ PLAT-35)
 	# everything written over it.
 	LAW_SUITES=()
 	;;
+PLAT-36)
+	MILESTONE="** PLAT-36: Importing a user's Vim configuration"
+	SUITES=(
+		src/frontend/viewmodel/tests/unit/test_editor_vim_import.nim
+		src/frontend/viewmodel/tests/unit/test_editor_vim_import_differential.nim
+	)
+	# THIS MILESTONE PUBLISHES A FLOOR AND WAS GATED BY NEITHER FILE.
+	# Verification of the PLAT-37…44 drafts found that PLAT-36 carries a
+	# `FLOOR:` line, that this script had no `case` label for it, and that
+	# `just editor-model-case-floors` did not call it — so the floor was a
+	# number nothing read. BOTH halves are edited together, which is what the
+	# recipe's own equality (milestones gated == entries in this table) exists
+	# to have stopped: a milestone with an entry and no caller, or a caller
+	# with no entry, fails by name.
+	#
+	# NO `LAW_SUITES`, for PLAT-30's, PLAT-31's, PLAT-34's and PLAT-35's
+	# reason and not by oversight. `Editor-Model-Conformance-Suite.md` §3
+	# publishes `LAW-A` … `LAW-X` and none of them is PLAT-36's. This
+	# milestone's oracles are §6.1's twenty-two-spelling table, §6.1's five
+	# map arguments and ten `set` options, and §6.3's five-member closed
+	# reason set — four published lists in a DIFFERENT document
+	# (`GUI/Editing-Operations-And-Keymaps.md`) — and §7.1's two-way count
+	# over each is asserted INSIDE `test_editor_vim_import.nim`, which
+	# `staticRead`s that document. A `LAW_PREFIX` here would make this gate
+	# parse a table that does not exist, and per §4 a parser that matches
+	# nothing satisfies everything written over it.
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-35. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-36. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

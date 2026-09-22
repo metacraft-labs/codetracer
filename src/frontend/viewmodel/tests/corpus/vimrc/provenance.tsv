@@ -1,0 +1,39 @@
+# PLAT-36 corpus — the hand-maintained half. `manifest.tsv` is what a program
+# computes; this is what a human writes, and it is the milestone's *"named in
+# the repo with their source and revision"*.
+#
+# `fetch-corpus.py --verify` re-downloads every row at its pinned commit and
+# compares the SHA-256 against the committed bytes. It needs the network and is
+# deliberately NOT in any lane: a gate that depends on github.com reddens when
+# github.com is slow. The lane's reproducibility is the committed bytes.
+#
+# THESE ARE NOT EIGHTEEN INDIVIDUALS' DOTFILES, and saying so is the point.
+# They are eighteen real, published Vim script files that a user sources as
+# configuration, from four upstreams with four clear licences. The alternative
+# — eighteen dotfiles repositories scraped by popularity — was refused because
+# most carry no licence at all, so redistributing them here would be a guess,
+# and because their DISTRIBUTION is narrower than this set's: they are
+# overwhelmingly the same `<leader>`-and-`:command<CR>` shape. This set spans a
+# pure key-to-key remap with no Vimscript at all, pure `<Plug>` indirection,
+# mouse events, `set`-only files with no mapping line, a file that is mostly an
+# `unmap` teardown block, and two large personal configurations.
+#
+# id	repo	commit	path	licence	sha256
+v01-vim-mswin	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/mswin.vim	Vim	6b7ebd03e9ef9c79721110012d321de2e4abb33fdc9aaeb17e691c898d75b368
+v02-vim-evim	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/evim.vim	Vim	7898bb424ce850914dfbae9b33ef0b31b9ff94737e009895c36c8e223471d198
+v03-vim-defaults	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/defaults.vim	Vim	94d9a89460aa34925ab2caea80d3c232dc9386e63c49743608dc6511a0611521
+v04-vim-vimrc-example	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/vimrc_example.vim	Vim	868433e30d85907be8736bc996242aea68a2baca0c61520706fdd0f5786f28fe
+v05-vim-gvimrc-example	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/gvimrc_example.vim	Vim	967d36a0242a3b0b0307829485a2550e5f8e98ea01764453b435f774222e7474
+v06-vim-less	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/macros/less.vim	Vim	832765f205544ba6b7bdb0932c41f38ee58fb0a96595c4ac3c327bfe50427558
+v07-vim-dvorak-enable	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/dvorak/dvorak/enable.vim	Vim	96d0d0f54c3c5261d38f1e9b7beca8ac7bce9391e16e4985dae48e7a6843d514
+v08-vim-dvorak-plugin	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/dvorak/plugin/dvorak.vim	Vim	268702765ae50189c98deec786db2ae2a264d818ccb2e5f158f25d5dbbb8ee5c
+v09-vim-swapmouse	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/swapmouse/plugin/swapmouse.vim	Vim	c715b231ebadf53d5dce1669b5aeeb0cf4745d2ec1bcee0de992b5acda48ba33
+v10-vim-comment	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/comment/plugin/comment.vim	Vim	e4a5be200e5904e5bb2a6bba5e32af1b7a71728fc96744a68d5134a88e8d842c
+v11-vim-matchit	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/matchit/plugin/matchit.vim	Vim	b980aee4d3bcb07d5fce5231bbc382a4889ab743a2aad621e1f81e82a1f1e540
+v12-vim-justify	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/justify/plugin/justify.vim	Vim	ca73c8b626f6e566934e7c539e15464490eaca2a3da7b4767068c0af1a90a8f2
+v13-vim-helpcurwin	vim/vim	12c69acc0a1f1530dc0f0618c763bd9c07b7b6b3	runtime/pack/dist/opt/helpcurwin/plugin/helpcurwin.vim	Vim	a05646b508d95cb6db7a4cf319759fb3ee859987fe7e62961848e8d338243daa
+v14-nvim-mswin	neovim/neovim	adbe0493b3f5e72f4caf672621e5fdffc9b327a6	runtime/scripts/mswin.vim	Vim (Neovim runtime)	daa8181d25164a5c0fd5b293876636df955ad7d1581081d3441a6d3be705565a
+v15-amix-basic	amix/vimrc	46294d589d15d2e7308cf76c58f2df49bbec31e8	vimrcs/basic.vim	MIT	bde3c8e77682d22bde680919d3416524fbc4e13d8aaf2ed25bcd3bdc3b6875b1
+v16-amix-extended	amix/vimrc	46294d589d15d2e7308cf76c58f2df49bbec31e8	vimrcs/extended.vim	MIT	6f09437efaa51eb34c29c0480cb1743ca37e1b70f69db8ce992f50ab3c43331d
+v17-amix-filetypes	amix/vimrc	46294d589d15d2e7308cf76c58f2df49bbec31e8	vimrcs/filetypes.vim	MIT	d03fc19e7472fdb9dc13df69191a9fea7b07ab59490701c0ff9f9ba62e6f21e4
+v18-spf13-vimrc	spf13/spf13-vim	e29767450ad849423e6df5ca2d77c36e15cead50	.vimrc	Apache-2.0	51a1dd8b34c324dffa72b6443bb38e304576ed6bd2f4f99a342dfc0024f009ef

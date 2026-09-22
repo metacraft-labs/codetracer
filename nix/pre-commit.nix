@@ -42,6 +42,28 @@ in
     # touched the suite next.
     "^src/frontend/viewmodel/tests/corpus/unicode/"
 
+    # PLAT-36's VIM-CONFIGURATION CORPUS, where the bytes are UPSTREAM's.
+    #
+    # Eighteen published `.vimrc` files pinned by SHA-256 in
+    # `provenance.tsv`, whose digests `fetch-corpus.py --digests` checks
+    # offline and `--verify` re-downloads. A whitespace hook does not merely
+    # edit a fixture here — it makes the committed bytes differ from the
+    # upstream commit they claim to be, which is the whole of the corpus's
+    # reproducibility claim.
+    #
+    # MEASURED, 2026-09-22, not assumed: with the corpus copied aside and the
+    # two fixers run over it, `trim-trailing-whitespace` and
+    # `end-of-file-fixer` between them rewrite THREE of the eighteen and
+    # delete 52 bytes — v16-amix-extended (-7), v17-amix-filetypes (-11),
+    # v18-spf13-vimrc (-34). It was found the way the Unicode corpus's entry
+    # above predicts it would be: on the run of `prek run --files` over the
+    # commit that ADDS the corpus.
+    #
+    # `.gitattributes` in that directory already marks it `-text -diff`, and
+    # that is a different guard for a different attacker — see the paragraph
+    # above. The corpus needs both.
+    "^src/frontend/viewmodel/tests/corpus/vimrc/.*\\.vim$"
+
     # A VENDORED COPY, and byte-identity IS the contract.
     #
     # tools/check-test-assertions.sh is a byte-for-byte copy of

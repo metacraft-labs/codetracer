@@ -91,7 +91,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 412
+const ExpectedAssertions = 414
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run. §10.1's *"a static one cannot see a case that returned early"* is why
   ## `CHECKS:` is printed as well.
@@ -247,10 +247,19 @@ proc newEditBuffer*(path, text: string): EditBuffer =
 
 const ScannedKeymapModules = [
   "editing_keymap.nim", "kakoune_keymap.nim", "product_keymap.nim",
-  "vim_keymap.nim"]
+  "vim_keymap.nim", "vim_import.nim"]
 
-const ScannedKeymapModuleCount = 4
+const ScannedKeymapModuleCount = 5
   ## A NAMED CARDINALITY so the set equality has something to disagree with.
+  ##
+  ## **IT WENT FROM FOUR TO FIVE ON 2026-09-22, AND THE ENUMERATION IS WHY.**
+  ## PLAT-36 added `keymap/vim_import.nim` — a fifth module in the directory
+  ## whose list named four — and this case went red BY NAME on the first run
+  ## of the floor gate, from a milestone that had been green for two days and
+  ## before either of PLAT-36's own suites existed. That is §35's eighth
+  ## firing and the value of the mechanism is not that a defect was found
+  ## (`vim_import.nim` spells no retired widget) — it is that the claim
+  ## stopped being true of the directory and something said so.
 
 const KeymapDirModules = block:
   var xs: seq[string] = @[]

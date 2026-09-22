@@ -1,0 +1,68 @@
+# PLAT-36's pinned `.vimrc` corpus — the ORACLE the suites are graded against.
+#
+# Editing-Operations-And-Keymaps.md §6.3: *"The report's headline is a MEASURED
+# figure — N of M lines translated"*, and the milestone: *"the coverage figure
+# is reproducible and the denominator cannot move between runs"*.
+#
+# WHICH COLUMNS HAVE AN INDEPENDENT ORACLE AND WHICH ARE PINNED MEASUREMENTS.
+# This distinction is stated rather than hidden, in PLAT-24's manner.
+#
+#   mapLines, settings, rPlugin, leader
+#       INDEPENDENTLY DERIVED. `vimrc-corpus-census.py` computes them from the
+#       corpus bytes with a parser that shares no code with `vim_import.nim`,
+#       in another language, written from Vim's documentation rather than from
+#       the Nim table. `python3 vimrc-corpus-census.py --check` re-takes them
+#       and compares. `mapLines` is the one that matters: it is the PARTITION
+#       LAW'S DENOMINATOR, and without a second producer the law reads
+#       `|A| + |B| == |A ∪ B|` and cannot fail.
+#
+#   everything else
+#       PINNED MEASUREMENTS. Deciding translated-versus-reported requires
+#       walking the 434-row Vim keymap, and a Python re-derivation of that
+#       table is Verification-Harness-Traps §30a's *"a whole re-derived
+#       module"* — a correct copy is invisible to every assertion and an
+#       incorrect one grades the importer against a second bug. So these are
+#       what the importer answered on the day they were recorded; their job is
+#       to make a CHANGE in that answer a red run, which is what a floor is
+#       for. The `audit` column says which rows were additionally checked by
+#       eye.
+#
+#   audit = hand-audited
+#       Twelve of the eighteen rows. Every mapping line of the files with nine
+#       or fewer was read and its verdict checked against the file; the four
+#       larger ones are uniform in shape (`swapmouse`'s twenty mouse remaps,
+#       `comment`'s sixteen `<Plug>` rows, `matchit`'s twenty-six `<Plug>` rows
+#       and thirteen `[nxo]unmap`s, `dvorak/enable`'s seventy `inoremap x y`)
+#       and were checked structurally, line count by line count. That is 166 of
+#       the 604 mapping lines checked by something other than the program under
+#       test.
+#
+# class: the FILE's class, derived from (translated, reported):
+#   empty       no mapping lines at all — `0 == 0` is a legitimate partition
+#   translated  reported == 0 and translated > 0
+#   reported    translated == 0 and reported > 0
+#   mixed       both non-zero
+# The suite asserts the four class counts as EQUALITIES (2 / 1 / 7 / 8) and
+# each one non-empty, because a corpus whose files are all trivially
+# translatable never exercises the untranslatable path —
+# Verification-Harness-Traps §34 in the POPULATION.
+#
+id	class	mapLines	settings	translated	reported	bound	unbound	uniqueRefused	optTranslated	optReported	rVimscript	rPlugin	rNoOperation	rNoOption	rSyntax	divergences	audit	leader
+v01-vim-mswin	mixed	50	5	6	44	6	0	0	0	5	8	0	36	5	0	3	measured	-
+v02-vim-evim	reported	9	12	0	9	0	0	0	0	12	3	0	6	12	0	0	hand-audited	-
+v03-vim-defaults	mixed	3	12	1	2	0	1	0	1	11	0	0	2	11	0	0	hand-audited	-
+v04-vim-vimrc-example	empty	0	4	0	0	0	0	0	0	4	0	0	0	4	0	0	hand-audited	-
+v05-vim-gvimrc-example	reported	2	2	0	2	0	0	0	0	2	0	0	2	2	0	0	hand-audited	-
+v06-vim-less	mixed	124	11	70	54	16	54	0	1	10	28	0	16	10	10	0	measured	-
+v07-vim-dvorak-enable	translated	70	0	70	0	70	0	0	0	0	0	0	0	0	0	70	hand-audited	-
+v08-vim-dvorak-plugin	reported	2	0	0	2	0	0	0	0	0	2	0	0	0	0	0	hand-audited	-
+v09-vim-swapmouse	reported	20	0	0	20	0	0	0	0	0	0	0	20	0	0	0	hand-audited	-
+v10-vim-comment	reported	16	0	0	16	0	0	0	0	0	0	16	0	0	0	0	hand-audited	-
+v11-vim-matchit	mixed	39	1	13	26	0	13	0	0	1	0	26	0	1	0	0	hand-audited	-
+v12-vim-justify	reported	4	2	0	4	0	0	0	1	1	4	0	0	1	0	0	hand-audited	-
+v13-vim-helpcurwin	reported	1	0	0	1	0	0	0	0	0	0	1	0	0	0	0	hand-audited	-
+v14-nvim-mswin	mixed	50	9	6	44	6	0	0	0	9	8	0	36	9	0	3	measured	-
+v15-amix-basic	mixed	40	64	3	37	3	0	0	8	56	22	0	11	56	4	0	measured	,
+v16-amix-extended	mixed	36	46	4	32	4	0	0	0	46	11	0	18	46	3	7	measured	-
+v17-amix-filetypes	empty	0	7	0	0	0	0	0	0	7	0	0	0	7	0	0	hand-audited	-
+v18-spf13-vimrc	mixed	138	108	8	130	8	0	0	9	99	106	10	14	99	0	8	measured	-
