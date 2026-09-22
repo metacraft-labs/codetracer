@@ -35,7 +35,7 @@
 ## silently smaller run is still caught. That is the same shape
 ## `value-presentation-boundary-test.sh` uses for its `nim check` arm.
 
-import std/[os, strutils, unittest]
+import std/[algorithm, os, strutils, unittest]
 
 import view_vocabulary
 
@@ -46,8 +46,8 @@ template ck(condition: untyped) =
   check condition
 
 const
-  ExpectedAssertionsWithGpui = 741
-  ExpectedAssertionsWithoutGpui = 670
+  ExpectedAssertionsWithGpui = 762
+  ExpectedAssertionsWithoutGpui = 691
     ## Both written from a run. See the final case.
     ##
     ## **BOTH RE-TAKEN ON 2026-09-15 by PLAT-21** (707 -> 741, 636 -> 670),
@@ -59,6 +59,15 @@ const
     ## The difference is 71: the GPUI arm contributes 72 assertions when it
     ## runs (a length check, an equality against the copy, and 35 in each
     ## direction over the tag set) and 1 when it does not.
+    ##
+    ## **BOTH RE-TAKEN AGAIN ON 2026-09-22 by PLAT-38** (741 -> 762, 670 ->
+    ## 691), and the second was MEASURED the same way rather than derived from
+    ## the delta: `isonim-gpui/src/isonim_gpui/renderer.nim` was moved aside,
+    ## the binary was run, and the file was put back. The delta held at 71,
+    ## which is a statement about the arm and not an input to either number.
+    ## What moved: the GPUI mapping's absent set is now EMPTY (`Modal` went to
+    ## `msPartial` when the renderer gained element focus) and the retired-gap
+    ## register gained a case.
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -530,14 +539,15 @@ suite "PLAT-3: the three front-end mappings":
     ck complete == 15
     ck partial == @["Markdown"]
 
-  test "GPUI is absent on exactly ONE entry, and it is named":
+  test "GPUI is absent on NO entry, and every row is accounted for":
     var absent: seq[string] = @[]
     var complete: seq[string] = @[]
+    var partial: seq[string] = @[]
     for k in ViewKind:
       case gpuiMapping(k).status
       of msAbsent: absent.add vocabularyName(k)
       of msComplete: complete.add vocabularyName(k)
-      of msPartial: discard
+      of msPartial: partial.add vocabularyName(k)
     # **THREE UNTIL 2026-09-15.** PLAT-3 read `Table`, `Modal` and
     # `ProgressIndicator` as absent from `tagMap` MEMBERSHIP, on the reasoning
     # that a tag outside the map "reaches a Rust classifier with no case for
@@ -545,9 +555,23 @@ suite "PLAT-3: the three front-end mappings":
     # the plan the Rust side builds: an unknown tag keeps its spelling and
     # classifies as `Div` — which is what `button`, `input`, `select`, `ul`
     # and `li` get, and those five are `msPartial`. Two rows moved; `Modal`
-    # stayed, because what it is missing is ELEMENT FOCUS rather than a tag.
-    ck absent == @["Modal"]
+    # stayed, because what it was missing was ELEMENT FOCUS rather than a tag.
+    #
+    # **AND `Modal` MOVED TOO ON 2026-09-22, SO THE SET IS EMPTY.** PLAT-38
+    # gave isonim-gpui element focus, a declared order and a focus TRAP, so
+    # the exclusivity that entry IS is something the medium offers.
+    # `vaVocabularyAbsentHere` is now a refusal no shipped manifest can
+    # provoke; the consequence is stated in `Architecture/
+    # Extensibility-Model.md` §3.4 rather than left to be discovered.
+    #
+    # An empty set is exactly what a case like this fails at (§4), so the
+    # weight is on `complete` and on the count below: the `absent` list being
+    # empty is asserted as a CARDINALITY, and every entry is accounted for on
+    # one of the three lists.
+    ck absent.len == 0
     ck complete == @["Text", "Image"]
+    ck partial.len == 14
+    ck absent.len + complete.len + partial.len == 16
 
   test "the GPUI mapping is NO LONGER derived from tag-map membership":
     # This case used to assert the implication PLAT-21 falsified — *"`Table`,
@@ -572,13 +596,17 @@ suite "PLAT-3: the three front-end mappings":
     # statuses. Membership cannot be what decides it.
     ck gpuiMapping(pkTable).status == msPartial
     ck gpuiMapping(pkProgressIndicator).status == msPartial
-    ck gpuiMapping(pkModal).status == msAbsent
+    ck gpuiMapping(pkModal).status == msPartial
 
   test "the summary reports all sixteen rows":
     let s = mappingSummary()
     ck s.splitLines.len == 17     # a header plus sixteen entries
     ck s.contains("ProgressIndicator   complete   complete   partial")
-    ck s.contains("Modal               complete   complete   ABSENT")
+    ck s.contains("Modal               complete   complete   partial")
+    # THE WORD `ABSENT` IS NOT IN THE SUMMARY AT ALL any more, asserted as an
+    # absence with the three positive controls above it: the summary was READ,
+    # it has seventeen lines, and three rows in it are quoted by name.
+    ck not s.contains("ABSENT")
     ck s.contains("Menu                partial    complete   partial")
     ck s.contains("Tabs                partial    complete   partial")
     let a = admissionSummary()
@@ -626,7 +654,7 @@ suite "PLAT-21: the register of GPUI gaps is well formed":
     # needs the renderer. What is checkable HERE, in a lane that links no
     # renderer, is that the register a gate reads cannot be satisfied by empty
     # rows (Verification-Harness-Traps §4).
-    ck FiledGpuiGaps.len == 4
+    ck FiledGpuiGaps.len == 1
     var ids: seq[string] = @[]
     for g in FiledGpuiGaps:
       ck g.id.startsWith("PLAT21-VG")
@@ -636,17 +664,55 @@ suite "PLAT-21: the register of GPUI gaps is well formed":
       ck g.what.len > 40
       ck g.measured.len > 40
       ck g.remedy.len > 40
-    # Thirteen of the sixteen entries are named by at least one gap, and the
-    # three that are not are named too — an entry list nobody asserts is one
-    # that can shrink silently.
-    ck entriesWithFiledGap().len == 13
+    # **THIRTEEN ENTRIES UNTIL 2026-09-22, ONE NOW.** PLAT-38 repaired the
+    # three gaps filed against the RENDERER and they are in `RetiredGpuiGaps`.
+    # An entry list nobody asserts is one that can shrink silently, so both
+    # halves are asserted: which entries still need an escape, and which do
+    # not.
+    ck entriesWithFiledGap() == @[pkImage]
     var clean: seq[ViewKind] = @[]
     for k in ViewKind:
       if gapsFor(k).len == 0: clean.add k
-    ck clean == @[pkText, pkProgressIndicator, pkMarkdown]
-    ck gapById("PLAT21-VG3").entries == @[pkModal]
+    ck clean.len == 15
+    ck pkImage notin clean
+    ck pkModal in clean
     ck gapById("PLAT21-VG4").subject == gsVocabulary
+    ck gapById("PLAT21-VG4").entries == @[pkImage]
     ck gapById("no-such-gap").id == ""
+
+  test "the retired gaps are a register too, and the shrink is an identity":
+    # **A RETIREMENT THAT DELETED THE ROW WOULD LEAVE NO RECORD THAT THE CLAIM
+    # WAS EVER TRUE**, and the next reader would have to rediscover why the
+    # binding is shaped the way it is. PLAT-35's rule — *"a filed gap is
+    # retired when its divergence is repaired"* — is asserted here as an
+    # identity over the union, so neither a gap that vanished from both
+    # registers nor an id that appears in both can pass.
+    #
+    # The POSITIVE evidence each retirement is conditioned on is a field on
+    # the row and is asserted non-empty here; that it ARRIVED is asserted by
+    # the suite that can render, because `PLAT35-VG7` was retired against a
+    # run in which nothing happened and two empty answers compared equal.
+    ck RetiredGpuiGaps.len == 3
+    var rids: seq[string] = @[]
+    for g in RetiredGpuiGaps:
+      ck g.id.startsWith("PLAT21-VG")
+      ck g.id notin rids
+      rids.add g.id
+      ck g.subject == gsRenderer
+      ck g.entries.len > 0
+      ck g.what.len > 40
+      ck g.repairedIn.len > 40
+      ck g.evidence.len > 40
+      ck isRetired(g.id)
+      ck g.id notin filedGapIds()
+    ck not isRetired("PLAT21-VG4")
+    ck retiredGapById("no-such-gap").id == ""
+    var ever = everFiledGapIds()
+    ever.sort()
+    ck ever == @["PLAT21-VG1", "PLAT21-VG2", "PLAT21-VG3", "PLAT21-VG4"]
+    ck retiredGapById("PLAT21-VG1").entries.len == 12
+    ck retiredGapById("PLAT21-VG2").entries.len == 12
+    ck retiredGapById("PLAT21-VG3").entries == @[pkModal]
 
 suite "PLAT-3: the GPUI tag table this repository copied":
 

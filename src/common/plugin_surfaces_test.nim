@@ -38,7 +38,7 @@ import std/[options, strutils, unittest]
 
 import ./plugin_model
 
-const ExpectedAssertions = 207
+const ExpectedAssertions = 301
   ## Written from a run, and asserted against the tally below.
   ## `ci/lib/run-nim-test-lane.sh` READS this name: a file that declares
   ## it AND fails when its own tally disagrees is a file whose assertion
@@ -63,14 +63,25 @@ const AbsentAnchor = "ABSENT-ON-GPUI:"
   ## (Verification-Harness-Traps §4d) — and that header now contains several
   ## sentences about the subject, including one that names `Image`.
 
+func absentNamesIn*(line: string): seq[string] =
+  ## The entry names one anchor LINE carries, or none.
+  ##
+  ## **ONE PREDICATE, extracted from `prosaicAbsentOnGpui` by PLAT-38** and
+  ## for a reason that is about that milestone: the real subject is now the
+  ## EMPTY set, and an extractor whose only exercise is over an empty haystack
+  ## agrees with an empty table whether it works or not (§4). The case below
+  ## hands this function a line it is supposed to parse, which is the only way
+  ## left to show it still reads one.
+  let at = line.find(AbsentAnchor)
+  if at < 0: return @[]
+  for piece in line[at + AbsentAnchor.len .. ^1].split(','):
+    let name = piece.strip()
+    if name.len > 0: result.add name
+
 func prosaicAbsentOnGpui(): seq[string] =
   ## The entries `surfaces.nim`'s header CLAIMS are absent on GPUI.
   for line in SurfacesSource.splitLines():
-    let at = line.find(AbsentAnchor)
-    if at < 0: continue
-    for piece in line[at + AbsentAnchor.len .. ^1].split(','):
-      let name = piece.strip()
-      if name.len > 0: result.add name
+    for name in absentNamesIn(line): result.add name
 
 proc parsed(text: string): ParsedManifest =
   parseManifest(text, "plugin_surfaces_test")
@@ -188,37 +199,44 @@ suite "PLAT-9 §6.2: native where supplied, abstract as the baseline":
     for fe in FrontEnd:
       ck chooseView(m.manifest.contributions[0], fe).kind == vcAbstract
 
-  test "'abstract' is not automatically 'everywhere', and PLAT-3's table says so":
-    # `Modal` maps to `msAbsent` on GPUI. **THIS CASE USED `Table` UNTIL
-    # 2026-09-15**, on PLAT-3's reasoning that a tag outside isonim-gpui's
-    # `tagMap` "reaches a Rust classifier with no case for it" — which PLAT-21
-    # rendered through the real shim and found to be false: an unknown tag
-    # keeps its spelling and classifies as `Div`, exactly as `button` does. So
-    # `Table` and `ProgressIndicator` are `msPartial` now and a plugin surface
-    # built on either is ADMITTED on GPUI. `Modal` is the entry that stayed
-    # absent, and for the reason that was always the real one: there is no
-    # ELEMENT focus in that renderer, so the exclusivity a Modal IS cannot be
-    # built out of anything the medium offers. See `mappings.gpuiMapping`'s
-    # three corrected rows and `gpui_gaps.PLAT21-VG3`.
-    ck mappingFor(feGpui, pkModal).status == msAbsent
-    # …and the two that MOVED, asserted here so this case fails if they move
-    # back without the measurement moving with them.
+  test "'abstract is not automatically everywhere' is NO LONGER TRUE OF ANY SHIPPED ENTRY":
+    # **THIS CASE ASSERTED A REFUSAL UNTIL 2026-09-22 AND NOW ASSERTS ITS
+    # DISAPPEARANCE. READ WHY BEFORE CHANGING IT BACK.**
+    #
+    # It used `Table` until 2026-09-15, on PLAT-3's reasoning that a tag
+    # outside isonim-gpui's `tagMap` "reaches a Rust classifier with no case
+    # for it" — which PLAT-21 rendered through the real shim and found false:
+    # an unknown tag keeps its spelling and classifies as `Div`, exactly as
+    # `button` does. `Table` and `ProgressIndicator` became `msPartial`.
+    #
+    # It then used `Modal`, which stayed absent for the reason that was always
+    # the real one: there was no ELEMENT focus in that renderer, so the
+    # exclusivity a Modal IS could not be built out of anything the medium
+    # offered. **PLAT-38 gave isonim-gpui element focus and a focus TRAP**, so
+    # `Modal` is `msPartial` and `gpui_gaps.PLAT21-VG3` is retired.
+    #
+    # The consequence is larger than one row and is stated rather than left to
+    # be discovered: **NO front-end has an `msAbsent` entry any more**, so
+    # `vaVocabularyAbsentHere` is a refusal no SHIPPED manifest can provoke.
+    # The code path is still there and still correct; what is gone is any
+    # input that reaches it. Pinning a fixture that claimed otherwise would be
+    # Verification-Harness-Traps §7c — a green fixture describing a state no
+    # shipped route can reach — so the claim is inverted instead, and the
+    # residual is recorded in `surfaces.nim`'s header.
+    ck mappingFor(feGpui, pkModal).status == msPartial
     ck mappingFor(feGpui, pkTable).status == msPartial
     ck mappingFor(feGpui, pkProgressIndicator).status == msPartial
+    # The entry that stood here now PASSES, through the real `chooseView`.
     let m = withPane("""{ "id": "rows", "views": ["Modal"] }""")
     ck m.isOk
     let c = m.manifest.contributions[0]
-    let gpui = chooseView(c, feGpui)
-    ck gpui.kind == vcNone
-    ck gpui.absence == vaVocabularyAbsentHere
-    ck gpui.absentViews == @[pkModal]
-    # The control, on the same entry: the terminal renders a Modal completely
-    # — the focus trap is isonim-tui's own — so the refusal is about the
-    # FRONT-END and not about the entry.
+    ck chooseView(c, feGpui).kind == vcAbstract
+    # The control, on the same entry and the same manifest: the terminal
+    # renders a Modal COMPLETELY — the focus trap is isonim-tui's own — so
+    # `msPartial` on GPUI is a statement about how much the binding supplies,
+    # not about whether the entry runs.
     ck mappingFor(feTerminal, pkModal).status == msComplete
     ck chooseView(c, feTerminal).kind == vcAbstract
-    # And the entry that used to stand here now PASSES on GPUI, which is the
-    # behaviour change the correction carries.
     let tbl = withPane("""{ "id": "rows2", "views": ["Table"] }""")
     ck tbl.isOk
     ck chooseView(tbl.manifest.contributions[0], feGpui).kind == vcAbstract
@@ -228,54 +246,61 @@ suite "PLAT-9 §6.2: native where supplied, abstract as the baseline":
     # EXISTED. `surfaces.nim`'s header and Extensibility-Model.md §6.4 both
     # said `Table`, `ProgressIndicator` and `Image`. `Image` is `msComplete` on
     # GPUI — `img` is one of two tags reaching a dedicated Rust element kind —
-    # and `Modal`, which they omitted, is the third absent entry. The code was
-    # right throughout (`chooseView` calls `mappingFor`), so nothing was red
-    # and nothing could be: the case above exercises `Table` and nothing in the
-    # tree read the prose. This case reads both.
+    # and `Modal`, which they omitted, was the third. The code was right
+    # throughout (`chooseView` calls `mappingFor`), so nothing was red and
+    # nothing could be, because nothing read the prose. This case reads both.
+    #
+    # **THE SET IS EMPTY SINCE PLAT-38, AND AN EMPTY SET IS EXACTLY WHAT THIS
+    # KIND OF CASE FAILS AT.** A loop over the derived set passes every check
+    # written inside it when there is nothing to iterate (§4), so the shape
+    # changed with the number: the cardinality is asserted as ZERO, the anchor
+    # is asserted PRESENT so a deleted marker and an empty entry list are
+    # different readings, and the whole weight moves onto the positive twin —
+    # which is now total rather than a complement.
     let derived = absentEntryNames(feGpui)
-    # THE SIZE IS KNOWABLE, so the control is the COUNT rather than
-    # non-emptiness (Verification-Harness-Traps §4b): "at least one" is
-    # satisfied by one member of three, which is exactly the state the wrong
-    # sentence was in.
-    ck derived.len == 1
-    # ... and the scan reaches exactly one line, so neither an empty read nor a
-    # second marker can satisfy the comparison below (§4).
+    ck derived.len == 0
+    # The scan still reaches exactly one anchor line. Without this, someone
+    # deleting the marker outright would leave `prosaicAbsentOnGpui()` empty
+    # and every comparison below satisfied.
     ck SurfacesSource.count(AbsentAnchor) == 1
-    ck prosaicAbsentOnGpui().len == 1
+    ck prosaicAbsentOnGpui().len == 0
     ck prosaicAbsentOnGpui() == derived
 
-    # Every member of the DERIVED set refuses, through the real `chooseView` —
-    # over the set the table produces rather than over one entry written out
-    # here, which is how two of the three could be wrong in a green tree.
-    for name in derived:
-      let m = withPane("{ \"id\": \"s\", \"views\": [\"" & name & "\"] }")
-      ck m.isOk
-      let choice = chooseView(m.manifest.contributions[0], feGpui)
-      ck choice.kind == vcNone
-      ck choice.absence == vaVocabularyAbsentHere
+    # ... and the extractor still WORKS, demonstrated on a line it is given
+    # rather than assumed from a green run. This is §4's positive control for
+    # a scan whose real subject is now empty: without it, a `find` that had
+    # stopped matching would agree with an empty table forever.
+    ck absentNamesIn("##   " & AbsentAnchor & " Modal, Table") ==
+       @["Modal", "Table"]
+    ck absentNamesIn("## nothing to see here").len == 0
 
-    # THE POSITIVE TWIN OVER THE SAME TABLE (§4a), and it is the half that
-    # catches this particular defect: every entry NOT in the derived set HAS a
-    # view on GPUI, so naming one of them absent reddens here rather than
-    # nowhere.
+    # THE POSITIVE TWIN, over EVERY entry and EVERY front-end. It used to be
+    # the complement of a one-member set; it is the whole table now, which
+    # makes it the case's only load-bearing sweep — so it is counted.
     var present = 0
     var total = 0
     for k in ViewKind:
       inc total
-      if vocabularyName(k) in derived: continue
       let m = withPane("{ \"id\": \"s\", \"views\": [\"" &
                        vocabularyName(k) & "\"] }")
       ck m.isOk
       ck chooseView(m.manifest.contributions[0], feGpui).kind == vcAbstract
       inc present
     ck total == 16
-    ck present == total - derived.len
+    ck present == 16
 
-    # The correction itself, named on both sides, so the direction is legible.
+    # AND THE SAME CLAIM FOR THE OTHER TWO FRONT-ENDS, because "no entry is
+    # absent anywhere" is what makes `vaVocabularyAbsentHere` unreachable and
+    # that is a claim about all three columns rather than about GPUI's.
+    var absentAnywhere = 0
+    for fe in FrontEnd:
+      absentAnywhere += absentEntryNames(fe).len
+    ck absentAnywhere == 0
+
+    # The corrections themselves, named on both sides, so the direction stays
+    # legible after the set stops naming anything.
     ck mappingFor(feGpui, pkImage).status == msComplete
-    ck mappingFor(feGpui, pkModal).status == msAbsent
-    ck "Image" notin derived
-    ck "Modal" in derived
+    ck mappingFor(feGpui, pkModal).status == msPartial
 
   test "a partial mapping is present, not absent":
     # `msPartial` means the front-end renders it and the binding supplies a
@@ -343,17 +368,49 @@ suite "PLAT-9 §6.3: a required surface with no view names the front-end AND the
     ck m.manifest.contributions[0].requirement == srOptional
     ck surfaceRefusals(m.manifest, feTerminal).len == 0
 
-  test "the absent-vocabulary refusal names the ENTRIES, not just the surface":
+  test "the absent-vocabulary refusal is UNREACHABLE from the shipped table":
+    # **THIS CASE ASSERTED THE REFUSAL'S WORDING UNTIL 2026-09-22 AND NOW
+    # ASSERTS THAT NOTHING CAN PROVOKE IT. READ BEFORE CHANGING IT BACK.**
+    #
+    # It built a required surface over `Modal` — the one entry that mapped
+    # `msAbsent` on GPUI — and checked that the refusal named the ENTRY, the
+    # SURFACE and the FRONT-END, and did not blame `Text`. PLAT-38 gave
+    # isonim-gpui element focus and a focus TRAP, so `Modal` is `msPartial`
+    # and NO front-end has an `msAbsent` entry any more. There is no manifest
+    # this product ships that reaches `vaVocabularyAbsentHere`.
+    #
+    # Keeping the old fixture would have meant a green case describing a state
+    # no shipped route can reach — `Verification-Harness-Traps.md` §7c —
+    # so the claim is inverted and the residual is recorded in
+    # `Architecture/Extensibility-Model.md` §3.4: whether a refusal nothing can
+    # provoke should keep its code path is a decision for whoever owns that
+    # document, not for the milestone that caused it.
     let m = withPane("""
       { "id": "rows", "requirement": "required", "views": ["Modal", "Text"] }""")
-    let refusals = surfaceRefusals(m.manifest, feGpui)
-    ck refusals.len == 1
-    ck "Modal" in refusals[0].detail
-    ck "rows" in refusals[0].detail
-    ck "gpui" in refusals[0].detail
-    # `Text` maps completely on GPUI, so it must NOT be blamed.
-    ck mappingFor(feGpui, pkText).status != msAbsent
-    ck not refusals[0].detail.contains("Modal, Text")
+    ck m.isOk
+    ck surfaceRefusals(m.manifest, feGpui).len == 0
+    ck chooseView(m.manifest.contributions[0], feGpui).kind == vcAbstract
+    # …and the same for EVERY front-end and EVERY entry, which is what makes
+    # "unreachable" a statement about the table rather than about this
+    # manifest. A required surface over any single entry is admitted
+    # everywhere.
+    var admitted = 0
+    for fe in FrontEnd:
+      for k in ViewKind:
+        let one = withPane("{ \"id\": \"s\", \"requirement\": " &
+                           "\"required\", \"views\": [\"" &
+                           vocabularyName(k) & "\"] }")
+        ck one.isOk
+        ck surfaceRefusals(one.manifest, fe).len == 0
+        inc admitted
+    ck admitted == 48
+    # THE MECHANISM IS UNCHANGED AND STILL DISCRIMINATES, which is the half
+    # that would otherwise be lost: a required surface that declares NOTHING
+    # is still refused, by a different absence, so `surfaceRefusals` is not
+    # simply answering the empty list to everything.
+    let nothing = withPane("""{ "id": "mystery", "requirement": "required" }""")
+    ck nothing.isOk
+    ck surfaceRefusals(nothing.manifest, feGpui).len == 1
 
   test "a COMMAND is invoked, not drawn, so §6.3 never refuses one":
     # The partition is data (`RenderingContributionKinds`), and this is the

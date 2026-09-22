@@ -1,0 +1,13 @@
+{
+  "B1": "Check failed: b.lastKeyReceived.key == gpuiKeystroke(k).name",
+  "B2": "Check failed: gpuiKeystroke(kEscape).name == record.sentinelKey",
+  "B3": "Check failed: b.focusNode(\"subject\")",
+  "B4": "Check failed: sameNode(focusTrapElement(), b.nodes[\"dlg\"])",
+  "G1": "Check failed: taken == filed",
+  "G2": "Check failed: dirExists(dir)",
+  "G3": "/home/zahary/m/codetracer-gui/codetracer/src/frontend/gpui/tests/test_gpui_key_delivery.nim(567) test_gpui_key_delivery",
+  "R1": "Check failed: s.arrivals.len >= 1",
+  "R2": "Check failed: s.expectModifier in s.arrivals[^1].modifiers",
+  "R3": "Check failed: record.negativeTwin.deliverySeq == 0",
+  "R4": "Check failed: not v.blankNonBlank"
+}

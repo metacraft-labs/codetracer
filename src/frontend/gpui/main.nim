@@ -34,20 +34,52 @@
 ##      `DockArea` would be handed (`leaves.gpuiKitDockAvailable` is the
 ##      constant that says so), and the container is a flex `div`.
 ##   2. **Whether a GPU window actually appears depends on how
-##      `isonim-gpui`'s Rust shim was built.** Without `--features
-##      gpui-backend` the shim is a shadow-tree implementation and
-##      `createWindow` opens nothing — isonim-gpui's own `Cargo.toml` says so.
-##      `--report-plan` therefore exists: it prints what GPUI *would* execute,
-##      which is the verification tier PLAT-19 established, and it is what the
-##      integration tests read.
+##      `isonim-gpui`'s Rust shim was built** — and, until PLAT-37, on
+##      something this sentence used to get wrong, so it is corrected here
+##      rather than quietly rewritten.
+##
+##      **TWO SWITCHES ARE OFF, NOT ONE.** The first is the Cargo feature:
+##      `gpui-nim-shim`'s `default = []` and `just rust-build` is a bare
+##      `cargo build`, so `--features gpui-backend` is off, which is what
+##      PLAT-19 through PLAT-23 record. The second is in THIS FILE, and it is
+##      the one the old sentence hid. It said *"without `--features
+##      gpui-backend` … `createWindow` opens nothing"*, which reads as though
+##      the feature were the only thing in the way. It is not:
+##      `isonim-gpui`'s `window.rs` carries **no `cfg` outside
+##      `#[cfg(test)]`** — `create_window` is a `Vec` push and `show_window` a
+##      state transition, byte-identical in both builds — and the ONLY
+##      function that branches on the feature is `gpui_launch`, which this
+##      binary did not call. So flipping the feature alone would have changed
+##      nothing observable here, and a milestone that flipped it would have
+##      measured no difference and had to explain why.
+##
+##      PLAT-37 throws both: the lane builds the shim with the feature, and
+##      `launchWindow` below enters `gpui_launch` with a root-builder callback
+##      instead of the old `createWindow` → `show()` → `requestRepaint()` →
+##      `destroy()` sequence, which touched the registry and never the
+##      renderer.
+##
+##      `--report-plan` still exists and still means what it meant: it prints
+##      what GPUI *would* execute and enters no event loop, which is the
+##      verification tier PLAT-19 established and what the integration tests
+##      read. It is the INTROSPECTION tier. It is not evidence that anything
+##      was painted, and PLAT-37's instrument contract says so in a table.
 
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
-import std/[os, strutils]
+import std/[json, os, strutils, times]
 
 import isonim_gpui/renderer
-import isonim_gpui/window
+# `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
+# high-level `window.nim` wraps the registry — `createWindow`, `show`,
+# `destroy` — which is precisely the layer that has no `cfg` on it and never
+# reaches a renderer. The two functions this front-end needs, `gpui_launch`
+# and `gpui_quit_after_ms`, are not wrapped there; they are the raw FFI.
+import isonim_gpui/bindings
+
+import ./chrome
+import ./replay_ops
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
 # below OPENS a document rather than handing a string to a derivation, so the
@@ -72,6 +104,59 @@ OPTIONS:
                     without entering an event loop. What GPUI would execute.
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
+  --quit-after-ms=<n>
+                    Close the window and return after <n> milliseconds.
+                    0 (the default) means "stay open until the window is
+                    closed". This is what makes the front-end usable from a
+                    screenshot harness and from a test lane: `gpui_launch`
+                    blocks inside GPUI's platform event loop for exactly as
+                    long as the window exists, so without a deadline a
+                    windowed run has no bound on it at all.
+  --replay-ops=<spec>
+                    Advance the recording before the window is drawn.
+                    <spec> is a comma-separated list over the SAME closed
+                    five-member operation vocabulary
+                    `src/tests/visual/scenarios.json` publishes:
+                      stepIn=<n>  next=<n>  stepOut=<n>  continueForward=<n>
+                      setBreakpoint@<row>
+                    `<row>` is an offset into the editor's FIRST DRAWN ROW,
+                    resolved against the recording's own source, never a
+                    literal line number.
+                    This exists because the GPUI front-end drives the
+                    recording from the command line rather than from the
+                    keyboard. It was written when the renderer could not
+                    deliver a key at all; PLAT-38 repaired that (a key
+                    reaches a focused element with its payload, see
+                    `--input-probe`), so what remains is that no BINDING
+                    maps a key to a replay operation here yet. That is
+                    PLAT-23's `--ui=gui` contract rather than a renderer
+                    gap, and this flag stays until it lands.
+  --input-probe=<path>
+                    PLAT-38. Declare the first pane focusable, give it
+                    element focus, listen for `keydown` on it, and write
+                    what the RUST-SIDE ELEMENT STORE held to <path> after
+                    the event loop returns. The record is the key names,
+                    the modifier lists and the delivery sequence the shim
+                    recorded BEFORE each callback ran — which is the one
+                    oracle a Nim-side emulation cannot forge, and is what
+                    `ci/test/plat38-keystroke.sh` reads back.
+                    `CODETRACER_GPUI_PROBE_SENTINEL` names a key whose
+                    arrival closes the loop, so a capture can tell "the
+                    typist finished" from "the deadline fired".
+  --plan-out=<path> Write the render plan the window was built from to
+                    <path>, in addition to opening the window. One tree,
+                    two readings: a second run would be a second tree.
+                    The file is RFC 8259 JSON. That sentence is worth a
+                    line because it was FALSE until 2026-09-22: the shim's
+                    `render_plan_to_json` escaped `\` and `"` and nothing
+                    else, so any text node carrying a newline — a source
+                    line, a docstring, a captured stdout line — produced a
+                    document no strict parser accepts. Nim's `std/json` is
+                    lenient about control characters and read it happily,
+                    which is why it went unnoticed; Python's `json.load`
+                    did not. Fixed in `isonim-gpui`'s `json_escape`, with
+                    a Rust case over the whole C0 range beside the one
+                    that had only ever tested quotes.
   --version         Print the version and exit
   --help            Print this and exit
 
@@ -108,6 +193,19 @@ type
     reportPlan: bool
     width: int
     height: int
+    quitAfterMs: uint32
+      ## PLAT-37. 0 means "no deadline"; the window stays until it is closed.
+      ## Handed to `gpui_quit_after_ms` BEFORE `gpui_launch`, which is the
+      ## only moment the shim reads it.
+    replayOps: seq[ReplayOp]
+    planOut: string
+    inputProbe: string
+      ## PLAT-38. A path to write the KEY-DELIVERY record to, after the event
+      ## loop returns. Empty means "do not probe", which is every ordinary
+      ## run: declaring a pane focusable and attaching a key listener is what
+      ## the product will do unconditionally once there is something for a key
+      ## to mean, and until then it is the capture lane's instrument rather
+      ## than a behaviour change in the front-end.
     message: string
 
 func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
@@ -142,6 +240,36 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       except ValueError:
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --height needs an integer")
+    elif arg.startsWith("--quit-after-ms="):
+      # A NEGATIVE DEADLINE IS REFUSED RATHER THAN CLAMPED. `uint32(-1)` is
+      # 4294967295 ms — a little over 49 days — so a clamp here would turn a
+      # typo into a run with effectively no bound, which is the silent repair
+      # Verification-Harness-Traps §36a names.
+      var ms = 0
+      try: ms = parseInt(arg["--quit-after-ms=".len .. ^1])
+      except ValueError:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --quit-after-ms needs an integer")
+      if ms < 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --quit-after-ms cannot be negative")
+      result.quitAfterMs = uint32(ms)
+    elif arg.startsWith("--replay-ops="):
+      try:
+        result.replayOps = parseReplayOps(arg["--replay-ops=".len .. ^1])
+      except ReplayOpError as e:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --replay-ops: " & e.msg)
+    elif arg.startsWith("--input-probe="):
+      result.inputProbe = arg["--input-probe=".len .. ^1]
+      if result.inputProbe.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --input-probe needs a path")
+    elif arg.startsWith("--plan-out="):
+      result.planOut = arg["--plan-out=".len .. ^1]
+      if result.planOut.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --plan-out needs a path")
     elif arg == "--headless":
       # `ct` already refuses this combination (ui-selection.md §8). Refusing it
       # HERE TOO is deliberate: a user who runs the component directly gets the
@@ -174,6 +302,262 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                   " a time; got " else: "codetracer-gpui: one recording at a" &
                   " time; got ") & $positional.len)
   result.traceFolder = positional[0]
+
+# ---------------------------------------------------------------------------
+# THE WINDOW — PLAT-37
+# ---------------------------------------------------------------------------
+#
+# PLAT-20's residue 4 was that this binary "opens the window, draws the leaves
+# and exits". It did neither of the first two: `createWindow` pushed a
+# `WindowConfig` onto a `Vec`, `show()` moved its `state` field from `Created`
+# to `Visible`, and `destroy()` removed it — three mutations of a registry the
+# renderer never reads, in a code path with no `cfg` on it, identical in a
+# shim built with `--features gpui-backend` and one built without.
+#
+# `gpui_launch` is the function that branches. Under the feature it calls
+# `window::create_window` and then `launch_gpui_app`, which opens a real GPUI
+# window over the shadow tree and BLOCKS in `Application::run` until the loop
+# stops. Without the feature it builds a root, calls the builder, and returns.
+# **That difference is the whole of DIFF-6**: one binary, one compositor, one
+# scenario, two shims — and the only instrument that can see it is a picture,
+# because the shadow tree both builds is identical.
+#
+# THE ROOT BUILDER CARRIES NO USER DATA, which is why the three values below
+# are module-level rather than captured. `RootBuilderCallback` is
+# `extern "C" fn(root: *mut GpuiElement)`; there is no context pointer in the
+# ABI, so a closure cannot be handed across it. `isonim-gpui`'s own
+# `tests/test_gui.nim` does the same thing with its scene constants.
+
+type
+  ProbeArrival = object
+    ## **ONE KEY, AS THE RUST-SIDE ELEMENT STORE RECORDED IT.** Read inside
+    ## the handler the shim called, out of the node's own record, which the
+    ## shim wrote before the callback ran — so nothing in this process can
+    ## forge it, and an adapter that emulated delivery by walking the shadow
+    ## tree from Nim would leave every field at its initial value. That is the
+    ## distinction PLAT-38's gate rests on.
+    key: string
+    modifiers: seq[string]
+    kind: string
+    seqNo: int
+
+var
+  pendingOutcome: LeafRenderOutcome
+    ## The leaf tree, built BEFORE `gpui_launch` so `--report-plan` and the
+    ## window path derive from one render rather than two.
+  pendingViewportWidth = 0
+  builderCalls = 0
+  probeEnabled = false
+  probeTarget: GpuiElement = nil
+  probeArrivals: seq[ProbeArrival] = @[]
+  probeSentinel = ""
+    ## PLAT-38. When this key arrives, the probe asks the loop to stop. A
+    ## SENTINEL rather than a timer, so the capture can tell *"the typist
+    ## finished"* from *"the deadline fired"* — two outcomes that a
+    ## `--quit-after-ms` run cannot separate, and only one of which is a pass.
+
+func modifierNamesOf(mods: GpuiModifiers): seq[string] =
+  for m in mods:
+    result.add (case m
+      of gmControl: "control"
+      of gmAlt: "alt"
+      of gmShift: "shift"
+      of gmPlatform: "platform"
+      of gmFunction: "function")
+    ## Asserted by the caller. A `gpui_launch` that returned without calling
+    ## the builder would leave an empty window and look, from outside, exactly
+    ## like a window that painted nothing (§4).
+
+proc probeHandler(el: GpuiElement): GpuiEventHandler =
+  ## The `keydown` listener the input probe installs, built by a SEPARATE
+  ## PROC so the element it reads is captured BY VALUE.
+  ##
+  ## **THIS IS PLAT-21's RECORDED DEFECT AND PLAT-38 WALKED INTO IT.** The
+  ## first version built this closure inline inside `for i in 0 ..< panes`,
+  ## guarded by `if i == 0`. One closure, so the guard looked sufficient — and
+  ## it is not: `pane` is a loop-body `let` that the remaining iterations
+  ## REASSIGN, so by the time a key arrived the closure was reading the LAST
+  ## pane, which had received nothing. The symptom was a probe dump whose
+  ## totals were right (`deliverySeq: 2`, `lastKey: "escape"`, read after the
+  ## loop from `probeTarget`) and whose per-arrival readings were all empty
+  ## strings — evidence that looked like a broken element store rather than
+  ## like a captured variable.
+  ##
+  ## `gpui_binding.keyHandler` carries the same note for the same reason and
+  ## solved it the same way. Taking the argument by value gives the handler
+  ## its own environment.
+  result = proc(ev: GpuiEvent) =
+    discard ev
+    probeArrivals.add ProbeArrival(
+      key: el.lastEventKey(),
+      modifiers: modifierNamesOf(el.lastEventModifiers()),
+      kind: (case el.lastEventKind()
+             of gekKeyDown: "keydown"
+             of gekKeyUp: "keyup"
+             of gekOther: "other"),
+      seqNo: el.lastEventSeq())
+    if probeSentinel.len > 0 and el.lastEventKey() == probeSentinel:
+      # The typist is finished. Quitting from HERE rather than from a timer
+      # is what lets the capture distinguish "the work completed" from "the
+      # backstop fired"; `gpui_quit` is an atomic store the loop's own poller
+      # consumes on this thread.
+      gpui_quit()
+
+proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
+  ## The `root_builder` handed to `gpui_launch`, called from inside the shim
+  ## before the event loop starts.
+  ##
+  ## **IT DOES NOT BUILD THE LEAVES**, and that is deliberate rather than
+  ## incidental: `renderLeaves` has already run, on the caller's side, so
+  ## `--report-plan` and the painted window are two readings of ONE tree. A
+  ## builder that rendered a second time would make the plan a description of
+  ## a different tree from the one on screen — two copies of one derivation,
+  ## which is Verification-Harness-Traps §30 arriving through a callback.
+  ##
+  ## **IT STYLES FROM HERE AND NOT FROM `leaves.nim`.** The chrome is applied
+  ## to the launch root and to the children of the leaf container, read back
+  ## out of the shadow tree, so `gpui/app/leaves.nim` is untouched by this
+  ## milestone. That matters for a reason that is not aesthetic:
+  ## `run-plat20-mutations.py`, `run-plat21-mutations.py`,
+  ## `run-plat22-mutations.py` and `run-plat35-visual-mutations.py` all digest
+  ## that file into their control comparators, and an edit here would have
+  ## staled four harnesses' controls at once (§39a).
+  inc builderCalls
+  var r: GpuiRenderer
+  # The window surface. `apply_styles_to_div` in `gpui_app.rs` reads `bg`,
+  # `w`, `h`, `flex_direction`, `p`, `m`, `gap`, `text_color`, `rounded`,
+  # `items`, `justify` and `cursor` — and NOTHING ELSE. In particular it does
+  # not read `display`, which is the only style `leaves.nim` sets, so the
+  # tree as built carries no visual instruction at all.
+  r.setStyle(root, "background-color", chromeOf(crWindowBackground))
+  r.setStyle(root, "color", chromeOf(crWindowForeground))
+  r.setStyle(root, "width", "100%")
+  r.setStyle(root, "height", "100%")
+  r.setStyle(root, "flex-direction", "row")
+  r.setStyle(root, "padding", $ChromePaddingPx & "px")
+  r.setStyle(root, "gap", $ChromeGapPx & "px")
+
+  let container = pendingOutcome.root
+  r.setStyle(container, "width", "100%")
+  r.setStyle(container, "height", "100%")
+  r.setStyle(container, "flex-direction", "row")
+  r.setStyle(container, "gap", $ChromeGapPx & "px")
+
+  # THE PANES ARE READ BACK OUT OF THE TREE, not counted from `leafSet`.
+  # Reading the input and calling it an observation is §4a; the renderer is
+  # handed what the tree holds, so the tree is what the widths are computed
+  # from.
+  let panes = childCount(container)
+  let paneW = paneWidthPx(pendingViewportWidth, panes)
+  for i in 0 ..< panes:
+    let pane = nthChild(container, i)
+    if pane.isNil: continue
+    r.setStyle(pane, "background-color", chromeOf(crPaneBackground))
+    r.setStyle(pane, "color", chromeOf(crWindowForeground))
+    r.setStyle(pane, "width", $paneW & "px")
+    r.setStyle(pane, "height", "100%")
+    r.setStyle(pane, "flex-direction", "column")
+    r.setStyle(pane, "padding", $ChromePaddingPx & "px")
+    r.setStyle(pane, "rounded", "4px")
+    # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
+    # PLAT-38 — THE INPUT PROBE. The first pane is declared FOCUSABLE and is
+    # given element focus, and a `keydown` listener records what the RUST
+    # element store held when it ran.
+    #
+    # It is attached here rather than in `renderLeaves` for the reason the
+    # chrome is: `gpui/app/leaves.nim` is digested into four mutation
+    # harnesses' control comparators, and an edit there would stale all four
+    # at once (§39a). It is attached to the FIRST pane rather than to every
+    # pane because "the key reached the focused element and nothing else" is
+    # the claim, and a listener on every pane would make the negative half
+    # unobservable.
+    if probeEnabled and i == 0:
+      setFocusable(pane)
+      discard focusElement(pane)
+      probeTarget = pane
+      r.addEventListener(pane, "keydown", probeHandler(pane))
+    # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
+    # first, so index 0 is it — and a leaf that drew no heading (a refusal,
+    # or an unloaded extension) has a text node there instead, which takes
+    # no style and is harmless.
+    if childCount(pane) > 0:
+      let heading = nthChild(pane, 0)
+      if not heading.isNil:
+        r.setStyle(heading, "color", chromeOf(crPaneTitleForeground))
+
+  r.appendChild(root, container)
+
+proc writeInputProbe(path: string; elapsedMs: int; deadlineMs: uint32): bool =
+  ## PLAT-38. Write what the element store held, after the loop returned.
+  ##
+  ## **THE FINAL READINGS COME OUT OF THE STORE AGAIN**, not out of
+  ## `probeArrivals`: the per-arrival list was taken from inside the handler
+  ## and the totals are taken here, after `Application::run` returned, so the
+  ## record outliving the event loop is itself observed rather than assumed.
+  ##
+  ## `endedOnDeadline` is written from the ELAPSED TIME against the deadline
+  ## the caller armed. *"The backstop saved us"* and *"the work finished"* are
+  ## different outcomes, and a capture that could not tell them apart would
+  ## report a timeout as a delivery.
+  var arrivals = newJArray()
+  for a in probeArrivals:
+    var mods = newJArray()
+    for m in a.modifiers: mods.add newJString(m)
+    arrivals.add %*{"key": a.key, "modifiers": mods, "kind": a.kind,
+                    "seq": a.seqNo}
+  let doc = %*{
+    "probe": "plat38-input",
+    "arrivals": arrivals,
+    "deliverySeq": (if probeTarget.isNil: 0 else: probeTarget.lastEventSeq()),
+    "deliveryCount": (if probeTarget.isNil: 0
+                      else: probeTarget.deliveryCount()),
+    "lastKey": (if probeTarget.isNil: "" else: probeTarget.lastEventKey()),
+    "focusedCount": focusedCount(),
+    "targetFocused": (if probeTarget.isNil: false else: isFocused(probeTarget)),
+    "elapsedMs": elapsedMs,
+    "deadlineMs": int(deadlineMs),
+    "endedOnDeadline": deadlineMs > 0'u32 and elapsedMs >= int(deadlineMs)}
+  try:
+    writeFile(path, pretty(doc))
+  except IOError as e:
+    stderr.writeLine("codetracer-gpui: --input-probe: " & e.msg)
+    return false
+  true
+
+proc launchWindow(cmd: GpuiCommand; title: string;
+                  outcome: LeafRenderOutcome): int =
+  ## Open the window, run the event loop, and return when it stops.
+  ##
+  ## Returns the process exit code. The event loop's own termination is the
+  ## first result, and it is a result rather than a formality: PLAT-19
+  ## measured that a windowed client ran past a 12 s and a 90 s cap before
+  ## `gpui_quit_after_ms` existed, because `gpui_launch` does not return while
+  ## the window does.
+  pendingOutcome = outcome
+  pendingViewportWidth = cmd.width
+  builderCalls = 0
+  probeEnabled = cmd.inputProbe.len > 0
+  probeArrivals = @[]
+  probeTarget = nil
+  probeSentinel = getEnv("CODETRACER_GPUI_PROBE_SENTINEL", "")
+  if cmd.quitAfterMs > 0'u32:
+    gpui_quit_after_ms(cmd.quitAfterMs)
+  let startedAt = epochTime()
+  gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
+              paintWindowChrome)
+  let elapsedMs = int((epochTime() - startedAt) * 1000)
+  if probeEnabled:
+    if not writeInputProbe(cmd.inputProbe, elapsedMs, cmd.quitAfterMs):
+      return 1
+  if builderCalls != 1:
+    # LOUD, not silent. `gpui_launch` calls the builder exactly once, before
+    # the loop; zero calls means the shadow tree the renderer read was never
+    # populated by this process, and a window that painted an empty tree is
+    # indistinguishable from a window that painted nothing.
+    stderr.writeLine("codetracer-gpui: the root builder ran " &
+                     $builderCalls & " times, expected exactly 1")
+    return 1
+  0
 
 proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
   ## PLAT-22. **Edit mode's surface: the WORKING TREE, and no recording.**
@@ -263,20 +647,56 @@ proc runEdit(cmd: GpuiCommand): int =
       return 1
     echo leafPlanJson(r, drawn)
     return 0
-  let win = createWindow("CodeTracer — " & cmd.traceFolder & " [EDIT]",
-                         float(cmd.width), float(cmd.height))
-  if not win.show():
-    stderr.writeLine("codetracer-gpui: the window would not open")
-    return 1
-  requestRepaint()
-  win.destroy()
-  0
+  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder & " [EDIT]", drawn)
 
 proc runOpen(cmd: GpuiCommand): int =
   ## Open the recording, build the shell, draw the leaves.
   if cmd.product == pmEdit:
     return runEdit(cmd)
   let session = openGpuiTrace(cmd.traceFolder)
+
+  # PLAT-37. `--replay-ops`, applied BEFORE anything is projected or drawn,
+  # because every pane's content is a function of where the debugger is
+  # stopped.
+  #
+  # **THE PERFORMED COUNT IS ASSERTED AGAINST THE DECLARED ONE, EXACTLY.**
+  # PLAT-35's Electron capture was validated against a corpus that counted
+  # CLICKS rather than MOVES, so the recorded states were one operation
+  # behind and two scenarios silently collided on one screen — which is the
+  # population defect (§34) the scenario set exists to prevent. "At least one
+  # operation ran" would be satisfied by a driver that stopped after the
+  # first step, so the comparison is an equality (§4b).
+  block replay:
+    if cmd.replayOps.len == 0:
+      break replay
+    var performed = 0
+    for op in cmd.replayOps:
+      if op.kind == BreakpointOpKind:
+        # A breakpoint is not a motion: it is applied to the SURFACE below,
+        # against the editor's own first drawn row. It contributes nothing
+        # to the motion count, which is why `declaredOperations` skips it.
+        continue
+      for _ in 0 ..< op.times:
+        case op.kind
+        of "stepIn": session.stepIn()
+        of "next": session.stepForward()
+        of "stepOut": session.stepOut()
+        of "continueForward": session.continueForward()
+        else:
+          # Unreachable: `parseReplayOps` rejects anything else. Kept loud
+          # rather than `discard`ed, because an `else` that swallows is how
+          # a vocabulary grows a member nothing performs.
+          stderr.writeLine("codetracer-gpui: no driver for operation '" &
+                           op.kind & "'")
+          return 1
+        discard session.drainEvents()
+        inc performed
+    let declared = declaredOperations(cmd.replayOps)
+    if performed != declared:
+      stderr.writeLine("codetracer-gpui: performed " & $performed & " of " &
+                       $declared & " declared operations")
+      return 1
+
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
   # `toBackendService` is the adapter `headless_session` itself uses to inject
@@ -344,6 +764,32 @@ proc runOpen(cmd: GpuiCommand): int =
     session.requestAndLoadLocals()
   except CatchableError:
     discard
+  # PLAT-37. THE BREAKPOINT IS RESOLVED AGAINST THE RECORDING'S OWN SOURCE,
+  # never against a literal. `--replay-ops=setBreakpoint@<row>` names an
+  # offset into the FIRST ROW THE EDITOR ACTUALLY DREW, which is why the
+  # surface is built twice: once to learn where the editor is looking, and
+  # once with the point on it. A hardcoded line number would make the
+  # scenario about this file rather than about the program, and would move
+  # silently the next time the fixture's source changes.
+  var points: seq[EditorPoint] = @[]
+  let bpRow = breakpointRow(cmd.replayOps)
+  if bpRow >= 0:
+    let probe = editorSurfaceFor(
+      source = sourceService.vm,
+      editor = session.session.editorVM,
+      state = session.session.stateVM,
+      flow = session.session.flowVM,
+      availability = sourceService.availability(),
+      budget = gpuiRowBudget(),
+      medium = GpuiMedium)
+    if probe.rows.len == 0:
+      stderr.writeLine("codetracer-gpui: --replay-ops asked for a breakpoint" &
+                       " and the editor drew no rows to place it on")
+      return 1
+    let at = probe.rows[min(bpRow, probe.rows.high)].line
+    points.add EditorPoint(path: session.getCurrentFile(), line: at,
+                           kind: epkBreakpoint, enabled: true)
+
   let surface = editorSurfaceFor(
     source = sourceService.vm,
     editor = session.session.editorVM,
@@ -351,7 +797,8 @@ proc runOpen(cmd: GpuiCommand): int =
     flow = session.session.flowVM,
     availability = sourceService.availability(),
     budget = gpuiRowBudget(),
-    medium = GpuiMedium)
+    medium = GpuiMedium,
+    points = points)
 
   var r: GpuiRenderer
   let leafSet = shell.leavesFor(windowId)
@@ -367,19 +814,43 @@ proc runOpen(cmd: GpuiCommand): int =
     echo leafPlanJson(r, drawn)
     return 0
 
-  let win = createWindow("CodeTracer — " & cmd.traceFolder,
-                         float(cmd.width), float(cmd.height))
-  if not win.show():
-    stderr.writeLine("codetracer-gpui: the window would not open")
-    return 1
-  requestRepaint()
-  # PLAT-20 ends here, and saying so is the point: entering an event loop that
-  # dispatches input into `shell.applyIn` is the same `LayoutCommand` algebra
-  # the terminal already routes, and wiring it is PLAT-21's, whose panes are
-  # what there would be to interact with. A loop that spun over leaves drawing
-  # their own names would be a demo.
-  win.destroy()
-  0
+  # PLAT-37. `--plan-out`: the INTROSPECTION reading of the very tree that is
+  # about to be painted.
+  #
+  # **ONE TREE, TWO READINGS, AND THAT IS THE POINT.** The alternative — run
+  # the binary once with `--report-plan` and once windowed — produces two
+  # trees from two processes, and the OCR join would then be comparing the
+  # strings one run reported against the pixels a different run drew. That is
+  # not a weaker join, it is a join about nothing: `PLAT35-PD3` is a measured
+  # case of this very front-end's locals arriving in five runs out of six, so
+  # two runs genuinely can disagree.
+  if cmd.planOut.len > 0:
+    if not leafPlanIsValid(r, drawn):
+      stderr.writeLine("codetracer-gpui: the render plan did not verify")
+      return 1
+    try:
+      writeFile(cmd.planOut, leafPlanJson(r, drawn))
+    except IOError as e:
+      stderr.writeLine("codetracer-gpui: --plan-out: " & e.msg)
+      return 1
+
+  # PLAT-20 ENDED HERE, AND PLAT-37 IS WHERE IT STOPS ENDING HERE. The
+  # sentence that used to close this function — *"entering an event loop that
+  # dispatches input into `shell.applyIn` … is PLAT-21's"* — conflated two
+  # things that turn out to be separable, and the separation is this
+  # milestone's whole shape: ENTERING the loop and painting a frame is one
+  # act, and DELIVERING INPUT into it is another.
+  #
+  # **PLAT-38 TOOK THE SECOND.** `PLAT21-VG1` (no payload on
+  # `gpui_dispatch_event`) and `PLAT21-VG3` (focus per window rather than per
+  # element) were measured defects in the renderer binding and are retired:
+  # the shim's event ABI carries a payload, elements hold focus exclusively,
+  # and `gpui_app.rs` attaches a real `on_key_down` to a tracked-focus root,
+  # so a compositor key reaches the element store. What is still not here is a
+  # BINDING from a key to a replay operation — that is PLAT-23's `--ui=gui`
+  # contract, and `--replay-ops` is what stands in for it meanwhile.
+  # `--input-probe` is the instrument that shows the delivery half works.
+  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder, drawn)
 
 proc main() =
   let cmd = parseGpuiCommand(commandLineParams())

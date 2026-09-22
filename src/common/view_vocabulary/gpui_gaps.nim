@@ -81,83 +81,121 @@ type
     remedy*: string
       ## What would close it, and in which repository.
 
+type
+  RetiredGpuiGap* = object
+    ## **A gap whose divergence has been REPAIRED.**
+    ##
+    ## PLAT-35's rule, inherited by PLAT-38: *"a filed gap is retired when its
+    ## divergence is repaired"*. A repaired gap left in `FiledGpuiGaps` would
+    ## make the census demand an escape the binding no longer takes, so the
+    ## gate reddens either way — but a gap that simply VANISHED would leave no
+    ## record that the claim was ever true, and the next reader would have to
+    ## rediscover why the binding is shaped the way it is.
+    ##
+    ## **AND A RETIREMENT MUST NOT FIRE ON A RUN IN WHICH NOTHING HAPPENED.**
+    ## `PLAT35-VG7` was retired against the one run in six where the GPUI
+    ## locals never arrived: two empty answers compared equal, the question
+    ## agreed, and the retirement case then demanded the gap go. So every row
+    ## here names the POSITIVE EVIDENCE its retirement is conditioned on, and
+    ## the suite asserts that evidence ARRIVED before it asserts the gap is
+    ## absent from the register.
+    id*: string
+    entries*: seq[ViewKind]
+      ## The entries the gap named while it was filed. Kept so the shrink can
+      ## be asserted as an identity — `filed ∪ retired` is the original
+      ## register, in both directions.
+    subject*: GapSubject
+    what*: string
+      ## What the binding could not do. Past tense, verbatim from the filing.
+    repairedIn*: string
+      ## Where the repair landed, precisely enough to read.
+    evidence*: string
+      ## **THE POSITIVE OBSERVATION THE RETIREMENT REQUIRES**, named so the
+      ## suite can demand it rather than infer it from an absence.
+
 const
-  FiledGpuiGaps*: seq[GpuiGap] = @[
-    GpuiGap(
+  RetiredGpuiGaps*: seq[RetiredGpuiGap] = @[
+    RetiredGpuiGap(
       id: "PLAT21-VG1",
       entries: @[pkButton, pkCheckbox, pkToggle, pkInput, pkSelect, pkList,
                  pkTree, pkTable, pkTabs, pkCollapsible, pkModal, pkMenu],
       subject: gsRenderer,
-      what: "A KEY CANNOT BE DELIVERED TO A VIEW. isonim-gpui's " &
-            "`addEventListener(node, event, handler)` takes a `proc()` with " &
-            "NO PARAMETER, and `gpui_dispatch_event(node, event)` carries no " &
-            "payload either, so there is no `KeyboardEvent` and no way to " &
+      what: "A KEY COULD NOT BE DELIVERED TO A VIEW. isonim-gpui's " &
+            "`addEventListener(node, event, handler)` took a `proc()` with " &
+            "NO PARAMETER, and `gpui_dispatch_event(node, event)` carried no " &
+            "payload either, so there was no keyboard event and no way to " &
             "say WHICH key was pressed. Every interactive entry — all twelve " &
             "— has a keyboard contract the vocabulary requires " &
             "(`acKeyboard` is not optional, and `portability.checkPortable` " &
-            "refuses a pointer-only entry), and none of them can receive one " &
-            "through the renderer's own event surface.",
-      measured: "`rust/gpui-nim-shim/src/lib.rs` `gpui_add_event_listener_id` " &
-                "takes (node, event, callback_id) and stores " &
-                "`EventListener { callback, callback_id }`; the Nim side's " &
-                "`globalDispatcher(callbackId: int32)` looks the closure up " &
-                "and calls it with no argument. Measured on 2026-09-15 by " &
-                "firing three events at one element: the two with listeners " &
-                "ran, the third did not, and neither handler could tell " &
-                "which key it was.",
-      remedy: "isonim-gpui: widen the callback ABI to carry an event payload " &
-              "(a key name at minimum). Until then the binding encodes the " &
-              "key IN THE EVENT NAME — `vockey:ArrowDown` — which is the " &
-              "escape this gap files."),
-    GpuiGap(
+            "refuses a pointer-only entry), and none of them could receive " &
+            "one through the renderer's own event surface. The binding " &
+            "encoded the key in the EVENT NAME (`vockey:Down`).",
+      repairedIn: "isonim-gpui, PLAT-38. `EventCallback` is " &
+                  "`extern \"C\" fn(*const GpuiEventPayload)` and " &
+                  "`EventDispatcher` is " &
+                  "`extern \"C\" fn(i32, *const GpuiEventPayload)`; " &
+                  "`gpui_dispatch_event_with` carries a payload and answers " &
+                  "how many listeners it reached; " &
+                  "`rust/gpui-nim-shim/src/input.rs` records every delivery " &
+                  "in the node's own element store BEFORE any callback runs. " &
+                  "`gpui_app.rs` attaches a real `on_key_down` to a " &
+                  "tracked-focus root, so a compositor key reaches the same " &
+                  "routine.",
+      evidence: "A key was DELIVERED and read back from the Rust-side " &
+                "element store: the key name, the modifier set and a " &
+                "non-zero delivery sequence, for every one of the twelve " &
+                "interactive entries. Not the value the case sent — the " &
+                "value `gpui_last_event_*` answers."),
+    RetiredGpuiGap(
       id: "PLAT21-VG2",
       entries: @[pkButton, pkCheckbox, pkToggle, pkInput, pkSelect, pkList,
                  pkTree, pkTable, pkTabs, pkCollapsible, pkModal, pkMenu],
       subject: gsRenderer,
-      what: "THE `disabled` ATTRIBUTE IS DESTROYED ON THE WAY IN AND " &
-            "UNREADABLE ON THE WAY OUT. `renderer.mapAttributeName` rewrites " &
-            "`disabled` to `enabled`, and `mapAttributeValue` answers the " &
+      what: "THE `disabled` ATTRIBUTE WAS DESTROYED ON THE WAY IN AND " &
+            "UNREADABLE ON THE WAY OUT. `renderer.mapAttributeName` rewrote " &
+            "`disabled` to `enabled`, and `mapAttributeValue` answered the " &
             "LITERAL `\"false\"` for it whatever the caller passed — so " &
-            "`setAttribute(el, \"disabled\", \"false\")` records the element " &
-            "as disabled. `getAttribute(el, \"disabled\")` then answers \"\", " &
-            "because the stored key is `enabled`.",
-      measured: "2026-09-15, through the real shim: after " &
-                "setAttribute(disabled,\"true\") -> disabled='' enabled='false'; " &
-                "after setAttribute(disabled,\"false\") -> enabled='false', " &
-                "UNCHANGED. `disabled` is observable state on `Button` " &
-                "(`nodeFacts` emits it) and on every `ViewOption`.",
-      remedy: "isonim-gpui: `mapAttributeValue` should invert the value " &
-              "rather than constant-fold it. Until then the binding never " &
-              "writes the name `disabled` and carries the fact as " &
-              "`data-disabled`, which is the escape this gap files — and " &
-              "which the WEB binding does not need, because the DOM keeps " &
-              "what it is given."),
-    GpuiGap(
+            "`setAttribute(el, \"disabled\", \"false\")` recorded the " &
+            "element as disabled. `getAttribute(el, \"disabled\")` then " &
+            "answered \"\", because the stored key was `enabled`.",
+      repairedIn: "isonim-gpui, PLAT-38. `mapAttributeName` and " &
+                  "`mapAttributeValue` are the identity; the rewrite and " &
+                  "the constant fold are gone and their absence is asserted " &
+                  "with a planted positive control in " &
+                  "`tests/test_input_focus.nim`.",
+      evidence: "`setAttribute(el, \"disabled\", v)` then " &
+                "`getAttribute(el, \"disabled\")` answered `v`, on the real " &
+                "shim, for BOTH polarities and for every one of the twelve " &
+                "interactive entries."),
+    RetiredGpuiGap(
       id: "PLAT21-VG3",
       entries: @[pkModal],
       subject: gsRenderer,
-      what: "THERE IS NO ELEMENT FOCUS, SO EXCLUSIVITY CANNOT BE EXPRESSED. " &
-            "`Modal`'s specified behaviour is *a region that takes exclusive " &
-            "input until dismissed*, and the vocabulary's own note says the " &
-            "exclusivity is the medium-independent part — a terminal focus " &
-            "trap and an inert DOM background are two spellings of one " &
-            "statement about where input goes. isonim-gpui has focus at the " &
-            "WINDOW level only (`window.onFocus`, per window id); no element " &
-            "can hold, trap or refuse focus, and the render plan carries no " &
-            "layer, no z-order and no modality.",
-      measured: "2026-09-15: `grep -n focus` over " &
-                "`rust/gpui-nim-shim/src/tree.rs` and `render_sync.rs` " &
-                "returns NOTHING; every hit in `src/isonim_gpui/window.nim` " &
-                "is the per-window `onFocus` callback. The render plan's " &
-                "node shape is (kind, tag, text, has_click_handler, " &
-                "has_input_handler, event_names, styles, children) and none " &
-                "of those is a layer.",
-      remedy: "isonim-gpui: an element-level focus/trap concept, or gpui-kit's " &
-              "own overlay once it is reachable (PLAT-20 premise 1). Until " &
-              "then the binding renders the Modal's exclusivity as PRESENCE " &
-              "— the body is in the tree when open and absent when dismissed " &
-              "— which is what the entry's `open` fact already carries and is " &
-              "strictly less than the entry specifies."),
+      what: "THERE WAS NO ELEMENT FOCUS, SO EXCLUSIVITY COULD NOT BE " &
+            "EXPRESSED. `Modal`'s specified behaviour is *a region that " &
+            "takes exclusive input until dismissed*, and the vocabulary's " &
+            "own note says the exclusivity is the medium-independent part — " &
+            "a terminal focus trap and an inert DOM background are two " &
+            "spellings of one statement about where input goes. isonim-gpui " &
+            "had focus at the WINDOW level only (`window.onFocus`, per " &
+            "window id); no element could hold, trap or refuse focus.",
+      repairedIn: "isonim-gpui, PLAT-38. A node carries `focusable`, " &
+                  "`focused` and `focus_trap`; `gpui_focused_count` counts " &
+                  "holders over the WHOLE store (so the partition law can " &
+                  "fail); `gpui_focus_next`/`prev` walk the render tree's " &
+                  "document order; `gpui_set_focus_trap` confines that order " &
+                  "to a subtree and makes `gpui_focus_element` REFUSE from " &
+                  "outside it.",
+      evidence: "A `Modal` held a focus trap on the real shim: focus moved " &
+                "inside it when it opened, an element outside it was " &
+                "refused, motion cycled within it, and at most one element " &
+                "held focus at every point — counted over the whole tree.")]
+    ## **THE RETIRED GAPS.** Three, all against the RENDERER, all closed by
+    ## PLAT-38. `view_vocabulary_test.nim` asserts that none of these ids is
+    ## still in `FiledGpuiGaps`, that each one's evidence arrived, and that
+    ## the union of the two registers is the four ids PLAT-21 filed.
+
+  FiledGpuiGaps*: seq[GpuiGap] = @[
     GpuiGap(
       id: "PLAT21-VG4",
       entries: @[pkImage],
@@ -185,7 +223,13 @@ const
               "milestone gives a front-end real pixels to hand over.")]
     ## **THE FILED GAPS, AND THE COUNT IS PART OF THE CONTRACT.**
     ##
-    ## Four. `view_vocabulary_test.nim` asserts the length, asserts every field
+    ## **ONE, since PLAT-38.** It was four; three were against the RENDERER and
+    ## all three are in `RetiredGpuiGaps` above. The one that remains is the
+    ## one filed against the VOCABULARY — and that split is why the shrink is
+    ## the shape it is: no change to isonim-gpui could ever have closed
+    ## `PLAT21-VG4`, because the entry has nothing to give the renderer.
+    ##
+    ## `view_vocabulary_test.nim` asserts the length, asserts every field
     ## non-empty, asserts every `entries` list non-empty and every id unique,
     ## and — the assertion that makes this a gate rather than a document —
     ## asserts that the set of entries the GPUI binding REPORTED taking an
@@ -207,6 +251,33 @@ func gapById*(id: string): GpuiGap =
   for g in FiledGpuiGaps:
     if g.id == id: return g
   GpuiGap()
+
+func retiredGapIds*(): seq[string] =
+  for g in RetiredGpuiGaps: result.add g.id
+
+func filedGapIds*(): seq[string] =
+  for g in FiledGpuiGaps: result.add g.id
+
+func retiredGapById*(id: string): RetiredGpuiGap =
+  for g in RetiredGpuiGaps:
+    if g.id == id: return g
+  RetiredGpuiGap()
+
+func isRetired*(id: string): bool =
+  ## **ONE PREDICATE.** The retirement case and its negative twin both ask
+  ## through this rather than each filtering a list, so a control cannot agree
+  ## with itself while the rule is broken (Verification-Harness-Traps §30).
+  for g in RetiredGpuiGaps:
+    if g.id == id: return true
+  false
+
+func everFiledGapIds*(): seq[string] =
+  ## Every gap PLAT-21 filed, whether it is still open or has been retired.
+  ## **The identity the shrink is asserted against**: a gap that vanished from
+  ## both registers is a claim that stopped being recorded, and an id that
+  ## appears in both is a retirement nobody finished.
+  result = filedGapIds()
+  for id in retiredGapIds(): result.add id
 
 func describeGaps*(): string =
   ## The register, as a report. The form PLAT-21's status block quotes.

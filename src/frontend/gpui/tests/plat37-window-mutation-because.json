@@ -1,0 +1,14 @@
+{
+  "M1": "Check failed: framePassesSsim(entry)",
+  "M10": "Check failed: key notin idents",
+  "M11": "Check failed: onBlank == 0",
+  "M12": "Check failed: isReplayOpKind(kind)",
+  "M2": "Check failed: not controlPassesSsim(entry)",
+  "M3": "Check failed: k >= minK",
+  "M4": "Check failed: scoredAgainst == scenarios.len - 1",
+  "M5": "Check failed: featurelessFrames == 0",
+  "M6": "Check failed: not controlPassesEcr(entry)",
+  "M7": "Check failed: loosenings < 2",
+  "M8": "Check failed: ratio >= MinimumContrastRatio",
+  "M9": "gpui/tests/test_gpui_window_frame.nim(972, 11): Expect Failed, no exception was thrown."
+}

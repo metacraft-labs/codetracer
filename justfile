@@ -4694,6 +4694,105 @@ test-plat35-visual-alignment:
   bash ci/test/plat35-answer-independence.sh
   bash ci/test/editor-model-case-floor.sh PLAT-35
 
+# ─── PLAT-37: a window that opens, and a frame a human can look at ──────────
+#
+# THREE RECIPES, AND THE SPLIT IS THE CAPABILITY LINE.
+#
+#   plat37-capture   needs a COMPOSITOR. It opens real windows on headless
+#                    sway, reads the pixels back with `grim`, runs the four
+#                    compositor configurations and writes `build/plat37/`.
+#                    It asserts almost nothing.
+#   plat37-measure   needs the FRAMES (and GuiAssert). It turns the capture
+#                    into `src/tests/visual/plat37-measurements.json`, which
+#                    is committed — the same arrangement as PLAT-35's
+#                    recorded Electron answers, and for the same reason.
+#   plat37-case-floor  needs NEITHER. It is the gate, and it runs anywhere,
+#                    which is what lets `editor-model-case-floors` carry it.
+#
+# The shims are NOT built here. `cargo build --features gpui-backend` run from
+# this repo's dev shell fails to LINK — `rust-lld: error: unable to find
+# library -lxcb / -lxkbcommon / -lxkbcommon-x11`, measured 2026-09-22 —
+# because those are declared in `isonim-gpui`'s own `flake.nix`. A cross-repo
+# build belongs to the repo that owns it:
+#
+#     cd ../isonim-gpui && nix develop --command just plat37-shims
+plat37-capture *args:
+  bash ci/test/plat37-window-frame.sh {{args}}
+
+plat37-measure:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # The same two paths the `gpui-shell` lane carries, read from the one place
+  # that answers that question rather than transcribed here (§30).
+  # shellcheck source=/dev/null
+  . ci/lib/test-lane-files.sh
+  # shellcheck disable=SC2046,SC2086  # the flag string must word-split
+  nim c -r --hints:off $(test_lane_extra_flags gpui-shell) \
+    --nimcache:build/nimcache/plat37-measure \
+    -o:build/plat37/plat37-measure \
+    ci/test/plat37_measure.nim
+
+# The rejected threshold candidates, as a runnable sweep (§36b). It adds NO
+# gate of its own on purpose: asserting that the losers ARE vacuous would pin
+# a property of the corpus nothing depends on.
+plat37-threshold-probe:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # shellcheck source=/dev/null
+  . ci/lib/test-lane-files.sh
+  # shellcheck disable=SC2046,SC2086
+  nim c -r --hints:off $(test_lane_extra_flags gpui-shell) \
+    --nimcache:build/nimcache/plat37-threshold-probe \
+    -o:build/plat37/plat37-threshold-probe \
+    ci/test/plat37_threshold_probe.nim
+
+plat37-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-37
+
+# PLAT-38 — A REAL KEY, through the compositor's own `wl_seat`, into a focused
+# `codetracer-gpui` window, read back from the RUST-SIDE element store.
+#
+# It needs the WINDOWED shim, which is built by the sibling that owns it —
+# linking it needs `-lxcb`, `-lxkbcommon` and `-lxkbcommon-x11`, declared in
+# `isonim-gpui`'s `flake.nix` and not in this repo's shell:
+#
+#     cd ../isonim-gpui && nix develop --command just plat37-shims
+#
+# The lane REFUSES if that shim is absent rather than running the featureless
+# one, because a featureless run opens no window, receives no key, and reports
+# an empty arrival list that looks exactly like a delivery failure.
+plat38-capture *args:
+  bash ci/test/plat38-keystroke.sh {{args}}
+
+plat38-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-38
+
+# The rejected change-fraction thresholds, as a runnable sweep (§36b). It adds
+# NO gate of its own on purpose: asserting that the losers ARE vacuous would
+# pin a property of the corpus nothing depends on, and would make a future
+# improvement to the capture fail a check about roads not taken.
+plat38-threshold-probe:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ ! -f build/plat38/vision-before.ppm ] || [ ! -f build/plat38/vision-after.ppm ]; then
+    echo "PLAT-38: no captured frames in build/plat38/. Run \`just plat38-capture\` first."
+    echo "This probe re-takes a MEASUREMENT; it cannot invent the frames."
+    exit 1
+  fi
+  for t in 0.0001 0.001 0.002 0.01 0.05; do
+    python3 - build/plat38/vision-before.ppm build/plat38/vision-after.ppm \
+      build/plat38/vision-blank.ppm "$t" <<'PY'
+  import sys
+  sys.path.insert(0, "ci/test")
+  from plat38_frames import read_ppm, changed_fraction
+  b, a, z, t = read_ppm(sys.argv[1]), read_ppm(sys.argv[2]), read_ppm(sys.argv[3]), float(sys.argv[4])
+  ch = changed_fraction(b[2], a[2])
+  bl = changed_fraction(z[2], z[2])
+  print("threshold %-8s key-change %.6f %-8s blank %.6f %s" % (
+      t, ch, "PASS" if ch > t else "VACUOUS", bl, "PASS" if bl < t else "FAILS-CONTROL"))
+  PY
+  done
+
 test-ui-selection: build-once build-tui
   #!/usr/bin/env bash
   set -euo pipefail
@@ -5126,7 +5225,7 @@ editor-model-case-floors:
   set -uo pipefail
   failed=0
   ran=0
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38; do
     echo "=== ${m} ==="
     if bash ci/test/editor-model-case-floor.sh "${m}"; then
       ran=$((ran + 1))

@@ -16,6 +16,8 @@
 #   bash ci/test/editor-model-case-floor.sh PLAT-34
 #   bash ci/test/editor-model-case-floor.sh PLAT-35
 #   bash ci/test/editor-model-case-floor.sh PLAT-36
+#   bash ci/test/editor-model-case-floor.sh PLAT-37
+#   bash ci/test/editor-model-case-floor.sh PLAT-38
 #
 # THIS FILE WAS `plat24-case-floor.sh` AND IT GREW AN ARGUMENT
 # ===========================================================
@@ -369,9 +371,101 @@ PLAT-36)
 	# nothing satisfies everything written over it.
 	LAW_SUITES=()
 	;;
+PLAT-37)
+	MILESTONE="** PLAT-37: A =codetracer-gpui= window that opens"
+	SUITES=(
+		src/frontend/gpui/tests/test_gpui_window_frame.nim
+	)
+	# ONE SUITE, AND IT NEEDS THE `gpui-shell` LANE'S FLAGS — WHICH PLAT-37
+	# WIDENED BY ONE PATH.
+	#
+	# The flags are READ FROM `ci/lib/test-lane-files.sh`, never transcribed:
+	# the arrangement PLAT-34 established and PLAT-35 inherited, for the
+	# reason both of them give — that file already answers "what does a
+	# `gpui-shell`-lane file need to build", and a second spelling here would
+	# be a second place for it to drift (§30). What changed is that the answer
+	# now includes `--path:../GuiAssert/src`, because this milestone's gate
+	# reads pixels and GuiAssert is where `decodeGray`, `computeSsim`,
+	# `edgeChangeRatio` and `runOcr` live. Reading the flags rather than
+	# copying them is what made that a ONE-LINE change instead of a two-place
+	# one.
+	#
+	# **WHAT THIS ENTRY MAKES THIS GATE DEPEND ON, SAID BEFORE IT SURPRISES
+	# ANYBODY.** PLAT-37's floor counts eighteen vision cases plus four
+	# compositor configurations, so its suite is about PIXELS — and pixels
+	# come from a capture that needs a headless compositor. The suite does not
+	# need one: it reads `src/tests/visual/plat37-measurements.json`, a
+	# recorded capture committed exactly as PLAT-35 commits its Electron
+	# answers, and re-measures from `build/plat37/` only when those frames
+	# happen to be on the disk. That is what lets this entry run in
+	# `viewmodel-tests` beside the other thirteen. The recorded record carries
+	# its own provenance and the suite prints it, because a recorded capture
+	# with no date is a capture nobody can age.
+	#
+	# NO `LAW_SUITES`, for PLAT-30's, PLAT-31's, PLAT-34's, PLAT-35's and
+	# PLAT-36's reason and not by oversight. `Editor-Model-Conformance-
+	# Suite.md` §3 publishes `LAW-A` … `LAW-X` and none of them is PLAT-37's.
+	# This milestone's oracle is its OWN instrument contract — the two-row
+	# table in `CodeTracer-Platform.milestones.org` §"The two instruments" —
+	# and `DIFF-6`, both of which are asserted INSIDE the suite, because the
+	# claim is about which TIER a case is on and that is not an id in a
+	# backticked cell. A `LAW_PREFIX` here would make this gate parse a table
+	# that does not exist, and per §4 a parser that matches nothing satisfies
+	# everything written over it.
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags gpui-shell
+	)")
+	LAW_SUITES=()
+	;;
+PLAT-38)
+	MILESTONE="** PLAT-38: Key delivery and element focus"
+	SUITES=(
+		src/frontend/gpui/tests/test_gpui_key_delivery.nim
+	)
+	# ONE SUITE, AND IT NEEDS THE `gpui-shell` LANE'S FLAGS — the arrangement
+	# PLAT-34 established, PLAT-35 inherited and PLAT-37 widened by one path.
+	# Read, never transcribed: `ci/lib/test-lane-files.sh` already answers
+	# "what does a `gpui-shell`-lane file need to build", and a second
+	# spelling here would be a second place for it to drift (§30).
+	#
+	# **WHAT THIS ENTRY DEPENDS ON, SAID BEFORE IT SURPRISES ANYBODY.** Nine
+	# of PLAT-38's forty-six cases are about a key that entered through a
+	# COMPOSITOR, and a compositor is not something this gate can have. The
+	# suite does not need one: it reads
+	# `src/tests/visual/plat38-keystrokes.json`, a recorded capture committed
+	# exactly as PLAT-35 commits its Electron answers and PLAT-37 its frame
+	# measurements, and re-measures from `build/plat38/` only when that
+	# manifest happens to be on the disk. The record carries its own
+	# provenance and the suite PRINTS it, because a recorded capture with no
+	# date is a capture nobody can age. A record that is on NEITHER path is a
+	# named failure rather than a skip.
+	#
+	# The other thirty-seven link the real Rust shim and drive it directly —
+	# the tier PLAT-19 established and PLAT-21 used. They are the reason this
+	# entry cannot join the portable `vm-unit` lanes.
+	#
+	# NO `LAW_SUITES`, for PLAT-30's, PLAT-31's, PLAT-34's, PLAT-35's,
+	# PLAT-36's and PLAT-37's reason and not by oversight.
+	# `Editor-Model-Conformance-Suite.md` §3 publishes `LAW-A` … `LAW-X` and
+	# none of them is PLAT-38's. This milestone's laws are published in its
+	# own "Laws, corpus and generators" section — the focus partition, the
+	# key identity, and the population — and each is asserted INSIDE the
+	# suite, because the claim is about a COUNT taken over the element store
+	# and that is not an id in a backticked cell. A `LAW_PREFIX` here would
+	# make this gate parse a table that does not exist, and per §4 a parser
+	# that matches nothing satisfies everything written over it.
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags gpui-shell
+	)")
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-36. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-38. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

@@ -19,12 +19,41 @@
 ##     the web's (`Tabs` is `nav` here and a `div role="tablist"` there, `Menu`
 ##     is `nav` here and a `div role="menu"` there, `Markdown` is block text
 ##     here and a `div` there);
-##   * **its own key transport** — through the shim's event dispatcher, with the
-##     key encoded in the EVENT NAME, because the renderer's callback ABI has no
-##     payload (gap `PLAT21-VG1`);
-##   * **its own attribute names where the renderer mangles the obvious one** —
-##     it never writes `disabled`, because isonim-gpui rewrites that name and
-##     constant-folds its value (gap `PLAT21-VG2`).
+##   * **its own key transport** — through the shim's event dispatcher, with a
+##     GPUI-shaped keystroke (a base key name plus a modifier set) in the event
+##     PAYLOAD;
+##   * **its own attribute names**, which are the shared `data-` fact names the
+##     web binding also writes.
+##
+## ## WHAT PLAT-38 CHANGED HERE, AND WHY IT IS NOT COSMETIC
+##
+## PLAT-21 filed three gaps against the renderer and this module carried an
+## escape for each. All three are gone:
+##
+##   * `PLAT21-VG1` — *a key cannot be delivered*. The renderer's listener ABI
+##     was `proc()`: no event object, no key. The only channel that could say
+##     WHICH key was pressed was the event NAME, so this binding registered one
+##     listener per key of an entry's contract under `vockey:<name>` and fired
+##     the name. **The spelling `vockey:` is now retired**, and its absence is
+##     asserted with a planted positive control in
+##     `src/frontend/gpui/tests/test_gpui_key_delivery.nim` — an absence grep
+##     with no control is Verification-Harness-Traps §4. One listener per node
+##     under `keydown` now, and the key arrives in the payload.
+##   * `PLAT21-VG2` — `setAttribute(el, "disabled", v)` was rewritten to
+##     `enabled` and its value constant-folded to `"false"`, so saying
+##     "enabled" recorded "disabled" and `getAttribute(el, "disabled")`
+##     answered `""`. This module wrote `data-disabled` and recorded an escape
+##     saying the prefix was what saved it. **The escape is gone** — not
+##     because the write changed (it is still `data-disabled`, which is what
+##     the WEB binding writes through the same function) but because the
+##     reason it was renderer-keyed has been repaired. The round trip is
+##     measured on the real shim by the suite rather than asserted from here.
+##   * `PLAT21-VG3` — *no element focus*. `Modal`'s exclusivity was rendered as
+##     PRESENCE, which is strictly less than the entry specifies. The renderer
+##     now has element focus, a declared order and a focus TRAP, and this
+##     binding uses all three: every interactive node is declared focusable, a
+##     `Modal` sets a trap while it is open, and `Tab`/`Shift+Tab` move through
+##     the order the render tree declares.
 ##
 ## ## WHAT IS SHARED, AND THAT IS ALSO DELIBERATE
 ##
@@ -53,7 +82,7 @@
 ## verification tier, it is a real tier, and PLAT-20's status block says plainly
 ## that no GPUI window has been observed. Nothing here claims one.
 
-import std/[strutils, tables]
+import std/[tables, unicode]
 
 import isonim_gpui/renderer
 import isonim_gpui/bindings
@@ -64,37 +93,38 @@ import ./fact_reader
 export fact_reader.factAttributeName
 
 const
-  KeyEventPrefix* = "vockey:"
-    ## **THE ESCAPE `PLAT21-VG1` FILES.** isonim-gpui's listener ABI is
-    ## `proc()` — no event object, no key — so the only channel that can say
-    ## WHICH key was pressed is the event NAME. A listener is registered per key
-    ## of the entry's contract under `vockey:<name>`, and `sendKey` fires that
-    ## name. The dispatch is real: it goes out through `gpui_dispatch_event`,
-    ## the Rust side looks the listener up in the node's own map, and the
-    ## callback id comes back through `globalDispatcher`.
+  KeyDownEventName* = "keydown"
+    ## **ONE event name for every key.** Before PLAT-38 the name was the only
+    ## channel that could carry a key, so this binding spelled the key INTO it
+    ## (`vockey:Down`) and registered one listener per key of an entry's
+    ## contract. The payload carries the key now, so a node has one listener.
     ##
-    ## It is a constant rather than an inlined string so the suite can assert
-    ## the names the RENDER PLAN reports — `event_names` is one of the eight
-    ## fields the plan carries, which makes an entry's keyboard contract
-    ## observable from the Rust side rather than only from ours.
-
-  CharKeyName* = "Char"
-    ## `kChar` carries a rune, and the event name has to carry it too:
-    ## `vockey:Char:Z`. Without this a binding would have to register one
-    ## listener per possible character.
+    ## It is a constant rather than an inlined string for the reason the old
+    ## one was: `event_names` is one of the fields the RENDER PLAN carries, so
+    ## an entry's keyboard contract stays observable from the Rust side rather
+    ## than only from ours — and the suite asserts the plan reports exactly
+    ## this name, which is how the retirement of `vockey:` is checked from a
+    ## RUN rather than from a grep alone.
 
   DisabledFactName* = "disabled"
-    ## The one `nodeFacts` field whose plain attribute name isonim-gpui
-    ## destroys. Named so `PLAT21-VG2`'s escape is one constant rather than a
-    ## string repeated at the write site and the assertion site.
+    ## The `nodeFacts` field whose plain attribute name isonim-gpui used to
+    ## destroy (`PLAT21-VG2`). The gap is repaired; the constant stays because
+    ## the suite measures the round trip on the real shim by this name, and a
+    ## string repeated at the write site and the assertion site is where the
+    ## two would drift.
 
 type
   GpuiEscapeKind* = enum
     ## Which filed gap a taken escape belongs to. An enum rather than a string
     ## so a census over it is total and a fifth escape cannot appear unnamed.
-    gekKeyInEventName        ## PLAT21-VG1
-    gekDisabledAttribute     ## PLAT21-VG2
-    gekModalWithoutFocus     ## PLAT21-VG3
+    ##
+    ## **THREE MEMBERS WERE REMOVED BY PLAT-38** — `gekKeyInEventName`
+    ## (`PLAT21-VG1`), `gekDisabledAttribute` (`PLAT21-VG2`) and
+    ## `gekModalWithoutFocus` (`PLAT21-VG3`). Removing them rather than leaving
+    ## them unused is deliberate: `gpuiEscapeGapId` is exhaustive over this
+    ## enum, so a member with no remaining call site would compile forever and
+    ## an escape kind nothing can produce is a register entry nothing can
+    ## retire.
     gekImageWithoutPayload   ## PLAT21-VG4
 
   GpuiEscape* = object
@@ -138,14 +168,19 @@ type
       ## What the most recent dispatched key did, as the handler saw it.
       ## Carried on the binding rather than returned, because the handler runs
       ## on the far side of an FFI round trip and cannot return anything.
+    lastKeyReceived*: GpuiEvent
+      ## **THE KEY THE HANDLER WAS HANDED**, as opposed to the key the caller
+      ## sent. Before PLAT-38 there was nothing to record: the handler was a
+      ## `proc()` and knew only which closure it was. It is here so a case can
+      ## compare what ARRIVED against what was SENT — and the stronger oracle,
+      ## the Rust-side element store, is read through `renderer.lastEvent`
+      ## rather than from this field, because a field this module writes is a
+      ## surface the case built (§4a).
 
 func gpuiEscapeGapId*(k: GpuiEscapeKind): string =
-  ## Which filed gap each escape kind is. Exhaustive: a fifth escape kind
+  ## Which filed gap each escape kind is. Exhaustive: a second escape kind
   ## cannot compile without being filed.
   case k
-  of gekKeyInEventName: "PLAT21-VG1"
-  of gekDisabledAttribute: "PLAT21-VG2"
-  of gekModalWithoutFocus: "PLAT21-VG3"
   of gekImageWithoutPayload: "PLAT21-VG4"
 
 # ---------------------------------------------------------------------------
@@ -202,47 +237,81 @@ func gpuiChildTagFor*(k: ViewKind): string =
 # Key names
 # ---------------------------------------------------------------------------
 
-func gpuiKeyName*(k: Key; ch: string = ""): string =
-  ## `behaviour.Key` in the EVENT-NAME spelling this binding uses.
+type
+  GpuiKeystroke* = object
+    ## **A key as GPUI spells it**: a base key name plus a modifier set, which
+    ## is exactly the shape `gpui::Keystroke` has and exactly the shape the
+    ## widened payload carries.
+    ##
+    ## NOT a rendered `"shift-tab"`. Verification-Harness-Traps §25: a helper
+    ## that silently drops a modifier it cannot spell hands you a test about a
+    ## different key, and this workspace has already paid for that once. A
+    ## modifier cannot fall out of a set without the set changing.
+    name*: string
+    modifiers*: GpuiModifiers
+
+func gpuiKeystroke*(k: Key; ch: string = ""): GpuiKeystroke =
+  ## `behaviour.Key` in **GPUI's own keystroke spelling**.
   ##
-  ## Deliberately NOT the DOM's names and NOT isonim-tui's: a third medium that
-  ## borrowed one of the other two's spellings would leave the translation step
-  ## — the one thing PLAT-3 says differs per medium — untested on this column.
+  ## PLAT-21's version of this function invented a third vocabulary
+  ## (`"Commit"`, `"Toggle"`, `"Dismiss"`, `"FocusNext"`), because the key was
+  ## being smuggled through an event NAME and the name was this binding's to
+  ## choose. It is not this binding's to choose any more: the names below are
+  ## what `gpui::Keystroke.key` actually carries when a compositor key reaches
+  ## the shim — lowercase, `"escape"` rather than `"Esc"`, and `"tab"` with
+  ## the shift modifier for a back-tab, which is how a keyboard produces one.
+  ##
+  ## That is the point of the change rather than a side effect of it. A
+  ## renderer-specific spelling would have made this binding's decoder and the
+  ## renderer's encoder agree by construction, and PLAT-38's key-identity law
+  ## needs two independent readings of one keystroke.
   case k
-  of kNone: ""
-  of kChar: CharKeyName & ":" & ch
-  of kEnter: "Commit"
-  of kSpace: "Toggle"
-  of kEscape: "Dismiss"
-  of kTab: "FocusNext"
-  of kBackTab: "FocusPrev"
-  of kUp: "Up"
-  of kDown: "Down"
-  of kLeft: "Left"
-  of kRight: "Right"
-  of kHome: "First"
-  of kEnd: "Last"
-  of kBackspace: "EraseBack"
-  of kDelete: "EraseForward"
+  of kNone: GpuiKeystroke()
+  of kChar: GpuiKeystroke(name: ch)
+  of kEnter: GpuiKeystroke(name: "enter")
+  of kSpace: GpuiKeystroke(name: "space")
+  of kEscape: GpuiKeystroke(name: "escape")
+  of kTab: GpuiKeystroke(name: "tab")
+  of kBackTab: GpuiKeystroke(name: "tab", modifiers: {gmShift})
+  of kUp: GpuiKeystroke(name: "up")
+  of kDown: GpuiKeystroke(name: "down")
+  of kLeft: GpuiKeystroke(name: "left")
+  of kRight: GpuiKeystroke(name: "right")
+  of kHome: GpuiKeystroke(name: "home")
+  of kEnd: GpuiKeystroke(name: "end")
+  of kBackspace: GpuiKeystroke(name: "backspace")
+  of kDelete: GpuiKeystroke(name: "delete")
 
-func gpuiKeyEvent*(k: Key; ch: string = ""): string =
-  ## The event name a key is delivered under.
-  KeyEventPrefix & gpuiKeyName(k, ch)
-
-func keyFromGpuiEvent*(event: string): KeyPress =
-  ## The inverse. A handler registered for one name could have assumed its own
-  ## key, but then the event name would be decoration: parsing it back is what
-  ## makes the round trip through Rust load-bearing, because a dispatch that
-  ## arrived at the wrong listener produces the wrong `KeyPress` here.
-  if not event.startsWith(KeyEventPrefix): return press(kNone)
-  let name = event[KeyEventPrefix.len .. ^1]
-  if name.startsWith(CharKeyName & ":"):
-    let rest = name[CharKeyName.len + 1 .. ^1]
-    return (if rest.len == 1: typeChar(rest[0]) else: press(kNone))
+func keyFromGpuiKeystroke*(ks: GpuiKeystroke): KeyPress =
+  ## The inverse, over what the PAYLOAD carried.
+  ##
+  ## This is the function a real compositor key lands in: the shim passes
+  ## `gpui::Keystroke.key` through verbatim and this binding decides what it
+  ## MEANS. An unknown name answers `kNone` rather than guessing, so "a key
+  ## this entry does not claim" and "a key nothing could name" are one
+  ## outcome and the entry declines both.
+  if ks.name.len == 0: return press(kNone)
+  # The back-tab first: it shares its name with `kTab` and differs only in the
+  # modifier, so a decoder that matched on the name alone would answer `kTab`
+  # for both and the shift would be the thing that silently vanished.
+  if ks.name == "tab":
+    return press(if gmShift in ks.modifiers: kBackTab else: kTab)
   for k in Key:
-    if k != kChar and k != kNone and gpuiKeyName(k) == name:
+    if k != kChar and k != kNone and k != kTab and k != kBackTab and
+       gpuiKeystroke(k).name == ks.name:
       return press(k)
+  # A single-rune name that matched no named key is a character. GPUI reports
+  # the unshifted character plus a shift modifier, which is what `kChar`'s
+  # rune already means on the other two media.
+  if ks.name.runeLen == 1:
+    let r = ks.name.runeAt(0)
+    if r.int32 < 128: return typeChar(char(r.int32))
   press(kNone)
+
+func keyFromGpuiEvent*(ev: GpuiEvent): KeyPress =
+  ## What the widened payload decodes to. One line, so the suite and the
+  ## handler read the payload through the same function (§30).
+  keyFromGpuiKeystroke(GpuiKeystroke(name: ev.key, modifiers: ev.modifiers))
 
 # ---------------------------------------------------------------------------
 # Rendering
@@ -257,29 +326,28 @@ proc applyFacts(b: GpuiBinding; el: GpuiElement; v: ViewNode) =
   ## Stamp the node's observable state, through the SAME name function the web
   ## binding writes with and the shared reader reads with.
   ##
-  ## `disabled` is the one field that needs a word about it, and the word is
-  ## `PLAT21-VG2`: the plain name would arrive at the shim as `enabled` with
-  ## the literal value `false`, so the fact would be lost AND inverted. The
-  ## `data-` prefix is what saves it, and the escape is recorded because "the
-  ## prefix happened to save us" is not a thing a later reader can see.
+  ## **THERE IS NO `disabled` SPECIAL CASE ANY MORE, AND ITS ABSENCE IS THE
+  ## POINT.** PLAT-21 recorded an escape here (`PLAT21-VG2`): the plain name
+  ## arrived at the shim as `enabled` with the literal value `false`, so the
+  ## fact was lost AND inverted, and the `data-` prefix was what accidentally
+  ## saved it. The renderer keeps what it is given now. The write is unchanged
+  ## — `data-disabled`, which is exactly what the WEB binding writes through
+  ## exactly this function — so it is no longer a code path keyed on the
+  ## renderer, which is `gpui_gaps.nim`'s own definition of an escape.
   for f in nodeFacts(v):
-    if f.field == DisabledFactName:
-      b.recordEscape(gekDisabledAttribute, v,
-        "wrote " & factAttributeName(f.field) & "=" & f.value &
-        " because the renderer rewrites the plain name to `enabled` and " &
-        "folds its value to `false`")
     b.renderer.setAttribute(el, factAttributeName(f.field), f.value)
 
-proc keyHandler(b: GpuiBinding; nodeId, event: string): proc() =
-  ## ONE handler, for one node and one event name.
+proc keyHandler(b: GpuiBinding; nodeId: string): GpuiEventHandler =
+  ## ONE handler per node, and it reads the key OUT OF THE EVENT.
   ##
   ## **A SEPARATE `proc` AND NOT A CLOSURE LITERAL IN THE LOOP, AND THAT IS
-  ## MEASURED RATHER THAN STYLISTIC.** The first version of `installKeys` built
-  ## the closure inline inside `for binding in contract`, and every closure in
-  ## one loop shared ONE environment slot for the loop body's `let` — so all of
-  ## an entry's listeners ran `applyKey` with the LAST key of its contract.
+  ## MEASURED RATHER THAN STYLISTIC.** PLAT-21's `installKeys` built the
+  ## closure inline inside `for binding in contract`, and every closure in one
+  ## loop shared ONE environment slot for the loop body's `let` — so all of an
+  ## entry's listeners ran `applyKey` with the LAST key of its contract.
   ##
-  ## What that looked like from outside is the reason it is written down.
+  ## What that looked like from outside is the reason it is still written
+  ## down even though there is no longer a loop to make the mistake in.
   ## `Checkbox` went on passing, because its contract is Space then Enter and
   ## both are `trCheck`, so firing Space and applying Enter produced the right
   ## answer for the wrong reason. `List` and `Input` both end their contracts
@@ -287,38 +355,33 @@ proc keyHandler(b: GpuiBinding; nodeId, event: string): proc() =
   ## them separated the three. Verification-Harness-Traps §32a, in the
   ## instrument rather than in an arm: the listener resolved, the dispatch
   ## crossed into Rust and back, the handler ran, and the EVIDENCE was never
-  ## about the key.
-  ##
-  ## Taking the arguments by value gives each handler its own environment.
-  result = proc() =
+  ## about the key. **The payload removes the class of defect rather than the
+  ## instance**: there is one listener now, and which key it applies is a
+  ## function of what arrived rather than of which closure ran.
+  result = proc(ev: GpuiEvent) =
     inc b.dispatchCount
+    b.lastKeyReceived = ev
     for n in walk(b.model):
       if n.id == nodeId:
-        b.lastOutcome = applyKey(n, keyFromGpuiEvent(event))
+        b.lastOutcome = applyKey(n, keyFromGpuiEvent(ev))
         break
 
 proc installKeys(b: GpuiBinding; el: GpuiElement; v: ViewNode) =
-  ## One listener per key of the entry's contract, under `vockey:<name>`.
+  ## ONE listener per interactive node, under `keydown`, and the node is
+  ## declared FOCUSABLE.
   ##
-  ## THE ESCAPE `PLAT21-VG1` FILES, and it is recorded once per interactive
-  ## node rather than once per key: the gate counts ENTRIES.
+  ## PLAT-21 registered one listener per key of the entry's contract, under
+  ## `vockey:<name>`, and recorded an escape saying so. Both are gone: the key
+  ## rides in the payload, and focus is something the renderer now has.
   let contract = keyContract(v.kind)
   if contract.len == 0: return
-  let id = v.id
-  var names: seq[string] = @[]
-  for binding in contract:
-    if binding.key == kChar:
-      # `kChar` is a class of keys, not a key. One listener per character the
-      # cross-renderer script types would be a listener list that depends on
-      # the script; the binding registers the characters the model can receive
-      # by registering a marker and letting `sendKey` name the character.
-      continue
-    let event = gpuiKeyEvent(binding.key)
-    names.add event
-    b.renderer.addEventListener(el, event, b.keyHandler(id, event))
-  b.recordEscape(gekKeyInEventName, v,
-    "registered " & $names.len & " listener(s) whose NAME carries the key, " &
-    "because the renderer's callback ABI has no event payload")
+  b.renderer.addEventListener(el, KeyDownEventName, b.keyHandler(v.id))
+  # An entry with a keyboard contract is an entry keys can be routed TO, so
+  # it joins the focus order. The order itself is the render tree's document
+  # order, which is what `PLAT35-VG4` said was "declared by the leaf renderer
+  # and enforced by nothing" — it is enforced by the renderer now, and
+  # `focusOrder()` reads it back from the Rust side.
+  setFocusable(el)
 
 proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
   let r = b.renderer
@@ -335,14 +398,17 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
     if v.label.len > 0:
       r.appendChild(el, r.createTextNode(v.label))
   of pkModal:
-    # PLAT21-VG3. There is no element focus and no layer in this renderer, so
-    # the exclusivity the entry IS cannot be drawn. What the binding can carry
-    # is PRESENCE — the body is in the tree while the modal is open — and that
-    # is strictly less, which is why the escape is recorded rather than left
-    # to be inferred from a `div` that looks like every other `div`.
-    b.recordEscape(gekModalWithoutFocus, v,
-      "rendered the modal's exclusivity as presence only; the renderer has " &
-      "no element focus, no layer and no z-order")
+    # **PLAT21-VG3, CLOSED.** PLAT-21 could carry only PRESENCE here — the
+    # body is in the tree while the modal is open — and recorded an escape
+    # saying so, because the entry's specified behaviour is *a region that
+    # takes exclusive input until dismissed* and there was no element focus
+    # to build exclusivity out of. There is now: a focus TRAP confines the
+    # focus order to this subtree and refuses `focusElement` from outside it,
+    # which is the exclusivity the entry IS rather than a `div` that looks
+    # like every other `div`.
+    #
+    # The trap is set AFTER the children exist, at the end of `renderNode`,
+    # because a trap over an empty subtree has nothing to move focus to.
     if v.label.len > 0:
       r.appendChild(el, r.createTextNode(v.label))
   of pkImage:
@@ -362,10 +428,14 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
       let child = r.createElement(gpuiChildTagFor(v.kind))
       r.setAttribute(child, "data-option-id", o.id)
       r.setAttribute(child, "data-option-index", $i)
-      # NOT `disabled`: PLAT21-VG2 again, one level down. An option's
-      # availability is the state `behaviour.nextEnabled` skips on, so losing
-      # it here would make GPUI's motion disagree with the other two media
-      # while every element still rendered.
+      # `data-option-disabled`, through the shared name function, exactly as
+      # the web binding writes it. PLAT-21 had a note here saying this was
+      # `PLAT21-VG2` one level down — that the plain name would have been
+      # destroyed. It would not be now; the name is unchanged because it is
+      # the SHARED fact name, and an option's availability is the state
+      # `behaviour.nextEnabled` skips on, so a per-renderer spelling would
+      # make GPUI's motion disagree with the other two media while every
+      # element still rendered.
       r.setAttribute(child, factAttributeName("optionDisabled"), $o.disabled)
       let highlighted =
         if v.kind == pkTabs: i == v.selected
@@ -416,6 +486,18 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
   if showChildren:
     for c in v.children:
       r.appendChild(el, b.renderNode(c))
+
+  # THE MODAL'S EXCLUSIVITY, once its subtree exists. `setFocusTrap` moves
+  # focus inside when the current holder is outside, so opening a modal takes
+  # input from whatever had it — which is the behaviour the entry specifies
+  # and the thing `PLAT21-VG3` said could not be expressed.
+  #
+  # An open modal with no focusable descendant traps nothing, and that is the
+  # renderer's answer rather than this binding's: `gpui_set_focus_trap`
+  # blurs in that case rather than pretending. Recorded here because a modal
+  # whose body is all `Text` is a shape the vocabulary permits.
+  if v.kind == pkModal:
+    discard setFocusTrap(el, v.open)
   el
 
 proc collectNodes(b: GpuiBinding; el: GpuiElement; v: ViewNode) =
@@ -452,6 +534,20 @@ proc rerender*(b: GpuiBinding) =
   ## `dispatchCount` is deliberately NOT reset: it is a running total over a
   ## key script, and a counter a re-render zeroed would report 1 for every
   ## script of any length.
+  ##
+  ## **THE OLD TREE'S FOCUS STATE IS RELEASED FIRST, AND THAT WAS A DEFECT
+  ## FOUND BY A CASE RATHER THAN BY DESIGN.** A re-render builds an entirely
+  ## new element tree; the previous one is not destroyed, so a `Modal` that
+  ## was open before the re-render went on holding its focus TRAP in the
+  ## shim's store — and a trap belonging to a tree nothing draws refuses focus
+  ## in the tree that IS drawn. The symptom was `Escape` dismissing a modal
+  ## and the outside staying unreachable. Releasing here rather than teaching
+  ## the renderer about staleness is deliberate: the shim has no idea which
+  ## of its nodes this binding still considers current, and a renderer that
+  ## guessed would be guessing about the consumer's model.
+  for _, el in b.nodes:
+    discard setFocusTrap(el, false)
+    blurElement(el)
   b.escapes = @[]
   b.nodes = initTable[string, GpuiElement]()
   b.root = b.renderNode(b.model)
@@ -461,28 +557,51 @@ proc rerender*(b: GpuiBinding) =
 # Driving
 # ---------------------------------------------------------------------------
 
+proc gpuiPayloadFor*(k: Key; ch = ""): GpuiEvent =
+  ## The payload a key travels in. One function, used by `sendKey` and by the
+  ## suite's assertions, so the two cannot disagree about what was sent.
+  let ks = gpuiKeystroke(k, ch)
+  GpuiEvent(kind: gekKeyDown, key: ks.name, modifiers: ks.modifiers)
+
 proc sendKey*(b: GpuiBinding; id: string; k: Key; ch = ""): KeyOutcome =
-  ## Deliver a key by DISPATCHING IT THROUGH THE SHIM.
+  ## Deliver a key by DISPATCHING IT THROUGH THE SHIM, with the key in the
+  ## PAYLOAD.
   ##
-  ## `gpui_dispatch_event` crosses into Rust, the Rust side finds the node's
-  ## listener list for that event name, and the registered callback id comes
-  ## back through `globalDispatcher`. A key with no listener on the node — one
-  ## outside the entry's contract — reaches nothing, which is how "an unclaimed
-  ## key changes nothing" is asserted on this medium rather than assumed.
+  ## `gpui_dispatch_event_with` crosses into Rust, the Rust side records the
+  ## arrival in the node's own element store, finds the node's `keydown`
+  ## listeners and dispatches to them; the callback id and the payload come
+  ## back together through `globalDispatcher`. A key the entry does not claim
+  ## still ARRIVES and changes nothing, which is a stronger statement than
+  ## PLAT-21 could make — there, an unclaimed key reached no listener at all,
+  ## so "nothing happened" and "nothing was delivered" were one observation.
+  ##
+  ## The listener count the dispatch reached is returned by the shim and
+  ## dropped here deliberately: this function's answer is the vocabulary's
+  ## `KeyOutcome`, and a case that wants the delivery count reads it from the
+  ## element store, which is the side the binding cannot write.
   b.lastOutcome = ignored()
   if id notin b.nodes: return b.lastOutcome
-  if k == kChar:
-    # The character class: the listener is registered on demand under the
-    # exact name, because `installKeys` cannot enumerate every rune.
-    let node = b.nodes[id]
-    let event = gpuiKeyEvent(kChar, ch)
-    b.renderer.addEventListener(node, event, b.keyHandler(id, event))
-    fireEvent(node, event)
-  else:
-    fireEvent(b.nodes[id], gpuiKeyEvent(k))
+  discard fireEvent(b.nodes[id], KeyDownEventName, gpuiPayloadFor(k, ch))
   if b.lastOutcome.handled:
     b.rerender()
   b.lastOutcome
+
+proc focusNode*(b: GpuiBinding; id: string): bool =
+  ## Give element focus to one rendered node. Answers false when the node is
+  ## not in the tree, is not interactive, or sits outside an open modal's
+  ## focus trap — the last of which is `Modal`'s exclusivity, observable.
+  if id notin b.nodes: return false
+  focusElement(b.nodes[id])
+
+proc focusedNodeId*(b: GpuiBinding): string =
+  ## Which rendered node holds element focus, read from the RUST side and
+  ## matched back to a model id by node identity rather than by a table this
+  ## module keeps in step.
+  let f = focusedElement()
+  if f.isNil: return ""
+  for id, el in b.nodes:
+    if sameNode(el, f): return id
+  ""
 
 # ---------------------------------------------------------------------------
 # Reading the rendered tree back

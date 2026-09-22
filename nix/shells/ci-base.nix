@@ -381,6 +381,100 @@ with pkgs;
     xvfb-run
     xorg.xorgserver
     xdotool
+
+    # PLAT-37 — THE GPUI WINDOW LANE. `ci/test/plat37-window-frame.sh`
+    # opens a real `codetracer-gpui` window on a real compositor and reads
+    # the pixels back, and the four packages below are the whole of what
+    # that needs. Each is here for a reason that was MEASURED rather than
+    # assumed, so none of them is a "might as well":
+    #
+    #   sway + wayland-utils  headless **sway** is the only compositor GPUI
+    #                         has been observed to render under here.
+    #                         `weston --backend=headless-backend.so`
+    #                         advertises no `wl_seat` and GPUI's Wayland
+    #                         client unwraps that `None`
+    #                         (gpui_linux/src/linux/wayland/client.rs), so
+    #                         every GPUI process dies at startup under it;
+    #                         `isonim-gpui/scripts/wayland-run-test.sh`
+    #                         refuses it by name. Xvfb — which is already
+    #                         above — cannot substitute either, but NOT for
+    #                         the reason this comment carried until
+    #                         2026-09-22. It said Xvfb *"has no DRI3, so wgpu
+    #                         never gets a surface and the window reaches
+    #                         `IsViewable` and paints nothing"*. Re-measured
+    #                         with the windowed shim: **it paints** — the X
+    #                         framebuffer goes from 3.7e-05 non-NUL with no
+    #                         client to 0.62 with `codetracer-gpui` running,
+    #                         and the frame is the whole front-end. The
+    #                         `libEGL DRI3` warning is still printed; wgpu
+    #                         falls back to a software Vulkan device. What
+    #                         Xvfb cannot do is be CAPTURED here: `grim`
+    #                         speaks a Wayland protocol that does not exist
+    #                         on an X display, and this shell's `ffmpeg` has
+    #                         no `x11grab`. `wayland-info` is what that
+    #                         script uses to assert `wl_seat` and
+    #                         `zwlr_screencopy_manager_v1` are advertised
+    #                         BEFORE it runs anything.
+    #   grim                  the `zwlr_screencopy_manager_v1` client that
+    #                         reads the output back.
+    #                         `isonim-gpui/scripts/wayland-capture-frame.sh`
+    #                         runs `grim -t ppm`. NOT GuiAssert's
+    #                         `capture.recordScreen`, which records VIDEO
+    #                         (`wf-recorder`, stopped by SIGINT) and would
+    #                         need a decode pass to get a frame back.
+    #   ffmpeg                GuiAssert's `decodeGray` shells out to
+    #                         `ffprobe` then `ffmpeg -f rawvideo -pix_fmt
+    #                         gray`, which is what lets it read `grim`'s
+    #                         binary PPM without GuiAssert learning a
+    #                         format. `ffmpeg` and not `ffmpeg-full`: the
+    #                         pnm decoder is in the default build, and the
+    #                         extra codecs buy this lane nothing.
+    #   tesseract             GuiAssert's `runOcr` shells out to it for the
+    #                         OCR join. Its `flake.nix` pins nixpkgs
+    #                         `b6018f87` and names NO version string for
+    #                         either binary, so an OCR figure is only
+    #                         meaningful with a nixpkgs rev beside it —
+    #                         which is why the lane prints the resolved
+    #                         `tesseract --version` into its manifest
+    #                         rather than quoting a version from anywhere.
+    #
+    # THIS IS A DECLARED CROSS-REPO EDGE, not a discovered one. The suite
+    # imports `gui_assert` from the workspace sibling `../GuiAssert/src`
+    # (its own `config.nims` convention), and GuiAssert is NOT a build
+    # dependency of `codetracer` — nothing else in this tree imports it.
+    # The edge buys four pure-over-a-file entry points (`decodeGray`,
+    # `computeSsim`, `edgeChangeRatio`, `runOcr`) and costs this lane a
+    # sibling checkout, which `ci/test/plat37-window-frame.sh` refuses by
+    # name when it is absent rather than skipping.
+    sway
+    wayland-utils
+    grim
+    ffmpeg
+    tesseract
+
+    # PLAT-38 — THE KEY LANE. `ci/test/plat38-keystroke.sh` sends a REAL key
+    # into a focused `codetracer-gpui` window and reads the Rust-side element
+    # store back, and `wtype` is the whole difference between that and a
+    # synthesised call into `gpui_dispatch_event` (which would test the
+    # binding against itself — PLAT-38's gate says so in as many words).
+    #
+    # `wtype` is a Wayland client speaking `zwp_virtual_keyboard_manager_v1`.
+    # wlroots — and therefore the `sway` above — implements it, so the
+    # keyboard it creates is attached to the compositor's own `wl_seat` and
+    # its keys are routed to the focused surface exactly as a physical
+    # keyboard's would be.
+    #
+    # `ydotool` is deliberately NOT here and is not an alternative: it
+    # injects through `uinput`, which needs a privileged daemon and a device
+    # node a CI container does not have — and a key that never reached the
+    # compositor would be a different experiment wearing the same name.
+    #
+    # A MEASURED USAGE NOTE, because it cost an afternoon and is invisible:
+    # a `wtype` invocation with no leading `-s <ms>` sends its keystroke
+    # before the compositor has processed the new virtual keyboard's keymap,
+    # and the key is LOST — silently, with `wtype` exiting 0. Every
+    # invocation in this repo's lanes leads with `-s`.
+    wtype
   ];
 
   # Build-critical environment exports only. Developer convenience
@@ -388,6 +482,56 @@ with pkgs;
   # sibling-repo detection, reprobuild ASP solver paths) lives in
   # main.nix's shellHook.
   shellHook = ''
+    # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
+    # rather than prepended to `LD_LIBRARY_PATH`.
+    #
+    # A shim built with `--features gpui-backend` is a 544 MB cdylib whose
+    # `ldd` closure is EIGHT entries where the feature-less one's is FOUR
+    # (re-measured 2026-09-22 from the artefacts themselves, which is the
+    # reading `build/plat37/shim/<config>/ldd.txt` records and the gate
+    # asserts). **The four that appear are `libxcb.so.1`,
+    # `libxkbcommon.so.0`, `libxkbcommon-x11.so.0` and `libm.so.6`** — an
+    # earlier spelling of this comment named only the two xkbcommon entries
+    # and was wrong about the set while right about the count, which is
+    # exactly the kind of figure that survives because nothing re-takes it.
+    #
+    # EIGHT IS THE READING WITH NOTHING ON `LD_LIBRARY_PATH`, and three of the
+    # eight say `not found` there. With this variable prepended the same file
+    # reports ELEVEN, because a resolved `libxcb.so.1` pulls in `libXau.so.6`,
+    # `libXdmcp.so.6` and `libxcb-xkb.so.1` behind it and `ldd` cannot recurse
+    # through a library it did not find. Two true numbers for one artefact, so
+    # the condition is stated wherever either is quoted.
+    #
+    # Everything wgpu and GPUI reach for after that (`libGL`, the Vulkan
+    # loader, `libwayland-client`) is `dlopen`ed at run time and so never
+    # shows up in `ldd` at all. Without them the front-end fails at START with
+    # `could not load: …/libgpui_nim_shim.so`, which names the shim and not the
+    # library that is actually missing.
+    #
+    # WHY NOT `LD_LIBRARY_PATH` DIRECTLY. That variable is consulted by every
+    # process this shell starts — `cargo`, `node`, Electron, the recorders'
+    # own loaders — and putting a GL / Vulkan / Wayland stack in front of all
+    # of them to serve one lane is how an unrelated test starts resolving a
+    # different `libGL`. `ci/test/plat37-window-frame.sh` prepends this for
+    # the processes that need it, and nothing else does.
+    export CODETRACER_GPUI_RUNTIME_LIB_PATH="${
+      pkgs.lib.makeLibraryPath [
+        pkgs.libxkbcommon
+        pkgs.libGL
+        pkgs.libglvnd
+        pkgs.mesa
+        pkgs.vulkan-loader
+        pkgs.wayland
+        pkgs.fontconfig.lib
+        pkgs.freetype
+        pkgs.xorg.libX11
+        pkgs.xorg.libxcb
+        pkgs.xorg.libXcursor
+        pkgs.xorg.libXi
+        pkgs.xorg.libXrandr
+      ]
+    }"
+
     # Wasm target sysroot used by build_wasm.sh + db-backend.
     export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"
     export CFLAGS_wasm32_unknown_unknown="-I$(pwd)/src/db-backend/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"

@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 30
+# RECORDED-DARK-CEILING: 32
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -468,3 +468,93 @@ ci/test/noir-wasm-worker/transpile_route.mjs
 # verified to flip both ways with synthetic input. Proved able to fail against
 # the real product: `convertTabTitle` reverted to `TEST RESULTS` reddens two
 # named assertions.
+
+# ---------------------------------------------------------------------------
+# PLAT-37 — BLOCKED ON A CAPABILITY, AND THE CAPABILITY IS NAMED
+# ---------------------------------------------------------------------------
+# THE MISSING CAPABILITY: **no CI job in this repository has a Wayland
+# compositor.** `ci/test/plat37-window-frame.sh` opens real
+# `codetracer-gpui` windows under headless `sway` and reads the pixels back
+# with `grim` over `zwlr_screencopy_manager_v1`. The packages are now in the
+# dev shell (`nix/shells/ci-base.nix`: `sway`, `wayland-utils`, `grim`,
+# `ffmpeg`, `tesseract`), so the SHELL can do it; what is unmeasured is the
+# RUNNER. PLAT-37's own risk block states the limit and this entry inherits it
+# rather than restating it loosely: every measurement to date is x86-64 on one
+# dev workstation, `/dev/dri` inside the `eph-linux-x64` / `eph-linux-arm64`
+# guests is unchecked, arm64 is entirely unverified, and macOS has no Wayland
+# compositor at all so the wlroots capture does not exist there. The milestone
+# is `partial` until the fleet has answered.
+#
+# WHAT WOULD MAKE IT GREEN, concretely, so this entry is trackable and dies
+# when the blocker lifts: one `if: always()` step in `codetracer.yml` calling
+# `just plat37-capture` on an `eph-linux-x64` runner. If the capture succeeds
+# there, this line is deleted, the ceiling drops, and `just plat37-measure`
+# becomes a CI-refreshable artefact instead of a workstation one.
+#
+# OWNER: Zahary Karadjov <zahary@metacraft-labs.com>
+# REVIEW-BY: 2026-12-22
+# DECISION (2026-09-22, at verification): RECORDED, NOT WIRED — and the
+# decision was taken rather than deferred. Wiring was considered and refused
+# on this file's own rule: the step above would attach a REQUIRED lane to a
+# capability nobody has measured, and whether `eph-linux-x64` can run a
+# headless `sway` with `/dev/dri` is exactly the unmeasured thing. Adding the
+# step to find out would make a required job's result depend on the answer
+# before the answer exists, which is the failure the BLOCKED/UNWIRED split
+# above is drawn to prevent. The measurement that settles it is one manual
+# `just plat37-capture` on an `eph-linux-x64` runner; the owner above holds
+# it, and the review date is when this entry is re-read whether or not the
+# fleet has moved.
+#
+# WHAT THE OWNER IS ACCEPTING, STATED SO IT IS NOT DISCOVERED LATER. Until
+# that measurement is taken, PLAT-37's gate runs in CI over
+# `src/tests/visual/plat37-measurements.json` — numbers no CI run produced —
+# and the capture that produces them runs only on a workstation. Those are
+# two halves of ONE hole, not two: a recorded corpus is honest exactly as
+# long as something re-takes it, and today nothing in CI does. The gate
+# prints its corpus source on every run (`source=recorded` / `source=live`)
+# so the hole is visible in the log rather than inferred from this file, and
+# the record carries its own `provenance.writtenAt` so it can be aged. That
+# is instrumentation, not a fix, and it is recorded here as such.
+#
+# **THIS IS BLOCKED, NOT UNWIRED**, and the distinction is the one this file
+# insists on. There IS a `just` recipe — `just plat37-capture` — and it is not
+# missing; what is missing is a runner that can execute it. The measurement
+# that would settle it has not been taken, and taking it inside a required job
+# would be wiring a required lane to an unmeasured capability, which is the
+# opposite of what the ratchet is for.
+#
+# THE GATE THAT READS THIS CAPTURE IS *NOT* DARK, and that is the whole design:
+# `src/frontend/gpui/tests/test_gpui_window_frame.nim` runs from
+# `ci/test/editor-model-case-floor.sh PLAT-37`, which `just
+# editor-model-case-floors` calls, which the `viewmodel-tests` job runs. It
+# asserts over `src/tests/visual/plat37-measurements.json`, a recorded capture
+# committed exactly as PLAT-35 commits its Electron answers. So what is dark
+# here is the RE-TAKING of the measurement, not the checking of it.
+ci/test/plat37-window-frame.sh
+
+# ---------------------------------------------------------------------------
+# PLAT-38 — THE KEYSTROKE CAPTURE. **BLOCKED on the same capability PLAT-37's
+# capture is blocked on, and for the same reason.** `ci/test/plat38-keystroke.
+# sh` opens a real `codetracer-gpui` window on a headless sway, sends a key
+# through the compositor's own `wl_seat` with `wtype`, and reads the Rust-side
+# element store back. It needs a runner that can start a compositor and a
+# windowed GPUI client; no CI job here can.
+#
+# **THIS IS BLOCKED, NOT UNWIRED.** There IS a `just` recipe —
+# `just plat38-capture` — and it is not missing; what is missing is a runner
+# that can execute it. It has been RUN on this workstation: six pinned
+# scenarios delivered, the negative twin refused, on 2026-09-22.
+#
+# THE GATE THAT READS THIS CAPTURE IS *NOT* DARK, which is the whole design:
+# `src/frontend/gpui/tests/test_gpui_key_delivery.nim` runs from
+# `ci/test/editor-model-case-floor.sh PLAT-38`, which `just
+# editor-model-case-floors` calls, which the `viewmodel-tests` job runs. It
+# asserts over `src/tests/visual/plat38-keystrokes.json`, a recorded capture
+# committed exactly as PLAT-37 commits its frame measurements. So what is dark
+# here is the RE-TAKING of the measurement, not the checking of it.
+#
+# WHAT WOULD MAKE IT GREEN: the same thing PLAT-37's entry names — `just
+# plat38-capture` succeeding on an `eph-linux-x64` runner. If it does, this
+# line is deleted and the ceiling drops, which the both-directions rule
+# already forces in the same commit.
+ci/test/plat38-keystroke.sh

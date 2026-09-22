@@ -81,6 +81,17 @@
 ## is the campaign's usual one: a status derived from a table's KEYS is a claim
 ## about the table, not about the renderer.
 ##
+## **AND `Modal` MOVED TOO, ON 2026-09-22, WHICH LEAVES NO `msAbsent` ROW IN
+## THE GPUI COLUMN AT ALL.** PLAT-38 gave isonim-gpui element focus — a
+## per-node focus flag, a declared order read off the render tree, and a focus
+## TRAP that confines the order to a subtree and refuses a focus request from
+## outside it — so the exclusivity that `Modal` IS is now something the medium
+## offers and the binding sets. `absentEntries(feGpui)` is therefore EMPTY, and
+## the two suites that read it assert emptiness as a cardinality with a
+## positive twin over all sixteen entries rather than iterating a set that is
+## no longer there: a loop over an empty set passes every check written inside
+## it (Verification-Harness-Traps §4).
+##
 ## `GpuiTagMap` below is a copy of that table's KEYS, and
 ## `view_vocabulary_test` verifies the copy against isonim-gpui's own source
 ## rather than trusting it — with a count assertion, so a scan that read
@@ -335,21 +346,27 @@ func gpuiMapping*(k: ViewKind): Mapping =
     "BOTH tags are in tagMap and BOTH collapse to div, so the disclosure " &
     "relationship — which is the entry's whole content — is lost in the tag " &
     "and must be rebuilt by the binding")
-  of pkModal: m(msAbsent, "dialog — renders as a container; the MODALITY is " &
-    "what is missing, not the tag",
-    "STILL msAbsent AFTER PLAT-21's RE-MEASUREMENT, and the reason is now the " &
-    "right one. `dialog` is not in tagMap and that turns out not to matter: " &
-    "it keeps its spelling and classifies as `Div`, exactly as `table` does " &
-    "(see that row). What IS missing is ELEMENT FOCUS. isonim-gpui has focus " &
-    "at the WINDOW level only (`window.onFocus`, per window id); no element " &
-    "can hold, trap or refuse it, and the render plan's node shape — kind, " &
-    "tag, text, has_click_handler, has_input_handler, event_names, styles, " &
-    "children — carries no layer and no z-order. Exclusivity is what the " &
-    "entry IS, and a binding cannot supply it out of anything the renderer " &
-    "offers, which is the difference between this row and the Table row. " &
-    "Filed as `gpui_gaps.PLAT21-VG3`; measured by " &
-    "`test_gpui_vocabulary_binding.nim`, case *\"there is no element focus in " &
-    "this renderer\"*")
+  of pkModal: m(msPartial, "dialog — renders as a container; the MODALITY is " &
+    "a FOCUS TRAP the binding sets",
+    "**MOVED FROM msAbsent TO msPartial BY PLAT-38, AND IT IS THE LAST ROW " &
+    "IN THIS COLUMN TO MOVE.** PLAT-21 corrected two rows (`Table` and " &
+    "`ProgressIndicator`) and left this one at `msAbsent` for what was, by " &
+    "then, the right reason: not the tag — `dialog` keeps its spelling and " &
+    "classifies as `Div`, exactly as `table` does — but ELEMENT FOCUS, which " &
+    "the renderer did not have. Focus was per WINDOW (`window.onFocus`, per " &
+    "window id); no element could hold, trap or refuse it. Exclusivity is " &
+    "what the entry IS, so a binding could not supply it out of anything the " &
+    "medium offered, and that was the difference between this row and the " &
+    "Table row. **isonim-gpui has element focus now** — a per-node focus " &
+    "flag, a declared order taken from the render tree, and a focus TRAP " &
+    "that confines the order to a subtree and makes a focus request from " &
+    "outside it REFUSE. `gpui_binding` sets the trap while the modal is " &
+    "open. `msPartial` rather than `msComplete` for the reason every other " &
+    "entry in this column is partial: the tag arrives at the renderer " &
+    "indistinguishable from a container, so the semantics are the binding's " &
+    "to supply — and it now CAN. `gpui_gaps.PLAT21-VG3` is retired; measured " &
+    "by `test_gpui_key_delivery.nim`, case *\"a Modal traps focus and the " &
+    "outside is refused\"*")
   of pkMenu: m(msPartial, "nav -> div",
     "as Modal for the overlay, minus the exclusivity requirement")
   of pkProgressIndicator: m(msPartial, "progress — not in tagMap; keeps its " &

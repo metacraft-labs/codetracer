@@ -378,7 +378,25 @@ test_lane_extra_flags() {
 		# dependency the split exists to forbid. `test_gpui_shell_split.nim`
 		# asserts the same property from inside; if these two ever disagree,
 		# the lane is the one that is wrong.
-		echo "--path:src/frontend/viewmodel"
+		#
+		# PLAT-37 ADDS `--path:../GuiAssert/src`, AND IT IS A DECLARED
+		# CROSS-REPO EDGE RATHER THAN A DISCOVERED ONE. `GuiAssert` is a
+		# workspace repo (`repos/GuiAssert.toml`, branch `dev`) and is **not a
+		# build dependency of codetracer** — nothing outside this lane imports
+		# it. `test_gpui_window_frame.nim` reaches it through
+		# `src/frontend/gpui/tests/plat37_vision.nim` for FOUR entry points,
+		# each of which is PURE OVER A FILE: `decodeGray`, `computeSsim`,
+		# `edgeChangeRatio`, `runOcr`. No state, no driver, no lifecycle.
+		#
+		# What it buys is the only claim introspection structurally cannot
+		# make — *there is a window and its pixels are not the pixels of a
+		# blank screen*. What it costs is a sibling checkout, which the suite
+		# refuses BY NAME when it is absent rather than skipping.
+		#
+		# The path is spelled the way GuiAssert's own `config.nims` expects
+		# (`switch("path", "src")`), so modules are imported as
+		# `gui_assert/<module>`.
+		echo "--path:src/frontend/viewmodel --path:../GuiAssert/src"
 		;;
 
 	tui | tui-real-terminal)

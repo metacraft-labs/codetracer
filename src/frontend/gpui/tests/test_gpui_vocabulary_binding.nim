@@ -221,59 +221,82 @@ suite "PLAT-21: PLAT-3's msAbsent premise, RE-TAKEN against the render plan":
     ck b.says("load.progress") == "40"
     expectCount(18)
 
-suite "PLAT-21: the two renderer defects this milestone measured":
+suite "PLAT-21: the two renderer defects this milestone measured — REPAIRED BY PLAT-38":
 
-  test "the `disabled` attribute is destroyed by the renderer — PLAT21-VG2":
-    # The measurement `gpui_gaps.PLAT21-VG2` quotes, taken here rather than
-    # written into the register by hand. It is not a claim about our binding:
-    # it is a claim about `isonim-gpui/src/isonim_gpui/renderer.nim`'s
-    # `mapAttributeName` / `mapAttributeValue`, and it is made by writing a
-    # value in and reading it back out.
+  test "the `disabled` attribute ROUND-TRIPS — PLAT21-VG2, retired":
+    # **THIS CASE MEASURED A DEFECT UNTIL 2026-09-22 AND NOW MEASURES ITS
+    # REPAIR, AGAINST THE SAME CODE, THE SAME WAY.**
+    #
+    # What it used to find, quoted so the direction is legible:
+    # `isonim-gpui/src/isonim_gpui/renderer.nim`'s `mapAttributeName` rewrote
+    # `disabled` to `enabled` and `mapAttributeValue` answered the literal
+    # `"false"` for it whatever the caller passed. So
+    # `setAttribute(el, "disabled", "true")` left `disabled` reading `""` and
+    # `enabled` reading `"false"`, and the sharp half was that saying "this
+    # element is ENABLED" recorded it as disabled. Both are the identity now
+    # (PLAT-38), and the measurement is made the same way it always was — by
+    # writing a value in and reading it back out through the real shim.
     resetCount()
     gpui_reset_tree()
     let r = GpuiRenderer()
     let el = r.createElement("div")
     r.setAttribute(el, "disabled", "true")
-    ck renderer.getAttribute(el, "disabled") == ""
-    ck renderer.getAttribute(el, "enabled") == "false"
+    ck renderer.getAttribute(el, "disabled") == "true"
+    # The name the renderer used to substitute is not written at all.
+    ck renderer.getAttribute(el, "enabled") == ""
     r.setAttribute(el, "disabled", "false")
-    # THE SHARP HALF: saying "this element is ENABLED" records it as disabled.
-    ck renderer.getAttribute(el, "enabled") == "false"
-    # And the escape works: the same fact under the `data-` prefix survives
-    # whole, which is why `Button.disabled` reads back correctly below.
+    ck renderer.getAttribute(el, "disabled") == "false"
+    ck renderer.getAttribute(el, "enabled") == ""
+    # The shared `data-` fact name still works — it is what the WEB binding
+    # writes through the same function, and the binding's escape is gone
+    # because the write stopped being renderer-keyed, not because it changed.
     r.setAttribute(el, factAttributeName("disabled"), "false")
     ck renderer.getAttribute(el, factAttributeName("disabled")) == "false"
     let b = freshBinding()
     ck b.says("apply.disabled") == "false"
-    expectCount(5)
+    expectCount(6)
 
-  test "the renderer's callback ABI carries no key — PLAT21-VG1":
-    # `addEventListener` takes `proc()`. A handler cannot be told which key it
-    # was, so the binding puts the key in the EVENT NAME — and the round trip
-    # through Rust is what makes that load-bearing rather than decorative:
-    # `keyFromGpuiEvent` parses the name back, so a dispatch that reached the
-    # wrong listener produces the wrong `KeyPress`.
+  test "the renderer's callback ABI CARRIES a key — PLAT21-VG1, retired":
+    # **THIS CASE ASSERTED `vockey:` UNTIL 2026-09-22.** `addEventListener`
+    # took `proc()`: a handler could not be told which key it was, so the
+    # binding put the key in the EVENT NAME and registered one listener per
+    # key of an entry's contract. PLAT-38 widened the ABI; the key rides in
+    # the payload and `gpuiKeystroke` answers GPUI's own spelling rather than
+    # a vocabulary this binding invented.
     resetCount()
-    ck gpuiKeyEvent(kDown) == "vockey:Down"
-    ck gpuiKeyEvent(kChar, "Z") == "vockey:Char:Z"
-    ck keyFromGpuiEvent("vockey:Down").key == kDown
-    ck keyFromGpuiEvent("vockey:Char:Z").key == kChar
-    ck $keyFromGpuiEvent("vockey:Char:Z").ch == "Z"
-    # A name this binding never emits parses to nothing rather than to a
-    # plausible key — the mirror of the above, without which the parse could
-    # be answering `kDown` to everything.
-    ck keyFromGpuiEvent("keydown").key == kNone
-    ck keyFromGpuiEvent("vockey:ArrowDown").key == kNone
-    # The names are each medium's OWN: if this column borrowed the DOM's, the
-    # translation step would be untested here.
-    ck gpuiKeyName(kDown) != "ArrowDown"
-    ck gpuiKeyName(kEscape) == "Dismiss"
-    expectCount(9)
+    ck gpuiKeystroke(kDown).name == "down"
+    ck gpuiKeystroke(kDown).modifiers == {}
+    ck gpuiKeystroke(kChar, "Z").name == "Z"
+    # The back-tab shares a NAME with the tab and differs only in the
+    # modifier, which is how a keyboard produces one — and is the case a
+    # decoder matching on the name alone gets wrong silently (§25).
+    ck gpuiKeystroke(kBackTab).name == "tab"
+    ck gpuiKeystroke(kBackTab).modifiers == {gmShift}
+    ck keyFromGpuiKeystroke(gpuiKeystroke(kDown)).key == kDown
+    ck keyFromGpuiKeystroke(gpuiKeystroke(kTab)).key == kTab
+    ck keyFromGpuiKeystroke(gpuiKeystroke(kBackTab)).key == kBackTab
+    ck keyFromGpuiKeystroke(gpuiKeystroke(kChar, "Z")).key == kChar
+    ck $keyFromGpuiKeystroke(gpuiKeystroke(kChar, "Z")).ch == "Z"
+    # A name this binding never emits decodes to nothing rather than to a
+    # plausible key — the mirror, without which the decode could be answering
+    # `kDown` to everything.
+    ck keyFromGpuiKeystroke(GpuiKeystroke(name: "")).key == kNone
+    ck keyFromGpuiKeystroke(GpuiKeystroke(name: "ArrowDown")).key == kNone
+    # The names are GPUI's OWN rather than the DOM's or isonim-tui's: a
+    # binding that invented a third spelling would make its own decoder and
+    # the renderer's encoder agree by construction.
+    ck gpuiKeystroke(kDown).name != "ArrowDown"
+    ck gpuiKeystroke(kEscape).name == "escape"
+    expectCount(14)
 
-  test "there is no element focus in this renderer — PLAT21-VG3":
-    # `Modal`'s specified behaviour is exclusivity. The render plan's node
-    # shape is the whole of what a GPUI host is handed, and it has eight
-    # fields; none of them is a layer, a z-order or a focus.
+  test "there IS element focus in this renderer — PLAT21-VG3, retired":
+    # **THIS CASE ASSERTED AN ABSENCE UNTIL 2026-09-22.** `Modal`'s specified
+    # behaviour is exclusivity, and the render plan's node shape — the whole
+    # of what a GPUI host is handed — had eight fields, none of them a layer,
+    # a z-order or a focus. The plan's shape is UNCHANGED (focus is not a
+    # render-plan field and was never going to be); what changed is that the
+    # element store carries focus and the shim enforces exclusivity, which is
+    # asserted through the FFI rather than through the plan.
     resetCount()
     let b = freshBinding()
     let plan = parseJson(b.planJson())
@@ -282,16 +305,23 @@ suite "PLAT-21: the two renderer defects this milestone measured":
     keys.sort()
     ck keys == @["children", "event_names", "has_click_handler",
                  "has_input_handler", "kind", "styles", "tag", "text"]
-    ck "focus" notin keys
-    ck "layer" notin keys
-    ck "z_index" notin keys
-    # What the binding CAN carry is presence, and it does: the modal's body is
-    # a fact while it is open and absent once it is not.
+    # The modal is OPEN in the fixture, so it holds a focus trap and the trap
+    # is the exclusivity the entry IS. Read from the Rust side.
+    ck b.says("dlg.open") == "true"
+    ck sameNode(focusTrapElement(), b.nodes["dlg"])
+    ck focusedCount() <= 1
+    # An interactive element OUTSIDE the open modal is refused focus.
+    ck not b.focusNode("apply")
+    # Presence is still carried, as it always was — the body is a fact while
+    # the modal is open and absent once it is not — and dismissing releases
+    # the trap.
     ck b.says("dlgtext.text") == "Are you sure?"
     discard b.sendKey("dlg", kEscape)
     ck b.says("dlg.open") == "false"
     ck b.says("dlgtext.text") == "<absent>"
-    expectCount(7)
+    ck focusTrapElement().isNil
+    ck b.focusNode("apply")
+    expectCount(10)
 
 suite "PLAT-21: the keyboard contract, THROUGH the shim's own dispatcher":
 
@@ -328,23 +358,34 @@ suite "PLAT-21: the keyboard contract, THROUGH the shim's own dispatcher":
     var renderedIds: seq[string] = @[]
     for f in b.readGpuiFacts():
       if f.id notin renderedIds: renderedIds.add f.id
+    # **WHAT THIS ASSERTS CHANGED SHAPE IN PLAT-38, AND THE CHANGE IS THE
+    # RETIREMENT OF `vockey:` SEEN FROM THE RUST SIDE.** It used to be that
+    # an entry's whole keyboard CONTRACT was legible in the plan, because the
+    # binding registered one listener per key and spelled the key into the
+    # event name. There is one listener per interactive node now, under
+    # `keydown`, so what the plan reports is that the node is KEYBOARD-BOUND
+    # rather than which keys it answers — and the contract's legibility moved
+    # to `keyContract` itself, which is medium-independent and always was.
+    #
+    # The assertion is kept rather than dropped because it is the only place
+    # the retirement is checked from a RUN: a binding that still spelled keys
+    # into names would report those names here.
     var expected: seq[string] = @[]
     for n in walk(b.model):
       if n.id notin renderedIds: continue
       if n.kind notin InteractiveKinds: continue
-      var names: seq[string] = @[]
-      for binding in keyContract(n.kind):
-        if binding.key == kChar: continue
-        names.add gpuiKeyEvent(binding.key)
-      if names.len == 0: continue
-      names.sort()
-      expected.add names.join(",")
+      if keyContract(n.kind).len == 0: continue
+      expected.add KeyDownEventName
     planEvents.sort()
     expected.sort()
     ck planEvents.len > 0          # the §4 floor
     ck planEvents.len == 14
     ck planEvents == expected
-    expectCount(3)
+    # And every reported name IS the one name, so a stray `vockey:` on any
+    # node reddens here rather than being averaged away by a length check.
+    for e in planEvents:
+      ck e == KeyDownEventName
+    expectCount(17)
 
   test "a handled key CROSSED the FFI boundary, and an unclaimed one did not":
     # **ADDED AFTER ARM G6 SURVIVED.** The case below asserts that a key in the
@@ -364,21 +405,35 @@ suite "PLAT-21: the keyboard contract, THROUGH the shim's own dispatcher":
     ck b.dispatchCount == 1
     discard b.sendKey("recent", kDown)
     ck b.dispatchCount == 2
-    # An unclaimed key reaches NO listener on the Rust side, so the counter
-    # does not move — which is a different statement from "applyKey declined
-    # it", and it is the one this case is for.
+    # **WHAT THIS HALF ASSERTS CHANGED IN PLAT-38, AND IT GOT STRONGER.**
+    # There used to be one listener per KEY, so an unclaimed key reached no
+    # listener at all and `dispatchCount` did not move — which distinguished
+    # "the transport declined it" from "`applyKey` declined it". There is one
+    # listener per NODE now, so an unclaimed key DOES reach the handler; the
+    # counter moves and the model does not. The discriminator is the pair,
+    # and the second half comes out of the RUST store rather than out of
+    # anything this binding wrote.
+    let before = b.says("wrap.checked")
     discard b.sendKey("wrap", kDown)
-    ck b.dispatchCount == 2
+    ck b.dispatchCount == 3
+    ck b.says("wrap.checked") == before
+    ck not b.lastOutcome.handled
+    # The key ARRIVED — the element store says which one, and says it was a
+    # key-down rather than a click. "Nothing happened" and "nothing was
+    # delivered" are two states and this is what separates them.
+    ck b.nodes["wrap"].lastEventKey() == gpuiKeystroke(kDown).name
+    ck b.nodes["wrap"].lastEventKind() == gekKeyDown
+    ck b.nodes["wrap"].lastEventSeq() > 0
     # …and firing the event AT THE ELEMENT, with no call into this binding at
     # all, still acts. Nothing on the Nim side was asked to do anything: the
     # listener is registered in the Rust node's own map and the callback id
     # comes back through `globalDispatcher`.
     ck b.says("live.checked") == "false"
-    fireEvent(b.nodes["live"], gpuiKeyEvent(kSpace))
-    ck b.dispatchCount == 3
+    discard fireEvent(b.nodes["live"], KeyDownEventName, gpuiPayloadFor(kSpace))
+    ck b.dispatchCount == 4
     b.rerender()
     ck b.says("live.checked") == "true"
-    expectCount(7)
+    expectCount(12)
 
   test "a key in the contract acts, and a key outside it does nothing":
     resetCount()
@@ -388,23 +443,28 @@ suite "PLAT-21: the keyboard contract, THROUGH the shim's own dispatcher":
     ck hit.handled
     ck hit.transition == trCheck
     ck b.says("wrap.checked") == "true"
-    # Down is not in `Checkbox`'s contract, so no listener was ever registered
-    # under that name and `gpui_dispatch_event` reaches NOTHING on the Rust
-    # side. That is a stronger statement than "applyKey declined it".
+    # Down is not in `Checkbox`'s contract. Since PLAT-38 it still ARRIVES —
+    # the node has one listener for every key — and the entry declines it.
+    # The pair is the statement: the element store says the key came, and the
+    # fact says nothing moved.
     let miss = b.sendKey("wrap", kDown)
     ck not miss.handled
     ck miss.transition == trNone
     ck b.says("wrap.checked") == "true"
-    expectCount(7)
+    ck b.nodes["wrap"].lastEventKey() == gpuiKeystroke(kDown).name
+    expectCount(8)
 
   test "motion skips an unavailable option, on this medium too":
     resetCount()
     let b = freshBinding()
     ck b.says("recent.highlight") == "0"
     discard b.sendKey("recent", kDown)
-    # PAST `beta`, which is disabled. The option's availability survived the
-    # renderer only because the binding carried it under the `data-` prefix —
-    # see PLAT21-VG2.
+    # PAST `beta`, which is disabled. The option's availability is carried
+    # under the shared `data-` fact name — which is what the WEB binding
+    # writes too. Until PLAT-38 that prefix was also what SAVED it from the
+    # renderer's `disabled` rewrite; the rewrite is gone (PLAT21-VG2,
+    # retired) and the name is unchanged, because it was always the shared
+    # name rather than an escape.
     ck b.says("recent.highlight") == "2"
     discard b.sendKey("recent", kEnd)
     ck b.says("recent.highlight") == "2"
@@ -447,41 +507,53 @@ suite "PLAT-21: THE VERIFICATION GATE":
                  filed.mapIt(vocabularyName(it)).join(", "))
     ck taken.len > 0            # the §4 floor: a binding that recorded nothing
     ck taken == filed
-    ck taken.len == 13
+    # **THIRTEEN UNTIL 2026-09-22, ONE NOW.** PLAT-38 retired three of the
+    # four filed gaps, and the register shrank because the BINDING STOPPED
+    # ESCAPING — which is the direction the risk mitigation asks for. A gap
+    # cannot retire here because the renderer grew a capability; it retires
+    # because this run reports one fewer escape.
+    ck taken.len == 1
+    ck taken == @[pkImage]
     # Every escape kind the binding can take is filed, by enumeration over the
-    # enum rather than over the four somebody thought of.
+    # enum rather than over the ones somebody thought of.
     for k in GpuiEscapeKind:
       ck gapById(gpuiEscapeGapId(k)).id == gpuiEscapeGapId(k)
-    # And all four were actually taken on this view, so none of the four rows
-    # is a row nothing exercises.
-    ck b.escapeKinds() == {gekKeyInEventName, gekDisabledAttribute,
-                           gekModalWithoutFocus, gekImageWithoutPayload}
-    expectCount(8)
+    # And the one that remains was actually taken on this view, so the row is
+    # not a row nothing exercises.
+    ck b.escapeKinds() == {gekImageWithoutPayload}
+    expectCount(6)
 
-  test "the three entries that needed NO escape are named, and it is measured":
-    # The gate's interesting half. Sixteen entries, thirteen with a filed gap,
-    # and THREE that the binding rendered with nothing GPUI-specific at all:
-    # `Text`, `ProgressIndicator` and `Markdown`. Asserted as an identity so a
-    # future escape in any of the three reddens here rather than growing the
+  test "the entries that needed NO escape are named, and it is measured":
+    # The gate's interesting half. Sixteen entries, and PLAT-21 measured
+    # THREE that the binding rendered with nothing GPUI-specific at all:
+    # `Text`, `ProgressIndicator` and `Markdown`. **It is FIFTEEN now** —
+    # everything except `Image`, whose gap is against the VOCABULARY and which
+    # no change to isonim-gpui could ever have closed. Asserted as an identity
+    # so a future escape in any of them reddens here rather than growing the
     # register quietly.
     resetCount()
     var clean: seq[ViewKind] = @[]
     for k in ViewKind:
       if gapsFor(k).len == 0: clean.add k
-    ck clean == @[pkText, pkProgressIndicator, pkMarkdown]
+    ck clean.len == 15
+    ck pkImage notin clean
+    for k in [pkText, pkProgressIndicator, pkMarkdown, pkModal, pkButton,
+              pkTable]:
+      ck k in clean
     # And they really do render: the §4 floor again, because "no escape" and
     # "not rendered" are indistinguishable from the register alone.
     let b = freshBinding()
     ck b.says("title.text") == "Settings"
     ck b.says("load.progress") == "40"
     ck b.says("doc.text").contains("# Title")
-    expectCount(4)
+    ck b.says("dlg.open") == "true"
+    expectCount(12)
 
-  test "the register itself is well formed":
+  test "the register itself is well formed, and the shrink is an identity":
     # A gap whose fields may be blank is a gap that satisfies the gate for
     # free (Verification-Harness-Traps §4).
     resetCount()
-    ck FiledGpuiGaps.len == 4
+    ck FiledGpuiGaps.len == 1
     var ids: seq[string] = @[]
     for g in FiledGpuiGaps:
       ck g.id.startsWith("PLAT21-VG")
@@ -491,21 +563,40 @@ suite "PLAT-21: THE VERIFICATION GATE":
       ck g.what.len > 40
       ck g.measured.len > 40
       ck g.remedy.len > 40
-    # THREE filed against the RENDERER and ONE against the VOCABULARY, and the
-    # split is asserted because conflating them is how a renderer bug sends
-    # the next reader to edit the vocabulary.
+    # The one that remains is filed against the VOCABULARY, which is why it is
+    # the one that remains: conflating the two subjects is how a renderer bug
+    # sends the next reader to edit the vocabulary.
     var byRenderer = 0
     var byVocabulary = 0
     for g in FiledGpuiGaps:
       case g.subject
       of gsRenderer: inc byRenderer
       of gsVocabulary: inc byVocabulary
-    ck byRenderer == 3
+    ck byRenderer == 0
     ck byVocabulary == 1
     ck gapById("PLAT21-VG4").subject == gsVocabulary
     ck gapById("PLAT21-VG4").entries == @[pkImage]
-    ck describeGaps().contains("PLAT21-VG1")
-    expectCount(30)
+    ck describeGaps().contains("PLAT21-VG4")
+    # **THE SHRINK, AS AN IDENTITY.** PLAT-21 filed four; three are retired.
+    # `filed ∪ retired` must still be those four — a gap that vanished from
+    # both registers is a claim that stopped being recorded, and an id in both
+    # is a retirement nobody finished.
+    var ever = everFiledGapIds()
+    ever.sort()
+    ck ever == @["PLAT21-VG1", "PLAT21-VG2", "PLAT21-VG3", "PLAT21-VG4"]
+    ck RetiredGpuiGaps.len == 3
+    for g in RetiredGpuiGaps:
+      ck g.subject == gsRenderer     # all three were the renderer's
+      ck isRetired(g.id)
+      ck g.id notin filedGapIds()
+      ck g.entries.len > 0
+      ck g.repairedIn.len > 40
+      ck g.evidence.len > 40
+    ck not isRetired("PLAT21-VG4")   # the negative twin on the one predicate
+    ck retiredGapById("PLAT21-VG1").entries.len == 12
+    ck retiredGapById("PLAT21-VG2").entries.len == 12
+    ck retiredGapById("PLAT21-VG3").entries == @[pkModal]
+    expectCount(36)
 
 suite "PLAT-21: the GPUI surface declares its own budget":
 
@@ -537,7 +628,7 @@ suite "PLAT-21: the GPUI surface declares its own budget":
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 176
+const ExpectedAssertions = 217
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

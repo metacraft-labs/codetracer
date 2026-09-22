@@ -17,26 +17,39 @@
 ## ## "ABSTRACT" IS NOT AUTOMATICALLY "EVERYWHERE", AND PLAT-3 SAYS SO
 ##
 ## The tempting reading of §6.2 is that an abstract view runs on every
-## front-end by definition. PLAT-3 measured otherwise: `mappings.nim` records
-## `msAbsent` on GPUI for exactly this entry —
+## front-end by definition. PLAT-3 measured otherwise, and for two years of
+## this campaign's milestones `mappings.nim` recorded `msAbsent` on GPUI for at
+## least one entry. **It records none now** —
 ##
-##   ABSENT-ON-GPUI: Modal
+##   ABSENT-ON-GPUI:
 ##
-## — and a surface whose abstract view is a `Modal` is therefore genuinely
-## absent there, so calling it present would be the silent-nothing §6.3
-## forbids.
+## — so no abstract view is refused on GPUI for want of a vocabulary entry, and
+## the refusal machinery below is exercised by the OTHER front-ends and by the
+## negative twin rather than by a live absence here.
 ##
-## **THIS LINE NAMED THREE ENTRIES UNTIL 2026-09-15 AND NOW NAMES ONE.**
-## PLAT-21 rendered the vocabulary through the real isonim-gpui shim and read
-## the plan the Rust side builds: a tag that is not in the 35-entry tag map does
-## NOT reach "a classifier with no case for it" — it keeps its spelling and
-## classifies as `Div`, exactly as `button` and `ul` do. So `Table` and
-## `ProgressIndicator` moved to `msPartial` and a plugin surface built on
-## either is ADMITTED on GPUI now, where it used to be refused. `Modal` stayed,
-## for the reason that was always the real one and was stated third: there is
-## no element focus in that renderer, so the exclusivity a `Modal` IS cannot be
-## built out of anything the medium offers. `mappings.gpuiMapping`'s three
-## corrected rows carry the measurement.
+## **THIS LINE NAMED THREE ENTRIES UNTIL 2026-09-15, ONE UNTIL 2026-09-22, AND
+## NAMES NONE NOW.** PLAT-21 rendered the vocabulary through the real
+## isonim-gpui shim and read the plan the Rust side builds: a tag that is not
+## in the 35-entry tag map does NOT reach "a classifier with no case for it" —
+## it keeps its spelling and classifies as `Div`, exactly as `button` and `ul`
+## do. So `Table` and `ProgressIndicator` moved to `msPartial` and a plugin
+## surface built on either is ADMITTED on GPUI. `Modal` stayed, for the reason
+## that was always the real one and was stated third: there was no element
+## focus in that renderer, so the exclusivity a `Modal` IS could not be built
+## out of anything the medium offered. **PLAT-38 gave the renderer element
+## focus** — a per-node focus flag, a declared order taken from the render
+## tree, and a focus TRAP that confines the order to a subtree and refuses a
+## focus request from outside it — so `Modal` is `msPartial` too and this line
+## is empty.
+##
+## **AN EMPTY LINE IS A DANGEROUS THING FOR A SCAN TO READ, WHICH IS WHY THE
+## TEST CHANGED SHAPE RATHER THAN ITS NUMBER.** A loop over the derived set
+## passes every check written inside it when the set is empty
+## (Verification-Harness-Traps §4), so `plugin_surfaces_test` asserts the
+## cardinality is ZERO, asserts the anchor line is still PRESENT exactly once
+## (an anchor somebody deleted and an entry set that is empty are otherwise the
+## same reading), and carries the positive twin over all SIXTEEN entries: every
+## one of them has a view on GPUI, and naming any one absent reddens.
 ##
 ## THAT LINE IS CHECKED AGAINST THE TABLE, NOT MAINTAINED BY HAND.
 ## `plugin_surfaces_test` reads it out of this file with `staticRead` and
