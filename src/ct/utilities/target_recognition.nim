@@ -51,16 +51,44 @@
 
 import
   std/[json, options, osproc, streams, strutils, tables],
-  ../../common/lang
+  ../../common/lang,
+  ../../common/target_assessment
+
+export target_assessment
 
 const
-  RecognitionSchema* = "codetracer.target-recognition.v1"
-    ## The one schema version this build of the core understands.
+  RecognitionSchemaV1* = "codetracer.target-recognition.v1"
+    ## A document that carries **no** assessment.  Since LRS-2P that is a
+    ## POSITIVE FACT, not an absence — see `assessmentComputed`.
 
-  SupportedRecognitionSchemas* = [RecognitionSchema]
+  RecognitionSchemaV2* = "codetracer.target-recognition.v2"
+    ## A document that carries an embedded `codetracer.target-assessment.v1`
+    ## under the `assessment` key.  Design §9.5: *"a producer that starts
+    ## emitting one bumps its own schema"*.  Strictly an optional key needs no
+    ## bump; the bump is taken anyway so that `v1` can MEAN "no assessment was
+    ## computed" instead of being ambiguous between "the target had none" and
+    ## "the producer predates the field" — the same distinction
+    ## `DetectedTarget.recognitionRan` draws on the other side.
+
+  RecognitionSchema* = RecognitionSchemaV1
+    ## Back-compatible spelling of the v1 constant, kept because call sites
+    ## and tests outside this module name it.
+
+  SupportedRecognitionSchemas* = [RecognitionSchemaV1, RecognitionSchemaV2]
     ## Q5's "the versions it supports".  A list rather than a single constant
     ## because Q5's deprecation window explicitly contemplates a core that
-    ## accepts both `v1` and `v2` during a transition.
+    ## accepts both `v1` and `v2` during a transition — and LRS-2P is that
+    ## transition.  **Both must stay.**  Dropping `v1` would refuse every
+    ## already-installed recognizer; dropping `v2` would refuse every new one.
+    ##
+    ## The asymmetry with `SupportedTargetAssessmentSchemas` is deliberate:
+    ## the ENVELOPE accepts two versions because two producers are in the
+    ## field, while the embedded assessment has exactly one version because no
+    ## producer has ever emitted another (§9.3's schema consequence).
+
+  AssessmentKey* = "assessment"
+    ## The key §9.5 settles on.  Named so that the producer's field name and
+    ## the consumer's lookup cannot drift apart silently.
 
   RecognizeSubcommand* = "recognize"
     ## Q4's decision.  Named rather than inlined so a test can assert the argv
@@ -84,6 +112,14 @@ type
     rsExitedNonZero      ## the backend ran and failed (I/O or CLI error)
     rsMalformedOutput    ## stdout was not a recognition document
     rsUnsupportedSchema  ## a document arrived carrying a schema we do not read
+    rsUnsupportedAssessment
+      ## the envelope was readable and the EMBEDDED assessment was not: an
+      ## assessment schema this build does not read, or a family token it has
+      ## never heard of (rule K3).  Distinct from `rsUnsupportedSchema`
+      ## because the two name different halves of the same document and
+      ## therefore different remedies, and because collapsing them would make
+      ## "your recognizer is too new" indistinguishable from "your recognizer
+      ## emitted a kind vocabulary you cannot read".
 
   RecognitionDiagnostic* = object
     code*: string
@@ -119,7 +155,7 @@ type
     strategy*: string
 
   Recognition* = object
-    ## One `codetracer.target-recognition.v1` document.
+    ## One `codetracer.target-recognition.v1` or `…v2` document.
     schema*: string
     target*: string
     kind*: string
@@ -130,6 +166,17 @@ type
     debugInfo*: RecognitionDebugInfo
     recommended*: Option[RecognitionRecommendation]
     diagnostics*: seq[RecognitionDiagnostic]
+    assessmentComputed*: bool
+      ## **`false` is a fact, not a gap.**  A `…recognition.v1` document means
+      ## "no assessment was computed"; a `…v2` document always carries one
+      ## (`parseRecognitionDocument` refuses a `v2` that does not, rather than
+      ## treating the missing key as an empty assessment).  So a consumer can
+      ## distinguish "the producer computed nothing" from "the producer is too
+      ## old to have been asked" — which is the whole reason §9.5 spends a
+      ## schema major on an optional key, and the same distinction
+      ## `DetectedTarget.recognitionRan` already draws one layer up.
+    assessment*: TargetAssessment
+      ## Meaningful only when `assessmentComputed` is true.
 
   RecognitionOutcome* = object
     status*: RecognitionStatus
@@ -145,6 +192,20 @@ type
     rdNoLanguage  ## the delegation answered and could not tell
     rdAmbiguous   ## `primary` is null AND `ambiguous-language` was reported
     rdDegraded    ## the delegation could not be performed or trusted
+    rdProtocolError
+      ## the EMBEDDED assessment could not be understood: rule K3 (a family
+      ## token frozen for this schema major version that this build has never
+      ## heard of), or an assessment schema this build does not read.
+      ##
+      ## Distinct from `rdDegraded`, and the difference is the whole of design
+      ## 10.4's asymmetry: *"the launcher ignores what it does not understand,
+      ## because the cost of guessing wrong is routing to a component that
+      ## will then explain itself; the assessment REFUSES what it does not
+      ## understand, because the cost of guessing wrong is recording the wrong
+      ## thing, silently."*  A degraded recognition still lets `ct record`
+      ## fall through to its own detection and fail with an actionable error;
+      ## an assessment whose vocabulary this build cannot read would let it
+      ## record confidently and wrongly, so it stops.
 
   RecognitionDecision* = object
     kind*: RecognitionDecisionKind
@@ -233,6 +294,137 @@ proc parseComponent(node: JsonNode): RecognitionComponent =
     confidence: node.strField("confidence"),
     weight: node.intField("weight"),
     evidence: node.stringSeqField("evidence"))
+
+# ---------------------------------------------------------------------------
+# The embedded assessment (design 9)
+#
+# `codetracer.target-assessment.v1` rides inside the recognition envelope
+# under the `assessment` key (Q8, decided 2026-09-22).  Two rules govern what
+# happens when this build does not understand something in it, and they are
+# deliberately DIFFERENT from each other:
+#
+# * The FAMILY is frozen for the life of the assessment's major version
+#   (design 9.4).  A family token this build has never heard of is therefore a
+#   protocol error -- rule K3 -- and it is refused, loudly, naming the
+#   producer.  `parseKind` is where that lives.
+# * Every OTHER vocabulary in the document is open or additive: a specific
+#   kind, a language, an ISA, a toolchain, an approach.  An unrecognised value
+#   there degrades to the axis's own `unknown` sentinel and is RECORDED in
+#   `diagnostics`, never raised.  That is Q5's consumer obligation applied to
+#   a second document, and it is what makes "new specific kinds are additive
+#   within a major" true rather than aspirational.
+#
+# The asymmetry is the one thing design 9.4 says a contributor must remember,
+# so it is written here beside the code that implements it rather than only in
+# the design.
+# ---------------------------------------------------------------------------
+
+proc parseAssessedLanguages(node: JsonNode,
+                            diagnostics: var seq[string]): seq[AssessedLanguage] =
+  result = @[]
+  if node.kind != JArray:
+    return
+  for item in node:
+    if item.kind != JObject: continue
+    let spelling = item.strField("language")
+    var language = slUnknown
+    if spelling.len > 0 and not parseSourceLanguage(spelling, language):
+      language = slUnknown
+      diagnostics.add("target-assessment: the language census names '" &
+        spelling & "', which this build does not know; counted as unknown.")
+    result.add(AssessedLanguage(
+      language: language,
+      fileCount: item.intField("file_count"),
+      evidence: item.stringSeqField("evidence")))
+
+proc parseAssessmentDocument*(node: JsonNode, value: var TargetAssessment,
+                              failure: var seq[string]): bool =
+  ## Decode one embedded `codetracer.target-assessment.v1`.
+  ##
+  ## `false` means the document must not be acted on, and `failure` is the
+  ## user-facing refusal -- always naming the producer, because the pair is
+  ## PATH-discovered and "which binary do I replace" is the only actionable
+  ## part of the answer (design 9.2).
+  failure = @[]
+  if node.kind != JObject:
+    failure = @[
+      "error: the recognition document's `assessment` key is not an object.",
+      "       a `" & RecognitionSchemaV2 & "` document must carry a " &
+        "`codetracer.target-assessment.v1` object there."]
+    return false
+
+  # The schema string is read FIRST and nothing else is trusted until it
+  # checks out -- design 9.4, and the same rule the envelope already follows
+  # below: "the schema string is the only supported way to detect the version;
+  # field-presence sniffing is not."
+  let schema = node.strField("schema")
+  let producer = node.strField("producer")
+  if schema notin SupportedTargetAssessmentSchemas:
+    failure = @[
+      "error: the target assessment carries schema '" &
+        (if schema.len == 0: "(absent)" else: schema) & "',",
+      "       which this build of CodeTracer does not understand.",
+      "       supported: " & SupportedTargetAssessmentSchemas.join(", "),
+      "       producer: " & namedProducer(producer),
+      "help: update CodeTracer, or put a matching recognizer first on PATH."]
+    return false
+
+  var kindNode = newJObject()
+  if node.hasKey("kind") and node["kind"].kind == JObject:
+    kindNode = node["kind"]
+  var kind: TargetKind
+  var kindDiagnostic = ""
+  # Rule K3.  `parseKind` refuses an unknown family and a family token sent
+  # among the specific kinds, and its message names the producer.
+  if not parseKind(kindNode.stringSeqField("specific"),
+                   kindNode.strField("family"), producer,
+                   kind, kindDiagnostic):
+    failure = @["error: " & kindDiagnostic]
+    return false
+
+  var diagnostics: seq[string] = @[]
+  for line in node.stringSeqField("diagnostics"):
+    diagnostics.add(line)
+
+  var isa = tiUnknown
+  let isaToken = node.strField("target_isa")
+  if isaToken.len > 0 and not parseTargetIsa(isaToken, isa):
+    isa = tiUnknown
+    diagnostics.add("target-assessment: the target ISA '" & isaToken &
+      "' is not one this build knows; treated as unknown. Producer: " &
+      namedProducer(producer) & ".")
+
+  var toolchain = tcUnknown
+  let toolchainToken = node.strField("toolchain")
+  if toolchainToken.len > 0 and not parseToolchain(toolchainToken, toolchain):
+    toolchain = tcUnknown
+    diagnostics.add("target-assessment: the toolchain '" & toolchainToken &
+      "' is not one this build knows; treated as unknown. Producer: " &
+      namedProducer(producer) & ".")
+
+  var approach = raUnknown
+  let approachToken = node.strField("recording_approach")
+  if approachToken.len > 0 and
+     not parseRecordingApproach(approachToken, approach):
+    approach = raUnknown
+    diagnostics.add("target-assessment: the recording approach '" &
+      approachToken & "' is not one this build knows; treated as unknown. " &
+      "Producer: " & namedProducer(producer) & ".")
+
+  value = TargetAssessment(
+    schema: schema,
+    producer: producer,
+    target: node.strField("target"),
+    kind: kind,
+    toolchain: toolchain,
+    targetIsa: isa,
+    arch: node.strField("arch"),
+    recordingApproach: approach,
+    languages: parseAssessedLanguages(
+      if node.hasKey("languages"): node["languages"] else: newJArray(),
+      diagnostics),
+    diagnostics: diagnostics)
+  true
 
 proc parseRecognitionDocument*(raw: string): RecognitionOutcome =
   ## Parse and version-check one `--format=json` document.
@@ -341,6 +533,40 @@ proc parseRecognitionDocument*(raw: string): RecognitionOutcome =
           code: item.strField("code"),
           message: item.strField("message")))
 
+  # Design 9.5's embedding, and the one asymmetry the schema bump buys.
+  #
+  #   v1  ->  assessmentComputed = false.  A POSITIVE FACT: this producer did
+  #           not compute an assessment.  An `assessment` key in a v1 document
+  #           is IGNORED, because the schema string is the only supported way
+  #           to detect the version and sniffing the key would be exactly the
+  #           field-presence guess this module already forbids above.
+  #   v2  ->  the key is REQUIRED.  A v2 document without one is malformed,
+  #           not "a v2 with nothing to say": the bump's entire purpose is
+  #           that the VERSION tells you whether an assessment exists, and a
+  #           v2-without-assessment would re-create the ambiguity the bump was
+  #           spent to remove.
+  if recognition.schema == RecognitionSchemaV2:
+    if not document.hasKey(AssessmentKey):
+      return RecognitionOutcome(
+        status: rsMalformedOutput,
+        failure: @[
+          "error: the recognizer produced a '" & RecognitionSchemaV2 &
+            "' document with no `" & AssessmentKey & "` key.",
+          "       that schema version MEANS an assessment is embedded; " &
+            "without one the document is unreadable, not empty.",
+          "       a producer with no assessment to report must emit '" &
+            RecognitionSchemaV1 & "' instead.",
+          "help: update ct-native-replay, or put a matching one first on " &
+            "PATH."])
+    var assessment: TargetAssessment
+    var assessmentFailure: seq[string] = @[]
+    if not parseAssessmentDocument(document[AssessmentKey], assessment,
+                                   assessmentFailure):
+      return RecognitionOutcome(
+        status: rsUnsupportedAssessment, failure: assessmentFailure)
+    recognition.assessment = assessment
+    recognition.assessmentComputed = true
+
   RecognitionOutcome(status: rsOk, recognition: recognition)
 
 proc hasDiagnostic*(recognition: Recognition, code: string): bool =
@@ -441,6 +667,12 @@ proc decideFromRecognition*(outcome: RecognitionOutcome,
   case outcome.status
   of rsNotAttempted:
     return RecognitionDecision(kind: rdDegraded, lang: LangUnknown)
+  of rsUnsupportedAssessment:
+    # Rule K3: a protocol error, not a degradation.  `outcome.failure` already
+    # names the producer -- every refusal in `target_assessment.nim` does --
+    # so the user is told which half of the PATH-discovered pair to update.
+    return RecognitionDecision(
+      kind: rdProtocolError, lang: LangUnknown, lines: outcome.failure)
   of rsSpawnFailed, rsExitedNonZero, rsMalformedOutput, rsUnsupportedSchema:
     return RecognitionDecision(
       kind: rdDegraded, lang: LangUnknown, lines: outcome.failure)

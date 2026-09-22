@@ -53,13 +53,6 @@ const
     ## Every refusal-grade diagnostic carries this phrase; `isAmbiguous` keys
     ## on it so the protocol type needs no extra field for local state.
 
-proc directoryEntryNames(folder: string): seq[string] =
-  ## The bare names of the entries in `folder`.  Pure input for the pure
-  ## `projectKindsForMarkers`.
-  result = @[]
-  for _, path in walkDir(folder):
-    result.add(path.extractFilename)
-
 proc assessKind(program: string, language: SourceLanguage): TargetKind =
   ## The kind: family from the target's shape, specific kinds from the
   ## markers and the extension.  ALL project markers present are emitted
@@ -68,11 +61,14 @@ proc assessKind(program: string, language: SourceLanguage): TargetKind =
   ## target, and `nimscript` would then override the ISA of a language it
   ## does not belong to.
   if dirExists(program):
-    let names = directoryEntryNames(program)
-    var specific = projectKindsForMarkers(names)
-    if "Cargo.toml" in names and isWasmCargoProject(program):
-      specific.add(KindWasmCargoProject)
-    return TargetKind(specific: specific, family: tfProjectDirectory)
+    # LRS-2P: ONE folder-assessment algorithm, in
+    # `language_detection.assessFolderKind`.  This proc used to list the
+    # directory and apply the marker table itself, so the tree carried two
+    # implementations of "what is this directory" -- one answering a kind here
+    # and one answering a `Lang` in `detectFolderLang` -- and a marker added
+    # to either could disagree with the other.  Now the detector answers the
+    # kind and this reads it.
+    return assessFolderKind(program)
   let ext = program.splitFile.ext.toLowerAscii
   if fileExists(program) or language != slUnknown:
     if language == slNim and ext == ".nims":

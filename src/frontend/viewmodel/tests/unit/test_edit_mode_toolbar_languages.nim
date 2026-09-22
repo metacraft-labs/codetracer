@@ -327,18 +327,43 @@ suite "EMT §6 marker collisions, which is where the two tables disagree":
       pending(HeuristicAwaited & " — Noir inside a Cargo workspace")
     expectCount(3)
 
-  test "the CLI's own chain already answers Noir here — the derived control":
-    ## Green today. It reads `detectFolderLang`'s source and shows that the
-    ## rule EMT-D9 adopts is the one already written down, so EMT-A42 is a
-    ## claim about the toolbar following an existing decision rather than a new
-    ## opinion. Anchored to the `fileExists(folder / "…")` call syntax, never to
-    ## the doc comment (§16.5 / traps §4d).
+  test "the CLI tests both markers and pre-empts neither — the derived control":
+    ## Green today, and RENAMED AND RE-AIMED on 2026-09-22 by milestone LRS-2P
+    ## (`codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.md`
+    ## §9.1, Q10), which invalidated the claim it used to make.
+    ##
+    ## It used to read: *"the CLI's own chain already answers Noir here"*, and
+    ## it proved it by asserting that `Nargo.toml` is tested BEFORE
+    ## `Cargo.toml` in `detectFolderLang`'s `elif` ladder. That ladder is gone.
+    ## `assessFolderKind` tests all ten markers independently and reports every
+    ## one that is present, because Q10 (decided 2026-09-20 by the user) named
+    ## first-match precedence as a defect: *"a crate that is also a Foundry
+    ## project silently becomes Foundry"*. For a Noir package inside a Cargo
+    ## workspace the CLI now answers BOTH kinds and REFUSES to summarise them
+    ## as one language.
+    ##
+    ## **So EMT-A42 above is now a toolbar-only decision, not one the CLI
+    ## shares.** That is a correction to Edit-Mode-Toolbar.md §6/EMT-D9 rather
+    ## than a defect in either component: the toolbar's subject is the
+    ## workspace the user opened and it must propose *something*, while
+    ## `ct record`'s subject is one recording and it may refuse. EMT-A42 is
+    ## left asserting what it always asserted; only its justification changes,
+    ## and it is recorded here rather than quietly dropped.
+    ##
+    ## Anchored to the `fileExists(folder / "…")` call syntax, never to the
+    ## doc comment (§16.5 / traps §4d).
     startCount()
     let nargoAt = LanguageDetectionSrc.find("fileExists(folder / \"Nargo.toml\")")
     let cargoAt = LanguageDetectionSrc.find("fileExists(folder / \"Cargo.toml\")")
     ck nargoAt >= 0
     ck cargoAt >= 0
-    ck nargoAt < cargoAt          # Nargo.toml is tested first: Noir wins
+    # The POSITION of the two tests no longer decides anything, and asserting
+    # that it does would now be asserting something false -- see the docstring
+    # above.  What is pinned instead is the property that replaced it, and it
+    # is a stronger one: the ladder is independent `if`s, so NEITHER marker
+    # can pre-empt the other.  An `elif` anywhere in the marker ladder is the
+    # first-match precedence coming back, and this is the scan that catches it.
+    ck "elif fileExists(folder / " notin LanguageDetectionSrc
     ck "walkDir" in LanguageDetectionSrc      # the extension sweep exists ...
     ck "parentDir" notin LanguageDetectionSrc # ... and there is NO walk-up
     expectCount(5)
@@ -348,7 +373,12 @@ suite "EMT §6 marker collisions, which is where the two tables disagree":
     ## The CLI reads `.cargo/config.toml` and substring-matches `wasm32`; the
     ## pure heuristic must therefore be TOLD, via `hasWasm32CargoConfig`.
     startCount()
-    ck "isWasmCargoProject" in LanguageDetectionSrc
+    # `isWasmCargoProject` became `assessCargoProject` / `cargoTargetIsa` in
+    # LRS-2P (it answers three facts on three axes now, not a bool).  Pinned
+    # by the new names, because the old one survives only in comments and a
+    # source scan a COMMENT can satisfy is not a scan.
+    ck "proc assessCargoProject*" in LanguageDetectionSrc
+    ck "proc cargoTargetIsa" in LanguageDetectionSrc
     ck "\"wasm32\" in content" in LanguageDetectionSrc
     ck ".cargo\" / \"config.toml\"" in LanguageDetectionSrc
     when EditModeToolbarBuilt:
@@ -366,7 +396,7 @@ suite "EMT §6 marker collisions, which is where the two tables disagree":
     else:
       for _ in 0 ..< 4:
         pending(HeuristicAwaited & " — hasWasm32CargoConfig")
-    expectCount(7)
+    expectCount(8)
 
   test "EMT-A43 a loose source file never outranks a manifest":
     ## EMT-D10 rule 3. The brief's own case: a Rust workspace containing a
@@ -518,11 +548,39 @@ suite "EMT anti-drift and exclusion — the controls":
     ## missing feature but a WRONG diagnostic — `ct record player.gd` blamed a
     ## missing `ct-native-replay` that installing would not have helped.
     ##
-    ## So `markerFiles` must be derived from the same declaration
-    ## `detectFolderLang` reads, and the two must agree on membership AND on
-    ## precedence. Per §16.5 the scan is anchored to the `fileExists(folder /
-    ## "X")` CALL syntax — the module's own doc comment names several of the
-    ## same files, and a scan matching prose is satisfied by prose (traps §4d).
+    ## So `markerFiles` must be derived from the same declaration the CLI
+    ## reads, and the two must agree on MEMBERSHIP. Per §16.5 the scan is
+    ## anchored to the `fileExists(folder / "X")` CALL syntax — the module's
+    ## own doc comment names several of the same files, and a scan matching
+    ## prose is satisfied by prose (traps §4d).
+    ##
+    ## **RE-AIMED 2026-09-22 by milestone LRS-2P**
+    ## (`codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.md`
+    ## §9.1, Q10). Two things it used to assert are no longer true of the
+    ## source it reads, and both are corrected here rather than patched
+    ## around:
+    ##
+    ## 1. **The scan finds ELEVEN occurrences, not ten.** `detectFolderLang`
+    ##    became `assessFolderKind`, and `assessCargoProject` beside it reads
+    ##    `Cargo.toml` as well — because *"is this a cargo project"* and
+    ##    *"does it build for wasm"* are two questions and the second one
+    ##    needs the first. So the derivation is over the marker SET, and the
+    ##    set must still have exactly ten members.
+    ## 2. **The order carries no meaning.** The old chain asserted positions
+    ##    0..9, which pinned `detectFolderLang`'s first-match precedence. Q10
+    ##    (decided 2026-09-20 by the user) removed that precedence as a
+    ##    defect: a crate that is also a Foundry project is BOTH, and the CLI
+    ##    now reports both and refuses to summarise them as one language.
+    ##    Asserting the order would now be asserting something false.
+    ##
+    ## What replaces the precedence assertion is **stronger, not weaker**: the
+    ## sibling test below scans for an `elif` in the marker ladder, which is
+    ## what a reintroduced first-match `return` looks like — and which an
+    ## order assertion cannot catch, because a first-match ladder written in
+    ## the pinned order satisfies an order assertion perfectly. The toolbar's
+    ## OWN precedence (EMT-D9: Noir wins inside a Cargo workspace) is
+    ## unchanged and is still asserted below; what changed is that it is now
+    ## a toolbar decision the CLI does not share.
     startCount()
 
     # Derive the chain from source, in order.
@@ -537,21 +595,24 @@ suite "EMT anti-drift and exclusion — the controls":
 
     # The derivation itself must not be vacuous: a scan that finds nothing
     # passes every "must not contain" check written over it (traps §4).
-    ck chain.len == 10
-    ck chain[0] == "Nargo.toml"
-    ck chain[1] == "Scarb.toml"
-    ck chain[2] == "aiken.toml"
-    ck chain[3] == "Move.toml"
-    ck chain[4] == "Forc.toml"
-    ck chain[5] == "foundry.toml"
-    ck chain[6] == "Cargo.toml"
-    ck chain[7] == "lakefile.lean"
-    ck chain[8] == "shard.yml"
-    ck chain[9] == "program.json"
+    var markers: seq[string] = @[]
+    for marker in chain:
+      if marker notin markers: markers.add(marker)
+    ck markers.len == 10
+    ck "Nargo.toml" in markers
+    ck "Scarb.toml" in markers
+    ck "aiken.toml" in markers
+    ck "Move.toml" in markers
+    ck "Forc.toml" in markers
+    ck "foundry.toml" in markers
+    ck "Cargo.toml" in markers
+    ck "lakefile.lean" in markers
+    ck "shard.yml" in markers
+    ck "program.json" in markers
 
     when EditModeToolbarBuilt:
       # Membership: every marker the CLI knows is a marker the toolbar knows.
-      for marker in chain:
+      for marker in markers:
         var found = false
         for kind in ProjectKind:
           if marker in markerFiles(kind): found = true

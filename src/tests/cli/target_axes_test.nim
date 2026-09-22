@@ -37,6 +37,7 @@ import ../../common/target_assessment
 import ../../common/lang
 import ../../common/types   # tokenTextsFor / TOKEN_TEXTS (common_types)
 import ../../ct/trace/recorder_dispatch
+import ../../ct/utilities/language_detection  # assessFolderKind / assessCargoProject (LRS-2P)
 import ../../common/trace_index        # loadCalltraceMode, langForStorageAxes
 import ../../ct/trace/storage_and_import  # detectTraceAxes (LRS-5, (d))
 
@@ -292,7 +293,7 @@ suite "the kind set obeys K1..K4":
     var decoded: TargetKind
     var diag = ""
     check(not parseKind([KindCargoProject, "project-directory"],
-                        "project-directory", decoded, diag))
+                        "project-directory", "p", decoded, diag))
     check "project-directory" in diag
     check "K1" in diag
 
@@ -305,7 +306,7 @@ suite "the kind set obeys K1..K4":
     var decoded: TargetKind
     var diag = ""
     check parseKind(["cmake-project", KindCargoProject, "cmake-project"],
-                    token(original.family), decoded, diag)
+                    token(original.family), "p", decoded, diag)
     check diag == ""
     check decoded.family == original.family
     check decoded.specificKinds() == original.specificKinds()
@@ -313,7 +314,7 @@ suite "the kind set obeys K1..K4":
   test "K3: an unknown family fails loudly, naming the token, the kinds and the known families":
     var decoded: TargetKind
     var diag = ""
-    check(not parseKind([KindCargoProject], "some-future-family", decoded, diag))
+    check(not parseKind([KindCargoProject], "some-future-family", "p", decoded, diag))
     check "some-future-family" in diag
     check KindCargoProject in diag
     check "project-directory" in diag   # the known-family list is quoted back
@@ -322,7 +323,7 @@ suite "the kind set obeys K1..K4":
   test "K3: an empty family token is not silently the unknown family":
     var decoded = TargetKind(specific: @["x"], family: tfSingleFile)
     var diag = ""
-    check(not parseKind([KindCargoProject], "", decoded, diag))
+    check(not parseKind([KindCargoProject], "", "p", decoded, diag))
     check diag.len > 0
     check decoded.family == tfSingleFile   # untouched on failure
 
@@ -448,24 +449,36 @@ suite "the project-marker kinds match the algorithm they were read from":
     check(not projectKindForMarker("CMakeLists.txt", kind))
     check kind == ""
 
-  test "the marker SET is `detectFolderLang`'s marker set; order is not a property":
-    # `detectFolderLang` (`src/ct/utilities/language_detection.nim:28-65`) is
-    # the assessment algorithm in embryo, and it throws its answer away by
-    # returning a `Lang`: `Cargo.toml` becomes `LangRust` and the fact that the
-    # target is a *cargo project* -- the fact that decides whether to build
-    # before recording -- is lost at the return statement.
+  test "the marker SET is `assessFolderKind`'s marker set; order is not a property":
+    # `assessFolderKind` (`src/ct/utilities/language_detection.nim`) IS the
+    # assessment algorithm since LRS-2P.  It used to be `detectFolderLang`,
+    # which threw its answer away by returning a `Lang`: `Cargo.toml` became
+    # `LangRust` and the fact that the target is a *cargo project* -- the fact
+    # that decides whether to build before recording -- was lost at the return
+    # statement (design 9.1).
     #
     # This test used to pin the ORDER of the two lists as well, because
     # `detectFolderLang`'s first-match precedence was being reproduced.  Q10
-    # (decided 2026-09-20) makes `specific` a set and `projectKindsForMarkers`
-    # emit every marker present, so the precedence is no longer a property of
-    # the table and is deliberately not asserted.  What must still hold is
-    # MEMBERSHIP: the table and the algorithm read the same ten markers, so a
-    # marker added to one and not the other is caught here.  The markers are
-    # read out of the source so the constant cannot drift.
+    # (decided 2026-09-20) makes `specific` a set and every marker present is
+    # emitted, so the precedence is no longer a property of the algorithm and
+    # is deliberately not asserted.  What must still hold is MEMBERSHIP: the
+    # table and the algorithm read the same ten markers, so a marker added to
+    # one and not the other is caught here.  The markers are read out of the
+    # source so the constant cannot drift.
+    #
+    # LRS-2P, milestone rule 7: the milestone's deliverable text says this
+    # marker order "is load-bearing and is already pinned by
+    # target_axes_test.nim".  That was written before Q10 and is no longer
+    # true of either half -- the order is not load-bearing and the pin is by
+    # membership.  The deliverable's real requirement ("keep that pin working,
+    # or replace it with something STRONGER, never weaker") is met by the
+    # membership pin below PLUS the behavioural pin in the next test, which
+    # catches a reintroduced first-match `return` -- something an order
+    # assertion could never catch, because a first-match ladder in the pinned
+    # order passes an order assertion.
     let source = readTreeFile(LanguageDetectionPath,
-      "extracting detectFolderLang's project markers")
-    let startIdx = source.find("proc detectFolderLang")
+      "extracting assessFolderKind's project markers")
+    let startIdx = source.find("proc assessFolderKind")
     check startIdx >= 0
     let endIdx = source.find("\nconst LANGS*", startIdx)
     check endIdx > startIdx
@@ -486,13 +499,106 @@ suite "the project-marker kinds match the algorithm they were read from":
     var expected: seq[string] = @[]
     for row in ProjectMarkerKinds:
       expected.add(row.marker)
+    # STRONGER than the membership check alone: no marker may be tested twice
+    # in the algorithm.  A duplicated `fileExists` line would make the sorted
+    # lists differ in length and be reported here by name rather than as a
+    # bare count mismatch.
+    var deduped: seq[string] = @[]
+    for marker in found:
+      if marker notin deduped: deduped.add(marker)
+    if deduped.len != found.len:
+      checkpoint("a marker is tested more than once: " & found.join(", "))
+    check deduped.len == found.len
     found.sort()
     expected.sort()
     check found.len == 10
     if found != expected:
-      checkpoint("markers read from detectFolderLang: " & found.join(", "))
+      checkpoint("markers read from assessFolderKind: " & found.join(", "))
       checkpoint("markers in ProjectMarkerKinds:      " & expected.join(", "))
     check found == expected
+    # And every marker the algorithm tests resolves, through the table, to a
+    # kind that names a language.  This is what makes the membership check a
+    # check on the ALGORITHM rather than on two lists of strings.
+    for marker in found:
+      var kind = ""
+      check projectKindForMarker(marker, kind)
+      check langForProjectKind(kind) != LangUnknown
+
+  test "assessFolderKind emits EVERY marker present -- no first-match precedence":
+    # THE BEHAVIOURAL PIN (LRS-2P).  The membership test above reads source
+    # text; this one runs the algorithm over a real directory carrying two
+    # markers and requires BOTH kinds back.  It is the assertion an order pin
+    # could not make: `detectFolderLang`'s defect was not a wrong order, it
+    # was returning at the first hit, and a first-match ladder written in the
+    # pinned order satisfies an order assertion perfectly.
+    let scratch = getTempDir() / "ct-axes-folderkind"
+    removeDir(scratch)
+    createDir(scratch)
+    writeFile(scratch / "Cargo.toml", "[package]\nname = \"x\"\n")
+    writeFile(scratch / "foundry.toml", "[profile.default]\n")
+    let kind = assessFolderKind(scratch)
+    check kind.family == tfProjectDirectory
+    check KindCargoProject in kind.specific
+    check KindFoundryProject in kind.specific
+    # ...and the `Lang` summary REFUSES rather than picking one of the two.
+    let assessed = assessFolder(scratch)
+    check assessed.lang == LangUnknown
+    check assessed.ambiguity.len == 2
+    let lines = folderAmbiguityLines(scratch, assessed).join("\n")
+    check KindCargoProject in lines
+    check KindFoundryProject in lines
+    check "nothing may pick one silently" in lines
+
+    # Every one of the ten markers, alone, yields exactly its own kind and the
+    # language that kind names -- so a marker whose `add` was wired to the
+    # wrong constant is caught here and not only in the source scrape.
+    for row in ProjectMarkerKinds:
+      let one = getTempDir() / "ct-axes-folderkind-one"
+      removeDir(one)
+      createDir(one)
+      writeFile(one / row.marker, "")
+      let k = assessFolderKind(one)
+      check k.specific == @[row.kind]
+      check assessFolder(one).lang == langForProjectKind(row.kind)
+      removeDir(one)
+    removeDir(scratch)
+
+  test "a wasm crate is BOTH cargo-project and wasm-cargo-project, on three axes":
+    # `assessCargoProject` is LRS-2P's fourth deliverable: the proc that used
+    # to answer `LangRustWasm` (and then a bare `bool`) answers the three
+    # facts on the three axes that own them.
+    let crate = getTempDir() / "ct-axes-wasmcrate"
+    removeDir(crate)
+    createDir(crate)
+    writeFile(crate / "Cargo.toml", "[package]\nname = \"x\"\n")
+    createDir(crate / ".cargo")
+    writeFile(crate / ".cargo" / "config.toml",
+              "[build]\ntarget = \"wasm32-wasip1\"\n")
+    let wasm = assessCargoProject(crate)
+    check wasm.present
+    check wasm.kind.specific == @[KindCargoProject, KindWasmCargoProject]
+    check wasm.sourceLanguage == slRust
+    check wasm.targetIsa == tiWasm
+    # One toolchain, not two: the pair is not a collision.
+    check toolchainForKind(wasm.kind) == tcCargo
+    check toolchainAmbiguity(wasm.kind).len == 0
+    check targetIsaForAssessment(wasm.kind, slRust) == tiWasm
+    # The same directory without the marker: same language, different ISA.
+    removeFile(crate / ".cargo" / "config.toml")
+    let plain = assessCargoProject(crate)
+    check plain.present
+    check plain.kind.specific == @[KindCargoProject]
+    check plain.sourceLanguage == slRust
+    check plain.targetIsa == tiNative
+    # A directory with no manifest at all is not a cargo project, which is a
+    # different answer from "a native cargo project".
+    let empty = getTempDir() / "ct-axes-nocrate"
+    removeDir(empty)
+    createDir(empty)
+    check(not assessCargoProject(empty).present)
+    check assessCargoProject(empty).targetIsa == tiUnknown
+    removeDir(empty)
+    removeDir(crate)
 
   test "projectKindsForMarkers emits EVERY kind whose marker is present (Q10)":
     # The defect the set model removes: a crate that also carries a

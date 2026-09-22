@@ -247,11 +247,57 @@ proc allLangsExtensions(): HashSet[string] =
   for extension, _ in LANGS:
     result.incl("." & extension)
 
-proc declaredProjectMarkers(path: string): seq[string] =
+type
+  ProjectLine = object
+    ## One parsed `project` line, in the launcher's own grammar.
+    raw: string
+    scoped: bool
+      ## True when the line names the command it qualifies -- the LRS-2P form,
+      ## `project <cmd> <marker>...`.  False for the legacy one-token form,
+      ## `project <marker>`, which applies to the WHOLE COMPONENT.
+    command: string     ## "" when unscoped
+    markers: seq[string]
+
+proc declaredProjectLines(path: string): seq[ProjectLine] =
+  ## Parse every `project` line exactly the way `caps.projectMarkersFor`
+  ## does: one token after the keyword is a marker; two or more make the
+  ## first a command name.
+  ##
+  ## Transcribing the launcher's rule rather than importing it is a real cost
+  ## and is paid on purpose.  This checker imports NOTHING from the launcher
+  ## (the sibling `ci/test/desktop_component_caps_check.nim` is the one that
+  ## compiles `codetracer-launcher/src/caps.nim`, via `--path`), and it could
+  ## not usefully import this rule anyway: `projectMarkersFor` yields raw
+  ## pointers into a `CapBuffer` and cannot be driven from Nim code that wants
+  ## strings.  `ci/test/desktop-capabilities-dispatch.sh` mutation-tests this
+  ## parse in BOTH directions -- a component-wide line is rejected and a
+  ## correctly scoped one is accepted -- so the transcription cannot drift
+  ## silently in either.
   for rawLine in readFile(path).splitLines():
     let tokens = rawLine.strip().splitWhitespace()
     if tokens.len >= 2 and tokens[0] == "project":
-      result.add(tokens[1])
+      if tokens.len >= 3:
+        result.add(ProjectLine(raw: rawLine.strip(), scoped: true,
+                               command: tokens[1],
+                               markers: tokens[2 .. ^1]))
+      else:
+        result.add(ProjectLine(raw: rawLine.strip(), scoped: false,
+                               command: "", markers: @[tokens[1]]))
+
+proc declaredCommands(path: string): HashSet[string] =
+  ## Every routable command the file declares -- the first token of a line
+  ## that is not one of the metadata keywords.  Mirrors
+  ## `caps.isReservedKeyword` plus `known-extensions`.
+  const Reserved = ["name", "version", "bin", "description", "help-delegate",
+                    "licensed", "requires", "project", "known-extensions"]
+  result = initHashSet[string]()
+  for rawLine in readFile(path).splitLines():
+    let line = rawLine.strip()
+    if line.len == 0 or line.startsWith("#"): continue
+    let tokens = line.splitWhitespace()
+    if tokens.len == 0: continue
+    if tokens[0] in Reserved: continue
+    result.incl(tokens[0])
 
 proc sortedSeq(s: HashSet[string]): seq[string] =
   for item in s:
@@ -449,14 +495,59 @@ when isMainModule:
 
     echo ""
     echo "project markers"
-    # LRC-1 decision, recorded as an assertion so that adding markers has
-    # to be a deliberate change that also revisits the two reasons in the
-    # capability file's header comment (no cwd-driven record entry point
-    # in the core; the launcher drops unqualified matches when declared
-    # markers do not match — launcher.nim `projectMarkerOutcome` == 1).
-    let markers = declaredProjectMarkers(capsPath)
-    expect(markers.len == 0,
-      "no `project` markers are declared (found: " & markers.join(" ") & ")")
+    # ---------------------------------------------------------------------
+    # LRS-2P replaced this assertion, and the replacement is STRONGER rather
+    # than merely different.  It used to read `markers.len == 0`: no `project`
+    # line at all.  That was the only safe rule available, because
+    # `projectMarkerOutcome` read markers from the whole `CapBuffer` and the
+    # router drops an unqualified match when a component declares markers and
+    # none of them match -- so ONE `project Cargo.toml` line here would have
+    # made `ct list` outside a Cargo project answer "no component handles
+    # 'list'", for all 25 commands this file declares unqualified.
+    #
+    # `codetracer-launcher/src/caps.nim` now scopes a marker to the command it
+    # qualifies, so the rule that keeps that catastrophe impossible is no
+    # longer "declare none" but "declare none that is component-wide, and name
+    # only commands you actually declare".  A file with no `project` lines
+    # still passes, which is the state this file is in; what has changed is
+    # that adding one is now possible AND still cannot strand a sibling
+    # command.
+    #
+    # Both halves are mutation-tested by
+    # ci/test/desktop-capabilities-dispatch.sh: a bare `project <marker>` is
+    # rejected, a scoped line naming an undeclared command is rejected, and a
+    # correctly scoped line is ACCEPTED -- the last one being what stops this
+    # degenerating back into "no markers allowed" wearing a longer message.
+    # ---------------------------------------------------------------------
+    let projectLines = declaredProjectLines(capsPath)
+    let commands = declaredCommands(capsPath)
+    echo "    project lines:    ", $projectLines.len
+    for line in projectLines:
+      expect(line.scoped,
+        "the `project` line `" & line.raw & "` is COMPONENT-WIDE (one token " &
+        "after the keyword). The launcher drops an unqualified command match " &
+        "when the component declares markers and none match the cwd, and this " &
+        "file declares " & $commands.len & " commands unqualified -- so a " &
+        "component-wide marker would make `ct list` (and `ct login`, and `ct " &
+        "replay <id>`, ...) answer 'no component handles' outside a marked " &
+        "directory. Write `project <command> " & line.markers.join(" ") &
+        "` instead, naming the command the marker was written for")
+      # Guarded by `line.scoped` so the two assertions are INDEPENDENTLY
+      # load-bearing.  Found by mutation, 2026-09-22: with them unguarded, an
+      # unscoped line has `command == ""`, which is never a declared command,
+      # so the second assertion caught a component-wide marker even with the
+      # first one disabled -- and a mutation of the first therefore SURVIVED.
+      # The property was still enforced; what was missing was the ability to
+      # tell which assertion was enforcing it.
+      if not line.scoped: continue
+      expect(line.command in commands,
+        "the `project` line `" & line.raw & "` qualifies the command `" &
+        line.command & "`, which this file does not declare. A marker for a " &
+        "command nobody routes is dead text in a 4096-byte buffer, and it is " &
+        "the shape a typo takes")
+      for marker in line.markers:
+        expect(marker.len > 0 and not marker.startsWith("-"),
+          "the `project` marker `" & marker & "` is not a file name")
 
     echo ""
     if checks == 0:

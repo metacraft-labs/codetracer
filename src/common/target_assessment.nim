@@ -52,9 +52,10 @@
 ## last element and K2 reading "take the first element you understand".  A
 ## chain cannot say that a directory is *both* a Cargo workspace *and* a CMake
 ## project: it forces the producer to invent a precedence, which is exactly the
-## defect `detectFolderLang` has today, where a crate that also carries a
-## `foundry.toml` silently becomes a Foundry project and the Cargo fact is
-## discarded at the return statement.  A set carries both facts; the consumer,
+## defect `detectFolderLang` had, where a crate that also carried a
+## `foundry.toml` silently became a Foundry project and the Cargo fact was
+## discarded at the return statement.  (LRS-2P replaced it with
+## `assessFolderKind`, which reports every marker present.)  A set carries both facts; the consumer,
 ## which is the only party that knows whether two kinds *dispatch differently*,
 ## either resolves the pair itself or refuses — and it never guesses.
 ## Degradation therefore has exactly one target, the family, and the family
@@ -148,15 +149,20 @@
 ##
 ## ## Scope
 ##
-## This module defines the type and its conversions.  Nothing emits or reads
-## one across a process boundary yet — wiring it into `recognize` and into
-## `detectTarget` is LRS-2P.  Since LRS-2B, `ct record` builds one LOCALLY from
-## what it already knows about the target (`src/ct/trace/record_assessment.nim`)
-## and dispatches its recorder on the result, so the shape below is exercised
-## in production even before it crosses a wire.  Because no producer has ever
-## emitted `codetracer.target-assessment.v1`, the Q10 change from chain to set
-## redefines v1 rather than minting a v2: there is no installed consumer of the
-## chain shape to skew against.  Sequenced in
+## This module defines the type and its conversions.  **Since LRS-2P
+## (2026-09-22) it also crosses a process boundary**: `ct-native-replay
+## recognize` emits one under the `assessment` key of a
+## `codetracer.target-recognition.v2` document (design Q8), and
+## `src/ct/utilities/target_recognition.nim` decodes it — which is where
+## `parseKind`'s K3 refusal and `understand`'s degradation actually run.
+## Since LRS-2B, `ct record` ALSO builds one LOCALLY from what it already
+## knows about the target (`src/ct/trace/record_assessment.nim`) and
+## dispatches its recorder on the result; the two coexist because either
+## component may produce an assessment (design §9.5's first reason for making
+## it a sibling type).  Because no producer had ever emitted
+## `codetracer.target-assessment.v1` when Q10 was decided, the change from
+## chain to set redefined v1 rather than minting a v2: there was no installed
+## consumer of the chain shape to skew against.  Sequenced in
 ## `codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.milestones.org`.
 
 import std/[algorithm, strutils]
@@ -343,7 +349,19 @@ func specificKinds*(k: TargetKind): seq[string] =
       result.add(s)
   result.sort()
 
-func parseKind*(specific: openArray[string], family: string,
+func namedProducer*(producer: string): string =
+  ## How every diagnostic in this module spells the producer.
+  ##
+  ## **The producer is named in every refusal and every degradation, without
+  ## exception.**  The pair is PATH-discovered (§9.2), so "this build does not
+  ## understand that" is only half an answer: the user also has to be told
+  ## *which half of the pair* to update, and no other field of the document
+  ## carries that.  It is a single function so that a diagnostic cannot be
+  ## added later that quietly omits it, and `target_axes_test.nim` asserts the
+  ## producer appears in each of the four.
+  if producer.strip.len == 0: "(unnamed)" else: producer.strip
+
+func parseKind*(specific: openArray[string], family, producer: string,
                 value: var TargetKind, diagnostic: var string): bool =
   ## Decode a wire kind.  Rule K3 lives here and nowhere else.
   ##
@@ -353,12 +371,24 @@ func parseKind*(specific: openArray[string], family: string,
   ## vocabularies, and quietly accepting it would turn a protocol bug into an
   ## invisible behaviour change.  Duplicates in `specific` are collapsed; order
   ## is not preserved as meaning, only as the producer's spelling.
+  ##
+  ## `producer` is **required, not defaulted**.  K3 says the refusal names "the
+  ## token, the producer and the family vocabulary this build knows"; a default
+  ## would let a call site drop the one field that says which binary to
+  ## replace, and it would drop it silently.  Making it a parameter without a
+  ## default turns that omission into a compile error.  (LRS-2 shipped this
+  ## proc without the parameter and its K3 message named only the token and the
+  ## vocabulary — corrected here under milestone rule 7 rather than left.)
   var fam: TargetFamily
   if not parseTargetFamily(family, fam):
     diagnostic = "target-assessment: the kind's family is '" & family &
       "', which is not a target family this build knows. Known families: " &
       knownFamilyTokens() & ". The specific kinds were: " &
-      (if specific.len == 0: "(none)" else: specific.join(", ")) & "."
+      (if specific.len == 0: "(none)" else: specific.join(", ")) &
+      ". Producer: " & namedProducer(producer) &
+      ". A family token is frozen for the life of a schema major version " &
+      "(§9.4), so this is a version skew: update this build of CodeTracer, " &
+      "or put a matching producer first on PATH."
     return false
   var kinds: seq[string] = @[]
   for s in specific:
@@ -367,7 +397,8 @@ func parseKind*(specific: openArray[string], family: string,
       diagnostic = "target-assessment: '" & s & "' is a family token and " &
         "was sent among the specific kinds; the family travels in its own " &
         "field (rule K1). The specific kinds were: " & specific.join(", ") &
-        "; the family was: " & family & "."
+        "; the family was: " & family & ". Producer: " &
+        namedProducer(producer) & "."
       return false
     if s notin kinds:
       kinds.add(s)
@@ -424,9 +455,89 @@ func ambiguityDiagnostic*(r: KindResolution, producer: string): string =
     return ""
   "target-assessment: the target is more than one kind this build handles " &
     "differently — " & r.candidates.join(" and ") & " — and nothing may " &
-    "pick one silently. Producer: " &
-    (if producer.len == 0: "(unnamed)" else: producer) &
+    "pick one silently. Producer: " & namedProducer(producer) &
     ". Name the intended kind explicitly."
+
+func degradationDiagnostic*(r: KindResolution, producer: string): string =
+  ## What a consumer MUST print when it falls back to the family because the
+  ## producer named specific kinds this build has never heard of.
+  ##
+  ## This is the half of §9.3 that is easy to get wrong, because the code path
+  ## *works*: `resolveKind` answers `krFamilyOnly`, the consumer acts on the
+  ## family, and the recording happens.  What is lost without this line is the
+  ## user's only clue that a newer producer told them something their core
+  ## could not use — which is the precise failure this protocol exists to make
+  ## visible (§9.2's "bitten by skew twice").  Additive-within-a-major is a
+  ## promise that the fallback is *correct*, never that it is *silent*.
+  ##
+  ## Empty when nothing was skipped: a producer that simply had nothing more
+  ## specific than the family has not degraded anything, and saying so would
+  ## be noise on every ordinary run.
+  if r.status != krFamilyOnly or r.skipped.len == 0:
+    return ""
+  "target-assessment: this build does not know the specific target " &
+    (if r.skipped.len == 1: "kind " else: "kinds ") & r.skipped.join(", ") &
+    ", so it is acting on the family '" & r.token & "' instead. Producer: " &
+    namedProducer(producer) &
+    ". Specific kinds are additive within a schema major version (§9.4), so " &
+    "this is not an error — but the producer knows more about this target " &
+    "than this build can use; update CodeTracer to act on it."
+
+func unassessableDiagnostic*(r: KindResolution, producer: string): string =
+  ## Rule K4: the producer set the family to `unassessable`, which forbids any
+  ## general handling.  A consumer refuses and names the producer, because the
+  ## component that must change is the one that said so.  Empty otherwise.
+  if r.status != krRefused:
+    return ""
+  "target-assessment: the producer marked this target 'unassessable', which " &
+    "forbids acting on the family (rule K4). The specific kinds were: " &
+    (if r.skipped.len == 0: "(none)" else: r.skipped.join(", ")) &
+    ". Producer: " & namedProducer(producer) &
+    ". Update CodeTracer to a build that understands one of them."
+
+type
+  KindVerdict* = object
+    ## What a consumer learned from a kind, and what it must say about it.
+    ##
+    ## `understand` below returns this instead of a bare token so that the
+    ## "never silently" half of §9.3 is carried by the TYPE rather than by a
+    ## call-site convention: a consumer that acts on `token` and ignores
+    ## `diagnostic` is visibly dropping something, whereas a consumer that
+    ## called `resolveKind` and ignored the `skipped` field looked correct.
+    status*: KindResolutionStatus
+    ok*: bool
+      ## May the consumer act on `token`?  False for `krAmbiguous` (rule K2)
+      ## and `krRefused` (rule K4) — both are refusals.
+    token*: string
+      ## The specific kind, or the family token when degrading.  Empty when
+      ## `ok` is false.
+    diagnostic*: string
+      ## **Non-empty for every outcome that is not an exact, undegraded
+      ## match.**  Printing it is not optional: it is the degradation or the
+      ## refusal, and it always names the producer.
+
+func understand*(k: TargetKind, understood: openArray[string],
+                 producer: string): KindVerdict =
+  ## Apply rules K2/K4 and produce the diagnostic the outcome obliges.
+  ##
+  ## One call, so that a consumer cannot implement "act on the family" without
+  ## also obtaining the sentence that says it did.  `understood` is the
+  ## consumer's own vocabulary — passed in, exactly as `resolveKind` takes it,
+  ## so a test can drive a build that knows nothing, which is the version-skew
+  ## case that has to work.
+  let r = k.resolveKind(understood)
+  case r.status
+  of krExact:
+    KindVerdict(status: r.status, ok: true, token: r.token, diagnostic: "")
+  of krFamilyOnly:
+    KindVerdict(status: r.status, ok: true, token: r.token,
+                diagnostic: r.degradationDiagnostic(producer))
+  of krAmbiguous:
+    KindVerdict(status: r.status, ok: false, token: "",
+                diagnostic: r.ambiguityDiagnostic(producer))
+  of krRefused:
+    KindVerdict(status: r.status, ok: false, token: "",
+                diagnostic: r.unassessableDiagnostic(producer))
 
 # ---------------------------------------------------------------------------
 # Composition with `codetracer.target-recognition.v1`
@@ -479,11 +590,12 @@ func familyFromRecognitionKind*(recognitionKind: string,
 # The specific kinds this tree can already justify
 #
 # Every token below is backed by a marker the code reads TODAY.  The folder
-# markers are `detectFolderLang` (`src/ct/utilities/language_detection.nim:28-65`),
-# which is the assessment algorithm in embryo and which today throws the answer
-# away by returning a `Lang`: `Cargo.toml` becomes `LangRust`, and the fact that
-# it was a *cargo project* — the thing that decides whether to build before
-# recording — is lost at the return statement.
+# markers are read by `assessFolderKind`
+# (`src/ct/utilities/language_detection.nim`), which IS the assessment
+# algorithm since LRS-2P.  It used to be `detectFolderLang`, which threw the
+# answer away by returning a `Lang`: `Cargo.toml` became `LangRust`, and the
+# fact that it was a *cargo project* — the thing that decides whether to build
+# before recording — was lost at the return statement.
 #
 # This list is NOT exhaustive and is not meant to be: specific kinds are the
 # open half of the vocabulary.  `cmake-project` has no marker in the tree yet
@@ -531,10 +643,12 @@ const
     ## the defect ("a crate that is also a Foundry project silently becomes
     ## Foundry") and decided: `TargetKind.specific` is an unordered SET, the
     ## family has its own field, and two known kinds are a loud ambiguity.
-    ## `detectFolderLang` itself still returns a single `Lang` by first match;
-    ## replacing it with an assessment is LRS-2P.  `target_axes_test.nim`
-    ## asserts that this table and `detectFolderLang` read the same SET of
-    ## markers — membership, not order.
+    ## **LRS-2P completed it**: `detectFolderLang` is now `assessFolderKind`,
+    ## it returns a `TargetKind` rather than a `Lang`, and it reports EVERY
+    ## marker present instead of the first.  `target_axes_test.nim` asserts
+    ## that this table and `assessFolderKind` read the same SET of markers —
+    ## membership, not order — and, separately and behaviourally, that two
+    ## markers in one directory yield two kinds.
 
 func projectKindForMarker*(marker: string, kind: var string): bool =
   ## Total lookup over `ProjectMarkerKinds`.
@@ -576,8 +690,9 @@ const
     ## (`src/ct/db_backend_record.nim:143-188`).
   KindWasmCargoProject* = "wasm-cargo-project"
     ## A `Cargo.toml` project whose `.cargo/config.toml` mentions `wasm32`.
-    ## `isWasmCargoProject` (`src/ct/utilities/language_detection.nim:18-26`)
-    ## is the marker that decides it today.  (It used to be turned into
+    ## `assessCargoProject` (`src/ct/utilities/language_detection.nim`)
+    ## is what reads the marker; before LRS-2P it was `isWasmCargoProject`,
+    ## answering the same question as a bare `bool`.  (It used to be turned into
     ## `LangRustWasm` by `detectFolderLang` — the ISA welded onto the
     ## language; LRS-5's second deletion round removed the member and left the
     ## marker doing the work it was already doing.)
@@ -597,6 +712,30 @@ const
     ## the route rides on the artefact, and
     ## `record_dispatch_test` "a prebuilt .wasm module dispatches to wazero,
     ## and the route rides on the ARTEFACT" is the case that pins it.
+
+const
+  UnderstoodSpecificKinds*: array[14, string] = [
+    KindCargoProject, KindNoirProject, KindCairoProject, KindAikenProject,
+    KindMoveProject, KindSwayProject, KindFoundryProject, KindLeanProject,
+    KindCrystalProject, KindLeoProject,
+    KindNimScript, KindNimSource, KindWasmCargoProject, KindWasmModule]
+    ## **Every specific kind this build has code for**, and therefore the
+    ## `understood` vocabulary a consumer passes to `understand`.
+    ##
+    ## It is a list of what the code DOES, not of what the protocol may say:
+    ## the ten project manifests `langForProjectKind` and `toolchainForKind`
+    ## dispatch on, plus the four kinds `targetIsaForAssessment` reads.  A kind
+    ## outside it is not an error — specific kinds are additive within a schema
+    ## major version (design 9.4) — it is a DEGRADATION, and
+    ## `degradationDiagnostic` is what makes the degradation visible instead of
+    ## silent.
+    ##
+    ## Deriving it from the `Kind*` constants by hand rather than generating it
+    ## is deliberate: a constant exists here for `cmake-project`'s sake too
+    ## (design 9.3 uses it as the example of a kind a producer may emit and a
+    ## consumer may not know), and a generated list would claim understanding
+    ## of every token that had ever been named.  `target_axes_test.nim` pins
+    ## that every entry is a kind some production function actually acts on.
 
 func targetIsaForAssessment*(kind: TargetKind,
                              lang: SourceLanguage): TargetIsa =

@@ -157,6 +157,39 @@ const CDocument = """{
   "diagnostics": []
 }"""
 
+proc v2Document(specific, family: string;
+                producer = "ct-native-replay/9.9.9"): string =
+  ## A `codetracer.target-recognition.v2` document carrying one embedded
+  ## assessment -- the shape `ct-native-replay` emits since LRS-2P, with the
+  ## kind set and the family as parameters so a SKEW can be staged: a producer
+  ## naming facts this build was not compiled against.
+  """{
+  "schema": "codetracer.target-recognition.v2",
+  "target": "TARGET",
+  "kind": "executable",
+  "primary": {"language": "c", "confidence": "likely", "weight": 1,
+              "evidence": ["dwarf:sources=1"]},
+  "components": [{"language": "c", "confidence": "likely", "weight": 1,
+                  "evidence": ["dwarf:sources=1"]}],
+  "interpreter": null,
+  "format": {"container": "elf", "arch": "x86_64", "os": null,
+             "pie": true, "stripped": false},
+  "debug_info": {"present": true, "kind": "dwarf"},
+  "recommended": {"recorder": "ct-mcr", "backend": "mcr",
+                  "strategy": "native"},
+  "diagnostics": [],
+  "assessment": {
+    "schema": "codetracer.target-assessment.v1",
+    "producer": "PRODUCER",
+    "target": "TARGET",
+    "kind": {"specific": [SPECIFIC], "family": "FAMILY"},
+    "toolchain": "unknown", "target_isa": "native", "arch": "x86_64",
+    "recording_approach": "mcr", "languages": [], "diagnostics": []
+  }
+}""".replace("SPECIFIC", specific)
+    .replace("FAMILY", family)
+    .replace("PRODUCER", producer)
+
 proc answeringStub(document: string): string =
   ## A recognizer that logs its argv, answers `recognize` with `document`, and
   ## refuses anything else — so a recording attempt fails loudly instead of
@@ -307,8 +340,29 @@ suite "NTR-2 end to end: the shipped ct delegates recognition":
     check recognizeSpawns(box2) >= 1
 
   test "an unrecognised schema is refused by name, not mis-parsed":
+    # LRS-2P: `v2` is a schema this build DOES read now, so the unknown
+    # version here is `v3`.  The property is unchanged and the case is not
+    # weakened -- `v2`'s own rules get their own cases below.
     require fileExists(ct)
     let box = newSandbox("schema-skew")
+    writeStubRecognizer(box, answeringStub(
+      CDocument.replace("codetracer.target-recognition.v1",
+                        "codetracer.target-recognition.v3")))
+
+    let run = runCt(box, @["record", "-o", box.dir / "out", box.target])
+    checkpoint("ct output:\n" & run.output)
+    check "codetracer.target-recognition.v3" in run.output
+    check "codetracer.target-recognition.v1" in run.output
+    check "codetracer.target-recognition.v2" in run.output
+    check "does not understand" in run.output
+    # Refused, not parsed: the `c` in that document must not have been used.
+    check run.exitCode != 0
+
+  test "LRS-2P: a v2 document with no assessment is refused, through the binary":
+    # The schema bump is only worth its cost if the VERSION says whether an
+    # assessment exists.  A `v2` carrying none is unreadable, not empty.
+    require fileExists(ct)
+    let box = newSandbox("v2-no-assessment")
     writeStubRecognizer(box, answeringStub(
       CDocument.replace("codetracer.target-recognition.v1",
                         "codetracer.target-recognition.v2")))
@@ -316,10 +370,48 @@ suite "NTR-2 end to end: the shipped ct delegates recognition":
     let run = runCt(box, @["record", "-o", box.dir / "out", box.target])
     checkpoint("ct output:\n" & run.output)
     check "codetracer.target-recognition.v2" in run.output
-    check "codetracer.target-recognition.v1" in run.output
-    check "does not understand" in run.output
-    # Refused, not parsed: the `c` in that document must not have been used.
+    check "assessment" in run.output
     check run.exitCode != 0
+
+  test "LRS-2P SKEW (a): a newer producer's specific kind DEGRADES, out loud":
+    # The version-skew case this protocol exists for, driven through the
+    # SHIPPED binary against a producer emitting a kind this build has never
+    # heard of.  `cmake-project` is the design's own example of an additive
+    # specific kind: the document is valid, the consumer acts on the family,
+    # and it must SAY it did -- naming the producer, because the pair is
+    # PATH-discovered and "which half do I update" has no other answer.
+    require fileExists(ct)
+    let box = newSandbox("skew-new-kind")
+    writeStubRecognizer(box, answeringStub(
+      v2Document("\"cmake-project\"", "project-directory")))
+
+    let run = runCt(box, @["record", "-o", box.dir / "out", box.target])
+    checkpoint("ct output:\n" & run.output)
+    check "cmake-project" in run.output           # the kind it could not use
+    check "project-directory" in run.output       # what it acted on instead
+    check "ct-native-replay/9.9.9" in run.output  # THE PRODUCER
+    # A degradation is not an error: the run is not refused for it.  (It may
+    # still fail later for an unrelated reason -- the stub is not a recorder
+    # -- which is why the assertion is on the diagnostic, not on the code.)
+    check "not an error" in run.output
+
+  test "LRS-2P SKEW (b): a family this build never heard of REFUSES, by name":
+    # Families are frozen for the life of a schema major version, so an
+    # unknown one is a protocol error (rule K3) rather than an additive
+    # change, and `ct record` stops.
+    require fileExists(ct)
+    let box = newSandbox("skew-new-family")
+    writeStubRecognizer(box, answeringStub(
+      v2Document("\"oci-layer\"", "container-image")))
+
+    let run = runCt(box, @["record", "-o", box.dir / "out", box.target])
+    checkpoint("ct output:\n" & run.output)
+    check "container-image" in run.output          # the token
+    check "ct-native-replay/9.9.9" in run.output   # THE PRODUCER
+    check "project-directory" in run.output        # the vocabulary it knows
+    check run.exitCode != 0
+    # Refused BEFORE recording: nothing was written.
+    check(not dirExists(box.dir / "out" / "trace-1"))
 
   test "a non-zero recognizer exit is reported, not read as `no language`":
     require fileExists(ct)

@@ -756,9 +756,12 @@ suite "the assessment is loud about two facts it may not choose between":
   writeFile(scratch / "foundry.toml", "[profile.default]\n")
 
   test "a crate that is also a Foundry project is BOTH, not Foundry":
-    # The defect Q10 was decided against: `detectFolderLang` answers Solidity
-    # here by first match and discards the Cargo fact.  The assessment keeps
-    # both and refuses to pick.
+    # The defect Q10 was decided against.  `detectFolderLang` answered
+    # Solidity here by first match and discarded the Cargo fact; since LRS-2P
+    # `assessFolderKind` reports both kinds and `assessFolder`'s `Lang`
+    # summary is `LangUnknown` WITH an ambiguity rather than a silent pick,
+    # so `detectLang` below now yields `LangUnknown` where it used to yield
+    # `LangSolidity`.  Either way the assessment keeps both and refuses.
     let a = assessRecordingTarget(scratch, detectLang(scratch, LangUnknown))
     check KindCargoProject in a.kind.specific
     check KindFoundryProject in a.kind.specific
@@ -865,7 +868,7 @@ suite "an ISA stated by --lang overrides the assessment, and keeps two routes al
     removeDir(dir)
     createDir(dir)
     writeFile(dir / "Cargo.toml", "[package]\nname = \"plain\"\n")
-    check(not isWasmCargoProject(dir))            # no `wasm32` marker
+    check assessCargoProject(dir).targetIsa == tiNative  # no `wasm32` marker
     let bare = assessRecordingTarget(dir, LangRust)
     check bare.targetIsa == tiNative              # ...so the crate is native
     let a = assessRecordingTarget(dir, toLang("rust-wasm"),
@@ -888,7 +891,7 @@ suite "an ISA stated by --lang overrides the assessment, and keeps two routes al
     createDir(dir / ".cargo")
     writeFile(dir / "Cargo.toml", "[package]\nname = \"w\"\n")
     writeFile(dir / ".cargo" / "config.toml", "[build]\ntarget = \"wasm32-wasip1\"\n")
-    check isWasmCargoProject(dir)
+    check assessCargoProject(dir).targetIsa == tiWasm
     let fromMarker = assessRecordingTarget(dir, LangRust)
     check fromMarker.targetIsa == tiWasm          # the kind decides
     let overridden = assessRecordingTarget(dir, LangRust, languageWasExplicit = true,

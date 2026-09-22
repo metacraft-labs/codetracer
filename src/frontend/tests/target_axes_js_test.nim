@@ -91,7 +91,7 @@ suite "the axis modules build and behave on the JS backend":
     check original.specificKinds() == @[KindCargoProject, "cmake-project"]
     var decoded: TargetKind
     var diag = ""
-    check parseKind(original.specificKinds(), token(original.family),
+    check parseKind(original.specificKinds(), token(original.family), "p",
                     decoded, diag)
     check diag == ""
     check decoded.family == tfProjectDirectory
@@ -100,7 +100,7 @@ suite "the axis modules build and behave on the JS backend":
   test "an unknown family fails loudly, naming the kinds and the vocabulary":
     var decoded: TargetKind
     var diag = ""
-    check(not parseKind(@["cmake-project"], "some-future-family", decoded, diag))
+    check(not parseKind(@["cmake-project"], "some-future-family", "p", decoded, diag))
     check "some-future-family" in diag
     check "cmake-project" in diag
     for v in TargetFamily:

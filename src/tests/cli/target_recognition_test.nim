@@ -209,6 +209,44 @@ proc spawnLines(logPath: string): seq[string] =
 
 # ---------------------------------------------------------------------------
 
+proc assessmentDocument(target: string; specific: seq[string];
+                        family = "project-directory";
+                        producer = "ct-native-replay/0.9.0";
+                        schema = TargetAssessmentSchema;
+                        envelope = RecognitionSchemaV2): string =
+  ## A `codetracer.target-recognition.v2` envelope carrying one embedded
+  ## `codetracer.target-assessment.v1`, shaped exactly as
+  ## `codetracer-native-backend/src/recognize.rs` emits it.  Every knob a skew
+  ## case needs is a parameter, because the whole point of these cases is a
+  ## producer this build was not compiled against.
+  var kinds = newJArray()
+  for k in specific:
+    kinds.add(newJString(k))
+  $ %*{
+    "schema": envelope,
+    "target": target,
+    "kind": "directory",
+    "primary": nil,
+    "components": [],
+    "interpreter": nil,
+    "format": nil,
+    "debug_info": {"present": false, "kind": nil},
+    "recommended": nil,
+    "diagnostics": [],
+    "assessment": {
+      "schema": schema,
+      "producer": producer,
+      "target": target,
+      "kind": {"specific": kinds, "family": family},
+      "toolchain": "unknown",
+      "target_isa": "unknown",
+      "arch": "",
+      "recording_approach": "unknown",
+      "languages": [],
+      "diagnostics": []
+    }
+  }
+
 suite "NTR-2: the core delegates recognition to ct-native-replay":
 
   test "the stub recognizer this suite drives is a real, runnable process":
@@ -320,15 +358,22 @@ suite "NTR-2: the core delegates recognition to ct-native-replay":
     # INDEPENDENTLY RELEASED repositories — the core discovers ct-native-replay
     # on PATH rather than bundling it — so a version-skewed pair is a real
     # deployment state and mis-parsing one is a real risk.
+    # LRS-2P made `v2` a schema this build DOES read (it is the envelope that
+    # carries an embedded assessment), so the unknown version this case drives
+    # with is `v3`.  The property under test is unchanged and the case is not
+    # weakened: it still asserts that an unrecognised schema is refused before
+    # any other key is read.  `v2`'s own refusal rules get their own cases
+    # in the LRS-2P suite below.
     let future = goDocument("/tmp/whatever")
-      .replace(RecognitionSchema, "codetracer.target-recognition.v2")
+      .replace(RecognitionSchema, "codetracer.target-recognition.v3")
     let outcome = parseRecognitionDocument(future)
     checkpoint("failure: " & outcome.failure.join(" | "))
     check outcome.status == rsUnsupportedSchema
     let text = outcome.failure.join("\n")
     # Names what it found AND what it supports — both halves of Q5's rule.
-    check "codetracer.target-recognition.v2" in text
-    check RecognitionSchema in text
+    check "codetracer.target-recognition.v3" in text
+    check RecognitionSchemaV1 in text
+    check RecognitionSchemaV2 in text
     # Refused, not parsed: nothing from the document leaked into the result.
     check outcome.recognition.primary.isNone
     check outcome.recognition.components.len == 0
@@ -539,3 +584,194 @@ suite "NTR-2: the core delegates recognition to ct-native-replay":
     check detected.lang == LangUnknown
     check not detected.recognitionRan
     check spawnLines(stub.logPath).len == 0
+
+
+# ---------------------------------------------------------------------------
+# LRS-2P: the assessment on the wire, and the version skew it exists for
+#
+# The property this suite tests is NOT "a matched pair works".  It is what
+# happens when the two halves of a PATH-discovered pair were built at
+# different times, which design 9.2 records as a routine deployment state
+# this project has already been bitten by twice.  Every case below drives the
+# production parser with a document the CURRENT producer would never emit --
+# which is exactly what an OLDER or NEWER producer does emit.
+# ---------------------------------------------------------------------------
+
+suite "LRS-2P: `codetracer.target-assessment.v1`, embedded and version-skewed":
+
+  test "a v1 document MEANS no assessment was computed -- a fact, not a gap":
+    # Design 9.5: the schema bump is spent so that `v1` can SAY something.
+    # Without this, "the producer computed nothing" and "the producer predates
+    # the field" are one state, which is the exact conflation `recognitionRan`
+    # exists one layer up to prevent.
+    let outcome = parseRecognitionDocument(goDocument("/tmp/whatever"))
+    check outcome.status == rsOk
+    check outcome.recognition.schema == RecognitionSchemaV1
+    check(not outcome.recognition.assessmentComputed)
+    # ...and BOTH versions are accepted, which is what the constant was made a
+    # list for.  Dropping either one is a skew break in one direction.
+    check RecognitionSchemaV1 in SupportedRecognitionSchemas
+    check RecognitionSchemaV2 in SupportedRecognitionSchemas
+
+  test "an `assessment` key in a v1 document is IGNORED, not sniffed":
+    # The schema string is the only supported way to detect the version.  A
+    # consumer that read the key when it was present would be guessing the
+    # version from field presence, which this module refuses to do for the
+    # envelope and must refuse to do here for the same reason.
+    let sniffable = assessmentDocument("/tmp/whatever", @[KindCargoProject],
+                                       envelope = RecognitionSchemaV1)
+    let outcome = parseRecognitionDocument(sniffable)
+    check outcome.status == rsOk
+    check(not outcome.recognition.assessmentComputed)
+    check outcome.recognition.assessment.kind.specific.len == 0
+
+  test "a v2 document WITHOUT an assessment is refused, not read as empty":
+    # The other half of the same rule.  A v2 that carries nothing would
+    # re-create the ambiguity the bump was spent to remove, so it is
+    # malformed.
+    var document = parseJson(
+      assessmentDocument("/tmp/whatever", @[KindCargoProject]))
+    document.delete("assessment")
+    let outcome = parseRecognitionDocument($document)
+    check outcome.status == rsMalformedOutput
+    let text = outcome.failure.join("\n")
+    check RecognitionSchemaV2 in text
+    check RecognitionSchemaV1 in text
+    check "assessment" in text
+
+  test "a matched pair reads the kind, the producer and the axes":
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/crate", @[KindCargoProject]))
+    check outcome.status == rsOk
+    check outcome.recognition.assessmentComputed
+    let a = outcome.recognition.assessment
+    check a.schema == TargetAssessmentSchema
+    check a.producer == "ct-native-replay/0.9.0"
+    check a.kind.family == tfProjectDirectory
+    check a.kind.specificKinds == @[KindCargoProject]
+    check a.kind.understand(UnderstoodSpecificKinds, a.producer).ok
+    check a.kind.understand(UnderstoodSpecificKinds, a.producer).status == krExact
+    check a.kind.understand(UnderstoodSpecificKinds, a.producer).diagnostic == ""
+
+  test "SKEW (a): a specific kind this build never heard of DEGRADES, and says so":
+    # The producer is newer.  `cmake-project` is design 9.3's own example of a
+    # kind that needs no schema bump, so the document is valid and the
+    # consumer must act on the family -- OUT LOUD.  The failure this case
+    # exists to catch is the silent version: acting on the family and saying
+    # nothing, which works, records something plausible, and leaves the user
+    # with no clue that their core is behind their recognizer.
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/proj", @["cmake-project"]))
+    check outcome.status == rsOk          # additive: NOT an error
+    let a = outcome.recognition.assessment
+    let verdict = a.kind.understand(UnderstoodSpecificKinds, a.producer)
+    check verdict.status == krFamilyOnly
+    check verdict.ok                       # it may proceed ...
+    check verdict.token == token(tfProjectDirectory)
+    check verdict.diagnostic.len > 0       # ... but not silently
+    check "cmake-project" in verdict.diagnostic
+    check "project-directory" in verdict.diagnostic
+    check "ct-native-replay/0.9.0" in verdict.diagnostic   # THE PRODUCER
+
+  test "SKEW (a): the degradation names the producer even when it is absent":
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/proj", @["cmake-project"], producer = ""))
+    let a = outcome.recognition.assessment
+    let verdict = a.kind.understand(UnderstoodSpecificKinds, a.producer)
+    check verdict.diagnostic.len > 0
+    check "(unnamed)" in verdict.diagnostic
+
+  test "SKEW (a): a kind the build DOES know is not reported as a degradation":
+    # The control that stops the case above being vacuous: if every document
+    # produced a degradation line the line would carry no information.
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/crate", @[KindCargoProject]))
+    let a = outcome.recognition.assessment
+    check a.kind.understand(UnderstoodSpecificKinds, a.producer).diagnostic == ""
+
+  test "SKEW (b): a family this build never heard of REFUSES, naming the producer":
+    # Families are frozen for the life of a schema major version (design 9.4),
+    # so a token outside the vocabulary is rule K3's protocol error and not an
+    # additive change.  It is refused BEFORE anything else in the assessment
+    # is trusted.
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/thing", @["container-layer"],
+                         family = "container-image"))
+    check outcome.status == rsUnsupportedAssessment
+    let text = outcome.failure.join("\n")
+    check "container-image" in text                        # the token
+    check "ct-native-replay/0.9.0" in text                 # THE PRODUCER
+    check "project-directory" in text                      # the vocabulary
+    check "prebuilt-artefact" in text
+    check "single-file" in text
+    # Refused, not partly read: nothing from the assessment leaked out.
+    check(not outcome.recognition.assessmentComputed)
+    check outcome.recognition.assessment.kind.specific.len == 0
+    # ...and it is a PROTOCOL ERROR, not a degradation: design 10.4's
+    # asymmetry, where the launcher ignores what it cannot read and the
+    # assessment refuses it.
+    let decision = decideFromRecognition(outcome, "/tmp/thing")
+    check decision.kind == rdProtocolError
+
+  test "SKEW (b): an assessment schema this build does not read is refused too":
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/thing", @[KindCargoProject],
+                         schema = "codetracer.target-assessment.v2"))
+    check outcome.status == rsUnsupportedAssessment
+    let text = outcome.failure.join("\n")
+    check "codetracer.target-assessment.v2" in text
+    check TargetAssessmentSchema in text
+    check "ct-native-replay/0.9.0" in text
+
+  test "K4: `unassessable` refuses rather than degrading, and names the producer":
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/thing", @["licensed-blob"],
+                         family = "unassessable"))
+    check outcome.status == rsOk       # the FAMILY is known; K4 is a verdict
+    let a = outcome.recognition.assessment
+    let verdict = a.kind.understand(UnderstoodSpecificKinds, a.producer)
+    check verdict.status == krRefused
+    check(not verdict.ok)
+    check "licensed-blob" in verdict.diagnostic
+    check "ct-native-replay/0.9.0" in verdict.diagnostic
+
+  test "K2: two known kinds that dispatch differently are a loud ambiguity":
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/proj", @[KindCargoProject, KindFoundryProject]))
+    let a = outcome.recognition.assessment
+    let verdict = a.kind.understand(UnderstoodSpecificKinds, a.producer)
+    check verdict.status == krAmbiguous
+    check(not verdict.ok)
+    check verdict.token == ""
+    check KindCargoProject in verdict.diagnostic
+    check KindFoundryProject in verdict.diagnostic
+    check "ct-native-replay/0.9.0" in verdict.diagnostic
+
+  test "an axis value this build does not know degrades and is RECORDED":
+    # Unlike the family, the four axes are open at the value level: Q5's
+    # consumer obligation says an unknown enum value is never a parse error.
+    # It is still not silent -- it lands in `diagnostics`.
+    var raw = parseJson(assessmentDocument("/tmp/proj", @[KindCargoProject]))
+    raw["assessment"]["target_isa"] = newJString("risc-v-128")
+    let outcome = parseRecognitionDocument($raw)
+    check outcome.status == rsOk
+    let a = outcome.recognition.assessment
+    check a.targetIsa == tiUnknown
+    check a.diagnostics.join("\n").contains("risc-v-128")
+    check a.diagnostics.join("\n").contains("ct-native-replay/0.9.0")
+
+  test "the skew is visible through the REAL spawned delegation, not only the parser":
+    # `detectTarget` spawns a process, reads its stdout and version-checks the
+    # document -- the same code path the shipped `ct` runs against a real
+    # `ct-native-replay`.  Only the document's contents come from the stub.
+    let stub = setupStub("skew-degrade",
+      assessmentDocument("__TARGET__", @["cmake-project"]))
+    let detected = detectTarget(stub.target, LangUnknown, backend = stubBackend())
+    check detected.recognitionRan
+    check detected.recognition.isSome
+    check detected.recognition.get.assessmentComputed
+    let a = detected.recognition.get.assessment
+    check a.kind.specificKinds == @["cmake-project"]
+    check a.kind.understand(UnderstoodSpecificKinds, a.producer).status ==
+      krFamilyOnly
+    check spawnLines(stub.logPath).len == 1

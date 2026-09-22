@@ -1044,11 +1044,11 @@ const
     # The two that MUST be here, because they were `Lang` members and nothing
     # else can reach their recorder.  A PolkaVM blob and a Solana program have
     # no source language and no detectable marker (`getExtensionName` was `""`
-    # for both, no `LANGS` row, no `detectFolderLang` arm -- the Edit-Mode
+    # for both, no `LANGS` row, no `assessFolderKind` arm -- the Edit-Mode
     # Toolbar spec's EMT-F7 says so), so `--lang polkavm` / `--lang solana`
     # was the ONLY way to record one.  Deleting the members without this table
     # would not have renamed that route, it would have DELETED it: the target
-    # would fall through to `detectFolderLang`, a Solana crate would be read
+    # would fall through to `assessFolderKind`, a Solana crate would be read
     # as plain Rust, and `ct record` would take the native path.
     ("polkavm", tiPolkaVm),
     ("solana", tiSolanaSbf),

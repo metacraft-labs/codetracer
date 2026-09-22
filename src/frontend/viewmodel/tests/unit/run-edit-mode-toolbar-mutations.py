@@ -75,7 +75,7 @@ SUITES = [
 # whole check and never a fragment of one.
 TRANSCRIPT = "the recorded transcript is the one this suite claims to be about"
 PARSERS = "the four families that DO parse still parse — no regression twin"
-CLI_CHAIN = "the CLI's own chain already answers Noir here — the derived control"
+CLI_CHAIN = "the CLI tests both markers and pre-empts neither — the derived control"
 CMAKE = "one CMake project fires three cpp providers — arbitration is required"
 LANG_SET = "the Lang enum is the closed set, and it has 41 members"
 LIBTEST = "EMT-A22 a provider's DECLARED capability is not its availability"
@@ -119,23 +119,30 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         "M1",
         "src/ct/utilities/language_detection.nim",
-        'if fileExists(folder / "Nargo.toml"):\n    LangNoir',
-        'if fileExists(folder / "Cargo.toml"):\n    LangRust',
+        '  if fileExists(folder / "Scarb.toml"): specific.add(KindCairoProject)',
+        '  elif fileExists(folder / "Scarb.toml"): specific.add(KindCairoProject)',
         CLI_CHAIN,
-        "Promote Cargo above Nargo — the EXACT drift EMT-D9 is about, and the "
-        "answer the native backend already gives. The derived-precedence "
-        "assertion must notice; if it does not, EMT-A40 is transcription rather "
-        "than derivation and the anti-drift claim is decorative. "
-        "NOTE: the first spelling of this arm reordered Nargo against SCARB, "
-        "which the check does not constrain, and it survived. The arm was wrong, "
-        "not the check — recorded because a surviving arm that is simply "
-        "mis-aimed is indistinguishable from a weak assertion until you read it.",
+        "RE-AIMED 2026-09-22 by milestone LRS-2P. This arm used to promote "
+        "Cargo above Nargo in `detectFolderLang`'s `elif` ladder, and the check "
+        "it fed asserted that Nargo is tested first. That ladder is gone: Q10 "
+        "made the kind a SET and `assessFolderKind` tests all ten markers "
+        "independently, so marker ORDER decides nothing and an arm that "
+        "reorders two markers would now correctly survive. The drift worth "
+        "guarding is the one the old ladder HAD — first-match precedence — so "
+        "the arm reintroduces an `elif`, which makes one marker pre-empt "
+        "another again, and the check asserts no `elif` appears in the marker "
+        "ladder. "
+        "NOTE, kept from the previous spelling: the first version of this arm "
+        "reordered Nargo against SCARB, which the check did not constrain, and "
+        "it survived. The arm was wrong, not the check — recorded because a "
+        "surviving arm that is simply mis-aimed is indistinguishable from a "
+        "weak assertion until you read it.",
     ),
     Mutation(
         "M2",
         "src/ct/utilities/language_detection.nim",
-        "  for kind, path in walkDir(folder):",
-        "  for kind, path in walkDir(folder.parentDir):",
+        "  for entryKind, path in walkDir(folder):",
+        "  for entryKind, path in walkDir(folder.parentDir):",
         CLI_CHAIN,
         "Introduce a walk-up. EMT-D9's whole decision is 'nearest marker, no "
         "walk-up', and the check asserts `parentDir` appears nowhere in the "

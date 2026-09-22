@@ -568,8 +568,8 @@ func fallbackTargetIsaForLanguage*(lang: SourceLanguage): TargetIsa =
   ##
   ## Rust and C/C++ are the same shape one axis over: they answer `tiNative`
   ## here and reach `tiWasm` only when the assessment says so, which is exactly
-  ## what `isWasmCargoProject` (`src/ct/utilities/language_detection.nim:18-26`)
-  ## reads `.cargo/config.toml` for today, and exactly the pair `LangRustWasm` /
+  ## what `assessCargoProject` (`src/ct/utilities/language_detection.nim`)
+  ## reads `.cargo/config.toml` for, and exactly the pair `LangRustWasm` /
   ## `LangCppWasm` welded together into single enum members.
   ##
   ## So the answers below are the ISA a language reaches **when nothing else is

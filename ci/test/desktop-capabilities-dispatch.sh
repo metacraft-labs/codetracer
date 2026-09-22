@@ -292,10 +292,45 @@ mutate_and_expect_failure \
 	's/^record-test .*$/record-test .py .rb .nr/' \
 	'.rb'
 
+# --- LRS-2P: `project` markers must be scoped to the command they qualify --
+# The assertion these three drive used to be `markers.len == 0` and is now
+# "every project line names its command, and that command is declared". The
+# first mutation is the one that matters most: a COMPONENT-WIDE marker is the
+# line that would make `ct list` answer "no component handles 'list'" for
+# every user outside a Cargo project, because this file declares 25 commands
+# unqualified. See design 10.3 of
+# codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.md.
+
 mutate_and_expect_failure \
-	"declaring a 'project' marker is rejected" \
+	"a COMPONENT-WIDE 'project' marker is rejected (it would strand 'ct list')" \
 	's/^name codetracer-desktop$/name codetracer-desktop\nproject pyproject.toml/' \
 	'pyproject.toml'
+
+mutate_and_expect_failure \
+	"a scoped 'project' marker naming an undeclared command is rejected" \
+	's/^name codetracer-desktop$/name codetracer-desktop\nproject frobnicate Cargo.toml/' \
+	'frobnicate'
+
+# The POSITIVE control. Without it the rule above is indistinguishable from
+# the old "no markers at all", which is exactly what LRS-2P exists to lift:
+# the point of scoping markers was to make declaring one possible.
+SCENARIOS=$((SCENARIOS + 1))
+echo
+echo "scenario $SCENARIOS: a correctly scoped 'project' marker is ACCEPTED"
+SCOPED_MUTANT="$WORK_DIR/caps-$SCENARIOS"
+sed 's/^name codetracer-desktop$/name codetracer-desktop\nproject record Cargo.toml/' \
+	"$CAPS_SRC" >"$SCOPED_MUTANT"
+if cmp -s "$CAPS_SRC" "$SCOPED_MUTANT"; then
+	bad "the scoped-marker mutation did not change the file (the sed expression is stale)"
+else
+	run_checker "$SCOPED_MUTANT"
+	if [[ $CHECK_RC -eq 0 ]]; then
+		ok "a 'project record Cargo.toml' line passes the checker"
+	else
+		print_indented "$CHECK_OUT"
+		bad "the checker REJECTED a correctly scoped project marker; the rule has collapsed back into 'no markers allowed'"
+	fi
+fi
 
 # --- NTR-1 mutations: the `noext` token and the partition invariant --------
 # Rule NTR-R1 (Native-Target-Recognition.md §4) rests on two claims the file

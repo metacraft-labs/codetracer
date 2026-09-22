@@ -15,62 +15,210 @@ export target_recognition
 #   TODO: a project can have sources in multiple languages
 #   so the assumption it has a single one is not always valid
 #   but for now are not reforming that yet
-proc isWasmCargoProject*(folder: string): bool =
-  ## Exported for `src/ct/trace/record_assessment.nim`, which reads this marker
-  ## to assert `wasm-cargo-project` as a target KIND.  Since LRS-5's second
-  ## deletion round that is the ONLY reader of it: `detectFolderLang` below
-  ## used to weld the ISA onto a `Lang` value (`LangRustWasm`) and no longer
-  ## can, because the member is gone.
+type
+  CargoProjectAssessment* = object
+    ## What a `Cargo.toml` directory IS, as three facts on three axes.
+    ##
+    ## `isWasmCargoProject` used to answer this question as a single `bool`,
+    ## and before LRS-5's second deletion round it answered it as a single
+    ## `Lang` value, `LangRustWasm` -- *"kind = cargo project, source language
+    ## = Rust, target ISA = wasm"* compressed into one enum member, which is
+    ## design 1.1's conflation in miniature.  LRS-2P separates them: the three
+    ## facts travel on the three axes that own them, and nothing downstream
+    ## has to unpack a member name to recover one of them.
+    ##
+    ## (Milestone rule 7: LRS-2P's deliverable was written against the
+    ## pre-LRS-4 tree and says this proc "stops answering `LangRustWasm`".
+    ## LRS-5's second deletion round had already taken the `Lang` away and
+    ## left a `bool`; the deliverable is met by answering the triple, which is
+    ## what the text asked for and what the bool still was not.)
+    present*: bool
+      ## Is there a `Cargo.toml` here at all?  `false` makes every other field
+      ## meaningless -- distinguishing "not a cargo project" from "a native
+      ## cargo project" is why this is not an `Option[TargetIsa]`.
+    kind*: TargetKind
+      ## `cargo-project`, plus `wasm-cargo-project` when the marker says so.
+      ## BOTH, not one: a wasm crate is still a cargo crate, and Q10's set
+      ## model exists so a producer never has to choose between two true
+      ## facts.  `toolchainForKind` reads the pair as ONE toolchain (`tcCargo`)
+      ## and `toolchainAmbiguity` is empty for it, which is what says the pair
+      ## is not being read as a collision.
+    sourceLanguage*: SourceLanguage
+      ## `slRust`.  A property of the FILES, and the same for both flavours --
+      ## which is exactly why it cannot carry the ISA.
+    targetIsa*: TargetIsa
+      ## `tiWasm` or `tiNative`.  A property of the ARTEFACT.
+
+proc cargoTargetIsa(folder: string): TargetIsa =
+  ## The ISA a cargo project builds for, read from `.cargo/config.toml`.
+  ##
+  ## The same file and the same `wasm32` substring `isWasmCargoProject` read
+  ## before LRS-2P: the evidence has not changed, only what is done with it.
+  ## One reader, so the marker cannot be interpreted two ways in one build.
   let configPath = folder / ".cargo" / "config.toml"
   if fileExists(configPath):
     try:
       let content = readFile(configPath)
-      return "wasm32" in content
+      if "wasm32" in content:
+        return tiWasm
     except CatchableError:
       discard
-  false
+  tiNative
 
-proc detectFolderLang(folder: string): Lang =
-  if fileExists(folder / "Nargo.toml"):
-    LangNoir
-  elif fileExists(folder / "Scarb.toml"):
-    LangCairo
-  elif fileExists(folder / "aiken.toml"):
-    LangAiken
-  elif fileExists(folder / "Move.toml"):
-    LangMove
-  elif fileExists(folder / "Forc.toml"):
-    LangSway
-  elif fileExists(folder / "foundry.toml"):
-    LangSolidity
-  elif fileExists(folder / "Cargo.toml"):
-    # A wasm crate and a plain crate are both Rust.  What tells them apart is
-    # the `.cargo/config.toml` `wasm32` marker, which `assessKind` reads as
-    # `KindWasmCargoProject` and `targetIsaForAssessment` turns into `tiWasm`
-    # -- an ISA on its own axis.  Until LRS-5's second deletion round this
-    # answered `LangRustWasm` here, which is the same fact spelled as a
-    # language, and was one of the three writers of that member.
-    LangRust
-  elif fileExists(folder / "lakefile.lean"):
-    LangLean
-  elif fileExists(folder / "shard.yml"):
-    LangCrystal
-  elif fileExists(folder / "program.json"):
-    # Leo projects typically have a program.json at the root
-    LangLeo
-  else:
-    # Check for projects identifiable by file extensions in the folder
-    for kind, path in walkDir(folder):
-      if kind == pcFile:
-        let ext = path.splitFile()[2]
-        case ext
-        of ".masm": return LangMasm
-        of ".circom": return LangCircom
-        of ".leo": return LangLeo
-        of ".sol": return LangSolidity
-        of ".tolk": return LangTolk
-        else: discard
-    LangUnknown
+proc assessCargoProject*(folder: string): CargoProjectAssessment =
+  ## Assess a directory as a cargo project: the kind set, the language and the
+  ## ISA, each on the axis that owns it.
+  if not fileExists(folder / "Cargo.toml"):
+    return CargoProjectAssessment(
+      present: false,
+      kind: TargetKind(specific: @[], family: tfProjectDirectory),
+      sourceLanguage: slUnknown,
+      targetIsa: tiUnknown)
+  let isa = cargoTargetIsa(folder)
+  CargoProjectAssessment(
+    present: true,
+    kind: TargetKind(
+      specific: if isa == tiWasm: @[KindCargoProject, KindWasmCargoProject]
+                else: @[KindCargoProject],
+      family: tfProjectDirectory),
+    sourceLanguage: slRust,
+    targetIsa: isa)
+
+func langForProjectKind*(kind: string): Lang =
+  ## The `Lang` summary a project kind implies, or `LangUnknown` for a kind
+  ## that names no single language.
+  ##
+  ## This is the map that used to be written inline in `detectFolderLang`'s
+  ## `elif` ladder, where each arm converted a kind into a language AT THE
+  ## `return` and threw the kind away (design 9.1).  Pulled out so the kind
+  ## survives and the language is derived FROM it rather than instead of it.
+  ## Deliberately NOT total over the open specific-kind vocabulary: a kind
+  ## this build has never heard of names no language here, which is the
+  ## additive-within-a-major rule (design 9.4) and not a gap.
+  case kind
+  of KindNoirProject: LangNoir
+  of KindCairoProject: LangCairo
+  of KindAikenProject: LangAiken
+  of KindMoveProject: LangMove
+  of KindSwayProject: LangSway
+  of KindFoundryProject: LangSolidity
+  of KindCargoProject, KindWasmCargoProject: LangRust
+  of KindLeanProject: LangLean
+  of KindCrystalProject: LangCrystal
+  of KindLeoProject: LangLeo
+  else: LangUnknown
+
+proc assessFolderKind*(folder: string): TargetKind =
+  ## **The assessment algorithm, answering with a KIND** -- LRS-2P's third
+  ## deliverable, and the proc `detectFolderLang` used to be.
+  ##
+  ## `detectFolderLang` tested the ten markers below in an `elif` ladder and
+  ## converted the FIRST hit into a `Lang` at the `return`.  Two facts died
+  ## there: *"this is a cargo project"*, which is what decides whether to
+  ## build before recording (design 9.1), and *"it is ALSO a foundry
+  ## project"*, which Q10 -- decided 2026-09-20 by the user -- names as the
+  ## defect: /"a crate that is also a Foundry project silently becomes
+  ## Foundry"/.
+  ##
+  ## So the ladder is ten independent `if`s, and the ORDER of the markers is
+  ## no longer a property of this algorithm.  That is the point rather than an
+  ## omission: every marker present is reported, and the consumer resolves the
+  ## set or refuses naming both (rule K2).  `assessFolder` below is where the
+  ## `Lang` summary is derived from the set, and it refuses rather than picks.
+  ##
+  ## The ten marker tests below are written out rather than looped over
+  ## `ProjectMarkerKinds`, because `target_axes_test.nim` reads
+  ## the marker names back out of THIS source text and pins them against that
+  ## constant -- a loop would make the constant assert itself.  The pin is by
+  ## MEMBERSHIP (order is not a property), and it is backed by a behavioural
+  ## pin over a real directory that two markers yield two kinds, which is
+  ## strictly stronger than the order assertion it replaced: an order pin
+  ## cannot catch a reintroduced first-match `return`, and the behavioural one
+  ## does.
+  var specific: seq[string] = @[]
+  if fileExists(folder / "Nargo.toml"): specific.add(KindNoirProject)
+  if fileExists(folder / "Scarb.toml"): specific.add(KindCairoProject)
+  if fileExists(folder / "aiken.toml"): specific.add(KindAikenProject)
+  if fileExists(folder / "Move.toml"): specific.add(KindMoveProject)
+  if fileExists(folder / "Forc.toml"): specific.add(KindSwayProject)
+  if fileExists(folder / "foundry.toml"): specific.add(KindFoundryProject)
+  if fileExists(folder / "Cargo.toml"):
+    # `cargo-project` AND, when `.cargo/config.toml` says `wasm32`,
+    # `wasm-cargo-project`.  Both: one names the toolchain, the other the
+    # ISA, and `targetIsaForAssessment` / `toolchainForKind` read one each.
+    specific.add(KindCargoProject)
+    if cargoTargetIsa(folder) == tiWasm: specific.add(KindWasmCargoProject)
+  if fileExists(folder / "lakefile.lean"): specific.add(KindLeanProject)
+  if fileExists(folder / "shard.yml"): specific.add(KindCrystalProject)
+  if fileExists(folder / "program.json"): specific.add(KindLeoProject)
+  TargetKind(specific: specific, family: tfProjectDirectory)
+
+type
+  FolderAssessment* = object
+    ## What `detectTarget` learns about a directory.
+    kind*: TargetKind
+      ## The answer, carried forward instead of discarded.
+    lang*: Lang
+      ## The `Lang` SUMMARY the kind implies, for the callers that still take
+      ## one.  `LangUnknown` when the kind names no language -- and when the
+      ## kinds name two DIFFERENT ones, which is `ambiguity` below.
+    ambiguity*: seq[string]
+      ## The kinds that named two or more different languages.  Non-empty
+      ## means the summary is `LangUnknown` BECAUSE there were too many
+      ## answers, not because there were none -- rule K2: nothing picks one
+      ## silently.  `cargo-project` beside `wasm-cargo-project` names one
+      ## language and is not an ambiguity, the same way it is one toolchain.
+
+proc assessFolder*(folder: string): FolderAssessment =
+  ## Assess a directory, and derive the `Lang` summary FROM the kind.
+  ##
+  ## When the markers name nothing, the in-folder extension scan below is the
+  ## fallback -- unchanged from `detectFolderLang`, and reached under exactly
+  ## the same condition (no project marker matched).  It answers a language
+  ## and no kind, honestly: a directory holding a `.circom` file is not a
+  ## "circom project", no manifest says so, and minting a kind for it would
+  ## assert more than the evidence supports.
+  result.kind = assessFolderKind(folder)
+  var langs: seq[Lang] = @[]
+  var namedBy: seq[string] = @[]
+  for specific in result.kind.specific:
+    let named = langForProjectKind(specific)
+    if named == LangUnknown: continue
+    if named notin langs:
+      langs.add(named)
+      namedBy.add(specific)
+  if langs.len == 1:
+    result.lang = langs[0]
+    return
+  if langs.len >= 2:
+    result.lang = LangUnknown
+    result.ambiguity = namedBy
+    return
+  for entryKind, path in walkDir(folder):
+    if entryKind == pcFile:
+      case path.splitFile()[2]
+      of ".masm": result.lang = LangMasm; return
+      of ".circom": result.lang = LangCircom; return
+      of ".leo": result.lang = LangLeo; return
+      of ".sol": result.lang = LangSolidity; return
+      of ".tolk": result.lang = LangTolk; return
+      else: discard
+  result.lang = LangUnknown
+
+func folderAmbiguityLines*(folder: string, assessment: FolderAssessment): seq[string] =
+  ## The refusal a directory whose manifests name two languages earns.
+  ##
+  ## Named here, beside the algorithm that produces the ambiguity, so the
+  ## wording cannot drift from the fact.  `ct record` prints these and stops;
+  ## before LRS-2P `detectFolderLang` answered such a directory with whichever
+  ## language its ladder reached first and said nothing at all.
+  if assessment.ambiguity.len == 0:
+    return @[]
+  @["error: '" & folder & "' carries more than one project manifest, and " &
+      "they name different languages -- " & assessment.ambiguity.join(" and ") &
+      " -- so nothing may pick one silently.",
+    "help: pass --lang <language> to say which one to record, or record from " &
+      "inside the project you mean."]
 
 
 # The extension -> language table `ct record` / `ct run` detect with, via
@@ -226,6 +374,17 @@ type
     recognitionRan*: bool
     recognition*: Option[Recognition]
     diagnosticLines*: seq[string]
+    folderKind*: TargetKind
+      ## The assessed kind of a DIRECTORY target -- LRS-2P's third
+      ## deliverable, carried instead of discarded.  `family` is
+      ## `tfProjectDirectory` whenever the target was a directory at all, so
+      ## `specific.len == 0` with that family means "a directory carrying no
+      ## manifest this build knows", which is a different fact from "not a
+      ## directory" (`tfUnknown`, the zero value of the field).
+    folderKindAmbiguity*: seq[string]
+      ## Non-empty when the directory's manifests named two different
+      ## languages: `lang` is then `LangUnknown` because there were too MANY
+      ## answers, not because there were none (rule K2).
 
 proc configuredRecognitionBackend*(): RecognitionBackend =
   ## Resolve the recognizer from the user's configuration.
@@ -290,9 +449,24 @@ proc detectTarget*(program: string,
   let isFolder = dirExists(program)
 
   if isFolder:
-    let folderLang = detectFolderLang(program)
-    if folderLang != LangUnknown:
-      return DetectedTarget(lang: folderLang, recognitionRan: false)
+    # LRS-2P: the folder is ASSESSED, and the assessment's kind is carried
+    # forward.  `detectFolderLang` used to return a `Lang` and nothing else,
+    # so the kind -- the fact that decides whether to build before recording
+    # -- was recomputed later or lost.
+    let folder = assessFolder(program)
+    if folder.ambiguity.len > 0:
+      # Two manifests naming two languages.  Refuse here rather than
+      # delegating to a recognizer that reads object bytes and cannot answer a
+      # manifest question anyway; `ct record` prints `diagnosticLines` and
+      # stops.  Before LRS-2P this directory silently became whichever
+      # language the `elif` ladder reached first.
+      return DetectedTarget(
+        lang: LangUnknown, recognitionRan: false, folderKind: folder.kind,
+        folderKindAmbiguity: folder.ambiguity,
+        diagnosticLines: folderAmbiguityLines(program, folder))
+    if folder.lang != LangUnknown:
+      return DetectedTarget(lang: folder.lang, recognitionRan: false,
+                            folderKind: folder.kind)
 
   if not isFolder and "." in filename:
     let extensionLang = detectLangFromPath(filename)
@@ -320,7 +494,30 @@ proc detectTarget*(program: string,
       else: none(Recognition),
     diagnosticLines: decision.lines)
 
+  # LRS-2P: the embedded assessment's kind, resolved against the vocabulary
+  # this build actually has code for (rule K2).  This is where a version-
+  # skewed pair becomes visible instead of silent, and it runs on the real
+  # delegation -- not only in a test -- because that is the only place the
+  # skew can happen.
+  if outcome.status == rsOk and outcome.recognition.assessmentComputed:
+    let verdict = outcome.recognition.assessment.kind.understand(
+      UnderstoodSpecificKinds, outcome.recognition.assessment.producer)
+    if verdict.diagnostic.len > 0:
+      # Non-empty for every outcome that is not an exact, undegraded match:
+      # a degradation to the family, an ambiguity, or a K4 refusal.  Printing
+      # it is not optional -- that is the "never silently" half of design 9.3.
+      stderr.writeLine(
+        (if verdict.ok: "note: " else: "error: ") & verdict.diagnostic)
+    if not verdict.ok:
+      quit(1)
+
   case decision.kind
+  of rdProtocolError:
+    # Rule K3.  The assessment's vocabulary could not be read, so nothing
+    # about this target may be acted on.
+    for line in decision.lines:
+      stderr.writeLine(line)
+    quit(1)
   of rdAmbiguous:
     # Design rule C2 / `record.md`'s standing "never a silent pick": the
     # recognizer could not decide between two equally-supported languages, so
