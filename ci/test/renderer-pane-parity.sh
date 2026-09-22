@@ -122,7 +122,7 @@ bad() {
 #               shape `capabilities.undeclaredDegradations` and
 #               `web_deployment.undeclaredAbsences` both reject.
 #
-# ALL 33 ARE `both` TODAY, and that is a measured fact rather than an
+# ALL 36 ARE `both` TODAY, and that is a measured fact rather than an
 # aspiration: `makeComponent` carries no `when defined` branch, and every
 # module implementing a constructor compiles under `-d:ctWeb`. The kind
 # `desktoponly` therefore has no members — it exists so that the first pane to
@@ -138,6 +138,15 @@ kind_for() {
 	AgentActivity | AgentWorkspace | CaptionBarProgress) echo "both" ;;
 	PixelHistory | ShaderDebug | VideoPlayer) echo "both" ;;
 	AgentActivityDeepReview | RequestPanel | VCS | UnifiedDiff) echo "both" ;;
+	# Added 2026-09-22. These three were dispatched by `makeComponent` and
+	# absent from this budget, so THIS GATE WAS RED IN CI — it is wired at
+	# `.github/workflows/codetracer.yml` via `just test-renderer-pane-parity`.
+	# They are `both` rather than `desktoponly` because that is this
+	# budget's own default and the measured fact above still holds:
+	# `makeComponent` carries no `when defined` branch for any of them.
+	# Claiming `desktoponly` would require naming a capability the web
+	# profile lacks, and there is no evidence any of the three does.
+	Constraints | TestResults | Verification) echo "both" ;;
 	*) echo "unlisted" ;;
 	esac
 }

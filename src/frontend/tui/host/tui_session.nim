@@ -258,6 +258,25 @@ proc learnExtent*(s: TuiSession) =
   s.bounds = resolveBounds(s.timeline, rows, s.maxRRTicks)
   s.mutations = mutationTicks(rows)
   try:
+    # **ASK BEFORE READING.** `getCalltraceLines` reads `store.calltrace.lines`
+    # and `requestAndLoadCalltrace` is what fills it — and until this line was
+    # written, NOTHING in any front-end called the filler. Measured: every
+    # caller of `requestAndLoadCalltrace` in the tree was under `tests/`, so
+    # `getCalltraceLines()` returned an empty sequence on every real run and
+    # `callBoundaries` was silently always `@[]`. The `except` arm below hid
+    # it further, because "empty because nothing asked" and "empty because the
+    # request failed" produced the same value.
+    #
+    # This is the campaign's signature defect — *the mechanism works and
+    # nothing feeds it* — which PLAT-23 recorded at least eight times and
+    # priced at *"one change, a producer plus a call site"*. The producer
+    # already existed; this is the call site.
+    #
+    # Issued for its EFFECT, exactly as `loadedEventRows` issues
+    # `requestAndLoadEventLog`: the request decodes into the store, and the
+    # store is the one place the lines live. A second decoder here would make
+    # the terminal an independent reader of the same payload.
+    s.session.requestAndLoadCalltrace(height = CalltraceLevels, depth = 200)
     s.callBoundaries = boundariesFromCalltrace(s.session.getCalltraceLines())
   except CatchableError:
     s.callBoundaries = @[]

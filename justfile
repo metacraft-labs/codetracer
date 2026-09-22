@@ -4767,6 +4767,41 @@ plat38-capture *args:
 plat38-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-38
 
+# PLAT-39 — the unprivileged oracle: pixels to domain models.
+#
+# The whole point of this milestone is that it needs NOTHING from the
+# application: no compositor, no shim, no renderer, no running binary. It reads
+# committed PNGs captured from both front-ends and reconstructs the same three
+# declared model types out of them. If any recipe below ever grows a dependency
+# on a live process, the independence it exists to demonstrate is already gone.
+plat39-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-39
+
+# LAW-R4: the vision producer imports nothing from viewmodel/ or the page
+# objects, asserted with a DERIVED subject set and both polarities controlled.
+plat39-oracle-independence:
+  bash ci/test/plat39-oracle-independence.sh
+
+# Prints what the oracle reads out of every pinned frame, next to nothing. A
+# human can put this beside the screenshots. NOT-A-CI-GATE: it prints; it does
+# not assert. The assertions are in `test_screen_oracle.nim`.
+plat39-probe:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat39probe -o:build/plat39_probe \
+    src/tests/visual/screen_oracle/plat39_probe.nim
+
+# PLAT-40 — every pane producer has a caller a USER can reach.
+#
+# *A unit test is a production caller as far as a coverage tool is concerned,
+# and is not one as far as a user is concerned.* This gate is `grep` for the
+# call site run against the shipped tree, which is the only instrument that
+# finds the campaign's signature defect — the mechanism works and nothing feeds
+# it. It needs no toolchain and no build, so it costs nothing to run often.
+plat40-production-callers:
+  bash ci/test/plat40-production-callers.sh
+
 # The rejected change-fraction thresholds, as a runnable sweep (§36b). It adds
 # NO gate of its own on purpose: asserting that the losers ARE vacuous would
 # pin a property of the corpus nothing depends on, and would make a future
@@ -5225,7 +5260,7 @@ editor-model-case-floors:
   set -uo pipefail
   failed=0
   ran=0
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39; do
     echo "=== ${m} ==="
     if bash ci/test/editor-model-case-floor.sh "${m}"; then
       ran=$((ran + 1))

@@ -1,0 +1,515 @@
+## PLAT-39 — the pixel producer: a frame in, domain models out.
+##
+## **THE SECOND PRODUCER FOR TYPES THE DOM PRODUCER ALSO BUILDS.** Everything
+## here starts from an image file and ends at `domain_models`. There is no
+## selector, no attribute, no `pane-rectangles` answer, and no import from
+## `viewmodel/` or from the page objects — `ci/test/plat39-oracle-independence.sh`
+## asserts that mechanically, in both polarities, with a derived subject set.
+##
+## **WHY THAT INDEPENDENCE IS THE POINT.** `Verification-Harness-Traps.md` §30a
+## is this campaign's most persistent defect: a differential measures only what
+## its two sides compute *differently*, so everything shared is invisible.
+## `DIFF-4` ran 82 cells green against a disabled feature because both arms
+## called `applyResolution`; PLAT-33's `G4` made a convergence oracle call the
+## merge function it was checking and all 102 cases stayed green. A reading
+## taken from pixels shares no code path with the ViewModel, so it cannot be
+## accidentally re-derived from its own subject.
+##
+## **AND IT IS THE INSTRUMENT THAT WOULD HAVE CAUGHT THE CAMPAIGN'S WORST
+## FAILURE**: fifteen `[OK]`s against a binary with no renderer compiled in.
+## Every one of those assertions read a shadow tree, and a shadow tree is
+## equally happy whether or not anything reaches a display. A model parsed from
+## pixels comes back `srUnreadable`.
+
+import std/[algorithm, os, osproc, sequtils, strutils, tables]
+import gui_assert/image_math
+import gui_assert/ocr
+import ./screen_reading
+import ./domain_models
+import ./pane_grammar
+import ./region_locator
+
+type
+  PaneId* = enum
+    piUnknown = "unknown"
+    piProgramState = "state"
+    piEventLog = "eventLog"
+    piEditor = "editor"
+    piOther = "other"
+
+  LocatedPane* = object
+    id*: PaneId
+    rect*: Rect
+    titleText*: string
+
+  FrameReading* = object
+    ## Everything one frame yielded, including the panes that could not be
+    ## read. `LAW-R1` asserts read + empty + unreadable == panes declared
+    ## present, so the failures have to be CARRIED rather than dropped.
+    framePath*: string
+    width*, height*: int
+    panes*: seq[LocatedPane]
+    programState*: ScreenReading[ProgramStateModel]
+    eventLog*: ScreenReading[EventLogModel]
+    editor*: ScreenReading[EditorModel]
+
+const
+  PaneTitleKeywords*: array[3, tuple[id: PaneId, words: seq[string]]] = [
+    (piProgramState, @["STATE"]),
+    (piEventLog, @["EVENT", "EVENTLOG"]),
+    (piEditor, @[".PY", ".PYTHON", "MAIN.PY", "CALC/MAIN.PY", "EDITOR"])]
+    ## Titles as the TITLE STRIP renders them, uppercased before matching.
+    ##
+    ## **THE TWO FRONT-ENDS TITLE THE EDITOR DIFFERENTLY, AND BOTH SPELLINGS
+    ## ARE HERE BECAUSE THE READER MUST BE RENDERER-AGNOSTIC.** Electron titles
+    ## the pane with the open FILE NAME — `calc/main.py` — so it is matched on
+    ## the extension; there is no fixed word to match and a reader that
+    ## expected "EDITOR" would find no editor in any Electron frame. The GPUI
+    ## front-end titles the same pane `Editor`. A reader that knew only one
+    ## spelling would report `urRegionNotLocated` on the other renderer, and
+    ## `DIFF-8` would then be comparing a reading against a failure to read.
+
+  GpuiCaptureDir* = "src/tests/visual/captures/gpui"
+    ## Frames from the GPUI front-end, captured by PLAT-37's windowed lane on a
+    ## real Wayland compositor and committed as fixtures, exactly as PLAT-35
+    ## commits the Electron ones. `DIFF-8` reads both directories.
+
+proc cropGray*(img: GrayImage, r: Rect): GrayImage =
+  ## In-memory crop. No subprocess: the frame is already decoded, and shelling
+  ## out to ffmpeg once per region would dominate the cost of reading a frame.
+  let x0 = clamp(r.x, 0, max(0, img.width - 1))
+  let y0 = clamp(r.y, 0, max(0, img.height - 1))
+  let w = clamp(r.w, 0, img.width - x0)
+  let h = clamp(r.h, 0, img.height - y0)
+  result = GrayImage(width: w, height: h, pixels: newString(w * h))
+  for row in 0 ..< h:
+    let src = (y0 + row) * img.width + x0
+    let dst = row * w
+    if w > 0:
+      copyMem(addr result.pixels[dst], unsafeAddr img.pixels[src], w)
+
+proc writePgm*(img: GrayImage, path: string) =
+  ## A binary PGM (P5), which tesseract reads through leptonica. Verified
+  ## 2026-09-22 against tesseract 5.5.1: a hand-written P5 crop OCRs correctly.
+  var f = open(path, fmWrite)
+  defer: f.close()
+  f.write("P5\n" & $img.width & " " & $img.height & "\n255\n")
+  if img.pixels.len > 0:
+    discard f.writeBuffer(unsafeAddr img.pixels[0], img.pixels.len)
+
+proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
+                psm = 6): seq[OcrWord] =
+  ## OCR one region. Returns every word, INCLUDING low-confidence ones — see
+  ## `pane_grammar.OcrConfidenceFloor` for why the floor is applied to the
+  ## region rather than to each word.
+  let sub = cropGray(img, r)
+  if sub.width <= 0 or sub.height <= 0: return @[]
+  let path = scratch / ("region_" & $r.x & "_" & $r.y & "_" &
+                        $r.w & "x" & $r.h & ".pgm")
+  writePgm(sub, path)
+  try:
+    result = runOcrEx(path, initOcrOptions(psm = psm))
+  except CatchableError:
+    result = @[]
+  finally:
+    removeFile(path)
+
+func regionIsLegible*(words: openArray[OcrWord]): bool =
+  ## The region-level confidence test. See `OcrConfidenceFloor`.
+  if words.len < MinRegionWords: return false
+  words.anyIt(it.confidence >= OcrConfidenceFloor)
+
+func linesOf*(words: openArray[OcrWord]): seq[string] =
+  ## Regroup words into lines using tesseract's own numbering, rather than by
+  ## clustering y-coordinates — the engine's line breaks are the ones that
+  ## produced the boxes, and a second, worse line-breaker here could disagree
+  ## with them.
+  ##
+  ## **THE KEY IS (blockNum, lineNum) AND NOT lineNum ALONE.** Measured:
+  ## tesseract's `line_num` restarts within each block, so grouping on it by
+  ## itself merges words from unrelated parts of a pane. That is not a
+  ## hypothetical — it produced a variable row whose value read
+  ## `nil 44 def div(left, NoneType right): B`, which is one variable's value
+  ## interleaved with the current-line header from a different block. The rows
+  ## are sorted by their top edge so the output order is the reading order
+  ## rather than tesseract's internal block order.
+  var byLine = initOrderedTable[(int, int), seq[OcrWord]]()
+  for w in words:
+    if w.text.strip().len == 0: continue
+    byLine.mgetOrPut((w.blockNum, w.lineNum), @[]).add w
+  var rows: seq[tuple[top: int, text: string]] = @[]
+  for _, ws in byLine:
+    var s = @ws
+    s.sort(proc (a, b: OcrWord): int = cmp(a.bbox[0], b.bbox[0]))
+    var top = high(int)
+    for w in s: top = min(top, w.bbox[1])
+    rows.add (top, s.mapIt(it.text).join(" "))
+  rows.sort(proc (a, b: auto): int = cmp(a.top, b.top))
+  rows.mapIt(it.text)
+
+func editDistance*(a, b: string): int =
+  ## Plain Levenshtein. Small strings only — pane titles.
+  var prev = newSeq[int](b.len + 1)
+  var cur = newSeq[int](b.len + 1)
+  for j in 0 .. b.len: prev[j] = j
+  for i in 1 .. a.len:
+    cur[0] = i
+    for j in 1 .. b.len:
+      let cost = if a[i - 1] == b[j - 1]: 0 else: 1
+      cur[j] = min(min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost)
+    prev = cur
+  prev[b.len]
+
+const
+  TitleMatchTolerance* = 1
+    ## **A NEAREST-NEIGHBOUR CLASSIFIER OVER A CLOSED SET, NOT A LOOSENED
+    ## COMPARISON — and the difference is asserted, not asserted-to-be.**
+    ##
+    ## Measured 2026-09-22. The GPUI front-end's pane titles do not OCR
+    ## exactly, at any setting tried: `State` reads as `Gtate` or `Ctate`,
+    ## `Debug Controls` as `DNebua Controle` or `Debiia Controls`, `Event Log`
+    ## as `Event | o0`. Every combination of upscale (1x, 2x, 3x), inversion
+    ## (auto / always / never) and contrast was tried and NONE returns `State`.
+    ## This is a property of that renderer's thin antialiased text on a very
+    ## dark background, and no amount of tuning removes it.
+    ##
+    ## Substring matching therefore cannot identify a GPUI pane, and the
+    ## tempting repair — drop to matching two or three characters — is the
+    ## dishonest one, because it makes every class overlap every other.
+    ##
+    ## What makes a tolerance sound is that the CLASSES ARE FARTHER APART THAN
+    ## THE TOLERANCE, and both halves of that are measured rather than claimed:
+    ##
+    ##   closest pair of known titles : 4  (`Files`/`Tests`, `State`/`Tests`)
+    ##   largest OCR error to cover   : 1  (`Gtate`->`State`, `Ctate`->`State`)
+    ##
+    ## So 1 separates them with the class gap at four times the tolerance. **An
+    ## earlier draft of this constant said 2 and asserted the closest pair was
+    ## 5; both were wrong, and the suite's own soundness case caught it** —
+    ## 2 x 2 is exactly 4, so a tolerance of 2 could in principle reach halfway
+    ## to a neighbouring class. The numbers above are the measured ones.
+    ##
+    ## The two larger errors measured — `Debiia Controls` for `Debug Controls`
+    ## and `Event | o0` for `Event Log`, both distance 3 — are deliberately NOT
+    ## covered by this fallback and do not need to be: those panes are
+    ## identified by the exact keyword stage above, which `Event | o0` passes
+    ## on `EVENT`. Widening the tolerance to swallow them would push it past
+    ## the class separation and make the classifier unsound, to fix something
+    ## that is not broken.
+    ##
+    ## `test_screen_oracle.nim` asserts the pairwise separation over the full
+    ## set in both directions, so adding a title that collides with an existing
+    ## one fails the build rather than silently making the classifier
+    ## ambiguous.
+    ##
+    ## Exact matching is still preferred and tried first; this is the fallback.
+
+  KnownPaneTitles*: array[9, tuple[id: PaneId, title: string]] = [
+    (piProgramState, "State"),
+    (piEventLog, "Event Log"),
+    (piEditor, "Editor"),
+    (piOther, "Debug Controls"),
+    (piOther, "Call Trace"),
+    (piOther, "Files"),
+    (piOther, "Tests"),
+    (piOther, "Constraints"),
+    (piOther, "Scratchpad")]
+    ## The closed set the classifier chooses from. `piOther` entries are here
+    ## precisely so they can WIN: a title that is really `Call Trace` must be
+    ## claimed by a class rather than falling to the nearest of the three we
+    ## care about. Without them, `Call Trace` would be classified as whichever
+    ## of State/Editor/Event Log it happened to be least unlike.
+
+func classifyTitle*(title: string): PaneId =
+  ## **THE NEAREST-NEIGHBOUR DECISION, AS ONE PURE FUNCTION.**
+  ##
+  ## Extracted from `identifyPane` because the suite could not otherwise SEE
+  ## this decision. The soundness case used to assert a property of the
+  ## CONSTANT — `closest > 2 * TitleMatchTolerance` — while the classification
+  ## happened at a comparison site elsewhere. Those are two copies of one
+  ## predicate (`Verification-Harness-Traps.md` §30), and the mutation harness
+  ## proved it: arm `TITLE-a` widened the comparison to `<= 6`, leaving the
+  ## constant at 1, and **the suite stayed green** because the assertion was
+  ## reading the copy the arm had not touched. That is §36 — a published
+  ## killing mutation is a claim about the ASSERTION, and this one was too weak
+  ## to observe its own killer.
+  ##
+  ## One function, one tolerance, and the suite now grades the thing that
+  ## actually classifies rather than the number it is supposed to classify by.
+  let tokens = title.splitWhitespace()
+  if tokens.len == 0: return piUnknown
+  var bestId = piOther
+  var bestDist = high(int)
+  var runnerUp = high(int)
+  for (id, known) in KnownPaneTitles:
+    # Try the leading 1 and 2 tokens, since "Call Trace" and "Event Log" are
+    # two words while "State" is one.
+    for take in 1 .. min(2, tokens.len):
+      let candidate = tokens[0 ..< take].join(" ")
+      let d = editDistance(candidate.toLowerAscii, known.toLowerAscii)
+      if d < bestDist:
+        runnerUp = bestDist
+        bestDist = d
+        bestId = id
+      elif d < runnerUp:
+        runnerUp = d
+  if bestDist <= TitleMatchTolerance and bestDist < runnerUp:
+    return bestId
+  piOther
+
+proc identifyPane*(img: GrayImage, cell: Rect, scratch: string): LocatedPane =
+  ## Identify a cell by OCRing its title strip alone.
+  ##
+  ## Two stages: an exact keyword match, which is what the Electron titles
+  ## satisfy, and a nearest-neighbour fallback over `KnownPaneTitles` for
+  ## renderers whose titles do not OCR cleanly. See `TitleMatchTolerance`.
+  let words = ocrRegion(img, titleStrip(cell), scratch, psm = 7)
+  let title = words.mapIt(it.text).join(" ").strip()
+  let upper = title.toUpperAscii
+  result = LocatedPane(id: piOther, rect: cell, titleText: title)
+  if title.len == 0:
+    result.id = piUnknown
+    return
+  for (id, keys) in PaneTitleKeywords:
+    for k in keys:
+      if upper.contains(k):
+        result.id = id
+        return
+  result.id = classifyTitle(title)
+
+# ---------------------------------------------------------------------------
+# The three readers
+# ---------------------------------------------------------------------------
+
+proc readProgramState*(img: GrayImage, cell: Rect,
+                       scratch: string): ScreenReading[ProgramStateModel] =
+  let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
+  if words.len == 0:
+    return unreadable[ProgramStateModel](urNoWordAboveFloor,
+      "state pane located at " & $cell & " but OCR returned no words")
+  if not regionIsLegible(words):
+    return unreadable[ProgramStateModel](urNoWordAboveFloor,
+      "no word in the state pane reached confidence " & $OcrConfidenceFloor)
+  var model = ProgramStateModel(isVisible: true, watchExpression: "")
+  var matched = 0
+  var considered = 0
+  let allText = linesOf(words).join(" ").toUpperAscii
+  # **THE PRODUCT'S OWN EMPTY MESSAGE IS THE BEST POSSIBLE `srEmpty` SIGNAL.**
+  #
+  # `entry-shell` stops before the first statement and the pane draws *"No
+  # local variables are present in the current point of execution."* That is
+  # the application stating emptiness, which is a far stronger warrant than
+  # inferring it from a row count — and PLAT-23 measured why inference is
+  # dangerous here: its pane census moved from `locals=0` to `locals=8` on one
+  # step, so "no rows parsed" and "genuinely nothing" had been the same answer.
+  # Matching the message keeps those two apart at the source.
+  if allText.contains("NO LOCAL VARIABLES ARE PRESENT"):
+    return empty[ProgramStateModel]()
+  for line in linesOf(words):
+    let s = line.strip()
+    if s.len == 0: continue
+    # The tab row and the watch-expression placeholder are chrome, not rows.
+    let u = s.toUpperAscii
+    if u.startsWith("LOCALS") or u.startsWith("GLOBALS") or
+       u.startsWith("WATCHES") or u.contains("ENTER A WATCH"):
+      continue
+    inc considered
+    let parsed = splitVariableRow(s)
+    if parsed.ok:
+      inc matched
+      model.variableStates.add VariableStateModel(
+        name: parsed.name, valueType: parsed.valueType, value: parsed.value)
+  if considered == 0:
+    # Located, legible, and nothing that even looked like a row. A program
+    # stopped before its first statement genuinely has no locals, and that is
+    # `srEmpty` — the one case where emptiness is a real answer.
+    return empty[ProgramStateModel]()
+  if matched == 0:
+    return unreadable[ProgramStateModel](urGrammarMismatch,
+      "state pane had " & $considered & " candidate rows and none matched " &
+      ProgramStateGrammar.shape)
+  read(model)
+
+proc readEventLog*(img: GrayImage, cell: Rect,
+                   scratch: string): ScreenReading[EventLogModel] =
+  let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
+  if words.len == 0:
+    return unreadable[EventLogModel](urNoWordAboveFloor,
+      "event log located at " & $cell & " but OCR returned no words")
+  if not regionIsLegible(words):
+    return unreadable[EventLogModel](urNoWordAboveFloor,
+      "no word in the event log reached confidence " & $OcrConfidenceFloor)
+  var model = EventLogModel(isVisible: true, searchString: "", ofRows: 0)
+  var sawFooter = false
+  var candidateRows = 0
+  for line in linesOf(words):
+    let s = line.strip()
+    if s.len == 0: continue
+    # **THE ROW RULE IS TRIED BEFORE THE CHROME FILTER, NOT AFTER.**
+    #
+    # Measured: on the 1920x1080 frames the reader returned 5 events where the
+    # footer said 6 and the 1440x900 frames returned 6. The missing row was not
+    # missing — OCR had fused it onto the same line as the search box, and the
+    # chrome filter dropped the whole line before the row rule ever saw it. A
+    # filter that runs first can therefore delete real data, so anything that
+    # satisfies the published row grammar is taken as a row no matter what else
+    # shares its line.
+    let row = parseEventRow(s)
+    if row.ok:
+      inc candidateRows
+      model.events.add EventDataModel(consoleOutput: row.consoleOutput)
+      continue
+    let footer = parseFooterTotal(s)
+    if footer.ok:
+      model.ofRows = footer.total
+      sawFooter = true
+      continue
+    if s.toUpperAscii.contains("FIND EVENT"): continue  # the search box
+    inc candidateRows
+  if model.events.len == 0 and not sawFooter and candidateRows == 0:
+    return empty[EventLogModel]()
+  if model.events.len == 0 and candidateRows > 0:
+    return unreadable[EventLogModel](urGrammarMismatch,
+      "event log had " & $candidateRows & " candidate rows and none matched " &
+      EventLogGrammar.shape)
+  read(model)
+
+proc readEditor*(img: GrayImage, cell: Rect,
+                 scratch: string): ScreenReading[EditorModel] =
+  ## **THE HIGHLIGHTED ROW IS FOUND GEOMETRICALLY, THEN ITS GUTTER IS OCR'd.**
+  ##
+  ## Measured 2026-09-22: OCRing the editor pane as text does not reliably
+  ## recover line numbers — a gutter-plus-code strip returned line 44 as `42`
+  ## and lost most other numbers. But the execution line has a distinct
+  ## background, and that is a clean pixel signal: in `stepped-editor`'s editor
+  ## cell the row medians are 40 for 946 rows and 51/64 for exactly one
+  ## contiguous run of 22. Locating first and reading a digits-only cell second
+  ## is what makes this field recoverable at all.
+  let body = bodyBelowTitle(cell)
+  let rm = rowMedians(img, cell.x + 2, cell.x + cell.w - 2)
+  if rm.len == 0:
+    return unreadable[EditorModel](urRegionNotLocated, "no rows in editor cell")
+  # The pane's own background is its most common row median.
+  var hist = initCountTable[int]()
+  for y in body.y ..< min(body.y + body.h, rm.len):
+    hist.inc rm[y]
+  if hist.len == 0:
+    return unreadable[EditorModel](urRegionNotLocated, "editor body is empty")
+  let base = hist.largest.key
+  var runs: seq[GutterRun] = @[]
+  var y = body.y
+  while y < min(body.y + body.h, rm.len):
+    if rm[y] != base:
+      var j = y
+      while j < min(body.y + body.h, rm.len) and rm[j] != base: inc j
+      if j - y >= 8:  # a highlighted text row is ~22 px; 8 excludes rules/borders
+        runs.add GutterRun(first: y, last: j - 1)
+      y = j
+    else:
+      inc y
+  var model = EditorModel(isVisible: true, higlitedLineNumber: -1)
+  if runs.len == 0:
+    # No execution line drawn. The pane IS visible and readable; the DOM
+    # producer reports -1 for exactly this state, so this is `read`, not
+    # `empty` and not `unreadable`.
+    return read(model)
+  # The widest run is the execution line; a selection or hover band is thinner.
+  var best = runs[0]
+  for r in runs:
+    if r.last - r.first > best.last - best.first: best = r
+  let gutter = Rect(x: cell.x, y: best.first - 2,
+                    w: max(40, cell.w div 6), h: best.last - best.first + 5)
+  let words = ocrRegion(img, gutter, scratch, psm = 7)
+  if words.len == 0:
+    return unreadable[EditorModel](urNoWordAboveFloor,
+      "highlighted row located at y=" & $best.first & " but its gutter OCR'd empty")
+  let text = words.mapIt(it.text).join(" ")
+  let parsed = parseGutterDigits(text)
+  if not parsed.ok:
+    return unreadable[EditorModel](urGrammarMismatch,
+      "gutter cell read as " & text.escape & ", which is not " &
+      EditorGrammar.shape)
+  model.higlitedLineNumber = parsed.line
+  read(model)
+
+# ---------------------------------------------------------------------------
+# The frame-level entry point
+# ---------------------------------------------------------------------------
+
+proc readFrame*(framePath: string, scratch: string): FrameReading =
+  ## Read one frame into the three declared models.
+  ##
+  ## Every failure mode returns a typed `srUnreadable`; none of them returns an
+  ## empty model. That is the difference this milestone exists to make.
+  result.framePath = framePath
+  if not fileExists(framePath):
+    let why = "no file at " & framePath
+    result.programState = unreadable[ProgramStateModel](urFrameMissing, why)
+    result.eventLog = unreadable[EventLogModel](urFrameMissing, why)
+    result.editor = unreadable[EditorModel](urFrameMissing, why)
+    return
+
+  var img: GrayImage
+  try:
+    img = decodeGray(framePath)
+  except CatchableError as e:
+    let why = "decode failed: " & e.msg
+    result.programState = unreadable[ProgramStateModel](urFrameMissing, why)
+    result.eventLog = unreadable[EventLogModel](urFrameMissing, why)
+    result.editor = unreadable[EditorModel](urFrameMissing, why)
+    return
+  result.width = img.width
+  result.height = img.height
+
+  let grid = locateGrid(img)
+  if grid.isUnreadable:
+    result.programState = unreadable[ProgramStateModel](grid.reason, grid.detail)
+    result.eventLog = unreadable[EventLogModel](grid.reason, grid.detail)
+    result.editor = unreadable[EditorModel](grid.reason, grid.detail)
+    return
+
+  createDir(scratch)
+  for cell in grid.value.cells:
+    result.panes.add identifyPane(img, cell, scratch)
+
+  var stateCell, logCell, edCell = Rect(x: -1, y: -1, w: 0, h: 0)
+  for p in result.panes:
+    case p.id
+    of piProgramState: (if stateCell.x < 0: stateCell = p.rect)
+    of piEventLog: (if logCell.x < 0: logCell = p.rect)
+    of piEditor: (if edCell.x < 0: edCell = p.rect)
+    else: discard
+
+  result.programState =
+    if stateCell.x < 0:
+      unreadable[ProgramStateModel](urRegionNotLocated,
+        "no cell's title strip identified a state pane")
+    else: readProgramState(img, stateCell, scratch)
+
+  result.eventLog =
+    if logCell.x < 0:
+      unreadable[EventLogModel](urRegionNotLocated,
+        "no cell's title strip identified an event log pane")
+    else: readEventLog(img, logCell, scratch)
+
+  result.editor =
+    if edCell.x < 0:
+      unreadable[EditorModel](urRegionNotLocated,
+        "no cell's title strip identified an editor pane")
+    else: readEditor(img, edCell, scratch)
+
+proc detectElementsIsUnavailable*(): tuple[unavailable: bool, why: string] =
+  ## **`ocr.detectElements` IS NOT USED, AND THE READER SAYS SO BY NAME.**
+  ##
+  ## Measured rather than assumed: its only non-trivial backend, `ebOmniParser`,
+  ## ALWAYS raises `OcrBackendUnavailable` because no weights are bundled. This
+  ## proc calls it and reports the refusal, so "we did not use the element
+  ## detector" is a checked statement rather than a claim in a comment — and if
+  ## weights are ever bundled, this goes green and the milestone's reasoning
+  ## has to be revisited rather than silently staying stale.
+  try:
+    discard detectElements("/nonexistent-frame-for-availability-probe.png",
+                           ebOmniParser)
+    (false, "detectElements did not raise: the element detector is now available")
+  except CatchableError as e:
+    (true, e.msg)

@@ -463,9 +463,53 @@ PLAT-38)
 	)")
 	LAW_SUITES=()
 	;;
+PLAT-39)
+	MILESTONE="** PLAT-39: Screen-to-domain reconstruction"
+	SUITES=(
+		src/tests/visual/screen_oracle/test_screen_oracle.nim
+	)
+	# ONE SUITE, AND IT NEEDS ONLY GuiAssert — no compositor, no shim, no
+	# renderer. That is not a convenience, it is the milestone's whole claim:
+	# the oracle reads COMMITTED PNGs and shares no code path with the
+	# application. If this entry ever needed the `gpui-shell` flags, the
+	# independence it exists to assert would already be gone.
+	#
+	# **THIS ENTRY HAS A PREREQUISITE THAT IS NOT IN THE REPOSITORY, AND SAYS
+	# SO RATHER THAN DISCOVERING IT IN CI.** The six frames under
+	# `src/tests/visual/captures/electron/` are GITIGNORED — `.gitignore`
+	# records PLAT-35's reason, that a committed baseline *"pins whichever run
+	# happened to produce it"*. They exist only where `plat35-capture-electron`
+	# has run, so on a fresh checkout this milestone's suite has nothing to
+	# read and its first case fails BY NAME with that remedy.
+	#
+	# That is deliberate and it is not a skip: a prerequisite that is absent
+	# must be loud. But it does mean this gate is not yet portable, and the
+	# question of whether the captures should be committed is the OWNER'S —
+	# PLAT-35 declined because they would be baselines, while this milestone
+	# uses them as fixtures, which may not carry the same objection.
+	#
+	# **WHAT IT READS, AND WHY THAT IS NOT A MOCK.** The six frames were
+	# captured from the REAL Electron front-end under Xvfb by
+	# `plat35-capture-electron`. A frame is not a mock of a screen; it IS the
+	# screen. The
+	# milestone forbids SYNTHETIC frames — "a reading exercised on an image the
+	# test drew is a test of the drawing" — and the only images this suite
+	# draws itself are the deliberately BLANK controls for `LAW-R3`, whose
+	# entire content is the absence of content.
+	#
+	# NO `LAW_SUITES`, for the reason PLAT-30 … PLAT-38 each record:
+	# `Editor-Model-Conformance-Suite.md` §3 publishes `LAW-A` … `LAW-X` and
+	# none of them is PLAT-39's. Its laws — `LAW-R1` … `LAW-R6` — are published
+	# in its own milestone section and asserted inside the suite. Pointing
+	# `LAW_PREFIX` at a table that does not contain them would make this gate
+	# parse nothing, and a parser that matches nothing satisfies everything
+	# written over it (traps §4).
+	SUITE_FLAGS=("--path:../GuiAssert/src")
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-38. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-39. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1
