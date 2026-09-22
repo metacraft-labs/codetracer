@@ -80,6 +80,12 @@ import viewmodels/state_vm
 import viewmodels/calltrace_vm
 import viewmodels/event_log_vm
 import viewmodels/point_list_vm
+# PLAT-41 — the five newly expressed panes' ViewModels.
+import viewmodels/debug_controls_vm
+import viewmodels/flow_vm
+import viewmodels/search_vm
+import viewmodels/scratchpad_vm
+import viewmodels/shell_vm
 
 import headless_app/layout_model
 
@@ -108,13 +114,42 @@ type
 
 const
   PaneVocabularyPanes*: set[PaneKind] = {paneState, paneCalltrace,
-                                         paneEventLog, panePointList}
-    ## The panes PLAT-21 expresses in the vocabulary. A CLOSED SET a test
-    ## asserts, not a list a reader infers from which procs exist.
+                                         paneEventLog, panePointList,
+                                         # PLAT-41 adds five.
+                                         paneDebugControls, paneFlow,
+                                         paneSearch, paneScratchpad, paneShell}
+    ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
+    ## a list a reader infers from which procs exist.
 
-  PaneNativePanes*: set[PaneKind] = {paneEditor}
+  PaneNativePanes*: set[PaneKind] = {paneEditor,
+                                     # PLAT-41 adds the second one.
+                                     paneTimeline}
     ## The panes that are native views. See the header: this is PLAT-3's
-    ## admission decision applied, not a shortcut.
+    ## admission decision applied, not a shortcut. Both members are refused BY
+    ## NAME in `admission.Rejections` — "Editor" and "Timeline / scrubber" —
+    ## so this set is that table's consequence rather than a preference.
+
+  PaneAcceptedExceptions*: set[PaneKind] = {paneFileTree, paneBuildOutput}
+    ## **Panes this front-end deliberately does not draw, with the reason
+    ## recorded at the dispatch arm.**
+    ##
+    ## A set rather than a comment so the claim is ASSERTABLE: PLAT-23 warns
+    ## that an accepted exception *"must not become a way to close the gate
+    ## without drawing anything"*, and the guard against that is a member here
+    ## having to be justified out loud and counted against `PaneKind`, not a
+    ## reader trusting that somebody thought about it.
+    ##
+    ## Both are edit-mode panes whose subject is the working tree, and the only
+    ## session in scope is a replay one. See the dispatch arm.
+
+  PaneAccountedFor*: set[PaneKind] =
+    PaneVocabularyPanes + PaneNativePanes + PaneAcceptedExceptions
+    ## **The identity PLAT-41 owes: every pane is in exactly one of the three.**
+    ##
+    ## Asserted in both directions against `PaneKind` — that this covers the
+    ## enum, and that the three sets are pairwise disjoint. A pane in two of
+    ## them would mean two answers to one question, and a pane in none would be
+    ## the silent omission the accepted-exception rule exists to prevent.
 
   MaxTreeRows* = 200
     ## How many variables the state pane's tree offers at once.
@@ -317,6 +352,217 @@ proc tracepointsPaneView*(vm: PointListVM): PaneView =
   result.root = viewList("pointList", options, highlight = highlight)
   result.entries = entriesOf(result.root)
 
+# ===========================================================================
+# PLAT-41 — the eight panes that had no view
+# ===========================================================================
+#
+# **THE EIGHT DO NOT ALL GET THE SAME ANSWER, AND THAT IS THE MILESTONE'S
+# WHOLE CONTENT.** Splitting them three ways is not a shortcut around writing
+# eight views; it is what PLAT-3's own recorded decisions require, and writing
+# eight vocabulary trees would have overturned two of them silently.
+#
+#   5 expressed here   debugControls, flow, search, scratchpad, shell
+#   1 native escape    timeline  — PLAT-3 REJECTED "Timeline / scrubber" BY NAME
+#   2 accepted except. fileTree, buildOutput — no replay ViewModel, by decision
+#
+# **WHY TIMELINE IS NOT A VOCABULARY TREE.** `admission.Rejections` refuses
+# "Timeline / scrubber" in the same table that refuses the editor, and for a
+# reason that does not soften: *"a scrubber's contract is continuous position
+# within a range, and its usefulness is its resolution. A terminal's resolution
+# is the number of columns it has; a pointer's is the number of pixels. An
+# abstraction over both would have to pick one and lie to the other."* It even
+# names the two implementations that exist deliberately —
+# `tui/app/views/timeline_bar.nim` and `viewmodel/views/isonim_timeline_view.nim`.
+# A `ProgressIndicator` here would be exactly the lie that table forbids: it
+# would answer "position within a range" and drop the resolution, and every
+# medium would read it as a scrubber it is not.
+#
+# **WHY DEBUG CONTROLS *IS* ONE, THOUGH "Toolbar / status bar" IS ALSO
+# REJECTED.** That rejection refuses admitting a TOOLBAR ENTRY, and its own
+# words are the reason this pane is fine without one: a toolbar is *"a
+# container of Buttons and Texts with a position, and position is the
+# layout's"*. `Button` and `Text` are both already in the vocabulary, and the
+# position stays PLAT-4's. So this view adds no entry — it uses two that exist.
+# Rendering the pane is not the same act as admitting a word for the pane.
+
+proc debugControlsPaneView*(vm: DebugControlsVM): PaneView =
+  ## The debugger's controls: a `Tree` of `Button`s and one `Text`.
+  ##
+  ## **THIS IS THE PANE PLAT-37's FRAME SHOWED AS AN APOLOGY.** Its captured
+  ## window read *"the debugControls pane is not yet expressed in PLAT-3's
+  ## vocabulary"*, which was true and is the sentence this proc deletes.
+  ##
+  ## Availability is read from the ViewModel's own memos rather than recomputed:
+  ## `canStepForward` and friends already answer whether an operation is legal
+  ## at this stop, so a `Button` carries `disabled` from them and every medium's
+  ## focus order skips an illegal control without any pane knowing why. A view
+  ## that re-derived "can I step" would be a second opinion about a question the
+  ## ViewModel already answers (§30).
+  result.pane = paneDebugControls
+  if vm.isNil:
+    result.report = "the debug controls have no ViewModel; the session has " &
+                    "not launched"
+    result.root = viewText("debugControls.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children: seq[ViewNode] = @[]
+  children.add viewButton("debugControls.stepBackward", "Step back",
+                          disabled = not vm.canStepBackward.val)
+  children.add viewButton("debugControls.stepForward", "Step forward",
+                          disabled = not vm.canStepForward.val)
+  children.add viewButton("debugControls.reverseContinue", "Reverse continue",
+                          disabled = not vm.canReverseContinue.val)
+  children.add viewButton("debugControls.continue", "Continue",
+                          disabled = not vm.canContinue.val)
+  children.add viewText("debugControls.status", vm.statusText.val)
+  result.root = viewTreeNode("debugControls", "Debug controls", children)
+  result.entries = entriesOf(result.root)
+
+proc flowPaneView*(vm: FlowVM): PaneView =
+  ## Flow: a `Table`, one row per recorded step.
+  ##
+  ## A `Table` because a flow step is four fields the reader compares across
+  ## rows — where it was, what it evaluated, and the value before and after —
+  ## and comparing down a column is the whole point of the pane.
+  ##
+  ## `loadingState` is consulted BEFORE the row count, and the order matters:
+  ## "still loading" and "loaded, and there is nothing" are different facts and
+  ## a pane that reported both as "no steps" would be the two-empties collapse
+  ## PLAT-23 measured (`locals=0` and `locals=8` on one step).
+  result.pane = paneFlow
+  if vm.isNil:
+    result.report = "flow has no ViewModel; the session has not launched"
+    result.root = viewText("flow.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let steps = vm.steps.val
+  if steps.len == 0:
+    result.report =
+      if vm.loadingState.val == lsLoading: "flow is still loading"
+      else: "no flow steps have been loaded"
+    result.root = viewText("flow.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var cells: seq[seq[string]] = @[]
+  for s in steps:
+    cells.add @[$s.step, s.location, s.expression, s.beforeValue, s.afterValue]
+  let table = viewTable("flow",
+    @["step", "location", "expression", "before", "after"], cells)
+  let hovered = vm.hoveredStep.val
+  if hovered.isSome and hovered.get >= 0 and hovered.get < cells.len:
+    table.cursor = hovered.get
+  result.root = table
+  result.entries = entriesOf(result.root)
+
+proc searchPaneView*(vm: SearchVM): PaneView =
+  ## Search: a `Tree` of the query `Input` and a `List` of results.
+  ##
+  ## The query is an `Input` rather than a `Text` because it is the pane's
+  ## editable state — `SearchVM.query` is a `Signal[string]` a reader types
+  ## into — and the vocabulary distinguishes a reading from a control. A result
+  ## is a `ViewOption`, which is (identity, label, availability): the identity
+  ## is what a caller acts on, so a medium does not have to parse the label
+  ## back into a location.
+  result.pane = paneSearch
+  if vm.isNil:
+    result.report = "search has no ViewModel; the session has not launched"
+    result.root = viewText("search.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children: seq[ViewNode] = @[]
+  children.add viewInput("search.query", vm.query.val)
+  var options: seq[ViewOption] = @[]
+  for i, r in vm.results.val:
+    options.add ViewOption(id: "search.result." & $i,
+                           label: (if r.detail.len > 0: r.label & " — " & r.detail
+                                   else: r.label))
+  let list = viewList("search.results", options)
+  let sel = vm.selectedResult.val
+  if sel.isSome and sel.get >= 0 and sel.get < options.len:
+    list.cursor = sel.get
+  children.add list
+  result.root = viewTreeNode("search", "Search", children)
+  result.entries = entriesOf(result.root)
+  if options.len == 0:
+    result.report = "no search results"
+
+proc scratchpadPaneView*(vm: ScratchpadVM): PaneView =
+  ## The scratchpad: a `Table` of pinned expressions and their values.
+  ##
+  ## A `Table` rather than a `List` because a pinned value is genuinely two
+  ## fields — the expression a reader pinned and the value it had — and a list
+  ## of "expr = value" strings would make every medium parse the label back
+  ## apart to render two columns.
+  result.pane = paneScratchpad
+  if vm.isNil:
+    result.report = "the scratchpad has no ViewModel; the session has not " &
+                    "launched"
+    result.root = viewText("scratchpad.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let entries = vm.entries.val
+  if entries.len == 0:
+    result.report = "no values have been pinned to the scratchpad"
+    result.root = viewText("scratchpad.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var cells: seq[seq[string]] = @[]
+  for e in entries:
+    cells.add @[e.expression, e.valueText]
+  result.root = viewTable("scratchpad", @["expression", "value"], cells)
+  result.entries = entriesOf(result.root)
+
+proc shellPaneView*(vm: ShellVM): PaneView =
+  ## The shell: a `Tree` of the input `Input` and a `List` of history.
+  ##
+  ## **IT IS HISTORY AND NOT A TRANSCRIPT, BECAUSE THAT IS WHAT THE VIEWMODEL
+  ## HAS.** `ShellVM` carries `inputBuffer`, `inputHistory`, `historyIndex` and
+  ## `scrollPosition` — and no output. A view that drew an output pane would be
+  ## drawing a field nothing fills, which is the well-formed apology this
+  ## milestone exists to delete, one level further in. The absence is recorded
+  ## in `result.report` rather than papered over with an empty box.
+  result.pane = paneShell
+  if vm.isNil:
+    result.report = "the shell has no ViewModel; the session has not launched"
+    result.root = viewText("shell.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children: seq[ViewNode] = @[]
+  children.add viewInput("shell.input", vm.inputBuffer.val)
+  var options: seq[ViewOption] = @[]
+  for i, h in vm.inputHistory.val:
+    options.add ViewOption(id: "shell.history." & $i, label: h)
+  let list = viewList("shell.history", options)
+  let idx = vm.historyIndex.val
+  if idx >= 0 and idx < options.len:
+    list.cursor = idx
+  children.add list
+  result.root = viewTreeNode("shell", "Shell", children)
+  result.entries = entriesOf(result.root)
+  result.report = "the shell ViewModel carries input and history and no " &
+                  "output; this pane shows what exists"
+
+# ---------------------------------------------------------------------------
+# Timeline — the SECOND sanctioned native escape
+# ---------------------------------------------------------------------------
+
+proc timelinePaneView*(medium: string): PaneView =
+  ## The timeline, declared for ONE medium. See the PLAT-41 block above.
+  ##
+  ## This is `sourcePaneView`'s shape for `admission.Rejections`' second
+  ## refusal, and it is a deliberate REFUSAL to express rather than a gap:
+  ## `portability.checkPortable` rejects a native escape on purpose, so the
+  ## suite asserts this pane is refused exactly as it asserts the other six are
+  ## portable.
+  result.pane = paneTimeline
+  result.native = medium
+  result.root = nativeEscape("timeline", medium, "timeline")
+  result.entries = entriesOf(result.root)
+  result.report = "the timeline is a native view; PLAT-3's admission test " &
+                  "refused a Timeline/scrubber entry because a scrubber's " &
+                  "usefulness is its resolution and no abstraction over a " &
+                  "column and a pixel can keep both"
+
 # ---------------------------------------------------------------------------
 # Source — the sanctioned native escape
 # ---------------------------------------------------------------------------
@@ -347,17 +593,45 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneEventLog: eventLogPaneView(EventLogVM(vm))
   of panePointList: tracepointsPaneView(PointListVM(vm))
   of paneEditor: sourcePaneView(medium)
-  of paneDebugControls, paneFlow, paneTimeline, paneSearch, paneScratchpad,
-     paneShell, paneFileTree, paneBuildOutput:
-    # NOT YET EXPRESSED, and reported rather than silently empty.
+  # PLAT-41 — five newly expressed.
+  of paneDebugControls: debugControlsPaneView(DebugControlsVM(vm))
+  of paneFlow: flowPaneView(FlowVM(vm))
+  of paneSearch: searchPaneView(SearchVM(vm))
+  of paneScratchpad: scratchpadPaneView(ScratchpadVM(vm))
+  of paneShell: shellPaneView(ShellVM(vm))
+  # PLAT-41 — the second sanctioned native escape.
+  of paneTimeline: timelinePaneView(medium)
+  # PLAT-41 — the two ACCEPTED EXCEPTIONS, named with their reason.
+  of paneFileTree, paneBuildOutput:
+    # **AN ACCEPTED EXCEPTION, NAMED, WITH THE REASON — NOT A SILENT OMISSION.**
     #
-    # PLAT-21's goal names five panes and these eight are not among them. Each
-    # gets a `Text` saying so, which is PLAT-9's degradation rule — the layout
-    # keeps the slot and the front-end renders a report — rather than a blank
-    # region a reader would read as "this pane is broken".
+    # These two are the only `PaneKind` values with no ViewModel, and that is a
+    # DECISION rather than a gap. `headless_app.paneViewModel` has an arm for
+    # them which returns `nil` under a comment in capitals, and the argument it
+    # makes is the one accepted here: a `HeadlessSessionSlot` is a REPLAY
+    # session, while these two are EDIT-MODE panes whose subject is the working
+    # tree. Wiring `FilesystemVM` — which exists — to `paneFileTree` *"would
+    # mean claiming a replay session owns the working tree, which is the
+    # provenance confusion §2's whole table exists to keep apart."*
+    #
+    # PLAT-41 had to either accept that argument or refute it in writing, and
+    # may not quietly wire what that comment refuses. **It is accepted**, for a
+    # reason its own text gives: the panes are not unexpressible and no
+    # vocabulary entry is missing for them — a file tree is a `Tree` and build
+    # output is a `Table` or a `Text`, all of which exist. What is missing is a
+    # SOURCE, and the only source in scope here is the wrong one. Expressing
+    # them from a replay slot would draw a working tree that the session has no
+    # claim to, which is worse than drawing nothing: it would be confidently
+    # wrong rather than visibly absent.
+    #
+    # The remedy is named so this does not read as permanent: an EDIT-MODE
+    # session owns these, and the pane views can be written the day one exists
+    # to ask. Until then the report says which, and `PaneAcceptedExceptions`
+    # below makes the set assertable rather than inferable from this comment.
     PaneView(
       pane: kind,
       root: viewText($kind & ".report",
-        "the " & $kind & " pane is not yet expressed in PLAT-3's vocabulary"),
+        "the " & $kind & " pane is an edit-mode view; a replay session does " &
+        "not own the working tree and will not claim to"),
       entries: {pkText},
-      report: "not expressed in the vocabulary (PLAT-21 covers five panes)")
+      report: "accepted exception: edit-mode pane, no replay-session source")

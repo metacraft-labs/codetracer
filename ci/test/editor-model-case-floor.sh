@@ -507,9 +507,36 @@ PLAT-39)
 	SUITE_FLAGS=("--path:../GuiAssert/src")
 	LAW_SUITES=()
 	;;
+PLAT-41)
+	MILESTONE="** PLAT-41: The eight panes with no view"
+	SUITES=(
+		src/frontend/tui/tests/test_plat41_pane_coverage.nim
+	)
+	# ONE SUITE, AND IT COUNTS ONLY THIS MILESTONE'S OWN CASES.
+	#
+	# PLAT-41 also grew `test_cross_renderer_panes.nim` by 24 assertions —
+	# five panes gained real ViewModels there, the timeline joined the native
+	# escapes, and one flow assertion became a loop over the accepted
+	# exceptions. That suite is NOT listed here and the omission is deliberate:
+	# it is PLAT-21's, its 21 cases are PLAT-21's work, and counting them under
+	# PLAT-41 would be this campaign's own §28b defect — attributing a
+	# measurement to whoever ran it last. The growth is recorded in the
+	# milestone instead.
+	#
+	# It needs the `tui` lane's flags because `pane_views.nim` reaches the
+	# product's ViewModels, and the data-path cases construct five of them over
+	# a mock backend. Read from `ci/lib/test-lane-files.sh` rather than spelled
+	# again here (§30).
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)")
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-39. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-41. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

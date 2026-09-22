@@ -260,6 +260,18 @@ proc vmFor(pane: PaneKind): ViewModel =
   of paneCalltrace: ViewModel(s.calltraceVM)
   of paneEventLog: ViewModel(s.eventLogVM)
   of panePointList: ViewModel(s.pointListVM)
+  # PLAT-41 — the five newly expressed panes get their REAL ViewModels.
+  #
+  # These were `else: nil` until PLAT-41, which was correct while the panes
+  # were unexpressed: a nil VM yields a report tree and the loop below asserted
+  # that a report is portable. Once the panes ARE expressed, leaving them nil
+  # would keep the loop green while checking none of the new work — the
+  # portability claim would be about five apologies rather than five views.
+  of paneDebugControls: ViewModel(s.debugControlsVM)
+  of paneFlow: ViewModel(s.flowVM)
+  of paneSearch: ViewModel(s.searchVM)
+  of paneScratchpad: ViewModel(s.scratchpadVM)
+  of paneShell: ViewModel(s.shellVM)
   else: nil
 
 # ---------------------------------------------------------------------------
@@ -498,7 +510,7 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     ck live.sourceLines[rows[0].line - 1].contains("print(")
     expectCount(13)
 
-  liveTest "four panes are expressible in the vocabulary and the source pane is not":
+  liveTest "the vocabulary panes are expressible and the two native panes are not":
     for pane in PaneVocabularyPanes:
       let pv = paneView(pane, vmFor(pane), GpuiPanelBudget, "gpui")
       let report = checkPortable(pv.root)
@@ -519,11 +531,29 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     ck src.root.nativeView == "editor"
     ck paneEditor in PaneNativePanes
     ck paneEditor notin PaneVocabularyPanes
-    # The panes PLAT-21 does not cover REPORT rather than render blank.
-    let flow = paneView(paneFlow, nil, GpuiPanelBudget, "gpui")
-    ck flow.report.len > 0
-    ck flow.entries == {pkText}
-    expectCount(19)
+    # PLAT-41: the timeline is the SECOND sanctioned escape, refused by name in
+    # `admission.Rejections` for its own reason — a scrubber's usefulness is
+    # its resolution, and no abstraction over a column and a pixel keeps both.
+    let tl = timelinePaneView("gpui")
+    let tlReport = checkPortable(tl.root)
+    ck tlReport.violations.len == 1
+    ck tl.native == "gpui"
+    ck tl.root.nativeView == "timeline"
+    ck paneTimeline in PaneNativePanes
+    ck paneTimeline notin PaneVocabularyPanes
+    # The two ACCEPTED EXCEPTIONS report rather than render blank, and say
+    # WHICH exception they are. PLAT-41 replaced flow here: flow is expressed
+    # now, so asserting it reports would have been asserting the old state.
+    for pane in PaneAcceptedExceptions:
+      let ex = paneView(pane, nil, GpuiPanelBudget, "gpui")
+      ck ex.report.len > 0
+      ck ex.entries == {pkText}
+      ck ex.report.contains("accepted exception")
+    # 43 = the 9 vocabulary panes x 3 assertions each (portable, visited, not
+    # native) + 5 for the source escape + 5 for the timeline escape + the 2
+    # accepted exceptions x 3. It was 19 when the loop covered 4 panes and the
+    # only escape was the source pane; PLAT-41 moved every term.
+    expectCount(43)
 
   liveTest "the entries each pane uses are the ones the module declares":
     publishTracepoints()
@@ -892,7 +922,11 @@ suite "PLAT-21: the session is closed":
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 253
+# 277 = 253 + 24. The 24 is exactly the growth of the expressibility case
+# above (43 - 19): PLAT-41 expressed five more panes, added the timeline as the
+# second native escape, and replaced one flow assertion with a loop over the two
+# accepted exceptions. No other case changed.
+const ExpectedAssertions = 277
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":
