@@ -1,5 +1,5 @@
 import
-  std / [jsffi, jsconsole, asyncjs, strformat],
+  std / [jsffi, jsconsole, asyncjs, strformat, strutils],
   results,
   types, paths, lang,
   lib/[ jslib, electron_lib ],
@@ -66,6 +66,8 @@ import
 proc jsTypeOfLang(trace: JsObject): cstring {.importjs: "(typeof #.lang)".}
 proc jsLangString(trace: JsObject): cstring {.importjs: "(#.lang)".}
 proc jsLangRetiredName(trace: JsObject): cstring {.importjs: "(#.langRetiredName)".}
+proc jsTypeOfApproach(trace: JsObject): cstring {.importjs: "(typeof #.approach)".}
+proc jsApproachString(trace: JsObject): cstring {.importjs: "(#.approach)".}
 
 proc normalizeCalltraceModeJs(trace: JsObject) {.importjs: """
 (function(t) {
@@ -95,6 +97,21 @@ proc normalizeTraceEnums(trace: Trace) =
     if decoded.retiredName.len > 0 and
         (alreadyNamed.isNil or alreadyNamed.len == 0):
       trace.langRetiredName = cstring(decoded.retiredName)
+  # ``Trace.approach`` (LRS-5's second deletion round) crosses this hop as a
+  # NAME for the same reason ``lang`` does -- ``serializesAsTextInJson`` in
+  # ``src/common/trace_index.nim`` -- and needs the same rewrite to the
+  # ordinal ``cast[Trace]`` assumes.  ``parseEnum`` rather than a second
+  # hand-written map, exactly as ``decodeLangName``: the map is what LRS-4
+  # deleted here and it must not come back one field over.  An unknown or
+  # absent value becomes ``raUnknown``, which every reader already handles as
+  # "not a materialized recording".
+  if jsTypeOfApproach(obj) == cstring"string":
+    var approach = raUnknown
+    try:
+      approach = parseEnum[RecordingApproach]($jsApproachString(obj))
+    except ValueError:
+      approach = raUnknown
+    trace.approach = approach
   normalizeCalltraceModeJs(obj)
 
 proc findRawTraceWithCodetracer(app: ElectronApp, traceId: cstring): Future[cstring] {.async.} =

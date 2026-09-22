@@ -253,3 +253,28 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
         echo "stderr: ", stderrStr
       check ok
       check "PASS" in stdoutStr
+
+  test "recordTrace persists the OBSERVED axes, and the row loads as materialized (LRS-5 (b))":
+    ## The record side of LRS-5's second deletion round, through the real
+    ## writer and the real loader.  A wasm Rust recording is registered with
+    ## `axesArg = some(slRust / tiWasm / raVmEmulation)`, the cell on disk must
+    ## read `rs-wasm-unknown-vm`, and `find` must bring it back with
+    ## `approach == raVmEmulation` and `usesMaterializedTraces` true -- while
+    ## its `Lang` summary, `LangRust`, answers false on its own.  Without the
+    ## `axesArg` plumbing the same recording writes `rs-native-unknown-mcr`
+    ## and every replay-side site reads it as native: the silent mislabel the
+    ## wasm pair was kept to prevent.
+    ##
+    ## Added at review.  `target_axes_test.nim` pins the same fact by grepping
+    ## the two source files for the `axesArg` call sites, which survives no
+    ## reformat and observes no behaviour.
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "observed-axes-round-trip", "observedaxes")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr

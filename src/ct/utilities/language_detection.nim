@@ -16,9 +16,11 @@ export target_recognition
 #   so the assumption it has a single one is not always valid
 #   but for now are not reforming that yet
 proc isWasmCargoProject*(folder: string): bool =
-  ## Exported for `src/ct/trace/record_assessment.nim`, which reads the same
-  ## marker to assert `wasm-cargo-project` as a target KIND instead of welding
-  ## the ISA onto a `Lang` value the way `detectFolderLang` still does below.
+  ## Exported for `src/ct/trace/record_assessment.nim`, which reads this marker
+  ## to assert `wasm-cargo-project` as a target KIND.  Since LRS-5's second
+  ## deletion round that is the ONLY reader of it: `detectFolderLang` below
+  ## used to weld the ISA onto a `Lang` value (`LangRustWasm`) and no longer
+  ## can, because the member is gone.
   let configPath = folder / ".cargo" / "config.toml"
   if fileExists(configPath):
     try:
@@ -42,10 +44,13 @@ proc detectFolderLang(folder: string): Lang =
   elif fileExists(folder / "foundry.toml"):
     LangSolidity
   elif fileExists(folder / "Cargo.toml"):
-    if isWasmCargoProject(folder):
-      LangRustWasm
-    else:
-      LangRust
+    # A wasm crate and a plain crate are both Rust.  What tells them apart is
+    # the `.cargo/config.toml` `wasm32` marker, which `assessKind` reads as
+    # `KindWasmCargoProject` and `targetIsaForAssessment` turns into `tiWasm`
+    # -- an ISA on its own axis.  Until LRS-5's second deletion round this
+    # answered `LangRustWasm` here, which is the same fact spelled as a
+    # language, and was one of the three writers of that member.
+    LangRust
   elif fileExists(folder / "lakefile.lean"):
     LangLean
   elif fileExists(folder / "shard.yml"):
@@ -90,8 +95,17 @@ const LANGS* = {
   "py": LangPythonDb,
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
-  "wasm": LangRustWasm, # TODO: can be Cpp or other as well, maybe pass
-    # explicitly or check trace/other debug info?
+  # A prebuilt `.wasm` module.  The LANGUAGE here is a guess and is marked as
+  # one: a module may have been compiled from Rust, C++, or anything else, and
+  # nothing in the container says which.  Rust is the guess because it is the
+  # only wasm toolchain `ct record` builds for (`--target wasm32-wasip1`).
+  # What is NOT a guess is the ISA: `assessKind` reads the `.wasm` extension as
+  # `KindWasmModule` and `targetIsaForAssessment` answers `tiWasm` from the
+  # kind, so the route to `wazero` rides on the ARTEFACT.  Before LRS-5's
+  # second deletion round this row was `LangRustWasm` and the ISA came from
+  # the member -- see `record_dispatch_test`, "a prebuilt .wasm module
+  # dispatches to wazero, and the route rides on the ARTEFACT".
+  "wasm": LangRust,
   "sol": LangSolidity,
   "masm": LangMasm,
   "sw": LangSway,
@@ -127,13 +141,7 @@ const LANGS* = {
   "gd": LangGdScript,
 }.toTable()
 
-const WASM_LANGS = {
-  "rs": LangRustWasm,
-  "cpp": LangCppWasm,
-  "c": LangCppWasm,
-}.toTable()
-
-proc detectLangFromPath*(path: string, isWasm: bool): Lang =
+proc detectLangFromPath*(path: string): Lang =
   ## Map a path's file extension onto a `Lang`, or `LangUnknown` when the
   ## extension is not one this build knows.
   ##
@@ -161,14 +169,24 @@ proc detectLangFromPath*(path: string, isWasm: bool): Lang =
   ## site.  `src/tests/cli/lang_enum_contract_test.nim` asserts the returned
   ## value directly so a future reordering of `Lang` cannot quietly reintroduce
   ## the defect.
+  ##
+  ## ## The `isWasm` parameter is gone (LRS-5, second deletion round)
+  ##
+  ## It used to route `.rs` / `.cpp` / `.c` through a second table,
+  ## `WASM_LANGS`, onto `LangRustWasm` / `LangCppWasm` whenever the recorded
+  ## artefact was a `.wasm` module.  That was an ISA fact written into a
+  ## language answer.  The ISA now has an axis of its own:
+  ## `targetIsaForArtefactPath` below is the same fact, stated as an ISA, and
+  ## the assessment reads the `.wasm` extension as `KindWasmModule`.  The
+  ## quirk that went with the second table -- a `.c` source in a wasm
+  ## recording was reported as C++, because there was no `LangCWasm` member to
+  ## report -- goes with it, deliberately: `.c` is `slC` on the language axis
+  ## and `tiWasm` on the ISA axis, which is what it always was.
   let ext = path.splitFile.ext
   if ext.len <= 1:
     return LangUnknown
 
   let extension = ext[1..^1].toLowerAscii()
-  if isWasm and WASM_LANGS.hasKey(extension):
-    return WASM_LANGS[extension]
-
   if LANGS.hasKey(extension):
     let known = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
     if known != LangUnknown:
@@ -221,9 +239,17 @@ proc configuredRecognitionBackend*(): RecognitionBackend =
     enabled: ctConfig.rrBackend.enabled,
     path: ctConfig.rrBackend.path)
 
+func targetIsaForArtefactPath*(path: string): TargetIsa =
+  ## The target ISA an ARTEFACT's own path states, or `tiUnknown` when it
+  ## states none.  The import side's counterpart to `assessKind`'s
+  ## `KindWasmModule` (LRS-5, precondition (c)): `ct import` and the
+  ## online-sharing download path have no assessment to consult, only the
+  ## recorded `program` string, and a `.wasm` there is exactly as much of an
+  ## artefact fact as it is for `ct record`.
+  if path.splitFile.ext.toLowerAscii == ".wasm": tiWasm else: tiUnknown
+
 proc detectTarget*(program: string,
                    lang: Lang,
-                   isWasm: bool = false,
                    backend: RecognitionBackend = RecognitionBackend()):
     DetectedTarget =
   ## Recognize `program`, delegating the native question to
@@ -269,7 +295,7 @@ proc detectTarget*(program: string,
       return DetectedTarget(lang: folderLang, recognitionRan: false)
 
   if not isFolder and "." in filename:
-    let extensionLang = detectLangFromPath(filename, isWasm)
+    let extensionLang = detectLangFromPath(filename)
     if extensionLang != LangUnknown:
       return DetectedTarget(lang: extensionLang, recognitionRan: false)
 
@@ -321,7 +347,7 @@ proc detectTarget*(program: string,
   of rdLanguage, rdNoLanguage:
     discard
 
-proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
+proc detectLang*(program: string, lang: Lang): Lang =
   ## The single-`Lang` view of `detectTarget`, for callers that cannot yet
   ## carry the rest of the recognition result.
-  detectTarget(program, lang, isWasm).lang
+  detectTarget(program, lang).lang

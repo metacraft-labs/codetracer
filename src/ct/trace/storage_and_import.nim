@@ -1,5 +1,5 @@
 import
-  std/[ os, strutils, strformat, sets, algorithm, sequtils, json ],
+  std/[ options, os, strutils, strformat, sets, algorithm, sequtils, json ],
   ../../common/[ trace_index, lang, types, paths ],
   ../utilities/[ git, language_detection ],
   ctfs_sources,
@@ -15,13 +15,22 @@ proc isAbsolutePath(path: string): bool =
 proc stripPathRoot(path: string): string =
   stripTracePathRoot(path)
 
-proc storeTraceFiles(paths: seq[string], traceFolder, workdir: string, lang: Lang) =
+proc storeTraceFiles(paths: seq[string], traceFolder, workdir: string,
+                     axes: TargetAxes) =
   let filesFolder = traceFolder / "files"
   createDir(filesFolder)
 
   var sourcePaths = paths.mapIt(resolveTraceSourcePath(it, workdir))
 
-  if lang in {LangNoir, LangRustWasm, LangCppWasm}:
+  # The project-manifest sweep below is for recordings whose sources live in a
+  # project directory (`Nargo.toml`, `Cargo.toml`, …) rather than beside the
+  # program.  It used to be keyed by `lang in {LangNoir, LangRustWasm,
+  # LangCppWasm}`, which is the ISA spelled as a language: the ACIR and wasm
+  # targets are exactly the two.  LRS-5's second deletion round deleted the
+  # two wasm members, so it is keyed by the ISA -- the same set, named on the
+  # axis it belongs to, and now also true of a C wasm module, which never had
+  # a `Lang` value at all.
+  if axes.targetIsa in {tiAcir, tiWasm}:
     var baseFolder = ""
     for path in sourcePaths:
       if path.len > 0 and isAbsolutePath(path):
@@ -111,8 +120,8 @@ proc deriveWorkdir(program: string): string =
 
   getCurrentDir()
 
-proc detectTraceLang*(program: string, paths: seq[string],
-                      traceKind: string): Lang =
+proc detectTraceAxes*(program: string, paths: seq[string],
+                      traceKind: string): TargetAxes =
   ## Infer a recording's [Lang] from its recorded `program` identifier
   ## and captured source `paths`.
   ##
@@ -130,23 +139,63 @@ proc detectTraceLang*(program: string, paths: seq[string],
   ## Factored out of `importTrace` so the session importer classifies a
   ## multi-recording session exactly the way a single recording is
   ## classified, rather than growing a second, drifting heuristic.
-  let isWasm = program.extractFilename.split(".")[^1] == "wasm"
-  var detectedLang = detectLangFromPath(program, isWasm)
+  ##
+  ## ## It answers AXES, not a `Lang` (LRS-5, precondition (d))
+  ##
+  ## This used to be `detectTraceLang` and it was one of the three writers of
+  ## `LangRustWasm` / `LangCppWasm`: for a **db-kind** container whose sources
+  ## are Rust or C/C++ it answered the wasm member, because "this is a
+  ## materialized wasm recording rather than a native one" had nowhere else to
+  ## go — `recordings.lang` held one `Lang` name.  Since schema version 2 the
+  ## column holds all four axes, so the same two facts are stated on the axes
+  ## they belong to: the LANGUAGE from the path, the ISA from the artefact
+  ## (`targetIsaForArtefactPath`) or from the container's kind, and the
+  ## APPROACH from the ISA.
+  ##
+  ## Two consequences, both deliberate and neither a widening of what is
+  ## claimed:
+  ##
+  ## * a `.c` source in a db-kind container is now `slC` + `tiWasm`, where it
+  ##   used to be `LangCppWasm` — i.e. reported as **C++**, because there was
+  ##   no `LangCWasm` member to report.  The ISA is unchanged; the language is
+  ##   no longer rounded to its neighbour.
+  ## * an rr/MCR container is untouched: `traceKind != "db"` leaves the
+  ##   per-language fallback ISA and `raMcr`, which is what `LangRust` /
+  ##   `LangC` / `LangCpp` decomposed to before.
+  var detectedLang = detectLangFromPath(program)
   if detectedLang == LangUnknown:
     for path in paths:
-      let p = detectLangFromPath(path, isWasm)
+      let p = detectLangFromPath(path)
       if p != LangUnknown:
         detectedLang = p
         break
-  if detectedLang == LangUnknown:
-    return LangUnknown
-  # for now assume this is used only for db traces
-  # and that C/C++/Rust there can come only from wasm targets currently
-  if detectedLang == LangRust:
-    return if traceKind == "db": LangRustWasm else: LangRust
-  if detectedLang in {LangC, LangCpp}:
-    return if traceKind == "db": LangCppWasm else: detectedLang
-  detectedLang
+
+  let artefactIsa = targetIsaForArtefactPath(program)
+  if detectedLang == LangUnknown and artefactIsa == tiUnknown:
+    return storageAxesOfLang(LangUnknown)
+
+  var axes = storageAxesOfLang(detectedLang)
+  if artefactIsa != tiUnknown:
+    # The recorded program IS the artefact and names its own ISA (`foo.wasm`).
+    axes.targetIsa = artefactIsa
+    axes.approach = defaultRecordingApproach(artefactIsa)
+  elif traceKind == "db" and detectedLang in {LangC, LangCpp, LangRust}:
+    # For now assume a db-kind container whose sources are C/C++/Rust can only
+    # have come from a wasm target: those three languages reach a MATERIALIZED
+    # container by no other route today.  This is the same assumption the
+    # `LangRustWasm` / `LangCppWasm` answer encoded, kept verbatim and now
+    # visible as the two axes it always was.
+    axes.targetIsa = tiWasm
+    axes.approach = raVmEmulation
+  axes
+
+proc detectTraceLang*(program: string, paths: seq[string],
+                      traceKind: string): Lang =
+  ## The `Lang` SUMMARY of `detectTraceAxes` — kept for callers that need a
+  ## label rather than a route.  A wasm Rust recording summarises as
+  ## `LangRust`: the ISA and the approach are on `detectTraceAxes`' result and
+  ## in the stored cell, not in this value.
+  langForStorageAxes(detectTraceAxes(program, paths, traceKind)).lang
 
 proc readTraceFolderMeta*(folder: string): CtfsMetaDat
 
@@ -263,7 +312,15 @@ proc importTrace*(
   selfContained: bool = true,
   downloadUrl: string = "",
   traceKind: string = "db",
+  axesArg: Option[TargetAxes] = none(TargetAxes),
 ): Trace =
+  ## ``axesArg`` — LRS-5, precondition (b).  The four-axis value to REGISTER
+  ## the recording under, when the caller observed one.  ``ct record`` does:
+  ## the dispatch selector it just recorded with carries the language, the ISA
+  ## and the approach, so a wasm recording is registered as
+  ## ``rs-wasm-unknown-vm`` without anything having to name a ``LangRustWasm``
+  ## member.  When it is ``none`` the axes are derived here, from ``langArg``
+  ## or from ``detectTraceAxes``, exactly as the ``Lang``-only callers expect.
   ## M-REC-3: ``recordingIdArg`` is a UUIDv7 recording-id.
   ##
   ## M-REC-10: when ``recordingIdArg == NO_RECORDING_ID`` (the empty
@@ -368,10 +425,16 @@ proc importTrace*(
 
   let paths: seq[string] = meta.paths
 
-  let lang = if langArg != LangUnknown:
+  let axes =
+    if axesArg.isSome: axesArg.get
+    elif langArg != LangUnknown: storageAxesOfLang(langArg)
+    else: detectTraceAxes(program, paths, traceKind)
+  # The summary is derived from the axes rather than kept beside them, so the
+  # row's label and the row's cell can never disagree.
+  let lang = if langArg != LangUnknown and axesArg.isNone:
       langArg
     else:
-      detectTraceLang(program, paths, traceKind)
+      langForStorageAxes(axes).lang
 
   if dirExists(recordingSourceFolder / "files"):
     if recordingSourceFolder != outputFolder:
@@ -394,7 +457,7 @@ proc importTrace*(
     # it happens on the original machine
     # when the source files are still available and unchanged
     if paths.len > 0:
-      storeTraceFiles(paths, outputFolder, workdir, lang)
+      storeTraceFiles(paths, outputFolder, workdir, axes)
 
   var sourceFoldersInitialSet = initHashSet[string]()
   for path in paths:
@@ -426,7 +489,8 @@ proc importTrace*(
       # for now always use FullRecord for db-backend
       # and ignore possible env var override
       calltraceMode = CalltraceMode.FullRecord,
-      fileId = downloadUrl)
+      fileId = downloadUrl,
+      axesArg = some(axes))
   else:
     # M-REC-1.5: the old `rr`/`ttd` branch used to deserialize a full
     # `Trace` object from the legacy `trace_db_metadata.json`.  With the
@@ -449,8 +513,9 @@ proc importTrace*(
       rrPid = recordPid,
       exitCode = -1,
       calltrace = true,
-      calltraceMode = loadCalltraceMode("", lang),
-      fileId = downloadUrl)
+      calltraceMode = loadCalltraceMode("", axes),
+      fileId = downloadUrl,
+      axesArg = some(axes))
 
 proc getFolderSize(folderPath: string): int64 =
   var totalSize: int64 = 0

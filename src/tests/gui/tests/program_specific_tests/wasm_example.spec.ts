@@ -91,7 +91,10 @@ test.describe("wasm example — state and navigation", () => {
   // DOM with the variable name, integer value and `i32` type (verified
   // against the post-fix DOM dump: `x: 0` shows up with type `i32`).
   // The test still fails because the WASM DB-trace `Next` request is
-  // a no-op for the LangRustWasm path: two `clickNextButton()` calls
+  // a no-op for the wasm path (this comment said "the LangRustWasm path"
+  // until that Lang member was deleted -- LRS-5's second deletion round,
+  // 2026-09-21; the recording is `LangRust` + `raVmEmulation` now and the
+  // defect below is unchanged): two `clickNextButton()` calls
   // leave the debugger position at line 11 (entry point) where x is
   // still `0`. See TODO 5.2(i) in `/tmp/isonim-migration.txt` —
   // investigate `src/db-backend/src/dap_server.rs` around the

@@ -27,17 +27,28 @@ suite "toCLang is the one name table (LRS-3, the toJsLang merge)":
     check toCLang(LangAsm) == "assembly"
     check toCLang(LangAsm) != "assembler"
 
-  test "LangCppWasm is named `cpp`, the same language as LangCpp":
-    check toCLang(LangCppWasm) == "cpp"
-    check toCLang(LangCppWasm) == toCLang(LangCpp)
-    check toCLang(LangRustWasm) == toCLang(LangRust)
+  test "no two members share a toCLang name any more":
+    ## This case used to be "LangCppWasm is named `cpp`, the same language as
+    ## LangCpp" and asserted the fold LRS-3 landed: two members, one name.
+    ## LRS-5's second deletion round deleted `LangCppWasm` / `LangRustWasm`,
+    ## so the fold has nothing left to fold and the stronger property holds --
+    ## `toCLang` is INJECTIVE over `Lang`, which is why the picker below is
+    ## the supported list verbatim.
+    check toCLang(LangCpp) == "cpp"
+    check toCLang(LangRust) == "rust"
+    var names: seq[string] = @[]
+    for lang in Lang:
+      check toCLang(lang) notin names
+      names.add(toCLang(lang))
 
   test "the name folds exactly the conflated pairs, and nothing else":
     ## Two members share a `toCLang` name if and only if `axesOfLang` gives
-    ## them the same source language -- the name is per LANGUAGE.  `LangSolana`
-    ## and `LangPolkavm` both decompose to `slUnknown` with `LangUnknown` but
-    ## keep their own names, which is the one place the two relations differ,
-    ## so it is stated rather than folded into the rule.
+    ## them the same source language -- the name is per LANGUAGE.  Since
+    ## LRS-5's second deletion round both sides of that biconditional are
+    ## EMPTY: no two members share a language (the bijection) and therefore
+    ## none share a name.  `LangSolana` and `LangPolkavm`, which used to be
+    ## the one place the two relations differed (both `slUnknown`, different
+    ## names), are gone with the round.
     for a in Lang:
       for b in Lang:
         if a == b: continue
@@ -59,7 +70,11 @@ suite "SUPPORTED_LANGS is derived, and the dropdown renders exactly LANG_PICKER_
       if isSupportedLang(lang):
         expected.add(lang)
     check SUPPORTED_LANGS == expected
-    check SUPPORTED_LANGS.len == 36
+    # 36 after LRS-3; 32 since LRS-5's second deletion round removed four
+    # SUPPORTED members (the wasm pair and the platform pair).  The native
+    # half of this count lives in `src/tests/cli/target_axes_test.nim`, which
+    # says why nothing became unrecordable.
+    check SUPPORTED_LANGS.len == 32
 
   test "Python and JavaScript are in: their recorders exist":
     check LangPythonDb in SUPPORTED_LANGS
@@ -81,13 +96,17 @@ suite "SUPPORTED_LANGS is derived, and the dropdown renders exactly LANG_PICKER_
       names.add(toCLang(lang))
     for lang in SUPPORTED_LANGS:
       check toCLang(lang) in names
-    check LANG_PICKER_LANGS.len == 34
+    check LANG_PICKER_LANGS.len == SUPPORTED_LANGS.len
 
-  test "the plain member represents its pair; the wasm siblings are folded":
+  test "the fold is a no-op now, and every supported member is offered":
+    ## It used to be "the plain member represents its pair; the wasm siblings
+    ## are folded" and asserted `LangRustWasm notin LANG_PICKER_LANGS`.  With
+    ## the wasm pair deleted there is no pair to represent, so the property is
+    ## stated as what it has become: the picker IS the supported list.
+    for lang in SUPPORTED_LANGS:
+      check lang in LANG_PICKER_LANGS
     check LangRust in LANG_PICKER_LANGS
-    check LangRustWasm notin LANG_PICKER_LANGS
     check LangCpp in LANG_PICKER_LANGS
-    check LangCppWasm notin LANG_PICKER_LANGS
     check LangRubyDb in LANG_PICKER_LANGS
     check LangPythonDb in LANG_PICKER_LANGS
 
@@ -146,7 +165,10 @@ suite "the input spellings are one table (LRS-3, the asm unification), on the JS
     check toLang(cstring"rust") == LangRust
     check toLang(cstring"nims") == LangNim
     check toLang(cstring"gdscript") == LangGdScript
-    check toLang(cstring"cpp-wasm") == LangCppWasm
+    # A deprecated alias of the LANGUAGE since LRS-5's second deletion round;
+    # the wasm target rides on the artefact, not on the `--lang` spelling.
+    check toLang(cstring"cpp-wasm") == LangCpp
+    check toLang(cstring"rust-wasm") == LangRust
     check toLang(cstring"ruby(db)") == LangRubyDb
     check toLang(cstring"RS") == LangRust
     check toLang(cstring"Asm") == LangAsm
@@ -166,7 +188,12 @@ suite "the input spellings are one table (LRS-3, the asm unification), on the JS
     for (spelling, lang) in LANG_SPELLINGS:
       check toLang(cstring(spelling)) == lang
       check toLang(spelling) == lang
-    check LANG_SPELLINGS.len == 64
+    # 64 at LRS-3, unchanged by LRS-4 (a row MOVED); 62 since LRS-5's second
+    # deletion round: six rows left with the four members and four came back
+    # on `LangRust` / `LangCpp` as deprecated aliases, while `polkavm` and
+    # `solana` were removed outright.  `lang_spellings_test.nim` is where the
+    # decision is written down.
+    check LANG_SPELLINGS.len == 62
 
 suite "the renderer decodes `lang` by the enum's names on the JS backend (LRS-4)":
   ## `src/frontend/trace_metadata.nim` used to rewrite `ct trace-metadata`'s

@@ -68,6 +68,7 @@ import std/[os, sets, strutils, algorithm, tables]
 import ../../src/common/lang
 import ../../src/ct/utilities/language_detection
 import ../../src/ct/trace/recorder_dispatch
+import ../../src/ct/trace/record_assessment  # assessedSelector (LRS-5, .wasm)
 
 type CheckError = object of CatchableError
 
@@ -97,13 +98,27 @@ const
   Program = "/tmp/ct-caps-dispatch-check/app"
   TraceFolder = "/tmp/ct-caps-dispatch-check/out"
 
-proc recordDispatches(lang: Lang): bool =
+proc extensionSelector(extension: string, lang: Lang): RecorderSelector =
+  ## The selector `ct record program<extension>` actually dispatches on: the
+  ## ASSESSMENT's, not the per-`Lang` projection.
+  ##
+  ## This used to be `selectorOfLang(lang)`, on the stated ground that for an
+  ## extension-detected single file the two agree — "the assessment only
+  ## departs from it for a `.nims`, a directory, or an explicit `--lang`".
+  ## **LRS-5's second deletion round added a fourth case and broke that
+  ## ground**: a `.wasm` file is now `KindWasmModule` and therefore `tiWasm`
+  ## from the KIND, where the ISA used to come from `axesOfLang(LangRustWasm)`
+  ## — the member the round deleted.  `LANGS["wasm"]` is `LangRust`, whose
+  ## projection is `tiNative`, so the old transcription reported `.wasm` as
+  ## undispatchable and this checker failed on a capability file that is
+  ## correct.  Asking the real assessment is both the fix and the more
+  ## faithful transcription.
+  assessedSelector("program" & extension, lang)
+
+proc recordDispatches(extension: string, lang: Lang): bool =
   ## `ct record <program>` — src/ct/db_backend_record.nim, proc `record`,
   ## since LRS-2B a function of the ASSESSMENT's selector rather than of the
-  ## `Lang`.  For an extension-detected single file the per-`Lang` projection
-  ## `selectorOfLang` is that selector (the assessment only departs from it
-  ## for a `.nims`, a directory, or an explicit `--lang`), so it is what this
-  ## transcription uses:
+  ## `Lang`:
   ##
   ##   * `lang == LangUnknown`                          -> error, quit 1
   ##   * `not recorderToolFor(sel).isDeclared`         -> error, quit 1
@@ -111,16 +126,15 @@ proc recordDispatches(lang: Lang): bool =
   ##            codetracer-rr-backend component's territory, per
   ##            CodeTracer-Launcher.md §2.3's second example file)
   ##   * Nim, wasm/ACIR, Python arms, then `tool.supported` -> recordDb / recordNim
-  ##   * otherwise (declared, unsupported: Lua, GDScript, the
-  ##     retired rr pair)                              -> error, quit 1
+  ##   * otherwise (declared, unsupported: Lua, GDScript)  -> error, quit 1
   if lang == LangUnknown:
     return false
-  let tool = recorderToolFor(selectorOfLang(lang))
+  let tool = recorderToolFor(extensionSelector(extension, lang))
   if not tool.isDeclared:
     return false
   tool.supported
 
-proc runDispatches(lang: Lang): bool =
+proc runDispatches(extension: string, lang: Lang): bool =
   ## `ct run <program>` — src/ct/trace/run.nim:121 detects the language
   ## and hands it to `runWithRestart`, which at :72 takes the recorded
   ## program straight from argv for a materialized-trace language and
@@ -129,9 +143,9 @@ proc runDispatches(lang: Lang): bool =
   ## builds first and needs `ctConfig.rrBackend.enabled`
   ## (record.nim:451) — the commercial rr-backend component again — so
   ## codetracer-desktop must not claim those extensions for `run` either.
-  recordDispatches(lang)
+  recordDispatches(extension, lang)
 
-proc recordTestDispatches(lang: Lang): bool =
+proc recordTestDispatches(extension: string, lang: Lang): bool =
   ## `ct record-test` — src/ct/trace/record.nim, proc `recordTest`:
   ##
   ##   * `not recorderToolFor(assessedSelector(path, lang)).isDeclared`
@@ -145,20 +159,21 @@ proc recordTestDispatches(lang: Lang): bool =
   ## So the ONLY extension codetracer-desktop can honestly declare for
   ## `record-test` is Python's. `.rb` and `.nr` were declared before
   ## LRC-1 and both land on the `else`.
-  recorderToolFor(selectorOfLang(lang)).isDeclared and lang == LangPythonDb
+  recorderToolFor(extensionSelector(extension, lang)).isDeclared and
+    lang == LangPythonDb
 
-proc dispatches(command: string, lang: Lang): bool =
+proc dispatches(command: string, extension: string, lang: Lang): bool =
   case command
-  of "record": recordDispatches(lang)
-  of "run": runDispatches(lang)
-  of "record-test": recordTestDispatches(lang)
+  of "record": recordDispatches(extension, lang)
+  of "run": runDispatches(extension, lang)
+  of "record-test": recordTestDispatches(extension, lang)
   else: raise newException(CheckError, "unknown command: " & command)
 
 proc coreExtensions(command: string): HashSet[string] =
   ## The extensions the core can serve `command` for, computed from the
   ## production `LANGS` table.
   for extension, lang in LANGS:
-    if dispatches(command, lang):
+    if dispatches(command, "." & extension, lang):
       result.incl("." & extension)
 
 const DeliberateOmissions: seq[string] = @[]
@@ -317,11 +332,11 @@ proc checkCommand(capsPath, command: string) =
       "`" & command & "` extension " & extension & " is lowercase " &
       "(detectLangFromPath lowercases before the LANGS lookup)")
 
-    let lang = detectLangFromPath("program" & extension, isWasm = false)
+    let lang = detectLangFromPath("program" & extension)
     expect(lang != LangUnknown,
       "`" & command & " " & extension &
       "` : detectLangFromPath resolves it to " & lang.toName)
-    expect(dispatches(command, lang),
+    expect(dispatches(command, extension, lang),
       "`" & command & " " & extension & "` : " & lang.toName &
       " reaches a dispatch arm")
 
@@ -335,7 +350,8 @@ proc checkCommand(capsPath, command: string) =
           "`" & command & " " & extension &
           "` : Nim names its recorder (argv is built by recordNim)")
       else:
-        let invocation = recorderInvocation(selectorOfLang(lang), Program, TraceFolder)
+        let invocation = recorderInvocation(
+          extensionSelector(extension, lang), Program, TraceFolder)
         expect(invocation.args.len > 0,
           "`" & command & " " & extension &
           "` : recorder_dispatch builds a non-empty invocation")

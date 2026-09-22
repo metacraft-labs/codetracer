@@ -298,3 +298,72 @@ suite "ct record missing-recorder diagnostics":
     # second reason: the verification workflow copies sources in after
     # building, so a current binary routinely looks older than the
     # byte-identical sources it was built from.
+
+  test "an unrecognised --lang is REFUSED, not read as 'no language given' (LRS-5, at review)":
+    require fileExists(ct)
+    # The defect, found at LRS-5's second-deletion-round review by running the
+    # binary rather than the suites.  `toLang` answers `LangUnknown` for a
+    # spelling it does not have, and `detectTarget`'s first line reads
+    # `LangUnknown` as "no language was given" and runs detection anyway --
+    # so `--lang typo ./crate` recorded the crate NATIVELY, with no
+    # diagnostic and a zero exit, exactly as if the flag had been omitted.
+    # Measured before the fix: `--lang typo` and the bare invocation produced
+    # byte-identical output.
+    #
+    # It is the same class of defect this repository already settled for
+    # `--backend` (`record_backend_selection_test.nim`, and `ct-mcr/record.md`:
+    # "refuse to start when the requested configuration cannot be honored,
+    # rather than silently downgrading"), and LRS-5 walked right up to it:
+    # removing the `polkavm` / `solana` spellings with their `Lang` members
+    # would have deleted `ct record` for those two targets THROUGH this
+    # fall-through.  The spellings were kept; the hole was not closed, and is
+    # closed here.
+    let dir = scratch / "lang-unrecognised"
+    removeDir(dir)
+    createDir(dir)
+    let program = dir / "program.rb"
+    writeFile(program, "puts 1\n")
+
+    let (refused, refusedExit) = runWithoutRecorders(
+      ct, program, dir / "out-typo", emptyDir, extra = @["--lang", "definitely-not-a-language"])
+    checkpoint("ct --lang definitely-not-a-language output:\n" & refused)
+    check refusedExit != 0
+    check "definitely-not-a-language" in refused
+    # It must say it will not guess, and it must say what IS accepted.
+    check "neither a language nor a target" in refused
+    check "ruby" in refused
+    check "polkavm" in refused
+    # ...and it must refuse BEFORE doing any work: no recorder was looked up,
+    # so the missing-recorder diagnostic must not appear.
+    check "codetracer-ruby-recorder" notin refused
+
+    # The control: the same target with NO `--lang` still gets as far as the
+    # recorder lookup.  Before the fix these two outputs were identical.
+    let (bare, _) = runWithoutRecorders(
+      ct, program, dir / "out-bare", emptyDir)
+    checkpoint("ct (no --lang) output:\n" & bare)
+    check "codetracer-ruby-recorder" in bare
+    check refused != bare
+
+    # The two ISA-only spellings are NOT refused: they name a target rather
+    # than a language, which is exactly why they survived the deletion round
+    # and why this guard cannot simply test `toLang(...) == LangUnknown`.
+    # Asserted on a plain Rust crate -- the shape a Solana or PolkaVM program
+    # really has, and the one that would be read as native Rust if the
+    # spelling ever stopped resolving.
+    let crate = dir / "crate"
+    createDir(crate)
+    createDir(crate / "src")
+    writeFile(crate / "Cargo.toml", "[package]\nname = \"prog\"\n")
+    writeFile(crate / "src" / "main.rs", "fn main() {}\n")
+    for spelling in ["polkavm", "solana"]:
+      checkpoint("--lang " & spelling)
+      check isKnownLangSpelling(spelling)
+      check toLang(spelling) == LangUnknown     # ...and still no language
+      let (accepted, acceptedExit) = runWithoutRecorders(
+        ct, crate, dir / ("out-" & spelling), emptyDir,
+        extra = @["--lang", spelling])
+      checkpoint("ct --lang " & spelling & " output:\n" & accepted)
+      check acceptedExit != 0                   # no recorder on the scrubbed PATH
+      check "neither a language nor a target" notin accepted
+      check ("codetracer-" & spelling & "-recorder") in accepted

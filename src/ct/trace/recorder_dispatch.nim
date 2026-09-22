@@ -145,8 +145,12 @@ type
     ## result).  The language is consulted only where the ISA is the
     ## language's own runtime (``tiInterpreted``, ``tiBeam``) — for every VM
     ## ISA the recorder is a property of the ISA and the language is
-    ## advisory, which is why ``LangSolana`` and ``LangPolkavm`` (no source
-    ## language at all) still select a recorder.
+    ## advisory.  (It is why ``LangSolana`` and ``LangPolkavm`` — no source
+    ## language at all — used to select a recorder; LRS-5's second deletion
+    ## round removed both members and the selectors they projected to,
+    ## ``selector(slUnknown, tiSolanaSbf, raVmEmulation)`` and its PolkaVM
+    ## twin, are unchanged and still supported: the recorder was always a
+    ## property of the ISA, and now nothing has to spell that as a language.)
     language*: SourceLanguage
     targetIsa*: TargetIsa
     approach*: RecordingApproach
@@ -176,8 +180,9 @@ func selector*(language: SourceLanguage, targetIsa: TargetIsa,
 func selectorOfLang*(lang: Lang): RecorderSelector =
   ## **FALLBACK.**  The selector a bare ``Lang`` value projects to, via
   ## ``axesOfLang``.  It cannot tell ``.nims`` from ``.nim`` (both ``LangNim``
-  ## → ``tiNative`` / ``raMcr``) or a wasm crate from a native one when the
-  ## value is ``LangRust``; ``record_assessment.assessRecordingTarget`` can,
+  ## → ``tiNative`` / ``raMcr``) or a wasm crate from a native one (since
+  ## LRS-5's second deletion round every Rust target is ``LangRust``);
+  ## ``record_assessment.assessRecordingTarget`` can,
   ## and every production record path goes through it.  This exists for
   ## callers that genuinely have only the summary: messages about a stored
   ## ``Trace.lang``, and the table tests that sweep every ``Lang``.

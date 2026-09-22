@@ -5032,7 +5032,7 @@ impl Handler {
                                 *tracepoint_index,
                                 &tracepoint.expression,
                                 current_step_id,
-                                lang_from_context(Path::new(&location.path), self.trace_kind),
+                                lang_from_context(Path::new(&location.path)),
                             );
                             if locals.is_empty() {
                                 continue;

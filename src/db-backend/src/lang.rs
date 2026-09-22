@@ -14,8 +14,6 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use crate::task::TraceKind;
-
 pub use ct_lang::{Lang, lang_wire};
 
 /// Map a source path to the language whose value loader must decode its locals.
@@ -28,6 +26,15 @@ pub use ct_lang::{Lang, lang_wire};
 /// and C++ **header**: an RR replay stopped inside an inline function, a
 /// template, or any `std::` internal computed `Lang::Unknown` here.
 ///
+/// **The `trace_kind` parameter is gone (LRS-5, second deletion round).**  It
+/// had exactly one effect: `.rs` in a `TraceKind::Materialized` container
+/// answered `Lang::RustWasm`, an ISA and a recording approach carried on a
+/// LANGUAGE tag.  With that variant deleted the answer is `Lang::Rust` either
+/// way, and the parameter had nothing left to decide.  It is removed rather
+/// than kept as `_trace_kind` because a dead parameter on a dispatch function
+/// is an invitation to re-couple the two facts; the trace kind is still
+/// available at every call site that has one.
+///
 /// `Path::extension` is case-sensitive, so extensions that are conventionally
 /// spelled upper-case (`.C` for C++, `.F90` for pre-processed Fortran) need
 /// their own arms.
@@ -35,18 +42,20 @@ pub use ct_lang::{Lang, lang_wire};
 /// Only extensions for languages this product actually supports appear here;
 /// e.g. there is deliberately no `.cu`/`.cuh` arm because nothing in the
 /// codebase implements CUDA.
-pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
+pub fn lang_from_context(path: &Path) -> Lang {
     let extension = path.extension().unwrap_or(OsStr::new("")).to_str().unwrap_or("");
     // for now important mostly for system langs/rr support
     // but still good to add all supported langs: TODO
     match extension {
-        "rs" => {
-            if trace_kind == TraceKind::Materialized {
-                Lang::RustWasm
-            } else {
-                Lang::Rust
-            }
-        }
+        // `.rs` is Rust, whichever way the recording was made.  This used to
+        // answer `Lang::RustWasm` for a materialized container -- the target
+        // ISA and the recording approach welded onto the language, and one of
+        // the reasons LRS-4 could not delete the variant.  Nothing here loses
+        // a fact: the caller already has `trace_kind`, the persisted
+        // `recordings.lang` cell carries all four axes since trace_index
+        // schema version 2, and the value loaders this answer picks are the
+        // *language's*, which is the same for both routes.
+        "rs" => Lang::Rust,
         // `.h` is shared by C and C++; C is the conventional reading and both
         // resolve to the same `COrCppValueLoader` family in the native worker.
         "c" | "h" => Lang::C,
@@ -71,7 +80,6 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "masm" => Lang::Masm,
         "sw" => Lang::Sway,
         "move" => Lang::Move,
-        "polkavm" => Lang::PolkaVM,
         "cairo" => Lang::Cairo,
         "circom" => Lang::Circom,
         "leo" => Lang::Leo,
@@ -92,7 +100,7 @@ mod tests {
     use super::*;
 
     fn lang_of(path: &str) -> Lang {
-        lang_from_context(Path::new(path), TraceKind::Recreator)
+        lang_from_context(Path::new(path))
     }
 
     /// The defect this test exists for: an RR replay stopping inside any C/C++
@@ -187,16 +195,26 @@ mod tests {
         }
     }
 
+    /// LRS-5's second deletion round: `.rs` is `Lang::Rust` whatever the
+    /// container is.  Before it, a materialized container answered
+    /// `Lang::RustWasm` -- an ISA and an approach carried on the language
+    /// tag, through a `trace_kind` parameter this function no longer takes.
+    /// The recording approach is a per-recording fact the caller already has
+    /// and the column now stores; the language is a per-file fact and this
+    /// function answers only that.
     #[test]
-    fn materialized_rust_is_still_rust_wasm() {
-        assert_eq!(
-            lang_from_context(Path::new("/src/a.rs"), TraceKind::Materialized),
-            Lang::RustWasm
-        );
-        assert_eq!(
-            lang_from_context(Path::new("/src/a.rs"), TraceKind::Recreator),
-            Lang::Rust
-        );
+    fn materialized_rust_is_rust_whatever_the_container() {
+        assert_eq!(lang_from_context(Path::new("/src/a.rs")), Lang::Rust);
+        assert_eq!(lang_of("/src/a.rs"), Lang::Rust);
+    }
+
+    /// `.polkavm` used to map to `Lang::PolkaVM` -- a variant naming a VM
+    /// rather than a language.  With the variant gone the extension names no
+    /// language, which is the truth: a PolkaVM blob's sources are Rust, and a
+    /// `.rs` path in the same recording answers `Lang::Rust` above.
+    #[test]
+    fn a_polkavm_blob_names_no_source_language() {
+        assert_eq!(lang_of("/src/program.polkavm"), Lang::Unknown);
     }
 
     // -----------------------------------------------------------------
@@ -262,13 +280,19 @@ mod tests {
             // `python` / `ruby` were the retired rr backends' names; LRS-4
             // deleted the variants, so the shared list shrank by two and the
             // native backend's own `python` / `ruby` now name nothing here.
+            // `rustwasm` / `cppwasm` left the same way in LRS-5's second
+            // deletion round: `codetracer-native-backend` still HAS those two
+            // variants in its own (deliberately different) enum and still
+            // parses the names, but this core no longer emits them, so they
+            // are no longer *shared* -- they joined `small` / `odin` /
+            // `vlang` / `csharp` as native-backend-only spellings.  Its own
+            // mirror test must drop the two rows; recorded here because this
+            // list is the half that moved.
             (Lang::RubyDb, "rubydb"),
             (Lang::Javascript, "javascript"),
             (Lang::Lua, "lua"),
             (Lang::Asm, "asm"),
             (Lang::Noir, "noir"),
-            (Lang::RustWasm, "rustwasm"),
-            (Lang::CppWasm, "cppwasm"),
             (Lang::PythonDb, "pythondb"),
             (Lang::Unknown, "unknown"),
         ];

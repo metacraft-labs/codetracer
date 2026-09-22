@@ -71,21 +71,24 @@ type
     ## `SourceLanguage` says "I do not know", which is the honest answer for a
     ## value nobody assigned.
     ##
-    ## Chains and VMs are **not** here.  `LangSolana` and `LangPolkavm` are the
-    ## only two **non-sentinel** `Lang` members with an empty `getExtension`
-    ## entry, because they are not notations anyone writes a file in — a Solana
-    ## program is Rust or C, and PolkaVM is a machine.  They live on `TargetIsa`
-    ## below.
+    ## Chains and VMs are **not** here, and since LRS-5's second deletion
+    ## round they are not in `Lang` either.  `LangSolana` and `LangPolkavm`
+    ## used to be the only two **non-sentinel** `Lang` members with an empty
+    ## `getExtension` entry, because they are not notations anyone writes a
+    ## file in — a Solana program is Rust or C, and PolkaVM is a machine.  Both
+    ## members are now DELETED; the substrates they named live on `TargetIsa`
+    ## below (`tiSolanaSbf`, `tiPolkaVm`) and `--lang solana` / `--lang
+    ## polkavm` reaches them through `TargetIsaSpellings`.
     ##
-    ## The qualifier is load-bearing and was missing here: `getExtension` has
-    ## **three** empty answers, not two.  The third is `LangUnknown`, the
-    ## sentinel, which is empty for an unrelated reason — it names no language
-    ## at all rather than naming a substrate.  `target_axes_test.nim` asserts
-    ## that these two are the languageless pair and that each has an empty
-    ## extension; it never counts the empty extensions, which is why the
-    ## original "the two `Lang` members with an empty `getExtension`" survived
-    ## review.  The single source of those answers is now the exhaustive
-    ## `getExtensionName` in `src/common/common_lang.nim`.
+    ## **Rule 7, at the second deletion round:** the careful qualifier this
+    ## paragraph used to carry — `getExtension` has *three* empty answers, not
+    ## two, the third being the sentinel `LangUnknown` for the unrelated reason
+    ## that it names no language at all — no longer has a referent.  There is
+    ## now exactly ONE empty answer, the sentinel's, and
+    ## `target_axes_test.nim` asserts that directly: every `Lang` but
+    ## `LangUnknown` has a non-empty extension.  The single source of those
+    ## answers is the exhaustive `getExtensionName` in
+    ## `src/common/common_lang.nim`.
     slUnknown           ## 0 — sentinel: not determined, or determined to be none
     slC
     slCpp
@@ -751,7 +754,10 @@ func storageSlug*(v: SourceLanguage): string =
   ## a file in, so both moved to `TargetIsa` (`token(tiSolanaSbf)` is
   ## `solanasbf`, `token(tiPolkaVm)` is `polkavm` verbatim).  A recording under
   ## either stores `unknown` on *this* axis and the substrate on the ISA axis,
-  ## which is exactly what `axesOfLang(LangSolana)` already says.
+  ## which is exactly what `axesOfLang(LangSolana)` said while that member
+  ## existed.  LRS-5's second deletion round deleted it, so the ISA axis is now
+  ## the ONLY place either substrate is named — which is the four-axis revision
+  ## carried all the way through rather than a regression.
   case v
   of slUnknown: UnknownToken
   of slC: "c"

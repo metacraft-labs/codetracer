@@ -612,12 +612,12 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
 
   var lang = LangUnknown
   for p in paths:
-    let detected = detectLangFromPath(p, isWasm = false)
+    let detected = detectLangFromPath(p)
     if detected != LangUnknown:
       lang = detected
       break
   if lang == LangUnknown:
-    lang = detectLangFromPath(program, isWasm = false)
+    lang = detectLangFromPath(program)
 
   let recordingId = trace_index.newID(test = false)
   let outputFolder = recordingFolder(codetracerTraceDir, recordingId)

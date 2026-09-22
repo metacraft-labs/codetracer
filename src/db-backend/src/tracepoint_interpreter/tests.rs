@@ -242,7 +242,12 @@ fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
     match lang {
         Lang::RubyDb => Ok("ruby".to_string()),
         Lang::Noir => Ok("noir".to_string()),
-        Lang::RustWasm => Ok("rust(wasm)".to_string()),
+        // The fixture DIRECTORY is still called `rust(wasm)` -- it holds a
+        // Rust program recorded as a wasm module.  The `Lang` that names it is
+        // `Rust` since LRS-5's second deletion round deleted `RustWasm`; the
+        // wasm-ness is the recording's, not the language's, and this map is
+        // only choosing a directory.
+        Lang::Rust => Ok("rust(wasm)".to_string()),
         _ => Err("Unsupported language".into()),
     }
 }
@@ -324,7 +329,7 @@ fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(),
     match lang {
         Lang::RubyDb => record_ruby_trace(program_dir, target_dir)?,
         Lang::Noir => record_noir_trace(program_dir, target_dir)?,
-        Lang::RustWasm => record_rust_wasm_trace(program_dir, target_dir),
+        Lang::Rust => record_rust_wasm_trace(program_dir, target_dir),
         _ => return Err("Unsupported language".into()),
     }
 

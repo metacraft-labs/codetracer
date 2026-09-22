@@ -1,4 +1,4 @@
-import std/[ os, osproc, strutils, strformat, sequtils, json ],
+import std/[ options, os, osproc, strutils, strformat, sequtils, json ],
   json_serialization,
   uuid4,
   ../common/[ lang, paths, types, trace_index ],
@@ -274,6 +274,14 @@ proc recordDb(
   ## `sel` selects the recorder; `lang` is the summary the recording is
   ## registered under (`Trace.lang`, a per-file fact summarised per recording
   ## — see `src/common/common_types/debugger_features/trace.nim`).
+  ##
+  ## Since LRS-5's second deletion round `sel` ALSO decides what the
+  ## `recordings.lang` cell says, and it is the right thing to decide it: it
+  ## is the assessment's answer, so a wasm crate registers as
+  ## `rs-wasm-unknown-vm` and a `.nims` as what its ISA says, where the `Lang`
+  ## summary alone could say neither.  The toolchain axis stays `tcUnknown`
+  ## here — `sel` does not carry it (no recorder is selected by a toolchain),
+  ## and writing a guessed one is exactly what design Q1 forbids.
 
   requireRecorder(sel)
   if sel.targetIsa == tiAcir and backend.len > 0 and backend != "plonky2":
@@ -335,13 +343,17 @@ proc recordDb(
       echo fmt"error: recorder exited with {exitCode} for {lang}"
       quit(1)
 
-  result = importTrace(traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+  result = importTrace(
+    traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT,
+    traceKind = "db",
+    axesArg = some(TargetAxes(language: sel.language, targetIsa: sel.targetIsa,
+                              toolchain: tcUnknown, approach: sel.approach)))
 
 
 # record a program run
 proc record(
     cmd: string, args: seq[string], compileCommand: string,
-    langArg: Lang, backend: string, stylusTrace: string,
+    langArg: Lang, isaOverrideArg: TargetIsa, backend: string, stylusTrace: string,
     test = false, basic = false,
     # M-REC-2: ``traceIDRecord`` is now a UUIDv7 recording-id string;
     # empty (``""`` == NO_RECORDING_ID) means "mint a fresh one".
@@ -394,7 +406,15 @@ proc record(
   # For test framework mode, use the explicitly set langArg
   let lang = if pythonTestFramework.len > 0: langArg else: detectLang(executable, langArg)
   # echo "in db ", lang, " ", executable
-  if lang == LangUnknown:
+  # LRS-5: an ISA the user stated is enough on its own.  A PolkaVM blob and a
+  # Solana program have NO source language to detect -- no extension in
+  # `LANGS`, no marker in `detectFolderLang` -- which is why `--lang polkavm`
+  # / `--lang solana` was the only way to record one while those were `Lang`
+  # members.  With the members gone the spelling names the ISA instead
+  # (`targetIsaSpelling`), and an undetermined LANGUAGE is then the truth
+  # rather than a failure: it is exactly what `unknown-polkavm-unknown-vm`
+  # stores.
+  if lang == LangUnknown and isaOverrideArg == tiUnknown:
     if traceKind == "db":
       errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
       quit(1)
@@ -404,8 +424,14 @@ proc record(
   # under; the selector — source language, target ISA, recording approach —
   # is what the dispatch table is a function of, and it is what tells a
   # `.nims` (Nim VM, instrumented) from a `.nim` (native, ct-mcr).
+  # LRS-5: the `--lang` STRING may have named a target ISA (`polkavm`,
+  # `solana`, `wasm`, the wasm aliases).  `ct record` forwards the string and
+  # this process re-derives the override from it, so the two agree by
+  # construction rather than by a second table.
   let assessment = assessRecordingTarget(
-    executable, lang, languageWasExplicit = langArg != LangUnknown)
+    executable, lang,
+    languageWasExplicit = langArg != LangUnknown or isaOverrideArg != tiUnknown,
+    isaOverride = isaOverrideArg)
   if assessment.isAmbiguous:
     # Rule K2: two facts that dispatch differently are named, never picked.
     for line in assessment.diagnostics:
@@ -588,6 +614,8 @@ proc main*(): Trace =
   var socketPath = ""
   var isExportedWithArg = false
   var pythonInterpreter = ""
+  var isaOverride = tiUnknown
+    ## LRS-5: the target ISA a `--lang` spelling names, when it names one.
   var traceKind = "db" # by default
   var rrSupportPath = ""
   var server = false
@@ -628,7 +656,18 @@ proc main*(): Trace =
       if args.len < i + 2:
         displayHelp()
         return
+      # LRS-5, at review: refuse an unrecognised spelling here too.  `ct`
+      # refuses first and never forwards one, but `db-backend-record` is a
+      # program a user can run directly, and falling through to "no language
+      # given" is the same silent native recording there.  Both tables are
+      # accepted, so `--lang polkavm` / `--lang solana` still pass with no
+      # language at all -- which is why this cannot simply test `lang`.
+      if not isKnownLangSpelling(args[i + 1]):
+        for line in unknownLangSpellingLines(args[i + 1]):
+          stderr.writeLine(line)
+        quit(1)
       lang = toLang(args[i + 1])
+      isaOverride = targetIsaSpelling(args[i + 1])
       i += 2
     elif arg == "--backend":
       if args.len() < i + 2:
@@ -781,7 +820,7 @@ proc main*(): Trace =
 
   try:
     var trace = record(
-      program, recordArgs, "", lang, backend, stylusTrace,
+      program, recordArgs, "", lang, isaOverride, backend, stylusTrace,
       traceIDRecord=traceID, outputFolderArg=outputFolder,
       traceKind=traceKind, rrSupportPath=rrSupportPath,
       pythonInterpreter=pythonInterpreter,

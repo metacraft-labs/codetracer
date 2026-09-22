@@ -834,23 +834,83 @@ suite "trace_index schema version 1 — lang ordinal to name":
       except TraceIndexSchemaError:
         raised = true
       check(not raised)
-      check column.lang == LangUnknown
+      # LRS-5's SECOND deletion round changed what `lang` says here, and the
+      # change is a rule-7 correction rather than a weakening.  The summary is
+      # now the cell's LANGUAGE axis (`langForStorageAxes`), so a retired
+      # `LangPython` row summarises as `LangPythonDb` -- the language IS
+      # Python -- instead of as the sentinel.  What the case protects is
+      # unchanged and is asserted below exactly as before: the cell never
+      # raises, the retired NAME is preserved verbatim, the label still prints
+      # that name, and the member is not live.  What is new is that the row
+      # also keeps its syntax highlighting and its "was an rr recording"
+      # approach, neither of which the sentinel could carry.
       check column.retiredName == name
-      check langFromColumnValue(name) == LangUnknown
+      check column.axes.approach == raRr
+      check(not materializedReplayFor(column.axes.language, column.axes.approach))
+      var t = Trace(lang: column.lang, langRetiredName: column.retiredName)
+      check t.langLabel == name
       var live = false
       for lang in Lang:
         if $lang == name: live = true
       check(not live)
+    check decodeLangColumn("LangPython").lang == LangPythonDb
+    check decodeLangColumn("LangRuby").lang == LangRubyDb
     # The frozen v0 ordinals still carry the retired names, so a version-0
     # database with rows at 12 and 13 remaps to those names and then decodes
     # as retired -- the two policies compose.
     check langV0NameForOrdinal(12) == "LangPython"
     check langV0NameForOrdinal(13) == "LangRuby"
     check decodeLangColumn(langV0NameForOrdinal(12)).retiredName == "LangPython"
-    # `LangRustWasm` / `LangCppWasm` are NOT retired (kept until LRS-5), so
-    # their v0 names still decode to themselves.
-    check decodeLangColumn("LangRustWasm") == LangColumn(lang: LangRustWasm, retiredName: "")
-    check decodeLangColumn("LangCppWasm") == LangColumn(lang: LangCppWasm, retiredName: "")
+
+  test "the four names LRS-5's second round retired decode losslessly":
+    ## `LangRustWasm` (v0 ordinal 19), `LangCppWasm` (20), `LangPolkavm` (29)
+    ## and `LangSolana` (36) were deleted on 2026-09-21.  All four are in the
+    ## frozen `langV0OrdinalNames` snapshot, so `langNamesEverPersisted`
+    ## covered them with NO edit -- the append-only list did its job a second
+    ## time.
+    ##
+    ## **The assertion this milestone turns on** is not that the names decode,
+    ## it is that a version-1 `LangRustWasm` cell still answers MATERIALIZED
+    ## at the four replay-side sites in a build that has no such member.  It
+    ## does, because the retired branch takes its axes from the FROZEN
+    ## version-2 target of the name (`langV1NameToV2Token`) and not from the
+    ## live enum -- rule 3, applied to a fact that is not a name.
+    const Wasm = [("LangRustWasm", slRust), ("LangCppWasm", slCpp)]
+    for (name, expected) in Wasm:
+      checkpoint("retired wasm name: " & name)
+      check name in langNamesEverPersisted
+      let column = decodeLangColumn(name)
+      check column.retiredName == name          # nothing lost
+      check column.axes.language == expected
+      check column.axes.targetIsa == tiWasm
+      check column.axes.approach == raVmEmulation
+      # THE point: still materialized, with no member to say so.
+      check materializedReplayFor(column.axes.language, column.axes.approach)
+      check loadCalltraceMode("", column.axes) == CalltraceMode.FullRecord
+      # ...and the language survives as the summary, so such a row still gets
+      # Rust / C++ highlighting rather than "unknown".
+      check column.lang == langForSourceLanguage(expected)
+      var t = Trace(lang: column.lang, langRetiredName: column.retiredName)
+      check t.langLabel == name
+    for name in ["LangPolkavm", "LangSolana"]:
+      checkpoint("retired platform name: " & name)
+      check name in langNamesEverPersisted
+      let column = decodeLangColumn(name)
+      check column.retiredName == name
+      check column.lang == LangUnknown          # they named no language
+      check column.axes.language == slUnknown
+      check column.axes.approach == raVmEmulation
+      check materializedReplayFor(column.axes.language, column.axes.approach)
+    check decodeLangColumn("LangPolkavm").axes.targetIsa == tiPolkaVm
+    check decodeLangColumn("LangSolana").axes.targetIsa == tiSolanaSbf
+    # The version-2 TOKENS the 1 -> 2 migration writes for them decode to the
+    # same axes -- which is what makes the migration and the retired-name
+    # branch two spellings of one answer rather than two answers.
+    for name in ["LangRustWasm", "LangCppWasm", "LangPolkavm", "LangSolana"]:
+      let token = langV2TokenForV1Name(name)
+      check token.len > 0
+      check decodeLangColumn(token).axes == decodeLangColumn(name).axes
+      check decodeLangColumn(token).retiredName == token
 
   test "a RETIRED name decodes to LangUnknown with the name preserved, and never raises":
     ## The retired-name policy (`src/common/trace_index.nim`, LRS-2B): a cell
@@ -870,7 +930,14 @@ suite "trace_index schema version 1 — lang ordinal to name":
     except TraceIndexSchemaError:
       raised = true
     check(not raised)
+    # A name that was never a real member has no frozen version-2 target, so
+    # its axes are the all-sentinel value and the summary is the sentinel.
+    # That is the "never a guess at a neighbour" half of the policy, and it is
+    # what the language-axis summary added in LRS-5's second deletion round
+    # must NOT weaken: the fallback reads the cell's language, and this cell
+    # names none.
     check column.lang == LangUnknown
+    check column.axes == storageAxesOfLang(LangUnknown)
     check column.retiredName == Retired
     # The bare-`Lang` view is the sentinel, never a neighbour.
     # The same string WITHOUT the historical entry is still foreign and still
@@ -913,11 +980,11 @@ suite "trace_index schema version 1 — lang ordinal to name":
       if column.retiredName.len == 0:
         check $column.lang == name
       else:
-        check column.lang == LangUnknown
         check column.retiredName == name
         retired.add(name)
     retired.sort()
-    check retired == @["LangPython", "LangRuby"]
+    check retired == @["LangCppWasm", "LangPolkavm", "LangPython", "LangRuby",
+                       "LangRustWasm", "LangSolana"]
 
   test "every live Lang name has been recorded as persisted (the list is append-only)":
     ## A member added to `Lang` must be appended to `langNamesAddedSinceV0`
@@ -931,7 +998,11 @@ suite "trace_index schema version 1 — lang ordinal to name":
       check ($lang) in langNamesEverPersisted
     var liveCount = 0
     for _ in Lang: inc liveCount
-    check langNamesEverPersisted.len == liveCount + 2   # + LangPython, LangRuby
+    # + LangPython, LangRuby (LRS-4) + LangRustWasm, LangCppWasm,
+    # LangPolkavm, LangSolana (LRS-5's second deletion round).  Six retired
+    # names, and the list needed NO edit for either round: all six were in the
+    # frozen version-0 snapshot, which is what an append-only list is for.
+    check langNamesEverPersisted.len == liveCount + 6
     # And the frozen list is a superset built from two frozen literals, not
     # from `Lang`: it has every version-0 name plus the additions, no repeats.
     check langNamesEverPersisted.len == LANG_V0_ENTRY_COUNT + langNamesAddedSinceV0.len
@@ -962,6 +1033,30 @@ suite "trace_index schema version 1 — lang ordinal to name":
     check "\"langRetiredName\":\"LangRuby\"" in retired
     for lang in Lang:
       check ("\"lang\":\"" & $lang & "\"") in Json.encode(Trace(lang: lang))
+
+  test "ct trace-metadata encodes Trace.approach as its NAME too (LRS-5 (b))":
+    ## The behavioural half of the rule the case above pins for `lang`,
+    ## applied to the field LRS-5's second deletion round added.  It is what
+    ## `serializesAsTextInJson(RecordingApproach)` buys, and it is the reason
+    ## the renderer can decode with `parseEnum` instead of a second
+    ## hand-written ordinal map: without the opt-in `json_serialization`
+    ## writes `"approach":4` and the JS string branch never runs, exactly as
+    ## it did for `"lang":20` before LRS-4 found it.
+    ##
+    ## Added at review.  `target_axes_test.nim` pins the same fact by grepping
+    ## `trace_index.nim` for the opt-in, which cannot see whether the rule is
+    ## in a module where it TAKES EFFECT -- and the placement is the whole
+    ## finding: a rule declared downstream of this module is ignored, the
+    ## module doing the `Json.encode` included.  Verified against the real
+    ## binary as well: `ct trace-metadata` on a freshly recorded wasm
+    ## recording prints `"approach":"raVmEmulation"`.
+    let wasm = Json.encode(Trace(lang: LangRust, approach: raVmEmulation,
+                                 recordingId: "r3"))
+    check "\"approach\":\"raVmEmulation\"" in wasm
+    check "\"approach\":" & $ord(raVmEmulation) notin wasm
+    for approach in RecordingApproach:
+      check ("\"approach\":\"" & $approach & "\"") in
+        Json.encode(Trace(approach: approach))
 
   test "a retired row keeps its label in a listing":
     ## `langLabel` is what `ct list` and the upload listing print.  A retired
@@ -1147,9 +1242,11 @@ suite "trace_index schema version 2 — lang name to four-axis token":
       checkpoint("live member: " & $lang)
       check langV2TokenForV1Name($lang) == langToColumnValue(lang)
       inc liveCovered
-    # Exactly two of the 41 are unreachable from the live enum, and that is
-    # the whole reason rule 3 exists.
-    check LANG_V1_NAME_COUNT - liveCovered == 2
+    # Exactly six of the 41 are unreachable from the live enum, and that is
+    # the whole reason rule 3 exists.  Two after LRS-4, four more after
+    # LRS-5's second deletion round -- the map is a snapshot of a retired
+    # encoding and does not shrink when the enum does.
+    check LANG_V1_NAME_COUNT - liveCovered == 6
 
   test "a version-1 database holding ALL 41 legacy names migrates, each to its own target":
     ## The milestone's stated bar.  Not a sample: the failure this step exists
@@ -1219,16 +1316,17 @@ suite "trace_index schema version 2 — lang name to four-axis token":
       checkpoint("legacy name: " & entries[i][0])
       let column = decodeLangColumn(langCell(path, "id-" & $i))
       if column.retiredName.len > 0:
-        check column.lang == LangUnknown
         check column.retiredName == entries[i][1]
         unsummarised.add(entries[i][0])
       else:
         check $column.lang == entries[i][0]
     unsummarised.sort()
-    # Exactly the two members LRS-4 deleted: their recordings are still
-    # readable, still distinguishable from the surviving Python and Ruby, and
-    # still labelled by what they say rather than by "unknown".
-    check unsummarised == @["LangPython", "LangRuby"]
+    # Exactly the six members the two deletion rounds removed: their
+    # recordings are still readable, still distinguishable from the surviving
+    # members of the same language, and still labelled by what the cell says
+    # rather than by "unknown".
+    check unsummarised == @["LangCppWasm", "LangPolkavm", "LangPython",
+                            "LangRuby", "LangRustWasm", "LangSolana"]
 
   test "a version-0 database runs 0 -> 1 -> 2 in one call":
     ## The composition, end to end, through the public entry point.  A 1 -> 2
@@ -1430,7 +1528,14 @@ suite "trace_index schema version 2 — lang name to four-axis token":
     ## decoder, which is the one a database actually reaches.
     check langToColumnValue(LangPythonDb) == "py-interpreted-unknown-instrumented"
     check langToColumnValue(LangUnknown) == "unknown"
-    check langToColumnValue(LangRustWasm) == "rs-wasm-unknown-vm"
+    # `langToColumnValue(LangRustWasm)` used to be the assertion here; the
+    # member is gone, and the same cell is now written by the RECORD side from
+    # the assessed axes rather than by a `Lang` that spelled the ISA.
+    check encodeAxesToken(TargetAxes(language: slRust, targetIsa: tiWasm,
+                                     toolchain: tcUnknown,
+                                     approach: raVmEmulation)) ==
+      "rs-wasm-unknown-vm"
+    check langV2TokenForV1Name("LangRustWasm") == "rs-wasm-unknown-vm"
     for bare in ["py", "rs", "js", "nim", "c", "cpp", "midenasm", "mcr",
                  "native", "interpreted", "instrumented", "cargo",
                  "unknown-unknown-unknown-unknown"]:
@@ -1443,7 +1548,9 @@ suite "trace_index schema version 2 — lang name to four-axis token":
         check "neither a four-axis token nor a Lang enum name" in e.msg
       check raised
     # The sentinel, and only the sentinel, is hyphen-free and accepted.
-    check decodeLangColumn("unknown") == LangColumn(lang: LangUnknown, retiredName: "")
+    check decodeLangColumn("unknown") ==
+      LangColumn(lang: LangUnknown, retiredName: "",
+                 axes: storageAxesOfLang(LangUnknown))
 
   test "a version-1 NAME still decodes after version 2, and keeps its label":
     ## The legacy branch of `decodeLangColumn`.  A row written by an older
@@ -1451,19 +1558,28 @@ suite "trace_index schema version 2 — lang name to four-axis token":
     ## live format moved on — the same obligation the retired-name policy
     ## states, one format later.
     check decodeLangColumn("LangElixir") ==
-      LangColumn(lang: LangElixir, retiredName: "")
+      LangColumn(lang: LangElixir, retiredName: "",
+                 axes: storageAxesOfLang(LangElixir))
     let retired = decodeLangColumn("LangPython")
-    check retired.lang == LangUnknown
     check retired.retiredName == "LangPython"
-    var t = Trace(lang: LangUnknown, langRetiredName: "LangPython")
+    var t = Trace(lang: retired.lang, langRetiredName: retired.retiredName)
     check t.langLabel == "LangPython"
     # And a token no live member summarises labels by what the cell says,
     # which is strictly more than the name it replaced.
     let unsummarised = decodeLangColumn("py-interpreted-unknown-rr")
-    check unsummarised.lang == LangUnknown
     check unsummarised.retiredName == "py-interpreted-unknown-rr"
-    t = Trace(lang: LangUnknown, langRetiredName: "py-interpreted-unknown-rr")
+    t = Trace(lang: unsummarised.lang,
+              langRetiredName: unsummarised.retiredName)
     check t.langLabel == "py-interpreted-unknown-rr"
+    # `lang` is the cell's LANGUAGE axis since LRS-5's second deletion round
+    # (it was `LangUnknown` before).  Both cells above say "Python", and both
+    # still say "this was an rr recording" on the axis that decides replay.
+    check retired.lang == LangPythonDb
+    check unsummarised.lang == LangPythonDb
+    check retired.axes.approach == raRr
+    check unsummarised.axes.approach == raRr
+    check(not materializedReplayFor(unsummarised.axes.language,
+                                    unsummarised.axes.approach))
 
   test "verifyTraceIndexSchemaAt judges each version by ITS OWN cell format":
     ## The parameterised verifier is what lets each step check itself from

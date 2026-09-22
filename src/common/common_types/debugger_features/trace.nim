@@ -75,10 +75,35 @@ type
       ## `codetracer-specs/Refactoring-Plans/Language-Recording-Type-Split.md`
       ## §0.0 R1/R2 and §4.1.
     langRetiredName*: langstring
-      ## Empty unless the trace index row named a `Lang` member that this build
-      ## no longer has.  Then `lang` is `LangUnknown` and this is the name the
-      ## recording was made under, kept for display (`trace_index.langLabel`).
-      ## See the retired-name policy in `src/common/trace_index.nim`.
+      ## Empty unless no live `Lang` summarises the whole `recordings.lang`
+      ## cell: a four-axis token whose ISA or approach no member has (a wasm
+      ## recording, since LRS-5 deleted `LangRustWasm`), or the name of a
+      ## member a later build removed.  Then this is what the cell said, kept
+      ## for display (`trace_index.langLabel`), and `lang` is the cell's
+      ## LANGUAGE axis alone.  See the retired-name policy and
+      ## `langForStorageAxes` in `src/common/trace_index.nim`.
+    approach*: RecordingApproach
+      ## **How this recording was made** — the per-recording fact `lang`
+      ## cannot carry, decoded from the four-axis `recordings.lang` cell
+      ## (`trace_index.loadTrace`).
+      ##
+      ## Added by LRS-5's second deletion round, which is precondition (b) of
+      ## deleting `LangRustWasm` / `LangCppWasm`: for Rust and C++ the language
+      ## has two recording routes — native (`raMcr`, replayed by
+      ## `ct-native-replay`) and wasm (`raVmEmulation`, a materialized CTFS
+      ## trace) — and while the summary was the only per-recording fact the
+      ## frontend had, two `Lang` members were the only way to tell them apart.
+      ## The four sites that branch on it read
+      ## `usesMaterializedTraces(trace)`, which is
+      ## `materializedReplayFor(sourceLanguageOf(lang), approach)`: the REPL
+      ## (`ui/repl.nim` -> `repl_vm.setMaterialized`),
+      ## `DebuggerService.lineStepJump`, the re-record path
+      ## (`index/traces.nim`) and `trace_index.loadCalltraceMode`'s default.
+      ##
+      ## It crosses the `ct trace-metadata` -> Electron hop as a NAME, not an
+      ## ordinal (`serializesAsTextInJson(RecordingApproach)` in
+      ## `src/common/trace_index.nim`; decoded by
+      ## `src/frontend/trace_metadata.nim`).
     imported*: bool
     calltrace*: bool
     events*: bool
@@ -122,3 +147,22 @@ type
     path*: langstring
     name*: langstring
     lastOpened*: langstring
+
+func usesMaterializedTraces*(trace: Trace): bool =
+  ## **The per-recording form, and the one the replay side uses.**  Does this
+  ## recording open as a self-contained, materialized (CTFS) trace rather than
+  ## as a native replay recording?
+  ##
+  ## LRS-5's second deletion round, precondition (b).  Until it, the four sites
+  ## that branch on this asked `usesMaterializedTraces(trace.lang)` — a
+  ## question about a LANGUAGE — and it could only be answered for Rust and C++
+  ## because two `Lang` members, `LangRustWasm` and `LangCppWasm`, existed to
+  ## say "wasm".  It now reads `Trace.approach`, which the `recordings.lang`
+  ## cell carries per recording since trace_index schema version 2, with the
+  ## language axis supplying the two stated exceptions
+  ## (`MaterializedSummaryExceptions`: a Nim MCR container IS materialized, a
+  ## Lua one cannot exist).
+  ##
+  ## A `nil` trace is `false`: no recording is open, so nothing is materialized.
+  if trace.isNil: false
+  else: materializedReplayFor(sourceLanguageOf(trace.lang), trace.approach)

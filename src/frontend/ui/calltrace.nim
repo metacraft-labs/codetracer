@@ -1047,10 +1047,42 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
       if hasIgnorePatterns:
         vm.setRawIgnorePatterns(ignorePatterns)
 
-  #TODO: pass explicitly in trace as trace kind/in init/other way?
-  let lang = toLangFromFilename(self.location.path)
+  # LRS-5's second deletion round: the DECISION this milestone had to take
+  # rather than inherit (design §3.5's rule-7 correction).
+  #
+  # This flag used to be set from `toLangFromFilename(self.location.path)` --
+  # the language of the ACTIVE FILE -- and `usesMaterializedTraces` of that.
+  # It is the wrong input for what the flag gates, and it was measurably wrong
+  # before this milestone: in a wasm-recorded Rust program the active path is a
+  # `.rs` file, `usesMaterializedTraces(LangRust)` is `false`, and this pane
+  # therefore took the NATIVE path through a MATERIALIZED recording.  Deleting
+  # `LangRustWasm` would have left that unchanged rather than caused it, which
+  # is why LRS-4's review recorded it as a pre-existing gap and left the
+  # decision here.
+  #
+  # The decision: read the RECORDING, like the other four sites.  Three
+  # reasons, in order of force.
+  #
+  # 1. What the flag gates is WHICH BACKEND this pane talks to -- the
+  #    db-backend's materialized calltrace/event stream, or the native replay
+  #    path.  That is a property of the container, not of the file on screen.
+  # 2. The flag is LATCHED (`...Set` above): it is taken once, from whichever
+  #    file happened to be active at the first complete-move.  A per-recording
+  #    decision taken from an accidental per-move input is a race, not a
+  #    design.
+  # 3. Its own name says `...Trace`.
+  #
+  # What changes observably for a user: a recording whose active file is of a
+  # different language than the recording's own summary.  Stepping into a `.c`
+  # extension source from a Python (materialized) recording used to latch
+  # `false` here and drive this pane down the native path inside a
+  # materialized recording; it now stays materialized.  The converse -- a
+  # native C recording whose first active file is a `.py` helper, which used
+  # to latch `true` -- now stays native.  In both directions this pane now
+  # agrees with the REPL, `lineStepJump`, the re-record path and the stored
+  # calltrace mode instead of disagreeing with all four.
   if not self.usesMaterializedTracesTraceSet:
-    self.usesMaterializedTracesTrace = lang != LangUnknown and lang.usesMaterializedTraces
+    self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces
     self.usesMaterializedTracesTraceSet = true
 
   # For materialized traces: if the call key is already loaded, just

@@ -708,7 +708,13 @@ impl DapMeasurementDriver {
             Language::Ruby => Lang::RubyDb,
             Language::JavaScript => Lang::Javascript,
             Language::Cairo => Lang::Cairo,
-            Language::Solana => Lang::Solana,
+            // A Solana program's sources are Rust, and that is the language
+            // the db-backend's value loaders are picked by.  `Lang::Solana`
+            // named the chain rather than a language and was deleted in
+            // LRS-5's second deletion round; `lang_from_context` answers
+            // `Lang::Rust` for the `.rs` files of such a recording, so this
+            // sends what the engine would have derived anyway.
+            Language::Solana => Lang::Rust,
         }
         .wire_name();
         Ok(DapBenchContext {

@@ -577,8 +577,26 @@ const
   KindWasmCargoProject* = "wasm-cargo-project"
     ## A `Cargo.toml` project whose `.cargo/config.toml` mentions `wasm32`.
     ## `isWasmCargoProject` (`src/ct/utilities/language_detection.nim:18-26`)
-    ## is the marker that decides it today, and `detectFolderLang` turns it
-    ## into `LangRustWasm` — the ISA welded onto the language.
+    ## is the marker that decides it today.  (It used to be turned into
+    ## `LangRustWasm` by `detectFolderLang` — the ISA welded onto the
+    ## language; LRS-5's second deletion round removed the member and left the
+    ## marker doing the work it was already doing.)
+  KindWasmModule* = "wasm-module"
+    ## A **prebuilt `.wasm` module** handed to `ct record` — which is also
+    ## what a `wasm-cargo-project` hands to `db-backend-record` after
+    ## `cargo build --target wasm32-wasip1` (`src/ct/trace/record.nim`).
+    ##
+    ## **LRS-5, precondition (c).**  The extension is an ARTEFACT fact, of
+    ## exactly the same kind as the `.cargo/config.toml` marker above, and
+    ## until this milestone the assessment did not read it: `assessKind`
+    ## answered `tfPrebuiltArtefact` with NO specific kind, so
+    ## `targetIsaForAssessment` fell through to the per-language fallback and
+    ## the `tiWasm` came from `axesOfLang(LangRustWasm)` — from the Lang
+    ## MEMBER.  That is why the member could not be deleted without the route
+    ## for a prebuilt module silently becoming the native one.  With this kind
+    ## the route rides on the artefact, and
+    ## `record_dispatch_test` "a prebuilt .wasm module dispatches to wazero,
+    ## and the route rides on the ARTEFACT" is the case that pins it.
 
 func targetIsaForAssessment*(kind: TargetKind,
                              lang: SourceLanguage): TargetIsa =
@@ -596,8 +614,9 @@ func targetIsaForAssessment*(kind: TargetKind,
   ## | `nimscript` | `slNim` | `tiNimVm` | `.nim` is also `slNim` and is `tiNative` |
   ## | `nim-source` | `slNim` | `tiNative` | ditto, from the other side |
   ## | `wasm-cargo-project` | `slRust` | `tiWasm` | a plain crate is also `slRust` and is `tiNative` |
+  ## | `wasm-module` | any | `tiWasm` | a `.rs` beside it is `slRust` and is `tiNative` |
   ##
-  ## Rule K2 applies as everywhere else: this derivation knows three kinds,
+  ## Rule K2 applies as everywhere else: this derivation knows four kinds,
   ## and they name three different ISAs, so TWO of them in one set is an
   ## ambiguity that must not be resolved silently — `targetIsaForAssessment`
   ## answers `tiUnknown` for it, which no caller may mistake for a decision,
@@ -609,6 +628,7 @@ func targetIsaForAssessment*(kind: TargetKind,
     if specific == KindNimScript and tiNimVm notin found: found.add(tiNimVm)
     if specific == KindNimSource and tiNative notin found: found.add(tiNative)
     if specific == KindWasmCargoProject and tiWasm notin found: found.add(tiWasm)
+    if specific == KindWasmModule and tiWasm notin found: found.add(tiWasm)
   case found.len
   of 0: fallbackTargetIsaForLanguage(lang)
   of 1: found[0]
@@ -617,7 +637,8 @@ func targetIsaForAssessment*(kind: TargetKind,
 func targetIsaAmbiguity*(kind: TargetKind): seq[string] =
   ## The ISA-deciding kinds present in `kind` when there is more than one of
   ## them — the names a refusal must print.  Empty when the ISA is decided.
-  const IsaDecidingKinds = [KindNimScript, KindNimSource, KindWasmCargoProject]
+  const IsaDecidingKinds = [KindNimScript, KindNimSource, KindWasmCargoProject,
+                            KindWasmModule]
   var hits: seq[string] = @[]
   for specific in kind.specific:
     if specific in IsaDecidingKinds and specific notin hits:

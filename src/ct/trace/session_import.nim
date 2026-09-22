@@ -46,7 +46,7 @@
 ## per-process surface is served by the ``ct/listProcesses`` DAP request.
 
 import
-  std / [ os, osproc, strutils, sets ],
+  std / [ options, os, osproc, strutils, sets ],
   ../../common / [ trace_index, types, paths, lang ],
   trace_container,
   ctfs_sources,
@@ -251,6 +251,7 @@ proc importSessionManifest*(manifestPath: string,
   # heuristic single recordings go through, so a session's entry in the
   # trace list is labelled consistently with its members'.
   var lang = LangUnknown
+  var axes = storageAxesOfLang(LangUnknown)
   var sourcePathSet = initHashSet[string]()
   for entry in info.traces:
     let entryFolder = if dirExists(entry.path): entry.path
@@ -264,7 +265,10 @@ proc importSessionManifest*(manifestPath: string,
       # We just lose this member's contribution to the source folders.
       continue
     if lang == LangUnknown:
-      lang = detectTraceLang(meta.program, meta.paths, "db")
+      # LRS-5: the axes are what the session row is registered under; `lang`
+      # is their summary, kept because the surrounding code reads it.
+      axes = detectTraceAxes(meta.program, meta.paths, "db")
+      lang = langForStorageAxes(axes).lang
     for path in meta.paths:
       if path.len > 0 and isAbsolute(path):
         sourcePathSet.incl(path.parentDir)
@@ -279,6 +283,7 @@ proc importSessionManifest*(manifestPath: string,
     env = "",
     workdir = sessionFolder,
     lang = lang,
+    axesArg = some(axes),
     sourceFolders = sourceFolders.join(" "),
     lowLevelFolder = "",
     outputFolder = sessionFolder,

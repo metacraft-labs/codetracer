@@ -88,6 +88,9 @@ const SmartHarnessSrc =
 const CommonLangSrc =
   staticRead("../../../../common/common_lang.nim")
 
+const TargetAxesSrc =
+  staticRead("../../../../common/target_axes.nim")
+
 const RustLibtestSrc =
   staticRead("../../../../ct_test/frameworks/rust_libtest.nim")
 
@@ -161,9 +164,14 @@ type CanonicalRow = object
 const CanonicalRows: seq[CanonicalRow] = @[
   CanonicalRow(name: "Rust (Cargo)", listing: @["Cargo.toml", "src/"],
                lang: "LangRust", command: "cargo", args: @["build"]),
+  # The LANGUAGE of a wasm crate is Rust.  This row said `LangRustWasm` until
+  # LRS-5's second deletion round deleted the member: what separates this row
+  # from the plain Cargo one above is the `.cargo/config.toml` marker in its
+  # listing, which is an ISA fact (`KindWasmCargoProject`), and the build
+  # command it drives -- neither of which needs a second `Lang`.
   CanonicalRow(name: "Rust -> wasm",
                listing: @["Cargo.toml", ".cargo/config.toml", "src/"],
-               lang: "LangRustWasm", command: "cargo",
+               lang: "LangRust", command: "cargo",
                args: @["build", "--target", "wasm32-wasip1"]),
   CanonicalRow(name: "Noir", listing: @["Nargo.toml", "src/main.nr"],
                lang: "LangNoir", command: "nargo", args: @["compile"]),
@@ -476,17 +484,19 @@ suite "EMT §6 totality, emptiness and the two unrecognisable languages":
       pending(HeuristicAwaited & " — the asserted member count")
       expectCount(2)
 
-  test "EMT-A49 LangPolkavm and LangSolana cannot be recognised from sources":
+  test "EMT-A49 the PolkaVM and Solana targets cannot be recognised from sources":
     ## EMT-F7, and the assertion exists so the gap is not quietly "fixed" by a
-    ## guess. Both have recorder entries with `supported: true` and NO detection
-    ## path: no extension in `LANGS`, no marker in `detectFolderLang`, and
-    ## `getExtensionName` answers "" for both. Derived from source — green
-    ## today, and it is the control that keeps the heuristic honest.
+    ## guess.  Both ISAs have recorder entries with `supported: true` and NO
+    ## detection path: no extension in `LANGS`, no marker in
+    ## `detectFolderLang`.  Until LRS-5's second deletion round the evidence
+    ## was two `Lang` MEMBERS whose `getExtensionName` answered `""`; the
+    ## round deleted both, so the evidence is now their absence from the
+    ## language enum altogether, which is the stronger form of the same fact.
     startCount()
-    ck "LangPolkavm" in CommonLangSrc
-    ck "LangSolana" in CommonLangSrc
-    ck "of LangPolkavm: \"\"" in CommonLangSrc
-    ck "of LangSolana: \"\"" in CommonLangSrc
+    ck "of LangPolkavm:" notin CommonLangSrc
+    ck "of LangSolana:" notin CommonLangSrc
+    ck "tiPolkaVm" in TargetAxesSrc
+    ck "tiSolanaSbf" in TargetAxesSrc
     # Neither appears in the CLI's marker chain or its extension table.
     ck "LangPolkavm" notin LanguageDetectionSrc
     ck "LangSolana" notin LanguageDetectionSrc

@@ -15,7 +15,7 @@
 ## ``recent-folder-trailing-separators``, ``lang-name-roundtrip``,
 ## ``migrate-legacy-db``.
 
-import std/[algorithm, os, strutils, strformat]
+import std/[algorithm, options, os, strutils, strformat]
 
 when NimMajor >= 2:
   import ../db_connector/db_sqlite
@@ -469,25 +469,36 @@ proc scenarioLangNameRoundTrip() =
   echo "PASS"
 
 proc scenarioRetiredLangRows() =
-  ## LRS-4 deleted `LangPython` and `LangRuby`; a `trace_index.db` written by
-  ## an older build can still hold either NAME in `recordings.lang`.  Through
-  ## the PRODUCTION loader (`find`, `all`, `findRecentTraces`) such a row must
-  ## decode to `LangUnknown` with the name kept in `langRetiredName`, must
-  ## keep its label, and must not stop the rows beside it from loading
-  ## (design §5.6; `decodeLangColumn`).  The rows are written with raw SQL
-  ## because no production writer can spell a retired name any more -- that
-  ## is what "retired" means.
+  ## LRS-4 deleted `LangPython` and `LangRuby`, and LRS-5's second deletion
+  ## round deleted `LangRustWasm`, `LangCppWasm`, `LangPolkavm` and
+  ## `LangSolana`; a `trace_index.db` written by an older build can still hold
+  ## any of those NAMES in `recordings.lang`.  Through the PRODUCTION loader
+  ## (`find`, `all`, `findRecentTraces`) such a row must keep the name in
+  ## `langRetiredName`, must keep its label, and must not stop the rows beside
+  ## it from loading (design §5.6; `decodeLangColumn`).  The rows are written
+  ## with raw SQL because no production writer can spell a retired name any
+  ## more -- that is what "retired" means.
   ##
   ## Still true, and deliberately unchanged, after schema version 2: a
   ## version-1 NAME is still decoded by ``decodeLangColumn``'s legacy branch,
   ## because a row written by an older build must not become a hard failure
   ## at open just because the column's live format moved on.
+  ##
+  ## **What LRS-5's second deletion round changed here, deliberately:** the
+  ## summary is now the cell's LANGUAGE axis, so a retired `LangRuby` row
+  ## loads as `LangRubyDb` (it IS a Ruby recording) rather than as the
+  ## sentinel, and a retired `LangRustWasm` row loads as `LangRust` with
+  ## `Trace.approach == raVmEmulation`.  Nothing is lost -- the label is still
+  ## the retired name, asserted below -- and the row keeps its highlighting
+  ## and its replay behaviour instead of degrading to "unknown".
   let live = trace_index.newID(test = false)
   insertRecording(live)
   let retiredRuby = trace_index.newID(test = false)
   insertRecording(retiredRuby)
   let retiredPython = trace_index.newID(test = false)
   insertRecording(retiredPython)
+  let retiredWasm = trace_index.newID(test = false)
+  insertRecording(retiredWasm)
   block:
     var db = open(traceIndexDbPath(), "", "", "")
     defer: db.close()
@@ -495,23 +506,50 @@ proc scenarioRetiredLangRows() =
             "LangRuby", retiredRuby)
     db.exec(sql"UPDATE recordings SET lang = ? WHERE recording_id = ?",
             "LangPython", retiredPython)
-    for (id, expected) in [(retiredRuby, "LangRuby"), (retiredPython, "LangPython")]:
+    db.exec(sql"UPDATE recordings SET lang = ? WHERE recording_id = ?",
+            "LangRustWasm", retiredWasm)
+    for (id, expected) in [(retiredRuby, "LangRuby"),
+                           (retiredPython, "LangPython"),
+                           (retiredWasm, "LangRustWasm")]:
       let raw = db.getValue(
         sql"SELECT lang FROM recordings WHERE recording_id = ?", id)
       if raw != expected:
         fail("fixture: recordings.lang should hold " & expected & "; got " & raw.escape())
 
-  for (id, name) in [(retiredRuby, "LangRuby"), (retiredPython, "LangPython")]:
+  for (id, name, summary) in [(retiredRuby, "LangRuby", LangRubyDb),
+                              (retiredPython, "LangPython", LangPythonDb),
+                              (retiredWasm, "LangRustWasm", LangRust)]:
     let found = trace_index.find(id, test = false)
     if found.isNil:
       fail("find returned nil for the retired row " & id)
-    if found.lang != LangUnknown:
-      fail("retired row " & name & " decoded to " & $found.lang & ", expected LangUnknown")
+    if found.lang != summary:
+      fail("retired row " & name & " decoded to " & $found.lang &
+           ", expected " & $summary)
     if found.langRetiredName != name:
       fail("retired row " & name & " kept langRetiredName " &
            found.langRetiredName.escape() & ", expected " & name)
     if found.langLabel != name:
       fail("retired row " & name & " labels as " & found.langLabel & ", expected " & name)
+
+  # THE assertion the second deletion round turns on: a row recorded under
+  # `LangRustWasm` still replays as a MATERIALIZED recording in a build that
+  # has no such member.  The approach comes from the frozen version-2 target
+  # of the retired name, not from the summary -- which is `LangRust`, and
+  # `usesMaterializedTraces(LangRust)` is `false`.
+  block:
+    let wasmRow = trace_index.find(retiredWasm, test = false)
+    if wasmRow.approach != raVmEmulation:
+      fail("retired row LangRustWasm has approach " & $wasmRow.approach &
+           ", expected raVmEmulation")
+    if not wasmRow.usesMaterializedTraces:
+      fail("retired row LangRustWasm must still replay as a materialized trace")
+    if usesMaterializedTraces(wasmRow.lang):
+      fail("the Lang summary must NOT be what answers this -- " &
+           "usesMaterializedTraces(LangRust) is expected to be false")
+    # (The stored `calltrace_mode` cell of this fixture row is non-empty, so
+    # `loadCalltraceMode`'s DEFAULT -- the fourth of the four sites -- is not
+    # exercised here; `trace_index_migration_test` asserts it directly against
+    # the decoded axes, which is where an empty cell is reachable.)
 
   let liveTrace = trace_index.find(live, test = false)
   if liveTrace.isNil or liveTrace.lang != LangNoir or liveTrace.langRetiredName.len > 0:
@@ -521,17 +559,18 @@ proc scenarioRetiredLangRows() =
   let everything = trace_index.all(test = false)
   var seen = 0
   for t in everything:
-    if t.recordingId in [live, retiredRuby, retiredPython]:
+    if t.recordingId in [live, retiredRuby, retiredPython, retiredWasm]:
       inc seen
-  if seen != 3:
-    fail("all() returned " & $seen & " of the 3 rows; a retired name must not hide a row")
+  if seen != 4:
+    fail("all() returned " & $seen & " of the 4 rows; a retired name must not hide a row")
   let recent = trace_index.findRecentTraces(10, test = false)
   var labels: seq[string] = @[]
   for t in recent:
     labels.add(t.langLabel)
-  if "LangRuby" notin labels or "LangPython" notin labels or "LangNoir" notin labels:
+  if "LangRuby" notin labels or "LangPython" notin labels or
+     "LangRustWasm" notin labels or "LangNoir" notin labels:
     fail("findRecentTraces labels were " & $labels &
-         "; expected LangRuby, LangPython and LangNoir among them")
+         "; expected LangRuby, LangPython, LangRustWasm and LangNoir among them")
 
   # Nothing rewrote the cells: the raw names stay on disk for LRS-5's remap.
   block:
@@ -540,6 +579,9 @@ proc scenarioRetiredLangRows() =
     if db.getValue(sql"SELECT lang FROM recordings WHERE recording_id = ?",
                    retiredRuby) != "LangRuby":
       fail("the retired cell was rewritten; it must stay LangRuby on disk")
+    if db.getValue(sql"SELECT lang FROM recordings WHERE recording_id = ?",
+                   retiredWasm) != "LangRustWasm":
+      fail("the retired cell was rewritten; it must stay LangRustWasm on disk")
 
   echo "PASS"
 
@@ -619,6 +661,89 @@ proc scenarioMigrateLegacyDb() =
 
   echo "PASS"
 
+proc scenarioObservedAxesRoundTrip() =
+  ## **LRS-5's second deletion round, precondition (b), asserted on the CELL
+  ## rather than on the source text.**
+  ##
+  ## Deleting `LangRustWasm` removed the only way a one-`Lang` column could
+  ## say "this Rust recording is a wasm one".  What replaces it is
+  ## `recordTrace`'s `axesArg`: the record side passes the axes the assessment
+  ## observed, and the column stores all four.  Get that wrong and `ct record`
+  ## writes `rs-native-unknown-mcr` for a wasm recording -- a correct reader
+  ## of a wrong cell, which is the silent mislabel the whole deferral existed
+  ## to prevent, and which no amount of DECODER testing can catch.
+  ##
+  ## Added at review.  The suite already pinned this half by reading
+  ## `db_backend_record.nim` and `storage_and_import.nim` as TEXT and checking
+  ## for the `axesArg` substrings (`target_axes_test.nim`, "recordTrace
+  ## persists the OBSERVED axes when the caller has them").  A source grep
+  ## dies to a reformat and says nothing about what lands on disk; this drives
+  ## the production writer and the production loader against a real SQLite
+  ## database and reads the row back.
+  let wasmAxes = TargetAxes(language: slRust, targetIsa: tiWasm,
+                            toolchain: tcUnknown, approach: raVmEmulation)
+  let wasmId = trace_index.newID(test = false)
+  discard trace_index.recordTrace(
+    wasmId,
+    program = "/tmp/wasmdemo.wasm",
+    args = @[], compileCommand = "", env = "", workdir = "/tmp",
+    lang = LangRust,                      # the SUMMARY: a wasm Rust recording
+    sourceFolders = "", lowLevelFolder = "",
+    outputFolder = "/tmp/trace-" & wasmId,
+    test = false, imported = false, shellID = -1, rrPid = 0, exitCode = 0,
+    calltrace = true, calltraceMode = CalltraceMode.FullRecord,
+    axesArg = some(wasmAxes))
+
+  # The same summary with NO observed axes -- what every caller wrote before
+  # this milestone, and what `recordDb` would write again if the plumbing were
+  # reverted.  It is a NATIVE cell, and that is the mislabel.
+  let nativeId = trace_index.newID(test = false)
+  discard trace_index.recordTrace(
+    nativeId,
+    program = "/tmp/native-crate", args = @[], compileCommand = "", env = "",
+    workdir = "/tmp", lang = LangRust, sourceFolders = "", lowLevelFolder = "",
+    outputFolder = "/tmp/trace-" & nativeId,
+    test = false, imported = false, shellID = -1, rrPid = 0, exitCode = 0,
+    calltrace = true, calltraceMode = CalltraceMode.FullRecord)
+
+  block:
+    var db = open(traceIndexDbPath(), "", "", "")
+    defer: db.close()
+    let wasmCell = db.getValue(
+      sql"SELECT lang FROM recordings WHERE recording_id = ?", wasmId)
+    if wasmCell != "rs-wasm-unknown-vm":
+      fail("the observed axes must reach the column: recordings.lang is " &
+           wasmCell.escape() & ", expected rs-wasm-unknown-vm")
+    let nativeCell = db.getValue(
+      sql"SELECT lang FROM recordings WHERE recording_id = ?", nativeId)
+    if nativeCell != "rs-native-unknown-mcr":
+      fail("a summary-only write must stay the language's default cell; got " &
+           nativeCell.escape())
+
+  # ...and the production loader reads it back as a MATERIALIZED recording,
+  # with no `Lang` member anywhere in the chain able to say so: the summary is
+  # `LangRust`, whose own `usesMaterializedTraces` is false.
+  let wasmRow = trace_index.find(wasmId, test = false)
+  if wasmRow.isNil:
+    fail("find returned nil for the wasm row")
+  if wasmRow.lang != LangRust:
+    fail("the wasm row summarises as " & $wasmRow.lang & ", expected LangRust")
+  if wasmRow.approach != raVmEmulation:
+    fail("the wasm row loaded approach " & $wasmRow.approach &
+         ", expected raVmEmulation")
+  if not wasmRow.usesMaterializedTraces:
+    fail("a wasm recording must replay as a materialized trace")
+  if usesMaterializedTraces(wasmRow.lang):
+    fail("the Lang summary must NOT be what answers this")
+  let nativeRow = trace_index.find(nativeId, test = false)
+  if nativeRow.approach != raMcr:
+    fail("the native row loaded approach " & $nativeRow.approach &
+         ", expected raMcr")
+  if nativeRow.usesMaterializedTraces:
+    fail("a native Rust recording must not replay as a materialized trace")
+
+  echo "PASS"
+
 when isMainModule:
   if paramCount() < 1:
     fail("usage: trace_index_test_helper <scenario>")
@@ -635,5 +760,6 @@ when isMainModule:
   of "lang-name-roundtrip": scenarioLangNameRoundTrip()
   of "migrate-legacy-db": scenarioMigrateLegacyDb()
   of "retired-lang-rows": scenarioRetiredLangRows()
+  of "observed-axes-round-trip": scenarioObservedAxesRoundTrip()
   else:
     fail("unknown scenario: " & paramStr(1))

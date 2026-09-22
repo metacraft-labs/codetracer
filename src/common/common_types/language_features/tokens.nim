@@ -51,13 +51,18 @@ func tokenTextsFor*(lang: Lang): array[TokenText, string] =
   ## generic bracket row below and a wasm-recorded Rust sequence rendered as
   ## `[` while the same program recorded natively rendered `vec![` -- the
   ## conflation of language and ISA showing through the value renderer
-  ## (design §1.2).  Each wasm member now shares its language's row.
+  ## (design §1.2).  LRS-4 gave each wasm member its language's row; LRS-5's
+  ## second deletion round deleted the members, and **the fold became a
+  ## no-op**: a wasm recording of a Rust program summarises as `LangRust` and
+  ## reaches the Rust row because there is no second Rust member to reach the
+  ## wrong one.  `LangPolkavm` / `LangSolana` left the generic row the same
+  ## way -- they named a VM, and a VM has no bracket vocabulary at all.
   case lang
-  of LangRust, LangRustWasm:
+  of LangRust:
     ["{", "}", "[", "]", "vec![", "]"]
   of LangNim:
     ["(", ")", "[", "]", "@[", "]"]
-  of LangC, LangCpp, LangCppWasm, LangGo, LangPascal:  # LangPascal TODO
+  of LangC, LangCpp, LangGo, LangPascal:  # LangPascal TODO
     ["{", "}", "[", "]", "vector[", "]"]
   of LangRubyDb, LangPythonDb:
     ["(", ")", "[", "]", "[", "]"]
@@ -65,8 +70,8 @@ func tokenTextsFor*(lang: Lang): array[TokenText, string] =
     ["", "", "", "", "", ""]
   of LangFortran, LangD, LangCrystal, LangLean, LangJulia, LangAda,
      LangJavascript, LangLua, LangAsm, LangNoir,
-     LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm, LangCairo,
-     LangCircom, LangLeo, LangTolk, LangAiken, LangCadence, LangSolana,
+     LangSolidity, LangMasm, LangSway, LangMove, LangCairo,
+     LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
      LangElixir, LangErlang, LangPhp,
      LangGdScript:  # GDScript: Dictionary {} / Array []
     ["{", "}", "[", "]", "[", "]"]

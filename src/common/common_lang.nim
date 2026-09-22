@@ -70,18 +70,24 @@ type
     ## cells written by older builds and decode to `LangUnknown` with the name
     ## preserved (`trace_index.decodeLangColumn`, design §5.6).
     ##
-    ## **Deliberately NOT retired yet:** `LangRustWasm` / `LangCppWasm` (the
-    ## wasm pair) and `LangPolkavm` / `LangSolana` (the platform pair).  All
-    ## four are the persisted `recordings.lang` column's only way of saying
-    ## what it must say about a recording until LRS-5 stores the axes: the
-    ## wasm pair is how `Trace.lang` -- a SUMMARY, and the replay side's only
-    ## per-recording fact -- says "this Rust/C++ recording is a materialized
-    ## wasm one" (`usesMaterializedTraces(trace.lang)` in the call trace, the
-    ## event log, the REPL, `lineStepJump` and the re-record path), and the
-    ## platform pair name a target with no source language at all.  Deleting
-    ## them before the column can carry the ISA would register every new wasm
-    ## recording as native Rust/C++ -- the silent mislabel this series exists
-    ## to prevent.  They go in LRS-5, with the column.
+    ## **Retired in LRS-5's second deletion round (2026-09-21):**
+    ## `LangRustWasm` (was 18), `LangCppWasm` (19), `LangPolkavm` (27) and
+    ## `LangSolana` (34).  Each welded a non-language axis onto a language
+    ## enum — the wasm pair an ISA (`tiWasm`) and an approach
+    ## (`raVmEmulation`), the platform pair an ISA with NO source language at
+    ## all — and each was kept by LRS-4 only because the persisted
+    ## `recordings.lang` column had no other way to say it.  Schema version 2
+    ## stores all four axes (`rs-wasm-unknown-vm`,
+    ## `unknown-solanasbf-unknown-vm`, …) and `Trace.approach` carries the
+    ## recording approach per recording, so the column and the replay side say
+    ## it without a member.  Their names still occur in cells written by older
+    ## builds and decode losslessly (`trace_index.decodeLangColumn`, the frozen
+    ## `langV1NameToV2Token` map, design §3.5 and §5.6).
+    ##
+    ## **What is left is exactly one member per source language.**  After this
+    ## round `sourceLanguageOf` is a BIJECTION between `Lang` and
+    ## `SourceLanguage` — asserted by `target_axes_test.nim` — which is the
+    ## property that makes `Trace.lang` a language summary and nothing else.
     LangUnknown,  # 0 -- the sentinel, at the zero position (see above)
     LangC,        # 1
     LangCpp,      # 2
@@ -102,31 +108,27 @@ type
     LangLua,      # 15
     LangAsm,      # 16
     LangNoir,     # 17
-    LangRustWasm, # 18 -- kept until LRS-5, see above
-    LangCppWasm,  # 19 -- kept until LRS-5, see above
-    LangPythonDb, # 20 -- Python, recorded by codetracer-python-recorder (the
+    LangPythonDb, # 18 -- Python, recorded by codetracer-python-recorder (the
                   # `Db` suffix is historical, as for LangRubyDb)
-    LangBash,     # 21 — tree-sitter support in db-backend; recorded by
+    LangBash,     # 19 — tree-sitter support in db-backend; recorded by
                   # codetracer-shell-recorders (`recorderToolFor`, `slBash`),
                   # reachable as `.sh`/`.bash` via `LANGS`
-    LangZsh,      # 22 — as LangBash: tree-sitter in db-backend, recorded by
+    LangZsh,      # 20 — as LangBash: tree-sitter in db-backend, recorded by
                   # codetracer-shell-recorders (`slZsh`), `.zsh` via `LANGS`
-    LangSolidity, # 23
-    LangMasm,     # 24
-    LangSway,     # 25
-    LangMove,     # 26
-    LangPolkavm,  # 27 -- kept until LRS-5, see above
-    LangCairo,    # 28
-    LangCircom,   # 29
-    LangLeo,      # 30
-    LangTolk,     # 31
-    LangAiken,    # 32
-    LangCadence,  # 33
-    LangSolana,   # 34 -- kept until LRS-5, see above
-    LangElixir,   # 35
-    LangErlang,   # 36
-    LangPhp,      # 37
-    LangGdScript  # 38 — GDScript (Godot); materialized trace from the patched
+    LangSolidity, # 21
+    LangMasm,     # 22
+    LangSway,     # 23
+    LangMove,     # 24
+    LangCairo,    # 25
+    LangCircom,   # 26
+    LangLeo,      # 27
+    LangTolk,     # 28
+    LangAiken,    # 29
+    LangCadence,  # 30
+    LangElixir,   # 31
+    LangErlang,   # 32
+    LangPhp,      # 33
+    LangGdScript  # 34 — GDScript (Godot); materialized trace from the patched
                   # engine recorder.  Pinned against the Rust `Lang::GDScript`
                   # (libs/ct-lang/src/lib.rs) by the contract test, like every
                   # other member.
@@ -169,10 +171,16 @@ func axesOfLang*(lang: Lang): LangAxes =
   ##   The answer for `LangNim` is therefore the per-language FALLBACK
   ##   (`fallbackTargetIsaForLanguage(slNim) == tiNative`), not a claim that
   ##   every Nim recording is native.
-  ## * `LangSolana` and `LangPolkavm` have NO source language: they name a
-  ##   chain and a VM, which is why their `getExtensionName` is empty.  The
-  ##   language of a program recorded under either is unknown until a file is
-  ##   looked at.  `target_axes_test.nim` asserts these are exactly the two.
+  ## * **No member answers `slUnknown` any more except the sentinel.**  Two
+  ##   used to -- `LangSolana` and `LangPolkavm`, which named a chain and a VM
+  ##   rather than a notation, and whose `getExtensionName` was empty for that
+  ##   reason.  LRS-5's second deletion round deleted both; their ISAs are
+  ##   `tiSolanaSbf` / `tiPolkaVm` and a `--lang solana` / `--lang polkavm`
+  ##   spelling reaches them through `TargetIsaSpellings`.  What
+  ##   `target_axes_test.nim` asserts now is the stronger property that
+  ##   replaced the old "exactly these two": this function is a BIJECTION onto
+  ##   `SourceLanguage`, so every non-sentinel member has a real language and
+  ##   an extension.
   case lang
   of LangUnknown: LangAxes(language: slUnknown, targetIsa: tiUnknown, approach: raUnknown)
   of LangC: LangAxes(language: slC, targetIsa: tiNative, approach: raMcr)
@@ -202,9 +210,6 @@ func axesOfLang*(lang: Lang): LangAxes =
                        approach: raInstrumentedRuntime)
   of LangAsm: LangAxes(language: slAsm, targetIsa: tiNative, approach: raMcr)
   of LangNoir: LangAxes(language: slNoir, targetIsa: tiAcir, approach: raVmEmulation)
-  # The wasm pair: same language, different ISA.
-  of LangRustWasm: LangAxes(language: slRust, targetIsa: tiWasm, approach: raVmEmulation)
-  of LangCppWasm: LangAxes(language: slCpp, targetIsa: tiWasm, approach: raVmEmulation)
   of LangPythonDb: LangAxes(language: slPython, targetIsa: tiInterpreted,
                             approach: raInstrumentedRuntime)
   of LangBash: LangAxes(language: slBash, targetIsa: tiInterpreted,
@@ -215,7 +220,6 @@ func axesOfLang*(lang: Lang): LangAxes =
   of LangMasm: LangAxes(language: slMidenAsm, targetIsa: tiMidenVm, approach: raVmEmulation)
   of LangSway: LangAxes(language: slSway, targetIsa: tiFuelVm, approach: raVmEmulation)
   of LangMove: LangAxes(language: slMove, targetIsa: tiMoveVm, approach: raVmEmulation)
-  of LangPolkavm: LangAxes(language: slUnknown, targetIsa: tiPolkaVm, approach: raVmEmulation)
   of LangCairo: LangAxes(language: slCairo, targetIsa: tiCairoVm, approach: raVmEmulation)
   of LangCircom: LangAxes(language: slCircom, targetIsa: tiCircomWitness,
                           approach: raVmEmulation)
@@ -223,7 +227,6 @@ func axesOfLang*(lang: Lang): LangAxes =
   of LangTolk: LangAxes(language: slTolk, targetIsa: tiTonVm, approach: raVmEmulation)
   of LangAiken: LangAxes(language: slAiken, targetIsa: tiPlutus, approach: raVmEmulation)
   of LangCadence: LangAxes(language: slCadence, targetIsa: tiFlowVm, approach: raVmEmulation)
-  of LangSolana: LangAxes(language: slUnknown, targetIsa: tiSolanaSbf, approach: raVmEmulation)
   of LangElixir: LangAxes(language: slElixir, targetIsa: tiBeam,
                           approach: raInstrumentedRuntime)
   of LangErlang: LangAxes(language: slErlang, targetIsa: tiBeam,
@@ -237,9 +240,27 @@ func axesOfLang*(lang: Lang): LangAxes =
                             approach: raInstrumentedRuntime)
 
 func sourceLanguageOf*(lang: Lang): SourceLanguage =
-  ## The per-file axis of a `Lang` value.  `slUnknown` for the sentinel and
-  ## for the two platform pseudo-languages (`LangSolana`, `LangPolkavm`).
+  ## The per-file axis of a `Lang` value.  `slUnknown` only for the sentinel:
+  ## LRS-5's second deletion round removed the two platform pseudo-languages
+  ## (`LangSolana`, `LangPolkavm`) that used to share that answer, so this
+  ## function is now a BIJECTION `Lang` <-> `SourceLanguage` and
+  ## `langForSourceLanguage` below is its inverse.
   axesOfLang(lang).language
+
+func langForSourceLanguage*(language: SourceLanguage): Lang =
+  ## The inverse of `sourceLanguageOf`, derived by iterating `Lang` against the
+  ## exhaustive `axesOfLang` `case` rather than from a second table (rule 4).
+  ##
+  ## Total and unambiguous *because* the second deletion round landed: with
+  ## `LangRustWasm` / `LangCppWasm` gone no two members share `slRust` or
+  ## `slCpp`, and with `LangPolkavm` / `LangSolana` gone `slUnknown` belongs to
+  ## `LangUnknown` alone.  `target_axes_test.nim` asserts the bijection, so a
+  ## member re-added on an occupied language fails the suite rather than making
+  ## this function pick by enum order.
+  for lang in Lang:
+    if axesOfLang(lang).language == language:
+      return lang
+  LangUnknown
 
 func storageAxesOfLang*(lang: Lang): TargetAxes =
   ## The four-axis value a `Lang` summary is PERSISTED as — milestone LRS-5.
@@ -279,21 +300,47 @@ func langForStorageAxes*(axes: TargetAxes): tuple[found: bool, lang: Lang] =
   ## as `LangRust`.  That is lossy in the SUMMARY and lossless on disk, which
   ## is the whole point of storing four axes — the cell keeps what the summary
   ## cannot hold.
+  ##
+  ## **The language-axis fallback — LRS-5, second deletion round.**  When no
+  ## member matches all three axes the summary is the member for the cell's
+  ## LANGUAGE axis, and `found` stays `false` so the caller still preserves the
+  ## cell verbatim (`Trace.langRetiredName`, `langLabel`).  This is not a
+  ## default implied by a persisted value — Q1's rule — because the language
+  ## axis is *stated in the cell*: `rs-wasm-unknown-vm` says `rs`, and the
+  ## summary reads it.  What it drops is the ISA and the approach, which since
+  ## this milestone are carried per recording by `Trace.approach` and by the
+  ## cell itself, and which no reader has to recover from the summary any more.
+  ##
+  ## Without it, deleting `LangRustWasm` would have made every wasm recording
+  ## summarise as `LangUnknown` — no Monaco language, no tree-sitter token
+  ## table, no language name in the REPL header — which is a different silent
+  ## degradation from the one the deletion was deferred for, not an absence of
+  ## one.  `slUnknown` still answers `LangUnknown`, so a cell that genuinely
+  ## names no language keeps the sentinel.
   for lang in Lang:
     let candidate = axesOfLang(lang)
     if candidate.language == axes.language and
        candidate.targetIsa == axes.targetIsa and
        candidate.approach == axes.approach:
       return (true, lang)
-  (false, LangUnknown)
+  (false, langForSourceLanguage(axes.language))
 
 const
   MaterializedSummaryExceptions* = [
-    (lang: LangNim, materialized: true),
-    (lang: LangLua, materialized: false),
+    (language: slNim, materialized: true),
+    (language: slLua, materialized: false),
   ]
-    ## The two `Lang` values whose replay-side "is this a materialized trace?"
-    ## answer is NOT `producesMaterializedTrace(axesOfLang(lang).approach)`.
+    ## The two SOURCE LANGUAGES whose replay-side "is this a materialized
+    ## trace?" answer is NOT `producesMaterializedTrace(approach)`.
+    ##
+    ## **Re-keyed from `Lang` onto the language axis by LRS-5's second deletion
+    ## round.**  The predicate below is now asked of a decoded *cell* (a
+    ## language plus an approach) and not only of a `Lang` summary, so the
+    ## exception list has to be keyed by something both forms carry.  The
+    ## answers are unchanged, member for member: `slNim` is `LangNim`'s
+    ## language and nothing else's, `slLua` is `LangLua`'s, and
+    ## `target_axes_test.nim` asserts both directions.
+    ##
     ## Each is a deliberate decision, not an average:
     ##
     ## * **`LangNim` — `true`.**  The decomposition says `tiNative` / `raMcr`,
@@ -318,27 +365,45 @@ const
     ##   extension table, the same kind `.gd` had, and it is recorded, not
     ##   closed, here.)
 
+func materializedReplayFor*(language: SourceLanguage,
+                            approach: RecordingApproach): bool =
+  ## **The per-recording form, and the primary one since LRS-5's second
+  ## deletion round.**  Does a recording of `language` made with `approach`
+  ## open as a self-contained, materialized (CTFS) trace rather than as a
+  ## native replay recording?
+  ##
+  ## `producesMaterializedTrace(approach)` with the two exceptions in
+  ## `MaterializedSummaryExceptions`.  Both arguments are facts a decoded
+  ## `recordings.lang` cell states outright, which is what lets the four
+  ## replay-side call sites stop asking a `Lang` summary a question the
+  ## summary could only answer while `LangRustWasm` existed.
+  for exception in MaterializedSummaryExceptions:
+    if exception.language == language:
+      return exception.materialized
+  producesMaterializedTrace(approach)
+
 func usesMaterializedTraces*(lang: Lang): bool =
   ## Does a recording summarised as ``lang`` open as a self-contained,
   ## materialized (CTFS) trace rather than a native replay recording?
   ##
-  ## **Derived**, since LRS-2B: `producesMaterializedTrace(axesOfLang(lang).approach)`
-  ## for 37 of the 39 values, with the two exceptions in
-  ## `MaterializedSummaryExceptions` stated and reasoned individually.  It used
-  ## to be a hand-kept 41-arm `case` (41 members then) (and before LRS-3 a mutable positional
-  ## `array[Lang, bool]`) whose 24 `true` answers had to be kept in agreement
-  ## with `recorderToolFor`'s `supported` arms by hand.
+  ## **Derived**, since LRS-2B, and since LRS-5's second deletion round a thin
+  ## wrapper over `materializedReplayFor` — the per-recording predicate — asked
+  ## of the axes the `Lang` value itself decomposes to.  The answers are
+  ## unchanged for every surviving member.
   ##
-  ## **This is a replay-side SUMMARY over a per-recording fact.**  `Trace.lang`
-  ## summarises a recording by one `Lang`, and this predicate answers for that
-  ## summary — which is why `LangNim` cannot be right for both of its flows and
-  ## needs an exception.  The record side does not use it to decide anything
-  ## any more: `ct record` derives the approach from the assessment and asks
-  ## `producesMaterializedTrace` of that.
-  for exception in MaterializedSummaryExceptions:
-    if exception.lang == lang:
-      return exception.materialized
-  producesMaterializedTrace(axesOfLang(lang).approach)
+  ## **This is a replay-side SUMMARY over a per-recording fact, and it is no
+  ## longer how a loaded recording is judged.**  `Trace.lang` summarises a
+  ## recording by one `Lang`, and for a Rust or C++ recording that summary
+  ## cannot say whether the recording was native or wasm — which is exactly
+  ## why the wasm pair existed.  The four replay-side sites that used to ask
+  ## `usesMaterializedTraces(trace.lang)` now ask
+  ## `usesMaterializedTraces(trace)`, which reads `Trace.approach` (the
+  ## per-recording fact the column carries since schema version 2).  What is
+  ## left for this overload is the EXTENSION-derived question
+  ## (`usesMaterializedTracesForExtension`) and the record-target question in
+  ## `index/traces.nim` when there is no loaded recording to ask.
+  let axes = axesOfLang(lang)
+  materializedReplayFor(axes.language, axes.approach)
 
 func toCLang*(lang: Lang): string =
   ## The NAME of the language a ``Lang`` value stands for -- the one such
@@ -349,13 +414,16 @@ func toCLang*(lang: Lang): string =
   ## the language dropdown (``LANG_PICKER_LANGS`` below) and the CI recording
   ## event's ``langName``.
   ##
-  ## It answers per LANGUAGE, not per recording artefact: the conflated pairs
-  ## fold onto one name each (``LangRust``/``LangRustWasm`` -> ``rust``,
-  ## ``LangCpp``/``LangCppWasm`` -> ``cpp``; ``LangRubyDb`` is ``ruby`` and
-  ## ``LangPythonDb`` ``python`` -- their retired pair partners ``LangRuby`` /
-  ## ``LangPython`` folded onto the same names until LRS-4 deleted them),
-  ## exactly as ``axesOfLang`` gives each pair one ``SourceLanguage``.  That is why this is
-  ## NOT a wire name: ``langWireName`` is the one that round-trips.
+  ## It answers per LANGUAGE, not per recording artefact.  It used to FOLD the
+  ## conflated pairs onto one name each (``LangRust``/``LangRustWasm`` ->
+  ## ``rust``, ``LangCpp``/``LangCppWasm`` -> ``cpp``; ``LangRubyDb`` is
+  ## ``ruby`` and ``LangPythonDb`` ``python``, their retired pair partners
+  ## ``LangRuby`` / ``LangPython`` folding onto the same names until LRS-4
+  ## deleted them).  **Since LRS-5's second deletion round there is nothing
+  ## left to fold**: ``sourceLanguageOf`` is a bijection, so this table is
+  ## injective and every member has its own name.  It is still NOT a wire
+  ## name -- ``langWireName`` is the one that round-trips, and the two answer
+  ## different questions (a Monaco/LSP id versus a protocol token).
   ##
   ## The two slots the two copies disagreed on, and how each was decided:
   ##
@@ -374,12 +442,14 @@ func toCLang*(lang: Lang): string =
   ##   ``displayName(slAsm)`` also says ``"assembly"``.  Monaco ids for files
   ##   that DO have a tokenizer are ``diff_document.DiffLanguageByExtension``'s
   ##   business, not this table's.
-  ## * ``LangCppWasm`` -> ``"cpp"``, the same name as ``LangCpp``.  The old
+  ## * ``LangCppWasm`` -> ``"cpp"`` -- HISTORICAL since LRS-5's second
+  ##   deletion round deleted the member, and kept because it is why
+  ##   ``LangCpp`` answers ``cpp`` and not ``c++`` today.  The old
   ##   ``"c++"`` made this table say C++ is ``cpp`` and C++-compiled-to-wasm
   ##   is ``c++`` (design §1.2(a)); it is the same language, and ``cpp`` is
   ##   also the id Monaco registers where ``c++`` is not.  The duplicate
-  ##   ``<option>`` this used to threaten is closed by ``LANG_PICKER_LANGS``,
-  ##   which folds same-name members before the dropdown is rendered.
+  ##   ``<option>`` it threatened is closed by ``LANG_PICKER_LANGS``, whose
+  ##   fold is a no-op now that no two members share a name.
   ##
   ## Exhaustive ``case`` rather than a positional ``array[Lang, string]``: the
   ## array form is checked for length only, so a member removed or reordered
@@ -403,8 +473,6 @@ func toCLang*(lang: Lang): string =
   of LangLua: "lua"
   of LangAsm: "assembly"
   of LangNoir: "noir"
-  of LangRustWasm: "rust"
-  of LangCppWasm: "cpp"
   of LangPythonDb: "python"
   of LangBash: "bash"
   of LangZsh: "zsh"
@@ -412,14 +480,12 @@ func toCLang*(lang: Lang): string =
   of LangMasm: "masm"
   of LangSway: "sway"
   of LangMove: "move"
-  of LangPolkavm: "polkavm"
   of LangCairo: "cairo"
   of LangCircom: "circom"
   of LangLeo: "leo"
   of LangTolk: "tolk"
   of LangAiken: "aiken"
   of LangCadence: "cadence"
-  of LangSolana: "solana"
   of LangElixir: "elixir"
   of LangErlang: "erlang"
   of LangPhp: "php"
@@ -454,7 +520,9 @@ func isSupportedLang*(lang: Lang): bool =
   ## domain plus the native family"), written on the axes so that it compiles
   ## on both backends -- `recorderToolFor` itself lives beside `std/os` and
   ## cannot be reached from the JS front end.  The native side pins the two
-  ## against each other over all 41 members (`target_axes_test.nim`).
+  ## against each other over every member (`target_axes_test.nim`) -- 35 of
+  ## them since LRS-5's second deletion round.  This line said "all 41", the
+  ## count before LRS-4 deleted two, and is corrected under rule 7.
   ##
   ## An exhaustive `case` over the approach (milestone rule 4): an approach
   ## added to the axis does not compile until it says whether it is
@@ -497,8 +565,16 @@ func langPickerRepresentative(lang: Lang): bool =
   ## ISA is the language's own fallback -- the plain `LangRust` over the
   ## wasm `LangRustWasm`, `LangCpp` over `LangCppWasm` -- and a member that
   ## shares its name with no other supported member represents itself
-  ## (`LangSolana` and `LangPolkavm` have no source language, so they could
+  ## (`LangSolana` and `LangPolkavm` had no source language, so they could
   ## never satisfy the ISA rule and must not have to).
+  ##
+  ## **All four of those members were deleted by LRS-5's second deletion
+  ## round, so every supported member is now `alone` and this function answers
+  ## `true` for all 32 of them -- the fold is a no-op, and `LANG_PICKER_LANGS`
+  ## therefore EQUALS `SUPPORTED_LANGS`.**  It is kept, and kept order-blind,
+  ## because it states the RULE rather than the current population: a member
+  ## re-added on an already-claimed `toCLang` name must fold rather than emit a
+  ## second `<option>` with the same `value`.
   if not isSupportedLang(lang):
     return false
   let name = toCLang(lang)
@@ -566,8 +642,6 @@ func toName*(lang: Lang): string =
   of LangLua: "Lua"
   of LangAsm: "assembly language"
   of LangNoir: "Noir"
-  of LangRustWasm: "Rust(wasm)"
-  of LangCppWasm: "C++(wasm)"
   of LangPythonDb: "Python"
   of LangBash: "Bash"
   of LangZsh: "Zsh"
@@ -575,14 +649,12 @@ func toName*(lang: Lang): string =
   of LangMasm: "MASM/Miden"
   of LangSway: "Sway"
   of LangMove: "Move"
-  of LangPolkavm: "PolkaVM"
   of LangCairo: "Cairo"
   of LangCircom: "Circom"
   of LangLeo: "Leo"
   of LangTolk: "Tolk"
   of LangAiken: "Aiken"
   of LangCadence: "Cadence"
-  of LangSolana: "Solana"
   of LangElixir: "Elixir"
   of LangErlang: "Erlang"
   of LangPhp: "PHP"
@@ -598,11 +670,14 @@ func getExtensionName*(lang: Lang): string =
   ## suffered elsewhere; the wrappers now differ only in whether they return a
   ## ``string`` or a ``cstring``.
   ##
-  ## Three members answer with the empty string, not two: ``LangUnknown`` is the
-  ## sentinel, and ``LangPolkavm`` and ``LangSolana`` are folder-based — a chain
-  ## and a VM rather than notations anyone writes a file in.  Prose elsewhere in
-  ## the tree says "the only two"; it means the only two NON-SENTINEL members,
-  ## and has been corrected to say so.
+  ## **Exactly ONE member answers with the empty string since LRS-5's second
+  ## deletion round: ``LangUnknown``, the sentinel.**  Three did before it --
+  ## the sentinel plus ``LangPolkavm`` and ``LangSolana``, which were
+  ## folder-based, a chain and a VM rather than notations anyone writes a file
+  ## in.  Both members are deleted, so the old careful qualifier ("the only two
+  ## NON-SENTINEL members with an empty entry") no longer has a referent.
+  ## ``target_axes_test.nim`` asserts the current shape directly: every
+  ## ``Lang`` but the sentinel has a non-empty extension.
   case lang
   of LangUnknown: ""            # sentinel
   of LangC: "c"
@@ -622,8 +697,6 @@ func getExtensionName*(lang: Lang): string =
   of LangLua: "lua"
   of LangAsm: "asm"
   of LangNoir: "nr"
-  of LangRustWasm: "rs"
-  of LangCppWasm: "cpp"
   of LangPythonDb: "py"
   of LangBash: "sh"
   of LangZsh: "zsh"
@@ -631,14 +704,12 @@ func getExtensionName*(lang: Lang): string =
   of LangMasm: "masm"
   of LangSway: "sw"
   of LangMove: "move"
-  of LangPolkavm: ""            # folder-based
   of LangCairo: "cairo"
   of LangCircom: "circom"
   of LangLeo: "leo"
   of LangTolk: "tolk"
   of LangAiken: "ak"
   of LangCadence: "cdc"
-  of LangSolana: ""             # folder-based
   of LangElixir: "ex"
   of LangErlang: "erl"
   of LangPhp: "php"
@@ -673,10 +744,10 @@ func reservedNames*(lang: Lang): seq[string] =
   # silently acquiring an answer nobody chose for it.
   of LangUnknown, LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran,
      LangD, LangCrystal, LangLean, LangJulia, LangAda,
-     LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir, LangRustWasm,
-     LangCppWasm, LangPythonDb, LangBash, LangZsh, LangSolidity,
-     LangMasm, LangSway, LangMove, LangPolkavm, LangCairo, LangCircom,
-     LangLeo, LangTolk, LangAiken, LangCadence, LangSolana, LangElixir,
+     LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir,
+     LangPythonDb, LangBash, LangZsh, LangSolidity,
+     LangMasm, LangSway, LangMove, LangCairo, LangCircom,
+     LangLeo, LangTolk, LangAiken, LangCadence, LangElixir,
      LangErlang, LangPhp, LangGdScript:
     @[]
 
@@ -693,10 +764,10 @@ func flowKeywords*(lang: Lang): seq[string] =
     @["func", "proc", "int", "seq", "for", "in", "var"]
   of LangUnknown, LangC, LangCpp, LangRust, LangGo, LangPascal, LangFortran,
      LangD, LangCrystal, LangLean, LangJulia, LangAda,
-     LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir, LangRustWasm,
-     LangCppWasm, LangPythonDb, LangBash, LangZsh, LangSolidity,
-     LangMasm, LangSway, LangMove, LangPolkavm, LangCairo, LangCircom,
-     LangLeo, LangTolk, LangAiken, LangCadence, LangSolana, LangElixir,
+     LangRubyDb, LangJavascript, LangLua, LangAsm, LangNoir,
+     LangPythonDb, LangBash, LangZsh, LangSolidity,
+     LangMasm, LangSway, LangMove, LangCairo, LangCircom,
+     LangLeo, LangTolk, LangAiken, LangCadence, LangElixir,
      LangErlang, LangPhp, LangGdScript:
     @[]
 
@@ -708,8 +779,12 @@ func langWireName*(lang: Lang): string =
   ## -- the receiver decodes it with that crate's ``lang_wire`` adapter, so a
   ## spelling that differs here is a refused request, not a wrong language.
   ## ``src/tests/cli/lang_enum_contract_test.nim`` pins the two tables member
-  ## for member.  Not ``toCLang``: that one folds ``LangRustWasm`` into
-  ## ``"rust"``, which is a display choice, and a wire name must round-trip.
+  ## for member.  Not ``toCLang``: that one is a DISPLAY choice and was a
+  ## folding one -- it used to fold ``LangRustWasm`` into ``"rust"`` -- while a
+  ## wire name must round-trip.  (Since LRS-5's second deletion round nothing
+  ## is left to fold, but the two functions still answer different questions
+  ## and must not be merged: ``toCLang`` names a Monaco/LSP language id and
+  ## ``langWireName`` names a protocol token.)
   ## (``LangRubyDb`` / ``LangPythonDb`` keep ``rubydb`` / ``pythondb`` on the
   ## wire after LRS-4 retired their pair partners: the spelling is a contract
   ## with ``codetracer-native-backend``'s ``Lang::from_str`` and is not
@@ -737,8 +812,6 @@ func langWireName*(lang: Lang): string =
   of LangLua: "lua"
   of LangAsm: "asm"
   of LangNoir: "noir"
-  of LangRustWasm: "rustwasm"
-  of LangCppWasm: "cppwasm"
   of LangPythonDb: "pythondb"
   of LangBash: "bash"
   of LangZsh: "zsh"
@@ -746,14 +819,12 @@ func langWireName*(lang: Lang): string =
   of LangMasm: "masm"
   of LangSway: "sway"
   of LangMove: "move"
-  of LangPolkavm: "polkavm"
   of LangCairo: "cairo"
   of LangCircom: "circom"
   of LangLeo: "leo"
   of LangTolk: "tolk"
   of LangAiken: "aiken"
   of LangCadence: "cadence"
-  of LangSolana: "solana"
   of LangElixir: "elixir"
   of LangErlang: "erlang"
   of LangPhp: "php"
@@ -796,6 +867,50 @@ func langSpellings*(lang: Lang): seq[string] =
   ## all (`python` and `py` always named `LangPythonDb`, design §3.1), so its
   ## deletion removed no row here.
   ##
+  ## **LRS-5, second deletion round (2026-09-21): where `rust-wasm` and
+  ## `cpp-wasm` went.**  Those two spellings named `LangRustWasm` /
+  ## `LangCppWasm`, the members this round deleted, and the milestone required
+  ## them to have a new home or a reasoned removal -- "a user who typed
+  ## `--lang rust-wasm` must still get a wasm recording or a clear error,
+  ## never a silent native one".  Both are now **deprecated aliases of their
+  ## LANGUAGE** (`rust-wasm`/`rustwasm` -> `LangRust`, `cpp-wasm`/`cppwasm` ->
+  ## `LangCpp`), announced once on stderr like `ruby(db)`.
+  ##
+  ## That keeps every invocation that works today working, because the
+  ## wasm-ness was never coming from the spelling in the cases that work:
+  ##
+  ## * `ct record --lang rust-wasm foo.wasm` -- the ISA comes from the
+  ##   `.wasm` extension (`KindWasmModule`, LRS-5 (c)), so the route is
+  ##   `wazero` with or without the flag;
+  ## * `ct record --lang rust-wasm ./crate` where `.cargo/config.toml` names
+  ##   `wasm32` -- the ISA comes from the marker (`KindWasmCargoProject`),
+  ##   which is how LRS-2B already routed it;
+  ## * `ct record --lang rust-wasm ./crate` with NO wasm marker is the one
+  ##   case where the member was the only source of `tiWasm`, and it does not
+  ##   work today either: `record.nim` builds a wasm binary only for
+  ##   `KindWasmCargoProject`, so the pre-existing behaviour was to hand a
+  ##   DIRECTORY to `wazero`.  A spelling whose only unique power is to reach
+  ##   a broken path is not a home worth keeping.
+  ##
+  ## The wasm-ness is not lost even where no artefact fact states it: the
+  ## four aliases are also `WasmLangSpellingIsa` rows, so `--lang rust-wasm`
+  ## carries `tiWasm` as an ISA OVERRIDE beside its language, and a crate with
+  ## no `wasm32` marker still records as wasm.  A separate `--target` FLAG was
+  ## the other alternative and is NOT added: `ct record` has no `--target`
+  ## today, the assessment already reads both artefact facts that decide the
+  ## ISA, and a second flag for one axis is what this series closed.  If one is
+  ## ever added, `TargetIsaSpellings` is what it parses.
+  ##
+  ## **`polkavm` and `solana` did NOT get the same treatment, and they did not
+  ## go either.**  They name no language, so they are not rows of this table
+  ## at all — they are `TargetIsaSpellings` rows.  Keeping them working was
+  ## not a courtesy: neither target has an extension, a project marker or a
+  ## `LANGS` row, so `--lang` was the ONLY route to their recorders, and an
+  ## unrecognised `--lang` resolves to `LangUnknown`, which `detectTarget`
+  ## reads as "no language was given" rather than refusing.  Deleting the
+  ## spellings would therefore have deleted `ct record` for both targets
+  ## *silently*.
+  ##
   ## Three members have NO spelling, each on purpose:
   ## * `LangUnknown` -- the sentinel; it is what a miss returns.
   ## * `LangBash` / `LangZsh` -- reachable by `ct record` through `LANGS`
@@ -808,8 +923,12 @@ func langSpellings*(lang: Lang): seq[string] =
   case lang
   of LangUnknown: @[]
   of LangC: @["c", "h"]
-  of LangCpp: @["cpp", "hpp"]
-  of LangRust: @["rust", "rs"]
+  # `cpp-wasm` / `cppwasm`: deprecated aliases, as `rust-wasm` above.
+  of LangCpp: @["cpp", "hpp", "cpp-wasm", "cppwasm"]
+  # `rust-wasm` / `rustwasm`: deprecated aliases since LRS-5's second
+  # deletion round deleted `LangRustWasm`.  See the block comment above and
+  # `DeprecatedLangSpellings` below.
+  of LangRust: @["rust", "rs", "rust-wasm", "rustwasm"]
   of LangNim: @["nim", "nims"]
   of LangGo: @["go"]
   of LangPascal: @["pascal", "pas"]
@@ -827,8 +946,6 @@ func langSpellings*(lang: Lang): seq[string] =
   # `asm` AND `s`: the front end always mapped both, the core only `asm`.
   of LangAsm: @["asm", "s"]
   of LangNoir: @["noir", "nr"]
-  of LangRustWasm: @["rust-wasm", "rustwasm"]
-  of LangCppWasm: @["cpp-wasm", "cppwasm"]
   of LangPythonDb: @["python", "py"]
   of LangBash: @[]
   of LangZsh: @[]
@@ -839,14 +956,12 @@ func langSpellings*(lang: Lang): seq[string] =
   of LangMasm: @["masm", "miden"]
   of LangSway: @["sway", "sw"]
   of LangMove: @["move"]
-  of LangPolkavm: @["polkavm"]
   of LangCairo: @["cairo"]
   of LangCircom: @["circom"]
   of LangLeo: @["leo"]
   of LangTolk: @["tolk"]
   of LangAiken: @["aiken", "ak"]
   of LangCadence: @["cadence", "cdc"]
-  of LangSolana: @["solana"]
   of LangElixir: @["elixir", "ex", "exs"]
   of LangErlang: @["erlang", "erl", "hrl"]
   of LangPhp: @["php"]
@@ -879,8 +994,23 @@ static:
     seen.add(spelling)
 
 const
+  WasmSpellingNote* =
+    "The wasm target is not named by `--lang` any more: it is read from the " &
+    "artefact -- a `.wasm` module, or a Cargo project whose " &
+    "`.cargo/config.toml` names `wasm32`."
+    ## The second sentence the four wasm aliases below carry.  Held as a
+    ## constant so the diagnostic and the test that pins it cannot drift.
+
   DeprecatedLangSpellings* = [
-    (spelling: "ruby(db)", lang: LangRubyDb, preferred: "ruby"),
+    (spelling: "ruby(db)", lang: LangRubyDb, preferred: "ruby", extra: ""),
+    (spelling: "rust-wasm", lang: LangRust, preferred: "rust",
+     extra: WasmSpellingNote),
+    (spelling: "rustwasm", lang: LangRust, preferred: "rust",
+     extra: WasmSpellingNote),
+    (spelling: "cpp-wasm", lang: LangCpp, preferred: "cpp",
+     extra: WasmSpellingNote),
+    (spelling: "cppwasm", lang: LangCpp, preferred: "cpp",
+     extra: WasmSpellingNote),
   ]
     ## Input spellings `toLang` still accepts but that `ct record` announces
     ## as deprecated (one line on stderr, then it records exactly as the
@@ -893,6 +1023,13 @@ const
     ## `static:` block below refuses one that is not, so the alias cannot
     ## silently stop resolving while still being announced as merely
     ## deprecated.
+    ##
+    ## `extra` is a second sentence for rows where "it selects X exactly as
+    ## `--lang Y` does" would leave a user wondering where a fact went.  The
+    ## four wasm rows (LRS-5's second deletion round) need it: what the
+    ## spelling used to add was a target ISA, and the note has to say where
+    ## the ISA comes from now instead of leaving the user to find out by
+    ## getting a native recording.
 
 static:
   for row in DeprecatedLangSpellings:
@@ -902,6 +1039,68 @@ static:
       "preferred spelling `" & row.preferred & "` is not a spelling of " & $row.lang
     doAssert row.spelling != row.preferred
 
+const
+  TargetIsaSpellings* = [
+    # The two that MUST be here, because they were `Lang` members and nothing
+    # else can reach their recorder.  A PolkaVM blob and a Solana program have
+    # no source language and no detectable marker (`getExtensionName` was `""`
+    # for both, no `LANGS` row, no `detectFolderLang` arm -- the Edit-Mode
+    # Toolbar spec's EMT-F7 says so), so `--lang polkavm` / `--lang solana`
+    # was the ONLY way to record one.  Deleting the members without this table
+    # would not have renamed that route, it would have DELETED it: the target
+    # would fall through to `detectFolderLang`, a Solana crate would be read
+    # as plain Rust, and `ct record` would take the native path.
+    ("polkavm", tiPolkaVm),
+    ("solana", tiSolanaSbf),
+    ("solanasbf", tiSolanaSbf),
+    # The general form, and the one the wasm aliases below ride on.
+    ("wasm", tiWasm),
+  ]
+    ## `--lang` spellings that name a **target ISA** rather than a language.
+    ##
+    ## **LRS-5, second deletion round.**  `--lang` has always accepted these
+    ## -- `polkavm` and `solana` were `Lang` MEMBERS, which is the conflation
+    ## this series removes -- and this table is that fact stated on the right
+    ## axis rather than a new feature.  The value overrides the assessment's
+    ## ISA (`assessRecordingTarget`'s `isaOverride`), which then decides the
+    ## recording approach and therefore the recorder, exactly as the deleted
+    ## members' `axesOfLang` arms did.
+    ##
+    ## A spelling here need not also be a `langSpellings` row and usually is
+    ## not: `polkavm` names no language, so `toLang("polkavm")` is
+    ## `LangUnknown` and the LANGUAGE stays undetermined -- which is the
+    ## truth, and which is what `unknown-polkavm-unknown-vm` stores.
+    ##
+    ## No new CLI FLAG was added for this.  `ct record` has no `--target`
+    ## today, the assessment already reads the two artefact facts that decide
+    ## the ISA on its own (a `.wasm` extension, a `.cargo/config.toml`
+    ## `wasm32` marker), and a second flag for one axis is what this series
+    ## closed.  If a `--target` is ever added, this table is what it parses.
+
+  WasmLangSpellingIsa* = [
+    ("rust-wasm", tiWasm), ("rustwasm", tiWasm),
+    ("cpp-wasm", tiWasm), ("cppwasm", tiWasm),
+  ]
+    ## The four DEPRECATED aliases carry an ISA as well as a language: they
+    ## resolve to `LangRust` / `LangCpp` through `langSpellings` AND override
+    ## the ISA to `tiWasm` here.  Without the second half, `--lang rust-wasm`
+    ## on a crate with no `wasm32` marker would silently become a native
+    ## recording -- the one thing the milestone said must not happen.
+
+func targetIsaSpelling*(spelling: string): TargetIsa =
+  ## The target ISA a `--lang` spelling names, or `tiUnknown` when it names
+  ## none.  Case-insensitive, like `toLang`.  Both tables are consulted: the
+  ## ISA-only spellings and the four wasm aliases that carry an ISA beside
+  ## their language.
+  let key = spelling.toLowerAscii
+  for (name, isa) in TargetIsaSpellings:
+    if name == key:
+      return isa
+  for (name, isa) in WasmLangSpellingIsa:
+    if name == key:
+      return isa
+  tiUnknown
+
 func deprecatedLangSpellingNote*(spelling: string): string =
   ## The one-line note `ct record` prints on stderr when `--lang` was given a
   ## deprecated spelling; `""` for every other input.  Case-insensitive like
@@ -910,9 +1109,12 @@ func deprecatedLangSpellingNote*(spelling: string): string =
   let key = spelling.toLowerAscii
   for row in DeprecatedLangSpellings:
     if row.spelling == key:
-      return "note: `--lang " & spelling & "` is deprecated and will be " &
+      result = "note: `--lang " & spelling & "` is deprecated and will be " &
         "removed in a later release; it selects " & toName(row.lang) &
         " exactly as `--lang " & row.preferred & "` does -- use that instead."
+      if row.extra.len > 0:
+        result.add(" " & row.extra)
+      return result
   ""
 
 proc toLang*(lang: string): Lang =
@@ -928,6 +1130,66 @@ proc toLang*(lang: string): Lang =
 
 proc toLang*(lang: cstring): Lang =
   toLang($lang)
+
+static:
+  # An ISA-only spelling must NOT also be a language spelling: that would be
+  # the conflation again, one table over.  The wasm aliases are the stated
+  # exception and live in their own table for exactly that reason.
+  for (name, _) in TargetIsaSpellings:
+    doAssert toLang(name) == LangUnknown,
+      "`" & name & "` names both a language and a target ISA"
+  for (name, _) in WasmLangSpellingIsa:
+    doAssert toLang(name) != LangUnknown,
+      "the wasm alias `" & name & "` must also resolve to its language"
+
+func isKnownLangSpelling*(spelling: string): bool =
+  ## Does `--lang <spelling>` name ANYTHING this build knows -- a language
+  ## (`LANG_SPELLINGS`, via `toLang`) or a target ISA (`TargetIsaSpellings`
+  ## and the four wasm aliases, via `targetIsaSpelling`)?
+  ##
+  ## **The defect this exists to close, found at LRS-5's review.**  `--lang`
+  ## resolves through `toLang`, which answers `LangUnknown` for a spelling it
+  ## does not have, and `detectTarget` reads `LangUnknown` as *"no language
+  ## was given"* rather than as *"the user named one I do not know"*:
+  ##
+  ##     if lang != LangUnknown:
+  ##       return DetectedTarget(lang: lang, recognitionRan: false)
+  ##
+  ## So `ct record --lang typo ./crate` behaved EXACTLY like `ct record
+  ## ./crate` -- detection ran, the crate was read as plain Rust, and a native
+  ## recording was made under a flag that asked for something else.  Measured
+  ## on the built binary at review: the two invocations produced
+  ## byte-identical output.
+  ##
+  ## That is the same class of defect `record_backend_selection_test.nim`
+  ## documents for `--backend`, which `ct-mcr/record.md` settled in the other
+  ## direction: *"refuse to start when the requested configuration cannot be
+  ## honored, rather than silently downgrading"*.  LRS-5's second deletion
+  ## round walked right up to it -- removing the `polkavm` / `solana`
+  ## spellings would have deleted `ct record` for those targets *through this
+  ## fall-through* -- and kept the spellings without closing the hole.  This
+  ## closes it.
+  ##
+  ## An EMPTY spelling is not this function's business: `--lang` absent is
+  ## "no language given", which is the legitimate case.  Callers check
+  ## `spelling.len > 0` first.
+  toLang(spelling) != LangUnknown or targetIsaSpelling(spelling) != tiUnknown
+
+func unknownLangSpellingLines*(spelling: string): seq[string] =
+  ## The diagnostic `ct record` prints for a `--lang` value that names
+  ## neither a language nor a target ISA, then exits non-zero.  Every accepted
+  ## spelling is listed, from the same two tables `isKnownLangSpelling`
+  ## consults, so the message cannot drift from what is accepted.
+  var accepted: seq[string] = @[]
+  for (known, _) in LANG_SPELLINGS:
+    accepted.add(known)
+  for (name, _) in TargetIsaSpellings:
+    if name notin accepted:
+      accepted.add(name)
+  @["error: `--lang " & spelling & "` names neither a language nor a target " &
+    "CodeTracer knows, so `ct record` will not guess what you meant.",
+    "help: drop `--lang` to let CodeTracer assess the target, or use one of: " &
+    accepted.join(", ")]
 
 proc decodeLangName*(name: string): tuple[lang: Lang, retiredName: string] =
   ## ``$lang`` back to a ``Lang``, by the enum's own member names, for a

@@ -110,7 +110,11 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     };
 
     m.insert(Lang::Noir, rust_node_names.clone());
-    m.insert(Lang::RustWasm, rust_node_names);
+    // `Lang::Rust`, not `Lang::RustWasm`: LRS-5's second deletion round
+    // deleted the wasm variant, and `get_current_language` answers
+    // `Lang::Rust` for a `.rs` whichever way the recording was made.  Without
+    // this key a wasm Rust recording would have found NO node names at all.
+    m.insert(Lang::Rust, rust_node_names);
 
     m.insert(
         Lang::PythonDb,
@@ -446,43 +450,12 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         },
     );
 
-    // Solana uses Rust source files — reuse Rust node names
-    m.insert(
-        Lang::Solana,
-        NodeNames {
-            if_conditions: vec!["if_expression".to_string()],
-            else_conditions: vec!["else_clause".to_string()],
-            loops: vec![
-                "for_expression".to_string(),
-                "loop_expression".to_string(),
-                "while_expression".to_string(),
-            ],
-            branches_body: vec!["block".to_string()],
-            branches: vec!["block".to_string()],
-            functions: vec!["function_item".to_string()],
-            values: vec!["identifier".to_string()],
-            comments: vec!["//".to_string()],
-        },
-    );
-
-    // PolkaVM uses Rust source files — reuse Rust node names
-    m.insert(
-        Lang::PolkaVM,
-        NodeNames {
-            if_conditions: vec!["if_expression".to_string()],
-            else_conditions: vec!["else_clause".to_string()],
-            loops: vec![
-                "for_expression".to_string(),
-                "loop_expression".to_string(),
-                "while_expression".to_string(),
-            ],
-            branches_body: vec!["block".to_string()],
-            branches: vec!["block".to_string()],
-            functions: vec!["function_item".to_string()],
-            values: vec!["identifier".to_string()],
-            comments: vec!["//".to_string()],
-        },
-    );
+    // Solana and PolkaVM recordings are of Rust source files, and since
+    // LRS-5's second deletion round they have no `Lang` variant of their own:
+    // a `.rs` in either is `Lang::Rust` and takes the Rust row above.  The two
+    // blocks that used to key `Lang::Solana` / `Lang::PolkaVM` here with
+    // hand-copied Rust node names are gone with the variants, and nothing is
+    // lost -- each was the Rust table re-typed.
 
     m
 });
@@ -660,7 +633,10 @@ impl ExprLoader {
             } else if extension == "pas" {
                 Lang::Pascal
             } else if extension == "rs" {
-                Lang::RustWasm // TODO RustWasm?
+                // `.rs` is Rust.  This said `Lang::RustWasm // TODO RustWasm?`
+                // until LRS-5's second deletion round deleted the variant --
+                // the TODO was right, and the answer is the language.
+                Lang::Rust
             } else if extension == "py" {
                 Lang::PythonDb
             } else if extension == "nim" || extension == "nims" || extension == "nimble" {
@@ -708,7 +684,7 @@ impl ExprLoader {
         );
 
         let mut parser = Parser::new();
-        if lang == Lang::Noir || lang == Lang::RustWasm {
+        if lang == Lang::Noir || lang == Lang::Rust {
             parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
         } else if lang == Lang::C {
             parser.set_language(&tree_sitter_c::LANGUAGE.into())?;
@@ -750,9 +726,6 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_masm::LANGUAGE.into())?;
         } else if lang == Lang::Cadence {
             parser.set_language(&tree_sitter_cadence::LANGUAGE.into())?;
-        } else if lang == Lang::Solana || lang == Lang::PolkaVM {
-            // Solana and PolkaVM use Rust source files
-            parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
         } else {
             // Fallback: try Rust grammar for unknown languages
             parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
@@ -989,7 +962,7 @@ impl ExprLoader {
     #[cfg(feature = "syntax-highlight")]
     fn is_variable_node(&self, lang: Lang, node: &Node) -> bool {
         match lang {
-            Lang::Rust | Lang::RustWasm => {
+            Lang::Rust => {
                 // NOTE: this is by no mean complete
                 if node.kind() != "identifier" {
                     return false;
@@ -1815,8 +1788,12 @@ impl ExprLoader {
 
                 true
             }
-            // Sway, Solana, and PolkaVM use Rust-like syntax — reuse Rust variable detection
-            Lang::Sway | Lang::Solana | Lang::PolkaVM => {
+            // Sway uses Rust-like syntax — reuse Rust variable detection.
+            // `Solana` and `PolkaVM` used to share this arm; LRS-5's second
+            // deletion round deleted both variants, and a `.rs` in either kind
+            // of recording now reaches the `Lang::Rust` arm above, which is
+            // the Rust detection this arm was a copy of.
+            Lang::Sway => {
                 if node.kind() != "identifier" {
                     return false;
                 }
@@ -2408,7 +2385,13 @@ impl ExprLoader {
 
     pub fn register_loop(&mut self, start: Position, end: Position, path: &PathBuf) {
         let lang = self.get_current_language(path);
-        let offset = if lang == Lang::RubyDb || lang == Lang::RustWasm {
+        // The `+1` for Rust is unchanged in effect: `get_current_language`
+        // answers `Lang::RustWasm` for every `.rs` before LRS-5's second
+        // deletion round and `Lang::Rust` for every `.rs` after it, so the
+        // same paths take the same offset.  What changed is that the condition
+        // no longer reads as "materialized Rust" when it never distinguished
+        // one.
+        let offset = if lang == Lang::RubyDb || lang == Lang::Rust {
             1
         } else {
             0

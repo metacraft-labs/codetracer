@@ -347,6 +347,21 @@ proc record*(lang: string,
   # forwarded `--lang` reaches `db-backend-record` too, whose stderr is
   # relayed onto our stdout, so a second note there would land in the wrong
   # stream.
+  # LRS-5, at review: an unrecognised `--lang` is REFUSED, not ignored.
+  # `toLang` answers `LangUnknown` for a spelling it does not have and
+  # `detectTarget` reads `LangUnknown` as "no language was given", so
+  # `--lang typo ./crate` used to behave exactly like `ct record ./crate` --
+  # a native recording under a flag that asked for something else, with no
+  # diagnostic and a zero exit.  Measured on the built binary: the two
+  # invocations produced byte-identical output.  `--backend` was settled the
+  # same way (`record_backend_selection_test.nim`, `ct-mcr/record.md`:
+  # "refuse to start when the requested configuration cannot be honored").
+  # `isKnownLangSpelling` accepts both tables, so `--lang polkavm` /
+  # `--lang solana` -- which name a target ISA and no language -- still pass.
+  if lang.len > 0 and not isKnownLangSpelling(lang):
+    for line in unknownLangSpellingLines(lang):
+      stderr.writeLine(line)
+    quit(1)
   let deprecationNote = deprecatedLangSpellingNote(lang)
   if deprecationNote.len > 0:
     stderr.writeLine(deprecationNote)
@@ -373,8 +388,14 @@ proc record*(lang: string,
   # that a `.nims` and a `.nim` are two recorders, or that Lua has none; the
   # assessment can, and `isDeclared` is the exact question this branch asks:
   # "does the dispatch table have anything to say about this target?"
+  # LRS-5: a `--lang` spelling may name a target ISA rather than (or beside)
+  # a language -- `polkavm`, `solana`, `wasm`, and the four deprecated wasm
+  # aliases.  Carried as an explicit override so those targets keep the route
+  # the deleted `LangPolkavm` / `LangSolana` members used to give them.
+  let isaOverride = targetIsaSpelling(lang)
   let assessment = assessRecordingTarget(
-    program, detectedLang, languageWasExplicit = lang != "")
+    program, detectedLang, languageWasExplicit = lang != "",
+    isaOverride = isaOverride)
   if assessment.isAmbiguous:
     # Rule K2: two facts that dispatch differently are named, never picked.
     for line in assessment.diagnostics:
@@ -481,7 +502,8 @@ proc record*(lang: string,
     # WASM Cargo project (the assessment read `wasm32` out of
     # `.cargo/config.toml`): build with the wasm32-wasip1 target, then record
     # the .wasm binary.  This used to key on `detectedLang in {LangRustWasm,
-    # LangCppWasm}` — the ISA welded onto the language.
+    # LangCppWasm}` — the ISA welded onto the language; LRS-5's second
+    # deletion round removed both members and this branch is unchanged.
     let buildProcess = osproc.execProcess(
       "cargo",
       workingDir = program,
@@ -602,7 +624,7 @@ proc record*(lang: string,
 proc recordTest*(testName: string, path: string, line: int, column: int, withDiff: string, storeTraceFolderForPid: int) =
   # TODO: not sure about wasm, for now not supported for tests
   let fullPath = expandFileName(expandTilde(path))
-  let lang = detectLangFromPath(fullPath, isWasm=false)
+  let lang = detectLangFromPath(fullPath)
   # Same route question as `record` above, asked of the same assessment.
   if not recorderToolFor(assessedSelector(fullPath, lang)).isDeclared:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)

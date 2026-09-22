@@ -165,7 +165,14 @@ proc syncReplConfigIntoVM*() =
     var langUsesMaterialized = false
     var langDisplayName = ""
     if not data.trace.isNil:
-      langUsesMaterialized = data.trace.lang.usesMaterializedTraces()
+      # LRS-5 (b), one of the four sites: the REPL panel's disabled mode is a
+      # property of the RECORDING, and it now reads the recording's own
+      # approach (`Trace.approach`, from the four-axis `recordings.lang` cell)
+      # rather than `usesMaterializedTraces(trace.lang)`.  For a wasm Rust
+      # recording the summary is `LangRust` -- which is right for the language
+      # NAME below and was never able to answer this question without a
+      # `LangRustWasm` member.
+      langUsesMaterialized = data.trace.usesMaterializedTraces()
       langDisplayName = data.trace.lang.toName()
     replVMInstance.setMaterialized(langUsesMaterialized)
     replVMInstance.setLangName(langDisplayName)

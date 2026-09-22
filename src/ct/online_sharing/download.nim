@@ -167,8 +167,11 @@ proc importDownloadedRecording(downloaded: DownloadedArtifact,
   # language it states is preferred over the filename guess — that is the read
   # half of "metadata carried alongside", used rather than merely stored.
   let programFilename = ctPath.extractFilename.changeFileExt("")
-  let isWasm = programFilename.endsWith(".wasm")
-  var lang = detectLang(programFilename, LangUnknown, isWasm)
+  var lang = detectLang(programFilename, LangUnknown)
+  # LRS-5: the `.wasm` suffix used to be handed to `detectLang` as `isWasm`,
+  # whose only effect was to pick `LangRustWasm` / `LangCppWasm`.  It is an
+  # ISA, it now says so, and `importTrace` registers it on its own axis.
+  let artefactIsa = targetIsaForArtefactPath(programFilename)
   if downloaded.hasRecord and downloaded.record.kind == akRecording and
       downloaded.record.metadata.langName.len > 0:
     # `langName` is `$Lang` as the uploader wrote it (`LangNoir`, `LangRubyDb`,
@@ -180,8 +183,12 @@ proc importDownloadedRecording(downloaded: DownloadedArtifact,
     except ValueError:
       discard
   let recordPid = NO_PID # pid is recoverable from the CTFS metadata block.
+  var axes = storageAxesOfLang(lang)
+  if artefactIsa != tiUnknown:
+    axes.targetIsa = artefactIsa
+    axes.approach = defaultRecordingApproach(artefactIsa)
   discard importTrace(unzippedLocation, recordingId, recordPid, lang,
-    DB_SELF_CONTAINED_DEFAULT, sourceUrl)
+    DB_SELF_CONTAINED_DEFAULT, sourceUrl, axesArg = some(axes))
   recordingId
 
 proc downloadTrace*(url: string,

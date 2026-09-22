@@ -605,7 +605,11 @@ proc resetOperation*(self: DebuggerService, full: bool, resetLastLocation: bool 
   self.data.ipc.send "CODETRACER::reset-operation", js{full: full, taskId: taskId, resetLastLocation: resetLastLocation}
 
 proc lineStepJump*(self: DebuggerService, lineStep: LineStep) =
-  if not self.data.trace.lang.usesMaterializedTraces:
+  # LRS-5 (b), one of the four sites: a jump to a step id is what a
+  # MATERIALIZED container supports and repeated `step-in` is what a native
+  # replay recording needs, so the question is about the recording and is
+  # asked of `Trace.approach`.
+  if not self.data.trace.usesMaterializedTraces:
     self.step(
       "step-in",
       StepIn,

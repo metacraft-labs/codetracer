@@ -21,12 +21,13 @@
 ##   type carries one.  LRS-2P replaces the `Lang`-derived parts with the
 ##   recognizer's own assessment.
 ## * The KIND decides where it can (`.nims` → `nimscript`, `Cargo.toml` +
-##   `wasm32` → `wasm-cargo-project`, every project marker present → every
-##   project kind, per Q10), and the `Lang` value's own axes answer where it
-##   cannot.  A `Lang` that exists precisely to name a non-default ISA
-##   (`LangRustWasm`, kept until LRS-5) keeps that answer.  (Until LRS-4 the
-##   retired `LangPython`/`LangRuby` did the same for a non-default
-##   APPROACH; no `Lang` value names one any more.)
+##   `wasm32` → `wasm-cargo-project`, `.wasm` → `wasm-module`, every project
+##   marker present → every project kind, per Q10), and the `Lang` value's own
+##   axes answer where it cannot.  Since LRS-5's second deletion round **no
+##   `Lang` value names a non-default ISA or a non-default APPROACH** — the
+##   wasm pair was the last one that did, and the `.wasm` kind above replaced
+##   the one thing it was still deciding.  The fallback arm is kept because it
+##   is the rule, not because anything reaches it.
 ## * Two facts that would dispatch differently are a REFUSAL, never a pick
 ##   (rule K2): two project manifests implying two toolchains, or two kinds
 ##   implying two ISAs, land in `diagnostics` and the caller refuses — unless
@@ -79,22 +80,40 @@ proc assessKind(program: string, language: SourceLanguage): TargetKind =
     elif language == slNim and ext == ".nim":
       TargetKind(specific: @[KindNimSource], family: tfSingleFile)
     elif ext == ".wasm":
-      TargetKind(specific: @[], family: tfPrebuiltArtefact)
+      # LRS-5 (c): the extension is an ARTEFACT fact -- the same class of fact
+      # as the `.cargo/config.toml` `wasm32` marker above -- so it names a
+      # KIND and `targetIsaForAssessment` derives `tiWasm` from it.  This arm
+      # used to emit no specific kind at all, and the ISA then came from
+      # `axesOfLang(LangRustWasm)`: the route for a prebuilt module rode on a
+      # `Lang` member, which is why the member could not be deleted first.
+      TargetKind(specific: @[KindWasmModule], family: tfPrebuiltArtefact)
     else:
       TargetKind(specific: @[], family: tfSingleFile)
   else:
     TargetKind(specific: @[], family: tfUnknown)
 
 proc assessRecordingTarget*(program: string, lang: Lang,
-                            languageWasExplicit = false): TargetAssessment =
+                            languageWasExplicit = false,
+                            isaOverride: TargetIsa = tiUnknown): TargetAssessment =
   ## Assess `program`, whose `Lang` summary `detectTarget` already produced.
   ## `languageWasExplicit` is true when that summary came from `--lang`.
   ##
+  ## `isaOverride` is a target ISA the USER stated, through a `--lang`
+  ## spelling that names one (`targetIsaSpelling`: `polkavm`, `solana`,
+  ## `wasm`, and the four deprecated wasm aliases).  It wins over the kind and
+  ## over the language fallback, because it is an instruction rather than an
+  ## observation — the same standing `--lang` itself has under Q8.  It is how
+  ## LRS-5's second deletion round kept `ct record --lang polkavm` and `--lang
+  ## solana` working after deleting the two members that used to carry those
+  ## ISAs: for those two targets there is no marker and no extension to
+  ## observe, so the user's word is the only fact there is.
+  ##
   ## The ISA is decided in this order, each step only when the previous one
   ## said nothing: the kind (`targetIsaForAssessment`), then the `Lang`
-  ## value's own ISA (`axesOfLang`, which is `tiWasm` for `LangRustWasm` and
-  ## the per-language fallback for everything else).  The approach follows the
-  ## ISA (`defaultRecordingApproach`) unless the `Lang` value exists to name a
+  ## value's own ISA (`axesOfLang`, which since LRS-5's second deletion round
+  ## is the per-language fallback for EVERY member — `LangRustWasm` was the
+  ## last one that answered anything else).  The approach follows the ISA
+  ## (`defaultRecordingApproach`) unless the `Lang` value exists to name a
   ## non-default one — the retired rr pair — in which case that is what the
   ## user asked for and what the dispatch table must answer about.
   let axes = axesOfLang(lang)
@@ -137,8 +156,9 @@ proc assessRecordingTarget*(program: string, lang: Lang,
     let fromKind = if isaClash.len == 0: targetIsaForAssessment(kind, axes.language)
                    else: tiUnknown
     result.targetIsa =
-      if fromKind != tiUnknown and
-         fromKind != fallbackTargetIsaForLanguage(axes.language): fromKind
+      if isaOverride != tiUnknown: isaOverride
+      elif fromKind != tiUnknown and
+           fromKind != fallbackTargetIsaForLanguage(axes.language): fromKind
       else: axes.targetIsa
     if axes.approach != defaultRecordingApproach(axes.targetIsa):
       # The `Lang` value names a non-default approach.  Since LRS-4 deleted
@@ -170,11 +190,13 @@ proc recorderSelectorFor*(assessment: TargetAssessment,
   selectorOf(assessment, sourceLanguageOf(lang))
 
 proc assessedSelector*(program: string, lang: Lang,
-                       languageWasExplicit = false): RecorderSelector =
+                       languageWasExplicit = false,
+                       isaOverride: TargetIsa = tiUnknown): RecorderSelector =
   ## One-call convenience for callers that only need the dispatch key.
   ## Ambiguity is NOT swallowed: a refused assessment yields a selector with
   ## `raUnknown`, which no table arm supports, so the caller still fails —
   ## but a caller that wants the diagnostic must use `assessRecordingTarget`
   ## and check `isAmbiguous` itself.
   recorderSelectorFor(
-    assessRecordingTarget(program, lang, languageWasExplicit), lang)
+    assessRecordingTarget(program, lang, languageWasExplicit, isaOverride),
+    lang)

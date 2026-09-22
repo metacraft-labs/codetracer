@@ -183,10 +183,13 @@ proc candidatePaths(data: Data; rawPath: string): seq[PathCandidate] =
 proc lspKindForLang(lang: Lang): string =
   ## The LSP server family for a file's language.  Answered on the SOURCE
   ## LANGUAGE axis: a language server does not care whether the program ran
-  ## natively or as a wasm module, so `LangRust` and `LangRustWasm` are one
+  ## natively or as a wasm module, so `LangRust` and `LangRustWasm` were one
   ## answer by construction rather than by a hand-written `of LangRust,
   ## LangRustWasm` merge (which is what this used to be, beside an
-  ## `of LangRuby, LangRubyDb` merge whose first half LRS-4 deleted).
+  ## `of LangRuby, LangRubyDb` merge whose first half LRS-4 deleted).  LRS-5's
+  ## second deletion round removed `LangRustWasm` itself, so the merge this
+  ## rewrite made unnecessary is now also impossible to write; the `case` over
+  ## the axis is unchanged.
   case sourceLanguageOf(lang)
   of slRuby:
     "ruby"

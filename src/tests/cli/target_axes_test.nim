@@ -14,7 +14,7 @@
 ##
 ## ## What the decomposition suite pins, and why it is the important one
 ##
-## The four axes are only worth having if the 39 values of `Lang` genuinely
+## The four axes are only worth having if the 35 values of `Lang` genuinely
 ## decompose onto them.  Until LRS-2B that decomposition lived HERE, in the
 ## test, as the safety net for the migration; it is now `axesOfLang` in
 ## `src/common/common_lang.nim` — the production table `recorder_dispatch.nim`
@@ -37,6 +37,8 @@ import ../../common/target_assessment
 import ../../common/lang
 import ../../common/types   # tokenTextsFor / TOKEN_TEXTS (common_types)
 import ../../ct/trace/recorder_dispatch
+import ../../common/trace_index        # loadCalltraceMode, langForStorageAxes
+import ../../ct/trace/storage_and_import  # detectTraceAxes (LRS-5, (d))
 
 const
   ThisFile = currentSourcePath()
@@ -228,9 +230,11 @@ suite "the default relations are total and say something":
 
   test "Rust and C++ default to native, and reach wasm only by assessment":
     # This is the `LangRustWasm` / `LangCppWasm` conflation, decomposed: the
-    # language is unchanged and the ISA moves.  `isWasmCargoProject`
-    # (`src/ct/utilities/language_detection.nim:18-26`) is the assessment step
-    # that decides it today, by reading `.cargo/config.toml` for `wasm32`.
+    # language is unchanged and the ISA moves.  Since LRS-5's second deletion
+    # round the two members are gone and the assessment is the ONLY way to
+    # reach `tiWasm`: `isWasmCargoProject`
+    # (`src/ct/utilities/language_detection.nim`) reading `.cargo/config.toml`
+    # for `wasm32`, or the `.wasm` extension (`KindWasmModule`).
     check fallbackTargetIsaForLanguage(slRust) == tiNative
     check fallbackTargetIsaForLanguage(slCpp) == tiNative
     check defaultRecordingApproach(tiNative) == raMcr
@@ -563,23 +567,46 @@ const
     ## are its stated exceptions (`MaterializedSummaryExceptions` in
     ## production); this set is the test's independent statement of which
     ## two, so the production list cannot quietly grow.
+    ##
+    ## LRS-5's second deletion round RE-KEYED the production list from `Lang`
+    ## onto the SOURCE LANGUAGE axis, because the predicate is now asked of a
+    ## decoded storage cell (a language plus an approach) as well as of a
+    ## summary.  This set stays keyed by `Lang` on purpose: it is the
+    ## independent statement, and asserting the two against each other is what
+    ## the first case below does.
 
-suite "all 39 Lang values decompose onto the four axes":
+suite "all 35 Lang values decompose onto the four axes":
 
   test "the production exception list is exactly the two this file expects":
     var listed: set[Lang] = {}
     for exception in MaterializedSummaryExceptions:
-      check exception.lang notin listed   # no duplicates
-      listed.incl(exception.lang)
+      let lang = langForSourceLanguage(exception.language)
+      check lang notin listed   # no duplicates
+      listed.incl(lang)
     check listed == MaterializedFlagExceptions
     # …and each exception genuinely disagrees with the derivation; an entry
     # that agreed would be dead and would hide a later real drift.
     for exception in MaterializedSummaryExceptions:
+      let lang = langForSourceLanguage(exception.language)
       check exception.materialized !=
-        producesMaterializedTrace(decompose(exception.lang).approach)
-      check usesMaterializedTraces(exception.lang) == exception.materialized
+        producesMaterializedTrace(decompose(lang).approach)
+      check usesMaterializedTraces(lang) == exception.materialized
 
-  test "the decomposition agrees with usesMaterializedTraces on 37 of 39":
+  test "the exception list keys onto exactly one Lang each, both ways":
+    # What makes the re-keying safe: the language axis is a BIJECTION with
+    # `Lang` after the second deletion round, so `slNim` is `LangNim`'s
+    # language and no one else's.  Before it, `slRust` belonged to both
+    # `LangRust` and `LangRustWasm` and an exception keyed on the axis would
+    # have silently covered two members.
+    for exception in MaterializedSummaryExceptions:
+      var holders: seq[Lang] = @[]
+      for lang in Lang:
+        if sourceLanguageOf(lang) == exception.language:
+          holders.add(lang)
+      check holders.len == 1
+      check langForSourceLanguage(exception.language) == holders[0]
+
+  test "the decomposition agrees with usesMaterializedTraces on all but two":
     var disagreements: seq[string] = @[]
     for lang in Lang:
       let d = decompose(lang)
@@ -626,10 +653,22 @@ suite "all 39 Lang values decompose onto the four axes":
     # half (`LangPython`, `LangRuby`), so `LangPythonDb` / `LangRubyDb` stand
     # alone as the language and there is nothing left to collapse.  The wasm
     # pair stays until LRS-5 (see the `Lang` doc comment) and still collapses.
-    check decompose(LangRust).language == decompose(LangRustWasm).language
-    check decompose(LangRust).isa != decompose(LangRustWasm).isa
-    check decompose(LangCpp).language == decompose(LangCppWasm).language
-    check decompose(LangCpp).isa != decompose(LangCppWasm).isa
+    # This used to compare `LangRust` against `LangRustWasm` and `LangCpp`
+    # against `LangCppWasm` -- same language, different ISA -- which is the
+    # decomposition of a conflation that no longer exists.  LRS-5's second
+    # deletion round deleted both wasm members, so the same property is
+    # stated where the ISA now lives: the language's fallback is native and
+    # the assessment is what moves it.
+    check decompose(LangRust).language == slRust
+    check decompose(LangRust).isa == fallbackTargetIsaForLanguage(slRust)
+    check decompose(LangCpp).language == slCpp
+    check decompose(LangCpp).isa == fallbackTargetIsaForLanguage(slCpp)
+    check targetIsaForAssessment(
+      TargetKind(specific: @[KindWasmCargoProject],
+                 family: tfProjectDirectory), slRust) == tiWasm
+    check targetIsaForAssessment(
+      TargetKind(specific: @[KindWasmModule],
+                 family: tfPrebuiltArtefact), slCpp) == tiWasm
     # Each source language that had a retired partner is now reached by
     # exactly one Lang value.
     for language in [slPython, slRuby]:
@@ -649,10 +688,14 @@ suite "all 39 Lang values decompose onto the four axes":
     # brackets because the ISA had been welded onto the language.  Two
     # members that decompose to the same source language must spell the
     # same brackets, and the wasm members must equal their plain siblings.
-    check tokenTextsFor(LangRustWasm) == tokenTextsFor(LangRust)
-    check tokenTextsFor(LangCppWasm) == tokenTextsFor(LangCpp)
+    # LRS-5's second deletion round deleted both wasm members, so the two
+    # equalities this case used to assert (`tokenTextsFor(LangRustWasm) ==
+    # tokenTextsFor(LangRust)` and its C++ twin) cannot be written any more --
+    # and the defect they guarded cannot be reintroduced without adding a
+    # second member for one language, which the bijection case below forbids.
     check tokenTextsFor(LangRust)[SeqOpen] == "vec!["
-    check TOKEN_TEXTS[LangRustWasm][SeqOpen] == "vec!["
+    check TOKEN_TEXTS[LangRust][SeqOpen] == "vec!["
+    check tokenTextsFor(LangCpp)[SeqOpen] == "vector["
     for a in Lang:
       for b in Lang:
         if a != b and decompose(a).language == decompose(b).language and
@@ -660,18 +703,49 @@ suite "all 39 Lang values decompose onto the four axes":
           checkpoint($a & " vs " & $b)
           check tokenTextsFor(a) == tokenTextsFor(b)
 
-  test "exactly the two platform pseudo-languages have no source language":
+  test "NO Lang value is a platform pseudo-language any more":
+    # This case used to read "exactly the two platform pseudo-languages have
+    # no source language" and assert `languageless == {LangPolkavm,
+    # LangSolana}`: two members that named a chain and a VM, decomposed to
+    # `slUnknown`, and had no file extension -- the evidence that they were
+    # never languages.  LRS-5's second deletion round deleted both, so the set
+    # is EMPTY and the evidence became the deletion.
     var languageless: set[Lang] = {}
     for lang in Lang:
       if lang != LangUnknown and decompose(lang).language == slUnknown:
         languageless.incl(lang)
-    check languageless == {LangPolkavm, LangSolana}
-    # And they are exactly the `Lang` values with no file extension, which is
-    # the evidence that they were never languages.
-    check getExtension(LangPolkavm).len == 0
-    check getExtension(LangSolana).len == 0
-    for lang in languageless:
-      check decompose(lang).isa != tiUnknown
+    check languageless == {}
+    # Every non-sentinel member now has a file extension, which is the same
+    # evidence read the other way: a member with no extension was a target,
+    # not a language.
+    for lang in Lang:
+      if lang != LangUnknown:
+        check getExtension(lang).len > 0
+    # The two ISAs themselves are untouched and still route (the recorder was
+    # always a property of the ISA) -- `record_dispatch_test` asserts that.
+    check token(tiSolanaSbf) == "solanasbf"
+    check token(tiPolkaVm) == "polkavm"
+
+  test "Lang and SourceLanguage are in BIJECTION after the second deletion round":
+    # The property the whole four-axis campaign converges on, and the one that
+    # makes `langForSourceLanguage` (and therefore the storage decoder's
+    # language-axis summary) well-defined rather than order-dependent.  Before
+    # this round it was false four times over: `slRust` was claimed by
+    # `LangRust` AND `LangRustWasm`, `slCpp` by `LangCpp` AND `LangCppWasm`,
+    # and `slUnknown` by `LangUnknown`, `LangPolkavm` AND `LangSolana`.
+    var seen: set[SourceLanguage] = {}
+    var count = 0
+    for lang in Lang:
+      let language = sourceLanguageOf(lang)
+      checkpoint($lang & " -> " & token(language))
+      check language notin seen
+      seen.incl(language)
+      check langForSourceLanguage(language) == lang
+      inc count
+    check count == 35
+    # ...and the inverse is total over the languages `Lang` covers.
+    for language in seen:
+      check sourceLanguageOf(langForSourceLanguage(language)) == language
 
   test "the dispatch selector of a Lang value IS its decomposition":
     # `selectorOfLang` is the per-value projection the dispatch table accepts
@@ -703,8 +777,12 @@ suite "all 39 Lang values decompose onto the four axes":
   test "every decomposed ISA agrees with the language's default, except by design":
     # A language's default ISA must be the one its `Lang` value decomposes to,
     # unless the `Lang` value exists precisely to name a non-default ISA.
-    const NonDefaultIsaByDesign = {LangRustWasm, LangCppWasm, LangPolkavm,
-                                   LangSolana}
+    # The set is EMPTY since LRS-5's second deletion round: it held exactly
+    # the four members that round deleted (`LangRustWasm`, `LangCppWasm`,
+    # `LangPolkavm`, `LangSolana`), each of which existed to name a
+    # non-default ISA.  Every surviving member decomposes to its language's
+    # own default, and the ISA is moved only by the assessment.
+    const NonDefaultIsaByDesign: set[Lang] = {}
     for lang in Lang:
       let d = decompose(lang)
       if lang notin NonDefaultIsaByDesign:
@@ -918,7 +996,7 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
     elif tool.supported: true
     else: not tool.isDeclared
 
-  test "isSupportedLang agrees with recorderToolFor on every one of the 39 values":
+  test "isSupportedLang agrees with recorderToolFor on every one of the 35 values":
     var disagreements: seq[string] = @[]
     for lang in Lang:
       if isSupportedLang(lang) != derivedFromDispatch(lang):
@@ -957,13 +1035,19 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
     check LangNim notin native     # Nim IS declared: ct-mcr
     check LangUnknown notin native
 
-  test "the list is the predicate over the enum, in declaration order, 36 long":
+  test "the list is the predicate over the enum, in declaration order, 32 long":
     var expected: seq[Lang] = @[]
     for lang in Lang:
       if isSupportedLang(lang):
         expected.add(lang)
     check SUPPORTED_LANGS == expected
-    check SUPPORTED_LANGS.len == 36
+    # 36 after LRS-3; 32 since LRS-5's second deletion round removed four
+    # SUPPORTED members (`LangRustWasm`, `LangCppWasm`, `LangPolkavm`,
+    # `LangSolana` -- each had a `recorderToolFor` arm with `supported: true`).
+    # Nothing became unrecordable: wazero still records a wasm module, and the
+    # Solana / PolkaVM recorders are still selected, by their ISA rather than
+    # by a `Lang`.  `record_dispatch_test` asserts both routes.
+    check SUPPORTED_LANGS.len == 32
     # The three defects of the two hand-kept lists (design §1.2(e)), closed:
     check LangPythonDb in SUPPORTED_LANGS
     check LangJavascript in SUPPORTED_LANGS
@@ -980,11 +1064,16 @@ suite "SUPPORTED_LANGS is recorderToolFor's domain plus the native family (LRS-3
       names.add(toCLang(lang))
     for lang in SUPPORTED_LANGS:
       check toCLang(lang) in names
-    check LANG_PICKER_LANGS.len == 34
+    # The FOLD IS NOW A NO-OP, which is what LRS-5's second deletion round
+    # promised: with the wasm pair gone no two supported members share a
+    # `toCLang` name, so the picker is exactly `SUPPORTED_LANGS`.  The fold is
+    # kept because it is the rule that keeps the dropdown free of duplicate
+    # `value` attributes, and a rule with no current instance is not dead.
+    check LANG_PICKER_LANGS.len == SUPPORTED_LANGS.len
+    for lang in SUPPORTED_LANGS:
+      check lang in LANG_PICKER_LANGS
     check LangRust in LANG_PICKER_LANGS
-    check LangRustWasm notin LANG_PICKER_LANGS
     check LangCpp in LANG_PICKER_LANGS
-    check LangCppWasm notin LANG_PICKER_LANGS
     # The representative rule reads the fallback ISA, never the ordinal.
     for lang in LANG_PICKER_LANGS:
       let a = axesOfLang(lang)
@@ -1304,3 +1393,229 @@ suite "the persisted four-axis encoding (LRS-5)":
     let summary = langForStorageAxes(withToolchain)
     check summary.found
     check summary.lang == LangRust
+
+# ---------------------------------------------------------------------------
+# LRS-5, second deletion round — precondition (b): the recording carries the
+# approach, and the SIX sites that branch on "is this materialized?" read it
+# ---------------------------------------------------------------------------
+#
+# Until this round the question was asked of a `Lang` summary.  For Rust and
+# C++ the summary could only answer it because two members existed —
+# `LangRustWasm` and `LangCppWasm` — so deleting them without moving the sites
+# would have registered every new wasm recording as native.  That is the
+# silent mislabel the whole series exists to prevent, and these cases are what
+# make it a test failure instead.
+#
+# Four of the six read `Trace` / the decoded cell and are asserted
+# behaviourally here.  All six are asserted STRUCTURALLY by the source sweep
+# at the end, because five of them are renderer code that no lane in this
+# repository can execute.
+
+suite "the recording's approach decides materialized replay, not its language":
+
+  test "materializedReplayFor answers per RECORDING, where the summary could not":
+    # The exact pair the wasm members existed for: one language, two routes.
+    check materializedReplayFor(slRust, raVmEmulation)      # a wasm recording
+    check(not materializedReplayFor(slRust, raMcr))         # a native one
+    check materializedReplayFor(slCpp, raVmEmulation)
+    check(not materializedReplayFor(slCpp, raMcr))
+    # ...and the `Lang` summary of BOTH is now the same member, which is why
+    # asking it would be answering the wrong question.
+    check langForStorageAxes(
+      TargetAxes(language: slRust, targetIsa: tiWasm, toolchain: tcUnknown,
+                 approach: raVmEmulation)).lang == LangRust
+    check langForStorageAxes(
+      TargetAxes(language: slRust, targetIsa: tiNative, toolchain: tcUnknown,
+                 approach: raMcr)).lang == LangRust
+    check(not usesMaterializedTraces(LangRust))
+
+  test "the two stated exceptions survive the move onto the axes":
+    # `LangNim`: both flows import a db container, so a Nim MCR recording IS
+    # materialized even though `producesMaterializedTrace(raMcr)` is false.
+    check materializedReplayFor(slNim, raMcr)
+    check(not producesMaterializedTrace(raMcr))
+    # `LangLua`: no Lua recorder exists, so no materialized Lua trace can.
+    check(not materializedReplayFor(slLua, raInstrumentedRuntime))
+    check producesMaterializedTrace(raInstrumentedRuntime)
+    # Every other language follows the approach with no exception at all.
+    for language in SourceLanguage:
+      if language in {slNim, slLua}:
+        continue
+      for approach in RecordingApproach:
+        check materializedReplayFor(language, approach) ==
+          producesMaterializedTrace(approach)
+
+  test "SITE 4: loadCalltraceMode's default reads the cell, not a Lang":
+    ## `trace_index.loadCalltraceMode` — the fourth of the four sites the
+    ## milestone names, and the only one reachable from a CLI lane.
+    let wasm = TargetAxes(language: slRust, targetIsa: tiWasm,
+                          toolchain: tcUnknown, approach: raVmEmulation)
+    let native = TargetAxes(language: slRust, targetIsa: tiNative,
+                            toolchain: tcUnknown, approach: raMcr)
+    check loadCalltraceMode("", wasm) == CalltraceMode.FullRecord
+    check loadCalltraceMode("", native) == CalltraceMode.NoInstrumentation
+    # Both summarise as `LangRust`, so a default taken from the summary would
+    # answer `NoInstrumentation` for the wasm recording — the mislabel.
+    check langForStorageAxes(wasm).lang == langForStorageAxes(native).lang
+    # A stored value always wins over the default, unchanged.
+    check loadCalltraceMode("CallKeyOnly", native) == CalltraceMode.CallKeyOnly
+
+  test "SITES 1-3 and 5-6: a Trace answers from its own approach":
+    ## `Trace.usesMaterializedTraces` is what `ui/repl.nim`,
+    ## `services/debugger_service.nim` `lineStepJump`, `index/traces.nim`,
+    ## `ui/calltrace.nim` and `ui/event_log.nim` call.  The predicate is
+    ## backend-agnostic and is asserted here; the call sites are pinned
+    ## structurally below.
+    let wasmTrace = Trace(lang: LangRust, approach: raVmEmulation)
+    let nativeTrace = Trace(lang: LangRust, approach: raMcr)
+    check wasmTrace.usesMaterializedTraces
+    check(not nativeTrace.usesMaterializedTraces)
+    # The Nim exception, through a Trace.
+    check Trace(lang: LangNim, approach: raMcr).usesMaterializedTraces
+    # A Python recording made by the RETIRED rr backend: the cell says `raRr`
+    # and the summary says `LangPythonDb`, whose own approach is instrumented.
+    # The recording is what is asked, so the answer is "native replay".
+    check(not Trace(lang: LangPythonDb, approach: raRr).usesMaterializedTraces)
+    check usesMaterializedTraces(LangPythonDb)
+    # A nil trace is false rather than a crash: no recording is open.
+    check(not Trace(nil).usesMaterializedTraces)
+
+  test "the six sites read the RECORDING, and none reads a Lang summary":
+    ## Structural, because five of the six are renderer code no lane here can
+    ## run.  Two of those five — the Call Trace pane and the Event Log — were
+    ## the DECISION this milestone had to take rather than inherit: they set
+    ## their own `usesMaterializedTracesTrace` from
+    ## `toLangFromFilename(self.location.path)`, the ACTIVE FILE's language,
+    ## and therefore already answered "native" for a wasm-recorded `.rs`
+    ## before this round (LRS-4's review found it and left it open).  The
+    ## decision: read the recording, like the other four.  This case is what
+    ## pins it.
+    const Sites = [
+      ("src/frontend/ui/repl.nim", "data.trace.usesMaterializedTraces()"),
+      ("src/frontend/services/debugger_service.nim",
+       "self.data.trace.usesMaterializedTraces"),
+      ("src/frontend/index/traces.nim", "data.trace.usesMaterializedTraces"),
+      ("src/frontend/ui/calltrace.nim",
+       "self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces"),
+      ("src/frontend/ui/event_log.nim",
+       "self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces"),
+    ]
+    for (relative, needle) in Sites:
+      let path = RepoRoot / relative
+      check fileExists(path)
+      let source = readFile(path)
+      checkpoint(relative & " must contain: " & needle)
+      check needle in source
+      # ...and must NOT ask the question of a `Lang` any more.  This is the
+      # assertion that fails if someone "simplifies" a site back onto the
+      # summary, which for Rust and C++ cannot answer it.
+      checkpoint(relative & " must not ask a Lang summary")
+      # The two OLD shapes, matched as code rather than as prose (the
+      # comments at each site quote them on purpose, which is why the needles
+      # include the surrounding syntax).
+      check "self.data.trace.lang.usesMaterializedTraces" notin source
+      check "data.trace.lang.usesMaterializedTraces()" notin source
+      check "usesMaterializedTracesTrace = lang != LangUnknown" notin source
+      check "= toLangFromFilename(self.location.path)" notin source
+    # `loadCalltraceMode` takes axes, not a `Lang` — the fourth site, pinned
+    # in the same shape as the other five.
+    let traceIndex = readFile(RepoRoot / "src" / "common" / "trace_index.nim")
+    check "proc loadCalltraceMode*(raw: string, axes: TargetAxes)" in traceIndex
+    check "materializedReplayFor(axes.language, axes.approach)" in traceIndex
+    # The one place a `Lang` may still be asked is a target that has NO
+    # recording yet — `index/traces.nim`'s "would a recording of this file be
+    # materialized?" branch.  Assert it is still there, so the case above is
+    # not passing merely because the whole branch was deleted.
+    let traces = readFile(RepoRoot / "src" / "frontend" / "index" / "traces.nim")
+    check "toLangFromFilename(selectedRecordTarget).usesMaterializedTraces" in traces
+
+  test "Trace.approach crosses the ct trace-metadata hop as a NAME":
+    ## The LRS-1 rule, applied to the field this round adds: no boundary
+    ## carries an enum's ordinal.  `Trace` is encoded with
+    ## `json_serialization`, which writes an enum as `ord(value)` unless the
+    ## type opts in — the exact defect LRS-4 found on `Trace.lang` and fixed
+    ## in this same module.
+    let traceIndex = readFile(RepoRoot / "src" / "common" / "trace_index.nim")
+    check "serializesAsTextInJson(Lang)" in traceIndex
+    check "serializesAsTextInJson(RecordingApproach)" in traceIndex
+    # ...and the renderer decodes the name with `parseEnum`, not with a
+    # hand-written ordinal map (the map LRS-4 deleted for `lang`).
+    let metadata = readFile(RepoRoot / "src" / "frontend" / "trace_metadata.nim")
+    check "parseEnum[RecordingApproach]" in metadata
+    check "approach: 0" notin metadata
+
+  test "detectTraceAxes states the wasm target on the ISA axis (precondition d)":
+    ## `storage_and_import.detectTraceLang` used to answer `LangRustWasm` /
+    ## `LangCppWasm` for a db-kind C/C++/Rust container — the third of the
+    ## three writers of those members.  It now answers AXES, and the two
+    ## facts it was carrying are on their own axes.
+    let rustDb = detectTraceAxes("main.rs", @[], "db")
+    check rustDb.language == slRust
+    check rustDb.targetIsa == tiWasm
+    check rustDb.approach == raVmEmulation
+    check materializedReplayFor(rustDb.language, rustDb.approach)
+    # An rr/MCR container of the same sources is untouched: native, and NOT
+    # materialized.  A `detectTraceAxes` that answered a native ISA for the
+    # db-kind case above would make these two indistinguishable, which is
+    # exactly the mislabel.
+    let rustRr = detectTraceAxes("main.rs", @[], "rr")
+    check rustRr.language == slRust
+    check rustRr.targetIsa == tiNative
+    check rustRr.approach == raMcr
+    check(not materializedReplayFor(rustRr.language, rustRr.approach))
+    check rustDb != rustRr
+    # C and C++ keep the ISA and gain an accurate language: the old answer
+    # for BOTH was `LangCppWasm`, because there was no `LangCWasm` member.
+    check detectTraceAxes("main.c", @[], "db").language == slC
+    check detectTraceAxes("main.cpp", @[], "db").language == slCpp
+    check detectTraceAxes("main.c", @[], "db").targetIsa == tiWasm
+    # A prebuilt module names its ISA outright, whatever the trace kind.
+    check detectTraceAxes("app.wasm", @[], "db").targetIsa == tiWasm
+    check detectTraceAxes("app.wasm", @[], "rr").targetIsa == tiWasm
+    # An interpreted language is unaffected by the db-kind rule.
+    check detectTraceAxes("main.py", @[], "db") == storageAxesOfLang(LangPythonDb)
+    # Nothing recognisable: the all-sentinel value, never a guess.
+    check detectTraceAxes("a.out", @[], "db") == storageAxesOfLang(LangUnknown)
+    # The `Lang` wrapper is the SUMMARY of the axes and nothing else.
+    check detectTraceLang("main.rs", @[], "db") == LangRust
+    check detectTraceLang("main.rs", @[], "rr") == LangRust
+
+  test "recordTrace persists the OBSERVED axes when the caller has them":
+    ## The other half of (b): the record side writes what it assessed, so a
+    ## wasm recording's cell says wasm.  Asserted on the encoder rather than
+    ## against a database, because the cell is what the replay side reads.
+    let assessed = TargetAxes(language: slRust, targetIsa: tiWasm,
+                              toolchain: tcUnknown, approach: raVmEmulation)
+    check encodeAxesToken(assessed) == "rs-wasm-unknown-vm"
+    # ...and what the `Lang` summary alone would have written instead, which
+    # is a NATIVE cell: the silent mislabel, stated as the value it produces.
+    check encodeAxesToken(storageAxesOfLang(LangRust)) == "rs-native-unknown-mcr"
+    check encodeAxesToken(assessed) != encodeAxesToken(storageAxesOfLang(LangRust))
+    # `recordDb` is where the assessed selector becomes those axes.
+    let record = readFile(RepoRoot / "src" / "ct" / "db_backend_record.nim")
+    check "axesArg = some(TargetAxes(language: sel.language, targetIsa: sel.targetIsa," in record
+    let storage = readFile(RepoRoot / "src" / "ct" / "trace" / "storage_and_import.nim")
+    check "axesArg: Option[TargetAxes] = none(TargetAxes)" in storage
+    check "axesArg = some(axes))" in storage
+
+  test "the assessment reads a .wasm extension as an ISA (precondition c)":
+    ## The artefact fact, and the mutation target: make `assessKind` ignore
+    ## the extension and the prebuilt-module route silently becomes native.
+    check targetIsaForAssessment(
+      TargetKind(specific: @[KindWasmModule], family: tfPrebuiltArtefact),
+      slRust) == tiWasm
+    check targetIsaForAssessment(
+      TargetKind(specific: @[KindWasmModule], family: tfPrebuiltArtefact),
+      slCpp) == tiWasm
+    # It is an ISA-deciding kind, so meeting a second one is an ambiguity
+    # rather than a silent pick (rule K2).
+    check KindWasmModule in targetIsaAmbiguity(
+      TargetKind(specific: @[KindWasmModule, KindNimSource],
+                 family: tfSingleFile))
+    check targetIsaForAssessment(
+      TargetKind(specific: @[KindWasmModule, KindNimSource],
+                 family: tfSingleFile), slNim) == tiUnknown
+    # Without the kind the language fallback answers, which is native — the
+    # mutation's outcome, stated so the case says what it is guarding.
+    check targetIsaForAssessment(
+      TargetKind(specific: @[], family: tfPrebuiltArtefact), slRust) == tiNative

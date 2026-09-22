@@ -80,10 +80,16 @@
 //! whose only content was a diagnostic, were deleted (`PythonDb` / `RubyDb`
 //! are the Python and Ruby identity; their wire names `pythondb` / `rubydb`
 //! are unchanged because `codetracer-native-backend`'s `Lang::from_str`
-//! knows them by those spellings).  `RustWasm` / `CppWasm` and `PolkaVM` /
-//! `Solana` stay until LRS-5 stores the axes: they are the persisted
-//! `recordings.lang` column's only way of saying "wasm" and "no source
-//! language" until then.
+//! knows them by those spellings).  LRS-5's SECOND deletion round
+//! (2026-09-21) made the next one: `RustWasm` / `CppWasm` and `PolkaVM` /
+//! `Solana` are gone, 39 variants -> **35**.  Each was a non-language axis
+//! welded onto a language enum, and each was kept only while the persisted
+//! `recordings.lang` column was one `Lang` name; trace_index schema version 2
+//! stores all four axes (`rs-wasm-unknown-vm`,
+//! `unknown-solanasbf-unknown-vm`) and the Nim `Trace.approach` carries the
+//! recording approach per recording, so nothing has to say "wasm" or "no
+//! source language" with a variant any more.  What is left is one variant per
+//! source language.
 //!
 //! It is **not** carried to `codetracer-native-backend`.  That repository has
 //! its own, deliberately different `Lang` (the languages the native backend
@@ -145,17 +151,13 @@ pub enum Lang {
     Lua,
     Asm,
     Noir,
-    /// Kept until LRS-5 (with `CppWasm`): the persisted `recordings.lang`
-    /// column's only way of saying a Rust/C++ recording is a wasm one.
-    RustWasm,
-    CppWasm,
     /// Python, recorded by `codetracer-python-recorder`; `Db` suffix as for
     /// `RubyDb` (the retired `Python` was deleted in LRS-4).
     PythonDb,
     // The shell and blockchain-VM languages, whose traces are materialized
     // and read by the db-backend rather than stepped through a native frame.
     // They are NOT absent from the Nim frontend enum — `src/common/common_lang.nim`
-    // declares all 39 of these variants at the same ordinals, and
+    // declares all 35 of these variants at the same ordinals, and
     // `src/tests/cli/lang_enum_contract_test.nim` asserts the two lists are
     // the same length, name for name.
     //
@@ -171,9 +173,6 @@ pub enum Lang {
     Sway,
     /// Sui/Aptos Move language
     Move,
-    /// PolkaVM RISC-V (Polkadot smart contracts).  Kept until LRS-5 (with
-    /// `Solana`): names a target with no source language.
-    PolkaVM,
     /// Cairo/StarkNet (zero-knowledge smart contracts)
     Cairo,
     /// Circom (zero-knowledge circuits)
@@ -186,8 +185,6 @@ pub enum Lang {
     Aiken,
     /// Cadence/Flow (Flow smart contracts)
     Cadence,
-    /// Solana (Solana programs/smart contracts).  Kept until LRS-5, as `PolkaVM`.
-    Solana,
     /// Elixir/BEAM materialized traces
     Elixir,
     /// Erlang/BEAM materialized traces
@@ -239,8 +236,6 @@ impl Lang {
             Lang::Lua => "lua",
             Lang::Asm => "asm",
             Lang::Noir => "noir",
-            Lang::RustWasm => "rustwasm",
-            Lang::CppWasm => "cppwasm",
             Lang::PythonDb => "pythondb",
             Lang::Bash => "bash",
             Lang::Zsh => "zsh",
@@ -248,14 +243,12 @@ impl Lang {
             Lang::Masm => "masm",
             Lang::Sway => "sway",
             Lang::Move => "move",
-            Lang::PolkaVM => "polkavm",
             Lang::Cairo => "cairo",
             Lang::Circom => "circom",
             Lang::Leo => "leo",
             Lang::Tolk => "tolk",
             Lang::Aiken => "aiken",
             Lang::Cadence => "cadence",
-            Lang::Solana => "solana",
             Lang::Elixir => "elixir",
             Lang::Erlang => "erlang",
             Lang::Php => "php",
@@ -267,7 +260,7 @@ impl Lang {
     ///
     /// Used by the wire-name round-trip tests; kept next to [`Lang::wire_name`]
     /// so the two are updated together.
-    pub const ALL: [Lang; 39] = [
+    pub const ALL: [Lang; 35] = [
         Lang::Unknown,
         Lang::C,
         Lang::Cpp,
@@ -286,8 +279,6 @@ impl Lang {
         Lang::Lua,
         Lang::Asm,
         Lang::Noir,
-        Lang::RustWasm,
-        Lang::CppWasm,
         Lang::PythonDb,
         Lang::Bash,
         Lang::Zsh,
@@ -295,14 +286,12 @@ impl Lang {
         Lang::Masm,
         Lang::Sway,
         Lang::Move,
-        Lang::PolkaVM,
         Lang::Cairo,
         Lang::Circom,
         Lang::Leo,
         Lang::Tolk,
         Lang::Aiken,
         Lang::Cadence,
-        Lang::Solana,
         Lang::Elixir,
         Lang::Erlang,
         Lang::Php,
@@ -654,12 +643,14 @@ mod tests {
         assert_eq!(Lang::default(), Lang::Unknown);
         assert_eq!(Lang::ALL[0], Lang::Unknown);
         assert_eq!(Lang::C as u8, 1);
-        // 39 since LRS-4 deleted `Python` and `Ruby` from the 41 (40 plus the
-        // `GDScript` append).  This length read 40 for a while after that
-        // append and the failure went unnoticed, which is the drift the Nim
-        // contract test exists to catch on the other side.
-        assert_eq!(Lang::ALL.len(), 39);
-        assert_eq!(Lang::GDScript as u8, 38);
+        // 35 since LRS-5's second deletion round removed `RustWasm`,
+        // `CppWasm`, `PolkaVM` and `Solana` from the 39 LRS-4 left (41 = 40
+        // plus the `GDScript` append, minus `Python` and `Ruby`).  This
+        // length read 40 for a while after that append and the failure went
+        // unnoticed, which is the drift the Nim contract test exists to catch
+        // on the other side.
+        assert_eq!(Lang::ALL.len(), 35);
+        assert_eq!(Lang::GDScript as u8, 34);
     }
 
     /// The retired members' wire names are gone with them, and nothing else
@@ -671,6 +662,18 @@ mod tests {
         assert_eq!(Lang::from_wire_name("ruby"), None);
         assert_eq!(Lang::from_wire_name("pythondb"), Some(Lang::PythonDb));
         assert_eq!(Lang::from_wire_name("rubydb"), Some(Lang::RubyDb));
+        // The same, for LRS-5's second deletion round.  `rustwasm` and
+        // `cppwasm` are now `codetracer-native-backend`-only spellings (its
+        // own, deliberately different `Lang` still has both variants and
+        // still parses them); this core emits neither, and a `rustwasm` on
+        // the worker socket is refused rather than re-pointed at `Rust` --
+        // which would be the ISA silently absorbed into the language again.
+        assert_eq!(Lang::from_wire_name("rustwasm"), None);
+        assert_eq!(Lang::from_wire_name("cppwasm"), None);
+        assert_eq!(Lang::from_wire_name("polkavm"), None);
+        assert_eq!(Lang::from_wire_name("solana"), None);
+        assert_eq!(Lang::from_wire_name("rust"), Some(Lang::Rust));
+        assert_eq!(Lang::from_wire_name("cpp"), Some(Lang::Cpp));
     }
 
     /// `Lang::ALL` must be exactly the enum, in order, with nothing past the

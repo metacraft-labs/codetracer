@@ -1,6 +1,6 @@
 import std / [
   os, osproc, strformat, httpclient, json, strutils, sequtils,
-  times
+  times, options
 ]
 import results
 import json_serialization
@@ -434,6 +434,13 @@ const
 # still crosses as an integer (its renderer map is LRS-6's).
 serializesAsTextInJson(Lang)
 
+# `Trace.approach` crosses the SAME hop and for the same reason must not cross
+# as `ord(RecordingApproach)`.  LRS-5's second deletion round put the field on
+# `Trace` (precondition (b)); this line is what keeps it a NAME on the
+# `ct trace-metadata` -> Electron hop, exactly as `Lang` above.  The renderer
+# decodes it in `src/frontend/trace_metadata.nim`.
+serializesAsTextInJson(RecordingApproach)
+
 proc langToColumnValue*(lang: Lang): string =
   ## The persisted form of ``lang`` since schema version **2**: the four-axis
   ## token (``target_axes.encodeAxesToken``).
@@ -454,11 +461,25 @@ type
       ## The live member the stored cell denotes — or ``LangUnknown`` when no
       ## live member summarises it (see ``retiredName``).
     retiredName*: string
-      ## Non-empty exactly when the cell was a legitimate persisted value that
-      ## this build has no live ``Lang`` for: a four-axis token no member
-      ## summarises, or the name of a member a later build removed.  Carried
-      ## so the row is displayed by what it was recorded under and nothing is
-      ## lost; ``lang`` is then the sentinel, never a guess at a neighbour.
+      ## Non-empty exactly when no live ``Lang`` summarises the whole cell: a
+      ## four-axis token whose (language, ISA, approach) triple no member has,
+      ## or the name of a member a later build removed.  Carried so the row is
+      ## displayed by what it was recorded under and nothing is lost.
+      ##
+      ## Since LRS-5's second deletion round ``lang`` is still filled in this
+      ## case, from the cell's LANGUAGE axis alone (``langForStorageAxes``), so
+      ## a wasm Rust recording summarises as ``LangRust`` rather than as the
+      ## sentinel; it is ``LangUnknown`` only when the cell names no language.
+      ## ``axes`` below is what the cell actually said, and is what the replay
+      ## side branches on.
+    axes*: TargetAxes
+      ## **The cell, in full** — the per-recording fact ``lang`` is a summary
+      ## of.  For a version-2 token it is the parse; for a version-1 ``Lang``
+      ## NAME it is ``storageAxesOfLang`` of that member; for a RETIRED
+      ## version-1 name it is the parse of that name's frozen version-2 target
+      ## (``langV1NameToV2Token``), which is what makes an old
+      ## ``LangRustWasm`` row still say "wasm, VM emulation" in a build that
+      ## has no such member.
 
 # Retired-name policy (decided 2026-09-20, LRS-2B): a ``recordings.lang``
 # cell holding the name of a member that a later build REMOVED decodes to
@@ -654,17 +675,28 @@ proc decodeLangColumn*(raw: string,
   if parseAxesToken(raw, axes):
     let summary = langForStorageAxes(axes)
     if summary.found:
-      return LangColumn(lang: summary.lang, retiredName: "")
-    return LangColumn(lang: LangUnknown, retiredName: raw)
+      return LangColumn(lang: summary.lang, retiredName: "", axes: axes)
+    return LangColumn(lang: summary.lang, retiredName: raw, axes: axes)
 
   # --- the schema-version-1 legacy branch -----------------------------------
   try:
-    return LangColumn(lang: parseEnum[Lang](raw), retiredName: "")
+    let live = parseEnum[Lang](raw)
+    return LangColumn(lang: live, retiredName: "", axes: storageAxesOfLang(live))
   except ValueError:
     discard
   for name in everPersisted:
     if name == raw:
-      return LangColumn(lang: LangUnknown, retiredName: raw)
+      # A name this build no longer has.  Its AXES are still known, and from a
+      # frozen literal rather than from the live enum (rule 3): the version-2
+      # target the 1 -> 2 migration would give this very cell.  That is what
+      # lets a version-1 `LangRustWasm` row keep answering "materialized" at
+      # the four replay-side sites in a build that has no `LangRustWasm`.
+      var retiredAxes: TargetAxes
+      let token = langV2TokenForV1Name(name)
+      if token.len == 0 or not parseAxesToken(token, retiredAxes):
+        retiredAxes = storageAxesOfLang(LangUnknown)
+      return LangColumn(lang: langForStorageAxes(retiredAxes).lang,
+                        retiredName: raw, axes: retiredAxes)
   raise newException(TraceIndexSchemaError,
     "trace_index: recordings.lang holds " & raw.escape() & ", which is " &
     "neither a four-axis token nor a Lang enum name.  Since trace_index " &
@@ -1469,8 +1501,22 @@ proc recordTrace*(
     calltrace: bool,
     calltraceMode: CalltraceMode,
     test: bool,
-    fileId: string = ""): Trace =
+    fileId: string = "",
+    axesArg: Option[TargetAxes] = none(TargetAxes)): Trace =
   # TODO pass here a Trace value and instead if neeeded construct it from other helpers
+
+  # LRS-5, precondition (b): what goes in the `lang` column is the OBSERVED
+  # four-axis value when the caller has one, and `storageAxesOfLang(lang)`
+  # only when it does not.
+  #
+  # `importTrace` has one: the record side assessed the target (an ISA from the
+  # `.cargo/config.toml` marker or from a `.wasm` extension, an approach from
+  # the ISA) and the import side derives one from the container's kind.  Before
+  # this milestone the only way to carry "this Rust recording is a wasm one"
+  # into the column was to pick a `Lang` MEMBER that said so -- `LangRustWasm`
+  # -- which is why deleting the member without this parameter would have
+  # registered every new wasm recording as `rs-native-unknown-mcr`: native.
+  let axes = if axesArg.isSome: axesArg.get else: storageAxesOfLang(lang)
 
   let currentDate: DateTime = now()
   var traceDate: string = ""
@@ -1509,7 +1555,7 @@ proc recordTrace*(
             id, program, args.join(" "),
             compileCommand, env, workdir, "", # <- output
             sourceFolders, lowLevelFolder, outputFolder,
-            langToColumnValue(lang), $(imported.int), $shellID,
+            encodeAxesToken(axes), $(imported.int), $shellID,
             $rrPid, $exitCode,
             ord(calltrace), $calltraceMode, $traceDate, fileId)
       break
@@ -1527,6 +1573,7 @@ proc recordTrace*(
     env: env,
     workdir: workdir,
     lang: lang,
+    approach: axes.approach,
     output: "",
     imported: imported,
     shellID: shellID,
@@ -1557,9 +1604,17 @@ proc recordTrace*(trace: Trace, test: bool): Trace =
     trace.calltraceMode,
     test)
 
-proc loadCalltraceMode*(raw: string, lang: Lang): CalltraceMode =
+proc loadCalltraceMode*(raw: string, axes: TargetAxes): CalltraceMode =
+  ## The stored calltrace mode, or the default for a row that has none.
+  ##
+  ## **One of the four sites LRS-5 moved off `usesMaterializedTraces(lang)`**
+  ## (precondition (b)).  The default is a property of the RECORDING -- a
+  ## materialized container has a full calltrace, a native replay recording has
+  ## none -- and it now reads the decoded cell's own language and approach
+  ## rather than a `Lang` summary that, for Rust and C++, could only answer it
+  ## while `LangRustWasm` and `LangCppWasm` existed.
   if raw.len == 0: # default, or missing calltrace mode(e.g. from a trace before altering table/update)
-    if not lang.usesMaterializedTraces:
+    if not materializedReplayFor(axes.language, axes.approach):
       CalltraceMode.NoInstrumentation # conservative default
     else:
       CalltraceMode.FullRecord
@@ -1608,13 +1663,14 @@ proc loadTrace(trace: Row, test: bool): Trace =
       outputFolder: trace[9],
       lang: lang,
       langRetiredName: column.retiredName,
+      approach: column.axes.approach,
       test: test,
       imported: trace[11].parseInt != 0,
       shellID: trace[12].parseInt,
       rrPid: trace[13].parseInt,
       exitCode: trace[14].parseInt,
       calltrace: trace[15].parseInt != 0,
-      calltraceMode: loadCalltraceMode(trace[16], lang),
+      calltraceMode: loadCalltraceMode(trace[16], column.axes),
       date: trace[17],
       downloadKey: trace[18],
       controlId: trace[19],

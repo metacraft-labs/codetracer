@@ -1453,8 +1453,8 @@ pub struct Tracepoint {
     // There is deliberately no `lang` field.  One existed until LRS-1 and
     // crossed `ct/run-tracepoints` as the `Lang` ORDINAL (the Nim record went
     // through `toJs`, where an enum is its integer); nothing on this side ever
-    // read it — `run_tracepoints` evaluates with `lang_from_context(path,
-    // trace_kind)` per stop — so it was deleted rather than moved to a name.
+    // read it — `run_tracepoints` evaluates with `lang_from_context(path)`
+    // per stop — so it was deleted rather than moved to a name.
     // A sender that still writes `"lang"` is tolerated: this struct does not
     // deny unknown fields, and `task::tests` pins that the key is ignored.
     pub results: Vec<Stop>,

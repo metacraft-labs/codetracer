@@ -236,7 +236,7 @@ suite "ct record dispatch table":
       if row.extension.len == 0:
         continue
       checkpoint("extension: ." & row.extension)
-      check detectLangFromPath("app." & row.extension, isWasm = false) ==
+      check detectLangFromPath("app." & row.extension) ==
         row.lang
 
   test "each recorder is invoked with the argv it documents":
@@ -464,7 +464,7 @@ suite "ct record dispatch table":
       checkpoint("pending language: " & lang.toName)
       let extension = getExtension(lang)
       check extension.len > 0
-      let reached = detectLangFromPath("program." & extension, isWasm = false)
+      let reached = detectLangFromPath("program." & extension)
       check reached == lang
       # …and what it reaches is the declaration, not silence.
       check recorderToolFor(sel(reached)).installHint.len > 0
@@ -562,10 +562,10 @@ suite "the ISA selects the recorder; the language does not":
   test "wasm is one arm for every language, where it used to be two Lang members":
     # `LangRustWasm` and `LangCppWasm` welded the ISA onto the language.  On
     # the axes both are `(<lang>, tiWasm, raVmEmulation)` and select `wazero`;
-    # so does a C wasm module, which had no `Lang` value at all.  (The two
-    # members still exist -- LRS-4 kept them until LRS-5 stores the axes,
-    # because they are the persisted `recordings.lang` column's only way of
-    # saying "wasm"; the dispatch table has not read them since LRS-2B.)
+    # so does a C wasm module, which never had a `Lang` value at all.  LRS-5's
+    # second deletion round deleted both members: the selectors below are
+    # unchanged, which is the point -- the dispatch table has not read the
+    # members since LRS-2B, and now nothing can.
     for language in [slRust, slCpp, slC, slUnknown]:
       let s = selector(language, tiWasm, raVmEmulation)
       checkpoint("wasm from " & displayName(s))
@@ -573,59 +573,83 @@ suite "the ISA selects the recorder; the language does not":
       check tool.supported
       check tool.recorderLabel == "wazero"
       check "--out-dir" in joinedArgs(s)
-    check sel(LangRustWasm) == selector(slRust, tiWasm, raVmEmulation)
-    check sel(LangCppWasm) == selector(slCpp, tiWasm, raVmEmulation)
+    # No `Lang` value projects to a wasm selector any more.  This used to be
+    # `check sel(LangRustWasm) == selector(slRust, tiWasm, raVmEmulation)` and
+    # its C++ twin; LRS-5's second deletion round deleted both members, and the
+    # property is stated over the whole enum instead of over the two rows that
+    # used to satisfy it.
+    for lang in Lang:
+      check axesOfLang(lang).targetIsa != tiWasm
 
-  test "a prebuilt .wasm module dispatches to wazero, and the route rides on the Lang member":
-    # The three roads to a wasm recording today, and where each one's ISA
-    # comes from -- recorded here because it is WHY `LangRustWasm` survives
-    # LRS-4 (see the `Lang` doc comment in `src/common/common_lang.nim`):
+  test "a prebuilt .wasm module dispatches to wazero, and the route rides on the ARTEFACT":
+    # **THE CASE THAT FLIPPED** (LRS-5, precondition (c)).  It used to be
+    # called "...and the route rides on the Lang member" and to assert
+    # `detectLang(module, LangUnknown) == LangRustWasm`, `a.kind.specific.len
+    # == 0` ("nothing decides the ISA") and `a.targetIsa == tiWasm` with the
+    # comment "...so the member does".  That was the last thing keeping
+    # `LangRustWasm` alive on the RECORD side: road 3 below took its ISA from
+    # `axesOfLang(LangRustWasm)`.
+    #
+    # The three roads to a wasm recording, and where each one's ISA comes
+    # from NOW:
     #
     # 1. a Cargo crate whose `.cargo/config.toml` names `wasm32`: the
-    #    assessment reads the MARKER (`wasm-cargo-project`) and the ISA is
-    #    `tiWasm` from the kind -- "a wasm crate is assessed as wasm, from the
-    #    marker and not from a Lang member", below;
-    # 2. `--lang rust-wasm` / `cpp-wasm`: the user names the member;
+    #    assessment reads the MARKER (`wasm-cargo-project`) -- "a wasm crate
+    #    is assessed as wasm, from the marker and not from a Lang member",
+    #    below.  Unchanged since LRS-2B;
+    # 2. `--lang rust-wasm` / `cpp-wasm`: a DEPRECATED ALIAS of the language
+    #    (`LangRust` / `LangCpp`) that announces itself once and changes no
+    #    route;
     # 3. a prebuilt `foo.wasm` handed to `ct record` (and what road 1 hands
-    #    to `db-backend-record` after `cargo build`): `LANGS["wasm"]` is
-    #    `LangRustWasm`, `assessKind` says `prebuilt-artefact` with NO
-    #    ISA-deciding kind, and the ISA therefore comes from
-    #    `axesOfLang(LangRustWasm).targetIsa` -- the member.  Delete the
-    #    member before the assessment reads the `.wasm` extension as an ISA
-    #    and this road resolves `.wasm` to the native path.
+    #    to `db-backend-record` after `cargo build`): `assessKind` reads the
+    #    `.wasm` extension as `KindWasmModule` and `targetIsaForAssessment`
+    #    answers `tiWasm` from THE KIND.  The `Lang` is `LangRust` -- a
+    #    documented guess at the source language, which decides no route.
     let dir = getTempDir() / "ct-dispatch-test-wasm-module"
     removeDir(dir)
     createDir(dir)
     let module = dir / "app.wasm"
     writeFile(module, "stand-in for a wasm module; only the extension is read")
     let lang = detectLang(module, LangUnknown)
-    check lang == LangRustWasm
+    check lang == LangRust                        # the LANGUAGE, a guess
+    check axesOfLang(lang).targetIsa == tiNative  # ...and it says NATIVE
     let a = assessRecordingTarget(module, lang)
     check a.kind.family == tfPrebuiltArtefact
-    check a.kind.specific.len == 0                # nothing decides the ISA
-    check a.targetIsa == tiWasm                   # ...so the member does
+    check a.kind.specific == @[KindWasmModule]    # the artefact decides the ISA
+    check a.targetIsa == tiWasm                   # ...and it is not the member's
     check a.recordingApproach == raVmEmulation
     let s = recorderSelectorFor(a, lang)
     check s == selector(slRust, tiWasm, raVmEmulation)
     check recorderToolFor(s).recorderLabel == "wazero"
-    # The replay-side summary must say "materialized" for what this records,
-    # which is the other half of why the member is kept: `LangRust` cannot.
-    check usesMaterializedTraces(lang)
-    check(not usesMaterializedTraces(LangRust))
+    # The replay side must still see "materialized".  It no longer asks the
+    # `Lang` summary -- which cannot answer it, and that was the OTHER half of
+    # why the member was kept -- but the recording's own approach, which is
+    # what `recordDb` registers the recording under.
+    check producesMaterializedTrace(a.recordingApproach)
+    check materializedReplayFor(slRust, a.recordingApproach)
+    check(not materializedReplayFor(slRust, raMcr))
 
-  test "the platform pseudo-languages select by ISA with no language at all":
-    # `LangSolana` and `LangPolkavm` have no source language (`slUnknown`) and
-    # the recorder is still selected, because for a VM ISA the recorder is a
-    # property of the ISA.
-    for lang in [LangSolana, LangPolkavm]:
-      let s = sel(lang)
-      checkpoint(lang.toName)
+  test "the platform ISAs select a recorder with no source language at all":
+    # `LangSolana` and `LangPolkavm` had no source language (`slUnknown`) and
+    # still selected a recorder, because for a VM ISA the recorder is a
+    # property of the ISA.  LRS-5's second deletion round deleted both
+    # members; the selectors are constructed directly here, which is the only
+    # way to reach these cells now and is exactly what the deletion asserts --
+    # the routing never needed a `Lang`.
+    for isa in [tiSolanaSbf, tiPolkaVm]:
+      let s = selector(slUnknown, isa, raVmEmulation)
+      checkpoint(token(isa))
       check s.language == slUnknown
       check recorderToolFor(s).supported
-      check recorderToolFor(s).recorderLabel == blockchainRecorderName(s.targetIsa)
+      check recorderToolFor(s).recorderLabel == blockchainRecorderName(isa)
       # …and the diagnostic still has something to call it.
-      check displayName(s) == token(s.targetIsa)
+      check displayName(s) == token(isa)
       check displayName(s) in missingRecorderMessage(s, @[]).join("\n")
+    # No `Lang` value stands for a chain or a VM any more: every member has a
+    # real source language, and only the sentinel is `slUnknown`.
+    for lang in Lang:
+      if lang != LangUnknown:
+        check sourceLanguageOf(lang) != slUnknown
 
   test "every blockchain ISA names a recorder, an override and a sibling":
     for isa in BlockchainIsas:
@@ -789,3 +813,86 @@ suite "the assessment is loud about two facts it may not choose between":
     check a.targetIsa == tiWasm
     check a.recordingApproach == raVmEmulation
     check recorderToolFor(recorderSelectorFor(a, LangRust)).recorderLabel == "wazero"
+
+# ---------------------------------------------------------------------------
+# LRS-5, second deletion round: a `--lang` spelling that names a TARGET ISA
+# ---------------------------------------------------------------------------
+
+suite "an ISA stated by --lang overrides the assessment, and keeps two routes alive":
+
+  test "--lang polkavm and --lang solana still reach their recorders":
+    # THE regression this exists for.  `LangPolkavm` / `LangSolana` had no
+    # extension, no project marker and no `LANGS` row -- `--lang` was the ONLY
+    # way to record such a target (the Edit-Mode Toolbar spec's EMT-F7 says
+    # so).  Deleting the members WITHOUT moving the spellings to the ISA axis
+    # would not have renamed that route, it would have deleted it: the target
+    # falls through to `detectFolderLang`, a Solana crate reads as plain Rust,
+    # and `ct record` takes the NATIVE path.  A silent one.
+    let dir = getTempDir() / "ct-dispatch-test-isa-override"
+    removeDir(dir)
+    createDir(dir)
+    writeFile(dir / "Cargo.toml", "[package]\nname = \"solprog\"\n")
+    createDir(dir / "src")
+    writeFile(dir / "src" / "lib.rs", "// a Solana program is a Rust crate\n")
+    # Without the override the crate is plain Rust and takes the native path.
+    let bare = assessRecordingTarget(dir, detectLang(dir, LangUnknown))
+    check bare.targetIsa == tiNative
+    check bare.recordingApproach == raMcr
+    check(not recorderToolFor(recorderSelectorFor(bare, LangRust)).isDeclared)
+    # With it, the recorder the deleted member used to select.
+    for (spelling, isa, sibling) in [("polkavm", tiPolkaVm, "codetracer-polkavm-recorder"),
+                                     ("solana", tiSolanaSbf, "codetracer-solana-recorder")]:
+      checkpoint("--lang " & spelling)
+      let override = targetIsaSpelling(spelling)
+      check override == isa
+      let a = assessRecordingTarget(dir, detectLang(dir, LangUnknown),
+                                    languageWasExplicit = true,
+                                    isaOverride = override)
+      check a.targetIsa == isa
+      check a.recordingApproach == raVmEmulation
+      let tool = recorderToolFor(recorderSelectorFor(a, detectLang(dir, LangUnknown)))
+      check tool.supported
+      check tool.sibling == sibling
+      check tool.recorderLabel == blockchainRecorderName(isa)
+    removeDir(dir)
+
+  test "--lang rust-wasm means wasm even where nothing else says so":
+    # The deprecated alias carries an ISA as well as a language.  Without the
+    # ISA half a crate with no `wasm32` marker would record NATIVELY under a
+    # flag whose whole point is to say "wasm" -- the silent native recording
+    # the milestone forbids.
+    let dir = getTempDir() / "ct-dispatch-test-wasm-alias"
+    removeDir(dir)
+    createDir(dir)
+    writeFile(dir / "Cargo.toml", "[package]\nname = \"plain\"\n")
+    check(not isWasmCargoProject(dir))            # no `wasm32` marker
+    let bare = assessRecordingTarget(dir, LangRust)
+    check bare.targetIsa == tiNative              # ...so the crate is native
+    let a = assessRecordingTarget(dir, toLang("rust-wasm"),
+                                  languageWasExplicit = true,
+                                  isaOverride = targetIsaSpelling("rust-wasm"))
+    check toLang("rust-wasm") == LangRust
+    check a.targetIsa == tiWasm
+    check a.recordingApproach == raVmEmulation
+    check recorderToolFor(recorderSelectorFor(a, LangRust)).recorderLabel == "wazero"
+    removeDir(dir)
+
+  test "a stated ISA beats the kind, and an unstated one changes nothing":
+    # Precedence, stated as a rule: the user's word is an instruction, the
+    # kind is an observation, and Q8 already says an explicit `--lang` is not
+    # second-guessed.  `tiUnknown` means "not stated" and must leave every
+    # other answer exactly as it was.
+    let dir = getTempDir() / "ct-dispatch-test-isa-precedence"
+    removeDir(dir)
+    createDir(dir)
+    createDir(dir / ".cargo")
+    writeFile(dir / "Cargo.toml", "[package]\nname = \"w\"\n")
+    writeFile(dir / ".cargo" / "config.toml", "[build]\ntarget = \"wasm32-wasip1\"\n")
+    check isWasmCargoProject(dir)
+    let fromMarker = assessRecordingTarget(dir, LangRust)
+    check fromMarker.targetIsa == tiWasm          # the kind decides
+    let overridden = assessRecordingTarget(dir, LangRust, languageWasExplicit = true,
+                                           isaOverride = tiSolanaSbf)
+    check overridden.targetIsa == tiSolanaSbf     # ...and the user overrides it
+    check assessRecordingTarget(dir, LangRust, isaOverride = tiUnknown) == fromMarker
+    removeDir(dir)

@@ -53,10 +53,17 @@ proc runWithRestart(
       errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
       quit(1)
     else:
-      let extension = if lang notin {LangRustWasm, LangCppWasm}:
-          getExtension(lang)
-        else:
+      # The `record` call below takes the recorder's argv spelling, not a
+      # language: for a wasm target it is literally "wasm".  This used to be
+      # `lang notin {LangRustWasm, LangCppWasm}` -- the ISA read off a `Lang`
+      # member.  LRS-5's second deletion round deleted both members, so the
+      # ISA is asked of the assessment, which is the same `assessedSelector`
+      # the route decision below already uses.
+      let selector = assessedSelector(recordArgs[0], lang)
+      let extension = if selector.targetIsa == tiWasm:
           "wasm"
+        else:
+          getExtension(lang)
 
       var outputFolder = ""
       var nimcachePath = ""
@@ -74,8 +81,7 @@ proc runWithRestart(
       # target the dispatch table describes is handed over as-is; the native
       # family is built first.  Asked of the ASSESSMENT rather than of
       # `usesMaterializedTraces(lang)`, which is a replay-side summary.
-      let viaDispatchTable =
-        recorderToolFor(assessedSelector(recordArgs[0], lang)).isDeclared
+      let viaDispatchTable = recorderToolFor(selector).isDeclared
       let program = if viaDispatchTable:
           recordArgs[0]
         else:

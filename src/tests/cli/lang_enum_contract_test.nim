@@ -276,7 +276,7 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
 
   test "the seven measured paths that used to resolve to LangC":
     for path in MeasuredUnknownPaths:
-      let lang = detectLangFromPath(path, isWasm = false)
+      let lang = detectLangFromPath(path)
       check:
         lang == LangUnknown
       if lang != LangUnknown:
@@ -287,9 +287,9 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
           "fell off its end onto Nim's zero-initialised `result`.")
 
   test "a dot-less name is LangUnknown (the one case that always worked)":
-    check detectLangFromPath("a_out", isWasm = false) == LangUnknown
-    check detectLangFromPath("program", isWasm = false) == LangUnknown
-    check detectLangFromPath("", isWasm = false) == LangUnknown
+    check detectLangFromPath("a_out") == LangUnknown
+    check detectLangFromPath("program") == LangUnknown
+    check detectLangFromPath("") == LangUnknown
 
   test "the answer does not depend on which Lang is ordinal 0":
     # The regression this file exists for was invisible precisely because the
@@ -298,7 +298,7 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
     # by falling through.
     let zeroValue = Lang(0)
     for path in MeasuredUnknownPaths:
-      let lang = detectLangFromPath(path, isWasm = false)
+      let lang = detectLangFromPath(path)
       check:
         lang == LangUnknown
       if zeroValue != LangUnknown and lang == zeroValue:
@@ -321,7 +321,7 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
       if LANGS.hasKey(extension):
         continue
       let path = "program." & extension
-      let lang = detectLangFromPath(path, isWasm = false)
+      let lang = detectLangFromPath(path)
       check:
         lang == LangUnknown
       if lang != LangUnknown:
@@ -334,7 +334,7 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
     # other half of the property and it is what makes the sweep above safe.
     for extension, expected in LANGS.pairs:
       let path = "program." & extension
-      let lang = detectLangFromPath(path, isWasm = false)
+      let lang = detectLangFromPath(path)
       check:
         lang == expected
       if lang != expected:
@@ -343,14 +343,30 @@ suite "detectLangFromPath: an unknown extension is LangUnknown, never the zero v
           " but detectLangFromPath returned " & $lang & ".")
 
   test "an uppercase known extension still resolves (the lowercasing path)":
-    check detectLangFromPath("Program.PY", isWasm = false) == LangPythonDb
-    check detectLangFromPath("Program.RB", isWasm = false) == LangRubyDb
+    check detectLangFromPath("Program.PY") == LangPythonDb
+    check detectLangFromPath("Program.RB") == LangRubyDb
 
-  test "isWasm routes the wasm extensions and leaves the rest alone":
-    check detectLangFromPath("program.rs", isWasm = true) == LangRustWasm
-    check detectLangFromPath("program.cpp", isWasm = true) == LangCppWasm
-    # An extension nothing knows is still LangUnknown in wasm mode.
-    check detectLangFromPath("a.out", isWasm = true) == LangUnknown
+  test "the wasm target is an ISA the ARTEFACT states, not a language":
+    # This case used to be "isWasm routes the wasm extensions and leaves the
+    # rest alone" and asserted `detectLangFromPath("program.rs", isWasm = true)
+    # == LangRustWasm`.  LRS-5's second deletion round deleted both wasm
+    # members and with them the `isWasm` parameter and its `WASM_LANGS` table:
+    # a source file's LANGUAGE does not change because the artefact is a wasm
+    # module.  What the parameter was really carrying is an ISA, and the ISA
+    # is now read off the artefact's own path.
+    check detectLangFromPath("program.rs") == LangRust
+    check detectLangFromPath("program.cpp") == LangCpp
+    # ...and the fact that used to ride on the language:
+    check targetIsaForArtefactPath("foo.wasm") == tiWasm
+    check targetIsaForArtefactPath("FOO.WASM") == tiWasm
+    check targetIsaForArtefactPath("program.rs") == tiUnknown
+    check targetIsaForArtefactPath("a.out") == tiUnknown
+    check targetIsaForArtefactPath("") == tiUnknown
+    # A prebuilt module names a language only as a documented guess; what is
+    # NOT a guess is that it is wasm.
+    check detectLangFromPath("foo.wasm") == LangRust
+    # An extension nothing knows is still LangUnknown.
+    check detectLangFromPath("a.out") == LangUnknown
 
 # ---------------------------------------------------------------------------
 # Property 2 — the JS ordinal map in trace_metadata.nim matches `Lang`
@@ -361,6 +377,16 @@ const
     ## The two members LRS-4 deleted.  Their names still occur in
     ## `recordings.lang` cells written before 2026-09-21 and must decode to
     ## the sentinel WITH the name, never raise, never a neighbour.
+
+  SecondRoundRetiredLangNames =
+    ["LangRustWasm", "LangCppWasm", "LangPolkavm", "LangSolana"]
+    ## The four members LRS-5's second deletion round deleted, the same day.
+    ## `decodeLangName` (the RENDERER's decoder, which knows only the live
+    ## enum) treats them exactly as the two above; the COLUMN decoder in
+    ## `src/common/trace_index.nim` does better, because it also has the
+    ## frozen version-2 target of each name and can therefore still say
+    ## "materialized, wasm" for an old `LangRustWasm` row --
+    ## `trace_index_migration_test` asserts that half.
 
 proc codeLinesOnly(source: string): string =
   ## `source` with every Nim comment line (`#...`, `##...`) dropped, so a
@@ -422,7 +448,7 @@ suite "trace_metadata.nim decodes lang by the enum's names, not a hand-written o
       check decoded.retiredName == ""
 
   test "a retired name decodes to the sentinel with the name kept, and never raises":
-    for name in RetiredLangNames:
+    for name in @RetiredLangNames & @SecondRoundRetiredLangNames:
       var raised = false
       var decoded: tuple[lang: Lang, retiredName: string]
       try:
@@ -498,9 +524,10 @@ proc parseRustLangEnum(source: string, path: string): seq[string] =
 
 func nimNameFor(rustVariant: string): string =
   ## The Nim spelling of a Rust variant name.  Compared case-insensitively
-  ## because the two files disagree on the capitalisation of exactly one
-  ## variant (`PolkaVM` / `LangPolkavm`), which is a naming convention
-  ## difference and not an ordinal difference.
+  ## because the two files used to disagree on the capitalisation of exactly
+  ## one variant (`PolkaVM` / `LangPolkavm`, deleted by LRS-5's second
+  ## deletion round) and still do on `GDScript` / `LangGdScript`, which is a
+  ## naming convention difference and not an ordinal difference.
   "Lang" & rustVariant
 
 suite "the Nim Lang enum is the canonical Rust Lang enum, ordinal for ordinal":
@@ -552,8 +579,9 @@ suite "the Nim Lang enum is the canonical Rust Lang enum, ordinal for ordinal":
     # its partner.  Pin the facts that make that wrong, so the comment cannot
     # drift back: that enum has `C` at 0, a `Small` at 21 and `Unknown` at
     # 26; this one has had `LangUnknown` at 0 and `LangC` at 1 since LRS-4,
-    # and `LangPythonDb` at 20 (it was 21 here and is 22 there).
-    check ord(LangPythonDb) == 20
+    # and `LangPythonDb` at 18 since LRS-5's second deletion round removed the
+    # wasm pair above it (it was 20 after LRS-4, 21 before, and is 22 there).
+    check ord(LangPythonDb) == 18
     check ord(LangUnknown) == 0
     check ord(LangC) == 1
 
@@ -574,10 +602,16 @@ suite "the Nim Lang enum is the canonical Rust Lang enum, ordinal for ordinal":
     # And the two retired members are not in the enum under any spelling.
     for value in Lang:
       check ($value) notin RetiredLangNames
+    # And the four LRS-5's second deletion round retired are not in the enum
+    # either, under any spelling.
+    for value in Lang:
+      check ($value) notin SecondRoundRetiredLangNames
     var count = 0
     for _ in Lang:
       inc count
-    check count == 39   # 41 (40 + the GDScript append) - LangPython - LangRuby
+    # 41 (40 + the GDScript append) - LangPython - LangRuby (LRS-4)
+    #    - LangRustWasm - LangCppWasm - LangPolkavm - LangSolana (LRS-5)
+    check count == 35
 
 # ---------------------------------------------------------------------------
 # Property 4 — exactly one ordinal-carrying `Lang` exists in the Rust tree
@@ -1236,7 +1270,7 @@ suite "langWireName is the Rust Lang::wire_name, member for member (the ct/load-
     for v in Lang:
       inc nimCount
       # Variant names compared case-insensitively for the same reason as
-      # property 3 (`PolkaVM` / `LangPolkavm`, `GDScript` / `LangGdScript`);
+      # property 3 (`GDScript` / `LangGdScript`);
       # the WIRE NAME is compared exactly, because that is the byte string
       # the receiver parses.
       let key = ($v)["Lang".len .. ^1].toLowerAscii
@@ -1326,7 +1360,12 @@ suite "langWireName is the Rust Lang::wire_name, member for member (the ct/load-
     # stopped caring about, and a test that pins one would fail the very
     # renumber the change exists to make safe.
     check langWireName(LangCairo) == "cairo"
-    check langWireName(LangSolana) == "solana"
+    # `LangSolana` was one of the three and is gone (LRS-5's second deletion
+    # round): a Solana recording's sources are Rust, so what the bench sends
+    # for it is Rust's wire name, and the defect this case exists for -- a
+    # hand-written ordinal naming a DIFFERENT language -- is asserted on the
+    # bench's own mapping below rather than on a member that no longer exists.
+    check langWireName(LangRust) == "rust"
     check langWireName(LangLeo) == "leo"
     check langWireName(LangTolk) == "tolk"
     check langWireName(LangCadence) == "cadence"
@@ -1713,7 +1752,13 @@ suite "no .rs or .nim payload spells lang as a bare integer":
       guiOps.contains("pub lang_wire: &'static str,")
       not guiOps.contains("pub lang_wire: u8")
       guiOps.contains("Language::Cairo => Lang::Cairo,")
-      guiOps.contains("Language::Solana => Lang::Solana,")
+      # `Lang::Solana` was deleted by LRS-5's second deletion round -- it
+      # named a chain, not a language.  A Solana program's sources are Rust,
+      # so the bench sends Rust's wire name, which is what
+      # `lang_from_context` would derive for its `.rs` files anyway.  The
+      # defect this line guards is unchanged: the arm must name a `Lang::`
+      # variant and never a bare integer.
+      guiOps.contains("Language::Solana => Lang::Rust,")
       guiOps.contains(".wire_name()")
       not guiOps.contains("Language::Cairo => 3")
       not guiOps.contains("Language::Solana => 3")

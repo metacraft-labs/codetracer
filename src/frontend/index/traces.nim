@@ -1252,12 +1252,24 @@ proc onNewRecord*(sender: js,
       recordArgs[0]
     else:
       cstring""
-  let selectedLang =
+  # LRS-5 (b), one of the four sites.  Two different questions share this
+  # branch and they are now asked of two different things:
+  #
+  # * with a recording open, "does THIS recording replay from a materialized
+  #   container?" — `Trace.approach`, the per-recording fact;
+  # * with none, "would a recording of this TARGET be materialized?" — the
+  #   target's filename, which is all there is, and the `Lang` summary is the
+  #   right tool for it.
+  #
+  # Before this milestone both went through `usesMaterializedTraces(Lang)`,
+  # and the first one was answerable for Rust and C++ only because
+  # `LangRustWasm` / `LangCppWasm` existed.
+  let selectedUsesMaterialized =
     if not data.trace.isNil:
-      data.trace.lang
+      data.trace.usesMaterializedTraces
     else:
-      toLangFromFilename(selectedRecordTarget)
-  if not selectedLang.usesMaterializedTraces and
+      toLangFromFilename(selectedRecordTarget).usesMaterializedTraces
+  if not selectedUsesMaterialized and
       not isExecutableFile(selectedRecordTarget):
     var buildArg = if selectedRecordTarget.len > 0:
         selectedRecordTarget
