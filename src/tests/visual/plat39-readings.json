@@ -1,0 +1,237 @@
+{
+  "_comment": [
+    "PLAT-39 — the oracle's readings, recorded so the suite can assert in CI.",
+    "",
+    "The frames these were derived from are GITIGNORED: PLAT-35 measured that",
+    "five of six differ between runs, so a committed frame would pin whichever",
+    "run produced it. The derived VALUES do not have that property — they are",
+    "as stable as the scenario, and the scenario is deterministic.",
+    "",
+    "This is the same split the rest of this directory already uses: pixels",
+    "are intermediates, derived values are the artefact. plat37-measurements",
+    ".json and plat38-keystrokes.json are the same shape.",
+    "",
+    "REGENERATE with `just plat39-record` after a recapture. If a reading here",
+    "changes, the matching digest below changed too, so the disagreement is",
+    "attributable rather than mysterious.",
+    "",
+    "Asserting this record is WEAKER than re-deriving from pixels and the",
+    "suite says so: it cannot notice that the reader stopped working. What it",
+    "does catch is a recorded pixel-derived value disagreeing with the",
+    "committed DOM-derived answers, and those two share no code."
+  ],
+  "takenAt": "2026-09-22T19:02:35Z",
+  "host": "gpu-server-001",
+  "expectedScenarios": 6,
+  "expectedGpuiScenarios": 2,
+  "frameDigests": {
+    "electron/entry-shell": "478A516E87522F829A11957DE531BBE13AFDCCF7",
+    "electron/stepped-editor": "90A061393028F5F805BFB704C0E726AC364AFE06",
+    "electron/advanced-state": "FA48E8C4543320272AA01FFB8574D09D7A105896",
+    "electron/returned-calltrace": "53B1883B070C1BCA944D2135E0A7B6291F0B168E",
+    "electron/continued-event-log": "903B27B75B7F96D7A03BC2FBE9DE520366264AC8",
+    "electron/breakpoint-editor": "34EA6FAEF1526089840BACE4784F53D6CCA9F075",
+    "gpui/stepped-editor": "584DC97B7E0155A1C3DF31B08A741A28C6C1E01E",
+    "gpui/advanced-state": "490E24B450DE564938A5C059CC88C072DEECDF2F"
+  },
+  "electron": {
+    "entry-shell": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "empty"
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 6,
+        "ofRows": 6
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 1
+      }
+    },
+    "stepped-editor": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "mul",
+          "sub"
+        ],
+        "count": 10
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 6,
+        "ofRows": 6
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 44
+      }
+    },
+    "advanced-state": {
+      "width": 1440,
+      "height": 900,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__doc__",
+          "__file__",
+          "__looder__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "div",
+          "mul",
+          "sub"
+        ],
+        "count": 10
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 6,
+        "ofRows": 6
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 56
+      }
+    },
+    "returned-calltrace": {
+      "width": 1440,
+      "height": 900,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "apply_op",
+          "div"
+        ],
+        "count": 10
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 6,
+        "ofRows": 6
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 110
+      }
+    },
+    "continued-event-log": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "apply_op",
+          "div",
+          "evaluate",
+          "expression",
+          "main",
+          "mul"
+        ],
+        "count": 14
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 6,
+        "ofRows": 6
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 113
+      }
+    },
+    "breakpoint-editor": {
+      "width": 1440,
+      "height": 900,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "mul",
+          "sub"
+        ],
+        "count": 9
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 6,
+        "ofRows": 6
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 44
+      }
+    }
+  },
+  "gpui": {
+    "stepped-editor": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "unreadable",
+        "reason": "grammar-mismatch"
+      },
+      "eventLog": {
+        "kind": "unreadable",
+        "reason": "grammar-mismatch"
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": -1
+      }
+    },
+    "advanced-state": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "unreadable",
+        "reason": "grammar-mismatch"
+      },
+      "eventLog": {
+        "kind": "unreadable",
+        "reason": "grammar-mismatch"
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": -1
+      }
+    }
+  }
+}

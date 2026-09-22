@@ -3490,6 +3490,33 @@ jobs:
         # failure in `test-vm` above cannot hide the floors' status.
         run: nix develop .#devShells.x86_64-linux.default --command just editor-model-case-floors
 
+      - name: PLAT-39 — the screen oracle's recorded readings (portable half)
+        if: ${{ !cancelled() }}
+        # THE STEP ABOVE CANNOT ASSERT PLAT-39 HERE, AND THIS ONE CAN.
+        #
+        # PLAT-39's pixel-reading suite consumes the frames under
+        # `src/tests/visual/captures/`, which are gitignored on purpose —
+        # PLAT-35 measured that five of six differ between runs, so a committed
+        # frame would pin whichever run produced it. The step that WRITES them
+        # (`plat35-capture-electron`, through `test-e2e`) is wired into no
+        # workflow at all, so in CI those frames are never created and the
+        # floors recipe above declares PLAT-39 deferred.
+        #
+        # A deferral is honest but it is not an assertion. This step is the
+        # assertion that survives the absence: it compares the RECORDED
+        # pixel-derived readings against the committed DOM-derived answers, and
+        # those two came from paths sharing no code — OCR of a photograph on one
+        # side, Playwright and the DOM on the other. A record that disagreed
+        # with the answers reddens here.
+        #
+        # WHAT IT CANNOT DO, so that a green here is not over-read: it does not
+        # execute the reader, so it cannot notice the reader breaking. Only the
+        # live suite does that, and only where the corpus exists.
+        #
+        # It reads two JSON files and needs no image toolchain — no GuiAssert,
+        # no ffmpeg, no tesseract — which is what makes it runnable here at all.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat39-record-gate
+
       # ----------------------------------------------------------------
       # PLAT-33: THE TWO COLLABORATION LANES, WHICH NO WORKFLOW NAMED.
       # ----------------------------------------------------------------

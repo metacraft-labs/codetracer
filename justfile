@@ -4792,6 +4792,32 @@ plat39-probe:
     --nimcache:nimcache/plat39probe -o:build/plat39_probe \
     src/tests/visual/screen_oracle/plat39_probe.nim
 
+# PLAT-39 — regenerate the committed readings record from the captured corpus.
+#
+# Run this after a recapture. The record is what lets the PORTABLE half of this
+# milestone assert in CI, where the capture step is wired into no workflow and
+# the frames therefore never exist. It refuses to write from an absent corpus:
+# every reading would be `urFrameMissing` wearing the shape of an answer.
+plat39-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat39rec -o:build/plat39_record \
+    src/tests/visual/screen_oracle/plat39_record.nim
+
+# PLAT-39 — the PORTABLE gate. Asserts the recorded readings against the
+# committed DOM-derived answers, and reads NO images: no GuiAssert, no ffmpeg,
+# no tesseract. This is the one that runs in CI.
+#
+# It is strictly weaker than `plat39-case-floor` and does not replace it: it
+# cannot notice that the reader stopped working, because nothing here executes
+# the reader. What it does catch is a recorded pixel-derived value disagreeing
+# with a DOM-derived one, and those two share no code.
+plat39-record-gate:
+  nim c -r --hints:off --warnings:off --nimcache:nimcache/plat39recgate \
+    -o:build/test_plat39_record \
+    src/tests/visual/screen_oracle/test_plat39_record.nim
+
 # PLAT-40 — every pane producer has a caller a USER can reach.
 #
 # *A unit test is a production caller as far as a coverage tool is concerned,
@@ -5280,6 +5306,10 @@ editor-model-case-floors:
   #      table includes them, so a milestone cannot vanish by deferring.
   # A milestone that deferred while its prerequisite was PRESENT would be a
   # silent pass, so presence is tested rather than assumed.
+  # PLAT-39's floor counts the LIVE, pixel-reading suite. Its portable half
+  # (`plat39-record-gate`) asserts the committed record and runs everywhere,
+  # including CI — so the milestone is not unasserted when this defers, it is
+  # asserted more weakly, which the deferral message says.
   corpus_dependent() { case "$1" in PLAT-39) return 0 ;; *) return 1 ;; esac; }
   corpus_present() { [ -d src/tests/visual/captures/electron ] && \
     [ "$(find src/tests/visual/captures/electron -name '*.png' | wc -l)" -ge 6 ]; }
@@ -5289,7 +5319,8 @@ editor-model-case-floors:
       echo "DEFERRED: ${m}'s floor reads src/tests/visual/captures/electron/,"
       echo "          which is gitignored and absent here. This is declared, not"
       echo "          silent: it is counted below and the milestone is named."
-      echo "          Remedy: just plat35-capture-electron"
+      echo "          The PORTABLE half still runs: just plat39-record-gate"
+      echo "          Remedy for the pixel half: just plat35-capture-electron"
       deferred=$((deferred + 1))
       continue
     fi
