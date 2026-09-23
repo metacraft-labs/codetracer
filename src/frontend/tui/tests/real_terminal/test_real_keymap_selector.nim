@@ -284,6 +284,52 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
     ck compared == 2 * DivergentOperationTasks
     ck mismatches.len == 0
 
+suite "PLAT-31 Tier 2: a pending prefix times out at its bound, on a real pty":
+  ## PLAT-31's last real-stack box. The bound is asserted EXACTLY at the value
+  ## level (`editing_keymap`'s `nowMs` parameter: at, one before and one past
+  ## `EditingPendingTimeoutMs`); what only a pty can say is that the SHIPPED
+  ## binary reads the clock at all — that a `d` a user typed and walked away
+  ## from is not still waiting when they come back. Real time cannot be held
+  ## to a millisecond, so the two sides are asserted with margins that dwarf
+  ## scheduling noise: a second key 30 ms after the first, and one
+  ## `PastBoundMs` after it.
+
+  const PastBoundMs = int(EditingPendingTimeoutMs) + 900
+
+  proc typedUnderVim(name: string; keys: seq[string]; pauseAfterFirstMs: int): string =
+    let d = asciiDoc()
+    let state = stateDirFor(name)
+    writeFile(state / KeymapFile, "vim\n")
+    let project = projectFor(name, d.text)
+    var sess = spawnEditor(project, state)
+    try:
+      discard waitForScreenText(sess, "EDIT " & ProjectFile)
+      for i, k in keys:
+        sess.sendKey(k)
+        if i == 0 and pauseAfterFirstMs > 0:
+          # A WALL-CLOCK pause. `drainOutput` returns once the terminal goes
+          # quiet, which it does within milliseconds of a `d` that draws
+          # nothing — measured: a "pause" through it was no pause at all.
+          sleep(pauseAfterFirstMs)
+      sess.saveByKeys()
+    finally:
+      sess.quit()
+    readFile(project / ProjectFile)
+
+  test "within the bound `g` `U` `w` upper-cases a word; past it the `g` is gone":
+    # `g U` is a CHORD in the resolver's trie (`vim_keymap`'s `operatorRows`),
+    # which is what the bound governs. Not `d`: that enters Vim's
+    # operator-pending MODE, which — as in Vim — waits without a timeout.
+    let original = asciiDoc().text
+    let composed = typedUnderVim("prefix-within", @["g", "U", "w"], 0)
+    let expected = inProcess(kmVim, original, @["g", "U", "w", "Esc"])
+    ck composed == expected
+    ck composed != original
+    # PAST THE BOUND: the `g` has been dropped when `U` arrives, so the chord
+    # never completes and the file is written back unchanged.
+    let timedOut = typedUnderVim("prefix-past", @["g", "U", "w"], PastBoundMs)
+    ck timedOut == original
+
 suite "PLAT-43 Tier 2 — assertion tally":
   test "CHECKS":
     echo "CHECKS: ", CHECKS
