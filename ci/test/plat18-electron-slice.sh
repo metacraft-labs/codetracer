@@ -41,6 +41,9 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 samples="${CT_P18_SAMPLES:-9}"
@@ -90,7 +93,7 @@ if [ "${CT_P18_RELEASE:-0}" = "1" ]; then
 fi
 
 nim_common=(--hints:off --warnings:off --path:src/frontend/viewmodel)
-cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/plat18-slice-${build_label}"
+cache_root="$(ct_nim_cache_root "${repo_root}")/plat18-slice-${build_label}"
 
 echo "=== PLAT-18 vertical slice: variables pane, 600-member fixture ==="
 echo "    build=${build_label} samples=${samples}"
