@@ -95,7 +95,13 @@ import ../../view_vocabulary/gpui_binding
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
-import viewmodels/timeline_vm   # the native timeline's ViewModel (PLAT-41)
+# The native timeline's ViewModel (PLAT-41) comes through the SDK facade, like
+# every other ViewModel a front-end consumes. `codetracer_embed` already
+# imports and exports `timeline_vm` (for the same reason as `origin_chain_vm`),
+# so naming `viewmodels/timeline_vm` here reached past the facade for nothing
+# and tripped `ci/test/sdk-facade-boundary.sh` (consumer-facade-only). The
+# siblings `shell.nim` and `edit_arm.nim` import it exactly this way.
+import codetracer_embed
 import isonim/core/[signals, computation]
 
 export shell, editor_surface
