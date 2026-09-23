@@ -88,6 +88,9 @@ import codetracer_embed
 
 import ./app/shell
 import ./app/leaves
+import ./app/edit_arm
+import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
+import ../viewmodel/host/keymap_preference
 import ./host/gpui_host
 
 const GpuiHelpText = """
@@ -131,6 +134,14 @@ OPTIONS:
                     maps a key to a replay operation here yet. That is
                     PLAT-23's `--ui=gui` contract rather than a renderer
                     gap, and this flag stays until it lands.
+  --edit-keys=<keys>
+                    PLAT-44, EDIT mode only. Comma-separated GPUI keystrokes
+                    (`x`, `escape`, `control-s`, `shift-a`) delivered, one
+                    by one, through the SHIM'S OWN dispatch to the focused
+                    editor pane — the listener a window's keys reach — before
+                    the plan is reported. The headless reading of what a
+                    typist in a window does; the window itself is
+                    `ci/test/plat44-edit-window.sh`.
   --input-probe=<path>
                     PLAT-38. Declare the first pane focusable, give it
                     element focus, listen for `keydown` on it, and write
@@ -199,6 +210,8 @@ type
       ## only moment the shim reads it.
     replayOps: seq[ReplayOp]
     planOut: string
+    editKeys: seq[string]
+      ## PLAT-44. GPUI keystroke spellings for `--edit-keys`.
     inputProbe: string
       ## PLAT-38. A path to write the KEY-DELIVERY record to, after the event
       ## loop returns. Empty means "do not probe", which is every ordinary
@@ -260,6 +273,12 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       except ReplayOpError as e:
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --replay-ops: " & e.msg)
+    elif arg.startsWith("--edit-keys="):
+      let spec = arg["--edit-keys=".len .. ^1]
+      if spec.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --edit-keys needs at least one key")
+      result.editKeys = spec.split(',')
     elif arg.startsWith("--input-probe="):
       result.inputProbe = arg["--input-probe=".len .. ^1]
       if result.inputProbe.len == 0:
@@ -342,6 +361,12 @@ type
     seqNo: int
 
 var
+  openArm: GpuiEditArm = nil
+    ## PLAT-44. The open document of an EDIT-mode window, or nil in a replay
+    ## window. Module-level for the root builder's reason above.
+  editPane: GpuiElement = nil
+    ## The editor leaf's element — the one the arm redraws and the keys reach.
+  editViewportRows = 0
   pendingOutcome: LeafRenderOutcome
     ## The leaf tree, built BEFORE `gpui_launch` so `--report-plan` and the
     ## window path derive from one render rather than two.
@@ -402,6 +427,85 @@ proc probeHandler(el: GpuiElement): GpuiEventHandler =
       # backstop fired"; `gpui_quit` is an atomic store the loop's own poller
       # consumes on this thread.
       gpui_quit()
+
+const KeyDownEvent = "keydown"
+
+proc gpuiKeyEventOf(spec: string): (bool, GpuiEvent) =
+  ## `control-s` / `shift-a` / `x` / `escape` → a GPUI key-down event: the
+  ## LAST `-`-separated part is GPUI's key name, the rest are modifiers. A
+  ## lone `-` is the minus key.
+  if spec.len == 0: return (false, GpuiEvent())
+  var parts = if spec == "-": @["-"] else: spec.split('-')
+  if spec.len > 1 and spec.endsWith("--"):
+    parts = spec[0 ..< spec.len - 2].split('-') & @["-"]
+  var mods: GpuiModifiers = {}
+  for m in parts[0 ..< parts.len - 1]:
+    case m
+    of "control": mods.incl gmControl
+    of "alt": mods.incl gmAlt
+    of "shift": mods.incl gmShift
+    of "platform": mods.incl gmPlatform
+    of "function": mods.incl gmFunction
+    else: return (false, GpuiEvent())
+  let key = parts[^1]
+  if key.len == 0: return (false, GpuiEvent())
+  (true, GpuiEvent(kind: gekKeyDown, key: key, modifiers: mods,
+                   repeat: false))
+
+var editArmed = false
+  ## Whether the editor pane already has its listener — the headless
+  ## `--edit-keys` path arms it before the window builder would.
+
+proc findEditorPane(root: GpuiElement): GpuiElement =
+  ## The editor leaf: the pane `renderEditor` stamped with the medium
+  ## attribute. Read back out of the tree rather than remembered, for the
+  ## chrome's reason (§4a).
+  if root.isNil: return nil
+  if getAttribute(root, EditorMediumAttribute).len > 0:
+    return root
+  for i in 0 ..< childCount(root):
+    let found = findEditorPane(nthChild(root, i))
+    if not found.isNil: return found
+  nil
+
+proc redrawEditor() =
+  ## PLAT-44. Redraw the editor pane from the arm's CURRENT document.
+  ##
+  ## Everything after the pane's heading is removed and drawn again by
+  ## `leaves.renderEditor` — the function that drew it the first time — so
+  ## the after-edit tree is the same derivation as the before-edit tree and
+  ## not a second, incremental one that could drift (§30). Every removal and
+  ## append is a shadow-tree mutation, which is what asks the shim to repaint.
+  if openArm.isNil or editPane.isNil: return
+  var r: GpuiRenderer
+  while childCount(editPane) > 1:
+    r.removeChild(editPane, nthChild(editPane, childCount(editPane) - 1))
+  discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
+                       openArm.surfaceOf(editViewportRows))
+
+proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
+  ## The editor pane's `keydown` listener. Built by a separate proc so `el`
+  ## is captured by value — `probeHandler`'s recorded defect.
+  result = proc(ev: GpuiEvent) =
+    discard ev
+    if openArm.isNil or el.lastEventKind() != gekKeyDown: return
+    let key = el.lastEventKey()
+    let applied = openArm.applyGpuiKey(key,
+      modifierNamesOf(el.lastEventModifiers()),
+      int64(epochTime() * 1000))
+    if applied.outcome != eoIgnored or applied.saved or
+       openArm.status.len > 0:
+      redrawEditor()
+    if probeSentinel.len > 0 and key == probeSentinel:
+      gpui_quit()
+
+proc armEditorPane(r: GpuiRenderer) =
+  ## Focus the editor pane and give it the key listener. Once.
+  if openArm.isNil or editPane.isNil or editArmed: return
+  editArmed = true
+  setFocusable(editPane)
+  discard focusElement(editPane)
+  r.addEventListener(editPane, "keydown", editKeyHandler(editPane))
 
 proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   ## The `root_builder` handed to `gpui_launch`, called from inside the shim
@@ -484,6 +588,10 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
       let heading = nthChild(pane, 0)
       if not heading.isNil:
         r.setStyle(heading, "color", chromeOf(crPaneTitleForeground))
+
+  # PLAT-44 — THE EDITOR TAKES KEYS. Attached here for the probe's reason:
+  # `leaves.nim` is digested into four harnesses' controls.
+  armEditorPane(r)
 
   r.appendChild(root, container)
 
@@ -569,8 +677,11 @@ proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
   ## mode does not use `SourceVM`"*), so nothing here opens a recording, spawns
   ## a `replay-server` or constructs a source window.
   ##
-  ## **THIS FRONT-END DERIVES FROM THE EDITING CORE AND CANNOT WRITE TO IT —
-  ## AND THE REASON CHANGED UNDER PLAT-34, WHICH IS WORTH READING.**
+  ## **PLAT-44: THIS FRONT-END NOW WRITES THE EDITING CORE** (`app/edit_arm`),
+  ## and the history below is kept because it says why it could not before.
+  ##
+  ## **UNTIL PLAT-44 THIS FRONT-END DERIVED FROM THE EDITING CORE AND COULD NOT
+  ## WRITE TO IT — AND THE REASON CHANGED UNDER PLAT-34, WHICH IS WORTH READING.**
   ##
   ## PLAT-22 gave the reason as the SUBSTRATE: *"PLAT-16's editing substrate is
   ## `isonim-tui`'s `TextAreaWidget` … and it is a TERMINAL widget: the
@@ -589,13 +700,10 @@ proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
   ##   * `PLAT21-VG3` — focus is per WINDOW; there is no element focus, so
   ##     there is nothing for a key to be delivered TO.
   ##
-  ## Those are gaps in the renderer binding, not in this model, and no amount
-  ## of work on this side closes them. So `mutableHere` is `false`,
-  ## `editorSurfaceForDocument` carries the disagreement between the contract
-  ## and the medium as a NOTICE naming both, and PLAT-34's deliverable 3 says
-  ## "read-only" in the box. A front-end that answered `mutable = true` over a
-  ## buffer nobody can type into would be the worse of the two failures
-  ## available here.
+  ## Those were gaps in the renderer binding, not in this model, and PLAT-38
+  ## closed both: a key reaches a focused element with its payload. So
+  ## `mutableHere` is now `true`, the read-only notice is gone, and the
+  ## contract and the surface agree.
   let problem = editProjectProblem(cmd.traceFolder)
   if problem.len > 0:
     return EditorSurface(medium: GpuiMedium, productMode: pmEdit,
@@ -612,15 +720,21 @@ proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
   let relative = listing.files[0]
   # THE DOCUMENT IS OPENED, NOT THE TEXT PASSED ON. One `EditingDocument`,
   # which is the same value the terminal's `EditBuffer` holds, and the surface
-  # is a derivation of it. That is the whole of PLAT-34's deliverable 3 on
-  # this side, and it is one line.
-  let doc = initEditingDocument(relative,
-                                readProjectFile(cmd.traceFolder, relative))
-  editorSurfaceForDocument(
-    d = doc,
-    medium = GpuiMedium,
-    mutableHere = false,
-    viewportHeight = editorRowsForViewport(cmd.height))
+  # is a derivation of it.
+  #
+  # PLAT-44: it is held by an EDIT ARM now, because this front-end WRITES it.
+  # The model is the user's stored choice, read through the same
+  # `loadKeymapPreference` the terminal reads (PLAT-43's GPUI half: one
+  # selector, two front-ends). A refused stored value is shown as the notice
+  # and the product default runs, exactly as in the terminal.
+  let preference = loadKeymapPreference()
+  openArm = newGpuiEditArm(cmd.traceFolder, relative,
+                           readProjectFile(cmd.traceFolder, relative),
+                           preference.model)
+  if preference.status == kplRefused:
+    openArm.status = preference.message
+  editViewportRows = editorRowsForViewport(cmd.height)
+  openArm.surfaceOf(editViewportRows)
 
 proc runEdit(cmd: GpuiCommand): int =
   ## `ct edit --ui=gpui <project>`, end to end, with NO recording open.
@@ -641,6 +755,33 @@ proc runEdit(cmd: GpuiCommand): int =
   var r: GpuiRenderer
   let leafSet = shell.leavesFor(windowId)
   let drawn = renderLeaves(r, leafSet, surface)
+  editPane = findEditorPane(drawn.root)
+  if cmd.editKeys.len > 0:
+    # PLAT-44, HEADLESS. The keys go through the SHIM'S OWN focus dispatch to
+    # the editor pane's listener — the path a window's keys take — and not
+    # into the arm directly. A window is created and told it holds focus,
+    # because `sendKeyToFocus` answers 0 when no window does (PLAT-38's
+    # negative twin), and a key that reached nothing must fail this run.
+    if openArm.isNil or editPane.isNil:
+      stderr.writeLine("codetracer-gpui: --edit-keys: there is no open " &
+                       "document to type into")
+      return 1
+    armEditorPane(r)
+    let win = gpui_create_window("codetracer-gpui --edit-keys",
+                                 cdouble(cmd.width), cdouble(cmd.height))
+    discard gpui_show_window(win)
+    gpui_notify_focus(win, 1)
+    for spec in cmd.editKeys:
+      let (ok, ev) = gpuiKeyEventOf(spec)
+      if not ok:
+        stderr.writeLine("codetracer-gpui: --edit-keys: cannot spell '" &
+                         spec & "' as a GPUI keystroke")
+        return 1
+      if sendKeyToFocus(KeyDownEvent, ev) != 1:
+        stderr.writeLine("codetracer-gpui: --edit-keys: '" & spec &
+                         "' reached no focused element")
+        return 1
+    gpui_reset_windows()
   if cmd.reportPlan:
     if not leafPlanIsValid(r, drawn):
       stderr.writeLine("codetracer-gpui: the render plan did not verify")
@@ -654,6 +795,10 @@ proc runOpen(cmd: GpuiCommand): int =
   if cmd.product == pmEdit:
     return runEdit(cmd)
   let session = openGpuiTrace(cmd.traceFolder)
+  # The shipped product default for the flow overlay — the same constant the
+  # terminal host applies, pinned against `default_config.yaml` by a test.
+  if not session.session.editorVM.isNil:
+    session.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
 
   # PLAT-37. `--replay-ops`, applied BEFORE anything is projected or drawn,
   # because every pane's content is a function of where the debugger is
