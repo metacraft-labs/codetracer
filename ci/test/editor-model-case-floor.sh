@@ -534,9 +534,23 @@ PLAT-41)
 	)")
 	LAW_SUITES=()
 	;;
+PLAT-42)
+	MILESTONE="** PLAT-42: The four debugger surfaces under GPUI"
+	SUITES=(
+		src/frontend/gpui/tests/test_plat42_surfaces.nim
+	)
+	# PORTABLE: the suite reads two committed JSON files — a record of the
+	# SHIPPED binary's render plan (`plat42-surfaces.json`, written by
+	# `ci/test/plat42_surfaces_record.py`) and the Electron answers — and
+	# imports nothing that needs a compositor, a shim or a trace. So it runs in
+	# this lane with no flags and no deferral, which is PLAT-37/38/39's
+	# measure-locally-commit-the-measurement arrangement.
+	SUITE_FLAGS=()
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-41. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-42. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1
