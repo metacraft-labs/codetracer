@@ -452,16 +452,6 @@ proc gpuiLayoutAnswers*(scenario: string; root: GpuiElement;
   row lqTokenColour, gpuiTokenColours(root), ctCaptured
   row lqFocusOrder, gpuiFocusOrder(root), ctCaptured
 
-proc answerSetToJson*(s: LayoutAnswerSet): JsonNode =
-  ## The wire form the two producers agree on. The Electron extractor writes
-  ## the same shape from TypeScript; this is the only place its spelling is
-  ## fixed on the Nim side.
-  result = %*{"frontEnd": s.frontEnd, "scenario": s.scenario,
-              "answers": newJArray()}
-  for a in s.answers:
-    result["answers"].add %*{"question": $a.question, "value": a.value,
-                             "tier": $a.tier}
-
 proc unknownQuestionKeys*(node: JsonNode): seq[string] =
   ## **THE KEYS `answerSetFromJson` DROPPED, SO SOMEBODY CAN ASSERT THERE ARE
   ## NONE.**

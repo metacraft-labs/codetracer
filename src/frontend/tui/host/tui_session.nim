@@ -75,16 +75,6 @@ const
   CalltraceLevels* = 400
     ## `stackTrace`'s `levels`. The same number CTUI-6's suites ask for, so a
     ## deep recursion is as visible here as it is there.
-  MaxEventsForBounds* = RecordingEventWindow
-    ## How much of the event log is read once, at open, to learn the
-    ## recording's extent — `native_host.loadRecordingPanes`' window, which
-    ## both native front-ends ask for.
-    ##
-    ## CTUI-8 established that `TimelineVM.bounds` (named `markers` until
-    ## 2026-09-24) is filled by nothing on a
-    ## replay session and that the recording's extent comes from
-    ## `ct/event-load`'s `maxRRTicks` instead. So the timeline's bounds are a
-    ## property of that one answer, and this is the window it is read from.
 
 type
   TuiSession* = ref object

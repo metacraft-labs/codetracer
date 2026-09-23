@@ -33,8 +33,15 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1274 bash ci/test/frontend-reachability.sh`, so 1275
-# findings fail `lint-nim` and 1274 do not.
+# `env CT_REACHABILITY_MAX=1295 bash ci/test/frontend-reachability.sh`, so 1296
+# findings fail `lint-nim` and 1295 do not.
+#
+# THE CEILING MOVED 1274 -> 1295 ON 2026-09-23, AFTER PLAT-35 .. PLAT-44 HAD
+# LANDED WITHOUT MOVING IT — the step was red on `dev` from the first of them.
+# Gross +38 and -8 on `dev`; 9 of the +38 were deleted or un-exported rather
+# than carried (reached by nothing), so the net is +21. The per-symbol account
+# is a DIFF OF TWO RUNS of this script and lives in the setter beside the
+# invocation in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1276 -> 1274 ON 2026-09-20 (PLAT-34), AND IT IS THE FIRST
 # TIME IT HAS GONE DOWN ON A FEATURE MILESTONE. Gross +8 and -10: the editing

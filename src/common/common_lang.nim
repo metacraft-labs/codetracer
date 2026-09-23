@@ -590,7 +590,7 @@ func langPickerRepresentative(lang: Lang): bool =
 const
   LANG_PICKER_LANGS* = block:
     ## `SUPPORTED_LANGS` with the same-name members folded: exactly one entry
-    ## per distinct `toCLang` name, so the dropdown `renderer.langs` builds
+    ## per distinct `toCLang` name, so the dropdown `lang.langPickerOptions` builds
     ## (`<option value='toCLang(z)'>toName(z)</option>`) carries no duplicate
     ## `value` -- it used to emit `rust` twice (design §1.2(c)) and, with
     ## `LangCppWasm` now spelled `cpp`, would have emitted `cpp` twice.  The

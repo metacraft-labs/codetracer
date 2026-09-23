@@ -269,10 +269,10 @@ const
     vmaUnique: adEnforced,
   ]
 
-  MapFamilyCount* = 22
-  ImportReasonCount* = 5
-  VimMapArgumentCount* = 5
-  VimOptionCount* = 10
+  MapFamilyCount = 22
+  ImportReasonCount = 5
+  VimMapArgumentCount = 5
+  VimOptionCount = 10
 
   DefaultMapleader* = "\\"
     ## Vim's own default (`:help mapleader`): *"if it is not set, the

@@ -266,6 +266,13 @@ const
     ## How much of the event log is read at open: enough to learn the
     ## recording's extent (`ct/event-load`'s `maxRRTicks`) and to fill the
     ## event-log pane's first pages.
+    ##
+    ## CTUI-8 established that `TimelineVM.bounds` (named `markers` until
+    ## 2026-09-24) is filled by nothing on a
+    ## replay session and that the recording's extent comes from
+    ## `ct/event-load`'s `maxRRTicks` instead. So the timeline's bounds are a
+    ## property of that one answer, and this is the window both native
+    ## front-ends read it from.
   RecordingCalltraceLevels* = 400
   RecordingCalltraceDepth* = 200
 

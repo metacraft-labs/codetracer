@@ -895,12 +895,6 @@ proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
   s.session.store.applyVerifiedBreakpoints(path, verified)
   true
 
-proc breakpointLinesIn*(s: HeadlessDebugSession; path: string): seq[int] =
-  ## The verified breakpoint lines the store holds for `path`, in row order.
-  for r in s.session.store.pointList.rows.val:
-    if r.kind == PointKindBreakpoint and r.path == path and r.enabled:
-      result.add r.line
-
 proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
                                  file: string; line: int;
                                  column: int = 0;
