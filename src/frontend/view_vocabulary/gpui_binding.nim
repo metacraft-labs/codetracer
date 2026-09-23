@@ -383,6 +383,25 @@ proc installKeys(b: GpuiBinding; el: GpuiElement; v: ViewNode) =
   # `focusOrder()` reads it back from the Rust side.
   setFocusable(el)
 
+const
+  TableCellEmPx* = 9
+    ## The advance of one character of the pane face, rounded UP — a column
+    ## sized from it is never narrower than its widest cell, only a little
+    ## wider.
+  TableColumnGapPx* = 12
+    ## The space between two columns.
+
+proc tableColumnWidthsPx*(v: ViewNode): seq[int] =
+  ## The width of every column of `v` but the LAST, in pixels: its widest cell
+  ## (the header included) at `TableCellEmPx` per character. The last column
+  ## is unsized and takes the rest of the row.
+  let columns = max(v.columns.len, (if v.rows.len > 0: v.rows[0].len else: 0))
+  for ci in 0 ..< columns - 1:
+    var widest = if ci < v.columns.len: v.columns[ci].runeLen else: 0
+    for row in v.rows:
+      if ci < row.len: widest = max(widest, row[ci].runeLen)
+    result.add widest * TableCellEmPx
+
 proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
   let r = b.renderer
   let el = r.createElement(gpuiTagFor(v.kind))
@@ -452,17 +471,38 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
     # containers here exactly as it is nested elements on the web, the
     # row/column relationship is the nesting, and NO ESCAPE IS RECORDED — see
     # `gpui_gaps.nim`'s "what counts as an escape", second exclusion.
+    #
+    # **A ROW IS DRAWN AS A ROW.** An unknown tag classifies as a `Div`, and a
+    # `Div` stacks its children vertically, so until PLAT-40 every cell of the
+    # table was a LINE of its own: the event log read `#`, `kind`, `value`,
+    # `0`, `stdout`, `2 + 3 = 5` down the pane, which PLAT-39's reader
+    # measured as a grammar mismatch (its GAP 2). Each `tr` is a flex ROW, and
+    # every column but the last is as wide as its widest cell, so the columns
+    # line up across rows; the last takes what is left.
+    let widths = tableColumnWidthsPx(v)
+    proc layOutRow(tr: GpuiElement) =
+      r.setStyle(tr, "display", "flex")
+      r.setStyle(tr, "gap", $TableColumnGapPx & "px")
+      r.setStyle(tr, "white-space", "nowrap")
+    proc layOutCell(cell: GpuiElement; column: int) =
+      if column < widths.len:
+        r.setStyle(cell, "width", $widths[column] & "px")
+        r.setStyle(cell, "flex-shrink", "0")
     let head = r.createElement("tr")
-    for c in v.columns:
+    layOutRow(head)
+    for ci, c in v.columns:
       let th = r.createElement("th")
+      layOutCell(th, ci)
       r.appendChild(th, r.createTextNode(c))
       r.appendChild(head, th)
     r.appendChild(el, head)
     for ri, row in v.rows:
       let tr = r.createElement("tr")
+      layOutRow(tr)
       r.setAttribute(tr, "data-row-index", $ri)
       for ci, cell in row:
         let td = r.createElement("td")
+        layOutCell(td, ci)
         r.setAttribute(td, "data-cell",
           (if ri == v.cursor and ci == v.column: "cursor" else: ""))
         r.appendChild(td, r.createTextNode(cell))
@@ -475,6 +515,14 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
     if v.progress != ProgressIndeterminate:
       r.setAttribute(el, "value", $v.progress)
   of pkTree:
+    # ONE LINE PER NODE, clipped with an ellipsis, as the editor's rows are
+    # (`gpui/app/leaves`). PLAT-40 measured the alternative: a `__builtins__`
+    # value wrapped across the whole state pane, so no row below it was on
+    # screen and PLAT-39's reader found no `name: value` row to read (its
+    # GAP 1). The full value stays in the node; the row shows what fits.
+    r.setStyle(el, "white-space", "nowrap")
+    r.setStyle(el, "overflow", "hidden")
+    r.setStyle(el, "text-overflow", "ellipsis")
     r.appendChild(el, r.createTextNode(v.label))
 
   let showChildren =

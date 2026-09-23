@@ -628,6 +628,21 @@ label
 // So overrides must be scoped as .eventLog .data-table, NOT .data-table .eventLog.
 .eventLog
   .data-table
+    // PLAT35-PD2 (closed by PLAT-40): the event log says what its columns
+    // are. DataTables' own header row stays hidden (`data_tables.styl`) —
+    // showing it re-measures the Scroller's columns against a table layout
+    // these flex rows do not use, and a run with it visible lost the location
+    // column. `ui/event_log.renderColumnHeader` draws this strip instead, one
+    // cell per column with the column's own class, so the class rules that
+    // size a body cell size its header cell too.
+    .eventLog-column-header
+      display: flex
+      align-items: center
+      border-bottom: 0.0625em solid colors-ui-border-secondary
+      .eventLog-cell
+        font-weight: 600
+        color: colors-ui-text-default-label
+        overflow: hidden
     tr
       border-top: none !important
       align-items: center !important

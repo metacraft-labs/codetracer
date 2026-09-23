@@ -115,6 +115,11 @@ OPTIONS:
                     blocks inside GPUI's platform event loop for exactly as
                     long as the window exists, so without a deadline a
                     windowed run has no bound on it at all.
+  --layout=<file>   Open the recording's window with the arrangement a saved
+                    layout document describes (the versioned JSON the
+                    layout model writes) instead of the default one. A
+                    document this build cannot read is an error, not a
+                    silent fallback.
   --replay-ops=<spec>
                     Advance the recording before the window is drawn.
                     <spec> is a comma-separated list over the SAME closed
@@ -228,6 +233,10 @@ type
     frameReport: string
       ## PLAT-42. A path to write the frame-timing record to after the event
       ## loop returns; empty means none.
+    layoutFile: string
+      ## PLAT-40. A saved layout document (`layout_model.saveLayout`'s
+      ## versioned JSON) to open the recording's window with, instead of
+      ## `defaultReplayLayout()`. Empty means the default.
     noFlowOverlay: bool
       ## PLAT-42. Open with the flow overlay hidden — the user's
       ## `EditorVM.showFlowOverlay` toggle, from the command line; the window
@@ -295,6 +304,11 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
           message: "codetracer-gpui: --replay-ops: " & e.msg)
     elif arg == "--no-flow-overlay":
       result.noFlowOverlay = true
+    elif arg.startsWith("--layout="):
+      result.layoutFile = arg["--layout=".len .. ^1]
+      if result.layoutFile.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --layout needs a path")
     elif arg.startsWith("--frame-report="):
       result.frameReport = arg["--frame-report=".len .. ^1]
       if result.frameReport.len == 0:
@@ -951,8 +965,21 @@ proc runOpen(cmd: GpuiCommand): int =
   # live debugger. Measured on the shipped binary against `calc` before the
   # repair: five leaves, five `— waiting for the session to launch`, rc 0.
   # `headless_app.openSession`'s own doc comment carries the finding.
+  # PLAT-40. A saved arrangement, when one was asked for. REFUSED rather than
+  # replaced by the default when it cannot be read: a user who named a layout
+  # and got another one would be looking at panes they did not ask for with
+  # nothing saying so.
+  var layout: LayoutNode = nil
+  if cmd.layoutFile.len > 0:
+    try:
+      layout = restoreLayout(parseJson(readFile(cmd.layoutFile)))
+    except CatchableError as e:
+      stderr.writeLine("codetracer-gpui: --layout: cannot open '" &
+                       cmd.layoutFile & "': " & e.msg.splitLines()[0])
+      return 1
   let slot = shell.app.openSession(session.backend.toBackendService(),
                                    title = cmd.traceFolder,
+                                   layout = layout,
                                    adopt = session.sdk)
   let windowId = WindowId(0)
   let opened = shell.openWindowForSession(windowId, slot.id)

@@ -385,9 +385,57 @@ proc dataTableRowOf(event: ProgramEvent; extras: EventLogRowExtras): JsObject =
   ## `maxRRTicks`, all four of which its own renderers read — so
   ## `eventLogDescriptionRepr(event, event.eventIndex)` was reading `undefined`
   ## off every row it drew. Every field either side of that seam is present now.
-  result = event.toJs
-  result.fullPath = extras.fullPath
+  ##
+  ## **A COPY, NOT THE ARGUMENT ITSELF** (`PLAT35-PD2`, closed by PLAT-40).
+  ## Under the JS backend an object argument is the caller's object, and the
+  ## caller passes the variable of a `for` loop — ONE object, overwritten on
+  ## every iteration. `event.toJs` handed DataTables that one object once per
+  ## row, so every row of the table was the LAST event: `calc`'s six rows all
+  ## read `stdout: checksum = 73`. `var row = event` is a fresh object per call.
+  var row = event
+  result = row.toJs
+  # THE LOCATION COLUMN NEVER GOES BLANK FOR A ROW THAT HAS A LOCATION.
+  # `fullPath` is the table reply's own text, and a capture of `calc`
+  # (PLAT-40's re-take of PLAT-35's `returned-calltrace`) measured a reply
+  # whose rows carried none — the column under the `location` header was
+  # empty on every row while `highLevelPath`/`highLevelLine`, which the
+  # neutral row always carries, said `main.py:111`. The reply's text wins
+  # when it has one.
+  result.fullPath =
+    if extras.fullPath.len > 0: extras.fullPath
+    elif event.highLevelPath.len > 0:
+      cstring($event.highLevelPath.split("/")[^1] & ":" & $event.highLevelLine)
+    else: extras.fullPath
   result.lowLevelLocation = extras.lowLevelLocation
+
+proc renderColumnHeader(tableId: cstring; columns: seq[JsObject]) =
+  ## **THE TABLE SAYS WHAT ITS COLUMNS ARE** (`PLAT35-PD2`, closed by
+  ## PLAT-40). A strip of header cells above the rows, one per column, each
+  ## carrying the column's OWN class — so the class rules that size a body
+  ## cell (`.eventLog-index`, `.eventLog-fullpath`, …) size its header cell,
+  ## and the two line up without either being measured.
+  ##
+  ## DataTables' own header row is NOT used: `data_tables.styl` hides it for
+  ## every table, and showing it here made the Scroller re-measure the columns
+  ## against a table layout these flex rows do not use — a capture with it
+  ## visible lost the location column entirely. Drawn again, idempotently, on
+  ## every column (re)initialisation, because the column set can change.
+  let table = document.getElementById(tableId)
+  if table.isNil: return
+  var host = table.parentNode
+  while not host.isNil and not cast[Element](host).classList.contains(cstring"data-table"):
+    host = host.parentNode
+  if host.isNil: return
+  let old = cast[Element](host).querySelector(cstring".eventLog-column-header")
+  if not old.isNil: old.parentNode.removeChild(old)
+  let strip = document.createElement(cstring"div")
+  strip.className = cstring"eventLog-column-header"
+  for column in columns:
+    let cell = document.createElement(cstring"span")
+    cell.className = column.className.to(cstring)
+    cell.textContent = column.title.to(cstring)
+    strip.appendChild(cell)
+  host.insertBefore(strip, host.firstChild)
 
 proc dataTablePayload(self: EventLogComponent;
                       draw, recordsTotal, recordsFiltered: int): JsObject =
@@ -1314,14 +1362,14 @@ proc events(self: EventLogComponent) =
             data: cstring"directLocationRRTicks",
             orderable: true,
             targets: 0,
-            title: cstring"direction location rr ticks",
+            title: cstring"tick",
             render: proc(directLocationRRTicks: int): cstring =
               renderRRTicksLine(directLocationRRTicks, self.data.minRRTicks, self.data.maxRRTicks, "event-rr-ticks-line")
           },
           js{
             className: cstring"eventLog-index eventLog-cell",
             data: cstring"rrEventId",
-            title: cstring"rr event id"
+            title: cstring"#"
           },
       ]
       if self.usesMaterializedTracesTrace:
@@ -1331,7 +1379,7 @@ proc events(self: EventLogComponent) =
           js{
             className: cstring"eventLog-" & lower & " " & local("cell"),
             searchable: true,
-            title: lower,
+            title: cstring"location",
             data: cstring"fullPath",
           }
         )
@@ -1341,7 +1389,7 @@ proc events(self: EventLogComponent) =
             className: cstring"eventLog-event eventLog-cell",
             searchable: true,
             data: cstring"kind",
-            title: cstring"event-image",
+            title: cstring"",
             render: proc(kind: EventLogKind, t: js, event: ProgramEvent): cstring =
               if event.content.split("\n").len() == 2 and event.content.split("\n")[^1] == "":
                 cstring""
@@ -1354,7 +1402,7 @@ proc events(self: EventLogComponent) =
             className: cstring"eventLog-text eventLog-cell",
             searchable: true,
             data: cstring"content",
-            title: cstring"text",
+            title: cstring"output",
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
                 of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
@@ -1504,6 +1552,7 @@ proc events(self: EventLogComponent) =
             self.api.emit(CtUpdateTable, updateTableArgs),
         }
       )
+      renderColumnHeader(self.denseId, denseColumns)
 
       console.timeEnd(cstring"new events: load in datatable: dense datatable preparation and call")
 

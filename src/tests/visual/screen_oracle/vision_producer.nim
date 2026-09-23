@@ -35,6 +35,11 @@ type
     piProgramState = "state"
     piEventLog = "eventLog"
     piEditor = "editor"
+    piCalltrace = "calltrace"
+      ## PLAT-40. Claimed by `KnownPaneTitles` before PLAT-40 as `piOther`, so
+      ## that it could WIN against the three panes PLAT-39 read; it is read now.
+    piPointList = "pointList"
+      ## PLAT-40. The breakpoint and tracepoint list.
     piOther = "other"
 
   LocatedPane* = object
@@ -54,8 +59,12 @@ type
     editor*: ScreenReading[EditorModel]
 
 const
-  PaneTitleKeywords*: array[3, tuple[id: PaneId, words: seq[string]]] = [
+  PaneTitleKeywords*: array[4, tuple[id: PaneId, words: seq[string]]] = [
     (piProgramState, @["STATE"]),
+    # PLAT-40. The desktop titles the breakpoint list's TAB `POINT LIST`, the
+    # native window titles its pane `Breakpoints`; neither is near enough to
+    # the other for the nearest-neighbour classifier, so both are keywords.
+    (piPointList, @["POINT LIST", "BREAKPOINTS"]),
     (piEventLog, @["EVENT", "EVENTLOG"]),
     (piEditor, @[".PY", ".PYTHON", "MAIN.PY", "CALC/MAIN.PY", "EDITOR"])]
     ## Titles as the TITLE STRIP renders them, uppercased before matching.
@@ -97,6 +106,21 @@ proc writePgm*(img: GrayImage, path: string) =
   if img.pixels.len > 0:
     discard f.writeBuffer(unsafeAddr img.pixels[0], img.pixels.len)
 
+const
+  TitleRetryExtraPx* = 14
+    ## How much taller the retried title strip is. The native window's title
+    ## glyphs end 44 px below the cell's top edge (measured on PLAT-40's
+    ## frame), 14 px past `TitleStripHeight`.
+  BandInkDelta = 40
+    ## A pixel is INK when its gray level is this far from the region's
+    ## median — the region's background, since text covers a minority of it.
+  BandMinInkPixels = 2
+    ## A pixel row with fewer ink pixels than this is blank.
+  BandSliverPx = 3
+    ## An ink run this short is a stroke (an underscore), not a line.
+  BandSliverGapPx = 4
+    ## How far below the line before it a sliver may start and still be its.
+
 proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
                 psm = 6, upscale = 1.0): seq[OcrWord] =
   ## OCR one region. Returns every word, INCLUDING low-confidence ones — see
@@ -113,6 +137,51 @@ proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
     result = @[]
   finally:
     removeFile(path)
+
+proc lineBands*(img: GrayImage, r: Rect): seq[Rect] =
+  ## The region's TEXT LINES, found by ink projection rather than by the OCR
+  ## engine: each maximal run of pixel rows carrying ink, padded by two rows.
+  let sub = cropGray(img, r)
+  if sub.width <= 0 or sub.height <= 0: return @[]
+  var levels = newSeq[int](sub.pixels.len)
+  for i, c in sub.pixels: levels[i] = ord(c)
+  levels.sort()
+  let bg = levels[levels.len div 2]
+  var start = -1
+  for y in 0 .. sub.height:
+    var ink = 0
+    if y < sub.height:
+      for x in 0 ..< sub.width:
+        if abs(ord(sub.pixels[y * sub.width + x]) - bg) > BandInkDelta: inc ink
+    if y < sub.height and ink >= BandMinInkPixels:
+      if start < 0: start = y
+    elif start >= 0:
+      let top = max(0, start - 2)
+      let bottom = min(sub.height, y + 2)
+      let band = Rect(x: r.x, y: r.y + top, w: r.w, h: bottom - top)
+      # A SLIVER IS PART OF THE LINE ABOVE IT. An underscore is drawn below
+      # the baseline with a blank row between it and the letters, so a line
+      # of `__cached__` split into the letters and a band of strokes, and OCR
+      # read the letters as `cached` (measured on the native window's state
+      # pane). A band no taller than `BandSliverPx` within `BandSliverGapPx`
+      # of the one before is merged into it.
+      if result.len > 0 and y - start <= BandSliverPx and
+         band.y - (result[^1].y + result[^1].h) <= BandSliverGapPx:
+        result[^1].h = band.y + band.h - result[^1].y
+      else:
+        result.add band
+      start = -1
+
+proc ocrLineBands*(img: GrayImage, r: Rect, scratch: string): seq[string] =
+  ## Each of `lineBands` OCR'd as ONE line (`psm 7`). The fallback for a
+  ## region the engine's own line grouping mis-segments: measured on PLAT-40's
+  ## native-window event log, whose narrow, aligned columns tesseract grouped
+  ## COLUMN by column in every page-segmentation mode — `# 0 2 3 4 1 kind
+  ## stdout stdout …` — while each row read alone is exact.
+  for band in lineBands(img, r):
+    let words = ocrRegion(img, band, scratch, psm = 7)
+    let line = words.mapIt(it.text).join(" ").strip()
+    if line.len > 0: result.add line
 
 func regionIsLegible*(words: openArray[OcrWord]): bool =
   ## The region-level confidence test. See `OcrConfidenceFloor`.
@@ -204,12 +273,13 @@ const
     ##
     ## Exact matching is still preferred and tried first; this is the fallback.
 
-  KnownPaneTitles*: array[9, tuple[id: PaneId, title: string]] = [
+  KnownPaneTitles*: array[10, tuple[id: PaneId, title: string]] = [
     (piProgramState, "State"),
     (piEventLog, "Event Log"),
     (piEditor, "Editor"),
     (piOther, "Debug Controls"),
-    (piOther, "Call Trace"),
+    (piCalltrace, "Call Trace"),
+    (piPointList, "Breakpoints"),
     (piOther, "Files"),
     (piOther, "Tests"),
     (piOther, "Constraints"),
@@ -276,10 +346,35 @@ proc identifyPane*(img: GrayImage, cell: Rect, scratch: string): LocatedPane =
         result.id = id
         return
   result.id = classifyTitle(title)
+  # **A TITLE NO CLASS CLAIMS IS READ AGAIN, FROM A TALLER STRIP.** Measured
+  # on PLAT-40's native-window frame: that front-end draws its titles lower
+  # in the cell than the desktop, so `TitleStripHeight` (the desktop's
+  # measurement) cuts their descenders and `Breakpoints` OCRs as
+  # `Rreaknointe` — three edits from anything, at any upscale — while a strip
+  # `TitleRetryExtraPx` taller reads it exactly. Only a title that classified
+  # as NOTHING is retried, and the retry's answer is taken only when it names
+  # a pane, so a title that is genuinely another pane keeps its answer.
+  if result.id == piOther:
+    let strip = titleStrip(cell)
+    let taller = Rect(x: strip.x, y: strip.y, w: strip.w,
+                      h: min(strip.h + TitleRetryExtraPx, cell.h))
+    let big = ocrRegion(img, taller, scratch, psm = 7)
+    let retitled = big.mapIt(it.text).join(" ").strip()
+    let again = classifyTitle(retitled)
+    if again != piOther and again != piUnknown:
+      result.id = again
+      result.titleText = retitled
 
 # ---------------------------------------------------------------------------
 # The three readers
 # ---------------------------------------------------------------------------
+
+func isStateChrome(u: string): bool =
+  ## A state-pane line that is chrome rather than a row: the tab strip, the
+  ## watch box, and the pane's own name where a front-end repeats it (the
+  ## native window draws `State` above its tabs).
+  u.startsWith("LOCALS") or u.startsWith("GLOBALS") or
+    u.startsWith("WATCHES") or u.contains("ENTER A WATCH") or u == "STATE"
 
 proc readProgramState*(img: GrayImage, cell: Rect,
                        scratch: string): ScreenReading[ProgramStateModel] =
@@ -294,6 +389,23 @@ proc readProgramState*(img: GrayImage, cell: Rect,
   var matched = 0
   var considered = 0
   let allText = linesOf(words).join(" ").toUpperAscii
+  # **THE ENGINE'S LINES FIRST, THE BANDS WHEN THEY FAIL THE GRAMMAR** — the
+  # event log's rule (`readEventLog`), for the same measured reason: on the
+  # native window's state pane the engine fused every row into three lines.
+  var lines = linesOf(words)
+  block retry:
+    var parsed, unparsed = 0
+    for line in lines:
+      let t = line.strip()
+      if t.len == 0 or isStateChrome(t.toUpperAscii): continue
+      if splitVariableRow(t).ok and t.count(':') <= 2: inc parsed
+      else: inc unparsed
+    if unparsed == 0: break retry
+    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+    var bandParsed = 0
+    for line in banded:
+      if splitVariableRow(line).ok: inc bandParsed
+    if bandParsed > parsed: lines = banded
   # **THE PRODUCT'S OWN EMPTY MESSAGE IS THE BEST POSSIBLE `srEmpty` SIGNAL.**
   #
   # `entry-shell` stops before the first statement and the pane draws *"No
@@ -305,13 +417,12 @@ proc readProgramState*(img: GrayImage, cell: Rect,
   # Matching the message keeps those two apart at the source.
   if allText.contains("NO LOCAL VARIABLES ARE PRESENT"):
     return empty[ProgramStateModel]()
-  for line in linesOf(words):
+  for line in lines:
     let s = line.strip()
     if s.len == 0: continue
     # The tab row and the watch-expression placeholder are chrome, not rows.
     let u = s.toUpperAscii
-    if u.startsWith("LOCALS") or u.startsWith("GLOBALS") or
-       u.startsWith("WATCHES") or u.contains("ENTER A WATCH"):
+    if isStateChrome(u):
       continue
     inc considered
     let parsed = splitVariableRow(s)
@@ -342,7 +453,36 @@ proc readEventLog*(img: GrayImage, cell: Rect,
   var model = EventLogModel(isVisible: true, searchString: "", ofRows: 0)
   var sawFooter = false
   var candidateRows = 0
-  for line in linesOf(words):
+  # **THE ENGINE'S LINES FIRST, THE BANDS WHEN THEY FAIL THE GRAMMAR.** A line
+  # the rules could not parse is the signal that the engine grouped the
+  # region wrongly (`ocrLineBands`); the bands are read only then, and taken
+  # only when they parse MORE rows, so a region the engine read correctly is
+  # never re-read.
+  var lines = linesOf(words)
+  block retry:
+    var parsed, unparsed = 0
+    for line in lines:
+      let s = line.strip()
+      if s.len == 0: continue
+      # FUSION IS TESTED BEFORE THE CHROME FILTER: measured on the desktop's
+      # event log once it gained a header row, the engine fused the search
+      # box, the header and five rows into ONE line, and a filter that ran
+      # first dropped the whole line as "the search box" — no retry, two rows.
+      if eventRowsFused(s):
+        inc unparsed
+        continue
+      if s.toUpperAscii.contains("FIND EVENT"): continue
+      if parseEventRow(s).ok or parseEventTableRow(s).ok: inc parsed
+      elif not parseFooterTotal(s).ok and
+           s.splitWhitespace() != @["#", "kind", "value"]: inc unparsed
+    if unparsed == 0: break retry
+    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+    var bandParsed = 0
+    for line in banded:
+      if (parseEventRow(line).ok and not eventRowsFused(line)) or
+         parseEventTableRow(line).ok: inc bandParsed
+    if bandParsed > parsed: lines = banded
+  for line in lines:
     let s = line.strip()
     if s.len == 0: continue
     # **THE ROW RULE IS TRIED BEFORE THE CHROME FILTER, NOT AFTER.**
@@ -359,6 +499,15 @@ proc readEventLog*(img: GrayImage, cell: Rect,
       inc candidateRows
       model.events.add EventDataModel(consoleOutput: row.consoleOutput)
       continue
+    # PLAT-40: the vocabulary's table row, which the terminal and the native
+    # window draw. Tried second, so the desktop's rule keeps first claim.
+    let tableRow = parseEventTableRow(s)
+    if tableRow.ok:
+      inc candidateRows
+      model.events.add EventDataModel(consoleOutput: tableRow.consoleOutput)
+      continue
+    # The table's own header row is chrome.
+    if s.splitWhitespace() == @["#", "kind", "value"]: continue
     let footer = parseFooterTotal(s)
     if footer.ok:
       model.ofRows = footer.total
@@ -372,6 +521,68 @@ proc readEventLog*(img: GrayImage, cell: Rect,
     return unreadable[EventLogModel](urGrammarMismatch,
       "event log had " & $candidateRows & " candidate rows and none matched " &
       EventLogGrammar.shape)
+  read(model)
+
+proc readCalltrace*(img: GrayImage, cell: Rect,
+                    scratch: string): ScreenReading[CalltraceModel] =
+  ## PLAT-40. `CalltraceGrammar` over the pane's body.
+  let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
+  if words.len == 0:
+    return unreadable[CalltraceModel](urNoWordAboveFloor,
+      "call trace located at " & $cell & " but OCR returned no words")
+  if not regionIsLegible(words):
+    return unreadable[CalltraceModel](urNoWordAboveFloor,
+      "no word in the call trace reached confidence " & $OcrConfidenceFloor)
+  var model = CalltraceModel(isVisible: true)
+  var considered = 0
+  for line in linesOf(words):
+    let s = line.strip()
+    if s.len == 0: continue
+    let u = s.toUpperAscii
+    # The product's own empty message, and its search box, are chrome.
+    if u.contains("NO CALL TRACE") or u.contains("SEARCH"): continue
+    inc considered
+    let row = parseCallRow(s)
+    if row.ok: model.calls.add CallRowModel(name: row.name)
+  if model.calls.len == 0:
+    if considered == 0: return empty[CalltraceModel]()
+    return unreadable[CalltraceModel](urGrammarMismatch,
+      "call trace had " & $considered & " candidate rows and none matched " &
+      CalltraceGrammar.shape)
+  read(model)
+
+proc readPointList*(img: GrayImage, cell: Rect,
+                    scratch: string): ScreenReading[PointListModel] =
+  ## PLAT-40. `PointListGrammar` over the pane's body.
+  let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
+  if words.len == 0:
+    return unreadable[PointListModel](urNoWordAboveFloor,
+      "point list located at " & $cell & " but OCR returned no words")
+  if not regionIsLegible(words):
+    return unreadable[PointListModel](urNoWordAboveFloor,
+      "no word in the point list reached confidence " & $OcrConfidenceFloor)
+  var model = PointListModel(isVisible: true)
+  var considered = 0
+  for line in linesOf(words):
+    let s = line.strip()
+    if s.len == 0: continue
+    let u = s.toUpperAscii
+    # The product's own empty messages are the `srEmpty` signal, stated by the
+    # application rather than inferred from a row count (PLAT-39's rule).
+    if u.contains("NO BREAKPOINTS OR TRACEPOINTS") or
+       u.contains("NO TRACEPOINT COLLECTIONS"):
+      return empty[PointListModel]()
+    if u == "POINTS" or u.startsWith("SELECTED"): continue
+    inc considered
+    let row = parsePointRow(s)
+    if row.ok:
+      model.points.add PointRowModel(kind: row.kind, fileName: row.fileName,
+                                     lineNumber: row.lineNumber)
+  if model.points.len == 0:
+    if considered == 0: return empty[PointListModel]()
+    return unreadable[PointListModel](urGrammarMismatch,
+      "point list had " & $considered & " candidate rows and none matched " &
+      PointListGrammar.shape)
   read(model)
 
 const
@@ -602,3 +813,66 @@ proc detectElementsIsUnavailable*(): tuple[unavailable: bool, why: string] =
     (false, "detectElements did not raise: the element detector is now available")
   except CatchableError as e:
     (true, e.msg)
+
+# ---------------------------------------------------------------------------
+# PLAT-40 — the three producer-fed panes, read off one frame
+# ---------------------------------------------------------------------------
+
+type
+  ProducerPanesReading* = object
+    ## What one frame yielded for the three panes PLAT-40 feeds. A separate
+    ## entry point from `readFrame` so PLAT-39's three-model reading, and the
+    ## tallies asserted over it, are unchanged by the two models added here.
+    framePath*: string
+    width*, height*: int
+    panes*: seq[LocatedPane]
+    calltrace*: ScreenReading[CalltraceModel]
+    eventLog*: ScreenReading[EventLogModel]
+    pointList*: ScreenReading[PointListModel]
+
+proc readProducerPanes*(framePath: string, scratch: string): ProducerPanesReading =
+  result.framePath = framePath
+  template allUnreadable(reason: UnreadableReason; why: string) =
+    result.calltrace = unreadable[CalltraceModel](reason, why)
+    result.eventLog = unreadable[EventLogModel](reason, why)
+    result.pointList = unreadable[PointListModel](reason, why)
+  if not fileExists(framePath):
+    allUnreadable(urFrameMissing, "no file at " & framePath)
+    return
+  var img: GrayImage
+  try:
+    img = decodeGray(framePath)
+  except CatchableError as e:
+    allUnreadable(urFrameMissing, "decode failed: " & e.msg)
+    return
+  result.width = img.width
+  result.height = img.height
+  let grid = locateGrid(img)
+  if grid.isUnreadable:
+    allUnreadable(grid.reason, grid.detail)
+    return
+  createDir(scratch)
+  for cell in grid.value.cells:
+    result.panes.add identifyPane(img, cell, scratch)
+  var ctCell, logCell, plCell = Rect(x: -1, y: -1, w: 0, h: 0)
+  for p in result.panes:
+    case p.id
+    of piCalltrace: (if ctCell.x < 0: ctCell = p.rect)
+    of piEventLog: (if logCell.x < 0: logCell = p.rect)
+    of piPointList: (if plCell.x < 0: plCell = p.rect)
+    else: discard
+  result.calltrace =
+    if ctCell.x < 0:
+      unreadable[CalltraceModel](urRegionNotLocated,
+        "no cell's title strip identified a call trace")
+    else: readCalltrace(img, ctCell, scratch)
+  result.eventLog =
+    if logCell.x < 0:
+      unreadable[EventLogModel](urRegionNotLocated,
+        "no cell's title strip identified an event log pane")
+    else: readEventLog(img, logCell, scratch)
+  result.pointList =
+    if plCell.x < 0:
+      unreadable[PointListModel](urRegionNotLocated,
+        "no cell's title strip identified a point list")
+    else: readPointList(img, plCell, scratch)

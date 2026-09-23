@@ -5511,3 +5511,31 @@ and moves the memo by the edit between two documents (`incrementalDerivation`);
 `test_op_env_memo.nim` holds it to a full derivation. If you change what
 `OpCtx`/`DisplayCtx` hold, change `fullDerivation` and `incrementalDerivation`
 together and rerun that suite.
+
+## Pane producers and reading panes off screens (PLAT-40, 2026-09-23)
+
+* A calltrace row is decided ONCE: `ReplayDataStore.callLineOf(CallLineWire)`.
+  The native hosts decode the JSON reply (`applyCalltraceResponse`), the
+  desktop copies its typed fields into a `CallLineWire`
+  (`ui/calltrace.syncCalltraceData`). Do not add a third decoder.
+* Both native front-ends ask for panes through `native_host.loadRecordingPanes`
+  (events + call trace, once per recording) and `loadStopPanes` (locals, per
+  stop). Breakpoints go through `HeadlessDebugSession.toggleBreakpoint`, which
+  writes the ENGINE's verified lines via `applyVerifiedBreakpoints`; the
+  desktop's `dapSetBreakpoints` reply feeds the same store call.
+* The event log is already populated at open by `EventLogVM`'s own
+  `ct/event-load` effect, before either native producer runs.
+* Nim's JS backend passes an object argument by reference, and a `for`
+  variable is ONE object reused per iteration. `x.toJs` of such an argument,
+  kept past the iteration, aliases the last element — that was PLAT35-PD2
+  (every event-log row showed the last event). Copy (`var row = x`) first.
+* In the terminal the `calltrace` PaneKind is painted as the CALL STACK (the
+  TUI spec's choice); there is no call-trace pane there.
+* `codetracer-gpui --layout=<file>` opens a saved layout document; the terminal
+  adopts the same JSON through `LayoutBinding.adoptLayoutDocument`.
+* Reading panes off a frame: `vision_producer.readProducerPanes` (pixels) and
+  `terminal_reading` (a `plainFrame` text screen, in CELLS not bytes — rows
+  carry `│`/`─`). Tesseract groups narrow aligned table columns column-wise;
+  `ocrLineBands` (ink-projection line bands, one `psm 7` read each) is the
+  fallback. Title strips of the native window need `TitleRetryExtraPx` more
+  height than the desktop's.

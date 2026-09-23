@@ -122,7 +122,7 @@ bad() {
 #               shape `capabilities.undeclaredDegradations` and
 #               `web_deployment.undeclaredAbsences` both reject.
 #
-# ALL 36 ARE `both` TODAY, and that is a measured fact rather than an
+# ALL 37 ARE `both` TODAY, and that is a measured fact rather than an
 # aspiration: `makeComponent` carries no `when defined` branch, and every
 # module implementing a constructor compiles under `-d:ctWeb`. The kind
 # `desktoponly` therefore has no members — it exists so that the first pane to
@@ -147,6 +147,11 @@ kind_for() {
 	# Claiming `desktoponly` would require naming a capability the web
 	# profile lacks, and there is no evidence any of the three does.
 	Constraints | TestResults | Verification) echo "both" ;;
+	# Added 2026-09-23 by PLAT-40, which made its arm LIVE: it was a COMMENTED
+	# `of Content.PointList:` line until then, and this parse drops comment
+	# lines, so this gate reported the pane as not dispatched at all — the
+	# scan's own record of a commented arm. `both` for the reason above.
+	PointList) echo "both" ;;
 	*) echo "unlisted" ;;
 	esac
 }
@@ -376,7 +381,7 @@ for pane in Debug Build BuildErrors Status SearchResults Menu WelcomeScreen \
 	Filesystem Scratchpad Repl TraceLog CalltraceEditor TerminalOutput Shell \
 	StepList LowLevelCode AgentActivity AgentWorkspace CaptionBarProgress \
 	PixelHistory ShaderDebug VideoPlayer AgentActivityDeepReview RequestPanel \
-	VCS UnifiedDiff; do
+	VCS UnifiedDiff Constraints TestResults Verification PointList; do
 	if ! grep -qx "${pane}" <<<"${registry}"; then
 		bad "the budget lists Content.${pane} and makeComponent no longer dispatches it — lower the budget in the same commit that removed the pane"
 		stale=$((stale + 1))

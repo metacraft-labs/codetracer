@@ -327,6 +327,9 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     notTakenLines = notTaken,
     inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
 
+  # PLAT-40. The Points pane reads the same points the gutter just drew.
+  rt.app.points = pointListPaneModelFor(s.points)
+
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,

@@ -40,7 +40,8 @@
 ##   each word, and its job is to raise `urNoWordAboveFloor` for a region that
 ##   contains nothing legible. See `OcrConfidenceFloor`.
 
-import std/[strutils]
+import std/[sequtils, strutils]
+from std/unicode import runeLen
 
 const
   OcrConfidenceFloor* = 60.0
@@ -122,8 +123,53 @@ const
           "first and reading a digits-only cell second is what makes this " &
           "field recoverable at all.")
 
+  EventLogTableGrammar* = GrammarRule(
+    name: "event-log-table-row",
+    shape: "<n> <channel> <text>",
+    note: "PLAT-40. The vocabulary's event-log TABLE, as the terminal and the " &
+          "native window draw it: the event's index, its channel as a bare " &
+          "word, its text. Read into the SAME `EventDataModel` as the " &
+          "desktop's row, as `<channel>: <text>`, so the two shapes compare " &
+          "as one value. Tried only on a line the desktop rule did not match.")
+
+  CalltraceGrammar* = GrammarRule(
+    name: "calltrace-row",
+    shape: "[indent] <name> [ '#' <index> ] [ '(' <args> ')' ] ...",
+    note: "PLAT-40. The call's NAME is the row's first token, cut at a '#' " &
+          "or '(' fused onto it: the desktop draws `name #index` and the " &
+          "arguments after it, the vocabulary draws the name alone, indented " &
+          "by depth. A name holds a letter; a token of punctuation or digits " &
+          "alone is chrome or noise and is urGrammarMismatch, not a call.")
+
+  PointListGrammar* = GrammarRule(
+    name: "point-row",
+    shape: "<kind> ... <path> ':' <line> [ ')' ]",
+    note: "PLAT-40. The kind is the FIRST token and must be `breakpoint` or " &
+          "`tracepoint`; the location is the LAST `<path>:<digits>` on the " &
+          "line, so a label between the two cannot be taken for it. Only the " &
+          "path's base name is kept: the pane draws the path at whatever " &
+          "width it has.")
+
+  TerminalEventRowGrammar* = GrammarRule(
+    name: "terminal-event-row",
+    shape: "<tick> <category> <file> ':' <line> <text>",
+    note: "PLAT-40. The shipped terminal's event pane (`TRACEPOINTS`): the " &
+          "tick, a four-cell CATEGORY (`out`, `err`, `mut`, `sys`, `trc`), " &
+          "the location, the text. The category is not a channel — `out` " &
+          "covers stdout and stderr alike — so the row answers the TEXT " &
+          "alone, and the three front-ends are compared on the text.")
+
 const AllGrammarRules* = [ProgramStateGrammar, EventLogGrammar,
-                          EventLogFooterGrammar, EditorGrammar]
+                          EventLogFooterGrammar, EditorGrammar,
+                          EventLogTableGrammar, CalltraceGrammar,
+                          PointListGrammar, TerminalEventRowGrammar]
+
+const TerminalEventCategories* = ["out", "mut", "sys", "err", "trc", "???"]
+  ## `app/views/event_log.categoryLabel`'s spellings, trimmed.
+
+const EventChannels* = ["stdout", "stderr", "stdin"]
+  ## The channels an event's output travels on, as both row shapes spell them.
+
 
 func splitVariableRow*(line: string): tuple[ok: bool, name, value, valueType: string] =
   ## `ProgramStateGrammar`. Returns ok=false for a line the rule does not
@@ -241,3 +287,156 @@ func isVisiblePrefixOf*(visible, full: string): bool =
   let v = norm(visible)
   let f = norm(full)
   v.len > 0 and f.startsWith(v)
+
+func parseEventTableRow*(line: string): tuple[ok: bool, consoleOutput: string] =
+  ## `EventLogTableGrammar`: `<n> <channel> <text>`, answered in the desktop
+  ## rule's form, `<channel>: <text>`.
+  let toks = line.strip().splitWhitespace()
+  if toks.len < 3: return (false, "")
+  for ch in toks[0]:
+    if not ch.isDigit: return (false, "")
+  if toks[1] notin EventChannels: return (false, "")
+  (true, toks[1] & ": " & toks[2 .. ^1].join(" "))
+
+func eventText*(consoleOutput: string): string =
+  ## The event's TEXT without its channel — what two front-ends are compared
+  ## on, since OCR spaces `stdout:` and the text differently per face.
+  let s = consoleOutput.strip()
+  for ch in EventChannels:
+    if s.startsWith(ch & ":"):
+      return s[ch.len + 1 .. ^1].strip()
+  s
+
+func withinOneEdit*(a, b: string): bool =
+  ## At most one insertion, deletion or substitution apart — the declared
+  ## tolerance for an OCR reading against an exact one (measured on PLAT-40's
+  ## native-window frame: `10 - 4 + 1 = 7` read as `10-4+1=17`).
+  if abs(a.len - b.len) > 1: return false
+  var i, j, edits = 0
+  while i < a.len and j < b.len:
+    if a[i] == b[j]:
+      inc i; inc j
+      continue
+    inc edits
+    if edits > 1: return false
+    if a.len > b.len: inc i
+    elif a.len < b.len: inc j
+    else:
+      inc i; inc j
+  edits + (a.len - i) + (b.len - j) <= 1
+
+func parseCallRow*(line: string): tuple[ok: bool, name: string] =
+  ## `CalltraceGrammar`.
+  ##
+  ## A leading ONE-CHARACTER token with more after it is the row's
+  ## expand/collapse ICON, not its name: the desktop draws `⊟ main #1 ()`, and
+  ## OCR reads the icon as `B`, `©` or `@` (measured on PLAT-40's desktop
+  ## frame, where every row read as `B` before this rule).
+  ## A leading token with no letter or digit at all (`@&`) is the same icon
+  ## read as two glyphs.
+  var toks = line.strip().splitWhitespace()
+  while toks.len > 1 and (toks[0].runeLen == 1 or
+                          not toks[0].anyIt(it.isAlphaNumeric)):
+    toks.delete(0)
+  if toks.len == 0: return (false, "")
+  var name = toks[0]
+  for stop in ['#', '(']:
+    let at = name.find(stop)
+    if at >= 0: name = name[0 ..< at]
+  if name.len == 0: return (false, "")
+  var letters = 0
+  for ch in name:
+    if ch.isAlphaAscii: inc letters
+    elif ch notin {'_', '<', '>', '.', ':', '$', '0'..'9'}:
+      return (false, "")
+  if letters == 0: return (false, "")
+  (true, name)
+
+func parsePointRow*(line: string): tuple[ok: bool, kind, fileName: string,
+                                        lineNumber: int] =
+  ## `PointListGrammar`.
+  let toks = line.strip().splitWhitespace()
+  if toks.len < 2: return (false, "", "", 0)
+  # The kind, stripped of the punctuation OCR fuses onto a row's first glyph
+  # (`'BREAKPOINT`) and matched within `withinOneEdit` (`BREAKPONT`, measured
+  # on the desktop's small-caps face), answered in its canonical spelling.
+  var word = ""
+  for ch in toks[0]:
+    if ch.isAlphaAscii: word.add ch.toLowerAscii
+  var kind = ""
+  for k in ["breakpoint", "tracepoint"]:
+    if word == k or withinOneEdit(word, k): kind = k
+  if kind.len == 0: return (false, "", "", 0)
+  for i in countdown(toks.high, 1):
+    var t = toks[i].strip(chars = {'(', ')', ',', ' '})
+    let colon = t.rfind(':')
+    if colon <= 0 or colon == t.high: continue
+    let digits = t[colon + 1 .. ^1]
+    if not digits.allCharsInSet({'0'..'9'}): continue
+    let path = t[0 ..< colon]
+    let slash = path.rfind('/')
+    return (true, kind, path[slash + 1 .. ^1], parseInt(digits))
+  (false, "", "", 0)
+
+func parseTerminalEventRow*(line: string): tuple[ok: bool, consoleOutput: string] =
+  ## `TerminalEventRowGrammar`.
+  let toks = line.strip().splitWhitespace()
+  if toks.len < 4: return (false, "")
+  if not toks[0].allCharsInSet({'0'..'9'}): return (false, "")
+  if toks[1] notin TerminalEventCategories: return (false, "")
+  let colon = toks[2].rfind(':')
+  if colon <= 0 or not toks[2][colon + 1 .. ^1].allCharsInSet({'0'..'9'}) or
+     colon == toks[2].high:
+    return (false, "")
+  (true, toks[3 .. ^1].join(" "))
+
+func compactText*(s: string): string =
+  ## A row's text with every space removed — the form two readings are
+  ## compared in, because OCR spaces `2 + 3 = 5` as `2+3 =5` and neither
+  ## spacing is the product's claim.
+  for ch in s:
+    if ch notin Whitespace: result.add ch
+
+
+func callNameKey*(name: string): string =
+  ## A call-trace row's name as two readings are compared: its first token
+  ## (the `CalltraceGrammar` cut — `<end of program>` is `<end`), with runs of
+  ## `_` collapsed to one, because OCR reads `<__main__>` as `<_main_>` on
+  ## every face measured and the underscores' COUNT is not what differs
+  ## between two front-ends' call traces.
+  let row = parseCallRow(name)
+  let base = if row.ok: row.name else: name.strip()
+  for ch in base:
+    if ch == '_' and result.len > 0 and result[^1] == '_': continue
+    result.add ch
+
+func eventRowsFused*(line: string): bool =
+  ## A line carrying MORE THAN ONE channel token is several event rows OCR
+  ## fused into one — the engine grouped the table column by column — and not
+  ## an event whose text happens to mention a channel.
+  var n = 0
+  for ch in EventChannels:
+    n += line.count(ch & ":")
+  n > 1
+
+func variableNameKey*(name: string): string =
+  ## A variable's name as two screen readings are compared: without the
+  ## underscores at its ends and with inner runs collapsed. OCR drops an edge
+  ## underscore on both faces measured (`__package__` read as `__package_`,
+  ## `__builtins__` as `builtins__`), and a dunder's underscore COUNT is not
+  ## what differs between two front-ends' state panes.
+  let core = name.strip(chars = {'_'})
+  for ch in core:
+    if ch == '_' and result.len > 0 and result[^1] == '_': continue
+    result.add ch
+
+func namesAgree*(a, b: openArray[string]): bool =
+  ## Every name the SMALLER reading holds is in the larger one, by
+  ## `variableNameKey` — a pane shorter than its variable list, or a line OCR
+  ## lost, leaves a reading with fewer names, never with different ones.
+  var small, large: seq[string]
+  for n in (if a.len <= b.len: a else: b): small.add variableNameKey(n)
+  for n in (if a.len <= b.len: b else: a): large.add variableNameKey(n)
+  for n in small:
+    if n notin large: return false
+  true

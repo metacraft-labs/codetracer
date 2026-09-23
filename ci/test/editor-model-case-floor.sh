@@ -507,6 +507,24 @@ PLAT-39)
 	SUITE_FLAGS=("--path:../GuiAssert/src")
 	LAW_SUITES=()
 	;;
+PLAT-40)
+	MILESTONE="** PLAT-40: The three panes the vocabulary expresses and nothing feeds"
+	SUITES=(
+		src/frontend/tui/tests/test_plat40_producers.nim
+	)
+	# ONE SUITE. It opens the real `calc` recording through the native hosts'
+	# own `openLocalTrace`, runs the shared producers, composites the shipped
+	# terminal's screen in process, and reads the committed DIFF-9 record the
+	# two capture lanes measured (`plat40-panes-window.sh`,
+	# `plat40-panes-capture.spec.ts`). It links isonim-tui, so it takes the
+	# `tui` lane's flags, read rather than spelled (§30).
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)")
+	LAW_SUITES=()
+	;;
 PLAT-41)
 	MILESTONE="** PLAT-41: The eight panes with no view"
 	SUITES=(

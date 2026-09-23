@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "layout": {
+    "kind": "row",
+    "children": [
+      {"kind": "pane", "pane": "editor", "title": "Editor", "weight": 1.0},
+      {"kind": "column", "weight": 1.0, "children": [
+        {"kind": "pane", "pane": "calltrace", "title": "Call Trace", "weight": 1.0},
+        {"kind": "pane", "pane": "eventLog", "title": "Event Log", "weight": 1.0},
+        {"kind": "pane", "pane": "pointList", "title": "Breakpoints", "weight": 1.0}
+      ]}
+    ]
+  },
+  "docked": []
+}

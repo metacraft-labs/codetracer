@@ -243,7 +243,7 @@ type GpuiRun = object
   rows: int
   serialised: string
   producerFailures: seq[string]
-    ## Which of the three pane producers raised, and with what message.
+    ## Which of the three pane producers loaded nothing, by name.
     ## **A value rather than a `discard`** — see `runGpuiScenario`.
   localsLoaded: int
     ## **HOW MANY VARIABLES THE STATE PANE ACTUALLY HOLDS after the producers
@@ -310,32 +310,26 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
     "the GPUI arm performed " & $performed & " of " & $declared &
     " declared operations for scenario " & sc.id
 
-  # The panes' own producers, exactly as `runOpen` and `tui_session.refresh`
-  # call them. Without these the state, call-trace and event-log panes render
-  # their "nothing at this position" report and every question about them
-  # becomes a universal quantification over an empty set (§4a).
+  # The panes' own producers, exactly as `runOpen` and `tui_session` call
+  # them: `native_host.loadRecordingPanes` and `loadStopPanes`, the ONE set
+  # both native front-ends share since PLAT-40. Without these the state,
+  # call-trace and event-log panes render their "nothing at this position"
+  # report and every question about them becomes a universal quantification
+  # over an empty set (§4a).
   #
-  # **THEIR FAILURES ARE RECORDED, NOT SWALLOWED.** They used to be three bare
-  # `except CatchableError: discard`, directly under a comment saying that
-  # without these calls every question about those panes becomes a universal
-  # quantification over an empty set — which is to say, the comment named the
-  # §4a defect and the code then arranged for it to happen silently. A
-  # producer that stopped working would empty the panes, every question about
-  # them would compare two empty answers, and the suite would go green.
-  #
-  # `ct/load-locals` changed shape upstream on 2026-09-21 (LRS-1: the language
-  # travels by name rather than by ordinal), which is exactly the kind of
-  # change that lands here. Whether it did is now a line in the log rather
-  # than a guess.
-  for (name, thunk) in {
-      "requestAndLoadLocals": proc () = session.requestAndLoadLocals(),
-      "requestAndLoadCalltrace": proc () = session.requestAndLoadCalltrace(),
-      "requestAndLoadEventLog": proc () =
-        discard session.requestAndLoadEventLog(0, 50)}:
-    try:
-      thunk()
-    except CatchableError as e:
-      result.producerFailures.add name & ": " & e.msg
+  # **WHAT DID NOT ARRIVE IS RECORDED, NOT SWALLOWED.** The producers are total
+  # — a request the engine declines is answered as not loaded rather than
+  # raised, so a window is never dropped over a pane that would merely have
+  # been empty — and the answer says which loaded. A producer that stopped
+  # working would empty its pane, every question about it would compare two
+  # empty answers, and the suite would go green; this makes it a named
+  # failure instead. `ct/load-locals` changed shape upstream on 2026-09-21
+  # (LRS-1), which is exactly the kind of change that lands here.
+  let recordingLoad = session.loadRecordingPanes()
+  let stopLoad = session.loadStopPanes()
+  if not recordingLoad.events: result.producerFailures.add "event log: nothing loaded"
+  if not recordingLoad.calltrace: result.producerFailures.add "call trace: nothing loaded"
+  if not stopLoad.locals: result.producerFailures.add "locals: the engine declined"
 
   # THE EFFECT, read off the ViewModel the producers write into. Recorded here
   # and asserted by `the GPUI arm's locals producer LOADED something`, which is
@@ -1173,11 +1167,12 @@ suite "PLAT-35: TIER 4 — the review is recorded, or its absence is":
 #
 # `PLAT-35` is a member of `just editor-model-case-floors`, a lane shared with
 # eleven other milestones that hard-fails on any `[FAILED]` case. Two tier-4
-# readings score 3, and `score < 4` blocks. Landing that red would put a
+# readings scored 3 (one since PLAT-40 repaired `PLAT35-PD2`), and `score < 4`
+# blocks. Landing that red would put a
 # permanently-red case into a shared lane, where "PLAT-35 is red" decays into
 # noise that masks the next real regression; refusing to land the tool because
-# of the defects it found is the other wrong answer. So the two are
-# QUARANTINED — with the shape this repo already uses for its `known-dark`
+# of the defects it found is the other wrong answer. So what is below
+# the floor is QUARANTINED — with the shape this repo already uses for its `known-dark`
 # ledgers, whose rule is that the file FAILS IN BOTH DIRECTIONS.
 
 suite "PLAT-35: THE QUARANTINE is exact, attributed and dated":

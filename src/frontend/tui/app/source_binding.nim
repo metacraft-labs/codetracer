@@ -102,6 +102,7 @@ import ./views/source_pane
 # WHICH, and it is preferred to renaming a five-year-old type to make a new
 # export fit.
 import ./views/inline_annotations
+import ./views/point_list
 # PLAT-22's shared editor row model and the derivation both front-ends' editors
 # go through.
 #
@@ -300,3 +301,14 @@ proc sourcePaneModelFor*(vm: SourceVM;
 # entire content is an ORDERING is the worst possible thing to have two copies
 # of: both compile, both run, and only one of them is right
 # (Verification-Harness-Traps §14).
+
+proc pointListPaneModelFor*(points: openArray[SourcePoint]): PointListPaneModel =
+  ## PLAT-40. The Points pane's rows: the SAME points the gutter marks, so the
+  ## pane and the gutter cannot disagree about which lines carry one.
+  var rows: seq[PointListPaneRow] = @[]
+  for p in points:
+    rows.add PointListPaneRow(
+      kind: (if p.kind == sptBreakpoint: PointKindBreakpoint
+             else: PointKindTracepoint),
+      path: p.path, line: p.line, enabled: p.enabled)
+  initPointListPaneModel(rows, loaded = true)

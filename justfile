@@ -4896,6 +4896,52 @@ plat44-sequences-record:
 plat40-production-callers:
   bash ci/test/plat40-production-callers.sh
 
+# PLAT-40 — DIFF-9: the call trace, event log and breakpoint list, read OFF
+# THE SCREEN of the native window and of the desktop. Three recipes, split on
+# the capability line exactly as PLAT-37's are:
+#
+#   plat40-capture-window    needs a COMPOSITOR and the windowed binary
+#                            (CODETRACER_PLAT40_BIN, built with
+#                            -d:gpuiShimPath): `ci/test/plat40-panes-window.sh`.
+#   plat40-capture-electron  needs Xvfb and the built desktop app.
+#   plat40-record            needs the frames and GuiAssert; writes the
+#                            committed `src/tests/visual/plat40-readings.json`.
+#
+# The gate itself (`test_plat40_producers.nim`, in the `tui` lane) asserts over
+# the record and runs everywhere.
+plat40-capture-window:
+  bash ci/test/plat40-panes-window.sh
+
+plat40-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/plat40-panes-capture.spec.ts {{args}}
+      ;;
+    *)
+      # A screen LARGER than the 1920x1080 window, as PLAT-35's capture uses:
+      # on a 1920x1080 screen the window's content area lands at 1920x1081
+      # and the capture refuses it.
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/plat40-panes-capture.spec.ts {{args}}
+      ;;
+  esac
+
+plat40-record:
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat40rec -o:build/plat40_record \
+    src/tests/visual/screen_oracle/plat40_record.nim
+
 # The rejected change-fraction thresholds, as a runnable sweep (§36b). It adds
 # NO gate of its own on purpose: asserting that the losers ARE vacuous would
 # pin a property of the corpus nothing depends on, and would make a future
@@ -5381,7 +5427,7 @@ editor-model-case-floors:
   corpus_dependent() { case "$1" in PLAT-39) return 0 ;; *) return 1 ;; esac; }
   corpus_present() { [ -d src/tests/visual/captures/electron ] && \
     [ "$(find src/tests/visual/captures/electron -name '*.png' | wc -l)" -ge 6 ]; }
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-41 PLAT-42 PLAT-43 PLAT-44; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-40 PLAT-41 PLAT-42 PLAT-43 PLAT-44; do
     echo "=== ${m} ==="
     if corpus_dependent "${m}" && ! corpus_present; then
       echo "DEFERRED: ${m}'s floor reads src/tests/visual/captures/electron/,"

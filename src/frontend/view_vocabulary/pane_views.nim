@@ -176,11 +176,26 @@ func stateTabOptions*(): seq[ViewOption] =
   for t in StateTab:
     result.add ViewOption(id: $t, label: ($t)[2 .. ^1])
 
+const VariableLabelSeparator* = ": "
+  ## **The vocabulary's spelling of "this name has this value"**, named once so
+  ## every medium draws the same row. It was ` = ` until PLAT-40, while the
+  ## desktop's state pane draws `name:value` — so PLAT-39's screen reader,
+  ## whose published row grammar splits on the first colon, read the desktop's
+  ## state pane and found NO row it could parse in the native window's (its
+  ## filed GAP 1). The desktop's shape is the one adopted: it is the shape a
+  ## reader of either screen now parses with one rule.
+
+proc variableLabel*(name, rendered: string): string =
+  ## A variable row's label: its name, `VariableLabelSeparator`, the
+  ## presenter's answer.
+  name & VariableLabelSeparator & rendered
+
 proc variableRow(v: store_types.Variable; path: string;
                  budget: Budget; expanded: HashSet[string]): ViewNode =
   ## One variable, as a `Tree` node.
   ##
-  ## The LABEL is `name = <the presenter's answer at this budget>`. See the
+  ## The LABEL is `variableLabel(name, <the presenter's answer at this
+  ## budget>)`. See the
   ## header for why the value is in the label and why that is not filed as a
   ## GPUI gap.
   let rendered =
@@ -189,7 +204,7 @@ proc variableRow(v: store_types.Variable; path: string;
   var children: seq[ViewNode] = @[]
   for c in v.children:
     children.add variableRow(c, path & "." & c.name, budget, expanded)
-  viewTreeNode(path, v.name & " = " & rendered, children,
+  viewTreeNode(path, variableLabel(v.name, rendered), children,
                expanded = path in expanded)
 
 proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
@@ -304,7 +319,12 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
     return
   var cells: seq[seq[string]] = @[]
   for r in rows:
-    cells.add @[$r.eventIndex, r.kind, r.value]
+    # The output's LINE TERMINATOR is not part of the text a cell shows: a
+    # `print` arrives as `2 + 3 = 5\n`, and a cell holding the `\n` draws a
+    # blank line under every event in a medium that honours it (PLAT-40
+    # measured every row of the native window's event log double-spaced).
+    cells.add @[$r.eventIndex, r.kind, r.value.strip(leading = false,
+                                                     chars = {'\n', '\r'})]
   let table = viewTable("eventLog", EventLogColumns, cells)
   let selected = vm.selectedRow.val
   if selected.isSome and selected.get >= 0 and selected.get < cells.len:

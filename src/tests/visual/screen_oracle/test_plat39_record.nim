@@ -27,6 +27,7 @@
 ## honest where the corpus exists.
 
 import std/[json, os, sequtils, sets, strutils, tables, unittest]
+import ./pane_grammar   # `namesAgree`, the comparison rule the live suite uses
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -131,17 +132,23 @@ suite "PLAT-39 record — DIFF-8's filed gaps, as recorded":
   ## quietly staying true.
 
   for scenario in GpuiScenarios:
-    test "GAP 1 — GPUI's state pane does not match the variable-row grammar — " & scenario:
+    test "GAP 1, CLOSED BY PLAT-40 — both renderers' state rows name the same variables — " & scenario:
+      # Filed 2026-09-22 (`name = value`, and wrapping values); closed
+      # 2026-09-23 — see `test_screen_oracle.nim`'s case of the same name.
       let r = parseJson(readFile(recordPath))
-      ck r["gpui"][scenario]["programState"]["kind"].getStr == "unreadable"
-      ck r["gpui"][scenario]["programState"]["reason"].getStr == "grammar-mismatch"
+      ck r["gpui"][scenario]["programState"]["kind"].getStr == "read"
       ck r["electron"][scenario]["programState"]["kind"].getStr == "read"
+      var gn, en: seq[string]
+      for n in r["gpui"][scenario]["programState"]["variableNames"]: gn.add n.getStr
+      for n in r["electron"][scenario]["programState"]["variableNames"]: en.add n.getStr
+      ck min(gn.len, en.len) >= 10
+      ck namesAgree(gn, en)
 
   for scenario in GpuiScenarios:
-    test "GAP 2 — GPUI's event log is a cell stack, not rows — " & scenario:
+    test "GAP 2, CLOSED BY PLAT-40 — both renderers' event log reads as six rows — " & scenario:
       let r = parseJson(readFile(recordPath))
-      ck r["gpui"][scenario]["eventLog"]["kind"].getStr == "unreadable"
-      ck r["gpui"][scenario]["eventLog"]["reason"].getStr == "grammar-mismatch"
+      ck r["gpui"][scenario]["eventLog"]["kind"].getStr == "read"
+      ck r["gpui"][scenario]["eventLog"]["events"].getInt == 6
       ck r["electron"][scenario]["eventLog"]["events"].getInt == 6
 
   for scenario in GpuiScenarios:

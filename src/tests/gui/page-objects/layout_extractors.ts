@@ -1,5 +1,8 @@
 import { EditorTab, EventLogTab, ProgramStateTab, TracePointEditor } from "./layout_page";
+import type { Page } from "@playwright/test";
 import type {
+  CalltraceModel,
+  PointListModel,
   EventDataModel,
   EventLogModel,
   EditorModel,
@@ -113,4 +116,51 @@ export async function extractLayoutPageModel(page: LayoutPage): Promise<LayoutPa
   }
 
   return model;
+}
+
+/**
+ * PLAT-40. The call trace's rows as the desktop drew them: each row's
+ * `.call-text` is `<name> #<index>`, and the model keeps the name.
+ */
+export async function extractCalltraceModel(page: Page): Promise<CalltraceModel> {
+  const texts = await page
+    .locator(".calltrace-view .call-text")
+    .evaluateAll((els) => els.map((e) => (e.textContent ?? "").trim()));
+  return {
+    isVisible: texts.length > 0,
+    calls: texts
+      .map((t) => t.replace(/\s+#\d+\s*$/, "").trim())
+      .filter((name) => name.length > 0)
+      .map((name) => ({ name })),
+  };
+}
+
+/**
+ * PLAT-40. The Breakpoints & Tracepoints pane's rows: kind, and the location's
+ * file BASE name and line (`<path>:<line>`).
+ */
+export async function extractPointListModel(page: Page): Promise<PointListModel> {
+  const rows = await page
+    .locator(".point-list-component .point-list-row")
+    .evaluateAll((els) =>
+      els.map((e) => ({
+        kind: (e.querySelector(".point-list-kind")?.textContent ?? "").trim(),
+        location: (e.querySelector(".point-list-location")?.textContent ?? "").trim(),
+      })),
+    );
+  const visible =
+    (await page.locator(".point-list-component").count()) > 0;
+  return {
+    isVisible: visible,
+    points: rows.map((r) => {
+      const colon = r.location.lastIndexOf(":");
+      const path = colon > 0 ? r.location.slice(0, colon) : r.location;
+      const line = colon > 0 ? parseInt(r.location.slice(colon + 1), 10) : 0;
+      return {
+        kind: r.kind,
+        fileName: path.slice(path.lastIndexOf("/") + 1),
+        lineNumber: Number.isFinite(line) ? line : 0,
+      };
+    }),
+  };
 }

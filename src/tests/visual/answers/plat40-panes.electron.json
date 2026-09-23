@@ -1,0 +1,148 @@
+{
+  "takenAt": "2026-09-23T10:10:26.343Z",
+  "scenario": {
+    "_comment": [
+      "PLAT-40 — the one stop both capture lanes drive the `calc` recording to,",
+      "and the one breakpoint both set, so DIFF-9 compares two front-ends at the",
+      "same state rather than two states. `gpuiOps` is `codetracer-gpui",
+      "--replay-ops`'s spelling; `breakpointLine` is the line its",
+      "`setBreakpoint@35` resolves to (the window's first drawn row is line 1 at",
+      "this stop), which the desktop capture sets by clicking its gutter. Line 36",
+      "is `return left - right` — an executable line, and one both editors have",
+      "on screen at the stop (line 34), where line 6 was scrolled out of the",
+      "desktop's editor. The record asserts the two agree rather than trusting",
+      "this file."
+    ],
+    "recording": "calc",
+    "gpuiOps": "next=3,setBreakpoint@35",
+    "nextSteps": 3,
+    "breakpointFile": "main.py",
+    "breakpointLine": 36
+  },
+  "rrTicks": 4,
+  "settledAfterAttempts": 2,
+  "calltrace": {
+    "isVisible": true,
+    "calls": [
+      {
+        "name": "<__main__>"
+      },
+      {
+        "name": "main"
+      },
+      {
+        "name": "evaluate"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "add"
+      },
+      {
+        "name": "evaluate"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "sub"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "add"
+      },
+      {
+        "name": "evaluate"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "mul"
+      },
+      {
+        "name": "evaluate"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "div"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "sub"
+      },
+      {
+        "name": "evaluate"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "add"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "mul"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "sub"
+      },
+      {
+        "name": "apply_op"
+      },
+      {
+        "name": "div"
+      },
+      {
+        "name": "<end of program>"
+      }
+    ]
+  },
+  "eventLog": {
+    "isVisible": true,
+    "events": [
+      {
+        "consoleOutput": "stdout: 2 + 3 = 5\n"
+      },
+      {
+        "consoleOutput": "stdout: 10 - 4 + 1 = 7\n"
+      },
+      {
+        "consoleOutput": "stdout: 6 * 7 = 42\n"
+      },
+      {
+        "consoleOutput": "stdout: 100 / 5 - 3 = 17\n"
+      },
+      {
+        "consoleOutput": "stdout: 1 + 2 * 3 - 4 / 2 = 2\n"
+      },
+      {
+        "consoleOutput": "stdout: checksum = 73\n"
+      }
+    ],
+    "ofRows": 6,
+    "searchString": ""
+  },
+  "pointList": {
+    "isVisible": true,
+    "points": [
+      {
+        "kind": "breakpoint",
+        "fileName": "main.py",
+        "lineNumber": 36
+      }
+    ]
+  }
+}

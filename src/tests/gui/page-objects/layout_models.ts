@@ -38,6 +38,28 @@ export interface EditorModel {
   tracePointEditorModels: TracePointEditorModel[];
 }
 
+/** PLAT-40. One call-trace row: the call's name. */
+export interface CallRowModel {
+  name: string;
+}
+
+export interface CalltraceModel {
+  isVisible: boolean;
+  calls: CallRowModel[];
+}
+
+/** PLAT-40. One breakpoint/tracepoint row: its kind and its file base name and line. */
+export interface PointRowModel {
+  kind: string;
+  fileName: string;
+  lineNumber: number;
+}
+
+export interface PointListModel {
+  isVisible: boolean;
+  points: PointRowModel[];
+}
+
 export interface LayoutPageModel {
   eventLogTabModels: EventLogModel[];
   editorTabModels: EditorModel[];

@@ -4,7 +4,7 @@
     "reader, and two pixel twins. Regenerate: `just plat42-surfaces-window`",
     "then `just plat42-window-record`. Asserted by test_plat42_window.nim."
   ],
-  "takenAt": "2026-09-23T07:21:59Z",
+  "takenAt": "2026-09-23T09:53:42Z",
   "host": "gpu-server-001",
   "pixelDelta": 16,
   "manifest": [
@@ -33,7 +33,7 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 27
+      "settledAfterS": 33
     },
     {
       "id": "advanced-state",
@@ -42,7 +42,7 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 39
+      "settledAfterS": 42
     },
     {
       "id": "returned-calltrace",
@@ -69,7 +69,7 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 21
+      "settledAfterS": 24
     },
     {
       "id": "noir-flow",

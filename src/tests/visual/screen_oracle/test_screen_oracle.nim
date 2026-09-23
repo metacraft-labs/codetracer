@@ -565,34 +565,43 @@ suite "PLAT-39 DIFF-8 — the same scenario, two renderers, one reader":
         ck r.panes.filterIt(it.id in {piProgramState, piEventLog,
                                       piEditor}).len == 3
 
-  test "FILED GAP 1 — GPUI's state pane does not use the variable-row grammar":
-    # MEASURED: the Electron pane draws `name:value Type` and reads 10
-    # variables. The GPUI pane is located and legible — 10 candidate rows — and
-    # NONE matches, because that renderer separates a name from its value with
-    # ` = ` rather than `:`.
-    # REMEDY: owned by PLAT-40. One renderer must adopt the other's row shape,
-    # or the vocabulary must name the separator so both can draw it.
+  test "GAP 1, CLOSED BY PLAT-40 — both renderers' state rows read with one grammar":
+    # FILED 2026-09-22: the GPUI pane was located and legible — 10 candidate
+    # rows — and NONE matched `name:value`, because the vocabulary spelled a
+    # row `name = value`; and a long value wrapped across the pane.
+    # CLOSED 2026-09-23 by PLAT-40: the vocabulary names its separator once
+    # (`pane_views.VariableLabelSeparator`, the desktop's `: `) and a tree row
+    # is one clipped line (`gpui_binding`). The two readings now name the same
+    # variables, compared by `variableNameKey` (OCR drops edge underscores).
     for s in GpuiScenarios:
       let g = gpuiReading(s)
-      ck g.programState.isUnreadable
-      ck g.programState.reason == urGrammarMismatch
-      ck readingOf(s).programState.isRead
-
-  test "FILED GAP 2 — GPUI's event log is a vertical stack of cells, not rows":
-    # MEASURED: Electron reads 6 events and ofRows=6. GPUI's pane is located
-    # and legible and yields 3 candidate rows that do not match, because the
-    # table is drawn one CELL per line — `#`, `kind`, `value`, then `0`,
-    # `stdout`, `2 + 3 = 5` — rather than one ROW per event. The data is
-    # present and correct; there is no column layout.
-    # REMEDY: owned by PLAT-40/PLAT-41. This is the single highest-value fact
-    # for either, because both are written as though the gap were FEEDING the
-    # panes, and the feed demonstrably works.
-    for s in GpuiScenarios:
-      let g = gpuiReading(s)
-      ck g.eventLog.isUnreadable
-      ck g.eventLog.reason == urGrammarMismatch
       let e = readingOf(s)
+      ck g.programState.isRead
+      ck e.programState.isRead
+      let gn = g.programState.value.variableStates.mapIt(it.name)
+      let en = e.programState.value.variableStates.mapIt(it.name)
+      checkpoint(s & ": gpui " & $gn & " | electron " & $en)
+      ck min(gn.len, en.len) >= 10
+      ck namesAgree(gn, en)
+
+  test "GAP 2, CLOSED BY PLAT-40 — both renderers' event log reads as the same rows":
+    # FILED 2026-09-22: the GPUI table was drawn one CELL per line — `#`,
+    # `kind`, `value`, `0`, `stdout`, … — so no row matched.
+    # CLOSED 2026-09-23 by PLAT-40: a table row is a flex row
+    # (`gpui_binding.tableColumnWidthsPx`). Six rows on each renderer, the same
+    # text row for row within OCR's one edit.
+    for s in GpuiScenarios:
+      let g = gpuiReading(s)
+      let e = readingOf(s)
+      ck g.eventLog.isRead
+      ck e.eventLog.isRead
+      ck g.eventLog.value.events.len == 6
       ck e.eventLog.value.events.len == 6
+      for i in 0 ..< min(g.eventLog.value.events.len, e.eventLog.value.events.len):
+        let gt = compactText(eventText(g.eventLog.value.events[i].consoleOutput))
+        let et = compactText(eventText(e.eventLog.value.events[i].consoleOutput))
+        checkpoint(s & " row " & $i & ": " & gt & " | " & et)
+        ck withinOneEdit(gt, et)
 
   test "GAP 3, CLOSED BY PLAT-42 — both renderers' execution line reads the same":
     # FILED 2026-09-22: the GPUI editor read cleanly and reported -1 — it drew
@@ -672,7 +681,7 @@ suite "PLAT-39 DIFF-8 — the same scenario, two renderers, one reader":
     ck classifyTitle("Evgnx") != piEventLog
     # And a title that is genuinely another pane is claimed by that pane rather
     # than falling to the nearest of the three we care about.
-    ck classifyTitle("Call Trace") == piOther
+    ck classifyTitle("Call Trace") == piCalltrace
     ck classifyTitle("Tests") == piOther
     # And the measured OCR errors are INSIDE the tolerance, which is the other
     # half of the claim: a tolerance no real error fits is decoration.

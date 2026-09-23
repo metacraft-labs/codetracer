@@ -18,7 +18,8 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 from ../viewmodel/store/types as vm_types import nil
 from ../viewmodel/store/replay_data_store import
   ReplayDataStore, createReplayDataStore, updateCalltraceSection,
-  updateDebuggerPosition, makeCallLine, makeCallArg, requestCalltraceSection
+  updateDebuggerPosition, makeCallArg, requestCalltraceSection,
+  CallLineWire, callLineOf
 from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
@@ -463,32 +464,23 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       continue
     let call = callLine.content.call
     let loc = call.location
-    # Determine children count and expand state matching the legacy call-line
-    # semantics now mirrored by the IsoNim calltrace view.
-    let childrenCount = callLine.content.count
-    let hiddenChildren = callLine.content.hiddenChildren
-    let count = if childrenCount > 0: childrenCount else: call.children.len
-    let lineHasChildren = count > 0
-    # A call is shown as expanded (collapse toggle visible) when it has
-    # children that are not hidden, or when the call itself has loaded
-    # children (call.children.len > 0).
-    let lineIsExpanded = lineHasChildren and (not hiddenChildren or call.children.len > 0)
-    var cl = makeCallLine(
-      name = $loc.highLevelFunctionName,
-      depth = callLine.depth,
-      rrTicks = cast[uint64](loc.rrTicks),
-      file = $loc.highLevelPath,
-      line = loc.highLevelLine,
-      sourceGeneration = loc.sourceGeneration,
-      sourceDigest = $loc.sourceDigest,
-      codeGeneration = loc.sourceGeneration,
-      callstackDepth = loc.callstackDepth,
-      hasChildren = lineHasChildren,
-      isExpanded = lineIsExpanded,
-      callKey = $call.key,
-    )
-    cl.index = backendStartIndex + i.int64
-    vmLines.add(cl)
+    # THE STORE DECIDES WHAT THE ROW SAYS (`callLineOf`), exactly as it does
+    # for the terminal and the native window, which decode the same response
+    # from its JSON. This side only copies the typed fields across.
+    vmLines.add callLineOf(CallLineWire(
+      rawName: $call.rawName,
+      highLevelFunctionName: $loc.highLevelFunctionName,
+      path: $loc.path, line: loc.line,
+      highLevelPath: $loc.highLevelPath, highLevelLine: loc.highLevelLine,
+      rrTicks: cast[uint64](loc.rrTicks),
+      depth: callLine.depth,
+      sourceGeneration: loc.sourceGeneration,
+      sourceDigest: $loc.sourceDigest,
+      callstackDepth: loc.callstackDepth,
+      count: callLine.content.count,
+      hiddenChildren: callLine.content.hiddenChildren,
+      loadedChildren: call.children.len,
+      callKey: $call.key), backendStartIndex + i.int64)
   # Mirror the backend's startCallLineIndex into the store so that the
   # visibleLines memo can correctly slice based on the global index.
   # Without this, after a calltrace-jump (search-result click) the
