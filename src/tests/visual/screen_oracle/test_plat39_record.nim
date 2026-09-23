@@ -145,11 +145,14 @@ suite "PLAT-39 record — DIFF-8's filed gaps, as recorded":
       ck r["electron"][scenario]["eventLog"]["events"].getInt == 6
 
   for scenario in GpuiScenarios:
-    test "GAP 3 — GPUI draws no execution-line highlight — " & scenario:
+    test "GAP 3, CLOSED BY PLAT-42 — GPUI's execution line reads as Electron's — " & scenario:
+      # Filed 2026-09-22 as `-1` (no band drawn); closed 2026-09-23 — see
+      # `test_screen_oracle.nim`'s case of the same name.
       let r = parseJson(readFile(recordPath))
       ck r["gpui"][scenario]["editor"]["kind"].getStr == "read"
-      ck r["gpui"][scenario]["editor"]["highlightedLine"].getInt == -1
-      ck r["electron"][scenario]["editor"]["highlightedLine"].getInt > 0
+      ck r["gpui"][scenario]["editor"]["highlightedLine"].getInt > 0
+      ck r["gpui"][scenario]["editor"]["highlightedLine"].getInt ==
+         r["electron"][scenario]["editor"]["highlightedLine"].getInt
 
   test "GAP 4 — the GPUI capture ignores the scenario's declared viewport":
     let r = parseJson(readFile(recordPath))

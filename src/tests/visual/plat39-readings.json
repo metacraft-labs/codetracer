@@ -20,7 +20,7 @@
     "does catch is a recorded pixel-derived value disagreeing with the",
     "committed DOM-derived answers, and those two share no code."
   ],
-  "takenAt": "2026-09-22T19:02:35Z",
+  "takenAt": "2026-09-23T07:16:00Z",
   "host": "gpu-server-001",
   "expectedScenarios": 6,
   "expectedGpuiScenarios": 2,
@@ -31,8 +31,8 @@
     "electron/returned-calltrace": "53B1883B070C1BCA944D2135E0A7B6291F0B168E",
     "electron/continued-event-log": "903B27B75B7F96D7A03BC2FBE9DE520366264AC8",
     "electron/breakpoint-editor": "34EA6FAEF1526089840BACE4784F53D6CCA9F075",
-    "gpui/stepped-editor": "584DC97B7E0155A1C3DF31B08A741A28C6C1E01E",
-    "gpui/advanced-state": "490E24B450DE564938A5C059CC88C072DEECDF2F"
+    "gpui/stepped-editor": "2295EB8FEBDBC85448A8B688A2555853AB2A003F",
+    "gpui/advanced-state": "3DA6368123EB6FA5FED76F0EAE8B005FFDC8700F"
   },
   "electron": {
     "entry-shell": {
@@ -214,7 +214,7 @@
       },
       "editor": {
         "kind": "read",
-        "highlightedLine": -1
+        "highlightedLine": 44
       }
     },
     "advanced-state": {
@@ -230,7 +230,7 @@
       },
       "editor": {
         "kind": "read",
-        "highlightedLine": -1
+        "highlightedLine": 56
       }
     }
   }

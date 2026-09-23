@@ -115,6 +115,16 @@ ARMS = [
         "matching the capture's stoppedLine on all six scenarios.",
     ),
     (
+        "R5-b", "LAW-R5",
+        f"{ORACLE}/vision_producer.nim",
+        "  MinGutterGapPx = 14",
+        "  MinGutterGapPx = 400",
+        "the execution band is never split into clusters, so the gutter crop "
+        "always runs into the code and no renderer's gutter parses; the pointer "
+        "stops being read on both renderers and 'GAP 3, CLOSED BY PLAT-42' "
+        "fails. (PLAT-42's cluster rule, added 2026-09-23.)",
+    ),
+    (
         "TITLE-a", "the title classifier",
         f"{ORACLE}/vision_producer.nim",
         "  if bestDist <= TitleMatchTolerance and bestDist < runnerUp:",

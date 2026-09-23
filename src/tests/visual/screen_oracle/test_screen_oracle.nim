@@ -594,17 +594,24 @@ suite "PLAT-39 DIFF-8 — the same scenario, two renderers, one reader":
       let e = readingOf(s)
       ck e.eventLog.value.events.len == 6
 
-  test "FILED GAP 3 — GPUI draws no execution-line highlight":
-    # MEASURED: the GPUI editor pane reads cleanly and reports -1, which is the
-    # value the DOM producer also uses for "no highlighted line". Electron
-    # reports 44 and 56 for the same two scenarios. So this is not a failure to
-    # read: it is a pane that genuinely draws no execution line.
-    # REMEDY: owned by PLAT-42.
+  test "GAP 3, CLOSED BY PLAT-42 — both renderers' execution line reads the same":
+    # FILED 2026-09-22: the GPUI editor read cleanly and reported -1 — it drew
+    # no execution-line band — while Electron reported 44 and 56.
+    # CLOSED 2026-09-23 by PLAT-42: GPUI draws the execution row's band
+    # (`gpui/app/leaves.ExecutionRowBand`, the desktop editor's `ON_BG_COLOR`)
+    # and its gutter as `<pointer><mark><number>` with a gap before the code,
+    # and this reader splits the band into ink clusters instead of cropping a
+    # fixed `cell.w div 6`. The captures were re-taken with the shipped binary
+    # by `ci/test/plat42-surfaces-window.sh` (its `stepped-editor` and
+    # `advanced-state` frames, as PNG). Now the two renderers are read to the
+    # SAME line, from pixels, with no shared constant — and the Electron
+    # readings are byte-identical before and after the reader change.
     for s in GpuiScenarios:
       let g = gpuiReading(s)
       ck g.editor.isRead
-      ck g.editor.value.higlitedLineNumber == -1
-      ck readingOf(s).editor.value.higlitedLineNumber > 0
+      ck g.editor.value.higlitedLineNumber > 0
+      ck g.editor.value.higlitedLineNumber ==
+         readingOf(s).editor.value.higlitedLineNumber
 
   test "FILED GAP 4 — the GPUI capture ignores the scenario's declared viewport":
     # MEASURED: `advanced-state` declares viewport `laptop` (1440x900) and its

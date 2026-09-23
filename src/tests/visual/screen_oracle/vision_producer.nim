@@ -98,7 +98,7 @@ proc writePgm*(img: GrayImage, path: string) =
     discard f.writeBuffer(unsafeAddr img.pixels[0], img.pixels.len)
 
 proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
-                psm = 6): seq[OcrWord] =
+                psm = 6, upscale = 1.0): seq[OcrWord] =
   ## OCR one region. Returns every word, INCLUDING low-confidence ones — see
   ## `pane_grammar.OcrConfidenceFloor` for why the floor is applied to the
   ## region rather than to each word.
@@ -108,7 +108,7 @@ proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
                         $r.w & "x" & $r.h & ".pgm")
   writePgm(sub, path)
   try:
-    result = runOcrEx(path, initOcrOptions(psm = psm))
+    result = runOcrEx(path, initOcrOptions(psm = psm, upscale = upscale))
   except CatchableError:
     result = @[]
   finally:
@@ -374,6 +374,99 @@ proc readEventLog*(img: GrayImage, cell: Rect,
       EventLogGrammar.shape)
   read(model)
 
+const
+  MinGutterGapPx = 14
+    ## A run of background at least this wide separates two ink CLUSTERS in
+    ## the band. Wider than one character cell of either front-end's gutter
+    ## face (~9 px), so a number is never split across clusters.
+  MaxGutterClusters = 3
+    ## Electron's gutter is two clusters (the arrow, ~30 px left of the
+    ## number, then the number); GPUI's is one (`▶ 44`). A third covers a
+    ## mark drawn in its own lane.
+
+proc inkClusters*(img: GrayImage; cell: Rect; band: GutterRun): seq[(int, int)] =
+  ## The band's ink, left to right, as `[first, last]` column spans separated
+  ## by at least `MinGutterGapPx` of the band's own background.
+  let x0 = cell.x + 2
+  let x1 = min(img.width, cell.x + cell.w div 2)
+  if x1 <= x0 or band.last < band.first: return
+  var hist: array[256, int]
+  for y in band.first .. band.last:
+    for x in x0 ..< x1:
+      inc hist[int(img.pixels[y * img.width + x])]
+  var bg = 0
+  for v in 1 .. 255:
+    if hist[v] > hist[bg]: bg = v
+  proc inkAt(x: int): bool =
+    for y in band.first .. band.last:
+      if abs(int(img.pixels[y * img.width + x]) - bg) > 40: return true
+    false
+  var start = -1
+  var lastInk = -1
+  for x in x0 ..< x1:
+    if inkAt(x):
+      if start < 0: start = x
+      elif x - lastInk > MinGutterGapPx:
+        result.add (start, lastInk)
+        start = x
+      lastInk = x
+  if start >= 0: result.add (start, lastInk)
+
+proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
+                       scratch: string):
+    tuple[ok: bool, line: int, text: string, right: int] =
+  ## The gutter number of the row in `band` — the execution row's, when the
+  ## editor reader calls it; any row's, for a record that reads rows — and the
+  ## x the gutter cell it read ends at.
+  ##
+  ## PLAT-42, 2026-09-23. The crop was a fixed `cell.w div 6` — Electron's
+  ## gutter on Electron's panes. GPUI's editor pane is 276 px wide at
+  ## 1440x900, so the crop was 46 px: it cut `113` to `1]`, and — worse — cut
+  ## `44` to `4`, a WRONG reading the grammar accepts. (Read at 1x: a 2x
+  ## upscale was tried and read `» 110` as `p» 110`, which the grammar
+  ## rightly rejects.) So the gutter is read
+  ## by whole ink clusters: the shortest prefix of the band's clusters (up to
+  ## `MaxGutterClusters`) that parses as `EditorGrammar`. A cluster is bounded
+  ## by a gap wider than a character, so no prefix can end mid-number. When no
+  ## prefix parses the reading is unreadable — see the note at the end.
+  let clusters = inkClusters(img, cell, band)
+  # THREE READINGS, TRIED IN ORDER, each measured, each asked only when the
+  # ones before it read nothing the grammar accepts:
+  #   1. a 2 px margin at 1x — reads Electron's 22 px band and nearly every
+  #      GPUI row;
+  #   2. a third of the band's height at 1x — GPUI's last visible row,
+  #      clipped to 18 px by the pane's edge, read `-'1"1'0` with 2 px and
+  #      `» 110` with this;
+  #   3. the 2 px margin at 2x — the same clipped row at another stop read
+  #      `b.'l.'i'i` both ways at 1x and `» 113` at 2x.
+  # The order is part of the rule: the proportional margin tried FIRST read
+  # Electron's `44` as `4`, and 2x tried first read `» 110` as `p» 110`.
+  let pad = 2
+  let tall = max(pad, (band.last - band.first + 1) div 3)
+  for (margin, upscale) in [(pad, 1.0), (tall, 1.0), (pad, 2.0)]:
+    for k in 1 .. min(MaxGutterClusters, clusters.len):
+      let crop = Rect(x: cell.x, y: band.first - margin,
+                      w: clusters[k - 1][1] - cell.x + 3,
+                      h: band.last - band.first + 1 + 2 * margin)
+      let words = ocrRegion(img, crop, scratch, psm = 7, upscale = upscale)
+      if words.len == 0: continue
+      let text = words.mapIt(it.text).join(" ")
+      let parsed = parseGutterDigits(text)
+      if parsed.ok: return (true, parsed.line, text, crop.x + crop.w)
+  # NO FIXED-WIDTH FALLBACK. It existed until the cluster rule was verified
+  # on PLAT-39's own Electron corpus (all six read through clusters, the
+  # record unchanged), and it was measured to be dangerous: on a GPUI frame
+  # whose clusters did not parse it cropped `44` to `4` and returned a WRONG
+  # line the grammar accepts. A band nothing reads is unreadable, by name.
+  var shown = ""
+  if clusters.len > 0:
+    let crop = Rect(x: cell.x, y: band.first - pad,
+                    w: clusters[min(MaxGutterClusters, clusters.len) - 1][1] -
+                       cell.x + 3,
+                    h: band.last - band.first + 1 + 2 * pad)
+    shown = ocrRegion(img, crop, scratch, psm = 7).mapIt(it.text).join(" ")
+  (false, -1, shown, -1)
+
 proc readEditor*(img: GrayImage, cell: Rect,
                  scratch: string): ScreenReading[EditorModel] =
   ## **THE HIGHLIGHTED ROW IS FOUND GEOMETRICALLY, THEN ITS GUTTER IS OCR'd.**
@@ -417,17 +510,13 @@ proc readEditor*(img: GrayImage, cell: Rect,
   var best = runs[0]
   for r in runs:
     if r.last - r.first > best.last - best.first: best = r
-  let gutter = Rect(x: cell.x, y: best.first - 2,
-                    w: max(40, cell.w div 6), h: best.last - best.first + 5)
-  let words = ocrRegion(img, gutter, scratch, psm = 7)
-  if words.len == 0:
+  let parsed = readGutterDigits(img, cell, best, scratch)
+  if parsed.text.len == 0:
     return unreadable[EditorModel](urNoWordAboveFloor,
       "highlighted row located at y=" & $best.first & " but its gutter OCR'd empty")
-  let text = words.mapIt(it.text).join(" ")
-  let parsed = parseGutterDigits(text)
   if not parsed.ok:
     return unreadable[EditorModel](urGrammarMismatch,
-      "gutter cell read as " & text.escape & ", which is not " &
+      "gutter cell read as " & parsed.text.escape & ", which is not " &
       EditorGrammar.shape)
   model.higlitedLineNumber = parsed.line
   read(model)
