@@ -73,9 +73,11 @@ import ./keymap/editing_keymap
 import ./keymap/product_keymap
 import ./keymap/vim_keymap
 import ./keymap/kakoune_keymap
+import ./keymap/keymap_selection
 
 export editor_state, selection, wrap
 export editing_keymap, product_keymap, vim_keymap, kakoune_keymap
+export keymap_selection
 
 # `Annotation` IS WITHHELD, and the reason is a name collision rather than a
 # boundary. `operations` re-exports `editor/transaction`, whose `Annotation` is
@@ -155,6 +157,30 @@ func terminalWrapSettings*(): WrapSettings =
   ## the one thing a debugger's source column may not do.
   WrapSettings(wrapColumn: 0, policy: DefaultColumnPolicy)
 
+func initialModeFor*(model: KeymapModel): EditingMode =
+  ## The mode a document opens in under `model` — see `initEditingDocument` on
+  ## why it is the model's to decide. One `case`, total over the enum, used by
+  ## both the constructor and `switchModel`.
+  case model
+  of kmProductDefault: emInsert
+  of kmVim, kmKakoune: emNormal
+
+proc switchModel*(d: var EditingDocument; model: KeymapModel) =
+  ## PLAT-43. Re-key an OPEN document to `model`.
+  ##
+  ## The text, the selection, the registers, the marks, the undo history and
+  ## the last change are the DOCUMENT and are kept. What belongs to the old
+  ## model's grammar is reset: the mode (to the new model's opening mode, as
+  ## `initEditingDocument` would choose it), a pending count, a pending
+  ## operator, a half-typed chord and a macro being recorded — a Vim `d`
+  ## waiting for its motion must not be completed by a Kakoune key.
+  d.model = model
+  d.state.mode = initialModeFor(model)
+  d.state.count = 0
+  d.state.pendingOperator = ""
+  d.state.pending = PendingChords()
+  d.state.recording = ""
+
 proc initEditingDocument*(path, text: string;
                           model = kmProductDefault;
                           settings = terminalWrapSettings();
@@ -176,10 +202,7 @@ proc initEditingDocument*(path, text: string;
     model: model,
     settings: settings,
     viewportRows: max(1, viewportRows))
-  result.state.mode =
-    case model
-    of kmProductDefault: emInsert
-    of kmVim, kmKakoune: emNormal
+  result.state.mode = initialModeFor(model)
 
 proc keymapOf*(model: KeymapModel): KeymapDefinition =
   ## The three shipped models, by name. **ONE `case`, and it is total over the
@@ -226,6 +249,28 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
       if d.state.doc != docBefore: eoChanged else: eoMoved
   KeyApplication(outcome: outcome, operations: step.operations,
                  resolution: step.kind, timedOut: step.timedOut)
+
+func editScopeOf*(d: EditingDocument): EditingScope =
+  ## **THE SCOPE A FRONT-END'S EDITOR PANE RESOLVES KEYS IN**, for a focused
+  ## editor in Edit product mode — one rule for every front-end (PLAT-44: the
+  ## terminal and GPUI both call this; §30b).
+  ##
+  ## `textEntry` follows the document's MODE: a printable key stands for
+  ## itself exactly in insert mode, whichever model put the document there.
+  ## PLAT-43 measured the alternative: the terminal passed `true`
+  ## unconditionally, and under Vim in normal mode `d` `w` typed `dw`.
+  EditingScope(model: d.model, product: pmEdit, pane: epEditor,
+               mode: d.state.mode, textEntry: d.state.mode == emInsert)
+
+proc claimsKey*(d: EditingDocument; scope: EditingScope; key: string;
+                nowMs: int64): bool =
+  ## PLAT-43. Would `applyKey` treat `key` as the editor's? The same resolver,
+  ## asked without executing: `erNothing` is the one answer that hands the key
+  ## back to the product keymap, exactly as `applyKey` reads it.
+  if key.len == 0:
+    return false
+  editing_keymap.resolveKey(d.state, keymapOf(d.model).keymap, scope, key,
+                            nowMs).kind != erNothing
 
 proc applyNamed*(d: var EditingDocument; name: string; args: OpArgs;
                  nowMs: int64): EditingOutcome =

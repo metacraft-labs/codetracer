@@ -538,19 +538,44 @@ PLAT-42)
 	MILESTONE="** PLAT-42: The four debugger surfaces under GPUI"
 	SUITES=(
 		src/frontend/gpui/tests/test_plat42_surfaces.nim
+		src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim
 	)
-	# PORTABLE: the suite reads two committed JSON files — a record of the
+	# PORTABLE: the first suite reads two committed JSON files — a record of the
 	# SHIPPED binary's render plan (`plat42-surfaces.json`, written by
 	# `ci/test/plat42_surfaces_record.py`) and the Electron answers — and
 	# imports nothing that needs a compositor, a shim or a trace. So it runs in
 	# this lane with no flags and no deferral, which is PLAT-37/38/39's
-	# measure-locally-commit-the-measurement arrangement.
-	SUITE_FLAGS=()
+	# measure-locally-commit-the-measurement arrangement. The second is the flow
+	# overlay's per-line rule over a committed capture, pure, and needs only the
+	# ViewModel path. The terminal's half of the flow overlay
+	# (`tui/tests/test_plat42_flow_overlay_terminal.nim`) needs a replay-server
+	# and a recording, so it lives in the `tui` lane and is not counted here.
+	SUITE_FLAGS=("" "--path:src/frontend/viewmodel")
+	LAW_SUITES=()
+	;;
+PLAT-43)
+	MILESTONE="** PLAT-43: A keymap selector"
+	SUITES=(
+		src/frontend/tui/tests/test_plat43_keymap_selector.nim
+		src/frontend/tui/tests/test_plat43_selector_sources.nim
+	)
+	# The Tier-1 suite: the partition law, refusal by name (typed and stored),
+	# `:keymap` through the runtime's prompt, the preference on a real
+	# directory, and DIFF-12 over PLAT-31's 38 divergent tasks x 2 models x 18
+	# corpus documents. The pty half (`real_terminal/test_real_keymap_selector
+	# .nim`) needs the shipped binary and lives in `tui-real-terminal`; it is
+	# not counted here. The `tui` lane's flags, read rather than spelled (§30).
+	# The source-fact suite reads files only and takes no flags.
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)" "")
 	LAW_SUITES=()
 	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-42. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-43. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

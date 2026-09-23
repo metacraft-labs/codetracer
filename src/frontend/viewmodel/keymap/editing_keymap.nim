@@ -599,6 +599,24 @@ type
     kind*: EditingResolutionKind
     timedOut*: bool
 
+proc resolveKey*(st: EditorState; km: EditingKeymap; scope: EditingScope;
+                 key: string; nowMs: int64): EditingResolution =
+  ## What `key` WOULD resolve to against `st`, with no effect — the first
+  ## half of `applyKey`, which calls this. PLAT-43 needed the answer without
+  ## the execution: a front-end deciding whether a key belongs to the editor
+  ## at all must ask the same resolver that will then run it, or the two
+  ## disagree about the key the moment a model binds something the front-end's
+  ## own list does not name (Vim's `Esc`, Kakoune's `Ctrl+x`).
+  ##
+  ## The scope's EDITING MODE is re-read from the state here rather than taken
+  ## from `scope`, so a caller cannot hand a stale mode in: a chord that
+  ## entered insert mode changes which trie the NEXT chord resolves through,
+  ## and that is the entire reason the mode is state rather than a resolver
+  ## argument.
+  var sc = scope
+  sc.mode = st.mode
+  resolve(trieFor(km, sc), st, sc, key, nowMs)
+
 proc applyKey*(st: EditorState; km: EditingKeymap; scope: EditingScope;
                key: string; settings: WrapSettings; nowMs: int64;
                viewportRows = 20): KeyStep =
@@ -614,15 +632,8 @@ proc applyKey*(st: EditorState; km: EditingKeymap; scope: EditingScope;
   ## fold it — and it is the only one in which the rule and its two callers
   ## cannot disagree.
   ##
-  ## The scope's EDITING MODE is re-read from the state here rather than taken
-  ## from `scope`, so a caller cannot hand a stale mode in: a chord that
-  ## entered insert mode changes which trie the NEXT chord resolves through,
-  ## and that is the entire reason the mode is state rather than a resolver
-  ## argument.
-  var sc = scope
-  sc.mode = st.mode
-  let t = trieFor(km, sc)
-  let res = resolve(t, st, sc, key, nowMs)
+  ## The resolution is `resolveKey`'s — see there for the mode re-read.
+  let res = resolveKey(st, km, scope, key, nowMs)
   let (next, ops) = applyResolution(st, res, settings, nowMs, viewportRows)
   KeyStep(state: next, operations: ops, kind: res.kind, timedOut: res.timedOut)
 

@@ -169,6 +169,11 @@ type
       ## about a file's mtime.
     staleNoticeShown*: bool
       ## §2.1: the user is told *"once"*. This is the once.
+    model*: KeymapModel
+      ## PLAT-43. The keymap model every buffer of this session resolves keys
+      ## through — the one `:keymap <name>` selected, or the stored preference
+      ## the host loaded. A SESSION field and not only a per-document one, so a
+      ## file opened after the choice is opened under it.
     furnished*: bool
       ## Whether `runtime.ensureEditWorkspace` has already walked the project
       ## for this session.
@@ -339,10 +344,27 @@ proc editingScope*(buf: EditBuffer): EditingScope =
   ## §1.2 refuses to collapse the product mode into the pane mode, and the
   ## pane's NORMAL/COMMAND/SEARCH are navigation modes over PANES. A
   ## document opened under the Vim or Kakoune model opens in `emNormal` and
-  ## `editing_core.initEditingDocument` is what decides that; this flag is
-  ## about whether the medium is a text field, which it is.
-  EditingScope(model: buf.doc.model, product: pmEdit, pane: epEditor,
-               mode: buf.doc.state.mode, textEntry: true)
+  ## `editing_core.initEditingDocument` is what decides that.
+  ##
+  ## **`textEntry` FOLLOWS THE DOCUMENT'S MODE, and until PLAT-43 it was
+  ## `true` unconditionally.** That was right while the product default was
+  ## the only model a key could reach — it opens and stays in `emInsert` — and
+  ## it made the other two unusable the moment a selector reached them: under
+  ## Vim in normal mode `d` `w` typed `dw` into the buffer instead of deleting
+  ## a word, because the resolver's text-entry shadow answers a printable key
+  ## with itself before the trie is consulted. Measured on the first run of
+  ## `test_plat43_keymap_selector.nim`: Vim's `u` inserted a `u`, and all 38 of
+  ## PLAT-31's divergent tasks produced identical documents under Vim and
+  ## Kakoune. A printable key stands for itself exactly when the document is
+  ## in insert mode, whichever model put it there.
+  ##
+  ## The rule itself is `editing_core.editScopeOf`, shared with GPUI.
+  editScopeOf(buf.doc)
+
+proc claimsEditKey*(buf: EditBuffer; key: string; nowMs: int64): bool =
+  ## PLAT-43. Whether this buffer's model binds `key` in its current state —
+  ## `editing_core.claimsKey` under this front-end's scope.
+  not buf.isNil and buf.doc.claimsKey(buf.editingScope, key, nowMs)
 
 proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
   ## One canonical key name (`key_names.keyName`'s vocabulary) applied to the
@@ -393,9 +415,19 @@ proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
 # The session
 # ---------------------------------------------------------------------------
 
-proc newEditSession*(): EditSession =
+proc newEditSession*(model = kmProductDefault): EditSession =
   EditSession(buffers: @[], active: NoBuffer, points: @[], editedPaths: @[],
-              staleNoticeShown: false, furnished: false)
+              staleNoticeShown: false, furnished: false, model: model)
+
+proc selectModel*(s: EditSession; model: KeymapModel) =
+  ## PLAT-43. Make `model` this session's keymap: every OPEN buffer is re-keyed
+  ## through `editing_core.switchModel` (text and history kept) and every
+  ## buffer opened later opens under it.
+  if s.isNil:
+    return
+  s.model = model
+  for buf in s.buffers:
+    buf.doc.switchModel(model)
 
 proc activeBuffer*(s: EditSession): EditBuffer =
   if s.isNil or s.active < 0 or s.active >= s.buffers.len: nil
@@ -422,7 +454,7 @@ proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
   if existing >= 0:
     s.active = existing
     return existing
-  s.buffers.add newEditBuffer(path, text, viewportHeight)
+  s.buffers.add newEditBuffer(path, text, viewportHeight, s.model)
   s.active = s.buffers.high
   s.active
 

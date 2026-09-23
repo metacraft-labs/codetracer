@@ -38,6 +38,8 @@
 
 import std/strutils
 
+import codetracer_embed   # PLAT-43: `KeymapModel`, `selectKeymap`
+
 import ./commands/interpreter
 import ./edit_binding
 import ./input/keymap
@@ -108,6 +110,11 @@ type
       ## (`ensureEditWorkspace`), two suppliers, no branch in the consumer.
     startBuild*: proc(kind: BuildKind; command: string): BuildStartResult
       {.closure.}
+    saveKeymap*: proc(model: KeymapModel): string {.closure.}
+      ## PLAT-43. Remember the chosen keymap model for the next session; ""
+      ## on success, else a one-line message naming the path. Nil in a session
+      ## whose host keeps no state — the choice then holds for this session
+      ## only, and `:keymap` says so.
       ## Starts a build and takes ownership of the process. The SESSION it
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
@@ -170,6 +177,15 @@ type
       ## and wrote to another would silently keep two arrangements for one
       ## recording. `host/layout_store.nim` is what fills it, and it is the only
       ## thing in this front-end that touches a file for this purpose.
+    keymapModel*: KeymapModel
+      ## PLAT-43. The keymap model a NEW edit session starts under: the stored
+      ## preference the host loaded, or the last `:keymap` choice. The product
+      ## default until a host says otherwise.
+    keymapNotice*: string
+      ## PLAT-43. A stored keymap preference the host REFUSED, by name, to be
+      ## shown when Edit mode is furnished — where it wins the status line over
+      ## `editing … — N file(s)`, which would otherwise overwrite it within the
+      ## same frame (measured by the pty suite's first run). Shown once.
     editServices*: EditServices
       ## PLAT-16. The HOST's three filesystem/process capabilities, injected.
       ##
@@ -474,6 +490,34 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     let verb = if words.len > 0: words[0] else: ""
     let rest = if words.len > 1: text[text.find(words[1]) .. ^1] else: ""
     case verb
+    of "keymap":
+      # PLAT-43. The keymap selector. The NAME is decided by
+      # `keymap_selection.selectKeymap` and nowhere else — the same function
+      # the stored preference goes through — so an unknown model is refused
+      # by name with the accepted set rather than silently defaulted.
+      let current =
+        if rt.app.editSession.isNil: rt.keymapModel
+        else: rt.app.editSession.model
+      if rest.len == 0:
+        rt.note("keymap " & $current & "; the accepted values are " &
+                acceptedKeymapNamesText())
+      else:
+        let selection = selectKeymap(rest)
+        if not selection.ok:
+          rt.note(selection.refusal)
+        else:
+          if rt.app.editSession.isNil:
+            rt.app.editSession = newEditSession(selection.model)
+          rt.app.editSession.selectModel(selection.model)
+          rt.keymapModel = selection.model
+          let saved =
+            if rt.editServices.saveKeymap.isNil:
+              "not remembered: this session keeps no state"
+            else: rt.editServices.saveKeymap(selection.model)
+          rt.note("keymap " & $selection.model &
+                  (if saved.len == 0: "" else: " (" & saved & ")"))
+      outcome.detail = rt.app.notification
+      return
     of "w", "write":
       let buf = if rt.app.editSession.isNil: nil
                 else: rt.app.editSession.activeBuffer()
@@ -515,7 +559,7 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         let opened = rt.editServices.readFile(rest)
         if opened.ok:
           if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession()
+            rt.app.editSession = newEditSession(rt.keymapModel)
           discard rt.app.editSession.openFile(
             rest, opened.text, max(1, rt.sourcePaneRows()))
           rt.app.fileTree.openPath = rest
@@ -675,6 +719,14 @@ const EditorOwnedKeys* = [
   ## the buffer can do it, nothing routes it — so the day an INSERT input mode
   ## exists the behaviour is already there rather than needing to be written.
 
+const EditorEscapeKeys* = ["Tab", "Shift+Tab"]
+  ## The keys the editor NEVER owns, whatever a model binds — `EditorOwnedKeys`'
+  ## header gives the reason: a user needs one chord guaranteed to move focus
+  ## off the editor. Named separately because PLAT-43's resolver clause below
+  ## would otherwise hand `Tab` to the product default's `indent` binding —
+  ## measured: the pty suite's first run typed an indent where it meant to
+  ## leave the editor, and never reached the prompt.
+
 proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
   ## Whether this token is text for the open buffer rather than a command.
   ##
@@ -694,7 +746,15 @@ proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
   let name = keyName(token)
   if name.len == 0:
     return false
-  name in EditorOwnedKeys or isTextKey(name)
+  # PLAT-43: OR THE ACTIVE MODEL BINDS IT. `EditorOwnedKeys` is the product
+  # default's non-printable set; a Vim buffer needs `Esc` and a Kakoune one
+  # `Ctrl+x`, and a fixed list would hand those to the debugger's keymap. The
+  # model's own resolver is asked — the one `applyEditKey` then runs — so the
+  # two cannot disagree about whose key it is.
+  if name in EditorEscapeKeys:
+    return false
+  name in EditorOwnedKeys or isTextKey(name) or
+    rt.app.editSession.activeBuffer().claimsEditKey(name, 0)
 
 proc routeTokenToEditor*(rt: TuiRuntime; token: string;
                          nowMs: int64): EditKeyOutcome =
@@ -769,7 +829,7 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
   if rt.isNil or rt.app.isNil:
     return ""
   if rt.app.editSession.isNil:
-    rt.app.editSession = newEditSession()
+    rt.app.editSession = newEditSession(rt.keymapModel)
   if rt.app.editSession.furnished or rt.editServices.listFiles.isNil:
     return ""
   rt.app.editSession.furnished = true
@@ -791,6 +851,12 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
     discard rt.app.editSession.openFile(listing.files[0], first.text,
                                         max(1, rt.sourcePaneRows()))
     rt.app.fileTree.openPath = listing.files[0]
+    # A REFUSED KEYMAP PREFERENCE WINS TOO, on the same rule: the session is
+    # running a model the user did not choose, and "editing …" reads as if
+    # it were.
+    if rt.keymapNotice.len > 0:
+      result = rt.keymapNotice
+      rt.keymapNotice = ""
   else:
     # THE REFUSAL WINS THE STATUS LINE. A user who arrived in Edit mode and got
     # an empty pane must be told why; "editing … — 12 file(s)" over an empty

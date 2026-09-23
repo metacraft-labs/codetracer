@@ -92,14 +92,15 @@
 import std/[os, strutils]
 
 import ../app/runtime
+import ../../viewmodel/host/native_state
 
 export LayoutRestoreStatus, LayoutRestoreReport, LayoutPersistIntent
 
 const
-  LayoutDirEnvVar* = "CODETRACER_TUI_LAYOUT_DIR"
+  LayoutDirEnvVar* = NativeStateDirEnvVar
     ## Overrides the whole state root. See the module header.
 
-  StateHomeEnvVar* = "XDG_STATE_HOME"
+  StateHomeEnvVar* = NativeStateHomeEnvVar
 
   LayoutDocumentTempSuffix* = ".new"
 
@@ -129,14 +130,10 @@ type
       ## and they are told, on the same rule the restore half follows.
 
 proc layoutStateRoot*(): string =
-  ## Where this front-end keeps the state it writes for itself.
-  let override = getEnv(LayoutDirEnvVar)
-  if override.len > 0:
-    return override
-  let stateHome = getEnv(StateHomeEnvVar)
-  if stateHome.len > 0:
-    return stateHome / "codetracer"
-  getHomeDir() / ".local" / "state" / "codetracer"
+  ## Where this front-end keeps the state it writes for itself — the NATIVE
+  ## hosts' one state root (`viewmodel/host/native_state`), shared with the
+  ## keymap preference (PLAT-43) so the two cannot drift apart.
+  nativeStateRoot()
 
 proc canonicalTraceFolder*(traceFolder: string): string =
   ## The path the document is keyed by: absolute and normalised, so two

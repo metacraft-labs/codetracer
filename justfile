@@ -4828,6 +4828,11 @@ plat42-surfaces-record:
 plat42-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-42
 
+# PLAT-43 — the keymap selector's counted floor (Tier 1), and its pty half
+# against the shipped binary.
+plat43-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-43
+
 # PLAT-40 — every pane producer has a caller a USER can reach.
 #
 # *A unit test is a production caller as far as a coverage tool is concerned,
@@ -5323,7 +5328,7 @@ editor-model-case-floors:
   corpus_dependent() { case "$1" in PLAT-39) return 0 ;; *) return 1 ;; esac; }
   corpus_present() { [ -d src/tests/visual/captures/electron ] && \
     [ "$(find src/tests/visual/captures/electron -name '*.png' | wc -l)" -ge 6 ]; }
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-41 PLAT-42; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-41 PLAT-42 PLAT-43; do
     echo "=== ${m} ==="
     if corpus_dependent "${m}" && ! corpus_present; then
       echo "DEFERRED: ${m}'s floor reads src/tests/visual/captures/electron/,"
