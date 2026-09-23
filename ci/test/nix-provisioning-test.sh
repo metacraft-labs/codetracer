@@ -91,6 +91,16 @@ is_provisioning_step() { # $1 = a stripped YAML line
 	# that nearly had a redundant second Install Nix step committed to it.
 	*'nixos-modules/.github/setup-nix'*) return 0 ;;
 	*'nixos-modules/.github/install-nix'*) return 0 ;;
+	# The same two actions under the repository's CURRENT name. nixos-modules
+	# was renamed devops-modules, and `create-release` and `push-tag` now call
+	# `devops-modules/.github/install-nix@dev` -- a spelling the entries above
+	# do not match, so the scanner reported `create-release` as unprovisioned
+	# when its Install Nix step is right there. That is the same false positive
+	# described above, reintroduced by the rename rather than by a new job.
+	# The old spellings stay: GitHub redirects a renamed repository, so a step
+	# still naming nixos-modules is still genuinely provisioned.
+	*'devops-modules/.github/setup-nix'*) return 0 ;;
+	*'devops-modules/.github/install-nix'*) return 0 ;;
 	*'metacraft-github-actions/setup-dev-env'*) return 0 ;;
 	*'.github/actions/setup-db-backend-siblings'*) return 0 ;;
 	*'DeterminateSystems/nix-installer-action'*) return 0 ;;
