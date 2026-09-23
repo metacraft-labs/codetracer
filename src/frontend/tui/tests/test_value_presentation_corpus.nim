@@ -209,7 +209,9 @@ const
     ## itself the expected rendering. `scalarValuesSeen` below is its
     ## multiplier.
 
-  ChecksOracleSuite = 48
+  ChecksOracleSuite = 49
+    ## **49 SINCE 2026-09-23**: PLAT-42 adds one row to the byte-buffer case —
+    ## the same values TYPED `int`, which a type veto now renders as a list.
     ## **47 UNTIL 2026-09-15**: PLAT-21's `gpui-panel` adds one iteration to the
     ## budget case's loop, and the constant is FIXED on purpose, so it had to be
     ## moved by hand and from a run. That is the control working rather than a
@@ -572,9 +574,10 @@ suite "PLAT-2: the renderings, written down":
     # THE DELIMITER IS THE POINT. Changing `@[` to `<<` in the presenter left
     # every other assertion in this file green; it reddens these.
     #
-    # THE MEMBERS ARE ABOVE 255 ON PURPOSE. `builtin.byte-buffer` claims any
-    # sequence whose every member is an integer in `0 … 255`, and renders it as
-    # a hex dump — so `@[1, 2]` is `01 02 (2 bytes)` and asserts nothing about
+    # THE MEMBERS ARE ABOVE 255 ON PURPOSE. `builtin.byte-buffer` claims a
+    # sequence whose every member is an integer in `0 … 255` unless a type
+    # name says otherwise (PLAT-42), and renders it as a hex dump — so an
+    # untyped `@[1, 2]` is `01 02 (2 bytes)` and asserts nothing about
     # sequence delimiters. The first draft of this table used `1` and `2` and
     # this suite told us so, which is the oracle earning its place on its first
     # run. The byte-buffer spelling gets its own row below.
@@ -590,8 +593,12 @@ suite "PLAT-2: the renderings, written down":
 
   test "a sequence of bytes renders as a hex dump with its length":
     # `builtin.byte-buffer`: every member an integer in `0 … 255`, at least one.
-    ck present(oSeq("Seq", oInt("1"), oInt("2"), oInt("255")),
+    # Byte-TYPED members: since PLAT-42 a type that says otherwise (`int`)
+    # vetoes the claim, so the corpus's own `list` of `int` is a list.
+    ck present(oSeq("Seq", oInt("1", "u8"), oInt("2", "u8"), oInt("255", "u8")),
                TracepointBudget).root.text == "01 02 ff (3 bytes)"
+    ck present(oSeq("Seq", oInt("1"), oInt("2"), oInt("255")),
+               TracepointBudget).root.text == "@[1, 2, 255]"
     # THE CLASS IS `pcSequence`, NOT `pcByteBuffer`, and that is written down
     # here because it is surprising and because this oracle found it.
     # `value_model.classOf` is kind-directed and total over `PValue.kind`, and
@@ -601,9 +608,9 @@ suite "PLAT-2: the renderings, written down":
     # both map it. The distinction survives in the ATTRIBUTION, which is where
     # a reader can still ask; asserted on the next line so the two halves of
     # the answer are visible together.
-    ck present(oSeq("Seq", oInt("1"), oInt("2"), oInt("255")),
+    ck present(oSeq("Seq", oInt("1", "u8"), oInt("2", "u8"), oInt("255", "u8")),
                TracepointBudget).root.class == pcSequence
-    ck present(oSeq("Seq", oInt("1"), oInt("2"), oInt("255")),
+    ck present(oSeq("Seq", oInt("1", "u8"), oInt("2", "u8"), oInt("255", "u8")),
                TracepointBudget).attribution.presenter == "builtin.byte-buffer"
     # ONE MEMBER OUT OF RANGE AND IT IS AN ORDINARY SEQUENCE AGAIN. This is the
     # boundary the rule turns on, and it is what makes the row above a

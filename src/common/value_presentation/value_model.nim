@@ -32,6 +32,8 @@
 ## and one that did not. Presentation adds quotes, brackets and separators; it
 ## never re-encodes a number.
 
+import std/strutils
+
 import vocabulary
 
 type
@@ -200,8 +202,43 @@ func classOf*(v: PValue): PresentationClass =
   of pvkRaw, pvkOpaque, pvkRecursion, pvkNotExpanded: pcOpaque
   of pvkMedia: pcMedia
 
+const ByteTypeTokens = ["u8", "uint8", "uint8_t", "byte", "bytes", "ubyte",
+                        "bytearray", "bytestring", "bytebuffer", "uint8array",
+                        "memoryview", "octet", "octets"]
+  ## Words that make a TYPE NAME say "bytes": an element type (`u8`, `byte`,
+  ## `uint8_t`) or a byte container (`bytes`, `bytearray`, `Uint8Array`).
+  ## Matched per word, case-insensitively, so `Vec<u8>`, `[]byte`,
+  ## `seq[uint8]`, `&[u8]` and `[u8; 4]` all qualify and `list`, `int` and
+  ## `Seq` do not.
+
+func saysBytes*(typeName: string): bool =
+  ## Whether `typeName` names a byte type or a byte container. `unsigned char`
+  ## is the one two-word spelling and is matched as such.
+  let lower = typeName.toLowerAscii
+  if "unsigned char" in lower:
+    return true
+  var word = ""
+  for ch in lower & " ":
+    if ch.isAlphaNumeric or ch == '_':
+      word.add ch
+    else:
+      if word in ByteTypeTokens:
+        return true
+      word = ""
+  false
+
 func byteBufferOf*(v: PValue): seq[int] =
   ## The bytes `v` is, or an empty seq when it is not a byte buffer.
+  ##
+  ## **A TYPE THAT SAYS OTHERWISE VETOES IT** (PLAT-42, 2026-09-23). Until
+  ## then the claim was purely structural, so a Python `list` of small ints —
+  ## `results = [5, 7, 42, 17, 2]` in calc — rendered as `05 07 2a 11 02
+  ## (5 bytes)`: the right numbers in the wrong shape, on every surface. Now a
+  ## value that carries type names (on the container or on any member) is a
+  ## byte buffer only when one of them says bytes (`saysBytes`: `bytes`,
+  ## `Vec<u8>`, `[]byte`, members typed `u8` …). A value with NO type
+  ## information keeps the structural rule, which is what the terminal's
+  ## variables pane has drawn since CTUI-7 for an untyped `@[1, 2]`.
   ##
   ## EVERY member must be a `pvkInt` in `0 … 255` and there must be at least
   ## one, so `[1, 300]` is not a byte buffer and neither is `[]`. A predicate
@@ -211,6 +248,16 @@ func byteBufferOf*(v: PValue): seq[int] =
   ## and therefore could not tell an integer from a string that looked like one.
   result = @[]
   if v.isNil or v.kind != pvkSequence or v.members.len == 0:
+    return
+  var typed = v.typeName.len > 0
+  var membersSayBytes = true
+  for m in v.members:
+    if not m.value.isNil and m.value.typeName.len > 0:
+      typed = true
+      if not saysBytes(m.value.typeName): membersSayBytes = false
+    else:
+      membersSayBytes = false
+  if typed and not (saysBytes(v.typeName) or membersSayBytes):
     return
   for m in v.members:
     let c = m.value
