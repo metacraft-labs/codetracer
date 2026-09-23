@@ -1511,6 +1511,49 @@ proc cInsertBlankLineAbove(env: OpEnv; st: EditorState; args: OpArgs): OpResult 
 proc cInsertBlankLineBelow(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   settle(st, blankLine(env, st, false))
 
+proc openLine(env: OpEnv; st: EditorState; above: bool): EditorState =
+  ## **VIM'S AND KAKOUNE'S `o` / `O`**: open a line below or above each
+  ## caret, put the caret ON it, and enter insert mode — three effects, one
+  ## operation, the way `enter-append-line-end` is a move and a mode.
+  ##
+  ## Not `insert-blank-line-*` plus a mode switch, because that pair leaves
+  ## the caret on the ORIGINAL line: `insert-blank-line-*` is Kakoune's
+  ## `Alt+o` / `Alt+O` ("add an empty line, stay where you are"), and until
+  ## 2026-09-23 both shipped keymaps bound `o` and `O` to it — so a Vim user's
+  ## `O` opened a line and then read the text they typed as normal-mode
+  ## commands. Measured through the terminal by PLAT-28's pty case, where
+  ## `O # new` put a breakpoint on line 1 (`Space`) and typed nothing.
+  ##
+  ## The new line's start is where the newline went in, except below the
+  ## LAST line: there the newline terminates the current line and the new
+  ## one begins after it. A refused change (a read-only buffer) changes
+  ## neither the text nor the mode.
+  var edits: seq[Edit] = @[]
+  var opened: seq[(int, int)] = @[]
+  for r in st.selection:
+    let line = env.lineOf(r.head)
+    let last = line >= env.ctx.store.lineCount - 1
+    let at = if above: env.lineStartOf(line)
+             elif not last: env.lineStartOf(line + 1)
+             else: env.ctx.doc.len
+    edits.add Edit(fromPos: at, toPos: at, insert: "\n")
+    opened.add (at, (if not above and last: 1 else: 0))
+  if edits.len == 0: return st
+  let cs = changeSet(st.doc.len, edits)
+  var ranges: seq[SelectionRange] = @[]
+  for (at, past) in opened:
+    ranges.add caret(cs.mapPosOr(at, sideBefore) + past)
+  result = commitChange(st, cs, some(editorSelection(ranges,
+                                                     st.selection.primaryIndex)))
+  if result.doc != st.doc:
+    result.mode = emInsert
+
+proc cOpenLineAbove(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  settle(st, openLine(env, st, true))
+
+proc cOpenLineBelow(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  settle(st, openLine(env, st, false))
+
 proc cInsertTab(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   settle(st, insertAtCaret(st, env, st.indentUnit))
 
@@ -2124,6 +2167,8 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("insert-newline-and-indent", cInsertNewlineAndIndent),
     commandDecl("insert-blank-line-above", cInsertBlankLineAbove),
     commandDecl("insert-blank-line-below", cInsertBlankLineBelow),
+    commandDecl("open-line-above", cOpenLineAbove),
+    commandDecl("open-line-below", cOpenLineBelow),
     commandDecl("insert-tab", cInsertTab),
 
     commandDecl("delete-char-backward", cDeleteCharBackward),

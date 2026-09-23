@@ -37,7 +37,7 @@
 ##
 ## §4.4 asks for the claim to be *"stated exactly"*. `VimFiled` is that
 ## statement: one row per declaration Vim has no key for, with the reason.
-## `covered + filed == 224` is asserted as an equality with the two sets
+## `covered + filed == |operations|` is asserted as an equality with the two sets
 ## disjoint, so an operation whose binding was dropped becomes a GAP — neither
 ## bound nor filed — rather than quietly leaving the claim.
 ##
@@ -134,7 +134,7 @@ const
     ## which is not what `dd` does in the editor this model is named after.
     ##
     ## Nothing in the Vim table could see it: the chord resolved, the operation
-    ## was published, `covered + filed == 224` still held and the trie reported
+    ## was published, `covered + filed == |operations|` still held and the trie reported
     ## no conflict. What saw it was `DIFF-4`'s `delete-line` row — Vim's `dd`
     ## against Kakoune's `Ctrl+x` (`delete-line`, which deletes
     ## `lineStart … nextLineStart`) — disagreeing by exactly one byte **on all
@@ -265,8 +265,11 @@ proc buildVimKeymap(): EditingKeymap =
   r.add eb(@["R"], "enter-replace", {emNormal})
   r.add eb(@["Esc"], "enter-normal", {emInsert, emReplace} + VisualModes)
   r.add eb(@["Esc"], "cancel-operator", {emOperatorPending})
-  r.add eb(@["o"], "insert-blank-line-below", {emNormal})
-  r.add eb(@["O"], "insert-blank-line-above", {emNormal})
+  # `o` / `O` OPEN a line and enter insert mode. They were bound to
+  # `insert-blank-line-*` until 2026-09-23 — Kakoune's `Alt+o`, which stays in
+  # normal mode — so typing after them ran commands; see `open-line-below`.
+  r.add eb(@["o"], "open-line-below", {emNormal})
+  r.add eb(@["O"], "open-line-above", {emNormal})
   r.add eb(@["x"], "delete-char-forward", {emNormal})
   r.add eb(@["X"], "delete-char-backward", {emNormal})
   r.add eb(@["D"], "delete-to-line-end", {emNormal})
@@ -355,6 +358,13 @@ const
     FiledDeclaration(decl: "pipe-selection", forms: {}, reason:
       "Kakoune's `|`. Vim's `!` is a command-line construct, and §5.2 puts " &
       "the process on the HOST rather than in the operation"),
+    FiledDeclaration(decl: "insert-blank-line-above", forms: {}, reason:
+      "an empty line that leaves the caret where it was is vim-unimpaired's " &
+      "`[<Space>`, not core Vim; core Vim's `O` OPENS a line and enters insert " &
+      "mode, which is `open-line-above`"),
+    FiledDeclaration(decl: "insert-blank-line-below", forms: {}, reason:
+      "as `insert-blank-line-above` — unimpaired's `]<Space>`; `o` is " &
+      "`open-line-below`"),
     FiledDeclaration(decl: "insert-newline-and-indent", forms: {}, reason:
       "Vim spells it `autoindent`, an OPTION — §6.1 lists `expandtab` and its " &
       "family among what a `.vimrc` import translates, and an option is not a " &

@@ -246,7 +246,7 @@ type
     ## This is how it is stated exactly. A model does not claim the whole
     ## vocabulary; what it does not claim is written down HERE, one row per
     ## DECLARATION with the reason, and the suite asserts
-    ## `covered + filed == 224` as an equality with the two sets disjoint. So
+    ## `covered + filed == |operations|` as an equality with the two sets disjoint. So
     ## an operation that stopped having a binding is not merely uncovered — it
     ## is uncovered AND unfiled, which is a red gate rather than a silence.
     ##
@@ -714,7 +714,7 @@ proc coverageGaps*(def: KeymapDefinition): seq[string] =
 proc coverageOverlaps*(def: KeymapDefinition): seq[string] =
   ## Every operation that is BOTH bound and filed. The other direction, and it
   ## is the one that would otherwise let a filed row excuse a binding that
-  ## exists — `covered + filed == 224` is satisfied by a covered set and a
+  ## exists — `covered + filed == |operations|` is satisfied by a covered set and a
   ## filed set that overlap and a gap of the same size.
   let reachable = reachableOperations(def.keymap, def.model)
   result = @[]
