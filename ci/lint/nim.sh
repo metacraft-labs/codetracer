@@ -29,7 +29,7 @@ source ci/lib/lint-steps.sh
 # contract suite. `nimsuggest` is here for ci/test/nimsuggest-check.sh, and
 # python3 for ci/test/dap-command-sync.py.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh bash git python3 nimsuggest awk diff sha256sum
+	bash ci/lib/require-tools.sh bash git python3 nimsuggest awk diff sha256sum perl
 
 # The contract suite runs before the guard it covers, and for the same reason
 # ci/lint/bash.sh executes scripts/resolve-sibling-rev-test.sh: a guard that has
