@@ -1125,7 +1125,7 @@ jobs:
             echo "Expected exit code 2 (unsupported), got $exit_code" >&2
             exit 1
           fi
-          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+          if ! grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin" <<<"$output"; then
             echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
             exit 1
           fi
@@ -1142,7 +1142,7 @@ jobs:
             echo "Expected exit code 2 (unsupported), got $exit_code" >&2
             exit 1
           fi
-          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+          if ! grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin" <<<"$output"; then
             echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
             exit 1
           fi
@@ -2230,7 +2230,7 @@ jobs:
             echo "Expected exit code 2 (unsupported), got $exit_code" >&2
             exit 1
           fi
-          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+          if ! grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin" <<<"$output"; then
             echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
             exit 1
           fi
@@ -2246,7 +2246,7 @@ jobs:
             echo "Expected exit code 2 (unsupported), got $exit_code" >&2
             exit 1
           fi
-          if ! echo "$output" | grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin"; then
+          if ! grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin" <<<"$output"; then
             echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
             exit 1
           fi

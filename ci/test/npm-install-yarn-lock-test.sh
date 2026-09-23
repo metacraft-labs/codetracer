@@ -87,7 +87,7 @@ expect_fail() {
 #
 # shellcheck disable=SC2329  # invoked indirectly, as `expect_ok … contains …`
 contains() {
-	printf '%s\n' "$2" | grep -q -- "$1"
+	grep -q -- "$1" <<<"$2"
 }
 
 if [ ! -x "${HELPER}" ] && [ ! -f "${HELPER}" ]; then
