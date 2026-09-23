@@ -5467,3 +5467,25 @@ out at `top: 0px; height: 0px` while the content height still counts its 21px,
 and whose rendered rows sit at offsets that are not multiples of the line
 height. That is a half-rendered editor, and it persisted for three seconds in
 one run rather than resolving.
+
+## Window lanes (GPUI in a real compositor) — two facts measured 2026-09-23
+
+* The WINDOWED isonim-gpui shim is built in isonim-gpui's own dev shell
+  (glibc 2.42 at the time). A `codetracer-gpui` built in this repo's dev shell
+  can end up on an OLDER glibc when nix-direnv falls back to a previous profile
+  (the `codetracer-python-recorder` evaluation failure), and then it cannot
+  load that shim: it exits at once with `could not load: …libgpui_nim_shim.so`.
+  Build the window lane's binary inside isonim-gpui's shell and point the lane
+  at it (`CODETRACER_PLAT44_BIN`, `CODETRACER_PLAT42_BIN`).
+* `isonim_gpui/bindings.nim` bakes an ABSOLUTE shim path in at compile time
+  (`rust/target/debug`), which is why the PLAT-37/38 lanes SWAP the shared
+  .so under every other process that loads it. `-d:gpuiShimPath=<file>` now
+  pins a binary to its own shim; with `CODETRACER_WINDOW_BIN_PINS_SHIM=1` the
+  PLAT-42/44 lanes leave the shared file alone.
+* `wtype -s N` is ONE sleep, not a per-key gap: `wtype -s 15 -k Down -k Down …`
+  sends every key at once, and GPUI drains queued input before it draws again.
+  Pace keys with one `wtype` call per key and a `sleep` between.
+* ONE `wtype` PROCESS PER RUN, sleeps inside its sequence (`-k Down -s 1000 …`).
+  A `wtype` process per key LOSES keys — measured 3 of 14 delivered — because
+  each process is a new virtual keyboard and its first key races the client's
+  keymap; a single process delivered 14 of 14 and the sentinel.

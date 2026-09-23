@@ -163,7 +163,9 @@ if [ "${INSIDE}" = "1" ]; then
 fi
 
 check_prereqs
-select_windowed_shim
+# A binary built with `-d:gpuiShimPath=<windowed shim>` loads its own shim and
+# the shared one is left alone (`CODETRACER_WINDOW_BIN_PINS_SHIM=1`).
+[ "${CODETRACER_WINDOW_BIN_PINS_SHIM:-0}" = "1" ] || select_windowed_shim
 mkdir -p "${OUT}"
 bash "${ISONIM_GPUI}/scripts/wayland-run-test.sh" -- \
 	bash "${root}/ci/test/plat44-edit-window.sh" --inside

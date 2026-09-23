@@ -58,6 +58,13 @@ type
     changes*: int
       ## Of those, how many changed the document.
     saves*: int
+    viewportTop*: int
+      ## The first line the pane shows. Follows the caret with the minimal
+      ## scroll every front-end uses (`editing_core.followedViewportTop`);
+      ## until this field existed the GPUI pane always showed line 1, so a
+      ## caret moved below the fold edited text nobody could see.
+    viewportRows*: int
+      ## The pane's height in rows, set by the host from its window size.
 
   GpuiKeyResult* = object
     name*: string
@@ -73,7 +80,8 @@ proc newGpuiEditArm*(root, path, text: string;
                      model = kmProductDefault): GpuiEditArm =
   GpuiEditArm(root: root, path: path,
               doc: initEditingDocument(path, text, model),
-              loadedText: text, status: "")
+              loadedText: text, status: "", viewportTop: 1,
+              viewportRows: DefaultViewportRows)
 
 proc text*(arm: GpuiEditArm): string = arm.doc.state.doc
 
@@ -104,6 +112,8 @@ proc applyCanonicalKey*(arm: GpuiEditArm; name: string;
   result.outcome = applied.outcome
   if applied.outcome == eoChanged:
     inc arm.changes
+  arm.viewportTop = followedViewportTop(arm.viewportTop, caretLine(arm.doc),
+                                        arm.viewportRows)
   if SaveOperation in applied.operations or
      (name == SaveKey and applied.outcome == eoIgnored):
     result.saved = arm.save()
@@ -119,9 +129,14 @@ proc applyGpuiKey*(arm: GpuiEditArm; key: string; modifiers: openArray[string];
 
 proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
   ## The editor surface for the CURRENT document — writable, so no read-only
-  ## notice — with the caret shown. `status`, when set, is the notice.
+  ## notice — with the caret shown, scrolled to keep it visible. `status`,
+  ## when set, is the notice.
+  arm.viewportRows = viewportHeight
+  arm.viewportTop = followedViewportTop(arm.viewportTop, caretLine(arm.doc),
+                                        viewportHeight)
   result = editorSurfaceForDocument(
     d = arm.doc, medium = GpuiMedium, mutableHere = true,
-    viewportHeight = viewportHeight, showCaret = true)
+    viewportTop = arm.viewportTop, viewportHeight = viewportHeight,
+    showCaret = true)
   if arm.status.len > 0 and result.notice.len == 0:
     result.notice = arm.status

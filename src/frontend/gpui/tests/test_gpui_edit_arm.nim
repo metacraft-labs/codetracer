@@ -137,6 +137,26 @@ suite "PLAT-44: the arm writes the core, and saves through the project writer":
     ck surface.mutable == sourceContractFor(pmEdit).mutable
     ck surface.notice.len == 0
 
+  test "the pane FOLLOWS THE CARET down a long file, with the minimal scroll":
+    # Until the arm carried a viewport, its surface always began at line 1:
+    # a caret moved below the fold edited text nobody could see.
+    var text = ""
+    for i in 1 .. 100: text.add "line " & $i & "\n"
+    let arm = newGpuiEditArm("", ProjectFile, text)
+    let first = arm.surfaceOf(10)
+    ck first.rows[0].line == 1
+    for i in 1 .. 30:
+      discard arm.applyGpuiKey("down", [], int64(i))
+    let s = arm.surfaceOf(10)
+    # Caret on line 31 in a 10-row pane: the window is 22 … 31, not centred.
+    ck s.rows[0].line == 22
+    ck s.rows[^1].line == 31
+    ck "line 31" in s.rows[^1].text
+    # …and back up: one line above the window moves it by exactly one.
+    for i in 1 .. 10:
+      discard arm.applyGpuiKey("up", [], int64(100 + i))
+    ck arm.surfaceOf(10).rows[0].line == 21
+
   test "a READ-ONLY buffer still refuses a keystroke from this arm":
     let dir = createTempDir("plat44-", "-ro")
     try:

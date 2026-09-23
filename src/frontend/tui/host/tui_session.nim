@@ -297,6 +297,24 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
   # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
   # `EditorVM.showFlowOverlay` toggle.
+  let frames = framesFromStackTrace(s.stackBody())
+  rt.app.callStack = callStackModelFor(frames, s.entryFile)
+
+  # THE LOCALS ARE LOADED BEFORE THE SOURCE MODEL IS BUILT, because the source
+  # pane's inline values are read from them. Until 2026-09-23 the model was
+  # built first and passed no values at all, so the shipped terminal drew no
+  # inline value on any line (PLAT22-PG3's re-measurement found it).
+  try:
+    s.session.requestAndLoadLocals()
+  except CatchableError:
+    discard
+
+  # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
+  # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
+  # `EditorVM.showFlowOverlay` toggle. The inline values come from the SAME
+  # producer GPUI's editor uses — `editor_surface.inlineValuesOf` over
+  # `StateVM`, presented at this medium's row budget — so the two native
+  # editors cannot show two different sets of values for one stop.
   let editorVM = s.session.session.editorVM
   let flowVM = s.session.session.flowVM
   let notTaken =
@@ -304,15 +322,9 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     else: notTakenLinesOf(flowVM.styledLines.val)
   rt.app.source = sourcePaneModelFor(
     s.source, s.session.session.store.degraded.sourceAvailability.val,
-    notTakenLines = notTaken)
+    notTakenLines = notTaken,
+    inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
 
-  let frames = framesFromStackTrace(s.stackBody())
-  rt.app.callStack = callStackModelFor(frames, s.entryFile)
-
-  try:
-    s.session.requestAndLoadLocals()
-  except CatchableError:
-    discard
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,

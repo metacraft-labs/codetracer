@@ -68,7 +68,7 @@
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
-import std/[json, os, strutils, times]
+import std/[cpuinfo, json, os, strutils, times]
 
 import isonim_gpui/renderer
 # `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
@@ -134,6 +134,18 @@ OPTIONS:
                     maps a key to a replay operation here yet. That is
                     PLAT-23's `--ui=gui` contract rather than a renderer
                     gap, and this flag stays until it lands.
+  --no-flow-overlay
+                    Open with the flow overlay hidden (it is shown by default,
+                    as `flow.enabled: true` ships).
+  --frame-report=<path>
+                    PLAT-42. After the window's loop returns, write the
+                    frame-timing record: every frame's RENDER-PATH time (the
+                    shadow-tree walk, the render plan and the GPUI element
+                    tree — NOT GPUI's own layout and paint, which follow),
+                    every key-to-next-frame latency, and the host's load
+                    average at start and end. A budget is REPORTED, never
+                    asserted against a constant (a timing on a shared host is
+                    a measurement of that host).
   --edit-keys=<keys>
                     PLAT-44, EDIT mode only. Comma-separated GPUI keystrokes
                     (`x`, `escape`, `control-s`, `shift-a`; `comma` for
@@ -213,6 +225,13 @@ type
     planOut: string
     editKeys: seq[string]
       ## PLAT-44. GPUI keystroke spellings for `--edit-keys`.
+    frameReport: string
+      ## PLAT-42. A path to write the frame-timing record to after the event
+      ## loop returns; empty means none.
+    noFlowOverlay: bool
+      ## PLAT-42. Open with the flow overlay hidden — the user's
+      ## `EditorVM.showFlowOverlay` toggle, from the command line; the window
+      ## lane's negative twin for the drawn overlay.
     inputProbe: string
       ## PLAT-38. A path to write the KEY-DELIVERY record to, after the event
       ## loop returns. Empty means "do not probe", which is every ordinary
@@ -274,6 +293,13 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       except ReplayOpError as e:
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --replay-ops: " & e.msg)
+    elif arg == "--no-flow-overlay":
+      result.noFlowOverlay = true
+    elif arg.startsWith("--frame-report="):
+      result.frameReport = arg["--frame-report=".len .. ^1]
+      if result.frameReport.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --frame-report needs a path")
     elif arg.startsWith("--edit-keys="):
       let spec = arg["--edit-keys=".len .. ^1]
       if spec.len == 0:
@@ -454,6 +480,12 @@ proc gpuiKeyEventOf(spec: string): (bool, GpuiEvent) =
   (true, GpuiEvent(kind: gekKeyDown, key: key, modifiers: mods,
                    repeat: false))
 
+var handlerMs: seq[float] = @[]
+  ## PLAT-42. Each key's handler time (decode, the core's `applyKey`, the
+  ## redraw), for the frame report — the part of a keystroke the shim's
+  ## key-to-frame latency starts AFTER.
+let editTrace = getEnv("CODETRACER_GPUI_EDIT_TRACE", "") == "1"
+
 var editArmed = false
   ## Whether the editor pane already has its listener — the headless
   ## `--edit-keys` path arms it before the window builder would.
@@ -492,12 +524,21 @@ proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
     discard ev
     if openArm.isNil or el.lastEventKind() != gekKeyDown: return
     let key = el.lastEventKey()
+    let started = epochTime()
     let applied = openArm.applyGpuiKey(key,
       modifierNamesOf(el.lastEventModifiers()),
-      int64(epochTime() * 1000))
+      int64(started * 1000))
     if applied.outcome != eoIgnored or applied.saved or
        openArm.status.len > 0:
       redrawEditor()
+    let handledMs = (epochTime() - started) * 1000
+    handlerMs.add handledMs
+    if editTrace:
+      # `CODETRACER_GPUI_EDIT_TRACE=1`: one line per key, for diagnosing a
+      # window lane (which keys arrived, what the core did, what it cost).
+      stderr.writeLine("edit-key " & key & " -> " & applied.name & " " &
+                       $applied.outcome & " " & formatFloat(handledMs,
+                       ffDecimal, 1) & "ms")
     if probeSentinel.len > 0 and key == probeSentinel:
       gpui_quit()
 
@@ -634,6 +675,44 @@ proc writeInputProbe(path: string; elapsedMs: int; deadlineMs: uint32): bool =
     return false
   true
 
+proc loadAverage(): string =
+  ## `/proc/loadavg`'s first three fields, or "" where there is none.
+  try:
+    readFile("/proc/loadavg").splitWhitespace()[0 .. 2].join(" ")
+  except CatchableError:
+    ""
+
+proc writeFrameReport(path: string; loadStart, loadEnd: string;
+                      elapsedMs: int; deadlineMs: uint32): bool =
+  ## PLAT-42. The frame-timing record, read out of the shim after the loop.
+  var frames, latencies: seq[int64] = @[]
+  for i in 0'u64 ..< gpui_frame_count(): frames.add int64(gpui_frame_ns(i))
+  for i in 0'u64 ..< gpui_key_latency_count():
+    latencies.add int64(gpui_key_latency_ns(i))
+  var doc = %*{
+    "record": "plat42-frame-budget",
+    "renderPathNs": frames,
+    "keyToFrameNs": latencies,
+    "loadAverageStart": loadStart,
+    "loadAverageEnd": loadEnd,
+    "cpus": countProcessors(),
+    "elapsedMs": elapsedMs,
+    "endedOnDeadline": deadlineMs > 0'u32 and
+                       elapsedMs >= int(deadlineMs) - 500,
+  }
+  doc["keyHandlerMs"] = %handlerMs
+  if not openArm.isNil:
+    doc["documentLines"] = %openArm.doc.state.doc.countLines
+    doc["keysApplied"] = %openArm.keys
+    doc["viewportRows"] = %openArm.viewportRows
+    doc["finalViewportTop"] = %openArm.viewportTop
+  try:
+    writeFile(path, doc.pretty & "\n")
+    true
+  except CatchableError as e:
+    stderr.writeLine("codetracer-gpui: --frame-report: " & e.msg)
+    false
+
 proc launchWindow(cmd: GpuiCommand; title: string;
                   outcome: LeafRenderOutcome): int =
   ## Open the window, run the event loop, and return when it stops.
@@ -652,10 +731,17 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   probeSentinel = getEnv("CODETRACER_GPUI_PROBE_SENTINEL", "")
   if cmd.quitAfterMs > 0'u32:
     gpui_quit_after_ms(cmd.quitAfterMs)
+  let loadStart = loadAverage()
+  if cmd.frameReport.len > 0:
+    gpui_frame_stats_reset()
   let startedAt = epochTime()
   gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
               paintWindowChrome)
   let elapsedMs = int((epochTime() - startedAt) * 1000)
+  if cmd.frameReport.len > 0:
+    if not writeFrameReport(cmd.frameReport, loadStart, loadAverage(),
+                            elapsedMs, cmd.quitAfterMs):
+      return 1
   if probeEnabled:
     if not writeInputProbe(cmd.inputProbe, elapsedMs, cmd.quitAfterMs):
       return 1
@@ -800,7 +886,8 @@ proc runOpen(cmd: GpuiCommand): int =
   # The shipped product default for the flow overlay — the same constant the
   # terminal host applies, pinned against `default_config.yaml` by a test.
   if not session.session.editorVM.isNil:
-    session.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
+    session.session.editorVM.showFlowOverlay.val =
+      FlowOverlayShownByDefault and not cmd.noFlowOverlay
 
   # PLAT-37. `--replay-ops`, applied BEFORE anything is projected or drawn,
   # because every pane's content is a function of where the debugger is

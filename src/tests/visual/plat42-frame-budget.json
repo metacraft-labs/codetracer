@@ -1,0 +1,76 @@
+{
+  "_comment": [
+    "PLAT-42 \u2014 the frame budget, measured in a real window. Render-path",
+    "time EXCLUDES GPUI's own layout and paint. Reported, never asserted",
+    "against a constant (\u00a728a). Regenerate: `just plat42-frame-budget`",
+    "then `just plat42-frames-record`."
+  ],
+  "takenAt": "2026-09-23T04:49:14Z",
+  "host": "gpu-server-001",
+  "binary": "codetracer-gpui-window",
+  "notMeasured": "stepping: the GPUI replay window binds no key to a replay operation, so the large file is scrolled and edited instead",
+  "viewports": {
+    "1440x900": {
+      "renderPath": {
+        "count": 93,
+        "p50Ms": 1.826,
+        "p95Ms": 2.16,
+        "p99Ms": 2.819,
+        "maxMs": 4.002
+      },
+      "keyToFrame": {
+        "count": 86,
+        "p50Ms": 2.408,
+        "p95Ms": 2.706,
+        "p99Ms": 6.08,
+        "maxMs": 35.024
+      },
+      "keyHandler": {
+        "count": 86,
+        "p50Ms": 694.368,
+        "p95Ms": 805.696,
+        "p99Ms": 939.638,
+        "maxMs": 981.834
+      },
+      "loadAverageStart": "168.48 187.15 193.64",
+      "loadAverageEnd": "169.64 177.22 188.42",
+      "cpus": 24,
+      "documentLines": 40001,
+      "keysApplied": 86,
+      "finalViewportTop": 37,
+      "elapsedMs": 189018,
+      "endedOnDeadline": false
+    },
+    "2560x1440": {
+      "renderPath": {
+        "count": 91,
+        "p50Ms": 2.998,
+        "p95Ms": 3.67,
+        "p99Ms": 5.113,
+        "maxMs": 6.213
+      },
+      "keyToFrame": {
+        "count": 84,
+        "p50Ms": 3.606,
+        "p95Ms": 4.84,
+        "p99Ms": 6.856,
+        "maxMs": 45.661
+      },
+      "keyHandler": {
+        "count": 85,
+        "p50Ms": 711.658,
+        "p95Ms": 840.783,
+        "p99Ms": 923.866,
+        "maxMs": 937.311
+      },
+      "loadAverageStart": "169.64 177.22 188.42",
+      "loadAverageEnd": "312.47 233.15 207.33",
+      "cpus": 24,
+      "documentLines": 40001,
+      "keysApplied": 85,
+      "finalViewportTop": 9,
+      "elapsedMs": 188834,
+      "endedOnDeadline": false
+    }
+  }
+}

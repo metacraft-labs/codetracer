@@ -278,19 +278,22 @@ const
       id: pgInlineValuesDiverge,
       concern: ecInlineValues,
       subject: "front-end",
-      measurement: "The two existing editors show DIFFERENT DATA under one " &
-        "name. The terminal's inline annotations are " &
-        "`StateVM.currentVariables` selected by whole-word lexical match " &
-        "(`tui/app/source_binding.annotationsFrom`); the web's are the flow " &
-        "payload's `step.beforeValues`, anchored by " &
-        "`flow_layout.inlineLabelAnchorColumn` " &
-        "(`ui/flow.insertInlineDecorations`). Neither has a counterpart on " &
-        "the other medium. So `wired to the same ViewModels the terminal and " &
-        "web editors use` cannot be satisfied for this concern by any binding: " &
-        "there is no ONE ViewModel the two editors use.",
-      remedy: "decide which of the two `inline values` means, in a GUI spec, " &
-        "before a third front-end picks one by accident. This binding picks " &
-        "the terminal's — the shared ViewModel — and says so.")]
+      measurement: "RE-MEASURED FROM RUNS 2026-09-23 (PLAT-42). The two " &
+        "NATIVE editors now draw one producer's values: " &
+        "`editor_surface.inlineValuesOf` over `StateVM`, at each medium's " &
+        "row budget, on the execution line — the terminal's host had built " &
+        "its source model before loading the locals and drew none at all " &
+        "until then. At the three pinned stops with values the terminal " &
+        "and the shipped GPUI binary draw the same names. What still " &
+        "differs is the DESKTOP editor: its mid-line chips are the " &
+        "Omniscience flow's value labels (`ui/flow.insertInlineDecorations`, " &
+        "every step, per line), a different feature, and its recorded runs " &
+        "show no chip at any of the six pinned stops.",
+      remedy: "Omniscience-Flow.md now names the two features apart (the " &
+        "execution-line annotation vs the flow's value labels). Closing " &
+        "this gap means the native editors drawing the flow's value labels " &
+        "and the desktop drawing the execution-line annotation — or the " &
+        "product deciding it wants only one of the two.")]
     ## **The filed gaps, as DATA.** PLAT-21's `gpui_gaps.FiledGpuiGaps` shape,
     ## reused rather than re-derived (a second register is §14 one level up).
     ##

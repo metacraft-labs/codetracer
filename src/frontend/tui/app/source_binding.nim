@@ -231,14 +231,28 @@ proc annotationsFrom*(variables: seq[Variable]):
       continue
     result.add inline_annotations.Annotation(name: v.name, value: value)
 
+proc annotationsOf*(values: openArray[EditorValue]):
+                   seq[inline_annotations.Annotation] =
+  ## The shared producer's values, in the terminal pane's shape. A pure
+  ## re-spelling — name and value unchanged — so nothing is decided here.
+  for v in values:
+    result.add inline_annotations.Annotation(name: v.name, value: v.value)
+
 proc sourcePaneModelFor*(vm: SourceVM;
                          availability: SourceAvailability;
                          points: seq[SourcePoint] = @[];
                          variables: seq[Variable] = @[];
                          heat = LineHeat();
                          gutterMode = gutLineNumbers;
-                         notTakenLines: seq[int] = @[]): SourcePaneModel =
+                         notTakenLines: seq[int] = @[];
+                         inlineValues: seq[EditorValue] = @[]): SourcePaneModel =
   ## The pane's model for the CURRENT frame.
+  ##
+  ## `inlineValues` is what the shipped host passes (PLAT-42, 2026-09-23):
+  ## `editor_surface.inlineValuesOf` — THE producer GPUI's editor uses — so
+  ## the two native editors draw one set of values. `variables` is kept for
+  ## callers that build a model from raw `Variable`s; when both are given the
+  ## producer's values win.
   ##
   ## Everything is read at call time and nothing is retained: the returned
   ## value is the whole of what the pane will draw, so two frames are two
@@ -255,7 +269,8 @@ proc sourcePaneModelFor*(vm: SourceVM;
     viewportTop = vm.visibleFirstLine.val,
     executionLine = vm.executionLine.val,
     marks = marksForFile(points, path),
-    values = annotationsFrom(variables),
+    values = (if inlineValues.len > 0: annotationsOf(inlineValues)
+              else: annotationsFrom(variables)),
     heat = heat,
     gutterMode = gutterMode,
     degradedMessage = (

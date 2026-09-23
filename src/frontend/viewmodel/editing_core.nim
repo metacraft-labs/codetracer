@@ -246,6 +246,23 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
   KeyApplication(outcome: outcome, operations: step.operations,
                  resolution: step.kind, timedOut: step.timedOut)
 
+func followedViewportTop*(top, caretLine, rows: int): int =
+  ## The first visible line after the minimal scroll that brings `caretLine`
+  ## into a `rows`-high window starting at `top` — ONE rule for every
+  ## front-end (the terminal's `edit_binding.followCaret` and GPUI's edit arm
+  ## both call it). MINIMAL: the caret entering from the bottom moves the
+  ## window by one line, not to the middle, because a jump on every keystroke
+  ## near an edge is what makes an editor feel broken. 1-based lines.
+  result = top
+  if rows <= 0 or caretLine <= 0:
+    return
+  if caretLine < result:
+    result = caretLine
+  elif caretLine > result + rows - 1:
+    result = caretLine - rows + 1
+  if result < 1:
+    result = 1
+
 func editScopeOf*(d: EditingDocument): EditingScope =
   ## **THE SCOPE A FRONT-END'S EDITOR PANE RESOLVES KEYS IN**, for a focused
   ## editor in Edit product mode — one rule for every front-end (PLAT-44: the

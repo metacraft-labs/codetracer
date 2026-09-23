@@ -298,17 +298,11 @@ proc followCaret*(buf: EditBuffer; rows: int) =
   ## MINIMAL scroll — the caret entering from the bottom moves the window by
   ## one line, not to the middle — because a jump on every keystroke near an
   ## edge is what makes a terminal editor feel broken.
-  if buf.isNil or rows <= 0:
+  ##
+  ## The rule is `editing_core.followedViewportTop`, shared with GPUI.
+  if buf.isNil:
     return
-  let line = buf.caretLine
-  if line <= 0:
-    return
-  if line < buf.viewportTop:
-    buf.viewportTop = line
-  elif line > buf.viewportTop + rows - 1:
-    buf.viewportTop = line - rows + 1
-  if buf.viewportTop < 1:
-    buf.viewportTop = 1
+  buf.viewportTop = followedViewportTop(buf.viewportTop, buf.caretLine, rows)
 
 # ---------------------------------------------------------------------------
 # Keys

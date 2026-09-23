@@ -46,11 +46,13 @@ import ../store/[replay_data_store, types]
 # compiles on both backends; see its header.
 import ../../ui/flow_loop_math
 # PLAT-42 — the per-line flow decision. `flowStyledLines` is the body of the
-# desktop editor's `flowStyleLines`, and `review_flow_overlay` already calls it
-# from this layer; calling it here rather than re-deriving "which lines ran" is
-# what keeps every medium on ONE rule (Verification-Harness-Traps §30).
-import ../../ui/flow_line_styles
-export flow_line_styles.FlowStyledLine, flow_line_styles.FlowLineStyleKind
+# desktop editor's `flowStyleLines`; calling it here rather than re-deriving
+# "which lines ran" is what keeps every medium on ONE rule
+# (Verification-Harness-Traps §30). It is imported from `common/` rather than
+# from `ui/flow_line_styles` (which re-exports it with the CSS classes) so the
+# Embed SDK facade reaches no module of the desktop UI tree.
+import ../../../common/flow_line_rule
+export flow_line_rule.FlowStyledLine, flow_line_rule.FlowLineStyleKind
 
 # The `ct/load-flow` wire vocabulary, shared with the engine. A leaf module
 # with no imports, exactly so both this layer and `common_types` can hold the

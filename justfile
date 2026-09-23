@@ -4828,6 +4828,26 @@ plat42-surfaces-record:
 plat42-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-42
 
+# PLAT-42 — the frame budget measured in a real window (reported with the host
+# load, never asserted against a constant), and the four surfaces framed in
+# real windows with their pixel twins. Both need a compositor and a binary
+# built against the windowed shim (see each script's header).
+plat42-frame-budget:
+  bash ci/test/plat42-frame-budget.sh
+
+plat42-frames-record:
+  python3 ci/test/plat42_frames_record.py
+
+plat42-surfaces-window:
+  bash ci/test/plat42-surfaces-window.sh
+
+plat42-window-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat42win -o:build/plat42_window_record \
+    src/tests/visual/screen_oracle/plat42_window_record.nim
+
 # PLAT-43 — the keymap selector's counted floor (Tier 1), and its pty half
 # against the shipped binary.
 plat43-case-floor:
