@@ -907,7 +907,7 @@ fn test_eager_mode_indicator_renders_current_trace_mode() {
 // The M5 / M21 Playwright suite covers the in-browser rendering of the
 // eager origin badges; the SKIP stubs here document the test names so
 // the milestone's verification table stays honest. They self-skip when
-// the `ct` binary at `src/build-debug/bin/ct` (per CLAUDE.md
+// the `ct` binary at `src/build-debug/bin/ct` (per AGENTS.md
 // "Running Playwright e2e tests") is not on the dev shell.
 // ---------------------------------------------------------------------------
 
