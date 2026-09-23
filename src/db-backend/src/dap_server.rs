@@ -2072,7 +2072,7 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         // Electron reads the file itself. See `Handler::source`.
         "source" => handler.source(
             req.clone(),
-            req.load_args::<dap_types::SourceArguments>()?,
+            req.load_args::<crate::dap_ext::SourceArgumentsExt>()?,
             sender.clone(),
         )?,
         "stackTrace" => handler.stack_trace(
