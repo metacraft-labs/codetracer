@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 32
+# RECORDED-DARK-CEILING: 43
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -558,3 +558,76 @@ ci/test/plat37-window-frame.sh
 # line is deleted and the ceiling drops, which the both-directions rule
 # already forces in the same commit.
 ci/test/plat38-keystroke.sh
+
+# ---------------------------------------------------------------------------
+# PLAT-40, PLAT-41, PLAT-42, PLAT-44 — THE WINDOW CAPTURES. **BLOCKED on the
+# capability PLAT-37's and PLAT-38's captures are blocked on, and recorded on
+# the same terms.** Each of the scripts below either opens real
+# `codetracer-gpui` windows under a headless `sway` (reading pixels back with
+# `grim`, typing with `wtype`) or turns such a run into its committed record.
+# Two capabilities are missing from CI, and both are named so the entry dies
+# when they arrive:
+#
+#   1. NO CI JOB BUILDS A WINDOWED `codetracer-gpui`. Every capture needs a
+#      binary built with `-d:gpuiShimPath` against the `isonim-gpui` Rust shim
+#      (`CODETRACER_PLAT4x_BIN`); `just build-gpui` is named by no workflow,
+#      and the `gpui-shell` lane that would need it runs in no CI job.
+#      `plat42_surfaces_record.py` is headless (`--report-plan`) but needs
+#      that same binary plus the `calc` and `noir_space_ship` recordings.
+#   2. NO CI JOB HAS A WAYLAND COMPOSITOR — PLAT-37's entry above, verbatim:
+#      whether `eph-linux-x64` can run a headless `sway` is unmeasured.
+#
+# **THESE ARE BLOCKED, NOT UNWIRED.** Every one has its `just` recipe
+# (`plat40-capture-window`, `plat41-capture-window`, `plat42-frame-budget`,
+# `plat42-frames-record`, `plat42-surfaces-record`, `plat42-surfaces-window`,
+# `plat44-edit-window`, `plat44-sequences-window`, `plat44-sequences-record`);
+# what is missing is a runner that can execute them.
+#
+# THE GATES THAT READ THESE CAPTURES ARE *NOT* DARK, which is the design the
+# PLAT-37 entry describes: `ci/test/editor-model-case-floor.sh` PLAT-40
+# (`test_plat40_producers.nim`), PLAT-41 (`test_plat41_parity.nim`), PLAT-42
+# (`test_plat42_surfaces.nim`, `test_plat42_window.nim`,
+# `test_plat42_frame_budget.nim`) and PLAT-44 (`test_plat44_edit_window.nim`,
+# `test_plat44_sequences_window.nim`) assert over the committed records, and
+# `just editor-model-case-floors` runs them in the `viewmodel-tests` job. What
+# is dark is the RE-TAKING of the measurements, not the checking of them.
+#
+# `ci/lib/gpui-window-capture.sh` is the capture library the PLAT-40 and
+# PLAT-41 window scripts source. It is not a gate; it is here because every
+# script that reaches it is dark, and it becomes reachable the day they do.
+#
+# WHAT WOULD MAKE THEM GREEN: a CI job that runs `just build-gpui` against a
+# built `isonim-gpui` shim, and then — once PLAT-37's `just plat37-capture`
+# has been measured on an `eph-linux-x64` runner — one step per recipe above.
+# Each line is deleted, and the ceiling drops, in the commit that wires it.
+ci/lib/gpui-window-capture.sh
+ci/test/plat40-panes-window.sh
+ci/test/plat41-panes-window.sh
+ci/test/plat42-frame-budget.sh
+ci/test/plat42_frames_record.py
+ci/test/plat42_surfaces_record.py
+ci/test/plat42-surfaces-window.sh
+ci/test/plat44-edit-window.sh
+ci/test/plat44_sequences_window_record.py
+ci/test/plat44-sequences-window.sh
+
+# ---------------------------------------------------------------------------
+# HCR H6 — THE LAUNCH-UNDER-HCR ARMS. **BLOCKED on a sibling and two build
+# artefacts no CI job provides.** `scripts/hcr6-launch-arms.sh` runs the six
+# arms of `tests/hcr-live-edit/flame_launch_under_hcr.spec.ts` and grades them
+# with `codetracer-flame-demo`'s `hcr6_discrimination_matrix.py`. It needs:
+#
+#   * the `codetracer-flame-demo` sibling checkout, which no workflow clones;
+#   * that demo's `just gdext-hcr` build and a session-capable
+#     `hcr_patch_driver` in `artifacts/h5-driver/`, which no job builds.
+#
+# The script FAILS by name rather than skipping when one is missing, so wiring
+# it into a lane without them would make that lane red for a prerequisite, not
+# for a finding. **BLOCKED, NOT UNWIRED**: its recipe is `just
+# test-hcr-launch-arms`. It has been dark since it landed (c49d63e61,
+# 2026-09-16); this entry records that rather than creating it.
+#
+# WHAT WOULD MAKE IT GREEN: a job that clones `codetracer-flame-demo` at a
+# pinned revision, builds `gdext-hcr` and the H5 driver, and runs `just
+# test-hcr-launch-arms` in a lane that already has the prebuilt desktop app.
+scripts/hcr6-launch-arms.sh

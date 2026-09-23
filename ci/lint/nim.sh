@@ -655,6 +655,18 @@ lint_step "Value presentation boundary: one pipeline, pure, with no surface bypa
 lint_step "TUI layer split: the decision half of each decide/perform pair does no I/O" \
 	bash ci/test/tui-layer-split-boundary.sh
 
+# PLAT-39's LAW-R4 and PLAT-40's production-caller gate. Both are source scans
+# with their own positive and negative controls, need no build and no
+# toolchain beyond coreutils, grep and sed, and were wired into no lane — which
+# `shell-gate-coverage.sh` reported by name. They sit with the other boundary
+# scans for the reason those do: the answer arrives in the lint stage rather
+# than after a build.
+lint_step "PLAT-39 oracle independence: the vision producer imports nothing from the application" \
+	bash ci/test/plat39-oracle-independence.sh
+
+lint_step "PLAT-40 production callers: every pane producer has a caller a user can reach" \
+	bash ci/test/plat40-production-callers.sh
+
 # `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
 # allow-list is hand-written but no longer hand-CHECKED: the guard derives the
 # engine's dispatch from `src/db-backend/src/dap_server.rs` and the event
