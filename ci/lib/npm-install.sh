@@ -90,7 +90,7 @@ restore_lock() {
 			# `ci/test/npm-install-yarn-lock-test.sh`.
 			local diff_out
 			diff_out="$(diff "${saved}" "${lock}" || true)"
-			if printf '%s\n' "${diff_out}" | grep -q '^>'; then
+			if grep -q '^>' <<<"${diff_out}"; then
 				echo "" >&2
 				echo "WARNING: npm wanted to ADD entries to ${target_dir}/${lock}." >&2
 				echo "         That means package.json has changed and the lockfile is stale." >&2
