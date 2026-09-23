@@ -956,7 +956,7 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
     // the Windows arm on Linux and fail to resolve the function.
     #[cfg(target_os = "windows")]
     let status = {
-        let posix_arg = to_bash_posix_path(&script_path);
+        let posix_arg = to_bash_posix_path(script_path);
         Command::new("bash").arg(&posix_arg).status()
     };
     // On POSIX we normally wrap the script in ``direnv exec`` so the

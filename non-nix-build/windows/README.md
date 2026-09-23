@@ -78,6 +78,40 @@ Default install root:
 `env.sh` (Git Bash) now applies the same runtime setup via
 `non-nix-build/windows/setup-codetracer-runtime-env.sh`.
 
+## Git hooks (commit and push checks) without Nix
+
+The checks a commit must pass are declared once, in `nix/pre-commit.nix`. The
+Nix dev shell installs them as a `pre-commit` shim whose interpreter is a
+`/nix/store` path, which Windows cannot execute. `env.ps1` installs the other
+leg instead (`ci/dev/install-portable-git-hooks.sh`, also `just
+install-portable-git-hooks`): a shim that runs the SAME hooks, read from
+`nix/pre-commit.nix` by `ci/dev/portable-pre-commit.py`, through the
+`pre-commit` framework with tools from `PATH`. Set
+`WINDOWS_DIY_INSTALL_GIT_HOOKS=0` to skip it.
+
+A tool that is missing does not skip its check: the commit that needs it fails,
+naming the tool and the command that installs it. `just
+portable-pre-commit-doctor` lists every hook and what this machine lacks. The
+tools, at the versions Nix pins where a Windows build exists:
+
+| Hooks | Install |
+| --- | --- |
+| the framework; whitespace, end-of-file, YAML, large files | `python -m pip install --user pre-commit==4.3.0 pre-commit-hooks==6.0.0` |
+| `cspell`, `markdownlint-fix` | `npm install -g cspell@9.2.1 markdownlint-cli2@0.18.1` |
+| `shellcheck`, `shfmt` | `scoop install shellcheck shfmt@3.12.0` |
+| `taplo` | `cargo install taplo-cli --locked --version 0.10.0` |
+| `rustfmt`, `cargo-check`, `clippy`, merge markers, submodule URLs | the Rust toolchain and Git Bash `env.ps1` provisions |
+| `nixfmt-rfc-style` | no Windows build: commit `.nix` changes from a Nix host |
+
+A checkout shared with a Nix shell (a WSL distribution on the same disk) has one
+hooks directory, and each side reinstalls its own shim on entry. Re-run the
+installer after using the other side.
+
+The installer also removes the relative `core.hooksPath=.git/hooks` that
+git-hooks.nix writes. Under that value a linked worktree (`git worktree add`)
+runs no hooks at all, and nothing reports it. With the value unset, every
+worktree uses the shared hooks directory.
+
 ## tree-sitter-nim parser generation
 
 After `source env.sh` (Git Bash), the

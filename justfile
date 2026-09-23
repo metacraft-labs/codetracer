@@ -4,6 +4,19 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Install the commit/push checks nix/pre-commit.nix declares on a host WITHOUT
+# the Nix dev shell -- native Windows is the case it exists for. The Nix shell
+# installs its own leg on entry; this one runs the same hooks through the
+# pre-commit framework from PATH. env.ps1 calls it; see the script's header.
+install-portable-git-hooks:
+  bash ci/dev/install-portable-git-hooks.sh
+
+# Which of those checks this host can actually run, hook by hook, and the
+# command that installs whatever is missing. A missing tool fails the commit
+# that needs it; this says so before the commit does.
+portable-pre-commit-doctor:
+  python3 ci/dev/portable-pre-commit.py doctor
+
 # Assert that `just build` is `just build-once` plus watchers, and nothing
 # else. Executes BOTH scripts under a PATH of recording stubs (tup, webpack,
 # livereload, repro, runquotad, nix, uname) and compares the resulting command

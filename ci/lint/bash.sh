@@ -534,6 +534,19 @@ lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes"
 lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
 	bash ci/test/git-hooks-worktree-test.sh
 
+# The non-Nix leg of the same hooks (ci/dev/portable-pre-commit.py): what native
+# Windows runs at commit time instead of the /nix/store pre-commit shim it cannot
+# execute. Registered here because nothing else runs it -- the hosts it serves
+# are not CI hosts -- and its failure mode is a check that silently stops
+# happening, which only a test notices. Every enabled hook in nix/pre-commit.nix
+# must be rendered, guarded and able to refuse a commit; a missing tool or a
+# missing pre-commit framework must refuse it too. Real `git commit`s in a
+# mktemp repository; python3 + git + bash; no nix, no network. When this lane
+# has no pre-commit framework the suite still proves the refusal half, and says
+# which half ran.
+lint_step "contract suite: the portable (non-Nix) pre-commit layer runs every declared hook" \
+	bash ci/test/portable-pre-commit-test.sh
+
 # The macOS reprobuild drivers' daemon-cwd guards. Registered here because the
 # hazard is RUNNER-WIDE and cross-job: a driver that leaves a repro daemon
 # running poisons whatever runs next on that runner, so the job that fails is
