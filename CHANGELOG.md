@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 26.09.1 - 2026-09-23
+
+The entries below accumulated under "Unreleased" and are released here. They do
+not cover every change in this release: 455 user-facing commits (343 `fix`,
+112 `feat`) landed between the unpublished `26.08.1` tag and this one without
+changelog entries, and per the release checklist they are not written up after
+the fact. No breaking change is among them -- the commit range carries zero
+`type!:` subjects and zero `BREAKING CHANGE` bodies, so the breaking-change
+section below is complete.
+
 ### Breaking changes
 
 - **`ct list` now lists every artifact CodeTracer holds, not only recordings —
