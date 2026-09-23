@@ -116,7 +116,7 @@ for tool in sway wayland-info wtype python3; do
 	command -v "${tool}" >/dev/null 2>&1 || fail "'${tool}' is not on PATH"
 done
 [ -f "${WINDOWED_SHIM}" ] || fail "no windowed shim at ${WINDOWED_SHIM}"
-nm -D --defined-only "${WINDOWED_SHIM}" 2>/dev/null | grep -q 'gpui_frame_count' ||
+grep -q 'gpui_frame_count' <<<"$(nm -D --defined-only "${WINDOWED_SHIM}" 2>/dev/null)" ||
 	fail "${WINDOWED_SHIM} predates the frame-timing ABI; rebuild it"
 # A binary built with `-d:gpuiShimPath=<windowed shim>` loads its own shim and
 # the shared one is left alone (`CODETRACER_WINDOW_BIN_PINS_SHIM=1`); otherwise
