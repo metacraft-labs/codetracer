@@ -19,12 +19,18 @@
 ##   no panel.  `standaloneComponentConfig` is the config they get instead.
 ##
 ## This module is deliberately **dependency-free**: it imports nothing but
-## `std/jsffi`, for the same reason `index/layout_config_repair.nim` does.
-## `auto_hide.nim` itself pulls in `kdom`, the frontend `types.nim` object
-## graph and GoldenLayout, none of which compile under `nim js -d:nodejs`, so
-## a rule that stays in that file cannot be exercised headlessly at all.  Its
-## headless cover is
-## `src/tests/gui/tests/auto-hide/auto_hide_unpin_test.nim`.
+## `std/jsffi`, for the same reason `index/layout_config_repair.nim` does — a
+## rule with no dependencies is cheap to exercise and cheap to reason about.
+##
+## It is NOT here because the rule could not otherwise be reached.  An earlier
+## version of this comment said `auto_hide.nim` "pulls in `kdom`, the frontend
+## `types.nim` object graph and GoldenLayout, none of which compile under
+## `nim js -d:nodejs`"; that was asserted rather than measured, and it is
+## false.  `auto_hide.nim` compiles and runs under exactly the `vm-js` lane's
+## command (`nim js -d:nodejs --path:src/frontend/viewmodel`), which is why
+## `src/tests/gui/tests/auto-hide/auto_hide_unpin_test.nim` can call
+## `unpinPanel` itself rather than only this helper.  That file is the headless
+## cover for both.
 
 import std/jsffi
 

@@ -5568,3 +5568,49 @@ together and rerun that suite.
 - Both editor surfaces build rows only via `editor_surface.projectedRows` ->
   `row_projection.editorRowsOf` (RowProjection.firstLine/requested for the
   debug window).
+||||||| parent of 2dd4564e7 (test(ui): run unpinPanel headlessly for the four default strip panes)
+
+## `src/frontend/ui/auto_hide.nim` DOES compile and run under `nim js -d:nodejs`
+
+Measured at `b98719133`, aarch64-darwin, in `nix develop '.?submodules=1'`:
+
+    nim js -d:nodejs --path:src/frontend/viewmodel <a file importing ui/auto_hide>
+
+exits 0 — the exact compiler invocation `ci/lib/run-nim-test-lane.sh` uses for
+the `vm-js` lane. So an auto-hide behaviour can be driven headlessly from a
+`src/tests/gui/tests/**/**_test.nim` file with NO new lane and no extraction of
+the logic into a dependency-free helper.
+
+This contradicts two things a reader will find first, and both are narrower
+than they sound:
+
+* `ci/lib/test-lane-files.sh`'s note that "the renderer is a BROWSER module and
+  under `-d:nodejs` it does not compile at all" is about `renderer.nim`
+  specifically. Measured: the same probe over `frontend/renderer` fails with
+  `src/frontend/utils.nim(60, 16) Error: undeclared identifier:
+  'createElementNS'` — that is `std/dom`'s, absent under the define, in a file
+  the renderer imports. `auto_hide.nim` never reaches `utils.nim`, even though
+  it imports `kdom`, the frontend `types.nim` object graph and the IsoNim
+  views.
+* `auto_hide_panel_config.nim`'s own header says `auto_hide.nim` "does not
+  compile under `nim js -d:nodejs` at all". That is wrong as written. The
+  extraction is still worth having — a dependency-free predicate is cheaper to
+  test and to reason about — but it was not *necessary*.
+
+Three host facts to know before calling into it from node:
+
+* `dispatchLayoutUpdated()` is `window.dispatchEvent(new CustomEvent(...))`.
+  node has no `window`; shim it, or every proc that ends in a layout dispatch
+  dies on its last line.
+* `deferredUpdateGLSize()` returns immediately while `autoHideLayout` is nil,
+  so nothing reaches `requestAnimationFrame`.
+* `autoHideState` is module-level and `initAutoHideState()` is a NO-OP on a
+  non-nil state. Set `autoHideState = nil` first or cases leak into each other.
+
+And one behavioural fact that is easy to assert backwards: after a SUCCESSFUL
+`unpinPanel`, `panel.isUnpinning` is deliberately still `true`. The `finally`
+clears it only when the panel is still in `autoHideState.panels`, because a
+panel that is no longer registered cannot be hidden by the flag. The observable
+that says an unpin worked is `autoHideState.panels` no longer containing it —
+not the flag, and not `bottomStripModel()`, which filters on `isUnpinning` and
+is therefore ALSO empty when the panel is latched mid-unpin (the #692 defect).
