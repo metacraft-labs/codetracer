@@ -1539,6 +1539,34 @@ proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
 
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verifiedLines: openArray[int]) =
+  ## Replace `path`'s breakpoint rows with the lines the ENGINE verified.
+  ##
+  ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
+  ## native front-ends reach it through `HeadlessDebugSession.toggleBreakpoint`
+  ## and Electron through its debugger service's `setBreakpoints` answer, so a
+  ## breakpoint is on the point list because the engine bound it, whichever
+  ## front-end asked. The lines are the engine's — a breakpoint binds to a
+  ## recorded step, which need not be the line asked for — and a line below 1
+  ## is not a place and is dropped. Rows of other kinds and other files are
+  ## untouched; `path`'s breakpoint set is replaced whole, as DAP's
+  ## `setBreakpoints` replaces it.
+  var rows: seq[PointListEntry] = @[]
+  for r in store.pointList.rows.val:
+    if not (r.kind == PointKindBreakpoint and r.path == path):
+      rows.add r
+  for line in verifiedLines:
+    if line >= 1:
+      var name = path
+      let slash = max(path.rfind('/'), path.rfind('\\'))
+      if slash >= 0: name = path[slash + 1 .. ^1]
+      rows.add PointListEntry(kind: PointKindBreakpoint,
+                              label: name & ":" & $line, path: path,
+                              line: line, enabled: true,
+                              resolution: "verified")
+  store.applyPointRows(rows)
+
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
                              stopAfter = -1): JsonNode =
   ## The ``ct/run-tracepoints`` arguments for ``specs``: THE ONE PLACE THE
@@ -1652,7 +1680,7 @@ proc applyTracepointResults*(store: ReplayDataStore;
         break
     if not replaced:
       rows.add PointListEntry(
-        kind: "pkTracepoint",
+        kind: PointKindTracepoint,
         label: (if spec.expression.len > 0: spec.expression
                 else: "tracepoint " & $spec.tracepointId),
         path: path,

@@ -8,7 +8,7 @@ import
   # each — their `tryMountIsoNim…` proc. See the factory arms below.
   calltrace, trace, event_log, terminal_output,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
-  test_results, constraints,
+  test_results, constraints, point_list,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff, verification,
   agent_activity, agent_workspace,
@@ -1978,6 +1978,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # shows them on the desktop and in a browser from one declaration.
       Content.TestResults,
       Content.Constraints,
+      # PLAT-40: an IsoNim view over the session's `PointListVM`.
+      Content.PointList,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
@@ -2195,6 +2197,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
         if state.content == Content.Constraints:
           constraints.tryMountIsoNimConstraintsPanel()
+
+        if state.content == Content.PointList:
+          point_list.tryMountIsoNimPointListPanel()
 
         if state.content == Content.TraceLog:
           trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))

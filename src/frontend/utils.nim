@@ -313,6 +313,11 @@ proc makeTestResultsComponent*(data: Data, id: int): TestResultsComponent =
   when defined(ctRenderer):
     data.registerComponent(result, Content.TestResults)
 
+proc makePointListComponent*(data: Data, id: int): PointListComponent =
+  result = PointListComponent(id: id)
+  when defined(ctRenderer):
+    data.registerComponent(result, Content.PointList)
+
 proc makeConstraintsComponent*(data: Data, id: int): ConstraintsComponent =
   result = ConstraintsComponent(id: id)
   when defined(ctRenderer):
@@ -1094,7 +1099,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.VCS:             data.makeVCSComponent(id)
   of Content.UnifiedDiff:     data.makeUnifiedDiffComponent(id)
   of Content.Verification:    data.makeVerificationComponent(id)
-  # of Content.PointList:       data.makePointListComponent()
+  of Content.PointList:       data.makePointListComponent(id)
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")
 

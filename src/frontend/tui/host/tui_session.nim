@@ -74,9 +74,10 @@ const
   CalltraceLevels* = 400
     ## `stackTrace`'s `levels`. The same number CTUI-6's suites ask for, so a
     ## deep recursion is as visible here as it is there.
-  MaxEventsForBounds* = 4096
+  MaxEventsForBounds* = RecordingEventWindow
     ## How much of the event log is read once, at open, to learn the
-    ## recording's extent.
+    ## recording's extent — `native_host.loadRecordingPanes`' window, which
+    ## both native front-ends ask for.
     ##
     ## CTUI-8 established that `TimelineVM.markers` is filled by nothing on a
     ## replay session and that the recording's extent comes from
@@ -104,14 +105,6 @@ type
     mutations*: seq[uint64]
     maxRRTicks*: uint64
     originNav*: ref OriginNavigator
-    points*: seq[SourcePoint]
-      ## The breakpoints THE ENGINE VERIFIED, as its `setBreakpoints` reply
-      ## bound them — never the line a user asked for, since the engine binds a
-      ## breakpoint to a recorded step and the gutter must show where it went.
-      ## `source_binding`'s header says why this is a value rather than
-      ## `PointListVM`: nothing a user runs fills that list with DECLARED
-      ## points. Until 2026-09-23 nothing filled this either, and `:break` /
-      ## `F9` answered "no breakpoint service is wired".
 
 proc openTuiSession*(traceFolder: string; viewportHeight: int;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -255,77 +248,44 @@ proc learnExtent*(s: TuiSession) =
   ## change: `ct/event-load`'s `maxRRTicks` is a property of the recording, and
   ## re-asking for it after every step would put a whole-log request inside the
   ## step latency CTUI-14 measures.
+  # THE SHARED PRODUCERS (`native_host.loadRecordingPanes`) — the event log's
+  # first window and the call trace, asked by the same call the GPUI front-end
+  # makes, so neither front-end can be fed while the other is starved. Both
+  # decode into the store; everything below reads the store.
+  #
+  # The call trace is the one PLAT-40 found starved: until the terminal asked
+  # for it here, every caller of `requestAndLoadCalltrace` was under `tests/`,
+  # `getCalltraceLines()` was empty on every real run, and `callBoundaries` was
+  # silently `@[]` — "empty because nothing asked" and "empty because the
+  # request failed" produced the same value. `PaneLoad` now says which.
+  let loaded = s.session.loadRecordingPanes()
   var rows: seq[EventRow] = @[]
-  try:
-    rows = s.loadedEventRows(offset = 0, limit = MaxEventsForBounds)
-    # The extent comes off the STORE's own aggregate rather than by scanning
-    # the rows again. `applyEventLogRows` raises `maxRRTicks` to the largest
-    # any applied row reported and never lowers it, so a later page cannot
-    # shrink the recording.
+  for row in s.session.session.store.eventLog.rows.val:
+    rows.add eventRowOf(row)
+  # The extent comes off the STORE's own aggregate rather than by scanning
+  # the rows again. `applyEventLogRows` raises `maxRRTicks` to the largest any
+  # applied row reported and never lowers it, so a later page cannot shrink
+  # the recording.
+  if loaded.events:
     s.maxRRTicks = s.session.session.store.eventLog.maxRRTicks.val
-  except CatchableError:
-    discard
   s.bounds = resolveBounds(s.timeline, rows, s.maxRRTicks)
   s.mutations = mutationTicks(rows)
-  try:
-    # **ASK BEFORE READING.** `getCalltraceLines` reads `store.calltrace.lines`
-    # and `requestAndLoadCalltrace` is what fills it — and until this line was
-    # written, NOTHING in any front-end called the filler. Measured: every
-    # caller of `requestAndLoadCalltrace` in the tree was under `tests/`, so
-    # `getCalltraceLines()` returned an empty sequence on every real run and
-    # `callBoundaries` was silently always `@[]`. The `except` arm below hid
-    # it further, because "empty because nothing asked" and "empty because the
-    # request failed" produced the same value.
-    #
-    # This is the campaign's signature defect — *the mechanism works and
-    # nothing feeds it* — which PLAT-23 recorded at least eight times and
-    # priced at *"one change, a producer plus a call site"*. The producer
-    # already existed; this is the call site.
-    #
-    # Issued for its EFFECT, exactly as `loadedEventRows` issues
-    # `requestAndLoadEventLog`: the request decodes into the store, and the
-    # store is the one place the lines live. A second decoder here would make
-    # the terminal an independent reader of the same payload.
-    s.session.requestAndLoadCalltrace(height = CalltraceLevels, depth = 200)
-    s.callBoundaries = boundariesFromCalltrace(s.session.getCalltraceLines())
-  except CatchableError:
-    s.callBoundaries = @[]
+  s.callBoundaries =
+    if loaded.calltrace: boundariesFromCalltrace(s.session.getCalltraceLines())
+    else: @[]
 
 proc toggleBreakpoint*(s: TuiSession; path: string; line: int): bool =
-  ## Toggle a breakpoint at `path:line` and keep `points` equal to what the
-  ## engine verified. Returns false when the engine refused the request.
-  ##
-  ## DAP's `setBreakpoints` REPLACES the source's whole set
-  ## (https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetBreakpoints),
-  ## so the request carries every breakpoint this session holds in `path`,
-  ## with `line` added or removed. A toggle that sent only the new line would
-  ## silently clear the others on the engine while the gutter still drew them.
-  var lines: seq[int] = @[]
-  var kept: seq[SourcePoint] = @[]
-  var removing = false
-  for p in s.points:
-    if p.path == path and p.kind == sptBreakpoint:
-      if p.line == line: removing = true
-      else: lines.add p.line
-    else:
-      kept.add p
-  if not removing:
-    lines.add line
-  var wanted = newJArray()
-  for l in lines:
-    wanted.add %*{"line": l}
-  let resp = s.session.sendRawDapRequest("setBreakpoints",
-    %*{"source": {"path": path}, "breakpoints": wanted})
-  discard s.session.drainEvents()
-  if not resp.getOrDefault("success").getBool(false):
-    return false
-  for bp in resp{"body", "breakpoints"}.getElems:
-    let bound = bp.getOrDefault("line").getInt(0)
-    if bp.getOrDefault("verified").getBool(false) and bound >= 1:
-      kept.add SourcePoint(path: path, line: bound, kind: sptBreakpoint,
-                           enabled: true)
-  s.points = kept
-  true
+  ## `:break` / `F9`: toggle through `HeadlessDebugSession.toggleBreakpoint`,
+  ## THE producer of breakpoint rows both native front-ends share (PLAT-40).
+  ## Until 2026-09-23 the terminal kept its own list here, and `:break`
+  ## before that answered "no breakpoint service is wired".
+  s.session.toggleBreakpoint(path, line)
+
+proc points*(s: TuiSession): seq[SourcePoint] =
+  ## The breakpoints and tracepoints the store holds, as the source pane's
+  ## points — read from `store.pointList.rows`, which the shared producer
+  ## writes, so the gutter shows what every other surface shows.
+  sourcePointsOf(s.session.session.store.pointList.rows.val)
 
 proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## Rebuild every pane's model from the CURRENT stop, and re-point the
@@ -348,10 +308,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # pane's inline values are read from them. Until 2026-09-23 the model was
   # built first and passed no values at all, so the shipped terminal drew no
   # inline value on any line (PLAT22-PG3's re-measurement found it).
-  try:
-    s.session.requestAndLoadLocals()
-  except CatchableError:
-    discard
+  discard s.session.loadStopPanes()
 
   # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
   # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same

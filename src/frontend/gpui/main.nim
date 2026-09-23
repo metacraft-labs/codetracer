@@ -999,10 +999,13 @@ proc runOpen(cmd: GpuiCommand): int =
   # TOTAL, like the terminal's: `requestAndLoadLocals` raises when the engine
   # declines, and a front-end that let that escape would drop a window over a
   # pane that would merely have been empty.
-  try:
-    session.requestAndLoadLocals()
-  except CatchableError:
-    discard
+  #
+  # PLAT-40: THE SAME PRODUCERS THE TERMINAL CALLS (`native_host`), so no pane
+  # is fed on one native front-end and starved on the other. Until
+  # 2026-09-23 this asked for the locals alone, and the call-trace pane drew
+  # "no call trace has been loaded" on every recording.
+  discard session.loadRecordingPanes()
+  discard session.loadStopPanes()
   # PLAT-37. THE BREAKPOINT IS RESOLVED AGAINST THE RECORDING'S OWN SOURCE,
   # never against a literal. `--replay-ops=setBreakpoint@<row>` names an
   # offset into the FIRST ROW THE EDITOR ACTUALLY DREW, which is why the
@@ -1026,8 +1029,16 @@ proc runOpen(cmd: GpuiCommand): int =
                        " and the editor drew no rows to place it on")
       return 1
     let at = probe.rows[min(bpRow, probe.rows.high)].line
-    points.add EditorPoint(path: session.getCurrentFile(), line: at,
-                           kind: epkBreakpoint, enabled: true)
+    # THROUGH THE ENGINE (PLAT-40), by the producer the terminal's `:break`
+    # uses: the store's point list gets the line the engine VERIFIED, and the
+    # editor draws what the store holds. Until 2026-09-23 this drew a point at
+    # `at` without asking the engine anything, so the two front-ends could
+    # mark different lines for one request.
+    if not session.toggleBreakpoint(session.getCurrentFile(), at):
+      stderr.writeLine("codetracer-gpui: --replay-ops: the engine refused a" &
+                       " breakpoint at line " & $at)
+      return 1
+  points = editorPointsOf(session.session.store.pointList.rows.val)
 
   let surface = editorSurfaceFor(
     source = sourceService.vm,

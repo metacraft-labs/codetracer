@@ -44,6 +44,8 @@ when defined(js):
 
 import std/[os, posix, strutils]
 
+import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
+
 import headless_session
 export headless_session
 
@@ -236,6 +238,65 @@ proc openLocalTrace*(traceFolder: string;
   if bin.len == 0:
     raiseHost(replayServerRemedy())
   newHeadlessDebugSession(resolved, bin, handshake = bound)
+
+# ---------------------------------------------------------------------------
+# The panes' producers — ONE set, called by both native front-ends
+# ---------------------------------------------------------------------------
+#
+# PLAT-40. The terminal and the GPUI window open a recording through the
+# function above and then each decided on its own what to ask the engine for:
+# the terminal asked for the event log, the calltrace and the locals; GPUI
+# asked for the locals alone, so its call-trace pane drew "no call trace has
+# been loaded" on every recording — the campaign's signature shape, *the
+# mechanism works and nothing feeds it*, in the one place two front-ends could
+# disagree about it. So the asking lives here, once, and both front-ends call
+# it: a pane cannot be fed on one front-end and starved on the other.
+#
+# TOTAL: each request that the engine declines is recorded as not loaded
+# rather than raised, because a front-end that let the refusal escape would
+# drop a window or a terminal over a pane that would merely have been empty —
+# and the answer SAYS which were loaded, so a caller (and a suite) can tell
+# "empty because nothing asked" from "empty because the engine declined".
+
+const
+  RecordingEventWindow* = 4096
+    ## How much of the event log is read at open: enough to learn the
+    ## recording's extent (`ct/event-load`'s `maxRRTicks`) and to fill the
+    ## event-log pane's first pages.
+  RecordingCalltraceLevels* = 400
+  RecordingCalltraceDepth* = 200
+
+type
+  PaneLoad* = object
+    ## Which producers ran AND loaded something the store now holds.
+    events*: bool
+    calltrace*: bool
+    locals*: bool
+
+proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
+  ## The per-RECORDING producers, asked once at open: the event log's first
+  ## window and the call trace. Both decode into the store, which is the one
+  ## place the rows live; this returns whether each arrived.
+  try:
+    discard s.requestAndLoadEventLog(start = 0, count = RecordingEventWindow)
+    result.events = s.session.store.eventLog.rows.val.len > 0
+  except CatchableError:
+    result.events = false
+  try:
+    s.requestAndLoadCalltrace(height = RecordingCalltraceLevels,
+                              depth = RecordingCalltraceDepth)
+    result.calltrace = s.getCalltraceLines().len > 0
+  except CatchableError:
+    result.calltrace = false
+
+proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
+  ## The per-STOP producer: the values in scope where the debugger now is,
+  ## which the state pane and the editor's inline values both read.
+  try:
+    s.requestAndLoadLocals()
+    result.locals = true
+  except CatchableError:
+    result.locals = false
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

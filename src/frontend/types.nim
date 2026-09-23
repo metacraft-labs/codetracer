@@ -1935,6 +1935,12 @@ type
     ## a div someone mounted into a GoldenLayout container.
     discard
 
+  PointListComponent* = ref object of Component
+    ## PLAT-40's Point List pane. Stateless: it draws
+    ## `viewmodel/viewmodels/point_list_vm.PointListVM`, the ViewModel
+    ## session's point list; see `ui/point_list.nim`.
+    discard
+
   ConstraintsComponent* = ref object of Component
     ## NS9's Constraints pane. Stateless for the same reason; see
     ## `viewmodel/viewmodels/constraints_vm.ConstraintsVM`.
@@ -2194,6 +2200,13 @@ type
 
   Data* = ref object
     redraw*:                proc: void
+    onBreakpointsVerified*: proc(path: cstring; lines: seq[int])
+      ## PLAT-40: where the debugger service hands the ENGINE's answer to a
+      ## `setBreakpoints` request — the lines it verified for `path`. The
+      ## renderer installs it to call `ReplayDataStore.applyVerifiedBreakpoints`
+      ## on the ViewModel session's store, the same decoder the native
+      ## front-ends reach, so the point list holds what the engine bound.
+      ## Nil until the ViewModel session exists; the service checks.
     ipc*:                   JsObject
     config*:                Config
     lastNoInfoMessage*:     cstring
@@ -3084,6 +3097,9 @@ template traceLogComponent*(data: Data, id: int): TraceLogComponent =
 
 template testResultsComponent*(data: Data, id: int): TestResultsComponent =
   TestResultsComponent(data.ui.componentMapping[Content.TestResults][id])
+
+template pointListComponent*(data: Data, id: int): PointListComponent =
+  PointListComponent(data.ui.componentMapping[Content.PointList][id])
 
 template constraintsComponent*(data: Data, id: int): ConstraintsComponent =
   ConstraintsComponent(data.ui.componentMapping[Content.Constraints][id])

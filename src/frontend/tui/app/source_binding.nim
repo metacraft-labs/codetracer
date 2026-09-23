@@ -169,6 +169,20 @@ type
     kind*: SourcePointKind
     enabled*: bool
 
+proc sourcePointsOf*(rows: openArray[PointListEntry]): seq[SourcePoint] =
+  ## The store's point rows as the pane's points: breakpoints and
+  ## tracepoints, by `store/types`' one spelling of each kind, and only rows
+  ## with a line (a row whose line is 0 could not be located and is not a
+  ## place to draw a mark).
+  for r in rows:
+    if r.line < 1: continue
+    if r.kind == PointKindBreakpoint:
+      result.add SourcePoint(path: r.path, line: r.line, kind: sptBreakpoint,
+                             enabled: r.enabled)
+    elif r.kind == PointKindTracepoint:
+      result.add SourcePoint(path: r.path, line: r.line, kind: sptTracepoint,
+                             enabled: r.enabled)
+
 proc provenanceFor*(availability: SourceAvailability): GutterProvenance =
   ## §14's source axis, as the pane's three-way distinction.
   ##

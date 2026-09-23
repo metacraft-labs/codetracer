@@ -837,6 +837,59 @@ proc lastSetTracepointResponse*(s: HeadlessDebugSession;
   }
   result = s.backend.sendDapRequest("setBreakpoints", args)
 
+proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode]
+  ## Forward: defined with the rest of the event queue below.
+
+proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
+                       line: int): bool =
+  ## Toggle a breakpoint at `path:line` through the engine, and keep the
+  ## store's point list equal to what the ENGINE verified.
+  ##
+  ## **THE ONE PRODUCER OF BREAKPOINT ROWS** (PLAT-40). Every surface that
+  ## shows a breakpoint — the terminal's gutter, the GPUI editor's gutter,
+  ## the point-list pane on either front-end — reads `store.pointList.rows`,
+  ## and this is what writes the breakpoint rows there. Until 2026-09-23 the
+  ## terminal kept its own list and GPUI placed a point on its editor without
+  ## asking the engine at all, so the two could mark different lines for one
+  ## request.
+  ##
+  ## DAP's `setBreakpoints` REPLACES the source's whole set
+  ## (https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetBreakpoints),
+  ## so the request carries every breakpoint held for `path`, with `line`
+  ## added or removed — a toggle that sent one line would clear the others on
+  ## the engine while the rows still showed them. The rows recorded are the
+  ## lines the engine BOUND, which need not be the line asked for. Returns
+  ## false (and changes nothing) when the engine refused the request; rows of
+  ## other kinds and other files are untouched.
+  var lines: seq[int] = @[]
+  var removing = false
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path:
+      if r.line == line: removing = true
+      else: lines.add r.line
+  if not removing:
+    lines.add line
+  var wanted = newJArray()
+  for l in lines:
+    wanted.add %*{"line": l}
+  let resp = s.backend.sendDapRequest("setBreakpoints",
+    %*{"source": {"path": path}, "breakpoints": wanted})
+  discard s.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    return false
+  var verified: seq[int] = @[]
+  for bp in resp{"body", "breakpoints"}.getElems:
+    if bp.getOrDefault("verified").getBool(false):
+      verified.add bp.getOrDefault("line").getInt(0)
+  s.session.store.applyVerifiedBreakpoints(path, verified)
+  true
+
+proc breakpointLinesIn*(s: HeadlessDebugSession; path: string): seq[int] =
+  ## The verified breakpoint lines the store holds for `path`, in row order.
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path and r.enabled:
+      result.add r.line
+
 proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
                                  file: string; line: int;
                                  column: int = 0;

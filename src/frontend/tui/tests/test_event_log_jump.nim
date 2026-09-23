@@ -773,7 +773,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck storedHits[^1].rrTicks == hits[^1].rrTicks
       let pointRows = h.session.session.store.pointList.rows.val
       ck pointRows.len == 1
-      ck pointRows[0].kind == "pkTracepoint"
+      ck pointRows[0].kind == PointKindTracepoint
       ck pointRows[0].label == SweepExpression
       ck pointRows[0].path == programPath
       # THE ENGINE'S LINE, not the request's — `applyTracepointResults` prefers

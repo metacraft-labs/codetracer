@@ -207,6 +207,20 @@ func degradedMessageFor*(state: PaneDegradation): string =
   else:
     ""
 
+func editorPointsOf*(rows: openArray[PointListEntry]): seq[EditorPoint] =
+  ## The store's point rows as the editor's points — the GPUI arm of the
+  ## conversion `tui/app/source_binding.sourcePointsOf` is on the terminal:
+  ## breakpoints and tracepoints by `store/types`' one spelling of each kind,
+  ## rows without a line skipped.
+  for r in rows:
+    if r.line < 1: continue
+    if r.kind == PointKindBreakpoint:
+      result.add EditorPoint(path: r.path, line: r.line, kind: epkBreakpoint,
+                             enabled: r.enabled)
+    elif r.kind == PointKindTracepoint:
+      result.add EditorPoint(path: r.path, line: r.line, kind: epkTracepoint,
+                             enabled: r.enabled)
+
 proc inlineValuesOf*(vm: StateVM; budget: Budget): seq[EditorValue] =
   ## The values in scope at THIS tick, rendered through PLAT-2's pipeline.
   ##
