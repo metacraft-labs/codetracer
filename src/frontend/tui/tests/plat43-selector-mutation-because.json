@@ -1,0 +1,13 @@
+{
+  "C1": "buf.doc.state.mode == emNormal",
+  "C2": "buf.text == TextA",
+  "E1": "buf.doc.model == kmVim",
+  "P1": "refused.status == kplRefused",
+  "R1": "remembered == @[kmVim]",
+  "R2": "not rt.editorOwnsToken(\"\\t\")",
+  "R3": "vim.editorOwnsToken(\"\\e\")",
+  "S1": "not s.ok",
+  "S2": "not s.ok",
+  "S3": "s.refusal.contains(n)",
+  "S4": "back.ok"
+}
