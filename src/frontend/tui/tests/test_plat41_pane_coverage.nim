@@ -280,9 +280,13 @@ suite "PLAT-41 — the five panes DRAW DATA, not only reports":
       ck pv.report.len == 0
       ck pkTree in pv.entries
       var labels: seq[string] = @[]
+      # WHAT A RENDERER DRAWS: a node's children only when it is expanded —
+      # a tree with every folder shut would otherwise pass this with one row
+      # on screen (the harness's X7 measured exactly that).
       proc walk(n: ViewNode) =
         labels.add n.label
-        for c in n.children: walk(c)
+        if n.expanded:
+          for c in n.children: walk(c)
       walk(pv.root)
       checkpoint($labels)
       ck labels == @["source folders", "calc", "main.py"]
