@@ -24,6 +24,7 @@
 ## editor breaking after the record was taken; re-recording does that.
 
 import std/[json, os, sets, strutils, tables, unittest]
+import ./plat42_gutter
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -50,11 +51,7 @@ proc rowsOf(s: string): seq[JsonNode] = rec()["scenarios"][s]["rows"].getElems
 proc lineOf(row: JsonNode): int =
   ## The gutter's line number, read off the row's own text. `data-ct-row` is a
   ## VIEWPORT INDEX, not a line: a stop at line 110 still draws rows 1..54.
-  var digits = ""
-  for ch in row["text"].getStr:
-    if ch.isDigit: digits.add ch
-    else: break
-  if digits.len == 0: -1 else: parseInt(digits)
+  gutterLineOf(row["text"].getStr)
 
 proc execRows(s: string): seq[JsonNode] =
   for r in rowsOf(s):
@@ -90,6 +87,17 @@ suite "PLAT-42 surface 1 — the execution pointer":
       ck rows.len == 1
       if rows.len == 1:
         ck lineOf(rows[0]) == cap["stoppedLine"].getInt
+
+  for s in Scenarios:
+    test "the execution band is on that row and on no other — " & s:
+      # The band PLAT-39's reader locates the pointer by. Twin: a band on
+      # every row, or on none, fails.
+      var banded = 0
+      for r in rowsOf(s):
+        if r["rowBackground"].getStr.len > 0:
+          inc banded
+          ck r["pointer"].getStr == "eptExecution"
+      ck banded == 1
 
 suite "PLAT-42 surface 3 — inline values, on the EXECUTION LINE ONLY":
   ## The rule is deliberate and documented at `editor_surface.nim`: a value at
@@ -194,16 +202,22 @@ suite "PLAT-42 surface 4 — the flow overlay, DRAWN":
         ck lineOf(r) notin DeclinedArm
     ck pointing == 1
 
-suite "PLAT-42 — a presentation defect found on the way, FILED":
-  test "a Python list of ints is rendered as a hex byte string":
-    ## `results` is [5, 7, 42, 17, 2] at the continued-event-log stop. The GPUI
-    ## inline value reads `05 07 2a 11 02 (5 bytes)` — the right numbers in the
-    ## wrong shape. This is PLAT-2's value-presentation pipeline rather than a
-    ## PLAT-42 surface; asserted as measured so a fix turns this red.
+suite "PLAT-42 — a presentation defect found on the way, FIXED":
+  test "a Python list of ints renders as a list, not as a hex byte string":
+    ## `results` is [5, 7, 42, 17, 2] at the continued-event-log stop. Filed
+    ## here as measured — the GPUI inline value read `05 07 2a 11 02
+    ## (5 bytes)`, the right numbers in the wrong shape — and fixed in PLAT-2's
+    ## pipeline (`value_model.byteBufferOf`: a type that says otherwise vetoes
+    ## the byte-buffer claim; this value is a `list` of `int`). `@[…]` is every
+    ## front-end's sequence spelling for a non-Rust recording
+    ## (`presentationLangOf`), not a PLAT-42 choice.
     let rows = execRows("continued-event-log")
     ck rows.len == 1
     if rows.len == 1:
-      ck rows[0]["values"].getStr.contains("(5 bytes)")
+      let values = rows[0]["values"].getStr
+      checkpoint(values)
+      ck "bytes)" notin values
+      ck "results=@[5, 7, 42, 17, 2]" in values
 
 suite "PLAT-42 — assertion tally":
   test "CHECKS":

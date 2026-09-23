@@ -183,6 +183,67 @@ suite "PLAT-42: LAW-E2 — inline values reflow, on both media":
       ck annStyles{"position"}.getStr notin ["absolute", "fixed"]
       ck annStyles{"left"}.isNil
 
+suite "PLAT-42: the flow overlay as GPUI draws it, read from the Rust plan":
+
+  test "a not-taken row's code is at half opacity; a taken or unknown row's is not":
+    gpui_reset_tree()
+    var r: GpuiRenderer
+    let parent = r.createElement("div")
+    var surface = editorSurfaceForProject("doc.txt", "a\nb\nc\n", GpuiMedium,
+                                          false)
+    ck surface.rows.len >= 3
+    surface.rows[0].flow = efsTaken
+    surface.rows[1].flow = efsNotTaken
+    surface.rows[2].flow = efsUnknown
+    discard renderEditor(r, parent, sourcePaneView(GpuiMedium).root, surface)
+    let plan = parseJson(renderPlanJson(r, parent))
+    var opacityByFlow: seq[(string, string)] = @[]
+    proc walk(n: JsonNode) =
+      let a = n{"attributes"}
+      if not a.isNil and a{"data-ct-flow"}.getStr.len > 0:
+        let code = n["children"][1]
+        opacityByFlow.add (a["data-ct-flow"].getStr,
+                           code["styles"]{"opacity"}.getStr)
+      for c in n{"children"}.getElems: walk(c)
+    walk(plan)
+    checkpoint($opacityByFlow)
+    ck ("efsNotTaken", FlowNotTakenOpacity) in opacityByFlow
+    ck ("efsTaken", "") in opacityByFlow
+    ck ("efsUnknown", "") in opacityByFlow
+
+suite "PLAT-42: the execution row's band and the one-line rows, read from the Rust plan":
+
+  test "the band is on the execution row and on no other; every row is one line":
+    # PLAT-39's reader finds the execution line by this band (its GAP 3 was
+    # that GPUI drew none). The twin: a renderer that banded every row, or
+    # none, fails. And every row keeps its line on one row — a wrapped row
+    # takes the rows of the lines below it (the noir inline value did).
+    gpui_reset_tree()
+    var r: GpuiRenderer
+    let parent = r.createElement("div")
+    var surface = editorSurfaceForProject("doc.txt", "a\nb\nc\nd\n", GpuiMedium,
+                                          false)
+    ck surface.rows.len >= 4
+    surface.rows[2].pointer = eptExecution
+    discard renderEditor(r, parent, sourcePaneView(GpuiMedium).root, surface)
+    let plan = parseJson(renderPlanJson(r, parent))
+    var banded: seq[(string, string)] = @[]
+    var wraps: seq[(string, string)] = @[]
+    proc walk(n: JsonNode) =
+      let a = n{"attributes"}
+      if not a.isNil and a{EditorRowAttribute}.getStr.len > 0:
+        let st = n["styles"]
+        wraps.add (st{"white_space"}.getStr, st{"overflow"}.getStr)
+        if st{"bg"}.getStr.len > 0:
+          banded.add (a[EditorRowAttribute].getStr, st{"bg"}.getStr)
+      for c in n{"children"}.getElems: walk(c)
+    walk(plan)
+    checkpoint("banded rows: " & $banded)
+    ck wraps.len == surface.rows.len
+    for w in wraps:
+      ck w == ("nowrap", "hidden")
+    ck banded == @[($surface.rows[2].line, ExecutionRowBand)]
+
 suite "PLAT-42 laws — assertion tally":
   test "CHECKS":
     echo "CHECKS: ", CHECKS

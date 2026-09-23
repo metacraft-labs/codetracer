@@ -76,6 +76,9 @@ def read_surfaces(plan):
                      for c in n.get("children", [])
                      if c.get("attributes", {}).get("data-ct-text-role") == "editor-code"),
                     ""),
+                # The row's own background in the plan: the execution band
+                # (`leaves.ExecutionRowBand`), "" on every other row.
+                "rowBackground": n.get("styles", {}).get("bg", ""),
                 "text": text(n).strip()[:80],
             })
         for c in n.get("children", []):

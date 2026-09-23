@@ -30,6 +30,7 @@
 ## host, and a committed record of the shipped GPUI binary.
 
 import std/[json, os, strutils, tables, unittest]
+import ../../gpui/tests/plat42_gutter
 
 import codetracer_embed
 import ../app/runtime
@@ -76,11 +77,7 @@ proc gpuiNames(row: JsonNode): seq[string] =
       result.add part.split('=', maxsplit = 1)[0]
 
 proc lineOfRow(row: JsonNode): int =
-  var digits = ""
-  for ch in row["text"].getStr:
-    if ch.isDigit: digits.add ch
-    else: break
-  if digits.len == 0: -1 else: parseInt(digits)
+  gutterLineOf(row["text"].getStr)
 
 proc drive(s: TuiSession; sid: string) =
   ## The scenario's own operations, read from the file the GPUI record and

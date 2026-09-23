@@ -26,6 +26,7 @@
 ## (`fixture_provider`'s rule), never a green run over nothing.
 
 import std/[json, os, strutils, unittest]
+import ../../gpui/tests/plat42_gutter
 
 import ../app/runtime
 import ../app/tui_app
@@ -64,11 +65,8 @@ proc gpuiNotTaken(rec: JsonNode): seq[int] =
   ## The lines GPUI marked not-taken, by the gutter number in the row's text.
   for r in rec["flowScenarios"][FlowScenario]["rows"]:
     if r["flow"].getStr == "efsNotTaken":
-      var digits = ""
-      for ch in r["text"].getStr:
-        if ch.isDigit: digits.add ch
-        else: break
-      if digits.len > 0: result.add parseInt(digits)
+      let line = gutterLineOf(r["text"].getStr)
+      if line > 0: result.add line
 
 proc codeStylesOf(screen: SourcePaneScreen; model: SourcePaneModel;
                   line: int): seq[CellStyle] =

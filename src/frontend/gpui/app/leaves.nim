@@ -176,6 +176,13 @@ const
 
   TextRoleAttribute* = "data-ct-text-role"
   TextMetricAttribute* = "data-ct-text-metric"
+  ExecutionRowBand* = "#4f4f4f"
+    ## The execution row's band, drawn as the desktop editor draws it: the
+    ## `.on` line class's `ON_BG_COLOR` in `styles/default_dark_theme.styl`.
+    ## PLAT-39's reader locates the execution line GEOMETRICALLY by exactly
+    ## this band (`vision_producer`'s editor reading); until 2026-09-23 GPUI
+    ## drew none, which PLAT-39 filed as its GAP 3 and which left the pointer
+    ## readable on screen only as a glyph OCR cannot reliably find.
   TokenAttribute* = "data-ct-token"
     ## **PLAT-35's tier-3 rows for text metrics and token colour.**
     ##
@@ -291,6 +298,33 @@ func pointerGlyph*(p: EditorPointer): string =
   of eptInspection: InspectionPointerGlyph
   of eptExecution: ExecutionPointerGlyph
 
+const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
+  ## Between the gutter and the code. A reader — a person, or PLAT-39's
+  ## reader splitting the execution band into ink clusters — must be able to
+  ## tell where the number ends and the code begins; `39def` could not.
+  ##
+  ## FOUR NO-BREAK SPACES, both halves measured on the window frames: the text
+  ## layout drops a span's trailing ASCII spaces, and the face drawn is the
+  ## window's proportional default (the shim does not draw `font-family`, so
+  ## `gpuiMetricFor`'s mono is declared rather than applied — `PLAT35-VG1`),
+  ## where two no-break spaces measured ~9 px and `44` still merged into
+  ## `def`. Four clear the reader's 14 px cluster gap.
+
+func gutterText*(row: EditorRow; numberWidth: int): string =
+  ## `<padding><pointer><mark><number><gap>`, right-aligned as one unit.
+  ##
+  ## The lanes are LEFT of the number, as the desktop editor (`> 44`) and the
+  ## terminal (`--> ● 44`) draw them; the pointer sat after the number until
+  ## 2026-09-23, where it OCR'd glued to the digits (`44p`). The PADDING goes
+  ## in front of the lanes rather than between them and the number, so the
+  ## only wide gap on a row is `GutterGap` — the one a reader locates the
+  ## gutter's end by. Padded to the widest line number in the surface, so
+  ## every row's code starts in one column (the gutter face is monospaced,
+  ## `gpuiMetricFor(trGutterLineNumber)`).
+  let number = $row.line
+  spaces(max(0, numberWidth - number.len)) & pointerGlyph(row.pointer) &
+    markGlyph(row.mark) & number & GutterGap
+
 func inlineValueText*(values: openArray[EditorValue]): string =
   ## `/* x: 42, str: "ready" */`, or "" for no values.
   ##
@@ -368,7 +402,8 @@ func gpuiTokenFor*(role: TextRole; row: EditorRow): string =
   of trValueName: "value.name.foreground"
   of trValueText: "value.text.foreground"
 
-proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
+proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
+                     numberWidth = 1): GpuiElement =
   ## One row of the source editor.
   ##
   ## Every attribute below is the ROW's own field stringified. Nothing here
@@ -384,13 +419,31 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
   r.setAttribute(el, EditorHeldAttribute, (if row.held: "true" else: "false"))
   r.setAttribute(el, EditorValuesAttribute, structuredValues(row.values))
   r.setStyle(el, "display", "flex")
+  # ONE SOURCE LINE IS ONE ROW. Soft wrap is off in every editor this
+  # product ships (`editing_core.terminalWrapSettings`), so a long line — or a
+  # long inline value, which `gpuiRowBudget` leaves unbounded in width because
+  # a GPU row's capacity is pixels the surface does not know — is CLIPPED at
+  # the pane's edge rather than wrapped onto rows that belong to the lines
+  # below it. Until 2026-09-23 the shim did not draw these styles and a noir
+  # inline value wrapped one row into twenty; the window record is what showed
+  # it (`test_plat42_window.nim`).
+  r.setStyle(el, "white-space", "nowrap")
+  r.setStyle(el, "overflow", "hidden")
+  if row.pointer == eptExecution:
+    r.setStyle(el, "background", ExecutionRowBand)
 
   let gutter = r.createElement("span")
   r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
   r.setAttribute(gutter, TextMetricAttribute, gpuiMetricFor(trGutterLineNumber))
   r.setAttribute(gutter, TokenAttribute, gpuiTokenFor(trGutterLineNumber, row))
+  # THE MARKER LANES ARE LEFT OF THE NUMBER, as the desktop editor (`> 44`)
+  # and the terminal (`--> ● 44`) draw them. The pointer sat AFTER the number
+  # until 2026-09-23, where it OCR'd as a letter glued to the digits (`44p`)
+  # and PLAT-39's gutter grammar — marker glyphs, then digits — rejected every
+  # execution row it had located by its band.
   r.appendChild(gutter,
-    r.createTextNode(markGlyph(row.mark) & $row.line & pointerGlyph(row.pointer)))
+    r.createTextNode(gutterText(row, numberWidth)))
+  r.setStyle(gutter, "flex-shrink", "0")
   r.appendChild(el, gutter)
 
   let code = r.createElement("span")
@@ -406,6 +459,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
   # changes nothing. The decision is `flowStateOf`'s; this only paints it.
   if row.flow == efsNotTaken:
     r.setStyle(code, "opacity", FlowNotTakenOpacity)
+  r.setStyle(code, "flex-shrink", "0")
   r.appendChild(el, code)
 
   let annotation = inlineValueText(row.values)
@@ -414,6 +468,12 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
     r.setAttribute(ann, TextRoleAttribute, $trValueText)
     r.setAttribute(ann, TextMetricAttribute, gpuiMetricFor(trValueText))
     r.setAttribute(ann, TokenAttribute, gpuiTokenFor(trValueText, row))
+    # The value SHRINKS and ends in an ellipsis; the code before it never
+    # does. What is clipped is the value's tail, which is also what the
+    # terminal's `inline_annotations` gives up first.
+    r.setStyle(ann, "min-width", "0")
+    r.setStyle(ann, "overflow", "hidden")
+    r.setStyle(ann, "text-overflow", "ellipsis")
     r.appendChild(ann, r.createTextNode(annotation))
     r.appendChild(el, ann)
   el
@@ -462,8 +522,11 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     let msg = r.createElement("div")
     r.appendChild(msg, r.createTextNode(surface.degradedMessage))
     r.appendChild(parent, msg)
+  var widest = 1
   for row in surface.rows:
-    r.appendChild(parent, renderEditorRow(r, row))
+    widest = max(widest, len($row.line))
+  for row in surface.rows:
+    r.appendChild(parent, renderEditorRow(r, row, widest))
   surface.rows.len > 0
 
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
