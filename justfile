@@ -5491,6 +5491,35 @@ editor-model-case-floors:
     echo "      recipe exists to have stopped."
     exit 1
   fi
+  # THE THIRD EQUALITY: every milestone that PUBLISHES a floor has an entry in
+  # the gate's table, and every entry is a published floor. The count above
+  # catches a milestone added to one of the recipe and the table; it cannot
+  # catch one added to NEITHER — PLAT-36's `FLOOR:` line sat unread for a
+  # whole milestone that way. So the set of `FLOOR: <n> cases` lines in the
+  # milestone file, keyed by the `** PLAT-<n>:` heading above each, is
+  # compared with the table's `case` labels, both directions. An empty
+  # published set is a refusal: a parse that found nothing would satisfy the
+  # comparison (§4).
+  spec="$(sed -n 's/^SPEC_REL="\(.*\)"$/\1/p' ci/test/editor-model-case-floor.sh)"
+  if [ ! -f "${spec}" ]; then
+    echo "FAIL: the milestone file the gate reads (${spec:-<unset>}) is absent"
+    exit 1
+  fi
+  published="$(awk '/^\*\* PLAT-[0-9]+:/ { h = $2; sub(/:$/, "", h) }
+                    /^[ \t]*FLOOR: [0-9]+ cases/ { print h }' "${spec}" | sort -u)"
+  tabled="$(grep -oE '^PLAT-[0-9]+\)$' ci/test/editor-model-case-floor.sh | tr -d ')' | sort -u)"
+  if [ -z "${published}" ]; then
+    echo "FAIL: no \`FLOOR: <n> cases\` line was found in ${spec}"
+    exit 1
+  fi
+  unGated="$(comm -23 <(echo "${published}") <(echo "${tabled}") | tr '\n' ' ')"
+  unPublished="$(comm -13 <(echo "${published}") <(echo "${tabled}") | tr '\n' ' ')"
+  echo "floors published: $(echo "${published}" | wc -l); entries in the gate's table: $(echo "${tabled}" | wc -l)"
+  if [ -n "${unGated// /}" ] || [ -n "${unPublished// /}" ]; then
+    [ -n "${unGated// /}" ] && echo "FAIL: a published floor with no gate entry: ${unGated}"
+    [ -n "${unPublished// /}" ] && echo "FAIL: a gate entry with no published floor: ${unPublished}"
+    exit 1
+  fi
   if [ "${failed}" -ne 0 ]; then
     echo "FAIL: ${failed} milestone(s) below their published floor"
     exit 1
