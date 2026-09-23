@@ -108,12 +108,40 @@ type
     ## and the decoding are two functions with a string between them rather than
     ## one function with a file descriptor in it.
     pending*: string
+    escSinceMs*: int64
+      ## When a LONE `ESC` began to be held, on `nowMs`'s clock; `0` when
+      ## nothing is. Set by the driver, which owns the clock — `feed` stays a
+      ## pure function of the bytes.
+
+const
+  EscDelayMs* = 50'i64
+    ## How long a lone `ESC` waits for the rest of an escape sequence before it
+    ## is the `Esc` KEY. Neovim's `ttimeoutlen` default, and the reason there
+    ## has to be one at all: a terminal sends the Esc key as the single byte
+    ## that also begins every escape sequence, so only TIME tells them apart.
+    ## A sequence's bytes arrive in one write, microseconds apart; a human's
+    ## next key does not arrive within fifty milliseconds of the last.
+    ##
+    ## Until 2026-09-23 there was no delay: a lone `ESC` was held until the
+    ## NEXT byte, and a next byte that did not continue a sequence dropped it —
+    ## so under the Vim and Kakoune keymaps a single `Esc` never left insert
+    ## mode in a real terminal, and the following key was typed as text.
+    ## Found by PLAT-28's pty case; every earlier pty suite sent `\x1b\x1b`,
+    ## which the framing turns into one `Esc` and which no keyboard sends.
 
 proc initInputFramer*(): InputFramer =
-  InputFramer(pending: "")
+  InputFramer(pending: "", escSinceMs: 0)
 
 proc reset*(f: var InputFramer) =
   f.pending = ""
+  f.escSinceMs = 0
+
+proc holdsLoneEsc*(f: InputFramer): bool =
+  f.pending.len == 1 and f.pending[0] == '\x1b'
+
+proc escDue*(f: InputFramer; nowMs: int64): bool =
+  ## Whether a held lone `ESC` has waited out `EscDelayMs` and is the key.
+  f.holdsLoneEsc and nowMs - f.escSinceMs >= EscDelayMs
 
 proc isCsiFinal*(c: char): bool =
   ## Whether `c` terminates a CSI sequence: ECMA-48's final-byte range
@@ -547,17 +575,33 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     let token = d.buffered[0]
     d.buffered.delete(0)
     return DriverEvent(kind: dekToken, token: token)
+  # A LONE `ESC` IS THE KEY ONCE `EscDelayMs` PASSES WITH NOTHING AFTER IT.
+  # The read below waits no longer than the time left, so the key arrives
+  # `EscDelayMs` after it was pressed rather than on the next keystroke.
+  let clock = (getMonoTime() - MonoTime()).inMilliseconds
+  if d.framer.escDue(clock):
+    d.framer.reset()
+    return DriverEvent(kind: dekToken, token: $Esc)
+  var wait = timeoutMs
+  if d.framer.holdsLoneEsc:
+    let left = int(EscDelayMs - (clock - d.framer.escSinceMs))
+    if wait < 0 or left < wait: wait = max(0, left)
   let wake = if d.watcher.isNil: cint(-1) else: resizeWakeFd()
-  let b = readByteWithTimeout(timeoutMs, d.inFd, wake)
+  let b = readByteWithTimeout(wait, d.inFd, wake)
   if b == ReadEof:
     return DriverEvent(kind: dekEof)
   if b < 0:
     if not d.watcher.isNil and d.watcher.pump():
       return DriverEvent(kind: dekResize, size: d.watcher.currentSize())
+    if d.framer.escDue((getMonoTime() - MonoTime()).inMilliseconds):
+      d.framer.reset()
+      return DriverEvent(kind: dekToken, token: $Esc)
     return DriverEvent(kind: dekIdle)
   let (complete, token) = d.framer.feed(char(b))
   if complete:
     return DriverEvent(kind: dekToken, token: token)
+  if d.framer.holdsLoneEsc:
+    d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
   DriverEvent(kind: dekIdle)
 
 proc nowMs*(): int64 =
