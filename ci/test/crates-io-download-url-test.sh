@@ -382,7 +382,16 @@ else
 	stylus_json=$(nix derivation show -r "$stylus_deps_drv" 2>/dev/null)
 	s_legacy=$(printf '%s' "$stylus_json" | grep -oE "\"${LEGACY_PREFIX}[^\"]+\"" | sort -u | grep -c .)
 	s_cdn=$(printf '%s' "$stylus_json" | grep -oE "\"${CDN_PREFIX}[^\"]+\"" | sort -u | grep -c .)
-	s_crates=$(printf '%s' "$stylus_json" | grep -oE '"/nix/store/[^"]*-crate-[^"]*\.tar\.gz\.drv"' | sort -u | grep -c .)
+	# Match a crate-tarball derivation by its store NAME, with the /nix/store/
+	# prefix OPTIONAL. `nix derivation show` stopped emitting that prefix on its
+	# keys and input references (Nix 2.32 prints `<hash>-crate-x.tar.gz.drv`), so
+	# a pattern that required it counted ZERO crates against 545 CDN URLs and
+	# failed the "every crate from the CDN" check while every crate WAS from the
+	# CDN. Anchoring on the 32-char store hash keeps it from matching anything
+	# that is not a store path, and the `.tar.gz.drv` tail still excludes a crate
+	# merely NAMED like one (`proc-macro-crate-3.3.0.drv` is a build, not a
+	# tarball). Works on either output format.
+	s_crates=$(printf '%s' "$stylus_json" | grep -oE '"(/nix/store/)?[a-z0-9]{32}-crate-[^"]*\.tar\.gz\.drv"' | sed 's|"/nix/store/|"|' | sort -u | grep -c .)
 
 	if [ "$s_legacy" -eq 0 ]; then
 		pass "cargo-stylus: no crate is fetched from the crates.io API host"
