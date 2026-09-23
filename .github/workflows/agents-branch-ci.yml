@@ -1,0 +1,33 @@
+name: Agents Branch CI (lightweight)
+
+# Phase P — the two-tier CI model (metacraft-dev-guidelines
+# policies/branching-policy.md §"Two-Tier CI").
+#
+# The `agents` branch is where autonomous agents integrate. Every push to it
+# runs ONLY the repository's pre-commit / prek suite (formatting, linting,
+# hygiene) via the shared reusable-lint workflow — fast feedback that catches
+# the drift which otherwise re-blocks deploys, WITHOUT paying for the full
+# build/test matrix on every intermediate commit. It is not a merge gate: the
+# full required CI runs on the `agents` → mainline pull request, which is the
+# gate that must pass to promote.
+#
+# This is the canonical template for the Phase P repo sweep. External consumers
+# reference `metacraft-labs/devops-modules/.github/workflows/reusable-lint.yml@dev`
+# instead of the local `./` path below; everything else is identical.
+
+on:
+  push:
+    branches:
+      - agents
+  workflow_dispatch:
+
+concurrency:
+  group: agents-branch-ci-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-lint.yml@dev
+    secrets: inherit
+    with:
+      runner: '["self-hosted", "linux", "x64"]'
