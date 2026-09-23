@@ -54,7 +54,8 @@ import
   std / [ jsffi, jsconsole, strformat, sequtils ],
   kdom,
   ../types,
-  ../lib/[ jslib, logging ]
+  ../lib/[ jslib, logging ],
+  ./auto_hide_panel_config
 # Node type comes from kdom; do not import dom.Node which conflicts.
 
 when defined(js):
@@ -111,10 +112,16 @@ type
       ## BUILD, PROBLEMS, SEARCH RESULTS and REQUESTS, registered by
       ## `addStandaloneAutoHidePanel` from `ui/layout.nim` on every startup.
       ##
-      ## They must NOT be persisted: they carry no GL config to re-attach
-      ## from and their live element is created fresh each launch, so a
-      ## restored copy would occupy the content slot (`findPanelByContent`)
-      ## and suppress the real registration, leaving a dead strip tab.
+      ## They must NOT be persisted: their live element is created fresh each
+      ## launch, so a restored copy would occupy the content slot
+      ## (`findPanelByContent`) and suppress the real registration, leaving a
+      ## dead strip tab.
+      ##
+      ## They DO carry a re-attachable `config`, built by
+      ## `standaloneComponentConfig` — that is issue #692's fix.  Being
+      ## standalone says where the panel came from, not that it cannot be
+      ## unpinned; §3.2 of `Planned-Features/Auto-Hide-Panes.md` gives every
+      ## strip tab an Unpin affordance without a carve-out.
 
   AutoHideState* = ref object
     ## Central state for all auto-hidden panels.
@@ -244,9 +251,12 @@ proc pinnedDocumentPath*(panel: AutoHidePanel): cstring =
   ##   puts `editorTabPath(path, editorView)` straight into the component
   ##   state's `label`, which `pinPanel` copies into `panel.config`.
   ##
-  ## Everything else answers `""` — singleton panels carry a generated component
-  ## label and `addStandaloneAutoHidePanel` builds no config at all — and
-  ## `revealsPinnedPanel` reads `""` as "no document identity".
+  ## Everything else answers a generated component label — `stateComponent-0`,
+  ## `buildComponent-0` — which is not a document path.  `revealsPinnedPanel`
+  ## never compares it: a singleton is not an `opensAsDocumentTab` content, so
+  ## the pinned instance IS the panel the request asks for whatever this
+  ## returns.  (Standalone panes answered `""` here until M46 gave them a real
+  ## component config; both answers route identically, for that reason.)
   if panel.isNil:
     return cstring""
 
@@ -478,16 +488,33 @@ proc addStandaloneAutoHidePanel*(
   content: Content,
   componentId: int,
   liveElement: Element,
+  componentLabel: cstring,
   edge: AutoHideEdge = Bottom
 ) =
   ## Register a panel directly in the auto-hide state without ever
   ## placing it in Golden Layout. Use this for panels that should
-  ## always live as auto-hide panes (BUILD, PROBLEMS, SEARCH RESULTS).
+  ## start out as auto-hide panes (BUILD, PROBLEMS, FIND IN FILES,
+  ## REQUESTS).
   ##
   ## `liveElement` is the DOM element that will be shown in the overlay.
   ## The caller is responsible for creating this element, attaching a
   ## Karax renderer to it, and keeping it alive (not attached to the
   ## visible DOM tree — the overlay will reparent it on show).
+  ##
+  ## `componentLabel` is the GoldenLayout component label the pane mounts
+  ## into — `buildComponent-0`, `errorsComponent-0`, … — and it is
+  ## REQUIRED, not optional, because it is the whole of issue #692.  These
+  ## panes never pass through `pinPanel`, so nothing else ever captures a
+  ## config for them; without one, `unpinPanel` hands GoldenLayout an empty
+  ## object, `addItem` has no component to construct from it, and the Unpin
+  ## action in the strip tab's context menu does nothing at all.
+  ## `Planned-Features/Auto-Hide-Panes.md` §3.2 gives every strip tab that
+  ## affordance with no carve-out, so the pane gets a config rather than the
+  ## menu losing an entry.
+  ##
+  ## It is passed in rather than derived from `content` because the
+  ## derivation does not hold: PROBLEMS is `Content.BuildErrors` and mounts
+  ## into `errorsComponent-0`, not `buildErrorsComponent-0`.
   if autoHideState.isNil:
     initAutoHideState()
 
@@ -503,7 +530,9 @@ proc addStandaloneAutoHidePanel*(
     title: title,
     content: content,
     componentId: componentId,
-    config: js{},  # No GL config — standalone panel
+    # A REAL GoldenLayout component config, so Unpin produces a dockable
+    # panel like every other strip tab does (#692).
+    config: standaloneComponentConfig(componentLabel, ord(content), componentId),
     domTab: nil,
     liveElement: liveElement,
     containerElement: nil,
@@ -526,7 +555,33 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   ## Re-attach a pinned panel back into Golden Layout and remove it
   ## from the auto-hide state. The live DOM element is reparented into
   ## the newly created GL container, preserving all component state.
-  if autoHideState.isNil or layout.isNil:
+  ##
+  ## Two failure modes this proc is written against, both of them issue #692:
+  ##
+  ## * **Nothing to rebuild.** GoldenLayout's `addItem` constructs a component
+  ##   from the config it is handed; a config naming no component type adds
+  ##   nothing and does not say so.  `isReattachableConfig` asks first, and a
+  ##   config that cannot work is refused out loud instead of being attempted.
+  ## * **A panel latched mid-unpin.** `isUnpinning` hides the panel's strip tab
+  ##   (`panelsForEdge`) and drops it from the persisted state
+  ##   (`serializeAutoHideState`), so a panel left with the flag set is gone
+  ##   from the strip AND absent from the layout — invisible and unreachable
+  ##   until the next restart.  The `except` arm used to be the only place that
+  ##   cleared it, which covers a raise and nothing else; the `finally` below
+  ##   covers every exit.
+  if autoHideState.isNil or layout.isNil or panel.isNil:
+    return
+
+  if not isReattachableConfig(panel.config):
+    # Not a silent return: this is the state the reporter hit, and a log line
+    # naming the panel is the difference between "Unpin does nothing" and a
+    # diagnosis.
+    cerror "auto_hide: cannot unpin '" & $panel.title &
+      "' — its stored GoldenLayout config names no component to rebuild; " &
+      "leaving it pinned"
+    panel.isUnpinning = false
+    if not autoHideState.onChanged.isNil:
+      autoHideState.onChanged()
     return
 
   panel.isUnpinning = true
@@ -561,28 +616,49 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   }
   """.}
 
+  var reattached = false
   try:
     if not unpinPanelTarget.isNil:
       unpinPanelTarget(layout, panel)
     else:
       let ground = layout.groundItem
-      if not ground.isNil and ground.contentItems.len > 0:
+      if ground.isNil:
+        # `ground.addItem` on a nil ground is a native `TypeError`, not a
+        # fallback.  Say what is wrong instead of throwing from the "recovery"
+        # branch of an error path.
+        raise newException(ValueError,
+          "no GoldenLayout ground item to re-attach the panel to")
+      elif ground.contentItems.len > 0:
         let target = ground.contentItems[0]
         discard target.addItem(panel.config)
       else:
         console.warn cstring"auto_hide: no existing container — adding to root"
         discard ground.addItem(panel.config)
+    reattached = true
   except:
     cerror "auto_hide: failed to re-add panel to GL: " & getCurrentExceptionMsg()
-    panel.isUnpinning = false
-    if not autoHideState.onChanged.isNil:
-      autoHideState.onChanged()
   finally:
     when defined(ctRenderer):
       if not data.ui.isNil:
         data.ui.isReparenting = false
 
-  cdebug fmt"auto_hide: unpinned panel '{panel.title}'"
+    # THE FLAG IS CLEARED ON EVERY EXIT, not only on a raise.
+    #
+    # A successful re-attach is the one case that may leave it set, and only
+    # because the panel is no longer in `autoHideState.panels` at all by then:
+    # `layout.nim`'s `genericUiComponent` registration runs synchronously
+    # inside `addItem`, reparents the live element and filters the panel out.
+    # If the panel is STILL registered, the re-attach did not complete —
+    # `addItem` added nothing, or the registration did not take the
+    # reparenting branch — and the panel must go back to being an ordinary
+    # pinned one rather than vanish from both the strip and the layout.
+    if not reattached or autoHideState.panels.anyIt(it == panel):
+      panel.isUnpinning = false
+      if not autoHideState.onChanged.isNil:
+        autoHideState.onChanged()
+
+  if reattached:
+    cdebug fmt"auto_hide: unpinned panel '{panel.title}'"
 
   # When the last panel is unpinned from a side edge, the strip collapses
   # back to 0, widening #ROOT.  GL must recompute its size; defer so the

@@ -2373,7 +2373,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   setupSelectedPanelOutline()
   setupDropdownDismissListeners()
   auto_hide.unpinPanelTarget = proc(layout: GoldenLayout, panel: AutoHidePanel) =
-    let isEditor = panel.config.componentState.isEditor.to(bool)
+    # NO SPECULATIVE READ OF `panel.config.componentState` HERE.
+    #
+    # This proc used to open with
+    # `let isEditor = panel.config.componentState.isEditor.to(bool)`, binding a
+    # value nothing below ever read.  On a standalone pane — whose config was
+    # an empty object until M46 — `config.componentState` is `undefined` and
+    # the next `.` threw a native `TypeError`, so the whole unpin failed on
+    # line one and never reached `addItem` at all.  That is the inner half of
+    # issue #692; `auto_hide.unpinPanel` now validates the config before
+    # calling this, but a dead dereference should not be here either way.
     let edge = panel.edge
     # Place the panel in its own new standalone group at the correct edge.
     # We call addItem(config, index) directly on the main row/column —
@@ -2681,6 +2690,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         panelDef.content,
         componentId = 0,
         liveElement = wrapper,
+        # The label is what makes Unpin work for these four (#692): it is the
+        # GoldenLayout component label the pane's config is built around, and
+        # it cannot be derived from the content — PROBLEMS is
+        # `Content.BuildErrors` and mounts into `errorsComponent-0`.
+        componentLabel = panelDef.label,
         edge = AutoHideEdge.Bottom)
   , 500)  # 500ms delay lets GL finish its internal layout cycle
 

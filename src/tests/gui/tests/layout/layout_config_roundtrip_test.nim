@@ -578,9 +578,11 @@ else:
       # A panel mid-unpin is a transient; persisting it would resurrect a
       # panel the user just dragged back into the layout.  A standalone pane
       # (BUILD / PROBLEMS / FIND IN FILES / REQUESTS) is re-registered from
-      # scratch every launch and has no GL config to re-attach from, so a
-      # persisted copy would only suppress that registration and leave a
-      # strip tab whose overlay is empty.
+      # scratch every launch, live element and all, so a persisted copy would
+      # only suppress that registration and leave a strip tab whose overlay is
+      # empty.  (It DOES carry a re-attachable GL config since M46 — see
+      # `auto-hide/auto_hide_unpin_test.nim` — but the config is not what the
+      # overlay shows; the live element is, and that one cannot be persisted.)
       check serializer.contains("panel.isUnpinning or panel.standalone")
       for forbidden in ["liveElement", "domTab", "containerElement"]:
         check not serializer.contains("\"" & forbidden & "\"")
