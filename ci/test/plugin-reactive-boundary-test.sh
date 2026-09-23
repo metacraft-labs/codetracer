@@ -1888,7 +1888,8 @@ fi
 # The comparison is a plain string equality because both sides resolve symlinks:
 # `nim dump` names the real directory and `system_surface_lib_from_exe` runs
 # `pwd -P`. On the pinned 2.2.8 that is `<prefix>/nim/lib` from both, reached
-# through `<prefix>/lib` on the second.
+# through `<prefix>/lib` on the second; under nixpkgs' wrapped nim (the lint
+# devShell) the second first follows the wrapper to `<unwrapped>/nim/bin/nim`.
 exe_lib="$(cd "${repo_root}" && system_surface_lib_from_exe 2>/dev/null || true)"
 dump_lib="$(cd "${repo_root}" && system_surface_lib 2>/dev/null || true)"
 if [ -n "${exe_lib}" ] && [ "${exe_lib}" = "${dump_lib}" ]; then
@@ -1923,6 +1924,31 @@ if [ -z "${partial_lib}" ]; then
 	ok "a library directory missing one of the sweep's roots is NOT accepted"
 else
 	bad "a library directory missing one of the sweep's roots is NOT accepted" "${partial_lib}"
+fi
+
+# A WRAPPER SCRIPT IS FOLLOWED TO THE COMPILER IT EXECS. nixpkgs' `nim` — the
+# one the lint devShell carries — is a `makeWrapper` script in a prefix holding
+# only `bin/` and `etc/`, whose last line hands off to the real compiler by
+# absolute path. Walking up from the SCRIPT finds no library, which is how the
+# agreement control above went red in CI while `nim dump` was answering fine.
+# Driven with that exact shape: a wrapper prefix with no `lib/`, exec'ing (via
+# `-a "$0"`, the other spelling makeWrapper emits) the unrunnable nim that sits
+# beside the real library.
+wrapped_nim="${work}/wrapped-nim"
+mkdir -p "${wrapped_nim}/bin" "${wrapped_nim}/etc/nim"
+# The `$0` and `$@` are the WRAPPER's own text, written literally on purpose.
+# shellcheck disable=SC2016
+printf '#! /bin/sh -e\nexport NIM_CONFIG_PATH=%s\nexec -a "$0" "%s"  "$@"\n' \
+	"${wrapped_nim}/etc/nim" "${fallback_nim}/bin/nim" >"${wrapped_nim}/bin/nim"
+chmod +x "${wrapped_nim}/bin/nim"
+wrapped_lib="$(PATH="${wrapped_nim}/bin:${PATH}" bash -c '
+	. "'"${repo_root}"'/ci/lib/system-io-surface.sh"
+	system_surface_lib_from_exe 2>/dev/null || true')"
+if [ -n "${wrapped_lib}" ] && [ "${wrapped_lib}" = "$(cd "$(system_surface_lib)" && pwd -P)" ]; then
+	ok "a wrapper script is followed to the compiler it execs, and to that compiler's library"
+else
+	bad "a wrapper script is followed to the compiler it execs, and to that compiler's library" \
+		"got: ${wrapped_lib}"
 fi
 
 # A LOOKUP THAT LANDS SOMEWHERE PLAUSIBLE BUT WRONG IS A NAMED REFUSAL, not an
