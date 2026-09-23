@@ -1,0 +1,415 @@
+{
+  "_comment": [
+    "PLAT-40 — DIFF-9's readings: the call trace, the event log and the",
+    "breakpoint list, read OFF THE SCREEN of the native window and of the",
+    "desktop into PLAT-39's domain types, plus the desktop's DOM reading of",
+    "the same frame. The frames are gitignored; these values are the",
+    "artefact. REGENERATE with `just plat40-record` after both captures."
+  ],
+  "takenAt": "2026-09-23T10:12:47Z",
+  "host": "gpu-server-001",
+  "scenario": {
+    "_comment": [
+      "PLAT-40 — the one stop both capture lanes drive the `calc` recording to,",
+      "and the one breakpoint both set, so DIFF-9 compares two front-ends at the",
+      "same state rather than two states. `gpuiOps` is `codetracer-gpui",
+      "--replay-ops`'s spelling; `breakpointLine` is the line its",
+      "`setBreakpoint@35` resolves to (the window's first drawn row is line 1 at",
+      "this stop), which the desktop capture sets by clicking its gutter. Line 36",
+      "is `return left - right` — an executable line, and one both editors have",
+      "on screen at the stop (line 34), where line 6 was scrolled out of the",
+      "desktop's editor. The record asserts the two agree rather than trusting",
+      "this file."
+    ],
+    "recording": "calc",
+    "gpuiOps": "next=3,setBreakpoint@35",
+    "nextSteps": 3,
+    "breakpointFile": "main.py",
+    "breakpointLine": 36
+  },
+  "frameDigests": {
+    "gpui/panes": "43DC87F2C0729A3375EFC90679BB31D725442A23",
+    "gpui/default": "E18E096D481E785C072A0F48DBBBB1B140535970",
+    "gpui/blank": "F4D725E154EC9E5E7817DE55E3EF1FED7E32A2AA",
+    "electron/plat40-panes": "F3D6A97B1D67D3ABB5079AF7CDB001FC33654330"
+  },
+  "gpuiRuns": [
+    {
+      "id": "blank",
+      "ops": "",
+      "extra": "",
+      "rc": 0,
+      "settled": true,
+      "settledAfterS": 0
+    },
+    {
+      "id": "panes",
+      "ops": "next=3,setBreakpoint@35",
+      "extra": "--layout=/home/zahary/m/codetracer-gui/codetracer/src/tests/visual/plat40-layout.json",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 24
+    },
+    {
+      "id": "default",
+      "ops": "next=3,setBreakpoint@35",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 24
+    }
+  ],
+  "gpui": {
+    "panes": {
+      "width": 1920,
+      "height": 1080,
+      "located": [
+        "editor",
+        "calltrace",
+        "eventLog",
+        "pointList"
+      ],
+      "calltrace": {
+        "kind": "read",
+        "value": [
+          "<_main_>",
+          "main",
+          "evaluate",
+          "apply_op",
+          "add",
+          "evaluate",
+          "apply_op",
+          "sub",
+          "apply_op",
+          "add",
+          "evaluate",
+          "apply_op",
+          "mul",
+          "evaluate",
+          "apply_op",
+          "div",
+          "apply_op",
+          "sub",
+          "evaluate",
+          "apply_op",
+          "add",
+          "apply_op",
+          "mul",
+          "apply_op",
+          "sub",
+          "apply_op",
+          "div",
+          "<end"
+        ]
+      },
+      "eventLog": {
+        "kind": "read",
+        "value": [
+          "2+3 =5",
+          "10-4+1=17",
+          "6*7 =42",
+          "100/5-3=17",
+          "1 +2*3-4/2=2",
+          "checksum =73"
+        ]
+      },
+      "pointList": {
+        "kind": "read",
+        "value": [
+          {
+            "kind": "breakpoint",
+            "fileName": "main.py",
+            "lineNumber": 36
+          }
+        ]
+      }
+    },
+    "default": {
+      "width": 1920,
+      "height": 1080,
+      "located": [
+        "other",
+        "editor",
+        "calltrace",
+        "state",
+        "eventLog"
+      ],
+      "calltrace": {
+        "kind": "read",
+        "value": [
+          "<_main_>",
+          "main",
+          "evaluate",
+          "apply_op",
+          "add",
+          "evaluate",
+          "apply_op",
+          "sub",
+          "apply_op",
+          "add",
+          "evaluate",
+          "apply_op",
+          "mul",
+          "evaluate",
+          "apply_op",
+          "div",
+          "apply_op",
+          "sub",
+          "evaluate",
+          "apply_op",
+          "add",
+          "apply_op",
+          "mul",
+          "apply_op",
+          "sub",
+          "apply_op",
+          "div",
+          "<end"
+        ]
+      },
+      "eventLog": {
+        "kind": "read",
+        "value": [
+          "2+3 =5",
+          "10-4+1=17",
+          "6*7 =42",
+          "100/5-3=17",
+          "1 +2*3-4/2=2",
+          "checksum =73"
+        ]
+      },
+      "pointList": {
+        "kind": "unreadable",
+        "reason": "region-not-located",
+        "detail": "no cell's title strip identified a point list"
+      }
+    },
+    "blank": {
+      "width": 1920,
+      "height": 1080,
+      "located": [],
+      "calltrace": {
+        "kind": "unreadable",
+        "reason": "frame-blank",
+        "detail": "every column or row median is identical: the frame carries no layout"
+      },
+      "eventLog": {
+        "kind": "unreadable",
+        "reason": "frame-blank",
+        "detail": "every column or row median is identical: the frame carries no layout"
+      },
+      "pointList": {
+        "kind": "unreadable",
+        "reason": "frame-blank",
+        "detail": "every column or row median is identical: the frame carries no layout"
+      }
+    }
+  },
+  "electron": {
+    "panes": {
+      "width": 1920,
+      "height": 1080,
+      "located": [
+        "other",
+        "editor",
+        "state",
+        "calltrace",
+        "eventLog",
+        "other",
+        "other",
+        "pointList"
+      ],
+      "calltrace": {
+        "kind": "read",
+        "value": [
+          "<__main__>",
+          "main",
+          "evaluate",
+          "apply_op",
+          "add",
+          "evaluate",
+          "apply_op",
+          "sub",
+          "apply_op",
+          "add",
+          "evaluate",
+          "apply_op",
+          "mul",
+          "evaluate",
+          "apply_op",
+          "div",
+          "apply_op"
+        ]
+      },
+      "eventLog": {
+        "kind": "read",
+        "value": [
+          "2 + 3 = 5",
+          "10 - 4 + 1 = 7",
+          "6 % 7 = 42",
+          "100 / 5 - 3 = 17",
+          "1 + 2 %3 -4 /2 =2",
+          "checksum = 73"
+        ]
+      },
+      "pointList": {
+        "kind": "read",
+        "value": [
+          {
+            "kind": "breakpoint",
+            "fileName": "main.py",
+            "lineNumber": 36
+          }
+        ]
+      }
+    }
+  },
+  "electronDom": {
+    "takenAt": "2026-09-23T10:10:26.343Z",
+    "scenario": {
+      "_comment": [
+        "PLAT-40 — the one stop both capture lanes drive the `calc` recording to,",
+        "and the one breakpoint both set, so DIFF-9 compares two front-ends at the",
+        "same state rather than two states. `gpuiOps` is `codetracer-gpui",
+        "--replay-ops`'s spelling; `breakpointLine` is the line its",
+        "`setBreakpoint@35` resolves to (the window's first drawn row is line 1 at",
+        "this stop), which the desktop capture sets by clicking its gutter. Line 36",
+        "is `return left - right` — an executable line, and one both editors have",
+        "on screen at the stop (line 34), where line 6 was scrolled out of the",
+        "desktop's editor. The record asserts the two agree rather than trusting",
+        "this file."
+      ],
+      "recording": "calc",
+      "gpuiOps": "next=3,setBreakpoint@35",
+      "nextSteps": 3,
+      "breakpointFile": "main.py",
+      "breakpointLine": 36
+    },
+    "rrTicks": 4,
+    "settledAfterAttempts": 2,
+    "calltrace": {
+      "isVisible": true,
+      "calls": [
+        {
+          "name": "<__main__>"
+        },
+        {
+          "name": "main"
+        },
+        {
+          "name": "evaluate"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "add"
+        },
+        {
+          "name": "evaluate"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "sub"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "add"
+        },
+        {
+          "name": "evaluate"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "mul"
+        },
+        {
+          "name": "evaluate"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "div"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "sub"
+        },
+        {
+          "name": "evaluate"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "add"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "mul"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "sub"
+        },
+        {
+          "name": "apply_op"
+        },
+        {
+          "name": "div"
+        },
+        {
+          "name": "<end of program>"
+        }
+      ]
+    },
+    "eventLog": {
+      "isVisible": true,
+      "events": [
+        {
+          "consoleOutput": "stdout: 2 + 3 = 5\n"
+        },
+        {
+          "consoleOutput": "stdout: 10 - 4 + 1 = 7\n"
+        },
+        {
+          "consoleOutput": "stdout: 6 * 7 = 42\n"
+        },
+        {
+          "consoleOutput": "stdout: 100 / 5 - 3 = 17\n"
+        },
+        {
+          "consoleOutput": "stdout: 1 + 2 * 3 - 4 / 2 = 2\n"
+        },
+        {
+          "consoleOutput": "stdout: checksum = 73\n"
+        }
+      ],
+      "ofRows": 6,
+      "searchString": ""
+    },
+    "pointList": {
+      "isVisible": true,
+      "points": [
+        {
+          "kind": "breakpoint",
+          "fileName": "main.py",
+          "lineNumber": 36
+        }
+      ]
+    }
+  }
+}

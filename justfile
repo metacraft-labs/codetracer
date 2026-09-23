@@ -4828,6 +4828,64 @@ plat42-surfaces-record:
 plat42-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-42
 
+# PLAT-42 — the frame budget measured in a real window (reported with the host
+# load, never asserted against a constant), and the four surfaces framed in
+# real windows with their pixel twins. Both need a compositor and a binary
+# built against the windowed shim (see each script's header).
+plat42-frame-budget:
+  bash ci/test/plat42-frame-budget.sh
+
+plat42-frames-record:
+  python3 ci/test/plat42_frames_record.py
+
+plat42-surfaces-window:
+  bash ci/test/plat42-surfaces-window.sh
+
+plat42-window-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat42win -o:build/plat42_window_record \
+    src/tests/visual/screen_oracle/plat42_window_record.nim
+
+# PLAT-43 — the keymap selector's counted floor (Tier 1), and its pty half
+# against the shipped binary.
+plat43-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-43
+
+# PLAT-44 — the GPUI editing arm: the counted floor (portable suites), and the
+# window lane (a real keystroke through a real compositor changes the file).
+plat44-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-44
+
+plat44-edit-window:
+  bash ci/test/plat44-edit-window.sh
+
+# Read the window run's frames through PLAT-39's pixel reader and commit the
+# record `test_plat44_edit_window.nim` asserts over. Needs `tesseract`.
+plat44-window-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat44rec -o:build/plat44_window_record \
+    src/tests/visual/screen_oracle/plat44_window_record.nim
+
+# PLAT-44 — PLAT-34's sequences typed into a REAL window. Three steps: the
+# plan (the keys each reachable sequence takes, from the same translation the
+# headless suite uses), the window run (one sway, one window per sequence,
+# `wtype` typing, the file and the exit caret recorded, plus a negative twin),
+# and the committed record `test_plat44_sequences_window.nim` asserts over.
+plat44-sequences-plan:
+  nim c -r --hints:off --warnings:off --path:src/frontend/viewmodel \
+    --nimcache:nimcache/plat44plan -o:build/plat44_sequences_plan \
+    ci/test/plat44_sequences_plan.nim
+
+plat44-sequences-window:
+  bash ci/test/plat44-sequences-window.sh
+
+plat44-sequences-record:
+  python3 ci/test/plat44_sequences_window_record.py
+
 # PLAT-40 — every pane producer has a caller a USER can reach.
 #
 # *A unit test is a production caller as far as a coverage tool is concerned,
@@ -4837,6 +4895,87 @@ plat42-case-floor:
 # it. It needs no toolchain and no build, so it costs nothing to run often.
 plat40-production-callers:
   bash ci/test/plat40-production-callers.sh
+
+# PLAT-40 — DIFF-9: the call trace, event log and breakpoint list, read OFF
+# THE SCREEN of the native window and of the desktop. Three recipes, split on
+# the capability line exactly as PLAT-37's are:
+#
+#   plat40-capture-window    needs a COMPOSITOR and the windowed binary
+#                            (CODETRACER_PLAT40_BIN, built with
+#                            -d:gpuiShimPath): `ci/test/plat40-panes-window.sh`.
+#   plat40-capture-electron  needs Xvfb and the built desktop app.
+#   plat40-record            needs the frames and GuiAssert; writes the
+#                            committed `src/tests/visual/plat40-readings.json`.
+#
+# The gate itself (`test_plat40_producers.nim`, in the `tui` lane) asserts over
+# the record and runs everywhere.
+plat40-capture-window:
+  bash ci/test/plat40-panes-window.sh
+
+plat40-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/plat40-panes-capture.spec.ts {{args}}
+      ;;
+    *)
+      # A screen LARGER than the 1920x1080 window, as PLAT-35's capture uses:
+      # on a 1920x1080 screen the window's content area lands at 1920x1081
+      # and the capture refuses it.
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/plat40-panes-capture.spec.ts {{args}}
+      ;;
+  esac
+
+plat40-record:
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat40rec -o:build/plat40_record \
+    src/tests/visual/screen_oracle/plat40_record.nim
+
+# PLAT-41 — the thirteen panes, both front-ends, from RUNS: the native window
+# (its plan's per-pane census, and a frame of the eight newly expressed panes
+# for PLAT-39's reader) and the desktop's DOM census at the same stop. Split
+# on the capability line as PLAT-40's recipes are; the gate
+# (`test_plat41_parity.nim`, in the `tui` lane) asserts the committed record.
+plat41-capture-window:
+  bash ci/test/plat41-panes-window.sh
+
+plat41-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/plat41-parity-capture.spec.ts {{args}}
+      ;;
+    *)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/plat41-parity-capture.spec.ts {{args}}
+      ;;
+  esac
+
+plat41-record:
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat41rec -o:build/plat41_record \
+    src/tests/visual/screen_oracle/plat41_record.nim
 
 # The rejected change-fraction thresholds, as a runnable sweep (§36b). It adds
 # NO gate of its own on purpose: asserting that the losers ARE vacuous would
@@ -5323,7 +5462,7 @@ editor-model-case-floors:
   corpus_dependent() { case "$1" in PLAT-39) return 0 ;; *) return 1 ;; esac; }
   corpus_present() { [ -d src/tests/visual/captures/electron ] && \
     [ "$(find src/tests/visual/captures/electron -name '*.png' | wc -l)" -ge 6 ]; }
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-41 PLAT-42; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-40 PLAT-41 PLAT-42 PLAT-43 PLAT-44; do
     echo "=== ${m} ==="
     if corpus_dependent "${m}" && ! corpus_present; then
       echo "DEFERRED: ${m}'s floor reads src/tests/visual/captures/electron/,"
@@ -5350,6 +5489,35 @@ editor-model-case-floors:
     echo "      ci/test/editor-model-case-floor.sh has a table entry for ${known}."
     echo "      A milestone with an entry and no caller is the exact defect this"
     echo "      recipe exists to have stopped."
+    exit 1
+  fi
+  # THE THIRD EQUALITY: every milestone that PUBLISHES a floor has an entry in
+  # the gate's table, and every entry is a published floor. The count above
+  # catches a milestone added to one of the recipe and the table; it cannot
+  # catch one added to NEITHER — PLAT-36's `FLOOR:` line sat unread for a
+  # whole milestone that way. So the set of `FLOOR: <n> cases` lines in the
+  # milestone file, keyed by the `** PLAT-<n>:` heading above each, is
+  # compared with the table's `case` labels, both directions. An empty
+  # published set is a refusal: a parse that found nothing would satisfy the
+  # comparison (§4).
+  spec="$(sed -n 's/^SPEC_REL="\(.*\)"$/\1/p' ci/test/editor-model-case-floor.sh)"
+  if [ ! -f "${spec}" ]; then
+    echo "FAIL: the milestone file the gate reads (${spec:-<unset>}) is absent"
+    exit 1
+  fi
+  published="$(awk '/^\*\* PLAT-[0-9]+:/ { h = $2; sub(/:$/, "", h) }
+                    /^[ \t]*FLOOR: [0-9]+ cases/ { print h }' "${spec}" | sort -u)"
+  tabled="$(grep -oE '^PLAT-[0-9]+\)$' ci/test/editor-model-case-floor.sh | tr -d ')' | sort -u)"
+  if [ -z "${published}" ]; then
+    echo "FAIL: no \`FLOOR: <n> cases\` line was found in ${spec}"
+    exit 1
+  fi
+  unGated="$(comm -23 <(echo "${published}") <(echo "${tabled}") | tr '\n' ' ')"
+  unPublished="$(comm -13 <(echo "${published}") <(echo "${tabled}") | tr '\n' ' ')"
+  echo "floors published: $(echo "${published}" | wc -l); entries in the gate's table: $(echo "${tabled}" | wc -l)"
+  if [ -n "${unGated// /}" ] || [ -n "${unPublished// /}" ]; then
+    [ -n "${unGated// /}" ] && echo "FAIL: a published floor with no gate entry: ${unGated}"
+    [ -n "${unPublished// /}" ] && echo "FAIL: a gate entry with no published floor: ${unPublished}"
     exit 1
   fi
   if [ "${failed}" -ne 0 ]; then

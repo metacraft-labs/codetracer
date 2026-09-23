@@ -37,7 +37,7 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 242
+const ExpectedAssertions = 246
   ## Written from a run. See the final case.
   ##
   ## Was 179 before 2026-09-07. PLAT-3 extended `PresentationKind` from five
@@ -179,7 +179,7 @@ suite "PLAT-2: resolution precedence is stated and reportable":
     # `builtin.sequence` (rank 35). This is the case that makes the report a
     # precedence report rather than a lookup: the answer says who else could
     # have rendered it.
-    let bytes = seqOf("Seq", i("1"), i("2"), i("255"))
+    let bytes = seqOf("Seq", i("1", "u8"), i("2", "u8"), i("255", "u8"))
     let p = present(bytes, StatePanelBudget)
     ck p.attribution.presenter == "builtin.byte-buffer"
     ck p.attribution.candidates.len == 2
@@ -261,18 +261,23 @@ suite "PLAT-2: the budget is an input, and the presenter returns what fits":
     # Asserted as a COUNT so a budget that silently loses its bound is caught.
     ck withCells == 1
 
-  test "SurfaceBudgets is the seven named surfaces and nothing else":
+  test "SurfaceBudgets is the eight named surfaces and nothing else":
     # SEVEN, NOT SIX. PLAT-2's brief named six; `calltrace-arg` is the seventh
     # and was ADDED to the milestone's scope rather than found inside it —
     # `ui/calltrace.nim` carried a `safeCallArgText` the first migration
     # missed, and its output crosses into the scratchpad, which was already on
     # the pipeline. See `surfaces.SurfaceBudgets`.
-    ck SurfaceBudgets.len == 7
+    #
+    # EIGHT SINCE PLAT-21 added `gpui-panel` (2026-09-15). `surfaces.nim`
+    # records that "four suites carried the literal `7` and each was moved by
+    # hand"; this was a fifth, and it stayed red on `dev` until PLAT-42
+    # (2026-09-23) ran it.
+    ck SurfaceBudgets.len == 8
     var names: seq[string] = @[]
     for b in SurfaceBudgets:
       names.add b.name
     ck names == @["state-panel", "tracepoint", "flow", "scratchpad",
-                  "event-log", "tui-tree", "calltrace-arg"]
+                  "event-log", "tui-tree", "calltrace-arg", "gpui-panel"]
 
   test "depth is a budget and not a constant":
     let nested = PValue(kind: pvkRecord, typeName: "A", sourceKind: "Instance",
@@ -451,18 +456,26 @@ suite "PLAT-2: the renderings the surfaces used to disagree about":
     ck present(seqOf("Varargs", i("1000")), TracepointBudget).root.text ==
        "varargs[1000]"
 
-  test "the byte-buffer rule is the terminal's, inherited unchanged and now universal":
-    # PINNED, INCLUDING ITS SHARP EDGE. `type_formatters.byteBufferOf` accepted
-    # any sequence of at least one integer in `0 … 255`, so the terminal's
-    # variables pane has rendered `@[1, 2]` as `01 02 (2 bytes)` since CTUI-7.
-    # The migration keeps that rule byte for byte rather than improving it in
-    # passing, because a line that moved during a mechanism change is
-    # indistinguishable from a defect. What changed is its REACH: every surface
-    # has it now.
+  test "the byte-buffer rule is the terminal's — and a type that says otherwise vetoes it":
+    # The terminal's variables pane has rendered an UNTYPED `@[1, 2]` as
+    # `01 02 (2 bytes)` since CTUI-7, and that is kept: with no type names the
+    # rule is structural. Its SHARP EDGE — pinned here until 2026-09-23 — was
+    # that the same held for a TYPED Python `list` of `int`, so calc's
+    # `results = [5, 7, 42, 17, 2]` read `05 07 2a 11 02 (5 bytes)` on every
+    # surface (PLAT-42 found it in the GPUI editor). A type that says
+    # otherwise now vetoes the claim; one that says bytes keeps it.
+    var untyped = seqOf("Seq", i("1", ""), i("2", ""))
+    untyped.typeName = ""
+    ck present(untyped, TracepointBudget).root.text == "01 02 (2 bytes)"
     ck present(seqOf("Seq", i("1"), i("2")), TracepointBudget).root.text ==
-       "01 02 (2 bytes)"
-    ck present(seqOf("Seq", i("1"), i("300")), TracepointBudget).root.text ==
-       "@[1, 300]"
+       "@[1, 2]"
+    var pyBytes = seqOf("Seq", i("1"), i("2"))
+    pyBytes.typeName = "bytes"
+    ck present(pyBytes, TracepointBudget).root.text == "01 02 (2 bytes)"
+    ck present(seqOf("Seq", i("1", "u8"), i("2", "u8")),
+               TracepointBudget).root.text == "01 02 (2 bytes)"
+    ck present(seqOf("Seq", i("1", "u8"), i("300", "u8")),
+               TracepointBudget).root.text == "@[1, 300]"
     # An empty sequence is not a buffer, so `@[]` survives.
     ck present(seqOf("Seq"), TracepointBudget).root.text == "@[]"
     ck present(seqOf("Seq", str("1")), TracepointBudget).root.text ==

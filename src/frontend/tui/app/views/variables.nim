@@ -60,7 +60,7 @@
 ##     `__name__` and `main` appear under `Locals` on `calc`.
 ##   * `Arguments` — no ViewModel surface and no wire field. `ct/load-locals`
 ##     does not distinguish a parameter from a local, and `CallLine.args` is
-##     never populated by `headless_session.parseCallLine`.
+##     never populated by the store's calltrace decoder (`callLineOf`).
 ##   * `Return values` — no surface at all.
 ##   * `Registers` — projected ONLY by the MCR emulator backend
 ##     (`dap_handler.rs`'s `TraceKind::Emulator` arm of `variables`, over

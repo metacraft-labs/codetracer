@@ -91,7 +91,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 414
+const ExpectedAssertions = 420
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run. §10.1's *"a static one cannot see a case that returned early"* is why
   ## `CHECKS:` is printed as well.
@@ -116,6 +116,7 @@ const
   CoreSource = staticRead("../../editing_core.nim")
   KeymapSource = staticRead("../../keymap/editing_keymap.nim")
   GpuiMainSource = staticRead("../../../gpui/main.nim")
+  GpuiArmSource = staticRead("../../../gpui/app/edit_arm.nim")
   # The retirement scan's subjects. `staticRead` is compile-time only, so a
   # case cannot call it inline; naming them here also means the list of
   # modules the retirement claim is about is one place a reader can count.
@@ -247,9 +248,12 @@ proc newEditBuffer*(path, text: string): EditBuffer =
 
 const ScannedKeymapModules = [
   "editing_keymap.nim", "kakoune_keymap.nim", "product_keymap.nim",
-  "vim_keymap.nim", "vim_import.nim"]
+  "vim_keymap.nim", "vim_import.nim", "keymap_selection.nim"]
 
-const ScannedKeymapModuleCount = 5
+const ScannedKeymapModuleCount = 6
+  ## **SIX SINCE 2026-09-23**: PLAT-43 added `keymap/keymap_selection.nim`,
+  ## the one name→model selector, and this case went red by name — the
+  ## enumeration doing its job a ninth time.
   ## A NAMED CARDINALITY so the set equality has something to disagree with.
   ##
   ## **IT WENT FROM FOUR TO FIVE ON 2026-09-22, AND THE ENUMERATION IS WHY.**
@@ -529,13 +533,24 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     # re-derivation is invisible to every assertion about the ANSWER. So the
     # claim checked here is about the SOURCE: the front-end's own scope
     # builder names the same five dimensions with the same two constants.
+    #
+    # SINCE PLAT-43/44 (2026-09-23) THE BUILDER DELEGATES, and the facts moved
+    # with it: `editingScope` is one call to `editing_core.editScopeOf`, the
+    # rule GPUI's edit arm calls too, and `textEntry` is no longer the
+    # constant `true` — it follows the document's mode (a printable key is text
+    # only in insert mode; PLAT-43 measured the constant typing `dw` under
+    # Vim). So the scan follows the delegation into the function that now
+    # holds the five values.
     let body = codeOnly(bodyOf(BindingSource, "proc editingScope*("))
     counted body.len > 0
-    counted "product: pmEdit" in body
-    counted "pane: epEditor" in body
-    counted "textEntry: true" in body
-    counted "model: buf.doc.model" in body
-    counted "mode: buf.doc.state.mode" in body
+    counted "editScopeOf(buf.doc)" in body
+    let rule = codeOnly(bodyOf(CoreSource, "func editScopeOf*("))
+    counted rule.len > 0
+    counted "product: pmEdit" in rule
+    counted "pane: epEditor" in rule
+    counted "textEntry: d.state.mode == emInsert" in rule
+    counted "model: d.model" in rule
+    counted "mode: d.state.mode" in rule
 
   test "the GPUI surface reads the DOCUMENT and splits no string":
     let body = codeOnly(bodyOf(SurfaceSource,
@@ -556,11 +571,20 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     # used to read a file and hand the string to a derivation that split it;
     # it constructs the model now, which is the edge the thirty cells above
     # assume and cannot see.
+    #
+    # SINCE PLAT-44 the document is held by the EDIT ARM, because this
+    # front-end writes it now; `editSurfaceFor` opens the arm and asks it for
+    # the surface, and the arm is what constructs the model and derives from
+    # it. The scan follows that one step.
     let body = codeOnly(bodyOf(GpuiMainSource, "proc editSurfaceFor("))
     counted body.len > 0
-    counted "initEditingDocument(" in body
-    counted "editorSurfaceForDocument(" in body
+    counted "newGpuiEditArm(" in body
+    counted "surfaceOf(" in body
     counted "editorSurfaceForProject(" notin body
+    counted "initEditingDocument(" in
+      codeOnly(bodyOf(GpuiArmSource, "proc newGpuiEditArm*("))
+    counted "editorSurfaceForDocument(" in
+      codeOnly(bodyOf(GpuiArmSource, "proc surfaceOf*("))
 
   test "the keymap layer threads the CLOCK into every operation it runs":
     # PLAT-32's residual, closed here, as a SOURCE fact because no answer
@@ -694,12 +718,16 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
 
   test "EditSession module 3 of 3 — the runtime, which routes the keystroke":
     let src = codeOnly(RuntimeSource)
-    counted "newEditSession()" in src
+    # `newEditSession(rt.keymapModel)` since PLAT-43: a session opens under
+    # the keymap the user chose (the stored preference, or `:keymap`).
+    counted "newEditSession(rt.keymapModel)" in src
     # AND IT PASSES THE CLOCK. The last step of PLAT-32's residual: the
     # runtime has threaded `nowMs` through `handleToken` since CTUI-2 and the
     # editing path never asked for it.
     counted "rt.routeTokenToEditor(token, nowMs)" in src
-    counted "buf.applyEditKey(keyName(token), nowMs)" in src
+    # Through the SESSION since PLAT-28 (2026-09-23), so the file's project
+    # breakpoints are carried through the edit; the clock still goes with it.
+    counted "applyEditKeyIn(buf, keyName(token), nowMs)" in src
     counted mutableBufferSpellingsIn(src).len == 0
 
   # -------------------------------------------------------------------------

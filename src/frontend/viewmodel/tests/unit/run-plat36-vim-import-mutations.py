@@ -33,6 +33,11 @@ The claims, and the arms that kill them, in the milestone's own order:
   | the partition law's denominator is NOT the importer's own sum | `G3` |
   | `DIFF-5`'s two sides are two keymaps | `G1` |
   | the key-name round trip has a population | `G4` |
+  | `:source` installs the import: bindings, macros, later files | `S1`, `S2`, `S4` |
+  | `:keymap` afterwards is the shipped keymap, import's macros gone | `S3`, `S5` |
+  | the status line names the count and the first untranslated line | `S6` |
+  | a refused read installs nothing, and the size ceiling holds | `S7`, `S8` |
+  | the `:source` suite reads REAL files through the shipped reader | `G6` |
 
 Verification-Harness-Traps, applied rather than cited:
 
@@ -102,7 +107,15 @@ CORPUS = "src/frontend/viewmodel/tests/corpus/vimrc_corpus.nim"
 LAWS = "src/frontend/viewmodel/tests/unit/test_editor_vim_import.nim"
 DIFF = "src/frontend/viewmodel/tests/unit/test_editor_vim_import_differential.nim"
 
-TOUCHED = [IMPORTER, CORPUS, LAWS, DIFF]
+# PLAT-36's install path: `:source <file>` in the terminal's Edit mode.
+CORE = "src/frontend/viewmodel/editing_core.nim"
+BINDING = "src/frontend/tui/app/edit_binding.nim"
+RUNTIME = "src/frontend/tui/app/runtime.nim"
+EDIT_HOST = "src/frontend/tui/host/edit_host.nim"
+SOURCE = "src/frontend/tui/tests/test_plat36_source_command.nim"
+
+TOUCHED = [IMPORTER, CORPUS, LAWS, DIFF, CORE, BINDING, RUNTIME, EDIT_HOST,
+           SOURCE]
 
 CONTROL_HASHES = HERE / "plat36-vim-import-mutation-control.sha256"
 
@@ -156,7 +169,17 @@ R_DVORAK = RESOLVED + "v07-vim-dvorak-enable resolves to its own operation"
 DIFF5_OTHER = ("A DIVERGENCE WITH NO REPORT ENTRY WOULD BE A FAILURE — the "
                "other arm")
 
+S_SINGLE = "a single-operation mapping: `Q` under the import is `D` under Vim"
+S_MACRO = ("a multi-operation mapping replays through the macros the import "
+           "installed")
+S_REPORTED = ("an untranslatable line is REPORTED on the status line, with "
+              "its reason")
+S_LATER = "a file opened after `:source` is opened under it"
+S_KEYMAP = "`:keymap vim` afterwards is the SHIPPED keymap, macros and all"
+S_REFUSED = "no argument, a missing file, a file over the ceiling"
+
 NAMED_CASES = [
+    S_SINGLE, S_MACRO, S_REPORTED, S_LATER, S_KEYMAP, S_REFUSED,
     CLASSES, COVERAGE, TYPED, UNIQUE, SILENT, KEYNAMES, MACRO, LEADER,
     REASON_SYNTAX, REASON_NOOP, NEGATIVE, CORPUS_PINNED, OUTCOME_KINDS,
     T30A, DIFF5_OTHER,
@@ -463,6 +486,96 @@ ARMS = [
         "can produce'* names. The case must fail on the reason's count AND on "
         "the totals moving the wrong way, which is why it asserts both",
     ),
+
+    # =======================================================================
+    # THE INSTALL PATH — `:source <file>`
+    # =======================================================================
+    Arm(
+        "S1", CORE,
+        "    if d.imported.isNil:\n      editing_keymap.applyKey(",
+        "    if true:\n      editing_keymap.applyKey(",
+        S_SINGLE,
+        "**THE IMPORT IS INSTALLED AND NEVER CONSULTED.** Every key resolves "
+        "through the shipped model's keymap, so `:source` reports its count, "
+        "the buffer says `kmVim`, and the user's `Q` does whatever Vim's `Q` "
+        "does — the silent partial import §6.3 calls worse than none, at "
+        "100% of the mappings",
+    ),
+    Arm(
+        "S2", CORE,
+        "  for id, steps in imported.macros:\n    d.state.macros[id] = steps",
+        "  for id, steps in imported.macros:\n    discard (id, steps)",
+        S_MACRO,
+        "**THE BINDINGS ARE INSTALLED AND THE MACROS THEY REPLAY ARE NOT.** A "
+        "single-operation mapping still works, which is exactly why this arm "
+        "exists: every multi-operation right-hand side resolves to a "
+        "`replay-macro` of an id the state does not hold, and does nothing",
+    ),
+    Arm(
+        "S3", CORE,
+        "    d.state.macros.del id",
+        "    discard id",
+        S_KEYMAP,
+        "**THE IMPORT IS DROPPED AND ITS MACROS OUTLIVE IT.** A macro id the "
+        "importer minted stays in the state after `:keymap vim`, where a later "
+        "recording or `@` replay can reach a right-hand side no binding names",
+    ),
+    Arm(
+        "S4", BINDING,
+        "  if not s.imported.isNil:\n    s.buffers[^1].doc.installImported(",
+        "  if false:\n    s.buffers[^1].doc.installImported(",
+        S_LATER,
+        "**ONLY THE BUFFERS OPEN AT `:source` TIME ARE UNDER IT.** The next "
+        "`:e` opens a file under the plain Vim keymap, and the user's mapping "
+        "works in one buffer and not the one beside it",
+    ),
+    Arm(
+        "S5", BINDING,
+        "  s.model = model\n  s.imported = nil\n",
+        "  s.model = model\n",
+        S_KEYMAP,
+        "**`:keymap vim` KEEPS THE SESSION'S IMPORT.** Open buffers are "
+        "re-keyed to the shipped model, but the session still carries the "
+        "import, so the next file opened is under a configuration the user "
+        "just asked to leave",
+    ),
+    Arm(
+        "S6", CORE,
+        "  if c.report.len > 0:\n    let first = c.report[0]",
+        "  if false:\n    let first = c.report[0]",
+        S_REPORTED,
+        "**THE STATUS LINE GIVES THE COUNT AND NOT THE GAP.** N of M is "
+        "still printed, but the first untranslated line and its reason are "
+        "not — the user learns something was lost and not what, which §6.3 "
+        "says they then discover through muscle memory failing",
+    ),
+    Arm(
+        "S7", RUNTIME,
+        "        if not read.ok:\n          rt.note(read.message)",
+        "        if false:\n          rt.note(read.message)",
+        S_REFUSED,
+        "**A FAILED READ IS INSTALLED AS AN EMPTY CONFIGURATION.** The "
+        "refusal is replaced by 'sourced nope.vim: 0 of 0', and the session "
+        "is switched to Vim by a command that read nothing",
+    ),
+    Arm(
+        "S8", EDIT_HOST,
+        "  if info.size > MaxConfigFileBytes:",
+        "  if false:",
+        S_REFUSED,
+        "**THE CONFIGURATION SIZE CEILING IS GONE.** A file of any size is "
+        "read whole on the frame that typed `:source`",
+    ),
+    Arm(
+        "G6", SOURCE,
+        "      EditReadResult(ok: true, text: readUserConfigFile(root, spelled))",
+        "      EditReadResult(ok: true, text: \"nnoremap Q D\\n\")",
+        S_REFUSED,
+        "**THE SUITE'S READER BECOMES A STUB.** The file cases still pass — "
+        "the stub returns what the fixture wrote — and only the refusal case "
+        "can tell a real reader from one that answers every path. This is the "
+        "arm that makes the header's 'no mocks' a graded claim",
+    ),
 ]
 
 DECLARED_SURVIVORS: list = []
@@ -503,10 +616,18 @@ def write_source(path: str, text: str) -> None:
 
 
 def suites() -> list:
-    """(path, binary, flags) for each suite. Both are pure ViewModel."""
+    """(path, binary, flags) for each suite. The first two are pure
+    ViewModel; the `:source` suite is a TUI module and takes the `tui` lane's
+    flags, read from `ci/lib/test-lane-files.sh` rather than spelled here."""
+    tui = subprocess.run(
+        ["bash", "-c", ". ci/lib/test-lane-files.sh >/dev/null 2>&1 && "
+         "test_lane_extra_flags tui"],
+        cwd=ROOT, capture_output=True, text=True).stdout.split()
     return [
         (LAWS, "/tmp/plat36-mutation-laws", VM_FLAGS),
         (DIFF, "/tmp/plat36-mutation-diff", VM_FLAGS),
+        (SOURCE, "/tmp/plat36-mutation-source",
+         ["--hints:off", "--warnings:off", *tui]),
     ]
 
 
@@ -586,7 +707,7 @@ def declared_counts() -> dict:
 
 def check_killer_names(problems: int) -> int:
     """Every killer names a case the suites actually instantiate."""
-    bodies = {p: read_source(p) for p in (LAWS, DIFF)}
+    bodies = {p: read_source(p) for p in (LAWS, DIFF, SOURCE)}
     everywhere = "\n".join(bodies.values())
 
     for needle, path, label in CASE_TEMPLATES:

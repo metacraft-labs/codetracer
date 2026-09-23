@@ -126,6 +126,12 @@ type
       ## What the ViewModel reports at THIS tick. Rebuilt every frame; see
       ## `inline_annotations.nim` on why nothing here is cached.
     heat*: LineHeat
+    notTakenLines*: seq[int]
+      ## The flow overlay: lines inside a branch arm the recorded run DECLINED,
+      ## from `editor_surface.notTakenLinesOf`. They are painted de-emphasised,
+      ## which is the desktop editor's `.line-flow-skip` (half opacity) in the
+      ## terminal's vocabulary. Empty when the overlay is hidden or the flow
+      ## window claims nothing — and then the pane is exactly CTUI-5's.
     gutterMode*: GutterMode
     degradedMessage*: string
       ## Page-Descriptions.md §14's row, when there is one. Rendered in the
@@ -166,6 +172,12 @@ const
   PathStyle* = CellStyle(fg: "bright_black")
   RuleStyle* = CellStyle(fg: "bright_black")
   DegradedStyle* = CellStyle(fg: "red", bold: true)
+  FlowNotTakenStyle* = CellStyle(fg: "bright_black")
+    ## A line the run did not reach, de-emphasised. `bright_black` is the
+    ## colour this pane already uses for text that is present but not the
+    ## subject (the path, the rule, the loading placeholder); the syntax
+    ## colours are dropped on such a line because a highlighted keyword on a
+    ## dimmed line reads as live code.
 
   TokenStyles*: array[TokenClass, CellStyle] = [
     tcPlain: DefaultCellStyle,
@@ -210,7 +222,8 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           heat = LineHeat();
                           gutterMode = gutLineNumbers;
                           degradedMessage = "";
-                          inspectionLine = 0): SourcePaneModel =
+                          inspectionLine = 0;
+                          notTakenLines: seq[int] = @[]): SourcePaneModel =
   ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
   ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
@@ -218,7 +231,7 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
     firstHeldLine: firstHeldLine, heldLines: heldLines,
     totalLineCount: totalLineCount, viewportTop: viewportTop,
     executionLine: executionLine, inspectionLine: inspectionLine,
-    marks: marks, values: values, heat: heat,
+    marks: marks, values: values, heat: heat, notTakenLines: notTakenLines,
     gutterMode: gutterMode, degradedMessage: degradedMessage)
 
 # ---------------------------------------------------------------------------
@@ -446,6 +459,15 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                          var out2 = style
                          out2.bg = s.bg
                          out2)
+      # THE FLOW OVERLAY. Applied after the syntax colours so it replaces
+      # them, and before the execution-line background so a stop inside a
+      # declined arm (which the flow never reports, but a stale window could)
+      # still shows where the debugger is.
+      if line in model.notTakenLines and shown > 0:
+        g.restyle(row, codeCol, shown, proc(s: CellStyle): CellStyle =
+          var out2 = FlowNotTakenStyle
+          out2.bg = s.bg
+          out2)
       # The inline annotation, for the EXECUTION line only. §3.3.2 renders the
       # evaluated values "at the current step", and a value printed beside a
       # line the debugger is not on is a value from another moment.

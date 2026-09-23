@@ -1,0 +1,10 @@
+{
+  "_comment": [
+    "PLAT-41 \u2014 the stop both capture lanes drive `calc` to before the thirteen",
+    "panes are censused: three `next`s, the same stop PLAT-40 used, so a pane's",
+    "content is the recording's at one moment on both front-ends."
+  ],
+  "recording": "calc",
+  "gpuiOps": "next=3",
+  "nextSteps": 3
+}

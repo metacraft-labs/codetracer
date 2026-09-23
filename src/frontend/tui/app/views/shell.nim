@@ -57,6 +57,7 @@ import ./file_tree
 import ./event_log
 import ./frame_viewer
 import ./header
+import ./point_list
 import ./source_pane
 import ./status_bar
 import ./styled_row
@@ -132,6 +133,9 @@ type
       ## with no session open paints CTUI-3's own `timelineScrubber` row and
       ## every CTUI-3 assertion that reads it still reads it.
     eventLog*: EventLogModel
+    points*: PointListPaneModel
+      ## PLAT-40. The Points pane, as a value. NOT LOADED BY DEFAULT, so a shell
+      ## with no session paints the plain `POINTS ────` title row it always did.
       ## CTUI-8's event log, as a value. It shares the `timeline` rectangle with
       ## the scrubber — §3.3.5 is ONE pane holding both, and the Standard and
       ## Ultra-wide layouts call that pane "Timeline & Tracepoints" — so the bar
@@ -602,6 +606,20 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
       discard paintEventLog(
         g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
         model.eventLog)
+  # PLAT-40. THE POINTS PANE, when a session has supplied its rows. Before this
+  # arm the pane reached the terminal as a title over an empty rectangle.
+  elif region.pane == panePointList and model.points.loaded:
+    if region.activeTab >= 0 and region.tabs.len > 0:
+      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+      if a.height >= 2:
+        discard paintPointList(
+          g, CellArea(col: a.col, row: a.row + 1, width: inner,
+                      height: a.height - 1),
+          model.points)
+    else:
+      discard paintPointList(
+        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+        model.points)
   elif region.activeTab >= 0 and region.tabs.len > 0:
     g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
   else:

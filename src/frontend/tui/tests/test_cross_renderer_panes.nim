@@ -711,9 +711,9 @@ suite "PLAT-21: PLAT-2's purity requirement, with a third witness":
       # same `PValue` put through `present` at the same budget must produce the
       # same bytes. Without this the three could agree on a rendering all three
       # had truncated.
-      let expected = v.name & " = " &
+      let expected = variableLabel(v.name,
         (if v.presented.isNil: v.value
-         else: presentText(v.presented, GpuiPanelBudget))
+         else: presentText(v.presented, GpuiPanelBudget)))
       ck terminalLabel == expected
       inc compared
     ck compared == 12
@@ -763,7 +763,7 @@ suite "PLAT-21: PLAT-2's purity requirement, with a third witness":
     # …and it is still the presenter's answer, not the row plus its subtree.
     ck gpuiLabel.endsWith(presentText(
       vm.currentVariables.val[0].presented, GpuiPanelBudget)) or
-       gpuiLabel.startsWith(parent & " = ")
+       gpuiLabel.startsWith(parent & VariableLabelSeparator)
     vm.expandedPaths.val = before
     expectCount(6)
 

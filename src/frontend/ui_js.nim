@@ -39,7 +39,7 @@ import
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
   index/layout_config_repair,
-  ui/[test_results, constraints, generated_code],
+  ui/[test_results, constraints, generated_code, point_list],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -55,7 +55,7 @@ import
   ui/hcr_live_edit_panel,
   ../ct_test/contracts,
   ../common/noir_constraints,
-  viewmodel/viewmodels/[test_results_vm, constraints_vm],
+  viewmodel/viewmodels/[test_results_vm, constraints_vm, point_list_vm],
   # `electron_presence` supplies `inElectron`, which the two `if inElectron:`
   # blocks at the bottom of this file read to choose an IPC transport.
   #
@@ -797,6 +797,10 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Timeline", aTimeline
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
+          # PLAT-40. The point list's one way in: its `makeComponent` arm was
+          # commented out (constructing the pane raised) and its entry lived
+          # only in the commented-out "Panes" folder, so no user could open it.
+          element "Breakpoints & Tracepoints", aPointList
           element "Agent Activity", aAgentActivity
           # VN-M5. The one reachable surface for verification and for the
           # counterexample it produces. There is deliberately no "Counterexample"
@@ -2653,6 +2657,19 @@ when not defined(ctInExtension):
                 handler($kind, raw)),
       )
       activeSessionVM = createSessionVM(realBackend)
+      # PLAT-40: the debugger service's `setBreakpoints` answers go to the
+      # ViewModel store's one breakpoint decoder — the point list then holds
+      # what the engine verified, as it does on the native front-ends.
+      let pointStore = activeSessionVM.store
+      data.onBreakpointsVerified = proc(path: cstring; lines: seq[int]) =
+        pointStore.applyVerifiedBreakpoints($path, lines)
+      # The desktop builds panel ViewModels on demand rather than through
+      # `initializePanelViewModels`, so the session's point list may not exist
+      # yet: create it over the session's store and record it on the session,
+      # so every reader of `pointListVM` sees the one list.
+      if activeSessionVM.pointListVM.isNil:
+        activeSessionVM.pointListVM = createPointListVM(activeSessionVM.store)
+      point_list.setPointListVM(activeSessionVM.pointListVM)
       # Apply any `supportsStepBack` capability that arrived before this VM
       # existed (its DAP `initialize` response can beat this assignment), so the
       # reverse-step toolbar buttons reflect the backend's real capability.

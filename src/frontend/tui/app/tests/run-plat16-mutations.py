@@ -412,8 +412,8 @@ MUTATIONS = [
     # ---- Tier 2: the shipped binary on a real pty -------------------------
     Mutation(
         "M26", CLI,
-        '      editRequested = true\n    of "--layout-binding":',
-        '      editRequested = false\n    of "--layout-binding":',
+        '      editRequested = true\n    of "--no-flow-overlay":',
+        '      editRequested = false\n    of "--no-flow-overlay":',
         REALPTY,
         "`--edit <project>` opens the project in EDIT mode, with the file on "
         "screen",

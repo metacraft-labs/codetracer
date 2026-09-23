@@ -134,7 +134,7 @@ ARMS = [
     # THE PANE MUTATION — the milestone's own gate, half one
     # ------------------------------------------------------------------
     Arm("M1", LEAVES,
-        "  for row in surface.rows:\n    r.appendChild(parent, renderEditorRow(r, row))",
+        "  for row in surface.rows:\n    r.appendChild(parent, renderEditorRow(r, row, widest))",
         "  for row in surface.rows:\n    discard row",
         SUITE,
         "stepped-editor / editor-row-count",

@@ -348,7 +348,18 @@ PLAT-36)
 	SUITES=(
 		src/frontend/viewmodel/tests/unit/test_editor_vim_import.nim
 		src/frontend/viewmodel/tests/unit/test_editor_vim_import_differential.nim
+		src/frontend/tui/tests/test_plat36_source_command.nim
 	)
+	# THE THIRD SUITE IS THE IMPORT INSTALLED: `:source <file>` through the
+	# terminal runtime, which is the only one of the three that is a TUI
+	# module and so the only one that needs the `tui` lane's flags — read from
+	# `ci/lib/test-lane-files.sh`, never spelled again here (§30).
+	PLAT36_TUI_FLAGS="$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)"
+	SUITE_FLAGS=("" "" "${PLAT36_TUI_FLAGS}")
 	# THIS MILESTONE PUBLISHES A FLOOR AND WAS GATED BY NEITHER FILE.
 	# Verification of the PLAT-37…44 drafts found that PLAT-36 carries a
 	# `FLOOR:` line, that this script had no `case` label for it, and that
@@ -507,11 +518,34 @@ PLAT-39)
 	SUITE_FLAGS=("--path:../GuiAssert/src")
 	LAW_SUITES=()
 	;;
+PLAT-40)
+	MILESTONE="** PLAT-40: The three panes the vocabulary expresses and nothing feeds"
+	SUITES=(
+		src/frontend/tui/tests/test_plat40_producers.nim
+	)
+	# ONE SUITE. It opens the real `calc` recording through the native hosts'
+	# own `openLocalTrace`, runs the shared producers, composites the shipped
+	# terminal's screen in process, and reads the committed DIFF-9 record the
+	# two capture lanes measured (`plat40-panes-window.sh`,
+	# `plat40-panes-capture.spec.ts`). It links isonim-tui, so it takes the
+	# `tui` lane's flags, read rather than spelled (§30).
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)")
+	LAW_SUITES=()
+	;;
 PLAT-41)
 	MILESTONE="** PLAT-41: The eight panes with no view"
 	SUITES=(
 		src/frontend/tui/tests/test_plat41_pane_coverage.nim
+		src/frontend/tui/tests/test_plat41_parity.nim
 	)
+	# The SECOND suite is the milestone's run-tier half: the parity table from
+	# both front-ends' runs, PLAT-39's reader over the eight panes and DIFF-10,
+	# over the committed `plat41-readings.json`, plus a live session for the
+	# report-to-data transitions. It links isonim-tui like the first.
 	# ONE SUITE, AND IT COUNTS ONLY THIS MILESTONE'S OWN CASES.
 	#
 	# PLAT-41 also grew `test_cross_renderer_panes.nim` by 24 assertions —
@@ -527,30 +561,98 @@ PLAT-41)
 	# product's ViewModels, and the data-path cases construct five of them over
 	# a mock backend. Read from `ci/lib/test-lane-files.sh` rather than spelled
 	# again here (§30).
-	SUITE_FLAGS=("$(
+	TUI_FLAGS="$(
 		# shellcheck source=/dev/null
 		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
 			test_lane_extra_flags tui
-	)")
+	)"
+	SUITE_FLAGS=("${TUI_FLAGS}" "${TUI_FLAGS}")
 	LAW_SUITES=()
 	;;
 PLAT-42)
 	MILESTONE="** PLAT-42: The four debugger surfaces under GPUI"
 	SUITES=(
 		src/frontend/gpui/tests/test_plat42_surfaces.nim
+		src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim
+		src/frontend/gpui/tests/test_plat42_window.nim
+		src/frontend/gpui/tests/test_plat42_frame_budget.nim
+		src/frontend/tui/tests/test_plat42_laws.nim
 	)
-	# PORTABLE: the suite reads two committed JSON files — a record of the
+	# PORTABLE: the first suite reads two committed JSON files — a record of the
 	# SHIPPED binary's render plan (`plat42-surfaces.json`, written by
 	# `ci/test/plat42_surfaces_record.py`) and the Electron answers — and
 	# imports nothing that needs a compositor, a shim or a trace. So it runs in
 	# this lane with no flags and no deferral, which is PLAT-37/38/39's
-	# measure-locally-commit-the-measurement arrangement.
-	SUITE_FLAGS=()
+	# measure-locally-commit-the-measurement arrangement. The second is the flow
+	# overlay's per-line rule over a committed capture, pure, and needs only the
+	# ViewModel path. The third and fourth are the same arrangement for the
+	# WINDOW: `plat42-surfaces-window.sh` / `plat42-frame-budget.sh` measure a
+	# real `codetracer-gpui` window and commit the record, and the suites read
+	# the record — no binary, no image. The fifth, `LAW-E1`/`LAW-E2` over the
+	# eighteen documents, links both renderers (the real shim) and takes the
+	# `tui` lane's flags, read rather than spelled (§30). The terminal's halves
+	# that need a replay-server and a recording
+	# (`tui/tests/test_plat42_{flow_overlay,inline_values,line_status}_terminal`)
+	# live in the `tui` lane, and DIFF-11 (`real_terminal/test_plat42_diff11`)
+	# in `tui-real-terminal`; none of them is counted here.
+	SUITE_FLAGS=("" "--path:src/frontend/viewmodel" "" "" "$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)")
+	LAW_SUITES=()
+	;;
+PLAT-43)
+	MILESTONE="** PLAT-43: A keymap selector"
+	SUITES=(
+		src/frontend/tui/tests/test_plat43_keymap_selector.nim
+		src/frontend/tui/tests/test_plat43_selector_sources.nim
+	)
+	# The Tier-1 suite: the partition law, refusal by name (typed and stored),
+	# `:keymap` through the runtime's prompt, the preference on a real
+	# directory, and DIFF-12 over PLAT-31's 38 divergent tasks x 2 models x 18
+	# corpus documents. The pty half (`real_terminal/test_real_keymap_selector
+	# .nim`) needs the shipped binary and lives in `tui-real-terminal`; it is
+	# not counted here. The `tui` lane's flags, read rather than spelled (§30).
+	# The source-fact suite reads files only and takes no flags.
+	SUITE_FLAGS=("$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)" "")
+	LAW_SUITES=()
+	;;
+PLAT-44)
+	MILESTONE="** PLAT-44: The GPUI editing arm stops being read-only"
+	SUITES=(
+		src/frontend/gpui/tests/test_gpui_edit_arm.nim
+		src/frontend/tui/tests/test_plat44_both_arms_write.nim
+		src/frontend/gpui/tests/test_plat44_edit_window.nim
+		src/frontend/gpui/tests/test_plat44_sequences_window.nim
+	)
+	# PORTABLE HALF ONLY: the GPUI key decoder, the edit arm writing the core
+	# and saving to a real directory, a read-only buffer still refusing, the
+	# contract/surface agreement; and DIFF-1 with both arms writing from keys,
+	# read from painted cells and the Rust shadow tree, with the renderer-less
+	# child that must fail. The shipped-binary suites
+	# (`test_plat44_shipped_writes.nim`, `test_plat44_sequences.nim`) need
+	# `just build-gpui` and run in the `gpui-shell` lane, and are not counted
+	# here. The WINDOW is: `ci/test/plat44-edit-window.sh` measures it and
+	# `plat44_window_record.nim` reads its frames, and the third suite above
+	# asserts over that committed record, reading no binary and no image. The
+	# fourth is the same arrangement for PLAT-34's sequences TYPED into real
+	# windows (`plat44-sequences-window.sh`): it recomputes the reachable set
+	# from the corpus (ViewModel path) and reads the committed record.
+	SUITE_FLAGS=("--path:src/frontend/viewmodel" "$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)" "" "--path:src/frontend/viewmodel")
 	LAW_SUITES=()
 	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-42. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-44. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

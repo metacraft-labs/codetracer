@@ -102,6 +102,7 @@ import ./views/source_pane
 # WHICH, and it is preferred to renaming a five-year-old type to make a new
 # export fit.
 import ./views/inline_annotations
+import ./views/point_list
 # PLAT-22's shared editor row model and the derivation both front-ends' editors
 # go through.
 #
@@ -169,6 +170,20 @@ type
     kind*: SourcePointKind
     enabled*: bool
 
+proc sourcePointsOf*(rows: openArray[PointListEntry]): seq[SourcePoint] =
+  ## The store's point rows as the pane's points: breakpoints and
+  ## tracepoints, by `store/types`' one spelling of each kind, and only rows
+  ## with a line (a row whose line is 0 could not be located and is not a
+  ## place to draw a mark).
+  for r in rows:
+    if r.line < 1: continue
+    if r.kind == PointKindBreakpoint:
+      result.add SourcePoint(path: r.path, line: r.line, kind: sptBreakpoint,
+                             enabled: r.enabled)
+    elif r.kind == PointKindTracepoint:
+      result.add SourcePoint(path: r.path, line: r.line, kind: sptTracepoint,
+                             enabled: r.enabled)
+
 proc provenanceFor*(availability: SourceAvailability): GutterProvenance =
   ## §14's source axis, as the pane's three-way distinction.
   ##
@@ -231,13 +246,28 @@ proc annotationsFrom*(variables: seq[Variable]):
       continue
     result.add inline_annotations.Annotation(name: v.name, value: value)
 
+proc annotationsOf*(values: openArray[EditorValue]):
+                   seq[inline_annotations.Annotation] =
+  ## The shared producer's values, in the terminal pane's shape. A pure
+  ## re-spelling — name and value unchanged — so nothing is decided here.
+  for v in values:
+    result.add inline_annotations.Annotation(name: v.name, value: v.value)
+
 proc sourcePaneModelFor*(vm: SourceVM;
                          availability: SourceAvailability;
                          points: seq[SourcePoint] = @[];
                          variables: seq[Variable] = @[];
                          heat = LineHeat();
-                         gutterMode = gutLineNumbers): SourcePaneModel =
+                         gutterMode = gutLineNumbers;
+                         notTakenLines: seq[int] = @[];
+                         inlineValues: seq[EditorValue] = @[]): SourcePaneModel =
   ## The pane's model for the CURRENT frame.
+  ##
+  ## `inlineValues` is what the shipped host passes (PLAT-42, 2026-09-23):
+  ## `editor_surface.inlineValuesOf` — THE producer GPUI's editor uses — so
+  ## the two native editors draw one set of values. `variables` is kept for
+  ## callers that build a model from raw `Variable`s; when both are given the
+  ## producer's values win.
   ##
   ## Everything is read at call time and nothing is retained: the returned
   ## value is the whole of what the pane will draw, so two frames are two
@@ -254,12 +284,14 @@ proc sourcePaneModelFor*(vm: SourceVM;
     viewportTop = vm.visibleFirstLine.val,
     executionLine = vm.executionLine.val,
     marks = marksForFile(points, path),
-    values = annotationsFrom(variables),
+    values = (if inlineValues.len > 0: annotationsOf(inlineValues)
+              else: annotationsFrom(variables)),
     heat = heat,
     gutterMode = gutterMode,
     degradedMessage = (
       if availability == savAbsent: degradedMessageFor(vm.degradedState.val)
-      else: ""))
+      else: ""),
+    notTakenLines = notTakenLines)
 
 # `followAndRequest` IS NO LONGER DECLARED HERE. PLAT-22 moved it to
 # `view_vocabulary/editor_surface.nim` and this module re-exports it (see the
@@ -269,3 +301,14 @@ proc sourcePaneModelFor*(vm: SourceVM;
 # entire content is an ORDERING is the worst possible thing to have two copies
 # of: both compile, both run, and only one of them is right
 # (Verification-Harness-Traps §14).
+
+proc pointListPaneModelFor*(points: openArray[SourcePoint]): PointListPaneModel =
+  ## PLAT-40. The Points pane's rows: the SAME points the gutter marks, so the
+  ## pane and the gutter cannot disagree about which lines carry one.
+  var rows: seq[PointListPaneRow] = @[]
+  for p in points:
+    rows.add PointListPaneRow(
+      kind: (if p.kind == sptBreakpoint: PointKindBreakpoint
+             else: PointKindTracepoint),
+      path: p.path, line: p.line, enabled: p.enabled)
+  initPointListPaneModel(rows, loaded = true)

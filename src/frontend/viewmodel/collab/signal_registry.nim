@@ -315,9 +315,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # the VM owns the window instead of a flow sub-store; nothing here is user
   # intent, so a peer must receive them from the backend owner as a set and
   # never merge them.
-  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks"],
+  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks", "styledLines"],
     vscBackendAuthoritative,
-    "The loaded flow window: backend loop array, the loop picked from it, and the tick it was loaded for.")
+    "The loaded flow window: backend loop array, the loop picked from it, the tick it was loaded for, and its per-line facts.")
   entries.addDerived("FlowVM", ["isLoading", "totalIterations"])
 
   entries.addEntry("EditorVM", "activeTabIndex", vscSharedSessionViewState,

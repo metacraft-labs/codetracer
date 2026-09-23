@@ -111,9 +111,21 @@ when defined(js):
 
   proc mountIsoNimPointList*(container: isonim_dom.Element;
                              vm: PointListVM) =
-    ## Mount the IsoNim Point List panel as a child of `container`.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderPointListPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+    ## Mount the IsoNim Point List panel as a child of `container`, and
+    ## RE-RENDER it whenever the points change.
+    ##
+    ## **THE ROWS ARE A `for` IN THE `ui:` BLOCK, AND THAT LOOP RUNS ONCE.**
+    ## isonim's DOM renderer expands a `for` into a plain loop at render time
+    ## (`dsl/ui.processForStmt`), so the rows present at mount were the rows
+    ## the pane showed for ever: the header said "no longer needed" for
+    ## redraws, and a breakpoint set after the pane opened never appeared.
+    ## Found by PLAT-40's Electron test. The render runs inside an effect, so
+    ## every signal it reads — `points`, `selectedPoint`, `editingPoint` — is
+    ## tracked and a change redraws the panel, the way
+    ## `isonim_verification_view` mounts.
+    createEffect proc() =
+      let panel = renderPointListPanel(WebRenderer(), vm)
+      let containerNode = isonim_dom.Node(container)
+      while not isonim_dom.isNodeNil(containerNode.firstChild):
+        discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
+      isonim_dom.appendChild(containerNode, isonim_dom.Node(panel))

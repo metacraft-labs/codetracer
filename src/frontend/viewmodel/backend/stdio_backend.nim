@@ -159,6 +159,19 @@ type
     eventQueue*: seq[JsonNode]
       ## Buffer of DAP events received while waiting for a response.
       ## Tests can inspect or drain this queue after each action.
+    undelivered*: seq[JsonNode]
+      ## Every event read off the stream that has not yet been handed to the
+      ## `BackendService` subscribers `toBackendService` collects.
+      ##
+      ## SEPARATE FROM `eventQueue`, because the two have different owners:
+      ## `eventQueue` is the synchronous caller's (`waitForEvent` consumes
+      ## from it, `drainEvents` empties it), and a subscriber must see an event
+      ## whether or not a synchronous caller has already drained it.
+      ##
+      ## Until 2026-09-23 the adapter collected subscribers and never called
+      ## one, so on every native host `FlowVM`'s `ct/updated-flow` handler —
+      ## the only path the flow window arrives by — was dead, and the flow
+      ## overlay had nothing to draw.
     bound*: DapReadBound
       ## CTUI-14.  Unbounded by default; see this module's header.
     broken: bool
@@ -475,6 +488,7 @@ proc sendDapRequest*(backend: DapStdioBackend; command: string;
       return msg
     elif msgType == "event":
       backend.eventQueue.add(msg)
+      backend.undelivered.add(msg)
     # Ignore other messages (e.g. reverse requests from the server).
 
 proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
@@ -536,6 +550,7 @@ proc waitForEvent*(backend: DapStdioBackend; eventName: string;
     let msg = backend.readDapMessage()
     let msgType = msg.getOrDefault("type").getStr("")
     if msgType == "event":
+      backend.undelivered.add(msg)
       if msg.getOrDefault("event").getStr("") == eventName:
         return msg
       else:
@@ -549,8 +564,25 @@ proc waitForEvent*(backend: DapStdioBackend; eventName: string;
 
 proc drainEvents*(backend: DapStdioBackend): seq[JsonNode] =
   ## Return and clear all buffered events.
+  ##
+  ## Clears `eventQueue` only: an event drained here is still delivered to
+  ## the `BackendService` subscribers (see `undelivered`).
   result = backend.eventQueue
   backend.eventQueue = @[]
+
+proc takeUndelivered*(backend: DapStdioBackend): seq[JsonNode] =
+  ## The events no subscriber has seen yet, in arrival order; clears them.
+  result = backend.undelivered
+  backend.undelivered = @[]
+
+proc subscriberEnvelope*(event: JsonNode): JsonNode =
+  ## A DAP event in the envelope `BackendService` subscribers read:
+  ## `{"kind": <event name>, "data": <body>}` — `RealBackendService`'s shape
+  ## (`real_backend.nim`), which every `onEvent` handler in the ViewModel
+  ## layer already accepts.
+  result = %*{"kind": event.getOrDefault("event").getStr("")}
+  let body = event.getOrDefault("body")
+  result["data"] = if body.isNil: newJObject() else: body
 
 # ---------------------------------------------------------------------------
 # Lifecycle
@@ -622,17 +654,30 @@ proc toBackendService*(backend: DapStdioBackend): BackendService =
   ## continue, reverseContinue) directly.
   let b = backend  # capture for closures
 
+  var eventHandlers: seq[EventHandler] = @[]
+
+  let deliver = proc() =
+    # Snapshot first: a handler may send, and a send delivers again.
+    for event in b.takeUndelivered():
+      let envelope = subscriberEnvelope(event)
+      for handler in eventHandlers:
+        handler(envelope)
+
   let sendProc = proc(command: string;
                       args: JsonNode): BackendFuture[JsonNode] =
     # The BackendService interface uses CT-prefixed command names.
     # We forward them as-is; replay-server recognises both DAP standard
     # commands and ct/* custom commands.
     let resp = b.sendDapRequest(command, args)
+    # THE EVENTS THIS REQUEST PRODUCED ARE DELIVERED BEFORE ITS REPLY, which
+    # is the order the engine sends them in (`dap_handler.load_flow` sends
+    # `ct/updated-flow` and then responds). Delivering here — after the read
+    # loop has returned, never from inside it — is what keeps a handler that
+    # issues a request of its own from re-entering a half-read stream.
+    deliver()
     var fut = newFuture[JsonNode]("DapStdioBackend.send")
     fut.complete(resp)
     return fut
-
-  var eventHandlers: seq[EventHandler] = @[]
 
   let onEventProc = proc(handler: EventHandler) =
     eventHandlers.add(handler)

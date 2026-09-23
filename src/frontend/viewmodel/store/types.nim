@@ -1635,3 +1635,13 @@ proc `==`*(a, b: DeepReviewCallNodeEntry): bool {.noSideEffect.} =
   a.name == b.name and
     a.executionCount == b.executionCount and
     a.depth == b.depth
+
+const
+  PointKindBreakpoint* = "breakpoint"
+  PointKindTracepoint* = "tracepoint"
+    ## `PointListEntry.kind`'s two values, spelled ONCE. They are
+    ## `project_definitions.PointKind`'s own strings (`$pkBreakpoint`,
+    ## `$pkTracepoint`), which is what the definition-side producer writes;
+    ## the engine-sweep producer wrote `"pkTracepoint"` — the enum member's
+    ## NAME — until 2026-09-23, so a consumer filtering on the kind saw two
+    ## spellings of one thing.

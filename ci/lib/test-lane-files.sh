@@ -173,6 +173,7 @@ tui
 tui-real-terminal
 gpui-shell
 ui-selection
+screen-oracle
 EOF
 }
 
@@ -213,6 +214,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
+	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
 		return 1
@@ -293,6 +295,12 @@ test_lane_parity_partner() {
 	vm-native) echo "vm-js" ;;
 	vm-unit-js) echo "vm-unit" ;;
 	vm-unit) echo "vm-unit-js" ;;
+	# The WASM lane recompiles `vm-unit`'s suites on a third backend on
+	# purpose (PLAT-17: "run the existing suites on the third backend"), so a
+	# suite it shares with `vm-unit` is a parity pair, not a clash. Without
+	# this line every `vm-unit` suite `vm-unit-js` excludes — six of them —
+	# read as claimed by two different backends.
+	vm-unit-wasm) echo "vm-unit" ;;
 	*) echo "" ;;
 	esac
 }
@@ -365,6 +373,13 @@ test_lane_extra_flags() {
 		# which is what `ci/test/renderer-browser-build.sh` goes on to assert
 		# about the bundle this lane compiles.
 		echo "-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb"
+		;;
+	screen-oracle)
+		# The pixel readers come from GuiAssert (`gui_assert/ocr`,
+		# `gui_assert/image_math`) — the same declared cross-repo edge the
+		# `gpui-shell` lane carries for PLAT-37, and for the same pure-over-a-
+		# file entry points.
+		echo "--path:../GuiAssert/src"
 		;;
 	gpui-shell)
 		# PLAT-20. `--path:src/frontend/viewmodel` for the same reason every
@@ -1450,6 +1465,19 @@ test_lane_files() {
 		# tree-sitter link flags, i.e. giving the GPUI lane a terminal
 		# renderer, which is exactly what the split forbids.
 		_tlf_glob src/frontend/gpui/tests 'test_*.nim'
+		;;
+
+	screen-oracle)
+		# PLAT-39. Discovery over the oracle's own directory, so the next suite
+		# the oracle grows is in a lane on the day it is written — the two that
+		# exist sat in NO lane (`ci/test/test-lane-coverage.sh` said so) and
+		# were run only by `just plat39-record-gate` and the case-floor gate.
+		# `test_screen_oracle.nim` reads the six gitignored Electron captures
+		# and needs `tesseract`; its prerequisite is `just
+		# plat35-capture-electron`, exactly as the floors recipe's declared
+		# deferral says. `test_plat39_record.nim` asserts the committed record
+		# and runs anywhere.
+		_tlf_glob src/tests/visual/screen_oracle 'test_*.nim'
 		;;
 
 	ui-selection)

@@ -13,6 +13,18 @@
 ## - totalIterations memo reflects iteration count
 ## - Auto-load effect fires when debugger position or flowMode changes
 ##
+## - The flow window's per-line facts (`styledLines`) come from the window,
+##   and a reply never overwrites a window the event already delivered
+##
+## Why a mock backend: these cases pin the ORDER in which a `ct/load-flow`
+## reply and its `ct/updated-flow` event reach the ViewModel, including orders
+## (reply first, reply never, event first on a synchronous transport) that one
+## real engine run cannot produce on demand. `MockBackendService` is the
+## transport that lets a case choose the order; the windows it delivers are the
+## engine's wire shape (`loopFlowResponse`) or a real capture (the zk_shields
+## fixture). The real-engine path is covered end to end by
+## `test_plat42_surfaces.nim`, which reads rows the shipped binary drew.
+##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_flow_vm.nim
 
@@ -816,5 +828,90 @@ suite "FlowVM — the ct/load-flow engine boundary":
       drain()
 
       check vm.loops.val.len == before
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# PLAT-42: the per-line facts, and the reply/event race
+# ---------------------------------------------------------------------------
+
+const ZkShieldsWindow = staticRead(
+  "../../../../frontend/viewmodel/tests/fixtures/flow/zk_shields_flow_window.json")
+
+proc zkShieldsResponse(): JsonNode =
+  ## The real captured window, in the `ct/load-flow` response shape.
+  let capture = parseJson(ZkShieldsWindow)
+  %*{"viewUpdates": [capture["viewUpdate"]], "location": capture["position"]}
+
+suite "FlowVM per-line facts (PLAT-42)":
+
+  test "a window's per-line facts are adopted with it":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      drain()
+      check vm.styledLines.val.len == 0
+
+      mock.emitEvent(%*{"kind": UpdatedFlowCommandName,
+                        "data": zkShieldsResponse()})
+      drain()
+
+      check vm.styledLines.val == flowLineFacts(zkShieldsResponse()["viewUpdates"][0])
+      check vm.styledLines.val.len > 0
+
+      dispose()
+
+  test "a reply arriving AFTER the event does not overwrite its window":
+    # The native stdio transport delivers `ct/updated-flow` before the
+    # `ct/load-flow` reply completes, and that reply is a bare DAP envelope.
+    # Adopting it anyway flipped a loaded panel to `lsError`.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      mock.deferResponses = true
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createFlowVM(store)
+      drain()
+
+      var dbg = store.debugger.val
+      dbg.rrTicks = 121'u64
+      store.debugger.val = dbg
+      drain()
+      check mock.findCommand("ct/load-flow").isSome
+      check vm.loadingState.val == lsLoading
+
+      mock.emitEvent(%*{"kind": UpdatedFlowCommandName,
+                        "data": zkShieldsResponse()})
+      drain()
+      let adopted = vm.styledLines.val
+      check adopted.len > 0
+      check vm.loadingState.val == lsIdle
+
+      mock.settleAllDeferred(%*{"type": "response", "success": true,
+                                "command": "ct/load-flow", "body": {}})
+      drain()
+      check vm.loadingState.val == lsIdle
+      check vm.styledLines.val == adopted
+
+      dispose()
+
+  test "a reply that IS the window, in a DAP envelope, is adopted when no event came":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      mock.deferResponses = true
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createFlowVM(store)
+      drain()
+
+      var dbg = store.debugger.val
+      dbg.rrTicks = 121'u64
+      store.debugger.val = dbg
+      drain()
+
+      mock.settleAllDeferred(%*{"type": "response", "success": true,
+                                "command": "ct/load-flow",
+                                "body": zkShieldsResponse()})
+      drain()
+      check vm.loadingState.val == lsIdle
+      check vm.styledLines.val.len > 0
 
       dispose()

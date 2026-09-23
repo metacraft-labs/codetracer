@@ -127,8 +127,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-09-06"
-  MeasuredBinaryBytes = 13_423_040
+  MeasurementDate = "2026-09-23"
+  MeasuredBinaryBytes = 15_066_024
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -169,8 +169,22 @@ const
     ## re-measuring a 344-byte change is that the NEXT one is compared against
     ## what the product actually costs. Stripped, unchanged at 12_833_072 —
     ## the whole delta is in the not-stripped sections.
+    ##
+    ##   15_066_024  2026-09-23: the editing core (PLAT-16, PLAT-24…44)
+    ##
+    ## RE-ANCHORED LATE, and the lateness is the finding: the band tripped
+    ## somewhere in PLAT-16…44 and no change moved it, so this lane was red
+    ## for a reason nobody had recorded. The +1_642_984 bytes (+12.2%) were
+    ## ATTRIBUTED before the band moved, by summing `nm --size-sort` per Nim
+    ## module: the editor's named-operation vocabulary (`editor/operations`,
+    ## ~150 KB, and its state, history, change sets and wrap model), the Vim
+    ## and Kakoune keymaps and the `.vimrc` importer (~160 KB together), the
+    ## collaboration reducer and the headless layout model — the Edit mode
+    ## this binary gained, and no data: no corpus, fixture or `staticRead`
+    ## table is linked in. Stripped: 14_143_088. The ceiling keeps the band's
+    ## 8.02% over the new anchor.
 
-  BinaryCeilingBytes = 14_500_000
+  BinaryCeilingBytes = 16_274_000
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

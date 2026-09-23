@@ -38,6 +38,8 @@
 
 import std/strutils
 
+import codetracer_embed   # PLAT-43: `KeymapModel`, `selectKeymap`
+
 import ./commands/interpreter
 import ./edit_binding
 import ./input/keymap
@@ -108,6 +110,16 @@ type
       ## (`ensureEditWorkspace`), two suppliers, no branch in the consumer.
     startBuild*: proc(kind: BuildKind; command: string): BuildStartResult
       {.closure.}
+    readConfig*: proc(spelled: string): EditReadResult {.closure.}
+      ## PLAT-36. Read a user's Vim configuration for `:source`: `~`
+      ## expanded, relative paths against the project. Unlike `readFile` it
+      ## may reach outside the project — see `host/edit_host
+      ## .readUserConfigFile`. Nil in a session with no host filesystem.
+    saveKeymap*: proc(model: KeymapModel): string {.closure.}
+      ## PLAT-43. Remember the chosen keymap model for the next session; ""
+      ## on success, else a one-line message naming the path. Nil in a session
+      ## whose host keeps no state — the choice then holds for this session
+      ## only, and `:keymap` says so.
       ## Starts a build and takes ownership of the process. The SESSION it
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
@@ -126,6 +138,10 @@ type
       ## A navigation command was SENT and the host must consume the
       ## `stopped` + `ct/complete-move` pair it will produce. See the module
       ## header.
+    refreshesSession*: bool
+      ## The engine's state changed WITHOUT a move — a breakpoint was set or
+      ## cleared — so the host rebuilds the panes from the session, but must
+      ## not pump for a `stopped` event that is not coming.
     action*: KeyAction
       ## What fired, for the status line and for a test that wants to assert
       ## the binding rather than its effect.
@@ -170,6 +186,15 @@ type
       ## and wrote to another would silently keep two arrangements for one
       ## recording. `host/layout_store.nim` is what fills it, and it is the only
       ## thing in this front-end that touches a file for this purpose.
+    keymapModel*: KeymapModel
+      ## PLAT-43. The keymap model a NEW edit session starts under: the stored
+      ## preference the host loaded, or the last `:keymap` choice. The product
+      ## default until a host says otherwise.
+    keymapNotice*: string
+      ## PLAT-43. A stored keymap preference the host REFUSED, by name, to be
+      ## shown when Edit mode is furnished — where it wins the status line over
+      ## `editing … — N file(s)`, which would otherwise overwrite it within the
+      ## same frame (measured by the pty suite's first run). Shown once.
     editServices*: EditServices
       ## PLAT-16. The HOST's three filesystem/process capabilities, injected.
       ##
@@ -399,6 +424,28 @@ proc openPrompt(rt: TuiRuntime; kind: PromptKind): bool =
   discard rt.prompt.open(kind)
   true
 
+proc changesSessionState*(action: KeyAction): bool =
+  ## Whether a `drDone` for `action` changed what the session holds without
+  ## moving it — the host refreshes the panes but pumps nothing.
+  action == kaToggleBreakpoint
+
+proc movesTheDebugger*(action: KeyAction): bool =
+  ## Whether firing `action` sends a navigation command the host must pump.
+  ##
+  ## Enumerated rather than inferred from the dispatch result, because
+  ## `drDone` is also what a purely local action answers: `kaMaximizePane`
+  ## reports `drDone` and sends nothing, and a host that pumped after it would
+  ## block on an event no engine is going to send. `waitForEvent` reads the
+  ## pipe until its message budget runs out, so getting this wrong is a hang
+  ## rather than a wrong screen.
+  case action
+  of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
+     kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
+     kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
+     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
+     kaValueOrigin, kaReverseOrigin: true
+  else: false
+
 proc runPromptLine(rt: TuiRuntime; line: string;
                    outcome: var RuntimeOutcome) =
   ## A committed prompt line, through CTUI-10's interpreter.
@@ -474,6 +521,89 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     let verb = if words.len > 0: words[0] else: ""
     let rest = if words.len > 1: text[text.find(words[1]) .. ^1] else: ""
     case verb
+    of "keymap":
+      # PLAT-43. The keymap selector. The NAME is decided by
+      # `keymap_selection.selectKeymap` and nowhere else — the same function
+      # the stored preference goes through — so an unknown model is refused
+      # by name with the accepted set rather than silently defaulted.
+      let current =
+        if rt.app.editSession.isNil: rt.keymapModel
+        else: rt.app.editSession.model
+      if rest.len == 0:
+        let sourced =
+          if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
+          else: " with " & rt.app.editSession.imported.source & " sourced"
+        rt.note("keymap " & $current & sourced &
+                "; the accepted values are " & acceptedKeymapNamesText())
+      else:
+        let selection = selectKeymap(rest)
+        if not selection.ok:
+          rt.note(selection.refusal)
+        else:
+          if rt.app.editSession.isNil:
+            rt.app.editSession = newEditSession(selection.model)
+          rt.app.editSession.selectModel(selection.model)
+          rt.keymapModel = selection.model
+          let saved =
+            if rt.editServices.saveKeymap.isNil:
+              "not remembered: this session keeps no state"
+            else: rt.editServices.saveKeymap(selection.model)
+          rt.note("keymap " & $selection.model &
+                  (if saved.len == 0: "" else: " (" & saved & ")"))
+      outcome.detail = rt.app.notification
+      return
+    of "break", "b":
+      # §4.3's `:break`, in Edit mode: the same toggle `F9` makes, at the
+      # caret or at the line given. A function name — which Debug mode
+      # resolves against the recording — has nothing to resolve against here,
+      # and is refused by name rather than guessed.
+      let buf = if rt.app.editSession.isNil: nil
+                else: rt.app.editSession.activeBuffer()
+      if buf.isNil:
+        rt.note("no file is open to place a breakpoint in")
+      else:
+        var line = buf.caretLine
+        var ok = true
+        if rest.len > 0:
+          try:
+            line = parseInt(rest)
+          except ValueError:
+            ok = false
+            rt.note("`" & rest & "` is not a line number; in Edit mode " &
+                    ":break takes a line of " & buf.path)
+        if ok and (line < 1 or line > buf.lineCount):
+          ok = false
+          rt.note(buf.path & " has no line " & $line)
+        if ok:
+          let placed = rt.app.editSession.togglePointAt(buf.path, line)
+          rt.note((if placed: "breakpoint at " else: "removed the breakpoint at ") &
+                  buf.path & ":" & $line)
+      outcome.detail = rt.app.notification
+      return
+    of "source", "so":
+      # PLAT-36. A user's Vim configuration, imported on top of the Vim
+      # keymap and installed for THIS SESSION. Not remembered: the stored
+      # preference names a model, and an import is a model plus a file whose
+      # contents may change — re-reading it silently at start-up would make
+      # a key's meaning depend on a file the user did not name that day.
+      # The status line carries §6.3's count and the first untranslated line.
+      if rest.len == 0:
+        rt.note(":source needs a file, e.g. ':source ~/.vimrc'")
+      elif rt.editServices.readConfig.isNil:
+        rt.note(":source has no reader in this session")
+      else:
+        let read = rt.editServices.readConfig(rest)
+        if not read.ok:
+          rt.note(read.message)
+        else:
+          let sourced = sourceVimConfig(rest, read.text)
+          if rt.app.editSession.isNil:
+            rt.app.editSession = newEditSession(kmVim)
+          rt.app.editSession.installImported(sourced.imported)
+          rt.keymapModel = kmVim
+          rt.note(sourcedSummary(sourced))
+      outcome.detail = rt.app.notification
+      return
     of "w", "write":
       let buf = if rt.app.editSession.isNil: nil
                 else: rt.app.editSession.activeBuffer()
@@ -515,7 +645,7 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         let opened = rt.editServices.readFile(rest)
         if opened.ok:
           if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession()
+            rt.app.editSession = newEditSession(rt.keymapModel)
           discard rt.app.editSession.openFile(
             rest, opened.text, max(1, rt.sourcePaneRows()))
           rt.app.fileTree.openPath = rest
@@ -577,8 +707,14 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   # (`q`, `Ctrl+c`) always went through there and always worked, which is why a
   # published command was broken behind two working keys.
   outcome.action = result.dispatch.action
+  # ONLY A NAVIGATION IS PUMPED. This said `drDone` alone until 2026-09-23,
+  # which was harmless while every command that answered `drDone` moved the
+  # debugger; `:break` answering `drDone` (its service is now wired) would have
+  # blocked the loop on a `stopped` event no engine sends — see
+  # `movesTheDebugger` on why that is a hang rather than a wrong screen.
   if result.dispatch.status == drDone:
-    outcome.awaitsMove = true
+    outcome.awaitsMove = movesTheDebugger(outcome.action)
+    outcome.refreshesSession = changesSessionState(outcome.action)
 
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
@@ -646,22 +782,6 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # dragged pointer from costing a frame per report.
   outcome.repaint = true
 
-proc movesTheDebugger*(action: KeyAction): bool =
-  ## Whether firing `action` sends a navigation command the host must pump.
-  ##
-  ## Enumerated rather than inferred from the dispatch result, because
-  ## `drDone` is also what a purely local action answers: `kaMaximizePane`
-  ## reports `drDone` and sends nothing, and a host that pumped after it would
-  ## block on an event no engine is going to send. `waitForEvent` reads the
-  ## pipe until its message budget runs out, so getting this wrong is a hang
-  ## rather than a wrong screen.
-  case action
-  of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
-     kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
-     kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
-     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
-     kaValueOrigin, kaReverseOrigin: true
-  else: false
 
 const EditorOwnedKeys* = [
     "Backspace", "Delete", "Enter", "Left", "Right", "Up", "Down",
@@ -674,6 +794,14 @@ const EditorOwnedKeys* = [
   ## `edit_binding.applyEditKey` still implements indent and dedent for them —
   ## the buffer can do it, nothing routes it — so the day an INSERT input mode
   ## exists the behaviour is already there rather than needing to be written.
+
+const EditorEscapeKeys* = ["Tab", "Shift+Tab"]
+  ## The keys the editor NEVER owns, whatever a model binds — `EditorOwnedKeys`'
+  ## header gives the reason: a user needs one chord guaranteed to move focus
+  ## off the editor. Named separately because PLAT-43's resolver clause below
+  ## would otherwise hand `Tab` to the product default's `indent` binding —
+  ## measured: the pty suite's first run typed an indent where it meant to
+  ## leave the editor, and never reached the prompt.
 
 proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
   ## Whether this token is text for the open buffer rather than a command.
@@ -694,7 +822,15 @@ proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
   let name = keyName(token)
   if name.len == 0:
     return false
-  name in EditorOwnedKeys or isTextKey(name)
+  # PLAT-43: OR THE ACTIVE MODEL BINDS IT. `EditorOwnedKeys` is the product
+  # default's non-printable set; a Vim buffer needs `Esc` and a Kakoune one
+  # `Ctrl+x`, and a fixed list would hand those to the debugger's keymap. The
+  # model's own resolver is asked — the one `applyEditKey` then runs — so the
+  # two cannot disagree about whose key it is.
+  if name in EditorEscapeKeys:
+    return false
+  name in EditorOwnedKeys or isTextKey(name) or
+    rt.app.editSession.activeBuffer().claimsEditKey(name, 0)
 
 proc routeTokenToEditor*(rt: TuiRuntime; token: string;
                          nowMs: int64): EditKeyOutcome =
@@ -720,7 +856,7 @@ proc routeTokenToEditor*(rt: TuiRuntime; token: string;
   ## instead of one per call site, which is CTUI-10's defect removed rather
   ## than re-avoided.
   let buf = rt.app.editSession.activeBuffer()
-  result = buf.applyEditKey(keyName(token), nowMs)
+  result = rt.app.editSession.applyEditKeyIn(buf, keyName(token), nowMs)
   if result == ekChanged:
     rt.app.editSession.recordEdit(buf.path)
     rt.app.editSession.refreshEditedPaths()
@@ -769,7 +905,7 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
   if rt.isNil or rt.app.isNil:
     return ""
   if rt.app.editSession.isNil:
-    rt.app.editSession = newEditSession()
+    rt.app.editSession = newEditSession(rt.keymapModel)
   if rt.app.editSession.furnished or rt.editServices.listFiles.isNil:
     return ""
   rt.app.editSession.furnished = true
@@ -791,6 +927,12 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
     discard rt.app.editSession.openFile(listing.files[0], first.text,
                                         max(1, rt.sourcePaneRows()))
     rt.app.fileTree.openPath = listing.files[0]
+    # A REFUSED KEYMAP PREFERENCE WINS TOO, on the same rule: the session is
+    # running a model the user did not choose, and "editing …" reads as if
+    # it were.
+    if rt.keymapNotice.len > 0:
+      result = rt.keymapNotice
+      rt.keymapNotice = ""
   else:
     # THE REFUSAL WINS THE STATUS LINE. A user who arrived in Edit mode and got
     # an empty pane must be told why; "editing … — 12 file(s)" over an empty
@@ -854,6 +996,27 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     true
   of kaSearchBackward:
     outcome.repaint = rt.openPrompt(pkSearchBackward)
+    true
+  of kaToggleBreakpoint:
+    # EDIT MODE ANSWERS IT HERE; DEBUG MODE SENDS IT TO THE ENGINE. An edit
+    # session has no engine — `ct edit` starts none — so `dispatchAction`'s
+    # breakpoint service is absent and the key answered "unavailable" on the
+    # one mode §3 of CodeTracer-TUI-Edit-Mode.md says it must work in. The
+    # point goes on the edit session, at the caret of the file being edited,
+    # and moves with that file's text (`edit_binding.applyEditKeyIn`).
+    if rt.app.modes.product != pmEdit:
+      return false
+    let buf = if rt.app.editSession.isNil: nil
+              else: rt.app.editSession.activeBuffer()
+    if buf.isNil:
+      rt.note("no file is open to place a breakpoint in")
+    else:
+      let line = buf.caretLine
+      let placed = rt.app.editSession.togglePointAt(buf.path, line)
+      rt.note((if placed: "breakpoint at " else: "removed the breakpoint at ") &
+              buf.path & ":" & $line)
+    outcome.detail = rt.app.notification
+    outcome.repaint = true
     true
   of kaQuit:
     outcome.quit = true
@@ -1083,6 +1246,8 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   result.repaint = true
   if dispatch.status == drDone and movesTheDebugger(resolution.action):
     result.awaitsMove = true
+  if dispatch.status == drDone and changesSessionState(resolution.action):
+    result.refreshesSession = true
 
 # ---------------------------------------------------------------------------
 # The screen

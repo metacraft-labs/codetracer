@@ -85,7 +85,7 @@ import ../generators/vocabulary_generator
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
-const ExpectedAssertions = 8888
+const ExpectedAssertions = 8962
   ## **+144 ON 2026-09-19**, and they are one case: PLAT-31's §36a repair —
   ## the marks and the jump list mapped through the change set instead of
   ## clamped — had NO case that could see it removed. The arm re-aimed onto
@@ -110,10 +110,10 @@ const
     ## `page-up` / `page-down`'s parameter. Small, so a page is smaller than
     ## the scenario documents and both directions have somewhere to go.
 
-  ExpectedOperations = 224
-  ExpectedDeclarations = 140
+  ExpectedOperations = 226
+  ExpectedDeclarations = 142
   ExpectedDisplayDependent = 24
-  ExpectedDisplayIndependent = 200
+  ExpectedDisplayIndependent = 202
   ExpectedScenarioDocs = 18
   ExpectedCorpusClasses = 9
 

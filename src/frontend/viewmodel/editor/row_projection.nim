@@ -77,6 +77,17 @@ type
       ## `editor_rows.EditorRow.held`'s own doc comment is why it is a separate
       ## field rather than an empty string: *"an empty-string default is
       ## exactly how a source pane silently renders blank"*.
+    firstLine*: int
+      ## The line number of `doc`'s FIRST line; `0` means `1`. A debug surface
+      ## projects a WINDOW of a file — `SourceVM.visibleReads` is a contiguous
+      ## run starting at `visibleFirstLine` — and its rows must carry the
+      ## file's line numbers, not the window's. `viewportTop` is in the same
+      ## numbering.
+    requested*: seq[int]
+      ## Lines, in `firstLine`'s numbering, whose text is NOT held — a window
+      ## line the provider has not answered yet (`srkRequest`). Unlike
+      ## `heldFrom`/`heldTo` it need not be a range: a window can hold lines
+      ## 10–20 and 25–30 with the gap still in flight.
 
   TrailingLinePolicy* = enum
     ## What a projection does with the empty final line a file that ends in a
@@ -285,15 +296,17 @@ proc editorRowsOf*(p: RowProjection): seq[EditorRow] =
   ## whichever order a producer happened to add them.
   let ls = projectionLinesFor(p.doc, p.trailing)
   let starts = projectionLineStarts(p.doc)
+  let base = max(1, p.firstLine)
   let lastLine = if p.viewportHeight <= 0: high(int)
                  else: p.viewportTop + p.viewportHeight - 1
   result = @[]
   for idx in 0 ..< ls.len:
-    let line = idx + 1
+    let line = base + idx
     if line < p.viewportTop: continue
     if line > lastLine: break
-    let held = (p.heldFrom == 0 and p.heldTo == 0) or
-               (line >= p.heldFrom and line <= p.heldTo)
+    let held = ((p.heldFrom == 0 and p.heldTo == 0) or
+                (line >= p.heldFrom and line <= p.heldTo)) and
+               line notin p.requested
     var row = EditorRow(line: line, held: held,
                         text: if held: ls[idx] else: "",
                         pointer: eptNone, mark: emNone, flow: efsUnknown,

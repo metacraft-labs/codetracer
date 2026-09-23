@@ -44,116 +44,116 @@
   "declaredAgentReadings": 6,
   "reviews": {
     "entry-shell": {
-      "reviewer": "claude-opus-5 (repair pass)",
+      "reviewer": "claude-opus-5.5 (PLAT-40 re-review)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-09-21",
+      "reviewedAt": "2026-09-23",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-09-20T14:17:14.529Z",
+      "againstUiBundleMtime": "2026-09-23T10:05:30.708Z",
       "score": 7,
-      "summary": "Expected elements: present. A dense, legible dark debugger surface with the transport strip, the source editor and its gutter, and the call-trace and state panes where the block says they should be. The unstepped state pane says `No local variables are present in the current point of execution` — labelled rather than blank, which is the correct picture for this scenario and is better than the brief demands.",
+      "summary": "Expected elements: present. The transport strip, the source editor and its gutter, the call-trace and state panes where the block puts them, and an unstepped state pane that states `No local variables are present in the current point of execution` rather than drawing blank — the correct picture at the entry point. The event log below now carries labelled columns (`tick`, `#`, `location`, `output`) over six distinct rows.",
       "findings": [
         {
           "kind": "design",
-          "text": "Editor pane, right edge: source lines and the greyed inline `__builtins__` chips are cut mid-glyph with no visible horizontal scrollbar, so there is no affordance telling the reader that content continues. It is the same edge behaviour in every one of the six captures."
+          "text": "Editor pane, right edge: source lines and the greyed inline `__builtins__` chips are still cut mid-glyph with no horizontal scrollbar, so nothing says the content continues. Unchanged from the previous reading; the same clipping as `PLAT35-PD1` at the wide viewport."
+        },
+        {
+          "kind": "design",
+          "text": "Event-log pane: the `tick` figures carry an underline that reads as a progress bar or a link and is neither; next to the new column headers it is the one element whose meaning the header does not explain."
         }
       ]
     },
     "stepped-editor": {
-      "reviewer": "claude-opus-5 (repair pass)",
+      "reviewer": "claude-opus-5.5 (PLAT-40 re-review)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-09-21",
+      "reviewedAt": "2026-09-23",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-09-20T14:17:14.529Z",
-      "score": 6,
-      "summary": "Expected elements: present. One execution-pointer mark, on line 44 only, with the source row's background distinguished as well as the gutter glyph. The state pane lists named values and is not empty. The call trace lists frames with `<__main__> #0` marked current. Line numbers are contiguous ascending integers.",
+      "againstUiBundleMtime": "2026-09-23T10:05:30.708Z",
+      "score": 7,
+      "summary": "Expected elements: present. One execution pointer, on line 44 only, with the row's background distinguished as well as the gutter glyph; the state pane lists named values; the call trace lists frames with `<__main__> #0` current; line numbers are contiguous. The event log now shows the six distinct results `calc` printed, under column headers, where the previous capture drew one row six times.",
       "findings": [
         {
           "kind": "design",
-          "text": "State pane: value text is cut mid-glyph at the pane's right edge — `add:<function add at 0x7fffe7ebf420> Ob` — so the object identity a reader is looking at is the part that gets removed. A middle ellipsis or a wrap would keep the informative end."
+          "text": "State pane: value text is still cut mid-glyph at the pane's right edge — `add:<function add at 0x7fffe7ebf420> Ob` — so the object identity is the part removed. A middle ellipsis would keep the informative end."
         },
         {
           "kind": "design",
-          "text": "Event-log pane: all six rows render identical text, `main.py:112  stdout: checksum = 73`, although `calc` prints five distinct expression results before the checksum. Reported as an observation rather than a diagnosis; the mechanism is not established here."
+          "text": "Call-trace pane: argument lists are clipped the same way (`apply_op #3 (symbol=\"+\", left=2, r`), with no ellipsis marking the cut."
         }
       ]
     },
     "advanced-state": {
-      "reviewer": "claude-opus-5 (repair pass)",
+      "reviewer": "claude-opus-5.5 (PLAT-40 re-review)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-09-21",
+      "reviewedAt": "2026-09-23",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-09-20T14:17:14.529Z",
+      "againstUiBundleMtime": "2026-09-23T10:05:30.708Z",
       "score": 3,
-      "summary": "Expected elements: DISTORTED at the narrower viewport. The scenario reached its state correctly — line 56, inline value chips beside the OPERATIONS rows, a state pane that differs from `stepped-editor`'s — but this block's last requirement is explicit that at the narrower viewport nothing is clipped, and two of its three named cases occur. Reported first and rated below 4 per the brief's own rule.",
+      "summary": "Expected elements: DISTORTED at the narrower viewport. The scenario reached its state — line 56, inline value chips beside the OPERATIONS rows, a state pane that differs from `stepped-editor`'s — and the event log is now correct (headers, six distinct rows), but this block requires that at the narrower viewport nothing is clipped, and two of its three named cases still occur. Reported first and rated below 4 per the brief's own rule; `PLAT35-PD1` stands.",
       "findings": [
         {
           "kind": "missing-element",
-          "text": "Value text cut mid-glyph, which this block names as a case in its own words. State pane: `add:<function add at 0x7fffe7`, `__file__:\"/home/zahary/m/code`. Call-trace pane: `evaluate #2 (expression=\"`. The information is not elided, it is amputated — there is no ellipsis and no scrollbar, so nothing on screen says the value continues."
+          "text": "Value text cut mid-glyph, the case this block names in its own words. State pane: `add:<function add at 0x7fffe7`, `__file__:\"/home/zahary/m/code`. Call-trace pane: `evaluate #2 (expression=\"`. No ellipsis, no scrollbar: amputation, not elision."
         },
         {
           "kind": "missing-element",
-          "text": "Truncated pane title, the other case this block names: the right-hand stack's header reads `AGENT ACTI...` at 1440 wide. Unlike the value text this one at least carries an ellipsis, so it is legible as a truncation rather than as a name."
+          "text": "Truncated pane title, the other named case: the right-hand stack's header reads `AGENT ACTI...` at 1440 wide. It at least carries an ellipsis, so it reads as a truncation."
         },
         {
           "kind": "design",
-          "text": "The inline value chips beside lines 54-57 are themselves clipped to `add <fun` / `sub <fun`, so the annotation whose whole purpose is to show a value shows only that there is one. At the wide viewport the same chips read further but are still cut."
+          "text": "The inline value chips beside lines 54-57 are clipped to `add <fun` / `sub <fun`, so the annotation shows only that a value exists."
         }
       ]
     },
     "returned-calltrace": {
-      "reviewer": "claude-opus-5 (repair pass)",
+      "reviewer": "claude-opus-5.5 (PLAT-40 re-review)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-09-21",
+      "reviewedAt": "2026-09-23",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-09-20T14:17:14.529Z",
+      "againstUiBundleMtime": "2026-09-23T10:05:30.708Z",
       "score": 6,
-      "summary": "Expected elements: present, and this view is the one the scenario repair was for. The call trace marks `main #1` as current with `evaluate #2` behind it, the editor shows `main`'s body rather than `evaluate`'s, and the execution pointer is on line 110 — the statement after the call on 109, never inside the callee. A flow control reading `iteration 0 from 5` sits inline at the loop head.",
+      "summary": "Expected elements: present. The call trace marks `main #1` current with `evaluate #2` behind it, the editor shows `main`'s body, and the execution pointer is on line 110 — the statement after the call on 109. The flow control `iteration 0 from 5` sits inline at the loop head. The event log has labelled columns and six distinct rows with their locations.",
       "findings": [
         {
           "kind": "design",
-          "text": "State pane, `Locals` tab: shows the MODULE's names — `EXPRESSIONS`, `OPERATIONS`, `__file__`, `__doc__` — rather than `main`'s own `results`, `expression` and `value`, even though the call trace correctly marks `main` as the current frame. Whether the tab should follow the frame is a product decision this review does not own, so it is filed rather than rated as a missing element."
+          "text": "State pane, `Locals` tab: shows the MODULE's names (`EXPRESSIONS`, `OPERATIONS`, `__file__`) rather than `main`'s own `results`, `expression`, `value`, although the call trace marks `main` current. A product question this review does not own; filed rather than rated."
         },
         {
           "kind": "design",
-          "text": "The same mid-glyph clipping as every other capture, at this viewport: `results.append(va`, `__file__:\"/home/zahary/m/cod`, `evaluate #2 (expression=\"`."
+          "text": "The same mid-glyph clipping as every other capture at this viewport: `results.append(va`, `__file__:\"/home/zahary/m/cod`, `evaluate #2 (expression=\"`."
         }
       ]
     },
     "continued-event-log": {
-      "reviewer": "claude-opus-5 (repair pass)",
+      "reviewer": "claude-opus-5.5 (PLAT-40 re-review)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-09-21",
+      "reviewedAt": "2026-09-23",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-09-20T14:17:14.529Z",
-      "score": 3,
-      "summary": "Expected elements: MISSING. The event-log pane is populated and carries its footer row count (`Rows 1 to 6 of 6`), the transport buttons are present and there is no error banner — but the block's second requirement is that the table has column headers and its rows are aligned to them, and there are no headers at all. Reported first and rated below 4 per the brief's own rule.",
+      "againstUiBundleMtime": "2026-09-23T10:05:30.708Z",
+      "score": 7,
+      "summary": "Expected elements: present. The event-log pane is a dense table with labelled columns — `tick`, `#`, `location`, `output` — its rows aligned under them, six DISTINCT rows (the five expression results `calc` prints on line 111 and the checksum on 112) and the footer's row count `Rows 1 to 6 of 6`. The transport buttons are present and there is no error banner. Both of the previous capture's missing elements are repaired (`PLAT35-PD2`, closed by PLAT-40).",
       "findings": [
         {
-          "kind": "missing-element",
-          "text": "Event-log table: no column headers. Four columns are rendered — a left figure (`170`), a count (`5`), a source location (`main.py:112`) and a payload (`stdout: checksum = 73`) — and none of them is labelled, so the first two are unreadable without reading the implementation. The block names headers as an expected element."
-        },
-        {
-          "kind": "missing-element",
-          "text": "All six event rows render IDENTICAL text. `calc` prints five distinct expression results (`2 + 3 = 5`, `10 - 4 + 1 = 7`, ...) and then the checksum, so six rows that all read `main.py:112  stdout: checksum = 73` are showing one event six times or the wrong field six times. A populated table whose rows are all the same row is not a populated table."
+          "kind": "design",
+          "text": "The `tick` column's figures carry an underline bar that reads as progress or a link; under a `tick` header it now at least has a name, but it still competes with the execution state for attention."
         },
         {
           "kind": "design",
-          "text": "The left-hand figure `170` carries an underline that reads as a progress bar or a link and is neither; at a glance it competes with the execution state for attention."
+          "text": "The `output` column repeats the channel on every row (`stdout: `), which spends a fifth of the column's width on a word the six rows share."
         }
       ]
     },
     "breakpoint-editor": {
-      "reviewer": "claude-opus-5 (repair pass)",
+      "reviewer": "claude-opus-5.5 (PLAT-40 re-review)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-09-21",
+      "reviewedAt": "2026-09-23",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-09-20T14:17:14.529Z",
+      "againstUiBundleMtime": "2026-09-23T10:05:30.708Z",
       "score": 5,
-      "summary": "Expected elements: present. A red breakpoint disc in the gutter on line 26 and the execution pointer on line 44 — different rows, different glyphs, different colours, both legible, neither overwriting the other. This block does not carry the `nothing is clipped` clause, so the clipping below is a design finding rather than a missing element.",
+      "summary": "Expected elements: present. A red breakpoint disc in the gutter on line 26 and the execution pointer on line 44 — different rows, different glyphs, different colours, both legible. This block does not carry the `nothing is clipped` clause, so the clipping below is a design finding rather than a missing element.",
       "findings": [
         {
           "kind": "design",
-          "text": "The breakpoint disc and the execution pointer occupy the same gutter lane at different rows, so they are only distinguishable because they never coincide. The block asks for different LANES; on a line carrying both a stop and a mark this layout has nowhere to put the second glyph, and no scenario in the pinned set produces that line."
+          "text": "The breakpoint disc and the execution pointer share one gutter lane at different rows, so they are distinguishable only because they never coincide; the block asks for different LANES."
         },
         {
           "kind": "design",
@@ -166,14 +166,14 @@
     "_comment": [
       "PLAT-35 — THE QUARANTINE, AND WHY IT IS NOT AN EXEMPTION LIST.",
       "",
-      "Two of the six tier-4 readings score 3, and `score < 4` BLOCKS. `PLAT-35`",
+      "One of the six tier-4 readings scores 3 (two did until PLAT-40 repaired `PLAT35-PD2`), and `score < 4` BLOCKS. `PLAT-35`",
       "is a member of `just editor-model-case-floors`, which is SHARED with eleven",
       "other milestones and hard-fails on any [FAILED] case. Landing it red would",
       "put a permanently-red case into that lane, and `PLAT-35 is red` decays into",
       "noise that masks the next real regression. Refusing to land the tool",
       "because of the defects it found is the other wrong answer.",
       "",
-      "So the two cases are QUARANTINED — the shape this repo already uses in",
+      "So the case is QUARANTINED — the shape this repo already uses in",
       "`ci/test/rust-test-crate-coverage.known-dark.txt` and",
       "`ci/test/shell-gate-coverage.known-dark.txt`, whose rule is quoted here",
       "because it is the whole point: *THIS FILE FAILS IN BOTH DIRECTIONS.* An",
@@ -227,7 +227,7 @@
       "    against an unestablished mechanism is the thing this campaign has",
       "    already shipped three times."
     ],
-    "declaredKnownRed": 2,
+    "declaredKnownRed": 1,
     "expiresOn": "2026-12-31",
     "scenarios": {
       "advanced-state": {
@@ -236,13 +236,6 @@
         "owner": "codetracer-specs/Front-Ends/Electron-GUI.md — the spec that owns this front-end. It has no milestones file, so no milestone owns these panes today; the first Electron-GUI milestone inherits this, and `expiresOn` is what stops that from meaning nobody does.",
         "measurement": "AT 1440x900 THE ELECTRON PANES AMPUTATE TEXT WITH NO ELISION AFFORDANCE. Measured 2026-09-21 off the capture at its declared viewport: the state pane draws `add:<function add at 0x7fffe7` and `__file__:\"/home/zahary/m/code`, the call-trace pane draws `evaluate #2 (expression=\"`, and the right-hand stack's header reads `AGENT ACTI...`. The value text has no ellipsis and no horizontal scrollbar, so nothing on screen says the value continues; the pane title at least carries an ellipsis. It is not elision, it is amputation, and the object identity a reader opened the pane for is the part removed.",
         "remedy": "decide ONCE what this front-end does when a pane is narrower than its content — a middle ellipsis keeps the informative end of a `<function ... at 0x...>`, a horizontal scrollbar keeps all of it — and apply it consistently. IT IS NOT A MISSING AFFORDANCE: `text-overflow` appears 102 times across 37 of the 61 stylesheets in `src/frontend/styles/components/`, and `state.styl` alone uses `clip`, `ellipsis` and `visible` in six places. `.value-line-view-text` and `.value-expanded-view-text` are `display: flex` with `text-overflow: visible`, and on a flex row the property applies to the children — which that file's own comment on the current-line row already says."
-      },
-      "continued-event-log": {
-        "defect": "PLAT35-PD2",
-        "subject": "front-end",
-        "owner": "codetracer-specs/Front-Ends/Electron-GUI.md — the spec that owns this front-end. It has no milestones file, so no milestone owns this pane today; the first Electron-GUI milestone inherits this, and `expiresOn` is what stops that from meaning nobody does.",
-        "measurement": "THE EVENT-LOG TABLE HAS NO COLUMN HEADERS AND DRAWS ONE ROW SIX TIMES. Measured 2026-09-21 at 1920x1080 after `continueForward`: four columns are rendered — a left figure (`170`), a count (`5`), a source location (`main.py:112`) and a payload (`stdout: checksum = 73`) — and none is labelled. All six rows carry IDENTICAL text. `test-programs/calc/main.py` prints one line per entry of `EXPRESSIONS`, which has five members, at line 110, and then the checksum at line 112; so the six rows should be five distinct results followed by `checksum = 73` and instead every one of them is the checksum. The footer's own count agrees there are six (`Rows 1 to 6 of 6`), so the pane has the right number of events and draws the wrong one in five of them.",
-        "remedy": "label the four columns, and find which of the two the row renderer does: shows one event six times, or shows six events' wrong field. The mechanism is NOT established here and this remedy deliberately does not guess at it — `calc` at 1920x1080 after a single `continueForward` reproduces it in one run."
       }
     }
   }

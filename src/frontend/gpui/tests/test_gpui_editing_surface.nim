@@ -400,7 +400,9 @@ suite "PLAT-22: the GPUI editing surface":
       mutableHere = false)
     let reported = surface.reportedConcerns()
     let filed = concernsWithFiledGap()
-    ck ecFlowOverlay in filed
+    # `ecFlowOverlay` is NOT filed: `PLAT22-PG2` was retired by PLAT-42 once
+    # `FlowVM.styledLines` carried the per-line fact.
+    ck ecFlowOverlay notin filed
     ck ecLineStatus in filed
     ck ecInlineValues in filed
     ck ecExecutionPointer notin filed
@@ -417,33 +419,34 @@ suite "PLAT-22: the GPUI editing surface":
     ck ecLineStatus in reported
     ck surface.support[ecExecutionPointer] == esAbsent
     ck surface.support[ecInlineValues] == esAbsent
-    ck filedGap(pgFlowHasNoPerLineFact).concern == ecFlowOverlay
     ck filedGap(pgMarksHaveNoProducer).concern == ecLineStatus
     ck filedGap(pgInlineValuesDiverge).concern == ecInlineValues
-    ck filedGap(pgFlowHasNoPerLineFact).measurement.len > 0
-    ck filedGap(pgFlowHasNoPerLineFact).remedy.len > 0
+    ck filedGap(pgInlineValuesDiverge).measurement.len > 0
+    ck filedGap(pgInlineValuesDiverge).remedy.len > 0
 
-    # **THE FLOW OVERLAY SAYS ONLY WHAT IT CAN, and this is asserted over the
-    # RULE rather than over a rendering**, because `EditorVM.showFlowOverlay`
-    # defaults false and a case that only built surfaces would never reach
-    # `flowStateOf` at all. Arm E4 — which makes every line answer `efsTaken` —
+    # **THE FLOW OVERLAY SAYS ONLY WHAT THE FLOW SAYS, and this is asserted
+    # over the RULE rather than over a rendering**, because a case that only
+    # built edit-mode surfaces would never reach `flowStateOf` at all. Arm E4 —
+    # which makes every line the window says nothing about answer `efsTaken` —
     # SURVIVED against a suite that did exactly that.
     #
-    # A loop with `first = 10, last = 20, registeredLine = 10`, focused. What
-    # the extent can justify: inside is `efsTaken`, and everything else is
-    # `efsUnknown` — NOT `efsNotTaken`, because "this line did not run" is a
-    # claim `FlowVM` carries no fact for.
-    let loops = @[FlowLoopInfo(first: 10, last: 20, registeredLine: 10,
-                               rrTicksForIterations: @[])]
-    ck flowStateOf(loops, 0, 15) == efsTaken
-    ck flowStateOf(loops, 0, 10) == efsTaken
-    ck flowStateOf(loops, 0, 20) == efsTaken
-    ck flowStateOf(loops, 0, 9) == efsUnknown
-    ck flowStateOf(loops, 0, 21) == efsUnknown
-    # No focused loop, and no loops at all: both are `efsUnknown` everywhere,
+    # `FlowVM.styledLines` for a window in which 10 and 12 ran and 15 sits in a
+    # declined arm. A line with no entry is `efsUnknown` — NOT `efsTaken` and
+    # NOT `efsNotTaken`, because "the window has no step for this line" is a
+    # fact about the window, not about the program.
+    let facts = @[FlowStyledLine(position: 10, kind: flskHit),
+                  FlowStyledLine(position: 12, kind: flskHit),
+                  FlowStyledLine(position: 15, kind: flskSkip)]
+    ck flowStateOf(facts, 10) == efsTaken
+    ck flowStateOf(facts, 12) == efsTaken
+    ck flowStateOf(facts, 15) == efsNotTaken
+    ck flowStateOf(facts, 9) == efsUnknown
+    ck flowStateOf(facts, 11) == efsUnknown
+    ck notTakenLinesOf(facts) == @[15]
+    # No facts at all, and a non-positive line: `efsUnknown` everywhere,
     # which is the answer that does not overclaim.
-    ck flowStateOf(loops, -1, 15) == efsUnknown
-    ck flowStateOf(@[], 0, 15) == efsUnknown
+    ck flowStateOf(@[], 15) == efsUnknown
+    ck flowStateOf(facts, 0) == efsUnknown
     expectCount(26)
 
   test "an escape naming ANOTHER front-end is refused, and the refusal names both":
@@ -961,8 +964,147 @@ suite "PLAT-22: the GPUI editing surface":
 # 307 -> 321 on 2026-09-16: thirteen assertions for the provenance case and one
 # for the edit-mode statement, both added by the verification pass after two
 # undeclared arms survived the 307.
+#
+# 324 -> 335 on 2026-09-23: PLAT-28's two projection cases, seven and four.
 
-const ExpectedAssertions = 324
+const ExpectedAssertions = 335
+
+suite "PLAT-28: the rows ARE a projection, asserted against a direct build":
+
+  # **THE ORACLE IS A DIRECT, FIELD-BY-FIELD ROW BUILD FROM THE SAME
+  # VIEWMODELS**, and it is the one independent thing here: both surfaces now
+  # produce their rows as `row_projection.editorRowsOf` of a `DecorationSet`
+  # (Editor-ViewModel.md §8.4), so what this compares is the round trip —
+  # four fields encoded as decorations over a window document and decoded by
+  # the projection — against the rows written out directly, the way both
+  # surfaces built them before. The per-field RULES (`pointerFor`, `markFor`,
+  # `valuesForLine`, `flowStateOf`) are shared on purpose: they are the
+  # producers' decisions, and what is under test is that the projection loses,
+  # adds, moves or reorders nothing on the way through (§30: the shared part is
+  # named, the compared part is not shared).
+
+  proc directRows(h: LiveEditor; points: openArray[EditorPoint];
+                  flowVisible: bool): seq[EditorRow] =
+    let vm = h.service.vm
+    let exec = vm.executionLine.val
+    let values = inlineValuesOf(h.session.session.stateVM, gpuiRowBudget())
+    let facts = h.session.session.flowVM.styledLines.val
+    for read in vm.visibleReads():
+      var row = EditorRow(line: read.line, flow: efsUnknown)
+      row.held = read.kind == srkHeld
+      row.text = if row.held: read.text else: ""
+      row.pointer = pointerFor(read.line, exec, 0)
+      row.mark = markFor(points, vm.path.val, read.line)
+      if row.held and row.pointer == eptExecution:
+        row.values = valuesForLine(row.text, values)
+      if flowVisible:
+        row.flow = flowStateOf(facts, read.line)
+      result.add row
+
+  proc fieldMismatches(got, want: seq[EditorRow]): seq[string] =
+    if got.len != want.len:
+      return @["row count " & $got.len & " vs " & $want.len]
+    for i in 0 ..< got.len:
+      let (g, w) = (got[i], want[i])
+      let at = "line " & $w.line & ": "
+      if g.line != w.line: result.add at & "line " & $g.line
+      if g.text != w.text: result.add at & "text"
+      if g.held != w.held: result.add at & "held"
+      if g.pointer != w.pointer: result.add at & "pointer " & $g.pointer
+      if g.mark != w.mark: result.add at & "mark " & $g.mark
+      if g.flow != w.flow: result.add at & "flow " & $g.flow
+      if g.values != w.values: result.add at & "values"
+
+  test "the DEBUG surface's rows equal a direct build, served and unserved":
+    resetCount()
+    let h = openLive(24, big = false)
+    try:
+      # STEP UNTIL THE EXECUTION LINE ITSELF CARRIES A VALUE — the one field a
+      # stop can leave empty. Bounded, so a recording that never gets there is
+      # a red number, not a hang.
+      var steps = 0
+      for i in 1 .. 80:
+        h.session.stepForward()
+        try: h.session.requestAndLoadLocals()
+        except CatchableError: discard
+        var carried = false
+        for r in h.surfaceOf().rows:
+          if r.values.len > 0: carried = true
+        if carried:
+          steps = i
+          break
+      ck steps > 0
+      let exec = h.service.vm.executionLine.val
+      let path = h.service.vm.path.val
+      # A breakpoint ON the execution line and a tracepoint above it, so the
+      # mark field varies inside the window.
+      let points = @[
+        EditorPoint(path: path, line: exec, kind: epkBreakpoint, enabled: true),
+        EditorPoint(path: path, line: max(1, exec - 1), kind: epkTracepoint,
+                    enabled: true)]
+      let s = h.surfaceOf(points)
+      let want = h.directRows(points, s.flowOverlayVisible)
+      let diff = fieldMismatches(s.rows, want)
+      checkpoint("served: " & diff.join("; "))
+      ck diff.len == 0
+      # NON-VACUITY (§4): the comparison is over rows in which the fields the
+      # projection carries actually vary — a pointer, a mark and a value.
+      var withValues, withMark, withPointer = 0
+      for r in s.rows:
+        if r.values.len > 0: inc withValues
+        if r.mark != emNone: inc withMark
+        if r.pointer != eptNone: inc withPointer
+      ck withValues > 0
+      ck withMark == 2
+      ck withPointer == 1
+      # THE UNSERVED HALF: the window moved and nothing served, the one state
+      # in which `requested` lines exist.
+      h.pointAt(max(1, exec - 1))
+      h.service.vm.scrollTo(1)
+      let unserved = editorSurfaceFor(
+        source = h.service.vm,
+        editor = h.session.session.editorVM,
+        state = h.session.session.stateVM,
+        flow = h.session.session.flowVM,
+        availability = h.service.availability(),
+        budget = gpuiRowBudget(),
+        medium = GpuiMedium,
+        points = points)
+      let want2 = h.directRows(points, unserved.flowOverlayVisible)
+      let diff2 = fieldMismatches(unserved.rows, want2)
+      checkpoint("unserved: " & diff2.join("; "))
+      ck diff2.len == 0
+      ck unserved.rows.len > 0
+      expectCount(7)
+    finally:
+      closeLive(h)
+
+  test "the EDIT surface's rows equal a direct build, windowed and whole":
+    resetCount()
+    const Path = "src/plat28.py"
+    const Text = "def f(x):\n    y = x + 1\n    return y\n\nprint(f(2))\n"
+    let points = @[EditorPoint(path: Path, line: 2, kind: epkBreakpoint,
+                               enabled: true),
+                   EditorPoint(path: Path, line: 5, kind: epkTracepoint,
+                               enabled: false)]
+    for (top, height) in [(1, 0), (2, 3)]:
+      let s = editorSurfaceForProject(Path, Text, GpuiMedium, false,
+                                      viewportTop = top,
+                                      viewportHeight = height, points = points)
+      var want: seq[EditorRow] = @[]
+      var lines = Text.split('\n')
+      lines.setLen(lines.len - 1)          # a file's final newline ends a line
+      for i, text in lines:
+        let line = i + 1
+        if line < top or (height > 0 and line > top + height - 1): continue
+        want.add EditorRow(line: line, text: text, held: true,
+                           pointer: eptNone, flow: efsUnknown,
+                           mark: markFor(points, Path, line))
+      let diff = fieldMismatches(s.rows, want)
+      checkpoint($top & "/" & $height & ": " & diff.join("; "))
+      ck diff.len == 0
+      ck s.rows.len == (if height == 0: 5 else: 3)
+    expectCount(4)
 
 suite "PLAT-22: the assertion count":
   test "every case in this file ran":

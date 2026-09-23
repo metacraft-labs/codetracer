@@ -1455,6 +1455,15 @@ proc applyEventLogRows*(store: ReplayDataStore;
     if row.maxRRTicks > maxTicks:
       maxTicks = row.maxRRTicks
   store.eventLog.maxRRTicks.val = maxTicks
+  # THE TIMELINE'S EXTENT FOLLOWS WHAT THE LOG LEARNS (PLAT-41). The
+  # recording's extent is one fact, and for a completed recording the event
+  # log's `maxRRTicks` is where every front-end learns it; the timeline's own
+  # copy was raised only by LIVE recording-head updates, so on a replay the
+  # native timeline drew `tick 4 / 0`. Raised, never lowered — as the log's.
+  if maxTicks > store.timeline.val.maxRRTicks:
+    var timeline = store.timeline.val
+    timeline.maxRRTicks = maxTicks
+    store.timeline.val = timeline
   store.eventLog.loadingState.val = lsIdle
 
 proc applyEventLogResponse*(store: ReplayDataStore;
@@ -1538,6 +1547,34 @@ proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   ## empty the pane.
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
+
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verifiedLines: openArray[int]) =
+  ## Replace `path`'s breakpoint rows with the lines the ENGINE verified.
+  ##
+  ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
+  ## native front-ends reach it through `HeadlessDebugSession.toggleBreakpoint`
+  ## and Electron through its debugger service's `setBreakpoints` answer, so a
+  ## breakpoint is on the point list because the engine bound it, whichever
+  ## front-end asked. The lines are the engine's — a breakpoint binds to a
+  ## recorded step, which need not be the line asked for — and a line below 1
+  ## is not a place and is dropped. Rows of other kinds and other files are
+  ## untouched; `path`'s breakpoint set is replaced whole, as DAP's
+  ## `setBreakpoints` replaces it.
+  var rows: seq[PointListEntry] = @[]
+  for r in store.pointList.rows.val:
+    if not (r.kind == PointKindBreakpoint and r.path == path):
+      rows.add r
+  for line in verifiedLines:
+    if line >= 1:
+      var name = path
+      let slash = max(path.rfind('/'), path.rfind('\\'))
+      if slash >= 0: name = path[slash + 1 .. ^1]
+      rows.add PointListEntry(kind: PointKindBreakpoint,
+                              label: name & ":" & $line, path: path,
+                              line: line, enabled: true,
+                              resolution: "verified")
+  store.applyPointRows(rows)
 
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
                              stopAfter = -1): JsonNode =
@@ -1652,7 +1689,7 @@ proc applyTracepointResults*(store: ReplayDataStore;
         break
     if not replaced:
       rows.add PointListEntry(
-        kind: "pkTracepoint",
+        kind: PointKindTracepoint,
         label: (if spec.expression.len > 0: spec.expression
                 else: "tracepoint " & $spec.tracepointId),
         path: path,
@@ -1773,6 +1810,119 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
     isExpanded: isExpanded,
     callKey: callKey,
   )
+
+# ---------------------------------------------------------------------------
+# The calltrace decoder — ONE policy for what a `callLines[]` entry becomes
+# ---------------------------------------------------------------------------
+
+type
+  CallLineWire* = object
+    ## **One `callLines[]` entry of `ct/load-calltrace-section`, reduced to
+    ## the fields a calltrace row is made of.** Both decoders fill this — the
+    ## native front-ends from the response's JSON (`callLineWireOf`), the
+    ## desktop from its typed `CtUpdatedCalltraceResponseBody`
+    ## (`ui/calltrace.syncCalltraceData`) — and `callLineOf` alone decides
+    ## what the row says.
+    ##
+    ## PLAT-40 found the two decoders disagreeing: the native one named a row
+    ## by the call's `rawName` and located it at the LOW-level `path`/`line`,
+    ## never set `hasChildren`, `isExpanded` or `callKey`; the desktop named it
+    ## by `highLevelFunctionName` at the high-level location. The same
+    ## recording's call trace read differently on the terminal and on the
+    ## desktop, and both panes were internally consistent about it.
+    rawName*, highLevelFunctionName*: string
+    path*, highLevelPath*: string
+    line*, highLevelLine*: int
+    rrTicks*: uint64
+    depth*: int
+    sourceGeneration*: int
+    sourceDigest*: string
+    callstackDepth*: int
+    count*: int
+      ## `content.count` — the backend's child count for the line.
+    hiddenChildren*: bool
+      ## `content.hiddenChildren`.
+    loadedChildren*: int
+      ## `content.call.children.len` — children the section already carries.
+    callKey*: string
+
+proc callLineOf*(w: CallLineWire; globalIndex: int64): CallLine =
+  ## **What a calltrace row IS**, for every front-end.
+  ##
+  ## Named by the high-level function name, located at the high-level path and
+  ## line: the language's own view of the call, the one the editor shows. The
+  ## raw name and low-level location are the fallback for a recorder that
+  ## leaves the high-level fields empty, so a row is never nameless while the
+  ## backend sent a name.
+  ##
+  ## A line HAS children when the backend counts any or the section carries
+  ## some; it is shown EXPANDED when it has children that are not hidden, or
+  ## when its children are loaded — the legacy call-line semantics the IsoNim
+  ## calltrace view mirrors.
+  let children = if w.count > 0: w.count else: w.loadedChildren
+  let hasChildren = children > 0
+  let name =
+    if w.highLevelFunctionName.len > 0: w.highLevelFunctionName else: w.rawName
+  let (file, line) =
+    if w.highLevelPath.len > 0: (w.highLevelPath, w.highLevelLine)
+    else: (w.path, w.line)
+  result = makeCallLine(
+    name = name, depth = w.depth, rrTicks = w.rrTicks, file = file,
+    line = line, sourceGeneration = w.sourceGeneration,
+    sourceDigest = w.sourceDigest, codeGeneration = w.sourceGeneration,
+    callstackDepth = w.callstackDepth, hasChildren = hasChildren,
+    isExpanded = hasChildren and (not w.hiddenChildren or w.loadedChildren > 0),
+    callKey = w.callKey)
+  result.index = globalIndex
+
+proc callLineWireOf*(entry: JsonNode): Option[CallLineWire] =
+  ## One `callLines[]` entry of the JSON response, or `none` when it carries
+  ## no call (the desktop's decoder skips such an entry, and so does this).
+  if entry.isNil or entry.kind != JObject: return none(CallLineWire)
+  let content = entry.getOrDefault("content")
+  if content.isNil or content.kind != JObject: return none(CallLineWire)
+  let call = content.getOrDefault("call")
+  if call.isNil or call.kind != JObject: return none(CallLineWire)
+  var w = CallLineWire(
+    rawName: call.getOrDefault("rawName").getStr(""),
+    depth: entry.getOrDefault("depth").getInt(0),
+    count: content.getOrDefault("count").getInt(0),
+    hiddenChildren: content.getOrDefault("hiddenChildren").getBool(false),
+    callKey: call.getOrDefault("key").getStr(""))
+  let children = call.getOrDefault("children")
+  if not children.isNil and children.kind == JArray:
+    w.loadedChildren = children.len
+  let loc = call.getOrDefault("location")
+  if not loc.isNil and loc.kind == JObject:
+    w.path = loc.getOrDefault("path").getStr("")
+    w.line = loc.getOrDefault("line").getInt(0)
+    w.highLevelPath = loc.getOrDefault("highLevelPath").getStr("")
+    w.highLevelLine = loc.getOrDefault("highLevelLine").getInt(0)
+    w.highLevelFunctionName =
+      loc.getOrDefault("highLevelFunctionName").getStr("")
+    w.rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
+    w.sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
+    w.sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
+    w.callstackDepth = loc.getOrDefault("callstackDepth").getInt(0)
+  some(w)
+
+proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
+  ## Decode a `ct/load-calltrace-section` response body into the store.
+  ## Answers the number of rows written, or `-1` when the body is not a
+  ## calltrace section (the store is then left ALONE, as
+  ## `applyEventLogResponse` leaves it for a payload with no events).
+  if body.isNil or body.kind != JObject: return -1
+  let entries = body.getOrDefault("callLines")
+  if entries.isNil or entries.kind != JArray: return -1
+  let start = body.getOrDefault("startCallLineIndex").getBiggestInt(0).int64
+  var lines: seq[CallLine] = @[]
+  for i in 0 ..< entries.len:
+    let w = callLineWireOf(entries[i])
+    if w.isSome:
+      lines.add callLineOf(w.get, start + i.int64)
+  store.updateCalltraceSection(
+    lines, start, body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64)
+  lines.len
 
 proc stepDirectionToDapCommand*(direction: StepDirection): string =
   ## Map a StepDirection to the correct DAP command string.

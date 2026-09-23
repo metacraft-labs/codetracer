@@ -74,9 +74,10 @@ const
   CalltraceLevels* = 400
     ## `stackTrace`'s `levels`. The same number CTUI-6's suites ask for, so a
     ## deep recursion is as visible here as it is there.
-  MaxEventsForBounds* = 4096
+  MaxEventsForBounds* = RecordingEventWindow
     ## How much of the event log is read once, at open, to learn the
-    ## recording's extent.
+    ## recording's extent — `native_host.loadRecordingPanes`' window, which
+    ## both native front-ends ask for.
     ##
     ## CTUI-8 established that `TimelineVM.markers` is filled by nothing on a
     ## replay session and that the recording's extent comes from
@@ -124,6 +125,8 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
   let sess = openLocalTrace(traceFolder, bound)
   let store = sess.session.store
   let src = createSourceVM(store, sess.session.editorVM)
+  if not sess.session.editorVM.isNil:
+    sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
   src.setViewport(height = max(1, viewportHeight), overscan = SourceOverscan)
   var nav = new(OriginNavigator)
   nav[] = initOriginNavigator()
@@ -245,41 +248,44 @@ proc learnExtent*(s: TuiSession) =
   ## change: `ct/event-load`'s `maxRRTicks` is a property of the recording, and
   ## re-asking for it after every step would put a whole-log request inside the
   ## step latency CTUI-14 measures.
+  # THE SHARED PRODUCERS (`native_host.loadRecordingPanes`) — the event log's
+  # first window and the call trace, asked by the same call the GPUI front-end
+  # makes, so neither front-end can be fed while the other is starved. Both
+  # decode into the store; everything below reads the store.
+  #
+  # The call trace is the one PLAT-40 found starved: until the terminal asked
+  # for it here, every caller of `requestAndLoadCalltrace` was under `tests/`,
+  # `getCalltraceLines()` was empty on every real run, and `callBoundaries` was
+  # silently `@[]` — "empty because nothing asked" and "empty because the
+  # request failed" produced the same value. `PaneLoad` now says which.
+  let loaded = s.session.loadRecordingPanes()
   var rows: seq[EventRow] = @[]
-  try:
-    rows = s.loadedEventRows(offset = 0, limit = MaxEventsForBounds)
-    # The extent comes off the STORE's own aggregate rather than by scanning
-    # the rows again. `applyEventLogRows` raises `maxRRTicks` to the largest
-    # any applied row reported and never lowers it, so a later page cannot
-    # shrink the recording.
+  for row in s.session.session.store.eventLog.rows.val:
+    rows.add eventRowOf(row)
+  # The extent comes off the STORE's own aggregate rather than by scanning
+  # the rows again. `applyEventLogRows` raises `maxRRTicks` to the largest any
+  # applied row reported and never lowers it, so a later page cannot shrink
+  # the recording.
+  if loaded.events:
     s.maxRRTicks = s.session.session.store.eventLog.maxRRTicks.val
-  except CatchableError:
-    discard
   s.bounds = resolveBounds(s.timeline, rows, s.maxRRTicks)
   s.mutations = mutationTicks(rows)
-  try:
-    # **ASK BEFORE READING.** `getCalltraceLines` reads `store.calltrace.lines`
-    # and `requestAndLoadCalltrace` is what fills it — and until this line was
-    # written, NOTHING in any front-end called the filler. Measured: every
-    # caller of `requestAndLoadCalltrace` in the tree was under `tests/`, so
-    # `getCalltraceLines()` returned an empty sequence on every real run and
-    # `callBoundaries` was silently always `@[]`. The `except` arm below hid
-    # it further, because "empty because nothing asked" and "empty because the
-    # request failed" produced the same value.
-    #
-    # This is the campaign's signature defect — *the mechanism works and
-    # nothing feeds it* — which PLAT-23 recorded at least eight times and
-    # priced at *"one change, a producer plus a call site"*. The producer
-    # already existed; this is the call site.
-    #
-    # Issued for its EFFECT, exactly as `loadedEventRows` issues
-    # `requestAndLoadEventLog`: the request decodes into the store, and the
-    # store is the one place the lines live. A second decoder here would make
-    # the terminal an independent reader of the same payload.
-    s.session.requestAndLoadCalltrace(height = CalltraceLevels, depth = 200)
-    s.callBoundaries = boundariesFromCalltrace(s.session.getCalltraceLines())
-  except CatchableError:
-    s.callBoundaries = @[]
+  s.callBoundaries =
+    if loaded.calltrace: boundariesFromCalltrace(s.session.getCalltraceLines())
+    else: @[]
+
+proc toggleBreakpoint*(s: TuiSession; path: string; line: int): bool =
+  ## `:break` / `F9`: toggle through `HeadlessDebugSession.toggleBreakpoint`,
+  ## THE producer of breakpoint rows both native front-ends share (PLAT-40).
+  ## Until 2026-09-23 the terminal kept its own list here, and `:break`
+  ## before that answered "no breakpoint service is wired".
+  s.session.toggleBreakpoint(path, line)
+
+proc points*(s: TuiSession): seq[SourcePoint] =
+  ## The breakpoints and tracepoints the store holds, as the source pane's
+  ## points — read from `store.pointList.rows`, which the shared producer
+  ## writes, so the gutter shows what every other surface shows.
+  sourcePointsOf(s.session.session.store.pointList.rows.val)
 
 proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## Rebuild every pane's model from the CURRENT stop, and re-point the
@@ -292,16 +298,38 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   let tick = s.session.getCurrentRRTicks()
 
   serveSourceWindow(s)
-  rt.app.source = sourcePaneModelFor(
-    s.source, s.session.session.store.degraded.sourceAvailability.val)
-
+  # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
+  # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
+  # `EditorVM.showFlowOverlay` toggle.
   let frames = framesFromStackTrace(s.stackBody())
   rt.app.callStack = callStackModelFor(frames, s.entryFile)
 
-  try:
-    s.session.requestAndLoadLocals()
-  except CatchableError:
-    discard
+  # THE LOCALS ARE LOADED BEFORE THE SOURCE MODEL IS BUILT, because the source
+  # pane's inline values are read from them. Until 2026-09-23 the model was
+  # built first and passed no values at all, so the shipped terminal drew no
+  # inline value on any line (PLAT22-PG3's re-measurement found it).
+  discard s.session.loadStopPanes()
+
+  # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
+  # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
+  # `EditorVM.showFlowOverlay` toggle. The inline values come from the SAME
+  # producer GPUI's editor uses — `editor_surface.inlineValuesOf` over
+  # `StateVM`, presented at this medium's row budget — so the two native
+  # editors cannot show two different sets of values for one stop.
+  let editorVM = s.session.session.editorVM
+  let flowVM = s.session.session.flowVM
+  let notTaken =
+    if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
+    else: notTakenLinesOf(flowVM.styledLines.val)
+  rt.app.source = sourcePaneModelFor(
+    s.source, s.session.session.store.degraded.sourceAvailability.val,
+    points = s.points,
+    notTakenLines = notTaken,
+    inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
+
+  # PLAT-40. The Points pane reads the same points the gutter just drew.
+  rt.app.points = pointListPaneModelFor(s.points)
+
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
@@ -339,7 +367,9 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     state: s.state,
     origin: s.origin,
     originNav: s.originNav,
-    services: CommandServices())
+    services: CommandServices(
+      setBreakpoint: proc(path: string; line: int): bool =
+        sess.toggleBreakpoint(path, line)))
   rt.context = CommandContext(
     file: s.session.getCurrentFile(),
     line: s.session.getCurrentLine(),
@@ -348,6 +378,24 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     targets: targetsFor(s.bounds, s.callBoundaries, s.mutations),
     selectedVariable: "",
     functions: @[])
+
+proc setFlowOverlay*(s: TuiSession; shown: bool) =
+  ## Show or hide the flow overlay for this session — `EditorVM`'s own toggle,
+  ## the one the GPUI front-end's `--no-flow-overlay` sets too.
+  if not s.session.session.editorVM.isNil:
+    s.session.session.editorVM.showFlowOverlay.val = shown
+
+proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
+  ## What the host does with one token's outcome, in ONE place so the shipped
+  ## loop (`main.nim`) and the suites that drive the host run the same rule: a
+  ## navigation is pumped and then refreshed; a change to what the session
+  ## holds without a move (a breakpoint) is refreshed and NOT pumped — a pump
+  ## there would wait on a `stopped` event no engine sends.
+  if outcome.awaitsMove:
+    s.pumpMove()
+    s.refresh(rt)
+  elif outcome.refreshesSession:
+    s.refresh(rt)
 
 proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## Take the ESCAPE HATCH off the DAP channel now that the session is open,

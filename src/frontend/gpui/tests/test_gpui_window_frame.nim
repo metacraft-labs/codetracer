@@ -91,7 +91,11 @@ import ../replay_ops
 # The second and third are the price of a DERIVED subject set (§35a), and it
 # is the right price: a hand-typed list would hold the count still and would
 # also be blind to the file or the function that was just added.
-const ExpectedAssertions = 535
+#
+# RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
+# two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
+# `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
+const ExpectedAssertions = 555
 
 var countedAssertions = 0
 

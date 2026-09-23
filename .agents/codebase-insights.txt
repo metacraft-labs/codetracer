@@ -2740,9 +2740,19 @@ Related, and easy to get wrong:
   it defaults to `true`, so existing call sites are unchanged.
 * `headless_session.HeadlessDebugSession` is now a *host* around a
   `DebuggerSession` rather than an owner of its own graph. It still does its
-  own DAP handshake, because it needs `DapStdioBackend.waitForEvent` and
-  `BackendService.onEvent` is a registration, not a pump — the stdio
-  adapter's `onEventProc` collects handlers and never calls them.
+  own DAP handshake, because it needs `DapStdioBackend.waitForEvent`
+  (synchronous waits on a named event).
+* Since 2026-09-23 the stdio adapter DOES deliver events to `onEvent`
+  subscribers — until then it collected them and called none, so on every
+  native host `FlowVM` never received `ct/updated-flow` and the flow overlay,
+  the request-span tail and replay-status updates were dead. Delivery happens
+  in `sendProc` AFTER the request's read loop returns (a handler may send;
+  delivering mid-read would re-enter a half-read stream), in the
+  `{"kind": <event>, "data": <body>}` envelope `RealBackendService` uses.
+  Events a synchronous caller drains with `drainEvents` are still delivered:
+  `undelivered` is a separate list from `eventQueue`. Events read by a direct
+  `sendDapRequest` (e.g. `HeadlessDebugSession.stepIn`) are delivered on the
+  next `BackendService.send`.
 
 ## The degraded-state catalogue is split across two packages (BlockTracer M2b)
 
@@ -5457,3 +5467,104 @@ out at `top: 0px; height: 0px` while the content height still counts its 21px,
 and whose rendered rows sit at offsets that are not multiples of the line
 height. That is a half-rendered editor, and it persisted for three seconds in
 one run rather than resolving.
+
+## Window lanes (GPUI in a real compositor) — two facts measured 2026-09-23
+
+* The WINDOWED isonim-gpui shim is built in isonim-gpui's own dev shell
+  (glibc 2.42 at the time). A `codetracer-gpui` built in this repo's dev shell
+  can end up on an OLDER glibc when nix-direnv falls back to a previous profile
+  (the `codetracer-python-recorder` evaluation failure), and then it cannot
+  load that shim: it exits at once with `could not load: …libgpui_nim_shim.so`.
+  Build the window lane's binary inside isonim-gpui's shell and point the lane
+  at it (`CODETRACER_PLAT44_BIN`, `CODETRACER_PLAT42_BIN`).
+* `isonim_gpui/bindings.nim` bakes an ABSOLUTE shim path in at compile time
+  (`rust/target/debug`), which is why the PLAT-37/38 lanes SWAP the shared
+  .so under every other process that loads it. `-d:gpuiShimPath=<file>` now
+  pins a binary to its own shim; with `CODETRACER_WINDOW_BIN_PINS_SHIM=1` the
+  PLAT-42/44 lanes leave the shared file alone.
+* `wtype -s N` is ONE sleep at that position in the argument list, not a
+  per-key gap: `wtype -s 15 -k Down -k Down …` sends every key at once. Pace
+  keys by putting a `-s` BETWEEN them, inside ONE process.
+* ONE `wtype` PROCESS PER RUN (`-k Down -s 200 -k Down …`). A `wtype` process
+  per key LOSES keys — measured 3 of 14 delivered — because each process is a
+  new virtual keyboard and its first key races the client's keymap. Even one
+  process can lose its FIRST key (about a third of fresh windows): prime it
+  with a bare `-M shift -m shift` before the real keys.
+* `wtype TEXT` types a capital as a KEYSYM, without the Shift modifier — the
+  shape Caps Lock and input methods produce too. The shim now delivers GPUI's
+  `key_char` for printable keys (isonim-gpui `input::key_for_consumer`); before
+  that, `Q` arrived as `q`.
+* Take a window frame when the window has SETTLED (two identical non-blank
+  `grim` grabs in a row), never after a fixed sleep: at load ~170-300 on this
+  host a fixed 20 s produced black frames. `ci/test/plat42-surfaces-window.sh`
+  and `plat44-sequences-window.sh` do this.
+* A window can disagree with its render plan: until 2026-09-23 the shim parsed
+  `display`/`opacity`/`overflow` into the plan and drew none of them. A suite
+  that reads only the plan cannot see that; compare a FRAME.
+
+## The editing core's per-operation cost (measured 2026-09-23)
+
+`operations.initOpEnv` used to re-derive the whole document (grapheme
+segmentation twice, two line indexes, the wrap cache) on EVERY operation —
+~680 ms per cursor motion at 40,000 lines. It now memoises the last document
+and moves the memo by the edit between two documents (`incrementalDerivation`);
+`test_op_env_memo.nim` holds it to a full derivation. If you change what
+`OpCtx`/`DisplayCtx` hold, change `fullDerivation` and `incrementalDerivation`
+together and rerun that suite.
+
+## Pane producers and reading panes off screens (PLAT-40, 2026-09-23)
+
+* A calltrace row is decided ONCE: `ReplayDataStore.callLineOf(CallLineWire)`.
+  The native hosts decode the JSON reply (`applyCalltraceResponse`), the
+  desktop copies its typed fields into a `CallLineWire`
+  (`ui/calltrace.syncCalltraceData`). Do not add a third decoder.
+* Both native front-ends ask for panes through `native_host.loadRecordingPanes`
+  (events + call trace, once per recording) and `loadStopPanes` (locals, per
+  stop). Breakpoints go through `HeadlessDebugSession.toggleBreakpoint`, which
+  writes the ENGINE's verified lines via `applyVerifiedBreakpoints`; the
+  desktop's `dapSetBreakpoints` reply feeds the same store call.
+* The event log is already populated at open by `EventLogVM`'s own
+  `ct/event-load` effect, before either native producer runs.
+* Nim's JS backend passes an object argument by reference, and a `for`
+  variable is ONE object reused per iteration. `x.toJs` of such an argument,
+  kept past the iteration, aliases the last element — that was PLAT35-PD2
+  (every event-log row showed the last event). Copy (`var row = x`) first.
+* In the terminal the `calltrace` PaneKind is painted as the CALL STACK (the
+  TUI spec's choice); there is no call-trace pane there.
+* `codetracer-gpui --layout=<file>` opens a saved layout document; the terminal
+  adopts the same JSON through `LayoutBinding.adoptLayoutDocument`.
+* Reading panes off a frame: `vision_producer.readProducerPanes` (pixels) and
+  `terminal_reading` (a `plainFrame` text screen, in CELLS not bytes — rows
+  carry `│`/`─`). Tesseract groups narrow aligned table columns column-wise;
+  `ocrLineBands` (ink-projection line bands, one `psm 7` read each) is the
+  fallback. Title strips of the native window need `TitleRetryExtraPx` more
+  height than the desktop's.
+
+- PLAT-36 `:source <file>` (tui/app/runtime.nim, Edit mode): imports a vimrc via
+  `editing_core.sourceVimConfig` ON TOP OF `vimKeymap()` and installs it with
+  `EditSession.installImported` -> `EditingDocument.installImported`, which also
+  copies the import's macros into `EditorState.macros` (multi-op RHS replay
+  through them). `EditingDocument.imported` (ref, nil = shipped model) is what
+  `applyKey` resolves through; `switchModel`/`selectModel` drop it and its macros.
+  Only single-op or argument-free sequences translate: `dd`, `yyp`, `>>` are
+  REPORTED (operator + motion), use DIFF-5's rows (`D`, `jJ`, ...) in fixtures.
+- Harness control digests cover runtime.nim/edit_binding.nim/editing_core.nim in
+  PLAT-30/34/36/42/43/44; any edit there needs those harnesses regraded before
+  their control files are committed.
+- Editor line tables (EditorState.folded/breakpoints/tracepoints/trackedLines) move
+  with the text via `editor_state.mapLinesThrough` inside `mapPositionTables`,
+  which ALL THREE routes call (commitChange, applyHistoryStep for undo/redo,
+  collab_text.applyRemoteChange). A line is its byte range; deleted iff a
+  non-empty range collapses (dd removes, J keeps, O pushes down).
+- TUI Edit mode owns F9/Space/`:break [line]` (runtime.applyLocalAction /
+  edit verbs): points live on EditSession.points and are carried through each
+  key by `edit_binding.applyEditKeyIn` (lent as EditorState.trackedLines).
+- Vim/Kakoune `o`/`O` bind `open-line-above/below` (enter insert mode);
+  `insert-blank-line-*` is Kakoune's Alt+o, unbound (key_names has no
+  Alt+<letter>). Vocabulary is 142 declarations / 226 operations.
+- terminal_driver: a lone ESC becomes the Esc key after `EscDelayMs` (50 ms)
+  of silence. Bytes arriving together (`ESC j`) still drop the ESC and
+  `ESC ESC` is one Esc. Pty tests can now send a single "\x1b" and wait.
+- Both editor surfaces build rows only via `editor_surface.projectedRows` ->
+  `row_projection.editorRowsOf` (RowProjection.firstLine/requested for the
+  debug window).

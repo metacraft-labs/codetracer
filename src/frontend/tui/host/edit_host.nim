@@ -155,6 +155,41 @@ proc readProjectFile*(root, relative: string): string =
   except IOError as e:
     raise newException(TuiHostError, relative & ": " & e.msg)
 
+const
+  MaxConfigFileBytes* = 1024 * 1024
+    ## PLAT-36. The ceiling on a `:source`d configuration. The largest file in
+    ## the pinned `.vimrc` corpus is well under 100 KiB; a megabyte is a file
+    ## that is not a Vim configuration, and reading it would stall the frame.
+
+proc resolveConfigPath*(root, spelled: string): string =
+  ## Where `:source <spelled>` reads from: `~` expanded, an absolute path as
+  ## is, anything else relative to the project `root` — the directory the
+  ## user's other `:e` paths are relative to.
+  let expanded = expandTilde(spelled)
+  if expanded.isAbsolute: expanded.normalizedPath
+  else: absolutePath(absolutePath(root) / expanded).normalizedPath
+
+proc readUserConfigFile*(root, spelled: string): string =
+  ## The bytes of a user's configuration file, for `:source`.
+  ##
+  ## NOT CONTAINED IN THE PROJECT, and deliberately unlike `readProjectFile`:
+  ## a `.vimrc` lives in the user's home, and the containment rule exists to
+  ## stop an EDIT reaching outside the project — this is a read of a file
+  ## the user named, and nothing is written. The size ceiling still applies.
+  let full = resolveConfigPath(root, spelled)
+  if not fileExists(full):
+    raise newException(TuiHostError, spelled & ": no such file")
+  let info = getFileInfo(full)
+  if info.size > MaxConfigFileBytes:
+    raise newException(TuiHostError,
+      spelled & ": is " & $(info.size div 1024) & " KiB; a configuration " &
+      "file is read whole and the ceiling is " &
+      $(MaxConfigFileBytes div 1024) & " KiB")
+  try:
+    readFile(full)
+  except IOError as e:
+    raise newException(TuiHostError, spelled & ": " & e.msg)
+
 proc writeProjectFile*(root, relative, text: string) =
   ## Write one buffer back, under the same containment rule as the read.
   let resolvedRoot = absolutePath(root).normalizedPath

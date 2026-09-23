@@ -23,21 +23,17 @@
 ## WHAT "ONE EDITING CORE, TWO FRONT-ENDS" MEANS TODAY — READ THIS FIRST
 ## =========================================================================
 ##
-## Both front-ends derive their editor from an `EditingDocument`. **Only one
-## of them can change it**, and the asymmetry is a measured property of
-## `isonim-gpui` rather than of this model:
+## Both front-ends derive their editor from an `EditingDocument`, and **since
+## PLAT-44 (2026-09-23) both can change it**, through the same `applyKey` under
+## the same `editScopeOf`: the terminal from `edit_binding.applyEditKey`, GPUI
+## from `gpui/app/edit_arm.applyGpuiKey`.
 ##
-##   * `PLAT21-VG1` — `addEventListener` takes a `proc()` with no parameter
-##     and `gpui_dispatch_event` carries no payload, so **no key can be
-##     delivered to a view**.
-##   * `PLAT21-VG3` — focus is per WINDOW; there is no element focus, so
-##     there is nothing for a key to be delivered *to*.
-##
-## So the GPUI arm is **read-only**, and PLAT-34's deliverable 3 says so in
-## the box rather than in prose somewhere else. What it is NOT is *absent*:
-## PLAT-28's rule is that *"a read-only editor that does not re-render is not
-## a consumer"*, and the gate is that a change to THIS value changes what the
-## GPUI shadow tree holds, read from a run.
+## Until then the GPUI arm was READ-ONLY, and the asymmetry was a measured
+## property of `isonim-gpui` rather than of this model — `PLAT21-VG1` (no key
+## payload could be delivered to a view) and `PLAT21-VG3` (no element focus).
+## PLAT-38 closed both; PLAT-44 consumed them. The clause is retired here
+## rather than deleted so the reason the two arms were ever different stays
+## readable.
 ##
 ## The WEB front-end is neither arm. It is Monaco plus the legacy Karax path
 ## and it is not brought onto this model by this milestone;
@@ -63,6 +59,8 @@
 ## keymaps are `product_keymap`/`vim_keymap`/`kakoune_keymap`'s own tables and
 ## the operations are the shipped vocabulary.
 
+import std/tables
+
 import ./editor/editor_state
 import ./editor/operations
 import ./editor/selection
@@ -73,9 +71,15 @@ import ./keymap/editing_keymap
 import ./keymap/product_keymap
 import ./keymap/vim_keymap
 import ./keymap/kakoune_keymap
+import ./keymap/keymap_selection
+from ./keymap/vim_import import VimImport, ImportReportEntry, ImportReason,
+  importVimConfig, coverageFraction, describeReport
 
 export editor_state, selection, wrap
 export editing_keymap, product_keymap, vim_keymap, kakoune_keymap
+export keymap_selection
+export VimImport, ImportReportEntry, ImportReason, importVimConfig,
+  coverageFraction, describeReport
 
 # `Annotation` IS WITHHELD, and the reason is a name collision rather than a
 # boundary. `operations` re-exports `editor/transaction`, whose `Annotation` is
@@ -131,6 +135,23 @@ type
       ## field HERE because a document is opened *by* a front-end, and that
       ## front-end's settings are what its own derivations are taken at.
     viewportRows*: int
+    imported*: ImportedKeymap
+      ## PLAT-36. A user's Vim configuration, imported on top of the Vim
+      ## keymap (`:source <file>` in the terminal). Nil — the common case —
+      ## means the document resolves through `keymapOf(model)`, the shipped
+      ## model. A `ref` so the one imported keymap is shared by every buffer
+      ## of a session rather than copied into each, and because it never
+      ## changes after the import: a new `:source` installs a new one.
+
+  ImportedKeymap* = ref object
+    ## An imported configuration, reduced to what resolution needs: the
+    ## bindings (the Vim keymap with the user's mappings layered on it) and
+    ## the multi-operation right-hand sides those bindings replay, which
+    ## `EditorState.macros` must hold before a key can resolve to one.
+    source*: string
+      ## Where it was read from, as the user spelled it — for the status line.
+    keymap*: EditingKeymap
+    macros*: Table[string, seq[string]]
 
   KeyApplication* = object
     ## The whole of what one key did, as a value.
@@ -155,6 +176,40 @@ func terminalWrapSettings*(): WrapSettings =
   ## the one thing a debugger's source column may not do.
   WrapSettings(wrapColumn: 0, policy: DefaultColumnPolicy)
 
+func initialModeFor*(model: KeymapModel): EditingMode =
+  ## The mode a document opens in under `model` — see `initEditingDocument` on
+  ## why it is the model's to decide. One `case`, total over the enum, used by
+  ## both the constructor and `switchModel`.
+  case model
+  of kmProductDefault: emInsert
+  of kmVim, kmKakoune: emNormal
+
+proc dropImported(d: var EditingDocument) =
+  ## Take an imported configuration off `d`, macros included: a macro id the
+  ## import minted must not outlive the bindings that replay it.
+  if d.imported.isNil:
+    return
+  for id in d.imported.macros.keys:
+    d.state.macros.del id
+  d.imported = nil
+
+proc switchModel*(d: var EditingDocument; model: KeymapModel) =
+  ## PLAT-43. Re-key an OPEN document to `model`.
+  ##
+  ## The text, the selection, the registers, the marks, the undo history and
+  ## the last change are the DOCUMENT and are kept. What belongs to the old
+  ## model's grammar is reset: the mode (to the new model's opening mode, as
+  ## `initEditingDocument` would choose it), a pending count, a pending
+  ## operator, a half-typed chord and a macro being recorded — a Vim `d`
+  ## waiting for its motion must not be completed by a Kakoune key.
+  d.dropImported()
+  d.model = model
+  d.state.mode = initialModeFor(model)
+  d.state.count = 0
+  d.state.pendingOperator = ""
+  d.state.pending = PendingChords()
+  d.state.recording = ""
+
 proc initEditingDocument*(path, text: string;
                           model = kmProductDefault;
                           settings = terminalWrapSettings();
@@ -176,10 +231,58 @@ proc initEditingDocument*(path, text: string;
     model: model,
     settings: settings,
     viewportRows: max(1, viewportRows))
-  result.state.mode =
-    case model
-    of kmProductDefault: emInsert
-    of kmVim, kmKakoune: emNormal
+  result.state.mode = initialModeFor(model)
+
+proc installImported*(d: var EditingDocument; imported: ImportedKeymap) =
+  ## PLAT-36. Put `d` under an imported Vim configuration. The model becomes
+  ## `kmVim` — the import is layered on the Vim keymap, so the grammar the
+  ## document is in IS Vim's — through `switchModel`, which keeps the text and
+  ## history and resets a half-typed chord exactly as a `:keymap` does. A nil
+  ## `imported` leaves `d` under the plain Vim keymap.
+  d.switchModel(kmVim)
+  if imported.isNil:
+    return
+  d.imported = imported
+  for id, steps in imported.macros:
+    d.state.macros[id] = steps
+
+type
+  SourcedConfig* = object
+    ## PLAT-36. What reading one Vim configuration produced, for a front-end
+    ## to install and to report: the keymap, and §6.3's headline and report.
+    imported*: ImportedKeymap
+    translated*: int
+      ## Mapping lines that became bindings (or deliberate unbinds).
+    mappings*: int
+      ## Every mapping line — the partition law's denominator.
+    report*: seq[ImportReportEntry]
+      ## Every line that could not be translated, with its reason.
+
+proc sourceVimConfig*(source, text: string): SourcedConfig =
+  ## Import `text` (a `.vimrc` / `init.vim`) ON TOP OF the shipped Vim
+  ## keymap, which is what a Vim user's configuration assumes it is layered
+  ## on: an `nnoremap Q dd` is written against Vim's `dd`, and an import over
+  ## an empty keymap would leave every unmapped key dead. `source` is only
+  ## carried for the status line.
+  let imp = importVimConfig(text, vimKeymap().keymap)
+  let (translated, mappings) = coverageFraction(imp)
+  SourcedConfig(
+    imported: ImportedKeymap(source: source, keymap: imp.keymap,
+                             macros: imp.macros),
+    translated: translated, mappings: mappings, report: imp.report)
+
+func sourcedSummary*(c: SourcedConfig): string =
+  ## One status line: §6.3's *"a count, not a list"* — N of M — and, when
+  ## anything was reported, the FIRST reported line with its reason, so the
+  ## gap is named at the moment the user asked rather than discovered later
+  ## through muscle memory failing.
+  let source = if c.imported.isNil: "" else: c.imported.source
+  result = "sourced " & source & ": " & $c.translated & " of " &
+           $c.mappings & " mapping line(s) translated"
+  if c.report.len > 0:
+    let first = c.report[0]
+    result.add "; " & $c.report.len & " not translated, first at line " &
+               $first.line & ": " & $first.reason
 
 proc keymapOf*(model: KeymapModel): KeymapDefinition =
   ## The three shipped models, by name. **ONE `case`, and it is total over the
@@ -215,8 +318,13 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
     return KeyApplication(outcome: eoIgnored, operations: @[],
                           resolution: erNothing, timedOut: false)
   let docBefore = d.state.doc
-  let step = editing_keymap.applyKey(d.state, keymapOf(d.model).keymap, scope,
-                                     key, d.settings, nowMs, d.viewportRows)
+  let step =
+    if d.imported.isNil:
+      editing_keymap.applyKey(d.state, keymapOf(d.model).keymap, scope,
+                              key, d.settings, nowMs, d.viewportRows)
+    else:
+      editing_keymap.applyKey(d.state, d.imported.keymap, scope,
+                              key, d.settings, nowMs, d.viewportRows)
   d.state = step.state
   let outcome =
     case step.kind
@@ -226,6 +334,45 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
       if d.state.doc != docBefore: eoChanged else: eoMoved
   KeyApplication(outcome: outcome, operations: step.operations,
                  resolution: step.kind, timedOut: step.timedOut)
+
+func followedViewportTop*(top, caretLine, rows: int): int =
+  ## The first visible line after the minimal scroll that brings `caretLine`
+  ## into a `rows`-high window starting at `top` — ONE rule for every
+  ## front-end (the terminal's `edit_binding.followCaret` and GPUI's edit arm
+  ## both call it). MINIMAL: the caret entering from the bottom moves the
+  ## window by one line, not to the middle, because a jump on every keystroke
+  ## near an edge is what makes an editor feel broken. 1-based lines.
+  result = top
+  if rows <= 0 or caretLine <= 0:
+    return
+  if caretLine < result:
+    result = caretLine
+  elif caretLine > result + rows - 1:
+    result = caretLine - rows + 1
+  if result < 1:
+    result = 1
+
+func editScopeOf*(d: EditingDocument): EditingScope =
+  ## **THE SCOPE A FRONT-END'S EDITOR PANE RESOLVES KEYS IN**, for a focused
+  ## editor in Edit product mode — one rule for every front-end (PLAT-44: the
+  ## terminal and GPUI both call this; §30b).
+  ##
+  ## `textEntry` follows the document's MODE: a printable key stands for
+  ## itself exactly in insert mode, whichever model put the document there.
+  ## PLAT-43 measured the alternative: the terminal passed `true`
+  ## unconditionally, and under Vim in normal mode `d` `w` typed `dw`.
+  EditingScope(model: d.model, product: pmEdit, pane: epEditor,
+               mode: d.state.mode, textEntry: d.state.mode == emInsert)
+
+proc claimsKey*(d: EditingDocument; scope: EditingScope; key: string;
+                nowMs: int64): bool =
+  ## PLAT-43. Would `applyKey` treat `key` as the editor's? The same resolver,
+  ## asked without executing: `erNothing` is the one answer that hands the key
+  ## back to the product keymap, exactly as `applyKey` reads it.
+  if key.len == 0:
+    return false
+  editing_keymap.resolveKey(d.state, keymapOf(d.model).keymap, scope, key,
+                            nowMs).kind != erNothing
 
 proc applyNamed*(d: var EditingDocument; name: string; args: OpArgs;
                  nowMs: int64): EditingOutcome =

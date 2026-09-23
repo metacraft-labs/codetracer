@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "PLAT-44 — the window run's result and its three frames read through",
+    "PLAT-39's pixel reader. Regenerate: `just plat44-edit-window` then",
+    "`just plat44-window-record`. Asserted by test_plat44_edit_window.nim."
+  ],
+  "takenAt": "2026-09-23T03:46:33Z",
+  "host": "gpu-server-001",
+  "run": {
+    "binary": "codetracer-gpui-window",
+    "rc": 0,
+    "elapsedMs": 19159,
+    "endedOnDeadline": false,
+    "original": "alpha beta\ngamma\n",
+    "onDisk": "Qalpha beta\ngamma\n",
+    "expected": "Qalpha beta\ngamma\n",
+    "frames": {
+      "blank": 6220817,
+      "before": 6220817,
+      "after": 6220817
+    }
+  },
+  "frames": {
+    "blank": {
+      "located": false,
+      "reason": "frame-blank: every column or row median is identical: the frame carries no layout",
+      "text": ""
+    },
+    "before": {
+      "located": true,
+      "reason": "",
+      "text": "Editor the working tree 1> alpha beta 2 gamma 3"
+    },
+    "after": {
+      "located": true,
+      "reason": "",
+      "text": "Editor the working tree 1> Qalpha beta 2 gamma 3"
+    }
+  }
+}

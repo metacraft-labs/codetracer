@@ -64,6 +64,7 @@ import ./app/cli
 # here is §14's duplicated predicate in the one file no suite compiles. With
 # the last call gone the import is unused, and an unused import is a warning on
 # every build of the product.
+import ./app/edit_binding   # PLAT-43: `EditSession.selectModel`
 import ./app/runtime
 import ./app/tui_app
 import ./host/build_runner
@@ -75,6 +76,7 @@ import ./host/layout_store
 import ./host/native_host
 import ./host/terminal_driver
 import ./host/tui_session
+import ../viewmodel/host/keymap_preference
 
 const
   IdlePollMs = 200
@@ -130,7 +132,26 @@ proc wireEditServices(rt: TuiRuntime; root: string;
       EditWriteResult(ok: true)
     except TuiHostError as e:
       EditWriteResult(ok: false, message: e.msg)
+  rt.editServices.readConfig = proc(spelled: string): EditReadResult =
+    try:
+      EditReadResult(ok: true, text: readUserConfigFile(root, spelled))
+    except TuiHostError as e:
+      EditReadResult(ok: false, message: e.msg)
   rt.editServices.listFiles = listFiles
+  # PLAT-43. The keymap model this session starts under is the one the user
+  # last chose, read through the same `selectKeymap` a typed `:keymap` goes
+  # through. A stored value that is not a model is REFUSED BY NAME on the
+  # status line and the session runs the product default — never a silent
+  # fallback a user cannot tell from a working preference.
+  let keymapPreference = loadKeymapPreference()
+  rt.keymapModel = keymapPreference.model
+  if not rt.app.editSession.isNil:
+    rt.app.editSession.selectModel(keymapPreference.model)
+  if keymapPreference.status == kplRefused:
+    rt.keymapNotice = keymapPreference.message
+    rt.app.notification = keymapPreference.message
+  rt.editServices.saveKeymap = proc(model: KeymapModel): string =
+    saveKeymapPreference(model)
   rt.editServices.startBuild = proc(kind: BuildKind;
                                     cmd: string): BuildStartResult =
     state.running = startBuild(kind, cmd, root, nowMonoMs())
@@ -354,6 +375,8 @@ proc interactive(command: TuiCommand): int =
   session.disarmHandshakeInterrupt()
 
   session.header(rt)
+  if command.noFlowOverlay:
+    session.setFlowOverlay(false)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
   session.refresh(rt)
@@ -428,9 +451,7 @@ proc interactive(command: TuiCommand): int =
       if outcome.quit:
         running = false
       else:
-        if outcome.awaitsMove:
-          session.pumpMove()
-          session.refresh(rt)
+        session.applyOutcome(rt, outcome)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         # `report = false`: the line the key just wrote is the user's own.

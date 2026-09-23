@@ -210,8 +210,13 @@ proc buildKakouneKeymap(): EditingKeymap =
   r.add eb(@["v"], "enter-visual", {emNormal})
   r.add eb(@["x"], "enter-visual-line", {emNormal})
   r.add eb(@["Esc"], "enter-normal", {emInsert} + KakouneVisualModes)
-  r.add eb(@["o"], "insert-blank-line-below", KakouneLiveModes)
-  r.add eb(@["O"], "insert-blank-line-above", KakouneLiveModes)
+  # Kakoune's `o` / `O` open a line and enter insert mode. They were bound
+  # to `insert-blank-line-*` — Kakoune's `Alt+o` / `Alt+O`, which stay in
+  # normal mode — until 2026-09-23. `Alt+o` itself is not bound: the terminal
+  # decoder (`key_names`) produces no `Alt+<letter>`, because an ESC followed
+  # by a letter is also a fast `Esc` then the letter.
+  r.add eb(@["o"], "open-line-below", KakouneLiveModes)
+  r.add eb(@["O"], "open-line-above", KakouneLiveModes)
   r.add eb(@["Ctrl+d"], "delete-char-forward", KakouneLiveModes)
   r.add eb(@["Ctrl+f"], "delete-char-backward", KakouneLiveModes)
   r.add eb(@["D"], "delete-to-line-end", KakouneLiveModes)
@@ -290,6 +295,12 @@ proc buildKakouneFiled(): seq[FiledDeclaration] =
       "delimited), a different concept this vocabulary does not publish"),
     FiledDeclaration(decl: "subword-backward", forms: {}, reason:
       "as `subword-forward`"),
+    FiledDeclaration(decl: "insert-blank-line-below", forms: {}, reason:
+      "`<a-o>` upstream — add an empty line below and stay in normal mode. " &
+      "`keyName` produces no `Alt+<letter>` (see `group-backward`), so there " &
+      "is no chord for it; `o` is `open-line-below`"),
+    FiledDeclaration(decl: "insert-blank-line-above", forms: {}, reason:
+      "`<a-O>` upstream; as `insert-blank-line-below`"),
     FiledDeclaration(decl: "line-number", forms: {}, reason:
       "`:42` — the command line, which is §4.3's text-entry scope, where " &
       "every printable key is a character and no chord resolves"),

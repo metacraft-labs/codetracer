@@ -117,7 +117,13 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1672
+const ExpectedAssertions = 1681
+  ## *1672 -> 1681 on 2026-09-23: §35's enumeration over `viewmodel/` again,
+  ## three new production modules x three assertions each —
+  ## `keymap/keymap_selection.nim` (PLAT-43's one selector),
+  ## `host/keymap_preference.nim` and `host/native_state.nim` (the stored
+  ## choice and the native hosts' state root). None calls `rebase(` or spells
+  ## `mapOver`.*
   ## *1666 -> 1669 on 2026-09-20: §35's enumeration firing for an EIGHTH time,
   ## and the first time over `viewmodel/` rather than over `viewmodel/editor/`.
   ## PLAT-34 added `viewmodel/editing_core.nim`, `ProductionModules` walks

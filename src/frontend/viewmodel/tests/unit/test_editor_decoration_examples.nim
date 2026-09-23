@@ -67,6 +67,9 @@ import ../../editor/inlay
 import ../../editor/range_set
 import ../../editor/row_projection
 import ../../editor/wrap
+import ../../editor/editor_state
+import ../../editor/operations
+import ../../editor/collab_text
 import ../corpus/unicode_corpus
 
 import ../../../view_vocabulary/editor_surface
@@ -78,7 +81,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 329
+const ExpectedAssertions = 352
 
 const Policy = ColumnPolicy(tabSize: 4, ambiguous: awNarrow)
 const NoWrap = WrapSettings(wrapColumn: 0, policy: Policy)
@@ -369,7 +372,11 @@ const ExecutionLine = 3
 const InspectionLine = 5
 let DebugValues = @[EditorValue(name: "total", value: "7"),
                     EditorValue(name: "a", value: "3")]
-let DebugLoops = @[FlowLoopInfo(first: 3, last: 4, registeredLine: 5)]
+let DebugFlowFacts = @[FlowStyledLine(position: 3, kind: flskHit),
+                       FlowStyledLine(position: 4, kind: flskHit),
+                       FlowStyledLine(position: 5, kind: flskSkip)]
+  ## `FlowVM.styledLines` for a window in which lines 3-4 ran and line 5 sits
+  ## in a declined arm — the three flow states, so the `flow` cell varies.
 
 # THE DECLARED VARIETY TABLE. `true` means the field takes more than one value
 # across that scenario's rows; `false` means it is constant there. Both
@@ -409,7 +416,7 @@ proc modelRows(sc: Scenario): seq[EditorRow] =
       let line = i + 1
       let m = markFor(ProjectionPoints, ProjectionPath, line)
       let p = pointerFor(line, ExecutionLine, InspectionLine)
-      let f = flowStateOf(DebugLoops, 0, line)
+      let f = flowStateOf(DebugFlowFacts, line)
       let vs = if p == eptExecution: valuesForLine(lines[i], DebugValues)
                else: @[]
       for d in decorationsForRow(m, p, f, vs, starts[i], lines[i].len, id):
@@ -454,7 +461,7 @@ proc controlRows(sc: Scenario): seq[EditorRow] =
         pointer: p, mark: markFor(ProjectionPoints, ProjectionPath, line),
         values: if p == eptExecution and held: valuesForLine(text, DebugValues)
                 else: @[],
-        flow: flowStateOf(DebugLoops, 0, line))
+        flow: flowStateOf(DebugFlowFacts, line))
     rows
 
 func fieldOf(r: EditorRow; f: RowField): string =
@@ -532,9 +539,11 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
       counted g.remedy.len > 20
     # THE INHERITED ONES STAY FILED WHERE THEY ARE. PLAT-28's risk note:
     # *"both stay filed against their existing ids and are OUT OF SCOPE here"*.
-    counted FiledEditorGaps.len == 3
+    # `PLAT22-PG2` was retired by PLAT-42 (the flow's per-line fact now
+    # exists); the other inherited gap stays filed.
+    counted FiledEditorGaps.len == 2
     counted FiledEditorGaps[pgMarksHaveNoProducer].concern == ecLineStatus
-    counted FiledEditorGaps[pgFlowHasNoPerLineFact].concern == ecFlowOverlay
+    counted ecFlowOverlay notin concernsWithFiledGap()
 
   test "PLAT28-DG3 — THE TWO PRODUCERS AGREED ABOUT A LINE TERMINATOR AFTER PLAT-34, measured":
     # **THIS CASE MEASURED A DIVERGENCE AND NOW MEASURES ITS CLOSURE, AND THE
@@ -639,6 +648,93 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
     # being asked for.
     counted wrap.documentLines(doc).len == kept.len
     counted editorSurfaceForProject("/p", doc, "m", true).rows.len == dropped.len
+
+  test "A WINDOW PROJECTS WITH THE FILE'S LINE NUMBERS, AND A REQUESTED LINE IS NOT HELD":
+    # The debug surface projects `SourceVM`'s visible window — a contiguous
+    # run of a file starting at `visibleFirstLine`, some lines still in
+    # flight — so `firstLine` numbers the rows and `requested` un-holds the
+    # in-flight ones, which need not form a range.
+    let doc = "alpha\n\ngamma\n"
+    let starts = projectionLineStarts(doc)
+    let ds = decorationSet(@[
+      decoration(0, starts[2], starts[2],
+                 linePayload(classOfPointer(eptExecution)))])
+    let rows = editorRowsOf(RowProjection(
+      doc: doc, decorations: ds, firstLine: 40, viewportTop: 40,
+      viewportHeight: 0, trailing: tlpDropFinalEmpty, requested: @[41]))
+    counted rows.len == 3
+    counted rows[0].line == 40 and rows[2].line == 42
+    counted rows[0].held and rows[0].text == "alpha"
+    counted not rows[1].held and rows[1].text == ""
+    counted rows[2].held and rows[2].pointer == eptExecution
+    # The window's own viewport clips in the FILE's numbering too.
+    let clipped = editorRowsOf(RowProjection(
+      doc: doc, decorations: ds, firstLine: 40, viewportTop: 42,
+      viewportHeight: 1, trailing: tlpDropFinalEmpty))
+    counted clipped.len == 1 and clipped[0].line == 42
+
+suite "PLAT-28 — a line table moves with the text (§8.2)":
+  ## `EditorState.folded`, `breakpoints`, `tracepoints` and `trackedLines` name
+  ## LINES, and until 2026-09-23 no edit moved them. Every case below names
+  ## the Vim edit it spells as a change set, because the three shapes that
+  ## matter are `O` (open a line above), `dd` (delete the line) and `J` (join
+  ## it with the next): the first must move a breakpoint, the second must
+  ## remove it, and the third must keep it.
+
+  const Doc = "alpha\nbeta\ngamma\ndelta\n"   # lines 0..3, then the empty 4
+  const BetaStart = 6
+
+  test "`O` above a line moves it down; a line above it does not move":
+    let cs = changeSet(Doc.len, BetaStart, BetaStart, "new\n")
+    counted mapLinesThrough(Doc, cs, [0, 1, 2]) == @[0, 2, 3]
+
+  test "`dd` on a line DELETES it; the line that took its place is not it":
+    let cs = changeSet(Doc.len, BetaStart, BetaStart + "beta\n".len, "")
+    counted mapLinesThrough(Doc, cs, [0, 1, 2]) == @[0, -1, 1]
+
+  test "`J` keeps both joined lines' text, so it keeps both lines — on one row":
+    # `J` on `beta` deletes its newline and puts one space in its place.
+    let nl = BetaStart + "beta".len
+    let cs = changeSet(Doc.len, nl, nl + 1, " ")
+    counted cs.apply(Doc) == "alpha\nbeta gamma\ndelta\n"
+    counted mapLinesThrough(Doc, cs, [1, 2, 3]) == @[1, 1, 2]
+
+  test "emptying a line's text keeps the line; Enter inside it keeps it on the first half":
+    let emptied = changeSet(Doc.len, BetaStart, BetaStart + 4, "")
+    counted mapLinesThrough(Doc, emptied, [1]) == @[1]
+    let split = changeSet(Doc.len, BetaStart + 2, BetaStart + 2, "\n")
+    counted mapLinesThrough(Doc, split, [1, 2]) == @[1, 3]
+
+  test "a line that is not a line of the document is returned unchanged":
+    let cs = changeSet(Doc.len, 0, 0, "x\n")
+    counted mapLinesThrough(Doc, cs, [-1, 99]) == @[-1, 99]
+
+  test "THE THREE ROUTES A DOCUMENT MOVES BY all move the state's lines":
+    # A LOCAL edit (`commitChange`), its UNDO (`applyHistoryStep`) and a
+    # REMOTE change (`collab_text.applyRemoteChange`). The undo route carried
+    # its own copy of the marks mapping until this milestone and would have
+    # left the lines where the edit put them.
+    var st = initEditorState(Doc)
+    st.breakpoints = @[1]
+    st.tracepoints = @[2]
+    st.folded = @[3]
+    st.trackedLines = @[1, 2]
+    let edited = applyOperation(st, "insert-text", OpArgs(text: "top\n"),
+                                NoWrap).state
+    counted edited.breakpoints == @[2]
+    counted edited.tracepoints == @[3]
+    counted edited.folded == @[4]
+    counted edited.trackedLines == @[2, 3]
+    let undone = applyOperation(edited, "undo", OpArgs(), NoWrap).state
+    counted undone.doc == Doc
+    counted undone.breakpoints == @[1]
+    counted undone.trackedLines == @[1, 2]
+    let remote = applyRemoteChange(
+      undone, changeSet(Doc.len, BetaStart, BetaStart + "beta\n".len, ""),
+      "peer")
+    counted remote.breakpoints.len == 0
+    counted remote.tracepoints == @[1]
+    counted remote.trackedLines == @[-1, 1]
 
 suite "PLAT-28 — the tally":
   test "assertion count":

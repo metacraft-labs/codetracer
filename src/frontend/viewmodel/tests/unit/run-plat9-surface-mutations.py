@@ -142,7 +142,7 @@ P_BARE = ("a bare name is not a contributed pane id — which is what makes a "
 P_CHARSET = "the charset is closed, so an id survives a layout document unchanged"
 P_EDGES = "the empty and edge cases each have their own answer"
 P_NATIVE = "a native view is PREFERRED over the abstract one on its own front-end"
-P_ABSENT = "'abstract' is not automatically 'everywhere', and PLAT-3's table says so"
+P_ABSENT = "'abstract is not automatically everywhere' is NO LONGER TRUE OF ANY SHIPPED ENTRY"
 P_BOTH = "the refusal names both, and says what to do about it"
 P_OPTIONAL = "an optional surface is simply not present, and is still NAMED"
 P_COMMAND = "a COMMAND is invoked, not drawn, so §6.3 never refuses one"
@@ -264,21 +264,6 @@ MUTATIONS: list[Mutation] = [
         control_find="  if fe in c.nativeFrontEnds:\n    result.kind = vcNative",
         control_replace="  let hasNative = fe in c.nativeFrontEnds\n"
                         "  if hasNative:\n    result.kind = vcNative",
-    ),
-    Mutation(
-        "M5", SURF,
-        "    if mappingFor(fe, v).status == msAbsent:",
-        "    if false:",
-        P_ABSENT, NIM_PURE, "vaVocabularyAbsentHere",
-        "'abstract' becomes 'everywhere' by assumption. A surface whose only "
-        "view is a Table is reported as present on GPUI, where the tag reaches "
-        "a classifier with no case for it — which is the silent nothing §6.3 "
-        "forbids, arriving through the vocabulary instead of through the "
-        "manifest",
-        control_name="the mapping status is read into a named binding",
-        control_find="    if mappingFor(fe, v).status == msAbsent:",
-        control_replace="    let status = mappingFor(fe, v).status\n"
-                        "    if status == msAbsent:",
     ),
     # -- §6.3, required / optional -----------------------------------------
     Mutation(
@@ -833,13 +818,15 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         "M40", MAPPINGS,
         "    if mappingFor(fe, k).status == msAbsent: result.add k",
-        "    if false: result.add k",
-        P_ABSENTSET, NIM_PURE, "derived.len == 3",
-        "the absent set stops being READ OUT OF the table and becomes empty, "
-        "so a sentence naming three entries — or, as both of this milestone's "
-        "sentences did, naming the wrong three — is no longer contradicted by "
-        "anything. This arm is what makes the new case evidence rather than a "
-        "restatement.",
+        "    if true: result.add k",
+        P_ABSENTSET, NIM_PURE, "derived.len == 0",
+        "the absent set stops being READ OUT OF the table and names EVERY "
+        "entry. Aimed this way round since PLAT-40's regrade: the set has been "
+        "EMPTY since PLAT-38, so the arm's first spelling — the set forced "
+        "empty — had become an equivalent mutant that no case could notice. "
+        "Forcing it full is still the claim 'the set is derived from the "
+        "table', and the case's asserted cardinality of zero is what catches "
+        "it.",
         control_name="the status is read into a named binding",
         control_find="    if mappingFor(fe, k).status == msAbsent: result.add k",
         control_replace="    let absentHere = mappingFor(fe, k).status == "
@@ -867,9 +854,29 @@ MUTATIONS: list[Mutation] = [
 # DECLARED SURVIVORS. Each is a mutation this suite CANNOT kill, with the
 # reason, so the gap is a line in the transcript rather than an absence.
 DECLARED_SURVIVORS: list[Mutation] = [
-    # EMPTY. Every arm above kills, and the two that looked like candidates
-    # while this harness was written were both killable once the case was
-    # written the other way round:
+    Mutation(
+        "M5", SURF,
+        "    if mappingFor(fe, v).status == msAbsent:",
+        "    if false:",
+        P_ABSENT, NIM_PURE, "vaVocabularyAbsentHere",
+        "UNREACHABLE, measured: since PLAT-38 gave isonim-gpui element "
+        "focus, NO front-end maps any vocabulary entry to `msAbsent` "
+        "(`plugin_surfaces_test` asserts `absentAnywhere == 0`), so no "
+        "shipped manifest reaches this branch and disabling it changes no "
+        "reachable outcome. The mapping table is a constant a suite cannot "
+        "plant into. Whether a refusal nothing can provoke keeps its code "
+        "path is recorded as `Extensibility-Model.md` §3.4's decision; until "
+        "it is taken this arm is an equivalent mutant, declared rather than "
+        "hidden. (Until 2026-09-22 it killed: `Modal` mapped `msAbsent` on "
+        "GPUI.)",
+        control_name="the mapping status is read into a named binding",
+        control_find="    if mappingFor(fe, v).status == msAbsent:",
+        control_replace="    let status = mappingFor(fe, v).status\n"
+                        "    if status == msAbsent:",
+    ),
+    # Until 2026-09-22 this list was EMPTY — every arm above killed — and the
+    # two that looked like candidates while this harness was written were
+    # both killable once the case was written the other way round:
     #
     #   * "an optional surface is left out of the registry" looked
     #     unobservable, because an absent surface and an unregistered one both

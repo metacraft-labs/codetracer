@@ -574,6 +574,12 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("insert-newline-and-indent", caLine2Mid, {ckDocGrew, ckLineCountUp}),
     sp("insert-blank-line-above", caLine1Mid, {ckDocGrew, ckLineCountUp}),
     sp("insert-blank-line-below", caLine1Mid, {ckDocGrew, ckLineCountUp}),
+    sp("open-line-above", caLine1Mid,
+       {ckDocGrew, ckLineCountUp, ckModeChanged, ckModeInsert,
+        ckSelectionChanged}),
+    sp("open-line-below", caLine1Mid,
+       {ckDocGrew, ckLineCountUp, ckModeChanged, ckModeInsert,
+        ckSelectionChanged}),
     sp("insert-tab", caLine0Mid, {ckDocGrew}),
 
     sp("delete-char-backward", caLine0Mid, {ckDocShrank, ckClusterMinusOne}),

@@ -634,7 +634,7 @@ proc storyEventDenseHtml(rows: seq[EventLogRow]; selected: Option[int]): string 
   result.add "<div class=\"dt-container dts DTS dt-empty-footer\">"
   result.add "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">"
   result.add "<div class=\"dt-scroll\"><div class=\"dt-scroll-head\"><div class=\"dt-scroll-headInner\">"
-  result.add "<table class=\"dataTable\"><thead><tr><th>direction location rr ticks</th><th>rr event id</th><th>fullpath</th><th>event-image</th><th>text</th></tr></thead></table>"
+  result.add "<table class=\"dataTable\"><thead><tr><th>tick</th><th>#</th><th>location</th><th></th><th>output</th></tr></thead></table>"
   result.add "</div></div><div class=\"dt-scroll-body\"><table class=\"dataTable\"><tbody>"
   for i, row in rows:
     let rowState =

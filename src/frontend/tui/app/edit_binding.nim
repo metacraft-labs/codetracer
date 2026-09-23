@@ -169,6 +169,16 @@ type
       ## about a file's mtime.
     staleNoticeShown*: bool
       ## §2.1: the user is told *"once"*. This is the once.
+    model*: KeymapModel
+      ## PLAT-43. The keymap model every buffer of this session resolves keys
+      ## through — the one `:keymap <name>` selected, or the stored preference
+      ## the host loaded. A SESSION field and not only a per-document one, so a
+      ## file opened after the choice is opened under it.
+    imported*: ImportedKeymap
+      ## PLAT-36. The Vim configuration `:source` imported, or nil. Held at
+      ## session level for the same reason as `model`: a file opened after the
+      ## `:source` is opened under it. `selectModel` clears it — a `:keymap
+      ## vim` after a `:source` is a request for the SHIPPED Vim keymap.
     furnished*: bool
       ## Whether `runtime.ensureEditWorkspace` has already walked the project
       ## for this session.
@@ -293,17 +303,11 @@ proc followCaret*(buf: EditBuffer; rows: int) =
   ## MINIMAL scroll — the caret entering from the bottom moves the window by
   ## one line, not to the middle — because a jump on every keystroke near an
   ## edge is what makes a terminal editor feel broken.
-  if buf.isNil or rows <= 0:
+  ##
+  ## The rule is `editing_core.followedViewportTop`, shared with GPUI.
+  if buf.isNil:
     return
-  let line = buf.caretLine
-  if line <= 0:
-    return
-  if line < buf.viewportTop:
-    buf.viewportTop = line
-  elif line > buf.viewportTop + rows - 1:
-    buf.viewportTop = line - rows + 1
-  if buf.viewportTop < 1:
-    buf.viewportTop = 1
+  buf.viewportTop = followedViewportTop(buf.viewportTop, buf.caretLine, rows)
 
 # ---------------------------------------------------------------------------
 # Keys
@@ -339,10 +343,27 @@ proc editingScope*(buf: EditBuffer): EditingScope =
   ## §1.2 refuses to collapse the product mode into the pane mode, and the
   ## pane's NORMAL/COMMAND/SEARCH are navigation modes over PANES. A
   ## document opened under the Vim or Kakoune model opens in `emNormal` and
-  ## `editing_core.initEditingDocument` is what decides that; this flag is
-  ## about whether the medium is a text field, which it is.
-  EditingScope(model: buf.doc.model, product: pmEdit, pane: epEditor,
-               mode: buf.doc.state.mode, textEntry: true)
+  ## `editing_core.initEditingDocument` is what decides that.
+  ##
+  ## **`textEntry` FOLLOWS THE DOCUMENT'S MODE, and until PLAT-43 it was
+  ## `true` unconditionally.** That was right while the product default was
+  ## the only model a key could reach — it opens and stays in `emInsert` — and
+  ## it made the other two unusable the moment a selector reached them: under
+  ## Vim in normal mode `d` `w` typed `dw` into the buffer instead of deleting
+  ## a word, because the resolver's text-entry shadow answers a printable key
+  ## with itself before the trie is consulted. Measured on the first run of
+  ## `test_plat43_keymap_selector.nim`: Vim's `u` inserted a `u`, and all 38 of
+  ## PLAT-31's divergent tasks produced identical documents under Vim and
+  ## Kakoune. A printable key stands for itself exactly when the document is
+  ## in insert mode, whichever model put it there.
+  ##
+  ## The rule itself is `editing_core.editScopeOf`, shared with GPUI.
+  editScopeOf(buf.doc)
+
+proc claimsEditKey*(buf: EditBuffer; key: string; nowMs: int64): bool =
+  ## PLAT-43. Whether this buffer's model binds `key` in its current state —
+  ## `editing_core.claimsKey` under this front-end's scope.
+  not buf.isNil and buf.doc.claimsKey(buf.editingScope, key, nowMs)
 
 proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
   ## One canonical key name (`key_names.keyName`'s vocabulary) applied to the
@@ -393,9 +414,85 @@ proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
 # The session
 # ---------------------------------------------------------------------------
 
-proc newEditSession*(): EditSession =
+proc newEditSession*(model = kmProductDefault): EditSession =
   EditSession(buffers: @[], active: NoBuffer, points: @[], editedPaths: @[],
-              staleNoticeShown: false, furnished: false)
+              staleNoticeShown: false, furnished: false, model: model)
+
+proc selectModel*(s: EditSession; model: KeymapModel) =
+  ## PLAT-43. Make `model` this session's keymap: every OPEN buffer is re-keyed
+  ## through `editing_core.switchModel` (text and history kept) and every
+  ## buffer opened later opens under it.
+  if s.isNil:
+    return
+  s.model = model
+  s.imported = nil
+  for buf in s.buffers:
+    buf.doc.switchModel(model)
+
+proc installImported*(s: EditSession; imported: ImportedKeymap) =
+  ## PLAT-36. Put every OPEN buffer, and every buffer opened later, under an
+  ## imported Vim configuration — text and history kept, as `selectModel`
+  ## keeps them. The session's model becomes `kmVim`, the model the import is
+  ## layered on.
+  if s.isNil:
+    return
+  s.model = kmVim
+  s.imported = imported
+  for buf in s.buffers:
+    buf.doc.installImported(imported)
+
+proc applyEditKeyIn*(s: EditSession; buf: EditBuffer; key: string;
+                     nowMs: int64): EditKeyOutcome =
+  ## `applyEditKey`, with the session's points on `buf`'s file CARRIED THROUGH
+  ## the edit (PLAT-28 §8.2). A breakpoint belongs to the code on its line, so
+  ## a line opened above it moves it down, and a deleted line takes it away —
+  ## it does not become a breakpoint on whatever line took its place.
+  ##
+  ## The points are the SESSION's (§5: they belong to the project), so they
+  ## are lent to the buffer's model for exactly one key as
+  ## `EditorState.trackedLines` — aligned by index, so the answer says which
+  ## point went where — and taken back. The mapping is the model's
+  ## `mapLinesThrough`, the same rule its own `breakpoints` move by.
+  if s.isNil or buf.isNil:
+    return applyEditKey(buf, key, nowMs)
+  var owned: seq[int] = @[]
+  for i, p in s.points:
+    if p.path == buf.path: owned.add i
+  if owned.len == 0:
+    return applyEditKey(buf, key, nowMs)
+  buf.doc.state.trackedLines = @[]
+  for i in owned:
+    buf.doc.state.trackedLines.add s.points[i].line - 1
+  result = applyEditKey(buf, key, nowMs)
+  let moved = buf.doc.state.trackedLines
+  buf.doc.state.trackedLines = @[]
+  if moved.len != owned.len:
+    return
+  var kept: seq[SourcePoint] = @[]
+  var gone: seq[int] = @[]
+  for k, i in owned:
+    if moved[k] < 0: gone.add i
+    else: s.points[i].line = moved[k] + 1
+  for i, p in s.points:
+    if i notin gone: kept.add p
+  s.points = kept
+
+proc togglePointAt*(s: EditSession; path: string; line: int;
+                    kind = sptBreakpoint): bool =
+  ## Add a point of `kind` on `path:line`, or remove the one already there.
+  ## Returns whether one is there afterwards. The edit-mode half of §4.2's
+  ## `F9` / `Space` and §4.3's `:break`: CodeTracer-TUI-Edit-Mode.md §3 —
+  ## *"setting a breakpoint while editing is a normal thing to do"* — and with
+  ## no engine in an edit session, the point is the SESSION's until a
+  ## recording is debugged.
+  if s.isNil or path.len == 0 or line <= 0:
+    return false
+  for i, p in s.points:
+    if p.path == path and p.line == line and p.kind == kind:
+      s.points.delete(i)
+      return false
+  s.points.add SourcePoint(path: path, line: line, kind: kind, enabled: true)
+  true
 
 proc activeBuffer*(s: EditSession): EditBuffer =
   if s.isNil or s.active < 0 or s.active >= s.buffers.len: nil
@@ -422,7 +519,9 @@ proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
   if existing >= 0:
     s.active = existing
     return existing
-  s.buffers.add newEditBuffer(path, text, viewportHeight)
+  s.buffers.add newEditBuffer(path, text, viewportHeight, s.model)
+  if not s.imported.isNil:
+    s.buffers[^1].doc.installImported(s.imported)
   s.active = s.buffers.high
   s.active
 

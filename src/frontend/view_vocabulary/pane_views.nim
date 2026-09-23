@@ -86,6 +86,7 @@ import viewmodels/flow_vm
 import viewmodels/search_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
+import viewmodels/filesystem_vm
 
 import headless_app/layout_model
 
@@ -117,7 +118,11 @@ const
                                          paneEventLog, panePointList,
                                          # PLAT-41 adds five.
                                          paneDebugControls, paneFlow,
-                                         paneSearch, paneScratchpad, paneShell}
+                                         paneSearch, paneScratchpad, paneShell,
+                                         # PLAT-41's measured correction: the
+                                         # replay file tree is the recording's
+                                         # sources, as the desktop draws it.
+                                         paneFileTree}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -129,7 +134,7 @@ const
     ## NAME in `admission.Rejections` — "Editor" and "Timeline / scrubber" —
     ## so this set is that table's consequence rather than a preference.
 
-  PaneAcceptedExceptions*: set[PaneKind] = {paneFileTree, paneBuildOutput}
+  PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput}
     ## **Panes this front-end deliberately does not draw, with the reason
     ## recorded at the dispatch arm.**
     ##
@@ -176,11 +181,26 @@ func stateTabOptions*(): seq[ViewOption] =
   for t in StateTab:
     result.add ViewOption(id: $t, label: ($t)[2 .. ^1])
 
+const VariableLabelSeparator* = ": "
+  ## **The vocabulary's spelling of "this name has this value"**, named once so
+  ## every medium draws the same row. It was ` = ` until PLAT-40, while the
+  ## desktop's state pane draws `name:value` — so PLAT-39's screen reader,
+  ## whose published row grammar splits on the first colon, read the desktop's
+  ## state pane and found NO row it could parse in the native window's (its
+  ## filed GAP 1). The desktop's shape is the one adopted: it is the shape a
+  ## reader of either screen now parses with one rule.
+
+proc variableLabel*(name, rendered: string): string =
+  ## A variable row's label: its name, `VariableLabelSeparator`, the
+  ## presenter's answer.
+  name & VariableLabelSeparator & rendered
+
 proc variableRow(v: store_types.Variable; path: string;
                  budget: Budget; expanded: HashSet[string]): ViewNode =
   ## One variable, as a `Tree` node.
   ##
-  ## The LABEL is `name = <the presenter's answer at this budget>`. See the
+  ## The LABEL is `variableLabel(name, <the presenter's answer at this
+  ## budget>)`. See the
   ## header for why the value is in the label and why that is not filed as a
   ## GPUI gap.
   let rendered =
@@ -189,7 +209,7 @@ proc variableRow(v: store_types.Variable; path: string;
   var children: seq[ViewNode] = @[]
   for c in v.children:
     children.add variableRow(c, path & "." & c.name, budget, expanded)
-  viewTreeNode(path, v.name & " = " & rendered, children,
+  viewTreeNode(path, variableLabel(v.name, rendered), children,
                expanded = path in expanded)
 
 proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
@@ -304,7 +324,12 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
     return
   var cells: seq[seq[string]] = @[]
   for r in rows:
-    cells.add @[$r.eventIndex, r.kind, r.value]
+    # The output's LINE TERMINATOR is not part of the text a cell shows: a
+    # `print` arrives as `2 + 3 = 5\n`, and a cell holding the `\n` draws a
+    # blank line under every event in a medium that honours it (PLAT-40
+    # measured every row of the native window's event log double-spaced).
+    cells.add @[$r.eventIndex, r.kind, r.value.strip(leading = false,
+                                                     chars = {'\n', '\r'})]
   let table = viewTable("eventLog", EventLogColumns, cells)
   let selected = vm.selectedRow.val
   if selected.isSome and selected.get >= 0 and selected.get < cells.len:
@@ -405,17 +430,21 @@ proc debugControlsPaneView*(vm: DebugControlsVM): PaneView =
     result.root = viewText("debugControls.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  # THE DESKTOP'S TRANSPORT STRIP, action for action (`TransportActions`):
+  # until PLAT-41 this pane offered four of its nine — no step in, step out,
+  # their reverses or run-to-entry — so a user of the native window could
+  # not step into a call.
   var children: seq[ViewNode] = @[]
-  children.add viewButton("debugControls.stepBackward", "Step back",
-                          disabled = not vm.canStepBackward.val)
-  children.add viewButton("debugControls.stepForward", "Step forward",
-                          disabled = not vm.canStepForward.val)
-  children.add viewButton("debugControls.reverseContinue", "Reverse continue",
-                          disabled = not vm.canReverseContinue.val)
-  children.add viewButton("debugControls.continue", "Continue",
-                          disabled = not vm.canContinue.val)
+  for (id, label) in TransportActions:
+    children.add viewButton("debugControls." & id, label,
+                            disabled = not vm.transportAvailable(id))
   children.add viewText("debugControls.status", vm.statusText.val)
-  result.root = viewTreeNode("debugControls", "Debug controls", children)
+  # EXPANDED. A `Tree` node hides its children until it is expanded, and this
+  # one was built collapsed — so every medium drew the heading `Debug
+  # controls` and none of the four buttons (measured on the shipped GPUI
+  # binary by PLAT-41's run: the pane's plan held one text node).
+  result.root = viewTreeNode("debugControls", "Debug controls", children,
+                             expanded = true)
   result.entries = entriesOf(result.root)
 
 proc flowPaneView*(vm: FlowVM): PaneView =
@@ -580,6 +609,36 @@ proc sourcePaneView*(medium: string): PaneView =
 # The one door
 # ---------------------------------------------------------------------------
 
+proc fileTreeNode(e: FilesystemEntryNode; path: string): ViewNode =
+  var kids: seq[ViewNode] = @[]
+  for i, c in e.children:
+    kids.add fileTreeNode(c, path & "." & $i)
+  viewTreeNode(path, e.text, kids, expanded = kids.len > 0)
+
+proc fileTreePaneView*(vm: FilesystemVM): PaneView =
+  ## The REPLAY session's file tree: the recording's own source folders, a
+  ## `Tree` with every folder open (a recording's source list is small, and a
+  ## collapsed folder would hide the files a reader opened the pane for).
+  ##
+  ## PLAT-41 first filed this pane as an accepted exception, on the argument
+  ## that a replay session has no file tree of its own; the desktop — the
+  ## reference — draws the recording's sources in replay, which refutes it.
+  result.pane = paneFileTree
+  if vm.isNil:
+    result.report = "the file tree has no ViewModel; the session has not " &
+                    "launched"
+    result.root = viewText("fileTree.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let root = vm.rootEntry.val
+  if root.children.len == 0:
+    result.report = "no source files have been loaded for this recording"
+    result.root = viewText("fileTree.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  result.root = fileTreeNode(root, "fileTree")
+  result.entries = entriesOf(result.root)
+
 proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
                medium: string): PaneView =
   ## **The ONE entry point a front-end calls.**
@@ -601,37 +660,28 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneShell: shellPaneView(ShellVM(vm))
   # PLAT-41 — the second sanctioned native escape.
   of paneTimeline: timelinePaneView(medium)
-  # PLAT-41 — the two ACCEPTED EXCEPTIONS, named with their reason.
-  of paneFileTree, paneBuildOutput:
+  of paneFileTree: fileTreePaneView(FilesystemVM(vm))
+  # PLAT-41 — the ACCEPTED EXCEPTION, named with its reason.
+  of paneBuildOutput:
     # **AN ACCEPTED EXCEPTION, NAMED, WITH THE REASON — NOT A SILENT OMISSION.**
     #
-    # These two are the only `PaneKind` values with no ViewModel, and that is a
-    # DECISION rather than a gap. `headless_app.paneViewModel` has an arm for
-    # them which returns `nil` under a comment in capitals, and the argument it
-    # makes is the one accepted here: a `HeadlessSessionSlot` is a REPLAY
-    # session, while these two are EDIT-MODE panes whose subject is the working
-    # tree. Wiring `FilesystemVM` — which exists — to `paneFileTree` *"would
-    # mean claiming a replay session owns the working tree, which is the
-    # provenance confusion §2's whole table exists to keep apart."*
+    # The one `PaneKind` with no replay ViewModel, and that is a DECISION
+    # rather than a gap: a BUILD is an edit-mode act whose subject is the
+    # working tree, `headless_app.paneViewModel` answers `nil` for it under a
+    # comment saying so, and the desktop — the reference — draws no build
+    # output in replay either. No vocabulary entry is missing (build output is
+    # a `Table` or a `Text`); what is missing is a SOURCE, and a replay session
+    # is not one.
     #
-    # PLAT-41 had to either accept that argument or refute it in writing, and
-    # may not quietly wire what that comment refuses. **It is accepted**, for a
-    # reason its own text gives: the panes are not unexpressible and no
-    # vocabulary entry is missing for them — a file tree is a `Tree` and build
-    # output is a `Table` or a `Text`, all of which exist. What is missing is a
-    # SOURCE, and the only source in scope here is the wrong one. Expressing
-    # them from a replay slot would draw a working tree that the session has no
-    # claim to, which is worse than drawing nothing: it would be confidently
-    # wrong rather than visibly absent.
-    #
-    # The remedy is named so this does not read as permanent: an EDIT-MODE
-    # session owns these, and the pane views can be written the day one exists
-    # to ask. Until then the report says which, and `PaneAcceptedExceptions`
-    # below makes the set assertable rather than inferable from this comment.
+    # PLAT-41 first held `paneFileTree` here on the same argument; the desktop
+    # draws the recording's own sources in replay, which refuted it, and that
+    # pane has a view above (`fileTreePaneView`). The remedy for this one is
+    # named so it does not read as permanent: an edit-mode session owns a
+    # build, and the view can be written the day one exists to ask.
     PaneView(
       pane: kind,
       root: viewText($kind & ".report",
         "the " & $kind & " pane is an edit-mode view; a replay session does " &
-        "not own the working tree and will not claim to"),
+        "not build the working tree and will not claim to"),
       entries: {pkText},
       report: "accepted exception: edit-mode pane, no replay-session source")

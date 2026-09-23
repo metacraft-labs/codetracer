@@ -1,0 +1,222 @@
+{
+  "takenAt": "2026-09-23T11:01:11.658Z",
+  "scenario": {
+    "_comment": [
+      "PLAT-41 — the stop both capture lanes drive `calc` to before the thirteen",
+      "panes are censused: three `next`s, the same stop PLAT-40 used, so a pane's",
+      "content is the recording's at one moment on both front-ends."
+    ],
+    "recording": "calc",
+    "gpuiOps": "next=3",
+    "nextSteps": 3
+  },
+  "rrTicks": 4,
+  "rows": [
+    {
+      "pane": "editor",
+      "state": "data",
+      "detail": "60 line(s)"
+    },
+    {
+      "pane": "calltrace",
+      "state": "data",
+      "detail": "28 call(s)"
+    },
+    {
+      "pane": "state",
+      "state": "data",
+      "detail": "9 value(s)"
+    },
+    {
+      "pane": "eventLog",
+      "state": "data",
+      "detail": "9 event row(s)"
+    },
+    {
+      "pane": "debugControls",
+      "state": "data",
+      "detail": "9 transport control(s)"
+    },
+    {
+      "pane": "flow",
+      "state": "data",
+      "detail": "112 value chip(s)"
+    },
+    {
+      "pane": "timeline",
+      "state": "data",
+      "detail": "tick 4 / 171"
+    },
+    {
+      "pane": "search",
+      "state": "report",
+      "detail": "0 result(s)"
+    },
+    {
+      "pane": "pointList",
+      "state": "absent",
+      "detail": "0 point(s)"
+    },
+    {
+      "pane": "scratchpad",
+      "state": "report",
+      "detail": "0 pinned value(s)"
+    },
+    {
+      "pane": "shell",
+      "state": "absent",
+      "detail": "0 line(s)"
+    },
+    {
+      "pane": "fileTree",
+      "state": "data",
+      "detail": "3 entr(y|ies)"
+    },
+    {
+      "pane": "buildOutput",
+      "state": "report",
+      "detail": "0 line(s)"
+    }
+  ],
+  "transport": {
+    "isVisible": true,
+    "actions": [
+      "Reverse next",
+      "Next",
+      "Reverse step in",
+      "Step in",
+      "Reverse step out",
+      "Step out",
+      "Reverse continue",
+      "Continue",
+      "Run to entry"
+    ]
+  },
+  "timeline": {
+    "isVisible": true,
+    "currentTick": 4,
+    "lastTick": 171
+  },
+  "fileTree": {
+    "isVisible": true,
+    "entries": [
+      "source folders",
+      "calc",
+      "main.py"
+    ]
+  },
+  "flowNames": [
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "sub",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "mul",
+    "sub",
+    "OPERATIONS",
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "OPERATIONS",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "div",
+    "mul",
+    "sub",
+    "OPERATIONS",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "apply_op",
+    "div",
+    "mul",
+    "sub",
+    "EXPRESSIONS",
+    "EXPRESSIONS",
+    "OPERATIONS",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "apply_op",
+    "div",
+    "evaluate",
+    "mul",
+    "sub",
+    "EXPRESSIONS",
+    "OPERATIONS",
+    "__builtins__",
+    "__cached__",
+    "__doc__",
+    "__file__",
+    "__loader__",
+    "__name__",
+    "__package__",
+    "__spec__",
+    "add",
+    "apply_op",
+    "div",
+    "evaluate",
+    "main",
+    "mul",
+    "sub"
+  ]
+}

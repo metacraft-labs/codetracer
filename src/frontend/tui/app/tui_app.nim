@@ -49,6 +49,7 @@ import isonim_tui
 
 import ./edit_binding
 import ./views/shell
+import ./views/point_list
 
 export headless_app
 export shell
@@ -85,6 +86,8 @@ type
     variables*: VariablesModel
     timeline*: TimelineBarModel
     eventLog*: EventLogModel
+    points*: PointListPaneModel
+      ## PLAT-40. The Points pane's rows; empty until a session supplies them.
       ## CTUI-6, CTUI-7 and CTUI-8's panes, as values, on exactly the rule
       ## `source` above states: a host sets each one per frame from what the
       ## matching binding produced, and the view is a pure function of the
@@ -271,6 +274,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     variables: app.variables,
     timeline: app.timeline,
     eventLog: app.eventLog,
+    points: app.points,
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
     build: buildPaneModelFor(app.build),

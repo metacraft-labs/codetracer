@@ -589,35 +589,6 @@ proc parseVariable(localNode: JsonNode): Variable =
   variableFromValue(localNode.getOrDefault("expression").getStr(""),
                     localNode.getOrDefault("value"))
 
-proc parseCallLine(callLineNode: JsonNode; globalIndex: int64): CallLine =
-  ## Parse a single calltrace line from the ct/load-calltrace-section response.
-  ## The response JSON uses ``callLines[].content.call`` for the call data
-  ## and ``callLines[].depth`` for the indentation level.
-  let content = callLineNode.getOrDefault("content")
-  let depth = callLineNode.getOrDefault("depth").getInt(0)
-  var name = ""
-  var file = ""
-  var line = 0
-  var rrTicks: uint64 = 0
-
-  if not content.isNil and content.kind == JObject:
-    let call = content.getOrDefault("call")
-    if not call.isNil and call.kind == JObject:
-      name = call.getOrDefault("rawName").getStr("")
-      let loc = call.getOrDefault("location")
-      if not loc.isNil and loc.kind == JObject:
-        file = loc.getOrDefault("path").getStr("")
-        line = loc.getOrDefault("line").getInt(0)
-        rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
-
-  CallLine(
-    index: globalIndex,
-    name: name,
-    depth: depth,
-    rrTicks: rrTicks,
-    location: Location(file: file, line: line),
-  )
-
 # ---------------------------------------------------------------------------
 # Data loading — send DAP requests and feed responses into the store
 # ---------------------------------------------------------------------------
@@ -696,17 +667,10 @@ proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
   # drain any interleaved events from the queue.
   discard s.backend.drainEvents()
   if resp.getOrDefault("success").getBool(false):
-    let body = resp.getOrDefault("body")
-    if not body.isNil and body.kind == JObject:
-      let callLinesNode = body.getOrDefault("callLines")
-      let startCallLineIdx = body.getOrDefault("startCallLineIndex").getBiggestInt(0).int64
-      let totalCount = body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64
-      if not callLinesNode.isNil and callLinesNode.kind == JArray:
-        var lines: seq[CallLine]
-        for idx in 0 ..< callLinesNode.len:
-          lines.add(parseCallLine(callLinesNode[idx], startCallLineIdx + idx.int64))
-        s.session.store.updateCalltraceSection(lines, startCallLineIdx, totalCount)
-        drain()
+    # The store's decoder, the one the desktop's calltrace path also ends in
+    # (`callLineOf`), so a row reads the same on every front-end.
+    if s.session.store.applyCalltraceResponse(resp.getOrDefault("body")) >= 0:
+      drain()
 
 # ---------------------------------------------------------------------------
 # Navigation — calltrace and event jumps
@@ -836,6 +800,59 @@ proc lastSetTracepointResponse*(s: HeadlessDebugSession;
     "breakpoints": [bp],
   }
   result = s.backend.sendDapRequest("setBreakpoints", args)
+
+proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode]
+  ## Forward: defined with the rest of the event queue below.
+
+proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
+                       line: int): bool =
+  ## Toggle a breakpoint at `path:line` through the engine, and keep the
+  ## store's point list equal to what the ENGINE verified.
+  ##
+  ## **THE ONE PRODUCER OF BREAKPOINT ROWS** (PLAT-40). Every surface that
+  ## shows a breakpoint — the terminal's gutter, the GPUI editor's gutter,
+  ## the point-list pane on either front-end — reads `store.pointList.rows`,
+  ## and this is what writes the breakpoint rows there. Until 2026-09-23 the
+  ## terminal kept its own list and GPUI placed a point on its editor without
+  ## asking the engine at all, so the two could mark different lines for one
+  ## request.
+  ##
+  ## DAP's `setBreakpoints` REPLACES the source's whole set
+  ## (https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetBreakpoints),
+  ## so the request carries every breakpoint held for `path`, with `line`
+  ## added or removed — a toggle that sent one line would clear the others on
+  ## the engine while the rows still showed them. The rows recorded are the
+  ## lines the engine BOUND, which need not be the line asked for. Returns
+  ## false (and changes nothing) when the engine refused the request; rows of
+  ## other kinds and other files are untouched.
+  var lines: seq[int] = @[]
+  var removing = false
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path:
+      if r.line == line: removing = true
+      else: lines.add r.line
+  if not removing:
+    lines.add line
+  var wanted = newJArray()
+  for l in lines:
+    wanted.add %*{"line": l}
+  let resp = s.backend.sendDapRequest("setBreakpoints",
+    %*{"source": {"path": path}, "breakpoints": wanted})
+  discard s.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    return false
+  var verified: seq[int] = @[]
+  for bp in resp{"body", "breakpoints"}.getElems:
+    if bp.getOrDefault("verified").getBool(false):
+      verified.add bp.getOrDefault("line").getInt(0)
+  s.session.store.applyVerifiedBreakpoints(path, verified)
+  true
+
+proc breakpointLinesIn*(s: HeadlessDebugSession; path: string): seq[int] =
+  ## The verified breakpoint lines the store holds for `path`, in row order.
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path and r.enabled:
+      result.add r.line
 
 proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
                                  file: string; line: int;

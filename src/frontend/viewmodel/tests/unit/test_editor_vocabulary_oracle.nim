@@ -72,7 +72,7 @@ import ../../editor/operations
 import ../../../../common/editing_key_bindings
 import ../generators/vocabulary_generator
 
-const ExpectedAssertions = 1038
+const ExpectedAssertions = 1050
 
 var countedAssertions = 0
 
@@ -89,11 +89,11 @@ const
   SectionStart = "### 2.2 The four categories"
   SectionEnd = "### 2.3 "
 
-  ExpectedDeclarations = 140
-  ExpectedOperations = 224
+  ExpectedDeclarations = 142
+  ExpectedOperations = 226
   ExpectedDisplayDependent = 24
-  ExpectedDisplayIndependent = 200
-  ExpectedPerCategory = [34, 16, 20, 70]      ## A, B, C, D
+  ExpectedDisplayIndependent = 202
+  ExpectedPerCategory = [34, 16, 20, 72]      ## A, B, C, D
   ExpectedDisplayColumnRows = 50              ## A's 34 and B's 16 carry one
 
   # The forms each category generates. §2.2 A and §2.2 B state them; this is

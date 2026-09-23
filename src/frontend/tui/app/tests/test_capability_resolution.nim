@@ -52,7 +52,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 362
+const ExpectedAssertions = 365
 
 const
   LandedThroughMilestone = 14
@@ -828,11 +828,12 @@ suite "CTUI-11 Tier 1: capability resolution":
     let options = publishedOptions(section)
     checkpoint("options published in §6.2: " & options.join(" "))
     # THE NON-VACUITY FLOOR. An extractor that matched nothing would satisfy
-    # every acceptance check below for free. Fifteen tokens over twelve lines:
-    # `-h/--help`, `-v/--version` and `-t/--theme` are each written as a pair,
-    # and PLAT-6 added `--layout-binding`.
-    ck options.len == 15
+    # every acceptance check below for free. Sixteen tokens over thirteen
+    # lines: `-h/--help`, `-v/--version` and `-t/--theme` are each written as
+    # a pair, PLAT-6 added `--layout-binding` and PLAT-42 `--no-flow-overlay`.
+    ck options.len == 16
     ck "--layout-binding" in options
+    ck "--no-flow-overlay" in options
 
     var accepted = 0
     for option in options:

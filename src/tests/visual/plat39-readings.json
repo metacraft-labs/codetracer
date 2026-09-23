@@ -20,19 +20,19 @@
     "does catch is a recorded pixel-derived value disagreeing with the",
     "committed DOM-derived answers, and those two share no code."
   ],
-  "takenAt": "2026-09-22T19:02:35Z",
+  "takenAt": "2026-09-23T10:12:34Z",
   "host": "gpu-server-001",
   "expectedScenarios": 6,
   "expectedGpuiScenarios": 2,
   "frameDigests": {
-    "electron/entry-shell": "478A516E87522F829A11957DE531BBE13AFDCCF7",
-    "electron/stepped-editor": "90A061393028F5F805BFB704C0E726AC364AFE06",
-    "electron/advanced-state": "FA48E8C4543320272AA01FFB8574D09D7A105896",
-    "electron/returned-calltrace": "53B1883B070C1BCA944D2135E0A7B6291F0B168E",
-    "electron/continued-event-log": "903B27B75B7F96D7A03BC2FBE9DE520366264AC8",
-    "electron/breakpoint-editor": "34EA6FAEF1526089840BACE4784F53D6CCA9F075",
-    "gpui/stepped-editor": "584DC97B7E0155A1C3DF31B08A741A28C6C1E01E",
-    "gpui/advanced-state": "490E24B450DE564938A5C059CC88C072DEECDF2F"
+    "electron/entry-shell": "0FA0FAFF2D78E383762BB2D06C83E0C4E643507B",
+    "electron/stepped-editor": "4ABDBF5288B770553ACA7356FA97C9B18D471172",
+    "electron/advanced-state": "5C452D07FF3799533AAD1ED3092A28429302D8CE",
+    "electron/returned-calltrace": "5062DDF543B30D660AB6566A86305E11B65556E5",
+    "electron/continued-event-log": "90679B07C3DDECF257A20E11F828809932FE7FB5",
+    "electron/breakpoint-editor": "ED16CEFE63E594DF8948897E07A64CD083230B29",
+    "gpui/stepped-editor": "260BFABF94E7A84E51741599865C8C060B47F02C",
+    "gpui/advanced-state": "46BECB4849E929C4FC69910B6E4ED66B37F26B94"
   },
   "electron": {
     "entry-shell": {
@@ -86,18 +86,19 @@
       "programState": {
         "kind": "read",
         "variableNames": [
+          "__cached__",
           "__doc__",
           "__file__",
-          "__looder__",
+          "__loader__",
           "__name__",
-          "__package__",
           "__spec__",
           "add",
+          "builtins__",
           "div",
           "mul",
           "sub"
         ],
-        "count": 10
+        "count": 11
       },
       "eventLog": {
         "kind": "read",
@@ -115,6 +116,8 @@
       "programState": {
         "kind": "read",
         "variableNames": [
+          "EXPRESSIONS",
+          "OPERATIONS",
           "__cached__",
           "__doc__",
           "__file__",
@@ -126,7 +129,7 @@
           "apply_op",
           "div"
         ],
-        "count": 10
+        "count": 12
       },
       "eventLog": {
         "kind": "read",
@@ -144,6 +147,8 @@
       "programState": {
         "kind": "read",
         "variableNames": [
+          "EXPRESSIONS",
+          "OPERATIONS",
           "__cached__",
           "__doc__",
           "__file__",
@@ -159,7 +164,7 @@
           "main",
           "mul"
         ],
-        "count": 14
+        "count": 16
       },
       "eventLog": {
         "kind": "read",
@@ -177,17 +182,18 @@
       "programState": {
         "kind": "read",
         "variableNames": [
+          "__cached__",
           "__doc__",
           "__file__",
           "__loader__",
           "__name__",
-          "__package__",
           "__spec__",
           "add",
+          "builtins__",
           "mul",
           "sub"
         ],
-        "count": 9
+        "count": 10
       },
       "eventLog": {
         "kind": "read",
@@ -205,32 +211,61 @@
       "width": 1920,
       "height": 1080,
       "programState": {
-        "kind": "unreadable",
-        "reason": "grammar-mismatch"
+        "kind": "read",
+        "variableNames": [
+          "__builtins__",
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package_",
+          "__spec__",
+          "add",
+          "mul",
+          "sub"
+        ],
+        "count": 11
       },
       "eventLog": {
-        "kind": "unreadable",
-        "reason": "grammar-mismatch"
+        "kind": "read",
+        "events": 6,
+        "ofRows": 0
       },
       "editor": {
         "kind": "read",
-        "highlightedLine": -1
+        "highlightedLine": 44
       }
     },
     "advanced-state": {
       "width": 1920,
       "height": 1080,
       "programState": {
-        "kind": "unreadable",
-        "reason": "grammar-mismatch"
+        "kind": "read",
+        "variableNames": [
+          "__builtins__",
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package_",
+          "__spec__",
+          "add",
+          "div",
+          "mul",
+          "sub"
+        ],
+        "count": 12
       },
       "eventLog": {
-        "kind": "unreadable",
-        "reason": "grammar-mismatch"
+        "kind": "read",
+        "events": 6,
+        "ofRows": 0
       },
       "editor": {
         "kind": "read",
-        "highlightedLine": -1
+        "highlightedLine": 56
       }
     }
   }
