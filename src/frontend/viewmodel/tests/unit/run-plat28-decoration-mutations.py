@@ -80,8 +80,12 @@ WRAP = "src/frontend/viewmodel/editor/wrap.nim"
 GENERATOR = "src/frontend/viewmodel/tests/generators/decoration_generator.nim"
 LAWS = "src/frontend/viewmodel/tests/unit/test_editor_decoration_laws.nim"
 EX = "src/frontend/viewmodel/tests/unit/test_editor_decoration_examples.nim"
+# §8.2's line tables (2026-09-23): the rule, and the route an undo takes.
+EDSTATE = "src/frontend/viewmodel/editor/editor_state.nim"
+OPERATIONS = "src/frontend/viewmodel/editor/operations.nim"
 
-TOUCHED = [ANCHOR, RANGESET, DECORATION, INLAY, PROJECTION, WRAP, GENERATOR,
+TOUCHED = [EDSTATE, OPERATIONS,
+           ANCHOR, RANGESET, DECORATION, INLAY, PROJECTION, WRAP, GENERATOR,
            LAWS, EX]
 
 CONTROL_HASHES = HERE / "plat28-decoration-mutation-control.sha256"
@@ -173,11 +177,13 @@ G_FIELDS = "the seven fields and the four scenarios are asserted cardinalities"
 G_DG3 = ("PLAT28-DG3 — THE TWO PRODUCERS AGREED ABOUT A LINE TERMINATOR AFTER "
          "PLAT-34, measured")
 
+G_DD = "`dd` on a line DELETES it; the line that took its place is not it"
+G_ROUTES = "THE THREE ROUTES A DOCUMENT MOVES BY all move the state's lines"
 G_WINDOW = ("A WINDOW PROJECTS WITH THE FILE'S LINE NUMBERS, AND A REQUESTED "
             "LINE IS NOT HELD")
 
 NAMED_CASES = [
-    G_WINDOW,
+    G_DD, G_ROUTES, G_WINDOW,
     D1_INSERT, D1_COLLAPSE, D2_COLLAPSED, D2_DELETED, D2_REFUSAL,
     D3_DELETE, D4_DELETE, D5_TOTAL, D5_STABLE,
     C7_WITH, C7_WITHOUT, C7_WRAP, FUZZ2, FUZZ7,
@@ -530,6 +536,25 @@ ARMS = [
         "BOTH sides — cases that cannot fail unless something says so. The "
         "declared table is what says so, and it is two-sided: a cell marked "
         "varying and found constant is as red as the reverse",
+    ),
+    Arm(
+        "L1", EDSTATE,
+        "    if b > a and nb <= na:\n",
+        "    if false:\n",
+        G_DD,
+        "**A DELETED LINE HANDS ITS BREAKPOINT TO THE LINE THAT TOOK ITS "
+        "PLACE.** The collapsed range is read as surviving at its collapse "
+        "point, so `dd` on a breakpoint's line leaves the breakpoint on the "
+        "next line's code — §8.2's own sentence, violated",
+    ),
+    Arm(
+        "L2", OPERATIONS,
+        "  result.mapPositionTables(st, step.tr.changes)\n",
+        "  discard\n",
+        G_ROUTES,
+        "**AN UNDO IS A SECOND ROUTE AROUND THE MAPPING.** The document goes "
+        "back and every line table stays where the edit put it, so after "
+        "`O` and `u` a breakpoint sits one line below its code",
     ),
     Arm(
         "W1", PROJECTION,

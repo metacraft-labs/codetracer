@@ -5551,3 +5551,20 @@ together and rerun that suite.
 - Harness control digests cover runtime.nim/edit_binding.nim/editing_core.nim in
   PLAT-30/34/36/42/43/44; any edit there needs those harnesses regraded before
   their control files are committed.
+- Editor line tables (EditorState.folded/breakpoints/tracepoints/trackedLines) move
+  with the text via `editor_state.mapLinesThrough` inside `mapPositionTables`,
+  which ALL THREE routes call (commitChange, applyHistoryStep for undo/redo,
+  collab_text.applyRemoteChange). A line is its byte range; deleted iff a
+  non-empty range collapses (dd removes, J keeps, O pushes down).
+- TUI Edit mode owns F9/Space/`:break [line]` (runtime.applyLocalAction /
+  edit verbs): points live on EditSession.points and are carried through each
+  key by `edit_binding.applyEditKeyIn` (lent as EditorState.trackedLines).
+- Vim/Kakoune `o`/`O` bind `open-line-above/below` (enter insert mode);
+  `insert-blank-line-*` is Kakoune's Alt+o, unbound (key_names has no
+  Alt+<letter>). Vocabulary is 142 declarations / 226 operations.
+- terminal_driver: a lone ESC becomes the Esc key after `EscDelayMs` (50 ms)
+  of silence. Bytes arriving together (`ESC j`) still drop the ESC and
+  `ESC ESC` is one Esc. Pty tests can now send a single "\x1b" and wait.
+- Both editor surfaces build rows only via `editor_surface.projectedRows` ->
+  `row_projection.editorRowsOf` (RowProjection.firstLine/requested for the
+  debug window).

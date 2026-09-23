@@ -188,7 +188,7 @@ ARMS = [
         "    b.renderer.setAttribute(el, factAttributeName(f.field), f.value)",
         "    b.renderer.setAttribute(el, f.field, f.value)",
         SUITE_GPUI,
-        "the `disabled` attribute is destroyed by the renderer — PLAT21-VG2",
+        "the `disabled` attribute ROUND-TRIPS — PLAT21-VG2, retired",
         "  for f in nodeFacts(v):",
         "  for f in nodeFacts(v):  ## ctl",
         "THE DEFECT ITSELF, re-planted. Writing the plain field names hands "
@@ -303,7 +303,7 @@ ARMS = [
         '  result.root = nativeEscape("source", medium, "editor")',
         '  result.root = viewText("source", "editor for " & medium)',
         SUITE_CROSS,
-        "four panes are expressible in the vocabulary and the source pane is not",
+        "the vocabulary panes are expressible and the two native panes are not",
         "proc sourcePaneView*(medium: string): PaneView =",
         "proc sourcePaneView*(medium: string): PaneView =  ## ctl",
         "The source pane stops declaring itself native and becomes a portable "
@@ -331,7 +331,7 @@ ARMS = [
         '  of pkTable: m(msPartial, "table / tr / td — none is in tagMap, and each " &',
         '  of pkTable: m(msAbsent, "table / tr / td — none is in tagMap, and each " &',
         SUITE_VOCAB,
-        "GPUI is absent on exactly ONE entry, and it is named",
+        "GPUI is absent on NO entry, and every row is accounted for",
         "func gpuiMapping*(k: ViewKind): Mapping =",
         "func gpuiMapping*(k: ViewKind): Mapping = ## ctl",
         "PLAT-3's status restored. The measurement PLAT-21 took says a tag "
