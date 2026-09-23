@@ -706,6 +706,11 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
     doc["keysApplied"] = %openArm.keys
     doc["viewportRows"] = %openArm.viewportRows
     doc["finalViewportTop"] = %openArm.viewportTop
+    # Where the caret ENDED — the edit arm's own state after every key the
+    # window delivered, so a lane that types a sequence can check the caret
+    # as well as the file (a motion-only sequence leaves the file unchanged).
+    doc["caretLine"] = %caretLine(openArm.doc)
+    doc["caretColumn"] = %caretColumn(openArm.doc)
   try:
     writeFile(path, doc.pretty & "\n")
     true

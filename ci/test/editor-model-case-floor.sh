@@ -539,6 +539,9 @@ PLAT-42)
 	SUITES=(
 		src/frontend/gpui/tests/test_plat42_surfaces.nim
 		src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim
+		src/frontend/gpui/tests/test_plat42_window.nim
+		src/frontend/gpui/tests/test_plat42_frame_budget.nim
+		src/frontend/tui/tests/test_plat42_laws.nim
 	)
 	# PORTABLE: the first suite reads two committed JSON files — a record of the
 	# SHIPPED binary's render plan (`plat42-surfaces.json`, written by
@@ -547,10 +550,21 @@ PLAT-42)
 	# this lane with no flags and no deferral, which is PLAT-37/38/39's
 	# measure-locally-commit-the-measurement arrangement. The second is the flow
 	# overlay's per-line rule over a committed capture, pure, and needs only the
-	# ViewModel path. The terminal's half of the flow overlay
-	# (`tui/tests/test_plat42_flow_overlay_terminal.nim`) needs a replay-server
-	# and a recording, so it lives in the `tui` lane and is not counted here.
-	SUITE_FLAGS=("" "--path:src/frontend/viewmodel")
+	# ViewModel path. The third and fourth are the same arrangement for the
+	# WINDOW: `plat42-surfaces-window.sh` / `plat42-frame-budget.sh` measure a
+	# real `codetracer-gpui` window and commit the record, and the suites read
+	# the record — no binary, no image. The fifth, `LAW-E1`/`LAW-E2` over the
+	# eighteen documents, links both renderers (the real shim) and takes the
+	# `tui` lane's flags, read rather than spelled (§30). The terminal's halves
+	# that need a replay-server and a recording
+	# (`tui/tests/test_plat42_{flow_overlay,inline_values,line_status}_terminal`)
+	# live in the `tui` lane, and DIFF-11 (`real_terminal/test_plat42_diff11`)
+	# in `tui-real-terminal`; none of them is counted here.
+	SUITE_FLAGS=("" "--path:src/frontend/viewmodel" "" "" "$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)")
 	LAW_SUITES=()
 	;;
 PLAT-43)
@@ -579,6 +593,7 @@ PLAT-44)
 		src/frontend/gpui/tests/test_gpui_edit_arm.nim
 		src/frontend/tui/tests/test_plat44_both_arms_write.nim
 		src/frontend/gpui/tests/test_plat44_edit_window.nim
+		src/frontend/gpui/tests/test_plat44_sequences_window.nim
 	)
 	# PORTABLE HALF ONLY: the GPUI key decoder, the edit arm writing the core
 	# and saving to a real directory, a read-only buffer still refusing, the
@@ -589,12 +604,15 @@ PLAT-44)
 	# `just build-gpui` and run in the `gpui-shell` lane, and are not counted
 	# here. The WINDOW is: `ci/test/plat44-edit-window.sh` measures it and
 	# `plat44_window_record.nim` reads its frames, and the third suite above
-	# asserts over that committed record, reading no binary and no image.
+	# asserts over that committed record, reading no binary and no image. The
+	# fourth is the same arrangement for PLAT-34's sequences TYPED into real
+	# windows (`plat44-sequences-window.sh`): it recomputes the reachable set
+	# from the corpus (ViewModel path) and reads the committed record.
 	SUITE_FLAGS=("--path:src/frontend/viewmodel" "$(
 		# shellcheck source=/dev/null
 		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
 			test_lane_extra_flags tui
-	)" "")
+	)" "" "--path:src/frontend/viewmodel")
 	LAW_SUITES=()
 	;;
 *)

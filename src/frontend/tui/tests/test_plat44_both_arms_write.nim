@@ -225,6 +225,56 @@ suite "PLAT-44: DIFF-1 with both arms writing, from real keys":
       # The half that cannot fail, asserted and not relied on.
       ck arm.text == term.doc.state.doc
 
+  for kind in TxKind:
+    test "written through ONE arm, read on BOTH — " & $kind:
+      # DIFF-1's first half, stated in its own terms: with the GPUI side an
+      # INPUT as well as an output, a transaction can be driven from EITHER
+      # arm and read on both. Here the keys go through one arm ONLY, and the
+      # text that arm would save is opened in the OTHER front-end and read
+      # from ITS observed output — the handoff a user makes by saving in one
+      # editor and opening the file in the other. Both directions.
+      let tx = keyTx(kind)
+      # Typed in GPUI, read in the terminal's painted cells.
+      let arm = newGpuiEditArm("", "doc", Doc, tx.model)
+      var now = 0'i64
+      for k in tx.arrange & tx.keys:
+        inc now
+        let (key, mods) = gpuiSpelling(k)
+        discard arm.applyGpuiKey(key, mods, now)
+      let fromGpui = arm.text
+      let line1 = changedLine(Doc, fromGpui)
+      let opened = newEditBuffer("doc", fromGpui, GridRows, tx.model)
+      checkpoint("gpui wrote, terminal paints: " & line1)
+      if kind != txUndo:
+        ck line1.len > 0
+        ck line1 in terminalObserved(opened)
+        # …and the screen is not the untouched document's: a changed line
+        # can be a substring of an original one (`ef calc(n):`), so the
+        # control is the whole observed output, not a containment.
+        ck terminalObserved(opened) !=
+           terminalObserved(newEditBuffer("doc", Doc, GridRows, tx.model))
+      # Typed in the terminal, read in GPUI's shadow tree.
+      let term = newEditBuffer("doc", Doc, GridRows, tx.model)
+      for k in tx.arrange & tx.keys:
+        inc now
+        discard term.applyEditKey(k, now)
+      let fromTerm = term.doc.state.doc
+      let line2 = changedLine(Doc, fromTerm)
+      let reopened = newGpuiEditArm("", "doc", fromTerm, tx.model)
+      checkpoint("terminal wrote, gpui draws: " & line2)
+      when not defined(ctGpuiShimAbsent):
+        if kind != txUndo:
+          ck line2.len > 0
+          ck line2 in gpuiObserved(reopened)
+          ck gpuiObserved(reopened) !=
+             gpuiObserved(newGpuiEditArm("", "doc", Doc, tx.model))
+      # An undo's only product is the original text, from either arm.
+      if kind == txUndo:
+        ck fromGpui == Doc
+        ck fromTerm == Doc
+      # The two front-ends wrote the same file — asserted, not relied on.
+      ck fromGpui == fromTerm
+
   test "A BUILD WITH NO RENDERER MUST NOT REPORT [OK]":
     # PLAT-21's control with §37a's repair, as PLAT-34 performs it: this file
     # compiled again with `-d:ctGpuiShimAbsent` must FAIL — having RUN, which

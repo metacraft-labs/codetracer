@@ -4870,6 +4870,22 @@ plat44-window-record:
     --nimcache:nimcache/plat44rec -o:build/plat44_window_record \
     src/tests/visual/screen_oracle/plat44_window_record.nim
 
+# PLAT-44 — PLAT-34's sequences typed into a REAL window. Three steps: the
+# plan (the keys each reachable sequence takes, from the same translation the
+# headless suite uses), the window run (one sway, one window per sequence,
+# `wtype` typing, the file and the exit caret recorded, plus a negative twin),
+# and the committed record `test_plat44_sequences_window.nim` asserts over.
+plat44-sequences-plan:
+  nim c -r --hints:off --warnings:off --path:src/frontend/viewmodel \
+    --nimcache:nimcache/plat44plan -o:build/plat44_sequences_plan \
+    ci/test/plat44_sequences_plan.nim
+
+plat44-sequences-window:
+  bash ci/test/plat44-sequences-window.sh
+
+plat44-sequences-record:
+  python3 ci/test/plat44_sequences_window_record.py
+
 # PLAT-40 — every pane producer has a caller a USER can reach.
 #
 # *A unit test is a production caller as far as a coverage tool is concerned,
