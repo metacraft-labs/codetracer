@@ -1,0 +1,9 @@
+{
+  "X1": "pv.root.expanded",
+  "X2": "steps.len > 0",
+  "X3": "marks.len == 2",
+  "X4": "loaded.files",
+  "X5": "slot.paneViewModel(paneFileTree) == ViewModel(s.session.fileTreeVM)",
+  "X6": "labels == @[\"source folders\", \"calc\", \"main.py\"]",
+  "X7": "labels == @[\"source folders\", \"calc\", \"main.py\"]"
+}
