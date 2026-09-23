@@ -140,11 +140,13 @@ ok() {
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/ci/lib/test-lane-files.sh"
 
-cache_root="${CT_NIM_CACHE_ROOT:-}"
-if [ -z "${cache_root}" ]; then
-	_ct_tag="$(printf '%s' "${REPO_ROOT}" | cksum | awk '{print $1}')"
-	cache_root="/tmp/ct-nim-cache/$(basename "${REPO_ROOT}")-${_ct_tag}"
-fi
+# The same root ci/lib/nim-cache-root.sh computes -- this block used to
+# re-implement it inline (override honoured, then basename + cksum of the
+# checkout), which gave an identical path but a second copy of the rule.
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
+cache_root="$(ct_nim_cache_root "${REPO_ROOT}")"
 mkdir -p "${cache_root}" test-logs
 
 # measure_file LANE FILE -> "cases<TAB>failures<TAB>assertions<TAB>status"

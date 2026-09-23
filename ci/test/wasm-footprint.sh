@@ -45,12 +45,15 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
 cd "${REPO_ROOT}" || exit 2
 
 PROBE="src/frontend/viewmodel/tests/manual/wasm_footprint_probe.nim"
 SESSIONS="${CT_FOOTPRINT_SESSIONS:-8}"
 
-out_dir="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/plat17-footprint"
+out_dir="$(ct_nim_cache_root "${REPO_ROOT}")/plat17-footprint"
 mkdir -p "${out_dir}"
 
 failures=0

@@ -46,13 +46,16 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
 cd "${REPO_ROOT}" || exit 2
 
 PROBE="src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim"
 ITERATIONS="${CT_FAKE_TIMER_ITERATIONS:-20000}"
 MAX_SLOWDOWN="${CT_FAKE_TIMER_MAX_SLOWDOWN:-20}"
 
-out_dir="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/plat17-faketimer"
+out_dir="$(ct_nim_cache_root "${REPO_ROOT}")/plat17-faketimer"
 mkdir -p "${out_dir}"
 
 failures=0
