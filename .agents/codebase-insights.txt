@@ -5229,19 +5229,6 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   dispatch on the stored capability, that combination refuses a unit the
   provider could have recorded. Fixing it properly needs a projectRoot-aware
   capability hook on the provider interface; there is none today.
-* A run over any workspace looks enormous and is almost entirely
-  `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
-  the CWD is inside a checkout with recorder siblings.
-* The registry's stored `TestProvider.info.capabilities` for `smart-*` is
-  computed by `newSmartHarnessProvider` with `projectRoot = ""`
-  (`smart_contract_common.nim:412`), so `canRunFile` there resolves the
-  recorder from the CWD too. `runRecorderCommand` re-resolves it from
-  `scope.projectRoot`, and the two can disagree when the recorder repo is
-  reachable from the workspace but not from the CWD, and the recorder is
-  neither on PATH nor named by `<SPEC>_CMD`. Since `runUnitOutcome` now gates
-  dispatch on the stored capability, that combination refuses a unit the
-  provider could have recorded. Fixing it properly needs a projectRoot-aware
-  capability hook on the provider interface; there is none today.
 
 ## The notification toast stack is capped at THREE, so "three of them" is a floor
 
