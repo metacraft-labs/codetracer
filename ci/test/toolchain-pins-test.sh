@@ -213,7 +213,14 @@ seed_store_tools() {
 # host for precisely this reason, which is what identified the cause.
 sys_utility_path() {
 	local tool resolved dir seen=":" out=""
-	for tool in dirname basename cut sed tr grep awk git python3 jq sort head tail \
+	# `bash` MUST be in this list. The fixtures' scripts start with
+	# `#!/usr/bin/env bash`, and the guard itself is launched as `bash …`, both
+	# under `env -i` with only this PATH. On an FHS host the /bin fallback below
+	# happens to cover it; on NixOS there is no /bin/bash or /usr/bin/bash, and
+	# bash lives in its own store directory shared with none of the tools here —
+	# so every fixture died with `env: 'bash': No such file or directory` (and
+	# the direct `bash …` launch with exit 127), 100 failing lines in one suite.
+	for tool in bash dirname basename cut sed tr grep awk git python3 jq sort head tail \
 		wc uname mktemp readlink realpath cat env date find xargs; do
 		resolved="$(command -v "$tool" 2>/dev/null)" || continue
 		# `command -v` answers with a BARE WORD for a shell builtin or keyword
