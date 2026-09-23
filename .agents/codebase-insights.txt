@@ -5482,10 +5482,32 @@ one run rather than resolving.
   .so under every other process that loads it. `-d:gpuiShimPath=<file>` now
   pins a binary to its own shim; with `CODETRACER_WINDOW_BIN_PINS_SHIM=1` the
   PLAT-42/44 lanes leave the shared file alone.
-* `wtype -s N` is ONE sleep, not a per-key gap: `wtype -s 15 -k Down -k Down …`
-  sends every key at once, and GPUI drains queued input before it draws again.
-  Pace keys with one `wtype` call per key and a `sleep` between.
-* ONE `wtype` PROCESS PER RUN, sleeps inside its sequence (`-k Down -s 1000 …`).
-  A `wtype` process per key LOSES keys — measured 3 of 14 delivered — because
-  each process is a new virtual keyboard and its first key races the client's
-  keymap; a single process delivered 14 of 14 and the sentinel.
+* `wtype -s N` is ONE sleep at that position in the argument list, not a
+  per-key gap: `wtype -s 15 -k Down -k Down …` sends every key at once. Pace
+  keys by putting a `-s` BETWEEN them, inside ONE process.
+* ONE `wtype` PROCESS PER RUN (`-k Down -s 200 -k Down …`). A `wtype` process
+  per key LOSES keys — measured 3 of 14 delivered — because each process is a
+  new virtual keyboard and its first key races the client's keymap. Even one
+  process can lose its FIRST key (about a third of fresh windows): prime it
+  with a bare `-M shift -m shift` before the real keys.
+* `wtype TEXT` types a capital as a KEYSYM, without the Shift modifier — the
+  shape Caps Lock and input methods produce too. The shim now delivers GPUI's
+  `key_char` for printable keys (isonim-gpui `input::key_for_consumer`); before
+  that, `Q` arrived as `q`.
+* Take a window frame when the window has SETTLED (two identical non-blank
+  `grim` grabs in a row), never after a fixed sleep: at load ~170-300 on this
+  host a fixed 20 s produced black frames. `ci/test/plat42-surfaces-window.sh`
+  and `plat44-sequences-window.sh` do this.
+* A window can disagree with its render plan: until 2026-09-23 the shim parsed
+  `display`/`opacity`/`overflow` into the plan and drew none of them. A suite
+  that reads only the plan cannot see that; compare a FRAME.
+
+## The editing core's per-operation cost (measured 2026-09-23)
+
+`operations.initOpEnv` used to re-derive the whole document (grapheme
+segmentation twice, two line indexes, the wrap cache) on EVERY operation —
+~680 ms per cursor motion at 40,000 lines. It now memoises the last document
+and moves the memo by the edit between two documents (`incrementalDerivation`);
+`test_op_env_memo.nim` holds it to a full derivation. If you change what
+`OpCtx`/`DisplayCtx` hold, change `fullDerivation` and `incrementalDerivation`
+together and rerun that suite.

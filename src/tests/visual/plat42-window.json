@@ -1,0 +1,2394 @@
+{
+  "_comment": [
+    "PLAT-42 — the four surfaces read off real GPUI windows through PLAT-39's",
+    "reader, and two pixel twins. Regenerate: `just plat42-surfaces-window`",
+    "then `just plat42-window-record`. Asserted by test_plat42_window.nim."
+  ],
+  "takenAt": "2026-09-23T07:21:59Z",
+  "host": "gpu-server-001",
+  "pixelDelta": 16,
+  "manifest": [
+    {
+      "id": "blank",
+      "trace": "",
+      "ops": "",
+      "extra": "",
+      "rc": 0,
+      "settled": true,
+      "settledAfterS": 0
+    },
+    {
+      "id": "entry-shell",
+      "trace": "calc-2f0db4f45192",
+      "ops": "",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 9
+    },
+    {
+      "id": "stepped-editor",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=6",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 27
+    },
+    {
+      "id": "advanced-state",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=6,next=3",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 39
+    },
+    {
+      "id": "returned-calltrace",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=21,stepOut=1",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 60
+    },
+    {
+      "id": "continued-event-log",
+      "trace": "calc-2f0db4f45192",
+      "ops": "continueForward=1",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 9
+    },
+    {
+      "id": "breakpoint-editor",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=6,setBreakpoint@1",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 21
+    },
+    {
+      "id": "noir-flow",
+      "trace": "noir_space_ship-f9f31b01a0d2",
+      "ops": "stepIn=15",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 18
+    },
+    {
+      "id": "noir-flow-off",
+      "trace": "noir_space_ship-f9f31b01a0d2",
+      "ops": "stepIn=15",
+      "extra": "--no-flow-overlay",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 18
+    }
+  ],
+  "frames": {
+    "blank": {
+      "frame": "blank.ppm",
+      "present": true,
+      "executionLine": -1,
+      "editorLocated": false,
+      "rows": []
+    },
+    "entry-shell": {
+      "frame": "entry-shell.ppm",
+      "present": true,
+      "executionLine": 1,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 47,
+        "rows": 51
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "» 1 #!usr/bin/env nvthon3"
+        },
+        {
+          "line": 2,
+          "text": "72 \"\"\"calc — the small. fast. deterministi"
+        },
+        {
+          "line": 3,
+          "text": "3"
+        },
+        {
+          "line": 4,
+          "text": "4 WHY THIS PROGRAM EXISTS. AND WH"
+        },
+        {
+          "line": 5,
+          "text": "B"
+        },
+        {
+          "line": 6,
+          "text": "6 \" codetracer-snecs/Front-Fnds/CodeTr"
+        },
+        {
+          "line": 7,
+          "text": "7 a fixture that is \"small. fast. determin"
+        },
+        {
+          "line": 8,
+          "text": "8 lavout tests\". Fverv constraint in that"
+        },
+        {
+          "line": 9,
+          "text": "9"
+        },
+        {
+          "line": 10,
+          "text": "10 **kgmall / fast** — the fixture is recc"
+        },
+        {
+          "line": 11,
+          "text": "11 **src/frontend/tui/tests/fixtures/fixti"
+        },
+        {
+          "line": 12,
+          "text": "12 lane navs for that recordina the firsi"
+        },
+        {
+          "line": 13,
+          "text": "13 whole nproaram is a few hundred rec"
+        },
+        {
+          "line": 14,
+          "text": "14 seconds rather than minutes."
+        },
+        {
+          "line": 15,
+          "text": "15 * *kdeterministic** — no clock. no rai"
+        },
+        {
+          "line": 16,
+          "text": "16 other than \"“orint’ . A fixture whos"
+        },
+        {
+          "line": 17,
+          "text": "17 cannot be the around truth for a ste"
+        },
+        {
+          "line": 18,
+          "text": "18 **kgtennina and lavout** — it is writi"
+        },
+        {
+          "line": 19,
+          "text": "19 (*“main’\"’ -> ““evaluate'' -> \"“annl"
+        },
+        {
+          "line": 20,
+          "text": "20 rather than as one flat loon. becaus"
+        },
+        {
+          "line": 21,
+          "text": "21 it exercises nothina. Fverv sten lan"
+        },
+        {
+          "line": 22,
+          "text": "22"
+        },
+        {
+          "line": 23,
+          "text": "73 Nothina here asserts anvthina. The ¢"
+        },
+        {
+          "line": 24,
+          "text": "24 \" src/frontend/tui/tests/test fixture c"
+        },
+        {
+          "line": 25,
+          "text": "725 trace throuah a real *\"HeadlessDebu"
+        },
+        {
+          "line": 26,
+          "text": "e"
+        },
+        {
+          "line": 27,
+          "text": "27"
+        },
+        {
+          "line": 28,
+          "text": "78"
+        },
+        {
+          "line": 29,
+          "text": "79 def add(left. riaht):"
+        },
+        {
+          "line": 30,
+          "text": "30 \"\"\"Inteaer addition. as its own fran"
+        },
+        {
+          "line": 31,
+          "text": "31 return left + riaht"
+        },
+        {
+          "line": 32,
+          "text": "32"
+        },
+        {
+          "line": 33,
+          "text": "33"
+        },
+        {
+          "line": 34,
+          "text": "34 def sub(left. riaht):"
+        },
+        {
+          "line": 35,
+          "text": "35 \"\"\"Inteaer subtraction.\"\"\""
+        },
+        {
+          "line": 36,
+          "text": "36 return left - riaht"
+        },
+        {
+          "line": 37,
+          "text": "37"
+        },
+        {
+          "line": 38,
+          "text": "38"
+        },
+        {
+          "line": 39,
+          "text": "39 def mul(left. riaht):"
+        },
+        {
+          "line": 40,
+          "text": "40 \"\"\"Inteaer multinlication.\"\"\""
+        },
+        {
+          "line": 41,
+          "text": "41 return left * riaht"
+        },
+        {
+          "line": 42,
+          "text": "4?7"
+        },
+        {
+          "line": 43,
+          "text": "43"
+        },
+        {
+          "line": 44,
+          "text": "44 def div(left. riaht):"
+        },
+        {
+          "line": 45,
+          "text": "45 \"\"\"Eloor division. **//\"\" rather thar"
+        },
+        {
+          "line": 46,
+          "text": "46 “Yint' T : a float would make the prii"
+        },
+        {
+          "line": 47,
+          "text": "a7 reonr. and this nroaram's whole iob"
+        },
+        {
+          "line": 48,
+          "text": "48 return left // riaht"
+        },
+        {
+          "line": 49,
+          "text": "49"
+        },
+        {
+          "line": 50,
+          "text": "50"
+        },
+        {
+          "line": 51,
+          "text": "51 # The dispatch table is deliberatelv r"
+        },
+        {
+          "line": 52,
+          "text": "52 # lookunb is then a value the debuaae"
+        },
+        {
+          "line": 53,
+          "text": "53 OPFRATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "54 \"+\"- add."
+        }
+      ]
+    },
+    "stepped-editor": {
+      "frame": "stepped-editor.ppm",
+      "present": true,
+      "executionLine": 44,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 46,
+        "rows": 50
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "1 #!Yusr/bin/env nvthon3"
+        },
+        {
+          "line": 2,
+          "text": "72 \"\"\"calc — the small. fast. deterministi"
+        },
+        {
+          "line": 3,
+          "text": "3"
+        },
+        {
+          "line": 4,
+          "text": "4 WHY THIS PROGRAM EXISTS. AND WH"
+        },
+        {
+          "line": 5,
+          "text": "B"
+        },
+        {
+          "line": 6,
+          "text": "6 \" codetracer-snecs/Front-Fnds/CodeTr"
+        },
+        {
+          "line": 7,
+          "text": "7 a fixture that is \"small. fast. determin"
+        },
+        {
+          "line": 8,
+          "text": "8 lavout tests\". Fverv constraint in that"
+        },
+        {
+          "line": 9,
+          "text": "9"
+        },
+        {
+          "line": 10,
+          "text": "10 **kgmall / fast** — the fixture is recc"
+        },
+        {
+          "line": 11,
+          "text": "11 **src/frontend/tui/tests/fixtures/fixtiL"
+        },
+        {
+          "line": 12,
+          "text": "12 lane navs for that recordina the firsi"
+        },
+        {
+          "line": 13,
+          "text": "13 whole nproaram is a few hundred rec"
+        },
+        {
+          "line": 14,
+          "text": "14 seconds rather than minutes."
+        },
+        {
+          "line": 15,
+          "text": "15 * *kdeterministic** — no clock. no rai"
+        },
+        {
+          "line": 16,
+          "text": "16 other than \"“orint’ . A fixture whos"
+        },
+        {
+          "line": 17,
+          "text": "17 cannot be the around truth for a ste"
+        },
+        {
+          "line": 18,
+          "text": "18 **kgtennina and lavout** — it is writi"
+        },
+        {
+          "line": 19,
+          "text": "19 (*“main’\"’ -> ““evaluate'' -> \"“annl"
+        },
+        {
+          "line": 20,
+          "text": "20 rather than as one flat loon. becaus"
+        },
+        {
+          "line": 21,
+          "text": "21 it exercises nothina. Fverv sten lan"
+        },
+        {
+          "line": 22,
+          "text": "22"
+        },
+        {
+          "line": 23,
+          "text": "73 Nothina here asserts anvthina. The ¢"
+        },
+        {
+          "line": 24,
+          "text": "24 \" src/frontend/tui/tests/test fixture c"
+        },
+        {
+          "line": 25,
+          "text": "725 trace throuah a real *\"HeadlessDebu"
+        },
+        {
+          "line": 26,
+          "text": "e"
+        },
+        {
+          "line": 27,
+          "text": "27"
+        },
+        {
+          "line": 28,
+          "text": "78"
+        },
+        {
+          "line": 29,
+          "text": "79 def add(left. riaht):"
+        },
+        {
+          "line": 30,
+          "text": "30 \"\"\"Inteaer addition. as its own fran"
+        },
+        {
+          "line": 31,
+          "text": "31 return left + riaht"
+        },
+        {
+          "line": 32,
+          "text": "32"
+        },
+        {
+          "line": 33,
+          "text": "33"
+        },
+        {
+          "line": 34,
+          "text": "34 def sub(left. riaht):"
+        },
+        {
+          "line": 35,
+          "text": "35 \"\"\"Inteaer subtraction.\"\"\""
+        },
+        {
+          "line": 36,
+          "text": "36 return left - riaht"
+        },
+        {
+          "line": 37,
+          "text": "37"
+        },
+        {
+          "line": 38,
+          "text": "38"
+        },
+        {
+          "line": 39,
+          "text": "39 def mul(left. riaht):"
+        },
+        {
+          "line": 40,
+          "text": "40 \"\"\"Inteaer multinlication.\"\"\""
+        },
+        {
+          "line": 41,
+          "text": "41 return left * riaht"
+        },
+        {
+          "line": 42,
+          "text": "4?7"
+        },
+        {
+          "line": 43,
+          "text": "43"
+        },
+        {
+          "line": 44,
+          "text": "» 44 def div(left. riaht):"
+        },
+        {
+          "line": 45,
+          "text": "45 \"\"\"Eloor division. **//\"\" rather thar"
+        },
+        {
+          "line": 46,
+          "text": "46 “Yint' T : a float would make the prii"
+        },
+        {
+          "line": 47,
+          "text": "a7 reonr. and this nroaram's whole iob"
+        },
+        {
+          "line": 48,
+          "text": "48 return left // riaht"
+        },
+        {
+          "line": 49,
+          "text": "49"
+        },
+        {
+          "line": 50,
+          "text": "50"
+        },
+        {
+          "line": 51,
+          "text": "51 # The dispatch table is deliberatelv r"
+        },
+        {
+          "line": 52,
+          "text": "52 # lookunb is then a value the debuaae"
+        },
+        {
+          "line": 53,
+          "text": "53 OPFRATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "54 \"+\"- add."
+        }
+      ]
+    },
+    "advanced-state": {
+      "frame": "advanced-state.ppm",
+      "present": true,
+      "executionLine": 56,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 47,
+        "rows": 51
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "AR e R m ."
+        },
+        {
+          "line": 2,
+          "text": "ic rccoramygy s souicc"
+        },
+        {
+          "line": 3,
+          "text": "3"
+        },
+        {
+          "line": 4,
+          "text": "4 WHY THIS PROGRAM FXISTS. AND WH"
+        },
+        {
+          "line": 5,
+          "text": "B ========sssessssosocooosoooomooo—cooosoooooooooo"
+        },
+        {
+          "line": 6,
+          "text": "6 \" codetracer-specs/Front-Ends/CodeTr"
+        },
+        {
+          "line": 7,
+          "text": "7 a fixture that is \"small. fast. determin"
+        },
+        {
+          "line": 8,
+          "text": "8 lavout tests\". Fverv constraint in that"
+        },
+        {
+          "line": 9,
+          "text": "9"
+        },
+        {
+          "line": 10,
+          "text": "10 **kgmall / fast** — the fixture is recc"
+        },
+        {
+          "line": 11,
+          "text": "11 **sre/frontend/tui/tests/fixtures/fixti"
+        },
+        {
+          "line": 12,
+          "text": "12 lane navs for that recordina the firsi"
+        },
+        {
+          "line": 13,
+          "text": "13 whole proaram is a few hundred rec"
+        },
+        {
+          "line": 14,
+          "text": "14 seconds rather than minutes."
+        },
+        {
+          "line": 15,
+          "text": "15 * *kdeterministic** — no clock. no rai"
+        },
+        {
+          "line": 16,
+          "text": "16 other than \"“orint’ . A fixture whos"
+        },
+        {
+          "line": 17,
+          "text": "17 cannot be the around truth for a ste"
+        },
+        {
+          "line": 18,
+          "text": "18 **kgtennina and lavout** — it is writi"
+        },
+        {
+          "line": 19,
+          "text": "19 (*“main’ \" -> \"“evaluate' \" -> \"“abbpl"
+        },
+        {
+          "line": 20,
+          "text": "20 rather than as one flat loon. becaus"
+        },
+        {
+          "line": 21,
+          "text": "21 it exercises nothina. Fverv sten lan"
+        },
+        {
+          "line": 22,
+          "text": "22"
+        },
+        {
+          "line": 23,
+          "text": "73 Nothina here asserts anvthina. The ¢"
+        },
+        {
+          "line": 24,
+          "text": "24 \" src/frontend/tuiltests/test fixture ¢"
+        },
+        {
+          "line": 25,
+          "text": "725 trace throuah a real *\"HeadlessDebu"
+        },
+        {
+          "line": 26,
+          "text": "2"
+        },
+        {
+          "line": 27,
+          "text": "27"
+        },
+        {
+          "line": 28,
+          "text": "78"
+        },
+        {
+          "line": 29,
+          "text": "79 def add(left. riaht):"
+        },
+        {
+          "line": 30,
+          "text": "30 \"\"\"Inteaer addition. as its own fran"
+        },
+        {
+          "line": 31,
+          "text": "31 return left + riaht"
+        },
+        {
+          "line": 32,
+          "text": "32"
+        },
+        {
+          "line": 33,
+          "text": "33"
+        },
+        {
+          "line": 34,
+          "text": "34 def sub(left. riaht):"
+        },
+        {
+          "line": 35,
+          "text": "35 \"\"\"Inteaer subtraction.\"\"\""
+        },
+        {
+          "line": 36,
+          "text": "36 return left - riaht"
+        },
+        {
+          "line": 37,
+          "text": "37"
+        },
+        {
+          "line": 38,
+          "text": "38"
+        },
+        {
+          "line": 39,
+          "text": "39 def mul(left. riaht):"
+        },
+        {
+          "line": 40,
+          "text": "40 \"\"\"Inteaer multinlication.\"\"\""
+        },
+        {
+          "line": 41,
+          "text": "41 return left * riaht"
+        },
+        {
+          "line": 42,
+          "text": "4?7"
+        },
+        {
+          "line": 43,
+          "text": "43"
+        },
+        {
+          "line": 44,
+          "text": "44 def div(left. riaht):"
+        },
+        {
+          "line": 45,
+          "text": "45 \"\"\"Eloor division. **//\"\" rather thar"
+        },
+        {
+          "line": 46,
+          "text": "46 “Yint' T : a float would make the pril"
+        },
+        {
+          "line": 47,
+          "text": "a7 reonr. and this nroaram's whole iob"
+        },
+        {
+          "line": 48,
+          "text": "48 return left // riaht"
+        },
+        {
+          "line": 49,
+          "text": "49"
+        },
+        {
+          "line": 50,
+          "text": "50"
+        },
+        {
+          "line": 51,
+          "text": "51 # The disnatch table is deliberatelv r"
+        },
+        {
+          "line": 52,
+          "text": "52 # lookunb is then a value the debuaae"
+        },
+        {
+          "line": 53,
+          "text": "53 OPERATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "54 \"+\"- add."
+        },
+        {
+          "line": 55,
+          "text": "55 Een=Nc1 s"
+        },
+        {
+          "line": 56,
+          "text": "» 56 \" mul./* mul: <function mul..."
+        }
+      ]
+    },
+    "returned-calltrace": {
+      "frame": "returned-calltrace.ppm",
+      "present": true,
+      "executionLine": 110,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 55,
+        "support": 48,
+        "rows": 52
+      },
+      "rows": [
+        {
+          "line": 55,
+          "text": "AR e R m ."
+        },
+        {
+          "line": 56,
+          "text": "ic rccoramygy s souicc"
+        },
+        {
+          "line": 57,
+          "text": "57 \" div."
+        },
+        {
+          "line": 58,
+          "text": "58 1}"
+        },
+        {
+          "line": 59,
+          "text": "59"
+        },
+        {
+          "line": 60,
+          "text": "60"
+        },
+        {
+          "line": 61,
+          "text": "61 def annlv on(svmbol. left. riaht):"
+        },
+        {
+          "line": 62,
+          "text": "62 \"\"\"Ragnlve one onerator svmbol a"
+        },
+        {
+          "line": 63,
+          "text": "63"
+        },
+        {
+          "line": 64,
+          "text": "64 This frame exists so that the calltt"
+        },
+        {
+          "line": 65,
+          "text": "65 “Yleft® \" visiblv flows main -> eval"
+        },
+        {
+          "line": 66,
+          "text": "66 shane a value-oriain or a call-stac"
+        },
+        {
+          "line": 67,
+          "text": "67 nun"
+        },
+        {
+          "line": 68,
+          "text": "68 obneration = OPFRATIONSIsvmboll"
+        },
+        {
+          "line": 69,
+          "text": "69 return oneration(left. riaht)"
+        },
+        {
+          "line": 70,
+          "text": "70"
+        },
+        {
+          "line": 71,
+          "text": "71"
+        },
+        {
+          "line": 72,
+          "text": "77 def evaluatel(exnression):"
+        },
+        {
+          "line": 73,
+          "text": "73 \"\"\"Evaluate a strictlv left-to-riaht ¢"
+        },
+        {
+          "line": 74,
+          "text": "74"
+        },
+        {
+          "line": 75,
+          "text": "75 No onerator nrecedence on nurno"
+        },
+        {
+          "line": 76,
+          "text": "76 narser is a second thina that can |"
+        },
+        {
+          "line": 77,
+          "text": "77 be borina."
+        },
+        {
+          "line": 78,
+          "text": "78 nun"
+        },
+        {
+          "line": 79,
+          "text": "79 tokens = exnression.snlit()"
+        },
+        {
+          "line": 80,
+          "text": "80 total = int(tokenslO01)"
+        },
+        {
+          "line": 81,
+          "text": "81 index = 1"
+        },
+        {
+          "line": 82,
+          "text": "82 while index < len(tokens):"
+        },
+        {
+          "line": 83,
+          "text": "83 svmbol = tokenslindex]"
+        },
+        {
+          "line": 84,
+          "text": "84 onerand = int(tokenslindex + 1"
+        },
+        {
+          "line": 85,
+          "text": "85 total = annlv on(svmbol. total."
+        },
+        {
+          "line": 86,
+          "text": "86 index += 2"
+        },
+        {
+          "line": 87,
+          "text": "87 return total"
+        },
+        {
+          "line": 88,
+          "text": "88"
+        },
+        {
+          "line": 89,
+          "text": "89"
+        },
+        {
+          "line": 90,
+          "text": "90 FXPRFSSIONS =1"
+        },
+        {
+          "line": 91,
+          "text": "91 R"
+        },
+        {
+          "line": 92,
+          "text": "9?2 S A TN ="
+        },
+        {
+          "line": 93,
+          "text": "93 \"6 *x 7\""
+        },
+        {
+          "line": 94,
+          "text": "94 \"100/5 - 3\"."
+        },
+        {
+          "line": 95,
+          "text": "95 \"1 +2*¥3-4/7\"."
+        },
+        {
+          "line": 96,
+          "text": "96 1"
+        },
+        {
+          "line": 97,
+          "text": "97"
+        },
+        {
+          "line": 98,
+          "text": "98"
+        },
+        {
+          "line": 99,
+          "text": "99 def main():"
+        },
+        {
+          "line": 100,
+          "text": "100 \"\"\"Eyaluate everv expression anc"
+        },
+        {
+          "line": 101,
+          "text": "101"
+        },
+        {
+          "line": 102,
+          "text": "102 Called unconditionallv at module"
+        },
+        {
+          "line": 103,
+          "text": "103 Yif name ==\" main \" a"
+        },
+        {
+          "line": 104,
+          "text": "104 different wavs (as a scrint. asan"
+        },
+        {
+          "line": 105,
+          "text": "105 is one more wav for a recordina t"
+        },
+        {
+          "line": 106,
+          "text": "106 nun"
+        },
+        {
+          "line": 107,
+          "text": "107 results =1"
+        },
+        {
+          "line": 108,
+          "text": "108 for exnression in FXPRFSSIONS:"
+        },
+        {
+          "line": 109,
+          "text": "109 value = evaluate(exnression)"
+        },
+        {
+          "line": 110,
+          "text": "110 results.annend(value)/* res. .."
+        }
+      ]
+    },
+    "continued-event-log": {
+      "frame": "continued-event-log.ppm",
+      "present": true,
+      "executionLine": 113,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 58,
+        "support": 47,
+        "rows": 52
+      },
+      "rows": [
+        {
+          "line": 58,
+          "text": "AR e R m ."
+        },
+        {
+          "line": 59,
+          "text": "ic rccoramygy s souicc"
+        },
+        {
+          "line": 60,
+          "text": "60"
+        },
+        {
+          "line": 61,
+          "text": "61 def annlv on(svmbol. left. riaht):"
+        },
+        {
+          "line": 62,
+          "text": "62 \"\"\"Ragnlve one onerator svmbol a"
+        },
+        {
+          "line": 63,
+          "text": "63"
+        },
+        {
+          "line": 64,
+          "text": "64 This frame exists so that the calltt"
+        },
+        {
+          "line": 65,
+          "text": "65 “Yleft® \" visiblv flows main -> eval"
+        },
+        {
+          "line": 66,
+          "text": "66 shane a value-oriain or a call-stac"
+        },
+        {
+          "line": 67,
+          "text": "67 nun"
+        },
+        {
+          "line": 68,
+          "text": "68 obneration = OPFRATIONSIsvmboll"
+        },
+        {
+          "line": 69,
+          "text": "69 return oneration(left. riaht)"
+        },
+        {
+          "line": 70,
+          "text": "70"
+        },
+        {
+          "line": 71,
+          "text": "71"
+        },
+        {
+          "line": 72,
+          "text": "77 def evaluatel(exnression):"
+        },
+        {
+          "line": 73,
+          "text": "73 \"\"\"Eyaluate a strictlv left-to-riaht ¢"
+        },
+        {
+          "line": 74,
+          "text": "74"
+        },
+        {
+          "line": 75,
+          "text": "75 No onerator nrecedence on nurno"
+        },
+        {
+          "line": 76,
+          "text": "76 parser is a second thina that can |"
+        },
+        {
+          "line": 77,
+          "text": "77 be borina."
+        },
+        {
+          "line": 78,
+          "text": "78 nun"
+        },
+        {
+          "line": 79,
+          "text": "79 tokens = exnression.snlit()"
+        },
+        {
+          "line": 80,
+          "text": "80 total = int(tokensli0O1)"
+        },
+        {
+          "line": 81,
+          "text": "81 index = 1"
+        },
+        {
+          "line": 82,
+          "text": "82 while index < len(tokens):"
+        },
+        {
+          "line": 83,
+          "text": "83 svmbol = tokenslindex]"
+        },
+        {
+          "line": 84,
+          "text": "84 onerand = int(tokenslindex + 1"
+        },
+        {
+          "line": 85,
+          "text": "85 total = annlv on(svmbol. total."
+        },
+        {
+          "line": 86,
+          "text": "86 index += 2"
+        },
+        {
+          "line": 87,
+          "text": "87 return total"
+        },
+        {
+          "line": 88,
+          "text": "88"
+        },
+        {
+          "line": 89,
+          "text": "89"
+        },
+        {
+          "line": 90,
+          "text": "90 EXPRESSIONS =1"
+        },
+        {
+          "line": 91,
+          "text": "91 R"
+        },
+        {
+          "line": 92,
+          "text": "9?2 S A TN ="
+        },
+        {
+          "line": 93,
+          "text": "93 \"6 *x 7\""
+        },
+        {
+          "line": 94,
+          "text": "94 100 /75 - 3\"."
+        },
+        {
+          "line": 95,
+          "text": "95 \"1 +2*¥3-4/7\"."
+        },
+        {
+          "line": 96,
+          "text": "96 1"
+        },
+        {
+          "line": 97,
+          "text": "97"
+        },
+        {
+          "line": 98,
+          "text": "98"
+        },
+        {
+          "line": 99,
+          "text": "99 def main():"
+        },
+        {
+          "line": 100,
+          "text": "100 \"\"\"Eyaluate everv exnression anc"
+        },
+        {
+          "line": 101,
+          "text": "101"
+        },
+        {
+          "line": 102,
+          "text": "102 Called unconditionallv at module"
+        },
+        {
+          "line": 103,
+          "text": "103 if name ==\" main \" a"
+        },
+        {
+          "line": 104,
+          "text": "104 different wavs (as a scrint. asan"
+        },
+        {
+          "line": 105,
+          "text": "105 is one more wav for a recordina t"
+        },
+        {
+          "line": 106,
+          "text": "106 nun"
+        },
+        {
+          "line": 107,
+          "text": "107 results = I1"
+        },
+        {
+          "line": 108,
+          "text": "108 for exnression in FXPRFSSIONS:"
+        },
+        {
+          "line": 109,
+          "text": "109 value = evaluatel(exnression)"
+        },
+        {
+          "line": 110,
+          "text": "110 results.apnend(value)"
+        },
+        {
+          "line": 111,
+          "text": "111 print(\"%s = %d\" % (exnressior"
+        },
+        {
+          "line": 112,
+          "text": "112 print(\"checksum = %d\" % sum(re"
+        },
+        {
+          "line": 113,
+          "text": "113 return results/* results: @I5..."
+        }
+      ]
+    },
+    "breakpoint-editor": {
+      "frame": "breakpoint-editor.ppm",
+      "present": true,
+      "executionLine": 44,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 45,
+        "rows": 50
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "1 #!Yusr/bin/env nvthon3"
+        },
+        {
+          "line": 2,
+          "text": "&a? \"\"\"calc — the small. fast. determinisi"
+        },
+        {
+          "line": 3,
+          "text": "3"
+        },
+        {
+          "line": 4,
+          "text": "4 WHY THIS PROGRAM EXISTS. AND WH"
+        },
+        {
+          "line": 5,
+          "text": "B"
+        },
+        {
+          "line": 6,
+          "text": "6 \" codetracer-snecs/Front-Fnds/CodeTr"
+        },
+        {
+          "line": 7,
+          "text": "7 a fixture that is \"small. fast. determin"
+        },
+        {
+          "line": 8,
+          "text": "8 lavout tests\". Fverv constraint in that"
+        },
+        {
+          "line": 9,
+          "text": "9"
+        },
+        {
+          "line": 10,
+          "text": "10 **kgmall / fast** — the fixture is recc"
+        },
+        {
+          "line": 11,
+          "text": "11 **src/frontend/tui/tests/fixtures/fixtiL"
+        },
+        {
+          "line": 12,
+          "text": "12 lane navs for that recordina the firsi"
+        },
+        {
+          "line": 13,
+          "text": "13 whole nproaram is a few hundred rec"
+        },
+        {
+          "line": 14,
+          "text": "14 seconds rather than minutes."
+        },
+        {
+          "line": 15,
+          "text": "15 * *kdeterministic** — no clock. no rai"
+        },
+        {
+          "line": 16,
+          "text": "16 other than \"“orint’ . A fixture whos"
+        },
+        {
+          "line": 17,
+          "text": "17 cannot be the around truth for a ste"
+        },
+        {
+          "line": 18,
+          "text": "18 **kgtennina and lavout** — it is writi"
+        },
+        {
+          "line": 19,
+          "text": "19 (*“main’\"’ -> ““evaluate'' -> \"“annl"
+        },
+        {
+          "line": 20,
+          "text": "20 rather than as one flat loon. becaus"
+        },
+        {
+          "line": 21,
+          "text": "21 it exercises nothina. Fverv sten lan"
+        },
+        {
+          "line": 22,
+          "text": "22"
+        },
+        {
+          "line": 23,
+          "text": "73 Nothina here asserts anvthina. The ¢"
+        },
+        {
+          "line": 24,
+          "text": "24 \" src/frontend/tui/tests/test fixture c"
+        },
+        {
+          "line": 25,
+          "text": "725 trace throuah a real *\"HeadlessDebu"
+        },
+        {
+          "line": 26,
+          "text": "e"
+        },
+        {
+          "line": 27,
+          "text": "27"
+        },
+        {
+          "line": 28,
+          "text": "78"
+        },
+        {
+          "line": 29,
+          "text": "79 def add(left. riaht):"
+        },
+        {
+          "line": 30,
+          "text": "30 \"\"\"Inteaer addition. as its own fran"
+        },
+        {
+          "line": 31,
+          "text": "31 return left + riaht"
+        },
+        {
+          "line": 32,
+          "text": "32"
+        },
+        {
+          "line": 33,
+          "text": "33"
+        },
+        {
+          "line": 34,
+          "text": "34 def sub(left. riaht):"
+        },
+        {
+          "line": 35,
+          "text": "35 \"\"\"Inteaer subtraction.\"\"\""
+        },
+        {
+          "line": 36,
+          "text": "36 return left - riaht"
+        },
+        {
+          "line": 37,
+          "text": "37"
+        },
+        {
+          "line": 38,
+          "text": "38"
+        },
+        {
+          "line": 39,
+          "text": "39 def mul(left. riaht):"
+        },
+        {
+          "line": 40,
+          "text": "40 \"\"\"Inteaer multinlication.\"\"\""
+        },
+        {
+          "line": 41,
+          "text": "41 return left * riaht"
+        },
+        {
+          "line": 42,
+          "text": "4?7"
+        },
+        {
+          "line": 43,
+          "text": "43"
+        },
+        {
+          "line": 44,
+          "text": "» 44 def div(left. riaht):"
+        },
+        {
+          "line": 45,
+          "text": "45 \"\"\"Eloor division. **//\"\" rather thar"
+        },
+        {
+          "line": 46,
+          "text": "46 “Yint' T : a float would make the prii"
+        },
+        {
+          "line": 47,
+          "text": "a7 reonr. and this nroaram's whole iob"
+        },
+        {
+          "line": 48,
+          "text": "48 return left // riaht"
+        },
+        {
+          "line": 49,
+          "text": "49"
+        },
+        {
+          "line": 50,
+          "text": "50"
+        },
+        {
+          "line": 51,
+          "text": "51 # The dispatch table is deliberatelv r"
+        },
+        {
+          "line": 52,
+          "text": "52 # lookunb is then a value the debuaae"
+        },
+        {
+          "line": 53,
+          "text": "53 OPFRATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "54 \"+\"- add."
+        }
+      ]
+    },
+    "noir-flow": {
+      "frame": "noir-flow.ppm",
+      "present": true,
+      "executionLine": 5,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 46,
+        "rows": 51
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "T bub fn iterate asteroids(initial shield:"
+        },
+        {
+          "line": 2,
+          "text": "2 let mut remainina shield = initial s"
+        },
+        {
+          "line": 3,
+          "text": "3"
+        },
+        {
+          "line": 4,
+          "text": "4 foriin0..8 {"
+        },
+        {
+          "line": 5,
+          "text": "»5 let mass = masseslil:/*i: 0._."
+        },
+        {
+          "line": 6,
+          "text": "6 let damaae = calculate damaae"
+        },
+        {
+          "line": 7,
+          "text": "7 remainina shield -= damaae:"
+        },
+        {
+          "line": 8,
+          "text": "8"
+        },
+        {
+          "line": 9,
+          "text": "9 let mut reaeneration = 0:"
+        },
+        {
+          "line": 10,
+          "text": "10 if (remainina shield as u3?2 > 0)"
+        },
+        {
+          "line": 11,
+          "text": "11 reaeneration = calculate shield"
+        },
+        {
+          "line": 12,
+          "text": "12 remainina shield += reaenerati"
+        },
+        {
+          "line": 13,
+          "text": "13 1"
+        },
+        {
+          "line": 14,
+          "text": "14 status renort(i.initial shield. ren"
+        },
+        {
+          "line": 15,
+          "text": "15 1}"
+        },
+        {
+          "line": 16,
+          "text": "16"
+        },
+        {
+          "line": 17,
+          "text": "17 // We need to have at least 1 unit ¢"
+        },
+        {
+          "line": 18,
+          "text": "18 let result = remainina shield as u3"
+        },
+        {
+          "line": 19,
+          "text": "19 result"
+        },
+        {
+          "line": 20,
+          "text": "20 1}"
+        },
+        {
+          "line": 21,
+          "text": "21"
+        },
+        {
+          "line": 22,
+          "text": "727 fn calculate damaaelinitial shield: Fi"
+        },
+        {
+          "line": 23,
+          "text": "723 // Shields aet exnonentiallv less efi"
+        },
+        {
+          "line": 24,
+          "text": "24 /l At 100% shields 1 unit of mass v"
+        },
+        {
+          "line": 25,
+          "text": "25 /1 At 50% shields 1 unit of mass wi"
+        },
+        {
+          "line": 26,
+          "text": "26 let shield nct = calculate remainir"
+        },
+        {
+          "line": 27,
+          "text": "27 let mut damaae = 0:"
+        },
+        {
+          "line": 28,
+          "text": "78 if(shield nct == 100){"
+        },
+        {
+          "line": 29,
+          "text": "29 damaae = mass * 1:"
+        },
+        {
+          "line": 30,
+          "text": "30 1}"
+        },
+        {
+          "line": 31,
+          "text": "31 else{"
+        },
+        {
+          "line": 32,
+          "text": "32 damaae = mass * (100 - shield"
+        },
+        {
+          "line": 33,
+          "text": "33 1}"
+        },
+        {
+          "line": 34,
+          "text": "34 iffdamaae as u3?2 > remainina shi"
+        },
+        {
+          "line": 35,
+          "text": "35 damaae = remainina shield:"
+        },
+        {
+          "line": 36,
+          "text": "36 1"
+        },
+        {
+          "line": 37,
+          "text": "37 damaae as Field"
+        },
+        {
+          "line": 38,
+          "text": "38 1}"
+        },
+        {
+          "line": 39,
+          "text": "39"
+        },
+        {
+          "line": 40,
+          "text": "40 fn calculate shield reaeneration(initi"
+        },
+        {
+          "line": 41,
+          "text": "41 /! shields reaain a nercentaae of tF"
+        },
+        {
+          "line": 42,
+          "text": "4?7 let mut reaen = (initial shield * shi"
+        },
+        {
+          "line": 43,
+          "text": "43 ifl(remainina shield + reaen) as u:"
+        },
+        {
+          "line": 44,
+          "text": "44 reaen = initial shield - remainin"
+        },
+        {
+          "line": 45,
+          "text": "45 1}"
+        },
+        {
+          "line": 46,
+          "text": "46 reaen as Field"
+        },
+        {
+          "line": 47,
+          "text": "47 1}"
+        },
+        {
+          "line": 48,
+          "text": "48 fn calculate remainina shield nct(ini"
+        },
+        {
+          "line": 49,
+          "text": "49 let result = (remainina shield * 10"
+        },
+        {
+          "line": 50,
+          "text": "50 result as Field"
+        },
+        {
+          "line": 51,
+          "text": "51 1}"
+        },
+        {
+          "line": 52,
+          "text": "52"
+        },
+        {
+          "line": 53,
+          "text": "53 fn status renort(iteration: u3? .initial"
+        },
+        {
+          "line": 54,
+          "text": "54 printIn(f\"----- iteration {iteration?} -"
+        }
+      ]
+    },
+    "noir-flow-off": {
+      "frame": "noir-flow-off.ppm",
+      "present": true,
+      "executionLine": 5,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 46,
+        "rows": 51
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "T bub fn iterate asteroids(initial shield:"
+        },
+        {
+          "line": 2,
+          "text": "2 let mut remainina shield = initial s"
+        },
+        {
+          "line": 3,
+          "text": "3"
+        },
+        {
+          "line": 4,
+          "text": "4 foriin0..8 {"
+        },
+        {
+          "line": 5,
+          "text": "»5 let mass = masseslil:/*i: 0._."
+        },
+        {
+          "line": 6,
+          "text": "6 let damaae = calculate damaae"
+        },
+        {
+          "line": 7,
+          "text": "7 remainina shield -= damaae:"
+        },
+        {
+          "line": 8,
+          "text": "8"
+        },
+        {
+          "line": 9,
+          "text": "9 let mut reaeneration = 0:"
+        },
+        {
+          "line": 10,
+          "text": "10 if (remainina shield as u3?2 > 0)"
+        },
+        {
+          "line": 11,
+          "text": "11 reaeneration = calculate shield"
+        },
+        {
+          "line": 12,
+          "text": "12 remainina shield += reaenerati"
+        },
+        {
+          "line": 13,
+          "text": "13 1"
+        },
+        {
+          "line": 14,
+          "text": "14 status renort(i.initial shield. ren"
+        },
+        {
+          "line": 15,
+          "text": "15 1}"
+        },
+        {
+          "line": 16,
+          "text": "16"
+        },
+        {
+          "line": 17,
+          "text": "17 // We need to have at least 1 unit ¢"
+        },
+        {
+          "line": 18,
+          "text": "18 let result = remainina shield as u3"
+        },
+        {
+          "line": 19,
+          "text": "19 result"
+        },
+        {
+          "line": 20,
+          "text": "20 1}"
+        },
+        {
+          "line": 21,
+          "text": "21"
+        },
+        {
+          "line": 22,
+          "text": "727 fn calculate damaaelinitial shield: Fi"
+        },
+        {
+          "line": 23,
+          "text": "723 // Shields aet exnonentiallv less efi"
+        },
+        {
+          "line": 24,
+          "text": "24 /l At 100% shields 1 unit of mass v"
+        },
+        {
+          "line": 25,
+          "text": "25 /1 At 50% shields 1 unit of mass wi"
+        },
+        {
+          "line": 26,
+          "text": "26 let shield nct = calculate remainir"
+        },
+        {
+          "line": 27,
+          "text": "27 let mut damaae = 0:"
+        },
+        {
+          "line": 28,
+          "text": "78 if(shield nct == 100){"
+        },
+        {
+          "line": 29,
+          "text": "29 damaae = mass * 1:"
+        },
+        {
+          "line": 30,
+          "text": "30 1}"
+        },
+        {
+          "line": 31,
+          "text": "31 else{"
+        },
+        {
+          "line": 32,
+          "text": "32 damaae = mass * (100 - shield"
+        },
+        {
+          "line": 33,
+          "text": "33 1}"
+        },
+        {
+          "line": 34,
+          "text": "34 iffdamaae as u3?2 > remainina shi"
+        },
+        {
+          "line": 35,
+          "text": "35 damaae = remainina shield:"
+        },
+        {
+          "line": 36,
+          "text": "36 1"
+        },
+        {
+          "line": 37,
+          "text": "37 damaae as Field"
+        },
+        {
+          "line": 38,
+          "text": "38 1}"
+        },
+        {
+          "line": 39,
+          "text": "39"
+        },
+        {
+          "line": 40,
+          "text": "40 fn calculate shield reaeneration(initi"
+        },
+        {
+          "line": 41,
+          "text": "41 /! shields reaain a nercentaae of tF"
+        },
+        {
+          "line": 42,
+          "text": "4?7 let mut reaen = (initial shield * shi"
+        },
+        {
+          "line": 43,
+          "text": "43 ifl(remainina shield + reaen) as u:"
+        },
+        {
+          "line": 44,
+          "text": "44 reaen = initial shield - remainin"
+        },
+        {
+          "line": 45,
+          "text": "45 1}"
+        },
+        {
+          "line": 46,
+          "text": "46 reaen as Field"
+        },
+        {
+          "line": 47,
+          "text": "47 1}"
+        },
+        {
+          "line": 48,
+          "text": "48 fn calculate remainina shield nct(ini"
+        },
+        {
+          "line": 49,
+          "text": "49 let result = (remainina shield * 10"
+        },
+        {
+          "line": 50,
+          "text": "50 result as Field"
+        },
+        {
+          "line": 51,
+          "text": "51 1}"
+        },
+        {
+          "line": 52,
+          "text": "52"
+        },
+        {
+          "line": 53,
+          "text": "53 fn status renort(iteration: u3? .initial"
+        },
+        {
+          "line": 54,
+          "text": "54 printIn(f\"----- iteration {iteration?} -"
+        }
+      ]
+    }
+  },
+  "markTwin": [
+    {
+      "line": 1,
+      "changed": 0.0
+    },
+    {
+      "line": 2,
+      "changed": 0.9707602339181286
+    },
+    {
+      "line": 3,
+      "changed": 0.0
+    },
+    {
+      "line": 4,
+      "changed": 0.0
+    },
+    {
+      "line": 5,
+      "changed": 0.0
+    },
+    {
+      "line": 6,
+      "changed": 0.0
+    },
+    {
+      "line": 7,
+      "changed": 0.0
+    },
+    {
+      "line": 8,
+      "changed": 0.0
+    },
+    {
+      "line": 9,
+      "changed": 0.0
+    },
+    {
+      "line": 10,
+      "changed": 0.0
+    },
+    {
+      "line": 11,
+      "changed": 0.0
+    },
+    {
+      "line": 12,
+      "changed": 0.0
+    },
+    {
+      "line": 13,
+      "changed": 0.0
+    },
+    {
+      "line": 14,
+      "changed": 0.0
+    },
+    {
+      "line": 15,
+      "changed": 0.0
+    },
+    {
+      "line": 16,
+      "changed": 0.0
+    },
+    {
+      "line": 17,
+      "changed": 0.0
+    },
+    {
+      "line": 18,
+      "changed": 0.0
+    },
+    {
+      "line": 19,
+      "changed": 0.0
+    },
+    {
+      "line": 20,
+      "changed": 0.0
+    },
+    {
+      "line": 21,
+      "changed": 0.0
+    },
+    {
+      "line": 22,
+      "changed": 0.0
+    },
+    {
+      "line": 23,
+      "changed": 0.0
+    },
+    {
+      "line": 24,
+      "changed": 0.0
+    },
+    {
+      "line": 25,
+      "changed": 0.0
+    },
+    {
+      "line": 26,
+      "changed": 0.0
+    },
+    {
+      "line": 27,
+      "changed": 0.0
+    },
+    {
+      "line": 28,
+      "changed": 0.0
+    },
+    {
+      "line": 29,
+      "changed": 0.0
+    },
+    {
+      "line": 30,
+      "changed": 0.0
+    },
+    {
+      "line": 31,
+      "changed": 0.0
+    },
+    {
+      "line": 32,
+      "changed": 0.0
+    },
+    {
+      "line": 33,
+      "changed": 0.0
+    },
+    {
+      "line": 34,
+      "changed": 0.0
+    },
+    {
+      "line": 35,
+      "changed": 0.0
+    },
+    {
+      "line": 36,
+      "changed": 0.0
+    },
+    {
+      "line": 37,
+      "changed": 0.0
+    },
+    {
+      "line": 38,
+      "changed": 0.0
+    },
+    {
+      "line": 39,
+      "changed": 0.0
+    },
+    {
+      "line": 40,
+      "changed": 0.0
+    },
+    {
+      "line": 41,
+      "changed": 0.0
+    },
+    {
+      "line": 42,
+      "changed": 0.0
+    },
+    {
+      "line": 43,
+      "changed": 0.0
+    },
+    {
+      "line": 44,
+      "changed": 0.0
+    },
+    {
+      "line": 45,
+      "changed": 0.0
+    },
+    {
+      "line": 46,
+      "changed": 0.0
+    },
+    {
+      "line": 47,
+      "changed": 0.0
+    },
+    {
+      "line": 48,
+      "changed": 0.0
+    },
+    {
+      "line": 49,
+      "changed": 0.0
+    },
+    {
+      "line": 50,
+      "changed": 0.0
+    },
+    {
+      "line": 51,
+      "changed": 0.0
+    },
+    {
+      "line": 52,
+      "changed": 0.0
+    },
+    {
+      "line": 53,
+      "changed": 0.0
+    },
+    {
+      "line": 54,
+      "changed": 0.0
+    }
+  ],
+  "flowTwin": [
+    {
+      "line": 1,
+      "changed": 0.0
+    },
+    {
+      "line": 2,
+      "changed": 0.0
+    },
+    {
+      "line": 3,
+      "changed": 0.0
+    },
+    {
+      "line": 4,
+      "changed": 0.0
+    },
+    {
+      "line": 5,
+      "changed": 0.0
+    },
+    {
+      "line": 6,
+      "changed": 0.0
+    },
+    {
+      "line": 7,
+      "changed": 0.0
+    },
+    {
+      "line": 8,
+      "changed": 0.0
+    },
+    {
+      "line": 9,
+      "changed": 0.0
+    },
+    {
+      "line": 10,
+      "changed": 0.0
+    },
+    {
+      "line": 11,
+      "changed": 0.9293433083956775
+    },
+    {
+      "line": 12,
+      "changed": 0.9321872015281757
+    },
+    {
+      "line": 13,
+      "changed": 0.9333333333333333
+    },
+    {
+      "line": 14,
+      "changed": 0.0
+    },
+    {
+      "line": 15,
+      "changed": 0.0
+    },
+    {
+      "line": 16,
+      "changed": 0.0
+    },
+    {
+      "line": 17,
+      "changed": 0.0
+    },
+    {
+      "line": 18,
+      "changed": 0.0
+    },
+    {
+      "line": 19,
+      "changed": 0.0
+    },
+    {
+      "line": 20,
+      "changed": 0.0
+    },
+    {
+      "line": 21,
+      "changed": 0.0
+    },
+    {
+      "line": 22,
+      "changed": 0.0
+    },
+    {
+      "line": 23,
+      "changed": 0.0
+    },
+    {
+      "line": 24,
+      "changed": 0.0
+    },
+    {
+      "line": 25,
+      "changed": 0.0
+    },
+    {
+      "line": 26,
+      "changed": 0.0
+    },
+    {
+      "line": 27,
+      "changed": 0.0
+    },
+    {
+      "line": 28,
+      "changed": 0.0
+    },
+    {
+      "line": 29,
+      "changed": 0.0
+    },
+    {
+      "line": 30,
+      "changed": 0.0
+    },
+    {
+      "line": 31,
+      "changed": 0.0
+    },
+    {
+      "line": 32,
+      "changed": 0.0
+    },
+    {
+      "line": 33,
+      "changed": 0.0
+    },
+    {
+      "line": 34,
+      "changed": 0.0
+    },
+    {
+      "line": 35,
+      "changed": 0.0
+    },
+    {
+      "line": 36,
+      "changed": 0.0
+    },
+    {
+      "line": 37,
+      "changed": 0.0
+    },
+    {
+      "line": 38,
+      "changed": 0.0
+    },
+    {
+      "line": 39,
+      "changed": 0.0
+    },
+    {
+      "line": 40,
+      "changed": 0.0
+    },
+    {
+      "line": 41,
+      "changed": 0.0
+    },
+    {
+      "line": 42,
+      "changed": 0.0
+    },
+    {
+      "line": 43,
+      "changed": 0.0
+    },
+    {
+      "line": 44,
+      "changed": 0.0
+    },
+    {
+      "line": 45,
+      "changed": 0.0
+    },
+    {
+      "line": 46,
+      "changed": 0.0
+    },
+    {
+      "line": 47,
+      "changed": 0.0
+    },
+    {
+      "line": 48,
+      "changed": 0.0
+    },
+    {
+      "line": 49,
+      "changed": 0.0
+    },
+    {
+      "line": 50,
+      "changed": 0.0
+    },
+    {
+      "line": 51,
+      "changed": 0.0
+    },
+    {
+      "line": 52,
+      "changed": 0.0
+    },
+    {
+      "line": 53,
+      "changed": 0.0
+    },
+    {
+      "line": 54,
+      "changed": 0.0
+    }
+  ]
+}
