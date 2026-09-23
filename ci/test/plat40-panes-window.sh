@@ -37,13 +37,13 @@ LAYOUT="${root}/src/tests/visual/plat40-layout.json"
 # The operations, in `--replay-ops`'s spelling. Kept in ONE place the desktop
 # capture reads too (`plat40-scenario.json`), so the two front-ends cannot be
 # driven to different stops.
+# shellcheck disable=SC2034  # read by gpui-window-capture.sh
 OPS="$(python3 -c "import json; print(json.load(open('${root}/src/tests/visual/plat40-scenario.json'))['gpuiOps'])")"
-FRAME_W=1920
-FRAME_H=1080
-POLL_S=3
-STABLE_GRABS=2
-SETTLE_MAX_S=150
-QUIT_AFTER_MS=180000
+# shellcheck disable=SC2034  # read by gpui-window-capture.sh
+TRACE="${CALC}"
+# `OPS` and `TRACE` are read by the sourced library's `capture_window`.
+# shellcheck source=/dev/null
+. "${root}/ci/lib/gpui-window-capture.sh"
 INSIDE=0
 [ "${1:-}" = "--inside" ] && INSIDE=1
 
@@ -52,56 +52,12 @@ fail() {
 	exit 1
 }
 
-one() {
-	local id="$1"
-	shift
-	LD_LIBRARY_PATH="${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}:${LD_LIBRARY_PATH:-}" \
-		"${BIN}" "--quit-after-ms=${QUIT_AFTER_MS}" \
-		"--width=${FRAME_W}" "--height=${FRAME_H}" \
-		"--replay-ops=${OPS}" "--plan-out=${OUT}/${id}.plan.json" \
-		"$@" "${CALC}" >"${OUT}/${id}.run.log" 2>&1 &
-	local app=$!
-	local prev="${OUT}/${id}.prev.ppm" cur="${OUT}/${id}.cur.ppm" settled=false
-	local waited=0 same=0
-	while [ "${waited}" -lt "${SETTLE_MAX_S}" ] && kill -0 "${app}" 2>/dev/null; do
-		sleep "${POLL_S}"
-		waited=$((waited + POLL_S))
-		grim -t ppm "${cur}" >>"${OUT}/${id}.grim.log" 2>&1 || continue
-		if [ -f "${prev}" ] && cmp -s "${prev}" "${cur}"; then
-			same=$((same + 1))
-		else
-			same=0
-		fi
-		if [ "${same}" -ge "${STABLE_GRABS}" ] &&
-			python3 - "${cur}" <<'PY'; then
-import sys
-d = open(sys.argv[1], "rb").read()
-raster = d.split(b"\n", 3)[3]
-sys.exit(0 if max(raster[::97]) > 40 else 1)
-PY
-			settled=true
-			mv "${cur}" "${OUT}/${id}.ppm"
-			break
-		fi
-		mv "${cur}" "${prev}"
-	done
-	rm -f "${prev}" "${cur}"
-	kill "${app}" 2>/dev/null
-	wait "${app}" 2>/dev/null
-	local rc=$?
-	printf '{"id":"%s","ops":"%s","extra":"%s","rc":%d,"settled":%s,"settledAfterS":%d}\n' \
-		"${id}" "${OPS}" "$*" "${rc}" "${settled}" "${waited}" >>"${OUT}/manifest.jsonl"
-	echo "  ${id}: settled=${settled} after ${waited}s"
-}
-
 inside() {
 	rm -rf "${OUT}"
 	mkdir -p "${OUT}"
-	grim -t ppm "${OUT}/blank.ppm" >"${OUT}/blank.grim.log" 2>&1
-	printf '{"id":"blank","ops":"","extra":"","rc":0,"settled":true,"settledAfterS":0}\n' \
-		>>"${OUT}/manifest.jsonl"
-	one panes "--layout=${LAYOUT}"
-	one default
+	capture_blank
+	capture_window panes "--layout=${LAYOUT}"
+	capture_window default
 }
 
 if [ "${INSIDE}" = "1" ]; then

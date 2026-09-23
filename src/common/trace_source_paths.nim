@@ -175,3 +175,22 @@ proc pathContentRootFor*(
   TraceContentRoot(
     filesRoot: traceFilesRootFor(traceOutputFolder),
     selfContained: traceImported)
+
+proc sourceFolderRootsOf*(tracePaths: openArray[string]): seq[string] =
+  ## **The folders a recording's sources live in**, from its `paths.json` —
+  ## the ONE rule both the desktop (`index/traces.sourceFoldersFromTracePaths`)
+  ## and the native front-ends (`native_host.loadRecordingPanes`, PLAT-41) use
+  ## to build a replay session's file tree.
+  ##
+  ## A recorded path is relative to the trace's `files/` store; its folder is
+  ## a root (a bare file name at the top is its own root). Absolute paths are
+  ## skipped: they name the recording host's disk, not the trace's store.
+  ## First occurrence wins, so the order is the recording's.
+  for raw in tracePaths:
+    let path = normalizeSourcePath(raw)
+    if path.len == 0 or isAbsoluteTraceSourcePath(path):
+      continue
+    let slash = path.rfind('/')
+    let root = if slash <= 0: path else: path[0 ..< slash]
+    if root notin result:
+      result.add root

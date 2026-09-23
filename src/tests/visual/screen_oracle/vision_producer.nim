@@ -40,6 +40,16 @@ type
       ## that it could WIN against the three panes PLAT-39 read; it is read now.
     piPointList = "pointList"
       ## PLAT-40. The breakpoint and tracepoint list.
+    piDebugControls = "debugControls"
+    piFlow = "flow"
+    piTimeline = "timeline"
+    piSearch = "search"
+    piScratchpad = "scratchpad"
+    piShell = "shell"
+    piFileTree = "fileTree"
+    piBuildOutput = "buildOutput"
+      ## PLAT-41. The eight panes that had no view, read off the native
+      ## window where a layout places them.
     piOther = "other"
 
   LocatedPane* = object
@@ -273,17 +283,22 @@ const
     ##
     ## Exact matching is still preferred and tried first; this is the fallback.
 
-  KnownPaneTitles*: array[10, tuple[id: PaneId, title: string]] = [
+  KnownPaneTitles*: array[15, tuple[id: PaneId, title: string]] = [
     (piProgramState, "State"),
     (piEventLog, "Event Log"),
     (piEditor, "Editor"),
-    (piOther, "Debug Controls"),
+    (piDebugControls, "Debug Controls"),
     (piCalltrace, "Call Trace"),
     (piPointList, "Breakpoints"),
-    (piOther, "Files"),
+    (piFileTree, "Files"),
     (piOther, "Tests"),
     (piOther, "Constraints"),
-    (piOther, "Scratchpad")]
+    (piScratchpad, "Scratchpad"),
+    (piFlow, "Flow"),
+    (piTimeline, "Timeline"),
+    (piSearch, "Search"),
+    (piShell, "Shell"),
+    (piBuildOutput, "Build")]
     ## The closed set the classifier chooses from. `piOther` entries are here
     ## precisely so they can WIN: a title that is really `Call Trace` must be
     ## claimed by a class rather than falling to the nearest of the three we
@@ -876,3 +891,173 @@ proc readProducerPanes*(framePath: string, scratch: string): ProducerPanesReadin
       unreadable[PointListModel](urRegionNotLocated,
         "no cell's title strip identified a point list")
     else: readPointList(img, plCell, scratch)
+
+# ---------------------------------------------------------------------------
+# PLAT-41 — the eight newly expressed panes, read off one frame
+# ---------------------------------------------------------------------------
+
+type
+  QuietPane* = object
+    ## A pane whose TRUE answer on an unexercised session is its own empty
+    ## message — search before anyone searches, the scratchpad before anyone
+    ## pins, the shell before anyone types, and the build pane in replay.
+    pane*: PaneId
+    reading*: ScreenReading[seq[string]]
+      ## `srEmpty` when the body holds only the pane's chrome and its empty
+      ## message; `srRead` with the other lines when it holds more.
+
+  NewPanesReading* = object
+    framePath*: string
+    width*, height*: int
+    panes*: seq[LocatedPane]
+    transport*: ScreenReading[TransportModel]
+    flow*: ScreenReading[FlowPaneModel]
+    timeline*: ScreenReading[TimelineModel]
+    fileTree*: ScreenReading[FileTreeModel]
+    quiet*: seq[QuietPane]
+
+const
+  QuietPanes* = [piSearch, piScratchpad, piShell, piBuildOutput]
+  QuietChrome* = ["SEARCH", "SHELL"]
+    ## An Input's own label, which each of those panes draws above its
+    ## (empty) body.
+
+proc bodyLines(img: GrayImage; cell: Rect; scratch: string): seq[string] =
+  ## A pane body's lines, by the engine; by ink bands when the engine returns
+  ## nothing legible (a pane of short labels OCRs poorly as one block).
+  let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
+  if regionIsLegible(words):
+    result = linesOf(words)
+  if result.len == 0:
+    result = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+
+proc readTransport*(img: GrayImage; cell: Rect; scratch: string):
+    ScreenReading[TransportModel] =
+  var model = TransportModel(isVisible: true)
+  var lines = bodyLines(img, cell, scratch)
+  # A label per LINE: the engine can fuse two short buttons into one line,
+  # so a line that is no label is retried as bands before it counts.
+  var unmatched = 0
+  for l in lines:
+    if not parseTransportLabel(l).ok: inc unmatched
+  if unmatched > 0:
+    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+    var bandHits = 0
+    for l in banded:
+      if parseTransportLabel(l).ok: inc bandHits
+    if bandHits > lines.len - unmatched: lines = banded
+  for l in lines:
+    let t = parseTransportLabel(l)
+    if t.ok and t.label notin model.actions: model.actions.add t.label
+  if model.actions.len == 0:
+    if lines.len == 0: return empty[TransportModel]()
+    return unreadable[TransportModel](urGrammarMismatch,
+      $lines.len & " lines and none named a control: " & TransportGrammar.shape)
+  read(model)
+
+proc readTimeline*(img: GrayImage; cell: Rect; scratch: string):
+    ScreenReading[TimelineModel] =
+  let lines = bodyLines(img, cell, scratch)
+  for l in lines:
+    let t = parseTimelinePosition(l)
+    if t.ok:
+      return read(TimelineModel(isVisible: true, currentTick: t.current,
+                                lastTick: t.last))
+  if lines.len == 0: return empty[TimelineModel]()
+  unreadable[TimelineModel](urGrammarMismatch,
+    $lines.len & " lines and none matched " & TimelineGrammar.shape)
+
+proc readFlowPane*(img: GrayImage; cell: Rect; scratch: string):
+    ScreenReading[FlowPaneModel] =
+  var lines = bodyLines(img, cell, scratch)
+  var model = FlowPaneModel(isVisible: true)
+  var parsed = 0
+  for l in lines:
+    if parseFlowRow(l).ok: inc parsed
+  if parsed < lines.len:
+    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+    var bandParsed = 0
+    for l in banded:
+      if parseFlowRow(l).ok: inc bandParsed
+    if bandParsed > parsed: lines = banded
+  for l in lines:
+    if l.toUpperAscii.contains("NO FLOW STEPS"): return empty[FlowPaneModel]()
+    let r = parseFlowRow(l)
+    if r.ok:
+      model.rows.add FlowRowModel(location: r.location, expression: r.expression)
+  if model.rows.len == 0:
+    if lines.len == 0: return empty[FlowPaneModel]()
+    return unreadable[FlowPaneModel](urGrammarMismatch,
+      $lines.len & " lines and none matched " & FlowRowGrammar.shape)
+  read(model)
+
+proc readFileTree*(img: GrayImage; cell: Rect; scratch: string):
+    ScreenReading[FileTreeModel] =
+  let lines = bodyLines(img, cell, scratch)
+  var model = FileTreeModel(isVisible: true)
+  for l in lines:
+    let t = l.strip(chars = Whitespace + {'>', 'v', '|', '-'})
+    if t.len == 0: continue
+    if t.toUpperAscii.contains("NO SOURCE FILES"): return empty[FileTreeModel]()
+    model.entries.add t
+  if model.entries.len == 0: return empty[FileTreeModel]()
+  read(model)
+
+proc readQuietPane*(img: GrayImage; cell: Rect; scratch: string):
+    ScreenReading[seq[string]] =
+  var rest: seq[string] = @[]
+  for l in bodyLines(img, cell, scratch):
+    let u = l.strip().toUpperAscii
+    if u.len == 0 or u in QuietChrome: continue
+    if QuietMessages.anyIt(it.toUpperAscii.contains(u)): continue
+    rest.add l.strip()
+  if rest.len == 0: empty[seq[string]]() else: read(rest)
+
+proc readNewPanes*(framePath: string; scratch: string): NewPanesReading =
+  result.framePath = framePath
+  template allUnreadable(reason: UnreadableReason; why: string) =
+    result.transport = unreadable[TransportModel](reason, why)
+    result.flow = unreadable[FlowPaneModel](reason, why)
+    result.timeline = unreadable[TimelineModel](reason, why)
+    result.fileTree = unreadable[FileTreeModel](reason, why)
+    for p in QuietPanes:
+      result.quiet.add QuietPane(pane: p,
+                                 reading: unreadable[seq[string]](reason, why))
+  if not fileExists(framePath):
+    allUnreadable(urFrameMissing, "no file at " & framePath)
+    return
+  var img: GrayImage
+  try:
+    img = decodeGray(framePath)
+  except CatchableError as e:
+    allUnreadable(urFrameMissing, "decode failed: " & e.msg)
+    return
+  result.width = img.width
+  result.height = img.height
+  let grid = locateGrid(img)
+  if grid.isUnreadable:
+    allUnreadable(grid.reason, grid.detail)
+    return
+  createDir(scratch)
+  var cells = initTable[PaneId, Rect]()
+  for cell in grid.value.cells:
+    let p = identifyPane(img, cell, scratch)
+    result.panes.add p
+    if p.id notin cells: cells[p.id] = cell
+  template located(id: PaneId; T: typedesc; body: untyped): untyped =
+    if id notin cells:
+      unreadable[T](urRegionNotLocated,
+                    "no cell's title strip identified a " & $id & " pane")
+    else:
+      let cell {.inject.} = cells[id]
+      body
+  result.transport = located(piDebugControls, TransportModel,
+                             readTransport(img, cell, scratch))
+  result.flow = located(piFlow, FlowPaneModel, readFlowPane(img, cell, scratch))
+  result.timeline = located(piTimeline, TimelineModel,
+                            readTimeline(img, cell, scratch))
+  result.fileTree = located(piFileTree, FileTreeModel,
+                            readFileTree(img, cell, scratch))
+  for p in QuietPanes:
+    result.quiet.add QuietPane(pane: p, reading: located(p, seq[string],
+                               readQuietPane(img, cell, scratch)))

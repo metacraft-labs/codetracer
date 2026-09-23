@@ -4942,6 +4942,41 @@ plat40-record:
     --nimcache:nimcache/plat40rec -o:build/plat40_record \
     src/tests/visual/screen_oracle/plat40_record.nim
 
+# PLAT-41 — the thirteen panes, both front-ends, from RUNS: the native window
+# (its plan's per-pane census, and a frame of the eight newly expressed panes
+# for PLAT-39's reader) and the desktop's DOM census at the same stop. Split
+# on the capability line as PLAT-40's recipes are; the gate
+# (`test_plat41_parity.nim`, in the `tui` lane) asserts the committed record.
+plat41-capture-window:
+  bash ci/test/plat41-panes-window.sh
+
+plat41-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/plat41-parity-capture.spec.ts {{args}}
+      ;;
+    *)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/plat41-parity-capture.spec.ts {{args}}
+      ;;
+  esac
+
+plat41-record:
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat41rec -o:build/plat41_record \
+    src/tests/visual/screen_oracle/plat41_record.nim
+
 # The rejected change-fraction thresholds, as a runnable sweep (§36b). It adds
 # NO gate of its own on purpose: asserting that the losers ARE vacuous would
 # pin a property of the corpus nothing depends on, and would make a future

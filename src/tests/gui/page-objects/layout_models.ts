@@ -60,6 +60,36 @@ export interface PointListModel {
   points: PointRowModel[];
 }
 
+/** PLAT-41. The transport controls a pane offers, by label. */
+export interface TransportModel {
+  isVisible: boolean;
+  actions: string[];
+}
+
+/** PLAT-41. One flow row: where, and which expression. */
+export interface FlowRowModel {
+  location: string;
+  expression: string;
+}
+
+export interface FlowPaneModel {
+  isVisible: boolean;
+  rows: FlowRowModel[];
+}
+
+/** PLAT-41. Where the debugger is in the recording, and its last tick. */
+export interface TimelineModel {
+  isVisible: boolean;
+  currentTick: number;
+  lastTick: number;
+}
+
+/** PLAT-41. The file tree's entries, as labels, in reading order. */
+export interface FileTreeModel {
+  isVisible: boolean;
+  entries: string[];
+}
+
 export interface LayoutPageModel {
   eventLogTabModels: EventLogModel[];
   editorTabModels: EditorModel[];

@@ -529,7 +529,12 @@ PLAT-41)
 	MILESTONE="** PLAT-41: The eight panes with no view"
 	SUITES=(
 		src/frontend/tui/tests/test_plat41_pane_coverage.nim
+		src/frontend/tui/tests/test_plat41_parity.nim
 	)
+	# The SECOND suite is the milestone's run-tier half: the parity table from
+	# both front-ends' runs, PLAT-39's reader over the eight panes and DIFF-10,
+	# over the committed `plat41-readings.json`, plus a live session for the
+	# report-to-data transitions. It links isonim-tui like the first.
 	# ONE SUITE, AND IT COUNTS ONLY THIS MILESTONE'S OWN CASES.
 	#
 	# PLAT-41 also grew `test_cross_renderer_panes.nim` by 24 assertions —
@@ -545,11 +550,12 @@ PLAT-41)
 	# product's ViewModels, and the data-path cases construct five of them over
 	# a mock backend. Read from `ci/lib/test-lane-files.sh` rather than spelled
 	# again here (§30).
-	SUITE_FLAGS=("$(
+	TUI_FLAGS="$(
 		# shellcheck source=/dev/null
 		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
 			test_lane_extra_flags tui
-	)")
+	)"
+	SUITE_FLAGS=("${TUI_FLAGS}" "${TUI_FLAGS}")
 	LAW_SUITES=()
 	;;
 PLAT-42)

@@ -53,6 +53,7 @@ import viewmodels/[
   point_list_vm,
   scratchpad_vm,
   shell_vm,
+  filesystem_vm,
   origin_chain_vm,
   origin_chain_types,
 ]
@@ -106,6 +107,11 @@ type
     pointListVM*: PointListVM
     scratchpadVM*: ScratchpadVM
     shellVM*: ShellVM
+    fileTreeVM*: FilesystemVM
+      ## PLAT-41. The REPLAY session's file tree: the recording's own source
+      ## folders, as the desktop's Files pane shows them in replay — never the
+      ## working tree, which an edit-mode session owns. Filled by the native
+      ## hosts' `loadRecordingPanes` from the trace's `paths.json`.
     originChainVM*: OriginChainVM
       ## Optional Value Origin Tracking VM. The host attaches it via
       ## `attachOriginChainVM` so the derived `crossProcessSpans`
@@ -230,6 +236,8 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.scratchpadVM = createScratchpadVM(session.store)
   if session.shellVM.isNil:
     session.shellVM = createShellVM(session.store)
+  if session.fileTreeVM.isNil:
+    session.fileTreeVM = createFilesystemVM(session.store)
 
 # ---------------------------------------------------------------------------
 # M29 §5.3 — multi-process session management
@@ -439,6 +447,8 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.scratchpadVM.dispose()
   if not session.shellVM.isNil:
     session.shellVM.dispose()
+  if not session.fileTreeVM.isNil:
+    session.fileTreeVM.dispose()
   if not session.processTree.isNil:
     session.processTree.dispose()
   if not session.store.isNil:

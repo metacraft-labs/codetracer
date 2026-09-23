@@ -169,6 +169,37 @@ proc toolbarTooltip*(vm: DebugControlsVM; actionId, label: string): string =
   else: label & " (" & chord & ")"
 
 # ---------------------------------------------------------------------------
+# The transport strip
+# ---------------------------------------------------------------------------
+
+const TransportActions* = [
+  ("reverse-next", "Reverse next"),
+  ("next", "Next"),
+  ("reverse-step-in", "Reverse step in"),
+  ("step-in", "Step in"),
+  ("reverse-step-out", "Reverse step out"),
+  ("step-out", "Step out"),
+  ("reverse-continue", "Reverse continue"),
+  ("continue", "Continue"),
+  ("run-to-entry", "Run to entry")]
+  ## **The debugger's transport actions, in the desktop toolbar's order, with
+  ## its labels** (`views/isonim_debug_controls_view`), named once so every
+  ## front-end offers the same set (PLAT-41's DIFF-10). The ids are the ones
+  ## `invokeToolbarStep` dispatches on.
+
+proc transportAvailable*(vm: DebugControlsVM; actionId: string): bool =
+  ## Whether a transport action is legal at this stop — the desktop toolbar's
+  ## rule, read from the ViewModel's own memos: forward motions on
+  ## `canStepForward`, backward ones on `canStepBackward`, the two continues on
+  ## their own, and run-to-entry always.
+  case actionId
+  of "next", "step-in", "step-out": vm.canStepForward.val
+  of "reverse-next", "reverse-step-in", "reverse-step-out": vm.canStepBackward.val
+  of "continue": vm.canContinue.val
+  of "reverse-continue": vm.canReverseContinue.val
+  else: true
+
+# ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
 

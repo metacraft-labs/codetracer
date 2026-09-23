@@ -1,0 +1,105 @@
+{
+  "version": 3,
+  "layout": {
+    "kind": "row",
+    "children": [
+      {
+        "kind": "column",
+        "weight": 1.0,
+        "children": [
+          {
+            "kind": "pane",
+            "pane": "editor",
+            "title": "Editor",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "calltrace",
+            "title": "Call Trace",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "state",
+            "title": "State",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "eventLog",
+            "title": "Event Log",
+            "weight": 1.0
+          }
+        ]
+      },
+      {
+        "kind": "column",
+        "weight": 1.0,
+        "children": [
+          {
+            "kind": "pane",
+            "pane": "debugControls",
+            "title": "Debug Controls",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "flow",
+            "title": "Flow",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "timeline",
+            "title": "Timeline",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "search",
+            "title": "Search",
+            "weight": 1.0
+          }
+        ]
+      },
+      {
+        "kind": "column",
+        "weight": 1.0,
+        "children": [
+          {
+            "kind": "pane",
+            "pane": "pointList",
+            "title": "Breakpoints",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "scratchpad",
+            "title": "Scratchpad",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "shell",
+            "title": "Shell",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "fileTree",
+            "title": "Files",
+            "weight": 1.0
+          },
+          {
+            "kind": "pane",
+            "pane": "buildOutput",
+            "title": "Build",
+            "weight": 1.0
+          }
+        ]
+      }
+    ]
+  },
+  "docked": []
+}

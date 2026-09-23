@@ -58,6 +58,9 @@ export flow_line_rule.FlowStyledLine, flow_line_rule.FlowLineStyleKind
 # with no imports, exactly so both this layer and `common_types` can hold the
 # same strings; see its header for why the wire form is a name.
 import ../../../common/flow_mode_wire
+# PLAT-2's value pipeline, for the flow pane's values (`flowValueText`).
+import ../../../common/value_presentation
+import ../../../common/value_presentation/json_adapter
 export flow_mode_wire
 
 type
@@ -396,6 +399,47 @@ proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
         result.add FlowStyledLine(position: header, kind: flskHit)
   result.sort(proc (a, b: FlowStyledLine): int = cmp(a.position, b.position))
 
+proc flowValueText(value: JsonNode): string =
+  ## One recorded value as the flow pane prints it: PLAT-2's pipeline at the
+  ## flow surface's budget, so it reads as every other surface reads it.
+  if value.isNil or value.kind == JNull: ""
+  else: present(json_adapter.toPValue(value), FlowBudget).root.text
+
+proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
+  ## The window's steps as the flow pane's rows: one row per step and
+  ## expression, in the order the engine evaluated them (`exprOrder`), with the
+  ## value before and after the step.
+  if view.isNil or view.kind != JObject: return
+  let steps = view{"steps"}
+  if steps.isNil or steps.kind != JArray: return
+  var file = ""
+  let loc = view{"location"}
+  if not loc.isNil and loc.kind == JObject:
+    file = loc{"highLevelPath"}.getStr("")
+    if file.len == 0: file = loc{"path"}.getStr("")
+  let base = file[file.rfind('/') + 1 .. ^1]
+  for st in steps:
+    if st.kind != JObject: continue
+    let line = jsonInt(st{"position"}, 0)
+    let count = jsonInt(st{"stepCount"}, 0)
+    let before = st{"beforeValues"}
+    let after = st{"afterValues"}
+    var order: seq[string] = @[]
+    let orderNode = st{"exprOrder"}
+    if not orderNode.isNil and orderNode.kind == JArray:
+      for e in orderNode: order.add e.getStr("")
+    if order.len == 0 and not after.isNil and after.kind == JObject:
+      for k, _ in after: order.add k
+      order.sort()
+    for expr in order:
+      if expr.len == 0: continue
+      result.add FlowStepEntry(
+        step: count,
+        location: base & ":" & $line,
+        expression: expr,
+        beforeValue: flowValueText(if before.isNil: nil else: before{expr}),
+        afterValue: flowValueText(if after.isNil: nil else: after{expr}))
+
 proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## Adopt a `ct/load-flow` response.
   ##
@@ -439,6 +483,11 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   vm.loops.val = loops
   vm.focusedLoop.val = focused
   vm.styledLines.val = flowLineFacts(view)
+  # PLAT-41: THE STEPS ARE KEPT. The flow pane's rows are the window's own
+  # steps, and until 2026-09-23 this function adopted the loops and the line
+  # facts and dropped the steps on the floor, so the pane said "no flow steps
+  # have been loaded" beside an editor drawing the same window's overlay.
+  vm.steps.val = flowStepEntriesOf(view)
   vm.windowRRTicks.val = ticks
   vm.iterationCount.val =
     if focused >= 0: loops[focused].rrTicksForIterations.len else: 0

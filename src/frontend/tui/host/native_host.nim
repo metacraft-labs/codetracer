@@ -42,11 +42,14 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[os, posix, strutils]
+import std/[algorithm, json, os, posix, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
 
 import headless_session
+import store/types as store_types   # `FilesystemEntryNode`
+import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
+import ../../../common/trace_source_paths   # the shared source-folder rule
 export headless_session
 
 type
@@ -272,6 +275,52 @@ type
     events*: bool
     calltrace*: bool
     locals*: bool
+    files*: bool
+      ## PLAT-41: the replay file tree holds the recording's source folders.
+
+proc listedEntry(dir, relative: string): FilesystemEntryNode =
+  ## One folder of the trace's `files/` store, recursively: folders first,
+  ## then files, each group sorted — a stable order a reader can scan.
+  let name = relative[relative.rfind('/') + 1 .. ^1]
+  result = FilesystemEntryNode(text: name, path: "/" & relative,
+                               isFolder: true, isExpanded: true)
+  var folders, files: seq[string] = @[]
+  for kind, path in walkDir(dir):
+    let leaf = path.extractFilename
+    case kind
+    of pcDir, pcLinkToDir: folders.add leaf
+    of pcFile, pcLinkToFile: files.add leaf
+  folders.sort()
+  files.sort()
+  for f in folders:
+    result.children.add listedEntry(dir / f, relative & "/" & f)
+  for f in files:
+    result.children.add FilesystemEntryNode(text: f,
+                                            path: "/" & relative & "/" & f)
+
+proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
+  ## **The replay session's file tree**: the recording's own source folders,
+  ## derived from its `paths.json` by the rule the desktop's Files pane uses
+  ## (`trace_source_paths.sourceFolderRootsOf`), each listed from the trace's
+  ## `files/` store. An empty tree when the recording lists no sources or
+  ## carries no store — the pane then reports rather than guessing at a disk.
+  result = FilesystemEntryNode(text: "source folders", isFolder: true,
+                               isExpanded: true)
+  let pathsFile = traceFolder / "paths.json"
+  if not fileExists(pathsFile): return
+  var recorded: seq[string] = @[]
+  try:
+    for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
+  except CatchableError:
+    return
+  let store = traceFolder / "files"
+  for root in sourceFolderRootsOf(recorded):
+    let dir = store / root
+    if dirExists(dir):
+      result.children.add listedEntry(dir, root)
+    elif fileExists(dir):
+      result.children.add FilesystemEntryNode(text: root.extractFilename,
+                                              path: "/" & root)
 
 proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-RECORDING producers, asked once at open: the event log's first
@@ -288,6 +337,12 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
     result.calltrace = s.getCalltraceLines().len > 0
   except CatchableError:
     result.calltrace = false
+  # PLAT-41: the recording's own source tree, read off the trace folder — a
+  # host concern, which is why it is here and not in the ViewModel layer.
+  let files = s.session.fileTreeVM
+  if not files.isNil:
+    files.setRoot(recordingFileTree(s.tracePath))
+    result.files = files.rootEntry.val.children.len > 0
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-STOP producer: the values in scope where the debugger now is,

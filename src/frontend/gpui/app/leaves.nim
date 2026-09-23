@@ -95,6 +95,8 @@ import ../../view_vocabulary/gpui_binding
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
+import viewmodels/timeline_vm   # the native timeline's ViewModel (PLAT-41)
+import isonim/core/[signals, computation]
 
 export shell, editor_surface
 # `value_presentation` is re-exported because the BUDGETS are this medium's
@@ -529,6 +531,47 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     r.appendChild(parent, renderEditorRow(r, row, widest))
   surface.rows.len > 0
 
+const
+  TimelineBarWidthPx* = 400
+    ## The scrubber's track. A fixed track rather than the pane's width: the
+    ## pane's width is the dock's to decide and a track that re-measured it
+    ## would be a second layout owner (`admission.nim`'s rule).
+  TimelineBarHeightPx = 6
+  TimelineTrackColor = "#3a3a3a"
+  TimelineFillColor = "#4fb3a9"
+
+proc timelineText*(current, first, last: uint64): string =
+  ## `tick <current> / <last> [<percent>%]` — the terminal header's spelling.
+  let span = if last > first: last - first else: 0'u64
+  let done = if current > first: current - first else: 0'u64
+  let pct = if span == 0: 0.0 else: 100.0 * float(done) / float(span)
+  "tick " & $current & " / " & $last & " [" & formatFloat(pct, ffDecimal, 1) & "%]"
+
+proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
+  ## The recording's extent and where the debugger is in it: a line of text
+  ## (what a reader and PLAT-39's reader parse) and a track filled to the
+  ## current tick (what an eye reads).
+  let marks = vm.markers.val
+  let first = if marks.len > 0: marks[0] else: 0'u64
+  let last = if marks.len > 1: marks[1] else: first
+  let current = vm.currentPosition.val
+  let label = r.createElement("div")
+  r.appendChild(label, r.createTextNode(timelineText(current, first, last)))
+  r.appendChild(parent, label)
+  let track = r.createElement("div")
+  r.setStyle(track, "width", $TimelineBarWidthPx & "px")
+  r.setStyle(track, "height", $TimelineBarHeightPx & "px")
+  r.setStyle(track, "background", TimelineTrackColor)
+  let fill = r.createElement("div")
+  let span = if last > first: last - first else: 0'u64
+  let done = if current > first: min(current - first, span) else: 0'u64
+  let filled = if span == 0: 0 else: int(TimelineBarWidthPx.float * float(done) / float(span))
+  r.setStyle(fill, "width", $filled & "px")
+  r.setStyle(fill, "height", $TimelineBarHeightPx & "px")
+  r.setStyle(fill, "background", TimelineFillColor)
+  r.appendChild(track, fill)
+  r.appendChild(parent, track)
+
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
                     leaf: GpuiLeaf; budget: Budget): bool =
   ## Draw a builtin pane's vocabulary tree into `parent`. Answers whether the
@@ -568,6 +611,9 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
   ## renders a report naming the extension, and reinstalling it restores the
   ## pane where it was"* — and none of the three is a blank region.
   let node = r.createElement("div")
+  # Every leaf clips, not only a top-level column: two leaves stacked in one
+  # column must not draw into each other either (PLAT-41).
+  r.setStyle(node, "overflow", "hidden")
   r.setAttribute(node, PaneRoleAttribute, leaf.paneId)
   r.setAttribute(node, SlotPathAttribute, slotPath(leaf.slot))
   r.setAttribute(node, TabAttribute,
@@ -604,6 +650,27 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
       let drewRows = renderEditor(r, node, sourcePaneView(GpuiMedium).root,
                                   surface)
       return (node, not drewRows)
+    # **AN ACCEPTED EXCEPTION SAYS WHICH EXCEPTION IT IS** (PLAT-41's LAW-P3),
+    # in every product mode. `fileTree` and `buildOutput` have no replay
+    # ViewModel by DECISION, so the generic not-live sentence below — "waiting
+    # for the session to launch" — was a promise the session would never keep,
+    # drawn on a real run of the shipped binary. `paneView` names the
+    # exception and its reason without a ViewModel.
+    # **THE TIMELINE IS THIS FRONT-END'S OWN VIEW**, as the editor is: PLAT-3
+    # refused a Timeline entry in the vocabulary (`timelinePaneView` is a
+    # native escape), which obliges each medium to draw one natively. Until
+    # PLAT-41 GPUI drew nothing there — the escape node has no text — while
+    # the terminal and the desktop draw a scrubber.
+    if leaf.kind == glkBuiltin and leaf.builtin == paneTimeline and leaf.live:
+      r.setAttribute(node, StateAttribute, "live")
+      r.appendChild(node, paneTitleElement(r, leaf))
+      renderTimeline(r, node, TimelineVM(leaf.vm))
+      return (node, false)
+    if leaf.kind == glkBuiltin and leaf.builtin in PaneAcceptedExceptions:
+      r.setAttribute(node, StateAttribute, "pane-report")
+      r.appendChild(node, paneTitleElement(r, leaf))
+      discard renderPaneView(r, node, leaf, GpuiPanelBudget)
+      return (node, true)
     if not leaf.live:
       r.setAttribute(node, StateAttribute, "not-launched")
       # **THE SENTENCE NAMES THE PRODUCT MODE**, because "waiting for the

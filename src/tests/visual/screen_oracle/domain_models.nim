@@ -78,6 +78,34 @@ type
     isVisible*: bool
     points*: seq[PointRowModel]
 
+  TransportModel* = object
+    ## PLAT-41. The debugger's transport controls a pane offers, by LABEL
+    ## (`Next`, `Step in`, `Run to entry`, …) — what a reader of either
+    ## front-end's screen can name.
+    isVisible*: bool
+    actions*: seq[string]
+
+  FlowRowModel* = object
+    ## PLAT-41. One flow row: where, and which expression was evaluated there.
+    location*: string
+    expression*: string
+
+  FlowPaneModel* = object
+    isVisible*: bool
+    rows*: seq[FlowRowModel]
+
+  TimelineModel* = object
+    ## PLAT-41. Where the debugger is in the recording, and the recording's
+    ## last tick.
+    isVisible*: bool
+    currentTick*: int
+    lastTick*: int
+
+  FileTreeModel* = object
+    ## PLAT-41. The file tree's entries, as labels, in reading order.
+    isVisible*: bool
+    entries*: seq[string]
+
   LayoutPageModel* = object
     eventLogTabModels*: seq[EventLogModel]
     editorTabModels*: seq[EditorModel]
@@ -157,3 +185,6 @@ func `$`*(m: PointListModel): string =
     $m.points.len & ")"
   for p in m.points:
     result.add "\n    " & p.kind & " " & p.fileName & ":" & $p.lineNumber
+
+func `==`*(a, b: FlowRowModel): bool =
+  a.location == b.location and a.expression == b.expression

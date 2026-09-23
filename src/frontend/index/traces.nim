@@ -7,7 +7,7 @@ import
   ../[ trace_metadata, config, types ],
   ../viewmodel/viewmodels/visual_replay_layout,
   visual_replay_player,
-  ../../common/[ ct_logging, paths, ],
+  ../../common/[ ct_logging, paths, trace_source_paths ],
   # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
   ./launch_config,
@@ -315,16 +315,11 @@ proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} 
   var folders: seq[cstring] = @[]
   try:
     let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
-    for rawPath in tracePaths:
-      let path = $rawPath
-      if path.len == 0 or path.isAbsoluteFilesystemPath:
-        continue
-      let folder = path.parentDir
-      let root =
-        if folder.len == 0 or folder == ".":
-          path
-        else:
-          folder
+    var plain: seq[string] = @[]
+    for rawPath in tracePaths: plain.add $rawPath
+    # THE SHARED RULE (`trace_source_paths.sourceFolderRootsOf`), which the
+    # native front-ends' replay file tree uses too.
+    for root in sourceFolderRootsOf(plain):
       folders.addUniquePath(cstring(root))
   except:
     warnPrint "failed to derive filesystem folders from paths.json: ",

@@ -159,10 +159,41 @@ const
           "covers stdout and stderr alike — so the row answers the TEXT " &
           "alone, and the three front-ends are compared on the text.")
 
+  TransportGrammar* = GrammarRule(
+    name: "transport-control",
+    shape: "one of the transport labels, alone on its line",
+    note: "PLAT-41. A control is read by its LABEL, matched within OCR's one " &
+          "edit against the closed set `TransportLabels` — the desktop " &
+          "toolbar's labels, which the native pane draws too. A line that is " &
+          "no label is chrome (the pane's heading, its status line).")
+
+  TimelineGrammar* = GrammarRule(
+    name: "timeline-position",
+    shape: "'tick' <current> '/' <last> [ '[' <percent> '%]' ]",
+    note: "PLAT-41. The native window's timeline line and the terminal " &
+          "header's spelling. Both integers are required; the percentage is " &
+          "derived and not read.")
+
+  FlowRowGrammar* = GrammarRule(
+    name: "flow-row",
+    shape: "<step> <file> ':' <line> <expression> [ <before> [ <after> ] ]",
+    note: "PLAT-41. A flow table row: the step count, the location and the " &
+          "expression are read; the values are the presenter's and are not " &
+          "compared (OCR and the pane width both cut them).")
+
 const AllGrammarRules* = [ProgramStateGrammar, EventLogGrammar,
                           EventLogFooterGrammar, EditorGrammar,
                           EventLogTableGrammar, CalltraceGrammar,
-                          PointListGrammar, TerminalEventRowGrammar]
+                          PointListGrammar, TerminalEventRowGrammar,
+                          TransportGrammar, TimelineGrammar, FlowRowGrammar]
+
+const TransportLabels* = ["Reverse next", "Next", "Reverse step in", "Step in",
+                          "Reverse step out", "Step out", "Reverse continue",
+                          "Continue", "Run to entry"]
+  ## The desktop toolbar's labels (`debug_controls_vm.TransportActions`),
+  ## written out here because the reader imports no product module
+  ## (`plat39-oracle-independence.sh`); `test_plat41_parity.nim` asserts the
+  ## two lists are the same.
 
 const TerminalEventCategories* = ["out", "mut", "sys", "err", "trc", "???"]
   ## `app/views/event_log.categoryLabel`'s spellings, trimmed.
@@ -440,3 +471,50 @@ func namesAgree*(a, b: openArray[string]): bool =
   for n in small:
     if n notin large: return false
   true
+
+func parseTransportLabel*(line: string): tuple[ok: bool, label: string] =
+  ## `TransportGrammar`: the label this line is, within one edit.
+  let t = line.strip()
+  if t.len == 0: return (false, "")
+  for l in TransportLabels:
+    if t == l: return (true, l)
+  for l in TransportLabels:
+    if withinOneEdit(t.toLowerAscii, l.toLowerAscii): return (true, l)
+  (false, "")
+
+func parseTimelinePosition*(line: string): tuple[ok: bool, current, last: int] =
+  ## `TimelineGrammar`.
+  let toks = line.replace("/", " / ").strip().splitWhitespace()
+  if toks.len < 4 or toks[0].toLowerAscii.strip(chars = {':'}) != "tick":
+    return (false, 0, 0)
+  if toks[2] != "/": return (false, 0, 0)
+  try:
+    (true, parseInt(toks[1]), parseInt(toks[3]))
+  except ValueError:
+    (false, 0, 0)
+
+func parseFlowRow*(line: string): tuple[ok: bool, location, expression: string] =
+  ## `FlowRowGrammar`.
+  let toks = line.strip().splitWhitespace()
+  if toks.len < 3: return (false, "", "")
+  if not toks[0].allCharsInSet({'0'..'9'}): return (false, "", "")
+  let colon = toks[1].rfind(':')
+  if colon <= 0 or not toks[1][colon + 1 .. ^1].allCharsInSet({'0'..'9'}) or
+     colon == toks[1].high:
+    return (false, "", "")
+  (true, toks[1], toks[2])
+
+const
+  QuietMessages* = [
+    "no search results",
+    "no values have been pinned to the scratchpad",
+    "the shell ViewModel carries input and history and no output; this pane " &
+      "shows what exists",
+    "the buildOutput pane is an edit-mode view; a replay session does not " &
+      "build the working tree and will not claim to"]
+    ## The products' own empty messages, as whole sentences — the `srEmpty`
+    ## warrant, as PLAT-39's state reader takes "No local variables are
+    ## present" to be one. Written out because this reader imports no product
+    ## module; `test_plat41_parity.nim` asserts each is the pane's own report.
+    ## A pane WRAPS a sentence across lines and OCR can lose one of them, so a
+    ## body line counts as the message when it is a FRAGMENT of it.

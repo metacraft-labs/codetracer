@@ -617,6 +617,10 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     r.setStyle(pane, "color", chromeOf(crWindowForeground))
     r.setStyle(pane, "width", $paneW & "px")
     r.setStyle(pane, "height", "100%")
+    # A PANE CLIPS ITS OWN CONTENT (PLAT-41). A table wider than its pane —
+    # the flow pane's five columns — drew over the three panes beside it on
+    # the shipped binary; the pane is the boundary a reader expects.
+    r.setStyle(pane, "overflow", "hidden")
     r.setStyle(pane, "flex-direction", "column")
     r.setStyle(pane, "padding", $ChromePaddingPx & "px")
     r.setStyle(pane, "rounded", "4px")

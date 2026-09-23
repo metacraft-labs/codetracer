@@ -26,7 +26,7 @@
 ## and a pane parked in `PaneNativePanes` has to be genuinely refused by
 ## `checkPortable`.
 
-import std/[sets, strutils, unittest]
+import std/[os, sets, strutils, unittest]
 
 import ../../view_vocabulary/pane_views
 import ../../headless_app/layout_model
@@ -42,6 +42,9 @@ import viewmodels/flow_vm
 import viewmodels/search_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
+import viewmodels/filesystem_vm
+import ../host/native_host   # `recordingFileTree`, the replay file tree's producer
+import ./fixtures/fixture_provider
 import isonim/viewmodel as isonim_viewmodel
 import backend/mock_backend
 
@@ -74,13 +77,17 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
        PaneVocabularyPanes + PaneNativePanes + PaneAcceptedExceptions
 
   test "the cardinalities add up, and they are the measured ones":
-    # 13 = 9 + 2 + 2. Written out because the sum is the claim: if a later
-    # milestone expresses one of the exceptions, TWO of these move and the
-    # test names which.
+    # 13 = 10 + 2 + 1. Written out because the sum is the claim: when a pane
+    # moves category, TWO of these move and the test names which. It did
+    # once already — 9 + 2 + 2 until the replay file tree was expressed
+    # (PLAT-41's measured correction: the desktop draws the recording's own
+    # sources in replay, which refuted `fileTree`'s exception).
     ck card(allPanes()) == 13
-    ck card(PaneVocabularyPanes) == 9
+    ck card(PaneVocabularyPanes) == 10
     ck card(PaneNativePanes) == 2
-    ck card(PaneAcceptedExceptions) == 2
+    ck card(PaneAcceptedExceptions) == 1
+    ck paneFileTree in PaneVocabularyPanes
+    ck PaneAcceptedExceptions == {paneBuildOutput}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +
        card(PaneAcceptedExceptions) == card(allPanes())
 
@@ -259,6 +266,34 @@ suite "PLAT-41 — the five panes DRAW DATA, not only reports":
       ck pv.report.contains("no output")
       dispose()
 
+  test "fileTree renders the RECORDING'S OWN source tree, from its paths.json":
+    # Not constructed rows: `native_host.recordingFileTree` reads the `calc`
+    # recording's `paths.json` and its `files/` store — the tree the desktop's
+    # Files pane shows in replay — and the view draws it with an empty report.
+    let calc = resolveFixture("calc")
+    doAssert calc.outcome != foMissingPrereq,
+      missingPrereqMessage(calc.spec, calc.detail)
+    createRoot proc(dispose: proc()) =
+      let vm = createFilesystemVM(freshStore())
+      vm.setRoot(recordingFileTree(calc.tracePath))
+      let pv = paneView(paneFileTree, ViewModel(vm), GpuiPanelBudget, "gpui")
+      ck pv.report.len == 0
+      ck pkTree in pv.entries
+      var labels: seq[string] = @[]
+      proc walk(n: ViewNode) =
+        labels.add n.label
+        for c in n.children: walk(c)
+      walk(pv.root)
+      checkpoint($labels)
+      ck labels == @["source folders", "calc", "main.py"]
+      dispose()
+    # AND AN EMPTY TREE REPORTS: a trace folder with no `paths.json`.
+    createRoot proc(dispose: proc()) =
+      let vm = createFilesystemVM(freshStore())
+      vm.setRoot(recordingFileTree(getTempDir() / "plat41-no-such-trace"))
+      ck paneView(paneFileTree, ViewModel(vm), GpuiPanelBudget, "gpui").report.len > 0
+      dispose()
+
   test "debugControls renders Buttons whose availability comes from the VM":
     createRoot proc(dispose: proc()) =
       let vm = createDebugControlsVM(freshStore())
@@ -267,9 +302,12 @@ suite "PLAT-41 — the five panes DRAW DATA, not only reports":
       ck pv.report.len == 0
       ck pkButton in pv.entries
       ck pkText in pv.entries
-      # Four controls and a status line. Counted, because a view that emitted
-      # one button would satisfy `pkButton in entries` and draw a broken pane.
-      ck pv.root.children.len == 5
+      # The desktop's nine transport controls and a status line. Counted,
+      # because a view that emitted one button would satisfy `pkButton in
+      # entries` and draw a broken pane. (Four until PLAT-41 aligned the pane
+      # with the desktop toolbar's `TransportActions`.)
+      ck pv.root.children.len == TransportActions.len + 1
+      ck pv.root.children.len == 10
       dispose()
 
   test "a populated pane and a nil pane do NOT produce the same tree":

@@ -656,11 +656,13 @@ suite "PLAT-39 DIFF-8 — the same scenario, two renderers, one reader":
         let d = editDistance(KnownPaneTitles[i].title.toLowerAscii,
                              KnownPaneTitles[j].title.toLowerAscii)
         if d < closest: closest = d
-    # MEASURED: the closest pair is 4 — `Files`/`Tests` and `State`/`Tests`.
+    # MEASURED: the closest pair is 3 — `Files`/`Flow`, since PLAT-41 added
+    # the eight newly expressed panes' titles (it was 4, `Files`/`Tests`,
+    # before). Still more than twice the tolerance, which is the claim.
     # This case earned its keep: an earlier draft set the tolerance to 2 and
     # claimed in its own comment that the closest pair was 5. Both were wrong,
     # 2 x 2 is exactly 4, and this assertion is what said so.
-    ck closest == 4
+    ck closest == 3
     ck closest > 2 * TitleMatchTolerance
     ck TitleMatchTolerance == 1
 

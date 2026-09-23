@@ -1455,6 +1455,15 @@ proc applyEventLogRows*(store: ReplayDataStore;
     if row.maxRRTicks > maxTicks:
       maxTicks = row.maxRRTicks
   store.eventLog.maxRRTicks.val = maxTicks
+  # THE TIMELINE'S EXTENT FOLLOWS WHAT THE LOG LEARNS (PLAT-41). The
+  # recording's extent is one fact, and for a completed recording the event
+  # log's `maxRRTicks` is where every front-end learns it; the timeline's own
+  # copy was raised only by LIVE recording-head updates, so on a replay the
+  # native timeline drew `tick 4 / 0`. Raised, never lowered — as the log's.
+  if maxTicks > store.timeline.val.maxRRTicks:
+    var timeline = store.timeline.val
+    timeline.maxRRTicks = maxTicks
+    store.timeline.val = timeline
   store.eventLog.loadingState.val = lsIdle
 
 proc applyEventLogResponse*(store: ReplayDataStore;

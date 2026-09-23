@@ -94,7 +94,10 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 161
+# 162 since PLAT-41: the recording's extent now reaches `TimelineVM.markers`,
+# so the marker case asserts where `seekAtFraction` lands (three checks)
+# where it asserted that nothing moved (two).
+const ExpectedAssertions = 162
 
 var countedAssertions = 0
 
@@ -430,7 +433,11 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck firstPage.len == min(PageSize, truth.len)
       ck firstPage[0].event.tick == truth[0].rrTicks
 
-      # ---- BOUNDS: NOT from `TimelineVM`, and the source says so ----------
+      # ---- BOUNDS: from `TimelineVM`, and it AGREES with the event log -----
+      # Until PLAT-41 `TimelineVM.markers` was never fed on a replay and the
+      # bounds came from `ct/event-load.maxRRTicks`; the store's timeline
+      # extent now follows what the event log learns, so the markers answer
+      # first — and must name the same extent the wire reported.
       var rowsSoFar: seq[EventRow] = @[]
       for row in firstPage:
         if row.kind == elrEvent:
@@ -439,7 +446,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       echo "CTUI-8 TIMELINE BOUNDS: ", bounds.minTick, "..", bounds.maxTick,
            " from ", bounds.source
       ck bounds.known
-      ck bounds.source == "ct/event-load.maxRRTicks"
+      ck bounds.source == "TimelineVM.markers"
       ck bounds.maxTick == truth[0].maxRRTicks
       ck bounds.minTick == 0'u64
 
@@ -551,7 +558,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       # `app/tests/test_timeline_scrubber_quantization.nim`'s sibling suite.
       ck mutationTicks(rows).len == 0
 
-  test "the event log reaches the ViewModel, and the two markers still do not":
+  test "the event log reaches the ViewModel, and so does the recording's extent":
     inc examinedFixtures
     let resolution = resolveFixture(FixtureName)
     if resolution.outcome == foMissingPrereq:
@@ -627,15 +634,29 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck distinctValues.len > 1
       ck h.events.totalEventCount.val >= rows.len
       ck h.events.markerRows.val.len == 0
-      ck h.timeline.markers.val.len == 0
-      ck h.session.session.store.timeline.val.maxRRTicks == 0'u64
-      # `seekAtFraction` is the one TimelineVM action that depends on `markers`,
-      # so it is a no-op on every recording in this corpus. Measured rather than
-      # argued: the position does not change.
+      # THE EXTENT ARRIVES WITH THE LOG (PLAT-41). The store's timeline copy of
+      # `maxRRTicks` was raised only by LIVE recording-head updates, so on a
+      # replay `TimelineVM.markers` was empty and `seekAtFraction` a no-op; it
+      # now follows the event log's own `maxRRTicks`.
+      ck h.timeline.markers.val == @[0'u64, truth[0].maxRRTicks]
+      ck h.session.session.store.timeline.val.maxRRTicks == truth[0].maxRRTicks
+      # …and so `seekAtFraction` — the one TimelineVM action that depends on
+      # `markers` — MOVES the debugger now, to the three-quarter point of the
+      # recording rather than nowhere.
+      # The request goes through `BackendService`, and the engine's answer —
+      # `ct/complete-move` — is applied by a HOST (this harness only drains),
+      # so the move is read off the engine's own answer.
       let before = h.session.getCurrentRRTicks()
       h.timeline.seekAtFraction(0.75)
-      ck h.session.getCurrentRRTicks() == before
-      ck h.session.drainEvents().len == 0
+      var landed = -1'i64
+      for e in h.session.drainEvents():
+        if e{"event"}.getStr == "ct/complete-move":
+          landed = e{"body", "location", "rrTicks"}.getBiggestInt(-1)
+      checkpoint("seekAtFraction(0.75): " & $before & " -> " & $landed &
+                 " of " & $truth[0].maxRRTicks)
+      ck landed >= 0
+      ck landed.uint64 != before
+      ck landed.uint64 > truth[0].maxRRTicks div 2
 
   test "a post-hoc tracepoint the dialog composes puts real diamonds on the bar":
     # THE `◆` HALF OF §3.3.5, end to end on a real recording, and the evidence
