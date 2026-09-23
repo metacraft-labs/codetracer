@@ -101,7 +101,6 @@ fail() {
 recorded_violations() {
 	cat <<-'EOF'
 		src/db-backend/tests/dap_backend_server.rs::dap_server_socket_transport_is_unix_only
-		src/db-backend/tests/reprobuild_hcr_in_codetracer_test.rs::reprobuild_hcr_in_codetracer_unsupported_platform_profile
 	EOF
 }
 
@@ -183,9 +182,9 @@ check_floor() {
 	fi
 }
 
-check_floor ".rs files scanned"          "$files_scanned"   300
-check_floor "files carrying tests"       "$files_with_tests" 200
-check_floor "test functions examined"    "$tests_examined"  1200
+check_floor ".rs files scanned" "$files_scanned" 300
+check_floor "files carrying tests" "$files_with_tests" 200
+check_floor "test functions examined" "$tests_examined" 1200
 
 # ---------------------------------------------------------------------------
 # 3. The violations are exactly the recorded ones.
@@ -208,7 +207,7 @@ actual="$(actual_violations)"
 recorded="$(recorded_violations | sed 's/^[[:space:]]*//' | grep -v '^$' | LC_ALL=C sort -u)"
 
 if [ "$actual" = "$recorded" ]; then
-	ok "flagged set matches the baseline ($(printf '%s\n' "$recorded" | grep -c . ) entr(y/ies))"
+	ok "flagged set matches the baseline ($(printf '%s\n' "$recorded" | grep -c .) entr(y/ies))"
 else
 	delta="$(diff <(printf '%s\n' "$recorded") <(printf '%s\n' "$actual") |
 		sed -n 's/^< /  FIXED — remove it from the baseline: /p;s/^> /  NEW assertion-less test: /p')"
