@@ -51,7 +51,7 @@ neither the linker's path nor `LD_LIBRARY_PATH`. `ci/lib/test-lane-files.sh`
 already answers that question for the lane; this sources it rather than
 spelling the flags, so a second place for them to drift is not created. If the
 sourcing fails the harness says so and refuses, because a third suite silently
-dropped from the run would take `M14` — the only arm on the DISPATCH — with it.
+dropped from the run would take `M14` — the only arm on the dispatch's scope — with it.
 
 COUNT THE ARMS BY THEIR `subject`, NOT BY THEIR NAME. `G2`'s subject is the
 generator and `U1`'s is a suite; the letters say which, and the table in
@@ -82,12 +82,18 @@ OPS = "src/frontend/viewmodel/editor/operations.nim"
 STATE = "src/frontend/viewmodel/editor/editor_state.nim"
 BINDINGS = "src/common/editing_key_bindings.nim"
 DISPATCH = "src/frontend/tui/app/edit_binding.nim"
+EDITING_CORE = "src/frontend/viewmodel/editing_core.nim"
 GENERATOR = "src/frontend/viewmodel/tests/generators/vocabulary_generator.nim"
 LAWS = "src/frontend/viewmodel/tests/unit/test_editor_vocabulary_laws.nim"
 ORACLE = "src/frontend/viewmodel/tests/unit/test_editor_vocabulary_oracle.nim"
 TUI = "src/frontend/tui/app/tests/test_edit_binding_vocabulary.nim"
 
-TOUCHED = [OPS, STATE, BINDINGS, DISPATCH, GENERATOR, LAWS, ORACLE, TUI]
+TOUCHED = [OPS, STATE, BINDINGS, EDITING_CORE, GENERATOR, LAWS, ORACLE, TUI]
+
+# **READ, NOT MUTATED.** The terminal's dispatch builds its scope through
+# `editing_core.editScopeOf` now, so `M14` sits on the core; the dispatch module
+# is still what the third suite compiles, so it is digested with the subjects.
+READ_ONLY_INPUTS = [DISPATCH]
 
 CONTROL_HASHES = HERE / "plat30-vocabulary-mutation-control.sha256"
 
@@ -407,9 +413,9 @@ ARMS = [
     # dispatch that is wrong in a way no ViewModel suite can reach, because no
     # ViewModel suite builds this front-end's scope.
     Arm(
-        "M14", DISPATCH,
-        "  EditingScope(model: buf.doc.model, product: pmEdit, pane: epEditor,\n",
-        "  EditingScope(model: buf.doc.model, product: pmEdit, pane: epOtherPane,\n",
+        "M14", EDITING_CORE,
+        "  EditingScope(model: d.model, product: pmEdit, pane: epEditor,\n",
+        "  EditingScope(model: d.model, product: pmEdit, pane: epOtherPane,\n",
         MODEL_LEFT,
         "THE TERMINAL DISPATCHES UNDER THE WRONG SCOPE. `applyEditKey` is one "
         "call to the editing core now, and what this front-end still decides "
@@ -581,7 +587,7 @@ def suites() -> list:
         print("REFUSING: could not read the `tui` lane's flags out of "
               "ci/lib/test-lane-files.sh. Without them the third suite does "
               "not link, and dropping it silently would take M14 — the only "
-              "arm on the DISPATCH — with it.")
+              "arm on the dispatch's scope — with it.")
         return []
     return [
         (ORACLE, "/tmp/plat30-mutation-oracle", VM_FLAGS),
@@ -753,7 +759,7 @@ def needle_scan() -> int:
 
 
 def record_control_hashes() -> int:
-    lines = [f"{digest(p)}  {p}" for p in TOUCHED]
+    lines = [f"{digest(p)}  {p}" for p in TOUCHED + READ_ONLY_INPUTS]
     CONTROL_HASHES.write_text("\n".join(lines) + "\n")
     print(f"recorded {len(lines)} digests in {CONTROL_HASHES}")
     return 0
@@ -771,11 +777,11 @@ def check_control_hashes() -> bool:
         h, p = line.split(None, 1)
         recorded[p.strip()] = h
     ok = True
-    # `TOUCHED` is the whole subject set of this harness; `record_control_hashes`
-    # writes a digest for exactly these paths, so the comparator must read
-    # exactly these paths. The two iterating the same set is the property that
-    # makes "absent" mean something rather than being an accident of ordering.
-    for p in TOUCHED:
+    # `TOUCHED + READ_ONLY_INPUTS` is what `record_control_hashes` writes a
+    # digest for, so the comparator must read exactly these paths. The two
+    # iterating the same set is the property that makes "absent" mean
+    # something rather than being an accident of ordering.
+    for p in TOUCHED + READ_ONLY_INPUTS:
         # **A PATH THAT IS NOT IN THE FILE AT ALL IS A REFUSAL, NOT A SKIP.**
         # The old one-sided test — a membership guard ANDed onto the digest
         # comparison — made absence and agreement indistinguishable:

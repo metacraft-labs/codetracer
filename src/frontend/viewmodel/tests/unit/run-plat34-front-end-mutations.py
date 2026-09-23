@@ -87,6 +87,7 @@ BINDING = "src/frontend/tui/app/edit_binding.nim"
 KEYMAP = "src/frontend/viewmodel/keymap/editing_keymap.nim"
 SURFACE = "src/frontend/view_vocabulary/editor_surface.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
+GPUI_EDIT_ARM = "src/frontend/gpui/app/edit_arm.nim"
 CORPUS = "src/frontend/viewmodel/tests/generators/operation_sequence_corpus.nim"
 DIFF = "src/frontend/viewmodel/tests/unit/test_editor_front_end_differential.nim"
 OBS = "src/frontend/tui/tests/test_editor_front_end_observed.nim"
@@ -99,7 +100,7 @@ OBS = "src/frontend/tui/tests/test_editor_front_end_observed.nim"
 PROJECTION = "src/frontend/viewmodel/collab/projection.nim"
 PROJ_SUITE = "src/frontend/viewmodel/tests/unit/test_collab_editor_projection.nim"
 
-TOUCHED = [CORE, BINDING, KEYMAP, SURFACE, GPUI_MAIN, CORPUS, DIFF, OBS,
+TOUCHED = [CORE, KEYMAP, SURFACE, GPUI_EDIT_ARM, CORPUS, DIFF, OBS,
            PROJECTION, PROJ_SUITE]
 
 # **EVERYTHING THE SUITES READ THAT NO ARM MUTATES.** PLAT-33's rule, applied:
@@ -109,6 +110,11 @@ TOUCHED = [CORE, BINDING, KEYMAP, SURFACE, GPUI_MAIN, CORPUS, DIFF, OBS,
 # `staticRead`s four modules that are not subjects of any arm here, and the
 # `tui` lane's flag script is read by this harness itself.
 READ_ONLY_INPUTS = [
+    # The terminal's binding and the GPUI entry point take their scope and
+    # their surface from the core and the edit arm now, where `M2` and `M5`
+    # sit; the suites still read both.
+    BINDING,
+    GPUI_MAIN,
     "src/frontend/tui/app/tui_app.nim",
     "src/frontend/tui/app/runtime.nim",
     "src/frontend/tui/app/tests/test_edit_binding_vocabulary.nim",
@@ -176,8 +182,8 @@ ARMS = [
     # =====================================================================
     Arm(
         "M1", CORE,
-        "    of kmProductDefault: emInsert\n",
-        "    of kmProductDefault: emNormal\n",
+        "  of kmProductDefault: emInsert\n",
+        "  of kmProductDefault: emNormal\n",
         "DIFF-1: move-line-ladder",
         "**A PRODUCT DOCUMENT OPENS IN THE WRONG EDITING MODE AND THE "
         "TERMINAL'S KEYS STOP RESOLVING.** `product_keymap`'s thirteen rows "
@@ -192,9 +198,9 @@ ARMS = [
         "step is a bound key is where that is unmissable.",
     ),
     Arm(
-        "M2", BINDING,
-        "               mode: buf.doc.state.mode, textEntry: true)\n",
-        "               mode: buf.doc.state.mode, textEntry: false)\n",
+        "M2", CORE,
+        "               mode: d.state.mode, textEntry: d.state.mode == emInsert)\n",
+        "               mode: d.state.mode, textEntry: false)\n",
         "the terminal's SCOPE is the five values the differential drives",
         "**THE TERMINAL STOPS BEING A TEXT FIELD.** §4.3's text-entry "
         "dimension is what makes a printable key stand for itself, and Edit "
@@ -236,9 +242,9 @@ ARMS = [
         "campaign asks for: the source fact, and the behaviour it produces.",
     ),
     Arm(
-        "M5", GPUI_MAIN,
-        "  editorSurfaceForDocument(\n    d = doc,\n",
-        "  editorSurfaceForProject(\n    path = doc.path, text = doc.text,\n",
+        "M5", GPUI_EDIT_ARM,
+        "  result = editorSurfaceForDocument(\n    d = arm.doc,",
+        "  result = editorSurfaceForProject(\n    path = arm.doc.path, text = arm.doc.text,",
         "the GPUI front-end OPENS a document rather than passing bytes on",
         "**THE GPUI FRONT-END GOES BACK TO PASSING BYTES.** The two "
         "derivations agree today — `editorSurfaceForProject` is a two-line "
