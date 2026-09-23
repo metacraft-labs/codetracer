@@ -40,6 +40,7 @@ mod cross_process_origin;
 mod ctfs_trace_reader;
 mod dap;
 mod dap_error;
+mod dap_ext;
 mod dap_handler;
 mod dap_server;
 mod dap_types;
