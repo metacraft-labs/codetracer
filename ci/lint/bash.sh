@@ -84,7 +84,7 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # while `command -v python3` said yes throughout. Requirements are declared here
 # in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum
+	bash ci/lib/require-tools.sh shellcheck bash git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh

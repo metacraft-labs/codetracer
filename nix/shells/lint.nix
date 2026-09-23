@@ -145,6 +145,16 @@ pkgs.mkShell {
     # gates appimage-build and dmg-build like the other three lint jobs.
     perl
 
+    # `ci/test/flake-lock-metadata-test.sh` compares every direct GitHub input's
+    # recorded commit date against GitHub's own, and needs authenticated API
+    # access to do it: `gh` if it is logged in, else `curl` with GH_TOKEN. The
+    # shell carried neither, so in CI the suite had no way to ask -- and it is a
+    # HARD failure there by design ("skipping would report a green tick for a
+    # check that compared nothing"). It passed on workstations only because a
+    # user profile supplied both. `curl` is the lighter of the two; the token
+    # comes from the lint-bash job, which already mints one.
+    curl
+
     # `ci/test/stale-artefact-guards-test.sh` issues and inspects real
     # certificates while checking that `browser-replay/setup-certs.sh` asks
     # whether one is in date and covers the right names, rather than whether the

@@ -140,7 +140,14 @@ commit_date() { # owner repo rev -> ISO8601 committer date, or empty
 	if [ "$FETCH" = gh ]; then
 		gh api "repos/$owner/$repo/commits/$rev" --jq '.commit.committer.date' 2>/dev/null
 	else
-		curl -sS --max-time 30 \
+		# -L, because GitHub answers a renamed or transferred repository with
+		# `301 Moved Permanently` to its /repositories/<id>/ URL. `gh api`
+		# follows that; a bare curl returned the 260-byte redirect notice, the
+		# helper found no date in it, and the suite reported
+		# facebook/yoga@3acb6cca42 as a revision the repository "does not have"
+		# -- it does. The redirect stays on api.github.com, so curl keeps the
+		# Authorization header across it.
+		curl -sS -L --max-time 30 \
 			-H "Authorization: Bearer ${GITHUB_TOKEN:-${GH_TOKEN:-}}" \
 			-H "Accept: application/vnd.github+json" \
 			"https://api.github.com/repos/$owner/$repo/commits/$rev" 2>/dev/null |

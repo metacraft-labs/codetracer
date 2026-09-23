@@ -1731,6 +1731,13 @@ jobs:
       # shell missing a tool says which one BY NAME instead of dying obscurely
       # inside a contract suite.
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/bash.sh"
+        env:
+          # flake-lock-metadata-test asks GitHub for each direct input's commit
+          # date, and in CI it fails hard rather than skip when it cannot. The
+          # token this job already mints (Checkout and Install Nix are handed
+          # it above) is the credential it needs; without this the suite read
+          # "no authenticated GitHub access" on every run.
+          GH_TOKEN: ${{ steps.ci_token.outputs.token }}
 
   lint-nim:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
