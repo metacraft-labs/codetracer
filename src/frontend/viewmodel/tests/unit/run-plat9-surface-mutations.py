@@ -818,13 +818,15 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         "M40", MAPPINGS,
         "    if mappingFor(fe, k).status == msAbsent: result.add k",
-        "    if false: result.add k",
-        P_ABSENTSET, NIM_PURE, "derived.len == 3",
-        "the absent set stops being READ OUT OF the table and becomes empty, "
-        "so a sentence naming three entries — or, as both of this milestone's "
-        "sentences did, naming the wrong three — is no longer contradicted by "
-        "anything. This arm is what makes the new case evidence rather than a "
-        "restatement.",
+        "    if true: result.add k",
+        P_ABSENTSET, NIM_PURE, "derived.len == 0",
+        "the absent set stops being READ OUT OF the table and names EVERY "
+        "entry. Aimed this way round since PLAT-40's regrade: the set has been "
+        "EMPTY since PLAT-38, so the arm's first spelling — the set forced "
+        "empty — had become an equivalent mutant that no case could notice. "
+        "Forcing it full is still the claim 'the set is derived from the "
+        "table', and the case's asserted cardinality of zero is what catches "
+        "it.",
         control_name="the status is read into a named binding",
         control_find="    if mappingFor(fe, k).status == msAbsent: result.add k",
         control_replace="    let absentHere = mappingFor(fe, k).status == "

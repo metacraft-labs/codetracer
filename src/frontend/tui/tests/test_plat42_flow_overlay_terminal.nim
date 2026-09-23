@@ -37,6 +37,7 @@ import ../host/tui_session
 import ./fixtures/fixture_provider
 
 import codetracer_embed   # `Signal.val`, `EditorVM.toggleFlowOverlay`
+import backend/[backend_service, stdio_backend]   # the transport under test
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -79,6 +80,37 @@ proc codeStylesOf(screen: SourcePaneScreen; model: SourcePaneModel;
     if at >= screen.gutterWidth and span.text.strip().len > 0:
       result.add span.style
     at += cellWidthOf(span.text)
+
+
+suite "PLAT-42: the native transport hands the engine's events to its subscribers":
+
+  test "a subscriber sees the event a request produced, delivered with its reply":
+    # The flow window rides on this: `FlowVM` subscribes through
+    # `BackendService.onEvent`, and until 2026-09-23 the stdio adapter
+    # collected subscribers and never called one. The FLOW itself can still
+    # arrive through the reply on this engine (`flow_vm`'s reply path), so the
+    # case above cannot see a transport that stopped delivering; this one can.
+    let resolution = resolveFixture("calc")
+    if resolution.outcome == foMissingPrereq:
+      let message = missingPrereqMessage(resolution.spec, resolution.detail)
+      echo "  ", message
+      ck message.startsWith(MissingPrereqSkipPrefix)
+      skip()
+    else:
+      let s = openTuiSession(resolution.tracePath, viewportHeight = Rows - 6)
+      defer: s.close()
+      let svc = s.session.backend.toBackendService()
+      var seen: seq[string] = @[]
+      svc.onEvent(proc(e: JsonNode) = seen.add e{"kind"}.getStr(""))
+      let dbg = s.session.session.store.debugger.val
+      discard svc.send("ct/load-calltrace-section", %*{
+        "location": {"rrTicks": dbg.rrTicks.int64, "path": dbg.location.file,
+                     "line": dbg.location.line},
+        "startCallLineIndex": 0, "height": 10, "depth": 5,
+        "rawIgnorePatterns": "", "optimizeCollapse": true,
+        "autoCollapsing": false, "renderCallLineIndex": 0})
+      checkpoint("delivered: " & $seen)
+      ck "ct/updated-calltrace" in seen
 
 suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
 

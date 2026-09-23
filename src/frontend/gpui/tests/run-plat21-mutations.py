@@ -170,12 +170,14 @@ ARMS = [
         "the mapping-table case is satisfied by the substring `div`."),
 
     Arm("G2", GB,
-        "      b.recordEscape(gekDisabledAttribute, v,",
-        "      discard (gekDisabledAttribute, v,",
+        "    b.recordEscape(gekImageWithoutPayload, v,",
+        "    discard (gekImageWithoutPayload, v,",
         SUITE_GPUI,
         "every entry needing an escape is a filed gap, and every filed gap is taken",
         "  for f in nodeFacts(v):",
         "  for f in nodeFacts(v):  # ctl",
+        "RE-AIMED 2026-09-23 at the one escape the binding still takes: "
+        "`gekDisabledAttribute` (PLAT21-VG2) was closed and has no call site. "
         "A SILENT ESCAPE — the exact state PLAT-21's gate exists against. The "
         "binding still takes the escape; it just stops saying so. Note that "
         "the ENTRY census does not move (the same twelve entries are named by "
@@ -195,32 +197,36 @@ ARMS = [
         "`gpui_gaps.PLAT21-VG2` a measurement rather than a sentence."),
 
     Arm("G4", GB,
-        "  for k in Key:\n    if k != kChar and k != kNone and gpuiKeyName(k) == name:\n      return press(k)",
-        "  for k in Key:\n    if k != kChar and k != kNone:\n      return press(k)",
+        "  for k in Key:\n    if k != kChar and k != kNone and k != kTab and k != kBackTab and\n       gpuiKeystroke(k).name == ks.name:\n      return press(k)",
+        "  for k in Key:\n    if k != kChar and k != kNone and k != kTab and k != kBackTab:\n      return press(k)",
         SUITE_GPUI,
         "motion skips an unavailable option, on this medium too",
-        "func keyFromGpuiEvent*(event: string): KeyPress =",
-        "func keyFromGpuiEvent*(event: string): KeyPress = ## ctl",
+        "func keyFromGpuiEvent*(ev: GpuiEvent): KeyPress =",
+        "func keyFromGpuiEvent*(ev: GpuiEvent): KeyPress = ## ctl",
         "The event name stops being READ. Every dispatched key becomes the "
         "first member of `Key` that is not `kChar`/`kNone`, so the round trip "
         "through Rust arrives at the wrong `KeyPress`. Without this arm the "
         "name in the event would be decoration."),
 
     Arm("G5", GB,
-        "    let event = gpuiKeyEvent(binding.key)",
-        "    let event = gpuiKeyEvent(kEnter)",
+        "  b.renderer.addEventListener(el, KeyDownEventName, b.keyHandler(v.id))",
+        "  b.renderer.addEventListener(el, \"vockey:enter\", b.keyHandler(v.id))",
         SUITE_GPUI,
         "the render plan reports each entry's contract as event_names",
         "  let contract = keyContract(v.kind)",
         "  let contract = keyContract(v.kind)  # ctl",
-        "EVERY LISTENER UNDER ONE NAME. The plan's `event_names` then reports "
-        "one name per entry instead of the entry's contract — which is the "
+        "EVERY LISTENER UNDER THE WRONG NAME. The plan's `event_names` then "
+        "reports a name the shim never dispatches a key to — which is the "
         "one thing this tier can say about the keyboard contract from the "
-        "RUST side."),
+        "RUST side. RE-AIMED 2026-09-23: since PLAT-38 a node has ONE `keydown` "
+        "listener and the key rides in the payload, so the old needle (one "
+        "listener per contract key, all under one name) had no subject; the "
+        "claim it graded — the plan reports the listener the binding "
+        "registered — is graded at the registration now."),
 
     Arm("G6", GB,
-        "    fireEvent(b.nodes[id], gpuiKeyEvent(k))",
-        "    for n in walk(b.model):\n      if n.id == id:\n        b.lastOutcome = applyKey(n, press(k))\n        break",
+        "  discard fireEvent(b.nodes[id], KeyDownEventName, gpuiPayloadFor(k, ch))",
+        "  for n in walk(b.model):\n    if n.id == id:\n      b.lastOutcome = applyKey(n, press(k))\n      break",
         SUITE_GPUI,
         "a handled key CROSSED the FFI boundary, and an unclaimed one did not",
         "  b.lastOutcome = ignored()",

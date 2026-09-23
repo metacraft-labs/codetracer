@@ -32,6 +32,7 @@
 import std/[os, strutils, unittest]
 
 import codetracer_embed
+import backend/stdio_backend   # `DapReadBound`, the product's read clock
 import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
@@ -49,6 +50,8 @@ template ck(cond: untyped) =
 const
   Cols = 160
   Rows = 48
+  PumpClockMs = 60_000
+    ## Per message. A real move on `calc` answers in well under a second.
   StepsToFirstStop = 6
     ## `scenarios.json`'s `stepped-editor`: calc stopped inside a function
     ## body, on a line that ran — so the engine has a step to bind to.
@@ -89,7 +92,12 @@ suite "PLAT-42: per-line status on the shipped terminal":
       skip()
     else:
       let rt = newTuiRuntime(newTuiApp(), caps(), Cols, Rows)
-      let s = openTuiSession(resolution.tracePath, viewportHeight = Rows - 6)
+      # THE PRODUCT'S OWN READ CLOCK (CTUI-14), so a pump that waits for a
+      # `stopped` event no engine sends — the defect `awaitsMove` exists to
+      # prevent after `:break` — fails this case instead of hanging the lane.
+      let s = openTuiSession(resolution.tracePath, viewportHeight = Rows - 6,
+                             bound = DapReadBound(timeoutMs: PumpClockMs,
+                                                  interruptFd: -1))
       defer: s.close()
       s.setViewportHeight(rt.sourcePaneRows())
       s.refresh(rt)

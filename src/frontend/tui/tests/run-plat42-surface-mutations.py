@@ -54,6 +54,7 @@ STDIO = "src/frontend/viewmodel/backend/stdio_backend.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 RULE = "src/common/flow_line_rule.nim"
 FLOWVM = "src/frontend/viewmodel/viewmodels/flow_vm.nim"
+SESSION = "src/frontend/viewmodel/headless_session.nim"
 
 LAWS = "src/frontend/tui/tests/test_plat42_laws.nim"
 FLOW_TERM = "src/frontend/tui/tests/test_plat42_flow_overlay_terminal.nim"
@@ -62,7 +63,7 @@ FACTS = "src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim"
 EDITING = "src/frontend/gpui/tests/test_gpui_editing_surface.nim"
 LINE_TERM = "src/frontend/tui/tests/test_plat42_line_status_terminal.nim"
 
-SUBJECTS = [SURFACE, LEAVES, PANE, HOST, STDIO, RULE, FLOWVM, RUNTIME]
+SUBJECTS = [SURFACE, LEAVES, PANE, HOST, STDIO, RULE, FLOWVM, RUNTIME, SESSION]
 SUITES = [LAWS, FLOW_TERM, VALUES_TERM, FACTS, EDITING, LINE_TERM]
 
 ARMS = [
@@ -96,7 +97,9 @@ ARMS = [
     # --- per-line status on the shipped terminal ---------------------------
     ("L1", HOST, "    points = s.points,\n", "", [LINE_TERM],
      "the host passes no breakpoints to the pane again"),
-    ("L2", HOST, "  for l in lines:\n", "  for l in [line]:\n", [LINE_TERM],
+    # MOVED 2026-09-23: PLAT-40 moved the terminal's breakpoint toggle into
+    # the session both native front-ends share, so the arm follows it there.
+    ("L2", SESSION, "  for l in lines:\n", "  for l in [line]:\n", [LINE_TERM],
      "a toggle sends only its own line: setBreakpoints clears the others"),
     ("L3", RUNTIME,
      "    outcome.awaitsMove = movesTheDebugger(outcome.action)",
@@ -111,7 +114,7 @@ ARMS = [
      "  vm.styledLines.val = @[]", [FACTS, FLOW_TERM],
      "the flow window's per-line facts are discarded again (PLAT22-PG2)"),
     ("S1", STDIO, "    deliver()", "    discard", [FLOW_TERM],
-     "the native transport stops delivering events: no flow window arrives"),
+     "the native transport stops handing the engine's events to subscribers"),
     # --- PG3: the terminal host's inline values ----------------------------
     ("V1", HOST,
      "    inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))",
