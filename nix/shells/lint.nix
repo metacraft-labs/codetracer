@@ -134,6 +134,17 @@ pkgs.mkShell {
     findutils
     git
 
+    # `ci/test/reachability-prose-guard-test.sh` mutates its fixtures with
+    # `perl -0777 -pi` -- slurp mode, deliberately, because the sentence it
+    # rewrites is WRAPPED across comment lines and a line-at-a-time substitution
+    # silently matched nothing. perl was never listed here, so the suite only
+    # ran where the HOST happened to provide one: on a NixOS workstation
+    # `command -v perl` answers /run/current-system/sw/bin/perl straight
+    # through this shell, and on a runner without it every arm printed
+    # `perl: command not found`, changed nothing, and failed lint-nim -- which
+    # gates appimage-build and dmg-build like the other three lint jobs.
+    perl
+
     # `ci/test/stale-artefact-guards-test.sh` issues and inspects real
     # certificates while checking that `browser-replay/setup-certs.sh` asks
     # whether one is in date and covers the right names, rather than whether the
