@@ -455,6 +455,155 @@ if ! is_graded_by_mutation_harness "${CONTROL_GRADED}"; then
 fi
 echo "OK: the exemption predicate answers both polarities; it can exempt and refuse."
 
+# -----------------------------------------------------------------------
+# THE READ-ONLY COMPARATOR — a consumer no mutation harness grades, and why it
+# may still be exempt
+# -----------------------------------------------------------------------
+# §30a is about an answer that FLOWS from one side into the other. A file can
+# carry such a flow only by handing data on: writing it somewhere (a file, a
+# process, the environment, foreign code) or being imported by something that
+# does. PLAT-42's suites (`test_plat42_surfaces.nim`, `test_plat42_window.nim`)
+# read the Electron arm's `stoppedLine` and compare it with a committed GPUI
+# record, and do neither. They are graded by no mutation harness because none
+# can grade them: they read committed records, so mutating a producer changes
+# nothing they see. Adding them to `TOUCHED` would have claimed a grading that
+# does not happen.
+#
+# So the exemption is DERIVED FROM WHAT THE FILE CAN DO, not from where it sits
+# (the fourth defeat was a `*/tests/*` path pattern). A file is a read-only
+# comparator only when ALL of these hold, and each is checked:
+#
+#   1. it is a test ENTRY POINT — `test_*.nim` under a `tests/` directory — so it runs as its own
+#      executable rather than as a library someone links;
+#   2. NO other Nim file names its module, anywhere outside a comment — so
+#      nothing can import or include it and route its reads into a producer;
+#   3. neither its comment-stripped body NOR ANYTHING IT IMPORTS calls a
+#      write, process, environment or FFI primitive (`COMPARATOR_OUTFLOW`
+#      below, followed through `closure_outflow_reason`) — so its only output
+#      is its exit status.
+#
+# The polarity is deliberate: every check refuses on a false POSITIVE. A mention
+# of the module in another file, or a primitive's name in a string, costs a
+# loud failure, never a silent exemption. The relay plant that defeated this
+# guard's sixth spelling (`RELAY_PLANT`, below) is refused by rule 3, and the
+# controls after the sweep run rules 2 and 3 over both polarities.
+# shellcheck source=ci/lib/nim-imports.sh disable=SC1091
+. ci/lib/nim-imports.sh
+nim_imports_open_unanalysable_log
+
+COMPARATOR_OUTFLOW='\b(writeFile|writeLine|write|writeBuffer|writeBytes|writeChars|open|reopen|newFileStream|openFileStream|copyFile|copyFileWithPermissions|copyDir|moveFile|moveDir|createDir|removeFile|removeDir|createSymlink|createHardlink|setFilePermissions|execCmd|execCmdEx|execProcess|execProcesses|execShellCmd|startProcess|staticExec|gorge|gorgeEx|putEnv|delEnv|emit|importc|importcpp|importjs|dynlib|exportc|osproc|streams|memfiles|net|asyncnet|httpclient)\b'
+
+# Rule 3, over a TEXT so the control can run it over a plant.
+body_has_outflow() {
+	grep -qE -- "${COMPARATOR_OUTFLOW}" <<<"$1"
+}
+
+# Rule 2. Another Nim file IMPORTS or INCLUDES the module. Answered by
+# `ci/lib/nim-imports.sh`, the repository's one import extractor, rather than
+# by a name search: a mention in a string or a doc comment is not an import
+# (PLAT-42's own files name these suites in prose), and every spelling of an
+# import a name search misses — the newline-continued form, the quoted spec,
+# `when c: import x` — is one that extractor already handles.
+#
+# It runs only over files that mention the module name at all, which is a
+# superset of its importers. A line the extractor REFUSES to analyse counts as
+# an import (the refusal log is non-empty after the call), so an unanalysable
+# spelling makes the file NOT a comparator — a loud finding, never a silent
+# exemption, which is the obligation `nim-imports.sh` places on a caller.
+module_is_imported_elsewhere() {
+	local file="$1" mod other spec
+	mod="$(basename "${file}" .nim)"
+	while IFS= read -r other; do
+		[ "${other}" = "${file}" ] && continue
+		: >"${IMPORT_UNANALYSABLE_LOG}"
+		while IFS= read -r spec; do
+			spec="${spec%.nim}"
+			[ "${spec##*/}" = "${mod}" ] && return 0
+		done < <(nim_imports "${other}")
+		[ -s "${IMPORT_UNANALYSABLE_LOG}" ] && return 0
+	done < <(grep -rlwF --include='*.nim' --include='*.nims' \
+		--exclude-dir=node_modules --exclude-dir=target \
+		--exclude-dir=build-debug --exclude-dir=build-release \
+		-- "${mod}" src/ ci/ 2>/dev/null)
+	return 1
+}
+
+# Rule 3, over a FILE AND EVERYTHING IT IMPORTS. The body scan alone has a hole
+# the size of a helper: a comparator that passes the answer path to an imported
+# `publish(src, dst)` names no primitive itself. So every import is followed:
+#
+#   * `std/…` — the standard library. Its write, process and stream surfaces
+#     are reached only by CALLING them, or by importing `osproc`, `streams`,
+#     `net` … by name, and both land in the importing body where the outflow
+#     scan reads them.
+#   * `./…` or `../…` — resolved to a file in this repository, which must
+#     satisfy this same rule, recursively.
+#   * ANYTHING ELSE — a bare or `--path`-resolved name this rule cannot follow
+#     to a file — is refused. So is a line the extractor refuses to analyse.
+#
+# Prints why when there IS outflow (or an import it cannot follow).
+closure_outflow_reason() {
+	local file="$1" seen="${2:-}" spec dir target reason
+	case " ${seen} " in *" ${file} "*) return 1 ;; esac
+	seen="${seen} ${file}"
+	if body_has_outflow "$(strip_nim_comments <"${file}")"; then
+		echo "${file} calls a write, process, environment or FFI primitive"
+		return 0
+	fi
+	: >"${IMPORT_UNANALYSABLE_LOG}"
+	dir="$(dirname "${file}")"
+	while IFS= read -r spec; do
+		case "${spec}" in
+		std/*) ;;
+		./* | ../*)
+			target="$(realpath -m --relative-to=. "${dir}/${spec%.nim}.nim")"
+			if [ ! -f "${target}" ]; then
+				echo "${file} imports ${spec}, which resolves to no file"
+				return 0
+			fi
+			if reason="$(closure_outflow_reason "${target}" "${seen}")"; then
+				echo "${reason}"
+				return 0
+			fi
+			;;
+		*)
+			echo "${file} imports ${spec}, which this rule cannot follow to a file"
+			return 0
+			;;
+		esac
+	done < <(nim_imports "${file}")
+	if [ -s "${IMPORT_UNANALYSABLE_LOG}" ]; then
+		echo "${file} has an import line the extractor refused to analyse"
+		return 0
+	fi
+	return 1
+}
+
+# THE ONE PREDICATE, called by the sweep. Prints why a file is NOT a
+# comparator; silence and status 0 mean it is one.
+is_readonly_comparator() {
+	local file="$1"
+	case "${file}" in
+	*/tests/test_*.nim | */tests/*/test_*.nim) ;;
+	*)
+		echo "not a test_*.nim entry point under a tests/ directory"
+		return 1
+		;;
+	esac
+	if module_is_imported_elsewhere "${file}"; then
+		echo "another Nim file imports or includes it"
+		return 1
+	fi
+	local reason
+	if reason="$(closure_outflow_reason "${file}")"; then
+		echo "${reason}"
+		return 1
+	fi
+	return 0
+}
+
+COMPARATORS=()
+COMMENT_ONLY=()
 outgrowth=0
 HARNESS_EXEMPTIONS=0
 while IFS= read -r f; do
@@ -464,6 +613,26 @@ while IFS= read -r f; do
 	# absence grep is not what keeps it honest — nine killed arms are. Nothing
 	# else is exempt, whatever directory it sits in.
 	if is_graded_by_mutation_harness "${f}"; then
+		continue
+	fi
+	# A DERIVED SUBJECT IS GRADED ABOVE, by the rule for its side.
+	if in_subject_set "${f}"; then
+		continue
+	fi
+	# THE BODY, NOT THE FILE — this scan's first rule, applied to the sweep as
+	# well. `grep -rl` below reads raw files, so a doc comment that points a
+	# reader at the answer directory (`region_locator.nim` explains why it must
+	# NOT use it) was reported as a producer. A comment cannot carry an answer
+	# anywhere; the needle is re-tested on the comment-stripped body, with the
+	# same strippers the subject rules use.
+	case "${f}" in
+	*.nim) f_body="$(strip_nim_comments <"${f}")" ;;
+	*.ts | *.js) f_body="$(strip_ts_comments <"${f}")" ;;
+	*.py) f_body="$(grep -vE '^[[:space:]]*#' "${f}")" ;;
+	*) f_body="$(cat "${f}")" ;;
+	esac
+	if ! grep -qE -- "${OUTGROWTH_NEEDLE}" <<<"${f_body}"; then
+		COMMENT_ONLY+=("${f}")
 		continue
 	fi
 	# THE GRADER ITSELF, exempt by IDENTITY rather than by a path pattern. The
@@ -478,12 +647,17 @@ while IFS= read -r f; do
 		HARNESS_EXEMPTIONS=$((HARNESS_EXEMPTIONS + 1))
 		continue
 	fi
+	if comparator_refusal="$(is_readonly_comparator "${f}")"; then
+		COMPARATORS+=("${f}")
+		continue
+	fi
 	if ! in_subject_set "${f}"; then
 		echo "FAIL: ${f} names the answer vocabulary or the answer artefact"
 		echo "      (${OUTGROWTH_NEEDLE})"
 		echo "      and is in no subject set,"
 		echo "      and the mutation harness does not grade it either."
-		echo "      It is a fourth answer producer that no rule above grades."
+		echo "      It is a fourth answer producer that no rule above grades,"
+		echo "      and not a read-only comparator: ${comparator_refusal}."
 		echo "      Move it beside its front-end's producer, widen the subject"
 		echo "      directories at the top of this scan, or — if it really is a"
 		echo "      consumer — add it to ${MUTATION_HARNESS}'s TOUCHED list so"
@@ -524,6 +698,15 @@ if [ "${HARNESS_EXEMPTIONS}" -ne 1 ]; then
 	echo "      set or the harness path has moved and this exemption is inert."
 	exit 1
 fi
+
+# THE COMPARATORS ARE NAMED, on every run: an exemption nobody can see is an
+# exemption nobody can dispute.
+for c in "${COMMENT_ONLY[@]}"; do
+	echo "names the needle only in comments, so it carries nothing: ${c}"
+done
+for c in "${COMPARATORS[@]}"; do
+	echo "exempt as a read-only comparator (unimported test entry point, no outflow): ${c}"
+done
 
 if [ "${outgrowth}" -ne 0 ]; then
 	failed=1
@@ -588,6 +771,60 @@ if grep -qE -- "${OUTGROWTH_NEEDLE}" <<<"${BENIGN_BODY}"; then
 	exit 1
 fi
 echo "OK: the outgrowth needle sees the artefact relay and not a benign body."
+
+# -----------------------------------------------------------------------
+# THE COMPARATOR'S CONTROLS — both rules, both polarities
+# -----------------------------------------------------------------------
+# Rule 3 must refuse the relay plant above (it writes) and a process launch,
+# and must pass a body that only reads and compares. Rule 2 must see a module
+# that IS imported (`plat42_gutter.nim`, imported by `test_plat42_surfaces.nim`)
+# and must not see one nothing names. Without these, a predicate that stopped
+# matching would exempt every consumer under `tests/`, which is the fourth
+# defeat again.
+SPAWN_PLANT='let p = startProcess("cp", args = ["a.electron.json", "a.gpui.json"])'
+READ_ONLY_BODY='let cap = parseJson(readFile(answerDir / (s & ".electron.capture.json")))
+check lineOf(rows[0]) == cap["stoppedLine"].getInt'
+if ! body_has_outflow "${RELAY_PLANT}" || ! body_has_outflow "${SPAWN_PLANT}"; then
+	echo "FAIL: the comparator's outflow rule does not refuse a relay that"
+	echo "      writeFile()s the artefact or a startProcess() that copies it."
+	exit 1
+fi
+if body_has_outflow "${READ_ONLY_BODY}"; then
+	echo "FAIL: the comparator's outflow rule refuses a body that only reads"
+	echo "      and compares; it would exempt nothing and state nothing."
+	exit 1
+fi
+if ! module_is_imported_elsewhere "src/frontend/gpui/tests/plat42_gutter.nim"; then
+	echo "FAIL: the comparator's import rule does not see that"
+	echo "      plat42_gutter.nim is imported by test_plat42_surfaces.nim."
+	exit 1
+fi
+if module_is_imported_elsewhere "src/frontend/gpui/tests/test_plat35_no_such_module_control.nim"; then
+	echo "FAIL: the comparator's import rule reports a module nothing names"
+	echo "      as imported; it would refuse every comparator."
+	exit 1
+fi
+# The helper hole, closed: a comparator-shaped file whose only outflow is in a
+# module it imports must be refused. Planted in a scratch tree that mirrors the
+# layout, and removed on every path out.
+helper_plant="$(mktemp -d)"
+mkdir -p "${helper_plant}/tests"
+printf 'proc publish*(a, b: string) = writeFile(b, readFile(a))\n' >"${helper_plant}/tests/relay_helper.nim"
+printf 'import std/os\nimport ./relay_helper\npublish("x.electron.json", "x.gpui.json")\n' \
+	>"${helper_plant}/tests/test_relay_plant.nim"
+helper_reason="$(closure_outflow_reason "${helper_plant}/tests/test_relay_plant.nim" || true)"
+rm -rf "${helper_plant}"
+if [ -z "${helper_reason}" ]; then
+	echo "FAIL: a test whose body is clean but which imports a writing helper"
+	echo "      is not refused; the comparator rule has a hole the size of a helper."
+	exit 1
+fi
+if is_readonly_comparator "src/frontend/view_vocabulary/gpui_layout_answers.nim" >/dev/null; then
+	echo "FAIL: the comparator predicate exempts the GPUI producer itself."
+	exit 1
+fi
+echo "OK: the comparator rules refuse a relay, a spawn, a writing helper, an imported"
+echo "    module and a producer, and pass a read-only body and an unnamed module."
 
 if [ "${failed}" -ne 0 ]; then
 	exit 1
