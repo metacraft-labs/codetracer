@@ -14,15 +14,16 @@
 ##     FILE, on a real directory;
 ##   * a read-only buffer STILL REFUSES a keystroke from this arm (PLAT-34 once
 ##     took a route around the filters);
-##   * the shipped binary, driven headlessly with `--edit-keys` through the
-##     shim's own focus dispatch, changes a file ON DISK, draws the typed byte
-##     in its render plan, and no longer carries the read-only notice — with a
-##     positive control proving the notice scan can find the notice.
+##   * the surface is writable and agrees with the edit-mode contract.
 ##
-## NO MOCKS. A real directory, the real editing core, and for the last suite
-## the shipped `codetracer-gpui` binary over the real isonim-gpui shim.
+## The SHIPPED BINARY's half — `--edit-keys` through the shim's focus
+## dispatch, the file on disk, the plan, the notice's absence with its
+## positive control — is `test_plat44_shipped_writes.nim`, kept apart so this
+## suite stays portable (no binary to build) and can be counted by the floor.
+##
+## NO MOCKS. A real directory and the real editing core.
 
-import std/[os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import std/[os, strutils, tempfiles, unittest]
 
 import codetracer_embed
 import ../app/edit_arm
@@ -76,6 +77,15 @@ suite "PLAT-44: GPUI keystrokes decode to the product's key names":
       checkpoint(n & " <- " & key & " " & $mods)
       ck canonicalKeyOfGpui(key, mods) == n
 
+  test "a shifted symbol decodes the same from either GPUI spelling":
+    # Which of the two a platform sends is measured by the window lane; the
+    # decoder must not depend on it.
+    for (unshifted, shifted) in [("`", "~"), (".", ">"), (",", "<"),
+                                 ("1", "!"), ("9", "("), ("/", "?")]:
+      ck canonicalKeyOfGpui(unshifted, ["shift"]) == shifted
+      ck canonicalKeyOfGpui(shifted, ["shift"]) == shifted
+      ck canonicalKeyOfGpui(shifted, []) == shifted
+
   test "Shift+Tab keeps its prefix, and a platform chord has no name":
     ck canonicalKeyOfGpui("tab", ["shift"]) == "Shift+Tab"
     ck canonicalKeyOfGpui("a", ["platform"]) == ""
@@ -120,6 +130,13 @@ suite "PLAT-44: the arm writes the core, and saves through the project writer":
     finally:
       removeDir(dir)
 
+  test "the surface is writable, and so is the contract — they no longer disagree":
+    let arm = newGpuiEditArm("", ProjectFile, ProjectText)
+    let surface = arm.surfaceOf(20)
+    ck surface.mutable
+    ck surface.mutable == sourceContractFor(pmEdit).mutable
+    ck surface.notice.len == 0
+
   test "a READ-ONLY buffer still refuses a keystroke from this arm":
     let dir = createTempDir("plat44-", "-ro")
     try:
@@ -133,78 +150,6 @@ suite "PLAT-44: the arm writes the core, and saves through the project writer":
       # refusal above is the filter's and not a key that does nothing.
       let open = newGpuiEditArm(dir, ProjectFile, ProjectText)
       ck open.applyGpuiKey("z", [], 1).outcome == eoChanged
-    finally:
-      removeDir(dir)
-
-suite "PLAT-44: the shipped binary, headless, through the shim's own dispatch":
-
-  let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
-  let bin = repo / "build/bin/codetracer-gpui"
-  let shimDir = repo.parentDir / "isonim-gpui/rust/target/debug"
-
-  proc runBinary(project: string; keys: string): (int, string, string) =
-    var args = @["--edit", "--report-plan", "--width=1280", "--height=800"]
-    if keys.len > 0: args.add "--edit-keys=" & keys
-    args.add project
-    let p = startProcess(bin, args = args,
-                         env = newStringTable({"LD_LIBRARY_PATH": shimDir,
-                                               "CODETRACER_TUI_LAYOUT_DIR":
-                                                 project / ".state"}),
-                         options = {poStdErrToStdOut})
-    let output = p.outputStream.readAll()
-    let rc = p.waitForExit()
-    p.close()
-    (rc, output, readFile(project / ProjectFile))
-
-  test "the binary exists":
-    checkpoint(bin)
-    ck fileExists(bin)
-
-  test "typed keys change the FILE ON DISK, and the typed byte is in the plan":
-    let dir = createTempDir("plat44-", "-bin")
-    try:
-      writeFile(dir / ProjectFile, ProjectText)
-      let (rc, output, onDisk) = runBinary(dir, "shift-q,control-s")
-      checkpoint(output[0 ..< min(400, output.len)])
-      ck rc == 0
-      ck onDisk == "Q" & ProjectText
-      ck output.contains("Qalpha beta")
-      # …and the negative twin: the same run with no keys leaves the file and
-      # the plan as they were.
-      writeFile(dir / ProjectFile, ProjectText)
-      let (rc2, output2, onDisk2) = runBinary(dir, "")
-      ck rc2 == 0
-      ck onDisk2 == ProjectText
-      ck not output2.contains("Qalpha beta")
-      ck output2.contains("alpha beta")
-    finally:
-      removeDir(dir)
-
-  test "the read-only notice is GONE, and the scan can find it when present":
-    let dir = createTempDir("plat44-", "-notice")
-    try:
-      writeFile(dir / ProjectFile, ProjectText)
-      let (rc, output, _) = runBinary(dir, "")
-      ck rc == 0
-      let marker = "read-only: the '"
-      ck not output.contains(marker)
-      # POSITIVE CONTROL: the surface builder still produces that notice for
-      # a medium that cannot write, so the marker is the right string to scan
-      # for — an absence scan over a string nothing ever emits cannot fail.
-      let readOnly = editorSurfaceForProject(ProjectFile, ProjectText,
-                                             "gpui", mutableHere = false)
-      ck readOnly.notice.contains(marker)
-    finally:
-      removeDir(dir)
-
-  test "a key that reaches no element fails the run":
-    let dir = createTempDir("plat44-", "-badkey")
-    try:
-      writeFile(dir / ProjectFile, ProjectText)
-      let (rc, output, onDisk) = runBinary(dir, "hyper-x")
-      ck rc != 0
-      ck output.contains("cannot spell")
-      ck onDisk == ProjectText
     finally:
       removeDir(dir)
 

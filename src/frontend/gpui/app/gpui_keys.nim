@@ -38,6 +38,17 @@ const
     ## GPUI's names for the non-printable keys, as `keystroke.key` spells
     ## them.
 
+  UsShiftedSymbols* = {
+    '`': '~', '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^',
+    '7': '&', '8': '*', '9': '(', '0': ')', '-': '_', '=': '+', '[': '{',
+    ']': '}', '\\': '|', ';': ':', '\'': '"', ',': '<', '.': '>',
+    '/': '?'}.toTable
+    ## The US layout's shifted symbols. A keystroke may arrive as the UNSHIFTED
+    ## key plus `shift` (`` ` `` + shift) or as the shifted character itself
+    ## (`~`); which one GPUI's platform layer sends is a property of the
+    ## platform and is measured by the window lane rather than assumed, so the
+    ## decoder accepts both and they decode to the same name.
+
 proc canonicalKeyOfGpui*(key: string; modifiers: openArray[string]): string =
   ## The canonical name of one GPUI keystroke, or "" when there is none.
   ##
@@ -69,6 +80,8 @@ proc canonicalKeyOfGpui*(key: string; modifiers: openArray[string]): string =
       return ModifierNames[m] & "+" & base
     if shift and base[0] in 'a'..'z':
       return $base[0].toUpperAscii
+    if shift and UsShiftedSymbols.hasKey(base[0]):
+      return $UsShiftedSymbols[base[0]]
     return base
   let m = 1 + (if shift: 1 else: 0) + (if alt: 2 else: 0) +
           (if ctrl: 4 else: 0)

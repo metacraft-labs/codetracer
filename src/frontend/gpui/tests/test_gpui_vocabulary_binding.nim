@@ -303,7 +303,10 @@ suite "PLAT-21: the two renderer defects this milestone measured — REPAIRED BY
     var keys: seq[string] = @[]
     for k, _ in plan.pairs: keys.add k
     keys.sort()
-    ck keys == @["children", "event_names", "has_click_handler",
+    # NINE since 2026-09-23: PLAT-42 made the plan carry each element's
+    # public `attributes`, which is what let the editor's surfaces be read out
+    # of the shipped binary's plan. Still no layer, z-order or focus field.
+    ck keys == @["attributes", "children", "event_names", "has_click_handler",
                  "has_input_handler", "kind", "styles", "tag", "text"]
     # The modal is OPEN in the fixture, so it holds a focus trap and the trap
     # is the exclusivity the entry IS. Read from the Rust side.

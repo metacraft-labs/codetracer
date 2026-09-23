@@ -127,7 +127,11 @@ suite "PLAT-20: the shell is renderer-free":
           importers.add path.extractFilename
           break
     # §4b: the membership is knowable, so the control is the COUNT.
-    ck scanned == 3   # dock_projection.nim, shell.nim, leaves.nim
+    # dock_projection.nim, shell.nim, leaves.nim — and, since PLAT-44
+    # (2026-09-23), edit_arm.nim and gpui_keys.nim, neither of which imports
+    # GPUI: the edit arm reaches the renderer only through `leaves`, and the
+    # key decoder is pure.
+    ck scanned == 5
     ck importers.len == 1
     ck importers[0] == "leaves.nim"
     expectCount(3)

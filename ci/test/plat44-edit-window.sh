@@ -30,7 +30,14 @@ cd "${root}" || exit 1
 WS="$(cd "${root}/.." && pwd)"
 ISONIM_GPUI="${WS}/isonim-gpui"
 OUT="${root}/build/plat44"
-BIN="${root}/build/bin/codetracer-gpui"
+BIN="${CODETRACER_PLAT44_BIN:-${root}/build/bin/codetracer-gpui}"
+# THE BINARY AND THE WINDOWED SHIM MUST SHARE A C RUNTIME. The windowed shim
+# is built in isonim-gpui's shell (`just plat37-shims`); a `codetracer-gpui`
+# built against an older glibc cannot load it and exits at once with
+# "could not load: …libgpui_nim_shim.so" (measured 2026-09-23 when this
+# workspace's dev shell fell back to a profile with glibc 2.40 against a shim
+# built with 2.42). `CODETRACER_PLAT44_BIN` names a binary built in the shim's
+# toolchain; the result records which one ran.
 PROJECT="${OUT}/project"
 PROJECT_FILE="doc.txt"
 PROJECT_TEXT=$'alpha beta\ngamma\n'
@@ -94,8 +101,14 @@ inside() {
 	grim -t ppm "${blank}" 2>/dev/null || true
 	[ -s "${blank}" ] || fail "could not take the blank control frame"
 	# The typist: settle, frame BEFORE, Shift+q, frame AFTER, Ctrl+s, sentinel.
+	#
+	# `CODETRACER_PLAT44_NEGATIVE=1` is the lane's NEGATIVE TWIN: the same run
+	# with the Shift+q left out, which must end in `VERDICT: FAIL` — the proof
+	# that the verdict below can fail at all (§4).
+	local typed="wtype -s ${KEY_GAP_MS} -M shift q -m shift"
+	[ "${CODETRACER_PLAT44_NEGATIVE:-0}" = "1" ] && typed="true"
 	bash -c "sleep ${SETTLE_S}; grim -t ppm '${before}' >/dev/null 2>&1; \
-             wtype -s ${KEY_GAP_MS} -M shift q -m shift; sleep 2; \
+             ${typed}; sleep 2; \
              grim -t ppm '${after}' >/dev/null 2>&1; \
              wtype -s ${KEY_GAP_MS} -M ctrl s -m ctrl; sleep 2; \
              wtype -s ${KEY_GAP_MS} -k F12" >"${OUT}/typist.log" 2>&1 &
@@ -112,12 +125,13 @@ inside() {
 	ended=$(date +%s%3N)
 	wait "${typist}" 2>/dev/null || true
 	python3 - "${OUT}" "${PROJECT}/${PROJECT_FILE}" "${rc}" \
-		"$((ended - started))" "${QUIT_AFTER_MS}" "${PROJECT_TEXT}" \
+		"$((ended - started))" "${QUIT_AFTER_MS}" "${PROJECT_TEXT}" "${BIN}" \
 		>"${OUT}/result.json" <<'PY'
 import json, os, sys
-out, path, rc, elapsed, deadline, original = sys.argv[1:7]
+out, path, rc, elapsed, deadline, original, binary = sys.argv[1:8]
 on_disk = open(path).read() if os.path.exists(path) else None
 print(json.dumps({
+    "binary": os.path.basename(binary),
     "rc": int(rc), "elapsedMs": int(elapsed),
     "endedOnDeadline": int(elapsed) >= int(deadline) - 500,
     "original": original, "onDisk": on_disk,
@@ -128,6 +142,19 @@ print(json.dumps({
 }, indent=1))
 PY
 	cat "${OUT}/result.json"
+	# THE VERDICT IS THE FILE. A run whose binary died, whose loop ended on the
+	# backstop rather than the sentinel, or whose file is not what the keys
+	# should have made is a FAILED run — the first version of this lane printed
+	# such a result and exited 0.
+	python3 - "${OUT}/result.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+ok = (r["rc"] == 0 and not r["endedOnDeadline"]
+      and r["onDisk"] == r["expected"]
+      and all(r["frames"][k] > 0 for k in ("blank", "before", "after")))
+print("VERDICT:", "PASS" if ok else "FAIL")
+sys.exit(0 if ok else 1)
+PY
 }
 
 if [ "${INSIDE}" = "1" ]; then

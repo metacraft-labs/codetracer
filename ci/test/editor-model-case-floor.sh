@@ -573,9 +573,33 @@ PLAT-43)
 	)" "")
 	LAW_SUITES=()
 	;;
+PLAT-44)
+	MILESTONE="** PLAT-44: The GPUI editing arm stops being read-only"
+	SUITES=(
+		src/frontend/gpui/tests/test_gpui_edit_arm.nim
+		src/frontend/tui/tests/test_plat44_both_arms_write.nim
+		src/frontend/gpui/tests/test_plat44_edit_window.nim
+	)
+	# PORTABLE HALF ONLY: the GPUI key decoder, the edit arm writing the core
+	# and saving to a real directory, a read-only buffer still refusing, the
+	# contract/surface agreement; and DIFF-1 with both arms writing from keys,
+	# read from painted cells and the Rust shadow tree, with the renderer-less
+	# child that must fail. The shipped-binary suites
+	# (`test_plat44_shipped_writes.nim`, `test_plat44_sequences.nim`) need
+	# `just build-gpui` and run in the `gpui-shell` lane, and are not counted
+	# here. The WINDOW is: `ci/test/plat44-edit-window.sh` measures it and
+	# `plat44_window_record.nim` reads its frames, and the third suite above
+	# asserts over that committed record, reading no binary and no image.
+	SUITE_FLAGS=("--path:src/frontend/viewmodel" "$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)" "")
+	LAW_SUITES=()
+	;;
 *)
 	echo "FAIL: this gate has no table entry for '${MILESTONE_ID}'."
-	echo "      Known: PLAT-24 … PLAT-43. A milestone gates"
+	echo "      Known: PLAT-24 … PLAT-44. A milestone gates"
 	echo "      its own floor; adding one here is a deliberate edit, which is"
 	echo "      the point."
 	exit 1

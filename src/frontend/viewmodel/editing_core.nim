@@ -23,21 +23,17 @@
 ## WHAT "ONE EDITING CORE, TWO FRONT-ENDS" MEANS TODAY — READ THIS FIRST
 ## =========================================================================
 ##
-## Both front-ends derive their editor from an `EditingDocument`. **Only one
-## of them can change it**, and the asymmetry is a measured property of
-## `isonim-gpui` rather than of this model:
+## Both front-ends derive their editor from an `EditingDocument`, and **since
+## PLAT-44 (2026-09-23) both can change it**, through the same `applyKey` under
+## the same `editScopeOf`: the terminal from `edit_binding.applyEditKey`, GPUI
+## from `gpui/app/edit_arm.applyGpuiKey`.
 ##
-##   * `PLAT21-VG1` — `addEventListener` takes a `proc()` with no parameter
-##     and `gpui_dispatch_event` carries no payload, so **no key can be
-##     delivered to a view**.
-##   * `PLAT21-VG3` — focus is per WINDOW; there is no element focus, so
-##     there is nothing for a key to be delivered *to*.
-##
-## So the GPUI arm is **read-only**, and PLAT-34's deliverable 3 says so in
-## the box rather than in prose somewhere else. What it is NOT is *absent*:
-## PLAT-28's rule is that *"a read-only editor that does not re-render is not
-## a consumer"*, and the gate is that a change to THIS value changes what the
-## GPUI shadow tree holds, read from a run.
+## Until then the GPUI arm was READ-ONLY, and the asymmetry was a measured
+## property of `isonim-gpui` rather than of this model — `PLAT21-VG1` (no key
+## payload could be delivered to a view) and `PLAT21-VG3` (no element focus).
+## PLAT-38 closed both; PLAT-44 consumed them. The clause is retired here
+## rather than deleted so the reason the two arms were ever different stays
+## readable.
 ##
 ## The WEB front-end is neither arm. It is Monaco plus the legacy Karax path
 ## and it is not brought onto this model by this milestone;

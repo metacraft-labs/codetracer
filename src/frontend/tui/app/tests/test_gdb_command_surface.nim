@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 78
+  ExpectedAppModules = 79
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -207,8 +207,14 @@ const
     ## cut but lives under `host/`, and its stale-label rule moved into
     ## `tests/test_capability_resolution.nim` rather than into a new file. A
     ## removal is re-counted exactly as an addition is.
+    ##
+    ## RE-COUNTED ON 2026-09-23: 78 → 79. The one new file is
+    ## `tests/test_edit_binding_vocabulary.nim`, added by PLAT-30 on 2026-09-19
+    ## without re-counting here — so this case had been red on `dev` since,
+    ## found by the PLAT-43/44 lane run rather than by that change. Nothing
+    ## PLAT-42/43/44 added lives under `app/`.
 
-  ExpectedStyleLiterals = 195
+  ExpectedStyleLiterals = 196
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -233,6 +239,11 @@ const
     ## and plain rows, the truncation note) and `views/build_output.nim` (the
     ## rule, the output, the truncation note and ONE PER VERDICT, which is
     ## `verdictStyle`'s no-two-the-same rule spelled as five literals).
+    ##
+    ## RE-COUNTED ON 2026-09-23: PLAT-42 moved it by exactly ONE —
+    ## `views/source_pane.FlowNotTakenStyle`, the de-emphasised colour a line
+    ## inside a branch arm the run declined is painted in. It lives in a file
+    ## that already had literals, so `ExpectedStyledFiles` does not move.
   ExpectedStyledFiles = 24
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##

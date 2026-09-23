@@ -4833,6 +4833,23 @@ plat42-case-floor:
 plat43-case-floor:
   bash ci/test/editor-model-case-floor.sh PLAT-43
 
+# PLAT-44 — the GPUI editing arm: the counted floor (portable suites), and the
+# window lane (a real keystroke through a real compositor changes the file).
+plat44-case-floor:
+  bash ci/test/editor-model-case-floor.sh PLAT-44
+
+plat44-edit-window:
+  bash ci/test/plat44-edit-window.sh
+
+# Read the window run's frames through PLAT-39's pixel reader and commit the
+# record `test_plat44_edit_window.nim` asserts over. Needs `tesseract`.
+plat44-window-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --nimcache:nimcache/plat44rec -o:build/plat44_window_record \
+    src/tests/visual/screen_oracle/plat44_window_record.nim
+
 # PLAT-40 — every pane producer has a caller a USER can reach.
 #
 # *A unit test is a production caller as far as a coverage tool is concerned,
@@ -5328,7 +5345,7 @@ editor-model-case-floors:
   corpus_dependent() { case "$1" in PLAT-39) return 0 ;; *) return 1 ;; esac; }
   corpus_present() { [ -d src/tests/visual/captures/electron ] && \
     [ "$(find src/tests/visual/captures/electron -name '*.png' | wc -l)" -ge 6 ]; }
-  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-41 PLAT-42 PLAT-43; do
+  for m in PLAT-24 PLAT-25 PLAT-26 PLAT-27 PLAT-28 PLAT-29 PLAT-30 PLAT-31 PLAT-32 PLAT-33 PLAT-34 PLAT-35 PLAT-36 PLAT-37 PLAT-38 PLAT-39 PLAT-41 PLAT-42 PLAT-43 PLAT-44; do
     echo "=== ${m} ==="
     if corpus_dependent "${m}" && ! corpus_present; then
       echo "DEFERRED: ${m}'s floor reads src/tests/visual/captures/electron/,"

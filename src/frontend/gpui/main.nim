@@ -136,7 +136,8 @@ OPTIONS:
                     gap, and this flag stays until it lands.
   --edit-keys=<keys>
                     PLAT-44, EDIT mode only. Comma-separated GPUI keystrokes
-                    (`x`, `escape`, `control-s`, `shift-a`) delivered, one
+                    (`x`, `escape`, `control-s`, `shift-a`; `comma` for
+                    the `,` key, since `,` separates keys) delivered, one
                     by one, through the SHIM'S OWN dispatch to the focused
                     editor pane — the listener a window's keys reach — before
                     the plan is reported. The headless reading of what a
@@ -447,7 +448,8 @@ proc gpuiKeyEventOf(spec: string): (bool, GpuiEvent) =
     of "platform": mods.incl gmPlatform
     of "function": mods.incl gmFunction
     else: return (false, GpuiEvent())
-  let key = parts[^1]
+  # `comma` is the one spelling this option adds: `,` separates the keys.
+  let key = if parts[^1] == "comma": "," else: parts[^1]
   if key.len == 0: return (false, GpuiEvent())
   (true, GpuiEvent(kind: gekKeyDown, key: key, modifiers: mods,
                    repeat: false))
