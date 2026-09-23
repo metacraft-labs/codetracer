@@ -40,6 +40,7 @@ import ../app/source_binding
 import ../app/views/source_pane
 import ../host/tui_session
 import ./fixtures/fixture_provider
+import ../../viewmodel/editor/[inlay, row_projection, wrap]
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -141,6 +142,61 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
           ck ("/* " & want[0] & ": ") in painted
         else:
           ck "/* " notin painted
+
+suite "PLAT-28: REAL inline values, placed by the inlay model":
+  ## PLAT-28's real-stack box: *"A real recording, stepped, with inline values
+  ## from the real value-presentation pipeline placed on real source lines —
+  ## not constructed `EditorValue`s."* The recording is `calc`, driven to a
+  ## scenario stop through the real `replay-server`; the values are the ones
+  ## the shipped host hands the source pane (`inlineValuesOf` at the terminal's
+  ## row budget), on the line the debugger stopped at. They go through
+  ## `decorationsForRow` — the encoding both editor surfaces now use — and
+  ## `inlay.inlayWrapCache`, and the claim §8.3 makes is asserted on them: an
+  ## inline value OCCUPIES COLUMNS, so it widens its line by exactly its cells
+  ## and moves the wrap point where the plain line would not wrap.
+
+  let resolution = resolveFixture("calc")
+  test "at " & ValueScenarios[0] & ": the stop's own values widen the line and move the wrap":
+    if resolution.outcome == foMissingPrereq:
+      let message = missingPrereqMessage(resolution.spec, resolution.detail)
+      echo "  ", message
+      ck message.startsWith(MissingPrereqSkipPrefix)
+      skip()
+    else:
+      let rt = newTuiRuntime(newTuiApp(), caps(), Cols, Rows)
+      let s = openTuiSession(resolution.tracePath, viewportHeight = Rows - 6)
+      defer: s.close()
+      s.setViewportHeight(rt.sourcePaneRows())
+      s.drive(ValueScenarios[0])
+      s.refresh(rt)
+      let model = rt.app.source
+      let lineText = model.heldTextAt(model.executionLine)
+      var vs: seq[EditorValue] = @[]
+      for a in annotationsForLine(lineText, model.values):
+        vs.add EditorValue(name: a.name, value: a.value)
+      checkpoint("line " & $model.executionLine & ": " & lineText & " " & $vs)
+      ck vs.len > 0
+      let doc = lineText & "\n"
+      let ds = decorationSet(decorationsForRow(
+        emNone, eptExecution, efsUnknown, vs, 0, lineText.len, 0))
+      let policy = ColumnPolicy(tabSize: 4, ambiguous: awNarrow)
+      var widgetCells = 0
+      for v in vs: widgetCells += valueWidth(v)
+      let unbounded = WrapSettings(wrapColumn: 0, policy: policy)
+      let lineWidth = initWrapCache(doc, unbounded).metricsOf(0).width
+      # THE VALUES OCCUPY COLUMNS: the decorated line is wider by exactly them.
+      ck inlayWrapCache(doc, unbounded, ds).metricsOf(0).width ==
+         lineWidth + widgetCells
+      # AND THEY MOVE THE WRAP POINT: at a column the plain line fits in
+      # exactly, the decorated one takes a second row.
+      let settings = WrapSettings(wrapColumn: lineWidth + widgetCells - 1,
+                                  policy: policy)
+      let plain = initWrapCache(doc, settings)
+      let deco = inlayWrapCache(doc, settings, ds)
+      ck plain.rowsInLine(0) == 1
+      ck deco.rowsInLine(0) == 2
+      # …and the text before them is where it was.
+      ck deco.rowAt(0).width >= lineWidth
 
 suite "PLAT-42 PG3 — assertion tally":
   test "CHECKS":
