@@ -110,6 +110,11 @@ type
       ## (`ensureEditWorkspace`), two suppliers, no branch in the consumer.
     startBuild*: proc(kind: BuildKind; command: string): BuildStartResult
       {.closure.}
+    readConfig*: proc(spelled: string): EditReadResult {.closure.}
+      ## PLAT-36. Read a user's Vim configuration for `:source`: `~`
+      ## expanded, relative paths against the project. Unlike `readFile` it
+      ## may reach outside the project — see `host/edit_host
+      ## .readUserConfigFile`. Nil in a session with no host filesystem.
     saveKeymap*: proc(model: KeymapModel): string {.closure.}
       ## PLAT-43. Remember the chosen keymap model for the next session; ""
       ## on success, else a one-line message naming the path. Nil in a session
@@ -525,8 +530,11 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         if rt.app.editSession.isNil: rt.keymapModel
         else: rt.app.editSession.model
       if rest.len == 0:
-        rt.note("keymap " & $current & "; the accepted values are " &
-                acceptedKeymapNamesText())
+        let sourced =
+          if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
+          else: " with " & rt.app.editSession.imported.source & " sourced"
+        rt.note("keymap " & $current & sourced &
+                "; the accepted values are " & acceptedKeymapNamesText())
       else:
         let selection = selectKeymap(rest)
         if not selection.ok:
@@ -542,6 +550,30 @@ proc runPromptLine(rt: TuiRuntime; line: string;
             else: rt.editServices.saveKeymap(selection.model)
           rt.note("keymap " & $selection.model &
                   (if saved.len == 0: "" else: " (" & saved & ")"))
+      outcome.detail = rt.app.notification
+      return
+    of "source", "so":
+      # PLAT-36. A user's Vim configuration, imported on top of the Vim
+      # keymap and installed for THIS SESSION. Not remembered: the stored
+      # preference names a model, and an import is a model plus a file whose
+      # contents may change — re-reading it silently at start-up would make
+      # a key's meaning depend on a file the user did not name that day.
+      # The status line carries §6.3's count and the first untranslated line.
+      if rest.len == 0:
+        rt.note(":source needs a file, e.g. ':source ~/.vimrc'")
+      elif rt.editServices.readConfig.isNil:
+        rt.note(":source has no reader in this session")
+      else:
+        let read = rt.editServices.readConfig(rest)
+        if not read.ok:
+          rt.note(read.message)
+        else:
+          let sourced = sourceVimConfig(rest, read.text)
+          if rt.app.editSession.isNil:
+            rt.app.editSession = newEditSession(kmVim)
+          rt.app.editSession.installImported(sourced.imported)
+          rt.keymapModel = kmVim
+          rt.note(sourcedSummary(sourced))
       outcome.detail = rt.app.notification
       return
     of "w", "write":

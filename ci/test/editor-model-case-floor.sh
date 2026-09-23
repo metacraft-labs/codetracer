@@ -348,7 +348,18 @@ PLAT-36)
 	SUITES=(
 		src/frontend/viewmodel/tests/unit/test_editor_vim_import.nim
 		src/frontend/viewmodel/tests/unit/test_editor_vim_import_differential.nim
+		src/frontend/tui/tests/test_plat36_source_command.nim
 	)
+	# THE THIRD SUITE IS THE IMPORT INSTALLED: `:source <file>` through the
+	# terminal runtime, which is the only one of the three that is a TUI
+	# module and so the only one that needs the `tui` lane's flags — read from
+	# `ci/lib/test-lane-files.sh`, never spelled again here (§30).
+	PLAT36_TUI_FLAGS="$(
+		# shellcheck source=/dev/null
+		. ci/lib/test-lane-files.sh >/dev/null 2>&1 &&
+			test_lane_extra_flags tui
+	)"
+	SUITE_FLAGS=("" "" "${PLAT36_TUI_FLAGS}")
 	# THIS MILESTONE PUBLISHES A FLOOR AND WAS GATED BY NEITHER FILE.
 	# Verification of the PLAT-37…44 drafts found that PLAT-36 carries a
 	# `FLOOR:` line, that this script had no `case` label for it, and that

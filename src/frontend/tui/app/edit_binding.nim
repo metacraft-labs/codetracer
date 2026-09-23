@@ -174,6 +174,11 @@ type
       ## through — the one `:keymap <name>` selected, or the stored preference
       ## the host loaded. A SESSION field and not only a per-document one, so a
       ## file opened after the choice is opened under it.
+    imported*: ImportedKeymap
+      ## PLAT-36. The Vim configuration `:source` imported, or nil. Held at
+      ## session level for the same reason as `model`: a file opened after the
+      ## `:source` is opened under it. `selectModel` clears it — a `:keymap
+      ## vim` after a `:source` is a request for the SHIPPED Vim keymap.
     furnished*: bool
       ## Whether `runtime.ensureEditWorkspace` has already walked the project
       ## for this session.
@@ -420,8 +425,21 @@ proc selectModel*(s: EditSession; model: KeymapModel) =
   if s.isNil:
     return
   s.model = model
+  s.imported = nil
   for buf in s.buffers:
     buf.doc.switchModel(model)
+
+proc installImported*(s: EditSession; imported: ImportedKeymap) =
+  ## PLAT-36. Put every OPEN buffer, and every buffer opened later, under an
+  ## imported Vim configuration — text and history kept, as `selectModel`
+  ## keeps them. The session's model becomes `kmVim`, the model the import is
+  ## layered on.
+  if s.isNil:
+    return
+  s.model = kmVim
+  s.imported = imported
+  for buf in s.buffers:
+    buf.doc.installImported(imported)
 
 proc activeBuffer*(s: EditSession): EditBuffer =
   if s.isNil or s.active < 0 or s.active >= s.buffers.len: nil
@@ -449,6 +467,8 @@ proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
     s.active = existing
     return existing
   s.buffers.add newEditBuffer(path, text, viewportHeight, s.model)
+  if not s.imported.isNil:
+    s.buffers[^1].doc.installImported(s.imported)
   s.active = s.buffers.high
   s.active
 

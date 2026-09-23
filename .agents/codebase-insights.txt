@@ -5539,3 +5539,15 @@ together and rerun that suite.
   `ocrLineBands` (ink-projection line bands, one `psm 7` read each) is the
   fallback. Title strips of the native window need `TitleRetryExtraPx` more
   height than the desktop's.
+
+- PLAT-36 `:source <file>` (tui/app/runtime.nim, Edit mode): imports a vimrc via
+  `editing_core.sourceVimConfig` ON TOP OF `vimKeymap()` and installs it with
+  `EditSession.installImported` -> `EditingDocument.installImported`, which also
+  copies the import's macros into `EditorState.macros` (multi-op RHS replay
+  through them). `EditingDocument.imported` (ref, nil = shipped model) is what
+  `applyKey` resolves through; `switchModel`/`selectModel` drop it and its macros.
+  Only single-op or argument-free sequences translate: `dd`, `yyp`, `>>` are
+  REPORTED (operator + motion), use DIFF-5's rows (`D`, `jJ`, ...) in fixtures.
+- Harness control digests cover runtime.nim/edit_binding.nim/editing_core.nim in
+  PLAT-30/34/36/42/43/44; any edit there needs those harnesses regraded before
+  their control files are committed.

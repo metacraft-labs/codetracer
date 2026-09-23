@@ -132,6 +132,11 @@ proc wireEditServices(rt: TuiRuntime; root: string;
       EditWriteResult(ok: true)
     except TuiHostError as e:
       EditWriteResult(ok: false, message: e.msg)
+  rt.editServices.readConfig = proc(spelled: string): EditReadResult =
+    try:
+      EditReadResult(ok: true, text: readUserConfigFile(root, spelled))
+    except TuiHostError as e:
+      EditReadResult(ok: false, message: e.msg)
   rt.editServices.listFiles = listFiles
   # PLAT-43. The keymap model this session starts under is the one the user
   # last chose, read through the same `selectKeymap` a typed `:keymap` goes

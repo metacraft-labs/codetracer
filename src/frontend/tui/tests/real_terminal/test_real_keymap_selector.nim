@@ -330,6 +330,62 @@ suite "PLAT-31 Tier 2: a pending prefix times out at its bound, on a real pty":
     let timedOut = typedUnderVim("prefix-past", @["g", "U", "w"], PastBoundMs)
     ck timedOut == original
 
+suite "PLAT-36 Tier 2: a `:source`d mapping, typed on a real pty":
+  ## PLAT-36's real-stack box: a TRANSLATED mapping driven through the
+  ## shipped binary, asserted to produce the document the same keystrokes'
+  ## right-hand side produces under the hand-written Vim keymap. The
+  ## configuration is a real file in the project; `:source` is typed, the
+  ## mapped key is typed, `:w` writes, and the file ON DISK is compared.
+  ##
+  ## Two mappings, both rows of `DIFF-5`'s table: `Q` → `D` is one operation,
+  ## `Z` → `jJ` is two and so replays through the macro the import installs —
+  ## the path that only works if `:source` installed the macros as well as
+  ## the bindings.
+
+  const
+    VimrcFile = "vimrc"
+    Vimrc = "nnoremap Q D\nnnoremap Z jJ\n"
+    ShiftTab = "\x1b[Z"
+
+  proc typedAfterSource(name: string; keys: seq[string]): string =
+    let d = asciiDoc()
+    let state = stateDirFor(name)
+    let project = projectFor(name, d.text)
+    writeFile(project / VimrcFile, Vimrc)
+    var sess = spawnEditor(project, state)
+    try:
+      discard waitForScreenText(sess, "EDIT " & ProjectFile)
+      sess.send(Tab)
+      discard waitForScreenText(sess, "focus ")
+      sess.send(":source " & VimrcFile & "\r")
+      let told = waitForScreenText(sess, "sourced " & VimrcFile)
+      checkpoint(told.splitLines().filterIt(it.contains("sourced")).join(" | "))
+      ck told.contains("2 of 2 mapping line(s) translated")
+      # Back onto the editor: `Shift+Tab` is the focus ring's reverse step,
+      # and never the editor's key (PLAT-43's ownership case).
+      sess.send(ShiftTab)
+      discard sess.drainOutput(100)
+      for k in keys:
+        sess.sendKey(k)
+      sess.saveByKeys()
+    finally:
+      sess.quit()
+    # `:source` is a session's choice and is not remembered.
+    ck not fileExists(state / KeymapFile)
+    readFile(project / ProjectFile)
+
+  test "`Q` is `D` and `Z` is `jJ`, through the binary, on disk":
+    let original = asciiDoc().text
+    for (name, mapped, rhs) in [("source-single", @["Q"], @["D"]),
+                                ("source-macro", @["Z", "Z"],
+                                 @["j", "J", "j", "J"])]:
+      let onDisk = typedAfterSource(name, mapped)
+      let expected = inProcess(kmVim, original, rhs & @["Esc"])
+      checkpoint(name & ": on disk starts " &
+                 onDisk[0 ..< min(24, onDisk.len)].escape)
+      ck onDisk == expected
+      ck onDisk != original
+
 suite "PLAT-43 Tier 2 — assertion tally":
   test "CHECKS":
     echo "CHECKS: ", CHECKS
