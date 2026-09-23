@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 79
+  ExpectedAppModules = 80
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -213,8 +213,12 @@ const
     ## without re-counting here — so this case had been red on `dev` since,
     ## found by the PLAT-43/44 lane run rather than by that change. Nothing
     ## PLAT-42/43/44 added lives under `app/`.
+    ##
+    ## RE-COUNTED ON 2026-09-23 AGAIN: 79 → 80. `views/point_list.nim`, the
+    ## terminal breakpoint list PLAT-40 added (commit `4e1db66f0`), without
+    ## re-counting here — found by the next full `tui` lane run.
 
-  ExpectedStyleLiterals = 196
+  ExpectedStyleLiterals = 198
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -244,7 +248,12 @@ const
     ## `views/source_pane.FlowNotTakenStyle`, the de-emphasised colour a line
     ## inside a branch arm the run declined is painted in. It lives in a file
     ## that already had literals, so `ExpectedStyledFiles` does not move.
-  ExpectedStyledFiles = 24
+    ##
+    ## RE-COUNTED ON 2026-09-23 AGAIN: PLAT-40's `views/point_list.nim` adds
+    ## TWO literals in ONE new painting file — `EmptyPointsStyle` (the muted
+    ## "no breakpoints" line) and `DisabledPointStyle` (a disabled point's
+    ## row) — so 196 → 198 and 24 → 25.
+  ExpectedStyledFiles = 25
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour
