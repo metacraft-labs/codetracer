@@ -214,7 +214,8 @@ when defined(js):
   #   * The DOM reparenting — moving the live element's children into the new
   #     GL container — which is entirely inside that registration.
   #   * `auto_hide.unpinPanelTarget`.  In the shipped product `initLayout`
-  #     installs a closure there (`layout.nim:2370`) and THAT is what calls
+  #     installs a closure there (`layout.nim`, `auto_hide.unpinPanelTarget =
+  #     proc(...)`) and THAT is what calls
   #     `addItem`, choosing the insertion index from `panel.edge`.  It cannot
   #     be installed headlessly for the same reason the registration cannot, so
   #     the var is nil here and `unpinPanel` takes its own fallback branch.
@@ -235,9 +236,11 @@ when defined(js):
   # still runs in a lane.  It is deliberately built to model the boundary as
   # the root-cause analysis describes it, and no more.
   #
-  # Every `layout.nim:NNNN` below was read at `b98719133`.  Line numbers rot;
-  # the SYMBOL each one names is the durable reference, and the number is there
-  # only to shorten the search:
+  # The `layout.nim:NNNN` citations below were re-read at `f940ae392`.  They
+  # rot FAST — three others in this file drifted by four and five lines within
+  # a day, on a rebase that changed nothing about auto-hide — so the SYMBOL
+  # each one names is the reference, and the number only shortens the search.
+  # Anywhere a symbol alone was unambiguous, the number has been dropped.
   #
   #   * `addItem(config)` looks `config.componentName` up in a registry.  A
   #     name that is not registered constructs nothing, adds nothing, and
@@ -387,9 +390,9 @@ when defined(js):
     observed = UnpinObservation(handedConfig: nil, labelSeen: cstring"")
 
   proc registerBuildPane(): AutoHidePanel =
-    ## The real production registration, with the real arguments the call at
-    ## `layout.nim:2683` passes for BUILD (it reads them off the pane table at
-    ## `layout.nim:2549-2553`).
+    ## The real production registration, with the real arguments `layout.nim`'s
+    ## only `addStandaloneAutoHidePanel` call passes for BUILD — it reads them
+    ## off the `standaloneAutoHidePanels` table just above itself.
     addStandaloneAutoHidePanel(
       cstring"BUILD", Content.Build, 0, stubLiveElement(),
       componentLabel = cstring"buildComponent-0", edge = AutoHideEdge.Bottom)
@@ -475,7 +478,7 @@ when defined(js):
     test "so do the other three panes #692 named":
       ## PROBLEMS is the one that proves the label is not derivable from the
       ## content: `Content.BuildErrors` mounts into `errorsComponent-0`.
-      ## Table copied from `layout.nim:2549-2553`.
+      ## Table copied from `layout.nim`'s `standaloneAutoHidePanels`.
       const panes = [
         (Content.Build, cstring"BUILD", cstring"buildComponent-0"),
         (Content.BuildErrors, cstring"PROBLEMS", cstring"errorsComponent-0"),

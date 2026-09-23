@@ -5216,7 +5216,6 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   class of collision is structurally impossible rather than greppable. Substring
   is simply the wrong default for a matcher over a set of names nobody has
   promised to keep prefix-free.
-||||||| parent of f0b8f50c4 (fix(re-record): start one recorder per Ctrl+R, and say why the extras were ignored)
 * A run over any workspace looks enormous and is almost entirely
   `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
   the CWD is inside a checkout with recorder siblings.
@@ -5568,7 +5567,6 @@ together and rerun that suite.
 - Both editor surfaces build rows only via `editor_surface.projectedRows` ->
   `row_projection.editorRowsOf` (RowProjection.firstLine/requested for the
   debug window).
-||||||| parent of 2dd4564e7 (test(ui): run unpinPanel headlessly for the four default strip panes)
 
 ## `src/frontend/ui/auto_hide.nim` DOES compile and run under `nim js -d:nodejs`
 
