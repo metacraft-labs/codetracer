@@ -104,6 +104,14 @@ type
     mutations*: seq[uint64]
     maxRRTicks*: uint64
     originNav*: ref OriginNavigator
+    points*: seq[SourcePoint]
+      ## The breakpoints THE ENGINE VERIFIED, as its `setBreakpoints` reply
+      ## bound them — never the line a user asked for, since the engine binds a
+      ## breakpoint to a recorded step and the gutter must show where it went.
+      ## `source_binding`'s header says why this is a value rather than
+      ## `PointListVM`: nothing a user runs fills that list with DECLARED
+      ## points. Until 2026-09-23 nothing filled this either, and `:break` /
+      ## `F9` answered "no breakpoint service is wired".
 
 proc openTuiSession*(traceFolder: string; viewportHeight: int;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -283,6 +291,42 @@ proc learnExtent*(s: TuiSession) =
   except CatchableError:
     s.callBoundaries = @[]
 
+proc toggleBreakpoint*(s: TuiSession; path: string; line: int): bool =
+  ## Toggle a breakpoint at `path:line` and keep `points` equal to what the
+  ## engine verified. Returns false when the engine refused the request.
+  ##
+  ## DAP's `setBreakpoints` REPLACES the source's whole set
+  ## (https://microsoft.github.io/debug-adapter-protocol/specification#Requests_SetBreakpoints),
+  ## so the request carries every breakpoint this session holds in `path`,
+  ## with `line` added or removed. A toggle that sent only the new line would
+  ## silently clear the others on the engine while the gutter still drew them.
+  var lines: seq[int] = @[]
+  var kept: seq[SourcePoint] = @[]
+  var removing = false
+  for p in s.points:
+    if p.path == path and p.kind == sptBreakpoint:
+      if p.line == line: removing = true
+      else: lines.add p.line
+    else:
+      kept.add p
+  if not removing:
+    lines.add line
+  var wanted = newJArray()
+  for l in lines:
+    wanted.add %*{"line": l}
+  let resp = s.session.sendRawDapRequest("setBreakpoints",
+    %*{"source": {"path": path}, "breakpoints": wanted})
+  discard s.session.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    return false
+  for bp in resp{"body", "breakpoints"}.getElems:
+    let bound = bp.getOrDefault("line").getInt(0)
+    if bp.getOrDefault("verified").getBool(false) and bound >= 1:
+      kept.add SourcePoint(path: path, line: bound, kind: sptBreakpoint,
+                           enabled: true)
+  s.points = kept
+  true
+
 proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## Rebuild every pane's model from the CURRENT stop, and re-point the
   ## dispatcher and the command context at it.
@@ -322,6 +366,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     else: notTakenLinesOf(flowVM.styledLines.val)
   rt.app.source = sourcePaneModelFor(
     s.source, s.session.session.store.degraded.sourceAvailability.val,
+    points = s.points,
     notTakenLines = notTaken,
     inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
 
@@ -362,7 +407,9 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     state: s.state,
     origin: s.origin,
     originNav: s.originNav,
-    services: CommandServices())
+    services: CommandServices(
+      setBreakpoint: proc(path: string; line: int): bool =
+        sess.toggleBreakpoint(path, line)))
   rt.context = CommandContext(
     file: s.session.getCurrentFile(),
     line: s.session.getCurrentLine(),
@@ -371,6 +418,24 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     targets: targetsFor(s.bounds, s.callBoundaries, s.mutations),
     selectedVariable: "",
     functions: @[])
+
+proc setFlowOverlay*(s: TuiSession; shown: bool) =
+  ## Show or hide the flow overlay for this session — `EditorVM`'s own toggle,
+  ## the one the GPUI front-end's `--no-flow-overlay` sets too.
+  if not s.session.session.editorVM.isNil:
+    s.session.session.editorVM.showFlowOverlay.val = shown
+
+proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
+  ## What the host does with one token's outcome, in ONE place so the shipped
+  ## loop (`main.nim`) and the suites that drive the host run the same rule: a
+  ## navigation is pumped and then refreshed; a change to what the session
+  ## holds without a move (a breakpoint) is refreshed and NOT pumped — a pump
+  ## there would wait on a `stopped` event no engine sends.
+  if outcome.awaitsMove:
+    s.pumpMove()
+    s.refresh(rt)
+  elif outcome.refreshesSession:
+    s.refresh(rt)
 
 proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## Take the ESCAPE HATCH off the DAP channel now that the session is open,

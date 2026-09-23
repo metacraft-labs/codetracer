@@ -370,6 +370,8 @@ proc interactive(command: TuiCommand): int =
   session.disarmHandshakeInterrupt()
 
   session.header(rt)
+  if command.noFlowOverlay:
+    session.setFlowOverlay(false)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
   session.refresh(rt)
@@ -444,9 +446,7 @@ proc interactive(command: TuiCommand): int =
       if outcome.quit:
         running = false
       else:
-        if outcome.awaitsMove:
-          session.pumpMove()
-          session.refresh(rt)
+        session.applyOutcome(rt, outcome)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         # `report = false`: the line the key just wrote is the user's own.

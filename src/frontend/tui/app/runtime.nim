@@ -133,6 +133,10 @@ type
       ## A navigation command was SENT and the host must consume the
       ## `stopped` + `ct/complete-move` pair it will produce. See the module
       ## header.
+    refreshesSession*: bool
+      ## The engine's state changed WITHOUT a move — a breakpoint was set or
+      ## cleared — so the host rebuilds the panes from the session, but must
+      ## not pump for a `stopped` event that is not coming.
     action*: KeyAction
       ## What fired, for the status line and for a test that wants to assert
       ## the binding rather than its effect.
@@ -415,6 +419,28 @@ proc openPrompt(rt: TuiRuntime; kind: PromptKind): bool =
   discard rt.prompt.open(kind)
   true
 
+proc changesSessionState*(action: KeyAction): bool =
+  ## Whether a `drDone` for `action` changed what the session holds without
+  ## moving it — the host refreshes the panes but pumps nothing.
+  action == kaToggleBreakpoint
+
+proc movesTheDebugger*(action: KeyAction): bool =
+  ## Whether firing `action` sends a navigation command the host must pump.
+  ##
+  ## Enumerated rather than inferred from the dispatch result, because
+  ## `drDone` is also what a purely local action answers: `kaMaximizePane`
+  ## reports `drDone` and sends nothing, and a host that pumped after it would
+  ## block on an event no engine is going to send. `waitForEvent` reads the
+  ## pipe until its message budget runs out, so getting this wrong is a hang
+  ## rather than a wrong screen.
+  case action
+  of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
+     kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
+     kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
+     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
+     kaValueOrigin, kaReverseOrigin: true
+  else: false
+
 proc runPromptLine(rt: TuiRuntime; line: string;
                    outcome: var RuntimeOutcome) =
   ## A committed prompt line, through CTUI-10's interpreter.
@@ -621,8 +647,14 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   # (`q`, `Ctrl+c`) always went through there and always worked, which is why a
   # published command was broken behind two working keys.
   outcome.action = result.dispatch.action
+  # ONLY A NAVIGATION IS PUMPED. This said `drDone` alone until 2026-09-23,
+  # which was harmless while every command that answered `drDone` moved the
+  # debugger; `:break` answering `drDone` (its service is now wired) would have
+  # blocked the loop on a `stopped` event no engine sends — see
+  # `movesTheDebugger` on why that is a hang rather than a wrong screen.
   if result.dispatch.status == drDone:
-    outcome.awaitsMove = true
+    outcome.awaitsMove = movesTheDebugger(outcome.action)
+    outcome.refreshesSession = changesSessionState(outcome.action)
 
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
@@ -690,22 +722,6 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # dragged pointer from costing a frame per report.
   outcome.repaint = true
 
-proc movesTheDebugger*(action: KeyAction): bool =
-  ## Whether firing `action` sends a navigation command the host must pump.
-  ##
-  ## Enumerated rather than inferred from the dispatch result, because
-  ## `drDone` is also what a purely local action answers: `kaMaximizePane`
-  ## reports `drDone` and sends nothing, and a host that pumped after it would
-  ## block on an event no engine is going to send. `waitForEvent` reads the
-  ## pipe until its message budget runs out, so getting this wrong is a hang
-  ## rather than a wrong screen.
-  case action
-  of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
-     kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
-     kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
-     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
-     kaValueOrigin, kaReverseOrigin: true
-  else: false
 
 const EditorOwnedKeys* = [
     "Backspace", "Delete", "Enter", "Left", "Right", "Up", "Down",
@@ -1149,6 +1165,8 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   result.repaint = true
   if dispatch.status == drDone and movesTheDebugger(resolution.action):
     result.awaitsMove = true
+  if dispatch.status == drDone and changesSessionState(resolution.action):
+    result.refreshesSession = true
 
 # ---------------------------------------------------------------------------
 # The screen

@@ -118,6 +118,11 @@ type
       recordKeys*: string
       replayKeys*: string
         ## `--record-keys=<file>` and `--replay-keys=<file>`, or "".
+      noFlowOverlay*: bool
+        ## `--no-flow-overlay` — the flow overlay hidden for this session.
+        ## PLAT-42 built the overlay on both native front-ends and shows it by
+        ## default (`FlowOverlayShownByDefault`); this is the GPUI binary's
+        ## flag of the same name, so the two can be asked for the same screen.
       layoutBinding*: bool
         ## `--layout-binding` — PLAT-6's rearrangeable layout, OFF BY DEFAULT.
         ##
@@ -297,6 +302,7 @@ options:
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
   --layout-binding   let : and the mouse rearrange the panes, and remember them
+  --no-flow-overlay  do not dim the lines the run did not reach
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
@@ -392,6 +398,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var recordKeys = ""
   var replayKeys = ""
   var layoutBinding = false
+  var noFlowOverlay = false
   var editProject = ""
   var editRequested = false
   var i = first
@@ -420,6 +427,11 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       # POSITIONAL and `translateArgs` leaves positionals where they are — so
       # the handoff prepends the flag and the path arrives on its own.
       editRequested = true
+    of "--no-flow-overlay":
+      # The GPUI front-end's flag of the same name, with the same meaning: the
+      # flow overlay (PLAT-42) is shown by default and this hides it for the
+      # session. Idempotent, like the two flags around it.
+      noFlowOverlay = true
     of "--layout-binding":
       # Idempotent, like `--headless`: asking for the same one thing twice is
       # not a contradiction and there is no second arrangement mode for it to
@@ -694,8 +706,10 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   of tckHeadless:
     TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
-               replayKeys: replayKeys, layoutBinding: layoutBinding)
+               replayKeys: replayKeys, layoutBinding: layoutBinding,
+               noFlowOverlay: noFlowOverlay)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
-               replayKeys: replayKeys, layoutBinding: layoutBinding)
+               replayKeys: replayKeys, layoutBinding: layoutBinding,
+               noFlowOverlay: noFlowOverlay)
