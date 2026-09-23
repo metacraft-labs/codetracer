@@ -67,6 +67,9 @@ import ../../editor/inlay
 import ../../editor/range_set
 import ../../editor/row_projection
 import ../../editor/wrap
+import ../../editor/editor_state
+import ../../editor/operations
+import ../../editor/collab_text
 import ../corpus/unicode_corpus
 
 import ../../../view_vocabulary/editor_surface
@@ -78,7 +81,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 335
+const ExpectedAssertions = 352
 
 const Policy = ColumnPolicy(tabSize: 4, ambiguous: awNarrow)
 const NoWrap = WrapSettings(wrapColumn: 0, policy: Policy)
@@ -669,6 +672,69 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
       doc: doc, decorations: ds, firstLine: 40, viewportTop: 42,
       viewportHeight: 1, trailing: tlpDropFinalEmpty))
     counted clipped.len == 1 and clipped[0].line == 42
+
+suite "PLAT-28 — a line table moves with the text (§8.2)":
+  ## `EditorState.folded`, `breakpoints`, `tracepoints` and `trackedLines` name
+  ## LINES, and until 2026-09-23 no edit moved them. Every case below names
+  ## the Vim edit it spells as a change set, because the three shapes that
+  ## matter are `O` (open a line above), `dd` (delete the line) and `J` (join
+  ## it with the next): the first must move a breakpoint, the second must
+  ## remove it, and the third must keep it.
+
+  const Doc = "alpha\nbeta\ngamma\ndelta\n"   # lines 0..3, then the empty 4
+  const BetaStart = 6
+
+  test "`O` above a line moves it down; a line above it does not move":
+    let cs = changeSet(Doc.len, BetaStart, BetaStart, "new\n")
+    counted mapLinesThrough(Doc, cs, [0, 1, 2]) == @[0, 2, 3]
+
+  test "`dd` on a line DELETES it; the line that took its place is not it":
+    let cs = changeSet(Doc.len, BetaStart, BetaStart + "beta\n".len, "")
+    counted mapLinesThrough(Doc, cs, [0, 1, 2]) == @[0, -1, 1]
+
+  test "`J` keeps both joined lines' text, so it keeps both lines — on one row":
+    # `J` on `beta` deletes its newline and puts one space in its place.
+    let nl = BetaStart + "beta".len
+    let cs = changeSet(Doc.len, nl, nl + 1, " ")
+    counted cs.apply(Doc) == "alpha\nbeta gamma\ndelta\n"
+    counted mapLinesThrough(Doc, cs, [1, 2, 3]) == @[1, 1, 2]
+
+  test "emptying a line's text keeps the line; Enter inside it keeps it on the first half":
+    let emptied = changeSet(Doc.len, BetaStart, BetaStart + 4, "")
+    counted mapLinesThrough(Doc, emptied, [1]) == @[1]
+    let split = changeSet(Doc.len, BetaStart + 2, BetaStart + 2, "\n")
+    counted mapLinesThrough(Doc, split, [1, 2]) == @[1, 3]
+
+  test "a line that is not a line of the document is returned unchanged":
+    let cs = changeSet(Doc.len, 0, 0, "x\n")
+    counted mapLinesThrough(Doc, cs, [-1, 99]) == @[-1, 99]
+
+  test "THE THREE ROUTES A DOCUMENT MOVES BY all move the state's lines":
+    # A LOCAL edit (`commitChange`), its UNDO (`applyHistoryStep`) and a
+    # REMOTE change (`collab_text.applyRemoteChange`). The undo route carried
+    # its own copy of the marks mapping until this milestone and would have
+    # left the lines where the edit put them.
+    var st = initEditorState(Doc)
+    st.breakpoints = @[1]
+    st.tracepoints = @[2]
+    st.folded = @[3]
+    st.trackedLines = @[1, 2]
+    let edited = applyOperation(st, "insert-text", OpArgs(text: "top\n"),
+                                NoWrap).state
+    counted edited.breakpoints == @[2]
+    counted edited.tracepoints == @[3]
+    counted edited.folded == @[4]
+    counted edited.trackedLines == @[2, 3]
+    let undone = applyOperation(edited, "undo", OpArgs(), NoWrap).state
+    counted undone.doc == Doc
+    counted undone.breakpoints == @[1]
+    counted undone.trackedLines == @[1, 2]
+    let remote = applyRemoteChange(
+      undone, changeSet(Doc.len, BetaStart, BetaStart + "beta\n".len, ""),
+      "peer")
+    counted remote.breakpoints.len == 0
+    counted remote.tracepoints == @[1]
+    counted remote.trackedLines == @[-1, 1]
 
 suite "PLAT-28 — the tally":
   test "assertion count":

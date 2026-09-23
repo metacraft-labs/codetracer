@@ -216,6 +216,15 @@ type
     breakpoints*: seq[int]
     tracepoints*: seq[int]
     flowOverlay*: bool
+    trackedLines*: seq[int]
+      ## PLAT-28 §8.2. Lines a FRONT-END asks the model to carry through the
+      ## edits that follow — the terminal's project breakpoints, which belong
+      ## to the session rather than to one buffer's state. ALIGNED BY INDEX
+      ## with whatever the front-end handed in, and a line that was deleted
+      ## becomes `-1` rather than disappearing, so the caller can tell WHICH of
+      ## its points went. `folded`, `breakpoints` and `tracepoints` move by the
+      ## same rule (`mapLinesThrough`) but, being this state's own sets, simply
+      ## lose a deleted line.
 
     search*: SearchState
     comments*: LanguageComments
@@ -281,6 +290,7 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     recording: "", macros: initTable[string, seq[string]](), recorded: @[],
     lastChange: @[], marks: initTable[string, int](), jumps: @[], jumpIndex: 0,
     folded: @[], breakpoints: @[], tracepoints: @[], flowOverlay: false,
+    trackedLines: @[],
     search: SearchState(pattern: "", direction: sdForward),
     comments: comments, indentUnit: indentUnit, parse: parse,
     filters: @[],
@@ -318,6 +328,7 @@ func `==`*(a, b: EditorState): bool =
     a.marks == b.marks and a.jumps == b.jumps and a.jumpIndex == b.jumpIndex and
     a.folded == b.folded and a.breakpoints == b.breakpoints and
     a.tracepoints == b.tracepoints and a.flowOverlay == b.flowOverlay and
+    a.trackedLines == b.trackedLines and
     a.search == b.search and a.comments == b.comments and
     a.indentUnit == b.indentUnit and a.parse == b.parse and
     a.filters == b.filters and
@@ -337,6 +348,66 @@ proc recordTransaction*(st: var EditorState; t: Transaction;
   ## place, so "an edit is undoable" stays a property of the dispatcher rather
   ## than of each of the fifty operations that edit.
   st.history = record(st.history, t, docBefore, selectionBefore)
+
+proc mapLinesThrough*(doc: string; cs: ChangeSet;
+                      lines: openArray[int]): seq[int] =
+  ## **WHERE EACH LINE OF `doc` IS AFTER `cs`, OR `-1` IF IT WAS DELETED** —
+  ## PLAT-28 §8.2's *"a breakpoint on a deleted line is not a breakpoint on the
+  ## line that took its place"*, for everything in this state that names a
+  ## line. Aligned by index with `lines`; lines are 0-based, as `text_store`'s.
+  ##
+  ## A line is carried as its byte RANGE — its first byte through its
+  ## terminating newline — because a point anchor cannot tell the two edits
+  ## apart that matter here: `dd` deletes the range whole, `J` deletes only its
+  ## newline and keeps the text. The start maps `sideAfter` (text inserted AT
+  ## the start of the line, an opened line above it, pushes it down) and the
+  ## end `sideBefore` (text inserted at the start of the NEXT line is not this
+  ## line's). The line is DELETED exactly when a non-empty range collapses to
+  ## nothing; otherwise it is wherever its start landed.
+  ##
+  ## A line number that is not a line of `doc` is not a position the mapping
+  ## is defined over, so it is returned unchanged — the same rule `marks`
+  ## follow below, rather than a clamp that invents an answer.
+  result = newSeq[int](lines.len)
+  if lines.len == 0:
+    return
+  var starts = @[0]
+  for i, ch in doc:
+    if ch == '\n': starts.add i + 1
+  let newDoc = cs.apply(doc)
+  var newStarts = @[0]
+  for i, ch in newDoc:
+    if ch == '\n': newStarts.add i + 1
+  for k, line in lines:
+    if line < 0 or line >= starts.len:
+      result[k] = line
+      continue
+    let a = starts[line]
+    let b = if line + 1 < starts.len: starts[line + 1] else: doc.len
+    let na = cs.mapPosOr(a, sideAfter)
+    let nb = cs.mapPosOr(b, sideBefore)
+    if b > a and nb <= na:
+      result[k] = -1
+      continue
+    # The last start at or before `na`: a binary search, because a
+    # 40,000-line file is a real document and this runs per edit.
+    var lo = 0
+    var hi = newStarts.len - 1
+    while lo < hi:
+      let mid = (lo + hi + 1) div 2
+      if newStarts[mid] <= na: lo = mid else: hi = mid - 1
+    result[k] = lo
+
+func survivingLines(mapped: openArray[int]): seq[int] =
+  ## A set of lines after `mapLinesThrough`: the deleted ones gone, and kept
+  ## ascending and distinct (`toggleIn`'s invariant) — two breakpoints on lines
+  ## an edit joined are one breakpoint on the joined line.
+  for l in mapped:
+    if l < 0: continue
+    var i = 0
+    while i < result.len and result[i] < l: inc i
+    if i < result.len and result[i] == l: continue
+    result.insert(l, i)
 
 proc mapPositionTables*(st: var EditorState; before: EditorState;
                         cs: ChangeSet) =
@@ -369,6 +440,20 @@ proc mapPositionTables*(st: var EditorState; before: EditorState;
     let pos = before.jumps[i]
     if pos >= 0 and pos <= before.doc.len:
       st.jumps[i] = cs.mapPosOr(pos, sideAfter)
+  # PLAT-28 §8.2: every table that names a LINE moves with the text, by one
+  # rule. Until 2026-09-23 these four held line numbers the edit did not touch,
+  # so a breakpoint set on line 10 stayed on line 10 after a line was opened
+  # above it — on different code.
+  if before.folded.len > 0:
+    st.folded = survivingLines(mapLinesThrough(before.doc, cs, before.folded))
+  if before.breakpoints.len > 0:
+    st.breakpoints = survivingLines(
+      mapLinesThrough(before.doc, cs, before.breakpoints))
+  if before.tracepoints.len > 0:
+    st.tracepoints = survivingLines(
+      mapLinesThrough(before.doc, cs, before.tracepoints))
+  if before.trackedLines.len > 0:
+    st.trackedLines = mapLinesThrough(before.doc, cs, before.trackedLines)
 
 proc pushSelectionHistory*(st: var EditorState; nowMs: int64 = 0) =
   ## Record the selection the editor is ABOUT to leave. Called before the new

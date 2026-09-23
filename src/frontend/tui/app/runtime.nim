@@ -552,6 +552,34 @@ proc runPromptLine(rt: TuiRuntime; line: string;
                   (if saved.len == 0: "" else: " (" & saved & ")"))
       outcome.detail = rt.app.notification
       return
+    of "break", "b":
+      # §4.3's `:break`, in Edit mode: the same toggle `F9` makes, at the
+      # caret or at the line given. A function name — which Debug mode
+      # resolves against the recording — has nothing to resolve against here,
+      # and is refused by name rather than guessed.
+      let buf = if rt.app.editSession.isNil: nil
+                else: rt.app.editSession.activeBuffer()
+      if buf.isNil:
+        rt.note("no file is open to place a breakpoint in")
+      else:
+        var line = buf.caretLine
+        var ok = true
+        if rest.len > 0:
+          try:
+            line = parseInt(rest)
+          except ValueError:
+            ok = false
+            rt.note("`" & rest & "` is not a line number; in Edit mode " &
+                    ":break takes a line of " & buf.path)
+        if ok and (line < 1 or line > buf.lineCount):
+          ok = false
+          rt.note(buf.path & " has no line " & $line)
+        if ok:
+          let placed = rt.app.editSession.togglePointAt(buf.path, line)
+          rt.note((if placed: "breakpoint at " else: "removed the breakpoint at ") &
+                  buf.path & ":" & $line)
+      outcome.detail = rt.app.notification
+      return
     of "source", "so":
       # PLAT-36. A user's Vim configuration, imported on top of the Vim
       # keymap and installed for THIS SESSION. Not remembered: the stored
@@ -828,7 +856,7 @@ proc routeTokenToEditor*(rt: TuiRuntime; token: string;
   ## instead of one per call site, which is CTUI-10's defect removed rather
   ## than re-avoided.
   let buf = rt.app.editSession.activeBuffer()
-  result = buf.applyEditKey(keyName(token), nowMs)
+  result = rt.app.editSession.applyEditKeyIn(buf, keyName(token), nowMs)
   if result == ekChanged:
     rt.app.editSession.recordEdit(buf.path)
     rt.app.editSession.refreshEditedPaths()
@@ -968,6 +996,27 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     true
   of kaSearchBackward:
     outcome.repaint = rt.openPrompt(pkSearchBackward)
+    true
+  of kaToggleBreakpoint:
+    # EDIT MODE ANSWERS IT HERE; DEBUG MODE SENDS IT TO THE ENGINE. An edit
+    # session has no engine — `ct edit` starts none — so `dispatchAction`'s
+    # breakpoint service is absent and the key answered "unavailable" on the
+    # one mode §3 of CodeTracer-TUI-Edit-Mode.md says it must work in. The
+    # point goes on the edit session, at the caret of the file being edited,
+    # and moves with that file's text (`edit_binding.applyEditKeyIn`).
+    if rt.app.modes.product != pmEdit:
+      return false
+    let buf = if rt.app.editSession.isNil: nil
+              else: rt.app.editSession.activeBuffer()
+    if buf.isNil:
+      rt.note("no file is open to place a breakpoint in")
+    else:
+      let line = buf.caretLine
+      let placed = rt.app.editSession.togglePointAt(buf.path, line)
+      rt.note((if placed: "breakpoint at " else: "removed the breakpoint at ") &
+              buf.path & ":" & $line)
+    outcome.detail = rt.app.notification
+    outcome.repaint = true
     true
   of kaQuit:
     outcome.quit = true

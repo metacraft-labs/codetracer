@@ -1845,16 +1845,13 @@ proc applyHistoryStep(st: EditorState; step: HistoryStep): EditorState =
     if step.tr.selection.isSome: step.tr.selection.get
     else: mapSelection(st.selection, step.tr.changes)
   result.history = recordStep(step, before)
-  # The marks and the jump list move with the document, through the same change
-  # set and the same call `commitChange` uses (PLAT-31's §36a repair, which an
-  # undo must not be a second route around).
-  for id, pos in st.marks:
-    if pos >= 0 and pos <= before.len:
-      result.marks[id] = step.tr.changes.mapPosOr(pos, sideAfter)
-  for i in 0 ..< result.jumps.len:
-    let pos = st.jumps[i]
-    if pos >= 0 and pos <= before.len:
-      result.jumps[i] = step.tr.changes.mapPosOr(pos, sideAfter)
+  # The marks, the jump list and every line table move with the document,
+  # through the SAME call `commitChange` makes (PLAT-31's §36a repair, which an
+  # undo must not be a second route around). This was an inline copy of the
+  # marks-and-jumps half until PLAT-28's line mapping arrived, and a copy is
+  # exactly the second route: the new tables would have moved on an edit and
+  # stood still on its undo.
+  result.mapPositionTables(st, step.tr.changes)
 
 proc cUndo(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let step = popUndo(st.history, st.doc, st.selection)

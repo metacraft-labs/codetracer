@@ -725,7 +725,9 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     # runtime has threaded `nowMs` through `handleToken` since CTUI-2 and the
     # editing path never asked for it.
     counted "rt.routeTokenToEditor(token, nowMs)" in src
-    counted "buf.applyEditKey(keyName(token), nowMs)" in src
+    # Through the SESSION since PLAT-28 (2026-09-23), so the file's project
+    # breakpoints are carried through the edit; the clock still goes with it.
+    counted "applyEditKeyIn(buf, keyName(token), nowMs)" in src
     counted mutableBufferSpellingsIn(src).len == 0
 
   # -------------------------------------------------------------------------

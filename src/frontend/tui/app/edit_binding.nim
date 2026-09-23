@@ -441,6 +441,59 @@ proc installImported*(s: EditSession; imported: ImportedKeymap) =
   for buf in s.buffers:
     buf.doc.installImported(imported)
 
+proc applyEditKeyIn*(s: EditSession; buf: EditBuffer; key: string;
+                     nowMs: int64): EditKeyOutcome =
+  ## `applyEditKey`, with the session's points on `buf`'s file CARRIED THROUGH
+  ## the edit (PLAT-28 §8.2). A breakpoint belongs to the code on its line, so
+  ## a line opened above it moves it down, and a deleted line takes it away —
+  ## it does not become a breakpoint on whatever line took its place.
+  ##
+  ## The points are the SESSION's (§5: they belong to the project), so they
+  ## are lent to the buffer's model for exactly one key as
+  ## `EditorState.trackedLines` — aligned by index, so the answer says which
+  ## point went where — and taken back. The mapping is the model's
+  ## `mapLinesThrough`, the same rule its own `breakpoints` move by.
+  if s.isNil or buf.isNil:
+    return applyEditKey(buf, key, nowMs)
+  var owned: seq[int] = @[]
+  for i, p in s.points:
+    if p.path == buf.path: owned.add i
+  if owned.len == 0:
+    return applyEditKey(buf, key, nowMs)
+  buf.doc.state.trackedLines = @[]
+  for i in owned:
+    buf.doc.state.trackedLines.add s.points[i].line - 1
+  result = applyEditKey(buf, key, nowMs)
+  let moved = buf.doc.state.trackedLines
+  buf.doc.state.trackedLines = @[]
+  if moved.len != owned.len:
+    return
+  var kept: seq[SourcePoint] = @[]
+  var gone: seq[int] = @[]
+  for k, i in owned:
+    if moved[k] < 0: gone.add i
+    else: s.points[i].line = moved[k] + 1
+  for i, p in s.points:
+    if i notin gone: kept.add p
+  s.points = kept
+
+proc togglePointAt*(s: EditSession; path: string; line: int;
+                    kind = sptBreakpoint): bool =
+  ## Add a point of `kind` on `path:line`, or remove the one already there.
+  ## Returns whether one is there afterwards. The edit-mode half of §4.2's
+  ## `F9` / `Space` and §4.3's `:break`: CodeTracer-TUI-Edit-Mode.md §3 —
+  ## *"setting a breakpoint while editing is a normal thing to do"* — and with
+  ## no engine in an edit session, the point is the SESSION's until a
+  ## recording is debugged.
+  if s.isNil or path.len == 0 or line <= 0:
+    return false
+  for i, p in s.points:
+    if p.path == path and p.line == line and p.kind == kind:
+      s.points.delete(i)
+      return false
+  s.points.add SourcePoint(path: path, line: line, kind: kind, enabled: true)
+  true
+
 proc activeBuffer*(s: EditSession): EditBuffer =
   if s.isNil or s.active < 0 or s.active >= s.buffers.len: nil
   else: s.buffers[s.active]
