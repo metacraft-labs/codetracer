@@ -113,6 +113,25 @@ proc clusterBoundariesOf*(s: string): seq[int] =
   ## `s.len`. **Positions are byte offsets and cluster awareness composes
   ## above them** — this is that composition, and it is the only place in this
   ## module that segments anything.
+  ##
+  ## **AN ALL-ASCII TEXT IS ANSWERED WITHOUT THE SEGMENTER**, exactly: no ASCII
+  ## byte is Extend, SpacingMark, Prepend, ZWJ or a regional indicator, so
+  ## UAX #29 (https://unicode.org/reports/tr29/#Grapheme_Cluster_Boundary_Rules)
+  ## puts a boundary at every position except GB3's CR × LF. Measured on a
+  ## 40,000-line source file: 177 ms through the segmenter, and it ran on
+  ## every edit (PLAT-42's frame budget).
+  var ascii = true
+  for ch in s:
+    if ord(ch) >= 0x80:
+      ascii = false
+      break
+  if ascii:
+    result = newSeqOfCap[int](s.len + 1)
+    for i in 0 .. s.len:
+      if i > 0 and i < s.len and s[i - 1] == '\r' and s[i] == '\n':
+        continue
+      result.add i
+    return
   result = @[0]
   for c in graphemeClusters(s):
     if c.stop > result[^1]: result.add c.stop

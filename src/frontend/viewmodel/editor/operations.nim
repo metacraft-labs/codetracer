@@ -200,13 +200,25 @@ type
     refusal*: RefusalReason
     intents*: seq[HostIntent]
 
+  DerivedDocument = object
+    ## What `initOpEnv` derives from a document and its settings alone —
+    ## shared, never mutated once built (see `lastDerived`).
+    doc: string
+    settings: WrapSettings
+    ctx: OpCtx
+    display: DisplayCtx
+
   OpEnv* = object
     ## Everything an operation needs that is neither the state nor the
     ## argument. **`settings` is a PARAMETER and never a field of
     ## `EditorState`** — PLAT-27's settled decision, which this module obeys
     ## rather than re-litigates.
-    ctx*: OpCtx
-    display*: DisplayCtx
+    ##
+    ## `ctx` and `display` are read through accessors over a SHARED, immutable
+    ## `DerivedDocument` rather than stored by value: copying the document's
+    ## cluster boundaries into every environment cost ~20 ms per operation at
+    ## 40,000 lines, measured.
+    derived: ref DerivedDocument
     settings*: WrapSettings
     viewportRows*: int
     nowMs*: int64
@@ -287,6 +299,15 @@ const
 # ===========================================================================
 
 type CharCat = enum ccWord, ccSpace, ccOther
+
+func ctx*(env: OpEnv): lent OpCtx =
+  ## The document's operation context — cluster boundaries, line index,
+  ## column policy. Shared; see `OpEnv`.
+  env.derived.ctx
+
+func display*(env: OpEnv): lent DisplayCtx =
+  ## The document's display context — the wrap cache. Shared; see `OpEnv`.
+  env.derived.display
 
 func catOf(r: Rune): CharCat =
   ## §2.2 A's *"by character category — word / space / other"*, over RUNES
@@ -542,15 +563,122 @@ proc findFrom(doc, pattern: string; start: int; forward: bool): int =
 # THE ENVIRONMENT
 # ===========================================================================
 
+var lastDerived: ref DerivedDocument
+  ## A SINGLE-ENTRY MEMO of the last document's derived contexts.
+  ##
+  ## PLAT-42's frame budget measured it (2026-09-23): 80 `Down`s through a
+  ## 40,000-line file in a real GPUI window rendered in 1.8–3.0 ms p50 and
+  ## spent ~0.7 s p50 in the KEY HANDLER — because every operation, a cursor
+  ## motion included, re-segmented the whole document into grapheme clusters
+  ## twice (`initOpCtx` and `initDisplayCtx` each call `clusterBoundariesOf`),
+  ## built two `TextStore`s and a wrap cache. A motion does not change the
+  ## document, so the next operation derived the same three things again.
+  ## An EDIT changes the text, and the next call moves the memo by that edit
+  ## (`incrementalDerivation`) rather than re-deriving. Measured on the same
+  ## 40,000 lines (2.2 MB, release build), per call: `move-line-down` ~680 ms
+  ## before, ~0.7 ms after; an `insert-text` plus the move that follows it,
+  ## ~720 ms before, ~45 ms after; opening the document (one full derivation)
+  ## ~770 ms, once.
+  ##
+  ## The memo is keyed by the document TEXT and the settings, compared in
+  ## full (a `memcmp`, not a segmentation), so it cannot serve one document's
+  ## boundaries to another: equal text derives equal contexts, and any edit
+  ## changes the text. A new document gets a NEW `DerivedDocument`; the one an
+  ## earlier `OpEnv` points at is never written again. Operations stay pure
+  ## functions of their arguments — the memo changes how long an answer takes,
+  ## never what it is — and display-dependent and display-independent
+  ## operations still cost the same (see `initOpEnv`).
+
+proc fullDerivation(doc: string; settings: WrapSettings): ref DerivedDocument =
+  ## Everything, from the text. The boundaries and the line index are
+  ## computed ONCE and shared by both contexts — `initOpCtx` and
+  ## `initDisplayCtx` each computed them, identically.
+  let store = toTextStore(doc)
+  let bounds = clusterBoundariesOf(doc)
+  (ref DerivedDocument)(
+    doc: doc, settings: settings,
+    ctx: OpCtx(doc: doc, store: store, boundaries: bounds,
+               policy: settings.policy, inserted: "X"),
+    display: DisplayCtx(doc: doc, store: store,
+                        cache: initWrapCache(doc, settings),
+                        boundaries: bounds, settings: settings))
+
+proc editBetween(a, b: string): tuple[prefix, suffix: int] =
+  ## The one contiguous edit that turns `a` into `b`: the common prefix, and
+  ## the common suffix that does not overlap it. Any two strings have one; an
+  ## edit an operation actually made may have been several, and this is their
+  ## covering span — which is all the splices below need.
+  let m = min(a.len, b.len)
+  var p = 0
+  while p < m and a[p] == b[p]: inc p
+  var q = 0
+  while q < m - p and a[a.len - 1 - q] == b[b.len - 1 - q]: inc q
+  (p, q)
+
+proc incrementalDerivation(prev: ref DerivedDocument;
+                           doc: string): ref DerivedDocument =
+  ## `prev`'s document moved onto `doc` by the edit between them, touching
+  ## only the LINES the edit touched.
+  ##
+  ## Exact rather than approximate, and the reason is UAX #29 GB4
+  ## (https://unicode.org/reports/tr29/#GB4): there is always a cluster
+  ## boundary after LF, so each line — terminator included — segments
+  ## independently. The boundaries of the lines the edit touched are
+  ## recomputed; those above are kept; those below are kept and shifted by the
+  ## length change. The wrap cache moves by `updateWrapCache`, PLAT-27's own
+  ## incremental path (`LAW-C6` holds it to the full computation). The line
+  ## index is rebuilt: it is the cheap part (~6 ms at 40,000 lines).
+  ## `test_op_env_memo.nim` holds the whole of this to `fullDerivation`.
+  let old = prev.doc
+  let (p, q) = editBetween(old, doc)
+  let delta = doc.len - old.len
+  let lineStart = (if p == 0: 0 else: doc.rfind('\n', last = p - 1) + 1)
+  let editEnd = doc.len - q
+  let nl = doc.find('\n', editEnd)
+  let newLineEnd = (if nl < 0: doc.len else: nl + 1)
+  let oldLineEnd = newLineEnd - delta
+  var bounds = newSeqOfCap[int](prev.ctx.boundaries.len + max(0, delta) + 1)
+  var i = 0
+  let olds = prev.ctx.boundaries
+  while i < olds.len and olds[i] < lineStart:
+    bounds.add olds[i]
+    inc i
+  for b in clusterBoundariesOf(doc[lineStart ..< newLineEnd]):
+    bounds.add lineStart + b
+  var j = olds.upperBound(oldLineEnd)
+  while j < olds.len:
+    bounds.add olds[j] + delta
+    inc j
+  let cs = changeSet(old.len, p, old.len - q, doc[p ..< editEnd])
+  var cache: WrapCache
+  try:
+    cache = updateWrapCache(prev.display.cache, old, cs, doc)
+  except WrapError:
+    return fullDerivation(doc, prev.settings)
+  let store = toTextStore(doc)
+  (ref DerivedDocument)(
+    doc: doc, settings: prev.settings,
+    ctx: OpCtx(doc: doc, store: store, boundaries: bounds,
+               policy: prev.settings.policy, inserted: "X"),
+    display: DisplayCtx(doc: doc, store: store, cache: cache,
+                        boundaries: bounds, settings: prev.settings))
+
+proc derivedFor(doc: string; settings: WrapSettings): ref DerivedDocument =
+  if lastDerived.isNil or lastDerived.settings != settings:
+    lastDerived = fullDerivation(doc, settings)
+  elif lastDerived.doc != doc:
+    lastDerived = incrementalDerivation(lastDerived, doc)
+  lastDerived
+
 proc initOpEnv*(doc: string; settings: WrapSettings; viewportRows = 20;
                 nowMs: int64 = 0): OpEnv =
   ## The per-call scratch. The wrap cache is built here rather than lazily so
   ## that a display-INDEPENDENT operation costs exactly what a dependent one
   ## does — a lazy cache would make the cost of an operation a signal for
   ## whether it reads the wrap column, and a timing signal is a side channel a
-  ## suite can accidentally assert through.
-  OpEnv(ctx: initOpCtx(doc, settings.policy),
-        display: initDisplayCtx(doc, settings),
+  ## suite can accidentally assert through. Both come from `lastDerived`,
+  ## which is what keeps a motion from re-deriving an unchanged document.
+  OpEnv(derived: derivedFor(doc, settings),
         settings: settings, viewportRows: max(1, viewportRows),
         nowMs: nowMs)
 
