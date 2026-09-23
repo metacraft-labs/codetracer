@@ -29,6 +29,34 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 # shellcheck source=ci/lib/lint-steps.sh disable=SC1091
 source ci/lib/lint-steps.sh
 
+# Commit signing is off for every suite this harness runs.
+#
+# Many suites build throwaway repositories and commit into them. Those commits
+# inherited the RUNNER's global git config, and a runner with
+# `commit.gpgsign = true` but no matching secret key failed every one of them:
+#
+#   gpg: skipped "A9417A0B6297F790": No secret key
+#   fatal: failed to write commit object          (exit 128)
+#
+# That took out 7 suites at once -- 73 signing failures in one lint-bash run --
+# and lint-bash gates appimage-build and dmg-build, so no release artifact could
+# be produced at all. A fixture repository's commits are never meant to be
+# signed; whether they succeed must not depend on who the runner is.
+#
+# Overridden at COMMAND scope via GIT_CONFIG_COUNT, which outranks the global
+# and local config files, rather than by replacing the global file with
+# GIT_CONFIG_GLOBAL. Replacing it would also discard the `safe.directory` entry
+# actions/checkout writes there, and every suite that runs git inside the CI
+# checkout would then fail on "dubious ownership" instead. Only the two signing
+# keys are touched; identity, safe.directory and URL rewrites are left alone.
+#
+# No suite run from here sets GIT_CONFIG_COUNT itself (the ones that assert on
+# it -- visual-replay-private-cargo-preflight, origin-dap-gate -- are not run by
+# this harness), and none asserts that signing happens.
+export GIT_CONFIG_COUNT=2
+export GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
+export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
+
 # THE TOOLS THIS STAGE INVOKES, NAMED BEFORE ANYTHING RUNS.
 #
 # `devShells.lint` carries only what the lint stages actually call, which is
