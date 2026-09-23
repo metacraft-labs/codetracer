@@ -2740,9 +2740,19 @@ Related, and easy to get wrong:
   it defaults to `true`, so existing call sites are unchanged.
 * `headless_session.HeadlessDebugSession` is now a *host* around a
   `DebuggerSession` rather than an owner of its own graph. It still does its
-  own DAP handshake, because it needs `DapStdioBackend.waitForEvent` and
-  `BackendService.onEvent` is a registration, not a pump — the stdio
-  adapter's `onEventProc` collects handlers and never calls them.
+  own DAP handshake, because it needs `DapStdioBackend.waitForEvent`
+  (synchronous waits on a named event).
+* Since 2026-09-23 the stdio adapter DOES deliver events to `onEvent`
+  subscribers — until then it collected them and called none, so on every
+  native host `FlowVM` never received `ct/updated-flow` and the flow overlay,
+  the request-span tail and replay-status updates were dead. Delivery happens
+  in `sendProc` AFTER the request's read loop returns (a handler may send;
+  delivering mid-read would re-enter a half-read stream), in the
+  `{"kind": <event>, "data": <body>}` envelope `RealBackendService` uses.
+  Events a synchronous caller drains with `drainEvents` are still delivered:
+  `undelivered` is a separate list from `eventQueue`. Events read by a direct
+  `sendDapRequest` (e.g. `HeadlessDebugSession.stepIn`) are delivered on the
+  next `BackendService.send`.
 
 ## The degraded-state catalogue is split across two packages (BlockTracer M2b)
 

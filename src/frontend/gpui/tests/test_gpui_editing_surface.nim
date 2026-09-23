@@ -400,7 +400,9 @@ suite "PLAT-22: the GPUI editing surface":
       mutableHere = false)
     let reported = surface.reportedConcerns()
     let filed = concernsWithFiledGap()
-    ck ecFlowOverlay in filed
+    # `ecFlowOverlay` is NOT filed: `PLAT22-PG2` was retired by PLAT-42 once
+    # `FlowVM.styledLines` carried the per-line fact.
+    ck ecFlowOverlay notin filed
     ck ecLineStatus in filed
     ck ecInlineValues in filed
     ck ecExecutionPointer notin filed
@@ -417,33 +419,34 @@ suite "PLAT-22: the GPUI editing surface":
     ck ecLineStatus in reported
     ck surface.support[ecExecutionPointer] == esAbsent
     ck surface.support[ecInlineValues] == esAbsent
-    ck filedGap(pgFlowHasNoPerLineFact).concern == ecFlowOverlay
     ck filedGap(pgMarksHaveNoProducer).concern == ecLineStatus
     ck filedGap(pgInlineValuesDiverge).concern == ecInlineValues
-    ck filedGap(pgFlowHasNoPerLineFact).measurement.len > 0
-    ck filedGap(pgFlowHasNoPerLineFact).remedy.len > 0
+    ck filedGap(pgInlineValuesDiverge).measurement.len > 0
+    ck filedGap(pgInlineValuesDiverge).remedy.len > 0
 
-    # **THE FLOW OVERLAY SAYS ONLY WHAT IT CAN, and this is asserted over the
-    # RULE rather than over a rendering**, because `EditorVM.showFlowOverlay`
-    # defaults false and a case that only built surfaces would never reach
-    # `flowStateOf` at all. Arm E4 — which makes every line answer `efsTaken` —
+    # **THE FLOW OVERLAY SAYS ONLY WHAT THE FLOW SAYS, and this is asserted
+    # over the RULE rather than over a rendering**, because a case that only
+    # built edit-mode surfaces would never reach `flowStateOf` at all. Arm E4 —
+    # which makes every line the window says nothing about answer `efsTaken` —
     # SURVIVED against a suite that did exactly that.
     #
-    # A loop with `first = 10, last = 20, registeredLine = 10`, focused. What
-    # the extent can justify: inside is `efsTaken`, and everything else is
-    # `efsUnknown` — NOT `efsNotTaken`, because "this line did not run" is a
-    # claim `FlowVM` carries no fact for.
-    let loops = @[FlowLoopInfo(first: 10, last: 20, registeredLine: 10,
-                               rrTicksForIterations: @[])]
-    ck flowStateOf(loops, 0, 15) == efsTaken
-    ck flowStateOf(loops, 0, 10) == efsTaken
-    ck flowStateOf(loops, 0, 20) == efsTaken
-    ck flowStateOf(loops, 0, 9) == efsUnknown
-    ck flowStateOf(loops, 0, 21) == efsUnknown
-    # No focused loop, and no loops at all: both are `efsUnknown` everywhere,
+    # `FlowVM.styledLines` for a window in which 10 and 12 ran and 15 sits in a
+    # declined arm. A line with no entry is `efsUnknown` — NOT `efsTaken` and
+    # NOT `efsNotTaken`, because "the window has no step for this line" is a
+    # fact about the window, not about the program.
+    let facts = @[FlowStyledLine(position: 10, kind: flskHit),
+                  FlowStyledLine(position: 12, kind: flskHit),
+                  FlowStyledLine(position: 15, kind: flskSkip)]
+    ck flowStateOf(facts, 10) == efsTaken
+    ck flowStateOf(facts, 12) == efsTaken
+    ck flowStateOf(facts, 15) == efsNotTaken
+    ck flowStateOf(facts, 9) == efsUnknown
+    ck flowStateOf(facts, 11) == efsUnknown
+    ck notTakenLinesOf(facts) == @[15]
+    # No facts at all, and a non-positive line: `efsUnknown` everywhere,
     # which is the answer that does not overclaim.
-    ck flowStateOf(loops, -1, 15) == efsUnknown
-    ck flowStateOf(@[], 0, 15) == efsUnknown
+    ck flowStateOf(@[], 15) == efsUnknown
+    ck flowStateOf(facts, 0) == efsUnknown
     expectCount(26)
 
   test "an escape naming ANOTHER front-end is refused, and the refusal names both":

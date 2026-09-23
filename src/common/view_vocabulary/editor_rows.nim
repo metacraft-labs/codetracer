@@ -162,8 +162,8 @@ type
     ## a loop tree, which are a PANE (`isonim_flow_view.nim` draws them) rather
     ## than a property of line N.
     efsUnknown     ## the flow has nothing to say about this line
-    efsTaken       ## this line ran in the selected iteration
-    efsNotTaken    ## this line did not run
+    efsTaken       ## this line ran in the loaded flow window
+    efsNotTaken    ## this line lies in a branch arm the run did not take
 
   EditorValue* = object
     ## One inline value, as it will appear beside a line.
@@ -217,7 +217,12 @@ type
     ## A filed gap's own name, so a status block, a comment and a case all
     ## spell it the same way.
     pgMarksHaveNoProducer = "PLAT22-PG1"
-    pgFlowHasNoPerLineFact = "PLAT22-PG2"
+    # `PLAT22-PG2` ("the flow has no per-line fact") was RETIRED on
+    # 2026-09-23 and its id is not reused. The fact was on the wire all
+    # along — `branchesTaken`, the function extent, `relevantStepCount` — and
+    # `FlowVM.applyFlowUpdate` discarded it. It is now `FlowVM.styledLines`,
+    # computed by the desktop editor's own dimming rule
+    # (`ui/flow_line_styles.flowStyledLines`) and drawn by both native editors.
     pgInlineValuesDiverge = "PLAT22-PG3"
 
   EditorProducerGap* = object
@@ -269,23 +274,6 @@ const
         "acknowledgement into `PointListVM`; then `editorSurfaceFor` reads it " &
         "instead of taking the points as a parameter, and both editors gain " &
         "marks from one change."),
-    pgFlowHasNoPerLineFact: EditorProducerGap(
-      id: pgFlowHasNoPerLineFact,
-      concern: ecFlowOverlay,
-      subject: "viewmodel",
-      measurement: "`FlowVM` owns `steps`, `loops`, `selectedIteration` and " &
-        "`focusedLoop`. `FlowStepEntry` carries `step`, `location` (a DISPLAY " &
-        "string), `expression`, `beforeValue` and `afterValue` — and no line " &
-        "number — so taken/not-taken per line is not derivable from it. The " &
-        "web front-end does not derive it from `FlowVM` either: " &
-        "`ui/editor.flowStyleLines` reads `FlowComponent.flow` , a parallel " &
-        "payload, and `ui/flow.nim`'s own header says `the FlowVM receives " &
-        "the same data but does not affect rendering yet`. `FlowLoopInfo` " &
-        "carries `first`/`last`, so loop EXTENT is derivable and is what this " &
-        "row carries.",
-      remedy: "a per-line taken/not-taken memo on `FlowVM`, fed from the same " &
-        "payload `flowStyleLines` already reads. Until then a row may say " &
-        "`in the focused loop` and must not say `this line ran`."),
     pgInlineValuesDiverge: EditorProducerGap(
       id: pgInlineValuesDiverge,
       concern: ecInlineValues,

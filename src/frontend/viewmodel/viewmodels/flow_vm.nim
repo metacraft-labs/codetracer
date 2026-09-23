@@ -32,7 +32,7 @@
 ##   vm.setMode(fmLine)
 ##   echo vm.totalIterations.val   # derived from the loaded flow window
 
-import std/[json, options, strutils]
+import std/[algorithm, json, options, strutils, tables]
 
 import isonim/core/[signals, computation, owner, async_compat]
 import isonim/viewmodel
@@ -45,6 +45,12 @@ import ../store/[replay_data_store, types]
 # which iteration a tick belongs to. `flow_loop_math` imports nothing and
 # compiles on both backends; see its header.
 import ../../ui/flow_loop_math
+# PLAT-42 — the per-line flow decision. `flowStyledLines` is the body of the
+# desktop editor's `flowStyleLines`, and `review_flow_overlay` already calls it
+# from this layer; calling it here rather than re-deriving "which lines ran" is
+# what keeps every medium on ONE rule (Verification-Harness-Traps §30).
+import ../../ui/flow_line_styles
+export flow_line_styles.FlowStyledLine, flow_line_styles.FlowLineStyleKind
 
 # The `ct/load-flow` wire vocabulary, shared with the engine. A leaf module
 # with no imports, exactly so both this layer and `common_types` can hold the
@@ -123,6 +129,20 @@ type
       ## Index into `loops` of the loop whose control is on screen, or -1
       ## when the window contains no loop.
     windowRRTicks*: Signal[int]
+    appliedWindows*: int
+      ## How many windows `applyFlowUpdate` has adopted. Not a signal: nothing
+      ## renders it. The load effect compares it across a request to learn
+      ## whether the `ct/updated-flow` EVENT already delivered this request's
+      ## window, in which case the reply must not overwrite it.
+    styledLines*: Signal[seq[FlowStyledLine]]
+      ## PLAT-42 — what the flow can say about each SOURCE line of the window:
+      ## `flskHit` (the line ran in this window) or `flskSkip` (it lies inside
+      ## a branch arm that was not taken). Lines with no claim are absent.
+      ##
+      ## This is the per-line fact `PLAT22-PG2` said the ViewModel did not
+      ## have. It was on the wire all along — `branchesTaken`, the function
+      ## extent and `relevantStepCount` — and `applyFlowUpdate` discarded it,
+      ## keeping only the loops.
       ## The debugger tick the current window was loaded for. This is the
       ## input the active iteration is derived from.
 
@@ -275,6 +295,105 @@ proc pickFocusedLoop(loops: seq[FlowLoopInfo]): int =
       return index
   -1
 
+type
+  # A typed view of ONE flow window, holding exactly the fields
+  # `flowStyledLines` reads. The wire's own type (`FlowViewUpdate`) is built on
+  # `TableLike`, which is a JS object on the web backend; this view is what the
+  # shared predicate is instantiated over on the native one. It is a second
+  # SHAPE for the one rule's input, not a second rule.
+  FlowLineExtent = object
+    firstLine, lastLine: int
+  FlowLineBranches = object
+    table: Table[int, int]
+    extents: Table[int, FlowLineExtent]
+  FlowLineSpan = object
+    functionFirst, functionLast: int
+  FlowLineWindow = object
+    location: FlowLineSpan
+    branchesTaken: seq[seq[FlowLineBranches]]
+    commentLines: seq[int]
+    relevantStepCount: seq[int]
+
+const NotTaken = 2
+  ## `BranchState.NotTaken`'s ordinal on the wire (`Unknown, Taken, NotTaken`
+  ## in `common_types/codetracer_features/flow.nim`). `insideUntakenBranch`
+  ## names it through `mixin`, so this is the value it compares against here.
+  ## `test_flow_line_facts.nim` asserts the ordinal against the enum itself, so
+  ## a reordering of the enum fails a test rather than silently inverting
+  ## which arms are dimmed.
+
+const FlowWireNotTakenOrdinal* = NotTaken
+  ## `NotTaken`, exported under a name that cannot capture the `mixin`, for
+  ## the test that pins it.
+
+proc intKeyedTable[V](node: JsonNode; conv: proc (n: JsonNode): V): Table[int, V] =
+  result = initTable[int, V]()
+  if node.isNil or node.kind != JObject:
+    return
+  for k, v in node:
+    try:
+      result[parseInt(k)] = conv(v)
+    except ValueError:
+      discard  # a non-numeric key is not a line; the wire never sends one
+
+proc intList(node: JsonNode): seq[int] =
+  result = @[]
+  if node.isNil or node.kind != JArray:
+    return
+  for n in node:
+    if n.kind == JInt: result.add n.getInt
+
+proc flowLineWindow(view: JsonNode): FlowLineWindow =
+  ## Parse the fields `flowStyledLines` needs out of one wire view update.
+  let loc = view{"location"}
+  if not loc.isNil and loc.kind == JObject:
+    result.location = FlowLineSpan(
+      functionFirst: loc{"functionFirst"}.getInt(0),
+      functionLast: loc{"functionLast"}.getInt(0))
+  result.commentLines = intList(view{"commentLines"})
+  result.relevantStepCount = intList(view{"relevantStepCount"})
+  let bt = view{"branchesTaken"}
+  if not bt.isNil and bt.kind == JArray:
+    for group in bt:
+      var row: seq[FlowLineBranches] = @[]
+      if group.kind == JArray:
+        for entry in group:
+          row.add FlowLineBranches(
+            table: intKeyedTable[int](entry{"table"},
+              proc (n: JsonNode): int = n.getInt(0)),
+            extents: intKeyedTable[FlowLineExtent](entry{"extents"},
+              proc (n: JsonNode): FlowLineExtent =
+                FlowLineExtent(firstLine: n{"firstLine"}.getInt(0),
+                               lastLine: n{"lastLine"}.getInt(0))))
+      result.branchesTaken.add row
+
+proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
+  ## The per-line facts of one wire view update, decided by the shared rule.
+  ## Exported so a test can drive it with a real captured window.
+  ##
+  ## Two sources, one per kind of line, and neither is re-derived here:
+  ##
+  ##   * every line `flowStyledLines` classifies — the shared dimming rule;
+  ##   * the arm HEADERS, which that rule deliberately skips because the
+  ##     desktop editor paints them in a separate pass (`conditionStyleLines`).
+  ##     A header whose state is `Taken` or `NotTaken` is a line whose test was
+  ##     EVALUATED, so it ran — `GUI/Debugging-Features/Omniscience-Flow.md`
+  ##     requires the header of a declined arm to stay undimmed for exactly
+  ##     that reason. It is reported as `flskHit`. A header whose state is
+  ##     `Unknown` carries no claim and is left out.
+  ##
+  ## Sorted by line, one entry per line.
+  if view.isNil or view.kind != JObject:
+    return @[]
+  let window = flowLineWindow(view)
+  result = flowStyledLines(window, finished = false)
+  if window.branchesTaken.len > 0 and window.branchesTaken[0].len > 0:
+    for header, state in window.branchesTaken[0][0].table:
+      if state != 0 and header > window.location.functionFirst and
+         header <= window.location.functionLast:
+        result.add FlowStyledLine(position: header, kind: flskHit)
+  result.sort(proc (a, b: FlowStyledLine): int = cmp(a.position, b.position))
+
 proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## Adopt a `ct/load-flow` response.
   ##
@@ -317,10 +436,12 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
 
   vm.loops.val = loops
   vm.focusedLoop.val = focused
+  vm.styledLines.val = flowLineFacts(view)
   vm.windowRRTicks.val = ticks
   vm.iterationCount.val =
     if focused >= 0: loops[focused].rrTicksForIterations.len else: 0
   vm.loadingState.val = lsIdle
+  inc vm.appliedWindows
 
   if focused >= 0:
     vm.selectedIteration.val =
@@ -354,6 +475,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     let loops = createSignal(newSeq[FlowLoopInfo]())
     let focusedLoop = createSignal(-1)
     let windowRRTicks = createSignal(0)
+    let styledLines = createSignal(newSeq[FlowStyledLine]())
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -375,6 +497,8 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       loops: loops,
       focusedLoop: focusedLoop,
       windowRRTicks: windowRRTicks,
+      appliedWindows: 0,
+      styledLines: styledLines,
       isLoading: isLoading,
       totalIterations: totalIterations,
       disposeProc: dispose,
@@ -465,6 +589,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
         # Consume the response. Firing the request and dropping the reply is
         # what made every loop-iteration assertion at this layer vacuous; see
         # the module header.
+        let appliedBefore = vm.appliedWindows
         let future = store.backend.send("ct/load-flow", args)
         let vmRef = vm
         onComplete(future,
@@ -475,7 +600,21 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
             # deployments (backend_manager.rs:1001), so both paths must feed
             # the same applier. Consuming only the reply is how a panel ends
             # up permanently empty against the engine while its tests pass.
-            vmRef.applyFlowUpdate(response),
+            #
+            # BUT NOT BOTH FOR ONE REQUEST. A synchronous transport (the
+            # native hosts' stdio adapter) delivers the event before the reply
+            # completes, and a reply adopted after it would replace the real
+            # window with whatever the reply carries — or, when the reply is a
+            # bare DAP envelope, flip a loaded panel to `lsError`.
+            if vmRef.appliedWindows != appliedBefore:
+              return
+            # A DAP envelope carries the window under `body`.
+            let window =
+              if not response.isNil and response.kind == JObject and
+                 response{"viewUpdates"}.isNil and
+                 not response{"body"}.isNil: response["body"]
+              else: response
+            vmRef.applyFlowUpdate(window),
           proc(message: string) =
             # A failed flow load must not leave the panel claiming to still be
             # loading forever, and must not leave a stale window's loop shape

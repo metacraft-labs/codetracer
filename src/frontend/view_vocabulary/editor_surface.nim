@@ -241,34 +241,58 @@ proc inlineValuesOf*(vm: StateVM; budget: Budget): seq[EditorValue] =
       continue
     result.add EditorValue(name: v.name, value: rendered)
 
-func flowStateOf*(loops: openArray[FlowLoopInfo]; focused: int;
-                  line: int): EditorFlowState =
-  ## What the flow can say about one line, and NOT MORE THAN IT CAN.
+func flowStateOf*(facts: openArray[FlowStyledLine]; line: int): EditorFlowState =
+  ## What the flow says about one line.
   ##
-  ## `efsTaken` here means *"this line is inside the loop whose control is on
-  ## screen"*, which is the strongest per-line fact `FlowVM` carries:
-  ## `FlowLoopInfo` has `first` and `last` source lines, and `FlowStepEntry` has
-  ## no line number at all. It deliberately does NOT mean "this line ran in the
-  ## selected iteration" — the web front-end's `flow-taken` / `flow-not-taken`
-  ## classes mean that, and they are computed from a payload `FlowVM` does not
-  ## expose (`editor_rows.FiledEditorGaps[pgFlowHasNoPerLineFact]`).
+  ## `facts` is `FlowVM.styledLines` — the shared dimming rule
+  ## (`ui/flow_line_styles.flowStyledLines`) applied to the window the backend
+  ## sent, plus the arm headers whose test was evaluated. This function only
+  ## TRANSLATES; it decides nothing, so the desktop editor, the terminal and
+  ## GPUI cannot disagree about which line ran (Verification-Harness-Traps
+  ## §30: one predicate, every caller).
   ##
-  ## So this function answers two of the three values and never the third, and
-  ## `efsNotTaken` is returned for a line inside the focused loop's REGISTERED
-  ## line but outside its body — the one negative the extent can justify. A
-  ## medium rendering this must say "in the focused loop" and must not say "this
-  ## line ran", which is the distinction a degradation exists to keep.
-  if line <= 0 or focused < 0 or focused >= loops.len:
+  ##   * `flskHit`  → `efsTaken`    — the line ran in this window;
+  ##   * `flskSkip` → `efsNotTaken` — it sits inside an arm the run declined;
+  ##   * no entry   → `efsUnknown`  — nothing is claimed. NOT `efsNotTaken`:
+  ##     "the window has no step for this line" is a fact about the window, and
+  ##     rendering it as "this line did not run" is the defect
+  ##     `flowStyledLines`' own header records.
+  ##
+  ## Until 2026-09-23 this read the focused loop's EXTENT and answered
+  ## `efsTaken` for every line inside it, because the per-line facts were
+  ## discarded by `FlowVM.applyFlowUpdate` (filed as `PLAT22-PG2`). That was
+  ## the strongest fact available then, and it said "in the focused loop"
+  ## under a name that means "ran".
+  if line <= 0:
     return efsUnknown
-  let loop = loops[focused]
-  if loop.first <= 0 or loop.last < loop.first:
-    return efsUnknown
-  if line >= loop.first and line <= loop.last:
-    efsTaken
-  elif loop.registeredLine > 0 and line == loop.registeredLine:
-    efsNotTaken
-  else:
-    efsUnknown
+  for f in facts:
+    if f.position == line:
+      case f.kind
+      of flskHit: return efsTaken
+      of flskSkip: return efsNotTaken
+      of flskUnknown: return efsUnknown
+  efsUnknown
+
+func notTakenLinesOf*(facts: openArray[FlowStyledLine]): seq[int] =
+  ## The lines `flowStateOf` answers `efsNotTaken` for — what a medium that
+  ## draws only the dimming (the terminal) needs. Derived THROUGH `flowStateOf`
+  ## rather than by filtering on `flskSkip`, so the translation exists once.
+  result = @[]
+  for f in facts:
+    if flowStateOf(facts, f.position) == efsNotTaken and
+       (result.len == 0 or result[^1] != f.position):
+      result.add f.position
+
+const FlowOverlayShownByDefault* = true
+  ## Whether a native host opens with the flow overlay drawn.
+  ##
+  ## The desktop front-end draws it whenever `flow.enabled` is set, and
+  ## `src/config/default_config.yaml` ships `flow.enabled: true`. The native
+  ## hosts do not read that file (`frontend/config.nim` is renderer-only), so
+  ## the shipped default is carried here and `test_flow_line_facts.nim` reads
+  ## the YAML and fails if the two disagree. `EditorVM.showFlowOverlay` itself
+  ## still starts `false` — that is the ViewModel's neutral state, and the host
+  ## is what knows the product default.
 
 proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
                        flow: FlowVM; availability: SourceAvailability;
@@ -294,7 +318,7 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
   result.support = [ecExecutionPointer: esRendered,
                     ecLineStatus: esRendered,
                     ecInlineValues: esRendered,
-                    ecFlowOverlay: esDegraded]
+                    ecFlowOverlay: esRendered]
   if source.isNil:
     result.report = NoSessionReport
     result.rows = @[]
@@ -338,8 +362,12 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
     # defect. The table only moves when the PRODUCER is missing, and `StateVM`
     # is present.
     discard
-  let loops = if flow.isNil: @[] else: flow.loops.val
-  let focused = if flow.isNil: -1 else: flow.focusedLoop.val
+  # A window with no facts is an answer, not a degradation — the same reading
+  # as "nothing in scope" above: every row is `efsUnknown`, which claims
+  # nothing. The concern degrades only when there is no `FlowVM` at all.
+  let flowFacts = if flow.isNil: @[] else: flow.styledLines.val
+  if flow.isNil:
+    result.support[ecFlowOverlay] = esDegraded
 
   result.rows = @[]
   for read in source.visibleReads():
@@ -363,7 +391,7 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
     if row.held and row.pointer == eptExecution:
       row.values = valuesForLine(row.text, values)
     if result.flowOverlayVisible:
-      row.flow = flowStateOf(loops, focused, read.line)
+      row.flow = flowStateOf(flowFacts, read.line)
     result.rows.add row
 
 proc followAndRequest*(vm: SourceVM): seq[SourceLineRequest] =

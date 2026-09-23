@@ -124,6 +124,8 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
   let sess = openLocalTrace(traceFolder, bound)
   let store = sess.session.store
   let src = createSourceVM(store, sess.session.editorVM)
+  if not sess.session.editorVM.isNil:
+    sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
   src.setViewport(height = max(1, viewportHeight), overscan = SourceOverscan)
   var nav = new(OriginNavigator)
   nav[] = initOriginNavigator()
@@ -292,8 +294,17 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   let tick = s.session.getCurrentRRTicks()
 
   serveSourceWindow(s)
+  # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
+  # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
+  # `EditorVM.showFlowOverlay` toggle.
+  let editorVM = s.session.session.editorVM
+  let flowVM = s.session.session.flowVM
+  let notTaken =
+    if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
+    else: notTakenLinesOf(flowVM.styledLines.val)
   rt.app.source = sourcePaneModelFor(
-    s.source, s.session.session.store.degraded.sourceAvailability.val)
+    s.source, s.session.session.store.degraded.sourceAvailability.val,
+    notTakenLines = notTaken)
 
   let frames = framesFromStackTrace(s.stackBody())
   rt.app.callStack = callStackModelFor(frames, s.entryFile)

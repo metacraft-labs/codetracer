@@ -369,7 +369,11 @@ const ExecutionLine = 3
 const InspectionLine = 5
 let DebugValues = @[EditorValue(name: "total", value: "7"),
                     EditorValue(name: "a", value: "3")]
-let DebugLoops = @[FlowLoopInfo(first: 3, last: 4, registeredLine: 5)]
+let DebugFlowFacts = @[FlowStyledLine(position: 3, kind: flskHit),
+                       FlowStyledLine(position: 4, kind: flskHit),
+                       FlowStyledLine(position: 5, kind: flskSkip)]
+  ## `FlowVM.styledLines` for a window in which lines 3-4 ran and line 5 sits
+  ## in a declined arm — the three flow states, so the `flow` cell varies.
 
 # THE DECLARED VARIETY TABLE. `true` means the field takes more than one value
 # across that scenario's rows; `false` means it is constant there. Both
@@ -409,7 +413,7 @@ proc modelRows(sc: Scenario): seq[EditorRow] =
       let line = i + 1
       let m = markFor(ProjectionPoints, ProjectionPath, line)
       let p = pointerFor(line, ExecutionLine, InspectionLine)
-      let f = flowStateOf(DebugLoops, 0, line)
+      let f = flowStateOf(DebugFlowFacts, line)
       let vs = if p == eptExecution: valuesForLine(lines[i], DebugValues)
                else: @[]
       for d in decorationsForRow(m, p, f, vs, starts[i], lines[i].len, id):
@@ -454,7 +458,7 @@ proc controlRows(sc: Scenario): seq[EditorRow] =
         pointer: p, mark: markFor(ProjectionPoints, ProjectionPath, line),
         values: if p == eptExecution and held: valuesForLine(text, DebugValues)
                 else: @[],
-        flow: flowStateOf(DebugLoops, 0, line))
+        flow: flowStateOf(DebugFlowFacts, line))
     rows
 
 func fieldOf(r: EditorRow; f: RowField): string =
@@ -532,9 +536,11 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
       counted g.remedy.len > 20
     # THE INHERITED ONES STAY FILED WHERE THEY ARE. PLAT-28's risk note:
     # *"both stay filed against their existing ids and are OUT OF SCOPE here"*.
-    counted FiledEditorGaps.len == 3
+    # `PLAT22-PG2` was retired by PLAT-42 (the flow's per-line fact now
+    # exists); the other inherited gap stays filed.
+    counted FiledEditorGaps.len == 2
     counted FiledEditorGaps[pgMarksHaveNoProducer].concern == ecLineStatus
-    counted FiledEditorGaps[pgFlowHasNoPerLineFact].concern == ecFlowOverlay
+    counted ecFlowOverlay notin concernsWithFiledGap()
 
   test "PLAT28-DG3 — THE TWO PRODUCERS AGREED ABOUT A LINE TERMINATOR AFTER PLAT-34, measured":
     # **THIS CASE MEASURED A DIVERGENCE AND NOW MEASURES ITS CLOSURE, AND THE

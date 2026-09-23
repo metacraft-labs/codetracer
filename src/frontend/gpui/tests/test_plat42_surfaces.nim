@@ -6,7 +6,8 @@
 ##
 ## **WHERE THE EVIDENCE COMES FROM.** `ci/test/plat42_surfaces_record.py` runs
 ## `codetracer-gpui --report-plan` against the real `calc` recording, once per
-## pinned scenario, and records what each editor row carried. The plan is the
+## pinned scenario — and against `noir_space_ship` for the flow overlay, which
+## needs a declined branch — and records what each editor row carried. The plan is the
 ## Rust-side shadow tree, which is the reading PLAT-42 requires — *"read back out
 ## of the RUST-SIDE shadow tree, never out of the surface the case built"*.
 ##
@@ -119,15 +120,79 @@ suite "PLAT-42 surface 2 — per-line status":
       if s == "breakpoint-editor": ck marks == 1
       else: ck marks == 0
 
-suite "PLAT-42 surface 4 — the flow overlay, FILED AS UNBUILT":
-  ## Asserted as the state MEASURED, so building it turns this red and the
-  ## record has to be retaken rather than quietly going stale. The overlay is
-  ## unbuilt on the terminal as well — `ecFlowOverlay` has no reference under
-  ## src/frontend/tui/ — so this is new work on both media, not a port.
+const FlowScenario = "noir-declined-arm"
+  ## `noir_space_ship`'s `shield.nr`, stopped (`stepIn=15`) inside the loop
+  ## whose `if` on line 10 declined its arm on lines 11-13. `calc` cannot carry
+  ## this case: it has no `if` at all, by design.
+const DeclinedArm = [11, 12, 13]
+const DeclinedHeader = 10
+
+proc flowRowsOf(s: string): seq[JsonNode] =
+  rec()["flowScenarios"][s]["rows"].getElems
+
+suite "PLAT-42 surface 4 — the flow overlay, DRAWN":
+  ## Retired `PLAT22-PG2`. The per-line fact is `FlowVM.styledLines` — the
+  ## desktop editor's own dimming rule (`ui/flow_line_styles`) applied to the
+  ## `ct/updated-flow` window — and GPUI paints a declined line at the desktop
+  ## editor's `.line-flow-skip` opacity. Until 2026-09-23 every row here was
+  ## `efsUnknown`: the native stdio transport never delivered the event the
+  ## window arrives on. The terminal's half is `tui/tests/
+  ## test_plat42_flow_overlay_terminal.nim`, which compares against THIS record.
+
+  test "the flow scenarios are exactly the pinned set, on the named recording":
+    var got = initHashSet[string]()
+    for k, _ in rec()["flowScenarios"]: got.incl k
+    ck got == [FlowScenario].toHashSet
+    ck rec()["flowTrace"].getStr.startsWith("noir_space_ship-")
+
   for s in Scenarios:
-    test "every row's flow state is efsUnknown — " & s:
+    test "a program with no branch dims nothing — " & s:
+      # `calc` has no `if`, so no line can be in a declined arm. A rule that
+      # dimmed "lines with no step" — the defect `flowStyledLines` was
+      # rewritten to remove — would dim most of this file.
       for r in rowsOf(s):
-        ck r["flow"].getStr == "efsUnknown"
+        ck r["flow"].getStr in ["efsUnknown", "efsTaken"]
+        ck r["codeOpacity"].getStr == ""
+
+  test "the flow reaches the shipped rows at all":
+    # The non-vacuity floor for the case above: at least one calc stop carries
+    # a positive fact, so "nothing dimmed" is not "nothing loaded".
+    var taken = 0
+    for s in Scenarios:
+      for r in rowsOf(s):
+        if r["flow"].getStr == "efsTaken": inc taken
+    ck taken > 0
+
+  test "exactly the declined arm is not-taken, and exactly it is painted dimmed":
+    var notTaken: seq[int] = @[]
+    var dimmed: seq[int] = @[]
+    for r in flowRowsOf(FlowScenario):
+      if r["flow"].getStr == "efsNotTaken": notTaken.add lineOf(r)
+      if r["codeOpacity"].getStr.len > 0:
+        ck r["codeOpacity"].getStr == "0.5"
+        dimmed.add lineOf(r)
+    ck notTaken == @DeclinedArm
+    ck dimmed == @DeclinedArm
+
+  test "the header of the declined arm ran, and is not dimmed":
+    # Omniscience-Flow.md requires this by name: the condition line is the line
+    # whose test was evaluated.
+    var found = 0
+    for r in flowRowsOf(FlowScenario):
+      if lineOf(r) == DeclinedHeader:
+        inc found
+        ck r["flow"].getStr == "efsTaken"
+        ck r["codeOpacity"].getStr == ""
+    ck found == 1
+
+  test "the stop itself is a line that ran":
+    var pointing = 0
+    for r in flowRowsOf(FlowScenario):
+      if r["pointer"].getStr == "eptExecution":
+        inc pointing
+        ck r["flow"].getStr == "efsTaken"
+        ck lineOf(r) notin DeclinedArm
+    ck pointing == 1
 
 suite "PLAT-42 — a presentation defect found on the way, FILED":
   test "a Python list of ints is rendered as a hex byte string":

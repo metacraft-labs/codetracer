@@ -147,6 +147,9 @@ const
   EditorPointerAttribute* = "data-ct-pointer"
   EditorMarkAttribute* = "data-ct-mark"
   EditorFlowAttribute* = "data-ct-flow"
+  FlowNotTakenOpacity* = "0.5"
+    ## `.line-flow-skip { opacity: 0.5 }` — the Electron front-end's value,
+    ## carried across rather than chosen.
   EditorHeldAttribute* = "data-ct-held"
   EditorMediumAttribute* = "data-ct-medium"
   EditorProvenanceAttribute* = "data-ct-provenance"
@@ -396,6 +399,13 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow): GpuiElement =
   r.setAttribute(code, TokenAttribute, gpuiTokenFor(trEditorCode, row))
   r.appendChild(code,
     r.createTextNode(if row.held: row.text else: EditorLoadingText))
+  # THE FLOW OVERLAY, DRAWN AS THE DESKTOP EDITOR DRAWS IT: a line inside an
+  # arm the run declined is dimmed to half opacity (`.line-flow-skip` in
+  # `styles/components/flow.styl`), and a line that ran is left as it is
+  # (`.line-flow-hit` is `opacity: 1`). `efsUnknown` claims nothing and so
+  # changes nothing. The decision is `flowStateOf`'s; this only paints it.
+  if row.flow == efsNotTaken:
+    r.setStyle(code, "opacity", FlowNotTakenOpacity)
   r.appendChild(el, code)
 
   let annotation = inlineValueText(row.values)

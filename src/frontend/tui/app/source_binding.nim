@@ -236,7 +236,8 @@ proc sourcePaneModelFor*(vm: SourceVM;
                          points: seq[SourcePoint] = @[];
                          variables: seq[Variable] = @[];
                          heat = LineHeat();
-                         gutterMode = gutLineNumbers): SourcePaneModel =
+                         gutterMode = gutLineNumbers;
+                         notTakenLines: seq[int] = @[]): SourcePaneModel =
   ## The pane's model for the CURRENT frame.
   ##
   ## Everything is read at call time and nothing is retained: the returned
@@ -259,7 +260,8 @@ proc sourcePaneModelFor*(vm: SourceVM;
     gutterMode = gutterMode,
     degradedMessage = (
       if availability == savAbsent: degradedMessageFor(vm.degradedState.val)
-      else: ""))
+      else: ""),
+    notTakenLines = notTakenLines)
 
 # `followAndRequest` IS NO LONGER DECLARED HERE. PLAT-22 moved it to
 # `view_vocabulary/editor_surface.nim` and this module re-exports it (see the

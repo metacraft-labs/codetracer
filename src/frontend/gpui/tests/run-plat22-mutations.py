@@ -248,15 +248,16 @@ ARMS = [
     # THE FLOW OVERLAY
     # ------------------------------------------------------------------
     Arm("E4", SURFACE,
-        "  if line >= loop.first and line <= loop.last:\n    efsTaken",
-        "  if true:\n    efsTaken",
+        "      of flskUnknown: return efsUnknown\n  efsUnknown",
+        "      of flskUnknown: return efsUnknown\n  efsTaken",
         SUITE_EDIT,
         "PLAT-22's four concerns are four, and the filed register agrees with a RUN",
         CTL[SURFACE][0], CTL[SURFACE][1],
-        "THE OVERCLAIM. `efsTaken` here means 'inside the focused loop' and "
-        "NOT 'this line ran' — `FlowVM` carries no per-line taken/not-taken "
-        "fact at all, which is `FiledEditorGaps[pgFlowHasNoPerLineFact]`. An "
-        "overlay that answered `efsTaken` for every line would be telling a "
+        "THE OVERCLAIM. `efsTaken` means 'this line ran in the loaded flow "
+        "window', and a line `FlowVM.styledLines` carries no entry for is one "
+        "the window makes no claim about — a line with no step of its own, or "
+        "one outside the displayed function. An overlay that answered "
+        "`efsTaken` for every such line would be telling a "
         "user the program executed lines it never reached, which is the "
         "strongest form of a debugger lying."),
 

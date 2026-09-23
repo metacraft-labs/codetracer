@@ -235,10 +235,10 @@ const
         "byte length and knows it.")]
     ## **THE FILED GAPS, AS DATA.** PLAT-22's `FiledEditorGaps` shape, reused
     ## rather than re-derived. `PLAT22-PG1` (marks have no production producer)
-    ## and `PLAT22-PG2` (no per-line flow fact) are INHERITED and stay filed
-    ## against their existing ids in `editor_rows.nim`: this milestone carries
-    ## the mechanism, not the producers, and these two are its own additions to
-    ## that register rather than a second register.
+    ## is INHERITED and stays filed against its id in `editor_rows.nim` (its
+    ## sibling `PLAT22-PG2` was retired by PLAT-42): this milestone carries the
+    ## mechanism, not the producers, and these are its own additions to that
+    ## register rather than a second register.
 
 func decoOrder*(cls: DecoOrderClass; offset = 0): DecoOrder =
   ## **THE ONLY CONSTRUCTOR, AND IT RAISES WHERE THE REFERENCE CLAMPS.**
