@@ -399,8 +399,8 @@ ARMS = [
         "rather than at the predicate."),
 
     Arm("U3", SURFACE,
-        "    if row.held and row.pointer == eptExecution:\n      row.values = valuesForLine(row.text, values)",
-        "    if row.held:\n      row.values = valuesForLine(row.text, values)",
+        "      if held and result.pointer == eptExecution:\n        result.values = valuesForLine(text, values)",
+        "      if held:\n        result.values = valuesForLine(text, values)",
         SUITE_EDIT,
         "INLINE VALUES are presented at the GPUI ROW budget, on the execution line only",
         CTL[SURFACE][0], CTL[SURFACE][1],

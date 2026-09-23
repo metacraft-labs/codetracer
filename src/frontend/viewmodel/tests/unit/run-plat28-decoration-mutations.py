@@ -173,7 +173,11 @@ G_FIELDS = "the seven fields and the four scenarios are asserted cardinalities"
 G_DG3 = ("PLAT28-DG3 — THE TWO PRODUCERS AGREED ABOUT A LINE TERMINATOR AFTER "
          "PLAT-34, measured")
 
+G_WINDOW = ("A WINDOW PROJECTS WITH THE FILE'S LINE NUMBERS, AND A REQUESTED "
+            "LINE IS NOT HELD")
+
 NAMED_CASES = [
+    G_WINDOW,
     D1_INSERT, D1_COLLAPSE, D2_COLLAPSED, D2_DELETED, D2_REFUSAL,
     D3_DELETE, D4_DELETE, D5_TOTAL, D5_STABLE,
     C7_WITH, C7_WITHOUT, C7_WRAP, FUZZ2, FUZZ7,
@@ -526,6 +530,26 @@ ARMS = [
         "BOTH sides — cases that cannot fail unless something says so. The "
         "declared table is what says so, and it is two-sided: a cell marked "
         "varying and found constant is as red as the reverse",
+    ),
+    Arm(
+        "W1", PROJECTION,
+        "  let base = max(1, p.firstLine)\n",
+        "  let base = 1\n",
+        G_WINDOW,
+        "**A WINDOW IS NUMBERED FROM ONE.** The debug surface projects the "
+        "visible part of a file, so its rows would carry the WINDOW's line "
+        "numbers — a pointer on line 3 of a window starting at 40 drawn beside "
+        "the file's line 3, and every breakpoint on the wrong row",
+    ),
+    Arm(
+        "W2", PROJECTION,
+        "               line notin p.requested",
+        "               true",
+        G_WINDOW,
+        "**A LINE STILL IN FLIGHT IS DRAWN AS HELD.** Its text is the empty "
+        "string the window document carries for it, so the row renders blank "
+        "instead of as a placeholder — `SourceVM`'s second contract, 'nothing "
+        "renders as an empty string', broken one step before the medium",
     ),
 ]
 

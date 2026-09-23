@@ -78,7 +78,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 329
+const ExpectedAssertions = 335
 
 const Policy = ColumnPolicy(tabSize: 4, ambiguous: awNarrow)
 const NoWrap = WrapSettings(wrapColumn: 0, policy: Policy)
@@ -645,6 +645,30 @@ suite "PLAT-28 — where the projection and today's producer deliberately differ
     # being asked for.
     counted wrap.documentLines(doc).len == kept.len
     counted editorSurfaceForProject("/p", doc, "m", true).rows.len == dropped.len
+
+  test "A WINDOW PROJECTS WITH THE FILE'S LINE NUMBERS, AND A REQUESTED LINE IS NOT HELD":
+    # The debug surface projects `SourceVM`'s visible window — a contiguous
+    # run of a file starting at `visibleFirstLine`, some lines still in
+    # flight — so `firstLine` numbers the rows and `requested` un-holds the
+    # in-flight ones, which need not form a range.
+    let doc = "alpha\n\ngamma\n"
+    let starts = projectionLineStarts(doc)
+    let ds = decorationSet(@[
+      decoration(0, starts[2], starts[2],
+                 linePayload(classOfPointer(eptExecution)))])
+    let rows = editorRowsOf(RowProjection(
+      doc: doc, decorations: ds, firstLine: 40, viewportTop: 40,
+      viewportHeight: 0, trailing: tlpDropFinalEmpty, requested: @[41]))
+    counted rows.len == 3
+    counted rows[0].line == 40 and rows[2].line == 42
+    counted rows[0].held and rows[0].text == "alpha"
+    counted not rows[1].held and rows[1].text == ""
+    counted rows[2].held and rows[2].pointer == eptExecution
+    # The window's own viewport clips in the FILE's numbering too.
+    let clipped = editorRowsOf(RowProjection(
+      doc: doc, decorations: ds, firstLine: 40, viewportTop: 42,
+      viewportHeight: 1, trailing: tlpDropFinalEmpty))
+    counted clipped.len == 1 and clipped[0].line == 42
 
 suite "PLAT-28 — the tally":
   test "assertion count":

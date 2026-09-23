@@ -68,8 +68,8 @@ SUITES = [LAWS, FLOW_TERM, VALUES_TERM, FACTS, EDITING, LINE_TERM]
 
 ARMS = [
     # --- a surface drawn on EVERY row -------------------------------------
-    ("P1", SURFACE, "    if row.held and row.pointer == eptExecution:",
-     "    if row.held:", [EDITING],
+    ("P1", SURFACE, "      if held and result.pointer == eptExecution:",
+     "      if held:", [EDITING],
      "inline values drawn on every held row, not only the execution line"),
     ("B1", LEAVES,
      "  if row.pointer == eptExecution:\n    r.setStyle(el, \"background\", ExecutionRowBand)",

@@ -308,6 +308,54 @@ const FlowOverlayShownByDefault* = true
   ## still starts `false` — that is the ViewModel's neutral state, and the host
   ## is what knows the product default.
 
+type
+  RowFacts = object
+    ## What one row says beyond its text: the four vocabulary fields a
+    ## producer decided. `projectedRows` encodes them as decorations and the
+    ## projection decodes them, so a row's fields reach the medium through
+    ## PLAT-28's model and through nothing else.
+    mark: EditorMark
+    pointer: EditorPointer
+    flow: EditorFlowState
+    values: seq[EditorValue]
+
+proc projectedRows(doc: string; firstLine: int; trailing: TrailingLinePolicy;
+                   viewportTop, viewportHeight: int; requested: seq[int];
+                   factsOf: proc (line: int; text: string;
+                                  held: bool): RowFacts {.closure.}):
+                   seq[EditorRow] =
+  ## **EVERY `EditorRow` THIS MODULE RETURNS IS BUILT HERE, AS A PROJECTION**
+  ## (PLAT-28, Editor-ViewModel.md §8.4). The producers' per-line answers
+  ## become a `DecorationSet` over `doc` — line decorations for the mark, the
+  ## pointer and the flow state, inline widgets for the values — and the rows
+  ## are `row_projection.editorRowsOf` of that set. Until 2026-09-23 both
+  ## surfaces assembled `EditorRow`s field by field beside a projection that
+  ## could have produced them, which is the parallel structure §8.4 names.
+  ##
+  ## `factsOf` is asked only for the lines the viewport shows, so a 40,000-line
+  ## file costs a viewport's worth of decisions, as the direct loop did.
+  let ls = projectionLinesFor(doc, trailing)
+  let starts = projectionLineStarts(doc)
+  let base = max(1, firstLine)
+  let lastLine = if viewportHeight <= 0: high(int)
+                 else: viewportTop + viewportHeight - 1
+  var ds: seq[Decoration] = @[]
+  var nextId = 0
+  for idx in 0 ..< ls.len:
+    let line = base + idx
+    if line < viewportTop: continue
+    if line > lastLine: break
+    let held = line notin requested
+    let f = factsOf(line, if held: ls[idx] else: "", held)
+    for d in decorationsForRow(f.mark, f.pointer, f.flow, f.values,
+                               starts[idx], ls[idx].len, nextId):
+      ds.add d
+      inc nextId
+  editorRowsOf(RowProjection(doc: doc, decorations: decorationSet(ds),
+                             firstLine: base, viewportTop: viewportTop,
+                             viewportHeight: viewportHeight,
+                             trailing: trailing, requested: requested))
+
 proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
                        flow: FlowVM; availability: SourceAvailability;
                        budget: Budget; medium: string;
@@ -383,30 +431,42 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
   if flow.isNil:
     result.support[ecFlowOverlay] = esDegraded
 
+  # THE WINDOW AS A DOCUMENT. `visibleReads` is one read per line of a
+  # contiguous run, so the window's text joined by `'\n'` is a document whose
+  # first line is `visibleFirstLine`; a line still in flight contributes an
+  # empty line and is named in `requested`, so its row is `held = false`.
+  let reads = source.visibleReads()
   result.rows = @[]
-  for read in source.visibleReads():
-    var row = EditorRow(line: read.line, flow: efsUnknown)
+  if reads.len == 0:
+    return
+  var windowLines: seq[string] = @[]
+  var requested: seq[int] = @[]
+  for read in reads:
     case read.kind
-    of srkHeld:
-      row.held = true
-      row.text = read.text
+    of srkHeld: windowLines.add read.text
     of srkRequest:
-      row.held = false
-      row.text = ""
-    row.pointer = pointerFor(read.line, result.executionLine,
-                             result.inspectionLine)
-    row.mark = markFor(points, result.path, read.line)
-    # INLINE VALUES ON THE EXECUTION LINE ONLY, which is the terminal's rule
-    # carried across rather than re-decided. The values the ViewModel reports
-    # are the values in scope AT THE STOP; attaching them to every line that
-    # mentions the name would put the value of `x` at the stop beside a line
-    # thirty above it that has not run yet, which is a stale value with extra
-    # steps.
-    if row.held and row.pointer == eptExecution:
-      row.values = valuesForLine(row.text, values)
-    if result.flowOverlayVisible:
-      row.flow = flowStateOf(flowFacts, read.line)
-    result.rows.add row
+      windowLines.add ""
+      requested.add read.line
+  let executionLine = result.executionLine
+  let inspection = result.inspectionLine
+  let path = result.path
+  let flowVisible = result.flowOverlayVisible
+  let pts = @points
+  result.rows = projectedRows(windowLines.join("\n"), reads[0].line, tlpKeep,
+                              reads[0].line, 0, requested,
+    proc (line: int; text: string; held: bool): RowFacts =
+      result.pointer = pointerFor(line, executionLine, inspection)
+      result.mark = markFor(pts, path, line)
+      # INLINE VALUES ON THE EXECUTION LINE ONLY, which is the terminal's rule
+      # carried across rather than re-decided. The values the ViewModel
+      # reports are the values in scope AT THE STOP; attaching them to every
+      # line that mentions the name would put the value of `x` at the stop
+      # beside a line thirty above it that has not run yet, which is a stale
+      # value with extra steps.
+      if held and result.pointer == eptExecution:
+        result.values = valuesForLine(text, values)
+      result.flow = if flowVisible: flowStateOf(flowFacts, line)
+                    else: efsUnknown)
 
 proc followAndRequest*(vm: SourceVM): seq[SourceLineRequest] =
   ## Scroll to the execution pointer and report what the window then lacks.
@@ -521,25 +581,25 @@ proc editorSurfaceForDocument*(d: EditingDocument; medium: string;
   # counts. Neither answer moved; which question each is asked is now said out
   # loud.
   let ls = projectionLinesFor(d.text, trailing)
-  let lastLine =
-    if viewportHeight <= 0: high(int)
-    else: viewportTop + viewportHeight - 1
-  for idx, lineText in ls:
-    let line = idx + 1
-    if line < viewportTop: continue
-    if line > lastLine: break
-    # **`result.inspectionLine` AND NOT `d.caretLine`, AND THE DIFFERENCE IS
-    # §30 IN EIGHT WORDS.** The first spelling of this loop read the document
-    # a second time, so the surface's own `inspectionLine` field and the
-    # pointer its rows carry were two answers to one question — and PLAT-34's
-    # arm `M3`, which blanks the field, SURVIVED: the field moved and the rows
-    # did not, because nothing downstream read the field. One value, one
-    # reader, and the arm lands.
-    result.rows.add EditorRow(line: line, text: lineText, held: true,
-                              pointer: pointerFor(line, result.executionLine,
-                                                  result.inspectionLine),
-                              mark: markFor(points, d.path, line),
-                              flow: efsUnknown)
+  # **`result.inspectionLine` AND NOT `d.caretLine`, AND THE DIFFERENCE IS
+  # §30 IN EIGHT WORDS.** The first spelling of this loop read the document
+  # a second time, so the surface's own `inspectionLine` field and the
+  # pointer its rows carry were two answers to one question — and PLAT-34's
+  # arm `M3`, which blanks the field, SURVIVED: the field moved and the rows
+  # did not, because nothing downstream read the field. One value, one
+  # reader, and the arm lands.
+  #
+  # The rows themselves are `projectedRows`' — PLAT-28's projection — with
+  # the pointer and the mark as the two line decorations edit mode has.
+  let executionLine = result.executionLine
+  let inspection = result.inspectionLine
+  let path = d.path
+  let pts = @points
+  result.rows = projectedRows(d.text, 1, trailing, viewportTop,
+                              viewportHeight, @[],
+    proc (line: int; text: string; held: bool): RowFacts =
+      RowFacts(pointer: pointerFor(line, executionLine, inspection),
+               mark: markFor(pts, path, line), flow: efsUnknown))
   result.totalLineCount = ls.len
   result.viewportTop = viewportTop
 
