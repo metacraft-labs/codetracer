@@ -5901,3 +5901,34 @@ Two traps in the same area, both live:
   was read from a log the running lane had not yet truncated. Wait on the
   PROCESS (the background job's own exit), not on the log's contents, or delete
   the log before starting the lane.
+- `ct/load-locals` has ONE sender per stop on every host. Web (non-extension):
+  the StateVM auto-load effect (`state_vm.nim`, `store.requestLocals`);
+  `StateComponent.loadLocals` stands down once `initStateVMWithStore` ran
+  (`storeSendsLocals`) and is the sender only over the stub store (VS Code
+  extension). Native (TUI/GPUI via `headless_session`): the host's
+  `fetchLocals`; the store has `localsLoadedByHost = true`, so the effect sends
+  nothing (its answer reached no decoder there). Before this the web sent 2 per
+  move and native 3 per step (the `dsStepping` status write re-ran the effect).
+  The effect now subscribes to `stopIdentityOf(store.debugger.val)` (a memo),
+  not the whole `DebuggerState`. `lang` is `store.localsLanguage()` via the
+  host-installed `store.sourceLanguageOf` hook (the store is in the Embed SDK
+  graph and cannot import `common_lang`); only the native (rr/lldb) replay
+  backend reads `lang` (value printers) — `Db::load_locals` ignores it.
+  `.py` resolves to `pythondb`. `StateComponent.rrTicks` is never assigned
+  (always 0).
+- Electron main-process DAP router (`index/ipc_subsystems/dap.nim`) forwards
+  every renderer request under a WIRE `seq` unique across sessions
+  (`nextWireSeq`) and records `(sessionId, seq)` under it (`pendingRequests`);
+  the answer's `request_seq` is rewritten back to the session's own `seq`.
+  Backend responses carry only `request_seq`, so a `(sessionId, seq)` key is
+  not recoverable at answer time without this rewrite.
+- Main-process modules RUN under node with `-d:nodejs -d:ctIndex -d:server`
+  (the `server_index.js` defines; `-d:server` loads `electron_vars` without
+  Electron): lane `main-process`, `just test-main-process`.
+- To see what a native host WRITES to the real replay-server, launch it through
+  a bash script `exec < <(tee -a LOG); exec real-server "$@"` via
+  `REPLAY_SERVER_BIN` (see `test_plat29_inline_values.nim` `tappedServer`).
+- Renderer suites under jsdom can have an async phase: schedule a proc
+  `{.async.}` that `await`s a `setTimeout(resolve, 0)` promise so promise
+  continuations (e.g. `requestLocals`' `markComplete`) have run; put the
+  final `CHECKS:` echo / exit code in that phase.

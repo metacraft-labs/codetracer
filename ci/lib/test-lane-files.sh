@@ -147,6 +147,7 @@ host-instantiations
 renderer-electron
 renderer-web
 renderer-dom
+main-process
 frontend-native-units
 frontend-js
 vm-unit
@@ -189,6 +190,7 @@ test_lane_description() {
 	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
 	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
 	renderer-dom) echo "renderer suites on the BROWSER target, run under node over jsdom" ;;
+	main-process) echo "Electron main-process suites, the server_index build's defines, run under node" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
@@ -268,7 +270,7 @@ test_lane_description() {
 # which is the half that was never in doubt.
 test_lane_backend() {
 	case "$1" in
-	frontend-js | vm-js | vm-unit-js | host-instantiations) echo "js" ;;
+	frontend-js | vm-js | vm-unit-js | host-instantiations | main-process) echo "js" ;;
 	renderer-electron | renderer-web) echo "js-browser" ;;
 	renderer-dom) echo "js-dom" ;;
 	vm-unit-wasm) echo "wasm" ;;
@@ -380,6 +382,15 @@ test_lane_extra_flags() {
 		# suites drive the renderer's own modules, so they are compiled the way
 		# the renderer is.
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
+	main-process)
+		# The Electron MAIN process's defines — `!nim_node_index_server` in
+		# `Tuprules.tup` (`server_index.js`): `-d:ctIndex` selects the
+		# main-process arm of the shared modules, and `-d:server` is what lets
+		# `index/electron_vars.nim` load without Electron, so the suites run
+		# under plain node. The modules under test have no `when
+		# defined(server)` arm, so what runs is what `index.js` ships.
+		echo "-d:ctIndex -d:server"
 		;;
 	renderer-web)
 		# The same renderer, plus `-d:ctWeb` — the define `platform_host.nim`'s
@@ -706,9 +717,19 @@ test_lane_files() {
 	renderer-dom)
 		# Suites that RUN renderer modules — `ui/state.nim` and the DAP
 		# transport under it — which only compile for the browser target.
-		# `locals_answer_identity_test.nim` drives the web renderer's two
-		# `ct/load-locals` senders through the real response fan-out.
+		# `locals_answer_identity_test.nim` drives the web renderer's
+		# `ct/load-locals` senders through the real response fan-out: one
+		# request per stop, in the stopped-in file's language.
 		echo src/frontend/tests/locals_answer_identity_test.nim
+		;;
+
+	main-process)
+		# Suites that RUN the Electron main process's own modules.
+		# `dap_session_routing_test.nim` drives the DAP router
+		# (`index/ipc_subsystems/dap.nim`) with two sessions whose requests
+		# share a `seq`, and asserts each answer reaches the session that
+		# asked.
+		echo src/frontend/tests/dap_session_routing_test.nim
 		;;
 
 	frontend-native-units)
@@ -742,8 +763,9 @@ test_lane_files() {
 		# by the union.
 		# `renderer-dom`'s suites are subtracted the same way, for the same
 		# reason: they are browser-target modules and do not build with `nim c`.
+		# So are `main-process`'s: the Electron main process is `nim js` only.
 		_tlf_find src/frontend/tests '*_test.nim' '*_test_plan.nim' |
-			grep -vxF -f <(test_lane_files frontend-js; test_lane_files renderer-dom) || true
+			grep -vxF -f <(test_lane_files frontend-js; test_lane_files renderer-dom; test_lane_files main-process) || true
 		;;
 
 	frontend-js)

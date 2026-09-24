@@ -1688,9 +1688,12 @@ test-frontend-js:
   echo ""
   # Renderer modules RUN over jsdom (the `renderer-dom` lane): the web
   # renderer's `ct/load-locals` answers matched to the requests that produced
-  # them, from both senders through the real response fan-out.
+  # them, one request per stop, through the real response fan-out.
   echo "Running renderer-dom lane..."
   just test-renderer-dom
+  echo ""
+  echo "Running main-process lane..."
+  just test-main-process
 
 # Run the Playwright suite. Args are forwarded to `npx playwright test`.
 #
@@ -3555,9 +3558,10 @@ test-renderer-browser:
 # Renderer modules RUN, not only compiled: the `renderer-dom` lane builds its
 # suites for the browser target (the only target `ui/state.nim` compiles for)
 # and runs them under node over jsdom (`src/frontend/tests/jsdom-run.mjs`).
-# `locals_answer_identity_test.nim` drives the web renderer's two
-# `ct/load-locals` senders through the real response fan-out and asserts that
-# every answer is judged against the stop its own request was sent at.
+# `locals_answer_identity_test.nim` drives the web renderer's `ct/load-locals`
+# senders through the real response fan-out and asserts one request per stop,
+# in the stopped-in file's language, and that every answer is judged against
+# the stop its own request was sent at.
 #
 # NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
 # Nix-built node modules on entry; the runner fails (rather than skipping) when
@@ -3568,6 +3572,19 @@ test-renderer-dom:
   mkdir -p test-logs
   exec > >(tee test-logs/test-renderer-dom.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh renderer-dom
+
+# The Electron MAIN process's modules RUN under node: the `main-process` lane
+# builds its suites with the `server_index.js` defines (`-d:ctIndex
+# -d:server`, which load `electron_vars` without Electron).
+# `dap_session_routing_test.nim` drives the main process's DAP router with two
+# sessions whose requests share a `seq` and asserts each answer reaches the
+# session that asked.
+test-main-process:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-main-process.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh main-process
 
 # THE BUILD A DEVELOPER TYPES, which is not one of the two above.
 #
