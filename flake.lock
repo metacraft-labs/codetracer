@@ -528,7 +528,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "801dfa2d3889986e8c7c5b350e38a60042db6baf",
+        "rev": "cec060c3951d4772733b02d48ca20008ed44f089",
         "type": "github"
       },
       "original": {
@@ -2779,7 +2779,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-acp",
-        "rev": "789ccdd4e92119f19aaf52e99ed68dd1108f82f7",
+        "rev": "1a080bc0dc07641cc18755010e717ae433960700",
         "type": "github"
       },
       "original": {
@@ -2794,7 +2794,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-agent-harbor",
-        "rev": "600ce58409a4c4639127c8d9df75ec0241c72c0d",
+        "rev": "daac78a14e9bf21498f2bed3100ae09b696abc7d",
         "type": "github"
       },
       "original": {
@@ -2809,7 +2809,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "7b3d877aa0155d9273882f57db4ac7a5870b3a9b",
+        "rev": "c210845171a432bf40b0201a80bb4e2645a3ef53",
         "type": "github"
       },
       "original": {
@@ -2858,7 +2858,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-everywhere",
-        "rev": "88f1a26180c5e00f41456c8df5d428d75f28a385",
+        "rev": "ab533e65f07d79ae70581d2a023bfe5b85d9d47b",
         "type": "github"
       },
       "original": {

@@ -682,6 +682,34 @@ jobs:
             exit 1
           fi
 
+          # THE SCRIPTS LATER STEPS RUN, CHECKED AGAINST THE REVISION THEY WILL
+          # RUN FROM. This file is resolved at `@dev` by every remote caller,
+          # but the codetracer checkout it drives comes from the workspace lock
+          # -- two different revisions of one repo. When a step here starts
+          # running a script that an older codetracer does not have, every edge
+          # whose lock pins that older codetracer dies in that step, after the
+          # ten-minute core build, as `bash: <script>: No such file or
+          # directory` / exit 127. That is not hypothetical: `Check the gate's
+          # decoded-trace reasoning` landed with its script in e705fbad5
+          # (2026-09-19), and python run 35503672483 and js run 35503680304,
+          # pinned to codetracer e42e4855 / ac0cec46 (2026-09-09 / -10), both
+          # ended exactly that way. Name it here, in seconds, with the remedy.
+          #
+          # Every repo-relative `bash <path>.sh` a step of this workflow runs
+          # from CT_DIR belongs in this list (the driver itself is checked
+          # above, and the `just` recipes that reach it landed with it in
+          # 521b3d71a); ci/test/launcher-recorder-e2e-workflow-test.sh derives
+          # that set from this file and fails when one is missing, so a new
+          # step cannot quietly reintroduce the skew.
+          for script in scripts/build-siblings.sh ci/test/launcher-recorder-decode-test.sh; do
+            if [ ! -f "${CT_DIR}/${script}" ]; then
+              echo "  MISSING ${CT_DIR}/${script}"
+              echo "::error::the codetracer revision this run resolved from the workspace lock ($(git -C "${CT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)) predates ${script}, which a later step of this workflow runs. This workflow is taken from codetracer@dev, the checkout it drives is taken from the lock, and the lock published for the commit under test pins a codetracer that is too old for it. Refresh the workspace lock ('repro workspace lock --trigger-repo=${GITHUB_REPOSITORY##*/}' from a workspace whose codetracer checkout carries ${script}, then push the manifest repo); do NOT paper over it with a 'codetracer=<ref>' sibling override."
+              exit 1
+            fi
+            echo "  OK   ${CT_DIR}/${script}"
+          done
+
           # THE REVISION, NOT JUST THE DIRECTORY (added by LRC-6).  Sibling
           # revisions now come from the workspace lock, so "the recorder is
           # checked out" no longer implies "the recorder is checked out at a

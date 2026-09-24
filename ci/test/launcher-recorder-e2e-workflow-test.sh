@@ -980,6 +980,155 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# The workspace-shape step names a codetracer too old for this workflow.
+#
+# This workflow is resolved at `@dev` by every remote caller, but the codetracer
+# checkout it drives comes from the workspace lock. So a step that starts
+# running a new repo script breaks every edge whose lock pins an older
+# codetracer -- in that step, after the ten-minute core build, as exit 127.
+# Python run 35503672483 and js run 35503680304 both died that way on
+# `ci/test/launcher-recorder-decode-test.sh` (added in e705fbad5, 2026-09-19;
+# their locks pinned codetracer from 2026-09-09 / -10).
+#
+# Two properties, both checked against the committed YAML:
+#   a. every repo-relative `bash <path>.sh` a step runs is in the shape step's
+#      `for script in ...` list -- DERIVED from the YAML, so a new step cannot
+#      escape it; and a copy with ANY one entry removed must be REJECTED;
+#   b. the shape step, EXECUTED against a workspace whose codetracer lacks any
+#      one listed script, fails naming that script and the lock, and passes
+#      once every one is there.
+# ---------------------------------------------------------------------------
+echo
+echo "the workspace-shape step checks every repo script a later step runs"
+
+# shape_listed_scripts FILE -> the shape step's `for script in ...` entries.
+shape_listed_scripts() {
+	extract_step_script "Check the workspace has the shape the driver expects" "$1" |
+		sed -n 's/^[[:space:]]*for script in \(.*\); do[[:space:]]*$/\1/p' |
+		tr ' ' '\n' | grep -v '^$' | sort -u
+}
+
+# check_shape_covers_scripts FILE -> prints one line per uncovered script;
+# exit 0 iff every repo-relative `bash <path>.sh` run by a step (comments
+# excluded) is listed by the shape step, and at least one such script was
+# found. The driver is exempt: the shape step checks it by name, above the list.
+check_shape_covers_scripts() {
+	local file="$1" run_scripts listed s rc=0
+	listed="$(shape_listed_scripts "$file")"
+	run_scripts="$(strip_cr "$file" | grep -v '^[[:space:]]*#' |
+		grep -oE '(^|[[:space:]])bash [A-Za-z0-9_][A-Za-z0-9_./-]*\.sh' |
+		sed 's/^[[:space:]]*bash //' | sort -u)"
+	if [ -z "$run_scripts" ]; then
+		echo "no repo-relative 'bash <path>.sh' invocation found in $file -- the derivation is vacuous"
+		return 1
+	fi
+	for s in $run_scripts; do
+		[ "$s" = ci/test/launcher-recorder-e2e.sh ] && continue
+		if ! grep -qxF "$s" <<<"$listed"; then
+			echo "$s is run by a step but not checked by the workspace-shape step"
+			rc=1
+		fi
+	done
+	return "$rc"
+}
+
+SHAPE_LISTED="$(shape_listed_scripts "$REUSABLE")"
+if cov_out="$(check_shape_covers_scripts "$REUSABLE")"; then
+	ok "every repo script a step runs is checked by the workspace-shape step"
+else
+	fail "every repo script a step runs is checked by the workspace-shape step" "$cov_out"
+fi
+
+# Mutation: drop each entry in turn from the shape step's list; the check must
+# notice every time. Run through the same function, on copies of the real file.
+SHAPE_MUT="$TMP/shape-mutant.yml"
+mut_out=""
+for s in $SHAPE_LISTED; do
+	awk -v drop="$s" '
+		/^          for script in .*; do[[:space:]]*$/ {
+			line = $0; sub(/; do[[:space:]]*$/, "", line)
+			n = split(line, w, " "); out = ""
+			for (i = 1; i <= n; i++) if (w[i] != drop) out = out (out == "" ? "          " : " ") w[i]
+			print out "; do"; next
+		}
+		{ print }' "$REUSABLE" >"$SHAPE_MUT"
+	if cmp -s "$REUSABLE" "$SHAPE_MUT"; then
+		mut_out="${mut_out}the mutation dropping $s was not applied; "
+	elif check_shape_covers_scripts "$SHAPE_MUT" >/dev/null; then
+		mut_out="${mut_out}SURVIVED: $s was removed from the shape step and the check still passed; "
+	fi
+done
+if [ -z "$SHAPE_LISTED" ]; then
+	fail "a shape step that stops checking any script a later step runs is rejected" \
+		"the shape step lists no scripts at all"
+elif [ -n "$mut_out" ]; then
+	fail "a shape step that stops checking any script a later step runs is rejected" "$mut_out"
+else
+	ok "a shape step that stops checking any script a later step runs is rejected"
+fi
+
+# Execute the step. A workspace laid out correctly in every way except the
+# script in question, so the only thing that can fail is the new check.
+SH="$TMP/shape-step"
+mkdir -p "$SH/ws/codetracer/ci/test" "$SH/ws/codetracer-launcher" \
+	"$SH/ws/codetracer-ruby-recorder/cross-repo" "$SH/ws/codetracer-trace-format-nim"
+: >"$SH/ws/codetracer/ci/test/launcher-recorder-e2e.sh"
+: >"$SH/ws/codetracer-ruby-recorder/cross-repo/launcher-compat.yml"
+SHAPE_STEP="$SH/step.sh"
+extract_step_script "Check the workspace has the shape the driver expects" "$REUSABLE" >"$SHAPE_STEP"
+
+run_shape_step() {
+	local out rc
+	out="$(CT_DIR="$SH/ws/codetracer" RECORDER_REPO="codetracer-ruby-recorder" \
+		GITHUB_REPOSITORY="metacraft-labs/codetracer-ruby-recorder" \
+		bash "$SHAPE_STEP" 2>&1)"
+	rc=$?
+	printf '%s|%s' "$rc" "$out"
+}
+
+# place_all_but SCRIPT -> every listed script present except SCRIPT.
+place_all_but() {
+	local s
+	for s in $SHAPE_LISTED; do
+		rm -f "$SH/ws/codetracer/$s"
+		if [ "$s" != "$1" ]; then
+			mkdir -p "$(dirname "$SH/ws/codetracer/$s")"
+			: >"$SH/ws/codetracer/$s"
+		fi
+	done
+}
+
+miss_out=""
+for s in $SHAPE_LISTED; do
+	place_all_but "$s"
+	sh_out="$(run_shape_step)"
+	if ! { [ "${sh_out%%|*}" != 0 ] &&
+		grep -qF "predates ${s}" <<<"$sh_out" &&
+		grep -q "repro workspace lock --trigger-repo=codetracer-ruby-recorder" <<<"$sh_out"; }; then
+		miss_out="${miss_out}without ${s}: ${sh_out}"$'\n'
+	fi
+done
+if [ -z "$SHAPE_LISTED" ] || [ -n "$miss_out" ]; then
+	fail "a lock-pinned codetracer lacking any listed script fails the shape step, naming the script and the lock" \
+		"got: ${miss_out:-the shape step lists no scripts}"
+else
+	ok "a lock-pinned codetracer lacking any listed script fails the shape step, naming the script and the lock"
+fi
+
+place_all_but ""
+sh_out="$(run_shape_step)"
+ok_out=""
+for s in $SHAPE_LISTED; do
+	grep -qF "OK   $SH/ws/codetracer/${s}" <<<"$sh_out" || ok_out="${ok_out} ${s}"
+done
+if [ "${sh_out%%|*}" = 0 ] && [ -n "$SHAPE_LISTED" ] && [ -z "$ok_out" ]; then
+	ok "the shape step passes once the codetracer checkout carries every listed script"
+else
+	fail "the shape step passes once the codetracer checkout carries every listed script" \
+		"not reported OK:${ok_out}; got: ${sh_out}"
+fi
+
+# ---------------------------------------------------------------------------
 # 10. THE CHECKER'S OWN MUTATION TEST.
 #
 # Everything above reports a defect by NOT finding something, which is the
@@ -1235,7 +1384,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=19
+readonly EXPECTED_ASSERTIONS=23
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
