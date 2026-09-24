@@ -70,9 +70,13 @@ import codetracer_embed
 import ../../../common/editing_key_bindings
 
 import ./source_binding
+import ./syntax/highlight_producer
+import ./file_io_producer
 import ./views/edit_pane
 
 export edit_pane
+export highlight_producer
+export file_io_producer
 export source_binding
 # The binding table is part of this module's contract now: a caller that wants
 # to know which operation a key performs asks the TABLE, and
@@ -144,8 +148,18 @@ type
       ## carried-and-not-yet-produced note PLAT-16 attached to it still holds
       ## — no gesture in this front-end closes a fold today, and
       ## `test_mode_transition_oracle.nim` sets one directly.
+    serial*: int
+      ## Which opening of the file this buffer is, within its session — see
+      ## `HighlightRequest.bufferSerial`.
+    fileReport*: StalenessReport
+      ## PLAT-29. Every file read and write answer this buffer reconciled.
+    highlights*: BufferHighlights
+      ## PLAT-29. This buffer's syntax spans as the asynchronous producer left
+      ## them, and the staleness report of every parse that arrived.
 
   EditSession* = ref object
+    nextSerial*: int
+      ## The serial the next opened buffer gets.
     ## Everything Edit mode holds across a mode switch.
     ##
     ## ONE OBJECT, LIVING ACROSS THE TRANSITION, which is Mode-Transitions.md
@@ -192,6 +206,10 @@ type
 
 const
   NoBuffer* = -1
+  HighlightWindowSlack* = 64
+    ## Rows of spans handed to the pane beyond the buffer's own viewport
+    ## height — the pane can be taller than the height the buffer was opened
+    ## with, and a row with no spans draws plain.
 
 proc newEditBuffer*(path, text: string;
                     viewportHeight = 20;
@@ -248,14 +266,21 @@ proc outrunsRecording*(buf: EditBuffer): bool =
     return false
   buf.doc.text != buf.recordedText or buf.loadedText != buf.recordedText
 
-proc markSaved*(buf: EditBuffer) =
-  ## The buffer was written to disk. `host/` does the writing; this records it.
+proc markSaved*(buf: EditBuffer; savedText: string) =
+  ## `savedText` is now on disk. `host/` does the writing; this records it.
+  ##
+  ## THE BYTES THAT WERE WRITTEN, NOT THE BUFFER'S TEXT (PLAT-29). A write runs
+  ## on the host's file worker and its acknowledgement arrives later; the
+  ## buffer may have moved while it ran, and what was typed since is on no
+  ## disk. So the caller passes the bytes the acknowledgement is about
+  ## (`file_io_producer.FileAnswer.savedText`) and a buffer typed into during a
+  ## save stays dirty.
   ##
   ## `recordedText` IS DELIBERATELY NOT TOUCHED. Writing a file does not make a
   ## recording newer, so a save must not be able to clear a staleness notice —
   ## which is exactly what it did before `recordedText` existed.
   if not buf.isNil:
-    buf.loadedText = buf.doc.text
+    buf.loadedText = savedText
 
 proc caretLine*(buf: EditBuffer): int =
   ## 1-BASED. The conversion from the model's 0-based line is
@@ -520,6 +545,8 @@ proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
     s.active = existing
     return existing
   s.buffers.add newEditBuffer(path, text, viewportHeight, s.model)
+  inc s.nextSerial
+  s.buffers[^1].serial = s.nextSerial
   if not s.imported.isNil:
     s.buffers[^1].doc.installImported(s.imported)
   s.active = s.buffers.high
@@ -670,6 +697,24 @@ proc marksForFile*(points: openArray[SourcePoint];
   ## delegates.
   source_binding.marksForFile(points, path)
 
+proc windowOf(text: string; first, count: int): (seq[string], int) =
+  ## Lines `first ..< first + count` (1-based) of `text`, and how many lines
+  ## it has, in ONE pass that allocates only the lines it returns — the
+  ## `'\n'` convention `text_store` counts by, so a trailing newline is a
+  ## final empty line.
+  var lines: seq[string] = @[]
+  var line = 1
+  var start = 0
+  for i, ch in text:
+    if ch == '\n':
+      if line >= first and line < first + count:
+        lines.add text[start ..< i]
+      inc line
+      start = i + 1
+  if line >= first and line < first + count:
+    lines.add text[start .. ^1]
+  (lines, line)
+
 proc editPaneModelFor*(s: EditSession; buf: EditBuffer): EditPaneModel =
   ## The pane's model for the CURRENT frame.
   ##
@@ -679,10 +724,14 @@ proc editPaneModelFor*(s: EditSession; buf: EditBuffer): EditPaneModel =
   ## one sentence rather than one per front-end.
   if buf.isNil:
     return initEditPaneModel(sourceStatement = sourceStatementFor(pmEdit))
-  initEditPaneModel(
+  # THE WINDOW, NOT THE FILE — see `EditPaneModel.lines` for the 65 ms this
+  # used to cost a 24,000-line buffer on every frame.
+  let rows = buf.doc.viewportRows + HighlightWindowSlack
+  let (window, total) = windowOf(buf.text, max(1, buf.viewportTop), rows)
+  result = initEditPaneModel(
     path = buf.path,
     sourceStatement = sourceStatementFor(pmEdit),
-    lines = buf.lines,
+    lines = window,
     viewportTop = buf.viewportTop,
     caretLine = buf.caretLine,
     caretColumn = buf.caretColumn,
@@ -690,3 +739,11 @@ proc editPaneModelFor*(s: EditSession; buf: EditBuffer): EditPaneModel =
     dirty = buf.isDirty,
     marks = (if s.isNil: @[] else: marksForFile(s.points, buf.path)),
     language = "")
+  result.linesFrom = max(1, buf.viewportTop)
+  result.totalLines = total
+  # PLAT-29: the spans come from the producer's last answer, never from a
+  # parse here. A screen and a margin of them, so a pane taller than the
+  # buffer's own viewport still has spans for every row it draws.
+  result.spans = buf.highlights.spansForWindow(buf.doc, buf.viewportTop, rows)
+  result.spansFrom = buf.viewportTop
+  result.spansProvided = true

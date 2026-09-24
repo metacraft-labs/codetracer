@@ -234,8 +234,15 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     ck sess.transcriptDroppedBytes() == 0
     # …and the diagnosis is on the ORDINARY screen, naming what to do.
     checkpoint("last screen: " & strutils.strip(screen))
-    ck screen.contains("stopped answering")
-    ck screen.contains("replay-server")
+    # THE ROWS JOINED BEFORE THE PHRASE IS SEARCHED. The diagnosis names the
+    # recording's absolute path, so where it WRAPS depends on how deep the
+    # checkout is: in a worktree named `codetracer-plat29` the row broke
+    # inside "answer|ing" and this case went red on a correct screen
+    # (measured 2026-09-23). The row break is the terminal's, not the
+    # message's.
+    let joined = screen.replace("\n", "")
+    ck joined.contains("stopped answering")
+    ck joined.contains("replay-server")
     ck noSurvivingReplayServer()
     sess.close()
 

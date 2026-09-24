@@ -593,9 +593,27 @@ proc parseVariable(localNode: JsonNode): Variable =
 # Data loading — send DAP requests and feed responses into the store
 # ---------------------------------------------------------------------------
 
-proc requestAndLoadLocals*(s: HeadlessDebugSession) =
-  ## Send ``ct/load-locals`` to the backend, parse the response, and
-  ## feed the resulting Variable sequence into the store.
+type
+  LocalsAnswer = object
+    ## One `ct/load-locals` answer, not yet applied. The TYPE is not exported
+    ## — only `fetchLocals` makes one and only `applyLocals` consumes one —
+    ## while its fields are, so a caller can inspect what it holds.
+    ok*: bool
+      ## The backend answered with a locals list.
+    rows*: seq[Variable]
+    requestedAt*: StopStamp
+      ## The stop the request was SENT at — see `fetchLocals`.
+
+proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
+  ## Send ``ct/load-locals`` to the backend and parse the answer, WITHOUT
+  ## applying it. The answer carries the stop it was requested at
+  ## (``requestedAt``, taken immediately before the request is sent), which
+  ## is what ``ReplayDataStore.applyLocalsResponse`` reconciles against the
+  ## stop the store is at when the answer is applied — PLAT-29's
+  ## asynchronous boundary for the DAP data that feeds the locals and the
+  ## inline values. ``requestAndLoadLocals`` is fetch-then-apply; the split is
+  ## what lets a host (or a suite) move the debugger between the two and see
+  ## the answer dropped rather than drawn beside the wrong stop.
   ##
   ## This closes the data-flow loop that the GUI achieves via event-bus
   ## wiring: request -> response -> store update -> reactive signal change.
@@ -622,6 +640,7 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
     # materialized trace.
     "lang": LoadLocalsDefaultLang,
   }
+  result.requestedAt = s.session.store.stopStamp()
   let resp = s.backend.sendDapRequest("ct/load-locals", args)
   if resp.getOrDefault("success").getBool(false):
     let body = resp.getOrDefault("body")
@@ -631,15 +650,32 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
         # Watch answers ride the same list, marked `value.isWatch`. The
         # split itself is `applyLocalsResponse`'s — the one place every
         # host does it.
-        var rows: seq[Variable]
         for localNode in localsNode:
           var parsed = parseVariable(localNode)
           parsed.isWatch =
             localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false)
-          rows.add(parsed)
-        s.session.store.applyLocalsResponse(rows)
-        s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
-        drain()
+          result.rows.add(parsed)
+        result.ok = true
+
+proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
+  ## Apply a fetched answer through the store's reconciliation. `false` when
+  ## it was not applied — the fetch failed, or the debugger moved after it
+  ## was requested (counted in `store.stops.report`).
+  if not answer.ok:
+    return false
+  if not s.session.store.applyLocalsResponse(answer.rows, answer.requestedAt):
+    return false
+  s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
+  drain()
+  true
+
+proc requestAndLoadLocals*(s: HeadlessDebugSession) =
+  ## Send ``ct/load-locals`` to the backend, parse the response, and
+  ## feed the resulting Variable sequence into the store — ``fetchLocals``
+  ## then ``applyLocals``. Synchronous: the debugger cannot move between the
+  ## two here, so the answer is applied; the reconciliation is still the
+  ## route it takes, so a host that CAN move in between gets the drop.
+  discard s.applyLocals(s.fetchLocals())
 
 proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
                               startIndex: int64 = 0;

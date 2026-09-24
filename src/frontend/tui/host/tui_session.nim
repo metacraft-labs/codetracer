@@ -55,6 +55,7 @@ import headless_session
 # "ambiguous identifier" in the ones that import both, which is the shape a
 # reader meets as a compile error several modules away from either declaration.
 import ../../viewmodel/store/types as store_types
+import ../../viewmodel/viewmodels/inline_value_timeline
 
 import ../app/call_stack_binding
 import ../app/runtime
@@ -105,6 +106,11 @@ type
     mutations*: seq[uint64]
     maxRRTicks*: uint64
     originNav*: ref OriginNavigator
+    valueGate*: InlineValueGate
+      ## PLAT-29. The inline values are drawn only when the locals they come
+      ## from are about the stop the debugger is at — reconciled against the
+      ## store's stop timeline (`viewmodels/inline_value_timeline`). Counts
+      ## every draw; the store's `stops.report` counts every arrival.
 
 proc openTuiSession*(traceFolder: string; viewportHeight: int;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -146,7 +152,8 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
     callBoundaries: @[],
     mutations: @[],
     maxRRTicks: 0'u64,
-    originNav: nav)
+    originNav: nav,
+    valueGate: InlineValueGate())
 
 proc close*(s: TuiSession) =
   ## Tear the session down. Ordered VM-first because each `dispose` drops a
@@ -318,6 +325,14 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # editors cannot show two different sets of values for one stop.
   let editorVM = s.session.session.editorVM
   let flowVM = s.session.session.flowVM
+  # PLAT-29: the locals were requested at a stop, and are drawn beside the
+  # source only while the debugger is still at it — reconciled against the
+  # store's stop timeline on the way to the pane. `loadStopPanes` above is
+  # synchronous, so on this host the answer is always current by now; the
+  # withheld arm is observed by `test_plat29_inline_values.nim`.
+  let values = s.valueGate.installable(
+    s.session.session.store,
+    inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
   let notTaken =
     if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
     else: notTakenLinesOf(flowVM.styledLines.val)
@@ -325,7 +340,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     s.source, s.session.session.store.degraded.sourceAvailability.val,
     points = s.points,
     notTakenLines = notTaken,
-    inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
+    inlineValues = values)
 
   # PLAT-40. The Points pane reads the same points the gutter just drew.
   rt.app.points = pointListPaneModelFor(s.points)

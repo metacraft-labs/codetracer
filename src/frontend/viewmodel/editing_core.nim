@@ -59,13 +59,16 @@
 ## keymaps are `product_keymap`/`vim_keymap`/`kakoune_keymap`'s own tables and
 ## the operations are the shipped vocabulary.
 
-import std/tables
+import std/[strutils, tables]
 
 import ./editor/editor_state
 import ./editor/operations
 import ./editor/selection
 import ./editor/text_store
 import ./editor/wrap
+import ./editor/change_set
+import ./editor/document_version
+import ./editor/reconcile
 
 import ./keymap/editing_keymap
 import ./keymap/product_keymap
@@ -78,6 +81,7 @@ from ./keymap/vim_import import VimImport, ImportReportEntry, ImportReason,
 export editor_state, selection, wrap
 export editing_keymap, product_keymap, vim_keymap, kakoune_keymap
 export keymap_selection
+export document_version, reconcile
 export VimImport, ImportReportEntry, ImportReason, importVimConfig,
   coverageFraction, describeReport
 
@@ -135,6 +139,14 @@ type
       ## field HERE because a document is opened *by* a front-end, and that
       ## front-end's settings are what its own derivations are taken at.
     viewportRows*: int
+    timeline*: VersionedDocument
+      ## PLAT-29 §11: *"edits apply synchronously and the resulting state
+      ## carries a version"*. The document's text and the change sets that
+      ## moved it, drained from `EditorState.journal` after every key — so an
+      ## asynchronous producer (a highlight, a file read, a write's
+      ## acknowledgement) can name the version it was computed against and be
+      ## reconciled against this document rather than applied as though it had
+      ## not moved. Bounded to `TimelineDepth` change sets.
     imported*: ImportedKeymap
       ## PLAT-36. A user's Vim configuration, imported on top of the Vim
       ## keymap (`:source <file>` in the terminal). Nil — the common case —
@@ -165,6 +177,12 @@ type
 
 const
   DefaultViewportRows* = 20
+  TimelineDepth* = 256
+    ## How many change sets a document's timeline remembers. A producer
+    ## result older than that is `drVersionForgotten` — counted, not an error.
+    ## Two hundred and fifty-six keystrokes is minutes of typing ahead of a
+    ## parse that takes milliseconds; a result that far behind is one nobody
+    ## wants mapped.
 
 func terminalWrapSettings*(): WrapSettings =
   ## The configuration the TUI's edit pane runs at, in ONE place.
@@ -230,8 +248,38 @@ proc initEditingDocument*(path, text: string;
     state: initEditorState(text),
     model: model,
     settings: settings,
-    viewportRows: max(1, viewportRows))
+    viewportRows: max(1, viewportRows),
+    timeline: initVersionedDocument(text))
   result.state.mode = initialModeFor(model)
+
+proc drainJournal*(d: var EditingDocument) =
+  ## Move the change sets the last step applied from the model's journal onto
+  ## the timeline, one version each. The ONLY writer of `timeline` besides the
+  ## constructor, so the timeline's text and the model's `doc` cannot part.
+  ## EVERY writer of `d.state` calls it — `applyKey`, `applyNamed`,
+  ## `applyChangeSet` here, and the collaboration projection's two — so a
+  ## document leaves each call with an empty journal.
+  for cs in d.state.journal:
+    discard d.timeline.applyChanges(cs)
+  d.state.journal.setLen(0)
+  d.timeline.keepRecent(TimelineDepth)
+
+func version*(d: EditingDocument): DocumentVersion =
+  ## The version an asynchronous producer names when it is handed this
+  ## document's text.
+  d.timeline.version
+
+proc applyChangeSet*(d: var EditingDocument; cs: ChangeSet;
+                     nowMs: int64): bool =
+  ## A change that did NOT come from a key — a file read installing the
+  ## disk's bytes after `reconcile` let it through. It goes through
+  ## `operations.commitChange`, the one place the document moves, so it is
+  ## undoable, maps every mark and line table, and is journaled onto the
+  ## timeline like any keystroke. Returns whether the text moved.
+  let before = d.state.doc
+  d.state = commitChange(d.state, cs, userEvent = ueInput, nowMs = nowMs)
+  d.drainJournal()
+  d.state.doc != before
 
 proc installImported*(d: var EditingDocument; imported: ImportedKeymap) =
   ## PLAT-36. Put `d` under an imported Vim configuration. The model becomes
@@ -326,6 +374,7 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
       editing_keymap.applyKey(d.state, d.imported.keymap, scope,
                               key, d.settings, nowMs, d.viewportRows)
   d.state = step.state
+  d.drainJournal()
   let outcome =
     case step.kind
     of erNothing: eoIgnored
@@ -387,6 +436,7 @@ proc applyNamed*(d: var EditingDocument; name: string; args: OpArgs;
   let docBefore = d.state.doc
   let r = applyOperation(d.state, name, args, d.settings, d.viewportRows, nowMs)
   d.state = r.state
+  d.drainJournal()
   if d.state.doc != docBefore: eoChanged
   elif r.outcome == ooRefused: eoIgnored
   else: eoMoved
@@ -460,8 +510,26 @@ func lineCount*(d: EditingDocument): int =
 # than as an export with no consumer. The day a status line wants it, it
 # arrives with its caller.
 
+func caretPosOf*(doc: string; head: int): TextPos =
+  ## `toTextStore(doc).posOf(head)`, by ONE SCAN of the bytes before `head`
+  ## — no rope built, nothing allocated. The same answer, and asserted to be
+  ## by `test_plat29_highlight_producer.nim` over every offset of the corpus.
+  ##
+  ## Measured before it existed: `caretLine` and `caretColumn` each built a
+  ## rope of the whole document, and every frame asks both — on a
+  ## 24,000-line buffer that was tens of milliseconds a frame for two
+  ## numbers.
+  let off = clamp(head, 0, doc.len)
+  var line = 0
+  var lineStart = 0
+  for i in 0 ..< off:
+    if doc[i] == '\n':
+      inc line
+      lineStart = i + 1
+  TextPos(line: line, column: off - lineStart)
+
 proc caretPos(d: EditingDocument): TextPos =
-  toTextStore(d.state.doc).posOf(d.state.primaryHead)
+  caretPosOf(d.state.doc, d.state.primaryHead)
 
 proc caretLine*(d: EditingDocument): int =
   ## **1-BASED**, because the gutter, the pane and every message a user reads
@@ -493,10 +561,14 @@ proc caretColumn*(d: EditingDocument): int =
   ## waiting for a caller; it is coverage-shaped dead code"*). The day a
   ## medium places a cursor on a tab, the function arrives with its caller.
   let pos = d.caretPos
-  let ls = d.lines
-  if pos.line < 0 or pos.line >= ls.len:
-    return 0
-  let metrics = lineMetrics(ls[pos.line], d.settings.policy)
+  # The caret's line only — its start is `column` bytes back from the head,
+  # its end the next newline — rather than every line of the document.
+  let head = clamp(d.state.primaryHead, 0, d.state.doc.len)
+  let lineStart = head - pos.column
+  var lineEnd = d.state.doc.find('\n', lineStart)
+  if lineEnd < 0: lineEnd = d.state.doc.len
+  let metrics = lineMetrics(d.state.doc[lineStart ..< lineEnd],
+                            d.settings.policy)
   for i, c in metrics.clusters:
     if c.startByte >= pos.column:
       return i

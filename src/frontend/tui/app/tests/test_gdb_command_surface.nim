@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 80
+  ExpectedAppModules = 82
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -217,6 +217,13 @@ const
     ## RE-COUNTED ON 2026-09-23 AGAIN: 79 → 80. `views/point_list.nim`, the
     ## terminal breakpoint list PLAT-40 added (commit `4e1db66f0`), without
     ## re-counting here — found by the next full `tui` lane run.
+    ##
+    ## RE-COUNTED ON 2026-09-23 A THIRD TIME: 80 → 82. PLAT-29 moved two
+    ## producers behind the asynchronous boundary and each has its `app/`
+    ## half — `file_io_producer.nim` (what a `:w`/`:e!` answer means for a
+    ## buffer that moved) and `syntax/highlight_producer.nim` (the Edit pane's
+    ## parse, requested and reconciled off the render path). Their threads are
+    ## `host/`'s, so nothing else under `app/` moved.
 
   ExpectedStyleLiterals = 198
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour

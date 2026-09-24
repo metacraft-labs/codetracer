@@ -116,8 +116,12 @@ ARMS = [
     ("S1", STDIO, "    deliver()", "    discard", [FLOW_TERM],
      "the native transport stops handing the engine's events to subscribers"),
     # --- PG3: the terminal host's inline values ----------------------------
+    # RE-AIMED 2026-09-23 (PLAT-29, §32a): the values reach the pane through
+    # the stop-reconciled `InlineValueGate`, bound to `values` a few lines up,
+    # so the line that hands them over is `inlineValues = values)`. RE-RUN,
+    # not only re-recorded.
     ("V1", HOST,
-     "    inlineValues = inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))",
+     "    inlineValues = values)",
      "    inlineValues = @[])", [VALUES_TERM],
      "the shipped terminal draws no inline value again"),
     # --- the declared survivor ---------------------------------------------

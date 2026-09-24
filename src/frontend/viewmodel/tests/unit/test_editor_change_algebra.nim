@@ -117,7 +117,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1681
+const ExpectedAssertions = 1687
+  ## *1681 -> 1687 on 2026-09-23: §35's enumeration over `viewmodel/` once
+  ## more — PLAT-29's two new production modules x three assertions each:
+  ## `store/stop_timeline.nim` (the DAP answer's stop version) and
+  ## `viewmodels/inline_value_timeline.nim` (the draw-time gate). Neither calls
+  ## `rebase(` or spells `mapOver`: both reconcile through `reconcile`.*
   ## *1672 -> 1681 on 2026-09-23: §35's enumeration over `viewmodel/` again,
   ## three new production modules x three assertions each —
   ## `keymap/keymap_selection.nim` (PLAT-43's one selector),

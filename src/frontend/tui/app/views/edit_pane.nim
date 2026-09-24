@@ -85,7 +85,20 @@ type
       ## spelled here — a second copy of that sentence in a view is a second
       ## thing that can disagree with the core's answer.
     lines*: seq[string]
-      ## THE WHOLE FILE. Not a window: see the module header.
+      ## The file's lines from `linesFrom` on — the WHOLE FILE when
+      ## `totalLines` is 0 (a model built from a string, as the suites do),
+      ## and only the rows the pane can draw when the binding fills it.
+      ##
+      ## A WINDOW SINCE 2026-09-23, and measured: splitting a 24,000-line
+      ## buffer into a `seq[string]` for every frame cost ~65 ms on its own,
+      ## and `runtime.sourcePaneRows` builds this model too, so a keystroke
+      ## paid it twice before a byte was painted. The pane draws a screen; the
+      ## model now holds one.
+    linesFrom*: int
+      ## 1-based line number of `lines[0]`; `0` means `1`.
+    totalLines*: int
+      ## How many lines the file has; `0` means `lines.len` (the whole file
+      ## is in `lines`).
     viewportTop*: int
       ## 1-based first line shown.
     caretLine*: int
@@ -102,6 +115,15 @@ type
     language*: string
       ## The grammar id for the highlighter, derived by the binding from the
       ## file extension.
+    spans*: seq[seq[SyntaxSpan]]
+      ## PLAT-29. The syntax spans to draw, for the lines from `spansFrom` on,
+      ## as the ASYNCHRONOUS producer left them
+      ## (`syntax/highlight_producer.spansForWindow`): the current parse, or
+      ## the lines reconciliation let through, or none. When `spansProvided`
+      ## this pane draws exactly these and PARSES NOTHING — §11: the render
+      ## path does not wait on a parse.
+    spansFrom*: int
+    spansProvided*: bool
 
   EditPaneScreen* = object
     ## One painted pane, plus the counts a test asserts on. Same shape as
@@ -173,7 +195,13 @@ proc isEmpty*(model: EditPaneModel): bool =
   ## distinct from a file that is empty.
   model.path.len == 0
 
-proc lineCount*(model: EditPaneModel): int = model.lines.len
+proc lineCount*(model: EditPaneModel): int =
+  if model.totalLines > 0: model.totalLines else: model.lines.len
+
+proc lineAt*(model: EditPaneModel; line: int): string =
+  ## The text of a 1-based line, or "" for one outside what the model holds.
+  let idx = line - max(1, model.linesFrom)
+  if idx < 0 or idx >= model.lines.len: "" else: model.lines[idx]
 
 proc markFor*(model: EditPaneModel; line: int): GutterMark =
   ## The gutter mark on `line`. LAST DECLARATION WINS, the same rule
@@ -185,7 +213,7 @@ proc markFor*(model: EditPaneModel; line: int): GutterMark =
       result = mark
 
 proc paneGutterWidth*(model: EditPaneModel): int =
-  gutterWidth(gutterNumberWidth(max(1, model.lines.len)))
+  gutterWidth(gutterNumberWidth(max(1, model.lineCount)))
 
 # `pathBaseName` IS `styled_row`'s, NOT A SECOND ONE. The first draft of this
 # module declared its own and `test_call_stack_navigation.nim` went red with
@@ -244,7 +272,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     return
 
   let gw = paneGutterWidth(model)
-  let numberWidth = gutterNumberWidth(max(1, model.lines.len))
+  let numberWidth = gutterNumberWidth(max(1, model.lineCount))
   result.gutterWidth = gw
   result.codeWidth = max(0, area.width - gw)
 
@@ -264,6 +292,11 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     return
   let codeW = result.codeWidth
 
+  # WITH SPANS PROVIDED (the product path, since PLAT-29) NOTHING IS PARSED
+  # HERE: the producer ran off the render path and the model carries what it
+  # left. Without them — a pane drawn from a model somebody built by hand —
+  # the window is parsed the way it always was, below.
+  #
   # THE VISIBLE WINDOW ONLY IS PARSED, even though the model holds the whole
   # file. `highlightWindow` is the same entry point the Debug pane uses and it
   # takes a window; handing it a ten-thousand-line buffer on every frame would
@@ -272,12 +305,16 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
   # not in the PARSE because a frame does not.
   var window: seq[string] = @[]
   let firstVisible = max(1, model.viewportTop)
-  for i in 0 ..< bodyRows:
-    let line = firstVisible + i
-    if line >= 1 and line <= model.lines.len:
-      window.add model.lines[line - 1]
+  if not model.spansProvided:
+    for i in 0 ..< bodyRows:
+      let line = firstVisible + i
+      if line >= 1 and line <= model.lineCount:
+        window.add model.lineAt(line)
   let file =
-    if cache.isNil:
+    if model.spansProvided:
+      FileHighlight(mode: hmNone, firstLine: model.spansFrom,
+                    lines: model.spans)
+    elif cache.isNil:
       highlightWindow(model.path, firstVisible, window)
     else:
       cache.highlight(model.path, 0, "", firstVisible, window)
@@ -285,7 +322,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
   for i in 0 ..< bodyRows:
     let line = model.viewportTop + i
     let row = at + i
-    if line < 1 or line > model.lines.len:
+    if line < 1 or line > model.lineCount:
       # PAST THE END OF THE FILE. Blank, and blank is CORRECT here in a way it
       # never is in the Debug pane: `source_pane.nim` refuses to render a blank
       # for a line it does not hold because a blank is indistinguishable from a
@@ -316,7 +353,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     let limit = area.col + area.width
     if codeW > 0:
       let codeCol = area.col + gw
-      let raw = model.lines[line - 1]
+      let raw = model.lineAt(line)
       let text = truncateToCells(raw, codeW)
       g.paint(row, codeCol, text, DefaultCellStyle)
       let shown = cellWidthOf(text)

@@ -71,6 +71,8 @@ import ./host/build_runner
 import ./host/capabilities
 import ./host/edit_host
 import ./host/headless
+import ./host/highlight_worker
+import ./host/file_worker
 import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
@@ -161,6 +163,38 @@ proc wireEditServices(rt: TuiRuntime; root: string;
     else:
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
+
+proc startHighlights(rt: TuiRuntime; driver: TerminalDriver): HighlightWorker =
+  ## PLAT-29. The Edit pane's parse moves onto a worker thread: the runtime
+  ## hands it requests, the driver wakes on its pipe, and `drainHighlights`
+  ## installs the answers. Both loops call this, so neither parses on the
+  ## render path.
+  result = startHighlightWorker()
+  let worker = result
+  driver.auxWakeFd = worker.wakeRead
+  rt.editServices.requestHighlight = proc(req: HighlightRequest) =
+    worker.submit(req)
+
+proc startFiles(rt: TuiRuntime; root: string;
+                highlights: HighlightWorker): FileWorker =
+  ## PLAT-29. `:w` and `:e!` run on this worker and are reconciled when they
+  ## answer (`app/file_io_producer`). It wakes the loop through the
+  ## highlight worker's pipe.
+  result = startFileWorker(root, highlights.wakeWriteFd)
+  let worker = result
+  rt.editServices.submitFileJob = proc(job: FileJob) =
+    worker.submit(job)
+
+proc drainHighlights(rt: TuiRuntime; worker: HighlightWorker;
+                     files: FileWorker): bool =
+  ## Every parse and every file answer that arrived, installed. Whether a
+  ## frame should be drawn.
+  for res in worker.drain():
+    if rt.deliverHighlight(res):
+      result = true
+  for res in files.drain():
+    if rt.deliverFileJob(res):
+      result = true
 
 proc advanceBuild(rt: TuiRuntime; state: EditHostState;
                   report: bool): bool =
@@ -287,6 +321,14 @@ proc interactive(command: TuiCommand): int =
   let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
     let listing = listProjectFiles(projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
+  # PLAT-29: the Edit pane's parse runs on this worker, never on the render
+  # path; stopped when the loop that owns it returns.
+  let highlights = startHighlights(rt, driver)
+  defer: highlights.stop()
+  # Declared AFTER the highlight worker, so it is stopped FIRST (defers run in
+  # reverse) — its pending writes finish while the shared wake pipe is open.
+  let files = startFiles(rt, projectRoot, highlights)
+  defer: files.stop()
   # PLAT-6's OPT-IN, and it is the only thing that turns the layout binding on
   # in a shipped binary. `app/runtime.enableLayoutBinding` records why it is an
   # opt-in and what would have to be true to flip the default; what matters
@@ -429,7 +471,8 @@ proc interactive(command: TuiCommand): int =
       # that switched to Edit mode and typed `:build` owns a process, and a
       # loop that never polled it would leave that build running with no
       # verdict, no output and no `:cancel`.
-      if advanceBuild(rt, edit, report = true):
+      let built = advanceBuild(rt, edit, report = true)
+      if drainHighlights(rt, highlights, files) or built:
         paint(driver, rt)
     of dekResize:
       size = ev.size
@@ -574,6 +617,14 @@ proc editInteractive(command: TuiCommand): int =
   # walk happened on the ordinary screen; this hands back its answer.
   let edit = wireEditServices(rt, root, proc(): EditListResult =
     EditListResult(files: listing.files, truncated: listing.truncated))
+  # PLAT-29: the Edit pane's parse runs on this worker, never on the render
+  # path; stopped when the loop that owns it returns.
+  let highlights = startHighlights(rt, driver)
+  defer: highlights.stop()
+  # Declared AFTER the highlight worker, so it is stopped FIRST (defers run in
+  # reverse) — its pending writes finish while the shared wake pipe is open.
+  let files = startFiles(rt, root, highlights)
+  defer: files.stop()
 
   # THE SAME FUNCTION THE TOGGLE CALLS. Opening the first file and filling the
   # tree used to be written out here as well as in `app/runtime.nim`; two
@@ -597,7 +648,8 @@ proc editInteractive(command: TuiCommand): int =
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
       # session is checked on every tick. See `host/build_runner.pollBuild`.
-      if advanceBuild(rt, edit, report = true):
+      let built = advanceBuild(rt, edit, report = true)
+      if drainHighlights(rt, highlights, files) or built:
         paint(driver, rt)
     of dekResize:
       size = ev.size

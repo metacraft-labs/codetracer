@@ -456,10 +456,14 @@ MUTATIONS = [
         "back into one `bool`, with the dangerous one read as the benign one."),
     Mutation(
         # RE-POINTED BY PLAT-34 (§32a): `buf.widget.text` is `buf.doc.text`.
+        # RE-POINTED AGAIN 2026-09-23 (PLAT-29, §32a): a `:w` is acknowledged
+        # asynchronously and `markSaved` takes the bytes that were WRITTEN, so
+        # the line is `buf.loadedText = savedText`. RE-RUN, not only
+        # re-recorded.
         "M29", EDITBIND,
-        "    buf.loadedText = buf.doc.text",
-        "    buf.loadedText = buf.doc.text\n"
-        "    buf.recordedText = buf.doc.text",
+        "    buf.loadedText = savedText",
+        "    buf.loadedText = savedText\n"
+        "    buf.recordedText = savedText",
         SOURCE,
         "a saved edit is still an edit the recording predates",
         "THE SAME DEFECT THROUGH THE OTHER END, and it is a separate arm "
