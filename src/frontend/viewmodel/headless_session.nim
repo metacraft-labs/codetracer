@@ -41,6 +41,7 @@ import store/[replay_data_store, types]
 # reader of `headless_session` has to be able to tell which one is meant — this
 # module is precisely the one that cannot see the other.
 import ../../common/value_presentation
+from ../../common/lang import toLangFromFilename, langWireName
 import ../../common/value_presentation/json_adapter
 import session_vm
 import app/app_vm
@@ -246,6 +247,16 @@ proc newHeadlessDebugSession*(
     #    `waitForEvent` that `BackendService.onEvent` does not provide.
     let backendService = backend.toBackendService()
     let sdkSession = newDebuggerSession(backendService)
+    # THE LOCALS ARE THIS HOST'S TO ASK FOR, in the language of the file the
+    # debugger is stopped in. Set before `attach`, which builds the StateVM
+    # whose auto-load would otherwise send its own `ct/load-locals` — naming
+    # `c` whatever the file — on every stop, over a transport whose answer to
+    # it no decoder reads: `fetchLocals` / `applyLocals` are how the terminal
+    # and GPUI front-ends load the locals (`native_host.loadStopPanes`).
+    let store = sdkSession.session.store
+    store.localsLoadedByHost = true
+    store.sourceLanguageOf = proc(file: string): string =
+      langWireName(toLangFromFilename(file))
     sdkSession.attach(localFolderTrace(tracePath))
 
     result = HeadlessDebugSession(
@@ -633,12 +644,12 @@ proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
     "minCountLimit": 50,
     "depthLimit": 7,
     "watchExpressions": watches,
-    # The language's wire name (LRS-1).  This used to be `"lang": 0` with the
-    # comment "auto-detect", which it never was: 0 is `LangC`, the Rust
-    # `Lang::default()`.  The same value, spelled so that a renumbered enum
-    # cannot change what it means; `Db::load_locals` does not read it for a
-    # materialized trace.
-    "lang": LoadLocalsDefaultLang,
+    # The language's wire name (LRS-1) — of the file the debugger is stopped
+    # in (`sourceLanguageOf`, installed by `newHeadlessDebugSession`). This used
+    # to be `LoadLocalsDefaultLang` (`c`) for every trace: `Db::load_locals`
+    # does not read it for a materialized trace, but the native replay
+    # backend renders values through the named language's printers.
+    "lang": s.session.store.localsLanguage(),
   }
   result.requestedAt = s.session.store.stopStamp()
   let resp = s.backend.sendDapRequest("ct/load-locals", args)

@@ -29,13 +29,24 @@
 ##     shipped refresh loop draws values through the gate with every arrival
 ##     applied.
 ##
+## And, over the wire to that real server: each native stop is asked about
+## ONCE (the host's `fetchLocals`; the StateVM's auto-load stands down on a
+## host that loads the locals itself), naming the stopped-in file's language
+## and the stop's tick — where it used to be three requests per step, every
+## one saying `c` about a Python file.
+##
 ## NO MOCKS: real `DebuggerState`s, the shipped reconciler, and — in the
-## second suite — a real recording through a real `replay-server`. The gap
+## second and third suites — a real recording through a real `replay-server`.
+## The third reads what the host wrote through a TAP: `replay-server` is
+## launched by a two-line script that `exec`s the real binary with its stdin
+## copied to a log by `tee`. Not a stand-in for either end — every byte still
+## reaches the real server, which answers every request — and the only way to
+## see the requests the host sends rather than the ones a test sends. The gap
 ## between the request and the answer is made by calling the two halves of
 ## the shipped load (`fetchLocals`, `applyLocals`) with a real step between
 ## them; nothing about the answer or the move is simulated.
 
-import std/[os, strutils, unittest]
+import std/[json, os, strutils, unittest]
 
 import codetracer_embed
 import ../app/runtime
@@ -48,6 +59,7 @@ import ../../viewmodel/store/[replay_data_store, types]
 import ../../viewmodel/viewmodels/inline_value_timeline
 import ../../../common/view_vocabulary/editor_rows
 import ./fixtures/fixture_provider
+from ../../../common/lang import toLangFromFilename, langWireName
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -264,6 +276,85 @@ suite "PLAT-29: real DAP answers on a real recording":
       ck s.valueGate.report.count(pkInlineValues, roApplied) >= 12
       ck s.valueGate.report.count(pkInlineValues, roDropped) == 0
       ck drawn > 0
+
+proc tappedServer(real, log: string): string =
+  ## A launcher for the REAL `replay-server` that copies every byte the host
+  ## writes to it into `log` on the way in — a tap on the transport, not a
+  ## stand-in for either end: the server answers every request itself.
+  ## `exec` replaces the shell, so the server is the host's own child; the
+  ## `tee` feeding its stdin exits when the host closes the pipe.
+  result = getTempDir() / ("plat29-tapped-replay-server-" & $getCurrentProcessId())
+  writeFile(result, "#!/usr/bin/env bash\nexec < <(tee -a " & quoteShell(log) &
+            ")\nexec " & quoteShell(real) & " \"$@\"\n")
+  setFilePermissions(result, {fpUserRead, fpUserWrite, fpUserExec})
+
+proc loadLocalsRequests(log: string): seq[JsonNode] =
+  ## Every `ct/load-locals` request frame in the tapped stream, in order.
+  let text = readFile(log)
+  var at = 0
+  while true:
+    let hdr = text.find("Content-Length: ", at)
+    if hdr < 0: break
+    let hdrEnd = text.find("\r\n\r\n", hdr)
+    let n = parseInt(text[hdr + len("Content-Length: ") ..< hdrEnd].strip)
+    let frame = parseJson(text[hdrEnd + 4 ..< hdrEnd + 4 + n])
+    if frame{"command"}.getStr == "ct/load-locals":
+      result.add frame
+    at = hdrEnd + 4 + n
+
+suite "PLAT-29: one ct/load-locals per native stop, in the file's language":
+
+  let resolution = resolveFixture("calc")
+
+  test "each stop is asked about once, in its file's language, over the wire":
+    # What the terminal (and GPUI, through the same `native_host`) WRITES to
+    # the real server, read off the wire: the StateVM's auto-load used to
+    # send its own `ct/load-locals` on every stop — twice per step, once for
+    # the `dsStepping` write at the stop being left — beside the host's
+    # `fetchLocals`, and every one of them said `c` about a Python file.
+    if resolution.outcome == foMissingPrereq:
+      let message = missingPrereqMessage(resolution.spec, resolution.detail)
+      echo "  ", message
+      ck message.startsWith(MissingPrereqSkipPrefix)
+      skip()
+    else:
+      let real = fixture_provider.findReplayServer()
+      let log = getTempDir() / ("plat29-locals-wire-" & $getCurrentProcessId() & ".log")
+      writeFile(log, "")
+      let tapped = tappedServer(real, log)
+      let saved = getEnv("REPLAY_SERVER_BIN")
+      putEnv("REPLAY_SERVER_BIN", tapped)
+      let caps = resolveCapabilities(
+        initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
+                        lang = "en_US.UTF-8"), initCapabilityFlags())
+      let rt = newTuiRuntime(newTuiApp(), caps, 160, 48)
+      let s = openTuiSession(resolution.tracePath, viewportHeight = 42)
+      putEnv("REPLAY_SERVER_BIN", saved)
+      try:
+        s.setViewportHeight(rt.sourcePaneRows())
+        let store = s.session.session.store
+        s.refresh(rt)
+        for step in 1 .. 3:
+          let before = loadLocalsRequests(log).len
+          s.session.stepForward()
+          s.refresh(rt)
+          let sent = loadLocalsRequests(log)[before .. ^1]
+          let file = store.debugger.val.location.file
+          let expected = langWireName(toLangFromFilename(file))
+          checkpoint("step " & $step & " at " & file & ":" &
+                     $store.debugger.val.location.line & " sent " & $sent)
+          ck expected != LoadLocalsDefaultLang   # a Python file is not C
+          ck sent.len == 1
+          ck sent.len == 1 and sent[0]["arguments"]["lang"].getStr == expected
+          ck sent.len == 1 and
+            sent[0]["arguments"]["rrTicks"].getBiggestInt ==
+              store.debugger.val.rrTicks.int64
+          # And the real server answered it: the locals are this stop's.
+          ck store.localsCurrent()
+      finally:
+        s.close()
+        removeFile(tapped)
+        removeFile(log)
 
 suite "PLAT-29 inline values — assertion tally":
   test "CHECKS":

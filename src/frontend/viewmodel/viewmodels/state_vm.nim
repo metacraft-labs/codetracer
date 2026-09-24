@@ -30,7 +30,7 @@
 
 import std/[json, options, sets, tables, strutils]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch]
 import isonim/viewmodel
 
 import ../backend/backend_service
@@ -593,18 +593,41 @@ proc createStateVM*(store: ReplayDataStore;
       disposeProc: dispose,
     )
 
+    # THE STOP, not the whole `DebuggerState`. The auto-load below asks for
+    # the values at a stop, and a write that changes only `status` — every
+    # native step marks the debugger `dsStepping` at the stop it is LEAVING
+    # before the new position arrives — is not a new stop. Subscribing to the
+    # whole state re-ran the effect for it and sent a `ct/load-locals` about
+    # the stop being left, whose answer can only ever be dropped.
+    let stop = createMemo[string] proc(): string =
+      stopIdentityOf(store.debugger.val)
+
     createEffect proc() =
-      let dbg = store.debugger.val
+      discard stop.val
       let watches = watchExpressions.val
       if not mayIssueBackendCommands(runtimeRole):
         return
-      # THE HOST BRIDGE FIRST. On the shipping frontends the request whose
+      # THE HOST BRIDGE FIRST. On the VS Code extension the request whose
       # response is rendered is issued by the legacy `StateComponent`, and
       # this is what tells it the watch list changed. Reading
       # `watchExpressions.val` above is what subscribes this effect to it,
       # so adding or removing a watch re-runs both lines.
       if not vm.onWatchesChangedProc.isNil:
         vm.onWatchesChangedProc(watches)
-      store.requestLocals(dbg.rrTicks, watchExpressions = watches)
+      # THE ONE `ct/load-locals` PER STOP on a host whose answers arrive
+      # through the store's backend (the web renderer: `ui/state.nim` makes
+      # the legacy component's own sender stand down once this store is the
+      # session's). Its language is the stopped-in file's (`requestLocals`'
+      # default, `ReplayDataStore.localsLanguage`). A host that fetches and
+      # applies the locals itself (`localsLoadedByHost`) is not sent a second
+      # request its decoder would never read.
+      if store.localsLoadedByHost:
+        return
+      # Untracked: the request reads the position (its tick, its file's
+      # language, the stop it is sent at), and those reads must not subscribe
+      # this effect to the whole `DebuggerState` again.
+      untrack(proc() =
+        store.requestLocals(store.debugger.val.rrTicks,
+                            watchExpressions = watches))
 
     vm

@@ -345,6 +345,25 @@ type
       ## `forgetLocalsRequest` retires. Only a host that calls the first ever
       ## holds an entry (the native hosts fetch and apply synchronously and
       ## never do), and the ledger is bounded (`LocalsLedgerDepth`).
+    sourceLanguageOf*: proc(file: string): string {.closure.}
+      ## The host's answer to "which language is this source file in", as the
+      ## language's WIRE NAME (`langWireName(toLangFromFilename(file))`).
+      ## `ct/load-locals` carries it: the native replay backend renders a
+      ## value through the language's own printers (a Rust `String` or `Vec`
+      ## as Rust, not as a C struct), so a request that says `c` about a Rust
+      ## stop gets C-shaped values back. Installed by every host that can
+      ## answer (the web's `ui/state.initStateVMWithStore`, the native hosts'
+      ## `headless_session`); nil means "unknown", and `localsLanguage` falls
+      ## back to `LoadLocalsDefaultLang`. A hook rather than an import
+      ## because this module is in the Embed SDK's package graph and does not
+      ## import `common_lang` (see `LoadLocalsDefaultLang`).
+    localsLoadedByHost*: bool
+      ## The host requests and applies the locals itself, synchronously, after
+      ## each stop (`headless_session.fetchLocals` / `applyLocals`, which the
+      ## terminal and GPUI front-ends call from `native_host.loadStopPanes`).
+      ## The StateVM's auto-load then sends nothing: its answer would reach
+      ## no decoder on such a host, so it would be a second `ct/load-locals`
+      ## per stop that nothing reads.
 
 # ---------------------------------------------------------------------------
 # Degraded state (Page-Descriptions.md §14)
@@ -914,12 +933,23 @@ const
     ## ``store_test.nim`` pins it against ``langWireName(LangC)`` so the two
     ## cannot drift.
 
+proc localsLanguage*(store: ReplayDataStore): string =
+  ## The wire name of the language of the file the debugger is stopped in —
+  ## what a `ct/load-locals` sent now must say. `LoadLocalsDefaultLang` when
+  ## the host installed no `sourceLanguageOf` or no file is known yet.
+  let file = store.debugger.val.location.file
+  if store.sourceLanguageOf.isNil or file.len == 0:
+    return LoadLocalsDefaultLang
+  result = store.sourceLanguageOf(file)
+  if result.len == 0:
+    result = LoadLocalsDefaultLang
+
 proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
                     countBudget: int = 3000;
                     minCountLimit: int = 50;
                     depthLimit: int = 7;
                     watchExpressions: seq[string] = @[];
-                    lang: string = LoadLocalsDefaultLang) =
+                    lang: string = "") =
   ## Request locals/globals from the backend for the given rrTicks.
   ## Skipped if an identical request is already in flight.
   ##
@@ -940,6 +970,11 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   ## were 30 and 36).  A name cannot be off by two.  The receiver refuses a
   ## bare integer, so a caller that still passes one gets an error rather
   ## than a silently wrong language.
+  ##
+  ## An empty ``lang`` (the default) is the language of the file the debugger
+  ## is stopped in, as the host answers it (``localsLanguage``). The StateVM's
+  ## auto-load, which is the web renderer's ONE ``ct/load-locals`` sender per
+  ## stop, relies on that default.
   let key = "load-locals"
   # Include watch expressions in the dedup key so that adding a new
   # watch at the same rrTicks position still triggers a fresh request.
@@ -950,7 +985,16 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   # the count unchanged at the same step, so the request was suppressed
   # and the pane went on showing the answer to an expression that had
   # been deleted.
-  let argsStr = $rrTicks & "|" & watchExpressions.join("\x1f")
+  #
+  # AND THE STOP, not only its tick. Two stops can share a tick — a jump to
+  # another frame or line at the same `rrTicks` — and a request about the
+  # first, still in flight, is no answer about the second: the store drops it
+  # (`applyLocalsAnswer`) once the debugger has moved. Keyed on the tick
+  # alone, the second request was suppressed and the pane showed nothing
+  # current; while the web's legacy State component still sent its own
+  # undeduplicated request, that request papered over it.
+  let argsStr = $rrTicks & "|" & stopIdentityOf(store.debugger.val) & "|" &
+    watchExpressions.join("\x1f")
   if store.requestTracker.isDuplicate(key, argsStr):
     return
 
@@ -963,7 +1007,7 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
     "minCountLimit": minCountLimit,
     "depthLimit": depthLimit,
     "watchExpressions": watchExpressions,
-    "lang": lang,
+    "lang": (if lang.len > 0: lang else: store.localsLanguage()),
   }
   let fut = store.backend.send("ct/load-locals", args)
 

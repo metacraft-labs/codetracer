@@ -4,10 +4,10 @@
 ## the web renderer's real wiring, from both of its senders through the real
 ## response fan-out.
 ##
-## ## The defect this pins
+## ## The defects this pins
 ##
-## The web renderer sends `ct/load-locals` from TWO places on every debugger
-## move:
+## The web renderer used to send `ct/load-locals` from TWO places on every
+## debugger move:
 ##
 ##   A. `StateComponent.onCompleteMove` -> `loadLocals` -> the component's
 ##      mediator -> `middleware` -> `DapApi.sendCtRequest`;
@@ -15,19 +15,31 @@
 ##      -> the store's backend (`dap_backend.newDapBackendService`) ->
 ##      `DapApi.asyncSendCtRequest`.
 ##
-## Both answers are fanned out by `ui_js.onDapReceiveResponse` to the State
-## pane's store. The store used to reconcile each answer against the OLDEST
-## request it had recorded — but only sender A recorded one. So each move
-## produced more answers than records, the queue desynchronised, and after a
-## fast move an answer about the FIRST stop was checked against the SECOND
-## stop's stamp and APPLIED: last stop's values drawn beside this stop's
-## line, the one thing the stop timeline exists to prevent.
+## Both answers were fanned out by `ui_js.onDapReceiveResponse` to the State
+## pane's store, which reconciled each against the OLDEST request it had
+## recorded — but only sender A recorded one. So each move produced more
+## answers than records, the queue desynchronised, and after a fast move an
+## answer about the FIRST stop was checked against the SECOND stop's stamp
+## and APPLIED: last stop's values drawn beside this stop's line, the one
+## thing the stop timeline exists to prevent.
 ##
-## The fix names each request by the transport's own identity
+## The first fix names each request by the transport's own identity
 ## (`dap.trackCtRequests`, recorded from `dap.dispatchCtRequest`, the one send
-## path both senders reach) and carries it back in the answer's body
-## (`dap.deliverDapResponse`). This suite drives both senders and the delivery
-## for real and reads the store.
+## path every sender reaches) and carries it back in the answer's body
+## (`dap.deliverDapResponse`). The second removes the duplicate: the two
+## requests were not even the same question — A named the file's language
+## (`rust` for `calc.rs`) and a tick of 0 (the component's `rrTicks` is never
+## assigned), B named the stop's tick and the store's fallback language `c`,
+## and the native replay backend renders values through the named language's
+## printers. Now B is the ONE request per move, naming the stop's tick and
+## the file's language (`ReplayDataStore.sourceLanguageOf`, installed by
+## `initStateVMWithStore`), and A stands down once the StateVM runs over the
+## session's store. Where it does not — the stub-backed StateVM a host that
+## never builds the session's store is left with (the VS Code extension) — A
+## is still the one sender, and the first suite asserts it still asks.
+##
+## This suite drives the real senders and the delivery and reads the store
+## and the wire.
 ##
 ## ## What is real, and the one stand-in
 ##
@@ -68,6 +80,8 @@ import ../communication
 import ../middleware
 import ../../common/ct_event
 import ../ui/state
+import ../lang
+from ../viewmodel/viewmodels/state_vm import addWatch, removeWatch
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/editor/reconcile
@@ -134,10 +148,10 @@ let dapApi = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 0)
 let viewsApi = setupSinglePageViewsApi(cstring"test-views")
 setupMiddlewareApis(dapApi, viewsApi)
 
-let store = createReplayDataStore(newDapBackendService(dapApi))
-initStateVMWithStore(store)
-wireLocalsAnswers(viewsApi)
-
+# The State component registers FIRST, over the stub-backed StateVM
+# `register` builds — the order a host that never builds the session's store
+# (the VS Code extension) is left in, and the order the desktop is in when
+# `createUIComponents` beats `configureMiddleware`.
 let component = StateComponent(
   id: 0,
   values: JsAssoc[cstring, ValueComponent]{},
@@ -160,6 +174,49 @@ proc moveTo(rrTicks, line: int) =
       echo "move rejected: ", e.message
       moveFailures.add $e.message)
 
+proc newSince(baseline: int): seq[JsObject] =
+  let all = localsRequests()
+  all[baseline .. ^1]
+
+proc langOf(packet: JsObject): string =
+  $packet["arguments"]["lang"].to(cstring)
+
+proc ticksOf(packet: JsObject): int =
+  packet["arguments"]["rrTicks"].to(int)
+
+proc seqOf(packet: JsObject): int =
+  packet["seq"].to(int)
+
+proc watchesOf(packet: JsObject): seq[string] =
+  let raw = packet["arguments"]["watchExpressions"]
+  for i in 0 ..< raw["length"].to(int):
+    result.add $raw[i].to(cstring)
+
+# The language `calc.rs` is in, as the wire names it — resolved the way the
+# renderer resolves it, so the suite does not restate the table.
+let rustWire = langWireName(toLangFromFilename(cstring"/src/calc.rs"))
+doAssert rustWire != LoadLocalsDefaultLang
+
+suite "where the StateVM runs over a stub store, the State component asks":
+
+  test "the stub-store host still asks once per move, in the file's language":
+    # Before `initStateVMWithStore` the StateVM's auto-load goes to a stub
+    # backend that sends nothing, so the legacy component is the only
+    # sender: it must still ask, and name the file's language.
+    let base = localsRequests().len
+    moveTo(50, 5)
+    let sent = newSince(base)
+    ck sent.len == 1
+    ck sent.len == 1 and langOf(sent[0]) == rustWire
+
+# ---------------------------------------------------------------------------
+# The session's store, wired as `ui_js.configureMiddleware` wires it
+# ---------------------------------------------------------------------------
+
+let store = createReplayDataStore(newDapBackendService(dapApi))
+initStateVMWithStore(store)
+wireLocalsAnswers(viewsApi)
+
 proc deliver(frame: JsObject) =
   ## What `ui_js.onDapReceiveResponse` does with a response frame.
   deliverDapResponse(dapApi, dapApi, frame)
@@ -171,16 +228,6 @@ proc shown(): seq[string] =
 proc dropped(): int =
   store.stops.report.count(pkInlineValues, roDropped)
 
-proc newSince(baseline: int): seq[JsObject] =
-  let all = localsRequests()
-  all[baseline .. ^1]
-
-proc langOf(packet: JsObject): string =
-  $packet["arguments"]["lang"].to(cstring)
-
-proc seqOf(packet: JsObject): int =
-  packet["seq"].to(int)
-
 # The StateVM's effect asked once at construction, before `wireLocalsAnswers`
 # ran — the boot request `resetForNewSession` is about. Not recorded, so its
 # answer, were it to arrive, would name no stop.
@@ -188,39 +235,37 @@ let bootRequests = localsRequests().len
 
 suite "the web renderer matches a ct/load-locals answer to its request":
 
-  test "both senders are recorded; a stale answer is dropped, the current one applied":
+  test "one request per move, in the file's language; a stale answer is dropped":
     moveTo(100, 10)
     let atStop1 = newSince(bootRequests)
-    # BOTH SENDERS SENT — the premise of the defect, asserted by what each
-    # one sends: the State component names the file's language (`rust`, from
-    # `calc.rs`), the store's request carries its default (`c`). If either
-    # stopped sending, the rest would pass without the mismatch it pins.
-    ck atStop1.len == 2
-    ck atStop1.len == 2 and langOf(atStop1[0]) != langOf(atStop1[1])
-    ck store.pendingLocals.len == 2
+    # ONE REQUEST PER MOVE — the StateVM's auto-load over the session's
+    # store; the legacy component stands down. It names the language of the
+    # file the debugger stopped in (`rust`, from `calc.rs`), not the store's
+    # fallback `c`, and the stop's own tick.
+    ck atStop1.len == 1
+    ck atStop1.len == 1 and langOf(atStop1[0]) == rustWire
+    ck atStop1.len == 1 and ticksOf(atStop1[0]) == 100
+    ck store.pendingLocals.len == 1
 
     moveTo(200, 20)
-    let atStop2 = newSince(bootRequests + 2)
-    ck atStop2.len == 2
-    ck store.pendingLocals.len == 4
+    let atStop2 = newSince(bootRequests + 1)
+    ck atStop2.len == 1
+    ck atStop2.len == 1 and langOf(atStop2[0]) == rustWire
+    ck store.pendingLocals.len == 2
 
-    # The FAST MOVE: stop 1's answers arrive after the debugger reached stop 2.
+    # The FAST MOVE: stop 1's answer arrives after the debugger reached stop 2.
     let droppedBefore = dropped()
     deliver(localsAnswer(seqOf(atStop1[0]), 10))
     ck "initial_shield=10" notin shown()
-    deliver(localsAnswer(seqOf(atStop1[1]), 11))
-    ck "initial_shield=11" notin shown()
     ck shown().len == 0
     # Counted once per ANSWER, however many subscribers it was fanned out to.
-    ck dropped() - droppedBefore == 2
+    ck dropped() - droppedBefore == 1
     # A record lives exactly as long as its answer's delivery.
-    ck store.pendingLocals.len == 2
+    ck store.pendingLocals.len == 1
 
     deliver(localsAnswer(seqOf(atStop2[0]), 20))
     ck shown() == @["initial_shield=20"]
-    deliver(localsAnswer(seqOf(atStop2[1]), 21))
-    ck shown() == @["initial_shield=21"]
-    ck dropped() - droppedBefore == 2
+    ck dropped() - droppedBefore == 1
     ck store.pendingLocals.len == 0
     # The legacy component's own subscription received the answer as well.
     ck component.locals.len == 1
@@ -230,16 +275,47 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     moveTo(300, 30)
     let atStop3 = newSince(base)
     moveTo(400, 40)
-    let atStop4 = newSince(base + 2)
-    ck atStop3.len == 2 and atStop4.len == 2
-    # One of stop 4's answers overtakes both of stop 3's; the other comes last.
+    let atStop4 = newSince(base + 1)
+    ck atStop3.len == 1 and atStop4.len == 1
+    # Stop 4's answer overtakes stop 3's.
     deliver(localsAnswer(seqOf(atStop4[0]), 40))
     ck shown() == @["initial_shield=40"]
     deliver(localsAnswer(seqOf(atStop3[0]), 30))
-    deliver(localsAnswer(seqOf(atStop3[1]), 31))
     ck shown() == @["initial_shield=40"]
-    deliver(localsAnswer(seqOf(atStop4[1]), 41))
-    ck shown() == @["initial_shield=41"]
+    ck store.pendingLocals.len == 0
+
+  test "a repeated move asks nothing; a new stop at the same tick asks":
+    let base = localsRequests().len
+    moveTo(450, 45)
+    ck newSince(base).len == 1
+    # The same move delivered again is absorbed.
+    moveTo(450, 45)
+    ck newSince(base).len == 1
+    # Another line at the SAME tick (another frame of the same instant) is a
+    # new stop, asked about although the first request is still in flight:
+    # that one's answer names the stop the debugger has left.
+    moveTo(450, 46)
+    let sent = newSince(base)
+    ck sent.len == 2
+    ck sent.len == 2 and ticksOf(sent[1]) == 450
+    deliver(localsAnswer(seqOf(sent[0]), 45))
+    deliver(localsAnswer(seqOf(sent[1]), 46))
+    ck shown() == @["initial_shield=46"]
+    ck store.pendingLocals.len == 0
+
+  test "a watch-list change asks once, with the watch, in the file's language":
+    let base = localsRequests().len
+    activeStateVM().addWatch("initial_shield")
+    let sent = newSince(base)
+    ck sent.len == 1
+    ck sent.len == 1 and watchesOf(sent[0]) == @["initial_shield"]
+    ck sent.len == 1 and langOf(sent[0]) == rustWire
+    deliver(localsAnswer(seqOf(sent[^1]), 47))
+    activeStateVM().removeWatch("initial_shield")
+    let after = newSince(base)
+    ck after.len == 2
+    ck after.len == 2 and watchesOf(after[1]).len == 0
+    deliver(localsAnswer(seqOf(after[^1]), 48))
     ck store.pendingLocals.len == 0
 
   test "an answer to a request this store never recorded is not applied":
@@ -253,7 +329,7 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     let base = localsRequests().len
     moveTo(500, 50)
     let sent = newSince(base)
-    ck sent.len == 2
+    ck sent.len == 1
     let frame = localsAnswer(seqOf(sent[^1]), 50)
     deliver(frame)
     ck $ctRequestIdOf(frame["body"]) == "0:" & $seqOf(sent[^1])
@@ -266,20 +342,19 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     # — named by the `DapApi` that sent it (`responseDap`), not by the one the
     # fan-out goes through (`fanOut`, the session on screen).
     let base = localsRequests().len
-    # The previous case leaves one of its two requests unanswered.
     let pendingBefore = store.pendingLocals.len
     moveTo(600, 60)
     let atStop6 = newSince(base)
-    ck atStop6.len == 2
+    ck atStop6.len == 1
     moveTo(700, 70)
-    let atStop7 = newSince(base + 2)
-    ck atStop7.len == 2
+    let atStop7 = newSince(base + 1)
+    ck atStop7.len == 1
     # A second session asks at stop 7 with the same wire `seq` session 0
     # used at stop 6.
     let other = DapApi(ipc: recordingIpc(), seq: seqOf(atStop6[0]),
                        sessionId: 1)
     discard other.asyncSendCtRequest(CtLoadLocals, JsObject{})
-    ck store.pendingLocals.len == pendingBefore + 5
+    ck store.pendingLocals.len == pendingBefore + 3
     # Session 1's answer: about the current stop, so applied — although
     # session 0's identically numbered request is about stop 6.
     deliverDapResponse(dapApi, other, localsAnswer(seqOf(atStop6[0]), 71))
@@ -287,13 +362,47 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     # Session 0's answer to that seq: about stop 6, dropped.
     deliver(localsAnswer(seqOf(atStop6[0]), 60))
     ck shown() == @["initial_shield=71"]
-    deliver(localsAnswer(seqOf(atStop6[1]), 61))
     deliver(localsAnswer(seqOf(atStop7[0]), 72))
-    deliver(localsAnswer(seqOf(atStop7[1]), 73))
-    ck shown() == @["initial_shield=73"]
+    ck shown() == @["initial_shield=72"]
     ck store.pendingLocals.len == pendingBefore
 
-  ck moveFailures.len == 0
-  echo "CHECKS: ", checks
-  if failedChecks > 0:
-    {.emit: "process.exitCode = 1;".}
+proc settle(): Future[void] =
+  ## Yield to the event loop until every pending microtask has run — the
+  ## continuations that retire an ANSWERED request (`requestLocals`'
+  ## `onComplete`) run there, never inside a synchronous test block.
+  newPromise proc(resolve: proc()) =
+    {.emit: "setTimeout(`resolve`, 0);".}
+
+proc afterAnswersSettle() {.async.} =
+  await settle()
+  suite "once an answer has settled":
+
+    test "a status-only change is not a new stop, and asks nothing":
+      # The debugger is marked stepping at the stop it is LEAVING — a write
+      # to `status` alone, which is what `store.requestStep` does before the
+      # new position arrives. Once the stop's own request has been answered
+      # nothing is in flight to absorb a second one, so only the auto-load's
+      # reading of the STOP (not the whole state) keeps it from asking about
+      # the stop being left — an answer that could only be dropped.
+      let base = localsRequests().len
+      var stepping = store.debugger.val
+      stepping.status = store_types.dsStepping
+      store.debugger.val = stepping
+      ck newSince(base).len == 0
+      # A real move afterwards is asked about, once.
+      moveTo(900, 90)
+      ck newSince(base).len == 1
+
+    ck moveFailures.len == 0
+    echo "CHECKS: ", checks
+    if failedChecks > 0:
+      {.emit: "process.exitCode = 1;".}
+
+block:
+  # The last answered request's retirement (a microtask) must have run.
+  let base = localsRequests().len
+  moveTo(800, 80)
+  let sent = newSince(base)
+  doAssert sent.len == 1
+  deliver(localsAnswer(seqOf(sent[0]), 80))
+  discard afterAnswersSettle()
