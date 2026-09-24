@@ -200,9 +200,12 @@ suite "the factory mounts every mountable pane":
     counted dispatchRegion(source).len > 0
     counted directMountContents(source).len >= 25
     counted dispatchArms(source).len >= 25
-    # And the region really is the factory's, not the auto-hide handler's:
+    # And the file really is the one that owns the factory:
     # `mountComponentContainer` is what creates the container these arms mount
-    # into, and it is called above this region in the same registration.
+    # into.  Since #691 the dispatch is its own proc (`mountPaneForState`) and
+    # the call that builds the container sits in the `genericUiComponent`
+    # registration BELOW it rather than above it in the same closure, so this
+    # is a whole-file check and no longer says anything about ordering.
     counted source.contains("element.mountComponentContainer(editorLabel)")
 
   test "every direct-mount Content has an arm in the factory":

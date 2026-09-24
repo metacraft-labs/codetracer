@@ -246,6 +246,18 @@ const
     # `isValidLayoutConfig` before GoldenLayout ever sees it, which is how
     # this defect stayed invisible.
     "src/tests/gui/tests/layout/layout_config_roundtrip_test.nim",
+    # #691 (M47) — a component moved into an auto-hide tab came back as an
+    # EMPTY pane after a restart.  `restoreAutoHideState` built the panel with
+    # `liveElement: nil` and a comment promising a "config fallback" that no
+    # code implemented, so both reveal paths took their nil arm, logged a
+    # `console.warn` nobody sees and left the pane blank.  Registered here
+    # rather than left to glob discovery for the reason this block's header
+    # gives, and with one extra one: the case in
+    # `layout_config_roundtrip_test.nim` above PASSED throughout the defect,
+    # because it asserted the persisted JSON's fields and never that anything
+    # was mounted from them.  A file whose weakest case is the one a later
+    # change would keep is exactly what this registry is for.
+    "src/tests/gui/tests/auto-hide/auto_hide_restore_mount_test.nim",
     # #610 (M42a) and DR-R8 — what starting a review does to the layout.
     # Launching `ct review` pasted a hard-coded three-panel preset over
     # `data.ui.resolvedConfig`, so FILES, STATE, SCRATCHPAD, AGENT ACTIVITY,

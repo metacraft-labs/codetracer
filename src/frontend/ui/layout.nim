@@ -1536,6 +1536,397 @@ proc bindLayoutItemForTab(state: GoldenItemState; container: GoldenContainer) =
     return
   component.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
+proc mountPaneForState(state: GoldenItemState) =
+    ## Mount the pane `state` names into the `.component-container` div that
+    ## carries `state.label` as its id, creating the pane's `Component` first
+    ## if nothing has.
+    ##
+    ## EXTRACTED FROM `genericUiComponent`'s registration below, which is
+    ## still its first caller — the deferred body there is now one call.  It
+    ## has a second caller since issue #691: an auto-hide panel restored from
+    ## `auto_hide_state.json` never passes through GoldenLayout at all, so the
+    ## factory never ran for it and its pane came back blank.  That path
+    ## rebuilds the container from the panel's persisted component config
+    ## (`auto_hide.instantiatePanelElement`) and then calls THIS, so a restored
+    ## pane is mounted by the same dispatch as a GoldenLayout one rather than
+    ## by a second copy of it.  A second copy is what
+    ## `viewmodel/tests/unit/test_every_mountable_pane_has_a_factory_arm.nim`
+    ## exists to prevent: it asserts that every direct-mount `Content` has an
+    ## arm HERE, and an arm it cannot see is an arm nobody maintains.
+    ##
+    ## A `GoldenItemState` suits both callers: GoldenLayout hands one to the
+    ## registration, and a restored panel's `config.componentState` IS one —
+    ## `pinPanel` builds that object out of a live item's state and
+    ## persistence round-trips it as JSON.
+    ##
+    ## THE CONTAINER MUST ALREADY BE IN THE DOCUMENT when this runs; every arm
+    ## below finds its mount point with `getElementById`.  The registration
+    ## guarantees that by building the container first and deferring this by
+    ## 200 ms; the auto-hide path guarantees it by revealing the panel — which
+    ## reparents the rebuilt host into the docked sidebar or the overlay —
+    ## before `onPanelShown` calls this.
+    # Components that still enter the generic GoldenLayout route mount
+    # directly into the GoldenLayout container. Editor tabs are built by the
+    # separate `editorComponent` registration and never reach here.
+    let isDirectMountComponent = state.content in {
+      Content.Calltrace,
+      Content.State,
+      Content.EventLog,
+      Content.Timeline,
+      Content.Build,
+      Content.BuildErrors,
+      Content.SearchResults,
+      Content.Shell,
+      Content.CaptionBarProgress,
+      Content.TerminalOutput,
+      Content.StepList,
+      Content.CalltraceEditor,
+      Content.Repl,
+      Content.LowLevelCode,
+      Content.RequestPanel,
+      Content.TraceLog,
+      # NS9's two panes. Listed here, and NOT in `editModeHiddenContentIds`,
+      # which together is the whole of "both platforms get them": edit mode
+      # shows them on the desktop and in a browser from one declaration.
+      Content.TestResults,
+      Content.Constraints,
+      # PLAT-40: an IsoNim view over the session's `PointListVM`.
+      Content.PointList,
+      Content.Scratchpad,
+      Content.Filesystem,
+      Content.CommandPalette,
+      Content.VCS,
+      Content.UnifiedDiff,
+      Content.Verification,
+      Content.AgentActivity,
+      Content.AgentActivityDeepReview,
+      Content.AgentWorkspace,
+      # Content.FrameViewer was retired in M3 — the Video Player pane
+      # supersedes it.  ``FrameViewerVM`` remains as the data source the
+      # Video Player wraps; see ``viewmodel/viewmodels/frame_viewer_vm.nim``.
+      Content.PixelHistory,
+      Content.ShaderDebug,
+      Content.VideoPlayer,
+    }
+
+    var containerId: cstring
+    containerId = state.label
+
+    if not data.ui.componentMapping[state.content].hasKey(state.id):
+      discard data.makeComponent(state.content, state.id)
+    if not data.ui.componentMapping[state.content][state.id].isNil:
+      let component = data.ui.componentMapping[state.content][state.id]
+
+      if not isDirectMountComponent:
+        cwarn "layout: genericUiComponent has no direct mount for " &
+          $state.content & " id " & $state.id
+
+      # THE FIVE PANES THAT HAD NO ARM HERE.
+      #
+      # This proc is the only site that KNOWS the container exists: the
+      # `genericUiComponent` registration below calls
+      # `element.mountComponentContainer(editorLabel)`, which builds
+      # `#<x>Component-<id>`, and defers this dispatch by 200 ms. Every
+      # other pane in `isDirectMountComponent` has been mounted from here
+      # all along. These five mounted from their `register` method or from
+      # their `initXVMWithStore`, and then POLLED for a container that
+      # neither of those moments can guarantee.
+      #
+      # Measured on 25 real Electron desktop session logs (2026-09), on the
+      # modern shared-store path: `#stateComponent-0`,
+      # `#calltraceComponent-0` and `#timelineComponent-0` were absent at
+      # retry #1 in ALL 25 runs. The two that ran long enough to reach a
+      # verdict gave up at retry #200, 10.9 s and 30.4 s of runway in:
+      #
+      #   ERROR | state.nim     | tryMountIsoNimStatePanel: not ready after 200 retries, giving up
+      #   ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
+      #   DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
+      #
+      # A 2026-09 TRANSCRIPT, PRE-DATING THE ARMS BELOW. Do not grep the
+      # source for those three strings: the arms below made their claim
+      # false — a give-up ends one poll, because each mount re-enters with a
+      # fresh retry counter — and all three now `cwarn` that they abandoned
+      # THIS poll rather than the pane. The transcript stays because it is
+      # the measurement that put these arms here.
+      #
+      # The other 23 ended mid-poll between retry #20 and #110 with the
+      # container still absent. There is no retry margin to widen: the poll
+      # starts before the thing it polls for can exist, so it is not a race
+      # a faster machine wins. The State, Call Trace and Timeline panes were
+      # blank on the desktop for every one of those sessions.
+      #
+      # `1cb7b9d6` added the `register`-time call in `ui/state.nim` and it
+      # genuinely fixed Noir Studio — but `CalltraceComponent.register` has
+      # ALWAYS made the equivalent call, and calltrace still gave up on the
+      # desktop in both runs above. On the desktop `register` runs at
+      # component-construction time (`types.createUIComponents` in `onInit`),
+      # which is EARLIER than the container, not later. A second poll window
+      # opened before the container exists is still a poll that loses.
+      #
+      # Called unqualified: the module `state` is shadowed inside this
+      # closure by its own `state: GoldenItemState` parameter, so
+      # `state.tryMountIsoNimStatePanel()` would resolve against the wrong
+      # `state`.
+      if state.content == Content.State:
+        tryMountIsoNimStatePanel()
+
+      if state.content == Content.Calltrace:
+        tryMountIsoNimCalltrace()
+
+      # The Timeline was the worst-placed of the five and the reason nobody
+      # reported it: `TimelineComponent` has no `register` method at all. It
+      # falls back to the base method in `types.nim`, which only assigns
+      # `self.api`, so the timeline was the one pane with NO mount call on
+      # the component-registration path — its only callers were the two
+      # `initTimelineVM*` procs. This arm is its first.
+      if state.content == Content.Timeline:
+        tryMountIsoNimTimelinePanel()
+
+      # EventLog and TerminalOutput are the same shape as Calltrace: both
+      # mount from `register` and nowhere else, and both are in
+      # `isDirectMountComponent`. They are joined here so the invariant
+      # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
+      # direct-mount `Content` has an arm — holds without an allowlist of
+      # unexamined exemptions. Their mounts are idempotent and additionally
+      # guarded on their own component ref, so this arm can only help.
+      if state.content == Content.EventLog:
+        tryMountIsoNimEventLogPanel()
+
+      if state.content == Content.TerminalOutput:
+        tryMountIsoNimTerminalOutputPanel()
+
+      if state.content == Content.Shell:
+        let shellComponent = ShellComponent(component)
+        if shellComponent.shell.isNil:
+          discard shellComponent.createShell()
+
+      # Build is now an IsoNim view — its DOM is mounted by
+      # `build.tryMountIsoNimBuildPanel` against the `buildComponent-{id}`
+      # container, and reactive effects keep it in sync. No direct-DOM
+      # redraw hook is needed here.
+      if state.content == Content.Build:
+        # The IsoNim view mounts itself once `buildComponentRef` and
+        # the VM are both available (the registration order between
+        # `register()` and `configureMiddleware` is non-deterministic
+        # under different layouts).  Calling tryMount here is safe and
+        # idempotent — it short-circuits when already mounted.  Also
+        # sync any data the legacy ``build`` record already carries
+        # (e.g. when the GL container appears after a recorded build
+        # already finished).
+        build.syncLegacyBuildIntoVM(BuildComponent(component))
+        build.tryMountIsoNimBuildPanel()
+
+      # BuildErrors is now an IsoNim view -- its DOM is mounted by
+      # ``errors.tryMountIsoNimErrorsPanel`` against the
+      # ``errorsComponent-{id}`` container, and reactive effects keep
+      # it in sync. No direct-DOM redraw hook is
+      # needed here.
+      if state.content == Content.BuildErrors:
+        errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
+        errors.tryMountIsoNimErrorsPanel()
+
+      # SearchResults is now an IsoNim view -- its DOM is mounted by
+      # ``search_results.tryMountIsoNimSearchResultsPanel`` against
+      # the ``searchResultsComponent-{id}`` container, and reactive
+      # effects keep it in sync. No direct-DOM redraw hook is needed here.
+      if state.content == Content.SearchResults:
+        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
+        search_results.tryMountIsoNimSearchResultsPanel()
+
+      # StepList is now an IsoNim view -- its DOM is mounted by
+      # ``step_list.tryMountIsoNimStepListPanel`` against the
+      # ``stepListComponent-{id}`` container, and reactive effects
+      # keep it in sync. No direct-DOM redraw hook is needed here.
+      if state.content == Content.StepList:
+        step_list.syncLegacyStepListIntoVM(StepListComponent(component))
+        step_list.tryMountIsoNimStepListPanel()
+
+      # CalltraceEditor is now an IsoNim view -- its DOM is mounted
+      # by ``calltrace_editor.tryMountIsoNimCalltraceEditorPanel``
+      # against the GoldenLayout-managed ``<div id="calls">``
+      # container.  The panel is single-instance and the legacy
+      # render produced an empty placeholder, so there is no
+      # legacy state to sync into the VM.
+      if state.content == Content.CalltraceEditor:
+        calltrace_editor.tryMountIsoNimCalltraceEditorPanel()
+
+      # Repl is now an IsoNim view -- its DOM is mounted by
+      # ``repl.tryMountIsoNimReplPanel`` against the
+      # ``replComponent-{id}`` container, and reactive effects
+      # keep it in sync. No direct-DOM redraw hook is needed here.
+      if state.content == Content.Repl:
+        repl.syncLegacyReplIntoVM(ReplComponent(component))
+        repl.syncReplConfigIntoVM()
+        repl.tryMountIsoNimReplPanel()
+
+      # LowLevelCode is now an IsoNim view -- its outer container
+      # is mounted by ``low_level_code.tryMountIsoNimLowLevelCodePanel``
+      # against the ``lowLevelCodeComponent-{id}`` GoldenLayout host,
+      # and reactive effects keep it in sync.  The Monaco-driven
+      # asm buffer still lives inside the editor sub-tree (the
+      # EditorViewComponent owns that DOM); the IsoNim view here
+      # exposes the parity-faithful container shell + a fallback
+      # row list so headless tests can exercise the same data flow
+      # without Monaco.  Closes the no_source asm sub-tree
+      # follow-up tracked from 1.40.
+      if state.content == Content.LowLevelCode:
+        low_level_code.syncLegacyLowLevelCodeIntoVM(
+          LowLevelCodeComponent(component))
+        low_level_code.tryMountIsoNimLowLevelCodePanel()
+
+      # RequestPanel is now an IsoNim view -- its DOM is mounted by
+      # ``request_panel.tryMountIsoNimRequestPanel`` against the
+      # ``requestPanelComponent-{id}`` container, and reactive
+      # effects keep it in sync. No direct-DOM redraw hook is needed here.
+      # The legacy ``RequestPanelComponent``
+      # remains as the event-bus carrier (its ``register`` subscribes to
+      # ``CtUpdatedHttpRequests`` — RS-M3) and its mutators feed the VM via
+      # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
+      # any rows already accumulated when the panel becomes visible.
+      if state.content == Content.RequestPanel:
+        request_panel.syncLegacyRequestPanelIntoVM(
+          RequestPanelComponent(component))
+        request_panel.tryMountIsoNimRequestPanel()
+
+      # TraceLog is now an IsoNim view -- its DOM is mounted by
+      # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
+      # ``traceLogComponent-{id}`` container, and reactive effects
+      # keep it in sync. No direct-DOM redraw hook is needed here.
+      # The legacy ``TraceLogComponent`` remains
+      # as the event-bus carrier (its ``register`` method still
+      # subscribes to tracepoint-result events) and
+      # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
+      # accumulated when the panel becomes visible.
+      # TestResults and Constraints are IsoNim views with no legacy half,
+      # so there is nothing to sync -- the mount is the whole hook.
+      if state.content == Content.TestResults:
+        test_results.tryMountIsoNimTestResultsPanel()
+
+      if state.content == Content.Constraints:
+        constraints.tryMountIsoNimConstraintsPanel()
+
+      if state.content == Content.PointList:
+        point_list.tryMountIsoNimPointListPanel()
+
+      if state.content == Content.TraceLog:
+        trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
+        trace_log.tryMountIsoNimTraceLogPanel()
+
+      # Scratchpad is now an IsoNim view -- its DOM is mounted by
+      # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
+      # ``scratchpadComponent-{id}`` container, and reactive effects
+      # keep it in sync. No direct-DOM redraw hook is needed here.
+      # The legacy ``ScratchpadComponent`` remains
+      # as the event-bus carrier (its ``register`` method still
+      # subscribes to ``InternalAddToScratchpad`` /
+      # ``InternalAddToScratchpadFromExpression`` /
+      # ``CtLoadLocalsResponse``) and ``syncLegacyScratchpadIntoVM``
+      # mirrors any rows already accumulated when the panel becomes
+      # visible.  Mission goal #3 §1.70.
+      if state.content == Content.Scratchpad:
+        scratchpad.syncLegacyScratchpadIntoVM(
+          ScratchpadComponent(component))
+        scratchpad.tryMountIsoNimScratchpadPanel()
+
+      # Filesystem is now an IsoNim view -- its DOM is mounted by
+      # ``filesystem.tryMountIsoNimFilesystemPanel`` against the
+      # ``filesystemComponent-{id}`` container, and reactive effects
+      # keep it in sync. No direct-DOM redraw hook is
+      # needed here.  The legacy ``FilesystemComponent`` remains as
+      # the event-bus carrier (its existing event handlers populate
+      # ``data.services.editor.filesystem``) and
+      # ``syncLegacyFilesystemIntoVM`` mirrors any tree already
+      # accumulated when the panel becomes visible.  Mission goal #3
+      # \u00a71.71.  The rich jstree affordances (animated open/close,
+      # contextmenu plugin, search plugin) remain a follow-up.
+      if state.content == Content.Filesystem:
+        filesystem.syncLegacyFilesystemIntoVM(
+          FilesystemComponent(component))
+        filesystem.tryMountIsoNimFilesystemPanel()
+
+      # CommandPalette is now an IsoNim view -- its DOM is mounted by
+      # ``command.tryMountIsoNimCommandPalettePanel`` against the
+      # ``commandPaletteComponent-{id}`` container, and reactive
+      # effects keep it in sync. No direct-DOM redraw hook is needed here.
+      # The legacy
+      # ``CommandPaletteComponent`` remains as the event-bus carrier
+      # (the keyboard / interpreter / agent passthrough) and
+      # ``syncLegacyCommandPaletteIntoVM`` mirrors any state already
+      # accumulated when the panel becomes visible.  Mission goal #3
+      # \u00a71.72.  The rich per-kind row rendering paths
+      # (program-search HTML fragment, symbol-kind suffix, file-path
+      # tail truncation, agent-mode passthrough) remain a follow-up.
+      if state.content == Content.CommandPalette:
+        command.syncLegacyCommandPaletteIntoVM(
+          CommandPaletteComponent(component))
+        command.tryMountIsoNimCommandPalettePanel()
+
+      if state.content == Content.VCS:
+        vcs.syncLegacyVCSIntoVM(VCSComponent(component))
+        vcs.tryMountIsoNimVCSPanel(component.id)
+
+      # A unified diff is an editor-area *document*, not a second VCS panel
+      # (VCS-Panel.md, "Unified Diff View (Editor Integration)"): the sync
+      # parses the target's hunks into the tab's ViewModel and the mount
+      # creates the Monaco instance over them.
+      if state.content == Content.UnifiedDiff:
+        unified_diff.syncIntoVM(UnifiedDiffComponent(component))
+        unified_diff.tryMountUnifiedDiffTab(component.id)
+
+      # VN-M5. The verification panel is an IsoNim view with no legacy
+      # renderer at all, so there is nothing to sync into a VM first: the
+      # `VerificationComponent` carries no state. Its mount puts TWO IsoNim
+      # roots in the container — the run, and the counterexample the run
+      # produced — and the second is empty until a session is opened from
+      # the first.
+      if state.content == Content.Verification:
+        verification.tryMountIsoNimVerificationPanel()
+
+      if state.content == Content.AgentActivity:
+        agent_activity.syncLegacyAgentActivityIntoVM(
+          AgentActivityComponent(component))
+        agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
+
+      # ``Content.AgentActivityDeepReview`` has no renderer of its own since
+      # AA-1 deleted the roll-up.  The id survives as the review's layout
+      # identity for the Agent Activity pillar (see the note on the
+      # ``Content`` enum), so a layout persisted by an older build still
+      # constructs its component and gets an empty pane; there is nothing to
+      # mount into it until AA-2/AA-3 render the session's own content.
+
+      if state.content == Content.AgentWorkspace:
+        agent_workspace.syncLegacyAgentWorkspaceIntoVM(
+          AgentWorkspaceComponent(component))
+        agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
+
+      # Content.FrameViewer pane dispatch was retired in M3.  The legacy
+      # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
+      # other panes (Video Player, Pixel History, Shader Debug) share.
+
+      if state.content == Content.PixelHistory:
+        pixel_history.tryMountIsoNimPixelHistoryPanel(
+          PixelHistoryComponent(component))
+
+      if state.content == Content.ShaderDebug:
+        shader_debug.tryMountIsoNimShaderDebugPanel(
+          ShaderDebugComponent(component))
+
+      if state.content == Content.VideoPlayer:
+        video_player.syncVisualReplaySessionIntoPlayerVM()
+        video_player.tryMountIsoNimVideoPlayerPanel(
+          VideoPlayerComponent(component))
+
+      # CaptionBarProgress: render via IsoNim WebRenderer directly
+      # into the GL container. Progress and hover mutation paths refresh
+      # this direct mount explicitly.
+      if state.content == Content.CaptionBarProgress:
+        tryMountCaptionBarProgress(
+          containerId,
+          CaptionBarProgressComponent(component))
+
+      discard component.afterInit()
+
+
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
                  containerElement: kdom.Element = nil) =
   ## Initialise GoldenLayout for the active session.
@@ -1953,372 +2344,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           activeDraggedItem = genericContentItem
         )
 
-    # Components that still enter the generic GoldenLayout route mount
-    # directly into the GoldenLayout container. Editor tabs use the separate
-    # editorComponent route above.
-    let isDirectMountComponent = state.content in {
-      Content.Calltrace,
-      Content.State,
-      Content.EventLog,
-      Content.Timeline,
-      Content.Build,
-      Content.BuildErrors,
-      Content.SearchResults,
-      Content.Shell,
-      Content.CaptionBarProgress,
-      Content.TerminalOutput,
-      Content.StepList,
-      Content.CalltraceEditor,
-      Content.Repl,
-      Content.LowLevelCode,
-      Content.RequestPanel,
-      Content.TraceLog,
-      # NS9's two panes. Listed here, and NOT in `editModeHiddenContentIds`,
-      # which together is the whole of "both platforms get them": edit mode
-      # shows them on the desktop and in a browser from one declaration.
-      Content.TestResults,
-      Content.Constraints,
-      # PLAT-40: an IsoNim view over the session's `PointListVM`.
-      Content.PointList,
-      Content.Scratchpad,
-      Content.Filesystem,
-      Content.CommandPalette,
-      Content.VCS,
-      Content.UnifiedDiff,
-      Content.Verification,
-      Content.AgentActivity,
-      Content.AgentActivityDeepReview,
-      Content.AgentWorkspace,
-      # Content.FrameViewer was retired in M3 — the Video Player pane
-      # supersedes it.  ``FrameViewerVM`` remains as the data source the
-      # Video Player wraps; see ``viewmodel/viewmodels/frame_viewer_vm.nim``.
-      Content.PixelHistory,
-      Content.ShaderDebug,
-      Content.VideoPlayer,
-    }
-
-    var containerId: cstring
-    containerId = state.label
-
-    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparentingObj = isReparenting
 
     discard windowSetTimeout((proc =
       if isReparentingObj:
         return
-      if not data.ui.componentMapping[state.content].hasKey(state.id):
-        discard data.makeComponent(state.content, state.id)
-      if not data.ui.componentMapping[state.content][state.id].isNil:
-        let component = data.ui.componentMapping[state.content][state.id]
-
-        if not isDirectMountComponent:
-          cwarn "layout: genericUiComponent has no direct mount for " &
-            $state.content & " id " & $state.id
-
-        # THE FIVE PANES THAT HAD NO ARM HERE.
-        #
-        # This proc is the only site that KNOWS the container exists:
-        # `element.mountComponentContainer(editorLabel)` above has just built
-        # `#<x>Component-<id>`, and this dispatch runs 200 ms later. Every
-        # other pane in `isDirectMountComponent` has been mounted from here
-        # all along. These five mounted from their `register` method or from
-        # their `initXVMWithStore`, and then POLLED for a container that
-        # neither of those moments can guarantee.
-        #
-        # Measured on 25 real Electron desktop session logs (2026-09), on the
-        # modern shared-store path: `#stateComponent-0`,
-        # `#calltraceComponent-0` and `#timelineComponent-0` were absent at
-        # retry #1 in ALL 25 runs. The two that ran long enough to reach a
-        # verdict gave up at retry #200, 10.9 s and 30.4 s of runway in:
-        #
-        #   ERROR | state.nim     | tryMountIsoNimStatePanel: not ready after 200 retries, giving up
-        #   ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
-        #   DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
-        #
-        # A 2026-09 TRANSCRIPT, PRE-DATING THE ARMS BELOW. Do not grep the
-        # source for those three strings: the arms below made their claim
-        # false — a give-up ends one poll, because each mount re-enters with a
-        # fresh retry counter — and all three now `cwarn` that they abandoned
-        # THIS poll rather than the pane. The transcript stays because it is
-        # the measurement that put these arms here.
-        #
-        # The other 23 ended mid-poll between retry #20 and #110 with the
-        # container still absent. There is no retry margin to widen: the poll
-        # starts before the thing it polls for can exist, so it is not a race
-        # a faster machine wins. The State, Call Trace and Timeline panes were
-        # blank on the desktop for every one of those sessions.
-        #
-        # `1cb7b9d6` added the `register`-time call in `ui/state.nim` and it
-        # genuinely fixed Noir Studio — but `CalltraceComponent.register` has
-        # ALWAYS made the equivalent call, and calltrace still gave up on the
-        # desktop in both runs above. On the desktop `register` runs at
-        # component-construction time (`types.createUIComponents` in `onInit`),
-        # which is EARLIER than the container, not later. A second poll window
-        # opened before the container exists is still a poll that loses.
-        #
-        # Called unqualified: the module `state` is shadowed inside this
-        # closure by its own `state: GoldenItemState` parameter, so
-        # `state.tryMountIsoNimStatePanel()` would resolve against the wrong
-        # `state`.
-        if state.content == Content.State:
-          tryMountIsoNimStatePanel()
-
-        if state.content == Content.Calltrace:
-          tryMountIsoNimCalltrace()
-
-        # The Timeline was the worst-placed of the five and the reason nobody
-        # reported it: `TimelineComponent` has no `register` method at all. It
-        # falls back to the base method in `types.nim`, which only assigns
-        # `self.api`, so the timeline was the one pane with NO mount call on
-        # the component-registration path — its only callers were the two
-        # `initTimelineVM*` procs. This arm is its first.
-        if state.content == Content.Timeline:
-          tryMountIsoNimTimelinePanel()
-
-        # EventLog and TerminalOutput are the same shape as Calltrace: both
-        # mount from `register` and nowhere else, and both are in
-        # `isDirectMountComponent`. They are joined here so the invariant
-        # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
-        # direct-mount `Content` has an arm — holds without an allowlist of
-        # unexamined exemptions. Their mounts are idempotent and additionally
-        # guarded on their own component ref, so this arm can only help.
-        if state.content == Content.EventLog:
-          tryMountIsoNimEventLogPanel()
-
-        if state.content == Content.TerminalOutput:
-          tryMountIsoNimTerminalOutputPanel()
-
-        if state.content == Content.Shell:
-          let shellComponent = ShellComponent(component)
-          if shellComponent.shell.isNil:
-            discard shellComponent.createShell()
-
-        # Build is now an IsoNim view — its DOM is mounted by
-        # `build.tryMountIsoNimBuildPanel` against the `buildComponent-{id}`
-        # container, and reactive effects keep it in sync. No direct-DOM
-        # redraw hook is needed here.
-        if state.content == Content.Build:
-          # The IsoNim view mounts itself once `buildComponentRef` and
-          # the VM are both available (the registration order between
-          # `register()` and `configureMiddleware` is non-deterministic
-          # under different layouts).  Calling tryMount here is safe and
-          # idempotent — it short-circuits when already mounted.  Also
-          # sync any data the legacy ``build`` record already carries
-          # (e.g. when the GL container appears after a recorded build
-          # already finished).
-          build.syncLegacyBuildIntoVM(BuildComponent(component))
-          build.tryMountIsoNimBuildPanel()
-
-        # BuildErrors is now an IsoNim view -- its DOM is mounted by
-        # ``errors.tryMountIsoNimErrorsPanel`` against the
-        # ``errorsComponent-{id}`` container, and reactive effects keep
-        # it in sync. No direct-DOM redraw hook is
-        # needed here.
-        if state.content == Content.BuildErrors:
-          errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
-          errors.tryMountIsoNimErrorsPanel()
-
-        # SearchResults is now an IsoNim view -- its DOM is mounted by
-        # ``search_results.tryMountIsoNimSearchResultsPanel`` against
-        # the ``searchResultsComponent-{id}`` container, and reactive
-        # effects keep it in sync. No direct-DOM redraw hook is needed here.
-        if state.content == Content.SearchResults:
-          search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
-          search_results.tryMountIsoNimSearchResultsPanel()
-
-        # StepList is now an IsoNim view -- its DOM is mounted by
-        # ``step_list.tryMountIsoNimStepListPanel`` against the
-        # ``stepListComponent-{id}`` container, and reactive effects
-        # keep it in sync. No direct-DOM redraw hook is needed here.
-        if state.content == Content.StepList:
-          step_list.syncLegacyStepListIntoVM(StepListComponent(component))
-          step_list.tryMountIsoNimStepListPanel()
-
-        # CalltraceEditor is now an IsoNim view -- its DOM is mounted
-        # by ``calltrace_editor.tryMountIsoNimCalltraceEditorPanel``
-        # against the GoldenLayout-managed ``<div id="calls">``
-        # container.  The panel is single-instance and the legacy
-        # render produced an empty placeholder, so there is no
-        # legacy state to sync into the VM.
-        if state.content == Content.CalltraceEditor:
-          calltrace_editor.tryMountIsoNimCalltraceEditorPanel()
-
-        # Repl is now an IsoNim view -- its DOM is mounted by
-        # ``repl.tryMountIsoNimReplPanel`` against the
-        # ``replComponent-{id}`` container, and reactive effects
-        # keep it in sync. No direct-DOM redraw hook is needed here.
-        if state.content == Content.Repl:
-          repl.syncLegacyReplIntoVM(ReplComponent(component))
-          repl.syncReplConfigIntoVM()
-          repl.tryMountIsoNimReplPanel()
-
-        # LowLevelCode is now an IsoNim view -- its outer container
-        # is mounted by ``low_level_code.tryMountIsoNimLowLevelCodePanel``
-        # against the ``lowLevelCodeComponent-{id}`` GoldenLayout host,
-        # and reactive effects keep it in sync.  The Monaco-driven
-        # asm buffer still lives inside the editor sub-tree (the
-        # EditorViewComponent owns that DOM); the IsoNim view here
-        # exposes the parity-faithful container shell + a fallback
-        # row list so headless tests can exercise the same data flow
-        # without Monaco.  Closes the no_source asm sub-tree
-        # follow-up tracked from 1.40.
-        if state.content == Content.LowLevelCode:
-          low_level_code.syncLegacyLowLevelCodeIntoVM(
-            LowLevelCodeComponent(component))
-          low_level_code.tryMountIsoNimLowLevelCodePanel()
-
-        # RequestPanel is now an IsoNim view -- its DOM is mounted by
-        # ``request_panel.tryMountIsoNimRequestPanel`` against the
-        # ``requestPanelComponent-{id}`` container, and reactive
-        # effects keep it in sync. No direct-DOM redraw hook is needed here.
-        # The legacy ``RequestPanelComponent``
-        # remains as the event-bus carrier (its ``register`` subscribes to
-        # ``CtUpdatedHttpRequests`` — RS-M3) and its mutators feed the VM via
-        # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
-        # any rows already accumulated when the panel becomes visible.
-        if state.content == Content.RequestPanel:
-          request_panel.syncLegacyRequestPanelIntoVM(
-            RequestPanelComponent(component))
-          request_panel.tryMountIsoNimRequestPanel()
-
-        # TraceLog is now an IsoNim view -- its DOM is mounted by
-        # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
-        # ``traceLogComponent-{id}`` container, and reactive effects
-        # keep it in sync. No direct-DOM redraw hook is needed here.
-        # The legacy ``TraceLogComponent`` remains
-        # as the event-bus carrier (its ``register`` method still
-        # subscribes to tracepoint-result events) and
-        # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
-        # accumulated when the panel becomes visible.
-        # TestResults and Constraints are IsoNim views with no legacy half,
-        # so there is nothing to sync -- the mount is the whole hook.
-        if state.content == Content.TestResults:
-          test_results.tryMountIsoNimTestResultsPanel()
-
-        if state.content == Content.Constraints:
-          constraints.tryMountIsoNimConstraintsPanel()
-
-        if state.content == Content.PointList:
-          point_list.tryMountIsoNimPointListPanel()
-
-        if state.content == Content.TraceLog:
-          trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
-          trace_log.tryMountIsoNimTraceLogPanel()
-
-        # Scratchpad is now an IsoNim view -- its DOM is mounted by
-        # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
-        # ``scratchpadComponent-{id}`` container, and reactive effects
-        # keep it in sync. No direct-DOM redraw hook is needed here.
-        # The legacy ``ScratchpadComponent`` remains
-        # as the event-bus carrier (its ``register`` method still
-        # subscribes to ``InternalAddToScratchpad`` /
-        # ``InternalAddToScratchpadFromExpression`` /
-        # ``CtLoadLocalsResponse``) and ``syncLegacyScratchpadIntoVM``
-        # mirrors any rows already accumulated when the panel becomes
-        # visible.  Mission goal #3 §1.70.
-        if state.content == Content.Scratchpad:
-          scratchpad.syncLegacyScratchpadIntoVM(
-            ScratchpadComponent(component))
-          scratchpad.tryMountIsoNimScratchpadPanel()
-
-        # Filesystem is now an IsoNim view -- its DOM is mounted by
-        # ``filesystem.tryMountIsoNimFilesystemPanel`` against the
-        # ``filesystemComponent-{id}`` container, and reactive effects
-        # keep it in sync. No direct-DOM redraw hook is
-        # needed here.  The legacy ``FilesystemComponent`` remains as
-        # the event-bus carrier (its existing event handlers populate
-        # ``data.services.editor.filesystem``) and
-        # ``syncLegacyFilesystemIntoVM`` mirrors any tree already
-        # accumulated when the panel becomes visible.  Mission goal #3
-        # \u00a71.71.  The rich jstree affordances (animated open/close,
-        # contextmenu plugin, search plugin) remain a follow-up.
-        if state.content == Content.Filesystem:
-          filesystem.syncLegacyFilesystemIntoVM(
-            FilesystemComponent(component))
-          filesystem.tryMountIsoNimFilesystemPanel()
-
-        # CommandPalette is now an IsoNim view -- its DOM is mounted by
-        # ``command.tryMountIsoNimCommandPalettePanel`` against the
-        # ``commandPaletteComponent-{id}`` container, and reactive
-        # effects keep it in sync. No direct-DOM redraw hook is needed here.
-        # The legacy
-        # ``CommandPaletteComponent`` remains as the event-bus carrier
-        # (the keyboard / interpreter / agent passthrough) and
-        # ``syncLegacyCommandPaletteIntoVM`` mirrors any state already
-        # accumulated when the panel becomes visible.  Mission goal #3
-        # \u00a71.72.  The rich per-kind row rendering paths
-        # (program-search HTML fragment, symbol-kind suffix, file-path
-        # tail truncation, agent-mode passthrough) remain a follow-up.
-        if state.content == Content.CommandPalette:
-          command.syncLegacyCommandPaletteIntoVM(
-            CommandPaletteComponent(component))
-          command.tryMountIsoNimCommandPalettePanel()
-
-        if state.content == Content.VCS:
-          vcs.syncLegacyVCSIntoVM(VCSComponent(component))
-          vcs.tryMountIsoNimVCSPanel(component.id)
-
-        # A unified diff is an editor-area *document*, not a second VCS panel
-        # (VCS-Panel.md, "Unified Diff View (Editor Integration)"): the sync
-        # parses the target's hunks into the tab's ViewModel and the mount
-        # creates the Monaco instance over them.
-        if state.content == Content.UnifiedDiff:
-          unified_diff.syncIntoVM(UnifiedDiffComponent(component))
-          unified_diff.tryMountUnifiedDiffTab(component.id)
-
-        # VN-M5. The verification panel is an IsoNim view with no legacy
-        # renderer at all, so there is nothing to sync into a VM first: the
-        # `VerificationComponent` carries no state. Its mount puts TWO IsoNim
-        # roots in the container — the run, and the counterexample the run
-        # produced — and the second is empty until a session is opened from
-        # the first.
-        if state.content == Content.Verification:
-          verification.tryMountIsoNimVerificationPanel()
-
-        if state.content == Content.AgentActivity:
-          agent_activity.syncLegacyAgentActivityIntoVM(
-            AgentActivityComponent(component))
-          agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
-
-        # ``Content.AgentActivityDeepReview`` has no renderer of its own since
-        # AA-1 deleted the roll-up.  The id survives as the review's layout
-        # identity for the Agent Activity pillar (see the note on the
-        # ``Content`` enum), so a layout persisted by an older build still
-        # constructs its component and gets an empty pane; there is nothing to
-        # mount into it until AA-2/AA-3 render the session's own content.
-
-        if state.content == Content.AgentWorkspace:
-          agent_workspace.syncLegacyAgentWorkspaceIntoVM(
-            AgentWorkspaceComponent(component))
-          agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
-
-        # Content.FrameViewer pane dispatch was retired in M3.  The legacy
-        # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
-        # other panes (Video Player, Pixel History, Shader Debug) share.
-
-        if state.content == Content.PixelHistory:
-          pixel_history.tryMountIsoNimPixelHistoryPanel(
-            PixelHistoryComponent(component))
-
-        if state.content == Content.ShaderDebug:
-          shader_debug.tryMountIsoNimShaderDebugPanel(
-            ShaderDebugComponent(component))
-
-        if state.content == Content.VideoPlayer:
-          video_player.syncVisualReplaySessionIntoPlayerVM()
-          video_player.tryMountIsoNimVideoPlayerPanel(
-            VideoPlayerComponent(component))
-
-        # CaptionBarProgress: render via IsoNim WebRenderer directly
-        # into the GL container. Progress and hover mutation paths refresh
-        # this direct mount explicitly.
-        if state.content == Content.CaptionBarProgress:
-          tryMountCaptionBarProgress(
-            containerId,
-            CaptionBarProgressComponent(component))
-
-        discard component.afterInit()
-
+      mountPaneForState(state)
       ), 200)
 
   # Widen the splitter grab zone so it is easier to grab with the mouse.
@@ -2388,7 +2419,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     # We call addItem(config, index) directly on the main row/column —
     # GL2 wraps the component in a fresh stack automatically.
     #
-    # AutoHideEdge ordinals: Bottom=0, Left=1, Right=2
+    # `AutoHideEdge` is `Left, Right, Bottom`, so its ordinals are 0, 1, 2.
+    # (This comment used to say "Bottom=0, Left=1, Right=2", which is the
+    # order nothing in the codebase uses; the `case` below never depended on
+    # it, but a saved `auto_hide_state.json` stores the ordinal and a reader
+    # who trusted the comment would decode every edge wrongly.)
     let ground = layout.groundItem
     if ground.isNil or ground.contentItems.len == 0:
       discard ground.addItem(panel.config)
@@ -2450,6 +2485,23 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not reqComp.isNil:
         request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
       request_panel.tryMountIsoNimRequestPanel()
+      return
+    # A PANEL RESTORED FROM `auto_hide_state.json` HAS NEVER BEEN MOUNTED.
+    #
+    # Persistence cannot carry a DOM node, so `restoreAutoHideState` produces
+    # a panel with a component config and no live element, and the pane never
+    # passed through the `genericUiComponent` registration that would
+    # otherwise have mounted it.  `auto_hide.ensurePanelLiveElement` has just
+    # built its container from that config and the reveal has put the
+    # container in the document, so this is the mount — the SAME dispatch
+    # GoldenLayout's factory runs, not a second copy of it.
+    #
+    # Guarded on the flag rather than run for every reveal: a pinned panel's
+    # live element already carries a mounted IsoNim root, and re-running
+    # `afterInit` on it every time the user hovers a strip tab is work nobody
+    # asked for.  Issue #691.
+    if panel.instantiatedFromConfig:
+      mountPaneForState(cast[GoldenItemState](panel.config["componentState"]))
       return
     # Pinned GoldenLayout panels already carry a liveElement that showOverlay()
     # reparents into the overlay. Remaining legacy-backed GL panels (currently
@@ -2568,11 +2620,22 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           if existing.standalone or not existing.liveElement.isNil:
             continue
           # A pinned-state entry restored from disk for one of the four
-          # standalone panes: it has no live element, and unlike a restored
-          # GL panel there is no component config the overlay could build one
-          # from.  Leaving it in place would suppress the registration below
-          # and leave a strip tab whose overlay is empty, so drop it and
-          # register the standalone pane normally.
+          # standalone panes, with no live element yet.  Drop it and let the
+          # registration below run instead.
+          #
+          # THE REASON IS SUPPRESSION, NOT THE CONFIG, and it used to be
+          # written the other way round ("unlike a restored GL panel there is
+          # no component config the overlay could build one from").  That
+          # stopped being true twice over: M46 (#692) gave these four a real
+          # `standaloneComponentConfig`, and M47 (#691) taught the reveal path
+          # to build a host from any re-attachable config.  What still holds is
+          # that these panes get a live element from the block below on EVERY
+          # launch, and `findPanelByContent` lets only one entry per content
+          # exist — so a restored entry left in place would win the slot and
+          # the fresh registration would never run.
+          #
+          # The entry is only ever seen when an older build persisted one:
+          # `serializeAutoHideState` skips `standalone` panels.
           cwarn "auto_hide: replacing a restored entry for standalone pane '" &
             $panelDef.title & "' with a fresh registration"
           autoHideState.panels = autoHideState.panels.filterIt(it != existing)

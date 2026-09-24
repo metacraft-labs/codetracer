@@ -5599,3 +5599,75 @@ panel that is no longer registered cannot be hidden by the flag. The observable
 that says an unpin worked is `autoHideState.panels` no longer containing it —
 not the flag, and not `bottomStripModel()`, which filters on `isUnpinning` and
 is therefore ALSO empty when the panel is latched mid-unpin (the #692 defect).
+
+---
+
+## A DOM, not just a document: what `-d:nodejs` gives you and what it takes away
+
+The note above is right that `ui/auto_hide.nim` compiles and runs under
+`nim js -d:nodejs`. A fourth host fact belongs beside its three, and it is the
+one that decides how a DOM-touching auto-hide test has to be written.
+
+Under `-d:nodejs` Nim's `std/dom` (which `frontend/kdom.nim` re-exports whole)
+swaps in an **in-memory DOM emulation** — `lib/js/dom.nim`, the
+`when defined(nodejs)` block. It is real enough to be useful and wrong in two
+places that matter:
+
+* `document.getElementById` is a hand-rolled walk from `document.body`, and
+  `document.body` starts **nil**. The first lookup is then
+  `Cannot read properties of null (reading 'id')` — a native `TypeError` from
+  inside `getElem`, nowhere near the proc you are testing. Assign
+  `document.body` before anything else.
+* `document.createElement` is `new(result)` on an `{.importc.}` ref object, so
+  the element it returns has a **NULL `style` and a NULL `classList`**. Any
+  production code that writes `el.style.width = …` on it throws. That is not a
+  corner: `showDockedPanel`'s next act on a live element is four style writes,
+  and `layout.nim`'s standalone registration sets `wrapper.style.width` on a
+  freshly created div.
+
+So production code that must be drivable headlessly should build its elements
+through the **ambient** `document` (an `importjs` helper), not through kdom's:
+in the renderer that is the real `document`, and in a test the suite can supply
+one. `auto_hide.jsCreatePanelHost` is the worked example, and
+`src/tests/gui/tests/auto-hide/auto_hide_dom_harness.nim` is the shim two
+suites share. `CONTRIBUTING.md`'s "Frontend JS tests: `-d:nodejs` hands you a
+DOM that is not the DOM" is the same warning from the other end.
+
+One more, for writing the harness rather than the product: give the stub
+element an `innerHTML` **setter that clears `childNodes`**. Several procs open
+with `contentEl.innerHTML = ""`, and a shim that treats it as a plain string
+property lets one case's leftover node satisfy the next case's "the pane has
+content" assertion.
+
+## One mount dispatch, two callers — do not add a third
+
+`ui/layout.nim`'s `mountPaneForState(state: GoldenItemState)` is the only place
+that knows how to fill a pane's container: ~360 lines of
+`if state.content == Content.X: tryMountIsoNimXPanel()`. It has two callers and
+they are unobvious neighbours:
+
+* the `genericUiComponent` registration's deferred body, for a pane
+  GoldenLayout built;
+* `onPanelShown`, for an auto-hide panel restored from `auto_hide_state.json`
+  (#691) — which never passes through GoldenLayout, so its host is built by
+  `auto_hide.instantiatePanelElement` from the persisted config and the same
+  dispatch fills it. A restored panel's `config.componentState` IS a
+  `GoldenItemState`, which is why no translation layer is needed.
+
+`src/frontend/viewmodel/tests/unit/test_every_mountable_pane_has_a_factory_arm.nim`
+asserts every direct-mount `Content` has an arm in ONE region, and it finds that
+region by the literals `let isDirectMountComponent = state.content in {` and
+`discard component.afterInit()`, with the arms matched as
+`if state.content == Content.X:`. **A second dispatch would be invisible to it,
+and so would a rename of that parameter.** The extraction that gave the proc its
+name kept `state` as the parameter name for exactly that reason.
+
+Two traps in the same area, both live:
+
+* `renderer.redrawLegacyRendererInstance(label)` — the last line of
+  `onPanelShown`'s fallback — is a **stub that returns `false` and does
+  nothing** (`frontend/renderer.nim:413-414`). It reads like a general "refresh
+  this panel" hook. It is not one.
+* `AutoHideEdge` is `Left, Right, Bottom`, so its ordinals are **0, 1, 2**, and
+  that ordinal is what `auto_hide_state.json` stores. A comment in
+  `unpinPanelTarget` claimed `Bottom=0, Left=1, Right=2` for a long time.

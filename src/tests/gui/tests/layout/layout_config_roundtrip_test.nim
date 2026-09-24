@@ -42,7 +42,16 @@ import std/unittest
 
 when defined(js):
   import std/jsffi
+  import kdom
   import ../../../../frontend/index/layout_config_repair
+  # Issue #691: the "keeps enough config to be re-attached" case below now
+  # RESTORES and REVEALS a panel instead of only reading its JSON, so it needs
+  # the shipped auto-hide procs and a document to run them against.  The
+  # harness is shared with `auto-hide/auto_hide_restore_mount_test.nim`; its
+  # header explains why the `-d:nodejs` DOM emulation is not enough alone.
+  import ../../../../frontend/ui/auto_hide
+  # Quoted: an unquoted `../auto-hide/...` parses as a subtraction.
+  import "../auto-hide/auto_hide_dom_harness"
 
   # ``Content`` ordinals, mirrored as literals so this test keeps the
   # dependency-free property of the module under test.  Source of truth:
@@ -470,8 +479,23 @@ when defined(js):
         check not jsHasOwn(after, cstring"containerElement")
 
     test "a restored auto-hide panel keeps enough config to be re-attached":
-      ## The restored panel has no `liveElement`, so re-attaching it relies
-      ## entirely on the persisted GoldenLayout component config.
+      ## THIS CASE USED TO PASS WHILE THE FEATURE WAS BROKEN, and that is worth
+      ## writing down rather than quietly fixing.
+      ##
+      ## It asserted three things about the JSON — that it names a
+      ## `componentType`, that the panel's `content` agrees with its config's,
+      ## and that the state indexes the content — and stopped there.  All three
+      ## were true throughout issue #691, during which every restored auto-hide
+      ## tab expanded to an EMPTY PANE: `restoreAutoHideState` built the panel
+      ## with `liveElement: nil` and a comment promising a "config fallback"
+      ## that no code implemented, so the config the case certified was never
+      ## read by anything.  `Testing/Verification-Harness-Traps.md` §7 — a
+      ## green fixture that is an instance of the defect it exists to catch.
+      ##
+      ## The field assertions are kept (they are the persistence invariant this
+      ## FILE is about, and #608 is what broke them) and the case now also runs
+      ## the restore and the reveal, so "enough config to be re-attached" is
+      ## measured by re-attaching rather than asserted by inspection.
       let restored = jsonParse(cstring"""
         {"panels":[{"edge":2,"title":"STATE","content":4,"componentId":0,
                     "overlayWidth":420,"overlayHeight":0,
@@ -485,6 +509,36 @@ when defined(js):
       check panel["config"]["componentState"]["content"].to(int) ==
         panel["content"].to(int)
       check autoHideStateContainsContentId(restored, 4)
+
+      # And now the part the three checks above cannot see.  `edge: 2` is
+      # `AutoHideEdge.Bottom` — the enum is `Left, Right, Bottom`, so the
+      # ordinals are 0, 1, 2 — and the reveal docks it into
+      # `#auto-hide-docked-bottom-content`.
+      autoHideState = nil
+      initAutoHideState()
+      installAutoHideDocument()
+      restoreAutoHideState(cast[JsObject](restored))
+      check autoHideState.panels.len == 1
+      let live = autoHideState.panels[0]
+
+      # CONTROL (§4): nothing is mounted yet, and the container the STATE pane
+      # would look for does not exist.  Without this, "it exists afterwards"
+      # could pass because it existed all along.
+      check live.liveElement.isNil
+      check document.getElementById(cstring"stateComponent-0").isNil
+      check stubChildCount(
+        document.getElementById(DockedBottomContentId)) == 0
+
+      showDockedPanel(live)
+
+      # THE DISCRIMINATING ASSERTION.  `stateComponent-0` is the id
+      # `state.tryMountIsoNimStatePanel` resolves its container by; a restore
+      # that produces no such node in the document produces an empty pane,
+      # whatever the JSON says.  See
+      # `auto-hide/auto_hide_restore_mount_test.nim` for the rest of #691.
+      check not document.getElementById(cstring"stateComponent-0").isNil
+      check stubChildCount(
+        document.getElementById(DockedBottomContentId)) == 1
 
 else:
   import std/strutils
@@ -607,9 +661,41 @@ else:
     test "layout application is guarded against native GoldenLayout errors":
       ## A Nim `try/except` does NOT catch a native JS `Error`; the proven
       ## pattern is the raw-JS try/catch in `ui/session_switch.nim`.
+      ##
+      ## THE REGION IS THE PROC, NOT A BYTE COUNT, and the constant it
+      ## replaces is why.  This case used to slice
+      ## `body[start .. start + 40_000]` and ask whether `loadLayoutSafely`
+      ## was inside.  `initLayout` is far longer than 40 000 characters, so
+      ## the window was a truncation of the region the case means, and at
+      ## `a3c754aba` the call sat at offset 40 360 — three hundred and sixty
+      ## characters past it.  The case was red on mainline while the guard it
+      ## describes was present and correct, and it went green again only
+      ## because #691 moved ~19 700 characters of pane dispatch out of
+      ## `initLayout`.  A region that is defined by where the proc ends
+      ## cannot drift like that.
+      ##
+      ## The negative below is the invariant the source states in so many
+      ## words — *"NEVER call `loadLayout` directly here"* — and the byte
+      ## window could not express it at all: a direct call 40 001 characters
+      ## in was outside everything the case looked at.
       let body = source(LayoutPath)
       let start = body.find("proc initLayout*")
       check start >= 0
-      let region = body[start .. min(start + 40_000, body.high)]
-      check region.contains("loadLayoutSafely")
+      var stop = body.find("\nproc ", start + 1)
+      if stop < 0:
+        stop = body.len
+      # Comments stripped, so a `# NEVER call `loadLayout` directly here`
+      # cannot answer either assertion below — the file carries exactly that
+      # sentence two lines above the call.
+      var region = ""
+      for line in body[start ..< stop].splitLines:
+        let hash = line.find('#')
+        region.add(if hash >= 0: line[0 ..< hash] else: line)
+        region.add('\n')
+      # POSITIVE CONTROL: the slice really is `initLayout`'s body and not an
+      # empty string a moved marker left behind.
+      check region.len > 1000
+      check region.contains("loadLayoutSafely(layout, initialLayout)")
+      # And nothing in it reaches `loadLayout` the unguarded way.
+      check not region.replace("loadLayoutSafely(", "").contains("loadLayout(")
       check body.contains("{.emit:") and body.contains("catch (e)")
