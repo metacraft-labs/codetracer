@@ -289,8 +289,22 @@ in
       enable = true;
       name = "check merge conflict markers";
       # Match exact conflict markers (7 chars), not RST-style headings like ==================
+      #
+      # ALL FOUR markers, and the fourth is the one that actually gets through.
+      # This repository is worked with `merge.conflictStyle = diff3`, which emits
+      # a FOURTH marker — `|||||||`, opening the merge-base section — between
+      # `<<<<<<<` and `=======`. A resolver that pattern-matches the familiar
+      # three-marker shape deletes the outer three, keeps the base section as if
+      # it were content, and leaves the `|||||||` line behind.
+      #
+      # That is not hypothetical: three separate stray `|||||||` lines reached
+      # `origin/dev` in `.agents/codebase-insights.txt` during 2026-09, from two
+      # different authors, and one of them dragged a duplicated paragraph of
+      # prose in with it. Every one of them passed this hook, because the hook
+      # looked for three markers out of four. A guard that covers the failure
+      # modes nobody hits is not a guard.
       entry = ''
-        bash -c 'set -e; rc=0; for f in "$@"; do [ -f "$f" ] || continue; if grep -En "^(<{7}|={7}|>{7})( |$)" "$f" >/dev/null 2>&1; then echo "Merge conflict markers in $f"; rc=1; fi; done; exit $rc' --
+        bash -c 'set -e; rc=0; for f in "$@"; do [ -f "$f" ] || continue; if grep -En "^(<{7}|\|{7}|={7}|>{7})( |$)" "$f" >/dev/null 2>&1; then echo "Merge conflict markers in $f"; rc=1; fi; done; exit $rc' --
       '';
       language = "system";
       pass_filenames = true;
