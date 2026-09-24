@@ -12,5 +12,5 @@
 
 836b57735f8a12fae37d7b6fe24a6e8dff76f8f90066d25d5ea12afe688bf2a9  src/frontend/viewmodel/plugin_host/plugin_api.nim
 0d8c5f494f33e2900362aa0077e633b9ccaac4c84d92fa9f3f5ef4ec6d1573ba  src/frontend/viewmodel/codetracer_plugin.nim
-2e087f20de705add8e0e448d773f826aaf976a64ffcc32d18e2cdbd3256f3e10  ci/test/plugin-reactive-boundary.sh
+6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86  ci/test/plugin-reactive-boundary.sh
 05f39b61011e038710d1d84f6a14e2156c783813a74149458bc417033a603cbc  ci/lib/nim-imports.sh

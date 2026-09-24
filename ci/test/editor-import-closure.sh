@@ -37,20 +37,10 @@
 # ---------------------------------------------------------
 #   SHARED  `nim_imports` (ci/lib/nim-imports.sh) — the extractor, where all
 #           six routes live.
-#   NOT YET `normpath`. **CORRECTED 2026-09-18 BY PLAT-29'S VERIFICATION PASS,
-#           which found this entry claiming a hoist that had not happened.** It
-#           read "SHARED … hoisted out of the two older gates", and the two
-#           older gates were never touched: `ci/lib/nim-closure.sh` is a THIRD
-#           copy and this gate is its only caller. The drift the milestone
-#           measured is real and is still there — `plugin-reactive-boundary.sh`
-#           returns a RELATIVE path for an absolute input and
-#           `sdk-facade-boundary.sh` does not — and `ci/lib/nim-closure.sh`
-#           carries the repaired spelling. So §30 is WORSE here than before,
-#           not better: one predicate in three places, one of them wrong.
-#           Adopting the shared copy in the two older gates is meaning-
-#           preserving in the plugin gate (it passes relative paths only) and
-#           NO arm quotes `normpath`'s body, so the change is cheap; it is not
-#           done here, and the residual says so.
+#   SHARED  `normpath` (ci/lib/nim-closure.sh) — hoisted 2026-09-23. It
+#           was a THIRD copy until then (PLAT-29's verification pass found
+#           this entry claiming a hoist that had not happened); both older
+#           gates now source it and carry no copy of their own.
 #   NOT     the table parser, the stdlib-spec test and the BFS. Four functions
 #           in `plugin-reactive-boundary.sh` have mutation arms quoting their
 #           bodies (P31, A1, A7 in PLAT-8's harness; G9, G10, G11 in PLAT-7's),
@@ -318,34 +308,33 @@ pragma_spans() {
 }
 
 # ---------------------------------------------------------------------------
-# The root set — THE DIRECTORY, not a list (§35)
+# The root set — THE DIRECTORY, not a list (§35), and ALL of it
 #
-# TWO WAYS IT IS NARROWER THAN THAT SENTENCE, both MEASURED by PLAT-29's
-# verification pass on 2026-09-18 against synthetic trees, and both recorded
-# here rather than left for a later pass to rediscover:
+# EVERY `.nim` UNDER THE EDITOR DIRECTORY, FOLLOWING SYMLINKS (`find -L`). Two
+# ways the first spelling (`find -maxdepth 1 -type f`) was narrower than the
+# sentence above were MEASURED by PLAT-29's verification pass on 2026-09-18
+# against synthetic trees, and both are closed here and planted by
+# `test_editor_async_closure.nim` (routes 8 and 9):
 #
-#   * `-type f` IS FALSE FOR A SYMLINK. A `.nim` symlink in this directory is
-#     not a root, so a module symlinked in from outside the tree is never
-#     scanned and never walked to. Reproduced: `editor/linked.nim ->
-#     ../lib/sneaky.nim` with `import std/asyncdispatch` in it, gate green.
-#   * `-maxdepth 1` STOPS AT THE DIRECTORY'S OWN FILES. A module under
-#     `editor/<sub>/` IS caught when a root imports it — the walk resolves it
-#     like any other edge, and that was reproduced too — but one reached only
-#     from OUTSIDE `editor/` is in neither the root set nor the closure.
+#   * `-type f` IS FALSE FOR A SYMLINK, so `editor/linked.nim ->
+#     ../lib/sneaky.nim` carrying `import std/asyncdispatch` was never a root
+#     and the gate was green. `-L` makes `-type f` true of a link to a file,
+#     and descends into a symlinked directory too.
+#   * `-maxdepth 1` stopped at the directory's own files, so a module under
+#     `editor/<sub>/` reached only from OUTSIDE `editor/` was in neither the
+#     root set nor the closure. The scope decision the pass left open —
+#     whether `editor/<sub>/x.nim` is part of the model — is taken: a file in
+#     the editor directory's tree is the model's, wherever it is imported
+#     from. A module that is not the model's does not belong in that tree.
 #
-# Neither is reachable in today's tree: `editor/` holds no symlink and no
-# subdirectory, which is why the gate is honest about the tree it grades. The
-# fix for the first is one predicate (`\( -type f -o -type l \)`); the second
-# is a scope decision — whether `editor/<sub>/x.nim` is part of the model —
-# that belongs to whoever first puts a file there. §32a is why neither was
-# taken in the verification pass that found them: changing what the root set
-# admits re-aims the five arms in `run-plat29-async-mutations.py` that are
-# pointed at this file, and a re-aimed arm has to be RE-RUN.
+# `-L` cannot loop: `find` detects a symlink cycle and reports it rather than
+# walking it (and the report goes to /dev/null with the rest of `find`'s
+# stderr, so a cycle costs a skipped directory, never a hang).
 # ---------------------------------------------------------------------------
 roots=()
 while IFS= read -r f; do
 	[ -n "${f}" ] && roots+=("${f}")
-done < <(find "${EDITOR_DIR}" -maxdepth 1 -type f -name '*.nim' 2>/dev/null | sort)
+done < <(find -L "${EDITOR_DIR}" -type f -name '*.nim' 2>/dev/null | sort)
 
 mapfile -t closure < <(
 	if [ "${#roots[@]}" -gt 0 ]; then editor_closure "${roots[@]}" | sort -u; fi

@@ -161,6 +161,8 @@ fi
 # hook runs without -x and cannot follow it.
 # shellcheck source=ci/lib/nim-imports.sh disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/nim-imports.sh"
+# shellcheck source=ci/lib/nim-closure.sh disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/nim-closure.sh"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -515,38 +517,11 @@ ui_path_exempt() {
 # `import-specs-analysable` check grading it exactly as before.
 # ---------------------------------------------------------------------------
 
-# normpath PATH — collapse `.` and `..` textually. No filesystem access, so it
-# works for paths that do not exist yet (which is what the synthetic-tree tests
-# need).
-normpath() {
-	local p="$1" out=() part
-	# An absolute input must stay absolute. The loop below drops empty
-	# components, and the leading empty component of "/a/b" is what makes it
-	# absolute — so without this the sibling-package paths came back relative,
-	# every relative import inside IsoNim (`../core/clock`, `batch`, `graph`)
-	# failed to resolve, and the walk silently entered only the modules that
-	# happened to be reachable by absolute-root lookup.
-	local lead=""
-	case "${p}" in
-	/*) lead="/" ;;
-	esac
-	local IFS='/'
-	for part in $p; do
-		case "${part}" in
-		"" | ".") continue ;;
-		"..")
-			if [ "${#out[@]}" -gt 0 ] && [ "${out[-1]}" != ".." ]; then
-				unset 'out[-1]'
-			else
-				out+=("..")
-			fi
-			;;
-		*) out+=("${part}") ;;
-		esac
-	done
-	local joined="${out[*]}"
-	printf '%s' "${lead}${joined}"
-}
+# normpath — SHARED, from `ci/lib/nim-closure.sh` (sourced beside
+# `nim-imports.sh` above). This gate carried its own copy until 2026-09-23,
+# and the copies had DRIFTED: `plugin-reactive-boundary.sh`'s returned a
+# RELATIVE path for an absolute input. One predicate, one function
+# (Verification-Harness-Traps §30).
 
 # resolve_module SPEC IMPORTER_PATH — repo-relative path of the module SPEC
 # resolves to, or empty when it is external (stdlib, isonim, a sibling
