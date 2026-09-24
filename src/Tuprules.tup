@@ -207,6 +207,37 @@ NIM_FFI_CACHE_IGNORE = (([A-Za-z]:)?[/\\].*[/\\]ctnw[/\\].*|([A-Za-z]:)?[/\\].*[
 WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/\\].*|.+[/\\]\.?cargo[/\\](registry|git|\.crates.*|\.package-cache.*|\.global-cache.*|bin|env)([/\\].*)?|.+[/\\]\.?cargo[/\\]\.[^/\\]+)
 
 NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
+
+# The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP beside every
+# binary it links: `<out dir>/macro_sourcemap_<out name>.json`, where
+# <out name> is the output file's name without its extension -- so
+# `bin/macro_sourcemap_ct.json` for `bin/ct`, and
+# `bin/macro_sourcemap_db-backend-record.json` for `bin/db-backend-record`.
+# It does so UNCONDITIONALLY (compiler/cgen.nim `cgenWriteModules`, fork rev
+# 0b5b5ec5, the one reprobuild's `nim-fork` package builds); `--sourcemap:on`
+# only decides whether the file has expansions in it. Stock Nim writes nothing.
+#
+# That is a side output tup was never told about, and since the `ci` / default
+# dev shells switched `nim` to the fork (ccbb85a0a, landed on dev 2026-09-20)
+# every tup build under them has failed the ct and db-backend-record jobs with
+#
+#   tup error: File '.../src/build-debug/bin/macro_sourcemap_ct.json' was
+#   written to, but is not in .tup/db. You probably should specify it as an output
+#
+# (desktop edge run 35974652142 and every launcher-recorder-e2e run since).
+#
+# It is an EXCLUSION, not a declared output, on purpose. A declared output is a
+# promise the command writes the file, and tup fails any command that does not
+# ("Expected to write to file ... but didn't"): the Windows lane (win32) and any
+# build whose `nim` is stock 2.2.x would break instead. An exclusion tells tup
+# to accept the write when it happens, record the file as ignored, and move it
+# into place like any other output (tup's own t5091/t5092 cover exactly this),
+# so it holds whichever compiler the shell provides. Nothing in the tup graph
+# reads the file; it exists for recording `ct` itself with CodeTracer.
+#
+# Deliberately NOT added to `!nim_tester`, which DECLARES macro_sourcemap_%B.json
+# as an output: tup refuses to exclude a file that a rule generates.
+NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
 # Cargo writes CACHEDIR.TAG (and other metadata) into a temp directory whose
 # name is `<target_dir><RANDOM>` (e.g. `db_backend_targetF5RTUl/`) while
 # preparing the target dir, then atomically renames it to `<target_dir>`.
@@ -304,12 +335,35 @@ js %f |> %B.js
 --out:%o\
 js %f |> %B.js
 
+# The three `--sourcemap:on` rules below name an explicit `--nimcache` under
+# /tmp/ct-nim-cache, the same place every C rule and `!nim_test_js` already use,
+# and carry $(NIM_SIDE_OUTPUTS_IGNORE) for it.
+#
+# Without one, the JS backend's nimcache is `<out dir>/nimcache` (Nim's
+# `getNimcacheDir`: backendJs with no --nimcache), i.e. `src/build-debug/nimcache`
+# inside the tup variant. Stock Nim never touches it for a JS build. The
+# CodeTracer Nim fork does: under `--sourcemap:on` its macro-expansion recorder
+# (compiler/sem.nim, fork rev 0b5b5ec5) calls `createDir(nimcache)` for every
+# macro expansion it records, and tup refuses a directory a command creates and
+# leaves behind:
+#
+#   tup error: Directory '.../src/build-debug/nimcache' was created, but not
+#   subsequently removed. Only temporary directories can be created by commands.
+#
+# Those are the three `nimcache` failures of desktop run 35974652142, one each
+# for index.js, server_index.js and subwindow.js (`!nim_js` passes no
+# --sourcemap and never hit it). Outside the tup tree the directory is invisible
+# to tup on Linux (its FUSE mount sees only the tree) and ignored on Windows (the
+# exclusion), and stock Nim does not create it at all. One directory per rule,
+# because index.nim is compiled twice (index.js, server_index.js) and the two
+# may run concurrently.
 !nim_node_index = |> ^ %f^ $(NIM_SELECTED)\
 -d:ctIndex\
 -d:nodejs\
 --sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_node_index_js\
 --out:%o\
-js %f |> %B.js %B.js.map
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !nim_node_subwindow = |> ^ %f^ $(NIM_SELECTED)\
 -d:chronicles_enabled=off\
@@ -317,16 +371,18 @@ js %f |> %B.js %B.js.map
 --debugInfo:on\
 --lineDir:on\
 --sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_node_subwindow_js\
 --out:%o\
-js %f |> %B.js %B.js.map
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !nim_node_index_server = |> ^ %f^ $(NIM_SELECTED)\
 -d:ctIndex\
 -d:server\
 -d:nodejs\
 --sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_node_index_server_js\
 --out:%o \
-js %f |> %B.js %B.js.map
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !codetracer_shell = |> $(NIM_SELECTED)\
 -d:nodejs\
@@ -388,7 +444,7 @@ endif
 $(DYNLIB_OVERRIDE_FLAGS) \
 --nimcache:/tmp/ct-nim-cache/%B_c\
 --out:%o\
-c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
 # Shared flags for CodeTracer entrypoint binaries (ct, db-backend-record).
 CODETRACER_FLAGS = \
@@ -409,7 +465,7 @@ $(DYNLIB_OVERRIDE_FLAGS)
 $(CODETRACER_FLAGS) \
 --nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
 --out:%o\
-c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
 # CodeTracer binary with BPF capabilities (ct).
 # BPF capabilities (cap_bpf+cap_perfmon+cap_dac_read_search) are applied as a
@@ -424,7 +480,7 @@ $(CODETRACER_FLAGS) \
 --nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
 --out:%o\
 c %f\
-|> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
+|> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
 !nim_tester = |> ^ %f^ $(NIM_SELECTED) \
 --nimcache:/tmp/ct-nim-cache/tester \
