@@ -431,7 +431,7 @@ const
 # already reports as `LangUnknown` beside `langRetiredName` -- reaches it as
 # such.  `json_serialization`'s reader accepts an enum as int OR string, so
 # nothing that reads an encoded `Trace` back had to change.  `calltraceMode`
-# still crosses as an integer (its renderer map is LRS-6's).
+# crossed as an integer until LRS-6 opted it in too (below).
 serializesAsTextInJson(Lang)
 
 # `Trace.approach` crosses the SAME hop and for the same reason must not cross
@@ -440,6 +440,26 @@ serializesAsTextInJson(Lang)
 # `ct trace-metadata` -> Electron hop, exactly as `Lang` above.  The renderer
 # decodes it in `src/frontend/trace_metadata.nim`.
 serializesAsTextInJson(RecordingApproach)
+
+# `Trace.calltraceMode` is the third enum on the same hop, and the last one
+# that crossed it as `ord(CalltraceMode)` (LRS-6, 2026-09-23).  LRS-4 found it
+# while collecting its replay evidence -- `ct trace-metadata` printed
+# `"calltraceMode":3` beside the newly named `"lang"` -- and left it, because
+# the renderer still decoded it with a hand-written JS object literal
+# (`var MODE = { NoInstrumentation:0, … }`).  That map ran only for a STRING,
+# so for as long as the hop carried the integer it was dead code, and the
+# integer went through `cast[Trace]` unchecked: the same shape the `LANG` map
+# had before LRS-4.  With this line the hop carries the name, and the
+# renderer decodes it with `parseEnum[CalltraceMode]`
+# (`src/frontend/trace_metadata.nim`), so neither side holds a second copy of
+# the ordinals.  The line sits HERE for the reason given above for `Lang`: a
+# rule declared downstream of this module is ignored, the module doing the
+# `Json.encode` included.  `trace_index_migration_test.nim` pins the
+# behaviour -- every member encodes as its name and no ordinal appears --
+# which is the check that a misplaced rule would fail.  The persisted column
+# was already text (`$calltraceMode`, read back by `loadCalltraceMode`), so
+# nothing on disk changes.
+serializesAsTextInJson(CalltraceMode)
 
 proc langToColumnValue*(lang: Lang): string =
   ## The persisted form of ``lang`` since schema version **2**: the four-axis

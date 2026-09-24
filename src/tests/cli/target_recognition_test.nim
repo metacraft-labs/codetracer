@@ -747,6 +747,33 @@ suite "LRS-2P: `codetracer.target-assessment.v1`, embedded and version-skewed":
     check KindFoundryProject in verdict.diagnostic
     check "ct-native-replay/0.9.0" in verdict.diagnostic
 
+  test "K2: a wasm crate on the wire -- cargo-project + wasm-cargo-project -- is ONE target, not a collision (LRS-6)":
+    # The latent inconsistency LRS-2P's review registered: `understand`
+    # refused ANY two known kinds, so this document -- the kind set
+    # `assessFolderKind` itself builds for a wasm crate -- made `ct record`
+    # exit 1 while the identical set built LOCALLY proceeded.  The two kinds
+    # name one toolchain (`tcCargo`) and one ISA (`tiWasm`), so they dispatch
+    # alike and the verdict is `krCompatible`: it proceeds, and it prints
+    # nothing, exactly as the local path prints nothing.
+    let outcome = parseRecognitionDocument(
+      assessmentDocument("/tmp/wasm-crate",
+                         @[KindCargoProject, KindWasmCargoProject]))
+    check outcome.status == rsOk
+    let a = outcome.recognition.assessment
+    check a.kind.specificKinds == @[KindCargoProject, KindWasmCargoProject]
+    let verdict = a.kind.understand(UnderstoodSpecificKinds, a.producer)
+    check verdict.status == krCompatible
+    check verdict.ok
+    check verdict.diagnostic == ""
+    check verdict.candidates == @[KindCargoProject, KindWasmCargoProject]
+    # No ONE kind is picked for it: that would be the silent pick K2 forbids.
+    check verdict.token == ""
+    # And the local derivations answer the same set without a clash, which is
+    # the parity this case exists for.
+    check toolchainAmbiguity(a.kind).len == 0
+    check targetIsaAmbiguity(a.kind).len == 0
+    check toolchainForKind(a.kind) == tcCargo
+
   test "an axis value this build does not know degrades and is RECORDED":
     # Unlike the family, the four axes are open at the value level: Q5's
     # consumer obligation says an unknown enum value is never a parse error.

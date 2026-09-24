@@ -276,6 +276,15 @@ type
     krAmbiguous   ## it understood TWO OR MORE; `candidates` names them all and
                   ## the consumer must refuse or resolve the pair itself — the
                   ## protocol never picks one for it (rule K2)
+    krCompatible  ## it understood TWO OR MORE and they DISPATCH ALIKE: one
+                  ## toolchain and one target ISA between them
+                  ## (`kindsDispatchAlike`), so they are one target described
+                  ## twice — `cargo-project` beside `wasm-cargo-project` is a
+                  ## wasm crate — and not a collision.  Produced only by
+                  ## `understand`, which is the consumer "resolving the pair
+                  ## itself" that design §9.3 allows; `resolveKind` never
+                  ## answers it, because the protocol never breaks a tie
+                  ## (LRS-6, 2026-09-23)
     krFamilyOnly  ## it understood no specific kind and fell back to the family
     krRefused     ## the family is `tfUnassessable`: the producer forbade
                   ## degradation and the consumer must refuse
@@ -506,15 +515,71 @@ type
     ## called `resolveKind` and ignored the `skipped` field looked correct.
     status*: KindResolutionStatus
     ok*: bool
-      ## May the consumer act on `token`?  False for `krAmbiguous` (rule K2)
-      ## and `krRefused` (rule K4) — both are refusals.
+      ## May the consumer act on the verdict?  False for `krAmbiguous` (rule
+      ## K2) and `krRefused` (rule K4) — both are refusals.  True for
+      ## `krCompatible`: the kinds agree on everything this build dispatches
+      ## on.
     token*: string
       ## The specific kind, or the family token when degrading.  Empty when
-      ## `ok` is false.
+      ## `ok` is false, and for `krCompatible`, where there is no ONE kind to
+      ## name: the consumer acts on all of `candidates`, and picking one of
+      ## them for this field would be the silent pick rule K2 forbids.
+    candidates*: seq[string]
+      ## `krAmbiguous` and `krCompatible`: every specific kind the consumer
+      ## knows, in the producer's order.  Empty otherwise.
     diagnostic*: string
-      ## **Non-empty for every outcome that is not an exact, undegraded
-      ## match.**  Printing it is not optional: it is the degradation or the
-      ## refusal, and it always names the producer.
+      ## **Non-empty for every outcome that is not an exact or compatible,
+      ## undegraded match.**  Printing it is not optional: it is the
+      ## degradation or the refusal, and it always names the producer.
+      ## (`krCompatible` prints nothing, exactly as the LOCAL assessment
+      ## prints nothing for the same kind set -- `record_assessment.nim`
+      ## raises a diagnostic only for a toolchain or ISA clash.)
+
+func targetIsaAmbiguity*(kind: TargetKind): seq[string]
+func toolchainAmbiguity*(kind: TargetKind): seq[string]
+  # Forward declarations: both are defined below, beside the derivations
+  # whose disagreement they report, and `kindsDispatchAlike` is built on them.
+
+func kindsDispatchAlike*(kinds: openArray[string], family: TargetFamily): bool =
+  ## Do the specific kinds `kinds` DISPATCH ALIKE in this build -- is every
+  ## decision this build derives from a kind the same whichever of them it
+  ## is derived from?  Those decisions are the toolchain (`toolchainForKind`)
+  ## and the target ISA (`targetIsaForAssessment`); a set that names two of
+  ## either is a collision, and anything else is one target described more
+  ## than once.
+  ##
+  ## **This is the same test the LOCAL assessment applies**
+  ## (`src/ct/trace/record_assessment.nim` refuses exactly when
+  ## `targetIsaAmbiguity` or `toolchainAmbiguity` is non-empty), which is the
+  ## point: until LRS-6 `understand` refused ANY two known kinds, so a
+  ## producer that reported a wasm crate as `cargo-project` +
+  ## `wasm-cargo-project` -- the kind set `assessFolderKind` itself builds for
+  ## one -- would have been refused by `ct record` while the identical set
+  ## built locally proceeded.  One rule, reached from both places, is what
+  ## keeps the two paths from disagreeing again.
+  ##
+  ## The language a kind implies is not a third test because no two kinds
+  ## this build understands share a toolchain and differ in language
+  ## (`langForProjectKind` in `src/ct/utilities/language_detection.nim` maps
+  ## `cargo-project` and `wasm-cargo-project` -- the only toolchain-sharing
+  ## pair -- both to Rust), and that function lives above this module's floor
+  ## (`src/ct`), where the JS front end cannot reach it.
+  ##
+  ## **A gap in the shared rule, recorded rather than closed (LRS-6).**  Of
+  ## the 91 pairs of understood kinds, 11 pass this test: the wasm crate, and
+  ## `wasm-module` beside each of the ten project kinds (`noir-project` +
+  ## `wasm-module` -> `tcNargo` / `tiWasm`).  The ten are not one target
+  ## described twice -- a project kind names a toolchain and no ISA, and
+  ## `wasm-module` names an ISA and no toolchain, so neither clash test can
+  ## see that they disagree.  They are unreachable on BOTH paths today:
+  ## `wasm-module` is assessed only for a FILE and every project kind only for
+  ## a DIRECTORY (`record_assessment.assessKind`; the native-backend producer
+  ## emits no project kind at all).  Closing it means teaching the rule which
+  ## family each kind belongs to, which changes the local assessment too; it
+  ## is recorded in the LRS-6 tracker entry instead of being changed here.
+  let together = TargetKind(specific: @kinds, family: family)
+  toolchainAmbiguity(together).len == 0 and
+    targetIsaAmbiguity(together).len == 0
 
 func understand*(k: TargetKind, understood: openArray[string],
                  producer: string): KindVerdict =
@@ -525,6 +590,12 @@ func understand*(k: TargetKind, understood: openArray[string],
   ## consumer's own vocabulary — passed in, exactly as `resolveKind` takes it,
   ## so a test can drive a build that knows nothing, which is the version-skew
   ## case that has to work.
+  ##
+  ## Two or more understood kinds are refused only when they would DISPATCH
+  ## DIFFERENTLY (`kindsDispatchAlike`); a set that agrees on toolchain and
+  ## ISA is `krCompatible` and proceeds, silently, as the local assessment
+  ## does.  This is the consumer resolving the pair itself, which §9.3 allows
+  ## and `resolveKind` deliberately does not do.
   let r = k.resolveKind(understood)
   case r.status
   of krExact:
@@ -533,8 +604,18 @@ func understand*(k: TargetKind, understood: openArray[string],
     KindVerdict(status: r.status, ok: true, token: r.token,
                 diagnostic: r.degradationDiagnostic(producer))
   of krAmbiguous:
-    KindVerdict(status: r.status, ok: false, token: "",
-                diagnostic: r.ambiguityDiagnostic(producer))
+    if kindsDispatchAlike(r.candidates, k.family):
+      KindVerdict(status: krCompatible, ok: true, token: "",
+                  candidates: r.candidates, diagnostic: "")
+    else:
+      KindVerdict(status: r.status, ok: false, token: "",
+                  candidates: r.candidates,
+                  diagnostic: r.ambiguityDiagnostic(producer))
+  of krCompatible:
+    # `resolveKind` never answers this (see the enum); handled rather than
+    # asserted so a future change there is still a correct verdict.
+    KindVerdict(status: r.status, ok: true, token: "",
+                candidates: r.candidates, diagnostic: "")
   of krRefused:
     KindVerdict(status: r.status, ok: false, token: "",
                 diagnostic: r.unassessableDiagnostic(producer))

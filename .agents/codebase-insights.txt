@@ -5554,6 +5554,9 @@ together and rerun that suite.
 - Both editor surfaces build rows only via `editor_surface.projectedRows` ->
   `row_projection.editorRowsOf` (RowProjection.firstLine/requested for the
   debug window).
+- WINDOWS, test isolation: Nim's `getHomeDir` reads `USERPROFILE`, not `HOME`, so a suite that redirects only `HOME` / `XDG_DATA_HOME` for a helper subprocess lets that helper write the developer's REAL `%USERPROFILE%\.local\share\codetracer\trace_index.db` (happened 2026-09-23: 13 rows and a schema 1 -> 2 migration). Fixed 2026-09-24 (LRS-6 review) in `trace_index_test`, `trace_index_migration_test`, `cross_machine_replay_test` and `recording_folder_layout_test`: each also sets `USERPROFILE` / `LOCALAPPDATA` / `APPDATA` in a case-insensitive env table. Pinned by `trace_index_test` (the helper's `profile` scenario must resolve inside its scratch dir, plus a source sweep: any `*_test.nim` setting `env["HOME"] =` must set `env["USERPROFILE"] =`). New suites that spawn a child with a scratch home must do the same.
+- WINDOWS, pipes: `streams.readAll` on an `osproc` pipe stops at the first SHORT read, and a Windows pipe returns each child write separately, so `readAll` silently keeps only the first write (a one-line stderr came back as `cann`). Read until `readData` returns 0 instead (`readToEof` in `src/ct/utilities/target_recognition.nim` and the four suites above). POSIX never shows it.
+- WINDOWS, MAX_PATH: `trace_index_migration_test`'s legacy-migration case does `VACUUM INTO <db>.pre-lang-name-migration.bak`; under a deep TEMP (e.g. a Claude scratchpad) that path passes 260 chars and SQLite reports "unable to open database file". Run with a short TMP/TEMP. Also, `ct record` on Windows puts the trace directory under `%LOCALAPPDATA%\codetracer\` even when the index is isolated.
 
 ## `src/frontend/ui/auto_hide.nim` DOES compile and run under `nim js -d:nodejs`
 

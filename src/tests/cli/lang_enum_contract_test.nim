@@ -240,6 +240,10 @@ const
   RepoRoot = ThisFile.parentDir.parentDir.parentDir.parentDir
     ## src/tests/cli/<this> -> src/tests/cli -> src/tests -> src -> <repo>
   TraceMetadataPath = RepoRoot / "src" / "frontend" / "trace_metadata.nim"
+  CalltraceModeDeclPath = RepoRoot / "src" / "common" / "common_types" /
+    "debugger_features" / "call.nim"
+    ## Declares `CalltraceMode` on one line; property 2's MODE-map check
+    ## reads the member names from it.
   CtLangPath = RepoRoot / "libs" / "ct-lang" / "src" / "lib.rs"
     ## The single canonical Rust `Lang`.
   CtLangManifestPath = RepoRoot / "libs" / "ct-lang" / "Cargo.toml"
@@ -422,9 +426,70 @@ suite "trace_metadata.nim decodes lang by the enum's names, not a hand-written o
   test "the renderer's normalisation goes through decodeLangName":
     let source = codeLinesOnly(readFile(TraceMetadataPath))
     check source.contains("decodeLangName(")
-    # …and the MODE map is still there, deliberately: pinning or deleting it is
-    # LRS-6's (recorded in Language-Enum-Ordinal-Contracts.md as unpinned).
-    check source.contains("var MODE = {")
+
+  test "the hand-written JS MODE map is gone too, and calltraceMode is decoded by parseEnum (LRS-6)":
+    # The last hand-written ordinal map in this file: `var MODE = {
+    # NoInstrumentation:0, … }` decoded `Trace.calltraceMode`, fell back
+    # silently to `FullRecord` on a miss, and had no test.  It was also dead,
+    # because the hop carried the integer.  LRS-6 put the name on the hop
+    # (`serializesAsTextInJson(CalltraceMode)`, asserted below and exercised
+    # in `trace_index_migration_test.nim`) and deleted the map in favour of
+    # `parseEnum[CalltraceMode]`.  Code lines only, as above: the block
+    # comment is allowed to name what was deleted.
+    let source = codeLinesOnly(readFile(TraceMetadataPath))
+    check(not source.contains("var MODE = {"))
+    if source.contains("var MODE = {"):
+      checkpoint(
+        "`var MODE = {` is back in " & TraceMetadataPath & ".  LRS-6 deleted " &
+        "the hand-written CalltraceMode ordinal map; decode with " &
+        "`parseEnum[CalltraceMode]`, which reads the ordinal from the enum.")
+    # The member names are read from the enum's own declaration rather than
+    # listed here, so this check cannot go stale beside the enum it guards.
+    # (This suite does not import `common/types`; the renderer's field type is
+    # the one declared in `call.nim`.)
+    var modeNames: seq[string] = @[]
+    for line in readFile(CalltraceModeDeclPath).splitLines:
+      let at = line.find("CalltraceMode* {.pure.} = enum")
+      if at >= 0:
+        for name in line[at + "CalltraceMode* {.pure.} = enum".len .. ^1].split(','):
+          if name.strip.len > 0:
+            modeNames.add(name.strip)
+    checkpoint("CalltraceMode members parsed from " & CalltraceModeDeclPath &
+               ": " & $modeNames)
+    # Anti-vacuity: the parse found the declaration, not an empty line.
+    check "NoInstrumentation" in modeNames
+    check "FullRecord" in modeNames
+    for mode in modeNames:
+      check(not source.contains(mode & ":"))
+    check source.contains("parseEnum[CalltraceMode](")
+    # …and WITHOUT a default argument (LRS-6's review, 2026-09-24).
+    # `parseEnum[CalltraceMode](name, CalltraceMode.FullRecord)` is the
+    # deleted map's defect in one call: an unknown name becomes a confident,
+    # valid-looking mode and nothing says so.  `CalltraceMode` has no
+    # "unknown" member to decode to, so the renderer catches the miss and
+    # prints a warning naming the value before it guesses `FullRecord`.
+    const call = "parseEnum[CalltraceMode]("
+    var calls = 0
+    var at = source.find(call)
+    while at >= 0:
+      inc calls
+      let argsStart = at + call.len
+      let close = source.find(')', argsStart)
+      check close > argsStart
+      if close > argsStart:
+        let args = source[argsStart ..< close]
+        if ',' in args:
+          checkpoint("`" & call & args & ")` in " & TraceMetadataPath &
+            " has a default argument: an unknown calltraceMode would decode " &
+            "SILENTLY.  Call it with the name alone and warn in the " &
+            "`except ValueError` branch.")
+        check ',' notin args
+      at = source.find(call, at + call.len)
+    check calls >= 1
+    check source.contains("except ValueError:")
+    check source.contains("CalltraceMode this build knows")
+    let traceIndex = codeLinesOnly(readFile(TraceIndexPath))
+    check traceIndex.contains("serializesAsTextInJson(CalltraceMode)")
 
   test "ct trace-metadata puts the NAME on the hop, so the renderer's decoder is what runs":
     # Found while collecting LRS-4's replay evidence: the vendored

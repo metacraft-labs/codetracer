@@ -86,6 +86,21 @@ let helperBin = compileHelper()
 proc makeTmpHome(name: string): string =
   createTempDir("ct-xmr-" & name & "-", "")
 
+proc readToEof(s: Stream): string =
+  ## Everything the helper wrote, up to end of file.  Not `streams.readAll`,
+  ## which stops at the first SHORT read: a Windows pipe returns each of the
+  ## child's writes separately, so `readAll` kept only its first one
+  ## (LRS-6's review, 2026-09-24).  POSIX pipe streams fill the buffer first.
+  result = ""
+  var buffer {.noinit.}: array[4096, char]
+  while true:
+    let n = s.readData(addr buffer[0], buffer.len)
+    if n <= 0:
+      break
+    let start = result.len
+    result.setLen(start + n)
+    copyMem(addr result[start], addr buffer[0], n)
+
 proc runScenario(bin: string, scenarioArgs: openArray[string]; homeDir: string):
     tuple[ok: bool, stdoutStr: string, stderrStr: string] =
   ## Run the helper at ``bin`` with the env scrubbed to ``homeDir`` so
@@ -94,12 +109,21 @@ proc runScenario(bin: string, scenarioArgs: openArray[string]; homeDir: string):
   ## ``CT_LD_LIBRARY_PATH`` onto ``LD_LIBRARY_PATH`` so SQLite can be
   ## dlopen-ed inside the Nix dev-shell — same recipe as the sibling
   ## ``trace_index_test.nim`` orchestrator.
-  var env = newStringTable(modeCaseSensitive)
+  # Case-INsensitive on Windows, where `UserProfile` and `USERPROFILE` are
+  # one variable: an override must replace the inherited entry.
+  var env = newStringTable(
+    when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
   env["XDG_DATA_HOME"] = homeDir
   env["TMPDIR"] = homeDir
   env["HOME"] = homeDir
+  # WINDOWS: Nim's `getHomeDir` -- and so `paths.codetracerTraceDir` and the
+  # trace index -- reads `USERPROFILE`, not `HOME`; without these the helper
+  # wrote into the developer's REAL profile (LRS-6's review, 2026-09-24).
+  env["USERPROFILE"] = homeDir
+  env["LOCALAPPDATA"] = homeDir / "AppData" / "Local"
+  env["APPDATA"] = homeDir / "AppData" / "Roaming"
   let ctLd = getEnv("CT_LD_LIBRARY_PATH")
   if ctLd.len > 0:
     let existing = getEnv("LD_LIBRARY_PATH")
@@ -115,8 +139,8 @@ proc runScenario(bin: string, scenarioArgs: openArray[string]; homeDir: string):
     env = env,
     options = {})
   defer: p.close()
-  let stdoutStr = p.outputStream.readAll()
-  let stderrStr = p.errorStream.readAll()
+  let stdoutStr = p.outputStream.readToEof()
+  let stderrStr = p.errorStream.readToEof()
   let code = p.waitForExit()
   (code == 0, stdoutStr, stderrStr)
 
