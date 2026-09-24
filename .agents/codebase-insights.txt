@@ -5822,3 +5822,82 @@ Two traps in the same area, both live:
   conjunction, so reordering them is free and it drops the scan to at most once
   per line instead of once per header per line. Not done yet — it wants its own
   change and its own `just test-vm-native` run.
+- 2026-09-24: **The Test Results pane has TWO hosts and they are not symmetric,
+  and a new module under `viewmodel/` reddens `test_editor_change_algebra.nim`
+  by construction.** Two things worth knowing before touching this area (M50,
+  issue #748):
+  * The pane's runner is installed by a HOST, and until now the only host was
+    inside `ui_js.startWebRenderer` — which the desktop never enters. The
+    desktop half is now `viewmodel/viewmodels/desktop_test_host.nim`, installed
+    from `ui_js.nim`'s `if inElectron:` block, with `renderer.runTests` and
+    `editor.settleEditorTestRun` injected so the state machine runs headlessly.
+    The settle travels on `CODETRACER::test-run-settled`, sent by ALL FIVE exits
+    of `index/traces.onRunTest` from four send sites (the success send is
+    hoisted above the `newWindow` / `loadExistingRecord` branch so both arms
+    are covered). The contract is spec'd at
+    `codetracer-specs/GUI/Core-Panes/Test-Results-Pane.md`.
+    `startDesktopTestRun` calls `beginRun` BEFORE dispatching so a synchronous
+    refusal has a run to unwind, which makes an exception out of the dispatch
+    the one remaining way to be begun-but-never-ended — hence the bare
+    `try/except` around it. Keep that ordering and that guard together; either
+    alone is a stuck spinner.
+    **`ct record-test` exits 0 for a test that ran and FAILED** (`src/ct/trace/
+    record.nim`: `quit(0)` on a recording, `quit(1)` on none), so the desktop
+    arm reports a RECORDING and must never emit a `test-finished` with a status.
+    And `ct test run` is REFUSED inside the `ct` binary (`src/ct_test/
+    ct_test.nim`: `ct` is `--mm:refc`, the parallel runner shares sequences
+    across threads), which is why the pane's ▶ is still nil on the desktop.
+  * `test_editor_change_algebra.nim`'s `ExpectedAssertions` counts three
+    assertions per production module under `viewmodel/`, derived from the tree
+    at compile time. **Adding any module there makes that suite red** with
+    `countedAssertions was N … ExpectedAssertions was N-3`; the fix is to bump
+    the constant with a dated note, as its own header instructs. It has been hit
+    at least five times now.
+  * Nim identifiers are style-insensitive, so `var desktopTestHost` collides
+    with `import .../desktop_test_host` — `Error: redefinition`. Any
+    `var fooBarBaz` next to an `import foo_bar_baz` has the same problem.
+  * **Type-checking the index by hand needs `-d:nimNoLentIterators`, and that
+    is an invocation gap rather than a product defect.**
+    `nim -d:ctIndex -d:nodejs js src/frontend/index.nim` fails on `dev` at
+    `547497aa1` with `'filePath' is of type <lent cstring> which cannot be
+    captured` (raised from `lib/js/jsffi.nim(441, 16)`, declared at
+    `index/ipc_subsystems/acp_ipc.nim(786, 9)`), with and without unrelated
+    changes. Do NOT file that as a bug: `src/Tuprules.tup`'s
+    `NIM_COMMON_FLAGS` already carries `-d:nimNoLentIterators`, and
+    `!nim_node_index` — the rule that actually builds `index.js` — goes through
+    `$(NIM_SELECTED)`, so the real build has never seen this error. The lesson
+    generalises: a bare `nim c`/`nim js` of a file this repo builds under Tup
+    is missing the whole of `NIM_COMMON_FLAGS`, so read the rule in
+    `src/Tuprules.tup` before believing a compile failure you reproduced by
+    hand.
+- 2026-09-24: **A shell without zstd's `-isystem` turns `just test-vm-native`
+  into EIGHT fake regressions, all in `src/tests/gui/tests/request-panel/`.**
+  The real error is `fatal error: 'zstd.h' file not found`, from
+  `codetracer-trace-format-nim`'s `zstd_bindings.nim` / `span_stream.nim`; the
+  lane reports it only as `COMPILE ERROR` plus a 900-character clang command
+  line, so it reads as eight files this change broke. The mechanism is in the
+  repo's own `config.nims`: it scans `NIX_CFLAGS_COMPILE` for an `-isystem`
+  whose path contains `zstd` and re-emits it as `--passC`. No such token, no
+  header. Measured at `547497aa1` — the same eight fail at base, so **A/B one
+  of them before believing any request-panel red.** The remedy inside a shell
+  that is missing it:
+
+      export NIX_CFLAGS_COMPILE="$NIX_CFLAGS_COMPILE -isystem <zstd-dev>/include"
+      export NIX_LDFLAGS="$NIX_LDFLAGS -L<zstd>/lib"
+
+  and the durable one is to run the lane from the dev shell (`direnv exec .`
+  / `nix develop '.?submodules=1'`), which supplies the token.
+- 2026-09-24: **`just test-vm-*` recipes run `vm-test-prereqs` BEFORE the `tee`,
+  so a poll on `test-logs/test-vm-<lane>.log` matches the PREVIOUS run's summary
+  for the first minute.** Every lane is written `test-vm-js: vm-test-prereqs`,
+  and `just` runs that dependency to completion in its own process before the
+  recipe body starts. The body's first act is
+  `exec > >(tee test-logs/test-vm-<lane>.log)`, which truncates on open — but
+  `build-tailwind.sh` has already burned a minute by then, so
+  `until grep -q '<lane>: .* file(s) passed' test-logs/test-vm-<lane>.log`
+  fires immediately against the stale file and hands you last session's
+  numbers, which look exactly like a plausible result.
+  This happened here: a `vm-js` "result" of `84 passed / 6 failed / 2140 cases`
+  was read from a log the running lane had not yet truncated. Wait on the
+  PROCESS (the background job's own exit), not on the log's contents, or delete
+  the log before starting the lane.

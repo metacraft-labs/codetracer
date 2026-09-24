@@ -170,12 +170,17 @@ proc runButtonTitle*(vm: TestResultsVM): string =
   ## WHY it is disabled, in the tooltip — the three cases are different
   ## problems with different remedies and a single greyed control that said
   ## nothing would make all three look like the same dead affordance.
+  ##
+  ## The two fixed sentences are the view-model's constants and not literals
+  ## here: `RunInProgressText` is also what the per-row controls say in the
+  ## same state, and `NoRunHostText` is what `desktop_test_host` returns when
+  ## it is built without a dispatch. One string each, one place each.
   if vm.inFlight.val:
-    "A test run is already in progress"
+    RunInProgressText
   elif vm.runAbsence.val.len > 0:
     vm.runAbsence.val
   elif vm.runTests.val.isNil:
-    "No host in this build can run the tests"
+    NoRunHostText
   else:
     "Run the tests (nargo test)"
 

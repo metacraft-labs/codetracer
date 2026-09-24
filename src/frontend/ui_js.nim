@@ -56,6 +56,11 @@ import
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm, point_list_vm],
+  # THE DESKTOP TEST-RUNNER HOST (`GUI/Core-Panes/Test-Results-Pane.md` §4).
+  # Imported unconditionally: it is backend-agnostic by construction — its two
+  # effects are injected — and compiling it on both arms is what keeps the
+  # renderer lanes checking it.
+  viewmodel/viewmodels/desktop_test_host,
   # `electron_presence` supplies `inElectron`, which the two `if inElectron:`
   # blocks at the bottom of this file read to choose an IPC transport.
   #
@@ -4425,6 +4430,41 @@ proc onNs9PanesConstraints(
   constraints.constraintsVMInstance.setReport(
     parseNargoInfoJson($response.info, $response.provenance))
 
+# ---------------------------------------------------------------------------
+# THE DESKTOP TEST-RUNNER HOST
+#
+# `GUI/Core-Panes/Test-Results-Pane.md` §4. The web arm's equivalent lives
+# inside `startWebRenderer` below, which the desktop never enters — which is
+# why, before this, every desktop Run-test click armed a spinner nothing could
+# stop and left the pane exactly as it was (issue #748).
+#
+# The host itself is `viewmodel/viewmodels/desktop_test_host.nim`, with its two
+# effects injected, so *does a run that started reach `endRun`, and does the
+# editor get told* is assertable in a headless lane. Installed at the bottom of
+# this file, in the `if inElectron:` block; nil in every other build, which is
+# what the guards below read.
+# ---------------------------------------------------------------------------
+
+var desktopTestRunHost: DesktopTestHost
+
+proc onTestRunSettled(
+    sender: js,
+    response: jsobject(recordingId=cstring, recordedAt=cstring,
+                       errorMessage=cstring)) =
+  ## `index/traces.onRunTest` answered — on EVERY one of its exits.
+  ##
+  ## This is the message the desktop never had. `CODETRACER::failed-record`
+  ## carries only the error arm, is sent by every recording and build failure
+  ## in `index/traces.nim`, and the Test Results pane subscribes to none of it;
+  ## a settle keyed on it would fire for re-records that have nothing to do
+  ## with a test.
+  if desktopTestRunHost.isNil:
+    return
+  desktopTestRunHost.settleDesktopTestRun(
+    recordingId = $response.recordingId,
+    recordedAtText = $response.recordedAt,
+    errorMessage = $response.errorMessage)
+
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
   let data = ident("data")
@@ -4737,6 +4777,9 @@ proc configureIPC(data: Data) =
     "no-trace"
     "ns9-panes-catalog"
     "ns9-panes-constraints"
+    # WHAT SETTLES A DESKTOP TEST RUN. See `onTestRunSettled` and
+    # `GUI/Core-Panes/Test-Results-Pane.md` §5.
+    "test-run-settled"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).
@@ -7333,3 +7376,49 @@ if inElectron:
     configureIPC(data)
     configure(data)
     cast[JsObject](dom.window)["__CODETRACER_DATA__"] = data.toJs
+
+    # THE DESKTOP TEST-RUNNER HOST, and this is the "elsewhere" the Electron
+    # arm was told it may point at (`test_results_vm.nim`, "`runTests` is the
+    # affordance the absence used to stand in for"). It had never been written,
+    # so `beginRun`, `endRun` and `editor.settleEditorTestRun` had exactly one
+    # caller between them and all three were inside `startWebRenderer`.
+    #
+    # `GUI/Core-Panes/Test-Results-Pane.md` §4 defines what goes here; §4.3
+    # states, as a stated gap rather than as silence, why the pane's ▶ is still
+    # left disabled on this arm.
+    #
+    # INSTALLED AFTER `configure`, for the reason `startWebRenderer` gives
+    # about its own order: `configure` builds the panel services a mounted
+    # surface goes on to use, and `initTestResultsVM` mounts into one.
+    test_results.initTestResultsVM()
+    if not test_results.testResultsVMInstance.isNil:
+      desktopTestRunHost = newDesktopTestHost(
+        test_results.testResultsVMInstance,
+        dispatch = proc(selector, file: string; line: int): string =
+          # `renderer.runTests` — the SAME dispatch the editor's context-menu
+          # "Run test" uses, rather than a second path to `CODETRACER::
+          # run-test`. Column 1 matches what `editor.makeTestAction` passed
+          # before this host existed; `index/traces.onRunTest` forwards both to
+          # `ct record-test` and neither is used to select the test.
+          data.runTests(RunTestOptions(
+            testName: cstring(selector),
+            path: cstring(file),
+            line: line,
+            column: 1,
+            newWindow: false))
+          "",
+        settleEditor = proc(note: string) =
+          editor.settleEditorTestRun(cstring(note)))
+
+      # AND THE EDITOR'S RUN-TEST CONTROL IS POINTED AT IT. Installing the hook
+      # is what makes the click go through the host: `makeTestAction`'s handler
+      # takes its hook branch, which arms the spinner only after the host has
+      # accepted, and `settleDesktopTestRun` is what later unwinds it.
+      #
+      # `editorTestSelectorHook` stays nil on this arm, so `selector` here is
+      # the name `getLineFunctionName` scanned out of the source — exactly the
+      # string the desktop passed to `runTest` before, so nothing about which
+      # test runs has changed.
+      editor.editorTestRunHook =
+        proc(path: cstring; selector: cstring; line: int): cstring =
+          cstring(desktopTestRunHost.startDesktopTestRun($selector, $path, line))

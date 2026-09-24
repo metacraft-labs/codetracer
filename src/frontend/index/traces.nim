@@ -1583,6 +1583,34 @@ proc onRestartSubsystem*(sender: JsObject, name: cstring) {.async.} =
     #   and it sends back ct/restore, with the last location and breakpoints?
     await restartDbBackend()
 
+proc jsLocalTimeText(): cstring {.importjs: "new Date().toLocaleTimeString()".}
+  ## When the recording was made, in the reader's own clock. Stamped here
+  ## rather than in the renderer because this is the process that watched
+  ## `ct record-test` finish.
+
+proc sendTestRunSettled(recordingId: cstring; errorMessage: cstring) =
+  ## TELL THE RENDERER THE RUN IS OVER, however it ended.
+  ##
+  ## `GUI/Core-Panes/Test-Results-Pane.md` §5. `onRunTest` has five exits and
+  ## before this every one of them was silent as far as the Test Results pane
+  ## and the editor's Run-test button were concerned: the button spun until its
+  ## own two-minute deadline and the pane never moved (issue #748). The failure
+  ## exits are the ones that matter most, because they are the ones a user
+  ## meets — a run that succeeds at least replaces the window with the
+  ## recording.
+  ##
+  ## NOT `CODETRACER::failed-record`, which carries no success arm at all and
+  ## which every recording and build failure in this file also sends —
+  ## `checkRecordLaunch`, `onStopRecordingProcess`, `onRecordWithLaunchConfig`
+  ## and `onNewRecord` between them. A settle keyed on it would fire for
+  ## re-records that have nothing to do with a test, and would still leave
+  ## every successful run unsettled.
+  mainWindow.webContents.send "CODETRACER::test-run-settled", js{
+    recordingId: recordingId,
+    recordedAt: (if recordingId.len > 0: jsLocalTimeText() else: cstring""),
+    errorMessage: errorMessage
+  }
+
 proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
   let pid = nodeProcess.pid.to(int)
@@ -1605,7 +1633,12 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
     let lines = ($output).splitLines()
     # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
     echo output
-    if lines.len > 1:
+    # `lines.len > 2`, NOT `> 1`. The line read below is `lines[^3]`, so two
+    # lines of output indexed `lines[-1]` and raised an `IndexDefect` out of an
+    # `async` proc — which rejects the future, reaches no handler, and settles
+    # nothing. With the guard the same output takes the "couldn't extract
+    # traceId" arm below, which says so and ends the run.
+    if lines.len > 2:
       let traceIdLine = lines[^3]
       echo lines
       # M-REC-6: stdout-marker renamed to ``recordingId:``.
@@ -1615,8 +1648,20 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
         let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
         if trace.isNil:
           errorPrint "index: run-test: can't find trace"
+          sendTestRunSettled(cstring"", cstring(
+            "ct record-test reported recording " & $traceId &
+            ", but CodeTracer cannot find it. Nothing about the test has " &
+            "been established."))
           return
         infoPrint "trace is in ", trace.outputFolder
+
+        # SETTLED BEFORE THE TRACE IS LOADED, and the order is deliberate. The
+        # run is over the moment the recorder answered; loading the recording
+        # is the next operation, it can take seconds, and on the
+        # `newWindow` arm it happens in a different process entirely. Settling
+        # afterwards would leave the button spinning across the load, and would
+        # never settle at all if the load failed.
+        sendTestRunSettled(traceId, cstring"")
 
         if response.newWindow:
           infoPrint "new window"
@@ -1632,6 +1677,22 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
 
         return
     warnPrint "index: run-test: traced ok, but couldn't extract traceId"
+    # EXIT 0 AND NO `recordingId:` LINE. `ct record-test` prints the marker on
+    # every route that produced a recording, so this is a recorder that
+    # answered in a shape this build does not understand — which is a fault,
+    # and a fault the pane has to state rather than absorb.
+    sendTestRunSettled(cstring"", cstring(
+      "ct record-test finished without reporting a recording id, so there " &
+      "is nothing to replay. Its output is in the CodeTracer log."))
   else:
     errorPrint "index: ct record-test error: ", JSON.stringify(processResult.error)
-    mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"ct record-test error: " & JSON.stringify(processResult.error)}
+    let errorText = cstring"ct record-test error: " & JSON.stringify(processResult.error)
+    # BOTH MESSAGES, and they are not redundant. `failed-record` is the
+    # re-record latch's release and the new-record form's error line;
+    # `test-run-settled` is what ends the RUN — the pane's `endRun` and the
+    # editor's spinner. Before this the failure arm sent only the first, which
+    # the Test Results pane does not subscribe to, so a failed run left the
+    # button turning for two minutes under a message saying it had started.
+    # That is the reported defect in its most-travelled form.
+    mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: errorText}
+    sendTestRunSettled(cstring"", errorText)

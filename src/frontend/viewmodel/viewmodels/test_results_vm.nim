@@ -546,6 +546,14 @@ proc clearRun*(vm: TestResultsVM) =
 const
   NoRecorderHostText* = "No host in this build can record a test"
   NoReplayHostText* = "No host in this build can open a recording"
+  NoRunHostText* = "No host in this build can run the tests"
+    ## The header ▶'s sentence for a nil runner — the whole-suite sibling of
+    ## the two above, and it lives here for their reason rather than as a
+    ## literal in `isonim_test_results_view.runButtonTitle` where it used to
+    ## sit. `desktop_test_host` returns this exact sentence when it is built
+    ## without a dispatch, so a host that cannot run and a pane that says so
+    ## now read from ONE string instead of two that can drift apart
+    ## (`Testing/Verification-Harness-Traps.md` §30).
   RunInProgressText* = "A test run is already in progress"
   NeverRecordedText* = "this test has no recording yet"
   RecordingDiscardedText* = "this test ran, but no recording was kept"
@@ -609,22 +617,34 @@ proc rememberRecording*(vm: TestResultsVM;
                                recordedAtText: recordedAtText)
   vm.recordings.val = updated
 
+proc testIdForSelector*(vm: TestResultsVM; selector: string): string =
+  ## The id the pane joins on, for the identity a RUNNER knows.
+  ##
+  ## A host holds a selector — `nargo test --exact`'s string, or the function
+  ## name `ct record-test` is given — and the pane joins a run onto a catalog
+  ## BY `TestItem.id`. Resolving here and not at each call site keeps the
+  ## catalog the single place the two identities meet, and degrades the way
+  ## `noir_test_run.noirRunTestId` does: with no catalog entry the selector IS
+  ## the key, so a run is still reachable from a row the catalog did not
+  ## predict rather than being silently dropped.
+  ##
+  ## ONE PREDICATE, TWO HOSTS. `rememberRecordingForSelector` below and
+  ## `desktop_test_host` both need this answer, and a second copy is a second
+  ## thing that can be wrong while its twin goes on agreeing with itself
+  ## (`Testing/Verification-Harness-Traps.md` §30). The desktop host files a
+  ## run under the id this returns and the recording under the same one, so the
+  ## two cannot land on different rows.
+  for item in vm.catalog.val:
+    if item.selector == selector:
+      return item.id
+  selector
+
 proc rememberRecordingForSelector*(vm: TestResultsVM;
                                    selector, recordingId,
                                    recordedAtText: string) =
   ## The same, from the identity a RUNNER knows.
-  ##
-  ## The host that produces a recording holds a selector — `nargo test
-  ## --exact`'s string — and the pane joins on a catalog id. Resolving here and
-  ## not at the call site keeps the catalog the single place the two identities
-  ## meet, and degrades the way `noirRunTestId` does: with no catalog entry the
-  ## selector IS the key, so a recording is still reachable from a row the
-  ## catalog did not predict rather than being silently dropped.
-  for item in vm.catalog.val:
-    if item.selector == selector:
-      vm.rememberRecording(item.id, recordingId, recordedAtText)
-      return
-  vm.rememberRecording(selector, recordingId, recordedAtText)
+  vm.rememberRecording(vm.testIdForSelector(selector), recordingId,
+                       recordedAtText)
 
 proc forgetRecordings*(vm: TestResultsVM) =
   ## Every recording this pane knew about is gone.

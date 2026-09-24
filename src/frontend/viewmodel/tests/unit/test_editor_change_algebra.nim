@@ -117,7 +117,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1687
+const ExpectedAssertions = 1690
+  ## *1687 -> 1690 on 2026-09-24: §35's enumeration over `viewmodel/` again —
+  ## M50's one new production module x three assertions:
+  ## `viewmodels/desktop_test_host.nim` (the desktop Test Results host, issue
+  ## #748). It calls no `rebase(` and spells no `mapOver`; it touches no
+  ## document text at all. No law, population or example moved.*
   ## *1681 -> 1687 on 2026-09-23: §35's enumeration over `viewmodel/` once
   ## more — PLAT-29's two new production modules x three assertions each:
   ## `store/stop_timeline.nim` (the DAP answer's stop version) and
