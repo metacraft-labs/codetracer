@@ -5932,3 +5932,42 @@ Two traps in the same area, both live:
   `{.async.}` that `await`s a `setTimeout(resolve, 0)` promise so promise
   continuations (e.g. `requestLocals`' `markComplete`) have run; put the
   final `CHECKS:` echo / exit code in that phase.
+- 2026-09-24: **The welcome screen's start-options strip is built TWICE, and
+  only one copy was ever reviewed against what its arm can do (M52, issue
+  #734).** Both copies lived in `ui/welcome_screen.nim` as five
+  `WelcomeStartOptionRecord` literals — `welcomeStartOptions` for the desktop,
+  `mountWebWelcomeScreen` for the web — and nothing anywhere related a row's
+  `inactive` flag to whether its arm had a handler. The web copy marked "Open
+  folder" live; on that arm `tryMountIsoNimWelcomeScreen` passes an EMPTY
+  `WelcomeScreenCallbacks()` (nothing assigns `welcomeScreenComponentRef`
+  without a legacy component), and the view's fallback `case` in
+  `isonim_welcome_screen_view.triggerStartOption` has arms only for
+  `record-new-trace` and `open-online-trace` — so the click hit `else: discard`.
+  Both strips now come from `welcomeStartOptionRecords(active, reasons)` in
+  `viewmodel/viewmodels/welcome_screen_vm.nim`, which takes the set of kinds
+  the arm can HANDLE and computes `inactive` from it, so a live-but-dead row is
+  not constructible. `unreachableStartOptions` / `reasonlessDisabledStartOptions`
+  are the checkers; the suite is `welcome-screen/welcome_screen_vm_test.nim`
+  §"start option arms (#734)" and it runs on both backends.
+  **If you add a start option, add an enum value and an arm to
+  `triggerWelcomeStartOption`'s `case` — do not write a record literal.**
+- 2026-09-24: **`pointer-events: none` on a disabled control also suppresses
+  its native `title` tooltip**, which is usually the only place the refusal is
+  explained. `.inactive-start-option` carried both for years, so the web
+  welcome screen was five 0.2-opacity ghosts that could not be interrogated —
+  issue #734's actual complaint. The click was never made safe by the CSS
+  anyway: `triggerStartOption` returns early on `opt.inactive`. Use
+  `aria-disabled` + `cursor: not-allowed` and refuse in code. Same reason not
+  to use the `disabled` attribute on a button whose `title` you need.
+- 2026-09-24: **Adding a `Signal[...]` field to any `*VM` under
+  `src/frontend/viewmodel/` reddens
+  `viewmodel/tests/unit/test_collab_signal_registry.nim`** until it is
+  classified in `collab/signal_registry.nim`. `discoverViewModelFields` parses
+  the real sources off disk and `validateRegistry` fails on any unclassified
+  field, so the gate bites at RUN time and not at compile time. **It bites in
+  `just test-vm-collab-units`, NOT in `just test-vm-unit`** — `vm-unit`'s file
+  set explicitly rejects `/test_collab_*.nim$` (see
+  `ci/lib/test-lane-files.sh`, the `vm-unit)` arm), and `vm-collab-units` is
+  the lane that finds it. A green `test-vm-unit` therefore says nothing about
+  this gate. Sibling of the `ExpectedAssertions` bump
+  `test_editor_change_algebra` needs when a MODULE is added there.

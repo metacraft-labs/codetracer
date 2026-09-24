@@ -10847,6 +10847,81 @@ suite "IsoNim Welcome Screen — helpers":
     let s = formatWelcomeTimeAgo("2026/05/02 12:00:00")
     check s.len > 0
 
+# ---------------------------------------------------------------------------
+# Refused start options say why — issue #734
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Welcome Screen — refused start options (#734)":
+
+  test "a refused option renders its reason as the button's title":
+    # The rendering half of #734. A greyed control with no explanation is
+    # indistinguishable from a broken one; `disabledReason` is where the
+    # explanation lives and `title` is where the user can reach it.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(webWelcomeStartOptions())
+      vm.setStartOptionsNote(WebStartOptionsNote)
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      let options = findAllByClass(panel, "start-option")
+      check options.len == 5
+      for opt in options:
+        check r.getAttribute(opt, "aria-disabled") == "true"
+        check r.getAttribute(opt, "title").len > 0
+      check r.getAttribute(options[0], "title") == WebOpenFolderReason
+
+      # And the standing line, which is the part a user who has not yet
+      # thought to hover anything can read.
+      check findByClass(panel, StartOptionsNoteClass).textContent ==
+        WebStartOptionsNote
+      dispose()
+
+  test "a live option carries no reason and no note is rendered":
+    # The negative control: the desktop's DOM must be what it was.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(desktopWelcomeStartOptions(showTraceSharing = true))
+      vm.setStartOptionsNote("")
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      let options = findAllByClass(panel, "start-option")
+      check options.len == 5
+      # Four live, one refused (the shell), and only the refused one speaks.
+      for i in 0 ..< 4:
+        check r.getAttribute(options[i], "aria-disabled") == "false"
+        check r.getAttribute(options[i], "title") == ""
+      check r.getAttribute(options[4], "aria-disabled") == "true"
+      check r.getAttribute(options[4], "title") == DesktopShellUnavailableReason
+      check findByClassOrNil(panel, StartOptionsNoteClass).isNil
+      dispose()
+
+  test "clicking a refused option still does nothing":
+    # The CSS no longer carries `pointer-events: none` — it suppressed the
+    # native `title` tooltip, which was the only per-option explanation — so
+    # the click now actually reaches the handler and must be refused there.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(webWelcomeStartOptions())
+
+      var clicked: seq[string] = @[]
+      let callbacks = WelcomeScreenCallbacks(
+        onStartOptionClick: proc(key: string) = clicked.add(key))
+      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      for opt in findAllByClass(panel, "start-option"):
+        opt.fireEvent("click")
+      check clicked.len == 0
+      # The VM's own fallback arms must not fire either: `record-new-trace`
+      # and `open-online-trace` are the two keys the view can serve without a
+      # host, and on this arm they are refused like the rest.
+      check vm.mode.val == wsmWelcome
+      dispose()
+
 # ===========================================================================
 # Agent Activity panel tests (§1.75 — agent_activity Karax -> IsoNim
 # migration, mission goal #3).

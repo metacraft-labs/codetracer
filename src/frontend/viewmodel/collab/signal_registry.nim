@@ -684,7 +684,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("CommandPaletteVM", ["hasResults", "resultCount"])
 
   entries.addMany("WelcomeScreenVM",
-    ["recentTraces", "recentFolders", "startOptions", "hoveredRecording",
+    ["recentTraces", "recentFolders", "startOptions", "startOptionsNote",
+     "hoveredRecording",
      "hoveredOption", "editMode", "mode", "loading", "loadingRecordingId",
      "onlineTraceInput", "launchConfig", "newRecord",
      "recordBackendAvailability"],

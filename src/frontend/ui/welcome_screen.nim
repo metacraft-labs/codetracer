@@ -16,15 +16,22 @@ from ../viewmodel/store/types import
   recordTargetMaterializedReplayOnly
 from ../viewmodel/viewmodels/welcome_screen_vm import
   WelcomeScreenVM, NewRecordFormState, createWelcomeScreenVM, setRecentTraces,
-  setRecentFolders, setStartOptions, setMode, updateNewRecord,
+  setRecentFolders, setStartOptions, setStartOptionsNote, setMode,
+  updateNewRecord,
   syncLoadingState, setRecordBackendAvailability, recordBackendWireName,
   recordBackendChoiceFromWireName,
+  # Issue #734: both arms' start-option strips come from these two builders
+  # now. See the comment on `welcomeStartOptions` below.
+  desktopWelcomeStartOptions, webWelcomeStartOptions, WebStartOptionsNote,
   # The host seam's payloads. `installWelcomeVMCallbacks` fills the four
   # `on*` fields these describe; without them the welcome screen's
   # main-process flows have no transport at all.
   LaunchConfigRequest, NewRecordRequest,
   setOnlineTraceInput
-from ../viewmodel/viewmodels/welcome_screen_vm import optionKey, NO_LOADING_RECORDING
+# `optionKey` used to be imported here too, to spell out ten start-option keys
+# by hand. Both strips now come from `desktopWelcomeStartOptions` /
+# `webWelcomeStartOptions`, which derive the key from the name themselves.
+from ../viewmodel/viewmodels/welcome_screen_vm import NO_LOADING_RECORDING
 when defined(js):
   from isonim/web/dom_api as isonim_dom import nil
   from ../viewmodel/views/isonim_welcome_screen_view import
@@ -148,33 +155,23 @@ proc legacyFolderRecord(folder: RecentFolder): RecentFolderRecord =
   )
 
 proc welcomeStartOptions(self: WelcomeScreenComponent): seq[WelcomeStartOptionRecord] =
-  @[
-    WelcomeStartOptionRecord(
-      key: optionKey("Open folder"),
-      name: "Open folder",
-      inactive: false,
-    ),
-    WelcomeStartOptionRecord(
-      key: optionKey("Record new trace"),
-      name: "Record new trace",
-      inactive: false,
-    ),
-    WelcomeStartOptionRecord(
-      key: optionKey("Open local trace"),
-      name: "Open local trace",
-      inactive: false,
-    ),
-    WelcomeStartOptionRecord(
-      key: optionKey("Open online trace"),
-      name: "Open online trace",
-      inactive: not self.showTraceSharing,
-    ),
-    WelcomeStartOptionRecord(
-      key: optionKey("CodeTracer shell"),
-      name: "CodeTracer shell",
-      inactive: true,
-    ),
-  ]
+  ## The desktop arm's strip, built by the shared VM-layer builder rather than
+  ## by five record literals here.
+  ##
+  ## The literals were the shape issue #734 exploited: nothing tied a row's
+  ## `inactive` flag to whether `triggerWelcomeStartOption` below can actually
+  ## perform it, so the WEB copy of the same five literals shipped an active
+  ## "Open folder" that reached `discard`. `desktopWelcomeStartOptions`
+  ## derives the active set from `DesktopHandledStartOptions` by SUBTRACTION,
+  ## so no record here can be live and unhandled at once.
+  ##
+  ## One obligation is left to a human, and it is worth knowing which:
+  ## `DesktopHandledStartOptions` is a hand-maintained mirror of
+  ## `triggerWelcomeStartOption`'s `case` below. Nothing relates the two —
+  ## the VM suite that checks this invariant never imports this module, so
+  ## deleting an arm from that `case` without shrinking the set would NOT
+  ## redden anything. **Delete an arm, shrink the set in the same edit.**
+  desktopWelcomeStartOptions(self.showTraceSharing)
 
 proc currentWelcomeMode(self: WelcomeScreenComponent): WelcomeScreenMode =
   if self.newRecordScreen:
@@ -219,6 +216,12 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
     welcomeScreenVMInstance.setRecentFolders(folders)
 
   welcomeScreenVMInstance.setStartOptions(self.welcomeStartOptions())
+  # The desktop needs no standing note: at least three of the five options are
+  # live here, so the strip is not a wall of refusals, and each refusal that
+  # IS present carries its own `disabledReason`. Set explicitly rather than
+  # left alone so a VM that previously rendered the web arm (storybook, a
+  # test) cannot leak the web note onto a desktop screen.
+  welcomeScreenVMInstance.setStartOptionsNote("")
   welcomeScreenVMInstance.setMode(self.currentWelcomeMode())
   welcomeScreenVMInstance.syncLoadingState(
     self.loading,
@@ -581,27 +584,28 @@ when defined(js):
     # The start options a TAB can honour. `inactive` is the panel's own word
     # for "shown and refused", and it is used here rather than dropping the
     # rows: a user who cannot find "Record new trace" concludes the product is
-    # broken, and one who sees it greyed out learns what this surface is.
+    # broken, and one who sees it greyed out WITH A REASON learns what this
+    # surface is.
     #
-    # Only "Open folder" is live, and it is live because NS2's project store
-    # (OPFS) is what this same program already booted — the same capability the boot
-    # line reports as `platform=pkWeb`.
-    welcomeScreenVMInstance.setStartOptions(@[
-      WelcomeStartOptionRecord(
-        key: optionKey("Open folder"), name: "Open folder", inactive: false),
-      WelcomeStartOptionRecord(
-        key: optionKey("Record new trace"), name: "Record new trace",
-        inactive: true),
-      WelcomeStartOptionRecord(
-        key: optionKey("Open local trace"), name: "Open local trace",
-        inactive: true),
-      WelcomeStartOptionRecord(
-        key: optionKey("Open online trace"), name: "Open online trace",
-        inactive: true),
-      WelcomeStartOptionRecord(
-        key: optionKey("CodeTracer shell"), name: "CodeTracer shell",
-        inactive: true),
-    ])
+    # ISSUE #734. The "WITH A REASON" is new, and so is the fifth row's
+    # honesty. This list used to claim "Open folder" was live — the comment
+    # here said so too, reasoning from NS2's OPFS project store — and it was
+    # not: `tryMountIsoNimWelcomeScreen` below hands the view an EMPTY
+    # `WelcomeScreenCallbacks()` on this arm because there is no legacy
+    # component to build one from, the view's `case` fallback has no
+    # `open-folder` arm, and the desktop implementation is an Electron IPC
+    # message no browser tab answers. The click reached nothing.
+    #
+    # What "Open folder" should MEAN over OPFS is a product decision no spec
+    # has taken (grep `Noir-Studio.milestones.org`,
+    # `Browser-Based-Replaying.md` and `Unified-Browser-Replay-Architecture.md`
+    # for `showDirectoryPicker` — nothing), and `Noir-Studio.md` §4.1 is clear
+    # that OPFS is "a working copy, not durable storage the user owns", so the
+    # web meaning is not the desktop meaning. Until that spec exists the
+    # honest state is refused-and-explained, which is what
+    # `webWelcomeStartOptions` produces for all five rows.
+    welcomeScreenVMInstance.setStartOptions(webWelcomeStartOptions())
+    welcomeScreenVMInstance.setStartOptionsNote(WebStartOptionsNote)
     welcomeScreenVMInstance.setMode(wsmWelcome)
 
     tryMountIsoNimWelcomeScreen()

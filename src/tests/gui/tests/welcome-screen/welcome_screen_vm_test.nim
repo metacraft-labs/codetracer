@@ -39,7 +39,7 @@
 ## ``welcome_screen_recent_folders_test.nim``, which is native-only and says
 ## so; everything below runs on both backends again.
 
-import std/[json, options, unittest]
+import std/[json, options, sequtils, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
@@ -879,4 +879,131 @@ suite "WelcomeScreenVM — new_record_form":
       check host.newRecords[1].recordBackend == "db"
       check host.newRecords[1].startsLive == false
       check store.session.val.debugSessionMode == completedReplay
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Start-option arms — issue #734
+# ---------------------------------------------------------------------------
+#
+# THE ASSERTION THAT WAS MISSING. The welcome screen ships two start-option
+# strips: the desktop's, built from a live `WelcomeScreenComponent`, and the
+# web's, built from nothing because a statically hosted tab has no Electron
+# main process. Both used to be five hand-written record literals, and nothing
+# anywhere related a row's `inactive` flag to whether its arm could actually
+# perform it. The web arm's "Open folder" said `inactive: false`, the view was
+# handed an EMPTY `WelcomeScreenCallbacks()` on that arm, and the click landed
+# in the view's `case` fallback, which has no `open-folder` branch. A live
+# button that did nothing, on the surface most likely to be a user's first.
+#
+# These cases assert the invariant over the PRODUCTION builders rather than
+# over a list rebuilt here — `desktopWelcomeStartOptions` and
+# `webWelcomeStartOptions` are the same procs `ui/welcome_screen.nim` calls.
+# A fixture that restated the rows would be trap §7's green fixture: an
+# example of correctness that looks identical to the defect.
+
+suite "WelcomeScreenVM — start option arms (#734)":
+
+  test "no arm renders a live option it cannot perform":
+    # The exact violated invariant, over the shipped lists.  Before the fix
+    # this reported `@["open-folder"]` for the web arm.
+    check unreachableStartOptions(
+      desktopWelcomeStartOptions(showTraceSharing = true),
+      DesktopHandledStartOptions).len == 0
+    check unreachableStartOptions(
+      desktopWelcomeStartOptions(showTraceSharing = false),
+      DesktopHandledStartOptions).len == 0
+    check unreachableStartOptions(
+      webWelcomeStartOptions(), WebHandledStartOptions) == newSeq[string]()
+
+  test "every greyed-out option says why":
+    # The usability half of the issue: a disabled control with no explanation
+    # is indistinguishable from a broken one, which is what got #734 filed.
+    check reasonlessDisabledStartOptions(
+      desktopWelcomeStartOptions(showTraceSharing = true)).len == 0
+    check reasonlessDisabledStartOptions(
+      desktopWelcomeStartOptions(showTraceSharing = false)).len == 0
+    check reasonlessDisabledStartOptions(
+      webWelcomeStartOptions()) == newSeq[string]()
+    # ... and none of them fell through to the last-resort wording, which
+    # would mean an arm disabled a row without saying anything specific.
+    for opt in webWelcomeStartOptions():
+      check opt.disabledReason != StartOptionUnavailableHereReason
+    for opt in desktopWelcomeStartOptions(showTraceSharing = false):
+      check opt.disabledReason != StartOptionUnavailableHereReason
+
+  test "an active option never carries a disabled reason":
+    # The converse, so `disabledReason` cannot become a label that is shown
+    # on a working button.
+    for opt in desktopWelcomeStartOptions(showTraceSharing = true):
+      if not opt.inactive:
+        check opt.disabledReason == ""
+
+  test "the web arm refuses all five options, with distinct reasons":
+    let web = webWelcomeStartOptions()
+    check web.len == 5
+    check web.allIt(it.inactive)
+    check web.mapIt(it.key) == @[
+      "open-folder", "record-new-trace", "open-local-trace",
+      "open-online-trace", "codetracer-shell"]
+    # Distinct, because one repeated sentence under five buttons says nothing
+    # about any of them.
+    check web.mapIt(it.disabledReason).deduplicate.len == 5
+    # The reporter's button, named: it is refused now, and it says so.
+    check web[0].disabledReason == WebOpenFolderReason
+
+  test "the desktop arm keeps its three live options and gates the fourth":
+    let withSharing = desktopWelcomeStartOptions(showTraceSharing = true)
+    let withoutSharing = desktopWelcomeStartOptions(showTraceSharing = false)
+    check withSharing.filterIt(not it.inactive).mapIt(it.key) == @[
+      "open-folder", "record-new-trace", "open-local-trace",
+      "open-online-trace"]
+    check withoutSharing.filterIt(not it.inactive).mapIt(it.key) == @[
+      "open-folder", "record-new-trace", "open-local-trace"]
+    check withoutSharing[3].disabledReason == DesktopTraceSharingOffReason
+    check withoutSharing[4].disabledReason == DesktopShellUnavailableReason
+
+  test "unreachableStartOptions catches a typo'd key, not only a missing handler":
+    # A negative control for the checker itself: a key no arm can dispatch is
+    # exactly as dead as a handler-less one, and `startOptionKindForKey`
+    # returning `none` must not be read as "fine".
+    check unreachableStartOptions(
+      @[WelcomeStartOptionRecord(key: "open-folder ", name: "Open folder")],
+      DesktopHandledStartOptions) == @["open-folder "]
+    check unreachableStartOptions(
+      @[WelcomeStartOptionRecord(key: "open-folder", name: "Open folder")],
+      DesktopHandledStartOptions) == newSeq[string]()
+    # And the checker's SUBJECT is the live rows only: the same unrecognised
+    # key is NOT reported when the row is already refused, because a refused
+    # row promises nothing. (Pair this with the first check above — the two
+    # differ only in `inactive`, so between them they show the flag is what
+    # the checker branches on and not the key.)
+    check unreachableStartOptions(
+      @[WelcomeStartOptionRecord(key: "nonsense", name: "x", inactive: true)],
+      DesktopHandledStartOptions) == newSeq[string]()
+
+  test "option kinds round-trip through their keys":
+    for kind in WelcomeStartOptionKind:
+      check startOptionKindForKey(startOptionKey(kind)) == some(kind)
+      check startOptionKey(kind) == optionKey(startOptionName(kind))
+    check startOptionKindForKey("no-such-option").isNone
+
+  test "the web note is carried on the VM, and the desktop leaves it empty":
+    # `setStartOptionsNote` is the standing sentence under the strip. On the
+    # web every option is refused, so a per-button `title` is not enough: the
+    # reporter had no reason to hover a control they had already concluded was
+    # broken.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      check vm.startOptionsNote.val == ""
+      vm.setStartOptions(webWelcomeStartOptions())
+      vm.setStartOptionsNote(WebStartOptionsNote)
+      check vm.startOptionsNote.val == WebStartOptionsNote
+      check vm.activeStartOptions.val.len == 0
+      # The desktop path clears it, so a VM reused across arms cannot leak
+      # the web note onto a desktop screen.
+      vm.setStartOptions(desktopWelcomeStartOptions(showTraceSharing = true))
+      vm.setStartOptionsNote("")
+      check vm.startOptionsNote.val == ""
+      check vm.activeStartOptions.val.len == 4
       dispose()
