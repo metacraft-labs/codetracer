@@ -1741,9 +1741,18 @@ jobs:
 
   lint-nim:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
-    # 200-run window: 25 green, median 3.3m, max 3.7m. Same floor as lint-bash,
-    # for the same reason: 15m is ~4x the slowest green ever observed.
-    timeout-minutes: 15
+    # 45m, RE-MEASURED 2026-09-24. The 15m bound came from a 200-run window
+    # (25 green, median 3.3m, max 3.7m) taken when this stage was a handful of
+    # steps. It has since grown to 23, and because `dev`'s lint-nim stopped at
+    # an early failing step for days, no run showed that a COMPLETE stage no
+    # longer fits: #770's run 35933277847 (job 107637263905, on a healthy
+    # high-mem-server runner) spent 3.5m in dev-shell setup, 7.6m reaching the
+    # SDK facade guard, and was cancelled at 15m inside the Plugin reactive
+    # contract suite with nine steps left. Scaling those nine from a local run
+    # by that runner's measured speed puts a complete stage at ~30m; 45m is
+    # 1.5x that. It is a HANG bound, so it should be re-derived from green runs
+    # once there are some -- and lowered if they come in well under it.
+    timeout-minutes: 45
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
