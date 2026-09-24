@@ -6019,3 +6019,61 @@ Two traps in the same area, both live:
     `test_harness/mod.rs::ensure_replay_license_bypass` sets it unconditionally,
     so no existing harness will ever see this path. A test for it must spawn its
     own worker.
+- 2026-09-24: **`renderer.openNewTab` could not open a tab, and the reason is a
+  two-map split that is easy to reproduce elsewhere.** It registered its
+  `TabInfo` in `data.services.editor.open` and then called `utils.openTab`,
+  which branches on exactly that map: absent → `openNewEditorView` (creates the
+  component); present → `showTab`. The line above forced the second branch, and
+  `showTab` looks the tab up in **`data.ui.editors`** — a *different* map that
+  nothing had written — so it hit `cerror "tabs: no editor in showTab for
+  #untitled0"` and returned. No component, no layout container, and the
+  `data.focusComponent(data.ui.editors[path])` on the next line then focused
+  `undefined`. The menu's New File action was in this state too, not only the
+  welcome screen's new one (issue #735).
+  * **`open` is the tab MODEL, `ui.editors` is the COMPONENT.** A proc that
+    writes the first and expects `openTab` to build the second is wrong by
+    construction; `openTab` reads the first to decide whether the second exists.
+  * **`openNewEditorView` is the wrong repair for content you already hold.**
+    It `await`s `services.editor.tabLoad` → `CODETRACER::tab-load`, which on the
+    desktop fails to read `#untitled0` and in a browser tab is answered by
+    nobody, so the await never settles. Go straight to
+    `utils.makeEditorViewDetailed` (now exported) — it is the half of
+    `openNewEditorView` that runs *after* the source arrives, and it is what
+    `openNoSourceView` and `makeEditorView` already use for the same reason.
+  * Beware `utils.makeEditorView`: it calls `makeEditorViewDetailed` and then
+    repeats that proc's `makeEditorViewComponent` + `openLayoutTab` tail itself.
+    `makeEditorViewComponent` raises `ValueError: editor <name> exists` on a
+    name already in `ui.editors`, so the second call should always throw. Not
+    investigated further here; do not build new paths on it.
+- 2026-09-24: **`index/files.onSaveUntitled` wrote to the renderer's
+  placeholder name.** `renderer.dispatchSaveEffect` sends
+  `CODETRACER::save-untitled` as `{name: "#untitled0", raw, saveAs: true}` and
+  the handler wrote to `response.name` — i.e. a file literally called
+  `#untitled0`, relative to the Electron **main process's** working directory,
+  reported back as `saved-file`. `saveAs` was sent all along and read by
+  nothing. It now opens `dialog.showSaveDialog` when the target starts with `#`.
+  Two things to keep in mind if you touch it:
+  * **The reply must carry the BUFFER's name, not the destination.**
+    `ui_js.onSavedFile` looks the tab up by `response.name`; replying with the
+    chosen path clears nothing and the tab stays dirty. The cost is that the tab
+    keeps its `#untitled{N}` title — renaming it is renderer-side work nobody
+    has done.
+  * **A cancelled dialog must still reply.** `onSaveFileError` is what drains a
+    queued re-record request (issue #603); replying with nothing arms it for
+    ever.
+- 2026-09-24: **Grepping an emitted `nim js` bundle for a user-visible LABEL
+  finds nothing, and that is a property of the TYPE, not of the string.** Nim's
+  JS backend emits a `string` literal as a char-code array and a `cstring`
+  literal as a plain JS string. Measured on the real renderer bundle
+  (`nim js -d:ctRenderer src/frontend/ui_js.nim`, 2026-09-24): `grep -c 'New
+  file'` is **0**, while the array `78,101,119,32,102,105,108,101` appears once
+  — because `welcome_screen_vm.StartOptionNames` is `array[..., string]`. Most
+  user-facing text in the frontend is `string` for exactly that reason, so a
+  gate "verified" by grepping the bundle for a label reads ABSENT for every
+  build, including the ones that contain it.
+  * Grep for an emitted SYMBOL instead (`enterNewFileEditMode`,
+    `makeEditorViewDetailed__hgvyf_u159`) — those survive with a mangled
+    suffix and are what a positive control should read.
+  * An `importjs` body is INLINED, so its proc name is absent from the output
+    even when the code is there. Grep a distinctive line of the JS itself
+    (`a.download = n`), not the Nim proc name.

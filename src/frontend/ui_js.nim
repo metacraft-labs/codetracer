@@ -3902,6 +3902,36 @@ proc onNoTrace(
       # actionable.
       cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
         "the editor was not opened for " & $initialEditPath
+  elif data.startOptions.edit and data.startOptions.folder.len == 0:
+    # ISSUE #735 — "NEW FILE". Edit mode with no project folder and no file to
+    # open is this feature and nothing else, on either platform:
+    #
+    #   * `index/traces.onNewFile` sends `folder: ""` deliberately; every other
+    #     desktop route into edit mode sends the folder it opened.
+    #   * `ui/web_entry_surface.newFileNoTracePayload` sends `folder: ""` for
+    #     the same reason; `templateNoTracePayload` sends the project root.
+    #
+    # NO CLI LAUNCH CAN REACH IT, and the guarantee is `index/args.parseArgs`
+    # SETTING `data.startOptions.folder = electronprocess.cwd()` BEFORE it
+    # reads a single argument. `ct edit <path>` then overwrites that with the
+    # containing directory, and `ct edit` with the argument missing errors and
+    # `break`s — leaving the cwd default in place, not an empty string. Both
+    # ends of that are load-bearing: delete the default and a malformed
+    # `ct edit` starts landing here.
+    #
+    # So the branch is reached by exactly the two call sites that mean it, and
+    # the alternative — a flag on the payload — would be a second statement of
+    # the same fact, free to disagree with `folder`.
+    #
+    # WHAT IT REPLACES IS NOT NOTHING. Before this, that state mounted edit mode
+    # with an empty editor area and no way to type in it: no tab, no Monaco, and
+    # a Files pane over an empty tree. An untitled buffer is the least a "start
+    # writing code" entry point can be.
+    if await waitForLayoutGround(data):
+      data.openNewTab()
+    else:
+      cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
+        "the new empty file was not opened"
 
   # AND FILL THE TABS THE RESTORED LAYOUT BROUGHT BACK.
   #
@@ -6355,6 +6385,40 @@ when defined(ctWeb) and not defined(ctInExtension):
       # verdict rather than from a path test here. A second `classifyPath` in
       # this file is exactly the drift `web_entry.nim`'s header warns about.
       let wantsTemplate = entry.verdict == evTemplate and tmpl.hasFiles
+
+      # ISSUE #735 — THE WEB WELCOME SCREEN'S ONE LIVE START OPTION, wired here
+      # for `installNoirBuildCommands`' reason one screen over: this is the only
+      # place that holds `ui/welcome_screen` and `ui/web_entry_surface` at the
+      # same time, and neither may import the other (the first is the shared
+      # welcome surface, the second mounts panes and owns the project store).
+      #
+      # BEFORE the mount, unlike the build commands, because the callbacks
+      # record is built once per mount and `tryMountIsoNimWelcomeScreen` returns
+      # early for an already-mounted screen — a handler installed afterwards
+      # would not reach the view.
+      #
+      # Unconditional rather than `if not wantsTemplate`: the template arm never
+      # mounts a welcome screen, so installing the handler there costs one
+      # assignment and cannot fire, while a condition here would be a second
+      # statement of which arm mounts what.
+      welcome_screen.setWebWelcomeStartOptionHandler(proc(key: string) =
+        case key
+        of "new-file":
+          if not web_entry_surface.enterNewFileEditMode():
+            # The refusal is legible rather than a dead click: the only way
+            # `enterNewFileEditMode` says no is a transport that is not there or
+            # a bundled layout that did not parse, and both are build defects a
+            # visitor cannot act on but a report can name.
+            cerror "web: New file could not open an edit session"
+        else:
+          # NOT `discard`. Every other key on this arm is refused by
+          # `WebHandledStartOptions`, so `triggerStartOption` returns before it
+          # reaches a callback and this line is unreachable TODAY. It exists so
+          # that the day someone makes another kind live without giving it an
+          # arm, the click says so instead of doing nothing — which is the
+          # shape of issue #734.
+          cerror "web: no handler for start option '" & key & "'")
+
       let mounted =
         if wantsTemplate: web_entry_surface.enterTemplateEditMode(tmpl)
         else: welcome_screen.mountWebWelcomeScreen()

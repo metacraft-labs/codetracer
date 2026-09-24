@@ -39,7 +39,7 @@
 ## ``welcome_screen_recent_folders_test.nim``, which is native-only and says
 ## so; everything below runs on both backends again.
 
-import std/[json, options, sequtils, unittest]
+import std/[json, options, sequtils, strutils, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
@@ -938,29 +938,34 @@ suite "WelcomeScreenVM — start option arms (#734)":
       if not opt.inactive:
         check opt.disabledReason == ""
 
-  test "the web arm refuses all five options, with distinct reasons":
+  test "the web arm refuses every option but New file, with distinct reasons":
     let web = webWelcomeStartOptions()
-    check web.len == 5
-    check web.allIt(it.inactive)
+    check web.len == 6
     check web.mapIt(it.key) == @[
-      "open-folder", "record-new-trace", "open-local-trace",
+      "new-file", "open-folder", "record-new-trace", "open-local-trace",
       "open-online-trace", "codetracer-shell"]
+    # ISSUE #735. Exactly one live row, and it is the first one — see
+    # `WelcomeStartOptionKind`'s header for why the order is not incidental.
+    check web.filterIt(not it.inactive).mapIt(it.key) == @["new-file"]
     # Distinct, because one repeated sentence under five buttons says nothing
-    # about any of them.
-    check web.mapIt(it.disabledReason).deduplicate.len == 5
+    # about any of them. (Five, not six: the live row carries no reason, and
+    # `an active option never carries a disabled reason` below is what says so.)
+    let refusedReasons = web.filterIt(it.inactive).mapIt(it.disabledReason)
+    check refusedReasons.len == 5
+    check refusedReasons.deduplicate.len == 5
     # The reporter's button, named: it is refused now, and it says so.
-    check web[0].disabledReason == WebOpenFolderReason
+    check web[1].disabledReason == WebOpenFolderReason
 
-  test "the desktop arm keeps its three live options and gates the fourth":
+  test "the desktop arm keeps its four live options and gates the fifth":
     let withSharing = desktopWelcomeStartOptions(showTraceSharing = true)
     let withoutSharing = desktopWelcomeStartOptions(showTraceSharing = false)
     check withSharing.filterIt(not it.inactive).mapIt(it.key) == @[
-      "open-folder", "record-new-trace", "open-local-trace",
+      "new-file", "open-folder", "record-new-trace", "open-local-trace",
       "open-online-trace"]
     check withoutSharing.filterIt(not it.inactive).mapIt(it.key) == @[
-      "open-folder", "record-new-trace", "open-local-trace"]
-    check withoutSharing[3].disabledReason == DesktopTraceSharingOffReason
-    check withoutSharing[4].disabledReason == DesktopShellUnavailableReason
+      "new-file", "open-folder", "record-new-trace", "open-local-trace"]
+    check withoutSharing[4].disabledReason == DesktopTraceSharingOffReason
+    check withoutSharing[5].disabledReason == DesktopShellUnavailableReason
 
   test "unreachableStartOptions catches a typo'd key, not only a missing handler":
     # A negative control for the checker itself: a key no arm can dispatch is
@@ -989,9 +994,9 @@ suite "WelcomeScreenVM — start option arms (#734)":
 
   test "the web note is carried on the VM, and the desktop leaves it empty":
     # `setStartOptionsNote` is the standing sentence under the strip. On the
-    # web every option is refused, so a per-button `title` is not enough: the
-    # reporter had no reason to hover a control they had already concluded was
-    # broken.
+    # web all but one option is refused, so a per-button `title` is not enough:
+    # the reporter had no reason to hover a control they had already concluded
+    # was broken.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
@@ -999,11 +1004,93 @@ suite "WelcomeScreenVM — start option arms (#734)":
       vm.setStartOptions(webWelcomeStartOptions())
       vm.setStartOptionsNote(WebStartOptionsNote)
       check vm.startOptionsNote.val == WebStartOptionsNote
-      check vm.activeStartOptions.val.len == 0
+      check vm.activeStartOptions.val.mapIt(it.key) == @["new-file"]
       # The desktop path clears it, so a VM reused across arms cannot leak
       # the web note onto a desktop screen.
       vm.setStartOptions(desktopWelcomeStartOptions(showTraceSharing = true))
       vm.setStartOptionsNote("")
       check vm.startOptionsNote.val == ""
-      check vm.activeStartOptions.val.len == 4
+      check vm.activeStartOptions.val.len == 5
       dispose()
+
+# ===========================================================================
+# "New file" — issue #735
+# ===========================================================================
+#
+# The request: a way to start writing code without opening a folder first,
+# *"especially on the web build, where Open folder does not work"*.
+#
+# M52 left the web welcome screen with ZERO live start options — honest, and a
+# surface with no action of its own. These cases are the claim that it now has
+# exactly one, and that the one it has is live on the OTHER arm too, because a
+# desktop-only implementation does not answer what was asked for.
+#
+# Spec: `GUI/Welcome-And-Sessions/Welcome-Screen.md` §Start Options and
+# §"New file, and what it creates".
+#
+# CHECKS: 18
+
+suite "WelcomeScreenVM — New file (#735)":
+
+  test "New file is live on BOTH arms":
+    # The deliverable, stated over the production builders. A desktop-only
+    # implementation reddens the second pair; an arm that renders the row
+    # without being able to perform it reddens `no arm renders a live option it
+    # cannot perform` in the suite above, which reads the same two sets.
+    let desktop = desktopWelcomeStartOptions(showTraceSharing = true)
+    let web = webWelcomeStartOptions()
+    check wsoNewFile in DesktopHandledStartOptions
+    check wsoNewFile in WebHandledStartOptions
+    check desktop.filterIt(it.key == "new-file").len == 1
+    check web.filterIt(it.key == "new-file").len == 1
+    check not desktop.filterIt(it.key == "new-file")[0].inactive
+    check not web.filterIt(it.key == "new-file")[0].inactive
+
+  test "trace sharing being off does not take New file with it":
+    # The desktop's only conditional refusal is `wsoOpenOnlineTrace`, and
+    # `desktopWelcomeStartOptions` derives its active set by SUBTRACTION — so a
+    # subtraction written against the wrong kind would show up here and nowhere
+    # else the suite looks.
+    let withoutSharing = desktopWelcomeStartOptions(showTraceSharing = false)
+    check not withoutSharing.filterIt(it.key == "new-file")[0].inactive
+
+  test "New file is the FIRST row on both arms":
+    # Order is render order. On the web arm this is the only live row, and a
+    # single live control at the end of five refusals is one a reader stops
+    # before reaching; on the desktop it is the lowest-commitment way in.
+    check desktopWelcomeStartOptions(showTraceSharing = true)[0].key ==
+      "new-file"
+    check webWelcomeStartOptions()[0].key == "new-file"
+    check startOptionName(wsoNewFile) == "New file"
+
+  test "the key the dispatch arms are written against is 'new-file'":
+    # `ui/welcome_screen.triggerWelcomeStartOption` and `ui_js.startWebArm`
+    # both `case` on this literal, and neither module can be imported here (one
+    # is a `when defined(js)` renderer, the other is the renderer entry point).
+    # Pinning the derivation is what this suite can do about that: the key is
+    # `optionKey(name)`, so a renamed BUTTON silently renames the key, and a
+    # rename that skipped the two `case`s would land here.
+    check startOptionKey(wsoNewFile) == "new-file"
+    check startOptionKindForKey("new-file") == some(wsoNewFile)
+
+  test "the web surface has an action of its own again":
+    # M52's recorded cost, undone. Stated over `activeStartOptions` rather than
+    # over the record list, because that memo is what the view renders as
+    # clickable.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      vm.setStartOptions(webWelcomeStartOptions())
+      check vm.activeStartOptions.val.len == 1
+      check vm.activeStartOptions.val[0].key == "new-file"
+      check vm.activeStartOptions.val[0].name == "New file"
+      dispose()
+
+  test "the standing web note names the option that works":
+    # A line that said only "everything here needs the desktop app" would now
+    # be false, and — worse — would send a reader away from the one control
+    # that is not grey. The note is the only text on the screen a user who has
+    # concluded the page is broken will actually read.
+    check WebStartOptionsNote.contains("New file")
+    # And it still says what is refused and why, which is the #734 half.
+    check WebStartOptionsNote.contains("desktop app")

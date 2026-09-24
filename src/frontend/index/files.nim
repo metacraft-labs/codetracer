@@ -18,6 +18,12 @@ let
 proc writeFileAsync(fs: JsObject, path: cstring, data: cstring): Future[JsObject] {.importjs: "#.writeFile(#, #)".}
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
+proc showSaveDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showSaveDialog(#,#)".}
+  ## Electron's "save as" chooser, for `onSaveUntitled` (issue #735).
+  ##
+  ## Resolves `{canceled: bool, filePath: string}`. Bound here beside
+  ## `showOpenDialog` and in the same shape, because both are host dialogs this
+  ## module awaits and neither has a Nim wrapper anywhere else.
 proc getClass(icons: js, name: cstring, options: js): Future[cstring] {.importjs: "#.getClass(#,#)".}
 
 when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
@@ -298,11 +304,71 @@ proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveA
     mainWindow.webContents.send "CODETRACER::save-file-error",
       js{name: response.name, error: cstring(getCurrentExceptionMsg())}
 
+proc untitledSaveSuggestion*(bufferName: string): string =
+  ## The name to pre-fill the save dialog with, for a buffer that has no path.
+  ##
+  ## `renderer.openNewTab` names its buffers `#untitled{N}`: the leading `#` is
+  ## the marker for "this tab has no path", not part of a name anybody wants on
+  ## their disk — and a file called `#untitled1` needs quoting in every shell.
+  ## `.txt` because the buffer has no language (`fromPath("#untitled1")` is
+  ## `LangUnknown`) and a guess inferred from the content would be a guess shown
+  ## as a fact. The user can change both in the dialog; this is only the
+  ## starting point.
+  ##
+  ## Kept in step with `ui/web_entry_surface.untitledDownloadName`, which does
+  ## the same job for the browser arm's download. They are separate procs
+  ## because the two modules share no compilation unit — this one is the
+  ## Electron main process — and not because the rule differs.
+  var name = bufferName
+  if name.len > 0 and name[0] == '#':
+    name = name[1 .. ^1]
+  if name.len == 0:
+    name = "untitled"
+  if name.find('.') < 0:
+    name &= ".txt"
+  name
+
+proc isUntitledBufferName*(name: string): bool =
+  ## Whether a save target is a placeholder rather than a path on disk.
+  name.len > 0 and name[0] == '#'
+
 proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
+  ## Write an untitled buffer, ASKING WHERE FIRST.
+  ##
+  ## It used to write to `response.name` directly, and `response.name` is the
+  ## renderer's placeholder — so a Ctrl+S over a new empty file created a file
+  ## literally called `#untitled0`, in the Electron main process's working
+  ## directory, and reported it as saved. That is a silent write to a place the
+  ## user did not choose and cannot find; the `saveAs: true` the renderer has
+  ## always sent on this message said what should happen and nothing read it.
+  ##
+  ## The reply still carries the BUFFER's name rather than the chosen path,
+  ## because `ui_js.onSavedFile` looks the tab up by it and a reply naming the
+  ## destination would clear nothing. The consequence is that the tab keeps its
+  ## `#untitled{N}` title and a second save asks again; renaming the tab to its
+  ## destination is a renderer-side change this did not make. Documented in
+  ## `GUI/Welcome-And-Sessions/Welcome-Screen.md` §"New file, and what it
+  ## creates" rather than left to be rediscovered.
   try:
-    suppressSelfWrite(response.name)
-    discard await writeFileAsync(fsAsync, response.name, response.raw)
-    suppressSelfWrite(response.name)
+    var destination = response.name
+    if isUntitledBufferName($response.name):
+      let selection = await showSaveDialog(electron.dialog, mainWindow, js{
+        title: cstring"Save file",
+        defaultPath: cstring(untitledSaveSuggestion($response.name))
+      })
+      let chosen = cast[cstring](selection.filePath)
+      if cast[bool](selection.canceled) or chosen.isNil or chosen.len == 0:
+        # Reported, not swallowed. `onSaveFileError` is what drains a queued
+        # re-record request (issue #603); a cancel that replied with nothing
+        # would leave that request armed for ever, and would leave the buffer
+        # dirty with no account of why.
+        mainWindow.webContents.send "CODETRACER::save-file-error",
+          js{name: response.name, error: cstring"saving was cancelled"}
+        return
+      destination = chosen
+    suppressSelfWrite(destination)
+    discard await writeFileAsync(fsAsync, destination, response.raw)
+    suppressSelfWrite(destination)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()

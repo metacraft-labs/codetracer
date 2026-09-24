@@ -30,7 +30,15 @@
 ## ``index/config.nim``, which broke the moment issue #608 moved that text
 ## without changing what it does.
 
-import std/[strutils, unittest]
+import std/[algorithm, sequtils, strutils, unittest]
+
+# ISSUE #735. The welcome screen's start-option enum and the two arms' HANDLED
+# sets, so the `case` in the renderer can be checked against them instead of
+# being trusted. See "the desktop start-option arms and DesktopHandledStart
+# Options name the same keys" below, and the paragraph in
+# `GUI/Welcome-And-Sessions/Welcome-Screen.md` §"The invariant" that this
+# replaces.
+import viewmodels/welcome_screen_vm
 
 const
   SessionSwitchPath = "src/frontend/ui/session_switch.nim"
@@ -52,6 +60,8 @@ const
   FrontendFeaturesPath =
     "src/common/common_types/codetracer_features/frontend.nim"
   UiJsPath = "src/frontend/ui_js.nim"
+  WelcomeScreenUiPath = "src/frontend/ui/welcome_screen.nim"
+  IndexIpcUtilsPath = "src/frontend/index/ipc_utils.nim"
 
 proc sectionBetween(source, startMarker, endMarker: string): string =
   ## RAISES on a marker it cannot find, and that is the fix rather than a
@@ -384,13 +394,29 @@ else:
       check body.contains("$data.startOptions.name")
 
     test "folder edit mode publishes the selected folder to renderer state":
+      ## ISSUE #735 MOVED THE SUBJECT, and this scan had to follow it.
+      ##
+      ## The two lines below used to sit in `initEditModeForFolder`. "New file"
+      ## enters edit mode with NO folder, and rather than write a second copy of
+      ## the `no-trace` assembly for that case, `initEditModeForFolder` became a
+      ## one-line delegation to `initEditMode(sender, folders: seq[cstring])`,
+      ## which the new `onNewFile` calls with `@[]`. So the scan now reads the
+      ## proc that holds the lines, and asserts the delegation separately —
+      ## without that second check a refactor could leave `initEditMode` correct
+      ## and `initEditModeForFolder` pointed somewhere else entirely, and this
+      ## case would still pass.
       let indexTracesSource = readFile(IndexTracesPath)
       let initEditBody = sectionBetween(indexTracesSource,
-        "proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =",
-        "proc onInitEditMode*")
+        "proc initEditMode(sender: js; folders: seq[cstring]) {.async.} =",
+        "proc initEditModeForFolder")
 
       check initEditBody.contains("data.startOptions.folder = folder")
       check initEditBody.contains("path: folder")
+
+      let delegationBody = sectionBetween(indexTracesSource,
+        "proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =",
+        "proc onInitEditMode*")
+      check delegationBody.contains("await initEditMode(sender, @[folder])")
 
       let uiSource = readFile(UiJsPath)
       let noTraceBody = sectionBetween(uiSource,
@@ -550,3 +576,98 @@ else:
 
       check sharedIndex < welcomeIndex
       check welcomeIndex < mountIndex
+
+    test "the desktop start-option arms and DesktopHandledStartOptions name the same keys":
+      ## ISSUE #735 — THE HUMAN OBLIGATION M52 RECORDED, MADE STRUCTURAL.
+      ##
+      ## `DesktopHandledStartOptions` is what `desktopWelcomeStartOptions`
+      ## derives every row's `inactive` flag from, and it is a hand-written
+      ## mirror of the `case` in `ui/welcome_screen.triggerWelcomeStartOption`.
+      ## Nothing related the two: the ViewModel suite that owns the invariant
+      ## cannot import that module — it is a `when defined(js)` renderer that
+      ## pulls in Karax and Electron — so deleting an arm from the `case`
+      ## without shrinking the set would render a live button with nothing
+      ## behind it, which is issue #734 exactly, and would redden nothing.
+      ##
+      ## This lane can relate them, because it is native and can read the
+      ## renderer as TEXT while importing the set as a VALUE. It is a source
+      ## scan and carries a source scan's limits — it reads the arm labels, not
+      ## what the arms do — but the failure it is here for is a MISSING or
+      ## EXTRA arm, and that is exactly what a label list shows.
+      let source = readFile(WelcomeScreenUiPath)
+      let body = sectionBetween(source,
+        "proc triggerWelcomeStartOption*(self: WelcomeScreenComponent; key: string) =",
+        "proc resetView*(self: WelcomeScreenComponent) =")
+
+      var armKeys: seq[string] = @[]
+      for rawLine in body.splitLines:
+        let line = rawLine.strip
+        if line.startsWith("of \"") and line.endsWith("\":"):
+          armKeys.add(line["of \"".len ..< line.len - 2])
+
+      var handledKeys: seq[string] = @[]
+      for kind in WelcomeStartOptionKind:
+        if kind in DesktopHandledStartOptions:
+          handledKeys.add(startOptionKey(kind))
+
+      # A POSITIVE CONTROL ON THE SCAN ITSELF, first: a marker pair that
+      # silently matched the wrong region, or an `of` spelling this parser does
+      # not recognise, would give an EMPTY `armKeys` — and an empty list
+      # compared against an empty set would pass. `handledKeys` is non-empty by
+      # construction, so the equality below cannot be satisfied vacuously; this
+      # line says so out loud rather than leaving it to be re-derived.
+      check armKeys.len > 0
+      check armKeys.sorted == handledKeys.sorted
+
+    test "New file enters edit mode through the no-trace door on both arms":
+      ## ISSUE #735. Three hops the runtime suites cannot reach: the renderer
+      ## sends, the main process answers with an EMPTY project, and the
+      ## renderer's `onNoTrace` recognises that state and opens one untitled
+      ## buffer. Every one of them is Electron or DOM coupled.
+      let welcomeSource = readFile(WelcomeScreenUiPath)
+      let dispatchBody = sectionBetween(welcomeSource,
+        "proc triggerWelcomeStartOption*(self: WelcomeScreenComponent; key: string) =",
+        "proc resetView*(self: WelcomeScreenComponent) =")
+      check dispatchBody.contains("self.data.ipc.send \"CODETRACER::new-file\"")
+
+      # The main process has to be subscribed, or the send reaches nothing —
+      # which is the shape of #734's dead click one layer down.
+      check readFile(IndexIpcUtilsPath).contains("\"new-file\"")
+
+      let tracesSource = readFile(IndexTracesPath)
+      let newFileBody = sectionBetween(tracesSource,
+        "proc onNewFile*(sender: js, response: js) {.async.} =",
+        "proc onNewRecord*")
+      check newFileBody.contains("await initEditMode(sender, @[])")
+
+      let noTraceBody = sectionBetween(readFile(UiJsPath),
+        "proc onNoTrace(",
+        "proc invalidPath(")
+      # The branch, and what distinguishes it: edit mode with no folder. A
+      # payload flag would be a second statement of the same fact.
+      check noTraceBody.contains(
+        "elif data.startOptions.edit and data.startOptions.folder.len == 0:")
+      check noTraceBody.contains("data.openNewTab()")
+
+    test "openNewTab creates the editor view instead of asking showTab for one":
+      ## ISSUE #735 — THE DEFECT UNDER THE FEATURE, guarded.
+      ##
+      ## `openNewTab` registered its `TabInfo` in `services.editor.open` and
+      ## then called `data.openTab`, whose first branch is "not open yet ->
+      ## create the view" and whose second is "already open -> show it". The
+      ## registration on the line above forced the second, `showTab` found no
+      ## entry in `data.ui.editors`, logged `tabs: no editor in showTab for
+      ## #untitled0` and returned — so no component and no layout container
+      ## were ever made, and the `data.ui.editors[path]` on the next line was
+      ## `undefined`. The menu's New File action produced a console error and
+      ## nothing else.
+      ##
+      ## `openNewEditorView` is not the answer either: it `await`s a `tab-load`
+      ## for a path no filesystem has. An untitled buffer's content is the empty
+      ## string by construction, so it goes straight to the half that runs after
+      ## the source arrives.
+      let body = sectionBetween(readFile(RendererPath),
+        "proc openNewTab*(data: Data) {.locks: 0.} =",
+        "proc getMonacoOfActiveEditor(data: Data): MonacoEditor =")
+      check body.contains("data.makeEditorViewDetailed(path, ViewSource, tabInfo, location)")
+      check not body.contains("data.openTab(path, ViewSource)")

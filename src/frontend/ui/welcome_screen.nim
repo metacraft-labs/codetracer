@@ -43,6 +43,36 @@ var welcomeScreenComponentRef: WelcomeScreenComponent
 var welcomeScreenMountedComponentRef: WelcomeScreenComponent
 var isoNimWelcomeScreenMounted = false
 
+var webStartOptionHandler: proc(key: string)
+  ## ISSUE #735 — THE WEB ARM'S START-OPTION DISPATCH, and the reason it is a
+  ## registered hook rather than a direct call.
+  ##
+  ## `tryMountIsoNimWelcomeScreen` used to hand the view an EMPTY
+  ## `WelcomeScreenCallbacks()` whenever there was no legacy component, which
+  ## on the web is always; the view then fell through to its own `case`, which
+  ## has arms for two keys it can serve from the VM alone. M52 recorded that as
+  ## half of #734's dead click, and the half a `WebHandledStartOptions = {}`
+  ## made harmless rather than fixed. With a live option on this arm it has to
+  ## be fixed: the record says the option is performable, so something must
+  ## perform it.
+  ##
+  ## A hook, because the thing that performs it is `ui/web_entry_surface`, and
+  ## this module must not reach into it — `web_entry_surface` is the surface
+  ## that mounts panes and it already imports the project store, the replay host
+  ## and the pane hosts. `ui_js.startWebArm` is the one place that holds both
+  ## modules, which is exactly where `installNoirBuildCommands` is wired for the
+  ## template arm, and the same place wires this for the welcome arm.
+
+proc setWebWelcomeStartOptionHandler*(handler: proc(key: string)) =
+  ## Install (before mounting) the proc that performs a web start-option click.
+  ##
+  ## Must be called BEFORE `mountWebWelcomeScreen`: the callbacks record is
+  ## built once per mount and `tryMountIsoNimWelcomeScreen` returns early when
+  ## the screen is already mounted for the same component, so a handler
+  ## installed afterwards would not reach the view until something forced a
+  ## remount.
+  webStartOptionHandler = handler
+
 proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent)
 proc tryMountIsoNimWelcomeScreen*()
 proc clearIsoNimWelcomeScreen*()
@@ -300,7 +330,22 @@ proc loadRecentFolderFromWelcome*(self: WelcomeScreenComponent; folderPath: stri
     js{ folderPath: cstring(folderPath) }
 
 proc triggerWelcomeStartOption*(self: WelcomeScreenComponent; key: string) =
+  ## THE DESKTOP ARM'S DISPATCH, and the `case` that
+  ## `DesktopHandledStartOptions` mirrors. An arm added here must be added
+  ## there in the same edit, and an arm deleted here must be deleted there —
+  ## nothing relates the two (see `welcomeStartOptions` above).
   case key
+  of "new-file":
+    # ISSUE #735. Through the main process rather than straight into
+    # `renderer.openNewTab`, and the reason is that the welcome screen has NO
+    # LAYOUT: `ui/layout.initLayout` returns before GoldenLayout is constructed
+    # while `startOptions.welcomeScreen` is true and `data.trace` is nil, so a
+    # tab opened from here would have no container to go in. `CODETRACER::new-file`
+    # is answered by `index/traces.onNewFile`, which sends `CODETRACER::no-trace`
+    # with an EMPTY project — the same message "Open folder" ends up sending,
+    # so edit mode is entered by one door rather than two — and `ui_js.onNoTrace`
+    # opens the untitled buffer once the layout is on the ground.
+    self.data.ipc.send "CODETRACER::new-file"
   of "open-folder":
     self.data.ipc.send "CODETRACER::open-folder-dialog"
   of "record-new-trace":
@@ -603,7 +648,13 @@ when defined(js):
     # that OPFS is "a working copy, not durable storage the user owns", so the
     # web meaning is not the desktop meaning. Until that spec exists the
     # honest state is refused-and-explained, which is what
-    # `webWelcomeStartOptions` produces for all five rows.
+    # `webWelcomeStartOptions` produces for that row and four others.
+    #
+    # ISSUE #735 made the SIXTH row live, and it is the only one: "New file"
+    # needs no folder, no file on disk, no recorder and no main process, so it
+    # is the one start option this surface can actually perform. The screen is
+    # therefore no longer a wall of refusals — see
+    # `GUI/Welcome-And-Sessions/Welcome-Screen.md` §Start Options.
     welcomeScreenVMInstance.setStartOptions(webWelcomeStartOptions())
     welcomeScreenVMInstance.setStartOptionsNote(WebStartOptionsNote)
     welcomeScreenVMInstance.setMode(wsmWelcome)
@@ -624,10 +675,19 @@ when defined(js):
       return
     container.innerHTML = cstring""
     let callbacks =
-      if welcomeScreenComponentRef.isNil:
-        WelcomeScreenCallbacks()
-      else:
+      if not welcomeScreenComponentRef.isNil:
         welcomeScreenComponentRef.buildWelcomeCallbacks()
+      elif webStartOptionHandler != nil:
+        # ISSUE #735. The web arm has no legacy component to build a full
+        # callbacks record from, and needs exactly one field: the start-option
+        # dispatch. Every other callback stays nil, so the view's own fallbacks
+        # (`vm.loadRecentTrace`, `vm.showWelcome`, …) keep serving the rows this
+        # arm does render — there are none, the recents lists are empty here —
+        # and nothing else changes shape.
+        WelcomeScreenCallbacks(
+          onStartOptionClick: proc(key: string) = webStartOptionHandler(key))
+      else:
+        WelcomeScreenCallbacks()
     mountIsoNimWelcomeScreen(container, welcomeScreenVMInstance, callbacks)
     isoNimWelcomeScreenMounted = true
     welcomeScreenMountedComponentRef = welcomeScreenComponentRef

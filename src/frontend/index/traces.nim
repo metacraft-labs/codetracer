@@ -1320,8 +1320,20 @@ proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "CODETRACER::new-notification", notification
 
-proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
-  ## Initialize edit mode for a folder - called from welcome screen after folder selection
+proc initEditMode(sender: js; folders: seq[cstring]) {.async.} =
+  ## Enter edit mode over zero or one folders, and hand the renderer the
+  ## `CODETRACER::no-trace` message that puts it there.
+  ##
+  ## ISSUE #735 generalised this from one folder to a SEQUENCE, so that "New
+  ## file" — which opens edit mode with no project at all — takes the same path
+  ## rather than a parallel one. The empty case is not a special case anywhere
+  ## below: `loadFilesystem(@[])` returns the artificial "source folders" root
+  ## with no children, `loadFilenames(@[])` returns an empty list,
+  ## `getLaunchConfigsForWorkspace("")` finds nothing, and `getSave` ignores its
+  ## folders entirely. The one thing that does differ is `startOptions.folder`,
+  ## which stays empty — and `ui_js.onNoTrace` reads exactly that to decide the
+  ## session gets an untitled buffer.
+  let folder = if folders.len > 0: folders[0] else: cstring""
   # Set the startup options to edit mode
   data.startOptions.edit = true
   data.startOptions.welcomeScreen = false  # No longer in welcome screen mode
@@ -1330,10 +1342,10 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   data.workspaceFolder = folder
 
   # Load filesystem and filenames for the folder
-  let filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
-  let filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
+  let filesystem = await loadFilesystem(folders, traceFilesPath=cstring"", selfContained=false)
+  let filenames = await loadFilenames(folders, traceFolder=cstring"", selfContained=false)
   var functions: seq[Function] = @[]
-  let save = await getSave(@[folder], data.config.test)
+  let save = await getSave(folders, data.config.test)
   data.save = save
 
   # Open folders in the edit layout, not the debugger replay layout.  The
@@ -1357,8 +1369,16 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
     save: save
   }
 
-  # Also load and send launch configs for the workspace
-  let launchConfigs = getLaunchConfigsForWorkspace(folder)
+  # Also load and send launch configs for the workspace.
+  #
+  # Only when there IS one. `getLaunchConfigsForWorkspace("")` joins to the
+  # relative `.vscode/launch.json`, which resolves against the Electron main
+  # process's own working directory — so a projectless edit session (issue
+  # #735's "New file") would silently adopt whatever launch configurations
+  # happened to sit beside wherever CodeTracer was started from.
+  let launchConfigs =
+    if folder.len > 0: getLaunchConfigsForWorkspace(folder)
+    else: newSeq[LaunchConfig]()
   if launchConfigs.len > 0:
     var configsJs: seq[JsObject] = @[]
     for i, config in launchConfigs:
@@ -1377,8 +1397,29 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
       })
     mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
 
+proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
+  await initEditMode(sender, @[folder])
+
 proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
   await initEditModeForFolder(sender, response.folder)
+
+proc onNewFile*(sender: js, response: js) {.async.} =
+  ## ISSUE #735 — the welcome screen's "New file" start option.
+  ##
+  ## Edit mode with NO project: no folder to walk, no filenames, no save file.
+  ## `ui_js.onNoTrace` recognises that state by `startOptions.folder` being
+  ## empty — nothing else in the product reaches edit mode without a folder;
+  ## see that branch's comment for what guarantees it — and opens one untitled
+  ## buffer.
+  ##
+  ## The main process's own state is updated by `initEditMode` exactly as an
+  ## "Open folder" would update it, which is why this goes through the main
+  ## process at all rather than opening a tab in the renderer directly: after
+  ## this returns, `data.startOptions` and `data.workspaceFolder` describe an
+  ## edit session with no workspace, and everything downstream that asks —
+  ## `onRecordFromLaunch`, `hcr_launch`, a later mode switch — gets a truthful
+  ## answer instead of a stale "the welcome screen is up".
+  await initEditMode(sender, @[])
 
 proc onNewRecord*(sender: js,
     response: jsobject(filename=cstring, args=seq[cstring], options=JsObject,

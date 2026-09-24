@@ -10866,11 +10866,15 @@ suite "IsoNim Welcome Screen — refused start options (#734)":
 
       let panel = renderWelcomeScreenPanel(r, vm)
       let options = findAllByClass(panel, "start-option")
-      check options.len == 5
-      for opt in options:
-        check r.getAttribute(opt, "aria-disabled") == "true"
-        check r.getAttribute(opt, "title").len > 0
-      check r.getAttribute(options[0], "title") == WebOpenFolderReason
+      check options.len == 6
+      # Row 0 is "New file" (issue #735), the one option this arm can perform,
+      # so it is the one row that must NOT speak. Every other row must.
+      check r.getAttribute(options[0], "aria-disabled") == "false"
+      check r.getAttribute(options[0], "title") == ""
+      for i in 1 ..< options.len:
+        check r.getAttribute(options[i], "aria-disabled") == "true"
+        check r.getAttribute(options[i], "title").len > 0
+      check r.getAttribute(options[1], "title") == WebOpenFolderReason
 
       # And the standing line, which is the part a user who has not yet
       # thought to hover anything can read.
@@ -10889,20 +10893,26 @@ suite "IsoNim Welcome Screen — refused start options (#734)":
 
       let panel = renderWelcomeScreenPanel(r, vm)
       let options = findAllByClass(panel, "start-option")
-      check options.len == 5
-      # Four live, one refused (the shell), and only the refused one speaks.
-      for i in 0 ..< 4:
+      check options.len == 6
+      # Five live, one refused (the shell), and only the refused one speaks.
+      for i in 0 ..< 5:
         check r.getAttribute(options[i], "aria-disabled") == "false"
         check r.getAttribute(options[i], "title") == ""
-      check r.getAttribute(options[4], "aria-disabled") == "true"
-      check r.getAttribute(options[4], "title") == DesktopShellUnavailableReason
+      check r.getAttribute(options[5], "aria-disabled") == "true"
+      check r.getAttribute(options[5], "title") == DesktopShellUnavailableReason
       check findByClassOrNil(panel, StartOptionsNoteClass).isNil
       dispose()
 
-  test "clicking a refused option still does nothing":
+  test "clicking a refused option still does nothing, and the live one is reached":
     # The CSS no longer carries `pointer-events: none` — it suppressed the
     # native `title` tooltip, which was the only per-option explanation — so
     # the click now actually reaches the handler and must be refused there.
+    #
+    # ISSUE #735 turned this into a PAIR rather than a single negative, and the
+    # pair is what makes it a test: clicking every row on the web arm produces
+    # exactly one callback, for the one row that arm can perform. Before, this
+    # case asserted `clicked.len == 0` over an arm where every row was refused —
+    # which a `triggerStartOption` wired to nothing at all would also satisfy.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
@@ -10915,7 +10925,7 @@ suite "IsoNim Welcome Screen — refused start options (#734)":
       let panel = renderWelcomeScreenPanel(r, vm, callbacks)
       for opt in findAllByClass(panel, "start-option"):
         opt.fireEvent("click")
-      check clicked.len == 0
+      check clicked == @["new-file"]
       # The VM's own fallback arms must not fire either: `record-new-trace`
       # and `open-online-trace` are the two keys the view can serve without a
       # host, and on this arm they are refused like the rest.

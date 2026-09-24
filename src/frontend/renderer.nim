@@ -1234,20 +1234,89 @@ proc reopenLastTab*(data: Data) {.locks: 0.} =
 # openNewTab is used only to open a new empty file
 # for open any other kind of tab - use openLayoutTab !
 proc openNewTab*(data: Data) {.locks: 0.} =
+  ## Open a new, empty, unsaved buffer and focus it.
+  ##
+  ## Reached from the menu's New File action (`ui_js.nim`'s `newTab`) and, since
+  ## issue #735, from the welcome screen's "New file" start option by way of
+  ## `ui_js.onNoTrace`.
+  ##
+  ## ## Why this does not call `openTab`
+  ##
+  ## It used to, and the sequence could not work. `openTab` branches on whether
+  ## `data.services.editor.open` already has the tab: absent, it calls
+  ## `openNewEditorView`, which creates the component; present, it calls
+  ## `showTab`, which requires `data.ui.editors` to have one already. This proc
+  ## put the `TabInfo` into `open` on the line before, so it always took the
+  ## second branch, and `showTab` ended at
+  ## `cerror "tabs: no editor in showTab for #untitled0"` and returned. No
+  ## component was ever created, so no layout container was opened, and the
+  ## `data.ui.editors[path]` on the next line was `undefined`. The gesture
+  ## produced a console error and nothing else.
+  ##
+  ## Registering the tab is not the thing to drop, because `openNewEditorView`
+  ## is the wrong path for a buffer that has no source to fetch: it builds a
+  ## `Location` and `await`s `tabLoad`, which sends `CODETRACER::tab-load` for
+  ## `#untitled0`. On the desktop `index/files.open` would fail to read it; in a
+  ## browser tab nothing answers at all and the await never settles. An untitled
+  ## buffer's content is the empty string by construction and there is nobody to
+  ## ask.
+  ##
+  ## So it goes straight to `makeEditorViewDetailed`, which is the half of
+  ## `openNewEditorView` that runs AFTER the source arrives — register the tab,
+  ## make the component, open the layout container, make it active. That is not
+  ## a side entrance: it is the proc `openNewEditorView` itself calls once the
+  ## `tab-load` answers, so an untitled buffer is created by the same sequence
+  ## every ordinary file tab is created by, and `openNoSourceView` open-codes
+  ## the identical steps for a pane it likewise holds the content of.
+  ##
+  ## Do NOT model this on `utils.makeEditorView`. It calls
+  ## `makeEditorViewDetailed` and then repeats that proc's
+  ## `makeEditorViewComponent` + `openLayoutTab` tail itself, and
+  ## `makeEditorViewComponent` raises `editor <name> exists` for a name already
+  ## in `ui.editors` — so the second call should always throw. That is its own
+  ## defect, untouched here and deliberately not built on.
+  ##
+  ## The `TabInfo` below carries what a loaded one would have carried:
+  ## `received: true` (nothing is pending), `viewLine: 1`, and a `location`
+  ## marked `missingPath` because there is no file behind it.
   let path = cstring(fmt"#untitled{data.services.editor.untitledIndex}")
   data.services.editor.untitledIndex += 1
 
   let lang = fromPath(path)
-  data.services.editor.open[path] = TabInfo(
+  let location = types.Location(
+    path: path,
+    line: 1,
+    highLevelPath: path,
+    highLevelLine: 1,
+    functionName: cstring"",
+    missingPath: true)
+  let tabInfo = TabInfo(
     overlayExpanded: -1,
-    highlightLine: -1,
+    highlightLine: NO_LINE,
+    viewLine: 1,
     changed: true,
     untitled: true,
+    received: true,
+    loading: false,
     name: path,
+    path: path,
     source: cstring"",
+    lastSyncedSource: cstring"",
+    sourceLines: @[cstring""],
+    location: location,
     lang: lang)
-  data.openTab(path, ViewSource)
-  data.focusComponent(data.ui.editors[path])
+
+  data.removeEditorFromClosedTabs(path)
+  data.removeEditorFromLoading(path)
+  data.makeEditorViewDetailed(path, ViewSource, tabInfo, location)
+  if data.ui.editors.hasKey(path):
+    data.focusComponent(data.ui.editors[path])
+  else:
+    # `makeEditorViewDetailed` creates the component before it opens the layout
+    # container, so a miss here means the creation itself failed. Focusing
+    # `undefined` is what this line used to do on EVERY call; saying so is what
+    # makes the next report about the real failure.
+    cerror "editor: openNewTab: no editor component for " & $path
   # TODO
   if not data.services.search.paths.hasKey(path):
     data.services.search.pathsPrepared.add(fuzzysort.prepare(path))

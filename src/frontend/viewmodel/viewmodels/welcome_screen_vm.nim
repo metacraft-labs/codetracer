@@ -425,8 +425,8 @@ proc optionKey*(name: string): string =
 # ISSUE #734. The welcome screen's start-options strip is built once per arm:
 # the desktop arm from a live `WelcomeScreenComponent`, the web arm from
 # nothing at all (a statically hosted tab has no main process). Both used to
-# hand-write five `WelcomeStartOptionRecord` literals, and the web arm's first
-# literal said `inactive: false` for "Open folder" — an option nothing on that
+# hand-write one `WelcomeStartOptionRecord` literal per row, and the web arm's
+# first literal said `inactive: false` for "Open folder" — an option nothing on that
 # arm can perform. The view's `triggerStartOption` prefers the host callbacks,
 # the web arm passes an EMPTY `WelcomeScreenCallbacks()` (there is no legacy
 # component to build one from), and its `case` fallback has no `open-folder`
@@ -441,9 +441,16 @@ proc optionKey*(name: string): string =
 
 type
   WelcomeStartOptionKind* = enum
-    ## The five start options, in render order.  The enum — rather than the
+    ## The six start options, in render order.  The enum — rather than the
     ## bare key strings — is what lets an arm's ACTIVE set and its HANDLED set
     ## be the same value instead of two lists that agree by review.
+    ##
+    ## ISSUE #735 added `wsoNewFile`, and it is FIRST rather than appended.
+    ## Order here is render order, and this is the only option every arm can
+    ## perform: it needs no folder, no file on disk, no recorder and no main
+    ## process.  On the web arm it is the only live row, and the one live
+    ## action in a strip of refusals must not be the last thing read.
+    wsoNewFile
     wsoOpenFolder
     wsoRecordNewTrace
     wsoOpenLocalTrace
@@ -457,6 +464,7 @@ type
 
 const
   StartOptionNames*: array[WelcomeStartOptionKind, string] = [
+    "New file",
     "Open folder",
     "Record new trace",
     "Open local trace",
@@ -472,8 +480,8 @@ const
 
   # -- The desktop arm ------------------------------------------------------
   DesktopHandledStartOptions*: set[WelcomeStartOptionKind] =
-    {wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace, wsoOpenOnlineTrace,
-     wsoCodetracerShell}
+    {wsoNewFile, wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace,
+     wsoOpenOnlineTrace, wsoCodetracerShell}
     ## Every kind `WelcomeScreenComponent.triggerWelcomeStartOption`'s `case`
     ## has an arm for.  Delete an arm there and this set must shrink with it.
     ##
@@ -490,16 +498,23 @@ const
     "The CodeTracer shell is not available in this build yet."
 
   # -- The web arm ----------------------------------------------------------
-  WebHandledStartOptions*: set[WelcomeStartOptionKind] = {}
-    ## EMPTY, and that is the honest value. A statically hosted tab has no
-    ## Electron main process, so none of the four `CODETRACER::…` messages
-    ## `triggerWelcomeStartOption` sends is answered by anything; the platform
-    ## facade refuses the folder picker by design
-    ## (`viewmodel/host/web_browser.nim`'s `pickDirectory` resolves
-    ## `unsupported`); and the two options the view can serve from the VM
-    ## alone ("Record new trace", "Open online trace") open forms whose SUBMIT
-    ## is the same unanswered IPC. Making this set non-empty is a promise, and
-    ## the promise needs the flow behind it first.
+  WebHandledStartOptions*: set[WelcomeStartOptionKind] = {wsoNewFile}
+    ## ISSUE #735. Exactly one, and the promise behind it is built rather than
+    ## claimed: `ui/web_entry_surface.enterNewFileEditMode` delivers
+    ## `CODETRACER::no-trace` through the in-page transport — the same door
+    ## `enterTemplateEditMode` uses and the same door `index/traces.nim` uses on
+    ## the desktop — so the tab lands in Edit mode with one untitled buffer, and
+    ## `installUntitledSaveHost` answers the save.
+    ##
+    ## The other five stay refused for the reason M52 established, which has not
+    ## changed: a statically hosted tab has no Electron main process, so none of
+    ## the `CODETRACER::…` messages `triggerWelcomeStartOption` sends for them is
+    ## answered by anything; the platform facade refuses the folder picker by
+    ## design (`viewmodel/host/web_browser.nim`'s `pickDirectory` resolves
+    ## `unsupported`); and the two options the view can serve from the VM alone
+    ## ("Record new trace", "Open online trace") open forms whose SUBMIT is the
+    ## same unanswered IPC. Making this set larger is a promise, and the promise
+    ## needs the flow behind it first.
 
   WebOpenFolderReason* =
     "This browser tab cannot read folders from your computer. " &
@@ -519,7 +534,8 @@ const
   WebStartOptionsNote* =
     "This page runs CodeTracer in a browser tab, which has no access to " &
     "your computer's files and cannot run programs. Opening folders and " &
-    "traces, and recording, need the CodeTracer desktop app."
+    "traces, and recording, need the CodeTracer desktop app — but " &
+    "\"New file\" works here and opens an editor straight away."
     ## The standing line under the strip on the web arm.
     ##
     ## A per-button `title` explains ONE refusal to a user who already
@@ -529,6 +545,12 @@ const
     ## §4.2 states the same rule for the storage tier ("stated in the UI",
     ## "says so before the first keystroke", "Never a blank failure"); this is
     ## that rule applied to the capability tier.
+    ##
+    ## ISSUE #735 added the second sentence's tail. The line's job is to stop
+    ## the reader concluding the page is broken, and "everything here needs the
+    ## desktop app" would now be FALSE as well as discouraging: one row is live,
+    ## and a standing line that does not name it leaves the reader hunting for
+    ## the single button that is not grey.
 
 proc startOptionName*(kind: WelcomeStartOptionKind): string =
   StartOptionNames[kind]
@@ -547,7 +569,7 @@ proc startOptionKindForKey*(key: string): Option[WelcomeStartOptionKind] =
 proc welcomeStartOptionRecords*(active: set[WelcomeStartOptionKind];
                                 reasons: StartOptionDisabledReasons):
     seq[WelcomeStartOptionRecord] =
-  ## Build the full five-row strip for one arm.
+  ## Build the full strip — one row per `WelcomeStartOptionKind` — for one arm.
   ##
   ## Two invariants hold by CONSTRUCTION here, which is the point of routing
   ## both arms through one builder:
