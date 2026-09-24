@@ -87,6 +87,61 @@ proc hasBranchStateAt*[B](branchesTaken: openArray[B]; position: int): bool =
       return false
   table.hasKey(position)
 
+proc branchStateAnywhere*[B, S](branchesTaken: openArray[B]; header: int;
+                                state: S): bool =
+  ## Does ANY cell of the payload record `state` for the arm at `header`?
+  ##
+  ## The state is a PARAMETER rather than the name `Taken` spelled here, and
+  ## that is forced rather than stylistic: this module names no types (see the
+  ## Genericity note above), so a branch state can only reach it through
+  ## `mixin` — and a `mixin` binds where the proc that DECLARES it is
+  ## instantiated, which for a generic called from another generic is this
+  ## file, not the renderer. `nim js src/frontend/ui_js.nim` says so directly:
+  ## *"template/generic instantiation of `branchStateAnywhere` from here …
+  ## Error: undeclared identifier: 'Taken'"*. `insideUntakenBranch` has the
+  ## value in scope through its own `mixin`, so it passes it in.
+  ##
+  ## `S` is generic for the same reason the module is generic over `B`: the
+  ## state is `BranchState` for the two `FlowViewUpdate` worlds and a bare
+  ## ordinal `int` for `viewmodel/viewmodels/flow_vm.nim`'s `FlowLineWindow`,
+  ## whose constants `test_flow_line_facts.nim` pins against the enum.
+  ##
+  ## `Omniscience-Flow.md` § *Dimming means "the run did not take this branch"*:
+  ## "**Dimming does not depend on the loop iteration on display.** A line in a
+  ## loop body is not dimmed because the reader is looking at an iteration other
+  ## than the one it ran in. It ran."
+  ##
+  ## An arm's state is per (loop, iteration), but DIMMING is per window — one
+  ## verdict for the whole overlay — so the question the dimming rule has to ask
+  ## is "did this arm ever run", and that ranges over every cell, not over
+  ## `[0][0]` alone.
+  ##
+  ## It is also what makes the rule safe when two cells of one payload
+  ## disagree. They can: `expr_loader.final_branch_load` sweeps the file and
+  ## stamps `NotTaken` into `[0][0]` for arms it believes the walk never
+  ## reached, and until `observed_branch_lines` existed its check list was
+  ## `[0][0]` alone, so an arm entered on every pass of a LOOP was swept anyway.
+  ## Measured on a two-pass Rust loop whose `else` arm ran both times:
+  ## `branchesTaken[0][0] = [(5,NotTaken),(7,NotTaken)]` beside
+  ## `[1][0] = [(5,NotTaken),(7,Taken)]` — line 7's arm both ran and, said the
+  ## outer table, did not (`src/db-backend/tests/flow_branch_state_test.rs`).
+  ## That disagreement is issue #758's second complaint: "even when a branch
+  ## DOES show green (taken), the code inside is still grayed out".
+  ##
+  ## `Taken` outranks `NotTaken` here because they are not two opinions of equal
+  ## standing. `Taken` is written from an OBSERVATION — the walker stepped into
+  ## the arm — and the sweep's `NotTaken` is inferred from an ABSENCE. When a
+  ## proof and an inference-from-silence disagree, the silence was wrong.
+  for iterations in branchesTaken:
+    for cell in iterations:
+      let table = cell.table
+      when compiles(table.isNil):
+        if table.isNil:
+          continue
+      if table.hasKey(header) and table[header] == state:
+        return true
+  false
+
 proc insideUntakenBranch*[B](branchesTaken: openArray[B]; position: int): bool =
   ## Does `position` fall inside the interior of an arm the run DECLINED?
   ##
@@ -113,6 +168,7 @@ proc insideUntakenBranch*[B](branchesTaken: openArray[B]; position: int): bool =
   ## to instantiation above, and the reason the headless tests can run the very
   ## code the renderer runs.
   mixin NotTaken
+  mixin Taken
   if branchesTaken.len == 0:
     return false
   if branchesTaken[0].len == 0:
@@ -130,6 +186,11 @@ proc insideUntakenBranch*[B](branchesTaken: openArray[B]; position: int): bool =
       return false
   for header, state in states:
     if state != NotTaken:
+      continue
+    # An arm this window recorded as ENTERED anywhere is an arm that ran, and
+    # no claim to the contrary in another cell may dim its interior. See
+    # `branchStateAnywhere` for which claim loses and why.
+    if branchStateAnywhere(branchesTaken, header, Taken):
       continue
     if not extents.hasKey(header):
       continue

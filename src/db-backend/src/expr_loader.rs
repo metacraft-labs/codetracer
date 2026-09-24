@@ -510,6 +510,41 @@ fn field_name_in_parent(node: &Node) -> Option<String> {
     None
 }
 
+/// The lines `branch` occupies, or `None` if the grammar never located them.
+///
+/// The single statement of what makes an arm's span usable, shared by the
+/// per-file `branch_extents` and the per-step `branch_extent_at_header` so a
+/// span one of them reports and the other rejects is not constructible.
+///
+/// A branch whose body node was never identified is SKIPPED rather than
+/// reported with a sentinel. `Branch::new` leaves both positions at
+/// `NO_POSITION` and `extract_branches` only overwrites them when it finds a
+/// `branches_body` node for the language, so a language whose node names are
+/// not configured yields no extents at all — and "no extent" propagates as "no
+/// claim", which is the correct rendering of "nothing is known about this
+/// line". Emitting `-1..-1` would instead be a claim, and an empty one that
+/// ranges over nothing only by accident.
+fn locatable_extent(branch: &Branch) -> Option<BranchExtent> {
+    if branch.is_none
+        || branch.header_line.0 == NO_POSITION
+        || branch.code_first_line.0 == NO_POSITION
+        || branch.code_last_line.0 == NO_POSITION
+    {
+        return None;
+    }
+    // An arm whose body ends before it begins is not a span. This is reachable
+    // for a one-line arm written `if c { f(); }`, where `code_first_line` is
+    // the header line + 1 and `code_last_line` is the header line itself — a
+    // range no reader must take for "everything from here down".
+    if branch.code_last_line.0 < branch.code_first_line.0 {
+        return None;
+    }
+    Some(BranchExtent {
+        first_line: branch.code_first_line.0 as usize,
+        last_line: branch.code_last_line.0 as usize,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct ExprLoader {
     // parser: Parser,
@@ -2314,30 +2349,32 @@ impl ExprLoader {
             return extents;
         }
         for branch in &self.processed_files[path].branch {
-            if branch.is_none
-                || branch.header_line.0 == NO_POSITION
-                || branch.code_first_line.0 == NO_POSITION
-                || branch.code_last_line.0 == NO_POSITION
-            {
-                continue;
+            if let Some(extent) = locatable_extent(branch) {
+                extents.insert(branch.header_line.0 as usize, extent);
             }
-            // An arm whose body ends before it begins is not a span. This is
-            // reachable for a one-line arm written `if c { f(); }`, where
-            // `code_first_line` is the header line + 1 and `code_last_line` is
-            // the header line itself — a range the renderer must not read as
-            // "everything from here down".
-            if branch.code_last_line.0 < branch.code_first_line.0 {
-                continue;
-            }
-            extents.insert(
-                branch.header_line.0 as usize,
-                BranchExtent {
-                    first_line: branch.code_first_line.0 as usize,
-                    last_line: branch.code_last_line.0 as usize,
-                },
-            );
         }
         extents
+    }
+
+    /// The arm introduced by the header on `position`, if the grammar located
+    /// its body.
+    ///
+    /// The per-step counterpart of `branch_extents`, and it applies the SAME
+    /// validity rules through the same helper so the two cannot disagree about
+    /// which arms exist. `branch_extents` answers "where is every arm in this
+    /// file" once per window; this answers "did the walk just evaluate a
+    /// condition, and if so which lines is its arm" once per step.
+    ///
+    /// `None` is the honest answer for a language whose body nodes are not
+    /// configured, and it propagates as "no claim": the walker records no
+    /// pending decision, so nothing is ever reported about that conditional.
+    pub fn branch_extent_at_header(&self, position: Position, path: &PathBuf) -> Option<BranchExtent> {
+        self.processed_files
+            .get(path)?
+            .branch
+            .iter()
+            .filter(|branch| branch.header_line == position)
+            .find_map(locatable_extent)
     }
 
     pub fn get_loop_shape(&self, line: Position, path: &PathBuf) -> Option<LoopShape> {

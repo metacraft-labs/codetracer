@@ -5671,7 +5671,6 @@ Two traps in the same area, both live:
 * `AutoHideEdge` is `Left, Right, Bottom`, so its ordinals are **0, 1, 2**, and
   that ordinal is what `auto_hide_state.json` stores. A comment in
   `unpinPanelTarget` claimed `Bottom=0, Left=1, Right=2` for a long time.
-||||||| parent of 013d2bd56 (fix(web): match each locals answer to the request that produced it)
 - PLAT-29 async boundary, wired (2026-09-23). Every writer of an
   `EditingDocument.state` must call `drainJournal()` afterwards (applyKey,
   applyNamed, applyChangeSet, collab projection's two): `mapPositionTables`
@@ -5730,3 +5729,93 @@ Two traps in the same area, both live:
 - Nim test-lane nimcache defaults to /tmp/ct-nim-cache/<worktree-name>-<hash>/,
   so two worktrees do not collide; `pkill -f` with a pattern that appears in
   your own command line kills your own shell (exit 144) — kill by PID.
+
+- 2026-09-24: **`FlowViewUpdate.branchesTaken` is FOUR producers writing into one
+  structure, and they do not all write into the same cell.** `[loop][iteration]`,
+  and `[0][0]` is not "the first loop" — it is *the conditionals no loop
+  encloses*, plus everything the file-wide sweep adds.
+  * `expr_loader.load_branch_for_position` (sound) — the walker stepped on an
+    arm's `code_first_line`, so that arm's header is `Taken` and every sibling
+    in `Branch.opposite` is `NotTaken`. Goes into the cell of the step's own
+    loop/iteration. **A conditional with no sibling has an empty `opposite`**, so
+    a lone `if` can be proved taken and, by this route, never proved declined.
+  * `flow_preloader`'s pending-header rule (sound, added for #758) — a step ON a
+    header line is the condition being evaluated, so the NEXT step is inside the
+    arm or outside it. Records `NotTaken` in the cell **captured when the header
+    was seen**, not the current one: a conditional ending a loop body is resolved
+    by the loop header, which has already opened the next iteration.
+  * `expr_loader.final_branch_load` (unsound, and the source of two separate
+    bugs) — a file-wide sweep into `[0][0]` for every branch it believes the walk
+    never reached. Its `branch.status == Unknown` guard is **always true**,
+    because `load_branch_for_position` sets `Taken` on a CLONE and never writes
+    back, so the check list passed in is the whole of its knowledge. That list
+    was `[0][0]` itself until `FlowViewUpdate::observed_branch_lines`, which made
+    every arm inside a LOOP invisible to it. Still runs identically after a
+    truncated walk — that half is an open owner decision, see
+    `Omniscience-Flow.md` § *Known defect*.
+  * `FlowViewUpdate.add_branch_extents` — `header_line -> BranchExtent`, onto
+    `[0][0]` only, once per window. Static per file, so it is not per-iteration.
+  Reading state for a line therefore means asking *which cell*, and the two
+  frontend readers ask differently: `conditionStyleLines` paints `[0][0]` on
+  every update and the current loop cell on top of it, while
+  `flow_line_rule.insideUntakenBranch` (dimming) reads `[0][0]` alone. When the
+  sweep and a loop cell disagreed about one header, that was issue #758 in full —
+  red under the green on the header, and the taken arm's interior dimmed.
+  Hermetic coverage, with no recorder or `nargo` needed:
+  `src/db-backend/tests/flow_branch_state_test.rs` builds an in-memory `Db` the
+  way `dap_column_flow.rs` does and drives the real `FlowPreloader::load`.
+- 2026-09-24: **`mixin` does not reach a nested generic, and
+  `src/common/flow_line_rule.nim` has no imports on purpose.** A `mixin`ed name
+  binds where the proc DECLARING it is instantiated; a generic called from
+  another generic instantiates in `flow_line_rule.nim`, where nothing is in
+  scope. So a helper there cannot name `Taken`/`NotTaken` itself — the state has
+  to be a parameter, passed by the caller that does hold the `mixin`. There are
+  also THREE instantiations, not two: `BranchState` through `common/types.nim`,
+  `BranchState` through `frontend/types.nim`, and a bare ordinal `int` for
+  `viewmodel/viewmodels/flow_vm.nim`'s `FlowLineWindow`, whose `const NotTaken =
+  2` / `const Taken = 1` exist solely to satisfy those mixins.
+  `test_flow_line_facts.nim` pins both against the enum. **The native lane can
+  compile while the JS lane cannot**, so `nim js src/frontend/ui_js.nim` is the
+  check that matters here.
+- 2026-09-24: **The pending-header rule's `NotTaken` is an INFERENCE and must
+  never overwrite a sighting — and the AST extent it reasons over does not
+  describe every arm.** `code_first_line` is `header_line + 1` unconditionally
+  (`expr_loader.rs`, `extract_branches`: `get_first_line(node).inc()`), and
+  `code_last_line` is the body node's LAST line, i.e. the closing brace. So the
+  extent is `[header+1, closing brace]` whatever the body actually looks like,
+  and three shapes fall outside what "the next step is inside the arm or it is
+  not" can decide. Measured on `dev` `34581010a` and after the fix, with the
+  same answers on both sides unless noted:
+  * a header line reported a SECOND time after its arm ran (line-granularity
+    replay does this; see `MAX_NONPROGRESSING_STEPS`) re-registers the
+    conditional, and the step after it is outside the arm. Without a guard that
+    rewrote an observed `Taken` into `NotTaken` — a regression the fix
+    introduced and `flow_view_update.branch_state_at` now blocks. THE RULE IS:
+    an inference loses to a sighting, the same way
+    `flow_line_rule.branchStateAnywhere` decides it on the rendering side.
+  * an arm whose first EXECUTED line is not `code_first_line` — a leading
+    comment is enough — never gets its `Taken` from
+    `load_branch_for_position`, because that producer is keyed on
+    `code_first_line` exactly. The file-wide sweep then stamps the header
+    `NotTaken`. Pre-existing and unchanged: measured `[0][0] = [(3, NotTaken)]`
+    on both sides for `if a == 1 {` with a comment as the arm's first line.
+  * an `else if` chain: the arm that RAN is reported `NotTaken`. Pre-existing
+    and unchanged, measured `[(3, NotTaken), (5, NotTaken), (7, NotTaken)]` on
+    both sides with the middle arm taken. `extract_branches` pushes several
+    `Branch` records sharing one `header_line` for one `else if`, and
+    `position_branches` is keyed on `code_first_line`, so the `opposite` walk
+    can mark one header both `Taken` and `NotTaken` in a single call.
+    § *Known defect*'s "the painted scope is one line, and for `else if` it is
+    the wrong one" is the reading half of this.
+  An arm that is entered but whose body records NO step is reported `NotTaken`
+  too, on both sides. None of the three is fixed here; all are worth an issue.
+- 2026-09-24: **`insideUntakenBranch` is called once PER SOURCE LINE, and its
+  new `branchStateAnywhere` clause scans every cell of `branchesTaken`.** Cells
+  grow one per loop iteration the walk observed, bounded only by
+  `STEP_COUNT_LIMIT` (10 000 steps), so the cost of one flow repaint is
+  lines × NotTaken-headers × iterations — millions of table lookups in the JS
+  renderer for an ordinary long loop. The cheap fix is to test the extent
+  containment BEFORE the scan: the guards in that loop are an independent
+  conjunction, so reordering them is free and it drops the scan to at most once
+  per line instead of once per header per line. Not done yet — it wants its own
+  change and its own `just test-vm-native` run.

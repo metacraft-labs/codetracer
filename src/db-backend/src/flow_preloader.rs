@@ -12,7 +12,7 @@ use crate::{
     nim_mangling,
     replay::ReplaySession,
     task::{
-        Action, BranchesTaken, CoreTrace, CtLoadLocalsArguments, FlowEvent, FlowMode, FlowStep, FlowUpdate,
+        Action, BranchState, BranchesTaken, CoreTrace, CtLoadLocalsArguments, FlowEvent, FlowMode, FlowStep, FlowUpdate,
         FlowUpdateState, FlowUpdateStateKind, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps,
         Position, RRTicks, StepCount, TraceKind,
     },
@@ -224,6 +224,61 @@ impl FlowPreloader {
     // }
 }
 
+/// A conditional whose test the walk has just seen evaluated, and whose outcome
+/// the NEXT step decides.
+///
+/// # What this is for
+///
+/// `load_branch_for_position` is the sound producer of branch state, and it
+/// produces `NotTaken` only through `Branch.opposite` — observing one arm run
+/// proves its SIBLINGS did not. A conditional with no sibling has an empty
+/// `opposite`, so a lone `if` can be proved `Taken` and never proved declined.
+/// That is issue #758 exactly: its program is
+///
+/// ```text
+/// for i in 0..10 {
+///   if i % 3 == 0 { result = result + y; }
+/// }
+/// ```
+///
+/// and measured on that shape before this existed, the payload held
+/// `branches_taken[1][0] = [(5, Taken)]`, `[1][1] = []`, `[1][2] = []`,
+/// `[1][3] = [(5, Taken)]` — the passes that entered the arm said so and the
+/// passes that declined it said **nothing at all**
+/// (`tests/flow_branch_state_test.rs`).
+///
+/// # Why the next step settles it, and why it is a proof and not a guess
+///
+/// A step ON the header line is the condition being evaluated: the walk is
+/// there because the recording has a step there. The arm's lines are known
+/// independently, from the AST. So the step after the evaluation is either
+/// inside the arm — the arm was entered — or outside it, and there is no third
+/// possibility for a conditional whose test has been evaluated. This claims
+/// nothing about a conditional the walk never reached, which is the unsound
+/// direction the file-wide sweep takes.
+struct PendingBranch {
+    /// The file the header is in.
+    ///
+    /// Only a step in the SAME file can resolve it. In `FlowMode::Call` this is
+    /// automatic — `step_belongs_to_window_file` skips foreign steps before
+    /// `process_loops` sees them — but `FlowMode::Diff` is explicitly a view
+    /// over several files, and "the next step was somewhere else entirely" is
+    /// not evidence that this arm was declined.
+    path: PathBuf,
+    /// The header line, i.e. the key the state is reported under.
+    header_line: i64,
+    /// The arm's interior, from the AST.
+    first_line: i64,
+    last_line: i64,
+    /// `branches_taken[loop][iteration]` AS IT WAS when the test was evaluated.
+    ///
+    /// Captured rather than recomputed at resolution time, because a
+    /// conditional that is the last statement of a loop body is resolved by the
+    /// loop header — a step that has already opened the NEXT iteration. The
+    /// verdict belongs to the pass that evaluated the test.
+    cell: (usize, usize),
+}
+
 pub struct CallFlowPreloader<'a> {
     flow_preloader: &'a FlowPreloader,
     location: Location,
@@ -235,6 +290,14 @@ pub struct CallFlowPreloader<'a> {
     mode: FlowMode,
     trace_kind: TraceKind,
     lang: Lang,
+    /// Conditionals evaluated but not yet resolved. See `PendingBranch`.
+    ///
+    /// A `Vec` rather than an `Option` because conditionals nest: the step that
+    /// enters an outer arm can itself be an inner header, and both are then
+    /// awaiting their own next step. Anything still here when the walk ends is
+    /// DROPPED — a walk that stopped is not evidence about the branch it
+    /// stopped on.
+    pending_branches: Vec<PendingBranch>,
 }
 
 impl<'a> CallFlowPreloader<'a> {
@@ -257,6 +320,7 @@ impl<'a> CallFlowPreloader<'a> {
             mode,
             trace_kind,
             lang: lang_from_context(Path::new(&location.path)),
+            pending_branches: vec![],
         }
     }
 
@@ -979,12 +1043,17 @@ impl<'a> CallFlowPreloader<'a> {
         let path_buf = &PathBuf::from(&self.location.path);
         // TODO: maybe not true for diff flow, we can have multiple files/paths there
         flow_view_update.comment_lines = self.flow_preloader.expr_loader.get_comment_positions(path_buf);
-        flow_view_update.add_branches(
-            0,
-            self.flow_preloader
-                .expr_loader
-                .final_branch_load(path_buf, &flow_view_update.branches_taken[0][0].table),
-        );
+        // THE FILE-WIDE SWEEP, over the branches the walk NEVER OBSERVED TO RUN.
+        //
+        // The check list used to be `branches_taken[0][0]` alone — the table of
+        // conditionals outside every loop — so a conditional the walk entered
+        // on every pass of a LOOP was invisible to it and got stamped
+        // `NotTaken` here anyway. `observed_branch_lines` is what that check
+        // list was always meant to be; see its own note for the measurement,
+        // and for what it deliberately still does not fix (the sweep after a
+        // truncated walk).
+        let observed = flow_view_update.observed_branch_lines();
+        flow_view_update.add_branches(0, self.flow_preloader.expr_loader.final_branch_load(path_buf, &observed));
         // WHERE EACH ARM IS, alongside whether it ran.
         //
         // Shipped so the renderer can dim the interior of an arm the run
@@ -1088,8 +1157,122 @@ impl<'a> CallFlowPreloader<'a> {
             );
             info!("    add branch for position {:?} {:?}", path_buf.display(), line);
         }
+        // AFTER the loop bookkeeping above, because both halves of this need
+        // the cell indices it has just settled: the verdicts being resolved are
+        // written into the cells RECORDED WITH THEM, and a header registered
+        // here is registered against the pass this step belongs to.
+        self.resolve_pending_branches(&mut flow_view_update, line, path_buf);
+        self.register_pending_branch(&flow_view_update, line, path_buf);
         info!("    branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
+    }
+
+    /// Decide every conditional awaiting its next step, now that `line` is it.
+    ///
+    /// Three outcomes, and the middle one is why this is not a one-liner:
+    ///
+    /// * `line` is inside the arm — the arm was entered. Nothing is written:
+    ///   `load_branch_for_position` reports the `Taken` from the body line, and
+    ///   two producers writing one fact is two chances to disagree about it.
+    /// * `line` is the header again — a multi-step condition, or a loop header
+    ///   that is also a conditional. Still pending; the test's outcome has not
+    ///   been observed yet.
+    /// * anything else — the test was evaluated and control went elsewhere.
+    ///   `NotTaken`, in the cell of the pass that evaluated it, UNLESS that cell
+    ///   already holds an observed `Taken` for the same header; see the guard
+    ///   below for why an inference must lose to a sighting.
+    ///
+    /// A step in another FILE decides nothing and leaves the branch pending;
+    /// see `PendingBranch::path`.
+    fn resolve_pending_branches(&mut self, flow_view_update: &mut FlowViewUpdate, line: Position, path_buf: &PathBuf) {
+        let mut still_pending: Vec<PendingBranch> = vec![];
+        for pending in std::mem::take(&mut self.pending_branches) {
+            if &pending.path != path_buf {
+                still_pending.push(pending);
+                continue;
+            }
+            if line.0 >= pending.first_line && line.0 <= pending.last_line {
+                continue;
+            }
+            if line.0 == pending.header_line {
+                still_pending.push(pending);
+                continue;
+            }
+            // AN INFERENCE MAY NOT OVERWRITE AN OBSERVATION, and this guard is
+            // what keeps the rule from ever painting red over an arm that ran.
+            //
+            // The verdict below is inferred from where the NEXT step landed.
+            // A `Taken` already in the same cell was written by
+            // `load_branch_for_position` from a step INSIDE the arm — a
+            // sighting, not an inference. When the two disagree the sighting
+            // wins, exactly as `flow_line_rule.branchStateAnywhere` decides it
+            // on the rendering side.
+            //
+            // They disagree whenever the walk lands on the header line a SECOND
+            // time after the arm has already run, which line-granularity replay
+            // does: `MAX_NONPROGRESSING_STEPS` above exists because a native
+            // trace can report several consecutive steps against one source
+            // line. Measured on the step list `[3, 4, 3, 6]` over
+            // `if a == 1 {` at line 3 with its body at line 4 — without this
+            // guard the re-registered pending resolves against line 6 and
+            // rewrites a correct `Taken` into `NotTaken`
+            // (`tests/flow_branch_state_test.rs`, *a header line the walk
+            // revisits after its arm ran keeps `Taken`*).
+            //
+            // The cost is one-directional and it is the safe direction: a
+            // conditional evaluated twice within ONE cell, entered and then
+            // declined, keeps the `Taken` and reports nothing about the second
+            // evaluation. That under-informs; the alternative misinforms.
+            if flow_view_update.branch_state_at(pending.cell, pending.header_line as usize) == Some(BranchState::Taken)
+            {
+                info!(
+                    "    branch at {} was evaluated again and its arm ({}..{}) was not re-entered; \
+                     keeping the observed Taken in branches_taken{:?}",
+                    pending.header_line, pending.first_line, pending.last_line, pending.cell
+                );
+                continue;
+            }
+            info!(
+                "    branch at {} was evaluated and its arm ({}..{}) was NOT entered; \
+                 recording NotTaken in branches_taken{:?}",
+                pending.header_line, pending.first_line, pending.last_line, pending.cell
+            );
+            flow_view_update.set_branch_state(pending.cell, pending.header_line as usize, BranchState::NotTaken);
+        }
+        self.pending_branches = still_pending;
+    }
+
+    /// If `line` carries a conditional's header, note that its test was just
+    /// evaluated and that the next step decides the outcome.
+    ///
+    /// A header whose arm the grammar could not locate registers nothing, so a
+    /// language with no `branches_body` node names produces no claim rather
+    /// than a claim over a guessed span. A header already pending is not
+    /// re-registered: a condition spanning several steps is one evaluation.
+    fn register_pending_branch(&mut self, flow_view_update: &FlowViewUpdate, line: Position, path_buf: &PathBuf) {
+        let Some(extent) = self.flow_preloader.expr_loader.branch_extent_at_header(line, path_buf) else {
+            return;
+        };
+        if self
+            .pending_branches
+            .iter()
+            .any(|p| p.header_line == line.0 && &p.path == path_buf)
+        {
+            return;
+        }
+        let loop_id = if flow_view_update.loops.last().map(|l| l.first.0 <= line.0 && l.last.0 >= line.0) == Some(true)
+        {
+            flow_view_update.loops.last().map(|l| l.base.0).unwrap_or(0)
+        } else {
+            0
+        };
+        self.pending_branches.push(PendingBranch {
+            path: path_buf.clone(),
+            header_line: line.0,
+            first_line: extent.first_line as i64,
+            last_line: extent.last_line as i64,
+            cell: flow_view_update.branch_cell(loop_id),
+        });
     }
 
     fn to_flow_event(&self, event: &DbRecordEvent) -> FlowEvent {

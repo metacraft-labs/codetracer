@@ -264,6 +264,53 @@ suite "dimming means the run declined a branch":
     let styled = flowStyledLines(calculateDamageWindow(), finished = true)
     check isDimmed(styled, 29)
 
+  test "a line inside the arm the run DID enter is not dimmed":
+    # THE INVERSE OF THE TEST ABOVE, and issue #758's second complaint in its
+    # own words: "even when a branch DOES show green (taken), the code inside
+    # is still grayed out. […] creating a contradictory visual signal".
+    #
+    # It is not stated over the default window, because there `not
+    # isDimmed(29)` would also hold in a build that dims nothing at all. It is
+    # stated over the window where the two tables DISAGREE about one arm — the
+    # only shape in which the taken arm was actually being dimmed — and the
+    # discrimination is the pair of checks at the end: the arm that ran is
+    # undimmed while the arm that did not is still dimmed, from ONE payload, so
+    # "dims nothing" fails it.
+    #
+    # The disagreement is a real payload, not a hypothetical. `branchesTaken`
+    # is per (loop, iteration); `expr_loader.final_branch_load` sweeps the file
+    # into `[0][0]`, and its check list was `[0][0]` itself, so an arm entered
+    # on every pass of a LOOP was swept as never-reached. Measured on a
+    # two-pass Rust loop (`src/db-backend/tests/flow_branch_state_test.rs`):
+    # `[0][0] = [(5,NotTaken),(7,NotTaken)]` beside `[1][0] = [(5,NotTaken),
+    # (7,Taken)]`. The backend no longer emits that, and this layer must not
+    # depend on it not doing so: the arm that ran must be undimmed on the
+    # evidence in the payload, whichever cell carries it.
+    var sweptTable = initTable[int, ct.BranchState]()
+    sweptTable[IfHeader] = ct.NotTaken
+    sweptTable[ElseHeader] = ct.NotTaken      # the sweep's false claim
+    var extentTable = initTable[int, ct.BranchExtent]()
+    extentTable[IfHeader] = IfArm
+    extentTable[ElseHeader] = ElseArm
+    var enteredTable = initTable[int, ct.BranchState]()
+    enteredTable[IfHeader] = ct.NotTaken
+    enteredTable[ElseHeader] = ct.Taken       # what the pass observed
+    let disagreeing = ct.FlowViewUpdate(
+      location: ct.Location(path: "src/main.rs",
+                            functionFirst: 22, functionLast: 38),
+      steps: @[], loops: @[],
+      branchesTaken: @[
+        @[ct.BranchesTaken(table: sweptTable, extents: extentTable)],
+        @[ct.BranchesTaken(table: enteredTable,
+                           extents: initTable[int, ct.BranchExtent]())]],
+      loopIterationSteps: @[],
+      relevantStepCount: @[26, 28, 31, 32, 34, 37],
+      commentLines: @[])
+
+    let styled = flowStyledLines(disagreeing, finished = true)
+    check not isDimmed(styled, 32)   # the `else` arm ran — it must not be dimmed
+    check isDimmed(styled, 29)       # the `if` arm did not — it still is
+
   test "the same line, dimmed or not, according to the arm it is in":
     # THE DISCRIMINATING PAIR, and the reason the test above is not enough on
     # its own. Line 29 has no step of its own in EITHER reading — `visited` is

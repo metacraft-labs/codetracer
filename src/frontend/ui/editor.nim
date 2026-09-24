@@ -859,8 +859,29 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
               lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))
 
           of Unknown:
-            lines.add(MonacoLineStyle(line: position, class: cstring"flow-not-taken"))
-            lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-skip"))
+            # NOTHING IS PAINTED, and the deleted line here used to paint
+            # `flow-not-taken` — the same red, the same dimming, as a branch the
+            # run was PROVED not to enter.
+            #
+            # `Omniscience-Flow.md` § *Dimming means "the run did not take this
+            # branch"*: "A line with no branch information is left alone.
+            # Undimmed is the correct rendering of 'nothing is claimed about
+            # this line' — it is the absence of a statement, not a statement of
+            # absence. Two states the reader can see, not three." `Unknown` IS
+            # that absence, and rendering it as a decision made the debugger
+            # assert something it does not know.
+            #
+            # This costs nothing today and is therefore the cheap moment to fix
+            # it: nothing writes `Unknown` into `BranchesTaken.table` at all.
+            # The three producers in `expr_loader.rs` / `flow_preloader.rs` emit
+            # only `Taken` and `NotTaken`, and an absent key is absent rather
+            # than `Unknown` — `BranchState::default()` never reaches the wire.
+            # Measured over all three fixtures of
+            # `src/db-backend/tests/flow_branch_state_test.rs`: no `Unknown` in
+            # any cell of any payload. So this arm changes no pixel of any
+            # recording that exists, and stops the NEXT producer of `Unknown`
+            # from silently inheriting "not taken".
+            discard
 
   lines
 
@@ -870,10 +891,27 @@ proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   let flow = self.flow
   var lines: seq[MonacoLineStyle] = @[]
 
-  if not flow.isNil and not flow.flow.isNil and
-     flow.flow.branchesTaken.len > 0 and
-     flow.flow.branchesTaken[0].len > 0 and
-     not flow.flow.branchesTaken[0][0].table.isNil:
+  # THE GUARD BELONGS TO THE PASS IT GUARDS, and it used to be hoisted out
+  # here, over both.
+  #
+  # `branchesTaken.len > 0 and branchesTaken[0].len > 0 and not
+  # branchesTaken[0][0].table.isNil` is a bounds/nil check for the OUTER pass's
+  # `[0][0]` access. Hoisted, it also suppressed the LOOP pass — so a payload
+  # whose outer table is missing (one not built by `FlowViewUpdate::new`: a
+  # hand-built window, a partially decoded one) drew no branch colour at all,
+  # including for conditionals whose state sits in `branchesTaken[loop]
+  # [iteration]` and is perfectly well-formed. `conditionToLine` performs
+  # exactly these three checks for whichever cell it is asked for, so the
+  # hoisted copy was redundant for the pass it was written for and wrong for
+  # the other one.
+  #
+  # This is NOT where issue #758 lived — measured, not assumed. On the issue's
+  # own program the outer table is non-empty and the gate passes
+  # (`src/db-backend/tests/flow_branch_state_test.rs`). The defect was in the
+  # backend, which never produced a per-iteration `NotTaken` for a lone `if`.
+  # The gate is fixed here because the diagnostic had to rule it out anyway and
+  # left it standing as a latent second failure.
+  if not flow.isNil and not flow.flow.isNil:
     # conditions outside of loops:
     lines.add(self.conditionToLine(0, 0))
     var currentStepCount = self.flow.getCurrentStepCount(currentPosition)
