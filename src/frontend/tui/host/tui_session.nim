@@ -80,7 +80,8 @@ const
     ## recording's extent — `native_host.loadRecordingPanes`' window, which
     ## both native front-ends ask for.
     ##
-    ## CTUI-8 established that `TimelineVM.markers` is filled by nothing on a
+    ## CTUI-8 established that `TimelineVM.bounds` (named `markers` until
+    ## 2026-09-24) is filled by nothing on a
     ## replay session and that the recording's extent comes from
     ## `ct/event-load`'s `maxRRTicks` instead. So the timeline's bounds are a
     ## property of that one answer, and this is the window it is read from.

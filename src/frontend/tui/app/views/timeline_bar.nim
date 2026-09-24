@@ -44,10 +44,12 @@
 ## is the reason this model has a `boundsNote` and a `marksNote` at all:
 ##
 ##   * the BOUNDS are real, and they do not come from `TimelineVM`.
-##     `TimelineVM.markers` is a memo over `store.timeline`, and nothing writes
+##     `TimelineVM.bounds` is a memo over `store.timeline`, and nothing writes
 ##     `store.timeline` on a completed replay session — only the live-MCR
-##     `updateRecordingHead` / `requestRestoreAt` paths do. Measured: `markers`
-##     is `@[]` on all three fixtures, before and after stepping. The recording's
+##     `updateRecordingHead` / `requestRestoreAt` paths do. Measured: `bounds`
+##     is `@[]` on all three fixtures, before and after stepping (the field was
+##     spelled `markers` when that measurement was taken; only the name moved).
+##     The recording's
 ##     last tick arrives instead on every `ct/event-load` row as `maxRRTicks`
 ##     (171 / 1314 / 3896), which the engine builds from `last_step_id`.
 ##   * the SPANS are real: `ct/load-calltrace-section` answers rows carrying

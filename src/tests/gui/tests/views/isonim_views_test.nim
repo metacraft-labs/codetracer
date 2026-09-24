@@ -3557,6 +3557,215 @@ suite "IsoNim Timeline Panel — structure":
       dispose()
 
 # ---------------------------------------------------------------------------
+# Timeline execution-overview tests (issue #693)
+#
+# `Front-Ends/Electron-GUI.md:151-156` obliges: extent, current position,
+# "Event markers (calls, returns, exceptions)" and drag to seek. These cases
+# cover the three of those four that a mock DOM can see. **The fourth cannot
+# be covered here**: dragging is a `mousedown`/`mousemove`/`mouseup` sequence
+# on a laid-out element with a non-zero `getBoundingClientRect().width`, and
+# the mock renderer has no layout, so the drag handler is exercised only by
+# `mountIsoNimTimeline` under a real browser. It is unrun on this host.
+#
+# THE MARKS AND THE LABELS ARE RENDERED BY `for` LOOPS, which isonim expands
+# at render time and which therefore do NOT update in place. Every case below
+# populates the store BEFORE rendering, and the last one asserts that a
+# re-render is what picks up a later change — so the loop's one-shot nature is
+# a stated property rather than a surprise.
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Timeline Panel — execution overview":
+
+  test "with no extent the empty state is shown and the track is hidden":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let empty = findByClass(panel, "timeline-empty")
+      check empty.styles.getOrDefault("display", "") == "block"
+      check "timeline" in empty.textContent
+
+      let track = findByClass(panel, "timeline-track")
+      check track.styles.getOrDefault("display", "") == "none"
+
+      dispose()
+
+  test "with an extent the track is shown and the empty state is hidden":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 400'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      check findByClass(panel, "timeline-empty")
+        .styles.getOrDefault("display", "") == "none"
+      let track = findByClass(panel, "timeline-track")
+      check track.styles.getOrDefault("display", "") == "block"
+      check track.attributes["data-min-rr-ticks"] == "0"
+      check track.attributes["data-max-rr-ticks"] == "400"
+      # The extent is on the ARIA slider attributes too, not only on the
+      # `data-` ones: `role="slider"` was already there and a slider with no
+      # value range is one a screen reader reads as empty.
+      check track.attributes["aria-valuemax"] == "400"
+
+      dispose()
+
+  test "tick labels are rendered across the extent, ends included":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 400'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let labels = findAllByClass(panel, "timeline-tick-label")
+
+      check labels.len == 5
+      check labels[0].textContent == "0"
+      check labels[^1].textContent == "400"
+      # Placed by percentage of the track, like the playhead and the marks.
+      check labels[0].styles.getOrDefault("left", "") == "0.0%"
+      check labels[^1].styles.getOrDefault("left", "") == "100.0%"
+
+      dispose()
+
+  test "call, return and exception marks are placed on the track":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 100'u64
+      store.timeline.val = tl
+      store.calltrace.lines.val = @[
+        CallLine(name: "main", rrTicks: 0'u64, depth: 0),
+        CallLine(name: "inner", rrTicks: 20'u64, depth: 1),
+        CallLine(name: "after", rrTicks: 51'u64, depth: 1),
+      ]
+      store.eventLog.rows.val = @[
+        EventLogRow(kindId: ErrorEventKindId, kind: "error", rrTicks: 80'u64),
+      ]
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let marks = findAllByClass(panel, "timeline-marker")
+
+      # main@0, inner@20, inner returns@50, after@51, error@80.
+      check marks.len == 5
+      check marks[0].attributes["data-marker-kind"] == "call"
+      check marks[2].attributes["data-marker-kind"] == "return"
+      check marks[2].attributes["data-marker-rr-ticks"] == "50"
+      check marks[^1].attributes["data-marker-kind"] == "exception"
+      check marks[^1].attributes["data-marker-rr-ticks"] == "80"
+      # Each kind carries its own modifier class, so a stylesheet can tell
+      # them apart without parsing a data attribute.
+      check findAllByClass(panel, "timeline-marker-call").len == 3
+      check findAllByClass(panel, "timeline-marker-return").len == 1
+      check findAllByClass(panel, "timeline-marker-exception").len == 1
+      # Placed by the SAME tick-to-percent conversion as the playhead: the
+      # error at tick 80 of a 0..100 recording sits at 80%.
+      check marks[^1].styles.getOrDefault("left", "") == "80.0%"
+      # The track reports the real total and says the set is a window, so a
+      # reader of the DOM is not left to assume these are every event in the
+      # recording.
+      let track = findByClass(panel, "timeline-track")
+      check track.attributes["data-marker-count"] == "5"
+      check track.attributes["data-markers-are-windowed"] == "true"
+
+      dispose()
+
+  test "a recording with an extent but no loaded events has no marks":
+    ## The negative control for the case above. Without it a renderer that
+    ## drew a mark per tick label, or per anything else, would pass.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 400'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      check findAllByClass(panel, "timeline-marker").len == 0
+      check findByClass(panel, "timeline-track")
+        .attributes["data-marker-count"] == "0"
+      # …and the tick labels ARE there, which is what makes this a control on
+      # the marks rather than on the whole render.
+      check findAllByClass(panel, "timeline-tick-label").len == 5
+
+      dispose()
+
+  test "marks appear on the next render, not in the panel already rendered":
+    ## `dsl/ui` expands a `for` at render time, so the marks in a rendered
+    ## panel are frozen. `mountIsoNimTimeline` re-renders inside a
+    ## `createEffect` for exactly this reason; this case pins the property
+    ## that makes that necessary, so a future reader does not "simplify" the
+    ## mount back to a single `appendChild`.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 100'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let first = renderTimelinePanel(r, vm)
+      check findAllByClass(first, "timeline-marker").len == 0
+
+      store.calltrace.lines.val = @[
+        CallLine(name: "main", rrTicks: 10'u64, depth: 0),
+      ]
+      check findAllByClass(first, "timeline-marker").len == 0
+
+      let second = renderTimelinePanel(r, vm)
+      check findAllByClass(second, "timeline-marker").len == 1
+
+      dispose()
+
+  test "the playhead and the position readout track the debugger":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 200'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let playhead = findByClass(panel, "timeline-playhead")
+      let percent = findByClass(panel, "position-percent")
+
+      check playhead.styles.getOrDefault("left", "") == "0.0%"
+
+      var dbg = store.debugger.val
+      dbg.rrTicks = 50'u64
+      store.debugger.val = dbg
+
+      # The playhead is a style in its own render effect, so it moves without
+      # a re-render — unlike the marks above.
+      check playhead.styles.getOrDefault("left", "") == "25.0%"
+      check percent.textContent == "25.0%"
+      check findByClass(panel, "timeline-track")
+        .attributes["data-current-rr-ticks"] == "50"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
 # Timeline position tests
 # ---------------------------------------------------------------------------
 

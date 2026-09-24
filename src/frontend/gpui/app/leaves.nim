@@ -551,7 +551,7 @@ proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
   ## The recording's extent and where the debugger is in it: a line of text
   ## (what a reader and PLAT-39's reader parse) and a track filled to the
   ## current tick (what an eye reads).
-  let marks = vm.markers.val
+  let marks = vm.bounds.val
   let first = if marks.len > 0: marks[0] else: 0'u64
   let last = if marks.len > 1: marks[1] else: first
   let current = vm.currentPosition.val

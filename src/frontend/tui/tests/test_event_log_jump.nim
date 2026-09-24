@@ -35,7 +35,7 @@
 ##
 ## ## TWO FIELDS ARE ASSERTED TO BE EMPTY, AND ONE IS NOW ASSERTED TO BE FULL
 ##
-## `EventLogVM.markerRows` and `TimelineVM.markers` are filled by nothing on a
+## `EventLogVM.markerRows` and `TimelineVM.bounds` are filled by nothing on a
 ## replay session — see `app/timeline_binding.nim`'s header for the grep and the
 ## measurements. Each is asserted as `== 0` beside the surface that DOES answer,
 ## so the day a host starts filling one the suite goes red and says the pane can
@@ -94,7 +94,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-# 162 since PLAT-41: the recording's extent now reaches `TimelineVM.markers`,
+# 162 since PLAT-41: the recording's extent now reaches `TimelineVM.bounds`,
 # so the marker case asserts where `seekAtFraction` lands (three checks)
 # where it asserted that nothing moved (two).
 const ExpectedAssertions = 162
@@ -434,9 +434,9 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck firstPage[0].event.tick == truth[0].rrTicks
 
       # ---- BOUNDS: from `TimelineVM`, and it AGREES with the event log -----
-      # Until PLAT-41 `TimelineVM.markers` was never fed on a replay and the
+      # Until PLAT-41 `TimelineVM.bounds` was never fed on a replay and the
       # bounds came from `ct/event-load.maxRRTicks`; the store's timeline
-      # extent now follows what the event log learns, so the markers answer
+      # extent now follows what the event log learns, so the VM answers
       # first — and must name the same extent the wire reported.
       var rowsSoFar: seq[EventRow] = @[]
       for row in firstPage:
@@ -446,7 +446,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       echo "CTUI-8 TIMELINE BOUNDS: ", bounds.minTick, "..", bounds.maxTick,
            " from ", bounds.source
       ck bounds.known
-      ck bounds.source == "TimelineVM.markers"
+      ck bounds.source == VmBoundsSource
       ck bounds.maxTick == truth[0].maxRRTicks
       ck bounds.minTick == 0'u64
 
@@ -592,7 +592,7 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       let rows = h.events.eventRows.val
       echo "CTUI-8 EVENT ROWS: EventLogVM.eventRows ", rows.len,
            ", markerRows ", h.events.markerRows.val.len,
-           ", TimelineVM.markers ", h.timeline.markers.val.len,
+           ", TimelineVM.bounds ", h.timeline.bounds.val.len,
            ", store.timeline ", h.session.session.store.timeline.val,
            " — against ", truth.len, " event(s) the wire really returned"
       # THE POSITIVE TWIN: the wire answered, so an assertion about the
@@ -636,12 +636,12 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck h.events.markerRows.val.len == 0
       # THE EXTENT ARRIVES WITH THE LOG (PLAT-41). The store's timeline copy of
       # `maxRRTicks` was raised only by LIVE recording-head updates, so on a
-      # replay `TimelineVM.markers` was empty and `seekAtFraction` a no-op; it
+      # replay `TimelineVM.bounds` was empty and `seekAtFraction` a no-op; it
       # now follows the event log's own `maxRRTicks`.
-      ck h.timeline.markers.val == @[0'u64, truth[0].maxRRTicks]
+      ck h.timeline.bounds.val == @[0'u64, truth[0].maxRRTicks]
       ck h.session.session.store.timeline.val.maxRRTicks == truth[0].maxRRTicks
       # …and so `seekAtFraction` — the one TimelineVM action that depends on
-      # `markers` — MOVES the debugger now, to the three-quarter point of the
+      # `bounds` — MOVES the debugger now, to the three-quarter point of the
       # recording rather than nowhere.
       # The request goes through `BackendService`, and the engine's answer —
       # `ct/complete-move` — is applied by a HOST (this harness only drains),

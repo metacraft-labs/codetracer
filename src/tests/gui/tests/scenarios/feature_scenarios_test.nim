@@ -1621,11 +1621,14 @@ suite "Full workflow: record -> replay -> debug":
       # ---- Step 11: Timeline position matches ----
       check session.timelineVM.currentPosition.val == 300'u64
 
-      # ---- Step 12: Verify timeline markers ----
-      let markers = session.timelineVM.markers.val
-      check markers.len == 2
-      check markers[0] == 100'u64   # minRRTicks
-      check markers[1] == 50000'u64 # maxRRTicks
+      # ---- Step 12: Verify the recording's extent ----
+      # `TimelineVM.bounds`; the field was called `markers` until 2026-09-24,
+      # when issue #693 gave that name to the real call / return / exception
+      # projection.
+      let extent = session.timelineVM.bounds.val
+      check extent.len == 2
+      check extent[0] == 100'u64   # minRRTicks
+      check extent[1] == 50000'u64 # maxRRTicks
 
       dispose()
 

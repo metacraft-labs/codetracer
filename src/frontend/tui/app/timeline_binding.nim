@@ -31,13 +31,17 @@
 ##    all read the same tick off the same store. That is CTUI-8's atomic
 ##    `goto`, and `tests/test_event_log_jump.nim` asserts all four panes.
 ##
-## 2. **`TimelineVM.markers` is filled by NOTHING on a replay session, so the
-##    scrubber's bounds do not come from it.** `markers` is a memo over
+## 2. **`TimelineVM.bounds` is filled by NOTHING on a replay session, so the
+##    scrubber's bounds do not come from it.** (This field was called
+##    `markers` when the measurement below was taken and until 2026-09-24,
+##    when issue #693 gave that name to the real call / return / exception
+##    projection; the measurement is unaffected — only the spelling is.)
+##    `bounds` is a memo over
 ##    `store.timeline`, and the only writers of `store.timeline` are
 ##    `ReplayDataStore.updateRecordingHead` and the success arm of
 ##    `requestRestoreAt` — both LIVE-MCR paths, guarded by
 ##    `debugSessionMode in {liveMcr, liveMaterialized, historicalFromLive}` —
-##    plus the collaboration signal serialiser. Measured: `markers == @[]` and
+##    plus the collaboration signal serialiser. Measured: `bounds == @[]` and
 ##    `store.timeline == (0, 0, 0)` on all three fixtures, before and after
 ##    stepping, and `seekAtFraction` returns early on `marks.len < 2` and does
 ##    nothing at all. `TimelineVM.seek` is unaffected and is what this binding
@@ -132,21 +136,33 @@ type
     maxTick*: uint64
     known*: bool
     source*: string
-      ## `"TimelineVM.markers"` or `"ct/event-load.maxRRTicks"`. Carried so a
+      ## `VmBoundsSource` or `"ct/event-load.maxRRTicks"`. Carried so a
       ## failure message says which surface answered, and so a test can assert
       ## that the fallback really was the fallback.
 
+const VmBoundsSource* = "TimelineVM.bounds"
+  ## The `source` a VM-supplied bound carries.
+  ##
+  ## A CONSTANT rather than a literal at each site: it was spelled
+  ## `"TimelineVM.markers"` here and again in `tests/test_event_log_jump.nim`,
+  ## so renaming the field it names meant editing a string in two files and
+  ## the test would have gone red for a reason unrelated to its subject.
+
 proc boundsFromVm*(vm: TimelineVM): TimelineBounds =
-  ## `TimelineVM.markers`, when it has anything. See this module's header for
+  ## `TimelineVM.bounds`, when it has anything. See this module's header for
   ## why it normally does not, and why it is still asked first.
+  ##
+  ## (That field was called `markers` until 2026-09-24, when issue #693 gave
+  ## the name to the real call / return / exception projection and left the
+  ## extent under a name that says what it is.)
   result = TimelineBounds(minTick: 0, maxTick: 0, known: false, source: "")
   if vm.isNil:
     return
-  let marks = vm.markers.val
+  let marks = vm.bounds.val
   if marks.len < 2 or marks[1] <= marks[0]:
     return
   result = TimelineBounds(minTick: marks[0], maxTick: marks[1], known: true,
-                          source: "TimelineVM.markers")
+                          source: VmBoundsSource)
 
 proc boundsFromEvents*(events: openArray[EventRow];
                        maxRRTicks: uint64): TimelineBounds =

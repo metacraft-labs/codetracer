@@ -6077,3 +6077,76 @@ Two traps in the same area, both live:
   * An `importjs` body is INLINED, so its proc name is absent from the output
     even when the code is there. Grep a distinctive line of the JS itself
     (`a.download = n`), not the Nim proc name.
+- 2026-09-24: **THERE IS NO TIMELINE READ ROUTE — `ct/timeline-seek` is a
+  WRITE.** Established for issue #693 (Pxor M51). `ct/timeline-seek` is the only
+  `timeline` string on the DAP wire (`src/db-backend/src/dap_server.rs:2171`)
+  and it routes into `Handler::goto_ticks`. Nothing asks the engine for a
+  timeline and nothing answers with one, so *the payload feeding the timeline
+  pane carries no event kinds at all*: `store/types.TimelineState` is three
+  `uint64`s (`minRRTicks` / `maxRRTicks` / `currentRRTicks`) and is written only
+  by the live-MCR recording-head update, `requestRestoreAt`'s success arm, the
+  collaboration signal serialiser, and PLAT-41's `applyEventLogRows`.
+  * Event kinds WITH ticks do exist in the same store, from two OTHER routes:
+    `ct/load-calltrace-section` → `CalltraceStore.lines` (`CallLine.rrTicks` /
+    `.depth` / `.name`), and `ct/event-load` → `EventLogStore.rows`
+    (`EventLogRow.kindId` / `.rrTicks`).
+  * **`EventLogKind` has no `Call` and no `Return`**
+    (`src/common/common_types/codetracer_features/events.nim`) — it is an I/O
+    vocabulary (Write / Read / Open / Socket / Error / TraceLogEvent /
+    EvmEvent). So of `Front-Ends/Electron-GUI.md:155`'s three marker kinds, the
+    event log can only answer EXCEPTIONS, as `EventLogKind.Error` (ordinal 11).
+    Calls come from the calltrace; a call's END is on no wire at all and must be
+    inferred from `depth`.
+  * **Both of those signals hold a WINDOW.** `EventLogStore.rows`' own doc
+    comment says "a page and not the whole log", and `CalltraceStore` carries
+    `startLineIndex` / `totalCallsCount` / `finished`. Any marker projection is
+    therefore of what the session has LOADED. A whole-recording marker set needs
+    a backend route that does not exist.
+  * `TimelineVM.markers` used to BE the extent — two numbers, min and max — and
+    `timeline_vm_test.nim` pinned that as correct. The extent now lives on
+    `TimelineVM.bounds` and `markers` is the real projection; `boundsFromVm`
+    (`tui/app/timeline_binding.nim`), `gpui/app/leaves.renderTimeline` and
+    `views/isonim_timeline_view` were all reading the old field.
+- 2026-09-24: **A `for` inside an isonim `ui:` block runs ONCE PER RENDER, and
+  `for x in someSeq` will not compile there.** Two separate facts, both found in
+  `views/isonim_timeline_view.nim`:
+  * `dsl/ui.processForStmt` expands the loop at render time, so rows/marks
+    produced by a `for` are frozen in the node that was appended — unlike
+    `text`/style/attribute expressions, which the DSL wraps in their own
+    `createRenderEffect` and which DO update in place. A mount that appends once
+    shows the loop's result for ever (PLAT-40 found this in
+    `isonim_point_list_view`; the timeline had it too). The fix is to re-render
+    inside `createEffect` — and then to attach any `window`-level listeners
+    ONCE, outside that effect, or every redraw leaves another pair behind.
+  * The DSL wraps every dynamic attribute in a closure, and on Nim 2.x
+    `for m in someSeq` yields `lent T`, which cannot be captured: *"is of type
+    <lent TimelineMarker> which cannot be captured as it would violate memory
+    safety"*. Bind the seq to a `let` before `ui(r):` and index it
+    (`for i in 0 ..< s.len: ... s[i] ...`). The test lanes do not pass
+    `-d:nimNoLentIterators`, whatever `src/Tuprules.tup` does for the real build.
+  * **AND THE CLOSURES IN THAT LOOP SHARE ONE ENVIRONMENT.** Measured
+    2026-09-24 at `a9b3aaf4d` on the timeline's marks. Every dynamic attribute
+    in the loop body becomes a `createRenderEffect` closing over the loop index
+    AND over the element the DSL `let`-bound for that iteration — and Nim gives
+    the whole enclosing proc one closure environment, not one per iteration. At
+    render that is invisible, because each effect runs synchronously inside its
+    own iteration. On a later RE-RUN it is not: every effect now sees the LAST
+    index and the LAST element, so they all write the last mark's value to the
+    last mark's node and the earlier nodes keep their render-time values.
+    Rendering three marks over a `0..100` extent and then widening it to
+    `0..1000` left `left` at `10.0%` / `49.0%` on the first two and moved only
+    the third, to `5.0%`.
+    - **It does not reach the product**, and the reason is worth knowing rather
+      than relying on: `mountIsoNimTimeline` re-renders the whole panel inside
+      a `createEffect` that reads `markers` and `tickLabels`, and `tickLabels`
+      is derived from `bounds` — so any change that could move a mark also
+      rebuilds the panel it is in. A direct caller of `renderTimelinePanel`
+      (i.e. every mock-renderer view test) has no such effect and DOES see it.
+    - So: **after a signal change, assert against a FRESH render, never against
+      a node rendered before the change** — which is the same rule the one-shot
+      `for` already forces, for a second reason.
+    - The pattern is repo-wide, not the timeline's: `isonim_calltrace_view`,
+      `isonim_event_log_view`, `isonim_search_results_view`, `isonim_vcs_view`
+      and `debug_control_marks` all put dynamic style attributes inside a `for`
+      in a `ui:` block. A real per-iteration environment needs the body hoisted
+      into its own proc/template called once per item; nothing does that today.
