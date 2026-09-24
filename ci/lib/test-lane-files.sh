@@ -146,6 +146,7 @@ online-sharing-live
 host-instantiations
 renderer-electron
 renderer-web
+renderer-dom
 frontend-native-units
 frontend-js
 vm-unit
@@ -187,6 +188,7 @@ test_lane_description() {
 	host-instantiations) echo "JS-backend modules no other lane compiles: the facade's host instantiations and platform_host's Electron arm (compile-checked only)" ;;
 	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
 	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
+	renderer-dom) echo "renderer suites on the BROWSER target, run under node over jsdom" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
@@ -223,7 +225,12 @@ test_lane_description() {
 }
 
 # test_lane_backend ID — "c" (compile a binary and run it), "js" (compile with
-# `nim js -d:nodejs` and run under node), "js-browser", or "wasm".
+# `nim js -d:nodejs` and run under node), "js-browser", "js-dom", or "wasm".
+#
+# `js-dom` is `js-browser`'s compile RUN under node over jsdom
+# (`src/frontend/tests/jsdom-run.mjs`): for suites whose subject is a renderer
+# module that only compiles for the browser target, and whose property can be
+# observed without a real browser. It needs the checkout's `node_modules/jsdom`.
 #
 # `js-browser` EXISTS BECAUSE `-d:nodejs` IS NOT A NEUTRAL FLAG. The `js`
 # backend above passes it, and must: without it `std/exitprocs
@@ -263,6 +270,7 @@ test_lane_backend() {
 	case "$1" in
 	frontend-js | vm-js | vm-unit-js | host-instantiations) echo "js" ;;
 	renderer-electron | renderer-web) echo "js-browser" ;;
+	renderer-dom) echo "js-dom" ;;
 	vm-unit-wasm) echo "wasm" ;;
 	*) echo "c" ;;
 	esac
@@ -365,6 +373,12 @@ test_lane_extra_flags() {
 		# test-renderer-extension-build`) compiles it now, in the exact
 		# configuration `just build-ui-js` uses, so the sentence cannot rot
 		# back into a description of a build nobody runs.
+		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
+	renderer-dom)
+		# The Electron renderer's defines (see `renderer-electron`): these
+		# suites drive the renderer's own modules, so they are compiled the way
+		# the renderer is.
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
 		;;
 	renderer-web)
@@ -689,6 +703,14 @@ test_lane_files() {
 		echo src/frontend/ui_js.nim
 		;;
 
+	renderer-dom)
+		# Suites that RUN renderer modules — `ui/state.nim` and the DAP
+		# transport under it — which only compile for the browser target.
+		# `locals_answer_identity_test.nim` drives the web renderer's two
+		# `ct/load-locals` senders through the real response fan-out.
+		echo src/frontend/tests/locals_answer_identity_test.nim
+		;;
+
 	frontend-native-units)
 		# Discovery over EVERY unittest suite in the directory, not just the
 		# `*_test.nim` ones: `agentic_coding_test_plan.nim` (5 suites, 25 cases,
@@ -718,8 +740,10 @@ test_lane_files() {
 		# again: adding a file to `frontend-js` removes it from here in the
 		# same edit, and `ci/test/test-lane-coverage.sh` still sees it claimed
 		# by the union.
+		# `renderer-dom`'s suites are subtracted the same way, for the same
+		# reason: they are browser-target modules and do not build with `nim c`.
 		_tlf_find src/frontend/tests '*_test.nim' '*_test_plan.nim' |
-			grep -vxF -f <(test_lane_files frontend-js) || true
+			grep -vxF -f <(test_lane_files frontend-js; test_lane_files renderer-dom) || true
 		;;
 
 	frontend-js)

@@ -5671,3 +5671,62 @@ Two traps in the same area, both live:
 * `AutoHideEdge` is `Left, Right, Bottom`, so its ordinals are **0, 1, 2**, and
   that ordinal is what `auto_hide_state.json` stores. A comment in
   `unpinPanelTarget` claimed `Bottom=0, Left=1, Right=2` for a long time.
+||||||| parent of 013d2bd56 (fix(web): match each locals answer to the request that produced it)
+- PLAT-29 async boundary, wired (2026-09-23). Every writer of an
+  `EditingDocument.state` must call `drainJournal()` afterwards (applyKey,
+  applyNamed, applyChangeSet, collab projection's two): `mapPositionTables`
+  appends each ChangeSet to `EditorState.journal`, and `drainJournal` moves it
+  onto `EditingDocument.timeline` (a VersionedDocument, bounded to
+  `TimelineDepth`=256). `EditorState ==` compares `journal` too.
+- TUI Edit pane never parses on the render path when `spansProvided`: the
+  runtime's `scheduleHighlights` (called by `shellScreenOf`) asks
+  `editServices.requestHighlight` (host thread `host/highlight_worker`, newest
+  request wins) or, when nil (suites), runs `computeHighlight` inline. Answers
+  arrive via `deliverHighlight` and are reconciled per line
+  (`highlight_producer.installHighlight`/`refreshHeld`). `:w`/`:e!` go through
+  `editServices.submitFileJob` (host/file_worker, in order, never coalesced)
+  or run inline; `deliverFileJob` reconciles and calls
+  `markSaved(buf, savedText)` with the WRITTEN bytes (not buf.text).
+  EditPaneModel.lines is a WINDOW (`linesFrom`/`totalLines`); use
+  `lineAt`/`lineCount`, not `lines.len`.
+- DAP locals name the debugger STOP they were requested at:
+  `store/stop_timeline` (VersionedDocument over the stop identity; a move
+  replaces it, the same identity twice is one version). There is NO
+  `applyLocalsResponse(rows)` overload — pass `requestedAt: StopStamp`
+  (`store.stopStamp()` taken BEFORE sending). Headless: `fetchLocals` +
+  `applyLocals`; web renderer: matched by REQUEST IDENTITY, never by order —
+  the web sends `ct/load-locals` from TWO places per move
+  (`StateComponent.loadLocals` via mediator->middleware->`sendCtRequest`, and
+  the StateVM effect's `store.requestLocals` via `dap_backend` ->
+  `asyncSendCtRequest`). `dap.trackCtRequests(CtLoadLocals, ...)` (installed
+  by `ui/state.wireLocalsAnswers`) records `"<sessionId>:<seq>"` from
+  `dispatchCtRequest` (the one send path) into `store.noteLocalsRequestSent`;
+  `dap.deliverDapResponse` (what `ui_js.onDapReceiveResponse` calls) stamps
+  the same id into the answer body (`ctRequestId`), `syncStoreLocals` ->
+  `store.applyLocalsAnswer(rows, id)`, and the entry is retired after the
+  fan-out. Unknown id = dropped (drVersionForgotten); empty id (extension
+  transport) = reconciled at the current stop. A dropped answer leaves the
+  PREVIOUS stop's locals in the store, so surfaces draw inline values through
+  `inline_value_timeline.InlineValueGate.installable` (tui_session does).
+- Renderer mediators: `MediatorWithSubscribers.emit` fans out to SUBSCRIBED
+  child mediators only; the root's own `subscribe` handlers run only for
+  events a component sends UP (via its transport). So
+  `data.viewsApi.subscribe(CtLoadLocalsResponse, ...)` on the root is never
+  reached by `viewsApi.emit` from middleware (measured in
+  `src/frontend/tests/locals_answer_identity_test.nim`).
+- Renderer modules (`ui/*.nim`) can be RUN under node: compile the browser
+  target (`nim js -d:ctRenderer`, NO `-d:nodejs` — kdom lacks createElementNS
+  there) and load via `src/frontend/tests/jsdom-run.mjs` (lane
+  `renderer-dom`, backend `js-dom`; needs node_modules/jsdom, which the dev
+  shell links from the Nix-built node modules; CI runs it as `just
+  test-renderer-dom` in the viewmodel-tests job). Without
+  `-d:nodejs` unittest cannot set the exit code — set `process.exitCode`.
+  `JsObject{locals: x}` does NOT produce a `locals` key (the literal macro
+  mangles it to `invalid`); use `obj[cstring"locals"] = x`.
+- `ci/lib/nim-closure.sh` is the ONE `normpath` (sourced by
+  editor-import-closure.sh, plugin-reactive-boundary.sh, sdk-facade-boundary.sh).
+  The editor closure gate's root set is `find -L editor -type f` (recursive,
+  follows symlinks).
+- Nim test-lane nimcache defaults to /tmp/ct-nim-cache/<worktree-name>-<hash>/,
+  so two worktrees do not collide; `pkill -f` with a pattern that appears in
+  your own command line kills your own shell (exit 144) — kill by PID.

@@ -1672,6 +1672,12 @@ test-frontend-js:
   nim -d:chronicles_enabled=off -d:ctRenderer \
     --out:"$html_sinks_probe" js src/frontend/tests/html_sinks_probe.nim
   node --no-warnings src/frontend/tests/htmlSinks.test.mjs "$html_sinks_probe"
+  echo ""
+  # Renderer modules RUN over jsdom (the `renderer-dom` lane): the web
+  # renderer's `ct/load-locals` answers matched to the requests that produced
+  # them, from both senders through the real response fan-out.
+  echo "Running renderer-dom lane..."
+  just test-renderer-dom
 
 # Run the Playwright suite. Args are forwarded to `npx playwright test`.
 #
@@ -3532,6 +3538,23 @@ test-renderer-browser:
   bash ci/lib/run-nim-test-lane.sh renderer-electron
   bash ci/lib/run-nim-test-lane.sh renderer-web
   bash ci/test/renderer-browser-build.sh
+
+# Renderer modules RUN, not only compiled: the `renderer-dom` lane builds its
+# suites for the browser target (the only target `ui/state.nim` compiles for)
+# and runs them under node over jsdom (`src/frontend/tests/jsdom-run.mjs`).
+# `locals_answer_identity_test.nim` drives the web renderer's two
+# `ct/load-locals` senders through the real response fan-out and asserts that
+# every answer is judged against the stop its own request was sent at.
+#
+# NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
+# Nix-built node modules on entry; the runner fails (rather than skipping) when
+# it is absent. Same tailwind prerequisite as `test-renderer-browser`.
+test-renderer-dom:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-dom.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh renderer-dom
 
 # THE BUILD A DEVELOPER TYPES, which is not one of the two above.
 #

@@ -184,7 +184,7 @@ while read -r f; do
 		compile_cmd=(nim js -d:nodejs --hints:off --warnings:off
 			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
-	elif [ "${backend}" = "js-browser" ]; then
+	elif [ "${backend}" = "js-browser" ] || [ "${backend}" = "js-dom" ]; then
 		# `nim js` WITHOUT `-d:nodejs`. See test_lane_backend's header: the
 		# define is required by every lane that RUNS its output under node, and
 		# is fatal for a browser module — `kdom`'s `createElementNS` is absent
@@ -300,6 +300,10 @@ while read -r f; do
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
 	if [ "${backend}" = "js" ]; then
 		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
+	elif [ "${backend}" = "js-dom" ]; then
+		# A browser-target module, run over jsdom's DOM. The runner fails
+		# (exit 2) when `node_modules/jsdom` is absent rather than skipping.
+		output="$(timeout "${lane_timeout}" node src/frontend/tests/jsdom-run.mjs "${artifact}" 2>&1)" && rc=0 || rc=$?
 	elif [ "${backend}" = "wasm" ]; then
 		# `emcc -o <name>.js` emits a JS loader beside the `.wasm`; node runs
 		# the loader, which instantiates the module and calls `main`.

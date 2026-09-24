@@ -243,6 +243,7 @@ proc hideWelcomeScreenSurface() =
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
+import dap_backend
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
@@ -2444,11 +2445,11 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
     if not session.dapApi.isNil and session.dapApi.sessionId == sessionId:
       responseDap = session.dapApi
       break
-  resolvePendingDapResponse(responseDap, raw)
-  try:
-    receiveResponse(data.dapApi, raw["command"].to(cstring), raw["body"])
-  except ValueError:
-    console.log(cstring"dap: ignoring response for unmapped command: ", raw["command"])
+  #
+  # `deliverDapResponse` also stamps a TRACKED answer (`ct/load-locals`) with
+  # the identity of the request it answers before the fan-out, so a
+  # subscriber can match it to that request rather than to an order.
+  deliverDapResponse(data.dapApi, responseDap, raw)
 
 # We receive a DAP "Event" from the index process
 proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
@@ -2639,23 +2640,11 @@ when not defined(ctInExtension):
     # -----------------------------------------------------------------------
     if activeSessionVM.isNil:
       let dapRef = data.dapApi
-      let realBackend = newRealBackendService(
-        sendCommand = proc(command: string, argsJs: JsObject): BackendFuture[JsObject] =
+      let realBackend = newDapBackendService(dapRef,
+        onSend = proc(command: cstring; argsJs: JsObject) =
           when defined(js):
             if data.startOptions.inTest:
-              recordVmBackendRequest(cstring(command), argsJs)
-          # Translate the BackendService string command to a CtEventKind
-          # and forward it through the existing DapApi IPC channel.
-          let kind = dapCommandToEventKind(cstring(command))
-          dapRef.asyncSendCtRequest(kind, argsJs),
-        onBackendEvent = proc(handler: proc(kind: string, raw: JsObject)) =
-          # Subscribe to every event kind that has a DAP mapping so the
-          # ViewModel store receives the same events as the legacy UI.
-          for k in CtEventKind:
-            if EVENT_KIND_TO_DAP_MAPPING[k] != "":
-              dap.on[JsObject](dapRef, k, proc(kind: CtEventKind, raw: JsObject) =
-                handler($kind, raw)),
-      )
+              recordVmBackendRequest(command, argsJs))
       activeSessionVM = createSessionVM(realBackend)
       # PLAT-40: the debugger service's `setBreakpoints` answers go to the
       # ViewModel store's one breakpoint decoder — the point list then holds
@@ -2912,11 +2901,9 @@ when not defined(ctInExtension):
             $response.totalCallsCount)
           calltrace.syncCalltraceData(response))
 
-      data.viewsApi.subscribe(CtLoadLocalsResponse,
-        proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-          cdebug ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
-            $response.locals.len & " variables")
-          state.syncStoreLocals(response.locals))
+      # The locals answer's direct subscription, and the request tracking
+      # that lets it tell which request each answer is for.
+      state.wireLocalsAnswers(data.viewsApi)
 
       data.viewsApi.subscribe(CtCompleteMove,
         proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =

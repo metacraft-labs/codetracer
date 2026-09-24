@@ -3032,6 +3032,22 @@ jobs:
         # wants to learn after twenty minutes of suites.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
 
+      - name: Run renderer suites over a DOM (renderer-dom lane)
+        # The step above COMPILES the renderer; this one RUNS renderer modules.
+        # Its suites are built for the browser target — `ui/state.nim` does not
+        # compile under `-d:nodejs` — and executed under node over jsdom, which
+        # the dev shell links into `node_modules` on entry. The runner fails
+        # when jsdom is absent rather than skipping.
+        #
+        # `locals_answer_identity_test.nim` drives both of the web renderer's
+        # `ct/load-locals` senders through the real response fan-out and
+        # asserts each answer is judged against the stop its own request was
+        # sent at — after a fast move, the previous stop's values must never be
+        # drawn beside the new stop. `!cancelled()` so a red renderer build
+        # above does not hide this lane's verdict as "skipped".
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-dom
+
       - name: Compile the renderer the way a developer builds it
         # THE STEP ABOVE COMPILES WHAT SHIPS, AND THAT IS NOT WHAT ANYONE TYPES.
         # `just build-ui-js` adds `-d:ctInExtension` and

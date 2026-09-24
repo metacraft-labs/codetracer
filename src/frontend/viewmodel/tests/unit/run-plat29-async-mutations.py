@@ -49,8 +49,28 @@ Verification-Harness-Traps, applied rather than cited:
 FIVE SUBJECTS AND THREE OF THEM ARE THE HARNESS'S OWN EVIDENCE. The product is
 two modules; the population is a generator; the suites are two; and the GATE is
 a shell script. A gate that cannot fail is this campaign's recurring defect, so
-the gate is armed like any other subject — five arms on it, and one on the
-allow-list table it reads.
+the gate is armed like any other subject — six arms on it, one on the
+allow-list table it reads, and one on the path normaliser it sources.
+
+AND SINCE 2026-09-23, THE FOUR WIRINGS. The boundary has real producers behind
+it — the highlighter on a worker thread, `:w` and `:e!` on a file worker, and
+the DAP locals reconciled against the debugger's STOP — so the product modules
+that do the wiring are subjects too: the journal (`J1`), the highlight
+producer (`H1`-`H3`), the file producer (`F1`, `F2`), and the stop timeline,
+the store and the headless host that name and reconcile a `ct/load-locals`
+answer (`V1`-`V6`). Their killers live in the four `test_plat29_*` suites the
+`tui` lane runs; `test_plat29_inline_values.nim` drives a REAL recording
+through a REAL `replay-server`, so export `REPLAY_SERVER_BIN` when grading.
+
+AND SINCE 2026-09-24, THE WEB RENDERER'S WIRING (`W1`-`W5`, with `V6`/`V7` on
+the ledger). The web sends `ct/load-locals` from two places; the answer is
+matched to its request by the transport's own request identity, carried from
+`dap.dispatchCtRequest` to the answer's body by `dap.deliverDapResponse` and
+matched in `ui/state.syncStoreLocals`. Those arms mutate the TRANSPORT and the
+BRIDGE, not the ledger, and their killer is `locals_answer_identity_test.nim`,
+which drives both senders and the response fan-out under `nim js` + node over
+jsdom (the `renderer-dom` lane) — it needs `node_modules/jsdom` in the
+checkout.
 
 COUNT THE ARMS BY THEIR `subject`, NOT BY THEIR NAME, which is PLAT-28's own
 correction. `U4`'s subject is the EXAMPLES SUITE even though the defect it
@@ -87,7 +107,36 @@ CLOSURE = "src/frontend/viewmodel/tests/unit/test_editor_async_closure.nim"
 GATE = "ci/test/editor-import-closure.sh"
 ADMISSION = "src/common/editor_core_admission.nim"
 
-TOUCHED = [VERSION, RECONCILE, GENERATOR, LAWS, EX, CLOSURE, GATE, ADMISSION]
+# THE FOUR WIRINGS (2026-09-23): the producers behind the boundary, and the
+# journal that tells a front-end's timeline what the model did.
+EDSTATE = "src/frontend/viewmodel/editor/editor_state.nim"
+PRODUCER = "src/frontend/tui/app/syntax/highlight_producer.nim"
+FILEIO = "src/frontend/tui/app/file_io_producer.nim"
+VALUES = "src/frontend/viewmodel/viewmodels/inline_value_timeline.nim"
+T_PRODUCER = "src/frontend/tui/tests/test_plat29_highlight_producer.nim"
+T_FILES = "src/frontend/tui/tests/test_plat29_file_producer.nim"
+T_VALUES = "src/frontend/tui/tests/test_plat29_inline_values.nim"
+# THE DAP PRODUCER'S VERSION IS THE STOP (2026-09-23): the timeline, the
+# store that reconciles every `ct/load-locals` answer against it, and the
+# headless host that names the stop a request is sent at.
+STOPS = "src/frontend/viewmodel/store/stop_timeline.nim"
+STORE = "src/frontend/viewmodel/store/replay_data_store.nim"
+HEADLESS = "src/frontend/viewmodel/headless_session.nim"
+# The path normaliser every module resolution in the closure gate runs through
+# — in NO harness until 2026-09-23 (PLAT-29's residual 2).
+CLOSURE_LIB = "ci/lib/nim-closure.sh"
+# THE WEB RENDERER'S WIRING (2026-09-24): the transport that names each
+# `ct/load-locals` request and carries that identity to its answer, the State
+# pane's bridge that records and matches by it, and the suite that drives both
+# of the web's senders through the real response fan-out under `nim js`.
+DAP = "src/frontend/dap.nim"
+STATE_UI = "src/frontend/ui/state.nim"
+T_WEB = "src/frontend/tests/locals_answer_identity_test.nim"
+WEB_RUNNER = "src/frontend/tests/jsdom-run.mjs"
+
+TOUCHED = [VERSION, RECONCILE, GENERATOR, LAWS, EX, CLOSURE, GATE, ADMISSION,
+           EDSTATE, PRODUCER, FILEIO, VALUES, T_PRODUCER, T_FILES, T_VALUES,
+           STOPS, STORE, HEADLESS, CLOSURE_LIB, DAP, STATE_UI, T_WEB]
 
 CONTROL_HASHES = HERE / "plat29-async-mutation-control.sha256"
 
@@ -98,7 +147,24 @@ CLOSURE_BIN = os.environ.get("CT_P29_CLOSURE_BIN", "/tmp/plat29-mutation-closure
 
 NIM_FLAGS = ["--hints:off", "--warnings:off", "--path:src/frontend/viewmodel"]
 
-SUITES = [(LAWS, LAWS_BIN), (EX, EX_BIN), (CLOSURE, CLOSURE_BIN)]
+def _tui_flags() -> list:
+    """The `tui` lane's flags, read from `ci/lib/test-lane-files.sh`."""
+    return subprocess.run(
+        ["bash", "-c", ". ci/lib/test-lane-files.sh >/dev/null 2>&1 && "
+         "test_lane_extra_flags tui"],
+        cwd=ROOT, capture_output=True, text=True).stdout.split()
+
+
+# (suite, binary, extra flags). The wiring suites are TUI modules and take the
+# `tui` lane's flags; the model's three take none beyond `NIM_FLAGS`. The
+# real-thread suite (`test_plat29_highlight_worker.nim`) is not here: it runs
+# a minute of real edits per arm, and every arm it could kill is killed by the
+# three below in seconds.
+SUITES = [(LAWS, LAWS_BIN, []), (EX, EX_BIN, []), (CLOSURE, CLOSURE_BIN, []),
+          (T_PRODUCER, "/tmp/plat29-mutation-producer", None),
+          (T_FILES, "/tmp/plat29-mutation-files", None),
+          (T_VALUES, "/tmp/plat29-mutation-values", None),
+          (T_WEB, "/tmp/plat29-mutation-web.js", "js")]
 
 RESULT_LINE = re.compile(r"^\s*\[(OK|FAILED)\]\s+(.*?)\s*$")
 
@@ -154,14 +220,36 @@ C_R5 = ("ROUTE 5 — THE CALL SITE rather than the rendering: a refusal is a "
         "finding")
 C_R6 = "ROUTE 6 — `export … except` narrows one path and not the other"
 C_R7 = "ROUTE 7 — THE PLANTED IMPORT MUST REDDEN IT"
+C_R8 = "ROUTE 8 — a module SYMLINKED into the editor directory is a root"
+C_R9 = "ROUTE 9 — a module in a SUBDIRECTORY no root imports is a root"
 C_CONTROL = "THE CONTROL — the same tree with nothing planted is GREEN"
 
+W_STALE = "an edit on line 2 drops line 2's spans and keeps every other line"
+W_REMAP = "a later edit re-maps what is held, counted apart from arrivals"
+W_SHIFT = "text typed at a line's START keeps its spans, shifted by the typed cells"
+W_RELOAD = "typed INTO while the reload was read: discarded, typing kept"
+W_WRITE = "typed past while the write ran: the typing stays dirty"
+W_VALUES = "an answer the debugger moved past is dropped, and not drawn"
+W_INORDER = ("answers named by their request after the debugger moved: the "
+             "old one dropped")
+W_WEB = ("both senders are recorded; a stale answer is dropped, the current "
+         "one applied")
+W_WEB_OVERTAKEN = ("an answer overtaken by a later one is still judged by its "
+                   "own stop")
+W_WEB_SESSION = ("an answer is named by the session that sent it, not the one "
+                 "on screen")
+W_MIRROR = ("one move mirrored twice is one version, so its own request "
+            "survives")
+W_MOVE = "a move — tick, line, file or HCR generation — drops it"
+
 NAMED_CASES = [
+    W_STALE, W_REMAP, W_SHIFT, W_RELOAD, W_WRITE, W_VALUES,
+    W_INORDER, W_MIRROR, W_MOVE, W_WEB, W_WEB_OVERTAKEN, W_WEB_SESSION,
     V1_CLASS1, V2_INLINE_DROP, V2_TREE_MAP, V3, V4, V5_SIDES, V5_ORACLE,
     N_CLAMP, N_FORGOTTEN, N_LAWSET, N_ORACLE, N_RECON, N_DIR, N_NOTINT,
     P_SEED, P_SHAPES, P_CLASSIFIERS, P_HIST,
     E_STORM, E_ZERO, E_FORGOTTEN, E_CARRIED, E_REFUSED, E_LATENCY,
-    C_REAL, C_R1, C_R2, C_R3, C_R4, C_R5, C_R6, C_R7, C_CONTROL,
+    C_REAL, C_R1, C_R2, C_R3, C_R4, C_R5, C_R6, C_R7, C_R8, C_R9, C_CONTROL,
 ]
 
 
@@ -502,6 +590,227 @@ ARMS = [
         "own evidence is a gate nobody can use, and §4d names the usual "
         "repair (rewording a comment to appease a regex) as the smell",
     ),
+    # =======================================================================
+    # THE FOUR WIRINGS — the producers the boundary now actually has
+    # =======================================================================
+    Arm(
+        "J1", EDSTATE,
+        "  st.journal.add cs\n",
+        "  discard cs\n",
+        W_STALE,
+        "**THE MODEL STOPS TELLING THE TIMELINE WHAT IT DID.** Every edit "
+        "still lands and every keystroke still draws, but a front-end's "
+        "document version never advances — so every parse, read and write "
+        "looks as fresh as the document it was computed against, which is "
+        "the one failure this boundary exists to prevent",
+    ),
+    Arm(
+        "H1", PRODUCER,
+        "  if res.request.version == d.version:\n    # CURRENT:",
+        "  if true:\n    # CURRENT:",
+        W_STALE,
+        "**A STALE PARSE IS INSTALLED AS CURRENT.** Its spans are drawn on "
+        "the edited line's NEW text: the class of a token computed from bytes "
+        "that are no longer there — §11's 'applied as though the document had "
+        "not moved', in colour",
+    ),
+    Arm(
+        "H2", PRODUCER,
+        "  if not bh.hasParse or bh.parsedVersion == d.version: return\n",
+        "  if true: return\n",
+        W_REMAP,
+        "**HELD SPANS ARE NEVER MOVED AGAIN.** A second edit after a stale "
+        "arrival leaves the held lines at the line numbers of the first, so "
+        "every line below a new line is drawn with its neighbour's colours",
+    ),
+    Arm(
+        "H3", PRODUCER,
+        "    if shift != 0:\n      for sp in result[i].mitems:",
+        "    if false:\n      for sp in result[i].mitems:",
+        W_SHIFT,
+        "**TEXT TYPED AT A LINE'S START DOES NOT MOVE ITS SPANS.** The line is "
+        "rightly kept — the typing abuts its evidence — and then drawn with "
+        "every token coloured two cells to the left of where it is",
+    ),
+    Arm(
+        "F1", FILEIO,
+        "      FileAnswer(outcome: roDropped,\n                 note: \"reload of \"",
+        "      FileAnswer(install: true, change: changeSet(d.text.len, 0, "
+        "d.text.len, res.text), outcome: roDropped,\n                 note: "
+        "\"reload of \"",
+        W_RELOAD,
+        "**A STALE RELOAD IS INSTALLED OVER THE TYPING.** The disk's bytes "
+        "replace the buffer the user typed into while the read ran — the one "
+        "outcome §11 says a load must never have — and the status line still "
+        "says it was discarded",
+    ),
+    Arm(
+        "F2", FILEIO,
+        "    FileAnswer(saved: true, savedText: res.job.text, outcome: r.outcome,",
+        "    FileAnswer(saved: true, savedText: d.text, outcome: r.outcome,",
+        W_WRITE,
+        "**A WRITE MARKS THE CURRENT TEXT SAVED.** What was typed while the "
+        "write ran is on no disk, and the buffer says it is clean — the next "
+        "quit loses it without a word",
+    ),
+    Arm(
+        "V1", VALUES,
+        "  of roDropped: @[]",
+        "  of roDropped: values",
+        W_VALUES,
+        "**THE PREVIOUS STOP'S VALUES ARE DRAWN.** After a real `next` whose "
+        "locals answer has not been applied, the store still holds the old "
+        "stop's locals and the gate hands them to the pane — `x: 42` beside a "
+        "line where `x` is now something else",
+    ),
+    Arm(
+        "V2", STORE,
+        "  if not store.stops.admit(requestedAt):\n    return false\n",
+        "  discard store.stops.admit(requestedAt)\n",
+        W_VALUES,
+        "**A DAP ANSWER IS APPLIED AS THOUGH THE DEBUGGER HAD NOT MOVED.** The "
+        "drop is still COUNTED — so a report-only check would stay green — "
+        "and the old stop's locals are written over the store anyway",
+    ),
+    Arm(
+        "V3", STOPS,
+        "  if old == identity:\n    return\n",
+        "  if false:\n    return\n",
+        W_MIRROR,
+        "**A MOVE REPORTED TWICE IS TWO MOVES.** The web renderer mirrors "
+        "every move from two places; with this, the request sent between the "
+        "two mirrors is dropped as stale and the pane never shows the locals "
+        "of the stop the user is actually at",
+    ),
+    Arm(
+        "V4", STOPS,
+        r'  "\x01" & $d.rrTicks & "\0" & d.location.file',
+        r'  "\x01" & "\0" & d.location.file',
+        W_MOVE,
+        "**THE TICK IS NOT PART OF THE STOP.** Two stops on the same line at "
+        "different ticks — every iteration of a loop — are one version, so "
+        "the values of the previous iteration are applied at this one",
+    ),
+    Arm(
+        "V5", HEADLESS,
+        "  if not s.session.store.applyLocalsResponse(answer.rows, "
+        "answer.requestedAt):\n",
+        "  if not s.session.store.applyLocalsResponse(answer.rows, "
+        "s.session.store.stopStamp()):\n",
+        W_VALUES,
+        "**THE HOST NAMES THE STOP AT APPLY TIME, NOT AT REQUEST TIME** — "
+        "which is every answer claiming to be about the present, the exact "
+        "shape §11's first rule forbids, spelled one line away from correct",
+    ),
+    Arm(
+        "V6", STORE,
+        "    store.pendingLocals[at].requestedAt)\n",
+        "    store.stopStamp())\n",
+        W_INORDER,
+        "**A LATE ANSWER IS STAMPED WHEN IT ARRIVES.** The web renderer's "
+        "answers are genuinely late; stamping them on arrival makes the one "
+        "that was asked at the previous stop look current",
+    ),
+    Arm(
+        "V7", STORE,
+        "  if store.pendingLocals[at].answered:\n",
+        "  if false:\n",
+        W_INORDER,
+        "**A SECOND DELIVERY OF ONE ANSWER IS RECONCILED AGAIN.** The verdict "
+        "does not change, but every drop is counted twice, and the staleness "
+        "report — the number that tells a normal drop from a defect — "
+        "doubles",
+    ),
+
+    # =======================================================================
+    # THE WEB RENDERER'S WIRING (2026-09-24) — the transport and the bridge,
+    # not the ledger: every arm here leaves `replay_data_store.nim` intact.
+    # =======================================================================
+    Arm(
+        "W1", DAP,
+        "          t.onSent(requestId)\n",
+        "          discard requestId\n",
+        W_WEB,
+        "**THE SEND PATH STOPS NAMING THE REQUEST.** Both of the web's "
+        "senders still send and every answer still arrives stamped — but no "
+        "stop was recorded for any of them, so the ledger vouches for none "
+        "and the pane never shows the locals of the stop the user is at",
+    ),
+    Arm(
+        "W2", DAP,
+        "      body[CtRequestIdField] = requestId\n",
+        "      discard requestId\n",
+        W_WEB,
+        "**THE ANSWER ARRIVES ANONYMOUS.** Every request is still recorded "
+        "at its stop, but the body the subscribers receive no longer says "
+        "which request it answers, so it is taken for an answer about the "
+        "stop the debugger is at now — and the previous stop's locals are "
+        "drawn beside this stop's line: the defect this wiring was built to "
+        "remove",
+    ),
+    Arm(
+        "W3", STATE_UI,
+        "                                        $ctRequestIdOf(response.toJs)):\n",
+        "                                        \"\"):\n",
+        W_WEB,
+        "**THE BRIDGE DROPS THE IDENTITY IT WAS HANDED.** The transport "
+        "names the request and stamps the answer; the State pane's bridge "
+        "reconciles against the present instead. The same stale apply as "
+        "`W2`, one module later, where the old in-order queue used to sit",
+    ),
+    Arm(
+        "W4", STATE_UI,
+        "        stateVMStore.forgetLocalsRequest($requestId))\n",
+        "        discard requestId)\n",
+        W_WEB,
+        "**AN ANSWERED REQUEST IS NEVER RETIRED.** Nothing is drawn wrong at "
+        "first; the ledger grows by one entry per request until its bound "
+        "starts evicting the OLDEST — which, on a host that sends faster than "
+        "it is answered, is the request still in flight",
+    ),
+    Arm(
+        "W5", DAP,
+        "      requestId = ctRequestId(responseDap, raw[\"request_seq\"].to(int))\n",
+        "      requestId = ctRequestId(fanOut, raw[\"request_seq\"].to(int))\n",
+        W_WEB_SESSION,
+        "**THE ANSWER IS NAMED BY THE SESSION ON SCREEN, NOT THE ONE THAT "
+        "ASKED.** Every session numbers its requests from zero, so another "
+        "session's answer takes the identity of an unrelated request of the "
+        "visible one — and is judged against THAT request's stop",
+    ),
+    Arm(
+        "A6", GATE,
+        "done < <(find -L \"${EDITOR_DIR}\" -type f -name '*.nim' 2>/dev/null "
+        "| sort)\n",
+        "done < <(find \"${EDITOR_DIR}\" -maxdepth 1 -type f -name '*.nim' "
+        "2>/dev/null | sort)\n",
+        C_R8,
+        "**THE ROOT SET GOES BACK TO `-maxdepth 1 -type f`** — the spelling "
+        "PLAT-29's verification pass measured two escapes past: a symlinked "
+        "module and a subdirectory module no root imports. Route 8 notices "
+        "(and route 9 with it)",
+    ),
+    Arm(
+        "N1", CLOSURE_LIB,
+        '\t/*) lead="/" ;;\n',
+        '\t/*) lead="" ;;\n',
+        C_REAL,
+        "**AN ABSOLUTE PATH COMES BACK RELATIVE** — the drift the older "
+        "plugin gate's copy carried. The sibling-package roots stop "
+        "resolving, the five `isonim-tui` modules the editor model reaches "
+        "become unresolvable, and the real tree's closure goes red",
+    ),
+    Arm(
+        "M10", VERSION,
+        "func `<=`*(a, b: DocumentVersion): bool {.borrow.}\n",
+        "func `<=`*(a, b: DocumentVersion): bool {.borrow.}\n"
+        "func `-`*(a, b: DocumentVersion): DocumentVersion {.borrow.}\n",
+        N_NOTINT,
+        "**A VERSION CAN BE SUBTRACTED.** A caller computes 'the version "
+        "before this one' and names a result against a version nothing "
+        "published. The fourth refusal the type makes, asserted since "
+        "2026-09-23",
+    ),
 ]
 
 DECLARED_SURVIVORS: list = []
@@ -542,10 +851,25 @@ def write_source(path: str, text: str) -> None:
     (ROOT / path).write_bytes(text.encode("utf-8", errors="surrogateescape"))
 
 
-def run_one(path: str, binary: str, res: RunResult) -> None:
+def _web_suite_cmd(path: str, out_js: str) -> list:
+    """The web wiring suite: the renderer's browser target under `nim js`,
+    run by node over a real DOM (jsdom) — the `renderer-dom` lane's recipe."""
+    return ["bash", "-c",
+            'nim js --hints:off --warnings:off -d:chronicles_enabled=off '
+            '-d:ctRenderer --nimcache:"$1.nimcache" -o:"$1" "$2" && '
+            'node "$3" "$1"',
+            "web-suite", out_js, path, WEB_RUNNER]
+
+
+def run_one(path: str, binary: str, extra, res: RunResult) -> None:
+    if extra == "js":
+        cmd = _web_suite_cmd(path, binary)
+    else:
+        flags = _tui_flags() if extra is None else extra
+        cmd = ["nim", "c", "-r", *NIM_FLAGS, *flags, "-o:" + binary, path]
     try:
         proc = subprocess.run(
-            ["nim", "c", "-r", *NIM_FLAGS, "-o:" + binary, path],
+            cmd,
             cwd=ROOT, capture_output=True, text=True, timeout=SUITE_TIMEOUT,
             encoding="utf-8", errors="replace",
         )
@@ -589,8 +913,8 @@ def install_restore_on_signal() -> None:
 
 def run_suite() -> RunResult:
     res = RunResult(rc=0)
-    for path, binary in SUITES:
-        run_one(path, binary, res)
+    for path, binary, extra in SUITES:
+        run_one(path, binary, extra, res)
     return res
 
 
@@ -619,7 +943,9 @@ def check_killer_names(problems: int) -> int:
     laws = read_source(LAWS)
     ex = read_source(EX)
     closure = read_source(CLOSURE)
-    everywhere = laws + "\n" + ex + "\n" + closure
+    everywhere = "\n".join([laws, ex, closure, read_source(T_PRODUCER),
+                            read_source(T_FILES), read_source(T_VALUES),
+                            read_source(T_WEB)])
 
     templates = [
         ('test "LAW-V1 and FUZZ-5 x class " & $(ci + 1):', laws,
