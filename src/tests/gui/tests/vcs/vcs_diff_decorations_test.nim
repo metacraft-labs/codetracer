@@ -579,10 +579,23 @@ suite "the shapes the old synthetic document flattened (UD-1)":
       "  let token = parse(input);"
 
   test "an added, a deleted and a modified file share one tab without merging":
-    ## A git "Working Tree" target names several files at once.  Since UD-2 the
-    ## file headers are DOM chrome rather than model lines, so the pair carries
-    ## them as data — one entry per file, in document order, each keeping its
-    ## own path and status so the tab can label the files it is showing.
+    ## `buildDiffPair` accepts several files, and must keep them apart when it
+    ## does.  Since #753 no *VCS-panel* route reaches it with more than one —
+    ## the commit row's whole-commit button was the last, and every target that
+    ## panel mints now names a file (DeepReview-GUI.md §4.1).
+    ##
+    ## That is as far as the guarantee goes, and the distinction is the whole
+    ## point of #753: the Agent Activity panel's "Unified diff" button still
+    ## hands this proc every file in a message (`unified:<msgId>`, registered
+    ## as an `agent-diff:` entry and expanded by `loadFromAgentRegistry`).  So
+    ## these rows are a surface a user can still open, not only the data
+    ## layer's defensive behaviour — and writing the stronger sentence here
+    ## would repeat the exact mistake #753 was filed against, an invariant of
+    ## one route asserted over all of them.
+    ##
+    ## Since UD-2 the file headers are DOM chrome rather than model lines, so
+    ## the pair carries them as data — one entry per file, in document order,
+    ## each keeping its own path and status.
     let pair = buildDiffPair([mixedHunkFile(), addedFile(), deletedFile()])
     var headers: seq[string] = @[]
     var paths: seq[string] = @[]

@@ -11343,12 +11343,17 @@ suite "IsoNim VCS Panel — structure":
 
       findByClass(panel, "vcs-commit-header").fireEvent("click")
       findByClass(panel, "vcs-accordion-file").fireEvent("click")
-      findByClass(panel, "vcs-commit-diff-btn").fireEvent("click")
+      # The commit's diffs are opened per file, from the expanded accordion —
+      # not from the commit row.  #753 removed the commit-level button because
+      # the only target it could mint was the pathless `commit:<hash>`, which
+      # DeepReview-GUI.md §4.1 forbids a diff tab from showing.
+      check findByClassOrNil(panel, "vcs-commit-diff-btn") == nil
+      findByClass(panel, "vcs-file-diff-btn").fireEvent("click")
 
       check expandedCommit == 0
       check expandModifiers == (false, false)
       check selectedFile == "src/main.nim"
-      check openedDiff == "commit:abc123"
+      check openedDiff == "commit:abc123:src/main.nim"
 
       dispose()
 

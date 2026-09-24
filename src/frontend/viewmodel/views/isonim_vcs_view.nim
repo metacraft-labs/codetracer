@@ -789,18 +789,30 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
     renderGraphLanes(r, commit.graphCells, commit.dotLane,
                      commit.connectors, index == 0))
 
-  # Commit message + relative timestamp + hover diff button.
-  let commitIndex = index
+  # Commit message + relative timestamp.
+  #
+  # There is deliberately NO commit-level "open unified diff" button here.
+  # It used to mint the target `commit:<hash>` — a whole commit, with no path —
+  # and that is the one target shape a diff tab must never be given:
+  # DeepReview-GUI.md §4.1, "Each diff tab shows a single file. Cross-file
+  # navigation is the Changed Files list (§3); a review does not concatenate
+  # every file into one scrolling document."  A pathless commit target reached
+  # `unified_diff.loadFromGit`'s whole-commit branch, so an N-file commit
+  # rendered N stacked file headers above one concatenated document (#753).
+  #
+  # Nothing is lost by its removal, because the navigation §4.1 names is one
+  # level down in this very widget: clicking the row expands the accordion and
+  # `renderAccordionFileRow` gives every file of the commit its own "View Diff"
+  # button, carrying the single-file target `commit:<hash>:<path>`.  That is
+  # also all VCS-Panel.md §Commit History ever specified a commit row to do —
+  # "Clicking a commit: Updates the Changed Files section to show files
+  # modified in that commit".  The whole-commit diff tab was in no spec.
   let body = ui(r):
     tdiv(class = "vcs-commit-body"):
       span(class = "vcs-commit-msg"):
         text commit.message
       span(class = "vcs-commit-time-col"):
         text abbreviateRelTime(commit.relativeTime)
-      span(class = "vcs-commit-diff-btn",
-           onclick = proc() = callbacks.invokeOpenFileDiff("commit:" & commit.hash)):
-        tdiv(class = "custom-tooltip"):
-          text "Open unified diff"
   r.appendRenderedChild(headerNode, body)
 
   r.attachCommitTooltip(headerNode, commit.hash, commit.fullHash,
