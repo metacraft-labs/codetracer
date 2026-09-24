@@ -33,8 +33,12 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1295 bash ci/test/frontend-reachability.sh`, so 1296
-# findings fail `lint-nim` and 1295 do not.
+# `env CT_REACHABILITY_MAX=1296 bash ci/test/frontend-reachability.sh`, so 1297
+# findings fail `lint-nim` and 1296 do not.
+#
+# THE CEILING MOVED 1295 -> 1296 ON 2026-09-25: net +1 (gross +5, -4) from
+# commits that landed while the move below was in review; every one of the
+# five has a user, so none was deleted. Account in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1274 -> 1295 ON 2026-09-23, AFTER PLAT-35 .. PLAT-44 HAD
 # LANDED WITHOUT MOVING IT — the step was red on `dev` from the first of them.

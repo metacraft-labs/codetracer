@@ -609,8 +609,20 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #
 # It is a CEILING, so it falls when the import report gets a view and PLAT-44's
 # focus arm gets a front-end caller — fourteen of the twenty-nine are those two.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1295 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1295 bash ci/test/frontend-reachability.sh
+#
+# 1295 -> 1296 ON 2026-09-25, REBASING THE ABOVE ONTO dev: gross +5 and -4 from
+# commits that landed on 2026-09-24 in the meantime, measured the same way.
+#   -4, reached now: `document_version.initVersionedDocument`, `lengthAt`,
+#       `reconcile.producerChange`, `producerResult` (PLAT-29's producers,
+#       wired, as its entry predicted).
+#   +5, none of them dead: `file_conflicts.RecordLaunchPlan` (the result type
+#       of the exported `planRecordLaunch`); `traces.onNewFile` (an IPC
+#       handler); `welcome_screen_vm.unreachableStartOptions` and
+#       `reasonlessDisabledStartOptions` (asserted by
+#       `welcome_screen_vm_test.nim`); `flow_vm.FlowWireTakenOrdinal` (the
+#       sibling of the `FlowWireNotTakenOrdinal` carried above).
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1296 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1296 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
