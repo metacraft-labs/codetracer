@@ -11,6 +11,8 @@
 ## makes the "never hang" invariants below testable at all — see issue #603,
 ## where the queue could be armed and then silently never drained.
 
+import std/strutils
+
 type
   ExternalChangeDecision* = enum
     ecdReload
@@ -379,3 +381,224 @@ proc abandonReRecord*(queue: var ReRecordQueue;
   if not queue.active:
     return
   result = queue.settle(rrgAbort, reason)
+
+# ───────────────────────── launching the recorder ──────────────────────────
+#
+# Issue #747.  `rreDispatchRecord` ends in one `child_process.spawn` of the
+# `ct` binary, and the reporter's whole symptom is that spawn answering
+# `ENOENT`.  Node reports `ENOENT` for THREE different causes at that call and
+# gives the caller nothing to tell them apart — measured on node v20.20.0,
+# macOS 15 / arm64:
+#
+#   * the executable path does not exist;
+#   * `options.cwd` names a directory that does not exist;
+#   * the executable is a bare name that the *effective* `PATH` (which is
+#     `options.env.PATH` whenever `options.env` is supplied) does not resolve.
+#
+# In all three the error object reads `code: "ENOENT"`, `syscall: "spawn <exe>"`
+# and — this is the trap — `path: "<exe>"`, i.e. it names the EXECUTABLE even
+# when the executable is fine and the cwd is what is missing.  So the reported
+# message cannot be read as evidence about which one happened, and neither can
+# the `error.path` field.
+#
+# The values that reach that spawn on a re-record are RECORDED METADATA:
+# `Trace.workdir` and `Trace.env` describe the machine and the moment the
+# recording was made, not this machine now.  Every other sender of
+# `CODETRACER::new-record` supplies a working directory the user just picked in
+# a file dialog, which is why plain recording works while re-recording does
+# not.  The two funcs below are that whole decision, made explicit so it can be
+# exercised without Electron:
+#
+#   * `planRecordLaunch` derives what the renderer asks for;
+#   * `classifyRecordLaunch` / `recordLaunchCwd` / the two message funcs decide
+#     what the main process actually does with it, and say what was missing by
+#     name instead of letting `spawn` answer `ENOENT` for three questions.
+
+type
+  RecordLaunchInputs* = object
+    ## What the renderer knows about the recording it is about to repeat.
+    ##
+    ## All four fields come from the live session: three off `Trace`, one off
+    ## the debugger's current location.  Nothing here touches a filesystem —
+    ## the renderer has no business stat-ing paths for a process the main
+    ## process will spawn, and keeping the derivation pure is what lets
+    ## `re_record_queue_vm_test.nim` drive it natively.
+    program*: string
+      ## `Trace.program`.  May be a bare name: the Noir recorder stores the
+      ## project name, not a path.
+    workdir*: string
+      ## `Trace.workdir` — where the program ran WHEN IT WAS RECORDED.
+    locationPath*: string
+      ## `services.debugger.location.path`, the file the replay is stopped in.
+    noirProject*: bool
+      ## `Trace.lang == LangNoir`.  Noir re-records from the project root.
+
+  RecordLaunchPlan* = object
+    ## The `CODETRACER::new-record` payload, minus the parts that never vary.
+    programArg*: string
+      ## `args[0]`: what `ct record` is pointed at.
+    cwd*: string
+      ## The working directory the renderer REQUESTS.  Empty means "say
+      ## nothing about it", which leaves the recorder in the main process's own
+      ## directory — the same thing the welcome screen does when its work-dir
+      ## field is blank.
+    filename*: string
+      ## The `filename` field, used by the main process to pick a build target.
+      ## Empty is legal and means "use `args[0]`".
+
+func looksLikeAPath*(path: string): bool =
+  ## Does this string already name a location, or is it a bare name that only
+  ## means something relative to some directory?
+  ##
+  ## Used to decide whether a program may be re-rooted under the recorded
+  ## workdir.  The old test was `startsWith("/") or contains("/")`, which reads
+  ## `C:\projects\demo.py` as a bare name and re-roots it into
+  ## `<workdir>/C:\projects\demo.py`.  Windows is a supported host, so the
+  ## backslash and the drive-letter form are both path shapes here.
+  if path.len == 0:
+    return false
+  if path.contains('/') or path.contains('\\'):
+    return true
+  # `C:\x` is drive-absolute and `C:x` is drive-relative; either way the string
+  # is anchored to a drive and re-rooting it produces nonsense.
+  path.len >= 2 and path[1] == ':'
+
+func joinUnder*(base, leaf: string): string =
+  ## `base / leaf`, without dragging `std/os` into a module that also compiles
+  ## for the browser renderer.  The separator follows `base` so a Windows
+  ## workdir keeps its backslashes.
+  if base.len == 0:
+    return leaf
+  if leaf.len == 0:
+    return base
+  let last = base[^1]
+  if last == '/' or last == '\\':
+    return base & leaf
+  let sep = if base.contains('\\') and not base.contains('/'): '\\' else: '/'
+  base & sep & leaf
+
+func planRecordLaunch*(inputs: RecordLaunchInputs): RecordLaunchPlan =
+  ## Turn the live session's facts into the three values a re-record sends.
+  ##
+  ## Extracted verbatim from `renderer.launchReRecord` (issue #747) apart from
+  ## the `looksLikeAPath` correction noted above.  Two shapes it has to keep
+  ## handling, both observed in real `trace_index.db` rows:
+  ##
+  ##   * `program` is an absolute source path and `workdir` is its directory —
+  ##     the Python/Ruby/JavaScript recorders;
+  ##   * `program` is a bare PROJECT NAME (`noir_example`) and `workdir` is the
+  ##     project root — the Noir recorder.  `ct record` needs the root, so the
+  ##     workdir replaces the program outright.
+  result.programArg = inputs.program
+  if inputs.noirProject and inputs.workdir.len > 0:
+    # Noir metadata stores the project name; re-recording requires the project
+    # root, which is the only place `Nargo.toml` can be found.
+    result.programArg = inputs.workdir
+  if inputs.workdir.len > 0 and result.programArg.len > 0 and
+      not looksLikeAPath(result.programArg):
+    # A bare name is meaningless to a process started somewhere else, so anchor
+    # it to the directory the recording says it ran in.
+    result.programArg = joinUnder(inputs.workdir, result.programArg)
+  result.cwd = inputs.workdir
+  result.filename = inputs.locationPath
+
+type
+  RecordLaunchDefect* = enum
+    ## A precondition of the recorder spawn that does not hold.
+    ##
+    ## Deliberately NOT a list of everything that can go wrong — it is the list
+    ## of things `spawn` would otherwise report as an indistinguishable
+    ## `ENOENT`.  A missing working directory is absent because it does not
+    ## have to be fatal: see `recordLaunchCwd`.
+    rldNone
+    rldNoRecordTarget    ## nothing was named to record
+    rldRecorderMissing   ## the `ct` binary this process would spawn is not
+                         ## reachable — either the path does not exist, or it
+                         ## is a bare name and the effective `PATH` has no such
+                         ## executable
+
+  RecordLaunchFacts* = object
+    ## What the main process observed about the launch it is about to make.
+    ##
+    ## The *observations* (does this path exist? does `PATH` resolve this name?)
+    ## belong to the caller, which has `fs` and `process.env`; the *decision*
+    ## belongs here, where a test can make every combination without a
+    ## filesystem.
+    recorder*: string
+      ## The `ct` this process would spawn, as written.
+    recorderResolved*: string
+      ## Where it was actually found.  Empty means `spawn` will answer ENOENT
+      ## for it, whatever `error.path` ends up saying.
+    recordTarget*: string
+      ## The first argument after `record` — what gets recorded.
+    requestedCwd*: string
+      ## `options.cwd` as the renderer asked for it (`Trace.workdir`).
+    requestedCwdUsable*: bool
+      ## Does `requestedCwd` exist on THIS machine, and is it a directory?
+    fallbackCwd*: string
+      ## An existing directory to use when the requested one is gone — in
+      ## practice the directory holding `recordTarget`.  Empty means there is
+      ## none and the recorder should simply inherit.
+
+func classifyRecordLaunch*(facts: RecordLaunchFacts): RecordLaunchDefect =
+  ## Which precondition, if any, is broken.
+  if facts.recordTarget.len == 0:
+    return rldNoRecordTarget
+  if facts.recorderResolved.len == 0:
+    return rldRecorderMissing
+  rldNone
+
+func recordLaunchCwd*(facts: RecordLaunchFacts): string =
+  ## The working directory to actually pass to `spawn`.  Empty means "pass
+  ## none", i.e. inherit the main process's directory.
+  ##
+  ## A recorded workdir that no longer exists must NOT fail the launch. The
+  ## record target is an absolute path (or a project root) by the time it gets
+  ## here, so `ct record <target>` does not need the directory the program
+  ## happened to run in two weeks ago on another machine — and refusing would
+  ## turn a recoverable situation into issue #747's dead end.
+  if facts.requestedCwd.len == 0:
+    return ""
+  if facts.requestedCwdUsable:
+    return facts.requestedCwd
+  facts.fallbackCwd
+
+func recordLaunchRefusal*(facts: RecordLaunchFacts;
+                          defect: RecordLaunchDefect): string =
+  ## What the user is told when a precondition fails.
+  ##
+  ## Names the thing that is missing and where it was looked for. "ENOENT" on
+  ## its own is not a diagnosis — it is the same five letters for three
+  ## unrelated causes, and the reporter of #747 could not act on it.
+  case defect
+  of rldNone:
+    ""
+  of rldNoRecordTarget:
+    "Nothing to record: this recording does not name a program, and no file " &
+    "was selected to record instead."
+  of rldRecorderMissing:
+    if looksLikeAPath(facts.recorder):
+      "The CodeTracer recorder is missing: '" & facts.recorder &
+      "' does not exist. Recording needs the 'ct' binary that ships with " &
+      "this build."
+    else:
+      "The CodeTracer recorder is missing: '" & facts.recorder &
+      "' was not found on the PATH this recording would run with. Recording " &
+      "needs the 'ct' binary that ships with this build."
+
+func recordLaunchCwdWarning*(facts: RecordLaunchFacts): string =
+  ## What the user is told when the recorded working directory is gone and the
+  ## launch proceeds from somewhere else. Empty when there is nothing to say.
+  ##
+  ## Said out loud rather than logged: the recording that comes back was made
+  ## in a different directory from the one it claims, and a program that reads
+  ## relative data files will behave differently because of it.
+  if facts.requestedCwd.len == 0 or facts.requestedCwdUsable:
+    return ""
+  let replacement = recordLaunchCwd(facts)
+  if replacement.len > 0:
+    "The directory this recording was made in ('" & facts.requestedCwd &
+    "') no longer exists; recording from '" & replacement & "' instead."
+  else:
+    "The directory this recording was made in ('" & facts.requestedCwd &
+    "') no longer exists; recording from CodeTracer's own directory instead."

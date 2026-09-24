@@ -393,3 +393,191 @@ suite "Re-record is single-flight":
       tab.changed = false
     ws.pressCtrlR()
     check ws.count(newRecordMsg) == 1
+
+# ───────────────────────── issue #747: the launch itself ────────────────────
+#
+# Everything above stops at `rreDispatchRecord`.  #747 is what happens next:
+# the renderer derives `args[0]`, `options.cwd` and `filename` from the loaded
+# recording's metadata, and the main process spawns `ct record` with them.
+# That spawn answered `ENOENT` and the reporter had no way to tell which of
+# three unrelated causes produced it.
+#
+# These cases drive the same two production funcs the renderer and the main
+# process call — `planRecordLaunch` and the `classifyRecordLaunch` family in
+# `src/frontend/file_conflicts.nim` — with the shapes real `trace_index.db`
+# rows actually hold.
+
+const
+  # A Noir recording, exactly as `trace_index.db` stores one: `program` is the
+  # PROJECT NAME and `workdir` is the project root.
+  noirTrace = RecordLaunchInputs(
+    program: "noir_example",
+    workdir: "/w/test-programs/noir_example",
+    locationPath: "/w/test-programs/noir_example/src/main.nr",
+    noirProject: true)
+  # A Python recording: `program` is an absolute source path.
+  pythonTrace = RecordLaunchInputs(
+    program: "/w/demo/main.py",
+    workdir: "/w/demo",
+    locationPath: "/w/demo/main.py",
+    noirProject: false)
+
+suite "Re-record launch derivation (#747)":
+  test "a bare program name is anchored to the recorded workdir":
+    let plan = planRecordLaunch(RecordLaunchInputs(
+      program: "demo",
+      workdir: "/w/demo",
+      locationPath: "/w/demo/main.py",
+      noirProject: false))
+    # Without the workdir this is a name no other process can resolve.
+    check plan.programArg == "/w/demo/demo"
+    check plan.cwd == "/w/demo"
+    check plan.filename == "/w/demo/main.py"
+
+  test "an empty workdir leaves the bare name alone and requests no cwd":
+    # There is nothing to anchor to, and — this is the part that matters — an
+    # empty `cwd` is what makes the renderer omit `options.cwd` entirely
+    # (`renderer.launchReRecord` sets the key only when this is non-empty).
+    # Putting the empty string in that field instead would make the launch
+    # depend on which node API runs it: async `spawn` tolerates `{cwd: ""}` and
+    # inherits, while `spawnSync` answers `ENOENT` for the same input
+    # (measured, node v20.20.0 / macOS 15 arm64).
+    let plan = planRecordLaunch(RecordLaunchInputs(
+      program: "demo",
+      workdir: "",
+      locationPath: "/w/demo/main.py",
+      noirProject: false))
+    check plan.programArg == "demo"
+    check plan.cwd == ""
+
+  test "an empty workdir on a Noir recording does not erase the program":
+    # The Noir branch replaces the program with the workdir.  With no workdir
+    # there is nothing to replace it WITH, and swapping in "" would send
+    # `ct record ""`.
+    let plan = planRecordLaunch(RecordLaunchInputs(
+      program: "noir_example",
+      workdir: "",
+      locationPath: "",
+      noirProject: true))
+    check plan.programArg == "noir_example"
+    check plan.cwd == ""
+
+  test "an empty debugger location leaves the filename empty, not the program":
+    # `filename` picks the BUILD target in the main process and is allowed to
+    # be empty (it falls back to `args[0]`).  What it must never do is silently
+    # become the program, which would make the two fields disagree.
+    let plan = planRecordLaunch(RecordLaunchInputs(
+      program: "/w/demo/main.py",
+      workdir: "/w/demo",
+      locationPath: "",
+      noirProject: false))
+    check plan.filename == ""
+    check plan.programArg == "/w/demo/main.py"
+
+  test "a Noir recording re-records from its project root":
+    let plan = planRecordLaunch(noirTrace)
+    check plan.programArg == "/w/test-programs/noir_example"
+    check plan.cwd == "/w/test-programs/noir_example"
+
+  test "an absolute program is passed through untouched":
+    let plan = planRecordLaunch(pythonTrace)
+    check plan.programArg == "/w/demo/main.py"
+    check plan.cwd == "/w/demo"
+
+  test "a Windows program path is not re-rooted under the workdir":
+    # `C:\demo\main.py` contains no forward slash and does not start with "/",
+    # so the old test read it as a bare name and produced
+    # `C:\w\demo/C:\demo\main.py`.
+    let plan = planRecordLaunch(RecordLaunchInputs(
+      program: r"C:\demo\main.py",
+      workdir: r"C:\w\demo",
+      locationPath: r"C:\demo\main.py",
+      noirProject: false))
+    check plan.programArg == r"C:\demo\main.py"
+
+  test "a bare name under a Windows workdir keeps the workdir's separator":
+    let plan = planRecordLaunch(RecordLaunchInputs(
+      program: "demo",
+      workdir: r"C:\w\demo",
+      locationPath: "",
+      noirProject: false))
+    check plan.programArg == r"C:\w\demo\demo"
+
+suite "Re-record launch preconditions (#747)":
+  # `child_process.spawn` answers ENOENT for a missing executable, a missing
+  # `options.cwd` and an unresolvable bare command name alike, and puts the
+  # EXECUTABLE in `error.path` in all three (measured on node v20.20.0).  These
+  # are the questions the main process now asks before it spawns.
+  proc healthyFacts(): RecordLaunchFacts =
+    RecordLaunchFacts(
+      recorder: "/opt/ct/bin/ct",
+      recorderResolved: "/opt/ct/bin/ct",
+      recordTarget: "/w/demo/main.py",
+      requestedCwd: "/w/demo",
+      requestedCwdUsable: true,
+      fallbackCwd: "")
+
+  test "a launch with every precondition met is not refused":
+    let facts = healthyFacts()
+    check classifyRecordLaunch(facts) == rldNone
+    check recordLaunchCwd(facts) == "/w/demo"
+    check recordLaunchCwdWarning(facts) == ""
+
+  test "an unresolvable recorder is named, and names the PATH when it is bare":
+    var facts = healthyFacts()
+    facts.recorder = "ct"
+    facts.recorderResolved = ""
+    check classifyRecordLaunch(facts) == rldRecorderMissing
+    let message = recordLaunchRefusal(facts, rldRecorderMissing)
+    check message.contains("ct")
+    check message.contains("PATH")
+    # The old behaviour said "ENOENT" and nothing else.
+    check not message.contains("ENOENT")
+
+  test "a missing recorder PATH names the path when the recorder is one":
+    var facts = healthyFacts()
+    facts.recorderResolved = ""
+    let message = recordLaunchRefusal(facts, rldRecorderMissing)
+    check message.contains("/opt/ct/bin/ct")
+    check not message.contains("PATH")
+
+  test "nothing to record is refused before the spawn, by name":
+    var facts = healthyFacts()
+    facts.recordTarget = ""
+    check classifyRecordLaunch(facts) == rldNoRecordTarget
+    check recordLaunchRefusal(facts, rldNoRecordTarget).len > 0
+
+  test "the recorded workdir is checked, and a dead one does not fail the launch":
+    # THE #747 CASE.  `Trace.workdir` says where the program ran when it was
+    # recorded; the project can have moved, the recording can have come from
+    # another machine, or it can have been made in a temp directory that is
+    # long gone.  Handing that to `spawn` unchecked is the ENOENT.
+    var facts = healthyFacts()
+    facts.requestedCwd = "/gone/demo"
+    facts.requestedCwdUsable = false
+    facts.fallbackCwd = "/w/demo"
+    # Not a refusal: the record target is absolute, so the launch can proceed.
+    check classifyRecordLaunch(facts) == rldNone
+    check recordLaunchCwd(facts) == "/w/demo"
+    let warning = recordLaunchCwdWarning(facts)
+    check warning.contains("/gone/demo")
+    check warning.contains("/w/demo")
+    check warning.contains("no longer exists")
+
+  test "a dead workdir with no replacement inherits rather than dying":
+    var facts = healthyFacts()
+    facts.requestedCwd = "/gone/demo"
+    facts.requestedCwdUsable = false
+    facts.fallbackCwd = ""
+    check classifyRecordLaunch(facts) == rldNone
+    # "" means "send no `options.cwd` at all", which is what makes the child
+    # inherit instead of `chdir`-ing into a directory that is not there.
+    check recordLaunchCwd(facts) == ""
+    check recordLaunchCwdWarning(facts).contains("/gone/demo")
+
+  test "a recording that asked for no workdir is not warned about":
+    var facts = healthyFacts()
+    facts.requestedCwd = ""
+    facts.requestedCwdUsable = false
+    check recordLaunchCwd(facts) == ""
+    check recordLaunchCwdWarning(facts) == ""

@@ -4,7 +4,7 @@ import
   results,
   ipc_subsystems/[ dap, socket ],
   ../lib/[ jslib, electron_lib ],
-  ../[ trace_metadata, config, types ],
+  ../[ trace_metadata, config, types, file_conflicts ],
   ../viewmodel/viewmodels/visual_replay_layout,
   visual_replay_player,
   ../../common/[ ct_logging, paths, trace_source_paths ],
@@ -242,6 +242,73 @@ proc isExecutableFile(path: cstring): bool =
       return (stat.mode.to(int) and 0o111) != 0
   except:
     return false
+
+proc isDirectoryPath(path: cstring): bool =
+  ## Does `path` name a directory that exists right now?
+  ##
+  ## `spawn` needs this of `options.cwd` and answers `ENOENT` (or `ENOTDIR` for
+  ## a file, which it *throws* rather than emitting) when it does not hold, so
+  ## asking first is the difference between naming the missing directory and
+  ## reporting five letters that mean three different things.  See issue #747.
+  if path.len == 0:
+    return false
+  try:
+    return cast[bool](fs.statSync(path).isDirectory())
+  except:
+    return false
+
+proc effectiveSearchPath(options: JsObject): cstring =
+  ## The `PATH` `spawn` will resolve a bare executable name against.
+  ##
+  ## **`options.env` wins when it is supplied**, and a re-record can supply one
+  ## built from `Trace.env` — a snapshot of the environment the program was
+  ## recorded in, possibly on another machine.  So the recorder can be perfectly
+  ## installed and still be unfindable, which is the third `ENOENT` cause of
+  ## issue #747 and the one nothing in the codebase acknowledged.
+  if not options.isNil:
+    try:
+      let envObject = options.env
+      if not envObject.isNil and not envObject.PATH.isNil:
+        return envObject.PATH.to(cstring)
+    except:
+      discard
+  try:
+    return nodeProcess.toJs.env.PATH.to(cstring)
+  except:
+    return cstring""
+
+proc resolveRecorderExe(exe: cstring; options: JsObject): cstring =
+  ## Where `spawn(exe, …, options)` will actually find `exe`, or `""` when it
+  ## will not find it at all.
+  ##
+  ## `codetracerExe` is an absolute path when the install prefix is known and
+  ## the bare name `"ct"` otherwise (`src/common/paths.nim`,
+  ## `resolveCodetracerExe`), so both shapes are live and they fail for
+  ## different reasons.
+  if exe.len == 0:
+    return cstring""
+  if looksLikeAPath($exe):
+    if isExecutableFile(exe):
+      return exe
+    # Windows names the same binary `ct.exe` while `codetracerExe` spells it
+    # `<prefix>/bin/ct` (`paths.nim`'s `when defined(windows)` arm), so the
+    # bare spelling missing is not the same as the recorder missing.
+    let windowsExe = cstring($exe & ".exe")
+    if isExecutableFile(windowsExe):
+      return windowsExe
+    return cstring""
+  let searchPath = $effectiveSearchPath(options)
+  if searchPath.len == 0:
+    return cstring""
+  let delimiter = $cast[JsObject](nodePath).delimiter.to(cstring)
+  let separator = if delimiter.len > 0: delimiter else: ":"
+  for directory in searchPath.split(separator):
+    if directory.len == 0:
+      continue
+    let candidate = nodePath.join(cstring(directory), exe)
+    if isExecutableFile(candidate):
+      return candidate
+  cstring""
 
 proc materializedTraceRootHasEntries(trace: Trace; root: string): bool =
   let materializedPath = nodePath.join(trace.outputFolder, cstring"files", cstring(root))
@@ -513,6 +580,96 @@ proc optionCwd(options: JsObject): cstring =
   except:
     discard
   cstring""
+
+proc recordTargetOf(recordArgs: seq[cstring]): cstring =
+  ## The program inside a `ct record` argument vector.
+  ##
+  ## Not simply `recordArgs[0]`: `ui/welcome_screen.prepareArgs` (`:341-345`)
+  ## prefixes `-o <outputFolder>` when the user chose one, so the program is
+  ## the first entry that is not a flag or a flag's value.  Only `-o` takes a
+  ## value here, and it is the only flag any sender emits.
+  var i = 0
+  while i < recordArgs.len:
+    let arg = $recordArgs[i]
+    if arg == "-o":
+      i += 2
+      continue
+    if arg.len > 0 and arg[0] == '-':
+      i += 1
+      continue
+    return recordArgs[i]
+  cstring""
+
+proc recordLaunchFactsFor(exe: cstring; recordTarget: cstring;
+                          options: JsObject): RecordLaunchFacts =
+  ## Observe everything `classifyRecordLaunch` needs, in the one process that
+  ## can observe it.  The decision itself stays pure — see
+  ## `src/frontend/file_conflicts.nim`.
+  let requestedCwd = optionCwd(options)
+  result = RecordLaunchFacts(
+    recorder: $exe,
+    recorderResolved: $resolveRecorderExe(exe, options),
+    recordTarget: $recordTarget,
+    requestedCwd: $requestedCwd,
+    requestedCwdUsable: isDirectoryPath(requestedCwd))
+  if not result.requestedCwdUsable and recordTarget.len > 0:
+    # The target is an absolute path or a project root by the time it gets
+    # here, so its own directory is a defensible place to run from.
+    if isDirectoryPath(recordTarget):
+      result.fallbackCwd = $recordTarget
+    else:
+      let parent = cstring(($recordTarget).parentDir)
+      if isDirectoryPath(parent):
+        result.fallbackCwd = $parent
+
+proc applyRecordLaunchCwd(options: JsObject; facts: RecordLaunchFacts) =
+  ## Replace the requested `options.cwd` with the one that actually exists.
+  ##
+  ## Clearing the key rather than writing `""` matters.  `undefined` is how you
+  ## say "inherit" here — verified against node v20.20.0 / macOS 15 arm64, where
+  ## `spawn(exe, args, {cwd: undefined})` runs in the parent's directory and
+  ## `{cwd: "/gone"}` is the `ENOENT` of issue #747.  The empty string is NOT an
+  ## equivalent spelling: async `spawn` happens to tolerate `{cwd: ""}` and
+  ## inherit, but `spawnSync(exe, args, {cwd: ""})` answers `ENOENT` for the
+  ## same input, so writing `""` would make the meaning of this field depend on
+  ## which node API the caller reaches for.
+  ## https://nodejs.org/api/child_process.html#child_processspawncommand-args-options
+  if options.isNil:
+    return
+  let resolved = recordLaunchCwd(facts)
+  if resolved.len == 0:
+    if facts.requestedCwd.len > 0:
+      options["cwd".cstring] = jsUndefined
+  else:
+    options["cwd".cstring] = cast[JsObject](cstring(resolved))
+
+proc checkRecordLaunch(exe: cstring; recordTarget: cstring;
+                       options: JsObject): bool =
+  ## Refuse a recorder spawn whose preconditions do not hold, saying which one.
+  ##
+  ## Issue #747: `spawn` reports `ENOENT` for a missing executable, a missing
+  ## `options.cwd` and an unresolvable bare name alike, and names the
+  ## executable in `error.path` in all three — so the message the reporter
+  ## photographed was compatible with three unrelated causes and pointed at the
+  ## wrong one.  Asking first is what turns it back into a diagnosis.
+  ##
+  ## Returns `true` when the launch may proceed.  A dead working directory is
+  ## NOT a refusal: it is replaced, out loud.
+  let facts = recordLaunchFactsFor(exe, recordTarget, options)
+  let defect = classifyRecordLaunch(facts)
+  if defect != rldNone:
+    let refusal = recordLaunchRefusal(facts, defect)
+    errorPrint "index: record launch refused: ", refusal
+    mainWindow.webContents.send "CODETRACER::failed-record",
+      js{errorMessage: cstring(refusal)}
+    return false
+  applyRecordLaunchCwd(options, facts)
+  let warning = recordLaunchCwdWarning(facts)
+  if warning.len > 0:
+    warnPrint "index: ", warning
+    mainWindow.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationWarning, warning)
+  true
 
 proc sourceFoldersForLiveProgram(program, cwd: cstring): seq[cstring] =
   if cwd.len > 0 and pathExists(cwd):
@@ -1111,6 +1268,13 @@ proc onRecordWithLaunchConfig*(sender: js,
   mainWindow.webContents.send "CODETRACER::new-notification",
     newNotification(NotificationInfo, fmt"Recording: {config.name}")
 
+  # The same precondition gate as `onNewRecord` (issue #747).  This path is if
+  # anything more exposed: `config.cwd` comes straight out of a checked-in
+  # `launch.json`, which routinely names a directory that exists on the author's
+  # machine and not on this one.
+  if not checkRecordLaunch(codetracerExe, config.program, processOptions):
+    return
+
   let processResult = await startProcess(
     codetracerExe,
     @[cstring"record"].concat(recordArgs),
@@ -1352,6 +1516,11 @@ proc onNewRecord*(sender: js,
 
   let finalRecordArgs = recordBackendArgs.concat(recordArgs)
   infoPrint "index: record with args: ", finalRecordArgs
+  # Issue #747.  Everything `spawn` can answer `ENOENT` for is asked about here,
+  # by name, while there is still something to say about it.
+  if not checkRecordLaunch(
+      codetracerExe, recordTargetOf(recordArgs), response.options):
+    return
   let processResult = await startProcess(
     codetracerExe,
     @[cstring"record"].concat(finalRecordArgs),

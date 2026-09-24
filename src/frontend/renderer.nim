@@ -2062,6 +2062,26 @@ proc pendingReRecordQueue(data: Data): ReRecordQueueRef =
   else:
     cast[ReRecordQueueRef](data.pendingReRecord)
 
+proc safeStr(s: cstring): string =
+  ## `$s`, but `""` for a field that is `null` or `undefined`.
+  ##
+  ## Needed because the JS `$` is `cstrToNimstr`, which reads `c.length` with no
+  ## guard (`lib/system/jssys.nim`) and therefore throws a `TypeError` on an
+  ## absent field rather than yielding an empty string.  Trace metadata comes
+  ## across IPC as a plain JSON object, so a field the writer never set arrives
+  ## as `undefined`.
+  ##
+  ## Sixteen other frontend modules carry a byte-identical private copy of this
+  ## (`ui/welcome_screen.nim:44`, `ui/repl.nim:64`, …).  Hoisting all seventeen
+  ## into one exported helper is worth doing and is deliberately NOT done here:
+  ## an exported `safeStr` would join the overload set of every module that
+  ## already has a private one, and resolving that is a wider change than this
+  ## fix should carry.
+  if s.isNil:
+    ""
+  else:
+    $s
+
 proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
   ## Build/record a new trace for the current target.  Only reached once every
   ## modified buffer is on disk.
@@ -2081,28 +2101,28 @@ proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
     return false
 
-  var programArg = data.trace.program
-  if data.trace.lang == LangNoir and data.trace.workdir.len > 0:
-    # Noir metadata stores the project name; re-record requires the project root.
-    programArg = data.trace.workdir
+  # The derivation lives in `file_conflicts.planRecordLaunch` so it can be
+  # exercised without Electron — see issue #747 and
+  # `src/tests/gui/tests/welcome-screen/re_record_queue_vm_test.nim`.  What is
+  # left here is reading the session and sending the message.
+  let plan = planRecordLaunch(RecordLaunchInputs(
+    program: safeStr(data.trace.program),
+    workdir: safeStr(data.trace.workdir),
+    locationPath: safeStr(data.services.debugger.location.path),
+    noirProject: data.trace.lang == LangNoir))
 
-  # Some recorders (e.g. Noir) persist only the project name in metadata.
-  # When re-recording, prefer an absolute path under the original workdir so
-  # language detection can find project markers like Nargo.toml.
-  let workdirStr = $data.trace.workdir
-  let programStr = $programArg
-  if workdirStr.len > 0 and programStr.len > 0:
-    if not programStr.startsWith("/") and not programStr.contains("/"):
-      let candidate = workdirStr / programStr
-      programArg = candidate.cstring
-
-  var args: seq[cstring] = @[programArg]
+  var args: seq[cstring] = @[plan.programArg.cstring]
   for arg in data.trace.args:
     args.add(arg)
 
   var options = JsObject{}
-  if not data.trace.workdir.isNil and data.trace.workdir.len > 0:
-    options["cwd".cstring] = cast[JsObject](data.trace.workdir)
+  if plan.cwd.len > 0:
+    # A REQUEST, not an instruction: `Trace.workdir` says where the program ran
+    # when it was recorded, and the main process is the one that can tell
+    # whether that directory still exists.  It validates this before spawning
+    # (`index/traces.nim`, `classifyRecordLaunch`), because an unvalidated
+    # `options.cwd` is exactly what made `spawn` answer `ENOENT` in #747.
+    options["cwd".cstring] = cast[JsObject](plan.cwd.cstring)
 
   let envObject = buildRecordEnv(data.trace.env)
   if not envObject.isNil:
@@ -2116,7 +2136,7 @@ proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
   data.ipc.send(
     "CODETRACER::new-record",
     js{
-      filename: data.services.debugger.location.path,
+      filename: plan.filename.cstring,
       args: args,
       options: options,
       projectOnly: projectOnly,
