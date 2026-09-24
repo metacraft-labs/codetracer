@@ -187,16 +187,32 @@ proc insideUntakenBranch*[B](branchesTaken: openArray[B]; position: int): bool =
   for header, state in states:
     if state != NotTaken:
       continue
+    # ORDER MATTERS HERE, and only for cost — the three tests below are an
+    # independent conjunction, so any order answers the same question.
+    #
+    # `branchStateAnywhere` scans EVERY cell of `branchesTaken`, and the cells
+    # grow one per loop iteration (bounded only by `STEP_COUNT_LIMIT`). This
+    # proc runs once per source line of the rendered window, and the loop it
+    # sits in runs once per recorded header. Put the scan first and a long
+    # loop costs lines x headers x iterations on every repaint, in the JS
+    # renderer, for a question the two cheap tests usually settle: a header
+    # whose arm does not even contain this line can never dim it, whatever any
+    # other cell says about it.
+    #
+    # So: the hash lookup and the range compare first, both O(1), then the
+    # scan — reached only for a header that would otherwise dim this very
+    # line.
+    if not extents.hasKey(header):
+      continue
+    let extent = extents[header]
+    if position < extent.firstLine or position > extent.lastLine:
+      continue
     # An arm this window recorded as ENTERED anywhere is an arm that ran, and
     # no claim to the contrary in another cell may dim its interior. See
     # `branchStateAnywhere` for which claim loses and why.
     if branchStateAnywhere(branchesTaken, header, Taken):
       continue
-    if not extents.hasKey(header):
-      continue
-    let extent = extents[header]
-    if position >= extent.firstLine and position <= extent.lastLine:
-      return true
+    return true
   false
 
 proc flowStyledLines*[F](flow: F; finished: bool): seq[FlowStyledLine] =
