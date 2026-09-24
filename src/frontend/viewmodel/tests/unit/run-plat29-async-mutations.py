@@ -72,6 +72,16 @@ which drives both senders and the response fan-out under `nim js` + node over
 jsdom (the `renderer-dom` lane) — it needs `node_modules/jsdom` in the
 checkout.
 
+AND THE TWO RESIDUALS THAT WIRING LEFT, CLOSED THE SAME DAY (`R1`, `R2`,
+`L1`-`L6`). The Electron main process's DAP router tagged each answer with a
+session looked up by `seq` alone; its killer is `dap_session_routing_test.nim`
+(the `main-process` lane: `nim js -d:ctIndex -d:server` under node). And the
+web asked for the locals twice per move — the legacy component in the file's
+language, the StateVM's auto-load in `c` — while the native hosts asked three
+times per step, every one in `c`; their killers are the web suite and
+`test_plat29_inline_values.nim`'s wire case, which reads what the terminal
+host writes to the real server through a `tee` tap.
+
 COUNT THE ARMS BY THEIR `subject`, NOT BY THEIR NAME, which is PLAT-28's own
 correction. `U4`'s subject is the EXAMPLES SUITE even though the defect it
 performs is a population defect; `A1`'s subject is the ADMISSION TABLE even
@@ -133,10 +143,19 @@ DAP = "src/frontend/dap.nim"
 STATE_UI = "src/frontend/ui/state.nim"
 T_WEB = "src/frontend/tests/locals_answer_identity_test.nim"
 WEB_RUNNER = "src/frontend/tests/jsdom-run.mjs"
+# THE TWO RESIDUALS OF 2026-09-24, CLOSED (2026-09-24): the Electron main
+# process's DAP router, which tags each answer with the session that asked —
+# keyed by `(sessionId, seq)` through a wire `seq` unique across sessions —
+# and its suite; and the StateVM's auto-load, the ONE `ct/load-locals` sender
+# per stop, whose language is the stopped-in file's.
+MAIN_DAP = "src/frontend/index/ipc_subsystems/dap.nim"
+T_ROUTING = "src/frontend/tests/dap_session_routing_test.nim"
+STATE_VM = "src/frontend/viewmodel/viewmodels/state_vm.nim"
 
 TOUCHED = [VERSION, RECONCILE, GENERATOR, LAWS, EX, CLOSURE, GATE, ADMISSION,
            EDSTATE, PRODUCER, FILEIO, VALUES, T_PRODUCER, T_FILES, T_VALUES,
-           STOPS, STORE, HEADLESS, CLOSURE_LIB, DAP, STATE_UI, T_WEB]
+           STOPS, STORE, HEADLESS, CLOSURE_LIB, DAP, STATE_UI, T_WEB,
+           MAIN_DAP, T_ROUTING, STATE_VM]
 
 CONTROL_HASHES = HERE / "plat29-async-mutation-control.sha256"
 
@@ -164,7 +183,8 @@ SUITES = [(LAWS, LAWS_BIN, []), (EX, EX_BIN, []), (CLOSURE, CLOSURE_BIN, []),
           (T_PRODUCER, "/tmp/plat29-mutation-producer", None),
           (T_FILES, "/tmp/plat29-mutation-files", None),
           (T_VALUES, "/tmp/plat29-mutation-values", None),
-          (T_WEB, "/tmp/plat29-mutation-web.js", "js")]
+          (T_WEB, "/tmp/plat29-mutation-web.js", "js"),
+          (T_ROUTING, "/tmp/plat29-mutation-routing.js", "main")]
 
 RESULT_LINE = re.compile(r"^\s*\[(OK|FAILED)\]\s+(.*?)\s*$")
 
@@ -232,8 +252,13 @@ W_WRITE = "typed past while the write ran: the typing stays dirty"
 W_VALUES = "an answer the debugger moved past is dropped, and not drawn"
 W_INORDER = ("answers named by their request after the debugger moved: the "
              "old one dropped")
-W_WEB = ("both senders are recorded; a stale answer is dropped, the current "
-         "one applied")
+W_WEB = ("one request per move, in the file's language; a stale answer is "
+         "dropped")
+W_WEB_REPEAT = "a repeated move asks nothing; a new stop at the same tick asks"
+W_WEB_STATUS = "a status-only change is not a new stop, and asks nothing"
+W_NATIVE_WIRE = ("each stop is asked about once, in its file's language, over "
+                 "the wire")
+R_SESSIONS = "two sessions' requests with the same seq, answered out of order"
 W_WEB_OVERTAKEN = ("an answer overtaken by a later one is still judged by its "
                    "own stop")
 W_WEB_SESSION = ("an answer is named by the session that sent it, not the one "
@@ -245,6 +270,7 @@ W_MOVE = "a move — tick, line, file or HCR generation — drops it"
 NAMED_CASES = [
     W_STALE, W_REMAP, W_SHIFT, W_RELOAD, W_WRITE, W_VALUES,
     W_INORDER, W_MIRROR, W_MOVE, W_WEB, W_WEB_OVERTAKEN, W_WEB_SESSION,
+    W_WEB_REPEAT, W_WEB_STATUS, W_NATIVE_WIRE, R_SESSIONS,
     V1_CLASS1, V2_INLINE_DROP, V2_TREE_MAP, V3, V4, V5_SIDES, V5_ORACLE,
     N_CLAMP, N_FORGOTTEN, N_LAWSET, N_ORACLE, N_RECON, N_DIR, N_NOTINT,
     P_SEED, P_SHAPES, P_CLASSIFIERS, P_HIST,
@@ -778,6 +804,90 @@ ARMS = [
         "session's answer takes the identity of an unrelated request of the "
         "visible one — and is judged against THAT request's stop",
     ),
+
+    # =======================================================================
+    # THE RESIDUALS OF 2026-09-24, CLOSED — the main process's router, and
+    # the one `ct/load-locals` per stop in the stopped-in file's language.
+    # =======================================================================
+    Arm(
+        "R1", MAIN_DAP,
+        "    let wireSeq = nextWireSeq()\n"
+        "    pendingRequests[wireSeq] = PendingDapRequest(\n"
+        "      sessionId: sessionId, seq: message[\"seq\"].to(int))\n"
+        "    frame = jsAssign(newJsObject(), message)\n"
+        "    frame[\"seq\"] = wireSeq\n",
+        "    let wireSeq = message[\"seq\"].to(int)\n"
+        "    pendingRequests[wireSeq] = PendingDapRequest(\n"
+        "      sessionId: sessionId, seq: message[\"seq\"].to(int))\n",
+        R_SESSIONS,
+        "**THE ROUTER KEYS ITS TABLE BY THE RENDERER'S `seq` ALONE** — the "
+        "residual as it was. Every session numbers from zero, so the second "
+        "session's request overwrites the first's entry: one answer is "
+        "tagged with the wrong session and the other falls through to "
+        "whichever session the Backend Manager is serving",
+    ),
+    Arm(
+        "R2", MAIN_DAP,
+        "      body[\"request_seq\"] = request.seq\n",
+        "      discard request.seq\n",
+        R_SESSIONS,
+        "**THE ANSWER KEEPS THE WIRE NUMBER.** Routed to the right session, "
+        "but carrying the router's own `seq` rather than the one that session "
+        "sent — so the renderer's continuation and its request identity "
+        "(`dap.ctRequestId`) match nothing",
+    ),
+    Arm(
+        "L1", STATE_UI,
+        "  if storeSendsLocals:\n    return\n",
+        "  if false:\n    return\n",
+        W_WEB,
+        "**THE LEGACY COMPONENT ASKS AS WELL** — the web's two requests per "
+        "move, the residual as it was",
+    ),
+    Arm(
+        "L2", STORE,
+        "    \"lang\": (if lang.len > 0: lang else: store.localsLanguage()),\n",
+        "    \"lang\": (if lang.len > 0: lang else: LoadLocalsDefaultLang),\n",
+        W_WEB,
+        "**THE ONE REQUEST SAYS `c`.** One request per move, but about a "
+        "Rust stop in C — the native replay backend renders the values "
+        "through the named language's printers",
+    ),
+    Arm(
+        "L3", STATE_VM,
+        "      stopIdentityOf(store.debugger.val)\n",
+        "      $store.debugger.val\n",
+        W_WEB_STATUS,
+        "**THE AUTO-LOAD WATCHES THE WHOLE STATE, NOT THE STOP.** Marking "
+        "the debugger stepping at the stop it is leaving re-asks about that "
+        "stop — a request whose answer can only be dropped",
+    ),
+    Arm(
+        "L4", STATE_VM,
+        "      if store.localsLoadedByHost:\n        return\n",
+        "      if false:\n        return\n",
+        W_NATIVE_WIRE,
+        "**THE AUTO-LOAD ASKS ON A HOST THAT LOADS THE LOCALS ITSELF.** The "
+        "terminal and GPUI send a second `ct/load-locals` per stop, whose "
+        "answer no decoder reads",
+    ),
+    Arm(
+        "L5", STORE,
+        "  let argsStr = $rrTicks & \"|\" & stopIdentityOf(store.debugger.val) & \"|\" &\n",
+        "  let argsStr = $rrTicks & \"|\" & \"\" & \"|\" &\n",
+        W_WEB_REPEAT,
+        "**A REQUEST IN FLIGHT ABSORBS ANOTHER STOP AT THE SAME TICK.** The "
+        "second stop is never asked about, and the answer in flight names "
+        "the stop the debugger left, so it is dropped: the pane shows nothing "
+        "current",
+    ),
+    Arm(
+        "L6", HEADLESS,
+        "    \"lang\": s.session.store.localsLanguage(),\n",
+        "    \"lang\": LoadLocalsDefaultLang,\n",
+        W_NATIVE_WIRE,
+        "**THE NATIVE HOST'S REQUEST SAYS `c`** about every file, as it did",
+    ),
     Arm(
         "A6", GATE,
         "done < <(find -L \"${EDITOR_DIR}\" -type f -name '*.nim' 2>/dev/null "
@@ -861,9 +971,20 @@ def _web_suite_cmd(path: str, out_js: str) -> list:
             "web-suite", out_js, path, WEB_RUNNER]
 
 
+def _main_suite_cmd(path: str, out_js: str) -> list:
+    """The Electron main process's suite: `nim js` with the `server_index.js`
+    defines, run by node — the `main-process` lane's recipe."""
+    return ["bash", "-c",
+            'nim js --hints:off --warnings:off -d:nodejs -d:ctIndex -d:server '
+            '--nimcache:"$1.nimcache" -o:"$1" "$2" && node "$1"',
+            "main-suite", out_js, path]
+
+
 def run_one(path: str, binary: str, extra, res: RunResult) -> None:
     if extra == "js":
         cmd = _web_suite_cmd(path, binary)
+    elif extra == "main":
+        cmd = _main_suite_cmd(path, binary)
     else:
         flags = _tui_flags() if extra is None else extra
         cmd = ["nim", "c", "-r", *NIM_FLAGS, *flags, "-o:" + binary, path]
@@ -945,7 +1066,7 @@ def check_killer_names(problems: int) -> int:
     closure = read_source(CLOSURE)
     everywhere = "\n".join([laws, ex, closure, read_source(T_PRODUCER),
                             read_source(T_FILES), read_source(T_VALUES),
-                            read_source(T_WEB)])
+                            read_source(T_WEB), read_source(T_ROUTING)])
 
     templates = [
         ('test "LAW-V1 and FUZZ-5 x class " & $(ci + 1):', laws,

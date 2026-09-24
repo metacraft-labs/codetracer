@@ -2,8 +2,8 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-c7671d4cc0841967065c722c79cd583f9b895968adfc70f41b3f0ad23c0c7205  src/frontend/viewmodel/headless_session.nim
-f49874856549b22bcbb8bf7bdeb43f596506d172d5cfcbcbbdce0653a167529d  src/frontend/viewmodel/store/replay_data_store.nim
+f2ba8484ef6c2402fcf31f97f817f17ceb137942b52e37bc9e9dbe8ffaf2f8fc  src/frontend/viewmodel/headless_session.nim
+f3ded220ef9a723b8446845c64e5cd25f7f5c5e6c63778bcca9da609ad7319a5  src/frontend/viewmodel/store/replay_data_store.nim
 a2a04df8f85151a604a9ba23b6c1eef3026faa92ee81d40142058f689a6ff7d5  src/frontend/tui/host/native_host.nim
 adbab445f4452a1cee91c3dd83dfdbe8eb1226d3bb876a30e919cc1d02eebae5  src/frontend/tui/host/tui_session.nim
 670a5c759dbb669f344eba27b9a0319cd6c47435c501917ac4d790ec37602438  src/frontend/tui/app/views/shell.nim
