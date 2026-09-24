@@ -165,13 +165,29 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 #
 # Those five are exactly `repro.lock`'s `depends` list for this repo, and that
 # is not a coincidence any more: the action clones whatever the lock declares,
-# so this tier and CI's provisioning have one source. The four advisory
-# IsoNim-family entries below (isonim-tui, isonim-gpui, nim-termctl, nim-pty)
-# used to be cloned alongside them and are not any more -- nothing declares
-# them, nothing imports them, and the paragraph below already said builds
-# succeed without them. They stay here as warnings so a local workspace that
+# so this tier and CI's provisioning have one source. The three advisory
+# IsoNim-family entries below (isonim-gpui, nim-termctl, nim-pty) used to be
+# cloned alongside them and are not any more -- nothing the desktop core
+# builds imports them. They stay here as warnings so a local workspace that
 # does carry them keeps working and one that does not is told why a
 # `--path` silently went missing.
+#
+# `isonim-tui` was the fourth, and it is REQUIRED since the 2026-09-18 editor
+# work (421b1dcbb..195f9195c). `src/frontend/viewmodel/editor/{selection,
+# selection_ops,wrap}.nim` import `isonim_tui/text/width`, and those modules
+# are reached from `src/frontend/ui_js.nim`, i.e. from the renderer bundle
+# every `just build-once` produces. Its absence is not a warning-grade gap: the
+# `ui.js` tup job dies with
+#
+#     src/frontend/viewmodel/editor/selection.nim(162, 30) Error: cannot open
+#     file: isonim_tui/text/width
+#
+# which is how every launcher-recorder-e2e arm failed on 2026-09-20..24 (e.g.
+# desktop run 35974652142). Only `text/width` and the four std-only table
+# modules beside it are reached, so this adds one repo and nothing it
+# depends on. It is NOT in `repro.lock`'s `depends`, so
+# provision-repro-lock-siblings does not clone it; a lane that needs it
+# provisions it itself (see launcher-recorder-e2e.yml).
 #
 # `runquota` was added to that tier after issue #641. `src/ct/codetracer.nim`
 # imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
@@ -206,8 +222,9 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 #
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
-# zero exit. `isonim-tui` / `isonim-gpui` / `nim-termctl` / `nim-pty` are on
-# `src/Tuprules.tup`'s `--path` list but builds succeed without them, and the
+# zero exit. `isonim-gpui` / `nim-termctl` / `nim-pty` are on
+# `src/Tuprules.tup`'s `--path` list but builds succeed without them (only the
+# terminal and GPUI front-ends import them, and no tup rule builds either), and the
 # io-mon family (io-mon, nim-stackable-hooks, nim-shm-queue, nim-shm-gset) is
 # reached from `src/ct_test/incremental/*` yet is NOT provisioned by any CI
 # job -- promoting either group would break lanes that are green today.
@@ -228,6 +245,11 @@ required_siblings=(
 	# the tier notes above. Accepting the env var here would green this check on
 	# the tup driver, which strips it.
 	'runquota|libs/runquota_process/src/runquota_process.nim||`import runquota_process` in src/ct_test/process_exec.nim, reached from EVERY `ct` build via src/ct/codetracer.nim -> ../ct_test/ct_test; src/Tuprules.tup puts libs/runquota_*/src on the Nim search path'
+	# Probe the module the source imports, not the repo's `src/` -- the same
+	# lesson as io-mon below: a pin that predates `text/width.nim` would pass a
+	# directory probe and fail in the compiler anyway. No override column:
+	# neither config.nims nor src/Tuprules.tup reads an env var for it.
+	'isonim-tui|src/isonim_tui/text/width.nim||`import isonim_tui/text/width` in src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim, reached from the renderer bundle (src/frontend/ui_js.nim -> ui.js); src/Tuprules.tup puts isonim-tui/src on the Nim search path'
 )
 
 advisory_siblings=(
@@ -251,7 +273,6 @@ advisory_siblings=(
 	'nim-stackable-hooks|src/stackable_hooks.nim|NIM_STACKABLE_HOOKS_SRC|`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim'
 	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's dependency queue imports \`shm_queue\`"
 	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's writer imports \`shm_gset/transport\` (the symptom config.nims:74-77 documents)"
-	"isonim-tui|src||src/Tuprules.tup:73 puts it on the Nim search path"
 	"isonim-gpui|src||src/Tuprules.tup:74 puts it on the Nim search path"
 	"nim-termctl|src||src/Tuprules.tup:75 puts it on the Nim search path"
 	"nim-pty|src||src/Tuprules.tup:76 puts it on the Nim search path"

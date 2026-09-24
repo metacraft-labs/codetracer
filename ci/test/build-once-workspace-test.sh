@@ -152,6 +152,22 @@ KNOWN_GAPS=(
 	"codetracer.yml|windows-installer-build|nim-acp"
 	"codetracer.yml|windows-installer-build|nim-everywhere"
 	"codetracer.yml|windows-installer-build|runquota"
+
+	# isonim-tui became REQUIRED on 2026-09-24: the 2026-09-18 editor work
+	# (421b1dcbb..195f9195c) made src/frontend/viewmodel/editor/* import
+	# `isonim_tui/text/width`, reached from ui_js.nim, so every tup build of
+	# `ui.js` needs ../isonim-tui. launcher-recorder-e2e.yml provisions it (the
+	# flake.lock SHA). These four jobs do not, and are recorded as FOUND, not as
+	# accepted: any tup build of `ui.js` in them fails without it anyway (the
+	# preflight now names the repo instead of the compiler naming a module;
+	# not measured per job), and fixing them means editing jobs
+	# this change cannot exercise. `provision-repro-lock-siblings` clones only
+	# repro.lock's `depends`, which does not list isonim-tui, so each closes by
+	# declaring it there or by an `isonim-tui=<flake.lock rev>` siblings entry.
+	"codetracer.yml|cross-process-linux|isonim-tui"
+	"codetracer.yml|viewmodel-tests|isonim-tui"
+	"codetracer.yml|windows-installer-build|isonim-tui"
+	"codetracer.yml|test-ui-tests|isonim-tui"
 )
 
 assertions=0
