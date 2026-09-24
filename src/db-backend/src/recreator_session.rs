@@ -42,6 +42,135 @@ use crate::task::{
 };
 use crate::value::ValueRecordWithType;
 
+/// The licensing stop-reason code `ct-native-replay` writes when the free
+/// tier's daily replay quota is exhausted.
+///
+/// Emitted by `codetracer-native-backend`'s
+/// `src/licensing/cli.rs::emit_replay_start_block`, which writes
+/// `{"result":"blocked","stop_reason":{"code":"daily_replay_limit_reached",
+/// "count":<n>,"limit":<n>}}` to **stderr** and then exits with status 3.
+/// `codetracer-native-backend/tests/licensing_integration_test.rs::
+/// e2e_free_license_still_uses_daily_replay_limit` pins both the exit code and
+/// the JSON shape, so this constant is a cross-repo contract: changing it here
+/// without changing it there silently reverts issue #689.
+pub const DAILY_REPLAY_LIMIT_REACHED: &str = "daily_replay_limit_reached";
+
+/// The machine-readable reason a replay worker refused to start, parsed out of
+/// the JSON line its licensing module writes to stderr before exiting.
+///
+/// `count` / `limit` are `Option` because only some stop reasons carry them
+/// (the duration cap, for instance, carries a `session_kind` instead), and a
+/// reader that requires them would drop every other reason on the floor.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct WorkerStopReason {
+    /// The stable machine code, e.g. `daily_replay_limit_reached`.
+    pub code: String,
+    /// Replays already consumed today, when the reason is quota-shaped.
+    #[serde(default)]
+    pub count: Option<u64>,
+    /// The daily allowance that was exceeded, when the reason is quota-shaped.
+    #[serde(default)]
+    pub limit: Option<u64>,
+}
+
+/// The envelope the worker writes around a [`WorkerStopReason`].
+///
+/// Deliberately tolerant: the worker interleaves free-form log lines with this
+/// JSON, so every stderr line is attempted and non-JSON lines are skipped.
+#[derive(Debug, Deserialize)]
+struct WorkerStopLine {
+    stop_reason: Option<WorkerStopReason>,
+}
+
+/// A replay worker that refused to start, carrying the reason when the worker
+/// gave one.
+///
+/// This exists so callers can branch on *why* the launch failed instead of
+/// substring-matching a formatted string. Before it, every worker refusal —
+/// including a licensing quota block — reached the caller as
+/// `"worker process exited with <status> before creating socket"`, which is
+/// issue #689's cryptic message.
+#[derive(Debug, Clone)]
+pub struct ReplayWorkerStartError {
+    /// The parsed stop reason, when the worker wrote a machine-readable one.
+    pub stop_reason: Option<WorkerStopReason>,
+    /// The untyped detail (transport error plus raw worker stderr), kept for
+    /// diagnostics and for every failure the worker does not classify.
+    pub detail: String,
+    /// The pid of the worker that failed, for correlating with its stderr log.
+    pub worker_pid: u32,
+}
+
+impl ReplayWorkerStartError {
+    /// The machine code the worker reported, if any.
+    pub fn code(&self) -> Option<&str> {
+        self.stop_reason.as_ref().map(|reason| reason.code.as_str())
+    }
+
+    /// True when the worker refused because the free-tier daily replay quota
+    /// is exhausted (issue #689).
+    pub fn is_daily_replay_limit_reached(&self) -> bool {
+        self.code() == Some(DAILY_REPLAY_LIMIT_REACHED)
+    }
+}
+
+impl std::fmt::Display for ReplayWorkerStartError {
+    /// The quota case renders the **only** user-facing wording the licensing
+    /// spec specifies for the free-tier replay limit —
+    /// `codetracer-specs/Planned-Features/CodeTracer-End-User-Licensing.md`
+    /// §3.6 step 4. The limit is interpolated from the worker's own JSON
+    /// rather than hardcoded so the sentence cannot go stale against
+    /// `DEFAULT_FREE_TIER_DAILY_LIMIT`. No second vocabulary is invented here:
+    /// the counters stay in the struct fields for whoever builds the GUI
+    /// surface, which is not yet specified.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.stop_reason {
+            Some(reason) if reason.code == DAILY_REPLAY_LIMIT_REACHED => {
+                let limit = reason.limit.unwrap_or(0);
+                write!(
+                    f,
+                    "Free tier: {limit} replays per day. \
+                     Visit https://codetracer.com/pricing to upgrade."
+                )
+            }
+            Some(reason) => write!(
+                f,
+                "replay worker for pid {} refused to start: {}",
+                self.worker_pid, reason.code
+            ),
+            None => write!(
+                f,
+                "failed to initialize replay-worker transport for pid {}: {}",
+                self.worker_pid, self.detail
+            ),
+        }
+    }
+}
+
+impl Error for ReplayWorkerStartError {}
+
+/// Scan a worker's stderr for the licensing module's machine-readable stop
+/// reason.
+///
+/// Returns the **last** parseable reason: the worker may log several
+/// decisions and the most recent one is the one that ended the process.
+/// Lines that are not JSON, or are JSON without a `stop_reason`, are skipped
+/// rather than treated as failures — the worker's stderr is a mixed stream.
+pub fn parse_worker_stop_reason(stderr: &str) -> Option<WorkerStopReason> {
+    stderr
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('{') {
+                return None;
+            }
+            serde_json::from_str::<WorkerStopLine>(trimmed)
+                .ok()
+                .and_then(|parsed| parsed.stop_reason)
+        })
+        .next_back()
+}
+
 fn replay_query_timeout() -> Duration {
     std::env::var("CODETRACER_REPLAY_QUERY_TIMEOUT_SECS")
         .ok()
@@ -276,15 +405,28 @@ impl ReplayWorker {
             self.process = None;
             self.stream = None;
             self.active = false;
-            let detail = match worker_stderr {
+            // #689: the worker's stderr is not just a diagnostic blob — when
+            // the licensing module refuses the replay it carries a
+            // machine-readable stop reason. Parse it so the caller gets a
+            // typed refusal instead of "worker process exited with <status>
+            // before creating socket", which told the user nothing about the
+            // quota they had hit.
+            let stop_reason = worker_stderr.as_deref().and_then(parse_worker_stop_reason);
+            let detail = match &worker_stderr {
                 Some(stderr) => format!("{err}; worker stderr: {stderr}"),
                 None => err.to_string(),
             };
-            return Err(format!(
-                "failed to initialize replay-worker transport for pid {}: {}",
-                worker_pid, detail
-            )
-            .into());
+            if let Some(reason) = &stop_reason {
+                warn!(
+                    "replay worker pid {worker_pid} refused to start with stop reason {reason:?}; \
+                     raw detail: {detail}"
+                );
+            }
+            return Err(Box::new(ReplayWorkerStartError {
+                stop_reason,
+                detail,
+                worker_pid,
+            }));
         }
         self.active = true;
         Ok(())

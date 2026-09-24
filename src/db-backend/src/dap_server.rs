@@ -21,7 +21,7 @@ use crate::db::Db;
 use crate::macro_sourcemap::UpdateExpansionArgs;
 #[cfg(not(windows))]
 use crate::paths::CODETRACER_PATHS;
-use crate::recreator_session::RecreatorArgs;
+use crate::recreator_session::{RecreatorArgs, ReplayWorkerStartError};
 // M24 — multi-trace session loading. The dap_server holds onto a
 // `SessionHandler` instead of (or rather: wrapping) a single
 // `Handler` so requests can route per-thread to the owning trace.
@@ -3066,6 +3066,69 @@ pub fn handle_message_browser(
     Ok(())
 }
 
+/// The text a failed `launch` should show the user.
+///
+/// #689: a replay worker that refuses to start now returns a typed
+/// [`ReplayWorkerStartError`], whose `Display` renders the licensing spec's own
+/// wording for a quota refusal
+/// (`codetracer-specs/Planned-Features/CodeTracer-End-User-Licensing.md`
+/// §3.6 step 4). Every other failure keeps the `Debug` rendering the logs have
+/// always carried, because it is a developer-facing diagnostic with no
+/// specified user-facing form.
+///
+/// The downcast walks the error as it was boxed by
+/// `ReplayWorker::start`; the intervening `?`s (`ensure_active_stable`,
+/// `run_to_entry`, `setup`) all pass a `Box<dyn Error>` through unchanged, so
+/// the concrete type survives to here. If a future caller wraps it in a
+/// `format!`, this downcast stops matching and the test named below goes red.
+fn launch_failure_text(err: &(dyn Error + 'static)) -> String {
+    match err.downcast_ref::<ReplayWorkerStartError>() {
+        Some(worker_error) => worker_error.to_string(),
+        None => format!("launch error: {err:?}"),
+    }
+}
+
+/// Tell the DAP client that a `launch` it asked for cannot succeed.
+///
+/// #689: before this, every failure inside `task_thread`'s launch branch left
+/// the function through `?`. That returns from the worker thread, which nobody
+/// joins, so the *only* trace of the failure was an `error!` line in the
+/// backend's own log. The client had already been told `launch` succeeded by
+/// `handle_message` (which answers `success: true` before any trace is
+/// opened), and then waited forever for a `stopped` event no worker would ever
+/// send — the C-language symptom in issue #689, "nothing happens at all".
+///
+/// A second `launch` response is not the fix: `request_seq` has already been
+/// answered, and two responses to one request is a protocol violation. The
+/// carrier is `ct/notification`, the route the frontend already consumes —
+/// `src/frontend/middleware.nim` forwards it and `src/frontend/ui/status.nim`
+/// subscribes to `CtNotification` and renders every one into the status bar.
+/// No new renderer surface is introduced here; the GUI prompt issue #689 asks
+/// for (usage count, reset time, upgrade link) is still unspecified work.
+fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
+    let notification = task::Notification::new(task::NotificationKind::Error, text, false);
+    let body = match serde_json::to_value(&notification) {
+        Ok(body) => body,
+        Err(err) => {
+            error!("failed to serialize launch-failure notification: {err:?}");
+            return;
+        }
+    };
+    let event = DapMessage::Event(Event {
+        base: ProtocolMessage {
+            // Patched by the sending thread, like every other message queued
+            // on this channel (see `patch_message_seq`).
+            seq: 0,
+            type_: "event".to_string(),
+        },
+        event: "ct/notification".to_string(),
+        body,
+    });
+    if let Err(send_err) = sender.send(event) {
+        error!("failed to send launch-failure notification: {send_err:?}");
+    }
+}
+
 fn task_thread(
     name: &str,
     from_thread_receiver: Receiver<dap::Request>,
@@ -3202,154 +3265,167 @@ fn task_thread(
 
         info!("  try to handle {:?}", request.command);
         if request.command == "launch" {
-            let args = request.load_args::<dap::LaunchRequestArguments>()?;
-            if let Some(folder) = &args.trace_folder {
-                let launch_trace_folder = folder.clone();
-                let launch_trace_file = resolve_launch_trace_file(folder, args.trace_file.as_ref());
+            // #689: every `?` below used to return from `task_thread`, killing
+            // this worker thread with no message of any kind on the wire. The
+            // body is therefore run as a closure so a failed launch becomes a
+            // reported failure *and* the thread survives to serve the next
+            // request — which is how the non-launch branch below has always
+            // treated a failed request.
+            let launch_result: Result<(), Box<dyn Error>> = (|| {
+                let args = request.load_args::<dap::LaunchRequestArguments>()?;
+                if let Some(folder) = &args.trace_folder {
+                    let launch_trace_folder = folder.clone();
+                    let launch_trace_file = resolve_launch_trace_file(folder, args.trace_file.as_ref());
 
-                info!("stored launch trace folder: {0:?}", launch_trace_folder);
+                    info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
-                let launch_raw_diff_index = args.raw_diff_index.clone();
-                let session_manifest_path = resolve_session_manifest_path(&launch_trace_folder, &launch_trace_file);
-                // Only resolve the replay-worker executable for non-DB traces
-                // (see the parallel comment in the initial launch handler).
-                let recreator_exe = if session_manifest_path.is_some() {
-                    // Session loader resolves per-trace recreator exes
-                    // through the same paths the single-trace launch
-                    // uses; the per-session value is unused.
-                    PathBuf::new()
-                } else if is_db_trace(&launch_trace_folder, &launch_trace_file) {
-                    info!("DB-based trace detected — skipping replay-worker resolution");
-                    PathBuf::new()
-                } else {
-                    resolve_recreator_exe(args.recreator_exe.clone())
-                };
-                let restore_location = args.restore_location.clone();
+                    let launch_raw_diff_index = args.raw_diff_index.clone();
+                    let session_manifest_path = resolve_session_manifest_path(&launch_trace_folder, &launch_trace_file);
+                    // Only resolve the replay-worker executable for non-DB traces
+                    // (see the parallel comment in the initial launch handler).
+                    let recreator_exe = if session_manifest_path.is_some() {
+                        // Session loader resolves per-trace recreator exes
+                        // through the same paths the single-trace launch
+                        // uses; the per-session value is unused.
+                        PathBuf::new()
+                    } else if is_db_trace(&launch_trace_folder, &launch_trace_file) {
+                        info!("DB-based trace detected — skipping replay-worker resolution");
+                        PathBuf::new()
+                    } else {
+                        resolve_recreator_exe(args.recreator_exe.clone())
+                    };
+                    let restore_location = args.restore_location.clone();
 
-                // Skip a redundant `setup()` reload when this launch targets
-                // the exact trace that the existing handler already serves.
-                // Comparison is conservative: same folder + same trace file +
-                // same raw_diff_index, and the previous setup completed,
-                // and the previous run was already a session-or-single-trace
-                // initialised cleanly.  When the launch carries a
-                // restore_location we still rerun setup so the position is
-                // applied via run_to_entry's restore branch.
-                let session_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
-                let same_trace = loaded_trace_folder.as_ref() == Some(&launch_trace_folder)
-                    && loaded_trace_file.as_ref() == Some(&launch_trace_file)
-                    && loaded_raw_diff_index == launch_raw_diff_index
-                    && session_initialized
-                    && restore_location.is_none();
+                    // Skip a redundant `setup()` reload when this launch targets
+                    // the exact trace that the existing handler already serves.
+                    // Comparison is conservative: same folder + same trace file +
+                    // same raw_diff_index, and the previous setup completed,
+                    // and the previous run was already a session-or-single-trace
+                    // initialised cleanly.  When the launch carries a
+                    // restore_location we still rerun setup so the position is
+                    // applied via run_to_entry's restore branch.
+                    let session_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
+                    let same_trace = loaded_trace_folder.as_ref() == Some(&launch_trace_folder)
+                        && loaded_trace_file.as_ref() == Some(&launch_trace_file)
+                        && loaded_raw_diff_index == launch_raw_diff_index
+                        && session_initialized
+                        && restore_location.is_none();
 
-                if same_trace {
-                    info!(
-                        "skipping duplicate launch for already-loaded trace {launch_trace_folder:?}/{launch_trace_file:?}"
-                    );
-                    // The renderer expects the launch acknowledgement to
-                    // happen at the protocol level (handled by the receiving
-                    // thread/main thread). We only need to avoid re-running
-                    // the expensive CTFS Db population here.
-                } else if let Some(manifest_path) = session_manifest_path {
-                    // M24 session.toml launch
-                    let for_launch = run_to_entry;
-                    // §P5.4 — per-launch arg wins; CLI default fills in.
-                    let effective_rename_list = args
-                        .rename_list
-                        .clone()
-                        .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
-                    session = setup_session(
-                        &manifest_path,
-                        launch_raw_diff_index.clone(),
-                        &recreator_exe,
-                        restore_location,
-                        sender.clone(),
-                        for_launch,
-                        name,
-                        effective_rename_list.as_deref(),
-                    )
-                    .map_err(|e| {
-                        error!("session launch error: {e:?}");
-                        format!("session launch error: {e:?}")
-                    })?;
-                    // M29 §5.2 — emit `ct/listProcesses` on
-                    // session.toml re-load. Idempotent: each launch
-                    // produces a fresh full snapshot.
-                    dispatch_session_load_event(&session, &sender);
-                    loaded_trace_folder = Some(launch_trace_folder);
-                    loaded_trace_file = Some(launch_trace_file);
-                    loaded_raw_diff_index = launch_raw_diff_index;
-                } else {
-                    let for_launch = run_to_entry;
-                    // §P5.4 — per-launch arg wins; CLI default fills in.
-                    let effective_rename_list = args
-                        .rename_list
-                        .clone()
-                        .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
-                    let handler = setup(
-                        &launch_trace_folder,
-                        &launch_trace_file,
-                        launch_raw_diff_index.clone(),
-                        &recreator_exe,
-                        restore_location,
-                        sender.clone(),
-                        for_launch,
-                        name,
-                        effective_rename_list.as_deref(),
-                    )
-                    .map_err(|e| {
-                        error!("launch error: {e:?}");
-                        format!("launch error: {e:?}")
-                    })?;
-                    session = wrap_single_trace_as_session(handler, launch_trace_folder.clone())
-                        .map_err(|e| -> String { format!("session wrap error: {e:?}") })?;
-                    // M29 §5.2 — emit `ct/listProcesses` on single-
-                    // trace launch. The synthetic single-trace
-                    // session yields a one-entry process list with the
-                    // recorded `.ct` file as `displayName`.
-                    dispatch_session_load_event(&session, &sender);
-                    loaded_trace_folder = Some(launch_trace_folder);
-                    loaded_trace_file = Some(launch_trace_file);
-                    loaded_raw_diff_index = launch_raw_diff_index;
+                    if same_trace {
+                        info!(
+                            "skipping duplicate launch for already-loaded trace {launch_trace_folder:?}/{launch_trace_file:?}"
+                        );
+                        // The renderer expects the launch acknowledgement to
+                        // happen at the protocol level (handled by the receiving
+                        // thread/main thread). We only need to avoid re-running
+                        // the expensive CTFS Db population here.
+                    } else if let Some(manifest_path) = session_manifest_path {
+                        // M24 session.toml launch
+                        let for_launch = run_to_entry;
+                        // §P5.4 — per-launch arg wins; CLI default fills in.
+                        let effective_rename_list = args
+                            .rename_list
+                            .clone()
+                            .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
+                        session = setup_session(
+                            &manifest_path,
+                            launch_raw_diff_index.clone(),
+                            &recreator_exe,
+                            restore_location,
+                            sender.clone(),
+                            for_launch,
+                            name,
+                            effective_rename_list.as_deref(),
+                        )
+                        // #689: `inspect_err`, not `map_err` to a `String` — the
+                        // formatting would destroy the concrete
+                        // `ReplayWorkerStartError` that `launch_failure_text`
+                        // downcasts to, and the quota refusal would arrive as an
+                        // opaque blob again.
+                        .inspect_err(|e| error!("session launch error: {e:?}"))?;
+                        // M29 §5.2 — emit `ct/listProcesses` on
+                        // session.toml re-load. Idempotent: each launch
+                        // produces a fresh full snapshot.
+                        dispatch_session_load_event(&session, &sender);
+                        loaded_trace_folder = Some(launch_trace_folder);
+                        loaded_trace_file = Some(launch_trace_file);
+                        loaded_raw_diff_index = launch_raw_diff_index;
+                    } else {
+                        let for_launch = run_to_entry;
+                        // §P5.4 — per-launch arg wins; CLI default fills in.
+                        let effective_rename_list = args
+                            .rename_list
+                            .clone()
+                            .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
+                        let handler = setup(
+                            &launch_trace_folder,
+                            &launch_trace_file,
+                            launch_raw_diff_index.clone(),
+                            &recreator_exe,
+                            restore_location,
+                            sender.clone(),
+                            for_launch,
+                            name,
+                            effective_rename_list.as_deref(),
+                        )
+                        // #689: see the `inspect_err` note above — the concrete
+                        // error type must survive to `launch_failure_text`.
+                        .inspect_err(|e| error!("launch error: {e:?}"))?;
+                        session = wrap_single_trace_as_session(handler, launch_trace_folder.clone())
+                            .map_err(|e| -> String { format!("session wrap error: {e:?}") })?;
+                        // M29 §5.2 — emit `ct/listProcesses` on single-
+                        // trace launch. The synthetic single-trace
+                        // session yields a one-entry process list with the
+                        // recorded `.ct` file as `displayName`.
+                        dispatch_session_load_event(&session, &sender);
+                        loaded_trace_folder = Some(launch_trace_folder);
+                        loaded_trace_file = Some(launch_trace_file);
+                        loaded_raw_diff_index = launch_raw_diff_index;
+                    }
                 }
-            }
-            if let Some(program) = &args.program
-                && args.trace_folder.is_none()
-            {
-                let for_launch = run_to_entry;
-                let recreator_exe = resolve_recreator_exe(args.recreator_exe.clone());
-                // §P5.4 — per-launch arg wins; CLI default fills in.
-                let effective_rename_list = args
-                    .rename_list
-                    .clone()
-                    .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
-                let handler = setup_live_program(
-                    LiveProgramSetup {
-                        program: PathBuf::from(program),
-                        program_args: args.args.clone().unwrap_or_default(),
-                        cwd: args.cwd.as_ref().map(PathBuf::from),
-                        live_recording_dir: args.live_recording_dir.clone(),
-                    },
-                    &recreator_exe,
-                    sender.clone(),
-                    for_launch,
-                    name,
-                    effective_rename_list.as_deref(),
-                )
-                .map_err(|e| {
-                    error!("live launch error: {e:?}");
-                    format!("live launch error: {e:?}")
-                })?;
-                session = wrap_single_trace_as_session(handler, PathBuf::from(""))
-                    .map_err(|e| -> String { format!("live session wrap error: {e:?}") })?;
-                // M29 §5.2 — emit `ct/listProcesses` on live-program
-                // launch. Single-entry process list whose
-                // `displayName` falls back to the recording id (path
-                // is empty for live recordings until the recorder
-                // finishes).
-                dispatch_session_load_event(&session, &sender);
-                loaded_trace_folder = None;
-                loaded_trace_file = None;
-                loaded_raw_diff_index = None;
+                if let Some(program) = &args.program
+                    && args.trace_folder.is_none()
+                {
+                    let for_launch = run_to_entry;
+                    let recreator_exe = resolve_recreator_exe(args.recreator_exe.clone());
+                    // §P5.4 — per-launch arg wins; CLI default fills in.
+                    let effective_rename_list = args
+                        .rename_list
+                        .clone()
+                        .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
+                    let handler = setup_live_program(
+                        LiveProgramSetup {
+                            program: PathBuf::from(program),
+                            program_args: args.args.clone().unwrap_or_default(),
+                            cwd: args.cwd.as_ref().map(PathBuf::from),
+                            live_recording_dir: args.live_recording_dir.clone(),
+                        },
+                        &recreator_exe,
+                        sender.clone(),
+                        for_launch,
+                        name,
+                        effective_rename_list.as_deref(),
+                    )
+                    // #689: see the `inspect_err` note above — the concrete error
+                    // type must survive to `launch_failure_text`.
+                    .inspect_err(|e| error!("live launch error: {e:?}"))?;
+                    session = wrap_single_trace_as_session(handler, PathBuf::from(""))
+                        .map_err(|e| -> String { format!("live session wrap error: {e:?}") })?;
+                    // M29 §5.2 — emit `ct/listProcesses` on live-program
+                    // launch. Single-entry process list whose
+                    // `displayName` falls back to the recording id (path
+                    // is empty for live recordings until the recorder
+                    // finishes).
+                    dispatch_session_load_event(&session, &sender);
+                    loaded_trace_folder = None;
+                    loaded_trace_file = None;
+                    loaded_raw_diff_index = None;
+                }
+                Ok(())
+            })();
+            if let Err(e) = launch_result {
+                error!("launch error: {e:?}");
+                send_launch_failure_notification(&sender, &launch_failure_text(&*e));
             }
         } else {
             // Any session whose primary trace is initialized is
@@ -3384,7 +3460,36 @@ fn task_thread(
                     //   TODO: is it possible for some to leave bad state ?
                 }
             } else {
-                warn!("  handler NOT initialized, dropping {:?}", request.command);
+                // #689: this branch used to drop the request silently, and
+                // that was survivable only because a failed launch KILLED this
+                // thread — `handle_message`'s dead-channel arm (:2714-2745)
+                // then answered every later request `success: false`. Now that
+                // a failed launch leaves the thread alive and uninitialized,
+                // dropping here would turn a previously-answered request into
+                // an unanswered one, which is the very hang this milestone
+                // exists to remove. Answer it instead, the same way the
+                // initialized-but-failing arm above does.
+                warn!("  handler NOT initialized, refusing {:?}", request.command);
+                let error_response = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq: 0, // Will be patched by the sending thread
+                        type_: "response".to_string(),
+                    },
+                    request_seq: request.base.seq,
+                    success: false,
+                    command: request.command.clone(),
+                    message: Some(format!(
+                        "no trace is loaded in the '{name}' thread; cannot service {}",
+                        request.command
+                    )),
+                    body: json!({}),
+                });
+                if let Err(send_err) = sender.send(error_response) {
+                    error!(
+                        "failed to send not-initialized response for {}: {send_err:?}",
+                        request.command
+                    );
+                }
             }
         }
     }

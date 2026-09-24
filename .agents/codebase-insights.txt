@@ -5971,3 +5971,51 @@ Two traps in the same area, both live:
   the lane that finds it. A green `test-vm-unit` therefore says nothing about
   this gate. Sibling of the `ExpectedAssertions` bump
   `test_editor_change_algebra` needs when a MODULE is added there.
+- 2026-09-24: **`dap_server.rs::handle_message` answers `launch` with
+  `success: true` BEFORE any trace is opened** (`:2643-2655`), and the real
+  work happens later in `task_thread` on the stable worker thread. Two
+  consequences, both of which cost issue #689 its diagnosis:
+  * **A failed launch can never be reported as a failed `launch` response** —
+    `request_seq` has already been answered, and two responses to one request
+    is a protocol violation. The carrier for a launch failure is an EVENT.
+    `ct/notification` is the one that already works end to end:
+    `src/frontend/middleware.nim:247` forwards it and
+    `src/frontend/ui/status.nim:427` subscribes and renders it into the status
+    bar. Do not invent a new event for this.
+  * Until M55, `task_thread`'s launch branch handled every failure with `?`,
+    which RETURNS FROM THE WORKER THREAD. Nobody joins it, so the only trace
+    was an `error!` line in the backend's own log, and the client sat on a
+    successful launch waiting for a `stopped` event forever. That is the
+    C-language symptom in #689 ("nothing happens at all") and
+    `src/db-backend/tests/test_harness/mod.rs:108-118` documented it verbatim
+    for two years as a *test* hazard rather than a product bug.
+  The launch branch now runs as a closure so the thread survives; note that
+  keeping it alive made the `else { handler NOT initialized }` arm load-bearing
+  — it used to be unreachable-after-failure because the thread was dead and
+  `handle_message`'s dead-channel arm (`:2714-2745`) answered instead. It now
+  answers `success: false` itself.
+- 2026-09-24: **`ct-native-replay` reports a licensing refusal as machine-
+  readable JSON on stderr plus exit 3, and `codetracer` must parse it.** The
+  producer is `codetracer-native-backend/src/licensing/cli.rs::emit_replay_start_block`
+  (`{"result":"blocked","stop_reason":{"code":"daily_replay_limit_reached","count":N,"limit":M}}`).
+  That repo's `tests/licensing_integration_test.rs:2191` pins the exit code and
+  the JSON shape, but NOT the stream: it drives `license session-harness`, which
+  is `SessionStopOutput::JsonHarness` and asserts on **stdout**. The production
+  routing to **stderr** (`cli.rs:898`, via `SessionRunOptions::production` at
+  `cli.rs:805`) is unpinned on both sides — the one link in this chain held by
+  source reading alone. On this
+  side `ReplayWorker::start` parses it into `ReplayWorkerStartError` /
+  `WorkerStopReason` (`src/db-backend/src/recreator_session.rs`), whose
+  `Display` renders `CodeTracer-End-User-Licensing.md` §3.6 step 4 VERBATIM.
+  Two traps for anyone touching this path:
+  * **The typed error travels as a bare `Box<dyn Error>` and is recovered by
+    `downcast_ref`.** Every `?` between `start` and `dap_server::task_thread`
+    passes the box through unchanged — but a single `.map_err(|e| format!(...))`
+    anywhere on that chain destroys it and the quota refusal silently becomes
+    an opaque blob again. Three such `map_err`s were removed in favour of
+    `inspect_err` for exactly this reason. `replay_worker_quota_error_test.rs`
+    goes red if one comes back.
+  * **`CODETRACER_IN_UI_TEST=1` is the supported bypass** and
+    `test_harness/mod.rs::ensure_replay_license_bypass` sets it unconditionally,
+    so no existing harness will ever see this path. A test for it must spawn its
+    own worker.
