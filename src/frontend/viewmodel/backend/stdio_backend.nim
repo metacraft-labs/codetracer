@@ -272,7 +272,7 @@ proc awaitReadable(backend: DapStdioBackend; deadline: MonoTime) =
           sliceMs = int(left)
       var tv: Timeval
       tv.tv_sec = posix.Time(sliceMs div 1000)
-      tv.tv_usec = clong((sliceMs mod 1000) * 1000)
+      tv.tv_usec = Suseconds((sliceMs mod 1000) * 1000)
       let ready = posix.select(maxFd + 1, addr rs, nil, nil, addr tv)
       if ready < 0:
         if osLastError().cint == EINTR:
