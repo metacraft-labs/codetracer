@@ -499,3 +499,59 @@ suite "RS-M9 JavaScript request panel":
           check coveredLines[i] != coveredLines[j]
 
       dispose()
+
+
+  test "mixed_client_server_interleaving_preserves_request_ownership":
+    let fixture = currentSourcePath.parentDir / "fixtures" / "js_express_mixed" / "index.ct"
+    require fileExists(fixture)
+    let spanReader = initSpanStreamReader(containerBytes(fixture))
+    require spanReader.isOk
+    let settled = spanReader.get().settledSpans()
+    require settled.isOk
+    let spans = webRequests(settled.get())
+    require spans.len == 2
+    var opened = openNewTrace(fixture)
+    require opened.isOk
+    var trace = opened.get()
+    var wire: seq[JsonNode]
+    for i, span in spans:
+      let expectedUrl = if i == 0: "/alpha" else: "/beta"
+      check metaValue(span, "http.url") == expectedUrl
+      check numericMeta(span, "http.status_code") == (if i == 0: 200 else: 201)
+      check not span.contiguousOnOneThread
+      check not span.concurrentWithSiblings
+      if i > 0: check span.startStep > spans[i - 1].endStep
+      var clientSteps = 0
+      var handlerSteps = 0
+      var foreignHandlerSteps = 0
+      for step in span.startStep .. span.endStep:
+        let at = sourceOfStep(trace, step)
+        if at.file.endsWith("web/express-mixed/index.js"):
+          inc clientSteps
+        elif at.file.endsWith("web/express-mixed/app.js"):
+          # Fixture lines 9/10 and 13/14 are disjoint handler bodies.
+          if at.line in (if i == 0: @[9'u32, 10'u32] else: @[13'u32, 14'u32]):
+            inc handlerSteps
+          if at.line in (if i == 0: @[13'u32, 14'u32] else: @[9'u32, 10'u32]):
+            inc foreignHandlerSteps
+      require clientSteps > 0 # Required interleaving evidence, never a skip.
+      require handlerSteps > 0
+      check foreignHandlerSteps == 0
+      wire.add(toWireRecord(span))
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createRequestPanelVM(store)
+      let panel = renderRequestPanel(MockRenderer(), vm)
+      let body = findByClass(panel, "request-table-body")
+      store.applyRequestSpanDelta(deltaBody(wire, cursor = 2, reset = true))
+      require body.children.len == 2
+      for i in 0 .. 1:
+        mock.clearReceivedCommands()
+        fireEvent(body.children[i], "dblclick")
+        drain()
+        let sent = mock.findCommand("ct/seek-to-geid")
+        require sent.isSome
+        check sent.get.args["geid"].getInt == int(spans[i].startStep)
+        check sent.get.args["url"].getStr == (if i == 0: "/alpha" else: "/beta")
+      dispose()

@@ -72,7 +72,7 @@ JUSTFILE="${REPO_ROOT}/justfile"
 # Every contract below, counted once, whether or not this environment can run
 # it. Bump deliberately when adding one -- the reconciliation at the end fails
 # loudly if this disagrees with what actually ran.
-TOTAL_CONTRACTS=9
+TOTAL_CONTRACTS=10
 
 pass_count=0
 skip_count=0
@@ -95,6 +95,19 @@ skip() {
 }
 
 [ -f "${JUSTFILE}" ] || fail "justfile not found at ${JUSTFILE}"
+
+# Execute the actual lane inventory; counting a sorted/deduplicated union
+# would conceal duplicate routing. No mocked filesystem or lane selector.
+# The helper is linted separately; the per-file hook does not follow sources.
+# shellcheck source=/dev/null
+source "${REPO_ROOT}/ci/lib/test-lane-files.sh"
+layout_test=src/tests/gui/tests/layout/mode_layout_test.nim
+js_count="$(cd "${REPO_ROOT}" && test_lane_files vm-js | awk -v p="${layout_test}" '$0 == p { n++ } END { print n+0 }')"
+native_count="$(cd "${REPO_ROOT}" && test_lane_files vm-native | awk -v p="${layout_test}" '$0 == p { n++ } END { print n+0 }')"
+[[ ${js_count} == 1 && ${native_count} == 0 ]] ||
+	fail "JS-only layout suite must occur exactly once in vm-js and never in vm-native" \
+		"vm-js=${js_count}; vm-native=${native_count}"
+ok "JS-only layout suite is routed exactly once to its supported backend"
 
 # Extract the `test-vm-js` recipe body: from its target line to the next
 # top-level target or comment block at column 0.
