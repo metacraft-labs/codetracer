@@ -649,6 +649,10 @@ jobs:
             # Not in the workspace lock -- pinned to flake.lock's revs. See
             # "THE REMAINING TWO" above before changing either of these.
             isonim=9936c544925004bada019204b5b111f39d1a54bf
+            # The editor model imports `isonim_tui/text/width`, so `isonim-tui`
+            # is a required sibling (scripts/require-siblings.sh). Pinned to the
+            # revision codetracer's repro.lock and flake.lock both name.
+            isonim-tui=a28e651f015135bcd6132dfafb1772784516f45d
             runquota=f1ca742d19c7b981eeea0fba8b4e029207f43778
 
       - name: Check the workspace has the shape the driver expects

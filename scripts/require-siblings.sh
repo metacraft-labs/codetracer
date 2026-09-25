@@ -159,17 +159,18 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # the set that CI already treats as mandatory -- the repos cloned by
 # `.github/actions/setup-db-backend-siblings` (codetracer-trace-format,
 # codetracer-trace-format-nim, codetracer-native-recorder) and by
-# `.github/actions/provision-repro-lock-siblings` (isonim, nim-everywhere,
-# nim-acp, nim-agent-harbor, nim-agents) -- intersected with what a build here
-# has actually been observed to need.
+# `.github/actions/provision-repro-lock-siblings` (isonim, isonim-tui,
+# nim-everywhere, nim-acp, nim-agent-harbor, nim-agents) -- intersected with
+# what a build here has actually been observed to need.
 #
-# Those five are exactly `repro.lock`'s `depends` list for this repo, and that
+# Those six are exactly `repro.lock`'s `depends` list for this repo, and that
 # is not a coincidence any more: the action clones whatever the lock declares,
-# so this tier and CI's provisioning have one source. The four advisory
-# IsoNim-family entries below (isonim-tui, isonim-gpui, nim-termctl, nim-pty)
-# used to be cloned alongside them and are not any more -- nothing declares
-# them, nothing imports them, and the paragraph below already said builds
-# succeed without them. They stay here as warnings so a local workspace that
+# so this tier and CI's provisioning have one source. `isonim-tui` joined the
+# list on 2026-09-25, once the editor model began importing
+# `isonim_tui/text/width`; the other three advisory IsoNim-family entries below
+# (isonim-gpui, nim-termctl, nim-pty) used to be cloned alongside them and are
+# not any more -- nothing declares them, nothing imports them, and the
+# paragraph below already said builds succeed without them. They stay here as warnings so a local workspace that
 # does carry them keeps working and one that does not is told why a
 # `--path` silently went missing.
 #
@@ -206,7 +207,7 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 #
 # Everything else the source references across a relative path goes in the
 # advisory tier: a warning naming the module that will fail to resolve, and a
-# zero exit. `isonim-tui` / `isonim-gpui` / `nim-termctl` / `nim-pty` are on
+# zero exit. `isonim-gpui` / `nim-termctl` / `nim-pty` are on
 # `src/Tuprules.tup`'s `--path` list but builds succeed without them, and the
 # io-mon family (io-mon, nim-stackable-hooks, nim-shm-queue, nim-shm-gset) is
 # reached from `src/ct_test/incremental/*` yet is NOT provisioned by any CI
@@ -221,6 +222,7 @@ required_siblings=(
 	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:79"
 	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:78 puts on the Nim search path"
 	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:77 puts on the Nim search path"
+	'isonim-tui|src/isonim_tui/text/width.nim|ISONIM_TUI_SRC|`import isonim_tui/text/width` -- the grapheme segmenter -- in src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim, so every editor-model build and the editor import-closure gate need it'
 	'codetracer-trace-format-nim|src/codetracer_ct_print_lib.nim|CODETRACER_TRACE_FORMAT_NIM_SRC|`ct print` (src/ct/cli/print_trace.nim) imports codetracer_trace_writer/* and codetracer_ct_print_lib'
 	'codetracer-trace-format|codetracer_trace_types/Cargo.toml||every `path = "../../../codetracer-trace-format/..."` dependency in src/db-backend/Cargo.toml resolves through it (grep -c that path in the manifest for how many); cargo cannot even parse the manifest without them'
 	'codetracer-native-recorder|ct_emulator/src/ct_emulator/emulator_wasm_api.nim|CT_CODETRACER_NATIVE_RECORDER_SIBLING|src/db-backend/build.rs compiles the Nim MCR emulator from ct_emulator/ and links it as lib${CT_MCR_EMULATOR_LINK_NAME}.so; without it the db-backend link fails with 81 undefined `mcr*` symbols'
@@ -251,7 +253,6 @@ advisory_siblings=(
 	'nim-stackable-hooks|src/stackable_hooks.nim|NIM_STACKABLE_HOOKS_SRC|`import stackable_hooks/propagation` in src/ct_test/incremental/io_mon_capture.nim'
 	"nim-shm-queue|src/shm_queue.nim|SHM_QUEUE_SRC|io-mon's dependency queue imports \`shm_queue\`"
 	"nim-shm-gset|src/shm_gset.nim|SHM_GSET_SRC|io-mon's writer imports \`shm_gset/transport\` (the symptom config.nims:74-77 documents)"
-	"isonim-tui|src||src/Tuprules.tup:73 puts it on the Nim search path"
 	"isonim-gpui|src||src/Tuprules.tup:74 puts it on the Nim search path"
 	"nim-termctl|src||src/Tuprules.tup:75 puts it on the Nim search path"
 	"nim-pty|src||src/Tuprules.tup:76 puts it on the Nim search path"

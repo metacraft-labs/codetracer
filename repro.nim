@@ -406,6 +406,13 @@ package codeTracer:
 
     # Sibling library dependencies (SC-11 develop-mode from-source consumption)
     "isonim >=0"
+    # `isonim_tui/text/width` -- the grapheme segmenter the editor model's
+    # whole coordinate system rests on -- is imported by
+    # src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim, so
+    # this is a real dependency and has to be pinned by the lock like the
+    # others (provision-repro-lock-siblings clones only what the lock pins;
+    # its header asks for exactly this once isonim-tui became one).
+    "isonim-tui >=0"
     "nim-everywhere >=0"
     "nim-agent-harbor >=0"
     "nim-agents >=0"

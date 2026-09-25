@@ -47,9 +47,9 @@ description: |
   ``repro.lock`` is committed HERE, next to the source it describes, and it
   answers the question the build actually asks. Its ``depends`` field says
 
-      depends = "isonim,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere"
+      depends = "isonim,isonim-tui,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere"
 
-  and it carries a 40-hex revision for each. That is five repos at exact
+  and it carries a 40-hex revision for each. That is six repos at exact
   SHAs, resolved offline from a file in this commit -- no manifest repo, no
   publication lag, no branch tip, and no fifth-hand guess about which four
   extra checkouts a developer had lying around.
@@ -70,7 +70,11 @@ description: |
   ``--into``: names the ``../<name>`` adjacency ``config.nims`` expects
   explicitly, rather than leaving it to be inferred.
 
-  THE FOUR REPOS THAT WENT AWAY are not silently dropped -- nothing in this
+  THE FOUR REPOS THAT WENT AWAY are not silently dropped. (``isonim-tui`` has
+  since come back, DECLARED this time: the editor model imports
+  ``isonim_tui/text/width``, so it is in ``repro.nim`` and pinned by
+  ``repro.lock`` -- exactly the route the next paragraph asks for. What follows
+  holds for the other three.) Nothing in this
   repo compiles against them. ``scripts/require-siblings.sh`` puts all four
   in its ADVISORY tier with the reason "src/Tuprules.tup puts it on the Nim
   search path" and says so in as many words: "builds succeed without them".

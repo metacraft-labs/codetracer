@@ -436,7 +436,7 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # The dependency set `repro.lock`'s `codetracer` node declares, in the order it
 # declares them. Pinned here so that a repo silently added to or dropped from
 # the lock is a failure rather than a quiet change of what CI provisions.
-readonly LOCK_DECLARED_DEPS='isonim,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere'
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere'
 
 # Anti-vacuity first: the action must exist and must still invoke the command
 # whose behaviour every assertion below describes.
