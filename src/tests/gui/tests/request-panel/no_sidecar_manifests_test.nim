@@ -101,7 +101,7 @@ proc runRecipe(repo, outDir, optInPath: string; args: seq[string]):
   ## the sidecar opt-in deliberately switched ON.
   var cmd = "cd " & quoteShell(repo) & " && " &
     "CODETRACER_SPAN_MANIFEST=" & quoteShell(optInPath) & " " &
-    "timeout " & $RecipeTimeoutSeconds & " direnv exec . " &
+    "timeout " & $RecipeTimeoutSeconds & " repro exec . -- " &
     "just record-request-panel-fixture " & quoteShell(outDir)
   for a in args:
     cmd.add(" " & quoteShell(a))

@@ -12,7 +12,7 @@ echo "=== Building Browser Replay Distribution ==="
 # Step 1: Build WASM module
 echo ">>> Building replay-server WASM module..."
 cd "$REPO_ROOT/src/db-backend"
-direnv exec "$REPO_ROOT" bash build_wasm.sh 2>&1 | tail -5
+repro exec "$REPO_ROOT" -- bash -c 'cd src/db-backend && exec bash build_wasm.sh' 2>&1 | tail -5
 cd "$REPO_ROOT"
 
 if [ ! -f "src/db-backend/wasm-testing/pkg/db_backend_bg.wasm" ]; then

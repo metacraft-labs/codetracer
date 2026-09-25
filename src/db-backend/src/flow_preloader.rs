@@ -12,9 +12,9 @@ use crate::{
     nim_mangling,
     replay::ReplaySession,
     task::{
-        Action, BranchState, BranchesTaken, CoreTrace, CtLoadLocalsArguments, FlowEvent, FlowMode, FlowStep, FlowUpdate,
-        FlowUpdateState, FlowUpdateStateKind, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps,
-        Position, RRTicks, StepCount, TraceKind,
+        Action, BranchState, BranchesTaken, CoreTrace, CtLoadLocalsArguments, FlowEvent, FlowMode, FlowStep,
+        FlowUpdate, FlowUpdateState, FlowUpdateStateKind, FlowViewUpdate, Iteration, Location, Loop, LoopId,
+        LoopIterationSteps, Position, RRTicks, StepCount, TraceKind,
     },
     value::{Value, ValueRecordWithType, to_ct_value},
 };
@@ -1053,7 +1053,10 @@ impl<'a> CallFlowPreloader<'a> {
         // and for what it deliberately still does not fix (the sweep after a
         // truncated walk).
         let observed = flow_view_update.observed_branch_lines();
-        flow_view_update.add_branches(0, self.flow_preloader.expr_loader.final_branch_load(path_buf, &observed));
+        flow_view_update.add_branches(
+            0,
+            self.flow_preloader.expr_loader.final_branch_load(path_buf, &observed),
+        );
         // WHERE EACH ARM IS, alongside whether it ran.
         //
         // Shipped so the renderer can dim the interior of an arm the run
@@ -1260,7 +1263,11 @@ impl<'a> CallFlowPreloader<'a> {
         {
             return;
         }
-        let loop_id = if flow_view_update.loops.last().map(|l| l.first.0 <= line.0 && l.last.0 >= line.0) == Some(true)
+        let loop_id = if flow_view_update
+            .loops
+            .last()
+            .map(|l| l.first.0 <= line.0 && l.last.0 >= line.0)
+            == Some(true)
         {
             flow_view_update.loops.last().map(|l| l.base.0).unwrap_or(0)
         } else {

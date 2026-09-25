@@ -2118,7 +2118,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-python flask
+        repro exec . -- just demo-request-panel-python flask
     )
     # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
     # render in the GUI stays distinguishable from a failure to record.
@@ -2152,7 +2152,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-ruby sinatra
+        repro exec . -- just demo-request-panel-ruby sinatra
     )
     # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
     # render in the GUI stays distinguishable from a failure to record.
@@ -2187,7 +2187,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-php builtin
+        repro exec . -- just demo-request-panel-php builtin
     )
     # A PHP worker owns its recording, so the container lives under
     # $demo_dir/worker_<pid>/; the recipe leaves the path it used in a marker
@@ -2227,7 +2227,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-elixir "$framework"
+        repro exec . -- just demo-request-panel-elixir "$framework"
     )
     # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
     # render in the GUI stays distinguishable from a failure to record.
@@ -2263,7 +2263,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-js "$schedule"
+        repro exec . -- just demo-request-panel-js "$schedule"
     )
     # The recorder writes `<out>/trace-<n>/`; the recipe leaves the path it
     # used in a marker file rather than making this side guess the handle.
@@ -2298,7 +2298,7 @@ demo-request-panel LANG="synthetic":
     # the nginx the recording runs, neither of which is in codetracer's shell.
     (
       cd "$recorder_repo"
-      CODETRACER_DEMO_DIR="$demo_dir" direnv exec . just demo-request-panel-native
+      CODETRACER_DEMO_DIR="$demo_dir" repro exec . -- just demo-request-panel-native
     )
     # ct-mcr writes ONE container per recording; the recipe leaves the path it
     # used in a marker file rather than making this side guess the name.
@@ -2339,7 +2339,7 @@ demo-request-panel LANG="synthetic":
     {
       echo "ERROR: no 'nim' on PATH.  The demo container is written by the"
       echo "canonical Nim writer, so this recipe needs the dev shell:"
-      echo "  direnv exec . just demo-request-panel {{LANG}}"
+      echo "  repro exec . -- just demo-request-panel {{LANG}}"
     } >&2
     exit 1
   fi
@@ -2543,13 +2543,13 @@ test-solidity-flow:
   EVM_RECORDER="${CODETRACER_EVM_RECORDER_PATH:-../codetracer-evm-recorder/target/debug/codetracer-evm-recorder}"
   if [ ! -f "$EVM_RECORDER" ]; then
     echo "Building codetracer-evm-recorder..."
-    direnv exec ../codetracer-evm-recorder cargo build --manifest-path ../codetracer-evm-recorder/Cargo.toml
+    repro exec ../codetracer-evm-recorder -- cargo build
   fi
   export CODETRACER_EVM_RECORDER_PATH="$(realpath "$EVM_RECORDER")"
 
   # Use the evm-recorder's dev shell for solc/anvil
-  direnv exec ../codetracer-evm-recorder \
-    cargo nextest run --no-capture --run-ignored all \
+  repro exec ../codetracer-evm-recorder -- \
+    bash -c 'cd "$1" && shift && exec "$@"' solidity-flow "$PWD" cargo nextest run --no-capture --run-ignored all \
       --manifest-path src/db-backend/Cargo.toml \
       test_solidity_flow solidity_flow_dap
   echo "Solidity flow test passed!"
@@ -5654,7 +5654,7 @@ ensure-ct-mcr:
         cd "$sibling" && just build-ct-mcr-windows
     elif command -v direnv >/dev/null 2>&1 && [ -f "$sibling/.envrc" ]; then
         direnv allow "$sibling"
-        direnv exec "$sibling" just -f "$sibling/Justfile" build-ct-mcr
+        repro exec "$sibling" -- just -f "$sibling/Justfile" build-ct-mcr
     else
         cd "$sibling" && just build-ct-mcr
     fi

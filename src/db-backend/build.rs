@@ -904,7 +904,7 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
 }
 
 /// Regenerate the recorder's C output by invoking the named helper
-/// script. On POSIX we wrap the call in `direnv exec` so the Nim
+/// script. On POSIX we wrap the call in `repro exec` so the Nim
 /// toolchain from the recorder's flake lands on PATH. On Windows we
 /// run `bash` directly: direnv isn't part of the Windows dev-deps
 /// toolchain, and env.ps1 already puts nim/gcc on PATH for the parent
@@ -959,7 +959,7 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
         let posix_arg = to_bash_posix_path(script_path);
         Command::new("bash").arg(&posix_arg).status()
     };
-    // On POSIX we normally wrap the script in ``direnv exec`` so the
+    // On POSIX we normally wrap the script in ``repro exec`` so the
     // recorder's Nim/Nimble env loads onto PATH.  Nix builds run in
     // a sandbox where direnv isn't available (and ``use flake`` in
     // the recorder's .envrc would not work even if it were);
@@ -972,9 +972,10 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
         let _ = recorder_root; // silence the unused-variable lint on this branch
         Command::new("bash").arg(script_path).status()
     } else {
-        Command::new("direnv")
+        Command::new("repro")
             .arg("exec")
             .arg(&recorder_root)
+            .arg("--")
             .arg("bash")
             .arg(script_path)
             .status()
@@ -992,7 +993,7 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
             } else {
                 panic!(
                     "{script_name} exited with status {s}; \
-                     run it manually via `direnv exec {} bash ct_emulator/{script_name}`",
+                     run it manually via `repro exec {} -- bash ct_emulator/{script_name}`",
                     recorder_root.display(),
                 );
             }
@@ -1005,8 +1006,8 @@ fn regenerate_c(emulator_dir: &Path, script_path: &Path, output_dir: &Path) {
                 );
             } else {
                 panic!(
-                    "failed to spawn `direnv exec` for {script_name}: {e}. \
-                     Ensure direnv is on PATH and the recorder's .envrc has been allowed."
+                    "failed to spawn `repro exec` for {script_name}: {e}. \
+                     Ensure repro is on PATH and the recorder environment is available."
                 );
             }
         }

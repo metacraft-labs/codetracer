@@ -46,7 +46,11 @@ fn get_solidity_source_path() -> PathBuf {
 fn evm_recorder_repo_dir() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dir = manifest_dir.join("../../../codetracer-evm-recorder");
-    if dir.join(".envrc").exists() { Some(dir) } else { None }
+    if dir.join("repro.nim").exists() {
+        Some(dir)
+    } else {
+        None
+    }
 }
 
 /// Check if `solc` (Solidity compiler) is available on PATH, via `SOLC_PATH`,
@@ -64,8 +68,8 @@ fn is_solc_available() -> bool {
     }
     // Fall back to the EVM recorder's dev shell.
     if let Some(repo) = evm_recorder_repo_dir() {
-        return std::process::Command::new("direnv")
-            .args(["exec", repo.to_str().unwrap(), &cmd, "--version"])
+        return std::process::Command::new("repro")
+            .args(["exec", repo.to_str().unwrap(), "--", &cmd, "--version"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
@@ -86,8 +90,8 @@ fn is_anvil_available() -> bool {
     }
     // Fall back to the EVM recorder's dev shell.
     if let Some(repo) = evm_recorder_repo_dir() {
-        return std::process::Command::new("direnv")
-            .args(["exec", repo.to_str().unwrap(), "anvil", "--version"])
+        return std::process::Command::new("repro")
+            .args(["exec", repo.to_str().unwrap(), "--", "anvil", "--version"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);

@@ -84,7 +84,7 @@ proc phpFromSibling(): string =
     return ""
   let (output, exitCode) = execCmdEx(
     "cd " & quoteShell(sibling) &
-    " && timeout 900 direnv exec . bash -c 'command -v php' 2>/dev/null")
+    " && timeout 900 repro exec . -- bash -c 'command -v php' 2>/dev/null")
   if exitCode != 0:
     return ""
   for line in output.splitLines:

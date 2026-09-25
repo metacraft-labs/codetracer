@@ -1,3 +1,4 @@
+import repro_dsl_stdlib/foreign_env
 import std/[os, strutils]
 
 import repro_dsl_stdlib
@@ -472,6 +473,9 @@ package codeTracer:
       "xvfb-run >=0"
 
   devEnv:
+    when not defined(windows):
+      useFlakeDevShell(flakeRef = ".?submodules=1")
+
     activity "default"
     activity "frontend"
     activity "backend"

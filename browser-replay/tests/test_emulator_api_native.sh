@@ -15,13 +15,13 @@ if [ ! -d "$NATIVE_RECORDER" ]; then
 	exit 0
 fi
 
-if ! command -v direnv &>/dev/null; then
-	echo "SKIP: direnv not found (needed for Nim dev shell)"
+if ! command -v repro &>/dev/null; then
+	echo "SKIP: repro not found (needed for Nim dev shell)"
 	exit 0
 fi
 
 TEST_NIM="$NATIVE_RECORDER/ct_emulator/tests/test_wasm_api.nim"
-direnv exec "$NATIVE_RECORDER" nim c -r "$TEST_NIM" \
+repro exec "$NATIVE_RECORDER" -- nim c -r "$TEST_NIM" \
 	2>&1 | tail -15
 
 echo ""

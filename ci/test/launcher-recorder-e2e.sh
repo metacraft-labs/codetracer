@@ -881,21 +881,21 @@ resolve_runtimes() {
 	local rt rt_path rt_dir resolved
 	while IFS= read -r rt; do
 		[[ -n $rt ]] || continue
-		command -v direnv >/dev/null 2>&1 ||
+		command -v repro >/dev/null 2>&1 ||
 			die "the fixture declares discovery.runtime '$rt', which is resolved from
-  $RECORDER_REPO's own dev shell, but 'direnv' is not on PATH.
+  $RECORDER_REPO's own dev shell, but 'repro' is not on PATH.
   It is the same mechanism scripts/build-siblings.sh uses to build the recorder."
 		# shellcheck disable=SC2016
 		# Single quotes are the point: `$1` must be expanded by the bash that
 		# `direnv exec` spawns INSIDE the recorder's dev shell, not by this one.
 		# The name is passed as an argument rather than interpolated so a tool
 		# name from the fixture can never be read as shell syntax.
-		rt_path="$(direnv exec "$RECORDER_DIR" bash -c 'command -v -- "$1"' _ "$rt" 2>/dev/null | head -n1)"
+		rt_path="$(repro exec "$RECORDER_DIR" -- bash -c 'command -v -- "$1"' _ "$rt" 2>/dev/null | head -n1)"
 		[[ -n $rt_path && -x $rt_path ]] ||
 			die "the desktop core needs the '$rt' runtime for the $LANG_KEY edge
   (src/ct/trace/recorder_dispatch.nim, artifact kind raRuntime), and it is not
   provided by '$RECORDER_REPO's dev shell either.
-      direnv exec $RECORDER_DIR command -v $rt
+      repro exec $RECORDER_DIR -- bash -c 'command -v $rt'
   found nothing.  Deliberately NOT a skip: without the runtime the recording
   cannot happen and the gate would be testing nothing."
 		# See the header: `direnv exec` falls through to the ambient PATH, so

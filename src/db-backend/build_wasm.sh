@@ -120,7 +120,7 @@ MINGW* | MSYS* | CYGWIN* | *_NT*)
 	bash "$EMULATOR_WASM_BUILD_SCRIPT"
 	;;
 *)
-	direnv exec "$CT_RECORDER_ROOT" bash "$EMULATOR_WASM_BUILD_SCRIPT"
+	repro exec "$CT_RECORDER_ROOT" -- bash "$EMULATOR_WASM_BUILD_SCRIPT"
 	;;
 esac
 
