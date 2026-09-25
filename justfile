@@ -1138,6 +1138,13 @@ test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
 test-launcher-recorder-e2e-wiring:
   bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
+# Verify that a FAILED sibling build prints the tail of its own build log, both
+# in scripts/build-siblings.sh's summary and in the launcher<->recorder
+# driver's failure path, and still fails.  Stock bash; `repro` and `just` are
+# stubbed.  See ci/test/sibling-build-failure-test.sh.
+test-sibling-build-failure-report:
+  bash ci/test/sibling-build-failure-test.sh
+
 # Verify the DECODED-TRACE reasoning of the gate above, which the gate itself
 # can only exercise after a launcher, a built core, a recorder and `ct-print`
 # are all in place.  The trace-shape discrimination, the empty-recording guard,

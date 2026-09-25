@@ -18,6 +18,9 @@
 # Environment:
 #   BUILD_SIBLINGS_VERBOSE=1  — stream child build output to stderr instead of
 #                               capturing it into a per-repo log file.
+#   BUILD_SIBLINGS_FAIL_TAIL_LINES=N — how many trailing lines of each FAILED
+#                               repo's log the summary prints (default 60;
+#                               0 prints none).
 #
 # Conventions:
 #   - All builds are run via `repro exec <repo> -- <cmd>` so each repo's flake
@@ -121,6 +124,7 @@ export EXTRA_NIM_PATH ZSTD_CFLAGS ZSTD_LIBS
 # Per-repo results.
 declare -A RESULT_STATE  # repo -> PASS|SKIP|FAIL|MISSING
 declare -A RESULT_DETAIL # repo -> human-readable detail
+declare -A RESULT_LOG    # repo -> captured build log (only when not VERBOSE)
 
 # ---------------------------------------------------------------------------
 # Helper: should we run this repo?
@@ -197,7 +201,13 @@ build_sibling() {
 	fi
 
 	local rc=0
+	# Where this build's output can be read.  In verbose mode no log is
+	# written, so naming $log would point at whatever an EARLIER run left
+	# there -- and ci/lib/sibling-build-failure.sh tails the file the FAIL row
+	# names.
+	local see="see $log"
 	if [ "${BUILD_SIBLINGS_VERBOSE:-0}" = "1" ]; then
+		see="output streamed above"
 		# Expand positional arguments in the activated child shell.
 		# shellcheck disable=SC2016
 		repro exec "$env_dir" -- bash -c 'cd "$1" && eval "$2"' build-sibling "$repo_dir" "$wrapped_cmd" || rc=$?
@@ -205,17 +215,18 @@ build_sibling() {
 		# Expand positional arguments in the activated child shell.
 		# shellcheck disable=SC2016
 		repro exec "$env_dir" -- bash -c 'cd "$1" && eval "$2"' build-sibling "$repo_dir" "$wrapped_cmd" >"$log" 2>&1 || rc=$?
+		RESULT_LOG[$key]="$log"
 	fi
 
 	if [ "$rc" -ne 0 ]; then
 		RESULT_STATE[$key]="FAIL"
-		RESULT_DETAIL[$key]="build exited $rc — see $log"
+		RESULT_DETAIL[$key]="build exited $rc — $see"
 		return 0
 	fi
 
 	if [ ! -e "$artifact_path" ]; then
 		RESULT_STATE[$key]="FAIL"
-		RESULT_DETAIL[$key]="build succeeded but $artifact still missing — see $log"
+		RESULT_DETAIL[$key]="build succeeded but $artifact still missing — $see"
 		return 0
 	fi
 
@@ -491,6 +502,41 @@ done
 echo "  ---" >&2
 printf "  %d pass, %d already built, %d missing, %d failed\n" \
 	"$pass_count" "$skip_count" "$missing_count" "$fail_count" >&2
+
+# The tail of every FAILED repo's log, in the summary itself.
+#
+# The per-repo log lives under .tools/build-siblings-logs on whatever machine
+# ran this. On a CI runner that path is gone when the job ends and no step
+# uploads it, so a summary that only NAMES the log ("build exited 101 — see
+# …") hides the one line that says why: the launcher<->recorder ruby arm of
+# run 36013311965 failed with exactly that and nothing else in the Actions
+# log. A compiler or cargo failure almost always ends with its cause, so the
+# last lines are the useful ones. This is diagnostics only; the exit status
+# below is unchanged.
+fail_tail_lines="${BUILD_SIBLINGS_FAIL_TAIL_LINES:-60}"
+case "$fail_tail_lines" in
+'' | *[!0-9]*) fail_tail_lines=60 ;;
+esac
+if [ "$fail_count" -gt 0 ] && [ "$fail_tail_lines" -gt 0 ]; then
+	for repo in $(printf '%s\n' "${!RESULT_STATE[@]}" | sort); do
+		[ "${RESULT_STATE[$repo]}" = "FAIL" ] || continue
+		log="${RESULT_LOG[$repo]:-}"
+		echo "" >&2
+		if [ -z "$log" ]; then
+			# BUILD_SIBLINGS_VERBOSE=1: the output was streamed above and no log
+			# was written, so there is nothing (and nothing stale) to tail.
+			echo "  $repo: build output was streamed above (BUILD_SIBLINGS_VERBOSE=1)" >&2
+			continue
+		fi
+		if [ ! -s "$log" ]; then
+			echo "  $repo: the build log $log is empty or missing" >&2
+			continue
+		fi
+		echo "---- $repo: last $fail_tail_lines lines of $log ----" >&2
+		tail -n "$fail_tail_lines" "$log" | sed 's/^/  | /' >&2
+		echo "---- end of $repo log ----" >&2
+	done
+fi
 
 if [ "$fail_count" -gt 0 ]; then
 	exit 1

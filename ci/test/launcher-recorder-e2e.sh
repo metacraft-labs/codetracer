@@ -167,6 +167,13 @@ FIXTURE_SCHEMA="launcher-compat/v1"
 # shellcheck disable=SC1091  # resolved at run time from $ROOT_DIR
 source "$ROOT_DIR/ci/lib/launcher-recorder-decode.sh"
 
+# What a failed sibling build prints: the summary rows and the TAIL of each
+# failed repo's own build log, which is otherwise a file on the runner that
+# nobody can open.  Tested by ci/test/sibling-build-failure-test.sh.
+# shellcheck source=../lib/sibling-build-failure.sh
+# shellcheck disable=SC1091  # resolved at run time from $ROOT_DIR
+source "$ROOT_DIR/ci/lib/sibling-build-failure.sh"
+
 PASSED=0
 FAILED=0
 SCENARIOS=0
@@ -692,7 +699,7 @@ step_build_recorder() {
 		note "recorder sibling absent; skipped by LAUNCHER_RECORDER_E2E_ALLOW_MISSING=1"
 	else
 		if ! bash "$BUILD_SIBLINGS" --only "$FX_SIBLING_KEY" >"$WORK_DIR/recorder-build.log" 2>&1; then
-			sed -n '1,80p' "$WORK_DIR/recorder-build.log" >&2
+			report_sibling_build_failure "$WORK_DIR/recorder-build.log"
 			if [[ $ALLOW_MISSING != "1" ]]; then
 				die "building the recorder sibling '$FX_SIBLING_KEY' failed
   (log: $WORK_DIR/recorder-build.log).
@@ -763,7 +770,7 @@ step_build_extra_siblings() {
 		echo "  also building: $key (for $repo)"
 		if [[ $SKIP_BUILDS != "1" ]]; then
 			if ! bash "$BUILD_SIBLINGS" --only "$key" >"$WORK_DIR/also-$idx-build.log" 2>&1; then
-				sed -n '1,80p' "$WORK_DIR/also-$idx-build.log" >&2
+				report_sibling_build_failure "$WORK_DIR/also-$idx-build.log"
 				[[ $ALLOW_MISSING == "1" ]] ||
 					die "building the declared sibling '$key' failed
   (log: $WORK_DIR/also-$idx-build.log).
