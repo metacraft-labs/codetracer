@@ -6,7 +6,7 @@
 # ## The defect this exists to catch
 #
 # `flake.nix` pins `reprobuild` to an exact SHA (mirrored from nixos-modules,
-# which is the org's single source of truth) and then overrides SIX of
+# which is the org's single source of truth) and then overrides FIVE of
 # reprobuild's own inputs so the `repro` this repo ships is built against THIS
 # repo's nixpkgs and THIS repo's siblings. One of those overrides is
 #
@@ -52,8 +52,7 @@
 #
 # Only `runquota` is checked, because it is the only overridden input that is
 # a flake whose code reprobuild COMPILES AGAINST. The nixpkgs/flake-parts/
-# git-hooks overrides are environment, and `codetracer-native-recorder` is a
-# non-flake source input with no lock entry of its own to compare against.
+# git-hooks overrides are environment.
 #
 # ## Why this is a static check and not "just build it"
 #

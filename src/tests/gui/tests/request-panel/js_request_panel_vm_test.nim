@@ -116,9 +116,8 @@ const
     ## neighbouring request's steps.
 
   DriverSuffix = "web/express/index.js"
-    ## The in-process driver.  It is recorded too (it is part of the program),
-    ## which is why "the seek lands in the handler" has to be checked rather
-    ## than assumed.
+    ## The in-process driver is excluded from this application-only fixture.
+    ## Assert its absence, rather than assuming the generation filter ran.
 
 type
   ExpectedRow = object
@@ -277,9 +276,10 @@ suite "RS-M9 JavaScript request panel":
     check hasSpanStreamFiles(bytes)
 
     # ONE container for the whole session: one Node process served all seven
-    # requests, and both recorded sources (the app and the in-process driver)
-    # are interned once for the process rather than once per request.
-    check meta.get().paths.len == 2
+    # requests. The fixture records the app and leaves the in-process HTTP
+    # driver runnable but uninstrumented, so body-parser awaits cannot put
+    # client steps inside a server request range.
+    check meta.get().paths.len == 1
     var recordedPaths: seq[string] = @[]
     for p in meta.get().paths:
       recordedPaths.add(p.replace('\\', '/'))
@@ -289,7 +289,7 @@ suite "RS-M9 JavaScript request panel":
       if p.endsWith(DemoAppSuffix): sawApp = true
       if p.endsWith(DriverSuffix): sawDriver = true
     check sawApp
-    check sawDriver
+    check not sawDriver
 
     # --- decode with the production reader ------------------------------
     let readerRes = initSpanStreamReader(bytes)
@@ -450,8 +450,8 @@ suite "RS-M9 JavaScript request panel":
       # The seek target is a step of THIS request and of no other, and — the
       # claim specific to this row — it resolves to a line of the HANDLER's
       # source rather than merely to some distinct ordered coordinate.  The
-      # driver that issued the requests is recorded in the same container, so
-      # landing in `app.js` rather than `index.js` is a real discrimination.
+      # driver is deliberately excluded from this fixture. Distinct handler
+      # line sets below still reject a range that lands in another request.
       var traceRes = openNewTrace(FixtureContainer)
       check traceRes.isOk
       var trace = traceRes.get()

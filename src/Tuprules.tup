@@ -296,8 +296,9 @@ endif
 --lineDir:on\
 --hints:off \
 --warnings:off \
+--nimcache:/tmp/ct-nim-cache/%B_nim_js\
 --out:%o\
-js %f |> %B.js
+js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !nim_node = |> ^ %f^ $(NIM_SELECTED)\
 -d:nodejs\
@@ -308,8 +309,9 @@ js %f |> %B.js
 -d:ctIndex\
 -d:nodejs\
 --sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_nim_node_index\
 --out:%o\
-js %f |> %B.js %B.js.map
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !nim_node_subwindow = |> ^ %f^ $(NIM_SELECTED)\
 -d:chronicles_enabled=off\
@@ -317,16 +319,18 @@ js %f |> %B.js %B.js.map
 --debugInfo:on\
 --lineDir:on\
 --sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_nim_node_subwindow\
 --out:%o\
-js %f |> %B.js %B.js.map
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !nim_node_index_server = |> ^ %f^ $(NIM_SELECTED)\
 -d:ctIndex\
 -d:server\
 -d:nodejs\
 --sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_nim_node_index_server\
 --out:%o \
-js %f |> %B.js %B.js.map
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !codetracer_shell = |> $(NIM_SELECTED)\
 -d:nodejs\
@@ -463,6 +467,12 @@ export NIMFLAGS
 # environment sanitization strips it and the linker cannot find libraries
 # that live in the Nix store.
 export LIBRARY_PATH
+
+# The Repro environment may bind a locally built Nim compiler whose runtime
+# loads PCRE from the activated library path. Tup must preserve that existing
+# path, just as it preserves PATH; otherwise even `nim --version` fails.
+export LD_LIBRARY_PATH
+export DYLD_LIBRARY_PATH
 
 # C_INCLUDE_PATH is the standard gcc/cc header search path. The Nix dev shell
 # sets this to include libbpf headers so that #include <bpf/libbpf.h> resolves

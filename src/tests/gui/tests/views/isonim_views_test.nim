@@ -4323,7 +4323,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let r = MockRenderer()
 
       let panel = renderScratchpadPanel(r, vm)
-      vm.addValue(makeScratchpadEntry("crash", "boom", isError = true))
+      vm.addValue(makeScratchpadEntry("crash", "<error: boom>", isError = true))
 
       let list = findByClass(panel, "value-components-container")
       let row = list.children[0]
@@ -4533,11 +4533,11 @@ suite "IsoNim Scratchpad Panel — vm":
     check isonim_scratchpad_view.rowClass(true) ==
       "scratchpad-value-view scratchpad-value-error"
 
-  test "cellText branches on isLiteral / isError flags":
+  test "cellText preserves already-presented literal and error text":
     check cellText(makeScratchpadEntry("a", "1")) == "1"
     check cellText(makeScratchpadEntry("$msg", "hi",
                                        isLiteral = true)) == "hi"
-    check cellText(makeScratchpadEntry("crash", "boom",
+    check cellText(makeScratchpadEntry("crash", "<error: boom>",
                                        isError = true)) ==
       "<error: boom>"
 
@@ -4976,7 +4976,7 @@ suite "IsoNim Terminal Output Panel — interactions":
       check req.isSome
       check req.get.args["eventIndex"].getInt == 7
       check req.get.args["directLocationRRTicks"].getInt == 42
-      check req.get.args["kind"].getStr == "Write"
+      check req.get.args["kind"].getInt == 0
 
       dispose()
 
@@ -11205,12 +11205,16 @@ suite "IsoNim Agent Activity Panel — structure":
 
       dispose()
 
-  test "diff previews and terminals preserve legacy ids":
+  test "diff links dispatch editor targets and terminals preserve ids":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 3)
+      var openedTargets: seq[string] = @[]
+      let callbacks = AgentActivityCallbacks(
+        onOpenFileDiff: proc(target: string) = openedTargets.add(target))
+      let panel = renderAgentActivityPanel(r, vm, componentId = 3,
+                                          callbacks = callbacks)
 
       vm.setMessages(@[
         makeAgentActivityMessage("a1", "patch", diffs = @[
@@ -11226,9 +11230,10 @@ suite "IsoNim Agent Activity Panel — structure":
         AgentActivityTerminalEntry(id: "term-a", shellId: 42)
       ])
 
-      let editor = findByClass(panel, "agent-editor")
-      check editor != nil
-      check editor.attributes["id"] == diffEditorId(3, 9)
+      check findByClass(panel, "agent-diff-file-path").textContent == "/repo/a.nim"
+      findByClass(panel, "agent-diff-file-row").fireEvent("click")
+      findByClass(panel, "agent-diff-unified-btn").fireEvent("click")
+      check openedTargets == @["file:a1:9", "unified:a1"]
       let shell = findByClass(panel, "shell-container")
       check shell != nil
       check shell.attributes["id"] == shellContainerId(42)

@@ -12,7 +12,7 @@
 ##
 ## Feature areas covered:
 ## 1. Event Log Navigation — row selection, pagination, sorting, search,
-##    double-click navigation, and debugger-driven reloading
+##    double-click navigation, and no refetch on debugger movement
 ## 2. Flow Visualization & Loop Iterations — mode switching, iteration
 ##    control, data loading, and step navigation
 ## 3. Tracepoint & Point List Management — selection, editing lifecycle,
@@ -27,6 +27,11 @@
 ##    tab management, and overlay toggles
 ## 8. Full Debugging Workflow — complete end-to-end session exercising
 ##    all panels together
+##
+## TEST DOUBLE JUSTIFICATION: MockBackendService exposes emitted commands and
+## controlled replies while the production SessionViewModel, store and signals
+## run unchanged. This isolates cross-panel request behavior; it does not claim
+## recorder or backend integration coverage.
 ##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_feature_scenarios.nim
@@ -198,24 +203,19 @@ suite "Event Log: row selection and navigation":
 
       dispose()
 
-  test "event log loads when debugger moves to a new position":
-    ## When the debugger steps to a new execution point, the event log
-    ## should automatically request fresh data for that position.
+  test "event log does not reload when the debugger moves":
     createRoot proc(dispose: proc()) =
-      let (app, store, mock) = makeAppWithMock()
-      let vm = app.session.eventLogVM
+      let mock = newMockBackendService(autoRespond = true)
+      let app = createAppViewModel(mock.toBackendService())
+      let store = app.session.store
       drain()
-
-      # Move debugger to trigger the auto-load effect.
+      check mock.findCommand("ct/event-load").isSome
+      mock.clearReceivedCommands()
       var dbg = store.debugger.val
       dbg.rrTicks = 500'u64
       store.debugger.val = dbg
       drain()
-
-      let cmd = mock.findCommand("ct/event-load")
-      check cmd.isSome
-      check cmd.get.args["rrTicks"].getBiggestInt == 500
-
+      check mock.findCommand("ct/event-load").isNone
       dispose()
 
   test "event log request includes current page and sort parameters":
@@ -1490,10 +1490,11 @@ suite "Full workflow: record -> replay -> debug":
       session.store.updateDebuggerPosition(100'u64, "fibonacci.py", 1)
       drain()
 
-      # Verify all panels requested initial data.
+      # Moving loads position-dependent data; the event list was loaded at
+      # session creation and remains valid at this first debugger position.
       check mock.findCommand("ct/load-locals").isSome
       check mock.findCommand("ct/load-calltrace-section").isSome
-      check mock.findCommand("ct/event-load").isSome
+      check mock.findCommand("ct/event-load").isNone
       check mock.findCommand("ct/load-flow").isSome
 
       # Verify editor shows the right file.
@@ -1612,8 +1613,8 @@ suite "Full workflow: record -> replay -> debug":
       check session.stateVM.currentVariables.val[1].value == "0"
       check session.stateVM.currentVariables.val.len == 3
 
-      # ---- Step 9: Verify event log was requested ----
-      check mock.findCommand("ct/event-load").isSome
+      # ---- Step 9: Movement preserves the already-loaded event list ----
+      check mock.findCommand("ct/event-load").isNone
 
       # ---- Step 10: Verify flow data was requested ----
       check mock.findCommand("ct/load-flow").isSome
@@ -1660,10 +1661,10 @@ suite "Full workflow: record -> replay -> debug":
         check session.editorVM.activeFileName.val == file
         check session.timelineVM.currentPosition.val == ticks
 
-        # Verify all data panels sent requests.
+        # Position-dependent panels refetch; the static event list does not.
         check mock.findCommand("ct/load-locals").isSome
         check mock.findCommand("ct/load-calltrace-section").isSome
-        check mock.findCommand("ct/event-load").isSome
+        check mock.findCommand("ct/event-load").isNone
         check mock.findCommand("ct/load-flow").isSome
 
       dispose()

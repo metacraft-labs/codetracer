@@ -935,7 +935,6 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     var lastQuery = ""
     var lastCol = -1
     var lastAsc = false
-    var lastHadDebuggerPosition = false
     var hasFired = false
     createEffect proc() =
       let page = currentPage.val
@@ -949,8 +948,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         debuggerState.rrTicks > 0'u64 or location.file.len > 0 or
         location.line != 0
       if hasDebuggerPosition or not hasFired:
-        if hasFired and hasDebuggerPosition == lastHadDebuggerPosition and
-            page == lastPage and
+        if hasFired and page == lastPage and
             ps == lastPageSize and query == lastQuery and
             col == lastCol and asc == lastAsc:
           return
@@ -959,7 +957,6 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         lastQuery = query
         lastCol = col
         lastAsc = asc
-        lastHadDebuggerPosition = hasDebuggerPosition
         hasFired = true
         let args = %*{
           "page": page,

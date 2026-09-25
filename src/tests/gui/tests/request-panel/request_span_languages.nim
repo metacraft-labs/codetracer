@@ -218,11 +218,11 @@ const
         "the Plug has no error hook: /boom is answered 500 by " &
         "Plug.ErrorHandler, which the middleware only ever sees as a status",
       requiredExtraKeys: BeamKeys, forbiddenKeys: @[DiscoveryModeKey],
-      contiguousRows: 7, concurrentRows: 4,
+      contiguousRows: 5, concurrentRows: 4,
       structuralNote:
         "MEASURED by the replay pass over the recorded ranges: the " &
-        "four-request rendezvous cohort genuinely overlaps, and one further " &
-        "row has another BEAM process's events interleaved into its range",
+        "four-request rendezvous cohort genuinely overlaps, and three further " &
+        "rows have another BEAM process's events interleaved into their ranges",
       slowRowFloorMs: 400,
       durationNote:
         "the cohort blocks ~3.3 s in the barrier and /slow sleeps ~400 ms",

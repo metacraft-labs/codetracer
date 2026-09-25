@@ -157,7 +157,7 @@
       # reprobuild revision's own flake.lock and mirror its `runquota-src`.
       # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
       # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/093f520dbe0177bf760585f1aea5064a986d5467";
+      url = "github:metacraft-labs/runquota/b561f9306ff89f2b82ab38edf21dbc7d9890d106";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
@@ -210,16 +210,12 @@
       # single pin: a second `nim-fork-src` pin here would be two pins for one
       # thing with nothing keeping them equal — the failure mode
       # `scripts/test-flake-pin-alignment.sh` exists to catch for `runquota`.)
-      url = "github:metacraft-labs/reprobuild/35c5754a8fd3b9858508d61701199fab8e69ebda";
+      url = "github:metacraft-labs/reprobuild/d5e9aa24e1871732c97adb5127ce3772b0a57210";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
       inputs.runquota-src.follows = "runquota";
-      # reprobuild's repro package needs ct_interpose (from the
-      # native-recorder repo) to build; share CodeTracer's own
-      # native-recorder input so a local sibling checkout is reused.
-      inputs.codetracer-native-recorder.follows = "codetracer-native-recorder";
       flake = true;
     };
 

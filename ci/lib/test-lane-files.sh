@@ -765,7 +765,11 @@ test_lane_files() {
 		# reason: they are browser-target modules and do not build with `nim c`.
 		# So are `main-process`'s: the Electron main process is `nim js` only.
 		_tlf_find src/frontend/tests '*_test.nim' '*_test_plan.nim' |
-			grep -vxF -f <(test_lane_files frontend-js; test_lane_files renderer-dom; test_lane_files main-process) || true
+			grep -vxF -f <(
+				test_lane_files frontend-js
+				test_lane_files renderer-dom
+				test_lane_files main-process
+			) || true
 		;;
 
 	frontend-js)
@@ -1241,6 +1245,7 @@ test_lane_files() {
 				'/multi-replay/' \
 				'/noir-space-ship/' \
 				'/source-access/' \
+				'/layout/mode_layout_test\.nim$' \
 				'/request-panel/no_sidecar_manifests_test\.nim$'
 		# real_backend_test / language_smoke_test / multi-replay /
 		# noir-space-ship / source-access need `headless_session` or
@@ -1248,12 +1253,17 @@ test_lane_files() {
 		# `vm-gui-headless` lane.
 		# no_sidecar_manifests_test drives six recorder toolchains — it is the
 		# `no-sidecar-manifests` lane.
+		# mode_layout_test exercises JavaScript layout objects; vm-js includes
+		# it separately so excluding its empty native body does not lose it.
 		;;
 
 	vm-js)
 		# The native lane's set, minus what cannot compile or run under
 		# `nim js`:
-		test_lane_files vm-native |
+		{
+			test_lane_files vm-native
+			_tlf_find src/tests/gui/tests/layout 'mode_layout_test.nim'
+		} | sort |
 			_tlf_reject \
 				'/agentic-coding/' \
 				'/status-bar/certificate_indicator_native_test\.nim$' \
