@@ -88,13 +88,17 @@
 #   metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2, which is
 #   the org-wide rule and not this gate's to re-decide.
 #
-#   TWO ENTRIES ARE THE STATED EXCEPTION, and they carry a 40-hex commit SHA:
-#   `isonim` and `runquota` are not declared in codetracer's project manifest,
-#   so the lock HAS no revision for them and a bare entry fails `Setup dev env`
-#   outright.  A commit SHA is the other reproducible shape `clone-siblings`
-#   accepts -- unlike `=<branch>`, it names the same tree on every re-run.  The
-#   full reasoning, the measurement behind it and the condition for removing it
-#   are at the `siblings:` block itself; see "THE REMAINING TWO" there.
+#   THREE ENTRIES ARE THE STATED EXCEPTION, and they carry a 40-hex commit
+#   SHA: `isonim`, `isonim-tui` and `runquota` are not declared in codetracer's
+#   project manifest, so the lock HAS no revision for them and a bare entry
+#   fails `Setup dev env` outright.  A commit SHA is the other reproducible
+#   shape `clone-siblings` accepts -- unlike `=<branch>`, it names the same tree
+#   on every re-run.  All three are flake inputs, and each SHA is the one
+#   `flake.lock` pins (ci/test/launcher-recorder-e2e-workflow-test.sh fails when
+#   they drift apart).  The full reasoning, the measurement behind it and the
+#   condition for removing it are at the `siblings:` block itself; see "THE
+#   FLAKE-INPUT THREE" there.  (The io-mon family is SHA-pinned too, for a
+#   different reason, stated beside those entries.)
 #
 #   THE REPO UNDER TEST IS STILL PINNED TO `github.sha`, and gets there without
 #   an input: it is the PRIMARY `actions/checkout` (see WORKSPACE LAYOUT
@@ -553,8 +557,10 @@ jobs:
         # per BLOCK, and a block naming one half only is the defect it names).
         # The repeat costs one extra clone of an already-pinned revision.
         #
-        # THE REMAINING TWO ARE PINNED BY COMMIT SHA, because the lock cannot
-        # answer for them.  `isonim` and `runquota` are absent from the
+        # THE FLAKE-INPUT THREE ARE PINNED BY COMMIT SHA, because the lock
+        # cannot answer for them.  `isonim` and `runquota` were the first two
+        # (below); `isonim-tui` joined them on 2026-09-24, see "ISONIM-TUI"
+        # after this block.  `isonim` and `runquota` are absent from the
         # `codetracer` project in metacraft-labs/metacraft-manifests, so a BARE
         # entry does not merely fail to help -- it fails this step outright with
         #
@@ -598,16 +604,51 @@ jobs:
         # Run 33021054045 is what the mismatch costs: the `ci` shell would not
         # compile against the runquota revision this repo pinned, and the direnv
         # step below reported it as a missing direnv.  So when flake.lock's
-        # `isonim` / `runquota` inputs are bumped, bump these two with them --
-        # they are one pin spelled in two places, not two independent knobs.
+        # `isonim` / `isonim-tui` / `runquota` inputs are bumped, bump these
+        # with them -- each is one pin spelled in two places, not two
+        # independent knobs.  That sentence was not enough on its own: by
+        # 2026-09-24 `isonim` here still said 9936c544 and `runquota` f1ca742d
+        # while flake.lock had moved `isonim` off 9936c544 on 2026-09-16
+        # (b18a3ff8f; at 172ce7fb since 36c173693) and `runquota` off f1ca742d
+        # on 2026-09-10 (cb3fff2e6; at 093f520d since 574a7502b), so the tup
+        # driver compiled the renderer against an IsoNim 82 commits older than
+        # the one the `ci` shell pins.  It drifted again within a day: the
+        # 2026-09-25 flake.lock rolls (47f37ed52, 5df6d5c12) moved isonim,
+        # isonim-tui, runquota, io-mon and nim-stackable-hooks while this
+        # block kept the old SHAs.  ci/test/launcher-recorder-e2e-workflow-
+        # test.sh now reads both files and fails when any flake-input entry
+        # here disagrees with flake.lock.
+        #
+        # ISONIM-TUI.  The 2026-09-18 editor work (421b1dcbb..195f9195c) made
+        # src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim
+        # import `isonim_tui/text/width`, and ui_js.nim reaches them, so the
+        # `ui.js` tup job needs ../isonim-tui.  Without it every arm of this
+        # gate died in `Build the codetracer-desktop core` with
+        #
+        #   src/frontend/viewmodel/editor/selection.nim(162, 30) Error: cannot
+        #   open file: isonim_tui/text/width
+        #
+        # (desktop run 35974652142 on all four arms; recorder runs 35985937174
+        # native and 35985941156 js).  scripts/require-siblings.sh lists it as
+        # REQUIRED since the same change, so ci/test/build-once-workspace-test.sh
+        # fails if this block drops it.  Like `isonim` and `runquota` it is
+        # absent from the lock records these edges resolve (checked on the
+        # native ccbe5866 and js 634bce37 records: neither names it; it only
+        # appears in records whose publisher's workspace happened to carry the
+        # isonim project), so a bare entry would fail this step and it takes
+        # the same flake.lock SHA shape.  isonim-gpui / nim-termctl / nim-pty
+        # are on the same `--path` list but nothing a tup rule builds imports
+        # them (only the terminal and GPUI front-ends do); they stay
+        # unprovisioned and require-siblings.sh keeps them advisory.
         #
         # THE PROPER FIX IS STILL IN ANOTHER REPOSITORY, and this is a bridge to
-        # it, not a replacement for it: declare `isonim` and `runquota` in
-        # codetracer's project manifest and publish a lock (`repro workspace lock
-        # --trigger-repo=codetracer`, in a workspace whose `.repro/manifests` is
-        # a real git checkout -- where it is a plain directory the lock is
-        # generated and then silently dropped).  When that lands, delete the
-        # `=<sha>` from both entries and they resolve like every other name here.
+        # it, not a replacement for it: declare `isonim`, `isonim-tui` and
+        # `runquota` in codetracer's project manifest and publish a lock
+        # (`repro workspace lock --trigger-repo=codetracer`, in a workspace
+        # whose `.repro/manifests` is a real git checkout -- where it is a
+        # plain directory the lock is generated and then silently dropped).  When that lands, delete the
+        # `=<sha>` from the three entries and they resolve like every other
+        # name here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
@@ -633,27 +674,36 @@ jobs:
             # core build dies with `cannot open file: io_mon/depfile`, no
             # src/build-debug/bin/ct is emitted, and this gate fails in its
             # artifact check having never reached the launcher or a recorder.
-            # SHA-pinned, not lock-resolved, and identical to the pins the main
-            # CI lane uses (.github/workflows/codetracer.yml): a published
+            # SHA-pinned, not lock-resolved. The nim-shm-* pins are the main
+            # CI lane's (.github/workflows/codetracer.yml); io-mon follows
+            # flake.lock (below). Not bare, because a published
             # workspace lock still carries an io-mon rev that predates
             # depfile.nim, so a bare `io-mon` here can silently resolve to a
             # revision that cannot build `ct`.
             # nim-stackable-hooks is SHA-pinned here (the main lane still says
             # `=dev`) because ci-contract-suites ratchets the number of mutable
-            # branch-tip entries and that ceiling is only ever lowered. This is
-            # the `dev` tip as of 2026-08-29.
-            io-mon=3b6196efc2021ba202add54a21b25f0268d70c79
+            # branch-tip entries and that ceiling is only ever lowered.
+            # io-mon and nim-stackable-hooks are ALSO flake inputs, so their
+            # SHAs must equal flake.lock's for the same reason as the three
+            # below (ci/test/launcher-recorder-e2e-workflow-test.sh compares
+            # every entry whose name is a flake input).  nim-stackable-hooks was
+            # still the 2026-08-29 `dev` tip, d51b571a, long after flake.lock
+            # had moved on; it follows flake.lock now, and so does io-mon (the
+            # 2026-09-25 flake.lock roll moved it off 3b6196ef; its pin still
+            # carries src/io_mon/depfile.nim).  The two nim-shm-* repos are
+            # not flake inputs and keep the main lane's pins.
+            io-mon=0c312f261ecbbad3931132aed4ba31167b2de202
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
-            nim-stackable-hooks=d51b571a3d53f92a3200541e8267f7bb25d36c6c
+            nim-stackable-hooks=512586916384f27614c2b28f6c256d33d451daa5
             # Not in the workspace lock -- pinned to flake.lock's revs. See
-            # "THE REMAINING TWO" above before changing either of these.
-            isonim=9936c544925004bada019204b5b111f39d1a54bf
-            # The editor model imports `isonim_tui/text/width`, so `isonim-tui`
-            # is a required sibling (scripts/require-siblings.sh). Pinned to the
-            # revision codetracer's repro.lock and flake.lock both name.
-            isonim-tui=a28e651f015135bcd6132dfafb1772784516f45d
-            runquota=f1ca742d19c7b981eeea0fba8b4e029207f43778
+            # "THE FLAKE-INPUT THREE" above before changing any of these.
+            # isonim-tui is in codetracer's repro.lock since 6850efc5e, but the
+            # recorder repos' lock records these edges also resolve do not
+            # carry it, so it keeps the SHA shape.
+            isonim=7268743981766f0d9c6d70d8d2ddbf70b8bd2c82
+            isonim-tui=fa81267515006dea11d58adfeeb0c2fcbcf576a8
+            runquota=b561f9306ff89f2b82ab38edf21dbc7d9890d106
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

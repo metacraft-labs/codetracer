@@ -1129,6 +1129,321 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 9c. THE CORE BUILD'S WORKSPACE: complete, pinned, and on flake.lock's revs.
+#
+# `Build the codetracer-desktop core` runs `just build-once`, whose tup build
+# reads every build sibling by RELATIVE PATH. The planner's repos are the
+# corners of the edge under test, not that workspace; the rest comes from the
+# literal block of `Setup dev env + clone the remaining siblings`. That block
+# went incomplete once already: the 2026-09-18 editor work made ui.js import
+# `isonim_tui/text/width`, nothing provisioned ../isonim-tui, and every arm of
+# every edge died in the core build (desktop run 35974652142; recorder runs
+# 35985937174 native, 35985941156 js). Its SHA pins had also drifted from
+# flake.lock -- isonim by 82 commits -- although the block says in so many
+# words that they are one pin spelled in two places.
+#
+#   a. PINNED: the block's names are exactly CORE_SIBLINGS_EXPECTED, so any
+#      change to the set is a deliberate edit of this file too.
+#   b. COMPLETE: every row of scripts/require-siblings.sh's REQUIRED table (the
+#      preflight `just build-once` runs first) is provisioned on every derived
+#      edge -- by the trigger's own checkout, the planner, or the block -- and a
+#      copy of the workflow with any one block-only required entry removed is
+#      REJECTED. The required set is read from the preflight, not restated.
+#   c. NO REF DRIFT: every `<name>=<value>` in the block is a 40-hex commit SHA
+#      (never a branch: not reproducible), and every one whose name is a
+#      flake.lock root input equals that input's `locked.rev`. The flake inputs
+#      compared must include CORE_FLAKE_PINNED_FLOOR, so a parser that finds
+#      nothing cannot pass. Mutants: a drifted SHA, and a `=dev` entry.
+#
+# ci/test/build-once-workspace-test.sh covers (b) for every build-once job in
+# the repo; it is repeated here per derived EDGE, next to (a) and (c), because
+# this is the file that owns this workflow's sibling wiring.
+# ---------------------------------------------------------------------------
+echo
+echo "the core build's sibling block is complete, pinned, and on flake.lock's revs"
+
+readonly CORE_STEP="Setup dev env + clone the remaining siblings"
+readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
+readonly FLAKE_LOCK="$REPO_ROOT/flake.lock"
+
+# (a) The block, by name. Revisions are deliberately NOT restated here: the
+# flake-input ones are compared with flake.lock in (c), so bumping flake.lock
+# and the block together needs no edit of this file.
+readonly CORE_SIBLINGS_EXPECTED="codetracer-native-recorder
+codetracer-trace-format
+codetracer-trace-format-nim
+io-mon
+isonim
+isonim-tui
+nim-acp
+nim-agent-harbor
+nim-agents
+nim-everywhere
+nim-shm-gset
+nim-shm-queue
+nim-stackable-hooks
+runquota"
+
+# The flake inputs (c) must have compared, at least.
+readonly CORE_FLAKE_PINNED_FLOOR="isonim isonim-tui runquota"
+
+# core_sibling_entries FILE -> the literal entries (`name` or `name=ref`) of the
+# core step's `siblings:` block, one per line; the planner's `${{ }}` line and
+# `#` comments are dropped, the way clone-siblings drops them.
+core_sibling_entries() {
+	strip_cr "$1" | awk -v want="      - name: $CORE_STEP" '
+		$0 == want { in_step = 1; next }
+		in_step && /^      - name: / { exit }
+		in_step && /^          siblings: \|[[:space:]]*$/ { in_blk = 1; next }
+		in_blk && /^            / {
+			line = $0
+			sub(/#.*/, "", line)
+			n = split(line, t, /[ \t]+/)
+			for (i = 1; i <= n; i++) {
+				if (t[i] == "" || index(t[i], "{{") || index(t[i], "}}") || t[i] ~ /^steps\./) continue
+				print t[i]
+			}
+			next
+		}
+		in_blk && /^[[:space:]]*$/ { next }
+		in_blk { exit }
+	'
+}
+
+# drop_core_entry FILE NAME -> FILE with NAME's line removed from the block.
+drop_core_entry() {
+	strip_cr "$1" | awk -v want="      - name: $CORE_STEP" -v drop="$2" '
+		$0 == want { in_step = 1 }
+		in_step && /^          siblings: \|[[:space:]]*$/ { in_blk = 1; print; next }
+		in_blk && /^            / {
+			tok = $0; sub(/^[ \t]+/, "", tok); sub(/[ \t].*$/, "", tok)
+			if (tok == drop || index(tok, drop "=") == 1) next
+			print; next
+		}
+		in_blk && !/^[[:space:]]*$/ { in_blk = 0; in_step = 0 }
+		{ print }
+	'
+}
+
+# set_core_ref FILE NAME REF -> FILE with the block's NAME entry set to NAME=REF.
+set_core_ref() {
+	strip_cr "$1" | awk -v want="      - name: $CORE_STEP" -v name="$2" -v ref="$3" '
+		$0 == want { in_step = 1 }
+		in_step && /^          siblings: \|[[:space:]]*$/ { in_blk = 1; print; next }
+		in_blk && /^            / {
+			tok = $0; sub(/^[ \t]+/, "", tok); sub(/[ \t].*$/, "", tok)
+			if (tok == name || index(tok, name "=") == 1) { print "            " name "=" ref; next }
+			print; next
+		}
+		in_blk && !/^[[:space:]]*$/ { in_blk = 0; in_step = 0 }
+		{ print }
+	'
+}
+
+# The required table, parsed out of the preflight exactly as
+# ci/test/build-once-workspace-test.sh parses it: `name|probe|overrides|reason`
+# rows inside `required_siblings=( ... )`, the name up to the first `|`.
+REQUIRED_NAMES="$(awk '
+	/^required_siblings=\(/ { inblock = 1; next }
+	inblock && /^\)/        { inblock = 0 }
+	inblock {
+		line = $0
+		sub(/^[ \t]*/, "", line)
+		if (line ~ /^#/ || line == "") next
+		sub(/^["'\'']/, "", line)
+		split(line, parts, "|")
+		if (parts[1] != "") print parts[1]
+	}
+' "$PREFLIGHT" 2>/dev/null)"
+readonly REQUIRED_NAMES
+
+# What every derived edge has WITHOUT the block: its own checkout (the trigger),
+# the planner's three, and any extra-siblings its caller passes. Computed once
+# by running the real planner, so the mutation loop below is cheap.
+declare -a CORE_EDGE_LABELS=()
+declare -a CORE_EDGE_HAVE=()
+for case_spec in ${CALLER_CASES[@]+"${CALLER_CASES[@]}"}; do
+	repo_full="${case_spec%%|*}"
+	case_rest="${case_spec#*|}"
+	recorder="${case_rest%%|*}"
+	extras="${case_rest#*|}"
+	[ "$extras" = "$recorder" ] && extras=""
+	run_plan "$repo_full" "$recorder" "$extras"
+	CORE_EDGE_LABELS+=("${repo_full##*/} + $recorder")
+	CORE_EDGE_HAVE+=("${repo_full##*/}"$'\n'"$_plan_siblings")
+done
+
+# core_workspace_violations FILE -> one line per (edge, required sibling) the
+# edge would not have; exit 0 iff there are none AND something was checked.
+core_workspace_violations() {
+	local file="$1" names i req rc=0
+	names="$(core_sibling_entries "$file" | sed 's/=.*//')"
+	if [ -z "$REQUIRED_NAMES" ] || [ "${#CORE_EDGE_HAVE[@]}" -eq 0 ]; then
+		echo "nothing to check: $(printf '%s' "$REQUIRED_NAMES" | grep -c .) required sibling(s), ${#CORE_EDGE_HAVE[@]} edge(s)"
+		return 1
+	fi
+	# Membership by pattern match, not grep: this runs once per edge x required
+	# name x mutation, and a fork per test costs minutes on a Windows runner.
+	for i in "${!CORE_EDGE_HAVE[@]}"; do
+		for req in $REQUIRED_NAMES; do
+			if [[ $'\n'"${CORE_EDGE_HAVE[$i]}"$'\n'"$names"$'\n' != *$'\n'"$req"$'\n'* ]]; then
+				echo "${CORE_EDGE_LABELS[$i]}: '$req' is REQUIRED by scripts/require-siblings.sh but neither the planner nor the '$CORE_STEP' block provisions it -- just build-once refuses to start"
+				rc=1
+			fi
+		done
+	done
+	return "$rc"
+}
+
+# flake_lock_revs NAME... -> `name rev` per NAME that is a flake.lock ROOT
+# input, looked up root.inputs[name] -> node (node keys can carry a `_N`
+# suffix, so reading nodes[name] can land on another repo's node). A parse or
+# tooling failure is reported as that, never as a statement about a pin.
+flake_lock_revs() {
+	python3 - "$FLAKE_LOCK" "$@" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        data = json.load(fh)
+    nodes = data["nodes"]
+    root = nodes[data["root"]]["inputs"]
+except Exception as exc:  # noqa: BLE001 - reported verbatim
+    print("PARSE-ERROR %s" % exc)
+    raise SystemExit(0)
+for name in sys.argv[2:]:
+    key = root.get(name)
+    if key is None:
+        continue
+    if isinstance(key, list):
+        key = key[0]
+    print("%s %s" % (name, nodes.get(key, {}).get("locked", {}).get("rev", "")))
+PY
+}
+
+# core_ref_violations FILE -> one line per `=<ref>` entry that is not a 40-hex
+# SHA, or that is a flake input whose SHA differs from flake.lock; exit 0 iff
+# none AND every name in CORE_FLAKE_PINNED_FLOOR was compared.
+core_ref_violations() {
+	local file="$1" entries e name ref revs compared="" want rc=0 lock_rev
+	local -a pinned_names=()
+	entries="$(core_sibling_entries "$file")"
+	mapfile -t pinned_names < <(printf '%s\n' "$entries" | grep '=' | sed 's/=.*//')
+	revs="$(flake_lock_revs ${pinned_names[@]+"${pinned_names[@]}"})" || {
+		echo "could not run python3 over $FLAKE_LOCK -- a tooling failure, not a statement about any pin"
+		return 1
+	}
+	if grep -q '^PARSE-ERROR' <<<"$revs"; then
+		echo "flake.lock did not parse ($revs) -- a tooling failure, not a statement about any pin"
+		return 1
+	fi
+	while IFS= read -r e; do
+		case "$e" in *=*) ;; *) continue ;; esac
+		name="${e%%=*}"
+		ref="${e#*=}"
+		if ! [[ $ref =~ ^[0-9a-f]{40}$ ]]; then
+			echo "'$e' does not pin a 40-hex commit SHA; a branch or tag is a different tree on every re-run"
+			rc=1
+			continue
+		fi
+		lock_rev="$(awk -v n="$name" '$1 == n { print $2 }' <<<"$revs")"
+		[ -n "$lock_rev" ] || continue # not a flake input (the io-mon family)
+		compared="$compared $name"
+		if [ "$ref" != "$lock_rev" ]; then
+			echo "'$name' is pinned to $ref here but flake.lock pins $lock_rev; the tup driver reads this checkout and the nix driver reads flake.lock, so they would compile different trees"
+			rc=1
+		fi
+	done <<<"$entries"
+	for want in $CORE_FLAKE_PINNED_FLOOR; do
+		case " $compared " in
+		*" $want "*) ;;
+		*)
+			echo "'$want' was not compared with flake.lock (compared:${compared:- nothing}); it is missing from the block, lost its SHA, or is no longer a flake input"
+			rc=1
+			;;
+		esac
+	done
+	return "$rc"
+}
+
+# (a)
+core_names="$(core_sibling_entries "$REUSABLE" | sed 's/=.*//' | sort)"
+if [ "$core_names" = "$CORE_SIBLINGS_EXPECTED" ]; then
+	ok "the core step's sibling block is exactly the pinned set ($(printf '%s' "$core_names" | grep -c .) names)"
+else
+	fail "the core step's sibling block is exactly the pinned set" \
+		"expected: $(printf '%s' "$CORE_SIBLINGS_EXPECTED" | tr '\n' ' ')" \
+		"got:      $(printf '%s' "$core_names" | tr '\n' ' ')" \
+		"If the change is intended, update CORE_SIBLINGS_EXPECTED in this file with it."
+fi
+
+# (b)
+if cw_out="$(core_workspace_violations "$REUSABLE")"; then
+	ok "every required sibling ($(printf '%s' "$REQUIRED_NAMES" | grep -c .) in scripts/require-siblings.sh) is provisioned on all ${#CORE_EDGE_HAVE[@]} derived edge(s)"
+else
+	mapfile -t cw_lines <<<"$cw_out"
+	fail "every required sibling in scripts/require-siblings.sh is provisioned on every derived edge" "${cw_lines[@]}"
+fi
+
+CORE_MUT="$TMP/core-mutant.yml"
+cw_mut=""
+cw_tried=0
+core_block_names=$'\n'"$(core_sibling_entries "$REUSABLE" | sed 's/=.*//')"$'\n'
+for req in $REQUIRED_NAMES; do
+	# Only entries the BLOCK alone provides: one the planner also emits on every
+	# edge (codetracer-trace-format-nim) can be dropped from the block safely.
+	[[ $core_block_names == *$'\n'"$req"$'\n'* ]] || continue
+	drop_core_entry "$REUSABLE" "$req" >"$CORE_MUT"
+	if cmp -s <(strip_cr "$REUSABLE") "$CORE_MUT"; then
+		cw_mut="${cw_mut}the mutation dropping $req changed nothing; "
+		continue
+	fi
+	all_have=1
+	for i in "${!CORE_EDGE_HAVE[@]}"; do
+		[[ $'\n'"${CORE_EDGE_HAVE[$i]}"$'\n' == *$'\n'"$req"$'\n'* ]] || all_have=0
+	done
+	[ "$all_have" -eq 1 ] && continue
+	cw_tried=$((cw_tried + 1))
+	if m_out="$(core_workspace_violations "$CORE_MUT")"; then
+		cw_mut="${cw_mut}SURVIVED: '$req' was dropped from the block and the check still passed; "
+	elif ! grep -qF "'$req' is REQUIRED" <<<"$m_out"; then
+		cw_mut="${cw_mut}dropping '$req' failed the check without naming it: $m_out; "
+	fi
+done
+if [ "$cw_tried" -ge 2 ] && [ -z "$cw_mut" ]; then
+	ok "a block missing any one of the $cw_tried required siblings only it provides is rejected, by name"
+else
+	fail "a block missing any one of the required siblings only it provides is rejected, by name" \
+		"${cw_mut:-only $cw_tried mutation(s) could be built -- the block or the required table did not parse}"
+fi
+
+# (c)
+if cr_out="$(core_ref_violations "$REUSABLE")"; then
+	ok "every pinned entry is a 40-hex SHA, and $CORE_FLAKE_PINNED_FLOOR equal flake.lock's revs"
+else
+	mapfile -t cr_lines <<<"$cr_out"
+	fail "every pinned entry is a 40-hex SHA, and the flake inputs equal flake.lock's revs" "${cr_lines[@]}"
+fi
+
+cr_mut=""
+set_core_ref "$REUSABLE" isonim-tui 0000000000000000000000000000000000000001 >"$CORE_MUT"
+if ! grep -q 'isonim-tui=0000000000000000000000000000000000000001' "$CORE_MUT"; then
+	cr_mut="${cr_mut}the drifted-SHA mutation was not applied; "
+elif m_out="$(core_ref_violations "$CORE_MUT")" || ! grep -qF "'isonim-tui' is pinned to" <<<"$m_out"; then
+	cr_mut="${cr_mut}SURVIVED: isonim-tui pinned away from flake.lock (got: ${m_out:-<nothing>}); "
+fi
+set_core_ref "$REUSABLE" io-mon dev >"$CORE_MUT"
+if ! grep -q '^            io-mon=dev$' "$CORE_MUT"; then
+	cr_mut="${cr_mut}the branch-ref mutation was not applied; "
+elif m_out="$(core_ref_violations "$CORE_MUT")" || ! grep -qF "'io-mon=dev' does not pin a 40-hex" <<<"$m_out"; then
+	cr_mut="${cr_mut}SURVIVED: io-mon=dev (got: ${m_out:-<nothing>}); "
+fi
+if [ -z "$cr_mut" ]; then
+	ok "a block pinning a flake input away from flake.lock, or any entry to a branch, is rejected"
+else
+	fail "a block pinning a flake input away from flake.lock, or any entry to a branch, is rejected" "$cr_mut"
+fi
+
+# ---------------------------------------------------------------------------
 # 10. THE CHECKER'S OWN MUTATION TEST.
 #
 # Everything above reports a defect by NOT finding something, which is the
@@ -1384,7 +1699,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=23
+readonly EXPECTED_ASSERTIONS=28
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
