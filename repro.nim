@@ -678,7 +678,7 @@ package codeTracer:
       # renderer down at startup with "Cannot read properties of undefined
       # (reading 'slice')" out of `nimCopy`.  Nim hot code reloading is also
       # explicitly a non-goal of CodeTracer's HMR design — see
-      # codetracer-specs/Front-Ends/IsoNim/Hot-Module-Reload.md — so nothing
+      # isonim-specs/Hot-Module-Reload.md — so nothing
       # here needs it.  The same flag had to be removed from the three other
       # build definitions that compile these sources (`justfile`,
       # `src/Tuprules.tup`, `build_for_extension.sh`);

@@ -245,7 +245,7 @@ suite "Renderer JS bundle — symbol uniqueness":
 
   test "no JavaScript bundle is built with Nim hot code reloading":
     ## `--hotCodeReloading:on` is not part of CodeTracer's HMR design:
-    ## `codetracer-specs/Front-Ends/IsoNim/Hot-Module-Reload.md` lists
+    ## `isonim-specs/Hot-Module-Reload.md` lists
     ## "Compatibility with Nim hot-code-reloading (the
     ## `--hotCodeReloading:on` C-target feature)" under Non-Goals.  What the
     ## flag does buy on the JS backend is the aliasing measured below.
