@@ -6150,3 +6150,64 @@ Two traps in the same area, both live:
       and `debug_control_marks` all put dynamic style attributes inside a `for`
       in a `ui:` block. A real per-iteration environment needs the body hoisted
       into its own proc/template called once per item; nothing does that today.
+- Mutation-harness control digests (`*-mutation-control.sha256`) go stale
+  whenever ANY listed subject changes — including justfile, codetracer.yml,
+  ci/lib/test-lane-files.sh (PLAT-17/33/34) and sibling files like
+  ../codetracer-specs/Architecture/Editor-ViewModel.md (PLAT-33). A quick
+  staleness sweep over every control file: parse `hash  path` lines and
+  sha256 each path relative to the repo root (or `git show <rev>:<path>`).
+- `ci/test/shell-gate-coverage.sh` counts a gate as covered only if a
+  WORKFLOW reaches it (workflow -> just recipe a lane calls -> script); a
+  recipe alone is not enough. Window-capture gates (sway/grim/wtype + the
+  isonim-gpui shim) are recorded BLOCKED in
+  `shell-gate-coverage.known-dark.txt`, whose RECORDED-DARK-CEILING must equal
+  the entry count exactly.
+- `frontend-reachability.sh` output: diff two runs by parsing the
+  `  <module>.nim  (n)` headers and `  <line>  <kind>  <name>` rows per bucket
+  ([A] tested-only, [B] nothing). Deleting a dead [B] routine can cascade:
+  its callees may drop from C to A/B, so re-run after each batch.
+- A dev-shell environment captured earlier (`declare -px` dump) goes stale
+  when `flake.lock` moves a sibling pin. 2026-09-24: the captured shell's
+  `nargo` was built against a codetracer-trace-format-nim that wrote
+  `meta.dat` v3, which the current reader refuses ("re-record the trace"), so
+  every Noir `ct record` in `vm-gui-headless` failed. Re-capture with
+  `nix develop .#devShells.x86_64-linux.default --command bash -c 'declare -px'`
+  before trusting a red recorder lane.
+- The Python and Ruby recorders statically link the SIBLING
+  codetracer-trace-format-nim through `codetracer_trace_writer_nim`'s build.rs;
+  after that sibling moves, an older `.so` fails to import with
+  `undefined symbol: trace_writer_register_drop_variables`. Python: `cargo build
+  --release --lib` in codetracer-python-recorder/codetracer-python-recorder and
+  copy `target/release/libcodetracer_python_recorder.so` over the package's
+  `codetracer_python_recorder.cpython-312-*.so` (the venv is an editable
+  install; maturin is not on the dev shell's PATH). Ruby: `cargo build
+  --release` inside the ruby recorder's own `nix develop` (needs libclang),
+  then copy `libcodetracer_ruby_recorder.so` to `codetracer_ruby_recorder.so`.
+- Lane mirrors in `ci/lib/test-lane-files.sh` are not always the CI path:
+  `frontend-js` (the recipe runs node with `globalThis.window = globalThis`
+  and compiles `dap_refusal_surfaces_test` without `-d:ctInExtension`),
+  `m16-release-gate` (`ct_test.nim` is only COMPILED by the script, the lane
+  runs it and gets a usage error), `bpf` (needs libbpf link flags, a built
+  `monitor.bpf.o` and caps) and `book-isonim` (the book's own Justfile adds
+  the `../isonim-docs` paths). A red there is not a red in CI; check the
+  recipe before "fixing" the lane.
+- Gitignored inputs some suites need in a fresh worktree:
+  `src/tests/visual/captures/electron/*.png` (`just plat35-capture-electron`,
+  which also rewrites the committed `answers/*.electron.json` provenance —
+  revert those) and `src/tests/visual/captures/gpui/*.png` (PLAT-37's windowed
+  capture; copy from a checkout that has them).
+- PLAT-37's capture (`ci/test/plat37-window-frame.sh`) copies the three
+  shims from `../isonim-gpui/rust/target/plat37/` over the LIVE
+  `rust/target/debug/libgpui_nim_shim.so` for the duration of the run. Those
+  copies go stale when the binary starts importing a new `gpui_*` symbol
+  (2026-09-25: `gpui_frame_stats_reset`; the 2026-09-22 shims had 63/86
+  symbols) and every run then dies at load with `could not import:` and
+  reads as "the window never painted". Rebuild with
+  `cd ../isonim-gpui && nix develop --command just plat37-shims`. Never run
+  the capture concurrently with `gpui-shell` or any GPUI suite: they dlopen
+  the same swapped path.
+- The headless-sway + GPUI window capture DOES run on the self-hosted
+  linux-x64 fleet: isonim-gpui's CI job "GUI tests (headless sway)" built the
+  `gpui-backend` shim and captured a painted window on gpu-server-002
+  (run 35834753536, 2026-09-23). "Unmeasured runner capability" is not a
+  valid reason to record a window-capture gate dark.

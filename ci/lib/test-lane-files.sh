@@ -921,7 +921,27 @@ test_lane_files() {
 				'/test_plugin_io_sdk\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
 				'/test_plugin_surfaces\.nim$' \
-				'/test_plugin_grant_lifecycle\.nim$'
+				'/test_plugin_grant_lifecycle\.nim$' \
+				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
+				'/test_every_status_surface_has_an_entry_point\.nim$'
+		# `test_every_mountable_pane_has_a_factory_arm` and
+		# `test_every_status_surface_has_an_entry_point` (both 2026-09-04) are
+		# the same shape as `test_pane_mount_markers_are_released` below: their
+		# subject is the SOURCE TREE — `ui/layout.nim`'s factory dispatch, and
+		# which status surfaces have an entry point — read at run time with
+		# `std/os`. MEASURED, 2026-09-24, on origin/dev 174e593ff:
+		#
+		#     test_every_mountable_pane_has_a_factory_arm.nim(198, 13)
+		#       Error: undeclared identifier: 'fileExists'
+		#     test_every_status_surface_has_an_entry_point.nim(88, 12)
+		#       Error: undeclared identifier: 'fileExists'
+		#
+		# `fileExists` does not exist on the JS target, so both died at the
+		# `nim js` step, before a case ran, from the day they joined this lane
+		# by discovery. Rejected rather than `when`-guarded for the reason the
+		# mount-marker entry gives: with the scan elided each would report green
+		# having asserted nothing about the tree. Both still run on native in
+		# `vm-unit`, where the filesystem they read exists.
 		# `test_editor_async_closure` (PLAT-29) SPAWNS the shell gate it grades
 		#     — `ci/test/editor-import-closure.sh`, once against the real tree
 		#     and once per planted route — through `std/osproc`. MEASURED rather
