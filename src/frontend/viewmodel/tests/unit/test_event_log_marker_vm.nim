@@ -205,14 +205,17 @@ suite "M25b — EventLogVM populates marker row metadata":
     check formatShowValue(hexRow) == "616263"
 
   test "test_event_log_vm_auto_load_applies_event_load_marker_response":
-    let (vm, store, mock) = makeEventLogVM()
+    # The AUTO-load is the one the VM issues when it is created: the row set
+    # is a property of the recording, and a debugger move changes only the
+    # dimming boundary (`GUI/Core-Panes/Event-Log-Pane.md`), so a move issues
+    # no `ct/event-load` at all. The response is therefore queued BEFORE the
+    # VM exists. (This case used to queue it after `makeEventLogVM` and rely
+    # on the first debugger position re-fetching, which the VM no longer
+    # does.)
+    let mock = newMockBackendService(autoRespond = true)
     mock.expect("ct/event-load", parseJson(SAMPLE_EVENT_LOAD_RESPONSE))
-
-    var debuggerState = store.debugger.val
-    debuggerState.rrTicks = 0'u64
-    debuggerState.location.file = "fixtures/account-balance-with-wasm/frontend.js"
-    debuggerState.location.line = 1
-    store.debugger.val = debuggerState
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createEventLogVM(store)
     drain()
 
     check mock.findCommand("ct/event-load").isSome
@@ -220,6 +223,17 @@ suite "M25b — EventLogVM populates marker row metadata":
     check vm.markerRows.val[0].boundaryId == "order-processing"
     check vm.markerRows.val[0].keyValue == "K1"
     check vm.markerRows.val[0].stepId == 10
+
+    # A move afterwards neither re-fetches nor drops the applied rows.
+    mock.clearReceivedCommands()
+    var debuggerState = store.debugger.val
+    debuggerState.rrTicks = 0'u64
+    debuggerState.location.file = "fixtures/account-balance-with-wasm/frontend.js"
+    debuggerState.location.line = 1
+    store.debugger.val = debuggerState
+    drain()
+    check mock.findCommand("ct/event-load").isNone
+    check vm.markerRows.val.len == 3
 
 # ---------------------------------------------------------------------------
 # Layer-2 Test 5 — counterpart set resolves against cached pair index.

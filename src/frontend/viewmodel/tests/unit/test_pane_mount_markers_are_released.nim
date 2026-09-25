@@ -79,7 +79,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 46
+const ExpectedAssertions = 48
+  ## Was 46. +2 for the two polarities of the declaration predicate in
+  ## `panesWithMountMarkers` (the "the scan finds ..." case): a file that only
+  ## MENTIONS a marker table in prose is not a pane, and a pane that declares
+  ## one with a pragma between name and type still is.
   ## Was 42. The debt list shrank from 15 to 7 (-16 assertions across the two
   ## loops over it) and two new cases were added: six panes x 2 assertions for
   ## the unregister-override fixes, two panes x 3 for the register-side clear,
@@ -133,12 +137,49 @@ const ClearsOnRegister = [
 proc paneName(path: string): string =
   path.extractFilename.changeFileExt("")
 
+proc declaresMountMarker(source: string): bool =
+  ## True when `source` DECLARES an `isoNim…MountedIds` table — a line that
+  ## begins with the name (optionally after `var`, optionally exported,
+  ## optionally with a pragma such as `{.used.}`) followed by `=` or `:`.
+  ##
+  ## This used to be `source.contains("MountedIds")`, which is not what the
+  ## doc comment below promised. `ui/isonim_panel_mount.nim` (ce3faf0a3,
+  ## 2026-09-04) — the module that REPLACED the id-keyed latch with a mark on
+  ## the container — quotes the old idiom
+  ## (`if isoNimVCSMountedIds.hasKey(componentId): return`) in its header, and
+  ## the substring match counted that prose as a pane with a marker and no
+  ## release. A file that explains the latch is not a pane that holds one.
+  for line in source.splitLines:
+    var t = line.strip()
+    if t.startsWith("var "):
+      t = t[4 .. ^1].strip()
+    if not t.startsWith("isoNim"):
+      continue
+    let nameEnd = t.find("MountedIds")
+    if nameEnd < 0:
+      continue
+    var rest = t[nameEnd + "MountedIds".len .. ^1]
+    if rest.startsWith("*"):
+      rest = rest[1 .. ^1]
+    rest = rest.strip()
+    if rest.startsWith("{."):
+      let close = rest.find(".}")
+      if close < 0:
+        continue
+      rest = rest[close + 2 .. ^1].strip()
+    if rest.startsWith("=") or rest.startsWith(":"):
+      # Reject a use such as `isoNimFooMountedIds[id] = true`: the name must
+      # be the whole identifier before the `=`/`:`.
+      if t[0 ..< nameEnd].allCharsInSet(IdentChars):
+        return true
+  false
+
 proc panesWithMountMarkers(): seq[string] =
   ## Every `ui/*.nim` that declares an `isoNim…MountedIds` table.
   result = @[]
   for path in walkFiles(UiDir / "*.nim"):
     let source = readFile(path)
-    if source.contains("MountedIds"):
+    if declaresMountMarker(source):
       result.add paneName(path)
   result.sort()
 
@@ -181,6 +222,11 @@ suite "panes release their mount markers":
     counted "constraints" in panes
     counted "test_results" in panes
     counted "scratchpad" in panes
+    # BOTH POLARITIES OF THE DECLARATION PREDICATE. The prose-only module is
+    # not a pane, and `vcs` — declared as `var isoNimVCSMountedIds {.used.}:`
+    # — still is, so narrowing the match did not drop the pragma form.
+    counted "isonim_panel_mount" notin panes
+    counted "vcs" in panes
 
   test "constraints and test_results release their markers":
     # The two panes this change fixes. Named individually rather than left to

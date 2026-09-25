@@ -468,15 +468,32 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
           break
       check hasNamedEntry
 
-  test "calltrace jump to calculate_damage lands on shield.nr executable line 26":
-    ## Tight headless mirror of the failing GUI test
+  const CalculateDamageDefinitionLine = 22
+    ## `fn calculate_damage(...)` in test-programs/noir_space_ship/src/shield.nr.
+  const CalculateDamageFirstStatementLine = 26
+    ## Its first statement — what a call trace entry does NOT point at.
+
+  test "calltrace jump to calculate_damage lands on its definition, shield.nr line 22":
+    ## Tight headless mirror of the GUI test
     ## ``calculate damage calltrace navigation``: jump to the
     ## calculate_damage entry and verify the debugger position is
-    ## exactly ``shield.nr:26`` (the first executable line in the
-    ## noir_space_ship trace).  This isolates the calltrace-jump →
+    ## exactly ``shield.nr:22`` — `fn calculate_damage(...)`, the
+    ## function's DEFINITION site. This isolates the calltrace-jump →
     ## complete-move → editor flow at the VM/backend layer so we
     ## can tell whether the bug is in the backend (wrong location)
     ## or purely in the DOM rendering layer (active-line marker).
+    ##
+    ## It asserted line 26 (the first statement) until 2026-09-25. The
+    ## GUI companion (`noir-space-ship.spec.ts`) moved to the definition
+    ## line on 2026-08-16 (a4c2daa35) — a call trace entry "opens source at
+    ## function definition" (`GUI/Core-Panes/Call-Trace-Pane.md`), as
+    ## distinct from "Jump to Call Site" — and said this headless companion
+    ## asserts the same, which it did not. The disagreement went unseen
+    ## because no workflow runs the `vm-gui-headless` lane, and a local
+    ## run in a dev shell older than the flake's trace-format pin records
+    ## a meta.dat v3 container that dies before this case. Line 26 stays
+    ## pinned below as the line this is NOT, so the two readings cannot be
+    ## confused again.
     let tracePath = findOrRecordNoirTrace()
     let session = newHeadlessDebugSession(tracePath, findReplayServer())
     defer: session.close()
@@ -503,10 +520,10 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
          " @ ", target.location.file, ":", target.location.line,
          " rrTicks=", target.rrTicks
 
-    # The CallLine itself should already report shield.nr:26 since the
-    # backend's load_location uses the call's first executable step record.
+    # The CallLine reports the function's definition line (see the header).
     check "shield.nr" in target.location.file
-    check target.location.line == 26
+    check target.location.line == CalculateDamageDefinitionLine
+    check target.location.line != CalculateDamageFirstStatementLine
 
     # Now perform the actual jump that the GUI exercises.
     session.calltraceJumpByLine(target)
@@ -519,7 +536,7 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
     check "shield.nr" in file
     # The expected active line is the calltrace row's executable source line.
     check line == target.location.line
-    check line == 26
+    check line == CalculateDamageDefinitionLine
 
 # ---------------------------------------------------------------------------
 # Suite 3: Loop iteration / iterate_asteroids

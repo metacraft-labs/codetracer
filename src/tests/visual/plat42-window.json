@@ -4,7 +4,7 @@
     "reader, and two pixel twins. Regenerate: `just plat42-surfaces-window`",
     "then `just plat42-window-record`. Asserted by test_plat42_window.nim."
   ],
-  "takenAt": "2026-09-23T09:53:42Z",
+  "takenAt": "2026-09-24T15:50:58Z",
   "host": "gpu-server-001",
   "pixelDelta": 16,
   "manifest": [
@@ -33,7 +33,7 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 33
+      "settledAfterS": 21
     },
     {
       "id": "advanced-state",
@@ -51,7 +51,7 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 60
+      "settledAfterS": 57
     },
     {
       "id": "continued-event-log",
@@ -74,7 +74,7 @@
     {
       "id": "noir-flow",
       "trace": "noir_space_ship-f9f31b01a0d2",
-      "ops": "stepIn=15",
+      "ops": "stepIn=33",
       "extra": "",
       "rc": 143,
       "settled": true,
@@ -83,11 +83,11 @@
     {
       "id": "noir-flow-off",
       "trace": "noir_space_ship-f9f31b01a0d2",
-      "ops": "stepIn=15",
+      "ops": "stepIn=33",
       "extra": "--no-flow-overlay",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 18
+      "settledAfterS": 24
     }
   ],
   "frames": {
@@ -1499,11 +1499,11 @@
     "noir-flow": {
       "frame": "noir-flow.ppm",
       "present": true,
-      "executionLine": 5,
+      "executionLine": 29,
       "editorLocated": true,
       "lineVote": {
         "firstLine": 1,
-        "support": 46,
+        "support": 47,
         "rows": 51
       },
       "rows": [
@@ -1525,7 +1525,7 @@
         },
         {
           "line": 5,
-          "text": "»5 let mass = masseslil:/*i: 0._."
+          "text": "5 let mass = masseslil:"
         },
         {
           "line": 6,
@@ -1573,7 +1573,7 @@
         },
         {
           "line": 17,
-          "text": "17 // We need to have at least 1 unit ¢"
+          "text": "17 /l We need to have at least 1 unit ¢"
         },
         {
           "line": 18,
@@ -1617,11 +1617,11 @@
         },
         {
           "line": 28,
-          "text": "78 if(shield nct == 100){"
+          "text": "728 if(shield nct == 100){"
         },
         {
           "line": 29,
-          "text": "29 damaae = mass * 1:"
+          "text": "» 29 damaane = mass * 1:/* dama..."
         },
         {
           "line": 30,
@@ -1637,7 +1637,7 @@
         },
         {
           "line": 33,
-          "text": "33 1}"
+          "text": "33 3"
         },
         {
           "line": 34,
@@ -1728,11 +1728,11 @@
     "noir-flow-off": {
       "frame": "noir-flow-off.ppm",
       "present": true,
-      "executionLine": 5,
+      "executionLine": 29,
       "editorLocated": true,
       "lineVote": {
         "firstLine": 1,
-        "support": 46,
+        "support": 47,
         "rows": 51
       },
       "rows": [
@@ -1754,7 +1754,7 @@
         },
         {
           "line": 5,
-          "text": "»5 let mass = masseslil:/*i: 0._."
+          "text": "5 let mass = masseslil:"
         },
         {
           "line": 6,
@@ -1802,7 +1802,7 @@
         },
         {
           "line": 17,
-          "text": "17 // We need to have at least 1 unit ¢"
+          "text": "17 /l We need to have at least 1 unit ¢"
         },
         {
           "line": 18,
@@ -1846,11 +1846,11 @@
         },
         {
           "line": 28,
-          "text": "78 if(shield nct == 100){"
+          "text": "728 if(shield nct == 100){"
         },
         {
           "line": 29,
-          "text": "29 damaae = mass * 1:"
+          "text": "» 29 damaane = mass * 1:/* dama..."
         },
         {
           "line": 30,
@@ -2216,15 +2216,15 @@
     },
     {
       "line": 11,
-      "changed": 0.9293433083956775
+      "changed": 0.0
     },
     {
       "line": 12,
-      "changed": 0.9321872015281757
+      "changed": 0.0
     },
     {
       "line": 13,
-      "changed": 0.9333333333333333
+      "changed": 0.0
     },
     {
       "line": 14,
@@ -2300,11 +2300,11 @@
     },
     {
       "line": 32,
-      "changed": 0.0
+      "changed": 0.9298418972332015
     },
     {
       "line": 33,
-      "changed": 0.0
+      "changed": 0.8108108108108109
     },
     {
       "line": 34,
@@ -2312,11 +2312,11 @@
     },
     {
       "line": 35,
-      "changed": 0.0
+      "changed": 0.9304979253112033
     },
     {
       "line": 36,
-      "changed": 0.0
+      "changed": 0.9333333333333333
     },
     {
       "line": 37,

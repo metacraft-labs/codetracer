@@ -161,9 +161,17 @@ suite "Headless app — launch":
     # `paneViewModel` says it.
     #
     # The exclusion is written as a SET and both halves are asserted, so a
-    # third pane cannot join it silently: the excluded set is exactly two, the
+    # pane cannot join it silently: the excluded set has an exact size, the
     # included set is everything else, and both are non-empty.
-    const EditOnlyPanes = {paneFileTree, paneBuildOutput}
+    #
+    # PLAT-41 MOVED `paneFileTree` OUT OF THE SET (54244c2ac, 2026-09-23), and
+    # the move is the product's, not this test's: a replay slot now answers
+    # the session's `fileTreeVM` — the RECORDING's own source folders, by the
+    # desktop's `sourceFoldersFromTracePaths` rule — not the working tree, so
+    # "a replay session has no ViewModel for the file tree" stopped being
+    # true. Only `paneBuildOutput` is still edit-mode-only. The file tree is
+    # now asserted from the replay side, below, like every other replay pane.
+    const EditOnlyPanes = {paneBuildOutput}
     let app = newHeadlessApp()
     let slot = app.openSession(mockBackend().toBackendService())
     slot.session.launch(traceOf("/tmp/trace-b"))
@@ -183,8 +191,12 @@ suite "Headless app — launch":
         inc replayPanes
         check not slot.paneViewModel(p).isNil
     checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
-    check editPanes == 2
+    check editPanes == 1
     check replayPanes > 0
+    # The pane PLAT-41 moved, pinned by name so the move cannot be undone
+    # quietly by re-adding it to the set above.
+    check paneFileTree notin EditOnlyPanes
+    check not slot.paneViewModel(paneFileTree).isNil
     app.dispose()
 
   test "a failed launch leaves the shell intact and the failure readable":

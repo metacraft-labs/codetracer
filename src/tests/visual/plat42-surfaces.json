@@ -5,12 +5,12 @@
     "Regenerate with `just plat42-surfaces-record`. Asserted by",
     "src/frontend/gpui/tests/test_plat42_surfaces.nim, which reads no binary."
   ],
-  "takenAt": "2026-09-23T06:08:35Z",
+  "takenAt": "2026-09-24T15:35:26Z",
   "host": "gpu-server-001",
   "scenarios": {
     "entry-shell": {
       "replayOps": "",
-      "planSha256": "762367010d8455336eaaddeffc8528cc3f818e6b2620cad65cf0260caab11add",
+      "planSha256": "061076f6e7e940d7be0674ae66f74dc622caf6cb7aebba77c5003987e0bc29cc",
       "rowCount": 54,
       "rows": [
         {
@@ -557,7 +557,7 @@
     },
     "stepped-editor": {
       "replayOps": "stepIn=6",
-      "planSha256": "a8af975a7b6dde989052c11ff2d708dfdbed254aa797a365df01bf0382bf2d01",
+      "planSha256": "13186277a54eba342326880172e4237a62355cae71e895c45bed71d4d33cb601",
       "rowCount": 54,
       "rows": [
         {
@@ -1104,7 +1104,7 @@
     },
     "advanced-state": {
       "replayOps": "stepIn=6,next=3",
-      "planSha256": "2fdd5575e4c616d07ef47f1f6760ae2437666bfcafeec4994eb4a59f874ca0f6",
+      "planSha256": "75c736d95470d51b397907e9e3383d872bfd6ba7e653dba3122edc3c89a7868b",
       "rowCount": 54,
       "rows": [
         {
@@ -1651,7 +1651,7 @@
     },
     "returned-calltrace": {
       "replayOps": "stepIn=21,stepOut=1",
-      "planSha256": "a528ecc668730d1015f3f8caf2d3895db28703b45064ac484d5c273263c15cef",
+      "planSha256": "b3ceae8d876f3135bdc78af46c22ad1ac97de76c5305897c199a892115fe0d09",
       "rowCount": 54,
       "rows": [
         {
@@ -2198,7 +2198,7 @@
     },
     "continued-event-log": {
       "replayOps": "continueForward=1",
-      "planSha256": "b4685c3a1863f694d5b63755d3565037f3ad18e167f5c5216c7a135f2ad6af0d",
+      "planSha256": "b46432c18a5107ff6d98f49d78de1c96f32814c9078e555d6bdf9efdb8a4f61e",
       "rowCount": 54,
       "rows": [
         {
@@ -2745,7 +2745,7 @@
     },
     "breakpoint-editor": {
       "replayOps": "stepIn=6,setBreakpoint@1",
-      "planSha256": "ea87504207072c71b38df1f0c534506c7adc76cc0f5d7d0126ef11ffafe1d5e4",
+      "planSha256": "46ea0951d184293f80237b0dd80bfb15dd0894ceca27752f1a5962bd2c43cc4e",
       "rowCount": 54,
       "rows": [
         {
@@ -3294,8 +3294,8 @@
   "flowTrace": "noir_space_ship-f9f31b01a0d2",
   "flowScenarios": {
     "noir-declined-arm": {
-      "replayOps": "stepIn=15",
-      "planSha256": "bfb9bc6d6e377dd0ce92a4d1e10f255cb72f35779006516efa0767a4b62bd294",
+      "replayOps": "stepIn=33",
+      "planSha256": "72cfac270ff9d5bf7de4217e569742a3b6d220ccca66833d73ceee25590d52ca",
       "rowCount": 54,
       "rows": [
         {
@@ -3313,7 +3313,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "2\u00a0\u00a0\u00a0\u00a0    let mut remaining_shield = initial_shield;"
@@ -3333,27 +3333,27 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "4\u00a0\u00a0\u00a0\u00a0    for i in 0..8 {"
         },
         {
           "row": 5,
-          "pointer": "eptExecution",
+          "pointer": "eptNone",
           "mark": "emNone",
-          "values": "i=0|masses=@[\"0x0000000000000000000000000000000000000000000000000000000000000064\", \"0x00000000000000000000000000000000000000000000000000000000000007d0\", \"0x00000000000000000000000000000000000000000000000000000000000000c8\", \"0x0000000000000000000000000000000000000000000000000000000000000064\", \"0x0000000000000000000000000000000000000000000000000000000000000064\", \"0x0000000000000000000000000000000000000000000000000000000000000032\", \"0x0000000000000000000000000000000000000000000000000000000000000032\", \"0x000000000000000000000000000000000000000000000000000000000000000e\"]",
-          "flow": "efsTaken",
+          "values": "",
+          "flow": "efsUnknown",
           "codeOpacity": "",
-          "rowBackground": "#4f4f4f",
-          "text": "\u25b6 5\u00a0\u00a0\u00a0\u00a0        let mass = masses[i];/* i: 0, masses: @[\"0x0000000000000000000000"
+          "rowBackground": "",
+          "text": "5\u00a0\u00a0\u00a0\u00a0        let mass = masses[i];"
         },
         {
           "row": 6,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "6\u00a0\u00a0\u00a0\u00a0        let damage = calculate_damage(initial_shield, remaining_shield, mas"
@@ -3363,7 +3363,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "7\u00a0\u00a0\u00a0\u00a0        remaining_shield -= damage;"
@@ -3383,7 +3383,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "9\u00a0\u00a0\u00a0\u00a0        let mut regeneration = 0;"
@@ -3393,7 +3393,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "10\u00a0\u00a0\u00a0\u00a0        if (remaining_shield as u32 > 0){"
@@ -3403,8 +3403,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
           "text": "11\u00a0\u00a0\u00a0\u00a0        regeneration = calculate_shield_regeneration(initial_shield ,remai"
         },
@@ -3413,8 +3413,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
           "text": "12\u00a0\u00a0\u00a0\u00a0        remaining_shield += regeneration;"
         },
@@ -3423,8 +3423,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
           "text": "13\u00a0\u00a0\u00a0\u00a0        }"
         },
@@ -3433,7 +3433,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "14\u00a0\u00a0\u00a0\u00a0        status_report(i,initial_shield, remaining_shield, damage, regenera"
@@ -3473,7 +3473,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "18\u00a0\u00a0\u00a0\u00a0    let result = remaining_shield as u32 > 0;"
@@ -3553,7 +3553,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "26\u00a0\u00a0\u00a0\u00a0    let shield_pct = calculate_remaining_shield_pct(initial_shield, remain"
@@ -3563,7 +3563,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "27\u00a0\u00a0\u00a0\u00a0    let mut damage = 0;"
@@ -3573,20 +3573,20 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "28\u00a0\u00a0\u00a0\u00a0    if(shield_pct == 100){"
         },
         {
           "row": 29,
-          "pointer": "eptNone",
+          "pointer": "eptExecution",
           "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
+          "values": "damage=\"0x0000000000000000000000000000000000000000000000000000000000000000\"|mass=\"0x0000000000000000000000000000000000000000000000000000000000000064\"",
+          "flow": "efsTaken",
           "codeOpacity": "",
-          "rowBackground": "",
-          "text": "29\u00a0\u00a0\u00a0\u00a0        damage = mass * 1;"
+          "rowBackground": "#4f4f4f",
+          "text": "\u25b6 29\u00a0\u00a0\u00a0\u00a0        damage = mass * 1;/* damage: \"0x00000000000000000000000000000000"
         },
         {
           "row": 30,
@@ -3603,7 +3603,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "31\u00a0\u00a0\u00a0\u00a0    else{"
@@ -3613,8 +3613,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
           "rowBackground": "",
           "text": "32\u00a0\u00a0\u00a0\u00a0        damage = mass * (100 - shield_pct);"
         },
@@ -3623,8 +3623,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
           "rowBackground": "",
           "text": "33\u00a0\u00a0\u00a0\u00a0    }"
         },
@@ -3633,7 +3633,7 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
           "text": "34\u00a0\u00a0\u00a0\u00a0    if(damage as u32 > remaining_shield as u32){"
@@ -3643,8 +3643,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
           "rowBackground": "",
           "text": "35\u00a0\u00a0\u00a0\u00a0        damage = remaining_shield;"
         },
@@ -3653,8 +3653,8 @@
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
           "rowBackground": "",
           "text": "36\u00a0\u00a0\u00a0\u00a0        }"
         },

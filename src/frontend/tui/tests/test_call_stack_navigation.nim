@@ -573,24 +573,6 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
         discard sourcePaneScreen(modelForFrame(frame), SourcePaneWidth,
                                  SourcePaneHeight, cache)
       let parsesBeforeLatency = cache.parseCount
-      var bestMs = 1.0e9
-      var samples = 0
-      var paintedRows = 0
-      for i in 1 .. LatencyFrames:
-        var frameModel = callStackModelFor(deepFrames, h.entryFile)
-        let paneScreen = callStackScreen(frameModel, StackPaneWidth,
-                                         StackPaneHeight)
-        let t0 = getMonoTime()
-        discard frameModel.applyKey(
-          (if i mod 2 == 0: KeyDown else: KeyBottom), paneScreen)
-        let picked = frameModel.selectedFrame()
-        let s = sourcePaneScreen(modelForFrame(picked), SourcePaneWidth,
-                                 SourcePaneHeight, cache)
-        let ms = (getMonoTime() - t0).inMicroseconds.float / 1000.0
-        paintedRows += s.rows.len
-        inc samples
-        if ms < bestMs: bestMs = ms
-      let parsesAfterLatency = cache.parseCount
 
       # THE SAME WALK WITH NO CACHE AT ALL — the cost of a selection into a
       # window nothing has parsed yet, which is what a user's FIRST visit to a
@@ -598,18 +580,57 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # risk mitigation gives (the gate is measured on the cached path), but
       # reported because the difference is the whole justification for the
       # cache and a reader should not have to add two numbers to find it.
+      #
+      # THE TWO ARE SAMPLED INTERLEAVED, ONE OF EACH PER ITERATION, and that is
+      # what makes `uncachedBest > bestMs` below a comparison of the two paths
+      # rather than of two moments of the host. They used to be two separate
+      # 40-sample loops run one after the other. The margin between them is one
+      # window parse (~0.4 ms on a ~2 ms selection), and on a shared CI host at
+      # load ~200 a burst of contention landing on the whole first loop and
+      # sparing the second flipped the two minima (cached 2.351 ms, uncached
+      # 2.330 ms, 2026-09-24) although the uncached path does strictly more work
+      # on every sample. Interleaved, both minima are drawn from the same
+      # stretch of wall-clock time, so load moves them together; which one goes
+      # first alternates per iteration so neither path is systematically the
+      # one that pays for a cold cache line or a just-woken core.
+      var bestMs = 1.0e9
+      var samples = 0
+      var paintedRows = 0
       var uncachedBest = 1.0e9
+      template timedSelection(i: int; useCache: bool;
+                              outRows: var int): float =
+        block:
+          var frameModel = callStackModelFor(deepFrames, h.entryFile)
+          let paneScreen = callStackScreen(frameModel, StackPaneWidth,
+                                           StackPaneHeight)
+          let t0 = getMonoTime()
+          discard frameModel.applyKey(
+            (if i mod 2 == 0: KeyDown else: KeyBottom), paneScreen)
+          let picked = frameModel.selectedFrame()
+          let s =
+            if useCache:
+              sourcePaneScreen(modelForFrame(picked), SourcePaneWidth,
+                               SourcePaneHeight, cache)
+            else:
+              sourcePaneScreen(modelForFrame(picked), SourcePaneWidth,
+                               SourcePaneHeight)
+          outRows = s.rows.len
+          (getMonoTime() - t0).inMicroseconds.float / 1000.0
       for i in 1 .. LatencyFrames:
-        var frameModel = callStackModelFor(deepFrames, h.entryFile)
-        let paneScreen = callStackScreen(frameModel, StackPaneWidth,
-                                         StackPaneHeight)
-        let t0 = getMonoTime()
-        discard frameModel.applyKey(
-          (if i mod 2 == 0: KeyDown else: KeyBottom), paneScreen)
-        discard sourcePaneScreen(modelForFrame(frameModel.selectedFrame()),
-                                 SourcePaneWidth, SourcePaneHeight)
-        let ms = (getMonoTime() - t0).inMicroseconds.float / 1000.0
-        if ms < uncachedBest: uncachedBest = ms
+        var rows = 0
+        var uncachedRows = 0
+        var cachedMs, uncachedMs: float
+        if i mod 2 == 0:
+          cachedMs = timedSelection(i, true, rows)
+          uncachedMs = timedSelection(i, false, uncachedRows)
+        else:
+          uncachedMs = timedSelection(i, false, uncachedRows)
+          cachedMs = timedSelection(i, true, rows)
+        paintedRows += rows
+        inc samples
+        if cachedMs < bestMs: bestMs = cachedMs
+        if uncachedMs < uncachedBest: uncachedBest = uncachedMs
+      let parsesAfterLatency = cache.parseCount
 
       let coldStart = getMonoTime()
       discard highlightWindow(windows[0].revision.path, windows[0].firstLine,

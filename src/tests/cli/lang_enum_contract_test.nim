@@ -1571,14 +1571,16 @@ const
   # `gui_ops.rs`'s `ctx.lang_wire` was exactly such a site — an identifier
   # whose type was `u8` — and nothing asked.  The two production senders on
   # this list have their TYPE asserted by the anchor test below
-  # (`lang_wire: &'static str`; `lang: string = LoadLocalsDefaultLang`).
+  # (`lang_wire: &'static str`; `lang: string`, and `localsLanguage`'s `string`).
   OpaqueLangPayloadSites = [
     # `ctx.lang_wire` is `&'static str`, the `Lang::wire_name` of the bench
     # language (was `u8`, and wrong for two of ten languages).
     ("src/codetracer-bench/src/gui_ops.rs", 1),
-    # `lang` is `requestLocals`'s `lang: string = LoadLocalsDefaultLang`
-    # parameter — the wire name, handed in by the caller (was `lang: int = 0`).
-    ("src/frontend/viewmodel/store/replay_data_store.nim", 1),
+    # (`replay_data_store.nim`'s `"lang": lang` was on this list, `lang` being
+    # `requestLocals`'s wire-name `string` parameter, until 01f337fa0 made it
+    # `(if lang.len > 0: lang else: store.localsLanguage())`, which the sweep
+    # reads as a NAME. The parameter's type and `localsLanguage`'s are still
+    # asserted by the anchor test.)
     # `lang` is a `&str` taken from the client's request with `as_str`, or
     # `LOAD_LOCALS_DEFAULT_LANG` (`"c"`, pinned by property 7) when absent;
     # an integer from the client is NOT forwarded.  (The crate's second
@@ -1624,9 +1626,15 @@ proc classifyLangPayloadValue(value: string): LangPayloadClass =
               "int(", ".u8", "u8(", ".ord"]:
     if v.contains(pat):
       return lpcOrdinal
-  # A name: a string literal or one of the two production spellers.
+  # A name: a string literal or one of the production spellers.
+  # `localsLanguage()` is `ReplayDataStore.localsLanguage*(): string` — the
+  # wire name of the stopped-in file's language, falling back to
+  # `LoadLocalsDefaultLang` (01f337fa0, 2026-09-24, moved
+  # `headless_session.nim`'s payload onto it). Its return TYPE is asserted
+  # by the anchor test below, since the sweep cannot see it.
   if v[0] == '"' or v.contains(".wire_name()") or v.contains("langWireName(") or
-     v.contains("LoadLocalsDefaultLang") or v.contains("LOAD_LOCALS_DEFAULT_LANG"):
+     v.contains("LoadLocalsDefaultLang") or v.contains("LOAD_LOCALS_DEFAULT_LANG") or
+     v.contains(".localsLanguage()"):
     return lpcName
   lpcOpaque
 
@@ -1771,6 +1779,7 @@ suite "no .rs or .nim payload spells lang as a bare integer":
       "langWireName(toLangFromFilename(path))",
       "LoadLocalsDefaultLang",
       "LOAD_LOCALS_DEFAULT_LANG",  # backend-manager's pinned literal (property 7)
+      "s.session.store.localsLanguage()",  # headless_session's sender
     ]:
       check classifyLangPayloadValue(right) == lpcName
       if classifyLangPayloadValue(right) != lpcName:
@@ -1830,8 +1839,15 @@ suite "no .rs or .nim payload spells lang as a bare integer":
       not guiOps.contains("=> 0u8")
     let store = readFile(RepoRoot / "src" / "frontend" / "viewmodel" / "store" /
                          "replay_data_store.nim")
+    # `requestLocals`'s `lang` is a wire-name `string`; empty means "the
+    # stopped-in file's language" (`localsLanguage`, 01f337fa0), which
+    # itself falls back to `LoadLocalsDefaultLang`. Both the parameter's
+    # type and the speller's return type are asserted: the sweep classifies
+    # `.localsLanguage()` as a NAME on the strength of this line.
     check:
-      store.contains("lang: string = LoadLocalsDefaultLang)")
+      store.contains("lang: string = \"\")")
+      store.contains("proc localsLanguage*(store: ReplayDataStore): string =")
+      store.contains("return LoadLocalsDefaultLang")
       not store.contains("lang: int = 0)")
 
   test "no ordinal `lang` anywhere (the frozen tracepoint-hop remnants are gone)":

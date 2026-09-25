@@ -32,13 +32,22 @@ TRACE = os.environ.get("CODETRACER_PLAT42_TRACE",
 OUT = os.path.join(ROOT, "src/tests/visual/plat42-surfaces.json")
 # The FLOW scenario needs a program with a branch the run declines, which `calc`
 # deliberately has none of (its operator dispatch is a table, not an `if`).
-# `noir_space_ship`'s `shield.nr` has one: `stepIn=15` stops inside its loop
-# with the arm on lines 11-13 not taken — found by probing step counts on
-# 2026-09-23, not chosen for the answer.
+# `noir_space_ship`'s `shield.nr` has one: `stepIn=33` stops in the first call
+# of `calculate_damage`, on line 29 (the taken arm of `shield_pct == 100`), with
+# the `else` arm (lines 32-33) and the `damage > remaining_shield` arm (lines
+# 35-36) declined — found by probing step counts on 2026-09-24, not chosen for
+# the answer.
+#
+# It was `stepIn=15`, "the arm on lines 11-13 not taken", until 2026-09-24. That
+# arm (the `if` on line 10, inside the loop) RUNS — `stepIn=42` stops on line 11
+# — and the backend only called it declined because of the defect f0e3f8f0f
+# fixed (#758: the file-wide sweep consulted only the out-of-loop table, so an
+# arm entered on every pass was marked declined). With that fix the old stop
+# has no declined line at all, so the scenario had to move to a real one.
 FLOW_TRACE = os.environ.get("CODETRACER_PLAT42_FLOW_TRACE",
                             os.path.join(ROOT, "test-logs/tui-fixtures/noir_space_ship-f9f31b01a0d2"))
 FLOW_SCENARIOS = [
-    {"id": "noir-declined-arm", "replayOps": "stepIn=15"},
+    {"id": "noir-declined-arm", "replayOps": "stepIn=33"},
 ]
 SCEN = os.path.join(ROOT, "src/tests/visual/scenarios.json")
 

@@ -61,7 +61,9 @@ const
   ValueScenarios = ["advanced-state", "returned-calltrace",
                     "continued-event-log"]
   QuietScenario = "stepped-editor"
-  FlowStepIns = 15
+  FlowStepIns = 33
+    ## The `noir-declined-arm` stop of `plat42-surfaces.json` / the window
+    ## record's `noir-flow` twin (`stepIn=33`; it was 15 until 2026-09-24).
   TwinFloor = 0.2
     ## A GPUI twin row "changed" above this INK fraction. The record's
     ## changed rows measure ~0.93 and its untouched rows 0.0 (see
