@@ -5639,11 +5639,31 @@ ensure-ct-mcr:
     if command -v repro >/dev/null 2>&1; then
         # ``repro build`` operates on the project at the current working
         # directory (the CLI has no ``--cwd`` flag); cd into the sibling
-        # first so the recorder's ``ct-mcr`` target resolves there.
+        # first so the recorder's target resolves there.
+        #
+        # The selector is ``default#ct-cli``, not ``ct-mcr``.
+        #
+        # The recorder declares its build edges as shell actions with
+        # explicit ids (``codetracer-native-recorder.ct-cli``,
+        # ``.interpose``, ``.dwarf-paths``, …) and registers exactly ONE
+        # named collection, ``collect("default", defaultActions)``. It
+        # exports no bare target called ``ct-mcr`` or ``ct-cli``:
+        # ``ct-mcr`` is how the binary is INVOKED (its ``executable``
+        # entry pins ``name: "ct_cli"`` so the declaration agrees with
+        # the on-disk path), and ``ct-cli`` is only the tail of an action
+        # id. Both bare spellings get ``unknown_target``.
+        #
+        # ``<collection>#<member>`` is the selector that reaches one
+        # action inside a collection: reprobuild suffix-matches
+        # ``.ct-cli`` against the collection's action ids, which
+        # ``codetracer-native-recorder.ct-cli`` uniquely satisfies. The
+        # ``unknown_target`` suggestion list is NOT a list of selectors —
+        # it prints raw action ids — so do not copy a name out of it.
+        #
         # ``--tool-provisioning=nix`` is required: reprobuild refuses an
         # implicit PATH fallback for ``uses`` declarations and the Nix-based
         # sibling resolves its toolchain through its flake.
-        ( cd "$sibling" && repro build --tool-provisioning=nix ct-mcr )
+        ( cd "$sibling" && repro build --tool-provisioning=nix 'default#ct-cli' )
     elif [ "${OS:-}" = "Windows_NT" ]; then
         # Windows DIY: no Nix dev shell, invoke the sibling's
         # Windows-specific build target directly. env.ps1 has already
