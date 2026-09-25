@@ -1,4 +1,4 @@
 include_rules
 
-: codetracer.nim |> !codetracer_bpf |> ../bin/ct$(EXE_SUFFIX) | ../bin/macro_sourcemap_ct.json
-: db_backend_record.nim |> !codetracer |> ../bin/db-backend-record$(EXE_SUFFIX) | ../bin/macro_sourcemap_db-backend-record.json
+: codetracer.nim |> !codetracer_bpf |> ../bin/ct$(EXE_SUFFIX)
+: db_backend_record.nim |> !codetracer |> ../bin/db-backend-record$(EXE_SUFFIX)
