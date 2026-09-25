@@ -37,7 +37,6 @@ import ../viewmodels/vcs_vm
 const VCSContainerClass* = "component-container vcs-container"
 const VCSNoRepoClass* = "vcs-no-repo"
 const VCSNoFilesText* = "No changed files"
-const VCSNoDiffText* = "No working tree changes."
 
 ## Branch lane colour palette — cycled by ``VCSGraphCell.colorIdx``.
 ## Values are chosen to harmonise with the CodeTracer dark-theme design system

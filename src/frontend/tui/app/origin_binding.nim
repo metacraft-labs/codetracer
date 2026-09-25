@@ -327,12 +327,6 @@ proc answersFor*(nav: OriginNavigator; variable: string;
   nav.variable.len > 0 and nav.variable == variable and
     (nav.depth > 0 or nav.queryTick == tick)
 
-proc needsQuery*(nav: OriginNavigator; variable: string;
-                 tick: uint64): bool =
-  ## Whether `o` must issue a NEW query. The inverse of `answersFor`, named so
-  ## a caller reads the intent rather than a negation.
-  not nav.answersFor(variable, tick)
-
 proc advance*(nav: var OriginNavigator): (bool, OriginStep) =
   ## `o`: one hop deeper into the chain. Returns the step to seek to.
   ##

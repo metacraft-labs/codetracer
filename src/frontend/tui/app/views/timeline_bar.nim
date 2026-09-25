@@ -452,18 +452,6 @@ proc timelineBarScreen*(model: TimelineBarModel;
   let area = CellArea(col: 0, row: 0, width: width, height: height)
   result = paintTimelineBar(g, area, model)
 
-proc timelineBarRows*(model: TimelineBarModel;
-                      width, height: int): seq[StyledRow] =
-  timelineBarScreen(model, width, height).rows
-
-proc timelineBarText*(model: TimelineBarModel;
-                      width, height: int): seq[string] =
-  ## The scrubber as plain text, one string per row. What a Tier-2 `regionText`
-  ## read is compared against.
-  result = @[]
-  for row in timelineBarRows(model, width, height):
-    result.add rowText(row)
-
 proc trackColumnAt*(screen: TimelineBarScreen; screenRow, screenCol: int): int =
   ## Which TRACK cell a screen coordinate is in, or -1 for anywhere else.
   ##
@@ -475,8 +463,3 @@ proc trackColumnAt*(screen: TimelineBarScreen; screenRow, screenCol: int): int =
     return -1
   let c = screenCol - screen.trackCol
   if c < 0 or c >= screen.trackWidth: -1 else: c
-
-proc renderTimelineBarTree*(model: TimelineBarModel; r: TerminalRenderer;
-                            width, height: int): TerminalNode =
-  ## The scrubber as a component tree: one `div` per row, styled spans inside.
-  styledRowsTree(r, timelineBarRows(model, width, height))

@@ -168,8 +168,6 @@ const
   TracepointDialogTitle* = "TRACEPOINTS"
   DialogBorder* = "─"
 
-  MarkFieldCells* = 2
-  StateFieldCells* = 4
   MaxExpressionCells* = 40
 
   TracepointKeyOpen* = "T"
@@ -574,24 +572,3 @@ proc paintTracepointManager*(g: var StyledGrid; area: CellArea;
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
-
-proc tracepointManagerScreen*(model: TracepointManagerModel;
-                              width, height: int): TracepointManagerScreen =
-  var g = newStyledGrid(width, height)
-  let area = CellArea(col: 0, row: 0, width: width, height: height)
-  result = paintTracepointManager(g, area, model)
-
-proc tracepointManagerRows*(model: TracepointManagerModel;
-                            width, height: int): seq[StyledRow] =
-  tracepointManagerScreen(model, width, height).rows
-
-proc tracepointManagerText*(model: TracepointManagerModel;
-                            width, height: int): seq[string] =
-  result = @[]
-  for row in tracepointManagerRows(model, width, height):
-    result.add rowText(row)
-
-proc renderTracepointManagerTree*(model: TracepointManagerModel;
-                                  r: TerminalRenderer;
-                                  width, height: int): TerminalNode =
-  styledRowsTree(r, tracepointManagerRows(model, width, height))

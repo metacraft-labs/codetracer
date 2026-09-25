@@ -153,7 +153,6 @@ const
 
   UserBadge* = "usr"
   LibraryBadge* = "lib"
-  BadgeCells* = 3
 
   ExecutionFrameStyle* = CellStyle(fg: "bright_yellow", bold: true)
   InspectedFrameStyle* = CellStyle(fg: "cyan", bold: true)
@@ -381,8 +380,3 @@ proc frameItemRow*(spec: FrameRowSpec): FrameItem =
       spans[i].style = spans[i].style.withBackground(InspectedRowBackground)
 
   result.row = spans
-
-proc frameItemText*(spec: FrameRowSpec): string =
-  ## The row as text. Derived from the spans, so a Tier-2 `regionText` read and
-  ## a Tier-1 cell read cannot disagree about what the row says.
-  rowText(frameItemRow(spec).row)

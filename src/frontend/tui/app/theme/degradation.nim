@@ -189,10 +189,6 @@ const
     ## the reason `dual_snap.CrossTierExclusionCount` is: an unexplained merge
     ## is a collapse, and a list nobody counts grows one entry at a time.
 
-  MonochromeSyntaxNote* =
-    "monochrome maps the nine token classes onto eight attribute combinations"
-    ## Quoted by the test that asserts the merge, so the log of a green run
-    ## says what the bottom rung does rather than only that it passed.
 
 proc groupOf*(role: SemanticRole): DistinctionGroup =
   ## Which set of states this role belongs to.

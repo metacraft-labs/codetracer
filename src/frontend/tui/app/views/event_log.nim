@@ -238,7 +238,6 @@ const
     ## here rather than imported because `app/` may not reach the db-backend and
     ## because an ordinal that silently changed on the wire must show up as a
     ## row this pane calls UNKNOWN rather than as a row it miscolours.
-  HighestKnownKind* = KindHistory
 
 func categoryFor*(kindId: int; stdout: bool): EventCategory =
   ## Which of §3.3.5's bullets an event belongs to.
@@ -334,9 +333,6 @@ proc fetchesFor*(model: EventLogModel; page: int): int =
   for p in model.fetchedPages:
     if p == page:
       inc result
-
-proc isPageHeld*(model: EventLogModel; page: int): bool =
-  model.held.hasKey(page)
 
 proc fetchPage(model: var EventLogModel; page: int) =
   ## Ask the seam for one page. EXACTLY ONCE per page per model: a page already
@@ -601,29 +597,3 @@ proc eventLogScreen*(model: EventLogModel;
   var g = newStyledGrid(width, height)
   let area = CellArea(col: 0, row: 0, width: width, height: height)
   result = paintEventLog(g, area, model)
-
-proc eventLogRows*(model: EventLogModel; width, height: int): seq[StyledRow] =
-  eventLogScreen(model, width, height).rows
-
-proc eventLogText*(model: EventLogModel; width, height: int): seq[string] =
-  result = @[]
-  for row in eventLogRows(model, width, height):
-    result.add rowText(row)
-
-proc bodyRowForEvent*(screen: EventLogScreen; index: int): int =
-  ## The SCREEN row showing event `index`, or -1 when it is scrolled out.
-  result = -1
-  for i, row in screen.visible:
-    if row.index == index:
-      return screen.area.row + 1 + i
-
-proc eventAtScreenRow*(screen: EventLogScreen; screenRow: int): int =
-  ## The absolute event index a screen row shows, or -1 outside the body.
-  let i = screenRow - screen.area.row - 1
-  if i < 0 or i >= screen.visible.len: -1
-  elif screen.visible[i].kind != elrEvent: -1
-  else: screen.visible[i].index
-
-proc renderEventLogTree*(model: EventLogModel; r: TerminalRenderer;
-                         width, height: int): TerminalNode =
-  styledRowsTree(r, eventLogRows(model, width, height))

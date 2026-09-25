@@ -114,14 +114,6 @@ const
     "from ct/event-load's maxRRTicks"
   NoMarksNote* =
     "no tracepoint has been run over this recording"
-  NoBookmarksNote* =
-    "there is no bookmark concept in the ViewModel layer"
-    ## §3.3.5's `◆` is "user-defined tracepoints AND bookmarks". A grep over
-    ## `src/frontend/viewmodel/` on 2026-09-06 finds no bookmark of a TICK
-    ## anywhere — every hit is a browser bookmark in the platform layer — so a
-    ## bookmark here can only be one made in this session, and nothing persists
-    ## it. Stated rather than left implicit so the day a store gains one, the
-    ## one place to change is this constant and `marksFrom`.
   EmptyLogNote* =
     "the recording carries no events"
 
@@ -197,29 +189,6 @@ proc resolveBounds*(vm: TimelineVM; events: openArray[EventRow];
 # ---------------------------------------------------------------------------
 # Call spans and boundaries
 # ---------------------------------------------------------------------------
-
-proc spansFromCalltrace*(lines: openArray[CallLine];
-                         maxTick: uint64): seq[TimelineSpan] =
-  ## `ct/load-calltrace-section`'s rows as scrubber spans.
-  ##
-  ## A call's END is not on the wire — `CallLine` carries the tick the call
-  ## STARTED at and its `depth`, and nothing says where it returned. So a span
-  ## runs from its own tick to the next tick at the SAME OR SHALLOWER depth,
-  ## which is where the call must have finished, and the last one runs to the
-  ## end of the recording. That inference is stated here rather than hidden: it
-  ## is exact for a well-nested calltrace and it is the only thing the answer
-  ## supports.
-  result = @[]
-  for i, line in lines:
-    var endTick = maxTick
-    for j in i + 1 ..< lines.len:
-      if lines[j].depth <= line.depth:
-        endTick = (if lines[j].rrTicks > line.rrTicks: lines[j].rrTicks - 1
-                   else: line.rrTicks)
-        break
-    result.add TimelineSpan(startTick: line.rrTicks,
-                            endTick: max(endTick, line.rrTicks),
-                            depth: line.depth, name: line.name)
 
 proc boundariesFromCalltrace*(lines: openArray[CallLine]): seq[uint64] =
   ## The ticks `[` and `]` may land on: one per recorded call, ascending and

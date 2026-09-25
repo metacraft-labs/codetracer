@@ -138,7 +138,6 @@ const
   TitleStyle* = CellStyle(fg: "white", bold: true)
   PromptStyle* = CellStyle(fg: "yellow", bold: true)
   MatchStyle* = CellStyle(fg: "bright_cyan", bold: true)
-  HelpStyle* = CellStyle(fg: "bright_black")
   SelectedBackground* = "bright_black"
   EmptyStyle* = CellStyle(fg: "bright_black", italic: true)
 

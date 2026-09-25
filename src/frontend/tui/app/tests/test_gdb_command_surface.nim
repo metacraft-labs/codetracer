@@ -225,7 +225,7 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 198
+  ExpectedStyleLiterals = 192
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -260,7 +260,15 @@ const
     ## TWO literals in ONE new painting file — `EmptyPointsStyle` (the muted
     ## "no breakpoints" line) and `DisabledPointStyle` (a disabled point's
     ## row) — so 196 → 198 and 24 → 25.
-  ExpectedStyledFiles = 25
+    ##
+    ## RE-COUNTED ON 2026-09-24: 198 → 192 and 25 → 24, by DELETION. Six
+    ## literals no module painted with — `command_line.SigilStyle` and
+    ## `MessageStyle`, `command_palette.HelpStyle`, and `search.CountStyle`,
+    ## `QueryStyle` and `WrapStyle` — were exported and reached by nothing (the
+    ## reachability guard's bucket B). They were deleted to bring that ratchet
+    ## back under its ceiling, and `views/search.nim` had no other literal, so
+    ## it leaves the styled-file count. No painted colour changed.
+  ExpectedStyledFiles = 24
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour

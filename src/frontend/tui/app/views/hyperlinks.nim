@@ -69,8 +69,6 @@ import std/unicode
 
 import isonim_tui
 
-import ./styled_row
-
 type
   PaneHyperlink* = object
     ## One OSC 8 target, in SCREEN cell coordinates.
@@ -163,24 +161,3 @@ proc paneHyperlinkFor*(path: string; line: int; row, col, width: int):
   ## at the wrong line is worse than no link.
   PaneHyperlink(row: row, col: col, width: width,
                 url: "file://" & path & "#L" & $max(1, line))
-
-proc linkedCells*(links: openArray[PaneHyperlink]): int =
-  ## Total cells covered by `links`. A count a test asserts on rather than
-  ## "there is at least one link".
-  for link in links:
-    if link.url.len > 0:
-      result += max(0, link.width)
-
-proc textUnder*(row: StyledRow; col, width: int): string =
-  ## The text of `[col, col+width)` cells of an encoded row.
-  ##
-  ## Used to state what a link covers in a failure message, and by the tests
-  ## that assert a link's extent is the location field and not the whole row.
-  result = ""
-  var at = 0
-  for span in row:
-    for r in runes(span.text):
-      let w = max(1, displayWidth($r))
-      if at >= col and at < col + width:
-        result.add $r
-      at += w
