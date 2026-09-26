@@ -159,13 +159,13 @@ proc workspaceRoot(): string =
   getCurrentDir()
 
 proc runInRecorderShell(repo, command: string): tuple[output: string, code: int] =
-  ## Run `command` inside `repo`'s Nix dev shell via `direnv exec` (the
+  ## Run `command` inside `repo`'s Nix dev shell via `repro exec` (the
   ## build-siblings strategy: each recorder builds/runs in its own toolchain).
-  ## `direnv exec` resets cwd, so the command `cd`s into the repo first. Never
+  ## `repro exec` resets cwd, so the command `cd`s into the repo first. Never
   ## raises: a launch failure is reported as a non-zero code with the exception
   ## text, so callers always get a diagnostic.
   let wrapped =
-    "direnv exec " & quoteShell(repo) & " bash -c " &
+    "repro exec " & quoteShell(repo) & " -- bash -c " &
     quoteShell("cd " & quoteShell(repo) & " && " & command)
   try:
     let (output, exitCode) = execCmdEx(wrapped)

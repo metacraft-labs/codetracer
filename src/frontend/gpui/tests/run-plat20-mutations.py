@@ -257,7 +257,7 @@ ARMS = [
         "compares on. A tab group that always reports tab 0 active loses it."),
 
     Arm("G10", DOCK,
-        "  let modelProblems = layout.validate()",
+        "  let modelProblems = layout.validate({})",
         "  let modelProblems: seq[LayoutProblem] = @[]",
         SUITE_DOCK,
         "an INVALID layout is refused rather than projected",

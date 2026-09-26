@@ -1,7 +1,8 @@
 ## PLAT-29 — THE IMPORT-CLOSURE CHECK, AND THE SEVEN ROUTES PAST A TEXT SCAN.
 ##
 ## Subject: `ci/test/editor-import-closure.sh`, driven against the REAL tree and
-## against eight synthetic trees, one per route.
+## against ten synthetic trees, one per route (routes 8 and 9 — a symlinked
+## root and a subdirectory module — added 2026-09-23).
 ##
 ## =========================================================================
 ## WHY THIS SUITE IS SEPARATE FROM THE OTHER TWO, AND WHY IT IS NATIVE-ONLY
@@ -83,7 +84,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 50
+const ExpectedAssertions = 58
+  ## **+8 ON 2026-09-23: ROUTES 8 AND 9** — the symlinked root and the
+  ## subdirectory module the gate's root set used to miss (four assertions
+  ## each).
 
 const repoRoot = currentSourcePath().parentDir.parentDir.parentDir.parentDir
   .parentDir.parentDir
@@ -145,6 +149,16 @@ type Route = enum
     ## are closed in `ci/lib/nim-imports.sh`, and a plant driven through a
     ## second builder would be planted against a tree the real routes were
     ## never proved over. One builder, one runner, one more parameter.
+  rtSymlinkedRoot
+    ## ROUTE 8 — a `.nim` SYMLINKED into the editor directory from outside it.
+    ## Measured green by PLAT-29's verification pass (2026-09-18) when the
+    ## root set was `find -maxdepth 1 -type f`, for which a symlink is not a
+    ## file. The linked module is imported by nothing; it is in the model
+    ## because it is in the model's directory.
+  rtSubdirModule
+    ## ROUTE 9 — a module in a SUBDIRECTORY of the editor directory, imported
+    ## by no root. Measured green by the same pass: `-maxdepth 1` never saw
+    ## it and nothing walked to it.
 
 const RouteCount = ord(high(Route)) - ord(low(Route)) + 1
 
@@ -171,7 +185,7 @@ proc coreBody(route: Route): string =
   of rtBlockComment:
     # ROUTE 2 — a block comment sharing the import's line.
     result.add "import ../lib/helper\n#[ a note ]# import std/asyncdispatch\n"
-  of rtReExportHop, rtExportExcept:
+  of rtReExportHop, rtExportExcept, rtSymlinkedRoot, rtSubdirModule:
     # ROUTES 3 AND 6 — this module is clean; the helper is not. A per-file scan
     # over the editor directory sees nothing at all here.
     result.add "import ../lib/helper\n"
@@ -234,6 +248,17 @@ proc buildTree(base: string; route: Route): string =
   createDir(libDir)
   writeFile(editorDir / "core.nim", coreBody(route))
   writeFile(libDir / "helper.nim", helperBody(route))
+  if route == rtSymlinkedRoot:
+    # The target lives OUTSIDE the editor directory and nothing imports it:
+    # the link is the only way it is in the model, so only a root set that
+    # follows links can see it.
+    writeFile(libDir / "sneaky.nim",
+              "import std/asyncdispatch\nproc sneaky*(): int = 8\n")
+    createSymlink(libDir / "sneaky.nim", editorDir / "linked.nim")
+  if route == rtSubdirModule:
+    createDir(editorDir / "sub")
+    writeFile(editorDir / "sub" / "deep.nim",
+              "import std/asyncdispatch\nproc deep*(): int = 9\n")
   if route == rtKeymapImport:
     # The synthetic keymap package, BESIDE the editor directory and not inside
     # it — for routes 3 and 6's reason, which the header above spends a
@@ -384,6 +409,24 @@ suite "PLAT-29 — the seven routes past a text scan":
     counted run.output.contains("VIOLATION editor-core-imports-allow-listed")
     counted run.output.contains("core.nim: std/asyncdispatch")
 
+  test "ROUTE 8 — a module SYMLINKED into the editor directory is a root":
+    let run = withTree(rtSymlinkedRoot)
+    checkpoint(run.output.strip())
+    counted run.code != 0
+    counted run.output.contains("VIOLATION editor-core-imports-allow-listed")
+    counted run.output.contains("linked.nim: std/asyncdispatch")
+    # Two roots — `core.nim` and the link — so the finding is about the root
+    # SET and not about a walk that happened to reach the target.
+    counted run.output.contains("2 root module(s)")
+
+  test "ROUTE 9 — a module in a SUBDIRECTORY no root imports is a root":
+    let run = withTree(rtSubdirModule)
+    checkpoint(run.output.strip())
+    counted run.code != 0
+    counted run.output.contains("VIOLATION editor-core-imports-allow-listed")
+    counted run.output.contains("deep.nim: std/asyncdispatch")
+    counted run.output.contains("2 root module(s)")
+
   test "PLAT-31 — A PLANTED KEYMAP IMPORT MUST REDDEN IT":
     # PLAT-31's verification gate: *"NO KEY TYPE IN THE CORE'S IMPORT CLOSURE,
     # by PLAT-29's instrument, with a planted import."* The instrument is this
@@ -419,7 +462,7 @@ suite "PLAT-29 — the seven routes past a text scan":
     # modules rather than about zero.
     counted run.output.contains("1 root module(s)")
     counted run.output.contains("2 in the closure")
-    counted RouteCount == 9
+    counted RouteCount == 11
 
 # ===========================================================================
 suite "PLAT-29 — the tally":

@@ -89,7 +89,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1775
+const ExpectedAssertions = 1776
+  ## **+1 ON 2026-09-23: `-` on a version is asserted refused** (the case
+  ## "THE VERSION IS NOT AN INT"), closing the clause PLAT-29's verification
+  ## pass found measured but unasserted.
   ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
   ## FIRING OF §35's ENUMERATION.** Five suites went red by name on the first
   ## run of the floor gate — PLAT-25's, PLAT-27's, PLAT-28's, PLAT-29's and
@@ -804,18 +807,19 @@ suite "PLAT-29 — the suite's own non-vacuity":
     counted not compiles(vd.version + 1)
     counted not compiles(InitialVersion + 1)
     counted not compiles(InitialVersion + InitialVersion)
-    # THE TWIN: what IS allowed still compiles, so the THREE refusals above are
+    # `-` IS REFUSED TOO, and asserted — the fourth clause of
+    # `document_version.nim`'s header. A caller that could subtract could
+    # compute "the version before this one" and name a result against a
+    # version nothing published; `keepRecent` exists so the one legitimate
+    # cut is computed inside the module rather than by a caller.
+    counted not compiles(vd.version - InitialVersion)
+    # THE TWIN: what IS allowed still compiles, so the FOUR refusals above are
     # not satisfied by a type nobody can use at all.
     #
-    # THREE, NOT FOUR — miscounted here and in the milestone until PLAT-29's
-    # verification pass counted them on 2026-09-18. The count is not cosmetic:
-    # `document_version.nim`'s header says `+`, `-` AND the integer literals
-    # are deliberately not borrowed, and only `+` is asserted. `-` was measured
-    # to be refused (`compiles(a - a)` is false), so the TYPE is right and the
-    # EVIDENCE is one clause short. Adding `counted not compiles(InitialVersion
-    # - InitialVersion)` moves `ExpectedAssertions` 1767 -> 1768 and the two
-    # CHECKS figures quoted in `ci/lib/test-lane-files.sh` and the milestone
-    # with it, so it is left to the pass that can re-run the arms behind it.
+    # (Three refusals until 2026-09-23: PLAT-29's verification pass counted
+    # them on 2026-09-18 and found `-` measured but unasserted — the type was
+    # right and the evidence one clause short. It is asserted now; 1775 ->
+    # 1776.)
     counted compiles(InitialVersion == InitialVersion)
     counted compiles(InitialVersion < InitialVersion)
     counted compiles(InitialVersion.ordinal)

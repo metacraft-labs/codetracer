@@ -839,14 +839,13 @@ proc applyWelcome(vm: WelcomeScreenVM) =
                       date: "2026/05/03 12:44:00", duration: "1.1s"),
   ])
   vm.setRecentFolders(@[])
-  vm.setStartOptions(@[
-    WelcomeStartOptionRecord(key: "open-folder", name: "Open folder"),
-    WelcomeStartOptionRecord(key: "record-new-trace", name: "Record new trace"),
-    WelcomeStartOptionRecord(key: "open-local-trace", name: "Open local trace"),
-    WelcomeStartOptionRecord(key: "open-online-trace", name: "Open online trace"),
-    WelcomeStartOptionRecord(key: "codetracer-shell", name: "CodeTracer shell",
-                             inactive: true),
-  ])
+  # The DESKTOP arm's real strip, from the same builder the product calls, so
+  # this catalogue entry shows what ships — including the refused "CodeTracer
+  # shell" row and the `title` that says why it is refused (issue #734). It
+  # used to be five hand-written records here, which is how the two production
+  # copies drifted in the first place.
+  vm.setStartOptions(desktopWelcomeStartOptions(showTraceSharing = true))
+  vm.setStartOptionsNote("")
 
 proc applyCommandPalette(vm: CommandPaletteVM) =
   vm.open()

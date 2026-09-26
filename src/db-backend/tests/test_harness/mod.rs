@@ -159,12 +159,12 @@ fn safe_canonicalize(path: &Path) -> PathBuf {
 /// Derive the repo root directory from a recorder binary path.
 ///
 /// Given a path like `.../codetracer-circom-recorder/target/release/codetracer-circom-recorder`,
-/// walks up to find the repo root (the directory containing `.envrc`).
-/// Returns `None` if no `.envrc` is found in any ancestor.
+/// walks up to find the repo root (the directory containing `repro.nim`).
+/// Returns `None` if no `repro.nim` is found in any ancestor.
 fn find_recorder_repo_dir(recorder_binary: &Path) -> Option<PathBuf> {
     let mut dir = recorder_binary.parent();
     while let Some(d) = dir {
-        if d.join(".envrc").exists() {
+        if d.join("repro.nim").exists() {
             return Some(d.to_path_buf());
         }
         dir = d.parent();
@@ -172,29 +172,43 @@ fn find_recorder_repo_dir(recorder_binary: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Run a recorder command, wrapping it with `direnv exec <repo_dir>` when the
-/// recorder lives in a sibling repo that has its own nix dev shell (`.envrc`).
+/// Enter a recorder environment while preserving the command's working directory.
+/// Arguments are forwarded separately, so source paths containing spaces remain intact.
+fn recorder_env_command(repo: &Path, cwd: &Path) -> Result<Command, String> {
+    let caller = std::env::current_dir().map_err(|e| format!("cannot resolve caller directory: {e}"))?;
+    let mut command = Command::new("repro");
+    command
+        .arg("exec")
+        .arg(caller.join(repo))
+        .arg("--")
+        .args(["bash", "-c", "cd \"$1\" && shift && exec \"$@\"", "recorder-env"])
+        .arg(caller.join(cwd));
+    Ok(command)
+}
+
+/// Run a recorder command, wrapping it with `repro exec <repo_dir>` when the
+/// recorder lives in a sibling repo that has its own nix dev shell (`repro.nim`).
 ///
 /// This ensures that language-specific toolchains (e.g. `circom`, `leo`) are on
 /// PATH even when the test is executed from a different repo's dev shell.
 ///
-/// If the recorder binary does not live inside a repo with `.envrc`, the command
-/// is executed directly without `direnv exec`.
+/// If the recorder binary does not live inside a repo with `repro.nim`, the command
+/// is executed directly without `repro exec`.
 fn run_recorder_command(recorder: &Path, args: &[&str]) -> Result<std::process::Output, String> {
     let repo_dir = find_recorder_repo_dir(recorder);
 
     let output = if let Some(ref repo_dir) = repo_dir {
-        // Build the full command: direnv exec <repo_dir> <recorder> <args...>
-        let mut cmd = Command::new("direnv");
-        cmd.arg("exec").arg(repo_dir).arg(recorder).args(args);
+        // Build the full command: repro exec <repo_dir> <recorder> <args...>
+        let mut cmd = recorder_env_command(repo_dir, Path::new("."))?;
+        cmd.arg(recorder).args(args);
         eprintln!(
-            "Running recorder via direnv exec {} {} {}",
+            "Running recorder via repro exec {} {} {}",
             repo_dir.display(),
             recorder.display(),
             args.join(" ")
         );
         cmd.output()
-            .map_err(|e| format!("failed to run recorder via direnv: {}", e))?
+            .map_err(|e| format!("failed to run recorder via repro: {}", e))?
     } else {
         Command::new(recorder)
             .args(args)
@@ -1787,29 +1801,18 @@ pub fn is_command_available(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Decide whether the recorder's `.envrc` dev shell should be entered via
-/// `direnv exec` before invoking BEAM tooling.
-///
-/// The dev-shell hop only helps when the recorder repo ships a Nix-flake
-/// `.envrc` *and* `direnv` can actually evaluate it: that is, the env is
-/// allowed (`direnv allow` was run) and the `use flake` directive resolves.
-/// On a Windows checkout there is no Nix, so `direnv exec` against the
-/// flake `.envrc` always errors ("`.envrc` is blocked" / flake eval
-/// failure) and would mask the BEAM tools that are already provisioned
-/// directly on `PATH`.
-///
-/// Probe with `direnv exec <repo> cmd /c exit` (Windows) / `... true`
-/// (Unix): a zero exit means direnv really can hand us the dev shell.
-fn should_use_recorder_direnv(recorder_repo: &Path) -> bool {
-    if !recorder_repo.join(".envrc").exists() || !is_command_available("direnv") {
+/// Probe the recorder's Repro environment before invoking BEAM tooling.
+/// Windows retains directly provisioned tools when no usable environment is available.
+fn should_use_recorder_repro(recorder_repo: &Path) -> bool {
+    if !recorder_repo.join("repro.nim").exists() || !is_command_available("repro") {
         return false;
     }
     let probe = if cfg!(windows) {
-        vec!["exec", recorder_repo.to_str().unwrap_or("."), "cmd", "/c", "exit"]
+        vec!["exec", recorder_repo.to_str().unwrap_or("."), "--", "cmd", "/c", "exit"]
     } else {
-        vec!["exec", recorder_repo.to_str().unwrap_or("."), "true"]
+        vec!["exec", recorder_repo.to_str().unwrap_or("."), "--", "true"]
     };
-    Command::new("direnv")
+    Command::new("repro")
         .args(&probe)
         .output()
         .map(|o| o.status.success())
@@ -3564,12 +3567,10 @@ fn record_solidity_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Str
 
     // The EVM recorder needs `solc` and `anvil` on PATH. These are provided
     // by the EVM recorder's Nix dev shell. When the repo directory is
-    // available, we use `direnv exec` to enter that shell automatically.
-    let output = if let Some(repo_dir) = evm_recorder_dir.filter(|d| d.join(".envrc").exists()) {
-        Command::new("direnv")
+    // available, we use `repro exec` to enter that shell automatically.
+    let output = if let Some(repo_dir) = evm_recorder_dir.filter(|d| d.join("repro.nim").exists()) {
+        recorder_env_command(repo_dir, Path::new("."))?
             .args([
-                "exec",
-                repo_dir.to_str().unwrap(),
                 recorder.to_str().unwrap(),
                 "record",
                 source_path.to_str().unwrap(),
@@ -3577,7 +3578,7 @@ fn record_solidity_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Str
                 trace_dir.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| format!("failed to run EVM recorder via direnv exec: {}", e))?
+            .map_err(|e| format!("failed to run EVM recorder via repro exec: {}", e))?
     } else {
         // Fall back to direct invocation (assumes solc/anvil are already on PATH)
         Command::new(&recorder)
@@ -3666,11 +3667,11 @@ fn record_fuel_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
 
     // Step 1: Compile the Sway project with forc (needs the fuel-recorder's dev shell)
     let forc_output = if let Some(ref repo_dir) = recorder_repo {
-        Command::new("direnv")
-            .args(["exec", repo_dir.to_str().unwrap(), "forc", "build"])
+        recorder_env_command(repo_dir, source_path)?
+            .args(["forc", "build"])
             .current_dir(source_path)
             .output()
-            .map_err(|e| format!("failed to run forc build via direnv: {}", e))?
+            .map_err(|e| format!("failed to run forc build via repro: {}", e))?
     } else {
         Command::new("forc")
             .arg("build")
@@ -3863,7 +3864,7 @@ fn record_solana_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
 /// The PolkaVM recorder expects a pre-compiled `.polkavm` blob. If `source_path`
 /// points to a `.rs` file instead, this function first attempts to build the blob
 /// by running `cargo run --example build_flow_test_blob` inside the recorder repo
-/// (via `direnv exec` for the correct dev shell).
+/// (via `repro exec` for the correct dev shell).
 ///
 /// Returns an error if the recorder binary is not found, or if recording fails.
 fn record_polkavm_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
@@ -3883,18 +3884,11 @@ fn record_polkavm_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Stri
             let repo_dir = find_recorder_repo_dir(&recorder);
             if let Some(ref repo_dir) = repo_dir {
                 eprintln!(
-                    "Building PolkaVM blob via: direnv exec {} cargo run --example build_flow_test_blob",
+                    "Building PolkaVM blob via: repro exec {} cargo run --example build_flow_test_blob",
                     repo_dir.display()
                 );
-                let build_output = Command::new("direnv")
-                    .args([
-                        "exec",
-                        repo_dir.to_str().unwrap(),
-                        "cargo",
-                        "run",
-                        "--example",
-                        "build_flow_test_blob",
-                    ])
+                let build_output = recorder_env_command(repo_dir, repo_dir)?
+                    .args(["cargo", "run", "--example", "build_flow_test_blob"])
                     .current_dir(repo_dir)
                     .output()
                     .map_err(|e| format!("failed to build PolkaVM blob: {}", e))?;
@@ -3923,7 +3917,7 @@ fn record_polkavm_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Stri
 
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    // Use run_recorder_command to wrap with `direnv exec` for the correct
+    // Use run_recorder_command to wrap with `repro exec` for the correct
     // dev shell environment.
     let output = run_recorder_command(
         &recorder,
@@ -4009,7 +4003,7 @@ fn record_circom_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
 
     // The circom recorder needs the `circom` compiler on PATH, which is
     // provided by the recorder repo's nix dev shell. Use `run_recorder_command`
-    // to automatically wrap with `direnv exec` when a `.envrc` is present.
+    // to automatically wrap with `repro exec` when a `repro.nim` is present.
     let output = run_recorder_command(
         &recorder,
         &[
@@ -4158,7 +4152,7 @@ fn record_aiken_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String
 /// `codetracer-flow-recorder/go-helper/` directory.
 ///
 /// The helper is built inside the flow recorder's Nix dev shell (via
-/// `direnv exec`) so that the Cadence Go SDK and Go toolchain are available.
+/// `repro exec`) so that the Cadence Go SDK and Go toolchain are available.
 /// The compiled binary is placed in the flow recorder's `target/debug/`
 /// directory for reuse across test runs.
 ///
@@ -4179,19 +4173,11 @@ fn build_cadence_go_helper(flow_recorder_dir: &Path) -> Result<PathBuf, String> 
     let helper_bin = output_dir.join("cadence-trace-helper");
 
     // Build the Go helper using the flow recorder's dev shell for Go + Cadence SDK
-    let build_output = Command::new("direnv")
-        .args([
-            "exec",
-            flow_recorder_dir.to_str().unwrap(),
-            "go",
-            "build",
-            "-o",
-            helper_bin.to_str().unwrap(),
-            ".",
-        ])
+    let build_output = recorder_env_command(flow_recorder_dir, &go_helper_dir)?
+        .args(["go", "build", "-o", helper_bin.to_str().unwrap(), "."])
         .current_dir(&go_helper_dir)
         .output()
-        .map_err(|e| format!("failed to run `direnv exec ... go build` for Go helper: {}", e))?;
+        .map_err(|e| format!("failed to run `repro exec ... go build` for Go helper: {}", e))?;
 
     if !build_output.status.success() {
         return Err(format!(
@@ -4342,14 +4328,12 @@ fn record_elixir_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
 
     let recorder_bin_dir_arg = recorder.parent().map(|p| p.display().to_string()).unwrap_or_default();
 
-    let use_direnv = should_use_recorder_direnv(&recorder_repo);
+    let use_repro = should_use_recorder_repro(&recorder_repo);
     let run_in_recorder_shell = |program: &str, args: &[&str], cwd: &Path| -> Result<std::process::Output, String> {
-        let mut command = if use_direnv {
-            let mut cmd = Command::new("direnv");
-            cmd.arg("exec")
-                .arg(&recorder_repo)
-                .arg("bash")
-                .arg("-lc")
+        let mut command = if use_repro {
+            let mut cmd = recorder_env_command(&recorder_repo, cwd)?;
+            cmd.arg("bash")
+                .arg("-c")
                 .arg("export PATH=\"$1:$PATH\"; shift; exec \"$@\"")
                 .arg("codetracer-beam-recorder-path")
                 .arg(&recorder_bin_dir_arg)
@@ -4425,12 +4409,10 @@ fn record_elixir_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     ];
 
     let output = {
-        let mut command = if should_use_recorder_direnv(&recorder_repo) {
-            let mut cmd = Command::new("direnv");
-            cmd.arg("exec")
-                .arg(&recorder_repo)
-                .arg("bash")
-                .arg("-lc")
+        let mut command = if should_use_recorder_repro(&recorder_repo) {
+            let mut cmd = recorder_env_command(&recorder_repo, source_path)?;
+            cmd.arg("bash")
+                .arg("-c")
                 .arg("export PATH=\"$1:$PATH\"; shift; exec \"$@\"")
                 .arg("codetracer-beam-recorder-path")
                 .arg(&recorder_bin_dir_arg)
@@ -4505,15 +4487,13 @@ fn record_erlang_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     // Run the given program inside the recorder repo's dev shell when one is
     // available — matches the Elixir helper for parity (BEAM tools may live in
     // the recorder's nix shell rather than the codetracer dev shell).
-    let use_direnv = should_use_recorder_direnv(&recorder_repo);
+    let use_repro = should_use_recorder_repro(&recorder_repo);
     let run_in_recorder_shell = |program: &str, args: &[&str], cwd: &Path| -> Result<std::process::Output, String> {
         let recorder_bin_dir_arg = recorder.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        let mut command = if use_direnv {
-            let mut cmd = Command::new("direnv");
-            cmd.arg("exec")
-                .arg(&recorder_repo)
-                .arg("bash")
-                .arg("-lc")
+        let mut command = if use_repro {
+            let mut cmd = recorder_env_command(&recorder_repo, cwd)?;
+            cmd.arg("bash")
+                .arg("-c")
                 .arg("export PATH=\"$1:$PATH\"; shift; exec \"$@\"")
                 .arg("codetracer-beam-recorder-path")
                 .arg(&recorder_bin_dir_arg)
@@ -4580,13 +4560,11 @@ fn record_erlang_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     ];
 
     let output = {
-        let mut command = if should_use_recorder_direnv(&recorder_repo) {
+        let mut command = if should_use_recorder_repro(&recorder_repo) {
             let recorder_bin_dir_arg = recorder.parent().map(|p| p.display().to_string()).unwrap_or_default();
-            let mut cmd = Command::new("direnv");
-            cmd.arg("exec")
-                .arg(&recorder_repo)
-                .arg("bash")
-                .arg("-lc")
+            let mut cmd = recorder_env_command(&recorder_repo, source_path)?;
+            cmd.arg("bash")
+                .arg("-c")
                 .arg("export PATH=\"$1:$PATH\"; shift; exec \"$@\"")
                 .arg("codetracer-beam-recorder-path")
                 .arg(&recorder_bin_dir_arg)

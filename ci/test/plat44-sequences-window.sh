@@ -5,7 +5,7 @@
 #   bash ci/test/plat44-sequences-window.sh --inside   # internal
 #
 # `ci/test/plat44_sequences_plan.nim` writes the plan: each sequence a key
-# reaches (24 of the thirty, measured — the six others are named in the plan
+# reaches (23 of the thirty, measured — the seven others are named in the plan
 # with the step no model binds), its model, its document, its canonical keys
 # and the document the keys must leave on disk. For each, this lane:
 #

@@ -44,10 +44,12 @@
 ## is the reason this model has a `boundsNote` and a `marksNote` at all:
 ##
 ##   * the BOUNDS are real, and they do not come from `TimelineVM`.
-##     `TimelineVM.markers` is a memo over `store.timeline`, and nothing writes
+##     `TimelineVM.bounds` is a memo over `store.timeline`, and nothing writes
 ##     `store.timeline` on a completed replay session — only the live-MCR
-##     `updateRecordingHead` / `requestRestoreAt` paths do. Measured: `markers`
-##     is `@[]` on all three fixtures, before and after stepping. The recording's
+##     `updateRecordingHead` / `requestRestoreAt` paths do. Measured: `bounds`
+##     is `@[]` on all three fixtures, before and after stepping (the field was
+##     spelled `markers` when that measurement was taken; only the name moved).
+##     The recording's
 ##     last tick arrives instead on every `ct/event-load` row as `maxRRTicks`
 ##     (171 / 1314 / 3896), which the engine builds from `last_step_id`.
 ##   * the SPANS are real: `ct/load-calltrace-section` answers rows carrying
@@ -450,18 +452,6 @@ proc timelineBarScreen*(model: TimelineBarModel;
   let area = CellArea(col: 0, row: 0, width: width, height: height)
   result = paintTimelineBar(g, area, model)
 
-proc timelineBarRows*(model: TimelineBarModel;
-                      width, height: int): seq[StyledRow] =
-  timelineBarScreen(model, width, height).rows
-
-proc timelineBarText*(model: TimelineBarModel;
-                      width, height: int): seq[string] =
-  ## The scrubber as plain text, one string per row. What a Tier-2 `regionText`
-  ## read is compared against.
-  result = @[]
-  for row in timelineBarRows(model, width, height):
-    result.add rowText(row)
-
 proc trackColumnAt*(screen: TimelineBarScreen; screenRow, screenCol: int): int =
   ## Which TRACK cell a screen coordinate is in, or -1 for anywhere else.
   ##
@@ -473,8 +463,3 @@ proc trackColumnAt*(screen: TimelineBarScreen; screenRow, screenCol: int): int =
     return -1
   let c = screenCol - screen.trackCol
   if c < 0 or c >= screen.trackWidth: -1 else: c
-
-proc renderTimelineBarTree*(model: TimelineBarModel; r: TerminalRenderer;
-                            width, height: int): TerminalNode =
-  ## The scrubber as a component tree: one `div` per row, styled spans inside.
-  styledRowsTree(r, timelineBarRows(model, width, height))

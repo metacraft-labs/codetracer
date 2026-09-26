@@ -147,6 +147,11 @@ KNOWN_GAPS=(
 	# needs the same workspace as the Linux one. Four of these six close with a
 	# bare entry; isonim and runquota need the manifest change above.
 	"codetracer.yml|windows-installer-build|isonim"
+	# isonim-tui became required on 2026-09-25 (the editor model imports
+	# `isonim_tui/text/width`). Same shape as isonim above: the windows-diy
+	# siblings: block carries only the db-backend repos, and closing it needs
+	# the same manifest change.
+	"codetracer.yml|windows-installer-build|isonim-tui"
 	"codetracer.yml|windows-installer-build|nim-agents"
 	"codetracer.yml|windows-installer-build|nim-agent-harbor"
 	"codetracer.yml|windows-installer-build|nim-acp"

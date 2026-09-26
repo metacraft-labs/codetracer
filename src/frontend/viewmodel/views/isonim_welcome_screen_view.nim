@@ -109,6 +109,21 @@ proc startOptionClass*(opt: WelcomeStartOptionRecord; hovered: bool): string =
     parts.add("hovered")
   parts.join(" ")
 
+const StartOptionsNoteClass* = "start-options-note"
+  ## The standing line under the start-options strip (issue #734). Rendered
+  ## only when `vm.startOptionsNote` is non-empty, so the desktop's DOM is
+  ## byte-for-byte what it was.
+
+proc startOptionAriaDisabled*(opt: WelcomeStartOptionRecord): string =
+  ## `aria-disabled` rather than the `disabled` attribute, because the button
+  ## must stay focusable and hoverable: its `title` — the only place the
+  ## refusal is spelled out per option — is what a real `disabled` control
+  ## would suppress in several browsers, and a screen reader that skips the
+  ## control entirely tells the user less than issue #734's reporter already
+  ## knew. The refusal itself is enforced in `triggerStartOption` below, not
+  ## by the attribute.
+  if opt.inactive: "true" else: "false"
+
 proc parseWelcomeDate(dateStr: string): Option[DateTime] =
   if dateStr.len == 0:
     return
@@ -245,6 +260,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
   let traces = vm.recentTraces.val
   let folders = vm.recentFolders.val
   let options = vm.startOptions.val
+  let startOptionsNote = vm.startOptionsNote.val
   let firstTime = traces.len == 0 and folders.len == 0
 
   ui(r):
@@ -318,11 +334,16 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
             let optCopy = opt
             button(class = "ct-button-sm-tertiary " &
                            startOptionClass(optCopy, hovered),
+                   title = optCopy.disabledReason,
+                   `aria-disabled` = startOptionAriaDisabled(optCopy),
                    onclick = startOptionClickHandler(vm, callbacks, optCopy),
                    onmouseover = startOptionMouseOverHandler(vm, optCopy.key),
                    onmouseleave = proc() =
                      vm.clearHoveredOption()):
               text optCopy.name
+        if startOptionsNote.len > 0:
+          tdiv(class = StartOptionsNoteClass):
+            text startOptionsNote
 
 proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                              callbacks: WelcomeScreenCallbacks): MockNode =
@@ -581,6 +602,7 @@ when defined(js):
     let traces = vm.recentTraces.val
     let folders = vm.recentFolders.val
     let options = vm.startOptions.val
+    let startOptionsNote = vm.startOptionsNote.val
     let firstTime = traces.len == 0 and folders.len == 0
 
     ui(r):
@@ -654,11 +676,16 @@ when defined(js):
               let optCopy = opt
               button(class = "ct-button-sm-tertiary " &
                              startOptionClass(optCopy, hovered),
+                     title = optCopy.disabledReason,
+                     `aria-disabled` = startOptionAriaDisabled(optCopy),
                      onclick = startOptionClickHandler(vm, callbacks, optCopy),
                      onmouseover = startOptionMouseOverHandler(vm, optCopy.key),
                      onmouseleave = proc() =
                        vm.clearHoveredOption()):
                 text optCopy.name
+          if startOptionsNote.len > 0:
+            tdiv(class = StartOptionsNoteClass):
+              text startOptionsNote
 
   proc renderNewRecordModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
                               callbacks: WelcomeScreenCallbacks):

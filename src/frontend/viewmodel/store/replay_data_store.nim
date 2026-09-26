@@ -26,7 +26,9 @@ import isonim/core/[signals, owner, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
-import types, request_tracker, degraded_state
+import types, request_tracker, degraded_state, stop_timeline
+
+export stop_timeline
 export degraded_state
 
 const
@@ -288,6 +290,20 @@ type
     capability*: Signal[ReplayCapability]
     sourceAvailability*: Signal[SourceAvailability]
 
+  LocalsRequestRecord* = object
+    ## One in-flight `ct/load-locals` request (`ReplayDataStore.pendingLocals`).
+    requestId*: string
+      ## The transport's identity for the request — what its answer names.
+    requestedAt*: StopStamp
+      ## The stop it was SENT at.
+    answered*: bool
+      ## An answer naming `requestId` has been reconciled. The web delivers
+      ## one answer to several subscribers; the second and later deliveries
+      ## are told the first verdict rather than reconciled (and counted)
+      ## again.
+    applied*: bool
+      ## The verdict, meaningful once `answered`.
+
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
@@ -304,6 +320,50 @@ type
     degraded*: DegradedStateStore
     backend*: BackendService
     requestTracker*: RequestTracker
+    stops*: StopTimeline
+      ## PLAT-29. The stops the debugger has been at, as versions — so a
+      ## `ct/load-locals` answer names the stop it was REQUESTED at and is
+      ## reconciled against the stop the store is at when it arrives
+      ## (`store/stop_timeline`). `stops.report` counts every arrival.
+    localsStamp*: StopStamp
+      ## The stop the locals in `locals` were requested at. Meaningful when
+      ## `hasLocalsStamp`: a store whose locals were written by some other
+      ## route (`updateLocals` from a replica or a snapshot) has none, and
+      ## `inline_value_timeline.InlineValueGate` withholds its values rather
+      ## than guessing which stop they are about.
+    hasLocalsStamp*: bool
+    pendingLocals*: seq[LocalsRequestRecord]
+      ## The `ct/load-locals` requests in flight on a host whose answers
+      ## arrive asynchronously (the web renderer), KEYED BY THE REQUEST'S
+      ## IDENTITY — the transport's own request id, which the answer carries
+      ## back — never by arrival order. The web sends `ct/load-locals` from
+      ## more than one place (the legacy State component and the StateVM's
+      ## auto-load effect) and may deliver one answer to more than one
+      ## subscriber, so a count of recorded requests and a count of answers
+      ## need not agree; a queue popped per answer desynchronises the first
+      ## time they do. `noteLocalsRequestSent` records, `applyLocalsAnswer` matches,
+      ## `forgetLocalsRequest` retires. Only a host that calls the first ever
+      ## holds an entry (the native hosts fetch and apply synchronously and
+      ## never do), and the ledger is bounded (`LocalsLedgerDepth`).
+    sourceLanguageOf*: proc(file: string): string {.closure.}
+      ## The host's answer to "which language is this source file in", as the
+      ## language's WIRE NAME (`langWireName(toLangFromFilename(file))`).
+      ## `ct/load-locals` carries it: the native replay backend renders a
+      ## value through the language's own printers (a Rust `String` or `Vec`
+      ## as Rust, not as a C struct), so a request that says `c` about a Rust
+      ## stop gets C-shaped values back. Installed by every host that can
+      ## answer (the web's `ui/state.initStateVMWithStore`, the native hosts'
+      ## `headless_session`); nil means "unknown", and `localsLanguage` falls
+      ## back to `LoadLocalsDefaultLang`. A hook rather than an import
+      ## because this module is in the Embed SDK's package graph and does not
+      ## import `common_lang` (see `LoadLocalsDefaultLang`).
+    localsLoadedByHost*: bool
+      ## The host requests and applies the locals itself, synchronously, after
+      ## each stop (`headless_session.fetchLocals` / `applyLocals`, which the
+      ## terminal and GPUI front-ends call from `native_host.loadStopPanes`).
+      ## The StateVM's auto-load then sends nothing: its answer would reach
+      ## no decoder on such a host, so it would be a second `ct/load-locals`
+      ## per stop that nothing reads.
 
 # ---------------------------------------------------------------------------
 # Degraded state (Page-Descriptions.md §14)
@@ -772,6 +832,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       vmDebug "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
     let store = ReplayDataStore(
       storeId: assignedId,
+      stops: initStopTimeline(),
       # -- top-level state --
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
@@ -872,12 +933,23 @@ const
     ## ``store_test.nim`` pins it against ``langWireName(LangC)`` so the two
     ## cannot drift.
 
+proc localsLanguage*(store: ReplayDataStore): string =
+  ## The wire name of the language of the file the debugger is stopped in —
+  ## what a `ct/load-locals` sent now must say. `LoadLocalsDefaultLang` when
+  ## the host installed no `sourceLanguageOf` or no file is known yet.
+  let file = store.debugger.val.location.file
+  if store.sourceLanguageOf.isNil or file.len == 0:
+    return LoadLocalsDefaultLang
+  result = store.sourceLanguageOf(file)
+  if result.len == 0:
+    result = LoadLocalsDefaultLang
+
 proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
                     countBudget: int = 3000;
                     minCountLimit: int = 50;
                     depthLimit: int = 7;
                     watchExpressions: seq[string] = @[];
-                    lang: string = LoadLocalsDefaultLang) =
+                    lang: string = "") =
   ## Request locals/globals from the backend for the given rrTicks.
   ## Skipped if an identical request is already in flight.
   ##
@@ -898,6 +970,11 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   ## were 30 and 36).  A name cannot be off by two.  The receiver refuses a
   ## bare integer, so a caller that still passes one gets an error rather
   ## than a silently wrong language.
+  ##
+  ## An empty ``lang`` (the default) is the language of the file the debugger
+  ## is stopped in, as the host answers it (``localsLanguage``). The StateVM's
+  ## auto-load, which is the web renderer's ONE ``ct/load-locals`` sender per
+  ## stop, relies on that default.
   let key = "load-locals"
   # Include watch expressions in the dedup key so that adding a new
   # watch at the same rrTicks position still triggers a fresh request.
@@ -908,7 +985,16 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   # the count unchanged at the same step, so the request was suppressed
   # and the pane went on showing the answer to an expression that had
   # been deleted.
-  let argsStr = $rrTicks & "|" & watchExpressions.join("\x1f")
+  #
+  # AND THE STOP, not only its tick. Two stops can share a tick — a jump to
+  # another frame or line at the same `rrTicks` — and a request about the
+  # first, still in flight, is no answer about the second: the store drops it
+  # (`applyLocalsAnswer`) once the debugger has moved. Keyed on the tick
+  # alone, the second request was suppressed and the pane showed nothing
+  # current; while the web's legacy State component still sent its own
+  # undeduplicated request, that request papered over it.
+  let argsStr = $rrTicks & "|" & stopIdentityOf(store.debugger.val) & "|" &
+    watchExpressions.join("\x1f")
   if store.requestTracker.isDuplicate(key, argsStr):
     return
 
@@ -921,7 +1007,7 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
     "minCountLimit": minCountLimit,
     "depthLimit": depthLimit,
     "watchExpressions": watchExpressions,
-    "lang": lang,
+    "lang": (if lang.len > 0: lang else: store.localsLanguage()),
   }
   let fut = store.backend.send("ct/load-locals", args)
 
@@ -1040,6 +1126,9 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   if store.session.val.debugSessionMode in {liveMcr, liveMaterialized} and
       rrTicks > store.session.val.recordingHeadRRTicks:
     store.updateRecordingHead(rrTicks)
+  # PLAT-29: a move is a new stop, so a locals answer requested before it is
+  # about a stop the debugger has left.
+  store.stops.observe(store.debugger.val)
 
 proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
   ## Update the current visual replay GEID independently of rrTicks. MCR
@@ -1070,8 +1159,8 @@ proc updateWatches*(store: ReplayDataStore;
     vmDebug "[PIPELINE] updateWatches: setting " & $watches.len & " watch result(s)"
   store.locals.watches.val = watches
 
-proc applyLocalsResponse*(store: ReplayDataStore;
-                          rows: seq[Variable]) =
+proc writeLocalsResponse(store: ReplayDataStore;
+                         rows: seq[Variable]) =
   ## Write ONE `ct/load-locals` response into the store, splitting the
   ## watch answers out of the locals.
   ##
@@ -1097,6 +1186,103 @@ proc applyLocalsResponse*(store: ReplayDataStore;
       locals.add(row)
   store.updateLocals(locals)
   store.updateWatches(watches)
+
+proc observeStop*(store: ReplayDataStore) =
+  ## Bring the stop timeline up to `store.debugger` — see `stop_timeline`'s
+  ## "Observed, not only notified". Called by everything that reads the
+  ## timeline, so a host that writes the position directly cannot leave it
+  ## behind.
+  store.stops.observe(store.debugger.val)
+
+proc stopStamp*(store: ReplayDataStore): StopStamp =
+  ## The stop a `ct/load-locals` request is being SENT at. Taken by the host
+  ## immediately before it sends, and handed back with the answer to
+  ## `applyLocalsResponse`.
+  store.observeStop()
+  store.stops.stamp()
+
+proc applyLocalsResponse*(store: ReplayDataStore;
+                          rows: seq[Variable];
+                          requestedAt: StopStamp): bool =
+  ## PLAT-29: THE ANSWER NAMES THE STOP IT WAS REQUESTED AT. When the
+  ## debugger has moved since, the answer is about a stop the user has left
+  ## and it is DROPPED — counted in `store.stops.report`, the locals left as
+  ## they were, and `false` returned — never written as though the debugger
+  ## had not moved. `true` when it was applied.
+  ##
+  ## There is no overload without `requestedAt`, deliberately: a host that
+  ## cannot say when it asked is a host whose answer cannot be reconciled,
+  ## and the compiler is what makes every host say.
+  store.observeStop()
+  if not store.stops.admit(requestedAt):
+    return false
+  store.localsStamp = store.stops.stamp()
+  store.hasLocalsStamp = true
+  store.writeLocalsResponse(rows)
+  true
+
+const
+  LocalsLedgerDepth* = StopTimelineDepth
+    ## In-flight `ct/load-locals` requests remembered. A request that is never
+    ## answered (the transport timed it out) must not hold its entry forever;
+    ## past this many the OLDEST is forgotten, and an answer naming a
+    ## forgotten request is dropped as `drVersionForgotten`.
+
+proc findLocalsRequest(store: ReplayDataStore; requestId: string): int =
+  for i, r in store.pendingLocals:
+    if r.requestId == requestId:
+      return i
+  -1
+
+proc noteLocalsRequestSent*(store: ReplayDataStore; requestId: string) =
+  ## The `ct/load-locals` request identified by `requestId` is being sent
+  ## NOW; its answer will arrive later, naming the same id. Records the stop
+  ## it is sent at. An id already in the ledger is REPLACED — a transport that
+  ## restarted its numbering is sending a new request, and the entry left by
+  ## the old one belongs to a question that will never be answered.
+  let at = store.findLocalsRequest(requestId)
+  if at >= 0:
+    store.pendingLocals.delete(at)
+  store.pendingLocals.add LocalsRequestRecord(
+    requestId: requestId, requestedAt: store.stopStamp())
+  while store.pendingLocals.len > LocalsLedgerDepth:
+    store.pendingLocals.delete(0)
+
+proc applyLocalsAnswer*(store: ReplayDataStore;
+                        rows: seq[Variable];
+                        requestId: string): bool =
+  ## The answer to the request `requestId` arrived: reconcile it against the
+  ## stop THAT request was sent at (`applyLocalsResponse`). `true` when
+  ## applied.
+  ##
+  ## - A second delivery of the same answer is told the first verdict and
+  ##   writes nothing.
+  ## - An id the ledger does not hold — never recorded, or forgotten past
+  ##   `LocalsLedgerDepth` — names no stop this store can vouch for: DROPPED,
+  ##   counted as `drVersionForgotten`.
+  ## - An EMPTY id is an answer from a transport that carries no request
+  ##   identity at all (the VS Code extension's `customRequest`); it is
+  ##   reconciled against the stop the store is at now, which is all such a
+  ##   host can say.
+  if requestId.len == 0:
+    return store.applyLocalsResponse(rows, store.stopStamp())
+  let at = store.findLocalsRequest(requestId)
+  if at < 0:
+    store.stops.dropUnvouched()
+    return false
+  if store.pendingLocals[at].answered:
+    return store.pendingLocals[at].applied
+  let verdict = store.applyLocalsResponse(rows,
+    store.pendingLocals[at].requestedAt)
+  store.pendingLocals[at].answered = true
+  store.pendingLocals[at].applied = verdict
+  verdict
+
+proc forgetLocalsRequest*(store: ReplayDataStore; requestId: string) =
+  ## Every subscriber has seen the answer to `requestId`: retire its entry.
+  let at = store.findLocalsRequest(requestId)
+  if at >= 0:
+    store.pendingLocals.delete(at)
 
 # ---------------------------------------------------------------------------
 # Event log — one decoder for `ct/event-load`

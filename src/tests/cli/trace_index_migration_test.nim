@@ -378,15 +378,43 @@ proc compileHelper() =
   if code == 0:
     helperBin = bin
 
-proc runHelper(scenario: string): tuple[ok: bool, outp, errp: string] =
-  let home = createTempDir("ct-trace-index-migration-" & scenario & "-", "")
-  defer: removeDir(home)
-  var env = newStringTable(modeCaseSensitive)
+proc readToEof(s: Stream): string =
+  ## Everything the helper wrote, up to end of file.  Not `streams.readAll`,
+  ## which stops at the first SHORT read: a Windows pipe returns each of the
+  ## child's writes separately, so `readAll` kept only its first line
+  ## (LRS-6's review, 2026-09-24; the same defect is fixed in
+  ## `src/ct/utilities/target_recognition.nim`).  POSIX pipe streams fill
+  ## the buffer first, which is why no Linux run saw it.
+  result = ""
+  var buffer {.noinit.}: array[4096, char]
+  while true:
+    let n = s.readData(addr buffer[0], buffer.len)
+    if n <= 0:
+      break
+    let start = result.len
+    result.setLen(start + n)
+    copyMem(addr result[start], addr buffer[0], n)
+
+proc runHelperIn(scenario, home: string): tuple[ok: bool, outp, errp: string] =
+  # Case-INsensitive on Windows, where the OS treats `UserProfile` and
+  # `USERPROFILE` as one variable: overriding it must replace the inherited
+  # entry, not add a second one beside it.
+  var env = newStringTable(
+    when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
   env["HOME"] = home
   env["XDG_DATA_HOME"] = home
   env["TMPDIR"] = home
+  # WINDOWS: Nim's `getHomeDir` -- which `paths.codetracerTraceDir`, and so
+  # the trace index, is derived from -- reads `USERPROFILE`, not `HOME`.
+  # Without these three every e2e case wrote into the developer's REAL
+  # `%USERPROFILE%/.local/share/codetracer/trace_index.db` and migrated it
+  # (LRS-6, 2026-09-23; fixed by its review).  Pinned by the "resolves inside
+  # its scratch profile" case below.
+  env["USERPROFILE"] = home
+  env["LOCALAPPDATA"] = home / "AppData" / "Local"
+  env["APPDATA"] = home / "AppData" / "Roaming"
   # The fault hook must not leak into a scenario that expects success.
   env.del(traceIndexMigrationFaultEnv)
   # In the Nix dev shell libsqlite3.so is on CT_LD_LIBRARY_PATH, not on the
@@ -398,9 +426,14 @@ proc runHelper(scenario: string): tuple[ok: bool, outp, errp: string] =
       if existing.len > 0: ctLd & ":" & existing else: ctLd
   let p = startProcess(helperBin, args = @[scenario], env = env, options = {})
   defer: p.close()
-  let outp = p.outputStream.readAll()
-  let errp = p.errorStream.readAll()
+  let outp = p.outputStream.readToEof()
+  let errp = p.errorStream.readToEof()
   (p.waitForExit() == 0, outp, errp)
+
+proc runHelper(scenario: string): tuple[ok: bool, outp, errp: string] =
+  let home = createTempDir("ct-trace-index-migration-" & scenario & "-", "")
+  defer: removeDir(home)
+  runHelperIn(scenario, home)
 
 compileHelper()
 
@@ -1058,6 +1091,41 @@ suite "trace_index schema version 1 — lang ordinal to name":
       check ("\"approach\":\"" & $approach & "\"") in
         Json.encode(Trace(approach: approach))
 
+  test "ct trace-metadata encodes Trace.calltraceMode as its NAME, never an ordinal (LRS-6)":
+    ## The third enum on the `ct trace-metadata` -> Electron hop, and the last
+    ## one that crossed it as an integer: LRS-4's replay evidence showed
+    ## `"calltraceMode":3` beside the newly named `"lang"`.
+    ## `serializesAsTextInJson(CalltraceMode)` in `trace_index.nim` puts the
+    ## name on the hop, which is what lets the renderer decode it with
+    ## `parseEnum[CalltraceMode]` instead of the hand-written `var MODE = {…}`
+    ## map LRS-6 deleted.  Behavioural, like the two cases above, because the
+    ## placement of the rule is the whole finding: a rule declared downstream
+    ## of `trace_index.nim` compiles and is ignored, so a grep for the line
+    ## could pass while the hop still carried the integer.
+    ##
+    ## "No ordinal" is checked by SHAPE, not only against the member's own
+    ## ordinal: a digit right after the key fails the case, whichever integer
+    ## it is.
+    for mode in CalltraceMode:
+      let encoded = Json.encode(Trace(calltraceMode: mode, recordingId: "r4"))
+      checkpoint("calltraceMode " & $mode & " encodes as: " & encoded)
+      check ("\"calltraceMode\":\"" & $mode & "\"") in encoded
+      let at = encoded.find("\"calltraceMode\":")
+      check at >= 0
+      if at >= 0:
+        let valueStart = at + "\"calltraceMode\":".len
+        check valueStart < encoded.len
+        if valueStart < encoded.len:
+          check encoded[valueStart] notin {'0'..'9', '-'}
+    # The reader side stays tolerant in both directions, which is what makes
+    # the change safe for any encoded `Trace` already written as an integer:
+    # `json_serialization` accepts an enum as a name OR an ordinal.
+    let named = Json.decode("{\"calltraceMode\":\"CallKeyOnly\"}", Trace)
+    check named.calltraceMode == CalltraceMode.CallKeyOnly
+    let numbered = Json.decode("{\"calltraceMode\":" &
+      $ord(CalltraceMode.RawRecordNoValues) & "}", Trace)
+    check numbered.calltraceMode == CalltraceMode.RawRecordNoValues
+
   test "a retired row keeps its label in a listing":
     ## `langLabel` is what `ct list` and the upload listing print.  A retired
     ## row shows the name it was recorded under, a live row its live name.
@@ -1086,6 +1154,37 @@ suite "trace_index schema version 1 — lang ordinal to name":
     if helperBin.len == 0:
       echo helperCompileOutput
     check helperBin.len > 0
+
+  test "the helper resolves its trace index INSIDE its scratch profile, never the real one":
+    ## The isolation pin (LRS-6's review, 2026-09-24).  Every e2e case here
+    ## writes a trace index -- one of them MIGRATES it -- so a child that
+    ## resolves the index anywhere but the scratch directory `runHelperIn`
+    ## gave it is writing into the developer's own profile.  That happened on
+    ## Windows, where the env set `HOME` and Nim's `getHomeDir` reads
+    ## `USERPROFILE`.  The child reports where it resolved; nothing here opens
+    ## or stats the real database.
+    require helperBin.len > 0
+    let home = createTempDir("ct-trace-index-migration-profile-", "")
+    defer: removeDir(home)
+    let (ok, outp, errp) = runHelperIn("profile", home)
+    checkpoint("scratch profile: " & home)
+    checkpoint("helper stdout: " & outp & "stderr: " & errp)
+    check ok
+    var resolved = ""
+    for line in outp.splitLines:
+      if line.startsWith("TRACE-INDEX "):
+        resolved = line["TRACE-INDEX ".len .. ^1].strip
+    check resolved.len > 0
+    let inside = when defined(windows):
+        resolved.normalizedPath.toLowerAscii.startsWith(
+          home.normalizedPath.toLowerAscii)
+      else:
+        resolved.normalizedPath.startsWith(home.normalizedPath)
+    if not inside:
+      checkpoint("the helper would write its trace index to " & resolved &
+        ", OUTSIDE its scratch profile " & home & ".  runHelperIn is " &
+        "missing the variable this OS derives the home directory from.")
+    check inside
 
   test "e2e: recordTrace writes a language NAME and find reads it back":
     require helperBin.len > 0

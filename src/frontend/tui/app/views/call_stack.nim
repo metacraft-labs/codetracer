@@ -474,8 +474,3 @@ proc rowAtScreenRow*(screen: CallStackScreen; screenRow: int): int =
   ## re-deriving where it should land.
   let i = screenRow - screen.area.row - 1
   if i < 0 or i >= screen.visible.len: -1 else: i
-
-proc renderCallStackTree*(model: CallStackModel; r: TerminalRenderer;
-                          width, height: int): TerminalNode =
-  ## The pane as a component tree: one `div` per row, styled spans inside.
-  styledRowsTree(r, callStackRows(model, width, height))

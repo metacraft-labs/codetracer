@@ -66,6 +66,23 @@ proc makeTmpHome(name: string): string =
   ## Create a fresh tmpdir for a single test run.  Caller cleans up.
   createTempDir("ct-trace-index-test-" & name & "-", "")
 
+proc readToEof(s: Stream): string =
+  ## Everything the helper wrote, up to end of file.  Not `streams.readAll`,
+  ## which stops at the first SHORT read: a Windows pipe returns each of the
+  ## child's writes separately, so `readAll` kept only its first line
+  ## (LRS-6's review, 2026-09-24; the same defect is fixed in
+  ## `src/ct/utilities/target_recognition.nim`).  POSIX pipe streams fill
+  ## the buffer first, which is why no Linux run saw it.
+  result = ""
+  var buffer {.noinit.}: array[4096, char]
+  while true:
+    let n = s.readData(addr buffer[0], buffer.len)
+    if n <= 0:
+      break
+    let start = result.len
+    result.setLen(start + n)
+    copyMem(addr result[start], addr buffer[0], n)
+
 proc runScenario(bin, scenario, homeDir: string):
     tuple[ok: bool, stdoutStr: string, stderrStr: string] =
   ## Run the helper for ``scenario`` with the env scrubbed to ``homeDir``.
@@ -77,12 +94,24 @@ proc runScenario(bin, scenario, homeDir: string):
   ## ``LD_LIBRARY_PATH``.  We splice the codetracer-specific path onto
   ## the dynamic-loader path so the dlopen in ``db_sqlite`` finds the
   ## shared object regardless of how the test was launched.
-  var env = newStringTable(modeCaseSensitive)
+  # Case-INsensitive on Windows, where the OS treats `UserProfile` and
+  # `USERPROFILE` as one variable: overriding it must replace the inherited
+  # entry, not add a second one beside it.
+  var env = newStringTable(
+    when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
   env["XDG_DATA_HOME"] = homeDir
   env["TMPDIR"] = homeDir
   env["HOME"] = homeDir
+  # WINDOWS: Nim's `getHomeDir` -- which `paths.codetracerTraceDir`, and so
+  # the trace index, is derived from -- reads `USERPROFILE`, not `HOME`.
+  # Without these three every scenario wrote into the developer's REAL
+  # `%USERPROFILE%/.local/share/codetracer/trace_index.db` (LRS-6's review,
+  # 2026-09-24).  Pinned by the "resolves inside its scratch profile" case.
+  env["USERPROFILE"] = homeDir
+  env["LOCALAPPDATA"] = homeDir / "AppData" / "Local"
+  env["APPDATA"] = homeDir / "AppData" / "Roaming"
   let ctLd = getEnv("CT_LD_LIBRARY_PATH")
   if ctLd.len > 0:
     let existing = getEnv("LD_LIBRARY_PATH")
@@ -96,8 +125,8 @@ proc runScenario(bin, scenario, homeDir: string):
     env = env,
     options = {})
   defer: p.close()
-  let stdoutStr = p.outputStream.readAll()
-  let stderrStr = p.errorStream.readAll()
+  let stdoutStr = p.outputStream.readToEof()
+  let stderrStr = p.errorStream.readToEof()
   let code = p.waitForExit()
   (code == 0, stdoutStr, stderrStr)
 
@@ -118,6 +147,75 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
 
   test "helper compiles":
     check helperBin.len > 0
+
+  test "the helper resolves its trace index INSIDE its scratch profile, never the real one":
+    ## The isolation pin (LRS-6's review, 2026-09-24).  Every case below
+    ## writes a trace index; if the child resolves it anywhere but the
+    ## scratch directory `runScenario` gave it, the suite is writing into
+    ## the developer's own profile.  That happened on Windows, where the
+    ## env set `HOME` and Nim's `getHomeDir` reads `USERPROFILE`.
+    if helperBin.len == 0:
+      check false
+    else:
+      let home = makeTmpHome("profile")
+      defer: removeDir(home)
+      let (ok, stdoutStr, stderrStr) = runScenario(helperBin, "profile", home)
+      checkpoint("scratch profile: " & home)
+      checkpoint("helper stdout: " & stdoutStr & "stderr: " & stderrStr)
+      check ok
+      var resolved = ""
+      for line in stdoutStr.splitLines:
+        if line.startsWith("TRACE-INDEX "):
+          resolved = line["TRACE-INDEX ".len .. ^1].strip
+      check resolved.len > 0
+      let inside = when defined(windows):
+          resolved.normalizedPath.toLowerAscii.startsWith(
+            home.normalizedPath.toLowerAscii)
+        else:
+          resolved.normalizedPath.startsWith(home.normalizedPath)
+      if not inside:
+        checkpoint("the helper would write its trace index to " & resolved &
+          ", OUTSIDE its scratch profile " & home & ".  runScenario is " &
+          "missing the variable this OS derives the home directory from.")
+      check inside
+
+  test "every suite that redirects a child's HOME redirects USERPROFILE too":
+    ## The same defect had four copies: this suite,
+    ## `trace_index_migration_test`, `cross_machine_replay_test` and
+    ## `recording_folder_layout_test` each spawned a helper with `HOME` /
+    ## `XDG_DATA_HOME` redirected and `USERPROFILE` inherited, so on Windows
+    ## each helper wrote the developer's real trace index.  The case above
+    ## proves THIS suite's child lands in its scratch dir; this one catches
+    ## the next suite written from the same template, on any OS, before
+    ## anyone runs it on Windows.  It is a source check, so it complements
+    ## the behavioural case rather than replacing it.
+    const homeOverride = "env[\"HOME\"] ="
+    const profileOverride = "env[\"USERPROFILE\"] ="
+    let srcRoot = currentSourcePath.parentDir.parentDir
+    var redirecting = 0
+    for path in walkDirRec(srcRoot):
+      if not path.endsWith("_test.nim"):
+        continue
+      # Sources only: a build tree (`src/build-debug`, …), a nimcache or
+      # `node_modules` can hold copies that are not this repository's suites.
+      var generated = false
+      for part in path.relativePath(srcRoot).split({'/', '\\'}):
+        if part.startsWith("build") or part == "node_modules" or
+            "nimcache" in part:
+          generated = true
+      if generated:
+        continue
+      let text = readFile(path)
+      if homeOverride in text:
+        inc redirecting
+        if profileOverride notin text:
+          checkpoint(path & " sets `" & homeOverride & " …` for a child " &
+            "process but never `" & profileOverride & " …`.  On Windows " &
+            "the child's getHomeDir() is then the developer's real " &
+            "profile, and whatever it writes lands there.")
+        check profileOverride in text
+    # Anti-vacuity: the four known suites were found.
+    check redirecting >= 4
 
   test "fresh DB has the new schema (recordings + indexes + helper tables)":
     if helperBin.len == 0:

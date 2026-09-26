@@ -110,6 +110,17 @@ type
       ## (`ensureEditWorkspace`), two suppliers, no branch in the consumer.
     startBuild*: proc(kind: BuildKind; command: string): BuildStartResult
       {.closure.}
+    submitFileJob*: proc(job: FileJob) {.closure.}
+      ## PLAT-29. Hand a read (`:e!`) or a write (`:w`) to the host's file
+      ## worker (`host/file_worker`), which answers through `deliverFileJob`.
+      ## Nil in a session with no host thread: the job then runs inline
+      ## through `readFile` / `writeFile` and is delivered at once, down the
+      ## same reconciliation.
+    requestHighlight*: proc(req: HighlightRequest) {.closure.}
+      ## PLAT-29. Hand a parse to the host's worker thread
+      ## (`host/highlight_worker`), which answers through `deliverHighlight`.
+      ## Nil in a session with no host thread — the suites — where the SAME
+      ## `computeHighlight` runs inline, so both routes classify identically.
     readConfig*: proc(spelled: string): EditReadResult {.closure.}
       ## PLAT-36. Read a user's Vim configuration for `:source`: `~`
       ## expanded, relative paths against the project. Unlike `readFile` it
@@ -227,6 +238,10 @@ proc sourcePaneRows*(rt: TuiRuntime): int
   ## viewport, the second to follow the caret — and the definition sits with
   ## the other screen readers at the end of this module, where every reader of
   ## the projection is together.
+
+proc runFileJob(rt: TuiRuntime; job: FileJob)
+  ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
+  ## beside `deliverFileJob`, the answer it hands a job to.
 
 proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
                     width, height: int): TuiRuntime =
@@ -609,31 +624,32 @@ proc runPromptLine(rt: TuiRuntime; line: string;
                 else: rt.app.editSession.activeBuffer()
       if buf.isNil:
         rt.note(":w needs an open file")
-      elif rt.editServices.writeFile.isNil:
+      elif rt.editServices.writeFile.isNil and
+           rt.editServices.submitFileJob.isNil:
         rt.note(":w has no writer in this session")
       else:
-        let written = rt.editServices.writeFile(buf.path, buf.text)
-        if written.ok:
-          # THE BUFFER STOPS BEING DIRTY AND GOES ON OUTRUNNING THE RECORDING,
-          # and those are two predicates rather than one. §2.1's staleness is
-          # about whether the bytes differ from what was RECORDED, not about
-          # whether they are on disk, so saving must not silence the notice —
-          # and saving makes a recording MORE stale, because after it the bytes
-          # the recording was made from are gone from the disk too.
-          #
-          # THIS COMMENT USED TO CLAIM THAT AND BE WRONG, which is why it now
-          # names the mechanism instead of the intention: `markSaved` updates
-          # `loadedText` only, `edit_binding.outrunsRecording` compares against
-          # `recordedText`, and `refreshEditedPaths` reads the second. The
-          # effect is asserted in `test_edit_mode_source.nim` ("a saved edit is
-          # still an edit the recording predates") and through the shipped
-          # binary in `tests/real_terminal/test_real_edit_mode.nim` — not by
-          # reading `editedPaths` here, which was true while the notice was
-          # not.
-          buf.markSaved()
-          rt.note("wrote " & buf.path)
-        else:
-          rt.note(written.message)
+        # PLAT-29: a WRITE IS A PRODUCER. The bytes of this version go to the
+        # host's file worker; its acknowledgement arrives through
+        # `deliverFileJob`, which marks the buffer saved as of exactly those
+        # bytes and says "wrote …". A session with no worker runs it inline,
+        # down the same path.
+        rt.note("writing " & buf.path & "…")
+        rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
+      outcome.detail = rt.app.notification
+      return
+    of "e!", "edit!":
+      # PLAT-29. Vim's `:e!`: reload the open file from disk. The read is a
+      # producer — see `file_io_producer` — so a reload the user typed past
+      # while it was in flight is discarded and SAID so, never installed
+      # over the typing; one that lands on an unmoved buffer replaces its text
+      # through the editing core, where it can be undone.
+      let buf = if rt.app.editSession.isNil: nil
+                else: rt.app.editSession.activeBuffer()
+      if buf.isNil:
+        rt.note(":e! needs an open file")
+      else:
+        rt.note("reloading " & buf.path & "…")
+        rt.runFileJob(fileJobFor(fjRead, buf.doc, buf.path, buf.serial))
       outcome.detail = rt.app.notification
       return
     of "e", "edit":
@@ -1253,12 +1269,114 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
 # The screen
 # ---------------------------------------------------------------------------
 
+proc scheduleHighlights*(rt: TuiRuntime) =
+  ## Before a frame: bring the active buffer's held spans up to its current
+  ## version, and ask for a parse of that version if none is current or in
+  ## flight. Never waits — §11's third rule — so the frame draws whatever is
+  ## known, and the answer arrives through `deliverHighlight`.
+  if rt.app.modes.product != pmEdit or rt.app.editSession.isNil:
+    return
+  let buf = rt.app.editSession.activeBuffer()
+  if buf.isNil:
+    return
+  # The buffer's own viewport height, not `sourcePaneRows`: that one builds
+  # the whole shell model to find a rectangle, and this runs every frame.
+  let rows = buf.doc.viewportRows + HighlightWindowSlack
+  buf.highlights.refreshHeld(buf.doc, buf.viewportTop, rows)
+  if buf.highlights.needsRequest(buf.doc):
+    let req = highlightRequestFor(buf.doc, buf.serial)
+    buf.highlights.noteRequested(req)
+    if rt.editServices.requestHighlight.isNil:
+      buf.highlights.installHighlight(buf.doc, computeHighlight(req),
+                                      buf.viewportTop, rows)
+    else:
+      rt.editServices.requestHighlight(req)
+
+proc deliverFileJob*(rt: TuiRuntime; res: FileJobResult): bool =
+  ## A file answer arrived. Reconciled against the buffer it was made for
+  ## (`file_io_producer.answerFor`); a read the buffer's edits made stale is
+  ## discarded rather than installed over them, and a write marks the buffer
+  ## saved as of the bytes that were written. `true` when a frame should be
+  ## drawn.
+  if rt.app.editSession.isNil:
+    return false
+  for buf in rt.app.editSession.buffers:
+    if buf.path == res.job.path and buf.serial == res.job.bufferSerial:
+      if buf.doc.version < res.job.version:
+        return false
+      let answer = buf.doc.answerFor(res, buf.fileReport)
+      if answer.install:
+        discard buf.doc.applyChangeSet(answer.change, 0)
+      if answer.saved:
+        # `loadedText` is "the bytes on disk" — the ones this answer is
+        # about, never the buffer's current text, which may have moved while
+        # the write ran. See `markSaved`.
+        #
+        # THE BUFFER STOPS BEING DIRTY AND GOES ON OUTRUNNING THE RECORDING,
+        # and those are two predicates rather than one: `recordedText` is NOT
+        # touched, because §2.1's staleness is about whether the bytes differ
+        # from what was RECORDED, and a save makes a recording MORE stale.
+        # Asserted in `test_edit_mode_source.nim` ("a saved edit is still an
+        # edit the recording predates") and through the shipped binary in
+        # `tests/real_terminal/test_real_edit_mode.nim`.
+        buf.markSaved(answer.savedText)
+      if answer.install:
+        rt.app.editSession.refreshEditedPaths()
+      rt.note(answer.note)
+      return true
+  false
+
+proc runFileJob(rt: TuiRuntime; job: FileJob) =
+  ## Submit to the host's worker, or — with none — do the job inline and
+  ## deliver it, down the same path.
+  if not rt.editServices.submitFileJob.isNil:
+    rt.editServices.submitFileJob(job)
+    return
+  var res = FileJobResult(job: job)
+  case job.kind
+  of fjRead:
+    if rt.editServices.readFile.isNil:
+      res.message = ":e! has no reader in this session"
+    else:
+      let r = rt.editServices.readFile(job.path)
+      res.ok = r.ok
+      res.text = r.text
+      res.message = r.message
+  of fjWrite:
+    if rt.editServices.writeFile.isNil:
+      res.message = ":w has no writer in this session"
+    else:
+      let w = rt.editServices.writeFile(job.path, job.text)
+      res.ok = w.ok
+      res.message = w.message
+  discard rt.deliverFileJob(res)
+
+proc deliverHighlight*(rt: TuiRuntime; res: HighlightResult): bool =
+  ## A parse arrived from the host's worker. Installed into the buffer it
+  ## was asked for — reconciled against that buffer's timeline when the
+  ## document moved while it was in flight — and `true` when a frame should
+  ## be drawn. A result for a buffer that is gone, or for an earlier opening
+  ## of the same file, is refused: it names a timeline this session no longer
+  ## has.
+  if rt.app.editSession.isNil:
+    return false
+  for buf in rt.app.editSession.buffers:
+    if buf.path == res.request.path and buf.serial == res.request.bufferSerial:
+      if buf.doc.version < res.request.version:
+        return false
+      buf.highlights.installHighlight(buf.doc, res, buf.viewportTop,
+                                      buf.doc.viewportRows +
+                                        HighlightWindowSlack)
+      return true
+  false
+
 proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   ## The whole frame for this runtime, at its current size.
   ##
   ## The MODE reaches the status bar through `modal_state.statusMode`, and the
   ## LAYOUT through `motions.layoutFor` — so `z` really replaces the tree with a
   ## single-pane one rather than merely noting that it was pressed.
+  rt.scheduleHighlights()
   var model = rt.app.shellModel(rt.width, rt.height)
   model.status.mode = statusMode(rt.modal.mode)
   if rt.maximize.active:

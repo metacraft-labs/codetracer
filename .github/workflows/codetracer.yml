@@ -1741,9 +1741,18 @@ jobs:
 
   lint-nim:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
-    # 200-run window: 25 green, median 3.3m, max 3.7m. Same floor as lint-bash,
-    # for the same reason: 15m is ~4x the slowest green ever observed.
-    timeout-minutes: 15
+    # 45m, RE-MEASURED 2026-09-24. The 15m bound came from a 200-run window
+    # (25 green, median 3.3m, max 3.7m) taken when this stage was a handful of
+    # steps. It has since grown to 23, and because `dev`'s lint-nim stopped at
+    # an early failing step for days, no run showed that a COMPLETE stage no
+    # longer fits: #770's run 35933277847 (job 107637263905, on a healthy
+    # high-mem-server runner) spent 3.5m in dev-shell setup, 7.6m reaching the
+    # SDK facade guard, and was cancelled at 15m inside the Plugin reactive
+    # contract suite with nine steps left. Scaling those nine from a local run
+    # by that runner's measured speed puts a complete stage at ~30m; 45m is
+    # 1.5x that. It is a HANG bound, so it should be re-derived from green runs
+    # once there are some -- and lowered if they come in well under it.
+    timeout-minutes: 45
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -3031,6 +3040,45 @@ jobs:
         # answers "does the product's front end build at all", which nobody
         # wants to learn after twenty minutes of suites.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
+
+      - name: Run renderer suites over a DOM (renderer-dom lane)
+        # The step above COMPILES the renderer; this one RUNS renderer modules.
+        # Its suites are built for the browser target — `ui/state.nim` does not
+        # compile under `-d:nodejs` — and executed under node over jsdom, which
+        # the dev shell links into `node_modules` on entry. The runner fails
+        # when jsdom is absent rather than skipping.
+        #
+        # `locals_answer_identity_test.nim` drives the web renderer's
+        # `ct/load-locals` senders through the real response fan-out and
+        # asserts one request per stop, in the stopped-in file's language,
+        # and that each answer is judged against the stop its own request was
+        # sent at — after a fast move, the previous stop's values must never be
+        # drawn beside the new stop. `!cancelled()` so a red renderer build
+        # above does not hide this lane's verdict as "skipped".
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-dom
+
+      - name: Run browser suites in headless Chromium (renderer-chromium lane)
+        # jsdom (the step above) is a DOM; this lane needs a BROWSER. Its
+        # suites load into a real page in Playwright's Chromium, which the dev
+        # shell provides, and ask for keys that Chromium's own input pipeline
+        # delivers — so focus, trusted key events, the browser's default
+        # actions and `showModal()`'s inert page are all real.
+        #
+        # `view_vocabulary_chromium_test.nim` renders the view vocabulary's
+        # sixteen entries into a document, holds them to the same scripted
+        # expectations the terminal suite holds isonim-tui's widgets to, and
+        # measures what the browser's own elements do on their own — the
+        # evidence the web column of the vocabulary's mapping is graded on.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-chromium
+
+      - name: Run the Electron main process's suites (main-process lane)
+        # The main process's DAP router, RUN under node with the
+        # `server_index.js` defines: two sessions whose requests share a
+        # `seq` must each be answered to the session that asked.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-main-process
 
       - name: Compile the renderer the way a developer builds it
         # THE STEP ABOVE COMPILES WHAT SHIPS, AND THAT IS NOT WHAT ANYONE TYPES.
@@ -8111,6 +8159,16 @@ jobs:
         # Stock bash, no network; it checks the three remote callers when their
         # sibling checkouts are present and says so when they are not.
         run: bash ci/test/launcher-recorder-e2e-workflow-test.sh
+
+      - name: Check that a failed sibling build shows its cause
+        # scripts/build-siblings.sh and the launcher<->recorder driver used to
+        # report a failed sibling build as "build exited 101 — see <log>", with
+        # <log> a file on the runner that no step uploads. The ruby arm of run
+        # 36013311965 failed with that and nothing else. Both now print the
+        # tail of the failed repo's log; this suite runs the real script with a
+        # stub `repro`/`just` and pins that, and that the failure stays fatal.
+        # Stock bash, no network.
+        run: bash ci/test/sibling-build-failure-test.sh
 
       - name: Self-test the private-registry credential preflight
         # This suite is also run by `visual-replay-regression-gate`, but that

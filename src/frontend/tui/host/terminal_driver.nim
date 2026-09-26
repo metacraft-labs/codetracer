@@ -209,7 +209,7 @@ const
     ## different answers rather than one timeout.
 
 proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
-                          wakeFd: cint = -1): int =
+                          wakeFd: cint = -1; auxWakeFd: cint = -1): int =
   ## One byte from `fd`, or `ReadTimeout` / `ReadEof` / `ReadWoke`.
   ##
   ## `wakeFd` is `host/resize.resizeWakeFd()` — the read end of the SIGWINCH
@@ -224,6 +224,9 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
   if wakeFd >= 0:
     FD_SET(wakeFd, rs)
     if wakeFd > maxFd: maxFd = wakeFd
+  if auxWakeFd >= 0:
+    FD_SET(auxWakeFd, rs)
+    if auxWakeFd > maxFd: maxFd = auxWakeFd
   var tv: Timeval
   tv.tv_sec = posix.Time(timeoutMs div 1000)
   tv.tv_usec = clong((timeoutMs mod 1000) * 1000)
@@ -350,6 +353,12 @@ type
     watcher*: ResizeWatcher
       ## CTUI-3's SIGWINCH self-pipe and the two reactive size signals.
     framer*: InputFramer
+    auxWakeFd*: cint
+      ## PLAT-29. A second self-pipe the loop wakes on: the highlight worker
+      ## writes a byte when a parse is ready, so the answer is drawn when it
+      ## arrives rather than on the next `IdlePollMs` tick. `-1` for none.
+      ## Readable ⇒ `nextEvent` answers `dekIdle`; draining it is its
+      ## owner's job (`host/highlight_worker.drain`).
     buffered*: seq[string]
       ## Complete input tokens framed while the input loop was NOT running.
       ##
@@ -389,7 +398,7 @@ proc newTerminalDriver*(caps: TerminalCapabilities;
   ## A driver over a negotiated terminal. Touches no OS state — `start` does
   ## that — so constructing one is as passive as constructing a `TuiApp`.
   TerminalDriver(caps: caps, inFd: inFd, outFd: outFd, watcher: nil,
-                 framer: initInputFramer(), buffered: @[],
+                 framer: initInputFramer(), buffered: @[], auxWakeFd: -1,
                  emitter: newFrameEmitter(caps),
                  coalescer: initWriteCoalescer(),
                  framesPainted: 0, bytesEmitted: 0,
@@ -587,7 +596,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     let left = int(EscDelayMs - (clock - d.framer.escSinceMs))
     if wait < 0 or left < wait: wait = max(0, left)
   let wake = if d.watcher.isNil: cint(-1) else: resizeWakeFd()
-  let b = readByteWithTimeout(wait, d.inFd, wake)
+  let b = readByteWithTimeout(wait, d.inFd, wake, d.auxWakeFd)
   if b == ReadEof:
     return DriverEvent(kind: dekEof)
   if b < 0:

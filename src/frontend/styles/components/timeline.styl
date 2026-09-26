@@ -68,6 +68,89 @@
     width: 2px
     background: #d7ba7d
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35)
+    // The view writes `left` as a percentage of the track, so the playhead's
+    // own width offsets it by one pixel at every position. Pulling it back by
+    // half its width puts the LINE on the tick rather than its left edge —
+    // which matters most at 100%, where an unshifted playhead sits entirely
+    // outside the track.
+    transform: translateX(-1px)
+
+  // --- Event markers (issue #693) ------------------------------------------
+  //
+  // `Front-Ends/Electron-GUI.md:155` — "Event markers (calls, returns,
+  // exceptions)". The view emits one `.timeline-marker` per recorded event it
+  // has loaded, carrying a kind modifier class and an inline `left`
+  // percentage; everything that makes the mark VISIBLE is here.
+  //
+  // `pointer-events: none` is load-bearing rather than tidy: the track is the
+  // seek surface, and a mark sitting on top of it would swallow the click or
+  // the mousedown that starts a drag, so a user could not seek to the very
+  // events they can see.
+  .timeline-marker
+    position: absolute
+    width: 2px
+    pointer-events: none
+    transform: translateX(-1px)
+
+  .timeline-marker-call
+    top: 4px
+    height: 12px
+    background: colors-ui-text-primary-body
+    opacity: 0.75
+
+  .timeline-marker-return
+    bottom: 4px
+    height: 12px
+    background: colors-ui-text-primary-body
+    opacity: 0.45
+
+  // An exception is the one mark that must read at a glance, so it is the
+  // full height of the track and the only one with a colour of its own.
+  .timeline-marker-exception
+    top: 0
+    bottom: 0
+    width: 3px
+    background: #f14c4c
+
+  // --- Tick labels ---------------------------------------------------------
+  //
+  // A row under the track carrying the numbers the gradations fall on. The
+  // spans are absolutely positioned by the same percentage the marks and the
+  // playhead use, so a label always sits under what it names.
+  .timeline-ticks
+    position: relative
+    height: 16px
+    margin: 2px PANEL_INSET 0
+    flex: 0 0 auto
+
+  .timeline-tick-label
+    position: absolute
+    top: 0
+    // Centre the number on its gradation, and let the first and last ones
+    // hang half off the ends rather than shifting every other label to make
+    // room for them.
+    transform: translateX(-50%)
+    white-space: nowrap
+    font-size: 11px
+    line-height: 16px
+    color: colors-ui-text-primary-body
+    opacity: 0.7
+
+  // --- Empty state ---------------------------------------------------------
+  //
+  // Shown in place of the track when the recording's extent is not known.
+  // Before issue #693 the pane drew a track with min == max == 0 and a
+  // playhead at 0%, which is the "almost-empty grid" the issue reports: it
+  // looks like a timeline that has nothing in it rather than like a timeline
+  // that has not arrived.
+  .timeline-empty
+    margin: 8px PANEL_INSET
+    padding: 8px 10px
+    border: 1px dashed colors-ui-surface-input-default
+    border-radius: 4px
+    color: colors-ui-text-primary-body
+    opacity: 0.7
+    font-size: 12px
 
   .timeline-hover-tooltip
     width: fit-content

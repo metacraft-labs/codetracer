@@ -10,5 +10,5 @@
   "M6": "Check failed: not controlPassesEcr(entry)",
   "M7": "Check failed: loosenings < 2",
   "M8": "Check failed: ratio >= MinimumContrastRatio",
-  "M9": "gpui/tests/test_gpui_window_frame.nim(972, 11): Expect Failed, no exception was thrown."
+  "M9": "gpui/tests/test_gpui_window_frame.nim(976, 11): Expect Failed, no exception was thrown."
 }

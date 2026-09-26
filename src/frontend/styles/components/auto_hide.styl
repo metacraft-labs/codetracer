@@ -892,6 +892,29 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   position: relative  // Anchor for the floating pin button
 
 // ---------------------------------------------------------------------------
+// Restored panels (issue #691)
+// ---------------------------------------------------------------------------
+
+// The host `auto_hide.nim`'s `instantiatePanelElement` builds for a panel
+// restored from `auto_hide_state.json`.  It plays the part a GoldenLayout
+// container plays for a pinned panel: a full-size box the pane's
+// `.component-container` mounts inside.
+.auto-hide-restored-container
+  width: 100%
+  height: 100%
+  overflow: hidden
+
+// Shown IN PLACE OF the panel when even the stored config cannot be rebuilt.
+// It exists because the alternative is a blank rectangle: both reveal paths
+// used to answer a missing panel with a `console.warn` the user never sees.
+.auto-hide-panel-unavailable
+  padding: PANEL_INSET
+  font-size: 12px
+  line-height: 1.5
+  color: PRIMARY_TEXT_COLOR
+  white-space: normal
+
+// ---------------------------------------------------------------------------
 // Collapsed-mode overlay: hide the full header row and show a small
 // floating pin/unpin button in the upper-right corner instead.
 // The panel title is already visible in the side-edge tab bar.

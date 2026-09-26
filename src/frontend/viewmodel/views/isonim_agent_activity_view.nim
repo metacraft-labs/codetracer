@@ -136,9 +136,13 @@ type
       ## whether the dataset can be opened, the VM does
       ## (`AgentActivityVM.openEvidence`), and this fires only when it agreed.
 
-proc dateNowMs(): float {.importjs: "Date.now()".}
-proc wallClockTimeJs(ms: float): cstring
-  {.importjs: "new Date(#).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})".}
+when defined(js):
+  proc dateNowMs(): float {.importjs: "Date.now()".}
+  proc wallClockTimeJs(ms: float): cstring
+    {.importjs: "new Date(#).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})".}
+else:
+  import std/times
+  proc dateNowMs(): float = epochTime() * 1000.0
 
 proc wallClockTime*(createdAtMs: float): string =
   when defined(js):
@@ -539,9 +543,6 @@ when defined(js):
   proc setIconHtml(el: isonim_dom.Element; html: string) =
     el.innerHTML = cstring(html)
   proc setIconHtml(el: MockNode; html: string) = discard
-  proc setImgSrc(el: isonim_dom.Element; src: string) =
-    el.setAttribute(cstring"src", cstring(src))
-  proc setImgSrc(el: MockNode; src: string) = discard
   proc showImageLightbox(src: cstring) {.importjs: """
     (function(src) {
       var ex = document.getElementById('ct-img-lightbox');
@@ -1831,7 +1832,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
             tdiv(class = "agent-paste-remove",
                  onclick = proc() = vm.removePastedImage(idx)):
               text "×"
-        setImgSrc(imgEl, imgData)
+        r.setAttribute(imgEl, "src", imgData)
         r.appendRenderedChild(imagesStrip, thumb)
     for i, p in paths:
       let pathIdx = i

@@ -4,6 +4,19 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Install the commit/push checks nix/pre-commit.nix declares on a host WITHOUT
+# the Nix dev shell -- native Windows is the case it exists for. The Nix shell
+# installs its own leg on entry; this one runs the same hooks through the
+# pre-commit framework from PATH. env.ps1 calls it; see the script's header.
+install-portable-git-hooks:
+  bash ci/dev/install-portable-git-hooks.sh
+
+# Which of those checks this host can actually run, hook by hook, and the
+# command that installs whatever is missing. A missing tool fails the commit
+# that needs it; this says so before the commit does.
+portable-pre-commit-doctor:
+  python3 ci/dev/portable-pre-commit.py doctor
+
 # Assert that `just build` is `just build-once` plus watchers, and nothing
 # else. Executes BOTH scripts under a PATH of recording stubs (tup, webpack,
 # livereload, repro, runquotad, nix, uname) and compares the resulting command
@@ -1125,6 +1138,13 @@ test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
 test-launcher-recorder-e2e-wiring:
   bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
+# Verify that a FAILED sibling build prints the tail of its own build log, both
+# in scripts/build-siblings.sh's summary and in the launcher<->recorder
+# driver's failure path, and still fails.  Stock bash; `repro` and `just` are
+# stubbed.  See ci/test/sibling-build-failure-test.sh.
+test-sibling-build-failure-report:
+  bash ci/test/sibling-build-failure-test.sh
+
 # Verify the DECODED-TRACE reasoning of the gate above, which the gate itself
 # can only exercise after a launcher, a built core, a recorder and `ct-print`
 # are all in place.  The trace-shape discrimination, the empty-recording guard,
@@ -1672,6 +1692,21 @@ test-frontend-js:
   nim -d:chronicles_enabled=off -d:ctRenderer \
     --out:"$html_sinks_probe" js src/frontend/tests/html_sinks_probe.nim
   node --no-warnings src/frontend/tests/htmlSinks.test.mjs "$html_sinks_probe"
+  echo ""
+  # Renderer modules RUN over jsdom (the `renderer-dom` lane): the web
+  # renderer's `ct/load-locals` answers matched to the requests that produced
+  # them, one request per stop, through the real response fan-out.
+  echo "Running renderer-dom lane..."
+  just test-renderer-dom
+  echo ""
+  # Browser-target suites RUN in a real page in headless Chromium (the
+  # `renderer-chromium` lane): the view vocabulary's web binding in a real
+  # document, with keys from Chromium's own input pipeline.
+  echo "Running renderer-chromium lane..."
+  just test-renderer-chromium
+  echo ""
+  echo "Running main-process lane..."
+  just test-main-process
 
 # Run the Playwright suite. Args are forwarded to `npx playwright test`.
 #
@@ -2096,7 +2131,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-python flask
+        repro exec . -- just demo-request-panel-python flask
     )
     # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
     # render in the GUI stays distinguishable from a failure to record.
@@ -2130,7 +2165,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-ruby sinatra
+        repro exec . -- just demo-request-panel-ruby sinatra
     )
     # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
     # render in the GUI stays distinguishable from a failure to record.
@@ -2165,7 +2200,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-php builtin
+        repro exec . -- just demo-request-panel-php builtin
     )
     # A PHP worker owns its recording, so the container lives under
     # $demo_dir/worker_<pid>/; the recipe leaves the path it used in a marker
@@ -2205,7 +2240,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-elixir "$framework"
+        repro exec . -- just demo-request-panel-elixir "$framework"
     )
     # `ct print -f http` reads spans.dat through the Nim reader, so a failure to
     # render in the GUI stays distinguishable from a failure to record.
@@ -2241,7 +2276,7 @@ demo-request-panel LANG="synthetic":
     (
       cd "$recorder_repo"
       CODETRACER_DEMO_DIR="$demo_dir" CODETRACER_DEMO_RECORD_ONLY=1 \
-        direnv exec . just demo-request-panel-js "$schedule"
+        repro exec . -- just demo-request-panel-js "$schedule"
     )
     # The recorder writes `<out>/trace-<n>/`; the recipe leaves the path it
     # used in a marker file rather than making this side guess the handle.
@@ -2276,7 +2311,7 @@ demo-request-panel LANG="synthetic":
     # the nginx the recording runs, neither of which is in codetracer's shell.
     (
       cd "$recorder_repo"
-      CODETRACER_DEMO_DIR="$demo_dir" direnv exec . just demo-request-panel-native
+      CODETRACER_DEMO_DIR="$demo_dir" repro exec . -- just demo-request-panel-native
     )
     # ct-mcr writes ONE container per recording; the recipe leaves the path it
     # used in a marker file rather than making this side guess the name.
@@ -2317,7 +2352,7 @@ demo-request-panel LANG="synthetic":
     {
       echo "ERROR: no 'nim' on PATH.  The demo container is written by the"
       echo "canonical Nim writer, so this recipe needs the dev shell:"
-      echo "  direnv exec . just demo-request-panel {{LANG}}"
+      echo "  repro exec . -- just demo-request-panel {{LANG}}"
     } >&2
     exit 1
   fi
@@ -2521,13 +2556,13 @@ test-solidity-flow:
   EVM_RECORDER="${CODETRACER_EVM_RECORDER_PATH:-../codetracer-evm-recorder/target/debug/codetracer-evm-recorder}"
   if [ ! -f "$EVM_RECORDER" ]; then
     echo "Building codetracer-evm-recorder..."
-    direnv exec ../codetracer-evm-recorder cargo build --manifest-path ../codetracer-evm-recorder/Cargo.toml
+    repro exec ../codetracer-evm-recorder -- cargo build
   fi
   export CODETRACER_EVM_RECORDER_PATH="$(realpath "$EVM_RECORDER")"
 
   # Use the evm-recorder's dev shell for solc/anvil
-  direnv exec ../codetracer-evm-recorder \
-    cargo nextest run --no-capture --run-ignored all \
+  repro exec ../codetracer-evm-recorder -- \
+    bash -c 'cd "$1" && shift && exec "$@"' solidity-flow "$PWD" cargo nextest run --no-capture --run-ignored all \
       --manifest-path src/db-backend/Cargo.toml \
       test_solidity_flow solidity_flow_dap
   echo "Solidity flow test passed!"
@@ -3532,6 +3567,56 @@ test-renderer-browser:
   bash ci/lib/run-nim-test-lane.sh renderer-electron
   bash ci/lib/run-nim-test-lane.sh renderer-web
   bash ci/test/renderer-browser-build.sh
+
+# Renderer modules RUN, not only compiled: the `renderer-dom` lane builds its
+# suites for the browser target (the only target `ui/state.nim` compiles for)
+# and runs them under node over jsdom (`src/frontend/tests/jsdom-run.mjs`).
+# `locals_answer_identity_test.nim` drives the web renderer's `ct/load-locals`
+# senders through the real response fan-out and asserts one request per stop,
+# in the stopped-in file's language, and that every answer is judged against
+# the stop its own request was sent at.
+#
+# NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
+# Nix-built node modules on entry; the runner fails (rather than skipping) when
+# it is absent. Same tailwind prerequisite as `test-renderer-browser`.
+test-renderer-dom:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-dom.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh renderer-dom
+
+# Browser-target suites RUN in a real page in headless Chromium: the
+# `renderer-chromium` lane compiles its suites for the browser target and
+# `src/frontend/tests/chromium-run.mjs` loads each into a page, delivering the
+# keys a suite asks for through Chromium's own input pipeline (Playwright's
+# `keyboard.press` — trusted events, the browser's default actions and all).
+# `view_vocabulary_chromium_test.nim` is PLAT-3's web arm in a real browser:
+# the vocabulary's web binding rendered into a document, held to the same
+# scripted expectations the terminal is held to, plus the measurements of what
+# the browser's own elements do that `mappings.webMapping` is graded on.
+#
+# NEEDS `node_modules/playwright` and Playwright's Chromium, both from the dev
+# shell (`PLAYWRIGHT_BROWSERS_PATH`); the runner fails rather than skipping.
+test-renderer-chromium:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-chromium.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh renderer-chromium
+
+# The Electron MAIN process's modules RUN under node: the `main-process` lane
+# builds its suites with the `server_index.js` defines (`-d:ctIndex
+# -d:server`, which load `electron_vars` without Electron).
+# `dap_session_routing_test.nim` drives the main process's DAP router with two
+# sessions whose requests share a `seq` and asserts each answer reaches the
+# session that asked.
+test-main-process:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-main-process.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh main-process
 
 # THE BUILD A DEVELOPER TYPES, which is not one of the two above.
 #
@@ -5601,7 +5686,7 @@ ensure-ct-mcr:
         cd "$sibling" && just build-ct-mcr-windows
     elif command -v direnv >/dev/null 2>&1 && [ -f "$sibling/.envrc" ]; then
         direnv allow "$sibling"
-        direnv exec "$sibling" just -f "$sibling/Justfile" build-ct-mcr
+        repro exec "$sibling" -- just -f "$sibling/Justfile" build-ct-mcr
     else
         cd "$sibling" && just build-ct-mcr
     fi

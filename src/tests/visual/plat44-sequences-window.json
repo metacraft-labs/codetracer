@@ -5,7 +5,7 @@
   "`just plat44-sequences-window`, then `just plat44-sequences-record`.",
   "Asserted by test_plat44_sequences_window.nim."
  ],
- "takenAt": "2026-09-23T07:56:22Z",
+ "takenAt": "2026-09-24T15:25:37Z",
  "host": "gpu-server-001",
  "corpus": 30,
  "unreachable": [
@@ -16,6 +16,10 @@
   {
    "id": "edit-split-and-join",
    "missing": "split-line"
+  },
+  {
+   "id": "edit-blank-line-below",
+   "missing": "insert-blank-line-below"
   },
   {
    "id": "multi-cursor-insert",
@@ -61,9 +65,9 @@
    "caretColumn": 22,
    "keysApplied": 16,
    "rc": 0,
-   "elapsedMs": 11378,
+   "elapsedMs": 16262,
    "endedOnDeadline": false,
-   "settledAfterS": 6,
+   "settledAfterS": 10,
    "onDisk": "\u200dlea\n    lead fooBarBaz_qux\n        eadi\nadi   \n\ndef f(\u200dl, le):\n    arr = [ea]\n    obj = {ad}\n    gen = <\u200dl>\n    s1 = 'le'\n    s2 = \"ea\"\n    s3 = `ad`\n    <em>\u200dl</em>\n    #[le]#\n# ea\n\ntail ad\n"
   },
   {
@@ -83,7 +87,7 @@
    "caretColumn": 0,
    "keysApplied": 6,
    "rc": 0,
-   "elapsedMs": 9264,
+   "elapsedMs": 9538,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "Vie\u0302\u0323t\n    Vie\u0302\u0323t fooBarBaz_qux\n        Vie\u0302\u0323t\nVie\u0302\u0323   \n\ndef f(Vi, Vi):\n    arr = [Vi]\n    obj = {Vi}\n    gen = <Vi>\n    s1 = 'Vi'\n    s2 = \"Vi\"\n    s3 = `Vi`\n    <em>Vi</em>\n    #[Vi]#\n# Vi\n\ntail Vi\n"
@@ -117,7 +121,7 @@
    "caretColumn": 0,
    "keysApplied": 19,
    "rc": 0,
-   "elapsedMs": 11917,
+   "elapsedMs": 12367,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u041f\u0440\u0438\u0432\n    \u041f\u0440\u0438\u0432 fooBarBaz_qux\n        \u0440\u0438\u0432\u0435\n\u0438\u0432\u0435   \n\ndef f(\u041f\u0440, \u041f\u0440):\n    arr = [\u0440\u0438]\n    obj = {\u0438\u0432}\n    gen = <\u041f\u0440>\n    s1 = '\u041f\u0440'\n    s2 = \"\u0440\u0438\"\n    s3 = `\u0438\u0432`\n    <em>\u041f\u0440</em>\n    #[\u041f\u0440]#\n# \u0440\u0438\n\ntail \u0438\u0432\n"
@@ -150,9 +154,9 @@
    "caretColumn": 9,
    "keysApplied": 18,
    "rc": 0,
-   "elapsedMs": 11850,
+   "elapsedMs": 14377,
    "endedOnDeadline": false,
-   "settledAfterS": 6,
+   "settledAfterS": 8,
    "onDisk": "emoj\n    moji fooBarBaz_qux\n        ojiw\njiw   \n\ndef f(em, mo):\n    arr = [oj]\n    obj = {ji}\n    gen = <em>\n    s1 = 'mo'\n    s2 = \"oj\"\n    s3 = `ji`\n    <em>em</em>\n    #[mo]#\n# oj\n\ntail ji\n"
   },
   {
@@ -182,9 +186,9 @@
    "caretColumn": 0,
    "keysApplied": 17,
    "rc": 0,
-   "elapsedMs": 11648,
+   "elapsedMs": 13772,
    "endedOnDeadline": false,
-   "settledAfterS": 6,
+   "settledAfterS": 8,
    "onDisk": "no f\n    o fi fooBarBaz_qux\n        fina\nfin   \n\ndef f(no, o ):\n    arr = [fi]\n    obj = {fi}\n    gen = <no>\n    s1 = 'o '\n    s2 = \"fi\"\n    s3 = `fi`\n    <em>no</em>\n    #[o ]#\n# fi\n\ntail fi\n"
   },
   {
@@ -212,9 +216,9 @@
    "caretColumn": 8,
    "keysApplied": 15,
    "rc": 0,
-   "elapsedMs": 11483,
+   "elapsedMs": 13529,
    "endedOnDeadline": false,
-   "settledAfterS": 6,
+   "settledAfterS": 8,
    "onDisk": "WTF-\n    TF-8 fooBarBaz_qux\n        F-8 \n-8    \n\ndef f(WT, TF):\n    arr = [F-]\n    obj = {-8}\n    gen = <WT>\n    s1 = 'TF'\n    s2 = \"F-\"\n    s3 = `-8`\n    <em>WT</em>\n    #[TF]#\n# F-\n\ntail -8\n"
   },
   {
@@ -244,7 +248,7 @@
    "caretColumn": 13,
    "keysApplied": 17,
    "rc": 0,
-   "elapsedMs": 11545,
+   "elapsedMs": 11735,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "xxxx\n    xxxx fooBarBaz_qux\n        xxxx\nxxx   \n\ndef f(xx, xx):\n    arr = [xx]\n    obj = {xx}\n    gen = <xx>\n    s1 = 'xx'\n    s2 = \"xx\"\n    s3 = `xx`\n    <em>xx</em>\n    #[xx]#\n# xx\n\ntail xx\n"
@@ -280,7 +284,7 @@
    "caretColumn": 0,
    "keysApplied": 21,
    "rc": 0,
-   "elapsedMs": 12460,
+   "elapsedMs": 12566,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "plai\n    lain fooBarBaz_qux\n        ain \nin    \n\ndef f(pl, la):\n    arr = [ai]\n    obj = {in}\n    gen = <pl>\n    s1 = 'la'\n    s2 = \"ai\"\n    s3 = `in`\n    <em>pl</em>\n    #[la]#\n# ai\n\ntail in\n"
@@ -301,7 +305,7 @@
    "caretColumn": 0,
    "keysApplied": 6,
    "rc": 0,
-   "elapsedMs": 9335,
+   "elapsedMs": 9576,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u0308\u200d \ud83c\udde6\u200d \n    \ud83c\udde6\u200d \ud83c\udde6\u0308\u200d  fooBarBaz_qux\n        \ud83c\udde6\u200d \ud83c\udde6\u0308\u200d \n\ud83c\udde6\u0308\u200d \u0600\u200d   \n\ndef f(\u0308\u200d , \ud83c\udde6\u200d ):\n    arr = [\ud83c\udde6\u200d ]\n    obj = {\ud83c\udde6\u0308\u200d }\n    gen = <\u0308\u200d >\n    s1 = '\ud83c\udde6\u200d '\n    s2 = \"\ud83c\udde6\u200d \"\n    s3 = `\ud83c\udde6\u0308\u200d `\n    <em>\u0308\u200d </em>\n    #[\ud83c\udde6\u200d ]#\n# \ud83c\udde6\u200d \n\ntail \ud83c\udde6\u0308\u200d \n"
@@ -332,7 +336,7 @@
    "caretColumn": 9,
    "keysApplied": 16,
    "rc": 0,
-   "elapsedMs": 11348,
+   "elapsedMs": 11434,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u1100  \u0308\u1160\n    \u1100  \u0308\u1160 fooBarBaz_qux\n        \u1100  \u0308\u1160\n\u1100  \u0308   \n\ndef f(\u1100 , \u1100 ):\n    arr = [\u1100 ]\n    obj = {\u1100 }\n    gen = <\u1100 >\n    s1 = '\u1100 '\n    s2 = \"\u1100 \"\n    s3 = `\u1100 `\n    <em>\u1100 </em>\n    #[\u1100 ]#\n# \u1100 \n\ntail \u1100 \n"
@@ -362,7 +366,7 @@
    "caretColumn": 9,
    "keysApplied": 14,
    "rc": 0,
-   "elapsedMs": 10882,
+   "elapsedMs": 11102,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\ud83c\udde6\u0308\uac01 \ud83c\udde6\u0903\n    \uac01 \ud83c\udde6\u0903  QfooBarBaz_qux\n        \ud83c\udde6\u0903 \ud83c\udde6\u0308\u0903 \n\ud83c\udde6\u0903 \ud83c\udde6\u0308\u0903   \n\ndef f(\ud83c\udde6\u0308\uac01, \uac01 ):\n    arr = [\ud83c\udde6\u0903 ]\n    obj = {\ud83c\udde6\u0903 }\n    gen = <\ud83c\udde6\u0308\uac01>\n    s1 = '\uac01 '\n    s2 = \"\ud83c\udde6\u0903 \"\n    s3 = `\ud83c\udde6\u0903 `\n    <em>\ud83c\udde6\u0308\uac01</em>\n    #[\uac01 ]#\n# \ud83c\udde6\u0903 \n\ntail \ud83c\udde6\u0903 \n"
@@ -394,7 +398,7 @@
    "caretColumn": 0,
    "keysApplied": 17,
    "rc": 0,
-   "elapsedMs": 11870,
+   "elapsedMs": 11663,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u00ea\u00ec\u00ed\u00f0\n    \u00ec\u00ed\u00f0\u00f2 \n        \u00ed\u00f0\u00f2\u00f3\n\u00f0\u00f2\u00f3   \n\ndef f(\u00ea\u00ec, \u00ec\u00ed):\n    arr = [\u00ed\u00f0]\n    obj = {\u00f0\u00f2}\n    gen = <\u00ea\u00ec>\n    s1 = '\u00ec\u00ed'\n    s2 = \"\u00ed\u00f0\"\n    s3 = `\u00f0\u00f2`\n    <em>\u00ea\u00ec</em>\n    #[\u00ec\u00ed]#\n# \u00ed\u00f0\n\ntail \u00f0\u00f2\n"
@@ -426,7 +430,7 @@
    "caretColumn": 0,
    "keysApplied": 17,
    "rc": 0,
-   "elapsedMs": 11630,
+   "elapsedMs": 12194,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u3000\u3001\u3002\u3003\n        \u3001\u3002\u3003\u3004 fooBarBaz_qux\n        \u3002\u3003\u3004\u3005\n\u3003\u3004\u3005   \n\ndef f(\u3000\u3001, \u3001\u3002):\n    arr = [\u3002\u3003]\n    obj = {\u3003\u3004}\n    gen = <\u3000\u3001>\n    s1 = '\u3001\u3002'\n    s2 = \"\u3002\u3003\"\n    s3 = `\u3003\u3004`\n    <em>\u3000\u3001</em>\n    #[\u3001\u3002]#\n# \u3002\u3003\n\ntail \u3003\u3004\n"
@@ -458,44 +462,10 @@
    "caretColumn": 0,
    "keysApplied": 17,
    "rc": 0,
-   "elapsedMs": 11632,
+   "elapsedMs": 11721,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "rope\n    rope FOOBARBAZ_QUX\n        ope.\npe.   \n\ndef f(ro, ro):\n    arr = [op]\n    obj = {pe}\n    gen = <ro>\n    s1 = 'ro'\n    s2 = \"op\"\n    s3 = `pe`\n    <em>ro</em>\n    #[ro]#\n# op\n\ntail pe\n"
-  },
-  {
-   "id": "edit-blank-line-below",
-   "model": "vim",
-   "expected": "run-\n    run- fooBarBaz_qux\n\n        un-n\nn-n   \n\ndef f(ru, ru):\n    arr = [un]\n    obj = {n-}\n    gen = <ru>\n    s1 = 'ru'\n    s2 = \"un\"\n    s3 = `n-`\n    <em>ru</em>\n    #[ru]#\n# un\n\ntail n-\n",
-   "expectedCaretLine": 1,
-   "expectedCaretColumn": 4,
-   "keys": [
-    "Down",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "Right",
-    "o",
-    "k"
-   ],
-   "dropped": 0,
-   "caretLine": 1,
-   "caretColumn": 4,
-   "keysApplied": 19,
-   "rc": 0,
-   "elapsedMs": 11958,
-   "endedOnDeadline": false,
-   "settledAfterS": 6,
-   "onDisk": "run-\n    run- fooBarBaz_qux\n\n        un-n\nn-n   \n\ndef f(ru, ru):\n    arr = [un]\n    obj = {n-}\n    gen = <ru>\n    s1 = 'ru'\n    s2 = \"un\"\n    s3 = `n-`\n    <em>ru</em>\n    #[ru]#\n# un\n\ntail n-\n"
   },
   {
    "id": "undo-one-insert",
@@ -526,7 +496,7 @@
    "caretColumn": 13,
    "keysApplied": 18,
    "rc": 0,
-   "elapsedMs": 11837,
+   "elapsedMs": 11880,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "Test\n    Test fooBarBaz_qux\n        Test\nest   \n\ndef f(Te, Te):\n    arr = [Te]\n    obj = {es}\n    gen = <Te>\n    s1 = 'Te'\n    s2 = \"Te\"\n    s3 = `es`\n    <em>Te</em>\n    #[Te]#\n# Te\n\ntail es\n"
@@ -561,7 +531,7 @@
    "caretColumn": 14,
    "keysApplied": 19,
    "rc": 0,
-   "elapsedMs": 11965,
+   "elapsedMs": 12078,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u200dlea\n    lead fooBZarBaz_qux\n        eadi\nadi   \n\ndef f(\u200dl, le):\n    arr = [ea]\n    obj = {ad}\n    gen = <\u200dl>\n    s1 = 'le'\n    s2 = \"ea\"\n    s3 = `ad`\n    <em>\u200dl</em>\n    #[le]#\n# ea\n\ntail ad\n"
@@ -592,7 +562,7 @@
    "caretColumn": 22,
    "keysApplied": 16,
    "rc": 0,
-   "elapsedMs": 11427,
+   "elapsedMs": 11568,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "Vie\u0302\u0323t\n    Vie\u0302\u0323t fooBarBaz_qux\n        Vie\u0302\u0323t\nVie\u0302\u0323   \n\ndef f(Vi, Vi):\n    arr = [Vi]\n    obj = {Vi}\n    gen = <Vi>\n    s1 = 'Vi'\n    s2 = \"Vi\"\n    s3 = `Vi`\n    <em>Vi</em>\n    #[Vi]#\n# Vi\n\ntail Vi\n"
@@ -627,7 +597,7 @@
    "caretColumn": 13,
    "keysApplied": 20,
    "rc": 0,
-   "elapsedMs": 12234,
+   "elapsedMs": 12328,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "afte\n    fter fooBarBaz_qux\n        ter \ner    \n\ndef f(af, ft):\n    arr = [te]\n    obj = {er}\n    gen = <af>\n    s1 = 'ft'\n    s2 = \"te\"\n    s3 = `er`\n    <em>af</em>\n    #[ft]#\n# te\n\ntail er\n"
@@ -660,7 +630,7 @@
    "caretColumn": 11,
    "keysApplied": 17,
    "rc": 0,
-   "elapsedMs": 11629,
+   "elapsedMs": 12090,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u041f\u0440\u0438\u0432\n    \u041f\u0440\u0438\u0432 fooBarBaz_qux\n        \u0440\u0438\u0432\u0435\n\u0438\u0432\u0435   \n\ndef f(\u041f\u0440, \u041f\u0440):\n    arr = [\u0440\u0438]\n    obj = {\u0438\u0432}\n    gen = <\u041f\u0440>\n    s1 = '\u041f\u0440'\n    s2 = \"\u0440\u0438\"\n    s3 = `\u0438\u0432`\n    <em>\u041f\u0440</em>\n    #[\u041f\u0440]#\n# \u0440\u0438\n\ntail \u0438\u0432\n"
@@ -694,7 +664,7 @@
    "caretColumn": 14,
    "keysApplied": 19,
    "rc": 0,
-   "elapsedMs": 12100,
+   "elapsedMs": 11984,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "emoj\n    moji fooBarBaz_qux\n        ojiw\njiw   \n\ndef f(em, mo):\n    arr = [oj]\n    obj = {ji}\n    gen = <em>\n    s1 = 'mo'\n    s2 = \"oj\"\n    s3 = `ji`\n    <em>em</em>\n    #[mo]#\n# oj\n\ntail ji\n"
@@ -727,7 +697,7 @@
    "caretColumn": 11,
    "keysApplied": 18,
    "rc": 0,
-   "elapsedMs": 12087,
+   "elapsedMs": 11850,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "no f\n    o fi fooBarBaz_qux\n        fina\nfin   \n\ndef f(no, o ):\n    arr = [fi]\n    obj = {fi}\n    gen = <no>\n    s1 = 'o '\n    s2 = \"fi\"\n    s3 = `fi`\n    <em>no</em>\n    #[o ]#\n# fi\n\ntail fi\n"
@@ -763,7 +733,7 @@
    "caretColumn": 0,
    "keysApplied": 21,
    "rc": 0,
-   "elapsedMs": 12469,
+   "elapsedMs": 12446,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "xxxx\n    xxxx fooBarBaz_qux\n        xxxx\nxxx   \n\ndef f(xx, xx):\n    arr = [xx]\n    obj = {xx}\n    gen = <xx>\n    s1 = 'xx'\n    s2 = \"xx\"\n    s3 = `xx`\n    <em>xx</em>\n    #[xx]#\n# xx\n\ntail xx\n"
@@ -797,7 +767,7 @@
    "caretColumn": 10,
    "keysApplied": 19,
    "rc": 0,
-   "elapsedMs": 11996,
+   "elapsedMs": 12191,
    "endedOnDeadline": false,
    "settledAfterS": 6,
    "onDisk": "\u1100  \u0308\u1160\n    \u1100  \u0308\u1160 fooBarBaz_qux\n        \u1100  \u0308\u1160\n\u1100  \u0308   \n\ndef f(\u1100 , \u1100 ):\n    arr = [\u1100 ]\n    obj = {\u1100 }\n    gen = <\u1100 >\n    s1 = '\u1100 '\n    s2 = \"\u1100 \"\n    s3 = `\u1100 `\n    <em>\u1100 </em>\n    #[\u1100 ]#\n# \u1100 \n\ntail \u1100 \n"
@@ -828,7 +798,7 @@
   "caretColumn": 8,
   "keysApplied": 15,
   "rc": 0,
-  "elapsedMs": 11135,
+  "elapsedMs": 11455,
   "endedOnDeadline": false,
   "settledAfterS": 6,
   "onDisk": "\u200dlea\n    lead fooBarBaz_qux\n        eadi\nadi   \n\ndef f(\u200dl, le):\n    arr = [ea]\n    obj = {ad}\n    gen = <\u200dl>\n    s1 = 'le'\n    s2 = \"ea\"\n    s3 = `ad`\n    <em>\u200dl</em>\n    #[le]#\n# ea\n\ntail ad\n"

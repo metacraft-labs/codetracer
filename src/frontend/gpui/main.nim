@@ -235,8 +235,9 @@ type
       ## loop returns; empty means none.
     layoutFile: string
       ## PLAT-40. A saved layout document (`layout_model.saveLayout`'s
-      ## versioned JSON) to open the recording's window with, instead of
-      ## `defaultReplayLayout()`. Empty means the default.
+      ## versioned JSON, docked panes included) to open the recording's
+      ## window with, instead of `defaultReplayLayout()`. Empty means the
+      ## default.
     noFlowOverlay: bool
       ## PLAT-42. Open with the flow overlay hidden — the user's
       ## `EditorVM.showFlowOverlay` toggle, from the command line; the window
@@ -973,10 +974,17 @@ proc runOpen(cmd: GpuiCommand): int =
   # replaced by the default when it cannot be read: a user who named a layout
   # and got another one would be looking at panes they did not ask for with
   # nothing saying so.
-  var layout: LayoutNode = nil
+  #
+  # THE WHOLE DOCUMENT, DOCKED PANES INCLUDED. `restoreLayoutDocument` rather
+  # than the tree-only `restoreLayout`, which refuses any document with a
+  # docked pane (`ldeDockedPanesUnsupported`) — so a layout the terminal
+  # saved after `:dock bottom`, or one this front-end's own window wrote after
+  # a dock, could not be opened here. The session slot holds a whole `Layout`,
+  # and `openSession`'s `Layout` overload validates it as one.
+  var layout = initLayout(defaultReplayLayout())
   if cmd.layoutFile.len > 0:
     try:
-      layout = restoreLayout(parseJson(readFile(cmd.layoutFile)))
+      layout = restoreLayoutDocument(parseJson(readFile(cmd.layoutFile)))
     except CatchableError as e:
       stderr.writeLine("codetracer-gpui: --layout: cannot open '" &
                        cmd.layoutFile & "': " & e.msg.splitLines()[0])

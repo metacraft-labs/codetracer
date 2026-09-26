@@ -435,3 +435,88 @@ suite "VCS panel — the reviewed commit in the Changed Files header (DR-R8)":
       vm.setHeader("Review: parser cleanup", reviewCommit = "a1b2c3d4e5f6...")
       vm.setHeader("main")
       check vm.reviewCommit.val == ""
+
+# ---------------------------------------------------------------------------
+# #753 — every diff target the VCS panel mints names exactly one file
+# ---------------------------------------------------------------------------
+
+proc namesExactlyOneFile(target: string): bool =
+  ## Whether a unified-diff target addresses a single file.
+  ##
+  ## DeepReview-GUI.md §4.1: "Each diff tab shows a single file.  Cross-file
+  ## navigation is the Changed Files list (§3); a review does not concatenate
+  ## every file into one scrolling document."  Only two of the shapes
+  ## `unified_diff.loadFromGit` accepts satisfy that — `file:<path>` and
+  ## `commit:<hash>:<path>`.  The pathless ones (`commit:<hash>`, and the
+  ## empty / "Working Tree" target) fan out to every file git reports, which is
+  ## the concatenated document #753 reported.
+  if target.startsWith("file:"):
+    return target.len > "file:".len
+  if target.startsWith("commit:"):
+    let commitPart = target["commit:".len .. ^1]
+    let colonIdx = commitPart.find(':')
+    return colonIdx >= 0 and colonIdx + 1 < commitPart.len
+  false
+
+suite "VCS panel — diff targets name one file (#753)":
+
+  test "test_vcs_panel_mints_no_multi_file_diff_target":
+    ## The regression guard for #753, at the route rather than at the renderer.
+    ##
+    ## `Unified-Diff-Design.milestones.org` recorded the multi-file document as
+    ## "a defensive fallback rather than a reachable surface", on the grounds
+    ## that "Every diff tab the UI can open names exactly one file
+    ## (`VCSVM.openActionFor` builds `file:<path>` or `commit:<hash>:<path>`)".
+    ## `openActionFor` governs only the *changed-file row* route; the commit
+    ## row carried its own button straight to `invokeOpenFileDiff`, bypassing
+    ## it with the pathless `commit:<hash>`.  So the claim was about one route
+    ## and was read as being about all of them.
+    ##
+    ## This asserts the claim itself instead of the reasoning behind it: fire
+    ## *every* diff affordance the rendered panel offers and require each
+    ## resulting target to name a file.  A new route that forgets the rule
+    ## fails here without anyone remembering to add a case for it.
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var targets: seq[string] = @[]
+      let callbacks = VCSCallbacks(
+        onOpenFileDiff: proc(target: string) = targets.add(target),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setBranchState("main", @["main"], false)
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "touch several files",
+                     relativeTime: "1h"),
+      ], selectedIndices = @[0])
+      # A commit touching more than one file — the shape that produced the
+      # reporter's screen, where seven headers stacked above one document.
+      vm.setCommitFiles(0, @[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
+                   additions: 2, deletions: 1),
+        VCSFileRow(status: "A", path: "scripts/build.sh", baseName: "build.sh",
+                   additions: 19, deletions: 0),
+      ])
+
+      # Every affordance in the panel whose job is to open a diff.  Matching on
+      # the shared `-diff-btn` suffix keeps this honest: a future button is
+      # swept up by it rather than silently skipped.
+      var buttons: seq[MockNode] = @[]
+      findAllByClass(panel, "diff-btn", buttons)
+      check buttons.len > 0
+      for button in buttons:
+        button.fireEvent("click")
+
+      check targets.len > 0
+      for target in targets:
+        checkpoint("diff target: " & target)
+        check namesExactlyOneFile(target)
+
+      # And specifically: the commit row no longer offers a whole-commit diff.
+      check findByClass(panel, "vcs-commit-diff-btn") == nil
+      check "commit:abc123" notin targets
+
+      dispose()

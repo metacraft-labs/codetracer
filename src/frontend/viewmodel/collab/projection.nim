@@ -183,6 +183,7 @@ proc projectEditorViewState*(state: SharedSessionViewState;
   # the session's version is not advanced past a batch that did not apply, so
   # the failure is sticky rather than skipped.
   p.doc.state = p.session.receiveInto(p.doc.state, batch)
+  p.doc.drainJournal()
   p.session.version - firstUnseen
 
 proc commitLocalChange*(p: EditorProjection; cs: ChangeSet;
@@ -216,6 +217,7 @@ proc commitLocalChange*(p: EditorProjection; cs: ChangeSet;
   if p.doc.state.filters.refusedBy(cs):
     return false
   p.doc.state = commitChange(p.doc.state, cs, nowMs = nowMs)
+  p.doc.drainJournal()
   p.session.recordLocal(cs, updateId)
   true
 

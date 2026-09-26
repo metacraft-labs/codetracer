@@ -10,7 +10,7 @@
 ## it from that one fact:
 ##
 ##   * it opens the real `noir_space_ship` recording through the production
-##     `openTuiSession`, steps in 15 times (the `noir-declined-arm` scenario's
+##     `openTuiSession`, steps in 33 times (the `noir-declined-arm` scenario's
 ##     own operations), and calls the production `refresh`;
 ##   * the lines the terminal's source-pane MODEL marks not-taken must equal
 ##     the lines the GPUI binary's render plan marked `efsNotTaken` in
@@ -46,9 +46,9 @@ template ck(cond: untyped) =
 
 const
   FlowScenario = "noir-declined-arm"
-  StepIns = 15
+  StepIns = 33
     ## `plat42_surfaces_record.py`'s `FLOW_SCENARIOS` spells this
-    ## `stepIn=15`; the case below asserts the record says the same, so the two
+    ## `stepIn=33` (it was 15 until 2026-09-24; see that file for why it moved); the case below asserts the record says the same, so the two
     ## cannot silently be about different stops.
   Cols = 120
   Rows = 40

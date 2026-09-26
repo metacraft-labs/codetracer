@@ -45,15 +45,17 @@
 ## -uall` lists exactly one addition there, `extent_distribution.nim`, which is
 ## a new file and therefore additive by construction.
 ##
-## ## WHY THE SHELL HOLDS A `WindowSet` AND `HeadlessApp` HOLDS A `LayoutNode`
+## ## WHY THE SHELL HOLDS A `WindowSet` AND `HeadlessApp` HOLDS A `Layout`
 ##
-## `HeadlessSessionSlot.layout` is a bare `LayoutNode`, which predates PLAT-4's
-## `Layout` (tree + docked + version) and `WindowSet`. Widening that field would
-## be a change to `HeadlessApp` — the one thing the gate forbids — so the shell
-## holds the `WindowSet` ITSELF, keyed by session, and synchronises the one
-## direction that matters: the session slot's tree is the window's tree.
+## `HeadlessSessionSlot.layout` was a bare `LayoutNode` when this file was
+## written, and widening it was a change to `HeadlessApp` — the one thing
+## PLAT-20's gate forbade — so the shell held the `WindowSet` ITSELF, keyed by
+## session, and synchronised only the TREE back onto the slot. That dropped a
+## docked pane on the way: `saveLayouts` then wrote an arrangement with the
+## pane in neither place. PLAT-4's closing pass (2026-09-26) widened the slot
+## to a whole `Layout`, and the sync below now carries the docked panes too.
 ##
-## That is not a workaround, it is where the concept belongs. Layout-ViewModel
+## The shell still holding the `WindowSet` is not a workaround: it is where the concept belongs. Layout-ViewModel
 ## §3A.1 puts `WindowSet` *above* `Layout`, and a top-level window is the
 ## HOST's concept: the terminal has exactly one and says so, a GPUI host may
 ## have several, and `HeadlessApp` — which is neither — should not know.
@@ -168,18 +170,15 @@ proc newGpuiShell*(viewport: DockViewport = DefaultGpuiViewport): GpuiShell =
 proc openWindowForSession*(shell: GpuiShell; id: WindowId;
                            session: HeadlessSessionId): WindowSetOutcome =
   ## Give `session` a top-level window whose `Layout` is the session's own
-  ## tree.
-  ##
-  ## The `Layout` is built from the slot's `LayoutNode` — `initLayout` with no
-  ## docked panes — because that is what the slot has. Docking a pane later is
-  ## a `WindowSet` operation on THIS side, and the session's tree follows via
-  ## `syncSessionLayouts`.
+  ## — a copy of the slot's, docked panes included. Changing it later is a
+  ## `WindowSet` operation on THIS side, and the session's `Layout` follows
+  ## via `syncSessionLayouts`.
   if shell.isNil:
     raiseShell("GpuiShell is nil")
   let slot = shell.app.slot(session)
   if slot.isNil:
     raiseShell("openWindowForSession: unknown session " & $session)
-  let outcome = shell.windows.openWindow(id, initLayout(slot.layout.clone()))
+  let outcome = shell.windows.openWindow(id, slot.layout.clone())
   if outcome.kind == wsApplied:
     shell.windows = outcome.windows
     shell.bindings[int(id)] = session
@@ -233,7 +232,9 @@ proc syncSessionLayouts*(shell: GpuiShell) =
     let session = shell.app.slot(shell.bindings[int(slot.id)])
     if session.isNil:
       continue
-    session.layout = slot.layout.tree.clone()
+    # The WHOLE layout. Copying only `.tree` (as this did while the slot held
+    # a `LayoutNode`) loses every docked pane on the way to `saveLayouts`.
+    session.layout = slot.layout.clone()
 
 proc applyIn*(shell: GpuiShell; id: WindowId;
               cmd: LayoutCommand): WindowSetOutcome =
@@ -348,7 +349,9 @@ proc restoreWindowLayout*(shell: GpuiShell; id: WindowId;
   let restored = restoreLayoutDocument(doc)
   var next = shell.windows.clone()
   next.windows[idx].layout = restored
-  let problems = next.validate()
+  # `{}`: the shell declares no owned-pane set (`validate`'s `owned` has no
+  # default, so the vacuous answer is spelled rather than inherited).
+  let problems = next.validate({})
   if problems.len > 0:
     # The FIRST problem, because `WindowSetOutcome` carries one — the same
     # shape `window_set`'s own refusals take. `validate` is still the thing

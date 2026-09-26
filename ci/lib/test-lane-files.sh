@@ -146,6 +146,9 @@ online-sharing-live
 host-instantiations
 renderer-electron
 renderer-web
+renderer-dom
+renderer-chromium
+main-process
 frontend-native-units
 frontend-js
 vm-unit
@@ -187,6 +190,9 @@ test_lane_description() {
 	host-instantiations) echo "JS-backend modules no other lane compiles: the facade's host instantiations and platform_host's Electron arm (compile-checked only)" ;;
 	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
 	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
+	renderer-dom) echo "renderer suites on the BROWSER target, run under node over jsdom" ;;
+	renderer-chromium) echo "BROWSER-target suites run in a real page in headless Chromium, keys from its input pipeline" ;;
+	main-process) echo "Electron main-process suites, the server_index build's defines, run under node" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
@@ -223,7 +229,22 @@ test_lane_description() {
 }
 
 # test_lane_backend ID — "c" (compile a binary and run it), "js" (compile with
-# `nim js -d:nodejs` and run under node), "js-browser", or "wasm".
+# `nim js -d:nodejs` and run under node), "js-browser", "js-dom",
+# "js-chromium", or "wasm".
+#
+# `js-chromium` is `js-browser`'s compile RUN in a real page in headless
+# Chromium (`src/frontend/tests/chromium-run.mjs`), for suites whose claim is
+# about what a BROWSER does — focus, trusted key events and the browser's own
+# default actions, `showModal()` and the inert page — none of which jsdom has.
+# The page asks the runner for keys (`window.ctPress`), and Playwright delivers
+# them through Chromium's input pipeline. Needs `node_modules/playwright` and
+# Playwright's Chromium (`PLAYWRIGHT_BROWSERS_PATH`), which the dev shell
+# provides; the runner fails rather than skipping without them.
+#
+# `js-dom` is `js-browser`'s compile RUN under node over jsdom
+# (`src/frontend/tests/jsdom-run.mjs`): for suites whose subject is a renderer
+# module that only compiles for the browser target, and whose property can be
+# observed without a real browser. It needs the checkout's `node_modules/jsdom`.
 #
 # `js-browser` EXISTS BECAUSE `-d:nodejs` IS NOT A NEUTRAL FLAG. The `js`
 # backend above passes it, and must: without it `std/exitprocs
@@ -261,8 +282,10 @@ test_lane_description() {
 # which is the half that was never in doubt.
 test_lane_backend() {
 	case "$1" in
-	frontend-js | vm-js | vm-unit-js | host-instantiations) echo "js" ;;
+	frontend-js | vm-js | vm-unit-js | host-instantiations | main-process) echo "js" ;;
 	renderer-electron | renderer-web) echo "js-browser" ;;
+	renderer-dom) echo "js-dom" ;;
+	renderer-chromium) echo "js-chromium" ;;
 	vm-unit-wasm) echo "wasm" ;;
 	*) echo "c" ;;
 	esac
@@ -366,6 +389,21 @@ test_lane_extra_flags() {
 		# configuration `just build-ui-js` uses, so the sentence cannot rot
 		# back into a description of a build nobody runs.
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
+	renderer-dom)
+		# The Electron renderer's defines (see `renderer-electron`): these
+		# suites drive the renderer's own modules, so they are compiled the way
+		# the renderer is.
+		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
+	main-process)
+		# The Electron MAIN process's defines — `!nim_node_index_server` in
+		# `Tuprules.tup` (`server_index.js`): `-d:ctIndex` selects the
+		# main-process arm of the shared modules, and `-d:server` is what lets
+		# `index/electron_vars.nim` load without Electron, so the suites run
+		# under plain node. The modules under test have no `when
+		# defined(server)` arm, so what runs is what `index.js` ships.
+		echo "-d:ctIndex -d:server"
 		;;
 	renderer-web)
 		# The same renderer, plus `-d:ctWeb` — the define `platform_host.nim`'s
@@ -689,6 +727,35 @@ test_lane_files() {
 		echo src/frontend/ui_js.nim
 		;;
 
+	renderer-dom)
+		# Suites that RUN renderer modules — `ui/state.nim` and the DAP
+		# transport under it — which only compile for the browser target.
+		# `locals_answer_identity_test.nim` drives the web renderer's
+		# `ct/load-locals` senders through the real response fan-out: one
+		# request per stop, in the stopped-in file's language.
+		echo src/frontend/tests/locals_answer_identity_test.nim
+		;;
+
+	renderer-chromium)
+		# Suites that need a BROWSER, not a DOM. PLAT-3's web arm: the view
+		# vocabulary's web binding at `[WebRenderer, Element]`, in a real
+		# document, driven by keys Chromium's own input pipeline delivers,
+		# held to the same scripted expectations the terminal is held to in
+		# `src/frontend/tui/tests/test_view_vocabulary_cross_medium.nim`, and
+		# measuring what the browser's own elements do on their own (the
+		# evidence behind `mappings.webMapping`'s grades).
+		echo src/frontend/tests/view_vocabulary_chromium_test.nim
+		;;
+
+	main-process)
+		# Suites that RUN the Electron main process's own modules.
+		# `dap_session_routing_test.nim` drives the DAP router
+		# (`index/ipc_subsystems/dap.nim`) with two sessions whose requests
+		# share a `seq`, and asserts each answer reaches the session that
+		# asked.
+		echo src/frontend/tests/dap_session_routing_test.nim
+		;;
+
 	frontend-native-units)
 		# Discovery over EVERY unittest suite in the directory, not just the
 		# `*_test.nim` ones: `agentic_coding_test_plan.nim` (5 suites, 25 cases,
@@ -718,8 +785,16 @@ test_lane_files() {
 		# again: adding a file to `frontend-js` removes it from here in the
 		# same edit, and `ci/test/test-lane-coverage.sh` still sees it claimed
 		# by the union.
+		# `renderer-dom`'s suites are subtracted the same way, for the same
+		# reason: they are browser-target modules and do not build with `nim c`.
+		# So are `main-process`'s: the Electron main process is `nim js` only.
 		_tlf_find src/frontend/tests '*_test.nim' '*_test_plan.nim' |
-			grep -vxF -f <(test_lane_files frontend-js) || true
+			grep -vxF -f <(
+				test_lane_files frontend-js
+				test_lane_files renderer-dom
+				test_lane_files renderer-chromium
+				test_lane_files main-process
+			) || true
 		;;
 
 	frontend-js)
@@ -871,7 +946,27 @@ test_lane_files() {
 				'/test_plugin_io_sdk\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
 				'/test_plugin_surfaces\.nim$' \
-				'/test_plugin_grant_lifecycle\.nim$'
+				'/test_plugin_grant_lifecycle\.nim$' \
+				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
+				'/test_every_status_surface_has_an_entry_point\.nim$'
+		# `test_every_mountable_pane_has_a_factory_arm` and
+		# `test_every_status_surface_has_an_entry_point` (both 2026-09-04) are
+		# the same shape as `test_pane_mount_markers_are_released` below: their
+		# subject is the SOURCE TREE — `ui/layout.nim`'s factory dispatch, and
+		# which status surfaces have an entry point — read at run time with
+		# `std/os`. MEASURED, 2026-09-24, on origin/dev 174e593ff:
+		#
+		#     test_every_mountable_pane_has_a_factory_arm.nim(198, 13)
+		#       Error: undeclared identifier: 'fileExists'
+		#     test_every_status_surface_has_an_entry_point.nim(88, 12)
+		#       Error: undeclared identifier: 'fileExists'
+		#
+		# `fileExists` does not exist on the JS target, so both died at the
+		# `nim js` step, before a case ran, from the day they joined this lane
+		# by discovery. Rejected rather than `when`-guarded for the reason the
+		# mount-marker entry gives: with the scan elided each would report green
+		# having asserted nothing about the tree. Both still run on native in
+		# `vm-unit`, where the filesystem they read exists.
 		# `test_editor_async_closure` (PLAT-29) SPAWNS the shell gate it grades
 		#     — `ci/test/editor-import-closure.sh`, once against the real tree
 		#     and once per planted route — through `std/osproc`. MEASURED rather
@@ -1195,6 +1290,7 @@ test_lane_files() {
 				'/multi-replay/' \
 				'/noir-space-ship/' \
 				'/source-access/' \
+				'/layout/mode_layout_test\.nim$' \
 				'/request-panel/no_sidecar_manifests_test\.nim$'
 		# real_backend_test / language_smoke_test / multi-replay /
 		# noir-space-ship / source-access need `headless_session` or
@@ -1202,12 +1298,17 @@ test_lane_files() {
 		# `vm-gui-headless` lane.
 		# no_sidecar_manifests_test drives six recorder toolchains — it is the
 		# `no-sidecar-manifests` lane.
+		# mode_layout_test exercises JavaScript layout objects; vm-js includes
+		# it separately so excluding its empty native body does not lose it.
 		;;
 
 	vm-js)
 		# The native lane's set, minus what cannot compile or run under
 		# `nim js`:
-		test_lane_files vm-native |
+		{
+			test_lane_files vm-native
+			_tlf_find src/tests/gui/tests/layout 'mode_layout_test.nim'
+		} | sort |
 			_tlf_reject \
 				'/agentic-coding/' \
 				'/status-bar/certificate_indicator_native_test\.nim$' \

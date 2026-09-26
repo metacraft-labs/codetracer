@@ -4,7 +4,9 @@
         "reorderEnabled": true,
         "popoutWholeStack": false,
         "blockedPopoutsThrowError": true,
-        "responsiveMode": "always"
+        "responsiveMode": "always",
+        "tabOverlapAllowance": 2,
+        "tabControlOffset": 0
     },
     "dimensions": {
         "borderWidth": 4,

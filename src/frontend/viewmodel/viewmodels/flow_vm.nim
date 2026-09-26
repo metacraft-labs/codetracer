@@ -327,9 +327,25 @@ const NotTaken = 2
   ## a reordering of the enum fails a test rather than silently inverting
   ## which arms are dimmed.
 
-const FlowWireNotTakenOrdinal* = NotTaken
-  ## `NotTaken`, exported under a name that cannot capture the `mixin`, for
-  ## the test that pins it.
+const Taken = 1
+  ## `BranchState.Taken`'s ordinal on the wire, the sibling of `NotTaken` above
+  ## and named here for the same reason: `insideUntakenBranch` reaches it
+  ## through `mixin`, so it has to be a symbol in THIS scope for the
+  ## instantiation over `FlowLineWindow` to compile. It is read by the rule's
+  ## "an arm entered anywhere outranks a sweep that says it was not" clause.
+  ##
+  ## Not having it here is a compile error and not a silent wrong answer:
+  ## `nim js src/frontend/ui_js.nim` fails with *"undeclared identifier:
+  ## 'Taken'"* pointing at `flow_line_rule.nim` from this file's instantiation.
+
+const
+  FlowWireNotTakenOrdinal* = NotTaken
+    ## `NotTaken`, exported under a name that cannot capture the `mixin`, for
+    ## the test that pins it.
+  FlowWireTakenOrdinal* = Taken
+    ## `Taken`, likewise. Pinned against the enum by `test_flow_line_facts.nim`,
+    ## so a reordering of `BranchState` fails a test rather than quietly turning
+    ## "this arm ran" into "this arm did not".
 
 proc intKeyedTable[V](node: JsonNode; conv: proc (n: JsonNode): V): Table[int, V] =
   result = initTable[int, V]()

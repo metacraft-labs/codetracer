@@ -432,6 +432,11 @@ proc configureIpcMain* =
     "record-from-launch"
     "record-with-launch-config"
     "init-edit-mode"
+    # Issue #735 — "New file": edit mode with no project, answered by
+    # `index/traces.onNewFile`. A browser tab reaches the same renderer state
+    # through `ui/web_entry_surface.enterNewFileEditMode`, which delivers the
+    # `CODETRACER::no-trace` this handler sends.
+    "new-file"
 
     # NS9 — the one message Test Results and Constraints are fed by. Answered
     # here by `index/ns9_panes.onNs9Panes`, and in a browser by

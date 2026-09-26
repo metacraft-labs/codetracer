@@ -22,26 +22,30 @@
 #
 # The version below is the REPAIRED one, verbatim.
 #
-# **AND IT IS A THIRD COPY, NOT A HOIST — corrected 2026-09-18 by PLAT-29's
-# verification pass.** Neither older gate was changed. `editor-import-closure.sh`
-# is this file's only caller; `plugin-reactive-boundary.sh` still carries the
-# DRIFTED spelling and `sdk-facade-boundary.sh` still carries its own copy of
-# the repaired one. So this file did not reduce the number of copies of
-# `normpath`, it raised it from two to three, and §30's "one predicate, one
-# function" is further away than before rather than nearer.
+# **AND IT IS NOW THE ONLY COPY — hoisted 2026-09-23.** PLAT-29's
+# verification pass (2026-09-18) found this file had been CREATED as a third
+# copy rather than a hoist: `editor-import-closure.sh` sourced it and neither
+# older gate was touched. Both now source it too, and their own definitions
+# are gone:
 #
-# Adopting this copy in the two older gates is meaning-preserving in the plugin
-# gate (it passes relative paths only) and NO mutation arm quotes `normpath`'s
-# body in any harness, so the change costs a sourcing line in each and no
-# re-aimed arm. It is the residual, and it is written down as one.
+#   | gate                          | before                  | now      |
+#   | ----------------------------- | ----------------------- | -------- |
+#   | `plugin-reactive-boundary.sh` | own copy, DRIFTED (no   | sources  |
+#   |                               | leading "/")            | this     |
+#   | `sdk-facade-boundary.sh`      | own copy, same as this  | sources  |
+#   |                               |                         | this     |
+#   | `editor-import-closure.sh`    | sources this            | same     |
 #
-# A SECOND THING THIS FILE IS NOT COVERED BY, measured in the same pass: it is
-# a behavioural input to `editor-import-closure.sh` — every module resolution
-# goes through `normpath` — and it appears in NO harness's subject list and NO
-# control digest. `ci/lib/nim-imports.sh`, the sibling library next door, is a
-# subject of PLAT-7's harness with both a digest line and arms aimed at it.
-# This one has neither, so a change to it is invisible to PLAT-29's
-# control-digest guard and no arm establishes that it is load-bearing.
+# Adopting it in the plugin gate is meaning-preserving because that gate
+# resolves repo-relative paths only, and NO mutation arm in any harness quoted
+# `normpath`'s body, so no arm was re-aimed by the move.
+#
+# COVERED, as of the same date: this file is a subject of
+# `run-plat29-async-mutations.py` — a digest line in
+# `plat29-async-mutation-control.sha256` and an arm (`N1`, the `lead` handling
+# removed) that the real-tree closure case must kill. Before that a change here
+# was invisible to every control-digest guard, although every module
+# resolution in three gates runs through it.
 #
 # WHAT IS NOT HERE, AND WHY — measured, 2026-09-18
 # -----------------------------------------------

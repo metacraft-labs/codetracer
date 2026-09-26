@@ -106,6 +106,40 @@ system_surface_lib_has_roots() {
 	return 0
 }
 
+# system_surface_nim_exec_target <path> — the executable a nim wrapper runs.
+#
+# Follows `makeWrapper`-style shell scripts (nixpkgs wraps nim this way: a
+# `#!` script whose LAST `exec` hands off to the real compiler by absolute
+# path, optionally through `-a "$0"`) until it reaches something that is not
+# such a script, and prints that. A path that is not a `#!` script — the ELF
+# compiler itself, the source layout's `bin/nim` — is printed unchanged, so this
+# is a no-op on every layout that worked before it existed. The target is taken
+# ONLY when it is an absolute path to an executable file; anything else (a
+# script that computes its target, a relative path) stops the walk at the
+# script, and the caller's validation then decides, as it always did. Bounded,
+# so a wrapper cycle cannot hang the gate.
+#
+# Read, never run: executing the wrapper is exactly what this fallback exists
+# to avoid (see `system_surface_lib_from_exe`).
+system_surface_nim_exec_target() {
+	local exe="$1" hops=0 line target first
+	while [ "${hops}" -lt 8 ]; do
+		[ -f "${exe}" ] || break
+		IFS= read -r -n 2 first <"${exe}" || true
+		[ "${first}" = "#!" ] || break
+		target=""
+		while IFS= read -r line; do
+			if [[ ${line} =~ ^[[:space:]]*exec[[:space:]]+(-a[[:space:]]+\"[^\"]*\"[[:space:]]+)?\"(/[^\"]+)\" ]]; then
+				target="${BASH_REMATCH[2]}"
+			fi
+		done <"${exe}"
+		[ -n "${target}" ] && [ -f "${target}" ] && [ -x "${target}" ] || break
+		exe="${target}"
+		hops=$((hops + 1))
+	done
+	printf '%s\n' "${exe}"
+}
+
 # system_surface_lib_from_exe — the library directory of the nim on PATH,
 # derived from WHERE THAT EXECUTABLE SITS rather than from what it prints.
 #
@@ -138,10 +172,18 @@ system_surface_lib_has_roots() {
 # against `nim dump`'s own line. A candidate that carries no `std/syncio.nim` is
 # NOT returned — an unvalidated guess is how a wrong path becomes an empty
 # sweep, which is the failure this whole file is written around.
+#
+# A WRAPPER IS FOLLOWED TO THE COMPILER IT RUNS. nixpkgs' `nim` (the one the
+# lint devShell carries) is a `makeWrapper` shell script in a prefix holding only
+# `bin/` and `etc/`; its last line is `exec "<store>/nim-unwrapped-X/nim/bin/nim"
+# "$@"`, and THAT binary's prefix is the one `nim dump` names. Walking up from
+# the script found no library at all, so the fallback came back empty on the
+# very layout CI runs. See `system_surface_nim_exec_target`.
 system_surface_lib_from_exe() {
 	local exe dir root cand
 	exe="$(command -v nim 2>/dev/null || true)"
 	[ -n "${exe}" ] || return 1
+	exe="$(system_surface_nim_exec_target "${exe}")" || return 1
 	dir="$(dirname -- "${exe}")"
 	root="$(cd -- "${dir}/.." 2>/dev/null && pwd -P)" || return 1
 	[ -n "${root}" ] || return 1

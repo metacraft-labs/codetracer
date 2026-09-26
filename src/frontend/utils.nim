@@ -145,13 +145,20 @@ proc openPanel*(
   noInfoMessage: cstring
 ): GoldenContentItem
 
-proc makeEditorViewDetailed(
+proc makeEditorViewDetailed*(
   data: Data,
   name: cstring,
   editorView: EditorView,
   tabInfo: TabInfo,
   location: types.Location
 )
+  ## Register a tab whose CONTENT IS ALREADY IN HAND, and open a layout
+  ## container for it.
+  ##
+  ## Exported for `renderer.openNewTab` (issue #735): an untitled buffer's
+  ## source is the empty string by definition, so it must not go through
+  ## `openNewEditorView`, which exists to ASK a host for the source and would
+  ## send a `tab-load` for a path no filesystem has.
 
 proc generateId*(data: Data, content: Content): int =
   if data.ui.componentMapping[content].len > 0:
@@ -1707,7 +1714,7 @@ proc openNewEditorView*(
 
       discard kdom.setTimeout(cb, 10)
 
-proc makeEditorViewDetailed(
+proc makeEditorViewDetailed*(
     data: Data,
     name: cstring,
     editorView: EditorView,

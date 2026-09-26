@@ -23,7 +23,7 @@
 ##
 ## Four ViewModel fields in this layer had turned out to be filled by nothing
 ## — `PointListVM.points` (CTUI-5), `store.locals.globals` (CTUI-7),
-## `TimelineVM.markers` and `EventLogVM.eventRows` (CTUI-8) — so the first
+## `TimelineVM.bounds` and `EventLogVM.eventRows` (CTUI-8) — so the first
 ## question this milestone had to answer was whether `OriginChainVM` is a fifth.
 ## (Two of the four have producers now: `eventRows` is
 ## `ReplayDataStore.eventLog.rows` and `PointListVM.points` is
@@ -326,12 +326,6 @@ proc answersFor*(nav: OriginNavigator; variable: string;
   ## was asked.
   nav.variable.len > 0 and nav.variable == variable and
     (nav.depth > 0 or nav.queryTick == tick)
-
-proc needsQuery*(nav: OriginNavigator; variable: string;
-                 tick: uint64): bool =
-  ## Whether `o` must issue a NEW query. The inverse of `answersFor`, named so
-  ## a caller reads the intent rather than a negation.
-  not nav.answersFor(variable, tick)
 
 proc advance*(nav: var OriginNavigator): (bool, OriginStep) =
   ## `o`: one hop deeper into the chain. Returns the step to seek to.

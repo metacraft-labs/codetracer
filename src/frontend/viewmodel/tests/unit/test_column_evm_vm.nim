@@ -153,12 +153,12 @@ proc recordEvmTrace(recorder, sourcePath: string): EvmFixture =
   # ``solc`` / ``anvil``.  Falls back to direct invocation when direnv
   # isn't on PATH or the repo lacks a ``.envrc`` (e.g. a packaged build).
   let recorderRepo = recorder.parentDir.parentDir.parentDir
-  let useDirenv = findExe("direnv").len > 0 and
-    fileExists(recorderRepo / ".envrc")
+  let useRepro = findExe("repro").len > 0 and
+    (fileExists(recorderRepo / "repro.nim") or fileExists(recorderRepo / ".envrc"))
 
   var cmd: string
-  if useDirenv:
-    cmd = "direnv exec " & quoteShell(recorderRepo) & " " &
+  if useRepro:
+    cmd = "repro exec " & quoteShell(recorderRepo) & " -- " &
       quoteShell(recorder) & " record " & quoteShell(localSource) &
       " --out-dir " & quoteShell(outDir)
   else:

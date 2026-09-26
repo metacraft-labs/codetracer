@@ -110,9 +110,6 @@ const
     ## Vim's own wording, because a user who knows one knows the other and
     ## because "wrapped" alone does not say which way.
 
-  CountStyle* = CellStyle(fg: "bright_black")
-  QueryStyle* = CellStyle(fg: "white")
-  WrapStyle* = CellStyle(fg: "yellow")
 
 proc initSearchModel*(scope = sscSource; direction = sdirForward;
                       caseSensitive = false): SearchModel =

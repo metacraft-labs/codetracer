@@ -373,6 +373,63 @@ proc receiveResponse*(dap: DapApi, command: cstring, rawValue: JsObject) =
 proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
   dap.receive(dapEventToCtEventKind(event), rawValue)
 
+# ---------------------------------------------------------------------------
+# Request identity carried to the answer
+# ---------------------------------------------------------------------------
+
+type
+  CtRequestTracker = object
+    kind: CtEventKind
+    onSent: proc(requestId: cstring)
+    onAnswered: proc(requestId: cstring)
+
+var ctRequestTrackers: seq[CtRequestTracker] = @[]
+
+const CtRequestIdField* = cstring"ctRequestId"
+  ## The key under which `deliverDapResponse` writes the answering request's
+  ## identity into a TRACKED response's `body`, before the fan-out. A
+  ## subscriber receives only the body, so the body is where the identity has
+  ## to travel.
+
+proc trackCtRequests*(kind: CtEventKind;
+                      onSent: proc(requestId: cstring);
+                      onAnswered: proc(requestId: cstring)) =
+  ## Name every `kind` request and its answer by one identity.
+  ##
+  ## `onSent(id)` runs as the request is written — from the ONE send path
+  ## (`dispatchCtRequest`), whoever issued it — and the answer's `body`
+  ## carries the same `id` under `CtRequestIdField` to every fan-out
+  ## subscriber. `onAnswered(id)` runs once the fan-out has finished.
+  ##
+  ## WHY THIS EXISTS: an answer is otherwise anonymous. `receiveResponse` hands
+  ## subscribers the body alone, so a consumer that needs to know WHICH request
+  ## a body answers — `ct/load-locals`, whose answer is about the stop it was
+  ## asked at — could only count, and counting desynchronises as soon as two
+  ## callers send the command or two subscribers receive the answer.
+  ##
+  ## The identity is the transport's own (`ctRequestId`: the sending
+  ## `DapApi`'s session and its wire `seq`, echoed back as `request_seq`), so
+  ## no new wire field is needed. In `-d:ctInExtension` builds there is no
+  ## `seq` and nothing fires: answers arrive untagged.
+  ctRequestTrackers.add CtRequestTracker(
+    kind: kind, onSent: onSent, onAnswered: onAnswered)
+
+proc isTracked(kind: CtEventKind): bool =
+  for t in ctRequestTrackers:
+    if t.kind == kind:
+      return true
+  false
+
+proc ctRequestIdOf*(body: JsObject): cstring =
+  ## The identity `deliverDapResponse` wrote into a tracked answer's body, or
+  ## "" for an answer that carries none.
+  if body.isNil or jsTypeOf(body) != cstring"object":
+    return cstring""
+  let v = body[CtRequestIdField]
+  if v.isNil or jsTypeOf(v) != cstring"string":
+    return cstring""
+  v.to(cstring)
+
 when not defined(ctInExtension):
   import errors
 
@@ -482,6 +539,12 @@ when not defined(ctInExtension):
       except:
         console.log cstring"ct request failure observer raised: ",
           cstring(getCurrentExceptionMsg())
+
+  proc ctRequestId*(dap: DapApi; requestSeq: int): cstring =
+    ## The identity of request `requestSeq` sent through `dap`: its session
+    ## and wire `seq`. Every replay session's `DapApi` numbers from zero, so
+    ## the `seq` alone is not unique.
+    cstring($dap.sessionId & ":" & $requestSeq)
 
   proc resolvePendingDapResponse*(dap: DapApi, raw: JsObject) =
     ## M49 — hand a DAP response frame to the `asyncSendCtRequest`
@@ -606,6 +669,13 @@ when not defined(ctInExtension):
         command: command,
         message: cstring"",
         body: js{})), DAP_RESPONSE_TIMEOUT_MS)
+    # THE REQUEST IS NAMED BEFORE IT IS WRITTEN, from this one send path, so
+    # no caller can issue a tracked request its answer cannot be matched to.
+    if isTracked(kind):
+      let requestId = ctRequestId(api, requestSeq)
+      for t in ctRequestTrackers:
+        if t.kind == kind and not t.onSent.isNil:
+          t.onSent(requestId)
     api.ipc.send("CODETRACER::dap-raw-message", packet)
 
   proc asyncSendCtRequest*(dap: DapApi,
@@ -727,3 +797,56 @@ proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
       notifyCtRequestFailed(outcome))
   else:
     discard dap.asyncSendCtRequest(kind, rawValue)
+
+proc isTrackedCommand(command: cstring): bool =
+  for t in ctRequestTrackers:
+    try:
+      if toDapCommandOrEvent(t.kind) == command:
+        return true
+    except ValueError:
+      discard
+  false
+
+proc deliverDapResponse*(fanOut: DapApi; responseDap: DapApi; raw: JsObject) =
+  ## Deliver one DAP response frame: settle the continuation waiting on it
+  ## (on `responseDap`, the `DapApi` that SENT the request), then fan its
+  ## `body` out to every `fanOut.on(...)` subscriber.
+  ##
+  ## A TRACKED command's body is stamped with the answering request's identity
+  ## (`trackCtRequests`) before the fan-out, and its trackers told once the
+  ## fan-out is over — so every subscriber can say which request it is
+  ## looking at the answer to, and the record of that request lives exactly
+  ## as long as the answer is being delivered.
+  ##
+  ## The continuation is settled first and outside the fan-out's `try`, as
+  ## `ui_js.onDapReceiveResponse` has always done it: the fan-out raises for a
+  ## command with no `*Response` kind, and that must not swallow the
+  ## continuation of a command the fan-out has no mapping for.
+  resolvePendingDapResponse(responseDap, raw)
+  if raw.isNil:
+    return
+  let command = raw["command"].to(cstring)
+  var body = raw["body"]
+  var requestId = cstring""
+  when not defined(ctInExtension):
+    if isTrackedCommand(command) and jsHasOwn(raw, cstring"request_seq"):
+      # A frame with no body (a bare refusal) still answers its request, and
+      # must say which one — or it would be taken for an answer about the
+      # stop the debugger is at now.
+      if body.isNil or jsTypeOf(body) != cstring"object":
+        body = newJsObject()
+        raw["body"] = body
+      requestId = ctRequestId(responseDap, raw["request_seq"].to(int))
+      body[CtRequestIdField] = requestId
+  try:
+    receiveResponse(fanOut, command, body)
+  except ValueError:
+    console.log(cstring"dap: ignoring response for unmapped command: ", command)
+  if requestId.len > 0:
+    for t in ctRequestTrackers:
+      if not t.onAnswered.isNil:
+        try:
+          if toDapCommandOrEvent(t.kind) == command:
+            t.onAnswered(requestId)
+        except ValueError:
+          discard

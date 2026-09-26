@@ -227,6 +227,20 @@ welcome-heading-type()
       flex-direction: column
       min-width: 0
 
+    // The standing explanation under the strip (issue #734).  Rendered only
+    // when the ViewModel carries one, which today means the web arm, where
+    // every start option is refused and a `title` per button is not enough:
+    // a user has to suspect a control before hovering it, and the reporter
+    // had no reason to suspect five grey rectangles rather than the product.
+    .start-options-note
+      margin-top: 0.75em
+      font-family: "SpaceGrotesk"
+      font-size: 0.75em
+      line-height: 1.5
+      max-width: 44em
+      color: colors-ui-text-primary-body
+      opacity: 0.75
+
     // Start options - direct child of .welcome-screen
     .start-options
       position: relative
@@ -248,13 +262,27 @@ welcome-heading-type()
         &.hovered
           opacity: 1
 
+      // A REFUSED option, which must still be READABLE and still HOVERABLE.
+      //
+      // Issue #734: this rule used to be `opacity: 0.2` plus
+      // `pointer-events: none`. The first made the label almost illegible and
+      // the second suppressed the browser's native `title` tooltip — so on the
+      // web arm, where every option is refused, the strip was five unreadable
+      // ghosts that could not be interrogated. The reporter concluded the
+      // product was broken, which was the only conclusion available.
+      //
+      // The click is refused in CODE (`triggerStartOption` in
+      // `isonim_welcome_screen_view.nim` returns early on `opt.inactive`), so
+      // `pointer-events: none` was never what made the refusal safe; it only
+      // hid the explanation. `cursor: not-allowed` says the same thing to the
+      // pointer without taking the hover away.
       .inactive-start-option
-        opacity: 0.2
-        pointer-events: none
+        opacity: 0.45
+        cursor: not-allowed
 
         &.hovered
           color: inherit
-          opacity: 0.2
+          opacity: 0.45
 
       .start-option-icon
         width: 6.25em

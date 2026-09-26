@@ -585,6 +585,27 @@ proc diagnosticMessage*(recognition: Recognition, code: string): string =
 # Invocation
 # ---------------------------------------------------------------------------
 
+proc readToEof(s: Stream): string =
+  ## Everything the child writes to `s`, up to end of file.
+  ##
+  ## Not `streams.readAll`: that stops at the first SHORT read
+  ## (`readBytes < bufferSize`), and on Windows a pipe read returns whatever
+  ## the child has written so far rather than waiting for a full buffer.  So
+  ## on Windows `readAll` kept only the recognizer's first write -- measured
+  ## 2026-09-24 (LRS-6's review), a one-line stderr came back as `cann` -- and
+  ## would do the same to a document written in more than one piece.  POSIX
+  ## pipe streams fill the buffer before returning, which is why no Linux run
+  ## saw it.  Reading until a read returns nothing is correct on both.
+  result = ""
+  var buffer {.noinit.}: array[4096, char]
+  while true:
+    let n = s.readData(addr buffer[0], buffer.len)
+    if n <= 0:
+      break
+    let start = result.len
+    result.setLen(start + n)
+    copyMem(addr result[start], addr buffer[0], n)
+
 proc recognizeTarget*(backendPath, target: string): RecognitionOutcome =
   ## Run `<backendPath> recognize --format=json <target>` and consume it.
   ##
@@ -620,8 +641,8 @@ proc recognizeTarget*(backendPath, target: string): RecognitionOutcome =
     # The document is a few hundred bytes and the recognizer's stderr is one
     # line at most, so reading stdout to EOF before stderr cannot deadlock on
     # a full pipe here.
-    output = process.outputStream.readAll()
-    errors = process.errorStream.readAll()
+    output = process.outputStream.readToEof()
+    errors = process.errorStream.readToEof()
   except CatchableError as e:
     errors = e.msg
   let code = process.waitForExit()

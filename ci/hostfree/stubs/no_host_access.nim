@@ -37,7 +37,7 @@
 ##   string functions. Banning them would push callers into hand-rolled string
 ##   surgery, which is worse than the problem.
 ## * **`std/times`** — the wall clock is the *time* facade's concern
-##   (Front-Ends/IsoNim/nim-everywhere-Time-Facade.md), not this one.
+##   (isonim-specs/nim-everywhere-Time-Facade.md), not this one.
 ## * **`echo` and `stdout`** — diagnostics are not a platform capability.
 ##
 ## ## The residual, stated plainly

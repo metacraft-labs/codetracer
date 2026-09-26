@@ -75,6 +75,13 @@ type
     readFileSync*: proc(filename: cstring, encoding: cstring): cstring
     existsSync*: proc(filename: cstring): bool
     lstatSync*: proc(filename: cstring): js
+    # `statSync` FOLLOWS symlinks, which `lstatSync` does not.  That is the
+    # difference between "is this a directory?" as `spawn` asks it — it
+    # `chdir`s, so a symlink to a directory is a directory — and as `lstat`
+    # answers it.  A project checked out behind a symlink is ordinary enough
+    # that getting this wrong would re-create issue #747's failure in a new
+    # place.  https://nodejs.org/api/fs.html#fsstatsyncpath-options
+    statSync*: proc(filename: cstring): js
     # https://nodejs.org/api/fs.html#fsopenpath-flags-mode-callback
     open*: proc(
       path: cstring,

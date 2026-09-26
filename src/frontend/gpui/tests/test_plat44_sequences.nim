@@ -99,9 +99,17 @@ proc caretRowOf(plan: string): int =
     discard
 
 const
-  ReachableSequences = 24
+  ReachableSequences = 23
     ## MEASURED 2026-09-23: how many of the thirty a key route reaches. Pinned
     ## so a keymap change that opens or closes a route moves a number here.
+    ##
+    ## 24 -> 23 on 2026-09-24, and it is this pin doing its job: 3619f2666
+    ## rebound Vim's and Kakoune's `o` / `O` from `insert-blank-line-below` /
+    ## `-above` to the new `open-line-below` / `-above` (open a line AND enter
+    ## insert mode), and filed `insert-blank-line-*` as having no chord. That
+    ## closed the only route to `edit-blank-line-below`, which is now the
+    ## seventh unreachable sequence (no key for `insert-blank-line-below`).
+    ## The window record was re-typed against the new keymap the same day.
     ## The six that no key reaches, each reported with the first step the
     ## FIRST model tried (the product default) has no key for:
     ## `move-subword-forward`, `split-line`, `add-cursor-below`,

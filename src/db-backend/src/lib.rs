@@ -73,6 +73,8 @@ pub mod core;
 pub mod ctfs_trace_reader;
 pub mod dap;
 pub mod dap_error;
+// CodeTracer fields on DAP bodies; kept out of the generated `dap_types`.
+pub mod dap_ext;
 pub mod dap_handler;
 pub mod dap_server;
 pub mod dap_types;

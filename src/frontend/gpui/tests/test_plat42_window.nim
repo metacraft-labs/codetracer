@@ -44,7 +44,9 @@ const
   ValueScenarios = ["advanced-state", "returned-calltrace",
                     "continued-event-log"]
   QuietScenario = "stepped-editor"
-  DeclinedArm = @[11, 12, 13]
+  DeclinedArm = @[32, 33, 35, 36]
+    ## `plat42-surfaces.json`'s `noir-declined-arm` stop (`stepIn=33`); it was
+    ## lines 11-13 at `stepIn=15` until 2026-09-24 — see `test_plat42_surfaces`.
   TwinFloor = 0.01
     ## A row "differs" when more than 1% of its band's pixels moved by more
     ## than the record's `pixelDelta`. Not a timing and not a tuned budget:

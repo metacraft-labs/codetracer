@@ -12,7 +12,12 @@
 ## - setPageSize updates size and resets page to 0
 ## - totalPages memo computes from totalEventCount and pageSize
 ## - isLoading memo reflects loading state
-## - Auto-load effect fires when page/sort/search/rrTicks changes
+## - Auto-load effect fires for page/sort/search changes, not debugger moves
+##
+## TEST DOUBLE JUSTIFICATION: MockBackendService records outgoing requests so
+## these tests can assert the ViewModel's request and deduplication contract.
+## The production store, signals and ViewModel run unchanged; these tests make
+## no claim about a real backend's replies or recorded event contents.
 ##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_event_log_vm.nim
@@ -484,48 +489,42 @@ suite "EventLogVM auto-load effect":
       var initialLoads = 0
       for cmd in mock.receivedCommands:
         if cmd.command == "ct/event-load":
-          check cmd.args["rrTicks"].getBiggestInt == 0
+          check not cmd.args.hasKey("rrTicks")
+          check cmd.args == %*{
+            "page": vm.currentPage.val, "pageSize": vm.pageSize.val,
+            "searchQuery": vm.searchQuery.val, "sortColumn": vm.sortColumn.val,
+            "sortAscending": vm.sortAscending.val}
           initialLoads += 1
       check initialLoads == 1
 
       dispose()
 
-  test "changing rrTicks triggers a further event log request at the new position":
+  test "first and subsequent debugger moves do not reload the event log":
+    # Event-Log-Pane.md: position changes presentation, never the row set.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)
       drain()
+      var initialLoads = 0
+      for cmd in mock.receivedCommands:
+        if cmd.command == "ct/event-load": inc initialLoads
+      check initialLoads == 1
 
-      # Whatever the initial load did, it is behind us; only what the
-      # move produces is under test here.
-      let cmdCountBefore = mock.receivedCommands.len
-
-      # Simulate debugger moving to a new position.
-      var dbg = store.debugger.val
-      dbg.rrTicks = 100'u64
-      store.debugger.val = dbg
-      drain()
-
-      # The effect should have triggered a load-event-log request, and it
-      # must carry the position that was moved to — reading the *first*
-      # `ct/event-load` in the whole log would have found the initial one
-      # at rrTicks 0 and passed on the wrong evidence.
-      var found = false
-      for i in cmdCountBefore ..< mock.receivedCommands.len:
-        let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/event-load":
-          check cmd.args["rrTicks"].getBiggestInt == 100
-          found = true
-          break
-      check found
+      for ticks in [100'u64, 200'u64, 0'u64]:
+        let cmdCountBefore = mock.receivedCommands.len
+        var dbg = store.debugger.val
+        dbg.rrTicks = ticks
+        store.debugger.val = dbg
+        drain()
+        for i in cmdCountBefore ..< mock.receivedCommands.len:
+          check mock.receivedCommands[i].command != "ct/event-load"
 
       dispose()
 
   test "auto-load does not fire again for an unchanged rrTicks == 0":
     # The dedup guard: reassigning the debugger signal without moving it
-    # must not issue a second load. `store.debugger` does not compare
-    # values, and several panels reassign it per move, so without this
-    # the panel would refetch on every one of them.
+    # must not issue a second load. IsoNim also suppresses identical
+    # signal assignments; the preceding test exercises differing values.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)

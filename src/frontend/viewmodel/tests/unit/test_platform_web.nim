@@ -638,7 +638,15 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     ## whether the stylesheet existed. A source scan is the cheap always-on
     ## floor under `ci/test/noir_demo_path_probe.mjs`, which counts
     ## `cssRules` in a real browser.
-    let renderer = readFile("src/frontend/renderer.nim")
+    #
+    # READ AT COMPILE TIME, because this suite runs on BOTH backends. It was a
+    # run-time `readFile` (c2d8b4548), which works on native and throws
+    # `fopen is not defined` under node — `vm-unit-js` reported this case
+    # FAILED from the day it landed, on a backend where the renderer it scans
+    # is the one that ships. `staticRead` is the idiom the other source scans
+    # in this directory use (`test_edit_mode_toolbar_languages.nim`), and the
+    # file is a compile-time dependency of this suite either way.
+    const renderer = staticRead("../../../renderer.nim")
     # The swap goes through the checked path, not a bare assignment.
     check renderer.contains("swapThemeHrefImpl(cast[js](link)")
     # BOTH failure modes are asked about: a MIME-rejected sheet fires `error`,

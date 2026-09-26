@@ -428,14 +428,6 @@ proc redrawLegacyRendererInstance*(label: cstring): bool =
 #   # kout text
 #   return text
 
-proc langs*: string =
-  ## The language dropdown's options.  Rendered by `lang.langPickerOptions`
-  ## from the derived `LANG_PICKER_LANGS`, which this used to build inline
-  ## from the frontend's own `SUPPORTED_LANGS` -- one of two hand-kept lists,
-  ## and the one that emitted `<option value='rust'>` twice.
-  langPickerOptions()
-
-
 var traceTime = Date.now() # per-replay
 const traceRedrawLimit = 500
 
@@ -1234,20 +1226,89 @@ proc reopenLastTab*(data: Data) {.locks: 0.} =
 # openNewTab is used only to open a new empty file
 # for open any other kind of tab - use openLayoutTab !
 proc openNewTab*(data: Data) {.locks: 0.} =
+  ## Open a new, empty, unsaved buffer and focus it.
+  ##
+  ## Reached from the menu's New File action (`ui_js.nim`'s `newTab`) and, since
+  ## issue #735, from the welcome screen's "New file" start option by way of
+  ## `ui_js.onNoTrace`.
+  ##
+  ## ## Why this does not call `openTab`
+  ##
+  ## It used to, and the sequence could not work. `openTab` branches on whether
+  ## `data.services.editor.open` already has the tab: absent, it calls
+  ## `openNewEditorView`, which creates the component; present, it calls
+  ## `showTab`, which requires `data.ui.editors` to have one already. This proc
+  ## put the `TabInfo` into `open` on the line before, so it always took the
+  ## second branch, and `showTab` ended at
+  ## `cerror "tabs: no editor in showTab for #untitled0"` and returned. No
+  ## component was ever created, so no layout container was opened, and the
+  ## `data.ui.editors[path]` on the next line was `undefined`. The gesture
+  ## produced a console error and nothing else.
+  ##
+  ## Registering the tab is not the thing to drop, because `openNewEditorView`
+  ## is the wrong path for a buffer that has no source to fetch: it builds a
+  ## `Location` and `await`s `tabLoad`, which sends `CODETRACER::tab-load` for
+  ## `#untitled0`. On the desktop `index/files.open` would fail to read it; in a
+  ## browser tab nothing answers at all and the await never settles. An untitled
+  ## buffer's content is the empty string by construction and there is nobody to
+  ## ask.
+  ##
+  ## So it goes straight to `makeEditorViewDetailed`, which is the half of
+  ## `openNewEditorView` that runs AFTER the source arrives — register the tab,
+  ## make the component, open the layout container, make it active. That is not
+  ## a side entrance: it is the proc `openNewEditorView` itself calls once the
+  ## `tab-load` answers, so an untitled buffer is created by the same sequence
+  ## every ordinary file tab is created by, and `openNoSourceView` open-codes
+  ## the identical steps for a pane it likewise holds the content of.
+  ##
+  ## Do NOT model this on `utils.makeEditorView`. It calls
+  ## `makeEditorViewDetailed` and then repeats that proc's
+  ## `makeEditorViewComponent` + `openLayoutTab` tail itself, and
+  ## `makeEditorViewComponent` raises `editor <name> exists` for a name already
+  ## in `ui.editors` — so the second call should always throw. That is its own
+  ## defect, untouched here and deliberately not built on.
+  ##
+  ## The `TabInfo` below carries what a loaded one would have carried:
+  ## `received: true` (nothing is pending), `viewLine: 1`, and a `location`
+  ## marked `missingPath` because there is no file behind it.
   let path = cstring(fmt"#untitled{data.services.editor.untitledIndex}")
   data.services.editor.untitledIndex += 1
 
   let lang = fromPath(path)
-  data.services.editor.open[path] = TabInfo(
+  let location = types.Location(
+    path: path,
+    line: 1,
+    highLevelPath: path,
+    highLevelLine: 1,
+    functionName: cstring"",
+    missingPath: true)
+  let tabInfo = TabInfo(
     overlayExpanded: -1,
-    highlightLine: -1,
+    highlightLine: NO_LINE,
+    viewLine: 1,
     changed: true,
     untitled: true,
+    received: true,
+    loading: false,
     name: path,
+    path: path,
     source: cstring"",
+    lastSyncedSource: cstring"",
+    sourceLines: @[cstring""],
+    location: location,
     lang: lang)
-  data.openTab(path, ViewSource)
-  data.focusComponent(data.ui.editors[path])
+
+  data.removeEditorFromClosedTabs(path)
+  data.removeEditorFromLoading(path)
+  data.makeEditorViewDetailed(path, ViewSource, tabInfo, location)
+  if data.ui.editors.hasKey(path):
+    data.focusComponent(data.ui.editors[path])
+  else:
+    # `makeEditorViewDetailed` creates the component before it opens the layout
+    # container, so a miss here means the creation itself failed. Focusing
+    # `undefined` is what this line used to do on EVERY call; saying so is what
+    # makes the next report about the real failure.
+    cerror "editor: openNewTab: no editor component for " & $path
   # TODO
   if not data.services.search.paths.hasKey(path):
     data.services.search.pathsPrepared.add(fuzzysort.prepare(path))
@@ -2062,6 +2123,26 @@ proc pendingReRecordQueue(data: Data): ReRecordQueueRef =
   else:
     cast[ReRecordQueueRef](data.pendingReRecord)
 
+proc safeStr(s: cstring): string =
+  ## `$s`, but `""` for a field that is `null` or `undefined`.
+  ##
+  ## Needed because the JS `$` is `cstrToNimstr`, which reads `c.length` with no
+  ## guard (`lib/system/jssys.nim`) and therefore throws a `TypeError` on an
+  ## absent field rather than yielding an empty string.  Trace metadata comes
+  ## across IPC as a plain JSON object, so a field the writer never set arrives
+  ## as `undefined`.
+  ##
+  ## Sixteen other frontend modules carry a byte-identical private copy of this
+  ## (`ui/welcome_screen.nim:44`, `ui/repl.nim:64`, …).  Hoisting all seventeen
+  ## into one exported helper is worth doing and is deliberately NOT done here:
+  ## an exported `safeStr` would join the overload set of every module that
+  ## already has a private one, and resolving that is a wider change than this
+  ## fix should carry.
+  if s.isNil:
+    ""
+  else:
+    $s
+
 proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
   ## Build/record a new trace for the current target.  Only reached once every
   ## modified buffer is on disk.
@@ -2081,28 +2162,28 @@ proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
     return false
 
-  var programArg = data.trace.program
-  if data.trace.lang == LangNoir and data.trace.workdir.len > 0:
-    # Noir metadata stores the project name; re-record requires the project root.
-    programArg = data.trace.workdir
+  # The derivation lives in `file_conflicts.planRecordLaunch` so it can be
+  # exercised without Electron — see issue #747 and
+  # `src/tests/gui/tests/welcome-screen/re_record_queue_vm_test.nim`.  What is
+  # left here is reading the session and sending the message.
+  let plan = planRecordLaunch(RecordLaunchInputs(
+    program: safeStr(data.trace.program),
+    workdir: safeStr(data.trace.workdir),
+    locationPath: safeStr(data.services.debugger.location.path),
+    noirProject: data.trace.lang == LangNoir))
 
-  # Some recorders (e.g. Noir) persist only the project name in metadata.
-  # When re-recording, prefer an absolute path under the original workdir so
-  # language detection can find project markers like Nargo.toml.
-  let workdirStr = $data.trace.workdir
-  let programStr = $programArg
-  if workdirStr.len > 0 and programStr.len > 0:
-    if not programStr.startsWith("/") and not programStr.contains("/"):
-      let candidate = workdirStr / programStr
-      programArg = candidate.cstring
-
-  var args: seq[cstring] = @[programArg]
+  var args: seq[cstring] = @[plan.programArg.cstring]
   for arg in data.trace.args:
     args.add(arg)
 
   var options = JsObject{}
-  if not data.trace.workdir.isNil and data.trace.workdir.len > 0:
-    options["cwd".cstring] = cast[JsObject](data.trace.workdir)
+  if plan.cwd.len > 0:
+    # A REQUEST, not an instruction: `Trace.workdir` says where the program ran
+    # when it was recorded, and the main process is the one that can tell
+    # whether that directory still exists.  It validates this before spawning
+    # (`index/traces.nim`, `classifyRecordLaunch`), because an unvalidated
+    # `options.cwd` is exactly what made `spawn` answer `ENOENT` in #747.
+    options["cwd".cstring] = cast[JsObject](plan.cwd.cstring)
 
   let envObject = buildRecordEnv(data.trace.env)
   if not envObject.isNil:
@@ -2116,7 +2197,7 @@ proc launchReRecord(data: Data, projectOnly: bool): bool {.discardable.} =
   data.ipc.send(
     "CODETRACER::new-record",
     js{
-      filename: data.services.debugger.location.path,
+      filename: plan.filename.cstring,
       args: args,
       options: options,
       projectOnly: projectOnly,

@@ -1831,6 +1831,39 @@ if ($ensureParser) {
   & $bashExe $tsParserScript
 }
 
+# The commit/push checks nix/pre-commit.nix declares -- this script's analogue of
+# the Nix dev shell's hook installation (nix/shells/main.nix). Without it a
+# Windows checkout either inherits a /nix/store hook it cannot execute or runs
+# no repository checks at all. Developer checkouts only: CI runs the lint
+# stages itself, and a caller that named a component subset asked for less.
+# WINDOWS_DIY_INSTALL_GIT_HOOKS=0 opts out. Never fatal: a hook this installer
+# did not write is left alone, and the installer says so.
+$installGitHooks = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_INSTALL_GIT_HOOKS" `
+  -Default (-not (Test-BootstrapAllowlistActive) -and -not $env:CI -and -not $env:GITHUB_ACTIONS)
+if ($installGitHooks) {
+  $hooksBash = ""
+  $gitBashBin = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_GIT_BASH_BIN")
+  if (-not [string]::IsNullOrWhiteSpace($gitBashBin)) {
+    $candidate = Join-Path $gitBashBin "bash.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $hooksBash = $candidate }
+  }
+  $hooksInstaller = (Join-Path $PSScriptRoot "ci/dev/install-portable-git-hooks.sh") -replace '\\', '/'
+  if ([string]::IsNullOrWhiteSpace($hooksBash)) {
+    Write-Warning "git hooks NOT installed: Git Bash was not found. Commits here run none of nix/pre-commit.nix's checks until 'bash $hooksInstaller' runs."
+  } else {
+    Push-Location $PSScriptRoot
+    try {
+      & $hooksBash $hooksInstaller
+      if ($LASTEXITCODE -ne 0) {
+        Write-Warning "git hooks NOT (fully) installed; see the installer's message above."
+      }
+    } finally {
+      Pop-Location
+      $global:LASTEXITCODE = 0
+    }
+  }
+}
+
 # Codetracer's own runtime env (recorder/backend discovery). Out of scope for a
 # caller that named a component subset via WINDOWS_DIY_ONLY.
 if (-not (Test-BootstrapAllowlistActive)) {

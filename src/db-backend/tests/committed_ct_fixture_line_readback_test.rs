@@ -326,19 +326,27 @@ fn php_builtin_fixture_steps_land_on_the_function_entries_they_recorded() {
 /// because the `sort` comparator on it is called once per comparison — the run
 /// is the handler executing, not a synthetic sequence. A one-line-high reading
 /// ends it on `});`.
+///
+/// The step ids are a property of ONE recording. The fixture was re-recorded
+/// (47f37ed52) with the HTTP driver left uninstrumented, so only `app.js`
+/// itself is in the trace and the `GET /api/users` handler now starts at step
+/// 24: its entry, the comparator's line three times, then `res.json` five
+/// times. Read back off that container before being pinned here.
 #[test]
 fn js_express_fixture_steps_land_on_the_handler_statements_they_recorded() {
     assert_request_panel_run(
         "js_express/index.ct",
         "test-programs/web/express/app.js",
-        65,
+        24,
         &[
             (43, r#"app.get("/api/users", (req, res) => {"#),
-            (43, r#"app.get("/api/users", (req, res) => {"#),
             (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
             (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
             (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
-            (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
+            (45, "res.json(users);"),
+            (45, "res.json(users);"),
+            (45, "res.json(users);"),
+            (45, "res.json(users);"),
             (45, "res.json(users);"),
         ],
     );

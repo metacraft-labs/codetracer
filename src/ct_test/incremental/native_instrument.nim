@@ -16,7 +16,7 @@
 ## This engine does NOT maintain its own `-finstrument-functions` runtime: the
 ## instrumentation belongs to the native recorder; the engine only CONSUMES the
 ## executed-function set. We invoke the plugin through the CodeTracer
-## build-siblings strategy — `direnv exec <native-recorder-repo> <cmd>` — so the
+## build-siblings strategy — `repro exec <native-recorder-repo> <cmd>` — so the
 ## plugin builds and runs in ITS OWN Nix dev shell (which has the right clang/gcc
 ## + Nim), exactly as the M13 live-recorder drivers do for the other recorders.
 ##
@@ -128,13 +128,13 @@ type
 proc runInNativeRecorderShell(repo, command: string):
     tuple[output: string, code: int] =
   ## Run `command` inside the native-recorder repo's Nix dev shell via
-  ## `direnv exec`, with the working directory set to the `ct_instrument` package
-  ## (direnv exec resets cwd, so the command explicitly `cd`s there first). Never
+  ## `repro exec`, with the working directory set to the `ct_instrument` package
+  ## (repro exec resets cwd, so the command explicitly `cd`s there first). Never
   ## raises — a launch failure is reported as a non-zero code with the exception
   ## text as output, so callers always get a diagnostic.
   let pkgDir = ctInstrumentDir(repo)
   let wrapped =
-    "direnv exec " & quoteShell(repo) & " bash -c " &
+    "repro exec " & quoteShell(repo) & " -- bash -c " &
     quoteShell("cd " & quoteShell(pkgDir) & " && " & command)
   try:
     let (output, exitCode) = execCmdEx(wrapped)

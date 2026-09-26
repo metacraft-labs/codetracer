@@ -25,10 +25,10 @@ import
 # and the integer went straight through ``cast[Trace]`` — an ordinal on the
 # ``ct`` -> Electron hop that every document in the Lang series believed
 # carried the name.  ``src/common/trace_index.nim`` now opts ``Lang`` in,
-# so the name is what arrives and the decoder below is what runs;
-# ``calltraceMode`` STILL arrives as an integer (its map is LRS-6's) and the
-# string branch of the ``MODE`` block is, today, dead code kept for the day
-# it opts in too.
+# so the name is what arrives and the decoder below is what runs.
+# ``calltraceMode`` kept arriving as an integer until LRS-6 (2026-09-23)
+# opted it in as well; until then the string branch of the hand-written
+# ``MODE`` map that decoded it was dead code (see below).
 #
 # Left unconverted, a string ``trace.lang`` would break the renderer: any
 # ``lang in {…}`` set-membership test compiles (because ``set[Lang]``
@@ -59,30 +59,39 @@ import
 # ``src/frontend/tests/frontend_lang_test.nim`` (this module is
 # Electron-only and no lane can import it).
 #
-# The ``calltraceMode`` half is still the hand-written ``MODE`` map; pinning
-# or replacing it is milestone LRS-6's (it has the same silent-fallback
-# shape this ``LANG`` map had and no test).
+# **The ``calltraceMode`` half is ``parseEnum[CalltraceMode]`` (LRS-6,
+# 2026-09-23).**  It was the last hand-written map here: a JS object literal
+# ``var MODE = { NoInstrumentation:0, CallKeyOnly:1, … }`` with the same
+# silent-fallback shape the ``LANG`` map had, and no test at all
+# (Language-Enum-Ordinal-Contracts.md recorded it that way).  It was also DEAD:
+# the map ran only for a string, and ``ct trace-metadata`` sent the integer
+# until ``serializesAsTextInJson(CalltraceMode)`` in
+# ``src/common/trace_index.nim`` made the hop carry the name.  Now the name
+# arrives, and ``parseEnum`` reads the ordinal from the enum.
+#
+# A name this build does not have -- only a newer ``ct`` could send one --
+# becomes ``FullRecord``, the value the deleted map fell back to, so no
+# reader sees a different mode than before: no Nim module under
+# ``src/frontend`` reads ``trace.calltraceMode`` today (measured by grep,
+# 2026-09-23; ``index/traces.nim`` only constructs one).  **But it is no
+# longer SILENT** (LRS-6's review, 2026-09-24).  The deleted map's defect was
+# never the map as such -- it was that an unknown name became a confident,
+# valid-looking mode with no trace, the failure mode
+# Language-Enum-Ordinal-Contracts.md recorded for it and for the ``LANG``
+# map.  ``parseEnum`` with a default argument would have kept exactly that.
+# Unlike ``lang`` (``LangUnknown`` plus the preserved ``langRetiredName``)
+# and ``approach`` (the ``raUnknown`` sentinel), ``CalltraceMode`` has no
+# "unknown" member to decode to, so ``FullRecord`` is a GUESS, and the miss
+# prints a warning naming the value, the recording and the known names.
+# ``lang_enum_contract_test`` pins that the default-argument form stays gone.
 
 proc jsTypeOfLang(trace: JsObject): cstring {.importjs: "(typeof #.lang)".}
 proc jsLangString(trace: JsObject): cstring {.importjs: "(#.lang)".}
 proc jsLangRetiredName(trace: JsObject): cstring {.importjs: "(#.langRetiredName)".}
 proc jsTypeOfApproach(trace: JsObject): cstring {.importjs: "(typeof #.approach)".}
 proc jsApproachString(trace: JsObject): cstring {.importjs: "(#.approach)".}
-
-proc normalizeCalltraceModeJs(trace: JsObject) {.importjs: """
-(function(t) {
-  if (!t) return;
-  var MODE = {
-    NoInstrumentation:0, CallKeyOnly:1, RawRecordNoValues:2, FullRecord:3
-  };
-  if (typeof t.calltraceMode === 'string') {
-    t.calltraceMode = (t.calltraceMode in MODE) ? MODE[t.calltraceMode] : MODE.FullRecord;
-  }
-})(#)
-""".}
-  ## Rewrite the string-encoded ``calltraceMode`` enum field on a parsed
-  ## trace JS object into its integer ordinal.  See the block comment above
-  ## for why ``lang`` is no longer done this way.
+proc jsTypeOfCalltraceMode(trace: JsObject): cstring {.importjs: "(typeof #.calltraceMode)".}
+proc jsCalltraceModeString(trace: JsObject): cstring {.importjs: "(#.calltraceMode)".}
 
 proc normalizeTraceEnums(trace: Trace) =
   if trace.isNil:
@@ -112,7 +121,23 @@ proc normalizeTraceEnums(trace: Trace) =
     except ValueError:
       approach = raUnknown
     trace.approach = approach
-  normalizeCalltraceModeJs(obj)
+  # ``calltraceMode``: the same rewrite, for the same reason.  A name this
+  # build does not have becomes ``FullRecord`` -- and SAYS so (see the block
+  # comment above for why that is not left silent).
+  if jsTypeOfCalltraceMode(obj) == cstring"string":
+    let name = $jsCalltraceModeString(obj)
+    try:
+      trace.calltraceMode = parseEnum[CalltraceMode](name)
+    except ValueError:
+      var known: seq[string] = @[]
+      for mode in CalltraceMode:
+        known.add($mode)
+      echo "warning: `ct trace-metadata` sent calltraceMode \"", name,
+        "\" for recording ", trace.recordingId, ", which is not a ",
+        "CalltraceMode this build knows (", known.join(", "), ").  A newer ",
+        "`ct` than this front end wrote it.  Treating it as FullRecord, ",
+        "which is a GUESS, not the recording's mode."
+      trace.calltraceMode = CalltraceMode.FullRecord
 
 proc findRawTraceWithCodetracer(app: ElectronApp, traceId: cstring): Future[cstring] {.async.} =
   ## M-REC-2: ``traceId`` is a UUIDv7 recording-id string.

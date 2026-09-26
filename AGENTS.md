@@ -25,7 +25,7 @@ relative path `../<sibling>`:
 | Nim | `config.nims` (`repoRoot.parentDir()`), `src/Tuprules.tup` (`$(ROOT)/../…`) | `--path` to a missing dir is silently ignored → `cannot open file: runquota_process`, minutes in |
 | Cargo | `src/db-backend/Cargo.toml` (`path = "../../../codetracer-trace-format/…"`) | `failed to load manifest` |
 | cc | `src/db-backend/build.rs` (`../../../codetracer-native-recorder/ct_emulator`) | 81 undefined `mcr*` symbols at link |
-| direnv/nix | `.envrc` (`../io-mon`, `../reprobuild`, `../direnv-nix-flake-overrides`, …) | overrides silently not applied |
+| Repro/Nix | `repro.nim` and native workspace input overrides (`../io-mon`, `../reprobuild`, …) | sibling overrides cannot be resolved |
 
 None of the four can be pointed elsewhere per-worktree, so relocating the
 checkout is the only fix. In particular **`runquota` has no override at all** by
@@ -107,7 +107,7 @@ just test-ct-providers
 This runs the cross-language `ct_test` provider suites (C/C++ GoogleTest/Catch2/CTest, M11
 native, M12 fallback, JavaScript, Ruby) plus the framework gate tests. It first builds the
 native (`ct-mcr`), JavaScript and Ruby recorder siblings in their own pinned dev shells
-(`direnv exec <repo> just build`, via `scripts/build-siblings.sh`) so the recording tests run
+(`repro exec <repo> -- just build`, via `scripts/build-siblings.sh`) so the recording tests run
 against real recorders; a missing or failed required sibling fails loudly rather than skipping
 (per `codetracer-specs/Working-with-the-CodeTracer-Repos.md` Part 2). Useful overrides:
 
@@ -160,37 +160,29 @@ For detailed Windows porting progress, see `windows-porting-initiative-status.md
 
 ## Nix dev shell and local flake overrides
 
-The `.envrc` auto-detects sibling repos and passes `--override-input` flags
-to `nix develop`. The sibling map is in `.envrc` (the `_ct_sibling_map` array).
+The Repro shell hook activates the flake through `repro.nim`. Run `repro allow`
+once for this checkout, then enter it with the hook installed. For an explicit
+command, use `repro exec /path/to/codetracer -- <command>`.
+
+Repro resolves declared workspace siblings as native flake input overrides.
+Keep direnv denied; `.envrc` and the old override plugin are not required for
+this activation path. Changes to the recipe require renewed Repro authorization.
 
 ### Blockchain recorder tools (circom, forc)
 
-The codetracer nix dev shell includes `circom` and `forc` from the
-`nix-blockchain-development` flake input. These are needed by the Circom
-and Fuel/Sway recorders at runtime.
+The Nix dev shell supplies the toolchains declared by the CodeTracer flake.
+Build recorder siblings through `scripts/build-siblings.sh`; each recorder's
+`repro.nim` activates its own pinned environment. See the helper's per-repository
+logs when a required tool or sibling build fails.
 
-For the packages to resolve, the local `nix-blockchain-development` checkout
-must be used (the `main` branch has all packages; the pinned `stylus-tools`
-branch in `flake.lock` does not). The `.envrc` sibling map includes
-`nix-blockchain-development` for automatic local override.
+### Inspecting a Nix environment directly
 
-### Invalidating the nix-direnv cache
-
-When you modify a local override input (e.g. change a package in
-`../nix-blockchain-development`), `nix-direnv` may serve a stale cached
-environment. To force re-evaluation:
+To diagnose an individual flake input independently of shell activation, use an
+explicit Nix invocation without changing direnv trust:
 
 ```bash
-# Option 1: Delete the cached profile
-rm -rf .direnv/flake-profile-* .direnv/flake-inputs
-direnv allow
-
-# Option 2: Use nix develop directly (bypasses nix-direnv cache)
 nix develop '.?submodules=1' --override-input nix-blockchain-development path:../nix-blockchain-development -c bash
 ```
-
-The `nix develop` approach always evaluates fresh and is useful for testing
-changes to override inputs before waiting for nix-direnv to catch up.
 
 ### Cadence Go helper
 

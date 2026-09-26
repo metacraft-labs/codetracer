@@ -56,6 +56,11 @@ import
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm, point_list_vm],
+  # THE DESKTOP TEST-RUNNER HOST (`GUI/Core-Panes/Test-Results-Pane.md` §4).
+  # Imported unconditionally: it is backend-agnostic by construction — its two
+  # effects are injected — and compiling it on both arms is what keeps the
+  # renderer lanes checking it.
+  viewmodel/viewmodels/desktop_test_host,
   # `electron_presence` supplies `inElectron`, which the two `if inElectron:`
   # blocks at the bottom of this file read to choose an IPC transport.
   #
@@ -243,6 +248,7 @@ proc hideWelcomeScreenSurface() =
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
+import dap_backend
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
@@ -2444,11 +2450,11 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
     if not session.dapApi.isNil and session.dapApi.sessionId == sessionId:
       responseDap = session.dapApi
       break
-  resolvePendingDapResponse(responseDap, raw)
-  try:
-    receiveResponse(data.dapApi, raw["command"].to(cstring), raw["body"])
-  except ValueError:
-    console.log(cstring"dap: ignoring response for unmapped command: ", raw["command"])
+  #
+  # `deliverDapResponse` also stamps a TRACKED answer (`ct/load-locals`) with
+  # the identity of the request it answers before the fan-out, so a
+  # subscriber can match it to that request rather than to an order.
+  deliverDapResponse(data.dapApi, responseDap, raw)
 
 # We receive a DAP "Event" from the index process
 proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
@@ -2639,23 +2645,11 @@ when not defined(ctInExtension):
     # -----------------------------------------------------------------------
     if activeSessionVM.isNil:
       let dapRef = data.dapApi
-      let realBackend = newRealBackendService(
-        sendCommand = proc(command: string, argsJs: JsObject): BackendFuture[JsObject] =
+      let realBackend = newDapBackendService(dapRef,
+        onSend = proc(command: cstring; argsJs: JsObject) =
           when defined(js):
             if data.startOptions.inTest:
-              recordVmBackendRequest(cstring(command), argsJs)
-          # Translate the BackendService string command to a CtEventKind
-          # and forward it through the existing DapApi IPC channel.
-          let kind = dapCommandToEventKind(cstring(command))
-          dapRef.asyncSendCtRequest(kind, argsJs),
-        onBackendEvent = proc(handler: proc(kind: string, raw: JsObject)) =
-          # Subscribe to every event kind that has a DAP mapping so the
-          # ViewModel store receives the same events as the legacy UI.
-          for k in CtEventKind:
-            if EVENT_KIND_TO_DAP_MAPPING[k] != "":
-              dap.on[JsObject](dapRef, k, proc(kind: CtEventKind, raw: JsObject) =
-                handler($kind, raw)),
-      )
+              recordVmBackendRequest(command, argsJs))
       activeSessionVM = createSessionVM(realBackend)
       # PLAT-40: the debugger service's `setBreakpoints` answers go to the
       # ViewModel store's one breakpoint decoder — the point list then holds
@@ -2912,11 +2906,9 @@ when not defined(ctInExtension):
             $response.totalCallsCount)
           calltrace.syncCalltraceData(response))
 
-      data.viewsApi.subscribe(CtLoadLocalsResponse,
-        proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-          cdebug ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
-            $response.locals.len & " variables")
-          state.syncStoreLocals(response.locals))
+      # The locals answer's direct subscription, and the request tracking
+      # that lets it tell which request each answer is for.
+      state.wireLocalsAnswers(data.viewsApi)
 
       data.viewsApi.subscribe(CtCompleteMove,
         proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
@@ -3910,6 +3902,36 @@ proc onNoTrace(
       # actionable.
       cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
         "the editor was not opened for " & $initialEditPath
+  elif data.startOptions.edit and data.startOptions.folder.len == 0:
+    # ISSUE #735 — "NEW FILE". Edit mode with no project folder and no file to
+    # open is this feature and nothing else, on either platform:
+    #
+    #   * `index/traces.onNewFile` sends `folder: ""` deliberately; every other
+    #     desktop route into edit mode sends the folder it opened.
+    #   * `ui/web_entry_surface.newFileNoTracePayload` sends `folder: ""` for
+    #     the same reason; `templateNoTracePayload` sends the project root.
+    #
+    # NO CLI LAUNCH CAN REACH IT, and the guarantee is `index/args.parseArgs`
+    # SETTING `data.startOptions.folder = electronprocess.cwd()` BEFORE it
+    # reads a single argument. `ct edit <path>` then overwrites that with the
+    # containing directory, and `ct edit` with the argument missing errors and
+    # `break`s — leaving the cwd default in place, not an empty string. Both
+    # ends of that are load-bearing: delete the default and a malformed
+    # `ct edit` starts landing here.
+    #
+    # So the branch is reached by exactly the two call sites that mean it, and
+    # the alternative — a flag on the payload — would be a second statement of
+    # the same fact, free to disagree with `folder`.
+    #
+    # WHAT IT REPLACES IS NOT NOTHING. Before this, that state mounted edit mode
+    # with an empty editor area and no way to type in it: no tab, no Monaco, and
+    # a Files pane over an empty tree. An untitled buffer is the least a "start
+    # writing code" entry point can be.
+    if await waitForLayoutGround(data):
+      data.openNewTab()
+    else:
+      cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
+        "the new empty file was not opened"
 
   # AND FILL THE TABS THE RESTORED LAYOUT BROUGHT BACK.
   #
@@ -4438,6 +4460,41 @@ proc onNs9PanesConstraints(
   constraints.constraintsVMInstance.setReport(
     parseNargoInfoJson($response.info, $response.provenance))
 
+# ---------------------------------------------------------------------------
+# THE DESKTOP TEST-RUNNER HOST
+#
+# `GUI/Core-Panes/Test-Results-Pane.md` §4. The web arm's equivalent lives
+# inside `startWebRenderer` below, which the desktop never enters — which is
+# why, before this, every desktop Run-test click armed a spinner nothing could
+# stop and left the pane exactly as it was (issue #748).
+#
+# The host itself is `viewmodel/viewmodels/desktop_test_host.nim`, with its two
+# effects injected, so *does a run that started reach `endRun`, and does the
+# editor get told* is assertable in a headless lane. Installed at the bottom of
+# this file, in the `if inElectron:` block; nil in every other build, which is
+# what the guards below read.
+# ---------------------------------------------------------------------------
+
+var desktopTestRunHost: DesktopTestHost
+
+proc onTestRunSettled(
+    sender: js,
+    response: jsobject(recordingId=cstring, recordedAt=cstring,
+                       errorMessage=cstring)) =
+  ## `index/traces.onRunTest` answered — on EVERY one of its exits.
+  ##
+  ## This is the message the desktop never had. `CODETRACER::failed-record`
+  ## carries only the error arm, is sent by every recording and build failure
+  ## in `index/traces.nim`, and the Test Results pane subscribes to none of it;
+  ## a settle keyed on it would fire for re-records that have nothing to do
+  ## with a test.
+  if desktopTestRunHost.isNil:
+    return
+  desktopTestRunHost.settleDesktopTestRun(
+    recordingId = $response.recordingId,
+    recordedAtText = $response.recordedAt,
+    errorMessage = $response.errorMessage)
+
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
   let data = ident("data")
@@ -4750,6 +4807,9 @@ proc configureIPC(data: Data) =
     "no-trace"
     "ns9-panes-catalog"
     "ns9-panes-constraints"
+    # WHAT SETTLES A DESKTOP TEST RUN. See `onTestRunSettled` and
+    # `GUI/Core-Panes/Test-Results-Pane.md` §5.
+    "test-run-settled"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).
@@ -6325,6 +6385,40 @@ when defined(ctWeb) and not defined(ctInExtension):
       # verdict rather than from a path test here. A second `classifyPath` in
       # this file is exactly the drift `web_entry.nim`'s header warns about.
       let wantsTemplate = entry.verdict == evTemplate and tmpl.hasFiles
+
+      # ISSUE #735 — THE WEB WELCOME SCREEN'S ONE LIVE START OPTION, wired here
+      # for `installNoirBuildCommands`' reason one screen over: this is the only
+      # place that holds `ui/welcome_screen` and `ui/web_entry_surface` at the
+      # same time, and neither may import the other (the first is the shared
+      # welcome surface, the second mounts panes and owns the project store).
+      #
+      # BEFORE the mount, unlike the build commands, because the callbacks
+      # record is built once per mount and `tryMountIsoNimWelcomeScreen` returns
+      # early for an already-mounted screen — a handler installed afterwards
+      # would not reach the view.
+      #
+      # Unconditional rather than `if not wantsTemplate`: the template arm never
+      # mounts a welcome screen, so installing the handler there costs one
+      # assignment and cannot fire, while a condition here would be a second
+      # statement of which arm mounts what.
+      welcome_screen.setWebWelcomeStartOptionHandler(proc(key: string) =
+        case key
+        of "new-file":
+          if not web_entry_surface.enterNewFileEditMode():
+            # The refusal is legible rather than a dead click: the only way
+            # `enterNewFileEditMode` says no is a transport that is not there or
+            # a bundled layout that did not parse, and both are build defects a
+            # visitor cannot act on but a report can name.
+            cerror "web: New file could not open an edit session"
+        else:
+          # NOT `discard`. Every other key on this arm is refused by
+          # `WebHandledStartOptions`, so `triggerStartOption` returns before it
+          # reaches a callback and this line is unreachable TODAY. It exists so
+          # that the day someone makes another kind live without giving it an
+          # arm, the click says so instead of doing nothing — which is the
+          # shape of issue #734.
+          cerror "web: no handler for start option '" & key & "'")
+
       let mounted =
         if wantsTemplate: web_entry_surface.enterTemplateEditMode(tmpl)
         else: welcome_screen.mountWebWelcomeScreen()
@@ -7346,3 +7440,49 @@ if inElectron:
     configureIPC(data)
     configure(data)
     cast[JsObject](dom.window)["__CODETRACER_DATA__"] = data.toJs
+
+    # THE DESKTOP TEST-RUNNER HOST, and this is the "elsewhere" the Electron
+    # arm was told it may point at (`test_results_vm.nim`, "`runTests` is the
+    # affordance the absence used to stand in for"). It had never been written,
+    # so `beginRun`, `endRun` and `editor.settleEditorTestRun` had exactly one
+    # caller between them and all three were inside `startWebRenderer`.
+    #
+    # `GUI/Core-Panes/Test-Results-Pane.md` §4 defines what goes here; §4.3
+    # states, as a stated gap rather than as silence, why the pane's ▶ is still
+    # left disabled on this arm.
+    #
+    # INSTALLED AFTER `configure`, for the reason `startWebRenderer` gives
+    # about its own order: `configure` builds the panel services a mounted
+    # surface goes on to use, and `initTestResultsVM` mounts into one.
+    test_results.initTestResultsVM()
+    if not test_results.testResultsVMInstance.isNil:
+      desktopTestRunHost = newDesktopTestHost(
+        test_results.testResultsVMInstance,
+        dispatch = proc(selector, file: string; line: int): string =
+          # `renderer.runTests` — the SAME dispatch the editor's context-menu
+          # "Run test" uses, rather than a second path to `CODETRACER::
+          # run-test`. Column 1 matches what `editor.makeTestAction` passed
+          # before this host existed; `index/traces.onRunTest` forwards both to
+          # `ct record-test` and neither is used to select the test.
+          data.runTests(RunTestOptions(
+            testName: cstring(selector),
+            path: cstring(file),
+            line: line,
+            column: 1,
+            newWindow: false))
+          "",
+        settleEditor = proc(note: string) =
+          editor.settleEditorTestRun(cstring(note)))
+
+      # AND THE EDITOR'S RUN-TEST CONTROL IS POINTED AT IT. Installing the hook
+      # is what makes the click go through the host: `makeTestAction`'s handler
+      # takes its hook branch, which arms the spinner only after the host has
+      # accepted, and `settleDesktopTestRun` is what later unwinds it.
+      #
+      # `editorTestSelectorHook` stays nil on this arm, so `selector` here is
+      # the name `getLineFunctionName` scanned out of the source — exactly the
+      # string the desktop passed to `runTest` before, so nothing about which
+      # test runs has changed.
+      editor.editorTestRunHook =
+        proc(path: cstring; selector: cstring; line: int): cstring =
+          cstring(desktopTestRunHost.startDesktopTestRun($selector, $path, line))

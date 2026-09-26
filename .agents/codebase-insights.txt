@@ -3780,30 +3780,57 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     rather than a function compared with itself.  Do not "simplify" it by
     routing the terminal arm through `applyKey`; the suite would still be
     green and would no longer mean anything.
-  * `isonim_tui.TabsWidget` WRAPS AND NO OTHER WIDGET DOES.  `moveRight` on
-    the last tab sets the first.  ListView, OptionList, Tree, DataTable,
-    RadioSet, ContentSwitcher and MarkdownViewer all CLAMP — read one by one,
-    NOT grepped: `grep -n wrap widgets/*.nim` returns 34 lines and all but two
-    are text wrapping or the word `wrapper`, so that grep proves nothing.
-    Outside `widgets/`, `command/palette.nim` moves `selectedIdx` modularly
-    and `focus/manager.nim` wraps Tab traversal, so the claim is about
-    widgets, not the library.  The vocabulary's `Tabs` does
-    not wrap; the divergence is ASSERTED in the cross-medium suite and
-    `mappings.terminalMapping(pkTabs)` is `msPartial` because of it.  If you
-    change either side, that case is where you will hear about it.
+  * `isonim_tui.TabsWidget` WRAPS BY DEFAULT and has `wraps = false` since
+    2026-09-26; the terminal binding passes it, so the vocabulary's `Tabs`
+    (which stops at the ends, as every other isonim-tui selection widget
+    does) and the widget agree. The cross-medium suite asserts both the
+    agreement AND that a default-built `TabsWidget` still wraps, so dropping
+    the option reddens it. isonim-tui also gained `widgets/menu.nim`
+    (`MenuWidget`: Enter runs AND closes, Escape closes) and
+    `MarkdownWidget.source`; the terminal column of `mappings.nim` is
+    complete on all sixteen.
   * `unittest.check` INSIDE A PLAIN `proc` CANNOT FAIL THE TEST.  Nim's
     `unittest` injects `testStatusIMPL` as a local in the `test` template AND
     declares a global fallback, so an assertion helper written as a `proc`
     compiles, prints `Check failed`, and the test still reports `[OK]`.
     Measured here: the cross-medium suite's Tabs case printed a failed
     comparison and passed.  Write assertion helpers as TEMPLATES.
-  * THREE VOCABULARY ENTRIES HAVE NO GPUI TAG AT ALL — `Table`, `Modal`,
-    `ProgressIndicator`.  `isonim-gpui`'s `tagMap` has 35 keys and none of
-    `table`/`tr`/`td`/`dialog`/`progress` is among them; `mapTag` passes an
-    unknown tag through unchanged.  `mappings.GpuiTagMap` is a COPY of those
-    keys (isonim_gpui dlopens a Rust cdylib at module init, so it cannot be
-    imported from a unit test) and `view_vocabulary_test` verifies the copy
-    against isonim-gpui's source with a count assertion.
+  * `mappings.GpuiTagMap` is a COPY of isonim-gpui's 35 `tagMap` keys
+    (isonim_gpui dlopens a Rust cdylib at module init, so it cannot be
+    imported from a unit test) and `view_vocabulary_test` verifies the copy.
+    Tag-map MEMBERSHIP decides nothing (PLAT-21): an unmapped tag renders as
+    a container, and no GPUI row is `msAbsent`.
+  * THE WEB ARM RUNS IN A REAL BROWSER: lane `renderer-chromium` (backend
+    `js-chromium`, `just test-renderer-chromium`) compiles
+    `src/frontend/tests/view_vocabulary_chromium_test.nim` with `nim js` and
+    `src/frontend/tests/chromium-run.mjs` loads it into Playwright's Chromium;
+    the page calls `window.ctPress(selector, key)` and gets a TRUSTED key
+    (`keyboard.press`, or CDP `Input.dispatchKeyEvent` for non-US-layout
+    characters — `keyboard.press('\u0301')` silently sends nothing). Use
+    this lane, not jsdom, for anything about focus, default actions or
+    `showModal()`. An `{.importjs.}` with zero args needs a parenthesised
+    pattern (`"(document.body)"`), and `#` may appear once per parameter —
+    use an arrow function for repeated use.
+  * `web_binding` IS GENERIC AND BOTH INSTANTIATIONS ARE REAL: `[MockRenderer,
+    MockNode]` (C, tui lane) and `[WebRenderer, Element]` (browser). The
+    `when isWebR(R)` template, not `defined(js) and R is WebRenderer` (the
+    second operand does not compile on C). `WebBinding` is a `ref` because
+    the installed keydown handlers hold it; `sendKey` focuses and DISPATCHES
+    through that handler. MEASURED in Chromium: a closed `<select>` commits
+    on Up/Down/Home/End/type-ahead, a text `<input>` moves its caret on
+    Up/Down, a checkbox ignores Enter — the binding prevents the first two
+    (`nativeDefaultChangesState`), and the web column of `mappings.nim` is
+    graded on what elements DO (7 complete, 9 partial), not on tags.
+  * `Input.cursor` COUNTS GRAPHEME CLUSTERS as every binding drives it:
+    `applyKey(node, key, boundaries)` takes the host's segmenter
+    (`vocabulary.ClusterBoundaries`); bindings pass
+    `frontend/view_vocabulary/graphemes.graphemeBoundaries` (UAX #29 via
+    `isonim_tui/text/width`), the vocabulary's default `runeBoundaries` is
+    the old behaviour. `src/common` still imports nothing from isonim-tui.
+  * The cross-medium view and its scripted cases live in
+    `frontend/view_vocabulary/cross_medium_script.nim`, shared by the tui
+    suite and the Chromium suite; PLAT-3's harness is
+    `src/frontend/tui/tests/run-plat3-vocabulary-mutations.py`.
   * PLAT-2's ATTRIBUTION NOW HAS A PRODUCT CALL SITE: the TUI variables
     pane's title row (`views/variables.provenanceOf` / `provenanceBadgeOf` /
     `fitProvenance`).  A narrow pane shows the SHORT form or nothing, never a
@@ -3826,9 +3853,38 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
   * `lcSplit` HAS A `splitMovesPane` FLAG.  False (every PLAT-4 caller) means
     the new pane must NOT be in the tree; true means it must be, and the
     split MOVES it.  It exists because `commit` yields ONE command and
-    "drag a tab onto a pane's edge" had no single-command spelling.  A
-    DOCKED source still has none — `lcSplit` refuses a pane in `docked`, so
-    `dropTargetsFor` offers a docked pane no split target at all.
+    "drag a tab onto a pane's edge" had no single-command spelling.  Since
+    PLAT-4's closing pass (2026-09-26) a DOCKED source is legal too: the pane
+    leaves `docked` (strip title kept) and becomes the new sibling, so
+    `dropTargetsFor` offers a docked pane all four edge strips.  A layout
+    whose pane is BOTH placed and docked is still refused.
+  * `validate(Layout, owned)` / `validate(WindowSet, owned)` (and `isValid`)
+    HAVE NO DEFAULT `owned` any more.  `{}` makes the owned-but-nowhere check
+    vacuous, so a caller must write `{}` itself; `test_layout_algebra.nim`
+    asserts `not compiles(validate(layout))`.  `validate(LayoutNode)` is
+    unchanged (it never took the argument).  Per-window layout defects and
+    owned-nowhere panes in a `WindowSet` are `wpLayoutInvalid`.
+  * `HeadlessSessionSlot.layout` IS A WHOLE `Layout` (tree + docked), not a
+    `LayoutNode`.  Tree queries go through `slot.layout.tree`;
+    `saveLayouts` writes a `docked` array per session entry (always, even
+    empty) and `restoreLayouts` decodes each entry through
+    `restoreLayoutDocument`, treating a missing `docked` (older documents) as
+    empty.  `gpui/app/shell.syncSessionLayouts` copies the WHOLE layout —
+    copying only `.tree` silently dropped docked panes from the session.
+    `openSession` has a `layout: Layout` overload beside the `LayoutNode` one.
+    `codetracer-gpui --layout=` decodes with `restoreLayoutDocument` (NOT the
+    tree-only `restoreLayout`, which refuses any docked pane) and opens the
+    session over that `Layout`; `gpui/tests/test_gpui_layout_flag.nim` runs
+    the shipped binary on `calc` and reads the docked pane's `bottom/` slot
+    path out of the `--report-plan` output.
+  * PLAT-4 HAS A MUTATION HARNESS NOW:
+    `viewmodel/tests/unit/run-plat4-layout-mutations.py` (needle scan, control
+    digests, one suite per arm).  Editing `layout_model.nim`, `window_set.nim`,
+    `headless_app.nim`, `gpui/app/shell.nim` or `tui/app/tui_app.nim` makes it
+    stale — re-record and regrade along with plat5/6/9/20/21/22/34/41.  Its
+    session-sync and terminal-seed arms are graded by the REAL-backend case in
+    `tui/tests/test_cross_renderer_panes.nim` (tui lane flags, calc recording,
+    `REPLAY_SERVER_BIN` required), not by a mocked GPUI-shell case.
   * THE TERMINAL LAYOUT BINDING (PLAT-6) IS `tui/app/layout/binding.nim`, and
     the two directions of its hit-test READ ONE TABLE.  `pointerAt` (cells ->
     `LayoutPointer`) and `cellsFor` (`DropRegion` -> cells) both measure edge
@@ -3859,11 +3915,13 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     not a seventeenth row in §4.3's published table, which
     `test_gdb_command_surface.nim` parses out of `CodeTracer-TUI.md`.
     WITHOUT THE FLAG NOTHING CHANGES: `layoutBinding` is nil, `shellModel`
-    carries the session's own `LayoutNode`, and those words are unknown
+    carries the session's own tree (`slot.layout.tree`), and those words are unknown
     commands.  It is an opt-in rather than the default because a binding's tree
     is a CLONE of the session's, so enabling one by default would give the
-    terminal two layout authorities; flipping it needs `HeadlessSessionSlot` to
-    hold a `Layout` rather than a `LayoutNode`.
+    terminal two layout authorities.  The slot now holds a `Layout` (PLAT-4's
+    closing pass) and `enableLayoutBinding` seeds from it, docked panes
+    included; the binding still works on its own copy, and making the
+    gestures write back / flipping the default is PLAT-45 deliverable 8.
   * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED, behind the same
     `--layout-binding` opt-in: `runPromptLine` takes the twelve `:` verbs and
     `handleToken` -> `routeMouseReport` takes a decoded SGR-1006 report into
@@ -5216,20 +5274,6 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   class of collision is structurally impossible rather than greppable. Substring
   is simply the wrong default for a matcher over a set of names nobody has
   promised to keep prefix-free.
-||||||| parent of f0b8f50c4 (fix(re-record): start one recorder per Ctrl+R, and say why the extras were ignored)
-* A run over any workspace looks enormous and is almost entirely
-  `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
-  the CWD is inside a checkout with recorder siblings.
-* The registry's stored `TestProvider.info.capabilities` for `smart-*` is
-  computed by `newSmartHarnessProvider` with `projectRoot = ""`
-  (`smart_contract_common.nim:412`), so `canRunFile` there resolves the
-  recorder from the CWD too. `runRecorderCommand` re-resolves it from
-  `scope.projectRoot`, and the two can disagree when the recorder repo is
-  reachable from the workspace but not from the CWD, and the recorder is
-  neither on PATH nor named by `<SPEC>_CMD`. Since `runUnitOutcome` now gates
-  dispatch on the stored capability, that combination refuses a unit the
-  provider could have recorded. Fixing it properly needs a projectRoot-aware
-  capability hook on the provider interface; there is none today.
 * A run over any workspace looks enormous and is almost entirely
   `unrunnable` (332 dispatched, 332 refused, `executed: 0` ⇒ exit 2) whenever
   the CWD is inside a checkout with recorder siblings.
@@ -5568,3 +5612,660 @@ together and rerun that suite.
 - Both editor surfaces build rows only via `editor_surface.projectedRows` ->
   `row_projection.editorRowsOf` (RowProjection.firstLine/requested for the
   debug window).
+- WINDOWS, test isolation: Nim's `getHomeDir` reads `USERPROFILE`, not `HOME`, so a suite that redirects only `HOME` / `XDG_DATA_HOME` for a helper subprocess lets that helper write the developer's REAL `%USERPROFILE%\.local\share\codetracer\trace_index.db` (happened 2026-09-23: 13 rows and a schema 1 -> 2 migration). Fixed 2026-09-24 (LRS-6 review) in `trace_index_test`, `trace_index_migration_test`, `cross_machine_replay_test` and `recording_folder_layout_test`: each also sets `USERPROFILE` / `LOCALAPPDATA` / `APPDATA` in a case-insensitive env table. Pinned by `trace_index_test` (the helper's `profile` scenario must resolve inside its scratch dir, plus a source sweep: any `*_test.nim` setting `env["HOME"] =` must set `env["USERPROFILE"] =`). New suites that spawn a child with a scratch home must do the same.
+- WINDOWS, pipes: `streams.readAll` on an `osproc` pipe stops at the first SHORT read, and a Windows pipe returns each child write separately, so `readAll` silently keeps only the first write (a one-line stderr came back as `cann`). Read until `readData` returns 0 instead (`readToEof` in `src/ct/utilities/target_recognition.nim` and the four suites above). POSIX never shows it.
+- WINDOWS, MAX_PATH: `trace_index_migration_test`'s legacy-migration case does `VACUUM INTO <db>.pre-lang-name-migration.bak`; under a deep TEMP (e.g. a Claude scratchpad) that path passes 260 chars and SQLite reports "unable to open database file". Run with a short TMP/TEMP. Also, `ct record` on Windows puts the trace directory under `%LOCALAPPDATA%\codetracer\` even when the index is isolated.
+
+## `src/frontend/ui/auto_hide.nim` DOES compile and run under `nim js -d:nodejs`
+
+Measured at `b98719133`, aarch64-darwin, in `nix develop '.?submodules=1'`:
+
+    nim js -d:nodejs --path:src/frontend/viewmodel <a file importing ui/auto_hide>
+
+exits 0 — the exact compiler invocation `ci/lib/run-nim-test-lane.sh` uses for
+the `vm-js` lane. So an auto-hide behaviour can be driven headlessly from a
+`src/tests/gui/tests/**/**_test.nim` file with NO new lane and no extraction of
+the logic into a dependency-free helper.
+
+This contradicts two things a reader will find first, and both are narrower
+than they sound:
+
+* `ci/lib/test-lane-files.sh`'s note that "the renderer is a BROWSER module and
+  under `-d:nodejs` it does not compile at all" is about `renderer.nim`
+  specifically. Measured: the same probe over `frontend/renderer` fails with
+  `src/frontend/utils.nim(60, 16) Error: undeclared identifier:
+  'createElementNS'` — that is `std/dom`'s, absent under the define, in a file
+  the renderer imports. `auto_hide.nim` never reaches `utils.nim`, even though
+  it imports `kdom`, the frontend `types.nim` object graph and the IsoNim
+  views.
+* `auto_hide_panel_config.nim`'s own header says `auto_hide.nim` "does not
+  compile under `nim js -d:nodejs` at all". That is wrong as written. The
+  extraction is still worth having — a dependency-free predicate is cheaper to
+  test and to reason about — but it was not *necessary*.
+
+Three host facts to know before calling into it from node:
+
+* `dispatchLayoutUpdated()` is `window.dispatchEvent(new CustomEvent(...))`.
+  node has no `window`; shim it, or every proc that ends in a layout dispatch
+  dies on its last line.
+* `deferredUpdateGLSize()` returns immediately while `autoHideLayout` is nil,
+  so nothing reaches `requestAnimationFrame`.
+* `autoHideState` is module-level and `initAutoHideState()` is a NO-OP on a
+  non-nil state. Set `autoHideState = nil` first or cases leak into each other.
+
+And one behavioural fact that is easy to assert backwards: after a SUCCESSFUL
+`unpinPanel`, `panel.isUnpinning` is deliberately still `true`. The `finally`
+clears it only when the panel is still in `autoHideState.panels`, because a
+panel that is no longer registered cannot be hidden by the flag. The observable
+that says an unpin worked is `autoHideState.panels` no longer containing it —
+not the flag, and not `bottomStripModel()`, which filters on `isUnpinning` and
+is therefore ALSO empty when the panel is latched mid-unpin (the #692 defect).
+
+---
+
+## A DOM, not just a document: what `-d:nodejs` gives you and what it takes away
+
+The note above is right that `ui/auto_hide.nim` compiles and runs under
+`nim js -d:nodejs`. A fourth host fact belongs beside its three, and it is the
+one that decides how a DOM-touching auto-hide test has to be written.
+
+Under `-d:nodejs` Nim's `std/dom` (which `frontend/kdom.nim` re-exports whole)
+swaps in an **in-memory DOM emulation** — `lib/js/dom.nim`, the
+`when defined(nodejs)` block. It is real enough to be useful and wrong in two
+places that matter:
+
+* `document.getElementById` is a hand-rolled walk from `document.body`, and
+  `document.body` starts **nil**. The first lookup is then
+  `Cannot read properties of null (reading 'id')` — a native `TypeError` from
+  inside `getElem`, nowhere near the proc you are testing. Assign
+  `document.body` before anything else.
+* `document.createElement` is `new(result)` on an `{.importc.}` ref object, so
+  the element it returns has a **NULL `style` and a NULL `classList`**. Any
+  production code that writes `el.style.width = …` on it throws. That is not a
+  corner: `showDockedPanel`'s next act on a live element is four style writes,
+  and `layout.nim`'s standalone registration sets `wrapper.style.width` on a
+  freshly created div.
+
+So production code that must be drivable headlessly should build its elements
+through the **ambient** `document` (an `importjs` helper), not through kdom's:
+in the renderer that is the real `document`, and in a test the suite can supply
+one. `auto_hide.jsCreatePanelHost` is the worked example, and
+`src/tests/gui/tests/auto-hide/auto_hide_dom_harness.nim` is the shim two
+suites share. `CONTRIBUTING.md`'s "Frontend JS tests: `-d:nodejs` hands you a
+DOM that is not the DOM" is the same warning from the other end.
+
+One more, for writing the harness rather than the product: give the stub
+element an `innerHTML` **setter that clears `childNodes`**. Several procs open
+with `contentEl.innerHTML = ""`, and a shim that treats it as a plain string
+property lets one case's leftover node satisfy the next case's "the pane has
+content" assertion.
+
+## One mount dispatch, two callers — do not add a third
+
+`ui/layout.nim`'s `mountPaneForState(state: GoldenItemState)` is the only place
+that knows how to fill a pane's container: ~360 lines of
+`if state.content == Content.X: tryMountIsoNimXPanel()`. It has two callers and
+they are unobvious neighbours:
+
+* the `genericUiComponent` registration's deferred body, for a pane
+  GoldenLayout built;
+* `onPanelShown`, for an auto-hide panel restored from `auto_hide_state.json`
+  (#691) — which never passes through GoldenLayout, so its host is built by
+  `auto_hide.instantiatePanelElement` from the persisted config and the same
+  dispatch fills it. A restored panel's `config.componentState` IS a
+  `GoldenItemState`, which is why no translation layer is needed.
+
+`src/frontend/viewmodel/tests/unit/test_every_mountable_pane_has_a_factory_arm.nim`
+asserts every direct-mount `Content` has an arm in ONE region, and it finds that
+region by the literals `let isDirectMountComponent = state.content in {` and
+`discard component.afterInit()`, with the arms matched as
+`if state.content == Content.X:`. **A second dispatch would be invisible to it,
+and so would a rename of that parameter.** The extraction that gave the proc its
+name kept `state` as the parameter name for exactly that reason.
+
+Two traps in the same area, both live:
+
+* `renderer.redrawLegacyRendererInstance(label)` — the last line of
+  `onPanelShown`'s fallback — is a **stub that returns `false` and does
+  nothing** (`frontend/renderer.nim:413-414`). It reads like a general "refresh
+  this panel" hook. It is not one.
+* `AutoHideEdge` is `Left, Right, Bottom`, so its ordinals are **0, 1, 2**, and
+  that ordinal is what `auto_hide_state.json` stores. A comment in
+  `unpinPanelTarget` claimed `Bottom=0, Left=1, Right=2` for a long time.
+- PLAT-29 async boundary, wired (2026-09-23). Every writer of an
+  `EditingDocument.state` must call `drainJournal()` afterwards (applyKey,
+  applyNamed, applyChangeSet, collab projection's two): `mapPositionTables`
+  appends each ChangeSet to `EditorState.journal`, and `drainJournal` moves it
+  onto `EditingDocument.timeline` (a VersionedDocument, bounded to
+  `TimelineDepth`=256). `EditorState ==` compares `journal` too.
+- TUI Edit pane never parses on the render path when `spansProvided`: the
+  runtime's `scheduleHighlights` (called by `shellScreenOf`) asks
+  `editServices.requestHighlight` (host thread `host/highlight_worker`, newest
+  request wins) or, when nil (suites), runs `computeHighlight` inline. Answers
+  arrive via `deliverHighlight` and are reconciled per line
+  (`highlight_producer.installHighlight`/`refreshHeld`). `:w`/`:e!` go through
+  `editServices.submitFileJob` (host/file_worker, in order, never coalesced)
+  or run inline; `deliverFileJob` reconciles and calls
+  `markSaved(buf, savedText)` with the WRITTEN bytes (not buf.text).
+  EditPaneModel.lines is a WINDOW (`linesFrom`/`totalLines`); use
+  `lineAt`/`lineCount`, not `lines.len`.
+- DAP locals name the debugger STOP they were requested at:
+  `store/stop_timeline` (VersionedDocument over the stop identity; a move
+  replaces it, the same identity twice is one version). There is NO
+  `applyLocalsResponse(rows)` overload — pass `requestedAt: StopStamp`
+  (`store.stopStamp()` taken BEFORE sending). Headless: `fetchLocals` +
+  `applyLocals`; web renderer: matched by REQUEST IDENTITY, never by order —
+  the web sends `ct/load-locals` from TWO places per move
+  (`StateComponent.loadLocals` via mediator->middleware->`sendCtRequest`, and
+  the StateVM effect's `store.requestLocals` via `dap_backend` ->
+  `asyncSendCtRequest`). `dap.trackCtRequests(CtLoadLocals, ...)` (installed
+  by `ui/state.wireLocalsAnswers`) records `"<sessionId>:<seq>"` from
+  `dispatchCtRequest` (the one send path) into `store.noteLocalsRequestSent`;
+  `dap.deliverDapResponse` (what `ui_js.onDapReceiveResponse` calls) stamps
+  the same id into the answer body (`ctRequestId`), `syncStoreLocals` ->
+  `store.applyLocalsAnswer(rows, id)`, and the entry is retired after the
+  fan-out. Unknown id = dropped (drVersionForgotten); empty id (extension
+  transport) = reconciled at the current stop. A dropped answer leaves the
+  PREVIOUS stop's locals in the store, so surfaces draw inline values through
+  `inline_value_timeline.InlineValueGate.installable` (tui_session does).
+- Renderer mediators: `MediatorWithSubscribers.emit` fans out to SUBSCRIBED
+  child mediators only; the root's own `subscribe` handlers run only for
+  events a component sends UP (via its transport). So
+  `data.viewsApi.subscribe(CtLoadLocalsResponse, ...)` on the root is never
+  reached by `viewsApi.emit` from middleware (measured in
+  `src/frontend/tests/locals_answer_identity_test.nim`).
+- Renderer modules (`ui/*.nim`) can be RUN under node: compile the browser
+  target (`nim js -d:ctRenderer`, NO `-d:nodejs` — kdom lacks createElementNS
+  there) and load via `src/frontend/tests/jsdom-run.mjs` (lane
+  `renderer-dom`, backend `js-dom`; needs node_modules/jsdom, which the dev
+  shell links from the Nix-built node modules; CI runs it as `just
+  test-renderer-dom` in the viewmodel-tests job). Without
+  `-d:nodejs` unittest cannot set the exit code — set `process.exitCode`.
+  `JsObject{locals: x}` does NOT produce a `locals` key (the literal macro
+  mangles it to `invalid`); use `obj[cstring"locals"] = x`.
+- `ci/lib/nim-closure.sh` is the ONE `normpath` (sourced by
+  editor-import-closure.sh, plugin-reactive-boundary.sh, sdk-facade-boundary.sh).
+  The editor closure gate's root set is `find -L editor -type f` (recursive,
+  follows symlinks).
+- Nim test-lane nimcache defaults to /tmp/ct-nim-cache/<worktree-name>-<hash>/,
+  so two worktrees do not collide; `pkill -f` with a pattern that appears in
+  your own command line kills your own shell (exit 144) — kill by PID.
+
+- 2026-09-24: **`FlowViewUpdate.branchesTaken` is FOUR producers writing into one
+  structure, and they do not all write into the same cell.** `[loop][iteration]`,
+  and `[0][0]` is not "the first loop" — it is *the conditionals no loop
+  encloses*, plus everything the file-wide sweep adds.
+  * `expr_loader.load_branch_for_position` (sound) — the walker stepped on an
+    arm's `code_first_line`, so that arm's header is `Taken` and every sibling
+    in `Branch.opposite` is `NotTaken`. Goes into the cell of the step's own
+    loop/iteration. **A conditional with no sibling has an empty `opposite`**, so
+    a lone `if` can be proved taken and, by this route, never proved declined.
+  * `flow_preloader`'s pending-header rule (sound, added for #758) — a step ON a
+    header line is the condition being evaluated, so the NEXT step is inside the
+    arm or outside it. Records `NotTaken` in the cell **captured when the header
+    was seen**, not the current one: a conditional ending a loop body is resolved
+    by the loop header, which has already opened the next iteration.
+  * `expr_loader.final_branch_load` (unsound, and the source of two separate
+    bugs) — a file-wide sweep into `[0][0]` for every branch it believes the walk
+    never reached. Its `branch.status == Unknown` guard is **always true**,
+    because `load_branch_for_position` sets `Taken` on a CLONE and never writes
+    back, so the check list passed in is the whole of its knowledge. That list
+    was `[0][0]` itself until `FlowViewUpdate::observed_branch_lines`, which made
+    every arm inside a LOOP invisible to it. Still runs identically after a
+    truncated walk — that half is an open owner decision, see
+    `Omniscience-Flow.md` § *Known defect*.
+  * `FlowViewUpdate.add_branch_extents` — `header_line -> BranchExtent`, onto
+    `[0][0]` only, once per window. Static per file, so it is not per-iteration.
+  Reading state for a line therefore means asking *which cell*, and the two
+  frontend readers ask differently: `conditionStyleLines` paints `[0][0]` on
+  every update and the current loop cell on top of it, while
+  `flow_line_rule.insideUntakenBranch` (dimming) reads `[0][0]` alone. When the
+  sweep and a loop cell disagreed about one header, that was issue #758 in full —
+  red under the green on the header, and the taken arm's interior dimmed.
+  Hermetic coverage, with no recorder or `nargo` needed:
+  `src/db-backend/tests/flow_branch_state_test.rs` builds an in-memory `Db` the
+  way `dap_column_flow.rs` does and drives the real `FlowPreloader::load`.
+- 2026-09-24: **`mixin` does not reach a nested generic, and
+  `src/common/flow_line_rule.nim` has no imports on purpose.** A `mixin`ed name
+  binds where the proc DECLARING it is instantiated; a generic called from
+  another generic instantiates in `flow_line_rule.nim`, where nothing is in
+  scope. So a helper there cannot name `Taken`/`NotTaken` itself — the state has
+  to be a parameter, passed by the caller that does hold the `mixin`. There are
+  also THREE instantiations, not two: `BranchState` through `common/types.nim`,
+  `BranchState` through `frontend/types.nim`, and a bare ordinal `int` for
+  `viewmodel/viewmodels/flow_vm.nim`'s `FlowLineWindow`, whose `const NotTaken =
+  2` / `const Taken = 1` exist solely to satisfy those mixins.
+  `test_flow_line_facts.nim` pins both against the enum. **The native lane can
+  compile while the JS lane cannot**, so `nim js src/frontend/ui_js.nim` is the
+  check that matters here.
+- 2026-09-24: **The pending-header rule's `NotTaken` is an INFERENCE and must
+  never overwrite a sighting — and the AST extent it reasons over does not
+  describe every arm.** `code_first_line` is `header_line + 1` unconditionally
+  (`expr_loader.rs`, `extract_branches`: `get_first_line(node).inc()`), and
+  `code_last_line` is the body node's LAST line, i.e. the closing brace. So the
+  extent is `[header+1, closing brace]` whatever the body actually looks like,
+  and three shapes fall outside what "the next step is inside the arm or it is
+  not" can decide. Measured on `dev` `34581010a` and after the fix, with the
+  same answers on both sides unless noted:
+  * a header line reported a SECOND time after its arm ran (line-granularity
+    replay does this; see `MAX_NONPROGRESSING_STEPS`) re-registers the
+    conditional, and the step after it is outside the arm. Without a guard that
+    rewrote an observed `Taken` into `NotTaken` — a regression the fix
+    introduced and `flow_view_update.branch_state_at` now blocks. THE RULE IS:
+    an inference loses to a sighting, the same way
+    `flow_line_rule.branchStateAnywhere` decides it on the rendering side.
+  * an arm whose first EXECUTED line is not `code_first_line` — a leading
+    comment is enough — never gets its `Taken` from
+    `load_branch_for_position`, because that producer is keyed on
+    `code_first_line` exactly. The file-wide sweep then stamps the header
+    `NotTaken`. Pre-existing and unchanged: measured `[0][0] = [(3, NotTaken)]`
+    on both sides for `if a == 1 {` with a comment as the arm's first line.
+  * an `else if` chain: the arm that RAN is reported `NotTaken`. Pre-existing
+    and unchanged, measured `[(3, NotTaken), (5, NotTaken), (7, NotTaken)]` on
+    both sides with the middle arm taken. `extract_branches` pushes several
+    `Branch` records sharing one `header_line` for one `else if`, and
+    `position_branches` is keyed on `code_first_line`, so the `opposite` walk
+    can mark one header both `Taken` and `NotTaken` in a single call.
+    § *Known defect*'s "the painted scope is one line, and for `else if` it is
+    the wrong one" is the reading half of this.
+  An arm that is entered but whose body records NO step is reported `NotTaken`
+  too, on both sides. None of the three is fixed here; all are worth an issue.
+- 2026-09-24: **`insideUntakenBranch` is called once PER SOURCE LINE, and its
+  new `branchStateAnywhere` clause scans every cell of `branchesTaken`.** Cells
+  grow one per loop iteration the walk observed, bounded only by
+  `STEP_COUNT_LIMIT` (10 000 steps), so the cost of one flow repaint is
+  lines × NotTaken-headers × iterations — millions of table lookups in the JS
+  renderer for an ordinary long loop. The cheap fix is to test the extent
+  containment BEFORE the scan: the guards in that loop are an independent
+  conjunction, so reordering them is free and it drops the scan to at most once
+  per line instead of once per header per line. Not done yet — it wants its own
+  change and its own `just test-vm-native` run.
+- 2026-09-24: **The Test Results pane has TWO hosts and they are not symmetric,
+  and a new module under `viewmodel/` reddens `test_editor_change_algebra.nim`
+  by construction.** Two things worth knowing before touching this area (M50,
+  issue #748):
+  * The pane's runner is installed by a HOST, and until now the only host was
+    inside `ui_js.startWebRenderer` — which the desktop never enters. The
+    desktop half is now `viewmodel/viewmodels/desktop_test_host.nim`, installed
+    from `ui_js.nim`'s `if inElectron:` block, with `renderer.runTests` and
+    `editor.settleEditorTestRun` injected so the state machine runs headlessly.
+    The settle travels on `CODETRACER::test-run-settled`, sent by ALL FIVE exits
+    of `index/traces.onRunTest` from four send sites (the success send is
+    hoisted above the `newWindow` / `loadExistingRecord` branch so both arms
+    are covered). The contract is spec'd at
+    `codetracer-specs/GUI/Core-Panes/Test-Results-Pane.md`.
+    `startDesktopTestRun` calls `beginRun` BEFORE dispatching so a synchronous
+    refusal has a run to unwind, which makes an exception out of the dispatch
+    the one remaining way to be begun-but-never-ended — hence the bare
+    `try/except` around it. Keep that ordering and that guard together; either
+    alone is a stuck spinner.
+    **`ct record-test` exits 0 for a test that ran and FAILED** (`src/ct/trace/
+    record.nim`: `quit(0)` on a recording, `quit(1)` on none), so the desktop
+    arm reports a RECORDING and must never emit a `test-finished` with a status.
+    And `ct test run` is REFUSED inside the `ct` binary (`src/ct_test/
+    ct_test.nim`: `ct` is `--mm:refc`, the parallel runner shares sequences
+    across threads), which is why the pane's ▶ is still nil on the desktop.
+  * `test_editor_change_algebra.nim`'s `ExpectedAssertions` counts three
+    assertions per production module under `viewmodel/`, derived from the tree
+    at compile time. **Adding any module there makes that suite red** with
+    `countedAssertions was N … ExpectedAssertions was N-3`; the fix is to bump
+    the constant with a dated note, as its own header instructs. It has been hit
+    at least five times now.
+  * Nim identifiers are style-insensitive, so `var desktopTestHost` collides
+    with `import .../desktop_test_host` — `Error: redefinition`. Any
+    `var fooBarBaz` next to an `import foo_bar_baz` has the same problem.
+  * **Type-checking the index by hand needs `-d:nimNoLentIterators`, and that
+    is an invocation gap rather than a product defect.**
+    `nim -d:ctIndex -d:nodejs js src/frontend/index.nim` fails on `dev` at
+    `547497aa1` with `'filePath' is of type <lent cstring> which cannot be
+    captured` (raised from `lib/js/jsffi.nim(441, 16)`, declared at
+    `index/ipc_subsystems/acp_ipc.nim(786, 9)`), with and without unrelated
+    changes. Do NOT file that as a bug: `src/Tuprules.tup`'s
+    `NIM_COMMON_FLAGS` already carries `-d:nimNoLentIterators`, and
+    `!nim_node_index` — the rule that actually builds `index.js` — goes through
+    `$(NIM_SELECTED)`, so the real build has never seen this error. The lesson
+    generalises: a bare `nim c`/`nim js` of a file this repo builds under Tup
+    is missing the whole of `NIM_COMMON_FLAGS`, so read the rule in
+    `src/Tuprules.tup` before believing a compile failure you reproduced by
+    hand.
+- 2026-09-24: **A shell without zstd's `-isystem` turns `just test-vm-native`
+  into EIGHT fake regressions, all in `src/tests/gui/tests/request-panel/`.**
+  The real error is `fatal error: 'zstd.h' file not found`, from
+  `codetracer-trace-format-nim`'s `zstd_bindings.nim` / `span_stream.nim`; the
+  lane reports it only as `COMPILE ERROR` plus a 900-character clang command
+  line, so it reads as eight files this change broke. The mechanism is in the
+  repo's own `config.nims`: it scans `NIX_CFLAGS_COMPILE` for an `-isystem`
+  whose path contains `zstd` and re-emits it as `--passC`. No such token, no
+  header. Measured at `547497aa1` — the same eight fail at base, so **A/B one
+  of them before believing any request-panel red.** The remedy inside a shell
+  that is missing it:
+
+      export NIX_CFLAGS_COMPILE="$NIX_CFLAGS_COMPILE -isystem <zstd-dev>/include"
+      export NIX_LDFLAGS="$NIX_LDFLAGS -L<zstd>/lib"
+
+  and the durable one is to run the lane from the dev shell (`direnv exec .`
+  / `nix develop '.?submodules=1'`), which supplies the token.
+- 2026-09-24: **`just test-vm-*` recipes run `vm-test-prereqs` BEFORE the `tee`,
+  so a poll on `test-logs/test-vm-<lane>.log` matches the PREVIOUS run's summary
+  for the first minute.** Every lane is written `test-vm-js: vm-test-prereqs`,
+  and `just` runs that dependency to completion in its own process before the
+  recipe body starts. The body's first act is
+  `exec > >(tee test-logs/test-vm-<lane>.log)`, which truncates on open — but
+  `build-tailwind.sh` has already burned a minute by then, so
+  `until grep -q '<lane>: .* file(s) passed' test-logs/test-vm-<lane>.log`
+  fires immediately against the stale file and hands you last session's
+  numbers, which look exactly like a plausible result.
+  This happened here: a `vm-js` "result" of `84 passed / 6 failed / 2140 cases`
+  was read from a log the running lane had not yet truncated. Wait on the
+  PROCESS (the background job's own exit), not on the log's contents, or delete
+  the log before starting the lane.
+- `ct/load-locals` has ONE sender per stop on every host. Web (non-extension):
+  the StateVM auto-load effect (`state_vm.nim`, `store.requestLocals`);
+  `StateComponent.loadLocals` stands down once `initStateVMWithStore` ran
+  (`storeSendsLocals`) and is the sender only over the stub store (VS Code
+  extension). Native (TUI/GPUI via `headless_session`): the host's
+  `fetchLocals`; the store has `localsLoadedByHost = true`, so the effect sends
+  nothing (its answer reached no decoder there). Before this the web sent 2 per
+  move and native 3 per step (the `dsStepping` status write re-ran the effect).
+  The effect now subscribes to `stopIdentityOf(store.debugger.val)` (a memo),
+  not the whole `DebuggerState`. `lang` is `store.localsLanguage()` via the
+  host-installed `store.sourceLanguageOf` hook (the store is in the Embed SDK
+  graph and cannot import `common_lang`); only the native (rr/lldb) replay
+  backend reads `lang` (value printers) — `Db::load_locals` ignores it.
+  `.py` resolves to `pythondb`. `StateComponent.rrTicks` is never assigned
+  (always 0).
+- Electron main-process DAP router (`index/ipc_subsystems/dap.nim`) forwards
+  every renderer request under a WIRE `seq` unique across sessions
+  (`nextWireSeq`) and records `(sessionId, seq)` under it (`pendingRequests`);
+  the answer's `request_seq` is rewritten back to the session's own `seq`.
+  Backend responses carry only `request_seq`, so a `(sessionId, seq)` key is
+  not recoverable at answer time without this rewrite.
+- Main-process modules RUN under node with `-d:nodejs -d:ctIndex -d:server`
+  (the `server_index.js` defines; `-d:server` loads `electron_vars` without
+  Electron): lane `main-process`, `just test-main-process`.
+- To see what a native host WRITES to the real replay-server, launch it through
+  a bash script `exec < <(tee -a LOG); exec real-server "$@"` via
+  `REPLAY_SERVER_BIN` (see `test_plat29_inline_values.nim` `tappedServer`).
+- Renderer suites under jsdom can have an async phase: schedule a proc
+  `{.async.}` that `await`s a `setTimeout(resolve, 0)` promise so promise
+  continuations (e.g. `requestLocals`' `markComplete`) have run; put the
+  final `CHECKS:` echo / exit code in that phase.
+- 2026-09-24: **The welcome screen's start-options strip is built TWICE, and
+  only one copy was ever reviewed against what its arm can do (M52, issue
+  #734).** Both copies lived in `ui/welcome_screen.nim` as five
+  `WelcomeStartOptionRecord` literals — `welcomeStartOptions` for the desktop,
+  `mountWebWelcomeScreen` for the web — and nothing anywhere related a row's
+  `inactive` flag to whether its arm had a handler. The web copy marked "Open
+  folder" live; on that arm `tryMountIsoNimWelcomeScreen` passes an EMPTY
+  `WelcomeScreenCallbacks()` (nothing assigns `welcomeScreenComponentRef`
+  without a legacy component), and the view's fallback `case` in
+  `isonim_welcome_screen_view.triggerStartOption` has arms only for
+  `record-new-trace` and `open-online-trace` — so the click hit `else: discard`.
+  Both strips now come from `welcomeStartOptionRecords(active, reasons)` in
+  `viewmodel/viewmodels/welcome_screen_vm.nim`, which takes the set of kinds
+  the arm can HANDLE and computes `inactive` from it, so a live-but-dead row is
+  not constructible. `unreachableStartOptions` / `reasonlessDisabledStartOptions`
+  are the checkers; the suite is `welcome-screen/welcome_screen_vm_test.nim`
+  §"start option arms (#734)" and it runs on both backends.
+  **If you add a start option, add an enum value and an arm to
+  `triggerWelcomeStartOption`'s `case` — do not write a record literal.**
+- 2026-09-24: **`pointer-events: none` on a disabled control also suppresses
+  its native `title` tooltip**, which is usually the only place the refusal is
+  explained. `.inactive-start-option` carried both for years, so the web
+  welcome screen was five 0.2-opacity ghosts that could not be interrogated —
+  issue #734's actual complaint. The click was never made safe by the CSS
+  anyway: `triggerStartOption` returns early on `opt.inactive`. Use
+  `aria-disabled` + `cursor: not-allowed` and refuse in code. Same reason not
+  to use the `disabled` attribute on a button whose `title` you need.
+- 2026-09-24: **Adding a `Signal[...]` field to any `*VM` under
+  `src/frontend/viewmodel/` reddens
+  `viewmodel/tests/unit/test_collab_signal_registry.nim`** until it is
+  classified in `collab/signal_registry.nim`. `discoverViewModelFields` parses
+  the real sources off disk and `validateRegistry` fails on any unclassified
+  field, so the gate bites at RUN time and not at compile time. **It bites in
+  `just test-vm-collab-units`, NOT in `just test-vm-unit`** — `vm-unit`'s file
+  set explicitly rejects `/test_collab_*.nim$` (see
+  `ci/lib/test-lane-files.sh`, the `vm-unit)` arm), and `vm-collab-units` is
+  the lane that finds it. A green `test-vm-unit` therefore says nothing about
+  this gate. Sibling of the `ExpectedAssertions` bump
+  `test_editor_change_algebra` needs when a MODULE is added there.
+- 2026-09-24: **`dap_server.rs::handle_message` answers `launch` with
+  `success: true` BEFORE any trace is opened** (`:2643-2655`), and the real
+  work happens later in `task_thread` on the stable worker thread. Two
+  consequences, both of which cost issue #689 its diagnosis:
+  * **A failed launch can never be reported as a failed `launch` response** —
+    `request_seq` has already been answered, and two responses to one request
+    is a protocol violation. The carrier for a launch failure is an EVENT.
+    `ct/notification` is the one that already works end to end:
+    `src/frontend/middleware.nim:247` forwards it and
+    `src/frontend/ui/status.nim:427` subscribes and renders it into the status
+    bar. Do not invent a new event for this.
+  * Until M55, `task_thread`'s launch branch handled every failure with `?`,
+    which RETURNS FROM THE WORKER THREAD. Nobody joins it, so the only trace
+    was an `error!` line in the backend's own log, and the client sat on a
+    successful launch waiting for a `stopped` event forever. That is the
+    C-language symptom in #689 ("nothing happens at all") and
+    `src/db-backend/tests/test_harness/mod.rs:108-118` documented it verbatim
+    for two years as a *test* hazard rather than a product bug.
+  The launch branch now runs as a closure so the thread survives; note that
+  keeping it alive made the `else { handler NOT initialized }` arm load-bearing
+  — it used to be unreachable-after-failure because the thread was dead and
+  `handle_message`'s dead-channel arm (`:2714-2745`) answered instead. It now
+  answers `success: false` itself.
+- 2026-09-24: **`ct-native-replay` reports a licensing refusal as machine-
+  readable JSON on stderr plus exit 3, and `codetracer` must parse it.** The
+  producer is `codetracer-native-backend/src/licensing/cli.rs::emit_replay_start_block`
+  (`{"result":"blocked","stop_reason":{"code":"daily_replay_limit_reached","count":N,"limit":M}}`).
+  That repo's `tests/licensing_integration_test.rs:2191` pins the exit code and
+  the JSON shape, but NOT the stream: it drives `license session-harness`, which
+  is `SessionStopOutput::JsonHarness` and asserts on **stdout**. The production
+  routing to **stderr** (`cli.rs:898`, via `SessionRunOptions::production` at
+  `cli.rs:805`) is unpinned on both sides — the one link in this chain held by
+  source reading alone. On this
+  side `ReplayWorker::start` parses it into `ReplayWorkerStartError` /
+  `WorkerStopReason` (`src/db-backend/src/recreator_session.rs`), whose
+  `Display` renders `CodeTracer-End-User-Licensing.md` §3.6 step 4 VERBATIM.
+  Two traps for anyone touching this path:
+  * **The typed error travels as a bare `Box<dyn Error>` and is recovered by
+    `downcast_ref`.** Every `?` between `start` and `dap_server::task_thread`
+    passes the box through unchanged — but a single `.map_err(|e| format!(...))`
+    anywhere on that chain destroys it and the quota refusal silently becomes
+    an opaque blob again. Three such `map_err`s were removed in favour of
+    `inspect_err` for exactly this reason. `replay_worker_quota_error_test.rs`
+    goes red if one comes back.
+  * **`CODETRACER_IN_UI_TEST=1` is the supported bypass** and
+    `test_harness/mod.rs::ensure_replay_license_bypass` sets it unconditionally,
+    so no existing harness will ever see this path. A test for it must spawn its
+    own worker.
+- 2026-09-24: **`renderer.openNewTab` could not open a tab, and the reason is a
+  two-map split that is easy to reproduce elsewhere.** It registered its
+  `TabInfo` in `data.services.editor.open` and then called `utils.openTab`,
+  which branches on exactly that map: absent → `openNewEditorView` (creates the
+  component); present → `showTab`. The line above forced the second branch, and
+  `showTab` looks the tab up in **`data.ui.editors`** — a *different* map that
+  nothing had written — so it hit `cerror "tabs: no editor in showTab for
+  #untitled0"` and returned. No component, no layout container, and the
+  `data.focusComponent(data.ui.editors[path])` on the next line then focused
+  `undefined`. The menu's New File action was in this state too, not only the
+  welcome screen's new one (issue #735).
+  * **`open` is the tab MODEL, `ui.editors` is the COMPONENT.** A proc that
+    writes the first and expects `openTab` to build the second is wrong by
+    construction; `openTab` reads the first to decide whether the second exists.
+  * **`openNewEditorView` is the wrong repair for content you already hold.**
+    It `await`s `services.editor.tabLoad` → `CODETRACER::tab-load`, which on the
+    desktop fails to read `#untitled0` and in a browser tab is answered by
+    nobody, so the await never settles. Go straight to
+    `utils.makeEditorViewDetailed` (now exported) — it is the half of
+    `openNewEditorView` that runs *after* the source arrives, and it is what
+    `openNoSourceView` and `makeEditorView` already use for the same reason.
+  * Beware `utils.makeEditorView`: it calls `makeEditorViewDetailed` and then
+    repeats that proc's `makeEditorViewComponent` + `openLayoutTab` tail itself.
+    `makeEditorViewComponent` raises `ValueError: editor <name> exists` on a
+    name already in `ui.editors`, so the second call should always throw. Not
+    investigated further here; do not build new paths on it.
+- 2026-09-24: **`index/files.onSaveUntitled` wrote to the renderer's
+  placeholder name.** `renderer.dispatchSaveEffect` sends
+  `CODETRACER::save-untitled` as `{name: "#untitled0", raw, saveAs: true}` and
+  the handler wrote to `response.name` — i.e. a file literally called
+  `#untitled0`, relative to the Electron **main process's** working directory,
+  reported back as `saved-file`. `saveAs` was sent all along and read by
+  nothing. It now opens `dialog.showSaveDialog` when the target starts with `#`.
+  Two things to keep in mind if you touch it:
+  * **The reply must carry the BUFFER's name, not the destination.**
+    `ui_js.onSavedFile` looks the tab up by `response.name`; replying with the
+    chosen path clears nothing and the tab stays dirty. The cost is that the tab
+    keeps its `#untitled{N}` title — renaming it is renderer-side work nobody
+    has done.
+  * **A cancelled dialog must still reply.** `onSaveFileError` is what drains a
+    queued re-record request (issue #603); replying with nothing arms it for
+    ever.
+- 2026-09-24: **Grepping an emitted `nim js` bundle for a user-visible LABEL
+  finds nothing, and that is a property of the TYPE, not of the string.** Nim's
+  JS backend emits a `string` literal as a char-code array and a `cstring`
+  literal as a plain JS string. Measured on the real renderer bundle
+  (`nim js -d:ctRenderer src/frontend/ui_js.nim`, 2026-09-24): `grep -c 'New
+  file'` is **0**, while the array `78,101,119,32,102,105,108,101` appears once
+  — because `welcome_screen_vm.StartOptionNames` is `array[..., string]`. Most
+  user-facing text in the frontend is `string` for exactly that reason, so a
+  gate "verified" by grepping the bundle for a label reads ABSENT for every
+  build, including the ones that contain it.
+  * Grep for an emitted SYMBOL instead (`enterNewFileEditMode`,
+    `makeEditorViewDetailed__hgvyf_u159`) — those survive with a mangled
+    suffix and are what a positive control should read.
+  * An `importjs` body is INLINED, so its proc name is absent from the output
+    even when the code is there. Grep a distinctive line of the JS itself
+    (`a.download = n`), not the Nim proc name.
+- 2026-09-24: **THERE IS NO TIMELINE READ ROUTE — `ct/timeline-seek` is a
+  WRITE.** Established for issue #693 (Pxor M51). `ct/timeline-seek` is the only
+  `timeline` string on the DAP wire (`src/db-backend/src/dap_server.rs:2171`)
+  and it routes into `Handler::goto_ticks`. Nothing asks the engine for a
+  timeline and nothing answers with one, so *the payload feeding the timeline
+  pane carries no event kinds at all*: `store/types.TimelineState` is three
+  `uint64`s (`minRRTicks` / `maxRRTicks` / `currentRRTicks`) and is written only
+  by the live-MCR recording-head update, `requestRestoreAt`'s success arm, the
+  collaboration signal serialiser, and PLAT-41's `applyEventLogRows`.
+  * Event kinds WITH ticks do exist in the same store, from two OTHER routes:
+    `ct/load-calltrace-section` → `CalltraceStore.lines` (`CallLine.rrTicks` /
+    `.depth` / `.name`), and `ct/event-load` → `EventLogStore.rows`
+    (`EventLogRow.kindId` / `.rrTicks`).
+  * **`EventLogKind` has no `Call` and no `Return`**
+    (`src/common/common_types/codetracer_features/events.nim`) — it is an I/O
+    vocabulary (Write / Read / Open / Socket / Error / TraceLogEvent /
+    EvmEvent). So of `Front-Ends/Electron-GUI.md:155`'s three marker kinds, the
+    event log can only answer EXCEPTIONS, as `EventLogKind.Error` (ordinal 11).
+    Calls come from the calltrace; a call's END is on no wire at all and must be
+    inferred from `depth`.
+  * **Both of those signals hold a WINDOW.** `EventLogStore.rows`' own doc
+    comment says "a page and not the whole log", and `CalltraceStore` carries
+    `startLineIndex` / `totalCallsCount` / `finished`. Any marker projection is
+    therefore of what the session has LOADED. A whole-recording marker set needs
+    a backend route that does not exist.
+  * `TimelineVM.markers` used to BE the extent — two numbers, min and max — and
+    `timeline_vm_test.nim` pinned that as correct. The extent now lives on
+    `TimelineVM.bounds` and `markers` is the real projection; `boundsFromVm`
+    (`tui/app/timeline_binding.nim`), `gpui/app/leaves.renderTimeline` and
+    `views/isonim_timeline_view` were all reading the old field.
+- 2026-09-24: **A `for` inside an isonim `ui:` block runs ONCE PER RENDER, and
+  `for x in someSeq` will not compile there.** Two separate facts, both found in
+  `views/isonim_timeline_view.nim`:
+  * `dsl/ui.processForStmt` expands the loop at render time, so rows/marks
+    produced by a `for` are frozen in the node that was appended — unlike
+    `text`/style/attribute expressions, which the DSL wraps in their own
+    `createRenderEffect` and which DO update in place. A mount that appends once
+    shows the loop's result for ever (PLAT-40 found this in
+    `isonim_point_list_view`; the timeline had it too). The fix is to re-render
+    inside `createEffect` — and then to attach any `window`-level listeners
+    ONCE, outside that effect, or every redraw leaves another pair behind.
+  * The DSL wraps every dynamic attribute in a closure, and on Nim 2.x
+    `for m in someSeq` yields `lent T`, which cannot be captured: *"is of type
+    <lent TimelineMarker> which cannot be captured as it would violate memory
+    safety"*. Bind the seq to a `let` before `ui(r):` and index it
+    (`for i in 0 ..< s.len: ... s[i] ...`). The test lanes do not pass
+    `-d:nimNoLentIterators`, whatever `src/Tuprules.tup` does for the real build.
+  * **AND THE CLOSURES IN THAT LOOP SHARE ONE ENVIRONMENT.** Measured
+    2026-09-24 at `a9b3aaf4d` on the timeline's marks. Every dynamic attribute
+    in the loop body becomes a `createRenderEffect` closing over the loop index
+    AND over the element the DSL `let`-bound for that iteration — and Nim gives
+    the whole enclosing proc one closure environment, not one per iteration. At
+    render that is invisible, because each effect runs synchronously inside its
+    own iteration. On a later RE-RUN it is not: every effect now sees the LAST
+    index and the LAST element, so they all write the last mark's value to the
+    last mark's node and the earlier nodes keep their render-time values.
+    Rendering three marks over a `0..100` extent and then widening it to
+    `0..1000` left `left` at `10.0%` / `49.0%` on the first two and moved only
+    the third, to `5.0%`.
+    - **It does not reach the product**, and the reason is worth knowing rather
+      than relying on: `mountIsoNimTimeline` re-renders the whole panel inside
+      a `createEffect` that reads `markers` and `tickLabels`, and `tickLabels`
+      is derived from `bounds` — so any change that could move a mark also
+      rebuilds the panel it is in. A direct caller of `renderTimelinePanel`
+      (i.e. every mock-renderer view test) has no such effect and DOES see it.
+    - So: **after a signal change, assert against a FRESH render, never against
+      a node rendered before the change** — which is the same rule the one-shot
+      `for` already forces, for a second reason.
+    - The pattern is repo-wide, not the timeline's: `isonim_calltrace_view`,
+      `isonim_event_log_view`, `isonim_search_results_view`, `isonim_vcs_view`
+      and `debug_control_marks` all put dynamic style attributes inside a `for`
+      in a `ui:` block. A real per-iteration environment needs the body hoisted
+      into its own proc/template called once per item; nothing does that today.
+- Mutation-harness control digests (`*-mutation-control.sha256`) go stale
+  whenever ANY listed subject changes — including justfile, codetracer.yml,
+  ci/lib/test-lane-files.sh (PLAT-17/33/34) and sibling files like
+  ../codetracer-specs/Architecture/Editor-ViewModel.md (PLAT-33). A quick
+  staleness sweep over every control file: parse `hash  path` lines and
+  sha256 each path relative to the repo root (or `git show <rev>:<path>`).
+- `ci/test/shell-gate-coverage.sh` counts a gate as covered only if a
+  WORKFLOW reaches it (workflow -> just recipe a lane calls -> script); a
+  recipe alone is not enough. Window-capture gates (sway/grim/wtype + the
+  isonim-gpui shim) are recorded BLOCKED in
+  `shell-gate-coverage.known-dark.txt`, whose RECORDED-DARK-CEILING must equal
+  the entry count exactly.
+- `frontend-reachability.sh` output: diff two runs by parsing the
+  `  <module>.nim  (n)` headers and `  <line>  <kind>  <name>` rows per bucket
+  ([A] tested-only, [B] nothing). Deleting a dead [B] routine can cascade:
+  its callees may drop from C to A/B, so re-run after each batch.
+- A dev-shell environment captured earlier (`declare -px` dump) goes stale
+  when `flake.lock` moves a sibling pin. 2026-09-24: the captured shell's
+  `nargo` was built against a codetracer-trace-format-nim that wrote
+  `meta.dat` v3, which the current reader refuses ("re-record the trace"), so
+  every Noir `ct record` in `vm-gui-headless` failed. Re-capture with
+  `nix develop .#devShells.x86_64-linux.default --command bash -c 'declare -px'`
+  before trusting a red recorder lane.
+- The Python and Ruby recorders statically link the SIBLING
+  codetracer-trace-format-nim through `codetracer_trace_writer_nim`'s build.rs;
+  after that sibling moves, an older `.so` fails to import with
+  `undefined symbol: trace_writer_register_drop_variables`. Python: `cargo build
+  --release --lib` in codetracer-python-recorder/codetracer-python-recorder and
+  copy `target/release/libcodetracer_python_recorder.so` over the package's
+  `codetracer_python_recorder.cpython-312-*.so` (the venv is an editable
+  install; maturin is not on the dev shell's PATH). Ruby: `cargo build
+  --release` inside the ruby recorder's own `nix develop` (needs libclang),
+  then copy `libcodetracer_ruby_recorder.so` to `codetracer_ruby_recorder.so`.
+- Lane mirrors in `ci/lib/test-lane-files.sh` are not always the CI path:
+  `frontend-js` (the recipe runs node with `globalThis.window = globalThis`
+  and compiles `dap_refusal_surfaces_test` without `-d:ctInExtension`),
+  `m16-release-gate` (`ct_test.nim` is only COMPILED by the script, the lane
+  runs it and gets a usage error), `bpf` (needs libbpf link flags, a built
+  `monitor.bpf.o` and caps) and `book-isonim` (the book's own Justfile adds
+  the `../isonim-docs` paths). A red there is not a red in CI; check the
+  recipe before "fixing" the lane.
+- Gitignored inputs some suites need in a fresh worktree:
+  `src/tests/visual/captures/electron/*.png` (`just plat35-capture-electron`,
+  which also rewrites the committed `answers/*.electron.json` provenance —
+  revert those) and `src/tests/visual/captures/gpui/*.png` (PLAT-37's windowed
+  capture; copy from a checkout that has them).
+- PLAT-37's capture (`ci/test/plat37-window-frame.sh`) copies the three
+  shims from `../isonim-gpui/rust/target/plat37/` over the LIVE
+  `rust/target/debug/libgpui_nim_shim.so` for the duration of the run. Those
+  copies go stale when the binary starts importing a new `gpui_*` symbol
+  (2026-09-25: `gpui_frame_stats_reset`; the 2026-09-22 shims had 63/86
+  symbols) and every run then dies at load with `could not import:` and
+  reads as "the window never painted". Rebuild with
+  `cd ../isonim-gpui && nix develop --command just plat37-shims`. Never run
+  the capture concurrently with `gpui-shell` or any GPUI suite: they dlopen
+  the same swapped path.
+- The headless-sway + GPUI window capture DOES run on the self-hosted
+  linux-x64 fleet: isonim-gpui's CI job "GUI tests (headless sway)" built the
+  `gpui-backend` shim and captured a painted window on gpu-server-002
+  (run 35834753536, 2026-09-23). "Unmeasured runner capability" is not a
+  valid reason to record a window-capture gate dark.

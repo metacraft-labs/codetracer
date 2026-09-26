@@ -100,8 +100,6 @@ const
   LayoutDirEnvVar* = NativeStateDirEnvVar
     ## Overrides the whole state root. See the module header.
 
-  StateHomeEnvVar* = NativeStateHomeEnvVar
-
   LayoutDocumentTempSuffix* = ".new"
 
 type

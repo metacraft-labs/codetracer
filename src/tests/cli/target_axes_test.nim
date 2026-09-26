@@ -357,6 +357,71 @@ suite "the kind set obeys K1..K4":
     # …and an unambiguous resolution has no diagnostic to print.
     check k.resolveKind([KindCargoProject]).ambiguityDiagnostic("p") == ""
 
+  test "K2 at the consumer: known kinds that dispatch ALIKE proceed, and the rule is the local assessment's (LRS-6)":
+    # `understand` used to refuse ANY two known kinds.  But `cargo-project`
+    # beside `wasm-cargo-project` is one toolchain and one ISA -- this file
+    # asserts both further down -- and `record_assessment` proceeds on the
+    # same set when it builds it locally.  The rule is now one rule:
+    # `understand` refuses exactly when `toolchainAmbiguity` or
+    # `targetIsaAmbiguity` would make the local assessment refuse.
+    let wasmCrate = TargetKind(
+      specific: @[KindCargoProject, KindWasmCargoProject],
+      family: tfProjectDirectory)
+    let verdict = wasmCrate.understand(UnderstoodSpecificKinds, "p/1")
+    check verdict.status == krCompatible
+    check verdict.ok
+    check verdict.diagnostic == ""
+    check verdict.candidates == @[KindCargoProject, KindWasmCargoProject]
+    check verdict.token == ""
+    # `resolveKind` itself still does not break the tie: the protocol layer
+    # reports both, and it is the consumer's verdict that resolves them.
+    check wasmCrate.resolveKind(UnderstoodSpecificKinds).status == krAmbiguous
+    # Two toolchains: refused, naming both.
+    let twoToolchains = TargetKind(
+      specific: @[KindCargoProject, KindNoirProject],
+      family: tfProjectDirectory)
+    let refused = twoToolchains.understand(UnderstoodSpecificKinds, "p/1")
+    check refused.status == krAmbiguous
+    check(not refused.ok)
+    check KindCargoProject in refused.diagnostic
+    check KindNoirProject in refused.diagnostic
+    # One toolchain but two ISAs: refused too.  `wasm-module` names no
+    # toolchain and `nim-source` names `tcNimC`, so the toolchain test alone
+    # would pass this pair; the ISAs (`tiWasm`, `tiNative`) are what differ.
+    let twoIsas = TargetKind(
+      specific: @[KindNimSource, KindWasmModule], family: tfSingleFile)
+    check toolchainAmbiguity(twoIsas).len == 0
+    check targetIsaAmbiguity(twoIsas).len == 2
+    let isaVerdict = twoIsas.understand(UnderstoodSpecificKinds, "p/1")
+    check isaVerdict.status == krAmbiguous
+    check(not isaVerdict.ok)
+    # And the exhaustive parity: for EVERY pair of kinds this build
+    # understands, the wire verdict proceeds exactly when the local
+    # assessment's two clash tests are both empty.
+    var pairs, compatible = 0
+    for i in 0 ..< UnderstoodSpecificKinds.len:
+      for j in i + 1 ..< UnderstoodSpecificKinds.len:
+        inc pairs
+        let k = TargetKind(
+          specific: @[UnderstoodSpecificKinds[i], UnderstoodSpecificKinds[j]],
+          family: tfProjectDirectory)
+        let localProceeds = toolchainAmbiguity(k).len == 0 and
+                            targetIsaAmbiguity(k).len == 0
+        let v = k.understand(UnderstoodSpecificKinds, "p/1")
+        checkpoint(UnderstoodSpecificKinds[i] & " + " &
+                   UnderstoodSpecificKinds[j])
+        check v.ok == localProceeds
+        check v.status == (if localProceeds: krCompatible else: krAmbiguous)
+        if localProceeds: inc compatible
+    check pairs == UnderstoodSpecificKinds.len *
+                   (UnderstoodSpecificKinds.len - 1) div 2
+    # Anti-vacuity in both directions: the loop saw compatible pairs (the
+    # wasm crate at least) and refused ones.
+    check compatible >= 1
+    check compatible < pairs
+    echo "    [pairs] ", pairs, " understood-kind pairs, ", compatible,
+      " dispatch alike"
+
   test "K2: the answer does not depend on the producer's spelling order":
     let ab = TargetKind(specific: @[KindCargoProject, "cmake-project"],
                         family: tfProjectDirectory)

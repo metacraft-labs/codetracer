@@ -183,7 +183,6 @@ type
       ## ruled, same fill").
 
 const
-  DiffLineBaseClass* = "ct-diff-line"
   DiffHunkHeaderClass* = "ct-diff-line ct-diff-line-hunk-header"
   DiffHunkHeaderMarginClass* = "ct-diff-line-hunk-header"
     ## The same paint, applied to the divider's MARGIN so the band is full

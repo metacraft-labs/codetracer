@@ -557,8 +557,72 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # owns. It is the same shape PLAT-33 recorded for `acceptConcurrent` and it is
 # recorded the same way. **NOT ALLOW-LISTED**: an allow-list entry claims a
 # symbol is permanently unreachable by name, and this is waiting for a caller.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1274 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1274 bash ci/test/frontend-reachability.sh
+# ----------------------------------------------------------------------------
+# 1274 -> 1295 ON 2026-09-23 (PLAT-35 .. PLAT-44, TAKEN AFTER THE FACT). Those
+# milestones landed without moving this number, so the step was RED on `dev`
+# from their first commit and nobody's evidence table could have quoted it as
+# passing. This entry is the account they owed, and a clean-up besides.
+# ----------------------------------------------------------------------------
+# THE ACCOUNT IS A DIFF OF TWO RUNS OF THIS SCRIPT — a `git worktree` at
+# 6852a7791 (where 1274 was set) against this tree — per §36b. GROSS +38 and
+# -8 on `dev`, and 9 of the +38 removed here before the ceiling was moved.
+#
+#   -8, reached since 1274: `layout_model.restoreLayout`,
+#       `decoration.decorationSet`, `row_projection.decorationsForRow`,
+#       `RowProjection`, `headless_session.continueForward`,
+#       `requestAndLoadCalltrace` (PLAT-40's own headline defect, fixed),
+#       `pane_views.PaneNativePanes` and `PaneVocabularyPanes`.
+#
+#   DELETED OR UN-EXPORTED, 9, RATHER THAN RATCHETED — each measured as reached
+#   by NOTHING, PLAT-31's rule applied:
+#     * deleted: `renderer.langs` (a wrapper over `lang.langPickerOptions` with
+#       no caller), `layout_store.StateHomeEnvVar` and
+#       `tui_session.MaxEventsForBounds` (aliases nothing read; the latter's
+#       CTUI-8 note moved onto `native_host.RecordingEventWindow`, the constant
+#       it aliased), `headless_session.breakpointLinesIn` and
+#       `gpui_layout_answers.answerSetToJson` (the GPUI arm computes its
+#       answers live and never serialises them);
+#     * un-exported: `keymap_selection.KeymapSourceCommand` (a default
+#       argument, read in its own module) and `vim_import`'s four published
+#       counts, which PLAT-36's harness reads by regex (`\*?` already admits
+#       the unexported spelling) and no module imports.
+#     Deleting `langs` moved `langPickerOptions` into the tested-only bucket:
+#     its one product caller was the wrapper nothing called.
+#
+#   +29 CARRIED, NAMED RATHER THAN ALLOW-LISTED:
+#     * tested, no product caller (25): `chrome.contrastRatio`,
+#       `MinimumContrastRatio` (PLAT-37); `layout_store.LayoutDirEnvVar`;
+#       `selection_ops.initOpCtx`, `wrap.initDisplayCtx` (PLAT-34's contexts);
+#       ten `vim_import` report accessors and `MapArgumentDecisions`
+#       (PLAT-36/43's import report, which no front-end displays yet);
+#       `flow_vm.FlowWireNotTakenOrdinal` (PLAT-42); `gpui_binding`'s
+#       `DisabledFactName`, `focusNode`, `focusedNodeId` (PLAT-44);
+#       `gpui_layout_answers`' `gpuiLayoutAnswers`, `answerSetFromJson`,
+#       `unknownQuestionKeys` (PLAT-35's comparison, run by its suite);
+#       `pane_views.PaneAccountedFor` (PLAT-41); `lang.langPickerOptions`.
+#     * reached by no other module, but not dead (4): `chrome.ChromeRole` and
+#       `native_host.PaneLoad` are the types of exported routines' parameters
+#       and results, and `vim_import.ArgumentDecision` is
+#       `MapArgumentDecisions`' element type; `registerPointListComponent` is
+#       an `{.exportc.}` entry point in the same pattern as
+#       `registerCalltraceComponent`, called from JavaScript.
+#
+# It is a CEILING, so it falls when the import report gets a view and PLAT-44's
+# focus arm gets a front-end caller — fourteen of the twenty-nine are those two.
+#
+# 1295 -> 1296 ON 2026-09-25, REBASING THE ABOVE ONTO dev: gross +5 and -4 from
+# commits that landed on 2026-09-24 in the meantime, measured the same way.
+#   -4, reached now: `document_version.initVersionedDocument`, `lengthAt`,
+#       `reconcile.producerChange`, `producerResult` (PLAT-29's producers,
+#       wired, as its entry predicted).
+#   +5, none of them dead: `file_conflicts.RecordLaunchPlan` (the result type
+#       of the exported `planRecordLaunch`); `traces.onNewFile` (an IPC
+#       handler); `welcome_screen_vm.unreachableStartOptions` and
+#       `reasonlessDisabledStartOptions` (asserted by
+#       `welcome_screen_vm_test.nim`); `flow_vm.FlowWireTakenOrdinal` (the
+#       sibling of the `FlowWireNotTakenOrdinal` carried above).
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1296 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1296 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -654,6 +718,18 @@ lint_step "Value presentation boundary: one pipeline, pure, with no surface bypa
 # same reason: the answer arrives in the lint stage rather than after a build.
 lint_step "TUI layer split: the decision half of each decide/perform pair does no I/O" \
 	bash ci/test/tui-layer-split-boundary.sh
+
+# PLAT-39's LAW-R4 and PLAT-40's production-caller gate. Both are source scans
+# with their own positive and negative controls, need no build and no
+# toolchain beyond coreutils, grep and sed, and were wired into no lane — which
+# `shell-gate-coverage.sh` reported by name. They sit with the other boundary
+# scans for the reason those do: the answer arrives in the lint stage rather
+# than after a build.
+lint_step "PLAT-39 oracle independence: the vision producer imports nothing from the application" \
+	bash ci/test/plat39-oracle-independence.sh
+
+lint_step "PLAT-40 production callers: every pane producer has a caller a user can reach" \
+	bash ci/test/plat40-production-callers.sh
 
 # `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
 # allow-list is hand-written but no longer hand-CHECKED: the guard derives the

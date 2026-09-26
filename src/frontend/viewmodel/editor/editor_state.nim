@@ -216,6 +216,15 @@ type
     breakpoints*: seq[int]
     tracepoints*: seq[int]
     flowOverlay*: bool
+    journal*: seq[ChangeSet]
+      ## PLAT-29. Every change set that moved `doc`, in order, since whoever
+      ## owns this state last DRAINED it — appended by `mapPositionTables`,
+      ## which all three routes a document moves by call (a local edit, its
+      ## undo or redo, a remote change). It is how a front-end's
+      ## `VersionedDocument` learns what happened without a second route
+      ## around the model: `editing_core.EditingDocument` drains it after every
+      ## key, and a state nobody drains simply accumulates the log of its own
+      ## history, which is a value like any other field.
     trackedLines*: seq[int]
       ## PLAT-28 §8.2. Lines a FRONT-END asks the model to carry through the
       ## edits that follow — the terminal's project breakpoints, which belong
@@ -290,7 +299,7 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
     recording: "", macros: initTable[string, seq[string]](), recorded: @[],
     lastChange: @[], marks: initTable[string, int](), jumps: @[], jumpIndex: 0,
     folded: @[], breakpoints: @[], tracepoints: @[], flowOverlay: false,
-    trackedLines: @[],
+    trackedLines: @[], journal: @[],
     search: SearchState(pattern: "", direction: sdForward),
     comments: comments, indentUnit: indentUnit, parse: parse,
     filters: @[],
@@ -328,7 +337,7 @@ func `==`*(a, b: EditorState): bool =
     a.marks == b.marks and a.jumps == b.jumps and a.jumpIndex == b.jumpIndex and
     a.folded == b.folded and a.breakpoints == b.breakpoints and
     a.tracepoints == b.tracepoints and a.flowOverlay == b.flowOverlay and
-    a.trackedLines == b.trackedLines and
+    a.trackedLines == b.trackedLines and a.journal == b.journal and
     a.search == b.search and a.comments == b.comments and
     a.indentUnit == b.indentUnit and a.parse == b.parse and
     a.filters == b.filters and
@@ -454,6 +463,7 @@ proc mapPositionTables*(st: var EditorState; before: EditorState;
       mapLinesThrough(before.doc, cs, before.tracepoints))
   if before.trackedLines.len > 0:
     st.trackedLines = mapLinesThrough(before.doc, cs, before.trackedLines)
+  st.journal.add cs
 
 proc pushSelectionHistory*(st: var EditorState; nowMs: int64 = 0) =
   ## Record the selection the editor is ABOUT to leave. Called before the new

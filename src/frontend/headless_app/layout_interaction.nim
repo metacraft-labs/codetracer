@@ -458,13 +458,13 @@ proc commandFor*(layout: Layout; source: PaneKind;
     some(cmdRestoreDocked(source, some(target.stackAnchor)))
   of dtSplitBefore, dtSplitAfter:
     let side = if target.kind == dtSplitBefore: ssBefore else: ssAfter
-    if placed:
-      return some(cmdSplitMove(target.splitTarget, source, target.axis, side))
-    # A docked pane cannot be split into the tree in one command: `lcSplit`
-    # refuses a pane that is in `docked` (`lpPaneBothPlacedAndDocked`), and
-    # restoring it first would make this layer sequence two commands — which
-    # §4.3 does not allow. Restore it, then drag it.
-    none(LayoutCommand)
+    # PLACED OR DOCKED, ONE COMMAND EITHER WAY. `lcSplit`'s `splitMovesPane`
+    # takes its pane from wherever the layout holds it — the tree or an
+    # auto-hide strip — since PLAT-4's closing pass (2026-09-26). Until then a
+    # docked source had no spelling here: `lcSplit` refused it
+    # (`lpPaneBothPlacedAndDocked`) and restore-then-split would have made
+    # this layer sequence two commands, which §4.3 does not allow.
+    some(cmdSplitMove(target.splitTarget, source, target.axis, side))
   of dtDockEdge:
     some(cmdDock(source, target.edge))
 

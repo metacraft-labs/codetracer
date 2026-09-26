@@ -366,3 +366,18 @@ suite "AA-3 selecting an evidence call asks for its dataset":
       check not vm.openEvidence("s:1")
       check requests.len == 0
       dispose()
+
+suite "Agent Activity pasted image rendering":
+  test "a completed attachment exposes its source through the renderer":
+    createRoot proc(dispose: proc()) =
+      let vm = createAgentActivityVM(makeStore())
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel(r, vm, componentId = 103)
+      let image = "data:image/png;base64,aGVsbG8="
+      vm.pastedImages.val = @[image]
+      let thumbnail = findByClass(panel, "agent-paste-img")
+      require thumbnail != nil
+      check thumbnail.attributes["src"] == image
+      vm.pastedImages.val = @[]
+      check findByClass(panel, "agent-paste-img") == nil
+      dispose()

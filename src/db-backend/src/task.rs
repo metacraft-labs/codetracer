@@ -1142,6 +1142,97 @@ impl FlowViewUpdate {
         }
         self.branches_taken[0][0].extents.extend(extents);
     }
+
+    /// Which cell of `branches_taken` a decision about a step on `loop_id`
+    /// belongs in, as `(loop index, iteration index)`.
+    ///
+    /// The same cell `add_branches` writes into, named so a decision the walk
+    /// can only RESOLVE on a later step is recorded against the pass that
+    /// evaluated the condition rather than against whichever pass the walk has
+    /// reached by then. The two are different whenever the declined conditional
+    /// is the last statement of a loop body: the next step is the loop header,
+    /// which has already opened the following iteration.
+    pub fn branch_cell(&self, loop_id: i64) -> (usize, usize) {
+        if self.branches_taken.is_empty() {
+            return (0, 0);
+        }
+        let max_len = (self.branches_taken.len() - 1) as i64;
+        let loop_index = min(loop_id, max_len).max(0) as usize;
+        (loop_index, self.branches_taken[loop_index].len().saturating_sub(1))
+    }
+
+    /// What `cell` currently records for `line`, if anything.
+    ///
+    /// The read counterpart of `set_branch_state`, and it exists so an INFERRED
+    /// verdict can be made to lose to an OBSERVED one rather than overwrite it —
+    /// see `resolve_pending_branches` in `flow_preloader.rs`. Out-of-range
+    /// indices answer `None` for the same reason `set_branch_state` declines to
+    /// write into them.
+    pub fn branch_state_at(&self, cell: (usize, usize), line: usize) -> Option<BranchState> {
+        let (loop_index, iteration) = cell;
+        if loop_index >= self.branches_taken.len() || iteration >= self.branches_taken[loop_index].len() {
+            return None;
+        }
+        self.branches_taken[loop_index][iteration].table.get(&line).copied()
+    }
+
+    /// Record `state` for `line` in the cell `branch_cell` named.
+    ///
+    /// Silently declines to write into a cell that does not exist. There is no
+    /// slot to fabricate: `branches_taken`'s shape is grown by the loop walk,
+    /// and an index outside it names an iteration that never happened.
+    pub fn set_branch_state(&mut self, cell: (usize, usize), line: usize, state: BranchState) {
+        let (loop_index, iteration) = cell;
+        if loop_index >= self.branches_taken.len() || iteration >= self.branches_taken[loop_index].len() {
+            return;
+        }
+        self.branches_taken[loop_index][iteration].table.insert(line, state);
+    }
+
+    /// The header lines `final_branch_load`'s sweep must NOT touch.
+    ///
+    /// The sweep's contract is "stamp `NotTaken` on every branch the walk never
+    /// reached", and until this existed its check list was `branches_taken[0][0]`
+    /// alone — the table holding only the conditionals **outside every loop**.
+    /// A conditional inside a loop records its state in
+    /// `branches_taken[loop][iteration]`, so it was invisible to the check list,
+    /// and `Branch::status` is no help either: `load_branch_for_position` marks
+    /// `Taken` on a CLONE and never writes back, so the sweep's
+    /// `status == Unknown` guard is true for every branch in the file.
+    ///
+    /// The result was that an arm the run entered on EVERY pass of a loop was
+    /// stamped `NotTaken` in the outer table. Measured on a two-pass Rust loop
+    /// whose `else` arm ran both times (`tests/flow_branch_state_test.rs`):
+    /// `branches_taken[0][0] = [(5, NotTaken), (7, NotTaken)]` with line 7 the
+    /// `else` header. That is both halves of issue #758 from one source — the
+    /// arm the run took painted `flow-not-taken`, and its interior dimmed,
+    /// because `flow_line_rule.insideUntakenBranch` reads exactly this table.
+    ///
+    /// WHAT IS EXCLUDED, AND WHY IT IS `Taken` AND NOT "DECIDED". A header the
+    /// walk proved `Taken` anywhere ran, so no sweep may claim otherwise. A
+    /// header the walk only ever saw DECLINED is still swept, because
+    /// "declined on every pass the window covers" is what the file-wide claim
+    /// is for — dropping it would take the dim off an arm that genuinely never
+    /// ran. Keys already present in the outer table are excluded too, exactly
+    /// as before: the sweep never overwrote a decision it found there.
+    ///
+    /// NOT FIXED HERE: the sweep still runs identically after a TRUNCATED walk,
+    /// so a conditional past a step-budget or stall-guard cut is still reported
+    /// as declined rather than as unreached. That is the owner decision
+    /// `Omniscience-Flow.md` § *Known defect* reserves, and this is not it.
+    pub fn observed_branch_lines(&self) -> HashMap<usize, BranchState> {
+        let mut observed: HashMap<usize, BranchState> = HashMap::default();
+        for (loop_index, iterations) in self.branches_taken.iter().enumerate() {
+            for (iteration, taken) in iterations.iter().enumerate() {
+                for (line, state) in &taken.table {
+                    if *state == BranchState::Taken || (loop_index == 0 && iteration == 0) {
+                        observed.insert(*line, *state);
+                    }
+                }
+            }
+        }
+        observed
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

@@ -508,6 +508,16 @@ mkdir -p src/public/dist
 "${BASH:-bash}" "$SCRIPT_DIR/require-tup-globs.sh"
 
 cd src
+# A fresh checkout must not inherit a Tup database from a parent directory.
+# --force permits a nested project; it is used only when our own database is
+# absent, and leaves the ancestor database untouched.
+if [ ! -d .tup ]; then
+	"${TUP:-tup}" init --force
+fi
+if [ ! -f .tup/db ]; then
+	echo "build-once: src/.tup/db is missing; refusing to build in an ancestor Tup project" >&2
+	exit 1
+fi
 "${TUP:-tup}" "$ct_tup_variant"
 cd ..
 

@@ -3,7 +3,7 @@
 # Build cross-repo dependencies that CodeTracer's GUI/E2E tests need.
 #
 # For each sibling repo that exists in the workspace, this script invokes the
-# repo's own dev-shell-built `just` target (via `direnv exec`) to produce the
+# repo's own dev-shell-built `just` target (via `repro exec`) to produce the
 # binary that `scripts/detect-siblings.sh` looks for. Without this step a
 # significant slice of the GUI test suite silently skips (blockchain language
 # program_specific_tests, ct-mcr-based browser-mcr-replay, noir-space-ship,
@@ -18,9 +18,12 @@
 # Environment:
 #   BUILD_SIBLINGS_VERBOSE=1  — stream child build output to stderr instead of
 #                               capturing it into a per-repo log file.
+#   BUILD_SIBLINGS_FAIL_TAIL_LINES=N — how many trailing lines of each FAILED
+#                               repo's log the summary prints (default 60;
+#                               0 prints none).
 #
 # Conventions:
-#   - All builds are run via `direnv exec <repo> <cmd>` so each repo's flake
+#   - All builds are run via `repro exec <repo> -- <cmd>` so each repo's flake
 #     pins the toolchain. This matches what end users do interactively.
 #   - Each entry knows the output artifact path and skips if it's already
 #     present (`--force` overrides). Builds are idempotent: re-running is cheap.
@@ -68,62 +71,60 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-# direnv must be on PATH so each sibling's flake provides its own toolchain.
-if ! command -v direnv >/dev/null 2>&1; then
-	echo "build-siblings.sh: ERROR: direnv not found on PATH." >&2
-	echo "  Run this script from inside the codetracer dev shell (just/justfile, direnv exec, etc.)." >&2
+# repro must be on PATH so each sibling's flake provides its own toolchain.
+if ! command -v repro >/dev/null 2>&1; then
+	echo "build-siblings.sh: ERROR: repro not found on PATH." >&2
+	echo "  Run this script from inside the codetracer dev shell (just/justfile, repro exec, etc.)." >&2
 	exit 1
 fi
 
-# Resolve nim/nimble from the codetracer dev shell so blockchain recorders
-# can transitively build `codetracer_trace_writer_nim` (a Rust crate whose
-# build.rs shells out to nimble).  The blockchain recorder flakes don't
-# include Nim, so without this injection their builds fail with
-# `failed to run nimble`.  Pinning nim+nimble paths via the codetracer flake
-# also keeps the toolchain consistent across recorders.
-# shellcheck disable=SC2016
-# Single quotes are intentional: $(command -v ...) must be expanded by the
-# child shell that direnv spawns, not by this parent shell.
-NIM_TOOLCHAIN_BIN="$(
-	direnv exec "$CT_ROOT" bash -c 'dirname "$(command -v nim)"' 2>/dev/null
-)"
-# shellcheck disable=SC2016
-NIMBLE_TOOLCHAIN_BIN="$(
-	direnv exec "$CT_ROOT" bash -c 'dirname "$(command -v nimble)"' 2>/dev/null
-)"
-if [ -z "$NIM_TOOLCHAIN_BIN" ] || [ -z "$NIMBLE_TOOLCHAIN_BIN" ]; then
-	echo "build-siblings.sh: WARNING: could not resolve nim/nimble from codetracer dev shell." >&2
-	echo "  Blockchain recorder builds that depend on codetracer_trace_writer_nim will fail." >&2
-fi
-EXTRA_NIM_PATH=""
-if [ -n "$NIM_TOOLCHAIN_BIN" ]; then
-	EXTRA_NIM_PATH="$NIM_TOOLCHAIN_BIN"
-fi
-if [ -n "$NIMBLE_TOOLCHAIN_BIN" ] && [ "$NIMBLE_TOOLCHAIN_BIN" != "$NIM_TOOLCHAIN_BIN" ]; then
-	EXTRA_NIM_PATH="${EXTRA_NIM_PATH:+$EXTRA_NIM_PATH:}$NIMBLE_TOOLCHAIN_BIN"
-fi
-export EXTRA_NIM_PATH
+LOG_DIR="${CT_ROOT}/.tools/build-siblings-logs"
+mkdir -p "$LOG_DIR"
 
-# codetracer-trace-format-nim needs libzstd headers and library paths while
-# building its Nim FFI library. Resolve them from the codetracer dev shell,
-# which already pins zstd for the main workspace.
-ZSTD_CFLAGS="$(
-	direnv exec "$CT_ROOT" bash -c 'pkg-config --cflags libzstd 2>/dev/null || pkg-config --cflags zstd 2>/dev/null' 2>/dev/null
-)"
-ZSTD_LIBS="$(
-	direnv exec "$CT_ROOT" bash -c 'pkg-config --libs libzstd 2>/dev/null || pkg-config --libs zstd 2>/dev/null' 2>/dev/null
-)"
-if [ -z "$ZSTD_CFLAGS" ] || [ -z "$ZSTD_LIBS" ]; then
-	echo "build-siblings.sh: WARNING: could not resolve zstd from codetracer dev shell." >&2
-	echo "  codetracer-trace-format-nim may fail to compile zstd bindings." >&2
+# Resolve the pinned compiler and zstd flags in one environment entry. Keep
+# errors per invocation: suppressing them hides activation failures, and four
+# independent entries repeat expensive provisioning before any build starts.
+EXTRA_NIM_PATH=""
+ZSTD_CFLAGS=""
+ZSTD_LIBS=""
+if [ "$CHECK_ONLY" -eq 0 ]; then
+	toolchain_output="$(mktemp "$LOG_DIR/toolchain.XXXXXX")" || exit 1
+	toolchain_log="${toolchain_output}.log"
+	# NUL-separated values preserve spaces and shell metacharacters as data.
+	# shellcheck disable=SC2016
+	if ! repro exec "$CT_ROOT" -- bash -e -c '
+		nim_path=$(command -v nim)
+		nimble_path=$(command -v nimble)
+		zstd_cflags=$(pkg-config --cflags libzstd 2>/dev/null || pkg-config --cflags zstd)
+		zstd_libs=$(pkg-config --libs libzstd 2>/dev/null || pkg-config --libs zstd)
+		printf "%s\0" "$(dirname "$nim_path")" "$(dirname "$nimble_path")" "$zstd_cflags" "$zstd_libs"
+	' >"$toolchain_output" 2>"$toolchain_log"; then
+		echo "build-siblings.sh: ERROR: required toolchain lookup failed; see $toolchain_log" >&2
+		rm -f "$toolchain_output"
+		exit 1
+	fi
+	if ! {
+		IFS= read -r -d '' NIM_TOOLCHAIN_BIN &&
+			IFS= read -r -d '' NIMBLE_TOOLCHAIN_BIN &&
+			IFS= read -r -d '' ZSTD_CFLAGS &&
+			IFS= read -r -d '' ZSTD_LIBS
+	} <"$toolchain_output"; then
+		echo "build-siblings.sh: ERROR: incomplete toolchain lookup; see $toolchain_log" >&2
+		rm -f "$toolchain_output"
+		exit 1
+	fi
+	rm -f "$toolchain_output"
+	EXTRA_NIM_PATH="$NIM_TOOLCHAIN_BIN"
+	if [ "$NIMBLE_TOOLCHAIN_BIN" != "$NIM_TOOLCHAIN_BIN" ]; then
+		EXTRA_NIM_PATH="$EXTRA_NIM_PATH:$NIMBLE_TOOLCHAIN_BIN"
+	fi
 fi
+export EXTRA_NIM_PATH ZSTD_CFLAGS ZSTD_LIBS
 
 # Per-repo results.
 declare -A RESULT_STATE  # repo -> PASS|SKIP|FAIL|MISSING
 declare -A RESULT_DETAIL # repo -> human-readable detail
-
-LOG_DIR="${CT_ROOT}/.tools/build-siblings-logs"
-mkdir -p "$LOG_DIR"
+declare -A RESULT_LOG    # repo -> captured build log (only when not VERBOSE)
 
 # ---------------------------------------------------------------------------
 # Helper: should we run this repo?
@@ -143,12 +144,12 @@ should_skip() {
 # Helper: run a build step for one repo.
 #   $1 — repo directory name (under WS_ROOT)
 #   $2 — artifact path (relative to repo) used to short-circuit if present
-#   $3 — build command (executed under `direnv exec <repo>`)
+#   $3 — build command (executed under `repro exec <repo>`)
 #   $4 — optional logical key (defaults to $1).  Use this when a single repo
 #        produces multiple artifacts (e.g. flow recorder = Rust crate + Go
 #        helper) so each step gets its own result row.
-#   $5 — optional direnv repo (defaults to $1).  Use this when a sibling has no
-#        usable direnv shell but can be built from another pinned dev shell.
+#   $5 — optional repro repo (defaults to $1).  Use this when a sibling has no
+#        usable repro shell but can be built from another pinned dev shell.
 # ---------------------------------------------------------------------------
 build_sibling() {
 	local repo="$1"
@@ -169,7 +170,7 @@ build_sibling() {
 	local env_dir="$WS_ROOT/$env_repo"
 	if [ ! -d "$env_dir" ]; then
 		RESULT_STATE[$key]="MISSING"
-		RESULT_DETAIL[$key]="direnv repo not checked out at $env_dir"
+		RESULT_DETAIL[$key]="repro repo not checked out at $env_dir"
 		return 0
 	fi
 
@@ -195,25 +196,37 @@ build_sibling() {
 	# sibling dev shells that don't bundle Nim (every blockchain recorder).
 	local wrapped_cmd="$cmd"
 	if [ -n "${EXTRA_NIM_PATH:-}" ]; then
-		wrapped_cmd="export PATH=\"$EXTRA_NIM_PATH:\$PATH\"; $cmd"
+		# shellcheck disable=SC2016
+		wrapped_cmd='export PATH="$EXTRA_NIM_PATH:$PATH"; '"$cmd"
 	fi
 
 	local rc=0
+	# Where this build's output can be read.  In verbose mode no log is
+	# written, so naming $log would point at whatever an EARLIER run left
+	# there -- and ci/lib/sibling-build-failure.sh tails the file the FAIL row
+	# names.
+	local see="see $log"
 	if [ "${BUILD_SIBLINGS_VERBOSE:-0}" = "1" ]; then
-		(cd "$repo_dir" && direnv exec "$env_dir" bash -c "$wrapped_cmd") || rc=$?
+		see="output streamed above"
+		# Expand positional arguments in the activated child shell.
+		# shellcheck disable=SC2016
+		repro exec "$env_dir" -- bash -c 'cd "$1" && eval "$2"' build-sibling "$repo_dir" "$wrapped_cmd" || rc=$?
 	else
-		(cd "$repo_dir" && direnv exec "$env_dir" bash -c "$wrapped_cmd") >"$log" 2>&1 || rc=$?
+		# Expand positional arguments in the activated child shell.
+		# shellcheck disable=SC2016
+		repro exec "$env_dir" -- bash -c 'cd "$1" && eval "$2"' build-sibling "$repo_dir" "$wrapped_cmd" >"$log" 2>&1 || rc=$?
+		RESULT_LOG[$key]="$log"
 	fi
 
 	if [ "$rc" -ne 0 ]; then
 		RESULT_STATE[$key]="FAIL"
-		RESULT_DETAIL[$key]="build exited $rc — see $log"
+		RESULT_DETAIL[$key]="build exited $rc — $see"
 		return 0
 	fi
 
 	if [ ! -e "$artifact_path" ]; then
 		RESULT_STATE[$key]="FAIL"
-		RESULT_DETAIL[$key]="build succeeded but $artifact still missing — see $log"
+		RESULT_DETAIL[$key]="build succeeded but $artifact still missing — $see"
 		return 0
 	fi
 
@@ -259,7 +272,8 @@ build_sibling \
 # Nim FFI shared lib (libcodetracer_trace_writer.so, used by wazero with CGO).
 trace_format_nim_cmd="nimble buildSharedLib"
 if [ -n "$ZSTD_CFLAGS" ] && [ -n "$ZSTD_LIBS" ]; then
-	trace_format_nim_cmd="export NIX_CFLAGS_COMPILE=\"\${NIX_CFLAGS_COMPILE:-} $ZSTD_CFLAGS\"; export NIX_LDFLAGS=\"\${NIX_LDFLAGS:-} $ZSTD_LIBS\"; nimble buildSharedLib"
+	# shellcheck disable=SC2016
+	trace_format_nim_cmd='export NIX_CFLAGS_COMPILE="${NIX_CFLAGS_COMPILE:-} $ZSTD_CFLAGS"; export NIX_LDFLAGS="${NIX_LDFLAGS:-} $ZSTD_LIBS"; nimble buildSharedLib'
 fi
 build_sibling \
 	codetracer-trace-format-nim \
@@ -279,7 +293,7 @@ build_sibling \
 	"nimble buildCtPrint" \
 	codetracer-trace-format-nim/ct-print
 
-# Native backend (ct-native-replay). Its own direnv/flake can reject freshly
+# Native backend (ct-native-replay). Its own repro/flake can reject freshly
 # initialized submodules in repo-managed checkouts, so build it the same way
 # the local justfile does: borrow codetracer's dev shell and compile in-place.
 if ! should_skip codetracer-native-backend; then
@@ -416,9 +430,9 @@ build_sibling \
 # the only thing that could happen.
 #
 # `just build` in that repo re-enters `nix develop` when cargo is absent, which
-# would nest a second dev shell inside the `direnv exec` one; `build-native` is
+# would nest a second dev shell inside the `repro exec` one; `build-native` is
 # the same recipe without that fallback (`cargo build --locked` plus the
-# rebar3 provider compile), and `direnv exec` has already supplied the
+# rebar3 provider compile), and `repro exec` has already supplied the
 # toolchain.  The binary lands in target/debug — the profile
 # scripts/detect-siblings.sh probes first.
 build_sibling \
@@ -488,6 +502,41 @@ done
 echo "  ---" >&2
 printf "  %d pass, %d already built, %d missing, %d failed\n" \
 	"$pass_count" "$skip_count" "$missing_count" "$fail_count" >&2
+
+# The tail of every FAILED repo's log, in the summary itself.
+#
+# The per-repo log lives under .tools/build-siblings-logs on whatever machine
+# ran this. On a CI runner that path is gone when the job ends and no step
+# uploads it, so a summary that only NAMES the log ("build exited 101 — see
+# …") hides the one line that says why: the launcher<->recorder ruby arm of
+# run 36013311965 failed with exactly that and nothing else in the Actions
+# log. A compiler or cargo failure almost always ends with its cause, so the
+# last lines are the useful ones. This is diagnostics only; the exit status
+# below is unchanged.
+fail_tail_lines="${BUILD_SIBLINGS_FAIL_TAIL_LINES:-60}"
+case "$fail_tail_lines" in
+'' | *[!0-9]*) fail_tail_lines=60 ;;
+esac
+if [ "$fail_count" -gt 0 ] && [ "$fail_tail_lines" -gt 0 ]; then
+	for repo in $(printf '%s\n' "${!RESULT_STATE[@]}" | sort); do
+		[ "${RESULT_STATE[$repo]}" = "FAIL" ] || continue
+		log="${RESULT_LOG[$repo]:-}"
+		echo "" >&2
+		if [ -z "$log" ]; then
+			# BUILD_SIBLINGS_VERBOSE=1: the output was streamed above and no log
+			# was written, so there is nothing (and nothing stale) to tail.
+			echo "  $repo: build output was streamed above (BUILD_SIBLINGS_VERBOSE=1)" >&2
+			continue
+		fi
+		if [ ! -s "$log" ]; then
+			echo "  $repo: the build log $log is empty or missing" >&2
+			continue
+		fi
+		echo "---- $repo: last $fail_tail_lines lines of $log ----" >&2
+		tail -n "$fail_tail_lines" "$log" | sed 's/^/  | /' >&2
+		echo "---- end of $repo log ----" >&2
+	done
+fi
 
 if [ "$fail_count" -gt 0 ]; then
 	exit 1

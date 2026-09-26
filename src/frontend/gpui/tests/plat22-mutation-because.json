@@ -7,7 +7,7 @@
   "E14": "Check failed: exactTextNodes(root, contract.statement) == 1",
   "E2": "Check failed: pointing == 1",
   "E3": "Check failed: valuesForLine(\"summary = 1\", vals).len == 0",
-  "E4": "Check failed: flowStateOf(loops, 0, 9) == efsUnknown",
+  "E4": "Check failed: flowStateOf(facts, 9) == efsUnknown",
   "E5": "Check failed: not renderEditor(r, parentForeign, sourcePaneView(GpuiMedium).root, foreign)",
   "E6": "Check failed: not s.mutable",
   "E7": "Check failed: renderedText(root, row.line) == EditorLoadingText",

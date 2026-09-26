@@ -133,8 +133,8 @@ suite "CTUI-0: the terminal renderer and the ViewModel graph in one process":
     # The layout model the desktop uses, in the terminal front-end's process.
     # CTUI-3 projects this same tree onto Yoga; asserting it is populated now
     # is what makes that a projection rather than a new model.
-    ck slot.layout != nil
-    ck slot.layout.validate().len == 0
+    ck slot.layout.tree != nil
+    ck slot.layout.validate({}).len == 0
     ck slot.visiblePanes().len > 0
 
     # And the two halves are live at the same time: re-render after opening a

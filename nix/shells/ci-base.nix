@@ -514,23 +514,42 @@ with pkgs;
     # of them to serve one lane is how an unrelated test starts resolving a
     # different `libGL`. `ci/test/plat37-window-frame.sh` prepends this for
     # the processes that need it, and nothing else does.
-    export CODETRACER_GPUI_RUNTIME_LIB_PATH="${
-      pkgs.lib.makeLibraryPath [
-        pkgs.libxkbcommon
-        pkgs.libGL
-        pkgs.libglvnd
-        pkgs.mesa
-        pkgs.vulkan-loader
-        pkgs.wayland
-        pkgs.fontconfig.lib
-        pkgs.freetype
-        pkgs.xorg.libX11
-        pkgs.xorg.libxcb
-        pkgs.xorg.libXcursor
-        pkgs.xorg.libXi
-        pkgs.xorg.libXrandr
-      ]
-    }"
+    # LINUX ONLY, and the guard is not cosmetic: every package in this list
+    # is a Linux graphics library. `pkgs.wayland`, `pkgs.mesa`,
+    # `pkgs.libglvnd`, `pkgs.vulkan-loader` and the `xorg.*` set all declare
+    # `meta.platforms` that exclude `aarch64-darwin`, and `makeLibraryPath`
+    # forces each one's `outPath`. Ungated, that made the **whole dev shell
+    # fail to evaluate on macOS** —
+    #
+    #   error: Package 'wayland-1.24.0' ... is not available on the requested
+    #     hostPlatform: hostPlatform.system = "aarch64-darwin"
+    #
+    # — which takes out every lane a macOS developer can run, not just the
+    # GPUI ones: `just test-vm-native`, `just test-vm-js` and `just
+    # build-once` all start with `nix develop`. The variable itself is
+    # consumed only by `ci/test/plat37-window-frame.sh` and
+    # `ci/test/plat38-keystroke.sh`, both of which drive a real Wayland
+    # compositor and so cannot run on Darwin at all; leaving it unset there
+    # loses nothing.
+    ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
+      export CODETRACER_GPUI_RUNTIME_LIB_PATH="${
+        pkgs.lib.makeLibraryPath [
+          pkgs.libxkbcommon
+          pkgs.libGL
+          pkgs.libglvnd
+          pkgs.mesa
+          pkgs.vulkan-loader
+          pkgs.wayland
+          pkgs.fontconfig.lib
+          pkgs.freetype
+          pkgs.xorg.libX11
+          pkgs.xorg.libxcb
+          pkgs.xorg.libXcursor
+          pkgs.xorg.libXi
+          pkgs.xorg.libXrandr
+        ]
+      }"
+    ''}
 
     # Wasm target sysroot used by build_wasm.sh + db-backend.
     export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"

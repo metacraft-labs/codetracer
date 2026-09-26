@@ -825,9 +825,19 @@ type
     ## ``inactive`` — when true, the button is rendered with the
     ##                ``inactive-start-option`` modifier and clicks
     ##                are no-ops.
+    ## ``disabledReason`` — WHY the button is refused, in words the user
+    ##                can read.  Non-empty exactly when ``inactive`` is
+    ##                true (``welcomeStartOptionRecords`` in
+    ##                ``viewmodels/welcome_screen_vm.nim`` is what
+    ##                guarantees it), and rendered as the button's
+    ##                ``title``.  Issue #734 was filed because four of
+    ##                these five buttons were greyed out on the web with
+    ##                no explanation anywhere, and a greyed control with
+    ##                no reason is indistinguishable from a broken one.
     key*: string
     name*: string
     inactive*: bool
+    disabledReason*: string
 
   WelcomeScreenMode* = enum
     ## Which top-level surface the welcome screen is rendering.

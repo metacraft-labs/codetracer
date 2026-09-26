@@ -24,25 +24,47 @@ var currentDapSessionId = 0
   ## Which session the Backend Manager is currently serving.  Updated
   ## every time we send a `ct/select-replay` command.
 
-var pendingSessionForSeq: Table[int, int] = initTable[int, int]()
-  ## Maps a DAP request `seq` number to the sessionId that issued the
-  ## request.  Populated when forwarding a request; consumed when the
-  ## matching response arrives (keyed by `request_seq`).
+type
+  PendingDapRequest = object
+    ## A request forwarded to the Backend Manager and not yet answered: the
+    ## session that issued it and the `seq` that session numbered it with.
+    sessionId: int
+    seq: int
 
-var internalSeqCounter = 100_000
-  ## Sequence counter for internally generated DAP commands
-  ## (`ct/select-replay`).  Starts high to avoid collisions with
-  ## renderer-generated seq numbers which start from 1.
+var pendingRequests: Table[int, PendingDapRequest] =
+    initTable[int, PendingDapRequest]()
+  ## Every forwarded request, keyed by the WIRE `seq` this process gave it
+  ## (`nextWireSeq`), holding the `(sessionId, seq)` pair that names it.
+  ## Populated when forwarding a request; consumed when the matching
+  ## response arrives (keyed by its `request_seq`, which the backend echoes).
+  ##
+  ## The key is the wire `seq` and NOT the renderer's own, because each
+  ## session's `DapApi` numbers its requests from zero: two sessions with a
+  ## request of the same `seq` in flight are routine, and the backend's
+  ## answer carries nothing but that number. A table keyed by the renderer's
+  ## `seq` alone let the second request overwrite the first's entry, so one
+  ## answer was tagged with the other session and the other fell through to
+  ## whichever session the Backend Manager happened to be serving. Giving
+  ## every forwarded request a number unique across sessions makes the
+  ## answer name its `(sessionId, seq)` pair exactly; the renderer's `seq`
+  ## is written back into `request_seq` before the answer is delivered, so
+  ## the renderer sees the number it sent.
 
-proc nextInternalSeq(): int =
-  inc internalSeqCounter
-  return internalSeqCounter
+var wireSeqCounter = 100_000
+  ## The wire `seq` of every request this process writes to the Backend
+  ## Manager — the forwarded ones and its own `ct/select-replay`. One
+  ## counter, so no two requests in flight share a number.
+
+proc nextWireSeq(): int =
+  inc wireSeqCounter
+  return wireSeqCounter
 
 proc registerStartReplayHandler*(handler: proc(body: JsObject)) =
   replayStartHandler = handler
 
 proc stringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
+proc jsAssign(target, source: JsObject): JsObject {.importjs: "Object.assign(#, #)".}
 
 proc wrapJsonForSending*(obj: JsObject): cstring =
     let stringified_packet = stringify(obj)
@@ -82,17 +104,23 @@ proc sendDapForSession*(sessionId: int, message: JsObject) =
       "type": cstring"request",
       "command": cstring"ct/select-replay",
       "arguments": sessionId,
-      "seq": nextInternalSeq()
+      "seq": nextWireSeq()
     }
     backendManagerSocket.write(wrapJsonForSending(selectMsg))
     currentDapSessionId = sessionId
 
-  # Track which session owns this request so the response can be tagged.
+  # Track which session owns this request so the response can be tagged:
+  # the frame goes out under a wire `seq` unique across sessions, recorded
+  # with the `(sessionId, seq)` pair it stands for (see `pendingRequests`).
+  var frame = message
   if jsHasKey(message, cstring"seq"):
-    let seq = message["seq"].to(int)
-    pendingSessionForSeq[seq] = sessionId
+    let wireSeq = nextWireSeq()
+    pendingRequests[wireSeq] = PendingDapRequest(
+      sessionId: sessionId, seq: message["seq"].to(int))
+    frame = jsAssign(newJsObject(), message)
+    frame["seq"] = wireSeq
 
-  backendManagerSocket.write(wrapJsonForSending(message))
+  backendManagerSocket.write(wrapJsonForSending(frame))
 
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   ## IPC handler for "dap-raw-message" from the renderer.
@@ -106,7 +134,8 @@ proc resolveSessionId(body: JsObject): int =
   ## belongs to.
   ##
   ## * **Responses** carry a `request_seq` that maps back to the
-  ##   originating session via `pendingSessionForSeq`.
+  ##   originating request via `pendingRequests`; its `request_seq` is
+  ##   rewritten to the `seq` that session sent.
   ## * **Events** have no such link; they belong to whichever session
   ##   the BM is currently serving (`currentDapSessionId`).
   ## * If the message already has a `sessionId` (future-proofing), we
@@ -115,11 +144,11 @@ proc resolveSessionId(body: JsObject): int =
     return body["sessionId"].to(int)
 
   if jsHasKey(body, cstring"request_seq"):
-    let reqSeq = body["request_seq"].to(int)
-    if reqSeq in pendingSessionForSeq:
-      result = pendingSessionForSeq[reqSeq]
-      pendingSessionForSeq.del(reqSeq)
-      return result
+    let wireSeq = body["request_seq"].to(int)
+    var request: PendingDapRequest
+    if pendingRequests.pop(wireSeq, request):
+      body["request_seq"] = request.seq
+      return request.sessionId
 
   # Fallback: attribute to the currently selected session.
   return currentDapSessionId

@@ -100,7 +100,11 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
 
   test "the host passes the SHARED producer, not raw variables":
     let src = readFile(repo / "src/frontend/tui/host/tui_session.nim")
-    ck "inlineValues = inlineValuesOf(s.state, tuiRowBudget(" in src
+    # The shared producer, at this medium's budget — handed to the pane
+    # through PLAT-29's stop reconciliation since 2026-09-23.
+    ck "inlineValuesOf(s.state, tuiRowBudget(" in src
+    ck "s.valueGate.installable(" in src
+    ck "inlineValues = values)" in src
     # …and it loads the locals BEFORE building the source model.
     ck src.find("s.session.requestAndLoadLocals()") <
        src.find("rt.app.source = sourcePaneModelFor(")

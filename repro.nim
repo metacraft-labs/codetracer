@@ -1,3 +1,4 @@
+import repro_dsl_stdlib/foreign_env
 import std/[os, strutils]
 
 import repro_dsl_stdlib
@@ -405,6 +406,13 @@ package codeTracer:
 
     # Sibling library dependencies (SC-11 develop-mode from-source consumption)
     "isonim >=0"
+    # `isonim_tui/text/width` -- the grapheme segmenter the editor model's
+    # whole coordinate system rests on -- is imported by
+    # src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim, so
+    # this is a real dependency and has to be pinned by the lock like the
+    # others (provision-repro-lock-siblings clones only what the lock pins;
+    # its header asks for exactly this once isonim-tui became one).
+    "isonim-tui >=0"
     "nim-everywhere >=0"
     "nim-agent-harbor >=0"
     "nim-agents >=0"
@@ -472,6 +480,9 @@ package codeTracer:
       "xvfb-run >=0"
 
   devEnv:
+    when not defined(windows):
+      useFlakeDevShell(flakeRef = ".?submodules=1")
+
     activity "default"
     activity "frontend"
     activity "backend"
@@ -667,7 +678,7 @@ package codeTracer:
       # renderer down at startup with "Cannot read properties of undefined
       # (reading 'slice')" out of `nimCopy`.  Nim hot code reloading is also
       # explicitly a non-goal of CodeTracer's HMR design — see
-      # codetracer-specs/Front-Ends/IsoNim/Hot-Module-Reload.md — so nothing
+      # isonim-specs/Hot-Module-Reload.md — so nothing
       # here needs it.  The same flag had to be removed from the three other
       # build definitions that compile these sources (`justfile`,
       # `src/Tuprules.tup`, `build_for_extension.sh`);

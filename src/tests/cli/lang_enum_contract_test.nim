@@ -240,6 +240,10 @@ const
   RepoRoot = ThisFile.parentDir.parentDir.parentDir.parentDir
     ## src/tests/cli/<this> -> src/tests/cli -> src/tests -> src -> <repo>
   TraceMetadataPath = RepoRoot / "src" / "frontend" / "trace_metadata.nim"
+  CalltraceModeDeclPath = RepoRoot / "src" / "common" / "common_types" /
+    "debugger_features" / "call.nim"
+    ## Declares `CalltraceMode` on one line; property 2's MODE-map check
+    ## reads the member names from it.
   CtLangPath = RepoRoot / "libs" / "ct-lang" / "src" / "lib.rs"
     ## The single canonical Rust `Lang`.
   CtLangManifestPath = RepoRoot / "libs" / "ct-lang" / "Cargo.toml"
@@ -422,9 +426,70 @@ suite "trace_metadata.nim decodes lang by the enum's names, not a hand-written o
   test "the renderer's normalisation goes through decodeLangName":
     let source = codeLinesOnly(readFile(TraceMetadataPath))
     check source.contains("decodeLangName(")
-    # …and the MODE map is still there, deliberately: pinning or deleting it is
-    # LRS-6's (recorded in Language-Enum-Ordinal-Contracts.md as unpinned).
-    check source.contains("var MODE = {")
+
+  test "the hand-written JS MODE map is gone too, and calltraceMode is decoded by parseEnum (LRS-6)":
+    # The last hand-written ordinal map in this file: `var MODE = {
+    # NoInstrumentation:0, … }` decoded `Trace.calltraceMode`, fell back
+    # silently to `FullRecord` on a miss, and had no test.  It was also dead,
+    # because the hop carried the integer.  LRS-6 put the name on the hop
+    # (`serializesAsTextInJson(CalltraceMode)`, asserted below and exercised
+    # in `trace_index_migration_test.nim`) and deleted the map in favour of
+    # `parseEnum[CalltraceMode]`.  Code lines only, as above: the block
+    # comment is allowed to name what was deleted.
+    let source = codeLinesOnly(readFile(TraceMetadataPath))
+    check(not source.contains("var MODE = {"))
+    if source.contains("var MODE = {"):
+      checkpoint(
+        "`var MODE = {` is back in " & TraceMetadataPath & ".  LRS-6 deleted " &
+        "the hand-written CalltraceMode ordinal map; decode with " &
+        "`parseEnum[CalltraceMode]`, which reads the ordinal from the enum.")
+    # The member names are read from the enum's own declaration rather than
+    # listed here, so this check cannot go stale beside the enum it guards.
+    # (This suite does not import `common/types`; the renderer's field type is
+    # the one declared in `call.nim`.)
+    var modeNames: seq[string] = @[]
+    for line in readFile(CalltraceModeDeclPath).splitLines:
+      let at = line.find("CalltraceMode* {.pure.} = enum")
+      if at >= 0:
+        for name in line[at + "CalltraceMode* {.pure.} = enum".len .. ^1].split(','):
+          if name.strip.len > 0:
+            modeNames.add(name.strip)
+    checkpoint("CalltraceMode members parsed from " & CalltraceModeDeclPath &
+               ": " & $modeNames)
+    # Anti-vacuity: the parse found the declaration, not an empty line.
+    check "NoInstrumentation" in modeNames
+    check "FullRecord" in modeNames
+    for mode in modeNames:
+      check(not source.contains(mode & ":"))
+    check source.contains("parseEnum[CalltraceMode](")
+    # …and WITHOUT a default argument (LRS-6's review, 2026-09-24).
+    # `parseEnum[CalltraceMode](name, CalltraceMode.FullRecord)` is the
+    # deleted map's defect in one call: an unknown name becomes a confident,
+    # valid-looking mode and nothing says so.  `CalltraceMode` has no
+    # "unknown" member to decode to, so the renderer catches the miss and
+    # prints a warning naming the value before it guesses `FullRecord`.
+    const call = "parseEnum[CalltraceMode]("
+    var calls = 0
+    var at = source.find(call)
+    while at >= 0:
+      inc calls
+      let argsStart = at + call.len
+      let close = source.find(')', argsStart)
+      check close > argsStart
+      if close > argsStart:
+        let args = source[argsStart ..< close]
+        if ',' in args:
+          checkpoint("`" & call & args & ")` in " & TraceMetadataPath &
+            " has a default argument: an unknown calltraceMode would decode " &
+            "SILENTLY.  Call it with the name alone and warn in the " &
+            "`except ValueError` branch.")
+        check ',' notin args
+      at = source.find(call, at + call.len)
+    check calls >= 1
+    check source.contains("except ValueError:")
+    check source.contains("CalltraceMode this build knows")
+    let traceIndex = codeLinesOnly(readFile(TraceIndexPath))
+    check traceIndex.contains("serializesAsTextInJson(CalltraceMode)")
 
   test "ct trace-metadata puts the NAME on the hop, so the renderer's decoder is what runs":
     # Found while collecting LRS-4's replay evidence: the vendored
@@ -1506,14 +1571,16 @@ const
   # `gui_ops.rs`'s `ctx.lang_wire` was exactly such a site — an identifier
   # whose type was `u8` — and nothing asked.  The two production senders on
   # this list have their TYPE asserted by the anchor test below
-  # (`lang_wire: &'static str`; `lang: string = LoadLocalsDefaultLang`).
+  # (`lang_wire: &'static str`; `lang: string`, and `localsLanguage`'s `string`).
   OpaqueLangPayloadSites = [
     # `ctx.lang_wire` is `&'static str`, the `Lang::wire_name` of the bench
     # language (was `u8`, and wrong for two of ten languages).
     ("src/codetracer-bench/src/gui_ops.rs", 1),
-    # `lang` is `requestLocals`'s `lang: string = LoadLocalsDefaultLang`
-    # parameter — the wire name, handed in by the caller (was `lang: int = 0`).
-    ("src/frontend/viewmodel/store/replay_data_store.nim", 1),
+    # (`replay_data_store.nim`'s `"lang": lang` was on this list, `lang` being
+    # `requestLocals`'s wire-name `string` parameter, until 01f337fa0 made it
+    # `(if lang.len > 0: lang else: store.localsLanguage())`, which the sweep
+    # reads as a NAME. The parameter's type and `localsLanguage`'s are still
+    # asserted by the anchor test.)
     # `lang` is a `&str` taken from the client's request with `as_str`, or
     # `LOAD_LOCALS_DEFAULT_LANG` (`"c"`, pinned by property 7) when absent;
     # an integer from the client is NOT forwarded.  (The crate's second
@@ -1559,9 +1626,15 @@ proc classifyLangPayloadValue(value: string): LangPayloadClass =
               "int(", ".u8", "u8(", ".ord"]:
     if v.contains(pat):
       return lpcOrdinal
-  # A name: a string literal or one of the two production spellers.
+  # A name: a string literal or one of the production spellers.
+  # `localsLanguage()` is `ReplayDataStore.localsLanguage*(): string` — the
+  # wire name of the stopped-in file's language, falling back to
+  # `LoadLocalsDefaultLang` (01f337fa0, 2026-09-24, moved
+  # `headless_session.nim`'s payload onto it). Its return TYPE is asserted
+  # by the anchor test below, since the sweep cannot see it.
   if v[0] == '"' or v.contains(".wire_name()") or v.contains("langWireName(") or
-     v.contains("LoadLocalsDefaultLang") or v.contains("LOAD_LOCALS_DEFAULT_LANG"):
+     v.contains("LoadLocalsDefaultLang") or v.contains("LOAD_LOCALS_DEFAULT_LANG") or
+     v.contains(".localsLanguage()"):
     return lpcName
   lpcOpaque
 
@@ -1706,6 +1779,7 @@ suite "no .rs or .nim payload spells lang as a bare integer":
       "langWireName(toLangFromFilename(path))",
       "LoadLocalsDefaultLang",
       "LOAD_LOCALS_DEFAULT_LANG",  # backend-manager's pinned literal (property 7)
+      "s.session.store.localsLanguage()",  # headless_session's sender
     ]:
       check classifyLangPayloadValue(right) == lpcName
       if classifyLangPayloadValue(right) != lpcName:
@@ -1765,8 +1839,15 @@ suite "no .rs or .nim payload spells lang as a bare integer":
       not guiOps.contains("=> 0u8")
     let store = readFile(RepoRoot / "src" / "frontend" / "viewmodel" / "store" /
                          "replay_data_store.nim")
+    # `requestLocals`'s `lang` is a wire-name `string`; empty means "the
+    # stopped-in file's language" (`localsLanguage`, 01f337fa0), which
+    # itself falls back to `LoadLocalsDefaultLang`. Both the parameter's
+    # type and the speller's return type are asserted: the sweep classifies
+    # `.localsLanguage()` as a NAME on the strength of this line.
     check:
-      store.contains("lang: string = LoadLocalsDefaultLang)")
+      store.contains("lang: string = \"\")")
+      store.contains("proc localsLanguage*(store: ReplayDataStore): string =")
+      store.contains("return LoadLocalsDefaultLang")
       not store.contains("lang: int = 0)")
 
   test "no ordinal `lang` anywhere (the frozen tracepoint-hop remnants are gone)":

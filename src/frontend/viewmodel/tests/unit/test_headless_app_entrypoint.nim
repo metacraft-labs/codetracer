@@ -39,6 +39,19 @@
 ##      pane that nothing implements does not compile, and `paneIsLive`
 ##      distinguishes "placed in the layout" from "has a ViewModel behind it".
 ##
+## ## The one stand-in, and why it is justified
+##
+## Every session here is opened over `MockBackendService` — the only mock in
+## this file, and the workspace policy asks for the reason in writing. The
+## subject is the SHELL: which sessions exist, which is active, and each one's
+## `Layout` and its save/restore document. None of that crosses the backend
+## boundary — property 1 above pins `receivedCommands` to prove that opening
+## a session sends nothing — so a real `replay-server` would be a process the
+## assertions never talk to. The cases that DO drive the backend (launch
+## failure, a launched session's live panes) script exactly the DAP replies
+## they assert on, and the real-process half of the same shell is covered by
+## the GPUI and terminal suites that open a real recording.
+##
 ## Compile and run:
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_headless_app_entrypoint.nim
@@ -94,7 +107,7 @@ suite "Headless app — construction is passive":
     let app = newHeadlessApp()
     let slot = app.openSession(mockBackend().toBackendService())
     for p in ReplayCorePanes:
-      check slot.layout.contains(p)
+      check slot.layout.tree.contains(p)
       check not slot.paneIsLive(p)
     check slot.livePanes().len == 0
     app.dispose()
@@ -161,9 +174,17 @@ suite "Headless app — launch":
     # `paneViewModel` says it.
     #
     # The exclusion is written as a SET and both halves are asserted, so a
-    # third pane cannot join it silently: the excluded set is exactly two, the
+    # pane cannot join it silently: the excluded set has an exact size, the
     # included set is everything else, and both are non-empty.
-    const EditOnlyPanes = {paneFileTree, paneBuildOutput}
+    #
+    # PLAT-41 MOVED `paneFileTree` OUT OF THE SET (54244c2ac, 2026-09-23), and
+    # the move is the product's, not this test's: a replay slot now answers
+    # the session's `fileTreeVM` — the RECORDING's own source folders, by the
+    # desktop's `sourceFoldersFromTracePaths` rule — not the working tree, so
+    # "a replay session has no ViewModel for the file tree" stopped being
+    # true. Only `paneBuildOutput` is still edit-mode-only. The file tree is
+    # now asserted from the replay side, below, like every other replay pane.
+    const EditOnlyPanes = {paneBuildOutput}
     let app = newHeadlessApp()
     let slot = app.openSession(mockBackend().toBackendService())
     slot.session.launch(traceOf("/tmp/trace-b"))
@@ -183,8 +204,12 @@ suite "Headless app — launch":
         inc replayPanes
         check not slot.paneViewModel(p).isNil
     checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
-    check editPanes == 2
+    check editPanes == 1
     check replayPanes > 0
+    # The pane PLAT-41 moved, pinned by name so the move cannot be undone
+    # quietly by re-adding it to the set above.
+    check paneFileTree notin EditOnlyPanes
+    check not slot.paneViewModel(paneFileTree).isNil
     app.dispose()
 
   test "a failed launch leaves the shell intact and the failure readable":
@@ -260,8 +285,8 @@ suite "Headless app — multi-session":
     let b = app.openSession(mockBackend().toBackendService(), "b",
                             layout = shared)
     check a.activatePane(paneEventLog)
-    check a.layout.isVisible(paneEventLog)
-    check not b.layout.isVisible(paneEventLog)
+    check a.layout.tree.isVisible(paneEventLog)
+    check not b.layout.tree.isVisible(paneEventLog)
     # The caller's own value is untouched too.
     check not shared.isVisible(paneEventLog)
     app.dispose()
@@ -359,7 +384,7 @@ suite "Headless app — saving and restoring layouts":
     let a = app.openSession(mockBackend().toBackendService(), "a")
     let b = app.openSession(mockBackend().toBackendService(), "b")
     check a.activatePane(paneEventLog)
-    check b.layout.setWeight(paneEditor, 4.0)
+    check b.layout.tree.setWeight(paneEditor, 4.0)
     # Which session was active is shell state too, so it is set BEFORE the
     # save — a document that recorded the wrong active slot would still
     # restore both layouts and would look right.
@@ -431,6 +456,105 @@ suite "Headless app — saving and restoring layouts":
       caught = true
       check e.kind == ldeUnknownVersion
     check caught
+    app.dispose()
+
+  test "a DOCKED pane survives saveLayouts -> restoreLayouts":
+    # PLAT-4's closing pass (2026-09-26). `HeadlessSessionSlot.layout` was a
+    # bare `LayoutNode`, so a session could not hold a docked pane at all and
+    # the GPUI shell's sync copied only the tree onto it — the app-level
+    # document then had the pane in NEITHER place. The slot holds a whole
+    # `Layout` now, and the document carries its `docked` list.
+    let app = newHeadlessApp()
+    let a = app.openSession(mockBackend().toBackendService(), "a")
+    let docked = apply(a.layout, cmdDock(paneEventLog, leBottom))
+    check docked.kind == loApplied
+    if docked.kind == loApplied:
+      a.layout = docked.layout
+    check a.layout.placement(paneEventLog) == plDocked
+    check paneEventLog notin a.visiblePanes()
+    let doc = app.saveLayouts()
+    check doc["sessions"][0]["docked"].len == 1
+    check doc["sessions"][0]["docked"][0]["pane"].getStr == $paneEventLog
+
+    let revived = newHeadlessApp()
+    let a2 = revived.openSession(mockBackend().toBackendService(), "x")
+    check a2.layout.placement(paneEventLog) == plPlaced
+    check revived.restoreLayouts(doc) == 1
+    check $a2.layout == $a.layout
+    check a2.layout.placement(paneEventLog) == plDocked
+    # NON-VACUOUS: the Event Log is owned and must be SOMEWHERE — it is on
+    # the strip, so the restored layout validates against the whole core set.
+    check a2.layout.validate(ReplayCorePanes).len == 0
+    # And a restore reopens no overlay (§3.2), through this door too.
+    check not a2.layout.docked[0].revealed
+    app.dispose()
+    revived.dispose()
+
+  test "every session entry writes docked, even empty":
+    let app = newHeadlessApp()
+    discard app.openSession(mockBackend().toBackendService(), "a")
+    let doc = app.saveLayouts()
+    check doc["sessions"][0].hasKey("docked")
+    check doc["sessions"][0]["docked"].kind == JArray
+    check doc["sessions"][0]["docked"].len == 0
+    app.dispose()
+
+  test "a document written before sessions held docked panes still restores":
+    # Every earlier build wrote each session as a bare tree with no `docked`
+    # key. Such an entry means what it meant then — nothing docked — and is
+    # read, not refused.
+    let app = newHeadlessApp()
+    let a = app.openSession(mockBackend().toBackendService(), "a")
+    check a.activatePane(paneEventLog)
+    var doc = app.saveLayouts()
+    doc["sessions"][0].delete("docked")
+    check not doc["sessions"][0].hasKey("docked")
+    let revived = newHeadlessApp()
+    let a2 = revived.openSession(mockBackend().toBackendService(), "x")
+    check revived.restoreLayouts(doc) == 1
+    check $a2.layout == $a.layout
+    check a2.layout.docked.len == 0
+    app.dispose()
+    revived.dispose()
+
+  test "an unreadable docked entry leaves every layout untouched, by kind":
+    let app = newHeadlessApp()
+    let a = app.openSession(mockBackend().toBackendService(), "a")
+    let aBefore = $a.layout
+    var doc = app.saveLayouts()
+    doc["sessions"][0]["docked"] = %*[{"pane": "editor", "edge": "diagonal",
+                                        "order": 0}]
+    var caught = false
+    try:
+      discard app.restoreLayouts(doc)
+    except LayoutDecodeError as e:
+      caught = true
+      check e.kind == ldeUnknownEdge
+    check caught
+    check $a.layout == aBefore
+    app.dispose()
+
+  test "a session can be opened over a whole Layout, and a broken one is refused":
+    let app = newHeadlessApp()
+    let arranged = apply(initLayout(defaultReplayLayout()),
+                         cmdDock(paneEventLog, leRight))
+    check arranged.kind == loApplied
+    if arranged.kind == loApplied:
+      let a = app.openSession(mockBackend().toBackendService(), "a",
+                              layout = arranged.layout)
+      check a.layout.placement(paneEventLog) == plDocked
+      # Deep-copied, as the tree overload is: the caller's value is its own.
+      check a.layout.tree != arranged.layout.tree
+    # §3.3 broken on the way in — placed AND docked — is refused at open.
+    var caught = false
+    try:
+      discard app.openSession(mockBackend().toBackendService(), "b",
+        layout = initLayout(defaultReplayLayout(), @[DockedPane(
+          pane: paneEventLog, edge: leBottom, order: 0)]))
+    except HeadlessAppError:
+      caught = true
+    check caught
+    check app.slotCount == 1
     app.dispose()
 
   test "an empty app saves a well-formed, restorable document":

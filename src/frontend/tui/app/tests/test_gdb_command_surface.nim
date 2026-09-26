@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 80
+  ExpectedAppModules = 82
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -217,8 +217,15 @@ const
     ## RE-COUNTED ON 2026-09-23 AGAIN: 79 → 80. `views/point_list.nim`, the
     ## terminal breakpoint list PLAT-40 added (commit `4e1db66f0`), without
     ## re-counting here — found by the next full `tui` lane run.
+    ##
+    ## RE-COUNTED ON 2026-09-23 A THIRD TIME: 80 → 82. PLAT-29 moved two
+    ## producers behind the asynchronous boundary and each has its `app/`
+    ## half — `file_io_producer.nim` (what a `:w`/`:e!` answer means for a
+    ## buffer that moved) and `syntax/highlight_producer.nim` (the Edit pane's
+    ## parse, requested and reconciled off the render path). Their threads are
+    ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 198
+  ExpectedStyleLiterals = 192
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -253,7 +260,15 @@ const
     ## TWO literals in ONE new painting file — `EmptyPointsStyle` (the muted
     ## "no breakpoints" line) and `DisabledPointStyle` (a disabled point's
     ## row) — so 196 → 198 and 24 → 25.
-  ExpectedStyledFiles = 25
+    ##
+    ## RE-COUNTED ON 2026-09-24: 198 → 192 and 25 → 24, by DELETION. Six
+    ## literals no module painted with — `command_line.SigilStyle` and
+    ## `MessageStyle`, `command_palette.HelpStyle`, and `search.CountStyle`,
+    ## `QueryStyle` and `WrapStyle` — were exported and reached by nothing (the
+    ## reachability guard's bucket B). They were deleted to bring that ratchet
+    ## back under its ceiling, and `views/search.nim` had no other literal, so
+    ## it leaves the styled-file count. No painted colour changed.
+  ExpectedStyledFiles = 24
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour

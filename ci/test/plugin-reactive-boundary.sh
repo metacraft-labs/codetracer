@@ -220,6 +220,8 @@ set -uo pipefail
 # follow the file at all.
 # shellcheck source=ci/lib/nim-imports.sh disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/nim-imports.sh"
+# shellcheck source=ci/lib/nim-closure.sh disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/nim-closure.sh"
 
 # The DERIVED half of PLAT-8's second denied set. `system` is auto-imported
 # into every nim module and ends with `export syncio`, so its surface is in
@@ -886,27 +888,11 @@ ffi_names_in() {
 # The reachable closure — the subject checks 1 and 2 range over
 # ---------------------------------------------------------------------------
 
-# normpath PATH — collapse `.` and `..` textually. No filesystem access, so it
-# works for paths that do not exist, which is what the contract suite's
-# synthetic trees need.
-normpath() {
-	local p="$1" out=() part
-	local IFS='/'
-	for part in $p; do
-		case "${part}" in
-		"" | ".") continue ;;
-		"..")
-			if [ "${#out[@]}" -gt 0 ] && [ "${out[-1]}" != ".." ]; then
-				unset 'out[-1]'
-			else
-				out+=("..")
-			fi
-			;;
-		*) out+=("${part}") ;;
-		esac
-	done
-	printf '%s' "${out[*]}"
-}
+# normpath — SHARED, from `ci/lib/nim-closure.sh` (sourced beside
+# `nim-imports.sh` above). This gate carried its own copy until 2026-09-23,
+# and the copies had DRIFTED: `plugin-reactive-boundary.sh`'s returned a
+# RELATIVE path for an absolute input. One predicate, one function
+# (Verification-Harness-Traps §30).
 
 # resolve_repo_module SPEC IMPORTER — the repo-relative path SPEC resolves to,
 # or empty when it resolves to no file in this repository.

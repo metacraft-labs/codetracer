@@ -125,10 +125,6 @@ proc terminalSizeOf*(fd: cint): TerminalSize =
     discard
   sizeFromEnv()
 
-proc queryTerminalSize*(): TerminalSize =
-  ## The size of the terminal this process is drawing on.
-  terminalSizeOf(STDOUT_FILENO)
-
 proc installResizeSignal*() =
   ## Install the SIGWINCH handler. Idempotent, and it is nim-termctl's — see
   ## the module header on why a second handler would be a mistake.

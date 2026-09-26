@@ -54,7 +54,12 @@ import ../../frontend/tui/tests/fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 225
+const ExpectedAssertions = 218
+  ## Was 225. -7 on 2026-09-25: the `--ui=gpui` case stopped being a refusal
+  ## (PLAT-20 accepted it), so its `ckUsageError` (11 counted checks: rc,
+  ## stdout, line count, two needles, their tally, and `ckNoFrame`'s five)
+  ## became four: the handoff reached the GPUI component's pinned binary (rc
+  ## and the `execv` failure naming it), and neither refusal text appeared.
 
 var countedAssertions = 0
 
@@ -89,8 +94,10 @@ const
     ## same geometry CTUI-11's and CTUI-12's real-terminal suites use, so a
     ## frame that differs between them differs for a reason other than size.
 
-  AcceptedSetText = "electron, gui, tui, webui"
-    ## §4's accepted set as the refusal must name it. Spelled here rather than
+  AcceptedSetText = "electron, gui, gpui, tui, webui"
+    ## §4's accepted set as the refusal must name it. `gpui` joined it with
+    ## PLAT-20 (cbb953f75, 2026-09-15); this suite kept the four-value text
+    ## until 2026-09-25, so every refusal case here was red from that commit. Spelled here rather than
     ## imported: this suite is a statement about what the SHIPPED BINARY prints,
     ## and importing the constant it prints from would make the assertion
     ## circular — Verification-Harness-Traps' "an expected value must not be
@@ -452,13 +459,30 @@ suite "PLAT-1 §3: `ct replay --ui=tui <trace>` reaches the terminal front-end":
 
 suite "PLAT-1 §4.2: an unrecognised value is refused, naming the accepted set":
 
-  test "`--ui=gpui` is refused by the shipped binary":
-    # §4.1: `gpui` is added to the accepted set by PLAT-20, which makes it
-    # work, and by no earlier milestone.
+  test "`--ui=gpui` is ACCEPTED by the shipped binary — PLAT-20":
+    # §4.1: `gpui` is added to the accepted set by the milestone that makes it
+    # work, and by no earlier one. PLAT-20 is that milestone (cbb953f75), so
+    # the shipped binary must no longer answer §4.2's refusal.
+    #
+    # WHERE `codetracer-gpui` IS, IS PINNED, not left to the host. Left to the
+    # lookup, a developer checkout with `build/bin/codetracer-gpui` exec'd the
+    # REAL window front-end from this suite, and a CI runner without one gets
+    # the "component is not installed" answer — exit 2, the same code as a
+    # usage error — so the same case meant different things on two hosts.
+    # `CODETRACER_GPUI_BIN` names a path that does not exist: `ct` must accept
+    # the value, resolve the GPUI component through ITS override (a dispatch
+    # to the TUI would resolve `codetracer-tui` and never name this path), and
+    # fail only at `execv`, naming that path. No stand-in binary runs at all.
+    let missingGpui = scratch / "no-such-codetracer-gpui"
     let res = runProcessCapturing(ctBinary,
       @["replay", "--ui=gpui", tracePath],
-      extraEnv = [("XDG_CONFIG_HOME", emptyConfigHome)])
-    ckUsageError(res, ["gpui", AcceptedSetText])
+      extraEnv = [("XDG_CONFIG_HOME", emptyConfigHome),
+                  ("CODETRACER_GPUI_BIN", missingGpui)])
+    checkpoint("rc=" & $res.rc & " stderr=" & res.stderr)
+    ck res.rc == 1
+    ck res.stderr.contains("ct: could not start '" & missingGpui & "'")
+    ck not res.stderr.contains("unknown --ui value")
+    ck not res.stderr.contains(AcceptedSetText)
 
   test "every other unrecognised value is refused the same way":
     var compared = 0

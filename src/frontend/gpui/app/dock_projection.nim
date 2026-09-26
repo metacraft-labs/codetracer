@@ -376,7 +376,9 @@ proc projectDock*(layout: Layout; viewport: DockViewport): DockProjection =
     return DockProjection(status: dpsRefused,
       problems: @[DockProjectionProblem(kind: dppEmptyLayout,
                                         detail: "no pane is placed or docked")])
-  let modelProblems = layout.validate()
+  # `{}`: a projection is not told which panes the shell owns, and says so
+  # (`validate`'s `owned` has no default).
+  let modelProblems = layout.validate({})
   if modelProblems.len > 0:
     var ps: seq[DockProjectionProblem] = @[]
     for p in modelProblems:

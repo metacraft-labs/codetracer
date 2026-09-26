@@ -150,8 +150,6 @@ const
   EmptyHistoryText* = "no history"
 
   PromptStyle* = CellStyle(fg: "white")
-  SigilStyle* = CellStyle(fg: "yellow", bold: true)
-  MessageStyle* = CellStyle(fg: "bright_black")
 
 proc initCommandLineModel*(kind = pkCommand;
                            history: seq[string] = @[]): CommandLineModel =

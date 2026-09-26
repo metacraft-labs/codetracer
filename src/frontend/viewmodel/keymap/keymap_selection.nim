@@ -38,7 +38,7 @@ type
     refusal*: string
 
 const
-  KeymapSourceCommand* = ":keymap"
+  KeymapSourceCommand = ":keymap"
     ## How the terminal's command names itself in a refusal.
   KeymapSourceStored* = "stored keymap"
     ## How a refusal names the preference file's contents.

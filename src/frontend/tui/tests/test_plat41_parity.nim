@@ -270,8 +270,8 @@ suite "PLAT-41 4 — report to data, per new pane, on a live session":
     ck not slot.paneIsLive(paneBuildOutput)
 
   test "the timeline: no extent on a fresh store, the recording's once the log is read":
-    ck createTimelineVM(fresh).markers.val.len == 0
-    let marks = s.session.timelineVM.markers.val
+    ck createTimelineVM(fresh).bounds.val.len == 0
+    let marks = s.session.timelineVM.bounds.val
     checkpoint($marks)
     ck marks.len == 2
     ck marks[1] == s.session.store.eventLog.maxRRTicks.val

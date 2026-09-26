@@ -1,0 +1,15 @@
+# Control digests for run-plat3-vocabulary-mutations.py.
+#
+# The bytes every arm restores to and every verdict was taken against: the
+# five mutation subjects, the three suites the arms are graded by, and the
+# shared script whose expectations two of those suites replay (§16c).
+# Refreshed with --record-control-hashes, which the needle scan GATES (§16).
+077e0d4ac7c4dd62e505fdaa9ddb93e19bdab7eee049f27ce93f9ff698331f6e  src/frontend/view_vocabulary/terminal_binding.nim
+e9da00e3ecbf4fb01250cbf46b49bf2d58418dd22410433df220410d9474d1cc  src/frontend/view_vocabulary/web_binding.nim
+45c7b2021853b9cd24d375230631a6e326253f2f3d22a8454bb9448f25cdd794  src/common/view_vocabulary/markdown_blocks.nim
+e987a7493e4e98fd6aea560fab68eae8a7e922c55f32a8b276707f6d3d5d1162  src/common/view_vocabulary/behaviour.nim
+0eaaa7811ee5fe56cce87e800ecf2c3bfe94c681140304596601c1234d7712cd  src/common/view_vocabulary/mappings.nim
+37773aa7d39152b2762e5a280782d927dc8ec24198f0716687bc7156acd00f19  src/frontend/tui/tests/test_view_vocabulary_cross_medium.nim
+dfc4ac1d3b3b3fa7ee9bc458caea1266ac5b6f5c9b14551b7dab469dbad9b06b  src/common/view_vocabulary_test.nim
+05492aeb12bf4044827cb09e5a166bf934fc359173015acecdfb6164e78352a7  src/frontend/tests/view_vocabulary_chromium_test.nim
+7e93ebdaf367c8ad0bbd03be1b95d25938ded8de68192e2dd2602c48b6de358e  src/frontend/view_vocabulary/cross_medium_script.nim

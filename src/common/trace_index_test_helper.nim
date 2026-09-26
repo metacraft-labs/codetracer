@@ -13,7 +13,8 @@
 ## ``trace-recording-id``, ``short-prefix-unique``, ``short-prefix-ambiguous``,
 ## ``short-prefix-too-short``, ``short-prefix-not-found``,
 ## ``recent-folder-trailing-separators``, ``lang-name-roundtrip``,
-## ``migrate-legacy-db``.
+## ``migrate-legacy-db``, ``retired-lang-rows``, ``observed-axes-round-trip``,
+## ``profile`` (the isolation pin: where this process resolves its index).
 
 import std/[algorithm, options, os, strutils, strformat]
 
@@ -25,6 +26,7 @@ else:
 import recording_id
 import types
 import lang
+import paths
 import trace_index
 
 proc fail(msg: string) =
@@ -744,6 +746,24 @@ proc scenarioObservedAxesRoundTrip() =
 
   echo "PASS"
 
+proc scenarioProfile() =
+  ## Report where THIS process resolves the trace index it would write --
+  ## ``DB_PATHS[0]``, the path ``trace_index`` opens for a normal (non-test)
+  ## recording -- and the home directory it was derived from.  The parent
+  ## asserts both lie inside the scratch directory it gave this process.
+  ##
+  ## This is the isolation pin.  The suites that spawn this helper used to set
+  ## only ``HOME`` / ``XDG_DATA_HOME``, and on Windows Nim's ``getHomeDir``
+  ## reads ``USERPROFILE`` instead, so every scenario wrote into the
+  ## developer's REAL ``%USERPROFILE%/.local/share/codetracer/trace_index.db``
+  ## (seen 2026-09-23: 13 test rows and a schema 1 -> 2 migration of a real
+  ## database).  Asking the child where it resolved is the portable check:
+  ## it names the profile variable that was missed on any OS, and it never
+  ## opens, reads or stats the real database.
+  echo "HOME-DIR ", getHomeDir()
+  echo "TRACE-INDEX ", DB_PATHS[0]
+  echo "PASS"
+
 when isMainModule:
   if paramCount() < 1:
     fail("usage: trace_index_test_helper <scenario>")
@@ -761,5 +781,6 @@ when isMainModule:
   of "migrate-legacy-db": scenarioMigrateLegacyDb()
   of "retired-lang-rows": scenarioRetiredLangRows()
   of "observed-axes-round-trip": scenarioObservedAxesRoundTrip()
+  of "profile": scenarioProfile()
   else:
     fail("unknown scenario: " & paramStr(1))

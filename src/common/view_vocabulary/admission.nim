@@ -31,8 +31,11 @@
 ## worth naming, because "all sixteen passed" is the answer a rubber stamp also
 ## gives:
 ##
-##   `Menu` — the TERMINAL does not have it. isonim-tui has 36 widget modules
-##   and none is a menu, a menubar, a context menu or a dropdown;
+##   `Menu` — the TERMINAL did not have it when this was written (isonim-tui
+##   gained `widgets/menu.nim` on 2026-09-26; the paragraph is kept because the
+##   admission was decided without it, which is what makes it an admission).
+##   isonim-tui then had 36 widget modules and none was a menu, a menubar, a
+##   context menu or a dropdown;
 ##   `command/palette.nim` is the closest construct and is not one. It is a
 ##   fuzzy command palette over a SEARCH INDEX contributed by `Provider`s: its
 ##   contents are computed from a query rather than authored as an ordered set,
@@ -46,14 +49,15 @@
 ##   reconstruct.) `Menu` is admitted because the test
 ##   asks for at least ONE front-end and the web has it outright — the product
 ##   ships `viewmodel/views/isonim_menu_shell_view.nim`, `ui/menu.nim` and
-##   `viewmodel/views/context_menu_bridge.nim`. Its terminal mapping is
-##   `msPartial` and says so.
+##   `viewmodel/views/context_menu_bridge.nim`. Its terminal mapping was
+##   `msPartial` and said so; it is `msComplete` now.
 ##
 ##   `ProgressIndicator` — its semantics are one number, which is as
 ##   medium-independent as a statement gets, and the terminal and the web both
-##   have it outright. It fails on GPUI (`progress` is not in the 35-entry tag
-##   map), but the test is "at least one", not "all three". Recording GPUI's
-##   absence is `mappings.nim`'s job and PLAT-21's gate.
+##   have it outright. This comment used to say it fails on GPUI because
+##   `progress` is not in the 35-entry tag map; PLAT-21 measured that an
+##   unmapped tag renders as a container and the GPUI row is `msPartial`.
+##   Either way the test is "at least one", not "all three".
 ##
 ## ## WHAT THE TEST REJECTED, AND WHY THAT IS THE INTERESTING HALF
 ##

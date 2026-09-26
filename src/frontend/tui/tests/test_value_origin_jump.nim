@@ -13,7 +13,7 @@
 ##
 ## Four ViewModel fields in this layer had turned out to be filled by nothing —
 ## `PointListVM.points` (CTUI-5), `store.locals.globals` (CTUI-7),
-## `TimelineVM.markers` and `EventLogVM.eventRows` (CTUI-8); the first and the
+## `TimelineVM.bounds` and `EventLogVM.eventRows` (CTUI-8); the first and the
 ## fourth have store-side producers since 2026-09-17. So the first thing
 ## this suite does is prove `OriginChainVM` is not a fifth, and it proves it
 ## three ways rather than by finding one non-empty field:
@@ -497,7 +497,7 @@ suite "CTUI-10: `o` lands on the origin OriginChainVM reports":
       h.origin.activeChain.val = none(OriginChain)
       h.nav[] = initOriginNavigator()
       # THE RECORDING'S EXTENT, from the surface CTUI-8 established is the one
-      # that answers: `ct/event-load`'s `maxRRTicks`. `TimelineVM.markers` is
+      # that answers: `ct/event-load`'s `maxRRTicks`. `TimelineVM.bounds` is
       # filled by nothing on a replay session, and a `TimelineTargets` whose
       # `maxTick` is 0 makes `timeline_keys.clampToBounds` clamp EVERY seek to
       # `minTick` — which is how a jump to the origin silently becomes a jump

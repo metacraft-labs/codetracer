@@ -3831,7 +3831,7 @@ impl Handler {
     ///    preferred over the working tree, which may be any build at all;
     /// 3. the recorded path itself, through [`crate::expr_loader::source_text`]
     ///    (filesystem, then the VFS a host pushed in) — and only when the
-    ///    client allows it (`SourceArguments::allow_working_tree`).
+    ///    client allows it (`SourceArgumentsExt::allow_working_tree`).
     ///
     /// Steps 1 and 2 both go through
     /// [`crate::expr_loader::resolve_bundled_source`], NOT through
@@ -3859,7 +3859,7 @@ impl Handler {
     ///
     /// # Every answer says where it came from
     ///
-    /// The response carries [`dap_types::SourceOriginKind`]. A client that only
+    /// The response carries [`crate::dap_ext::SourceOriginKind`]. A client that only
     /// sees `success: true` cannot tell the recording's copy from a same-named
     /// file that happens to sit on the replay host, so it cannot render the
     /// second as unverified — and it cannot notice if a future change to the
@@ -3878,10 +3878,15 @@ impl Handler {
     pub fn source(
         &mut self,
         req: dap::Request,
-        args: dap_types::SourceArguments,
+        args: crate::dap_ext::SourceArgumentsExt,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let path = args.source.as_ref().and_then(|s| s.path.clone()).unwrap_or_default();
+        let path = args
+            .dap
+            .source
+            .as_ref()
+            .and_then(|s| s.path.clone())
+            .unwrap_or_default();
         if path.is_empty() {
             return Err("source requires source.path".into());
         }
@@ -3889,34 +3894,36 @@ impl Handler {
         // Absent means yes, so a generic DAP client keeps today's behaviour.
         let allow_working_tree = args.allow_working_tree.unwrap_or(true);
 
-        let mut resolved: Option<(String, dap_types::SourceOriginKind)> = None;
+        let mut resolved: Option<(String, crate::dap_ext::SourceOriginKind)> = None;
         if let Some(root) = self.meta_dat_sources_root()
             && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&root, &requested)
             && let Some(text) = crate::expr_loader::source_text(&bundled)
         {
-            resolved = Some((text, dap_types::SourceOriginKind::Payload));
+            resolved = Some((text, crate::dap_ext::SourceOriginKind::Payload));
         }
         if resolved.is_none()
             && let Some(trace_folder) = self.trace_folder.clone()
             && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&trace_folder.join("files"), &requested)
             && let Some(text) = crate::expr_loader::source_text(&bundled)
         {
-            resolved = Some((text, dap_types::SourceOriginKind::Payload));
+            resolved = Some((text, crate::dap_ext::SourceOriginKind::Payload));
         }
         if resolved.is_none()
             && allow_working_tree
             && let Some(text) = crate::expr_loader::source_text(&requested)
         {
-            resolved = Some((text, dap_types::SourceOriginKind::WorkingTree));
+            resolved = Some((text, crate::dap_ext::SourceOriginKind::WorkingTree));
         }
 
         match resolved {
             Some((content, origin)) => {
                 self.respond_dap(
                     req,
-                    dap_types::SourceResponseBody {
-                        content,
-                        mime_type: None,
+                    crate::dap_ext::SourceResponseBodyExt {
+                        dap: dap_types::SourceResponseBody {
+                            content,
+                            mime_type: None,
+                        },
                         // Every `Location` this engine emits carries
                         // `source_generation: 0` (`db.rs`, `event_db.rs`,
                         // `task.rs`), because a materialized recording holds
@@ -3941,7 +3948,7 @@ impl Handler {
                 self.respond_dap_failure(
                     req,
                     message,
-                    serde_json::json!({ "sourceOrigin": dap_types::SourceOriginKind::Unavailable }),
+                    serde_json::json!({ "sourceOrigin": crate::dap_ext::SourceOriginKind::Unavailable }),
                     sender,
                 )?;
                 Ok(())
@@ -7030,12 +7037,14 @@ mod tests {
                 command: "source".to_string(),
                 arguments: serde_json::Value::Null,
             },
-            dap_types::SourceArguments {
-                source: Some(dap_types::Source {
-                    path: Some(path.to_string()),
-                    ..Default::default()
-                }),
-                source_reference: 0,
+            crate::dap_ext::SourceArgumentsExt {
+                dap: dap_types::SourceArguments {
+                    source: Some(dap_types::Source {
+                        path: Some(path.to_string()),
+                        ..Default::default()
+                    }),
+                    source_reference: 0,
+                },
                 allow_working_tree,
             },
             sender,
@@ -7087,10 +7096,10 @@ mod tests {
 
         let response = request_source(&mut handler, 1, recorded, None)?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "first\nsecond\nthird\n");
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "first\nsecond\nthird\n");
         assert_eq!(body.source_generation, Some(RECORDED_SOURCE_GENERATION));
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         // A path with no payload and no file on disk is REFUSED, never answered
         // `content: ""` — an empty string is indistinguishable from an empty
@@ -7160,18 +7169,18 @@ mod tests {
         // The project-relative layout — the regression this test exists for.
         let response = request_source(&mut handler, 1, &noir_recorded.to_string_lossy(), None)?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "PAYLOAD-NOIR\nmod shield;\n");
-        assert!(!body.content.contains("WORKING-TREE-NOIR"));
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "PAYLOAD-NOIR\nmod shield;\n");
+        assert!(!body.dap.content.contains("WORKING-TREE-NOIR"));
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         // The positive control: the layout the exact mapping already hit.
         let response = request_source(&mut handler, 2, &calc_recorded.to_string_lossy(), None)?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "PAYLOAD-CALC\nprint(1)\n");
-        assert!(!body.content.contains("WORKING-TREE-CALC"));
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "PAYLOAD-CALC\nprint(1)\n");
+        assert!(!body.dap.content.contains("WORKING-TREE-CALC"));
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
@@ -7217,11 +7226,11 @@ mod tests {
 
         let response = request_source(&mut handler, 1, &foreign.to_string_lossy(), None)?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "print('not part of this trace')\n");
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "print('not part of this trace')\n");
         assert_eq!(
             body.source_origin,
-            Some(dap_types::SourceOriginKind::WorkingTree),
+            Some(crate::dap_ext::SourceOriginKind::WorkingTree),
             "a read of the replay host's disk must never be reported as the recording's copy"
         );
 
@@ -7237,9 +7246,9 @@ mod tests {
         // `allowWorkingTree: false` simply broke `source` outright.
         let response = request_source(&mut handler, 3, &recorded.to_string_lossy(), Some(false))?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "recorded\n");
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "recorded\n");
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
@@ -7310,22 +7319,22 @@ mod tests {
         // host must be a refusal here rather than a quiet third answer.
         let response = request_source(&mut handler, 1, &recorded.to_string_lossy(), Some(false))?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
         assert_eq!(
-            body.content, "SRCVIEWS\nmod shield;\n",
+            body.dap.content, "SRCVIEWS\nmod shield;\n",
             "step 1 must resolve the project-relative view through the suffix walk; \
              `FILES-PAYLOAD` here means step 1 missed and step 2 answered"
         );
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         let response = request_source(&mut handler, 2, "res://gf_values.gd", Some(false))?;
         assert!(
             response.success,
             "a `res://` path exists on no filesystem: only the container's bundled views can answer it"
         );
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "SRCVIEWS-GDSCRIPT\n");
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "SRCVIEWS-GDSCRIPT\n");
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
@@ -7430,9 +7439,9 @@ mod tests {
         // would also pass if the containment check had simply broken `source`.
         let response = request_source(&mut handler, 20, &recorded.to_string_lossy(), Some(false))?;
         assert!(response.success);
-        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
-        assert_eq!(body.content, "recorded\n");
-        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "recorded\n");
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
 
         let _ = std::fs::remove_dir_all(&base);
         Ok(())

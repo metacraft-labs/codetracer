@@ -15,6 +15,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+from ../dap import trackCtRequests, ctRequestIdOf
 import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as store_types import nil
@@ -65,6 +66,10 @@ var originChainVMInstance: OriginChainVM
 proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - self.nameWidth
 proc loadLocals*(self: StateComponent)
 
+var storeSendsLocals = false
+  ## Set by `initStateVMWithStore`: the StateVM's auto-load, over the
+  ## session's real store, is the one `ct/load-locals` sender (`loadLocals`).
+
 func watchInputId(self: StateComponent): cstring =
   cstring(fmt"watch-{self.id}")
 
@@ -86,8 +91,9 @@ proc submitWatchExpression(self: StateComponent) =
 
   self.watchExpressions.add(expression)
 
-  # Sync the new watch expression to the StateVM and use the legacy
-  # load path so language-specific locals requests keep the right shape.
+  # Sync the new watch expression to the StateVM, whose auto-load re-asks
+  # with it; `loadLocals` asks itself only where that auto-load runs over a
+  # stub store (the VS Code extension).
   if stateVMInstance != nil:
     stateVMInstance.addWatch($expression)
   self.loadLocals()
@@ -407,7 +413,17 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
     # remounts. This was the one and only site that cleared `isoNimStateMounted`
     # and it is the reason the flag could not simply be deleted.
   stateVMStore = store
+  # THE LANGUAGE the store's `ct/load-locals` names: the stopped-in file's,
+  # resolved exactly as the legacy `StateComponent.loadLocals` resolved it.
+  # Installed before the StateVM exists, because its auto-load runs at once.
+  store.sourceLanguageOf = proc(file: string): string =
+    langWireName(toLangFromFilename(cstring(file)))
   stateVMInstance = createStateVM(store)
+  # From here on the StateVM's auto-load is the ONE sender of
+  # `ct/load-locals` — see `storeSendsLocals` and `loadLocals`. Set only once
+  # that StateVM exists: were `createStateVM` to raise (the caller logs and
+  # carries on), the legacy component must go on asking.
+  storeSendsLocals = true
   stateVMInstance.onToggleHistory = stateHistoryBridge
   # WATCHES: re-issue the request whose response this module renders.
   #
@@ -612,8 +628,8 @@ proc localsToStoreRows*(legacyLocals: seq[Variable]): seq[store_types.Variable] 
       isWatch = (not v.value.isNil and v.value.isWatch),
     ))
 
-proc syncStoreLocals*(legacyLocals: seq[Variable]) =
-  ## Mirror the legacy locals into the ViewModel store so the
+proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
+  ## Mirror one `ct/load-locals` answer into the ViewModel store so the
   ## StateVM's currentVariables memo sees the same data.
   ##
   ## Both RR and Materialized (DB) traces flow through this path;
@@ -625,15 +641,72 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## ``valueDisplayText`` helper now mirrors the legacy atom-value
   ## ``$value`` call which dispatches into the
   ## proper field per ``TypeKind``.
-  if stateVMStore.isNil:
+  if stateVMStore.isNil or response.isNil:
     return
   # WATCH ANSWERS TRAVEL IN THE SAME LIST. Each row carries `value.isWatch`
   # (set by the backend — see `db-backend/src/watch_expression.rs`); the
   # split itself belongs to `applyLocalsResponse`, which is the one place
   # every host performs it.
-  let vmRows = localsToStoreRows(legacyLocals)
-  stateVMStore.applyLocalsResponse(vmRows)
+  let vmRows = localsToStoreRows(response.locals)
+  # PLAT-29: THE ANSWER IS RECONCILED AGAINST THE STOP ITS OWN REQUEST WAS
+  # SENT AT. `wireLocalsAnswers` recorded that stop under the request's
+  # identity as the request was written — whichever of the web's two senders
+  # wrote it — and `dap.deliverDapResponse` stamped the same identity into
+  # this body. Matching by identity, not by order, is what keeps a second
+  # sender or a second subscriber from pairing an answer with the wrong
+  # request. One the debugger has moved past is dropped rather than drawn
+  # beside the new stop.
+  if not stateVMStore.applyLocalsAnswer(vmRows,
+                                        $ctRequestIdOf(response.toJs)):
+    cdebug "[PIPELINE] syncStoreLocals: dropped an answer for a stop the " &
+      "debugger has left"
+    return
   cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmRows.len} row(s) into store"
+
+var localsAnswersWired = false
+
+proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers) =
+  ## Connect the web renderer's `ct/load-locals` traffic to the store's
+  ## request ledger — both ends, and the one direct subscription.
+  ##
+  ## THE WEB SENDS `ct/load-locals` FROM ONE PLACE PER STOP: the StateVM's
+  ## auto-load effect (`store.requestLocals` -> the real backend's
+  ## `sendCommand` -> `DapApi.asyncSendCtRequest`). `StateComponent.loadLocals`
+  ## (through the mediator and `middleware` to `DapApi.sendCtRequest`) stands
+  ## down once `initStateVMWithStore` has run, and sent a second request per
+  ## move until it did. Every sender reaches `dap.dispatchCtRequest`, and that
+  ## is where the tracker records each request's stop under its identity —
+  ## so the matching holds however many senders there are. The answer reaches
+  ## the store through
+  ## `StateComponent.registerLocals` and, where the mediator delivers it,
+  ## through the direct subscription below; the ledger answers any second
+  ## delivery with the first verdict, and the entry is retired once
+  ## `dap.deliverDapResponse`'s fan-out is over. (Measured under the real
+  ## mediator constructors — `locals_answer_identity_test.nim` — the direct
+  ## subscription is NOT reached: `viewsApi.emit` fans out to subscribed
+  ## component mediators, and the root's own handlers run only for events a
+  ## component sends up. It is kept, as it was in `ui_js.nim`, and the
+  ## matching does not depend on how many deliveries there are.)
+  ##
+  ## Idempotent: `configureMiddleware` can run again for a new trace.
+  if localsAnswersWired:
+    return
+  localsAnswersWired = true
+  trackCtRequests(CtLoadLocals,
+    onSent = proc(requestId: cstring) =
+      if not stateVMStore.isNil:
+        stateVMStore.noteLocalsRequestSent($requestId),
+    onAnswered = proc(requestId: cstring) =
+      if not stateVMStore.isNil:
+        stateVMStore.forgetLocalsRequest($requestId))
+  # A DIRECT viewsApi subscription, bypassing the component mediator routing,
+  # so the store receives the answer even when the State component's own
+  # subscription is not wired up yet.
+  viewsApi.subscribe(CtLoadLocalsResponse,
+    proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
+      cdebug ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
+        $(if response.isNil: 0 else: response.locals.len) & " variables")
+      syncStoreLocals(response))
 
 proc lookupSourceLine(path: cstring; line: int): string =
   ## Look up the source code at `<path>:<line>` from the editor cache.
@@ -764,7 +837,7 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   self.locals = response.locals
 
   # Feed the same data into the parallel ViewModel store.
-  syncStoreLocals(response.locals)
+  syncStoreLocals(response)
   syncOriginSummaries(response)
   for localVariable in response.locals:
     let expression = localVariable.expression
@@ -810,6 +883,21 @@ proc activeWatchExpressions(self: StateComponent): seq[cstring] =
     result = self.watchExpressions
 
 proc loadLocals*(self: StateComponent) =
+  ## The legacy State component's `ct/load-locals` — the only sender on a
+  ## host whose StateVM runs over a stub store (the VS Code extension, where
+  ## `configureMiddleware` never builds the session's store).
+  ##
+  ## ONE REQUEST PER STOP. Once `initStateVMWithStore` has put the StateVM on
+  ## the session's real store, its auto-load (`state_vm.nim`) asks on every
+  ## stop and every watch-list change, through the same transport, and its
+  ## answer reaches this component through the same fan-out. This component
+  ## asking as well made two requests per move — one naming the file's
+  ## language, the store's naming `c` — so it stands down; the store's
+  ## request names the file's language (`ReplayDataStore.sourceLanguageOf`,
+  ## installed there), the stop's own tick (this component's `rrTicks` is
+  ## never assigned, so it sent 0), the same depth, budget and watches.
+  if storeSendsLocals:
+    return
   let countBudget = 3000
   let minCountLimit = 50
   let arguments = CtLoadLocalsArguments(
@@ -822,6 +910,8 @@ proc loadLocals*(self: StateComponent) =
     # `Lang` would serialise as its ordinal (LRS-1).
     lang: cstring(langWireName(toLangFromFilename(self.location.path))),
   )
+  # PLAT-29: the stop this is sent at is recorded by `wireLocalsAnswers`'s
+  # tracker as the request is WRITTEN, under the request's own identity.
   self.api.emit(CtLoadLocals, arguments)
 
 method onMove(self: StateComponent) {.async.} =

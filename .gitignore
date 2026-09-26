@@ -684,3 +684,29 @@ refs/*
 # When that is no longer true, a committed baseline starts buying regression
 # detection and this entry should go.
 src/tests/visual/captures/
+
+# Compiled Nim test binaries.
+#
+# `nim c -r src/tests/.../foo_test.nim` leaves the linked executable beside its
+# source, with the same name minus the extension. Nothing ignored them, so a
+# `git add -A` in a checkout where anyone had run a test file directly would
+# commit a multi-hundred-kilobyte Mach-O or ELF into a public repository. That
+# has been caught in review at least once, on a 618 KB binary.
+#
+# It is also precisely what the history-rewrite campaign is removing from these
+# repos' past, so re-adding one undoes that work.
+#
+# The two shapes below are the file-naming conventions in use (`<topic>_test`
+# and `test_<topic>`). `*_test` cannot match a source file, because a source
+# file's name ends in `.nim`. `test_*` CAN, so it is paired with a re-include
+# of anything carrying an extension — a compiled binary has no dot in its name
+# and a source always does.
+src/tests/**/*_test
+src/frontend/**/*_test
+src/common/**/*_test
+src/tests/**/test_*
+src/frontend/**/test_*
+src/common/**/test_*
+!src/tests/**/test_*.*
+!src/frontend/**/test_*.*
+!src/common/**/test_*.*

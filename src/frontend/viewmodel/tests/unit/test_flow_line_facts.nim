@@ -126,8 +126,15 @@ suite "PLAT-42: the flow overlay's per-line facts":
     check flowLineFacts(%*{}).len == 0
     check flowLineFacts(%*{"branchesTaken": [], "location": {}}).len == 0
 
-  test "the wire ordinal of NotTaken is the enum's":
+  test "the wire ordinals of NotTaken and Taken are the enum's":
     check FlowWireNotTakenOrdinal == ord(BranchState.NotTaken)
+    # `Taken` joined `NotTaken` as a `mixin`ed constant when the dimming rule
+    # learned that an arm entered on ANY pass outranks the file-wide sweep's
+    # claim that it was not (issue #758). Both are ordinals duplicated out of
+    # the enum, so both are pinned to it here: a reordering of `BranchState`
+    # would otherwise silently swap which arms are dimmed.
+    check FlowWireTakenOrdinal == ord(BranchState.Taken)
+    check FlowWireTakenOrdinal != FlowWireNotTakenOrdinal
 
   test "the native hosts' overlay default is the shipped config's":
     let enabled = yamlFlowEnabled(DefaultConfigYaml)

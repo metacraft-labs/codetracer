@@ -4,7 +4,7 @@ import
   results,
   ipc_subsystems/[ dap, socket ],
   ../lib/[ jslib, electron_lib ],
-  ../[ trace_metadata, config, types ],
+  ../[ trace_metadata, config, types, file_conflicts ],
   ../viewmodel/viewmodels/visual_replay_layout,
   visual_replay_player,
   ../../common/[ ct_logging, paths, trace_source_paths ],
@@ -242,6 +242,73 @@ proc isExecutableFile(path: cstring): bool =
       return (stat.mode.to(int) and 0o111) != 0
   except:
     return false
+
+proc isDirectoryPath(path: cstring): bool =
+  ## Does `path` name a directory that exists right now?
+  ##
+  ## `spawn` needs this of `options.cwd` and answers `ENOENT` (or `ENOTDIR` for
+  ## a file, which it *throws* rather than emitting) when it does not hold, so
+  ## asking first is the difference between naming the missing directory and
+  ## reporting five letters that mean three different things.  See issue #747.
+  if path.len == 0:
+    return false
+  try:
+    return cast[bool](fs.statSync(path).isDirectory())
+  except:
+    return false
+
+proc effectiveSearchPath(options: JsObject): cstring =
+  ## The `PATH` `spawn` will resolve a bare executable name against.
+  ##
+  ## **`options.env` wins when it is supplied**, and a re-record can supply one
+  ## built from `Trace.env` — a snapshot of the environment the program was
+  ## recorded in, possibly on another machine.  So the recorder can be perfectly
+  ## installed and still be unfindable, which is the third `ENOENT` cause of
+  ## issue #747 and the one nothing in the codebase acknowledged.
+  if not options.isNil:
+    try:
+      let envObject = options.env
+      if not envObject.isNil and not envObject.PATH.isNil:
+        return envObject.PATH.to(cstring)
+    except:
+      discard
+  try:
+    return nodeProcess.toJs.env.PATH.to(cstring)
+  except:
+    return cstring""
+
+proc resolveRecorderExe(exe: cstring; options: JsObject): cstring =
+  ## Where `spawn(exe, …, options)` will actually find `exe`, or `""` when it
+  ## will not find it at all.
+  ##
+  ## `codetracerExe` is an absolute path when the install prefix is known and
+  ## the bare name `"ct"` otherwise (`src/common/paths.nim`,
+  ## `resolveCodetracerExe`), so both shapes are live and they fail for
+  ## different reasons.
+  if exe.len == 0:
+    return cstring""
+  if looksLikeAPath($exe):
+    if isExecutableFile(exe):
+      return exe
+    # Windows names the same binary `ct.exe` while `codetracerExe` spells it
+    # `<prefix>/bin/ct` (`paths.nim`'s `when defined(windows)` arm), so the
+    # bare spelling missing is not the same as the recorder missing.
+    let windowsExe = cstring($exe & ".exe")
+    if isExecutableFile(windowsExe):
+      return windowsExe
+    return cstring""
+  let searchPath = $effectiveSearchPath(options)
+  if searchPath.len == 0:
+    return cstring""
+  let delimiter = $cast[JsObject](nodePath).delimiter.to(cstring)
+  let separator = if delimiter.len > 0: delimiter else: ":"
+  for directory in searchPath.split(separator):
+    if directory.len == 0:
+      continue
+    let candidate = nodePath.join(cstring(directory), exe)
+    if isExecutableFile(candidate):
+      return candidate
+  cstring""
 
 proc materializedTraceRootHasEntries(trace: Trace; root: string): bool =
   let materializedPath = nodePath.join(trace.outputFolder, cstring"files", cstring(root))
@@ -513,6 +580,96 @@ proc optionCwd(options: JsObject): cstring =
   except:
     discard
   cstring""
+
+proc recordTargetOf(recordArgs: seq[cstring]): cstring =
+  ## The program inside a `ct record` argument vector.
+  ##
+  ## Not simply `recordArgs[0]`: `ui/welcome_screen.prepareArgs` (`:341-345`)
+  ## prefixes `-o <outputFolder>` when the user chose one, so the program is
+  ## the first entry that is not a flag or a flag's value.  Only `-o` takes a
+  ## value here, and it is the only flag any sender emits.
+  var i = 0
+  while i < recordArgs.len:
+    let arg = $recordArgs[i]
+    if arg == "-o":
+      i += 2
+      continue
+    if arg.len > 0 and arg[0] == '-':
+      i += 1
+      continue
+    return recordArgs[i]
+  cstring""
+
+proc recordLaunchFactsFor(exe: cstring; recordTarget: cstring;
+                          options: JsObject): RecordLaunchFacts =
+  ## Observe everything `classifyRecordLaunch` needs, in the one process that
+  ## can observe it.  The decision itself stays pure — see
+  ## `src/frontend/file_conflicts.nim`.
+  let requestedCwd = optionCwd(options)
+  result = RecordLaunchFacts(
+    recorder: $exe,
+    recorderResolved: $resolveRecorderExe(exe, options),
+    recordTarget: $recordTarget,
+    requestedCwd: $requestedCwd,
+    requestedCwdUsable: isDirectoryPath(requestedCwd))
+  if not result.requestedCwdUsable and recordTarget.len > 0:
+    # The target is an absolute path or a project root by the time it gets
+    # here, so its own directory is a defensible place to run from.
+    if isDirectoryPath(recordTarget):
+      result.fallbackCwd = $recordTarget
+    else:
+      let parent = cstring(($recordTarget).parentDir)
+      if isDirectoryPath(parent):
+        result.fallbackCwd = $parent
+
+proc applyRecordLaunchCwd(options: JsObject; facts: RecordLaunchFacts) =
+  ## Replace the requested `options.cwd` with the one that actually exists.
+  ##
+  ## Clearing the key rather than writing `""` matters.  `undefined` is how you
+  ## say "inherit" here — verified against node v20.20.0 / macOS 15 arm64, where
+  ## `spawn(exe, args, {cwd: undefined})` runs in the parent's directory and
+  ## `{cwd: "/gone"}` is the `ENOENT` of issue #747.  The empty string is NOT an
+  ## equivalent spelling: async `spawn` happens to tolerate `{cwd: ""}` and
+  ## inherit, but `spawnSync(exe, args, {cwd: ""})` answers `ENOENT` for the
+  ## same input, so writing `""` would make the meaning of this field depend on
+  ## which node API the caller reaches for.
+  ## https://nodejs.org/api/child_process.html#child_processspawncommand-args-options
+  if options.isNil:
+    return
+  let resolved = recordLaunchCwd(facts)
+  if resolved.len == 0:
+    if facts.requestedCwd.len > 0:
+      options["cwd".cstring] = jsUndefined
+  else:
+    options["cwd".cstring] = cast[JsObject](cstring(resolved))
+
+proc checkRecordLaunch(exe: cstring; recordTarget: cstring;
+                       options: JsObject): bool =
+  ## Refuse a recorder spawn whose preconditions do not hold, saying which one.
+  ##
+  ## Issue #747: `spawn` reports `ENOENT` for a missing executable, a missing
+  ## `options.cwd` and an unresolvable bare name alike, and names the
+  ## executable in `error.path` in all three — so the message the reporter
+  ## photographed was compatible with three unrelated causes and pointed at the
+  ## wrong one.  Asking first is what turns it back into a diagnosis.
+  ##
+  ## Returns `true` when the launch may proceed.  A dead working directory is
+  ## NOT a refusal: it is replaced, out loud.
+  let facts = recordLaunchFactsFor(exe, recordTarget, options)
+  let defect = classifyRecordLaunch(facts)
+  if defect != rldNone:
+    let refusal = recordLaunchRefusal(facts, defect)
+    errorPrint "index: record launch refused: ", refusal
+    mainWindow.webContents.send "CODETRACER::failed-record",
+      js{errorMessage: cstring(refusal)}
+    return false
+  applyRecordLaunchCwd(options, facts)
+  let warning = recordLaunchCwdWarning(facts)
+  if warning.len > 0:
+    warnPrint "index: ", warning
+    mainWindow.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationWarning, warning)
+  true
 
 proc sourceFoldersForLiveProgram(program, cwd: cstring): seq[cstring] =
   if cwd.len > 0 and pathExists(cwd):
@@ -1111,6 +1268,13 @@ proc onRecordWithLaunchConfig*(sender: js,
   mainWindow.webContents.send "CODETRACER::new-notification",
     newNotification(NotificationInfo, fmt"Recording: {config.name}")
 
+  # The same precondition gate as `onNewRecord` (issue #747).  This path is if
+  # anything more exposed: `config.cwd` comes straight out of a checked-in
+  # `launch.json`, which routinely names a directory that exists on the author's
+  # machine and not on this one.
+  if not checkRecordLaunch(codetracerExe, config.program, processOptions):
+    return
+
   let processResult = await startProcess(
     codetracerExe,
     @[cstring"record"].concat(recordArgs),
@@ -1156,8 +1320,20 @@ proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "CODETRACER::new-notification", notification
 
-proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
-  ## Initialize edit mode for a folder - called from welcome screen after folder selection
+proc initEditMode(sender: js; folders: seq[cstring]) {.async.} =
+  ## Enter edit mode over zero or one folders, and hand the renderer the
+  ## `CODETRACER::no-trace` message that puts it there.
+  ##
+  ## ISSUE #735 generalised this from one folder to a SEQUENCE, so that "New
+  ## file" — which opens edit mode with no project at all — takes the same path
+  ## rather than a parallel one. The empty case is not a special case anywhere
+  ## below: `loadFilesystem(@[])` returns the artificial "source folders" root
+  ## with no children, `loadFilenames(@[])` returns an empty list,
+  ## `getLaunchConfigsForWorkspace("")` finds nothing, and `getSave` ignores its
+  ## folders entirely. The one thing that does differ is `startOptions.folder`,
+  ## which stays empty — and `ui_js.onNoTrace` reads exactly that to decide the
+  ## session gets an untitled buffer.
+  let folder = if folders.len > 0: folders[0] else: cstring""
   # Set the startup options to edit mode
   data.startOptions.edit = true
   data.startOptions.welcomeScreen = false  # No longer in welcome screen mode
@@ -1166,10 +1342,10 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   data.workspaceFolder = folder
 
   # Load filesystem and filenames for the folder
-  let filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
-  let filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
+  let filesystem = await loadFilesystem(folders, traceFilesPath=cstring"", selfContained=false)
+  let filenames = await loadFilenames(folders, traceFolder=cstring"", selfContained=false)
   var functions: seq[Function] = @[]
-  let save = await getSave(@[folder], data.config.test)
+  let save = await getSave(folders, data.config.test)
   data.save = save
 
   # Open folders in the edit layout, not the debugger replay layout.  The
@@ -1193,8 +1369,16 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
     save: save
   }
 
-  # Also load and send launch configs for the workspace
-  let launchConfigs = getLaunchConfigsForWorkspace(folder)
+  # Also load and send launch configs for the workspace.
+  #
+  # Only when there IS one. `getLaunchConfigsForWorkspace("")` joins to the
+  # relative `.vscode/launch.json`, which resolves against the Electron main
+  # process's own working directory — so a projectless edit session (issue
+  # #735's "New file") would silently adopt whatever launch configurations
+  # happened to sit beside wherever CodeTracer was started from.
+  let launchConfigs =
+    if folder.len > 0: getLaunchConfigsForWorkspace(folder)
+    else: newSeq[LaunchConfig]()
   if launchConfigs.len > 0:
     var configsJs: seq[JsObject] = @[]
     for i, config in launchConfigs:
@@ -1213,8 +1397,29 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
       })
     mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
 
+proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
+  await initEditMode(sender, @[folder])
+
 proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
   await initEditModeForFolder(sender, response.folder)
+
+proc onNewFile*(sender: js, response: js) {.async.} =
+  ## ISSUE #735 — the welcome screen's "New file" start option.
+  ##
+  ## Edit mode with NO project: no folder to walk, no filenames, no save file.
+  ## `ui_js.onNoTrace` recognises that state by `startOptions.folder` being
+  ## empty — nothing else in the product reaches edit mode without a folder;
+  ## see that branch's comment for what guarantees it — and opens one untitled
+  ## buffer.
+  ##
+  ## The main process's own state is updated by `initEditMode` exactly as an
+  ## "Open folder" would update it, which is why this goes through the main
+  ## process at all rather than opening a tab in the renderer directly: after
+  ## this returns, `data.startOptions` and `data.workspaceFolder` describe an
+  ## edit session with no workspace, and everything downstream that asks —
+  ## `onRecordFromLaunch`, `hcr_launch`, a later mode switch — gets a truthful
+  ## answer instead of a stale "the welcome screen is up".
+  await initEditMode(sender, @[])
 
 proc onNewRecord*(sender: js,
     response: jsobject(filename=cstring, args=seq[cstring], options=JsObject,
@@ -1352,6 +1557,11 @@ proc onNewRecord*(sender: js,
 
   let finalRecordArgs = recordBackendArgs.concat(recordArgs)
   infoPrint "index: record with args: ", finalRecordArgs
+  # Issue #747.  Everything `spawn` can answer `ENOENT` for is asked about here,
+  # by name, while there is still something to say about it.
+  if not checkRecordLaunch(
+      codetracerExe, recordTargetOf(recordArgs), response.options):
+    return
   let processResult = await startProcess(
     codetracerExe,
     @[cstring"record"].concat(finalRecordArgs),
@@ -1414,6 +1624,34 @@ proc onRestartSubsystem*(sender: JsObject, name: cstring) {.async.} =
     #   and it sends back ct/restore, with the last location and breakpoints?
     await restartDbBackend()
 
+proc jsLocalTimeText(): cstring {.importjs: "new Date().toLocaleTimeString()".}
+  ## When the recording was made, in the reader's own clock. Stamped here
+  ## rather than in the renderer because this is the process that watched
+  ## `ct record-test` finish.
+
+proc sendTestRunSettled(recordingId: cstring; errorMessage: cstring) =
+  ## TELL THE RENDERER THE RUN IS OVER, however it ended.
+  ##
+  ## `GUI/Core-Panes/Test-Results-Pane.md` §5. `onRunTest` has five exits and
+  ## before this every one of them was silent as far as the Test Results pane
+  ## and the editor's Run-test button were concerned: the button spun until its
+  ## own two-minute deadline and the pane never moved (issue #748). The failure
+  ## exits are the ones that matter most, because they are the ones a user
+  ## meets — a run that succeeds at least replaces the window with the
+  ## recording.
+  ##
+  ## NOT `CODETRACER::failed-record`, which carries no success arm at all and
+  ## which every recording and build failure in this file also sends —
+  ## `checkRecordLaunch`, `onStopRecordingProcess`, `onRecordWithLaunchConfig`
+  ## and `onNewRecord` between them. A settle keyed on it would fire for
+  ## re-records that have nothing to do with a test, and would still leave
+  ## every successful run unsettled.
+  mainWindow.webContents.send "CODETRACER::test-run-settled", js{
+    recordingId: recordingId,
+    recordedAt: (if recordingId.len > 0: jsLocalTimeText() else: cstring""),
+    errorMessage: errorMessage
+  }
+
 proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
   let pid = nodeProcess.pid.to(int)
@@ -1436,7 +1674,12 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
     let lines = ($output).splitLines()
     # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
     echo output
-    if lines.len > 1:
+    # `lines.len > 2`, NOT `> 1`. The line read below is `lines[^3]`, so two
+    # lines of output indexed `lines[-1]` and raised an `IndexDefect` out of an
+    # `async` proc — which rejects the future, reaches no handler, and settles
+    # nothing. With the guard the same output takes the "couldn't extract
+    # traceId" arm below, which says so and ends the run.
+    if lines.len > 2:
       let traceIdLine = lines[^3]
       echo lines
       # M-REC-6: stdout-marker renamed to ``recordingId:``.
@@ -1446,8 +1689,20 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
         let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
         if trace.isNil:
           errorPrint "index: run-test: can't find trace"
+          sendTestRunSettled(cstring"", cstring(
+            "ct record-test reported recording " & $traceId &
+            ", but CodeTracer cannot find it. Nothing about the test has " &
+            "been established."))
           return
         infoPrint "trace is in ", trace.outputFolder
+
+        # SETTLED BEFORE THE TRACE IS LOADED, and the order is deliberate. The
+        # run is over the moment the recorder answered; loading the recording
+        # is the next operation, it can take seconds, and on the
+        # `newWindow` arm it happens in a different process entirely. Settling
+        # afterwards would leave the button spinning across the load, and would
+        # never settle at all if the load failed.
+        sendTestRunSettled(traceId, cstring"")
 
         if response.newWindow:
           infoPrint "new window"
@@ -1463,6 +1718,22 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
 
         return
     warnPrint "index: run-test: traced ok, but couldn't extract traceId"
+    # EXIT 0 AND NO `recordingId:` LINE. `ct record-test` prints the marker on
+    # every route that produced a recording, so this is a recorder that
+    # answered in a shape this build does not understand — which is a fault,
+    # and a fault the pane has to state rather than absorb.
+    sendTestRunSettled(cstring"", cstring(
+      "ct record-test finished without reporting a recording id, so there " &
+      "is nothing to replay. Its output is in the CodeTracer log."))
   else:
     errorPrint "index: ct record-test error: ", JSON.stringify(processResult.error)
-    mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"ct record-test error: " & JSON.stringify(processResult.error)}
+    let errorText = cstring"ct record-test error: " & JSON.stringify(processResult.error)
+    # BOTH MESSAGES, and they are not redundant. `failed-record` is the
+    # re-record latch's release and the new-record form's error line;
+    # `test-run-settled` is what ends the RUN — the pane's `endRun` and the
+    # editor's spinner. Before this the failure arm sent only the first, which
+    # the Test Results pane does not subscribe to, so a failed run left the
+    # button turning for two minutes under a message saying it had started.
+    # That is the reported defect in its most-travelled form.
+    mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: errorText}
+    sendTestRunSettled(cstring"", errorText)

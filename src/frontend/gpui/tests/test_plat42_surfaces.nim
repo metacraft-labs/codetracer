@@ -129,11 +129,19 @@ suite "PLAT-42 surface 2 — per-line status":
       else: ck marks == 0
 
 const FlowScenario = "noir-declined-arm"
-  ## `noir_space_ship`'s `shield.nr`, stopped (`stepIn=15`) inside the loop
-  ## whose `if` on line 10 declined its arm on lines 11-13. `calc` cannot carry
-  ## this case: it has no `if` at all, by design.
-const DeclinedArm = [11, 12, 13]
-const DeclinedHeader = 10
+  ## `noir_space_ship`'s `shield.nr`, stopped (`stepIn=33`) on line 29 in the
+  ## first call of `calculate_damage`: the shield is full, so `shield_pct ==
+  ## 100` took its arm and declined the `else` (lines 32-33), and `damage >
+  ## remaining_shield` declined its arm (lines 35-36). `calc` cannot carry this
+  ## case: it has no `if` at all, by design.
+  ##
+  ## Until 2026-09-24 this was `stepIn=15` and lines 11-13 — the arm of the
+  ## in-loop `if` on line 10, which the run ENTERS on later passes. The backend
+  ## called it declined only because of the defect f0e3f8f0f fixed (#758), and
+  ## with that fix the old stop has no declined line; the record was re-taken.
+const DeclinedArm = [32, 33, 35, 36]
+const DeclinedHeader = 34
+  ## The `if` whose arm (35-36) was declined: its test ran, so it is taken.
 
 proc flowRowsOf(s: string): seq[JsonNode] =
   rec()["flowScenarios"][s]["rows"].getElems

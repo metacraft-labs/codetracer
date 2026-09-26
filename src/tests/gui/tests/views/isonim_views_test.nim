@@ -3557,6 +3557,215 @@ suite "IsoNim Timeline Panel — structure":
       dispose()
 
 # ---------------------------------------------------------------------------
+# Timeline execution-overview tests (issue #693)
+#
+# `Front-Ends/Electron-GUI.md:151-156` obliges: extent, current position,
+# "Event markers (calls, returns, exceptions)" and drag to seek. These cases
+# cover the three of those four that a mock DOM can see. **The fourth cannot
+# be covered here**: dragging is a `mousedown`/`mousemove`/`mouseup` sequence
+# on a laid-out element with a non-zero `getBoundingClientRect().width`, and
+# the mock renderer has no layout, so the drag handler is exercised only by
+# `mountIsoNimTimeline` under a real browser. It is unrun on this host.
+#
+# THE MARKS AND THE LABELS ARE RENDERED BY `for` LOOPS, which isonim expands
+# at render time and which therefore do NOT update in place. Every case below
+# populates the store BEFORE rendering, and the last one asserts that a
+# re-render is what picks up a later change — so the loop's one-shot nature is
+# a stated property rather than a surprise.
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Timeline Panel — execution overview":
+
+  test "with no extent the empty state is shown and the track is hidden":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let empty = findByClass(panel, "timeline-empty")
+      check empty.styles.getOrDefault("display", "") == "block"
+      check "timeline" in empty.textContent
+
+      let track = findByClass(panel, "timeline-track")
+      check track.styles.getOrDefault("display", "") == "none"
+
+      dispose()
+
+  test "with an extent the track is shown and the empty state is hidden":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 400'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      check findByClass(panel, "timeline-empty")
+        .styles.getOrDefault("display", "") == "none"
+      let track = findByClass(panel, "timeline-track")
+      check track.styles.getOrDefault("display", "") == "block"
+      check track.attributes["data-min-rr-ticks"] == "0"
+      check track.attributes["data-max-rr-ticks"] == "400"
+      # The extent is on the ARIA slider attributes too, not only on the
+      # `data-` ones: `role="slider"` was already there and a slider with no
+      # value range is one a screen reader reads as empty.
+      check track.attributes["aria-valuemax"] == "400"
+
+      dispose()
+
+  test "tick labels are rendered across the extent, ends included":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 400'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let labels = findAllByClass(panel, "timeline-tick-label")
+
+      check labels.len == 5
+      check labels[0].textContent == "0"
+      check labels[^1].textContent == "400"
+      # Placed by percentage of the track, like the playhead and the marks.
+      check labels[0].styles.getOrDefault("left", "") == "0.0%"
+      check labels[^1].styles.getOrDefault("left", "") == "100.0%"
+
+      dispose()
+
+  test "call, return and exception marks are placed on the track":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 100'u64
+      store.timeline.val = tl
+      store.calltrace.lines.val = @[
+        CallLine(name: "main", rrTicks: 0'u64, depth: 0),
+        CallLine(name: "inner", rrTicks: 20'u64, depth: 1),
+        CallLine(name: "after", rrTicks: 51'u64, depth: 1),
+      ]
+      store.eventLog.rows.val = @[
+        EventLogRow(kindId: ErrorEventKindId, kind: "error", rrTicks: 80'u64),
+      ]
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let marks = findAllByClass(panel, "timeline-marker")
+
+      # main@0, inner@20, inner returns@50, after@51, error@80.
+      check marks.len == 5
+      check marks[0].attributes["data-marker-kind"] == "call"
+      check marks[2].attributes["data-marker-kind"] == "return"
+      check marks[2].attributes["data-marker-rr-ticks"] == "50"
+      check marks[^1].attributes["data-marker-kind"] == "exception"
+      check marks[^1].attributes["data-marker-rr-ticks"] == "80"
+      # Each kind carries its own modifier class, so a stylesheet can tell
+      # them apart without parsing a data attribute.
+      check findAllByClass(panel, "timeline-marker-call").len == 3
+      check findAllByClass(panel, "timeline-marker-return").len == 1
+      check findAllByClass(panel, "timeline-marker-exception").len == 1
+      # Placed by the SAME tick-to-percent conversion as the playhead: the
+      # error at tick 80 of a 0..100 recording sits at 80%.
+      check marks[^1].styles.getOrDefault("left", "") == "80.0%"
+      # The track reports the real total and says the set is a window, so a
+      # reader of the DOM is not left to assume these are every event in the
+      # recording.
+      let track = findByClass(panel, "timeline-track")
+      check track.attributes["data-marker-count"] == "5"
+      check track.attributes["data-markers-are-windowed"] == "true"
+
+      dispose()
+
+  test "a recording with an extent but no loaded events has no marks":
+    ## The negative control for the case above. Without it a renderer that
+    ## drew a mark per tick label, or per anything else, would pass.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 400'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      check findAllByClass(panel, "timeline-marker").len == 0
+      check findByClass(panel, "timeline-track")
+        .attributes["data-marker-count"] == "0"
+      # …and the tick labels ARE there, which is what makes this a control on
+      # the marks rather than on the whole render.
+      check findAllByClass(panel, "timeline-tick-label").len == 5
+
+      dispose()
+
+  test "marks appear on the next render, not in the panel already rendered":
+    ## `dsl/ui` expands a `for` at render time, so the marks in a rendered
+    ## panel are frozen. `mountIsoNimTimeline` re-renders inside a
+    ## `createEffect` for exactly this reason; this case pins the property
+    ## that makes that necessary, so a future reader does not "simplify" the
+    ## mount back to a single `appendChild`.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 100'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let first = renderTimelinePanel(r, vm)
+      check findAllByClass(first, "timeline-marker").len == 0
+
+      store.calltrace.lines.val = @[
+        CallLine(name: "main", rrTicks: 10'u64, depth: 0),
+      ]
+      check findAllByClass(first, "timeline-marker").len == 0
+
+      let second = renderTimelinePanel(r, vm)
+      check findAllByClass(second, "timeline-marker").len == 1
+
+      dispose()
+
+  test "the playhead and the position readout track the debugger":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 0'u64
+      tl.maxRRTicks = 200'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let playhead = findByClass(panel, "timeline-playhead")
+      let percent = findByClass(panel, "position-percent")
+
+      check playhead.styles.getOrDefault("left", "") == "0.0%"
+
+      var dbg = store.debugger.val
+      dbg.rrTicks = 50'u64
+      store.debugger.val = dbg
+
+      # The playhead is a style in its own render effect, so it moves without
+      # a re-render — unlike the marks above.
+      check playhead.styles.getOrDefault("left", "") == "25.0%"
+      check percent.textContent == "25.0%"
+      check findByClass(panel, "timeline-track")
+        .attributes["data-current-rr-ticks"] == "50"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
 # Timeline position tests
 # ---------------------------------------------------------------------------
 
@@ -4114,7 +4323,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let r = MockRenderer()
 
       let panel = renderScratchpadPanel(r, vm)
-      vm.addValue(makeScratchpadEntry("crash", "boom", isError = true))
+      vm.addValue(makeScratchpadEntry("crash", "<error: boom>", isError = true))
 
       let list = findByClass(panel, "value-components-container")
       let row = list.children[0]
@@ -4324,11 +4533,11 @@ suite "IsoNim Scratchpad Panel — vm":
     check isonim_scratchpad_view.rowClass(true) ==
       "scratchpad-value-view scratchpad-value-error"
 
-  test "cellText branches on isLiteral / isError flags":
+  test "cellText preserves already-presented literal and error text":
     check cellText(makeScratchpadEntry("a", "1")) == "1"
     check cellText(makeScratchpadEntry("$msg", "hi",
                                        isLiteral = true)) == "hi"
-    check cellText(makeScratchpadEntry("crash", "boom",
+    check cellText(makeScratchpadEntry("crash", "<error: boom>",
                                        isError = true)) ==
       "<error: boom>"
 
@@ -4767,7 +4976,7 @@ suite "IsoNim Terminal Output Panel — interactions":
       check req.isSome
       check req.get.args["eventIndex"].getInt == 7
       check req.get.args["directLocationRRTicks"].getInt == 42
-      check req.get.args["kind"].getStr == "Write"
+      check req.get.args["kind"].getInt == 0
 
       dispose()
 
@@ -10847,6 +11056,91 @@ suite "IsoNim Welcome Screen — helpers":
     let s = formatWelcomeTimeAgo("2026/05/02 12:00:00")
     check s.len > 0
 
+# ---------------------------------------------------------------------------
+# Refused start options say why — issue #734
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Welcome Screen — refused start options (#734)":
+
+  test "a refused option renders its reason as the button's title":
+    # The rendering half of #734. A greyed control with no explanation is
+    # indistinguishable from a broken one; `disabledReason` is where the
+    # explanation lives and `title` is where the user can reach it.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(webWelcomeStartOptions())
+      vm.setStartOptionsNote(WebStartOptionsNote)
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      let options = findAllByClass(panel, "start-option")
+      check options.len == 6
+      # Row 0 is "New file" (issue #735), the one option this arm can perform,
+      # so it is the one row that must NOT speak. Every other row must.
+      check r.getAttribute(options[0], "aria-disabled") == "false"
+      check r.getAttribute(options[0], "title") == ""
+      for i in 1 ..< options.len:
+        check r.getAttribute(options[i], "aria-disabled") == "true"
+        check r.getAttribute(options[i], "title").len > 0
+      check r.getAttribute(options[1], "title") == WebOpenFolderReason
+
+      # And the standing line, which is the part a user who has not yet
+      # thought to hover anything can read.
+      check findByClass(panel, StartOptionsNoteClass).textContent ==
+        WebStartOptionsNote
+      dispose()
+
+  test "a live option carries no reason and no note is rendered":
+    # The negative control: the desktop's DOM must be what it was.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(desktopWelcomeStartOptions(showTraceSharing = true))
+      vm.setStartOptionsNote("")
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      let options = findAllByClass(panel, "start-option")
+      check options.len == 6
+      # Five live, one refused (the shell), and only the refused one speaks.
+      for i in 0 ..< 5:
+        check r.getAttribute(options[i], "aria-disabled") == "false"
+        check r.getAttribute(options[i], "title") == ""
+      check r.getAttribute(options[5], "aria-disabled") == "true"
+      check r.getAttribute(options[5], "title") == DesktopShellUnavailableReason
+      check findByClassOrNil(panel, StartOptionsNoteClass).isNil
+      dispose()
+
+  test "clicking a refused option still does nothing, and the live one is reached":
+    # The CSS no longer carries `pointer-events: none` — it suppressed the
+    # native `title` tooltip, which was the only per-option explanation — so
+    # the click now actually reaches the handler and must be refused there.
+    #
+    # ISSUE #735 turned this into a PAIR rather than a single negative, and the
+    # pair is what makes it a test: clicking every row on the web arm produces
+    # exactly one callback, for the one row that arm can perform. Before, this
+    # case asserted `clicked.len == 0` over an arm where every row was refused —
+    # which a `triggerStartOption` wired to nothing at all would also satisfy.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(webWelcomeStartOptions())
+
+      var clicked: seq[string] = @[]
+      let callbacks = WelcomeScreenCallbacks(
+        onStartOptionClick: proc(key: string) = clicked.add(key))
+      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      for opt in findAllByClass(panel, "start-option"):
+        opt.fireEvent("click")
+      check clicked == @["new-file"]
+      # The VM's own fallback arms must not fire either: `record-new-trace`
+      # and `open-online-trace` are the two keys the view can serve without a
+      # host, and on this arm they are refused like the rest.
+      check vm.mode.val == wsmWelcome
+      dispose()
+
 # ===========================================================================
 # Agent Activity panel tests (§1.75 — agent_activity Karax -> IsoNim
 # migration, mission goal #3).
@@ -10911,12 +11205,16 @@ suite "IsoNim Agent Activity Panel — structure":
 
       dispose()
 
-  test "diff previews and terminals preserve legacy ids":
+  test "diff links dispatch editor targets and terminals preserve ids":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 3)
+      var openedTargets: seq[string] = @[]
+      let callbacks = AgentActivityCallbacks(
+        onOpenFileDiff: proc(target: string) = openedTargets.add(target))
+      let panel = renderAgentActivityPanel(r, vm, componentId = 3,
+                                          callbacks = callbacks)
 
       vm.setMessages(@[
         makeAgentActivityMessage("a1", "patch", diffs = @[
@@ -10932,9 +11230,10 @@ suite "IsoNim Agent Activity Panel — structure":
         AgentActivityTerminalEntry(id: "term-a", shellId: 42)
       ])
 
-      let editor = findByClass(panel, "agent-editor")
-      check editor != nil
-      check editor.attributes["id"] == diffEditorId(3, 9)
+      check findByClass(panel, "agent-diff-file-path").textContent == "/repo/a.nim"
+      findByClass(panel, "agent-diff-file-row").fireEvent("click")
+      findByClass(panel, "agent-diff-unified-btn").fireEvent("click")
+      check openedTargets == @["file:a1:9", "unified:a1"]
       let shell = findByClass(panel, "shell-container")
       check shell != nil
       check shell.attributes["id"] == shellContainerId(42)
@@ -11258,12 +11557,17 @@ suite "IsoNim VCS Panel — structure":
 
       findByClass(panel, "vcs-commit-header").fireEvent("click")
       findByClass(panel, "vcs-accordion-file").fireEvent("click")
-      findByClass(panel, "vcs-commit-diff-btn").fireEvent("click")
+      # The commit's diffs are opened per file, from the expanded accordion —
+      # not from the commit row.  #753 removed the commit-level button because
+      # the only target it could mint was the pathless `commit:<hash>`, which
+      # DeepReview-GUI.md §4.1 forbids a diff tab from showing.
+      check findByClassOrNil(panel, "vcs-commit-diff-btn") == nil
+      findByClass(panel, "vcs-file-diff-btn").fireEvent("click")
 
       check expandedCommit == 0
       check expandModifiers == (false, false)
       check selectedFile == "src/main.nim"
-      check openedDiff == "commit:abc123"
+      check openedDiff == "commit:abc123:src/main.nim"
 
       dispose()
 

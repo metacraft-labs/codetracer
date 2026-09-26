@@ -26,6 +26,11 @@
 ## 8. Cross-VM consistency after move
 ## 9. Data minimality — unchanged position does not re-request
 ##
+## TEST DOUBLE JUSTIFICATION: MockBackendService exposes emitted commands and
+## controlled replies while the production SessionViewModel, store and signals
+## run unchanged. This isolates cross-panel request behavior; it does not claim
+## recorder or backend integration coverage.
+##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_debugging_scenarios.nim
 
@@ -899,10 +904,8 @@ suite "Scenario 8: Cross-VM consistency after move":
       # DebugControlsVM: status remains Idle (no step in progress).
       check session.debugControlsVM.statusText.val == "Idle"
 
-      # EventLogVM: event log request was sent.
-      let eventLogCmd = mock.findCommand("ct/event-load")
-      check eventLogCmd.isSome
-      check eventLogCmd.get.args["rrTicks"].getBiggestInt == 500
+      # EventLogVM: moving changes dimming, not the recording's row set.
+      check mock.findCommand("ct/event-load").isNone
 
       # FlowVM: flow data request was sent. The tick travels inside
       # `location`, which is a required field of the engine's

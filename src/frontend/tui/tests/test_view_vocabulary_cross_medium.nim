@@ -24,10 +24,18 @@
 ##             `DataTableWidget.selectedRow`, `ModalWidget.state`.
 ##
 ##   WEB       `frontend/view_vocabulary/web_binding` renders DOM elements
-##             through isonim's `RendererBackend`, routes the key through
-##             `behaviour.applyKey` after translating it into the DOM's own
-##             `KeyboardEvent.key` spelling, and reads the answer back off the
-##             rendered elements' `data-*` attributes.
+##             through isonim's `RendererBackend`, focuses the element and
+##             dispatches a `keydown` spelled the DOM's way
+##             (`KeyboardEvent.key`) at it, where the binding's installed
+##             listener applies it, and reads the answer back off the rendered
+##             elements' `data-*` attributes.
+##
+## The SAME web binding runs in a real document in headless Chromium, with
+## keys from Chromium's own input pipeline, in
+## `src/frontend/tests/view_vocabulary_chromium_test.nim` (the
+## `renderer-chromium` lane), over the same view and the same scripted cases
+## (`frontend/view_vocabulary/cross_medium_script`). This file holds the
+## terminal to those cases; that one holds the browser to them.
 ##
 ## THE TERMINAL SIDE IS AN INDEPENDENT ORACLE and that is the point. It never
 ## calls `applyKey`. If this file drove both sides through the vocabulary's
@@ -47,8 +55,9 @@
 ##   the backend the product's own non-JS overload of every `isonim_*_view.nim`
 ##   is compiled against, and `test_cross_renderer.nim` uses it as one of its
 ##   three real renderers. It is a DOM implementation, not a stand-in for one.
-##   The browser's `WebRenderer` cannot be used here because it compiles only
-##   under `nim js` against a live document, and this lane compiles C.
+##   The browser's `WebRenderer` cannot be used HERE because it compiles only
+##   under `nim js` against a live document, and this lane compiles C; the
+##   Chromium suite named above is where it runs.
 ##
 ##   `isonim_tui.testing.harness.TerminalTestHarness` — isonim-tui's own
 ##   headless bundle: renderer, headless driver, compositor, animator, focus
@@ -56,20 +65,22 @@
 ##   widget suites constructs one. Nothing in it is stubbed; it is the terminal
 ##   front-end's runtime minus the pty.
 ##
-## ## THE TWO EXCLUSIONS, NAMED
+## ## NO EXCLUSIONS, AND ONE BOUND ON THE INPUT CASES
 ##
-## `Markdown.text` is not compared. `MarkdownWidget` parses its source into an
-## `MdDocument` and does not keep the source, so the terminal side genuinely
-## cannot report it; the binding returns "" rather than echoing the model, and
-## this file drops the field BY NAME with the reason here. An unexplained
-## exclusion is how a suite stops covering what it claims to cover.
+## `Markdown.text` IS compared, since 2026-09-26. Until then `MarkdownWidget`
+## kept only its parsed `MdDocument`, the terminal could not report the
+## source, and this file excluded the field by name; the library keeps
+## `source` now. What each medium made OF the source is compared too — the
+## block outline, read out of isonim-tui's `MdDocument` on one side and off
+## the rendered elements on the other, two parsers written independently.
 ##
-## `Input.cursor` is compared, and only over ASCII. isonim-tui's
-## `InputWidget.selection.cursor` is a GRAPHEME-CLUSTER index and the
-## vocabulary's `Input.cursor` is a RUNE index; they agree on everything that
-## is neither a combining sequence nor an emoji join. The rune-level editing is
-## asserted against the vocabulary in `src/common/view_vocabulary_test.nim`,
-## where there is no second definition to disagree with.
+## `Input.cursor` is compared over a COMBINING SEQUENCE as well as ASCII
+## (scripted case "Input: a combining mark joins the character before it").
+## isonim-tui's `InputWidget.selection.cursor` is a GRAPHEME-CLUSTER index, and
+## so is the vocabulary's `Input.cursor` as every binding drives it
+## (`vocabulary.ClusterBoundaries`, `view_vocabulary/graphemes`). Until
+## 2026-09-26 the vocabulary counted RUNES, and this file drove ASCII only for
+## that reason.
 ##
 ## ## COUNTED ASSERTIONS (Verification-Harness-Traps §4c)
 
@@ -78,7 +89,10 @@ import std/[algorithm, strutils, tables, unittest]
 import isonim/testing/mock_dom
 import isonim_tui/testing/harness
 
+import isonim_tui/widgets/tabs as w_tabs
+
 import ../../../common/view_vocabulary
+import ../../view_vocabulary/cross_medium_script
 import ../../view_vocabulary/terminal_binding as tbind
 import ../../view_vocabulary/web_binding as wbind
 
@@ -88,55 +102,12 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 353
-  ## Written from a run. See the final case.
+const ExpectedAssertions = 807
+  ## Written from a run. See the final case. (353 until 2026-09-26, before
+  ## the shared-script, Markdown-outline and Menu-Enter cases existed.)
 
-const ExcludedFields = @["doc.text"]
-  ## `Markdown`'s source; see the header. A LIST OF FULLY-QUALIFIED FIELD
-  ## NAMES rather than a kind, so excluding a whole entry by accident is not
-  ## possible and the exclusion is visible in one place.
-
-# ---------------------------------------------------------------------------
-# The view. Written ONCE, in the vocabulary, and rendered twice.
-#
-# It carries all sixteen entries because "one view renders equivalently" is a
-# stronger claim the more of the vocabulary the view uses, and because an
-# entry left out of it would be an entry whose mapping table row nothing
-# checks.
-# ---------------------------------------------------------------------------
-
-proc opt(id, label: string; disabled = false): ViewOption =
-  ViewOption(id: id, label: label, disabled: disabled)
-
-proc settingsPanel(): ViewNode =
-  viewCollapsible("panel", "Debug settings", @[
-    viewText("title", "Settings"),
-    viewButton("apply", "Apply"),
-    viewCheckbox("wrap", "Wrap long values"),
-    viewToggle("live", "Live update"),
-    viewInput("filter", "abc"),
-    viewSelect("lang", @[opt("rs", "Rust"), opt("py", "Python"),
-                         opt("go", "Go")], selected = 0),
-    # `beta` IS DISABLED, and that is not decoration. A list with no
-    # unavailable member cannot show whether the two media agree about
-    # SKIPPING one, and the mutation that removes the skip from
-    # `behaviour.nextEnabled` left this suite fully green until this option
-    # was marked — measured, in the falsification pass for this milestone.
-    viewList("recent", @[opt("a", "alpha"), opt("b", "beta", disabled = true),
-                         opt("c", "gamma")]),
-    viewTreeNode("state", "locals", @[
-      viewTreeNode("state.x", "x"),
-      viewTreeNode("state.p", "p", @[viewTreeNode("state.p.y", "y")])],
-      expanded = true),
-    viewTable("tbl", @["name", "value"],
-              @[@["a", "1"], @["b", "2"], @["c", "3"]]),
-    viewTabs("panes", @[opt("t1", "Source"), opt("t2", "State")]),
-    viewMenu("ctx", @[opt("m1", "Copy"), opt("m2", "Paste")]),
-    viewProgress("load", 40),
-    viewImage("shot", "image/png", "screenshot of the state panel", 2048),
-    viewMarkdown("doc", "# Title\n\nbody"),
-    viewModal("dlg", "Confirm", @[viewText("dlgtext", "Are you sure?")])],
-    expanded = true)
+# The view is `cross_medium_script.settingsPanel()`: ONE definition, shared
+# with the Chromium suite, so the browser and this file render the same view.
 
 # ---------------------------------------------------------------------------
 # The two media, side by side
@@ -162,8 +133,7 @@ proc newCrossMedium(): CrossMedium =
 proc factsOf(fs: seq[StateFact]): Table[string, string] =
   for f in fs:
     let key = f.id & "." & f.field
-    if key notin ExcludedFields:
-      result[key] = f.value
+    result[key] = f.value
 
 proc terminalFacts(c: CrossMedium): Table[string, string] =
   factsOf(tbind.readTerminalFacts(c.terminal))
@@ -211,13 +181,14 @@ proc factOf(c: var CrossMedium; key: string): tuple[terminal, web: string] =
 # test's own. The `[OK]` in the transcript is now a claim about the
 # assertions.
 
-template sendBoth(c: var CrossMedium; id: string; k: Key; ch = ' ') =
+template sendBoth(c: var CrossMedium; id: string; k: Key; ch = "") =
   ## The SAME vocabulary key, spelled each medium's own way by its own
   ## binding. That translation is the only thing that differs, which is the
-  ## claim under test.
+  ## claim under test. `ch` is one RUNE (a `kChar`'s character), as a string
+  ## so a combining mark can be typed.
   ck tbind.sendKey(c.terminal, id, k, ch)
   discard wbind.sendKey[MockRenderer, MockNode](
-    c.web, id, k, (if k == kChar: $ch else: ""))
+    c.web, id, k, (if k == kChar: ch else: ""))
 
 template agree(c: var CrossMedium; after: string) =
   ## Both media report the same state, over a NON-EMPTY fact set.
@@ -257,16 +228,14 @@ suite "PLAT-3: one view, two media, the same state":
     let t = terminalFacts(c)
     let w = webFacts(c)
     # Sixteen entries plus the Modal's Text child plus the Tree's two visible
-    # children, over the fields each declares, minus Markdown's excluded
-    # field. Asserted as a NUMBER so a binding that quietly dropped an entry
-    # is caught here rather than passing a comparison of two shorter lists.
-    ck t.len == 28
-    ck w.len == 28
+    # children, over the fields each declares. Asserted as a NUMBER so a
+    # binding that quietly dropped an entry is caught here rather than
+    # passing a comparison of two shorter lists. (28 until 2026-09-26, when
+    # Markdown's `text` stopped being excluded.)
+    ck t.len == 29
+    ck w.len == 29
     ck divergences(c).len == 0
-    # And every one of the sixteen is actually present, by id. Read from the
-    # UNFILTERED projections, because `doc`'s only field is the excluded one
-    # and a presence check over the filtered set would report the Markdown
-    # entry as missing when it is merely uncompared.
+    # And every one of the sixteen is actually present, by id.
     var terminalIds: seq[string] = @[]
     for f in tbind.readTerminalFacts(c.terminal): terminalIds.add f.id
     var webIds: seq[string] = @[]
@@ -326,41 +295,43 @@ suite "PLAT-3: one view, two media, the same state":
     bothSay(c, "panes.selected", "0")
     agree(c, "tab motion")
 
-  test "Tabs: THE ONE DIVERGENCE THIS SUITE FOUND — the widget wraps":
-    # isonim-tui's `TabsWidget.moveRight` sets the FIRST tab when it is on the
-    # last, and `moveLeft` sets the last when it is on the first
-    # (widgets/tabs.nim, the two lines commented `# wrap`). The vocabulary's
-    # Tabs does not wrap, and neither does any other isonim-tui WIDGET:
-    # ListView, OptionList, Tree, DataTable, RadioSet, ContentSwitcher and
-    # MarkdownViewer all clamp, read one by one rather than grepped —
-    # `grep -n wrap widgets/*.nim` returns 34 lines and all but two of them
-    # are TEXT wrapping or the word `wrapper`, so that grep is not evidence
-    # of anything. Outside `widgets/`, `command/palette.nim` and
-    # `focus/manager.nim` DO wrap; the claim is therefore about widgets, not
-    # about the library, and `mappings.terminalMapping(pkTabs)` says so.
+  test "Tabs: both media stop at the ends — the divergence this suite found is closed":
+    # UNTIL 2026-09-26 THIS CASE ASSERTED A DIVERGENCE. isonim-tui's
+    # `TabsWidget.moveRight` set the FIRST tab when it was on the last, and
+    # `moveLeft` the last when on the first; the vocabulary's Tabs stops, as
+    # every other isonim-tui selection widget does (ListView, OptionList,
+    # Tree, DataTable, RadioSet). This case pinned `terminal=0 web=1` so the
+    # difference could not change unnoticed.
     #
-    # It is asserted here AS A DIVERGENCE rather than hidden, for two reasons.
-    # A suite that dropped the step would stop covering the entry at its
-    # boundary, which is where every off-by-one lives. And a divergence
-    # nothing asserts is one that can be silently fixed, silently widened, or
-    # silently spread to a second widget.
-    #
-    # `mappings.terminalMapping(pkTabs)` is `msPartial` because of this, and
-    # the mapping's note names it. When isonim-tui stops wrapping, THIS CASE
-    # goes red and that note is what the reader is sent to.
+    # The library now has `newTabs(..., wraps = false)`, the binding passes
+    # it, and the two media agree at both ends.
     var c = newCrossMedium()
+    sendBoth(c, "panes", kLeft)
+    bothSay(c, "panes.selected", "0")
     sendBoth(c, "panes", kRight)
     bothSay(c, "panes.selected", "1")
     sendBoth(c, "panes", kRight)
-    let (tw, ww) = factOf(c, "panes.selected")
-    ck tw == "0"      # the widget wrapped to the first tab
-    ck ww == "1"      # the vocabulary stopped at the last
-    ck tw != ww
-    ck terminalMapping(pkTabs).status == msPartial
-    ck terminalMapping(pkTabs).note.contains("THE WIDGET WRAPS")
-    # And it is the ONLY divergence in the whole view at this point: one
-    # asserted difference, not a suite that has stopped comparing.
-    ck divergences(c).len == 1
+    bothSay(c, "panes.selected", "1")
+    ck divergences(c).len == 0
+    ck terminalMapping(pkTabs).status == msComplete
+    # THE OPTION HAS TO KEEP MATTERING. The library's DEFAULT still wraps
+    # (Textual's behaviour, and WAI-ARIA's tabs pattern), so a binding that
+    # stopped passing `wraps = false` would bring the divergence straight
+    # back — and this is the half that says so: the same keys on a
+    # default-built `TabsWidget` DO wrap.
+    let h = newTerminalTestHarness(40, 6)
+    let plain = newTabs(h.renderer, @[Tab(id: "t1", label: "Source"),
+                                      Tab(id: "t2", label: "State")])
+    ck plain.wraps
+    plain.moveRight()
+    plain.moveRight()
+    ck plain.activeIndex == 0
+    var bound = false
+    for bw in c.terminal.bound:
+      if bw.kind == pkTabs:
+        bound = true
+        ck not bw.tabsW.wraps
+    ck bound
 
   test "Table: two dimensions, bounded in both":
     var c = newCrossMedium()
@@ -409,7 +380,7 @@ suite "PLAT-3: one view, two media, the same state":
     bothSay(c, "filter.cursor", "3")
     sendBoth(c, "filter", kLeft)
     bothSay(c, "filter.cursor", "2")
-    sendBoth(c, "filter", kChar, 'Z')
+    sendBoth(c, "filter", kChar, "Z")
     bothSay(c, "filter.text", "abZc")
     bothSay(c, "filter.cursor", "3")
     sendBoth(c, "filter", kBackspace)
@@ -471,7 +442,7 @@ suite "PLAT-3: one view, two media, the same state":
   test "Collapsible: collapsing removes its body from both media":
     var c = newCrossMedium()
     bothSay(c, "panel.expanded", "true")
-    ck terminalFacts(c).len == 28
+    ck terminalFacts(c).len == 29
     sendBoth(c, "panel", kSpace)
     bothSay(c, "panel.expanded", "false")
     let t = terminalFacts(c)
@@ -484,7 +455,7 @@ suite "PLAT-3: one view, two media, the same state":
     ck divergences(c).len == 0
     sendBoth(c, "panel", kEnter)
     bothSay(c, "panel.expanded", "true")
-    ck terminalFacts(c).len == 28
+    ck terminalFacts(c).len == 29
 
   test "a long mixed key script leaves both media in the same state":
     # The cases above each drive one entry. This one interleaves them, because
@@ -504,6 +475,77 @@ suite "PLAT-3: one view, two media, the same state":
       ck divergences(c).len == 0
     agree(c, "the whole script")
     ck script.len == 20
+
+  test "Menu: Enter runs the command and closes, on both media":
+    # No case pressed Enter on the menu until 2026-09-26, and the terminal's
+    # hand-built OptionList-in-a-Modal would have failed it: Enter neither
+    # closed the menu nor ran anything. isonim-tui's `MenuWidget` does both.
+    var c = newCrossMedium()
+    sendBoth(c, "ctx", kDown)
+    sendBoth(c, "ctx", kEnter)
+    bothSay(c, "ctx.open", "false")
+    var ran = -2
+    for bw in c.terminal.bound:
+      if bw.kind == pkMenu: ran = bw.menuW.lastActivated
+    ck ran == 1                 # the library says WHICH command ran
+    # A closed menu answers nothing on either medium.
+    sendBoth(c, "ctx", kUp)
+    bothSay(c, "ctx.highlight", "1")
+    agree(c, "running a menu command")
+
+  test "Markdown: the two media make the same blocks of the same source":
+    # Two parsers, written separately: isonim-tui's (terminal), read out of
+    # the widget's own `MdDocument`, and `markdown_blocks` (web), read back
+    # off the elements the web binding drew. Neither side re-derives its
+    # outline from the source.
+    var c = newCrossMedium()
+    let t = tbind.markdownOutlineOf(c.terminal, "doc")
+    let w = wbind.webMarkdownOutline(c.web, "doc")
+    if t != w:
+      checkpoint "terminal: " & $t & "\n     web: " & $w
+    # THE POSITIVE CONTROL: an outline of the whole document, not an empty
+    # one — two empty outlines agree about everything.
+    ck t.len == 23
+    ck t == w
+    for token in ["h1 Title", "p Some [b:bold] text and [c:code].", "ul{",
+                  "quote{", "code nim|echo 1", "hr", "ol1{",
+                  "p [a:https://x.y:link]"]:
+      ck token in t
+    # And the source itself, which the terminal reads from the widget.
+    bothSay(c, "doc.text", MarkdownSource)
+
+  test "the shared script: every expected value, on both media, and agreement after every key":
+    # `cross_medium_script.scriptedCases()` is also what the Chromium suite
+    # replays in a real document. Holding the terminal (and the in-memory
+    # DOM) to the SAME expected values is what lets the browser's run be
+    # compared with the terminal's without the two sharing a process.
+    let cases = scriptedCases()
+    var keys = 0
+    var expectations = 0
+    for sc in cases:
+      var c = newCrossMedium()
+      for st in sc.steps:
+        case st.kind
+        of skKey, skKeyHere:
+          sendBoth(c, st.id, st.key, st.ch)
+          inc keys
+          let d = divergences(c)
+          if d.len > 0:
+            checkpoint sc.name & ": after " & st.id & " " & $st.key &
+              ":\n  " & d.join("\n  ")
+          ck d.len == 0
+        of skExpect:
+          inc expectations
+          let (tf, wf) = factOf(c, st.fact)
+          if tf != st.value or wf != st.value:
+            checkpoint sc.name & ": " & st.fact & ": terminal=" & tf &
+              " web=" & wf & " expected=" & st.value
+          ck tf == st.value
+          ck wf == st.value
+    # The script ran, all of it: counted against its own declaration.
+    ck keys == countSteps(cases, skKey) + countSteps(cases, skKeyHere)
+    ck expectations == countSteps(cases, skExpect)
+    ck cases.len == 13
 
 suite "PLAT-3: the terminal binding is a real terminal binding":
 

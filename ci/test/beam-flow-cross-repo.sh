@@ -81,12 +81,8 @@ resolve_beam_recorder() {
 	export CODETRACER_ELIXIR_RECORDER_PATH="$CODETRACER_BEAM_RECORDER_PATH"
 
 	echo "Building codetracer-beam-recorder in $CODETRACER_BEAM_RECORDER_PATH"
-	if command -v direnv >/dev/null 2>&1 && [[ -f "$CODETRACER_BEAM_RECORDER_PATH/.envrc" ]]; then
-		direnv exec "$CODETRACER_BEAM_RECORDER_PATH" \
-			cargo build --locked --manifest-path "$CODETRACER_BEAM_RECORDER_PATH/Cargo.toml"
-	else
+	repro exec "$CODETRACER_BEAM_RECORDER_PATH" -- \
 		cargo build --locked --manifest-path "$CODETRACER_BEAM_RECORDER_PATH/Cargo.toml"
-	fi
 
 	# Search for the binary under both the new and legacy names so the build
 	# survives the migration window.

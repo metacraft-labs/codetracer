@@ -39,6 +39,10 @@
 ##                         the top after sorting upstream).
 ## - ``recentFolders``   — list of recently opened project folders.
 ## - ``startOptions``    — start-options buttons in render order.
+## - ``startOptionsNote`` — a standing sentence under the start-options
+##                         strip, or ``""`` for none.  Set by the arm
+##                         alongside ``startOptions``; see
+##                         ``webWelcomeStartOptions`` / issue #734.
 ## - ``hoveredRecording`` — UUIDv7 recording-id of the currently-hovered
 ##                         recent-trace row (the legacy view used a
 ##                         per-trace tooltip; mirroring it as one
@@ -175,6 +179,11 @@ type
     recentTraces*: Signal[seq[RecentTraceRecord]]
     recentFolders*: Signal[seq[RecentFolderRecord]]
     startOptions*: Signal[seq[WelcomeStartOptionRecord]]
+    startOptionsNote*: Signal[string]
+      ## A standing sentence under the start-options strip, or "" for none.
+      ## The desktop leaves it empty; the web arm sets `WebStartOptionsNote`,
+      ## because on that arm EVERY option is refused and a screen of grey
+      ## buttons with no text is what got issue #734 filed as a bug.
     # M-REC-2: trace ids are UUIDv7 strings now.
     hoveredRecording*: Signal[string]
     hoveredOption*: Signal[string]
@@ -410,6 +419,231 @@ proc optionKey*(name: string): string =
   result = result.replace(' ', '-')
 
 # ---------------------------------------------------------------------------
+# Start options — the arms, and the invariant that used to be violated
+# ---------------------------------------------------------------------------
+#
+# ISSUE #734. The welcome screen's start-options strip is built once per arm:
+# the desktop arm from a live `WelcomeScreenComponent`, the web arm from
+# nothing at all (a statically hosted tab has no main process). Both used to
+# hand-write one `WelcomeStartOptionRecord` literal per row, and the web arm's
+# first literal said `inactive: false` for "Open folder" — an option nothing on that
+# arm can perform. The view's `triggerStartOption` prefers the host callbacks,
+# the web arm passes an EMPTY `WelcomeScreenCallbacks()` (there is no legacy
+# component to build one from), and its `case` fallback has no `open-folder`
+# arm, so the click reached `discard`. A live button that does nothing.
+#
+# The fix is not to flip that one literal. It is to make the literal
+# impossible: an option is ACTIVE if and only if its kind is in the set of
+# kinds the arm declares it can HANDLE, and every inactive option carries a
+# reason. Both properties are established by `welcomeStartOptionRecords` and
+# neither arm can restate them differently, because neither arm writes a
+# record any more.
+
+type
+  WelcomeStartOptionKind* = enum
+    ## The six start options, in render order.  The enum — rather than the
+    ## bare key strings — is what lets an arm's ACTIVE set and its HANDLED set
+    ## be the same value instead of two lists that agree by review.
+    ##
+    ## ISSUE #735 added `wsoNewFile`, and it is FIRST rather than appended.
+    ## Order here is render order, and this is the only option every arm can
+    ## perform: it needs no folder, no file on disk, no recorder and no main
+    ## process.  On the web arm it is the only live row, and the one live
+    ## action in a strip of refusals must not be the last thing read.
+    wsoNewFile
+    wsoOpenFolder
+    wsoRecordNewTrace
+    wsoOpenLocalTrace
+    wsoOpenOnlineTrace
+    wsoCodetracerShell
+
+  StartOptionDisabledReasons* = array[WelcomeStartOptionKind, string]
+    ## Per-kind explanation shown when the kind is not in an arm's active set.
+    ## An empty entry falls back to ``StartOptionUnavailableHereReason`` so a
+    ## disabled option is never reasonless.
+
+const
+  StartOptionNames*: array[WelcomeStartOptionKind, string] = [
+    "New file",
+    "Open folder",
+    "Record new trace",
+    "Open local trace",
+    "Open online trace",
+    "CodeTracer shell",
+  ]
+
+  StartOptionUnavailableHereReason* =
+    "This option is not available on this CodeTracer surface."
+    ## Last-resort reason.  Reaching it means an arm disabled an option and
+    ## did not say why — better than silence, and the VM test names any
+    ## option that falls through to it.
+
+  # -- The desktop arm ------------------------------------------------------
+  DesktopHandledStartOptions*: set[WelcomeStartOptionKind] =
+    {wsoNewFile, wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace,
+     wsoOpenOnlineTrace, wsoCodetracerShell}
+    ## Every kind `WelcomeScreenComponent.triggerWelcomeStartOption`'s `case`
+    ## has an arm for.  Delete an arm there and this set must shrink with it.
+    ##
+    ## This one edge is MANUAL and nothing enforces it: `ui/welcome_screen.nim`
+    ## is a `when defined(js)` renderer module this VM layer does not (and must
+    ## not) import, so no test here can read that `case`.  Everything DOWNSTREAM
+    ## of this set is enforced — `welcomeStartOptionRecords` computes `inactive`
+    ## from it, and `unreachableStartOptions` checks the result — but the set
+    ## itself is a claim about a file this module cannot see.
+
+  DesktopTraceSharingOffReason* =
+    "Trace sharing is turned off in this CodeTracer configuration."
+  DesktopShellUnavailableReason* =
+    "The CodeTracer shell is not available in this build yet."
+
+  # -- The web arm ----------------------------------------------------------
+  WebHandledStartOptions*: set[WelcomeStartOptionKind] = {wsoNewFile}
+    ## ISSUE #735. Exactly one, and the promise behind it is built rather than
+    ## claimed: `ui/web_entry_surface.enterNewFileEditMode` delivers
+    ## `CODETRACER::no-trace` through the in-page transport — the same door
+    ## `enterTemplateEditMode` uses and the same door `index/traces.nim` uses on
+    ## the desktop — so the tab lands in Edit mode with one untitled buffer, and
+    ## `installUntitledSaveHost` answers the save.
+    ##
+    ## The other five stay refused for the reason M52 established, which has not
+    ## changed: a statically hosted tab has no Electron main process, so none of
+    ## the `CODETRACER::…` messages `triggerWelcomeStartOption` sends for them is
+    ## answered by anything; the platform facade refuses the folder picker by
+    ## design (`viewmodel/host/web_browser.nim`'s `pickDirectory` resolves
+    ## `unsupported`); and the two options the view can serve from the VM alone
+    ## ("Record new trace", "Open online trace") open forms whose SUBMIT is the
+    ## same unanswered IPC. Making this set larger is a promise, and the promise
+    ## needs the flow behind it first.
+
+  WebOpenFolderReason* =
+    "This browser tab cannot read folders from your computer. " &
+    "Install the CodeTracer desktop app to open a local project."
+  WebRecordNewTraceReason* =
+    "Recording runs a program on your machine, which a browser tab cannot " &
+    "do. Use the CodeTracer desktop app to record a trace."
+  WebOpenLocalTraceReason* =
+    "This browser tab cannot read trace files from your computer. " &
+    "Use the CodeTracer desktop app to open a local trace."
+  WebOpenOnlineTraceReason* =
+    "Downloading a shared trace is not available on this page yet."
+  WebCodetracerShellReason* =
+    "The CodeTracer shell records commands on your machine and is not " &
+    "available in a browser tab."
+
+  WebStartOptionsNote* =
+    "This page runs CodeTracer in a browser tab, which has no access to " &
+    "your computer's files and cannot run programs. Opening folders and " &
+    "traces, and recording, need the CodeTracer desktop app — but " &
+    "\"New file\" works here and opens an editor straight away."
+    ## The standing line under the strip on the web arm.
+    ##
+    ## A per-button `title` explains ONE refusal to a user who already
+    ## suspects the button and hovers it. Issue #734's reporter did not: four
+    ## buttons were grey, one did nothing, and the screen said nothing at all
+    ## — so the conclusion available to them was "broken". `Noir-Studio.md`
+    ## §4.2 states the same rule for the storage tier ("stated in the UI",
+    ## "says so before the first keystroke", "Never a blank failure"); this is
+    ## that rule applied to the capability tier.
+    ##
+    ## ISSUE #735 added the second sentence's tail. The line's job is to stop
+    ## the reader concluding the page is broken, and "everything here needs the
+    ## desktop app" would now be FALSE as well as discouraging: one row is live,
+    ## and a standing line that does not name it leaves the reader hunting for
+    ## the single button that is not grey.
+
+proc startOptionName*(kind: WelcomeStartOptionKind): string =
+  StartOptionNames[kind]
+
+proc startOptionKey*(kind: WelcomeStartOptionKind): string =
+  ## Derived through `optionKey` rather than written out, so the key a record
+  ## carries and the key the view turns into a CSS class cannot drift.
+  optionKey(StartOptionNames[kind])
+
+proc startOptionKindForKey*(key: string): Option[WelcomeStartOptionKind] =
+  for kind in WelcomeStartOptionKind:
+    if startOptionKey(kind) == key:
+      return some(kind)
+  none(WelcomeStartOptionKind)
+
+proc welcomeStartOptionRecords*(active: set[WelcomeStartOptionKind];
+                                reasons: StartOptionDisabledReasons):
+    seq[WelcomeStartOptionRecord] =
+  ## Build the full strip — one row per `WelcomeStartOptionKind` — for one arm.
+  ##
+  ## Two invariants hold by CONSTRUCTION here, which is the point of routing
+  ## both arms through one builder:
+  ##
+  ## 1. ``inactive == (kind notin active)``. An arm that passes the set of
+  ##    kinds it can HANDLE therefore cannot render a live button with no
+  ##    behaviour behind it — issue #734's "Open folder" bug.
+  ## 2. A record with ``inactive == true`` always has a non-empty
+  ##    ``disabledReason``. A greyed control that does not say why is the
+  ##    other half of the same issue.
+  result = @[]
+  for kind in WelcomeStartOptionKind:
+    let inactive = kind notin active
+    result.add(WelcomeStartOptionRecord(
+      key: startOptionKey(kind),
+      name: startOptionName(kind),
+      inactive: inactive,
+      disabledReason:
+        if not inactive: ""
+        elif reasons[kind].len > 0: reasons[kind]
+        else: StartOptionUnavailableHereReason,
+    ))
+
+proc desktopWelcomeStartOptions*(showTraceSharing: bool):
+    seq[WelcomeStartOptionRecord] =
+  ## The desktop arm's strip.  Derived FROM `DesktopHandledStartOptions` by
+  ## subtraction, so the active set is a subset of the handled set by
+  ## construction rather than by two lists agreeing.
+  var active = DesktopHandledStartOptions - {wsoCodetracerShell}
+  if not showTraceSharing:
+    active.excl(wsoOpenOnlineTrace)
+  var reasons: StartOptionDisabledReasons
+  reasons[wsoOpenOnlineTrace] = DesktopTraceSharingOffReason
+  reasons[wsoCodetracerShell] = DesktopShellUnavailableReason
+  welcomeStartOptionRecords(active, reasons)
+
+proc webWelcomeStartOptions*(): seq[WelcomeStartOptionRecord] =
+  ## The web arm's strip.  The active set IS `WebHandledStartOptions`, the
+  ## same symbol, so "shown as live" and "can be performed" are one fact.
+  var reasons: StartOptionDisabledReasons
+  reasons[wsoOpenFolder] = WebOpenFolderReason
+  reasons[wsoRecordNewTrace] = WebRecordNewTraceReason
+  reasons[wsoOpenLocalTrace] = WebOpenLocalTraceReason
+  reasons[wsoOpenOnlineTrace] = WebOpenOnlineTraceReason
+  reasons[wsoCodetracerShell] = WebCodetracerShellReason
+  welcomeStartOptionRecords(WebHandledStartOptions, reasons)
+
+proc unreachableStartOptions*(options: openArray[WelcomeStartOptionRecord];
+                              handled: set[WelcomeStartOptionKind]):
+    seq[string] =
+  ## The keys of every option rendered as LIVE that the arm cannot perform.
+  ## Empty is the only acceptable answer; a non-empty one is issue #734.
+  ##
+  ## An unrecognised key counts as unreachable: a hand-written record whose
+  ## key is misspelled reaches the view's `case` fallback and `discard`s, which
+  ## is exactly the same dead click.
+  result = @[]
+  for opt in options:
+    if opt.inactive:
+      continue
+    let kind = startOptionKindForKey(opt.key)
+    if kind.isNone or kind.get notin handled:
+      result.add(opt.key)
+
+proc reasonlessDisabledStartOptions*(
+    options: openArray[WelcomeStartOptionRecord]): seq[string] =
+  ## The keys of every greyed-out option that does not say why it is greyed
+  ## out — the usability half of issue #734.
+  result = @[]
+  for opt in options:
+    if opt.inactive and opt.disabledReason.len == 0:
+      result.add(opt.key)
+
+# ---------------------------------------------------------------------------
 # Actions — recent traces / recent folders
 # ---------------------------------------------------------------------------
 
@@ -440,6 +674,10 @@ proc setStartOptions*(vm: WelcomeScreenVM;
   ## option does not survive into the new list.
   vm.startOptions.val = options
   vm.hoveredOption.val = ""
+
+proc setStartOptionsNote*(vm: WelcomeScreenVM; note: string) =
+  ## Set (or clear, with "") the standing line under the start-options strip.
+  vm.startOptionsNote.val = note
 
 # ---------------------------------------------------------------------------
 # Actions — hover state
@@ -774,6 +1012,7 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
     let recentTraces = createSignal(newSeq[RecentTraceRecord]())
     let recentFolders = createSignal(newSeq[RecentFolderRecord]())
     let startOptions = createSignal(newSeq[WelcomeStartOptionRecord]())
+    let startOptionsNote = createSignal("")
     let hoveredRecording = createSignal(NO_HOVERED_RECORDING)
     let hoveredOption = createSignal("")
     let editMode = createSignal(false)
@@ -834,6 +1073,7 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
       recentTraces: recentTraces,
       recentFolders: recentFolders,
       startOptions: startOptions,
+      startOptionsNote: startOptionsNote,
       hoveredRecording: hoveredRecording,
       hoveredOption: hoveredOption,
       editMode: editMode,

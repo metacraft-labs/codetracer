@@ -200,6 +200,41 @@ when defined(js):
     ## `replaceState` would have been rewriting `/` — see
     ## `web_deployment.entryDocumentAddress`.
 
+  proc jsDownloadTextFile*(filename, contents: cstring): bool {.importjs: """
+(function (n, c) {
+  try {
+    var blob = new Blob([c], {type: 'text/plain;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = n;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+    return true;
+  } catch (e) {
+    console.error('codetracer-web: download of ' + n + ' failed', e);
+    return false;
+  }
+})(#, #)""".}
+    ## ISSUE #735 — A BROWSER TAB'S "SAVE AS", and the only one it has.
+    ##
+    ## `Noir-Studio.md` §4.1 puts three tiers in order and names the top one
+    ## *"durable storage the user owns"*; OPFS is explicitly not it. A download
+    ## is: the bytes leave the origin's sandbox and land wherever the browser's
+    ## own save dialog puts them, under a name the user can change, on a
+    ## filesystem the product has no further claim on. That is what saving an
+    ## untitled buffer MEANS, so it is what this arm does — rather than writing
+    ## into the OPFS working copy, which would be the "periodic snapshot"
+    ## mistake §4.1 refuses: work the user believes is saved, held somewhere a
+    ## storage-pressure eviction can take.
+    ##
+    ## Returns whether the click was issued. It cannot report what the user did
+    ## with the save dialog — no browser API does — so a `true` here means "the
+    ## bytes were handed over", never "a file exists at a path".
+
 proc mountedTemplate*(): ProjectTemplate =
   ## The project this page is editing, for anything that needs to ask
   ## afterwards.
@@ -539,11 +574,23 @@ proc installProjectSaveHost*() =
   ## `js{name, error}`. Matching those spellings is what lets
   ## `onSavedFile` clear `tab.changed` without knowing which platform answered.
   ##
-  ## `save-untitled` is deliberately NOT answered. A browser session has no
-  ## "save as" destination and `rreSaveUntitled` is unreachable from a project
-  ## whose every tab has a path; answering it would be a host for a gesture the
-  ## product does not offer, which is the shape of claim this campaign exists
-  ## to stop making. It keeps warning, visibly, which is the honest state.
+  ## `save-untitled` is answered SEPARATELY, by `installUntitledSaveHost`.
+  ##
+  ## It used to be answered by nothing, on the stated reasoning that
+  ## "`rreSaveUntitled` is unreachable from a project whose every tab has a
+  ## path". That was true and issue #735 made it false: "New file" is a live
+  ## start option on this arm now, so a browser tab can hold an untitled buffer
+  ## and `ctrl+s` over it reaches `CODETRACER::save-untitled`. Left unanswered
+  ## that is a blank failure over the user's own typing, which is the one
+  ## outcome `Noir-Studio.md` §4.2 rules out outright.
+  ##
+  ## The two hosts are separate procs because their destinations are different
+  ## in kind: this one writes into the OPFS working copy of an OPEN PROJECT,
+  ## and that one has no project to write into and hands the bytes to the user
+  ## instead. Merging them would need a branch on "is there a project" inside a
+  ## responder, which is the shape that made `projectRelative` return "" and
+  ## report a path as "outside the open project" when the truth was that there
+  ## was no project.
   data.ipc.respond(cstring"CODETRACER::save-file",
     proc(sender: js, payload: JsObject) =
       let name = cast[cstring](payload["name"])
@@ -768,6 +815,13 @@ proc templateNoTracePayload*(tmpl: ProjectTemplate; layout: JsObject): JsObject 
     save: Save(project: Project(), files: @[], id: -1)
   }
 
+proc installUntitledSaveHost*()
+  ## Defined below, beside the rest of the #735 "New file" path; forward-declared
+  ## here because `enterTemplateEditMode` installs it too. The menu's New File
+  ## action (`ui_js.nim`'s `newTab`) is reachable from inside an open project,
+  ## so an untitled buffer — and therefore `CODETRACER::save-untitled` — is not
+  ## exclusive to the welcome screen's route.
+
 proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
   ## Open the bundled template in edit mode. Returns whether the message was
   ## delivered, so the caller reports a refusal rather than assuming — the
@@ -832,6 +886,160 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
   # exists before anything can ask. Nothing asks until a Run has produced a
   # trace, so this only makes the tab ABLE to open a session.
   installReplayHost()
+  installUntitledSaveHost()
   discard data.ipc.deliver(cstring"CODETRACER::no-trace",
                            templateNoTracePayload(effective, layout))
+  true
+
+# ---------------------------------------------------------------------------
+# ISSUE #735 — "New file" in a browser tab
+# ---------------------------------------------------------------------------
+#
+# The welcome screen's other five start options need something this page does
+# not have: a folder on the user's disk, a trace file, a recorder, an Electron
+# main process. "New file" needs none of them — an untitled buffer is a string
+# in the renderer — which is why it is the one start option `WebHandledStart
+# Options` contains, and why issue #735's reporter asked for it *"especially on
+# the web build, where Open folder does not work"*.
+#
+# It goes through the SAME DOOR as everything else: a `CODETRACER::no-trace`
+# delivery. `enterTemplateEditMode` above uses it for the bundled project and
+# `index/traces.onNewFile` uses it on the desktop for exactly this feature, so
+# `ui_js.onNoTrace` — which is the proc that turns the message into Edit mode
+# and then opens the untitled buffer — cannot tell the three apart. One door,
+# not three.
+
+proc emptyProjectFilesystem*(): CodetracerFile =
+  ## The filesystem tree for a session with NO project: the artificial
+  ## "source folders" root, with nothing under it.
+  ##
+  ## Shape-for-shape with `index/files.loadFilesystem(@[], …)`, which is the
+  ## value the desktop's own `onNewFile` sends — the same proc that serves an
+  ## open folder, called with no folders. `ui/filesystem.legacyFileToVm` reads
+  ## `text`, `state`, `original` and the `path` property off the root whether or
+  ## not it has children, so an empty tree has to be this and not nil: a nil
+  ## filesystem reaches the panel as `undefined` and the Files pane renders
+  ## nothing at all rather than an empty project.
+  result = CodetracerFile(
+    text: cstring"source folders", children: @[], state: js{opened: true},
+    index: 0, parentIndices: @[],
+    original: CodetracerFileData(text: cstring"source folders", path: cstring""))
+  result.toJs.path = cstring""
+
+proc untitledDownloadName*(bufferName: string): string =
+  ## The filename a browser download gets for an untitled buffer.
+  ##
+  ## `renderer.openNewTab` names its buffers `#untitled{N}`, and the leading
+  ## `#` is a marker for "this tab has no path" rather than part of a name
+  ## anyone wants on their disk — a downloaded `#untitled1` is also a filename
+  ## every shell needs quoting for. The extension is `.txt` because the buffer
+  ## has no language: `fromPath("#untitled1")` is `LangUnknown`, and guessing
+  ## one from content would be a guess shown as a fact.
+  ##
+  ## Total, and deliberately so — a name this does not recognise is returned
+  ## with only the `#` stripped, because refusing to name a download is
+  ## refusing to save the user's work.
+  var name = bufferName
+  if name.len > 0 and name[0] == '#':
+    name = name[1 .. ^1]
+  if name.len == 0:
+    name = "untitled"
+  if name.find('.') < 0:
+    name &= ".txt"
+  name
+
+proc installUntitledSaveHost*() =
+  ## Answer `CODETRACER::save-untitled` — see `installProjectSaveHost`'s header
+  ## for why this is now a message that reaches a browser tab at all.
+  ##
+  ## The reply channels are the desktop's own (`index/files.onSaveUntitled`
+  ## sends `CODETRACER::saved-file` as `js{name}` and `CODETRACER::save-file-
+  ## error` as `js{name, error}`), and the `name` echoed back is the BUFFER's,
+  ## not the download's: `ui_js.onSavedFile` looks the tab up by it, and a tab
+  ## keyed `#untitled1` that is answered `untitled1.txt` stays dirty for ever.
+  ## Renaming the tab to its saved destination is a renderer-side change this
+  ## milestone did not make, and it is the same gap the desktop has.
+  data.ipc.respond(cstring"CODETRACER::save-untitled",
+    proc(sender: js, payload: JsObject) =
+      let name = cast[cstring](payload["name"])
+      let raw = cast[cstring](payload["raw"])
+      if jsDownloadTextFile(cstring(untitledDownloadName($name)), raw):
+        data.ipc.deliver(cstring"CODETRACER::saved-file", js{name: name})
+      else:
+        data.ipc.deliver(cstring"CODETRACER::save-file-error", js{
+          name: name,
+          error: cstring("this browser refused the download, so '" & $name &
+                         "' was not saved")
+        }))
+
+proc newFileNoTracePayload*(layout: JsObject): JsObject =
+  ## The `CODETRACER::no-trace` message for a session with no project.
+  ##
+  ## `templateNoTracePayload`'s field list, with the project taken out. The two
+  ## are deliberately separate rather than one proc with an `Option[Project
+  ## Template]`: every difference between them is a field whose EMPTY value is
+  ## load-bearing, and reading them side by side is what makes that visible.
+  ##
+  ## - `folder: ""` is what `ui_js.onNoTrace` branches on to decide this
+  ##   session gets an untitled buffer. `templateNoTracePayload` sends the
+  ##   project root there; `index/traces.initEditMode` sends the opened folder.
+  ##   Nothing else in the product reaches edit mode with no folder at all — see
+  ##   that branch's comment for what guarantees it — so the branch is this
+  ##   feature's and only this feature's.
+  ## - `name: ""` for `templateNoTracePayload`'s reason: `onNoTrace` hands it to
+  ##   `chooseInitialEditPath` as the requested path, and a non-empty value is
+  ##   returned UNCHANGED and opened as a tab.
+  ## - `welcomeScreen: false` because `ui/layout.initLayout` returns before
+  ##   GoldenLayout is constructed while it is true and `data.trace` is nil,
+  ##   which is exactly the state this page is in.
+  var startOptions = StartOptions(
+    edit: true,
+    welcomeScreen: false,
+    screen: false,
+    loading: false,
+    inTest: false,
+    record: false,
+    isInstalled: true,
+    name: cstring"",
+    folder: cstring"",
+    app: cstring"",
+    recordingID: cstring"")
+
+  js{
+    path: cstring"",
+    lang: LangUnknown,
+    home: cstring"",
+    layout: layout,
+    helpers: JsAssoc[cstring, Helper]{},
+    startOptions: startOptions,
+    config: defaultRendererConfig(),
+    filenames: newSeq[string](),
+    filesystem: emptyProjectFilesystem(),
+    functions: newSeq[Function](),
+    save: Save(project: Project(), files: @[], id: -1)
+  }
+
+proc enterNewFileEditMode*(): bool =
+  ## Open CodeTracer in Edit mode on a single untitled buffer, with no project.
+  ##
+  ## Returns whether the message was delivered, by `enterTemplateEditMode`'s
+  ## convention: the caller reports a refusal rather than assuming.
+  ##
+  ## No `installTemplateHost` here, and that is not an omission. That host
+  ## answers `tab-load` out of the bundled project, and there is no project; the
+  ## untitled buffer is created by `renderer.openNewTab`, which builds its
+  ## `TabInfo` itself and never asks a host for source. A `tab-load` responder
+  ## installed here would be a host for a question nothing on this path asks.
+  if data.ipc.isNil or data.ipc.isUndefined:
+    return false
+  let resolution = mode_layouts.resolveLayoutForMode(data, EditMode)
+  let layout = cast[JsObject](resolution.config)
+  if layout.isNil:
+    # `enterTemplateEditMode`'s reason, unchanged: with no layout `onNoTrace`
+    # mounts an empty GoldenLayout and the visitor sees a window with no panes
+    # and nothing saying why.
+    return false
+  installUntitledSaveHost()
+  discard data.ipc.deliver(cstring"CODETRACER::no-trace",
+                           newFileNoTracePayload(layout))
   true

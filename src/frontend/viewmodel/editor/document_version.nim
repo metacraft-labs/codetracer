@@ -222,6 +222,18 @@ proc lengthAt*(vd: VersionedDocument; v: DocumentVersion): int =
   ## mapping actually uses.
   vd.delta(v).length
 
+proc keepRecent*(vd: var VersionedDocument; count: int) =
+  ## Forget all but the most recent `count` change sets — a bounded timeline
+  ## for a buffer that lives as long as a session. A result computed against a
+  ## version older than that is `drVersionForgotten`, which is a counted
+  ## outcome rather than a failure. The cut is computed HERE rather than by a
+  ## caller, because a caller would have to subtract from a version, and a
+  ## version deliberately has no `-`.
+  if count < 0 or vd.log.len <= count: return
+  let drop = vd.log.len - count
+  vd.oldest = DocumentVersion(int(vd.oldest) + drop)
+  vd.log = vd.log[drop .. ^1]
+
 proc forget*(vd: var VersionedDocument; upTo: DocumentVersion) =
   ## Drop the change sets below `upTo`, making every version before it
   ## unreconcilable. Idempotent, and a no-op for a version already forgotten.

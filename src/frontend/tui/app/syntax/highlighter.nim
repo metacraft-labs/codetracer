@@ -365,10 +365,27 @@ proc classForNodeType*(nodeType: string; named: bool): TokenClass =
 # Cell arithmetic
 # ---------------------------------------------------------------------------
 
-proc cellOffsetAtByte(line: string; byteOffset: int): int =
+func isAsciiLine(line: string): bool =
+  for ch in line:
+    if ord(ch) >= 0x80: return false
+  true
+
+proc cellOffsetAtByte*(line: string; byteOffset: int): int =
   ## How many CELLS of `line` lie strictly before `byteOffset`.
+  ##
+  ## An ASCII prefix is one cell per byte, and that is the common case by a
+  ## wide margin: the rune walk below allocates a string per rune, which is
+  ## what dominated a whole-file highlight once the parse stopped being
+  ## window-sized.
   if byteOffset <= 0:
     return 0
+  var ascii = true
+  for i in 0 ..< min(byteOffset, line.len):
+    if ord(line[i]) >= 0x80:
+      ascii = false
+      break
+  if ascii:
+    return min(byteOffset, line.len)
   var bytes = 0
   for r in runes(line):
     if bytes >= byteOffset:
@@ -432,7 +449,11 @@ proc treeSitterSpans(grammar: GrammarId; lines: seq[string]):
   var perLine = newSeq[seq[SyntaxSpan]](lines.len)
   for i in 0 ..< lines.len:
     perLine[i] = @[]
-  for leaf in tree.rootNode.walkLeaves:
+  # `leafFacts` and not `walkLeaves`: the second yields a `Node`, which
+  # carries a copy of the source, so a whole-file walk copied the file once
+  # per leaf — the other half of the sixty-five seconds (isonim-tui's
+  # `leafFacts` header).
+  for leaf in tree.rootNode.leafFacts:
     let cls = classForNodeType(leaf.nodeType, leaf.isNamed)
     if cls == tcPlain:
       continue
@@ -440,19 +461,30 @@ proc treeSitterSpans(grammar: GrammarId; lines: seq[string]):
     let e = leaf.endByte
     if e <= s:
       continue
-    for i in 0 ..< lines.len:
+    # THE LINES THIS LEAF TOUCHES, AND ONLY THEM: a binary search to the line
+    # holding its first byte, then forward while lines still overlap it. The
+    # first spelling walked every line for every leaf — O(leaves x lines),
+    # invisible on a forty-line window and sixty-five seconds on a 24,000-line
+    # file once PLAT-29 moved the parse off the render path and gave it the
+    # whole document (measured by `test_plat29_highlight_worker.nim`).
+    var lo0 = 0
+    var hi0 = lines.len - 1
+    while lo0 < hi0:
+      let mid = (lo0 + hi0 + 1) div 2
+      if lineStart[mid] <= s: lo0 = mid else: hi0 = mid - 1
+    var i = lo0
+    while i < lines.len and lineStart[i] < e:
       let lo = lineStart[i]
       let hi = lo + lines[i].len
-      if e <= lo or s >= hi:
-        continue
-      let localStart = max(s, lo) - lo
-      let localEnd = min(e, hi) - lo
-      if localEnd <= localStart:
-        continue
-      perLine[i].add SyntaxSpan(
-        startCell: cellOffsetAtByte(lines[i], localStart),
-        endCell: cellOffsetAtByte(lines[i], localEnd),
-        class: cls)
+      if not (e <= lo or s >= hi):
+        let localStart = max(s, lo) - lo
+        let localEnd = min(e, hi) - lo
+        if localEnd > localStart:
+          perLine[i].add SyntaxSpan(
+            startCell: cellOffsetAtByte(lines[i], localStart),
+            endCell: cellOffsetAtByte(lines[i], localEnd),
+            class: cls)
+      inc i
   for i in 0 ..< lines.len:
     result[i] = mergeSpans(perLine[i])
 

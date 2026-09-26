@@ -144,7 +144,7 @@ proc makeEventRow(eventId: uint64; line: int; value: string;
 # memo settles on a file matching the language's extension.
 # ---------------------------------------------------------------------------
 
-const aikenConfig = LanguageSmokeConfig(
+let aikenConfig = LanguageSmokeConfig(
   name: "aiken",
   sourceFile: "validators/main.ak",
   sourceExt: ".ak",
@@ -157,7 +157,7 @@ const aikenConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 12, "compute(42)"),
 )
 
-const cadenceConfig = LanguageSmokeConfig(
+let cadenceConfig = LanguageSmokeConfig(
   name: "cadence",
   sourceFile: "transactions/main.cdc",
   sourceExt: ".cdc",
@@ -170,7 +170,7 @@ const cadenceConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 8, "compute()"),
 )
 
-const cairoConfig = LanguageSmokeConfig(
+let cairoConfig = LanguageSmokeConfig(
   name: "cairo",
   sourceFile: "src/main.cairo",
   sourceExt: ".cairo",
@@ -183,7 +183,7 @@ const cairoConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 5, "compute()"),
 )
 
-const circomConfig = LanguageSmokeConfig(
+let circomConfig = LanguageSmokeConfig(
   name: "circom",
   sourceFile: "compute.circom",
   sourceExt: ".circom",
@@ -196,7 +196,7 @@ const circomConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 14, "compute()"),
 )
 
-const leoConfig = LanguageSmokeConfig(
+let leoConfig = LanguageSmokeConfig(
   name: "leo",
   sourceFile: "src/main.leo",
   sourceExt: ".leo",
@@ -209,7 +209,7 @@ const leoConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 9, "compute(5u32, 3u32)"),
 )
 
-const masmConfig = LanguageSmokeConfig(
+let masmConfig = LanguageSmokeConfig(
   name: "masm",
   sourceFile: "compute.masm",
   sourceExt: ".masm",
@@ -227,7 +227,7 @@ const masmConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 4, "compute"),
 )
 
-const moveConfig = LanguageSmokeConfig(
+let moveConfig = LanguageSmokeConfig(
   name: "move",
   sourceFile: "sources/computation.move",
   sourceExt: ".move",
@@ -240,7 +240,7 @@ const moveConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 6, "test_computation(21, 21)"),
 )
 
-const polkavmConfig = LanguageSmokeConfig(
+let polkavmConfig = LanguageSmokeConfig(
   name: "polkavm",
   # PolkaVM source files compile from Rust per the spec note, so the
   # editor pane displays a `.rs` extension despite the recorder being
@@ -259,7 +259,7 @@ const polkavmConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 7, "compute(0x42, 0x10)"),
 )
 
-const solanaConfig = LanguageSmokeConfig(
+let solanaConfig = LanguageSmokeConfig(
   name: "solana",
   # Solana programs are written in Rust; the spec asserts on `.rs` files.
   sourceFile: "programs/example/src/lib.rs",
@@ -274,7 +274,7 @@ const solanaConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 18, "process_instruction(...)"),
 )
 
-const stylusConfig = LanguageSmokeConfig(
+let stylusConfig = LanguageSmokeConfig(
   name: "stylus",
   # Stylus programs are Rust compiled to WASM for Arbitrum.
   sourceFile: "src/lib.rs",
@@ -288,7 +288,7 @@ const stylusConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 22, "increment(5)", "evmEvent"),
 )
 
-const swayConfig = LanguageSmokeConfig(
+let swayConfig = LanguageSmokeConfig(
   name: "sway",
   sourceFile: "src/main.sw",
   sourceExt: ".sw",
@@ -301,7 +301,7 @@ const swayConfig = LanguageSmokeConfig(
   eventRow: makeEventRow(1'u64, 10, "main(100)"),
 )
 
-const tolkConfig = LanguageSmokeConfig(
+let tolkConfig = LanguageSmokeConfig(
   name: "tolk",
   sourceFile: "compute.tolk",
   sourceExt: ".tolk",

@@ -5,7 +5,7 @@
 # Frames, written to build/plat42-window/<id>.ppm:
 #   * the six pinned calc scenarios (src/tests/visual/scenarios.json), with
 #     their own `--replay-ops` — the pointer and the inline values;
-#   * `noir-flow` and `noir-flow-off`: noir_space_ship stopped (`stepIn=15`)
+#   * `noir-flow` and `noir-flow-off`: noir_space_ship stopped (`stepIn=33`)
 #     beside the declined `if` arm, with the flow overlay shown and hidden —
 #     the flow overlay's PIXEL TWIN;
 #   * `breakpoint-editor` against `stepped-editor` — the same stop with and
@@ -124,8 +124,8 @@ for s in json.load(open(sys.argv[1]))["scenarios"]:
     print(s["id"] + "\t" + ",".join(terms))
 PY
 	)
-	one noir-flow "${NOIR}" "stepIn=15"
-	one noir-flow-off "${NOIR}" "stepIn=15" --no-flow-overlay
+	one noir-flow "${NOIR}" "stepIn=33"
+	one noir-flow-off "${NOIR}" "stepIn=33" --no-flow-overlay
 }
 
 if [ "${INSIDE}" = "1" ]; then

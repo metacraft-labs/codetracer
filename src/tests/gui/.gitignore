@@ -14,3 +14,8 @@ node_modules/
 # and the suite silently skips without it (`fixturesExist`), so an ignored
 # fixture would read as "the tests pass" while nothing ran.
 !tests/**/fixtures/*.js
+
+# #747: a hand-written manual diagnostic, for the same reason — it is source,
+# not build output.  Named exactly rather than `tools/*.js`, because `tools/`
+# also holds TypeScript whose compiled output must stay ignored.
+!tools/re-record-spawn-probe.js
