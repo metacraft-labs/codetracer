@@ -1699,6 +1699,12 @@ test-frontend-js:
   echo "Running renderer-dom lane..."
   just test-renderer-dom
   echo ""
+  # Browser-target suites RUN in a real page in headless Chromium (the
+  # `renderer-chromium` lane): the view vocabulary's web binding in a real
+  # document, with keys from Chromium's own input pipeline.
+  echo "Running renderer-chromium lane..."
+  just test-renderer-chromium
+  echo ""
   echo "Running main-process lane..."
   just test-main-process
 
@@ -3579,6 +3585,25 @@ test-renderer-dom:
   mkdir -p test-logs
   exec > >(tee test-logs/test-renderer-dom.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh renderer-dom
+
+# Browser-target suites RUN in a real page in headless Chromium: the
+# `renderer-chromium` lane compiles its suites for the browser target and
+# `src/frontend/tests/chromium-run.mjs` loads each into a page, delivering the
+# keys a suite asks for through Chromium's own input pipeline (Playwright's
+# `keyboard.press` — trusted events, the browser's default actions and all).
+# `view_vocabulary_chromium_test.nim` is PLAT-3's web arm in a real browser:
+# the vocabulary's web binding rendered into a document, held to the same
+# scripted expectations the terminal is held to, plus the measurements of what
+# the browser's own elements do that `mappings.webMapping` is graded on.
+#
+# NEEDS `node_modules/playwright` and Playwright's Chromium, both from the dev
+# shell (`PLAYWRIGHT_BROWSERS_PATH`); the runner fails rather than skipping.
+test-renderer-chromium:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-renderer-chromium.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh renderer-chromium
 
 # The Electron MAIN process's modules RUN under node: the `main-process` lane
 # builds its suites with the `server_index.js` defines (`-d:ctIndex

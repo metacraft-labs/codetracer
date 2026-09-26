@@ -147,6 +147,7 @@ host-instantiations
 renderer-electron
 renderer-web
 renderer-dom
+renderer-chromium
 main-process
 frontend-native-units
 frontend-js
@@ -190,6 +191,7 @@ test_lane_description() {
 	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
 	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
 	renderer-dom) echo "renderer suites on the BROWSER target, run under node over jsdom" ;;
+	renderer-chromium) echo "BROWSER-target suites run in a real page in headless Chromium, keys from its input pipeline" ;;
 	main-process) echo "Electron main-process suites, the server_index build's defines, run under node" ;;
 	frontend-native-units) echo "src/frontend/tests suites that compile with the C backend" ;;
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
@@ -227,7 +229,17 @@ test_lane_description() {
 }
 
 # test_lane_backend ID — "c" (compile a binary and run it), "js" (compile with
-# `nim js -d:nodejs` and run under node), "js-browser", "js-dom", or "wasm".
+# `nim js -d:nodejs` and run under node), "js-browser", "js-dom",
+# "js-chromium", or "wasm".
+#
+# `js-chromium` is `js-browser`'s compile RUN in a real page in headless
+# Chromium (`src/frontend/tests/chromium-run.mjs`), for suites whose claim is
+# about what a BROWSER does — focus, trusted key events and the browser's own
+# default actions, `showModal()` and the inert page — none of which jsdom has.
+# The page asks the runner for keys (`window.ctPress`), and Playwright delivers
+# them through Chromium's input pipeline. Needs `node_modules/playwright` and
+# Playwright's Chromium (`PLAYWRIGHT_BROWSERS_PATH`), which the dev shell
+# provides; the runner fails rather than skipping without them.
 #
 # `js-dom` is `js-browser`'s compile RUN under node over jsdom
 # (`src/frontend/tests/jsdom-run.mjs`): for suites whose subject is a renderer
@@ -273,6 +285,7 @@ test_lane_backend() {
 	frontend-js | vm-js | vm-unit-js | host-instantiations | main-process) echo "js" ;;
 	renderer-electron | renderer-web) echo "js-browser" ;;
 	renderer-dom) echo "js-dom" ;;
+	renderer-chromium) echo "js-chromium" ;;
 	vm-unit-wasm) echo "wasm" ;;
 	*) echo "c" ;;
 	esac
@@ -723,6 +736,17 @@ test_lane_files() {
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		;;
 
+	renderer-chromium)
+		# Suites that need a BROWSER, not a DOM. PLAT-3's web arm: the view
+		# vocabulary's web binding at `[WebRenderer, Element]`, in a real
+		# document, driven by keys Chromium's own input pipeline delivers,
+		# held to the same scripted expectations the terminal is held to in
+		# `src/frontend/tui/tests/test_view_vocabulary_cross_medium.nim`, and
+		# measuring what the browser's own elements do on their own (the
+		# evidence behind `mappings.webMapping`'s grades).
+		echo src/frontend/tests/view_vocabulary_chromium_test.nim
+		;;
+
 	main-process)
 		# Suites that RUN the Electron main process's own modules.
 		# `dap_session_routing_test.nim` drives the DAP router
@@ -768,6 +792,7 @@ test_lane_files() {
 			grep -vxF -f <(
 				test_lane_files frontend-js
 				test_lane_files renderer-dom
+				test_lane_files renderer-chromium
 				test_lane_files main-process
 			) || true
 		;;

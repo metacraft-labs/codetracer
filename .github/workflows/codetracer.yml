@@ -3058,6 +3058,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-dom
 
+      - name: Run browser suites in headless Chromium (renderer-chromium lane)
+        # jsdom (the step above) is a DOM; this lane needs a BROWSER. Its
+        # suites load into a real page in Playwright's Chromium, which the dev
+        # shell provides, and ask for keys that Chromium's own input pipeline
+        # delivers — so focus, trusted key events, the browser's default
+        # actions and `showModal()`'s inert page are all real.
+        #
+        # `view_vocabulary_chromium_test.nim` renders the view vocabulary's
+        # sixteen entries into a document, holds them to the same scripted
+        # expectations the terminal suite holds isonim-tui's widgets to, and
+        # measures what the browser's own elements do on their own — the
+        # evidence the web column of the vocabulary's mapping is graded on.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-chromium
+
       - name: Run the Electron main process's suites (main-process lane)
         # The main process's DAP router, RUN under node with the
         # `server_index.js` defines: two sessions whose requests share a
