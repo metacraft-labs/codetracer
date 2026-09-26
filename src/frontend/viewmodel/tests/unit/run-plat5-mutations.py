@@ -65,7 +65,7 @@ T_CONTAINER = "a pointer over a container, or over nothing, offers nothing"
 T_PATHS = "paths round-trip against the model's own spelling"
 T_ONLY_PANE = ("the only pane of a layout can be dragged nowhere, and each "
                "refusal says why")
-T_DOCK_SPLIT = "a docked pane cannot be split into the tree in one command"
+T_DOCK_SPLIT = "a docked pane is split into the tree in one command"
 T_DOCK_SLOT0 = "a docked pane is never offered the first tab slot"
 T_INDEX = ("moving a tab out of its own stack at an index that does not exist "
            "is refused")
@@ -195,8 +195,8 @@ MUTATIONS = [
     ),
     Mutation(
         "P12", INTER,
-        "      return some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
-        "      return some(cmdSplit(target.splitTarget, source, target.axis, side))",
+        "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
+        "    some(cmdSplit(target.splitTarget, source, target.axis, side))",
         T_KINDS,
         "a split that cannot move a placed pane loses two kinds outright",
     ),
@@ -232,11 +232,14 @@ MUTATIONS = [
     ),
     Mutation(
         "P17", INTER,
-        "    # restoring it first would make this layer sequence two commands — which\n"
-        "    # §4.3 does not allow. Restore it, then drag it.\n"
-        "    none(LayoutCommand)",
-        "    some(cmdSplit(target.splitTarget, source, target.axis, side))",
+        "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
+        "    if not placed:\n"
+        "      return none(LayoutCommand)\n"
+        "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
         T_DOCK_SPLIT,
+        "RESPELLED 2026-09-26: the gesture used to be absent and this arm "
+        "offered it; PLAT-4's closing pass made it present, so the arm now "
+        "restores the absence (the pre-closing commandFor)",
     ),
     Mutation(
         "P18", INTER,
