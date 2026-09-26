@@ -9,6 +9,9 @@
 node_modules
 node_modules/
 nimcache/
+# Per-checkout nimcache (config.nims): every Nim compile in this checkout
+# keeps its intermediate files here, never in the shared ~/.cache/nim.
+.nimcache/
 .tup/
 .repro/
 .venv/
@@ -52,6 +55,7 @@ src/server_index.js
 src/server_index.js.map
 src/common/paths.js
 src/common/paths_test
+src/common/nimcache_is_worktree_local_test
 ui.js
 debugger.js
 browsersync_serv.js
