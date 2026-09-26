@@ -3780,30 +3780,57 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     rather than a function compared with itself.  Do not "simplify" it by
     routing the terminal arm through `applyKey`; the suite would still be
     green and would no longer mean anything.
-  * `isonim_tui.TabsWidget` WRAPS AND NO OTHER WIDGET DOES.  `moveRight` on
-    the last tab sets the first.  ListView, OptionList, Tree, DataTable,
-    RadioSet, ContentSwitcher and MarkdownViewer all CLAMP — read one by one,
-    NOT grepped: `grep -n wrap widgets/*.nim` returns 34 lines and all but two
-    are text wrapping or the word `wrapper`, so that grep proves nothing.
-    Outside `widgets/`, `command/palette.nim` moves `selectedIdx` modularly
-    and `focus/manager.nim` wraps Tab traversal, so the claim is about
-    widgets, not the library.  The vocabulary's `Tabs` does
-    not wrap; the divergence is ASSERTED in the cross-medium suite and
-    `mappings.terminalMapping(pkTabs)` is `msPartial` because of it.  If you
-    change either side, that case is where you will hear about it.
+  * `isonim_tui.TabsWidget` WRAPS BY DEFAULT and has `wraps = false` since
+    2026-09-26; the terminal binding passes it, so the vocabulary's `Tabs`
+    (which stops at the ends, as every other isonim-tui selection widget
+    does) and the widget agree. The cross-medium suite asserts both the
+    agreement AND that a default-built `TabsWidget` still wraps, so dropping
+    the option reddens it. isonim-tui also gained `widgets/menu.nim`
+    (`MenuWidget`: Enter runs AND closes, Escape closes) and
+    `MarkdownWidget.source`; the terminal column of `mappings.nim` is
+    complete on all sixteen.
   * `unittest.check` INSIDE A PLAIN `proc` CANNOT FAIL THE TEST.  Nim's
     `unittest` injects `testStatusIMPL` as a local in the `test` template AND
     declares a global fallback, so an assertion helper written as a `proc`
     compiles, prints `Check failed`, and the test still reports `[OK]`.
     Measured here: the cross-medium suite's Tabs case printed a failed
     comparison and passed.  Write assertion helpers as TEMPLATES.
-  * THREE VOCABULARY ENTRIES HAVE NO GPUI TAG AT ALL — `Table`, `Modal`,
-    `ProgressIndicator`.  `isonim-gpui`'s `tagMap` has 35 keys and none of
-    `table`/`tr`/`td`/`dialog`/`progress` is among them; `mapTag` passes an
-    unknown tag through unchanged.  `mappings.GpuiTagMap` is a COPY of those
-    keys (isonim_gpui dlopens a Rust cdylib at module init, so it cannot be
-    imported from a unit test) and `view_vocabulary_test` verifies the copy
-    against isonim-gpui's source with a count assertion.
+  * `mappings.GpuiTagMap` is a COPY of isonim-gpui's 35 `tagMap` keys
+    (isonim_gpui dlopens a Rust cdylib at module init, so it cannot be
+    imported from a unit test) and `view_vocabulary_test` verifies the copy.
+    Tag-map MEMBERSHIP decides nothing (PLAT-21): an unmapped tag renders as
+    a container, and no GPUI row is `msAbsent`.
+  * THE WEB ARM RUNS IN A REAL BROWSER: lane `renderer-chromium` (backend
+    `js-chromium`, `just test-renderer-chromium`) compiles
+    `src/frontend/tests/view_vocabulary_chromium_test.nim` with `nim js` and
+    `src/frontend/tests/chromium-run.mjs` loads it into Playwright's Chromium;
+    the page calls `window.ctPress(selector, key)` and gets a TRUSTED key
+    (`keyboard.press`, or CDP `Input.dispatchKeyEvent` for non-US-layout
+    characters — `keyboard.press('\u0301')` silently sends nothing). Use
+    this lane, not jsdom, for anything about focus, default actions or
+    `showModal()`. An `{.importjs.}` with zero args needs a parenthesised
+    pattern (`"(document.body)"`), and `#` may appear once per parameter —
+    use an arrow function for repeated use.
+  * `web_binding` IS GENERIC AND BOTH INSTANTIATIONS ARE REAL: `[MockRenderer,
+    MockNode]` (C, tui lane) and `[WebRenderer, Element]` (browser). The
+    `when isWebR(R)` template, not `defined(js) and R is WebRenderer` (the
+    second operand does not compile on C). `WebBinding` is a `ref` because
+    the installed keydown handlers hold it; `sendKey` focuses and DISPATCHES
+    through that handler. MEASURED in Chromium: a closed `<select>` commits
+    on Up/Down/Home/End/type-ahead, a text `<input>` moves its caret on
+    Up/Down, a checkbox ignores Enter — the binding prevents the first two
+    (`nativeDefaultChangesState`), and the web column of `mappings.nim` is
+    graded on what elements DO (7 complete, 9 partial), not on tags.
+  * `Input.cursor` COUNTS GRAPHEME CLUSTERS as every binding drives it:
+    `applyKey(node, key, boundaries)` takes the host's segmenter
+    (`vocabulary.ClusterBoundaries`); bindings pass
+    `frontend/view_vocabulary/graphemes.graphemeBoundaries` (UAX #29 via
+    `isonim_tui/text/width`), the vocabulary's default `runeBoundaries` is
+    the old behaviour. `src/common` still imports nothing from isonim-tui.
+  * The cross-medium view and its scripted cases live in
+    `frontend/view_vocabulary/cross_medium_script.nim`, shared by the tui
+    suite and the Chromium suite; PLAT-3's harness is
+    `src/frontend/tui/tests/run-plat3-vocabulary-mutations.py`.
   * PLAT-2's ATTRIBUTION NOW HAS A PRODUCT CALL SITE: the TUI variables
     pane's title row (`views/variables.provenanceOf` / `provenanceBadgeOf` /
     `fitProvenance`).  A narrow pane shows the SHORT form or nothing, never a

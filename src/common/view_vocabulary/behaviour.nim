@@ -256,38 +256,40 @@ proc moveSelected(v: ViewNode; step: int): Transition =
 # Input editing
 # ---------------------------------------------------------------------------
 
-func runeSplit(s: string; at: int): tuple[before, after: string] =
-  ## Split `s` at rune index `at`. RUNES, not bytes: `Input.cursor` is a rune
-  ## index because a byte index is a property of one encoding and a cell index
-  ## is a property of one medium.
-  var i = 0
-  var bytes = 0
-  for r in runes(s):
-    if i >= at: break
-    bytes += ($r).len
-    inc i
-  (s[0 ..< bytes], s[bytes .. ^1])
+func clusterAtOrAfter(bounds: seq[int]; offset: int): int =
+  ## The index of the first boundary at or after byte `offset`.
+  for i, b in bounds:
+    if b >= offset: return i
+  bounds.len - 1
 
-proc applyInputKey(v: ViewNode; kp: KeyPress): KeyOutcome =
-  let n = v.text.runeLen
+proc applyInputKey(v: ViewNode; kp: KeyPress;
+                   boundaries: ClusterBoundaries): KeyOutcome =
+  ## Editing over CLUSTERS as `boundaries` segments the text — see
+  ## `vocabulary.ClusterBoundaries` for why the segmenter is the host's.
+  let bounds = boundaries(v.text)
+  let n = bounds.len - 1
+  # A caret past the end (a model filled in under a different segmenter)
+  # stands at the end rather than indexing outside the text.
+  if v.cursor > n: v.cursor = n
+  if v.cursor < 0: v.cursor = 0
   case kp.key
   of kChar:
-    let (before, after) = runeSplit(v.text, v.cursor)
-    v.text = before & $kp.ch & after
-    v.cursor = v.cursor + 1
+    let at = bounds[v.cursor]
+    let ch = $kp.ch
+    v.text = v.text[0 ..< at] & ch & v.text[at .. ^1]
+    # WHERE THE CARET LANDS IS A SEGMENTATION QUESTION, not "+1". A
+    # combining mark typed after `e` JOINS `e`'s cluster, so the caret stays
+    # after that one cluster; a base character starts a new one.
+    v.cursor = clusterAtOrAfter(boundaries(v.text), at + ch.len)
     outcome(trInsert)
   of kBackspace:
     if v.cursor <= 0: return ignored()
-    let (before, after) = runeSplit(v.text, v.cursor)
-    var kept = before
-    kept.setLen(kept.len - ($before.toRunes[^1]).len)
-    v.text = kept & after
+    v.text = v.text[0 ..< bounds[v.cursor - 1]] & v.text[bounds[v.cursor] .. ^1]
     v.cursor = v.cursor - 1
     outcome(trDeleteBack)
   of kDelete:
     if v.cursor >= n: return ignored()
-    let (before, after) = runeSplit(v.text, v.cursor + 1)
-    v.text = before[0 ..< before.len - ($before.toRunes[^1]).len] & after
+    v.text = v.text[0 ..< bounds[v.cursor]] & v.text[bounds[v.cursor + 1] .. ^1]
     outcome(trDeleteForward)
   of kLeft:
     if v.cursor <= 0: return ignored()
@@ -401,8 +403,12 @@ proc reseatCursorAfterCollapse*(v: ViewNode) =
 # The machine
 # ---------------------------------------------------------------------------
 
-proc applyKey*(v: ViewNode; kp: KeyPress): KeyOutcome =
-  ## Apply one key to one node. Returns what happened.
+proc applyKey*(v: ViewNode; kp: KeyPress;
+               boundaries: ClusterBoundaries = runeBoundaries): KeyOutcome =
+  ## Apply one key to one node. Returns what happened. `boundaries` is the
+  ## host's cluster segmenter, used by `Input` alone (see
+  ## `vocabulary.ClusterBoundaries`); every front-end binding passes the
+  ## UAX #29 one.
   ##
   ## A node that is `disabled`, non-interactive, or a native escape answers
   ## nothing — and answering nothing is `handled = false`, so the host gets the
@@ -430,7 +436,7 @@ proc applyKey*(v: ViewNode; kp: KeyPress): KeyOutcome =
     else: ignored()
 
   of pkInput:
-    applyInputKey(v, kp)
+    applyInputKey(v, kp, boundaries)
 
   of pkSelect:
     if not v.open:
@@ -558,9 +564,11 @@ proc applyKey*(v: ViewNode; kp: KeyPress): KeyOutcome =
   of pkText, pkImage, pkMarkdown, pkProgressIndicator:
     ignored()
 
-proc applyKeys*(v: ViewNode; keys: openArray[KeyPress]): seq[KeyOutcome] =
+proc applyKeys*(v: ViewNode; keys: openArray[KeyPress];
+                boundaries: ClusterBoundaries = runeBoundaries):
+                  seq[KeyOutcome] =
   for kp in keys:
-    result.add applyKey(v, kp)
+    result.add applyKey(v, kp, boundaries)
 
 # ---------------------------------------------------------------------------
 # Convenience constructors for tests and bindings

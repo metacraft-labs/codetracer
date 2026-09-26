@@ -70,7 +70,8 @@
 ##               entries rather than one skinned twice.
 ##
 ##   `Input`     A single-line editable string with a caret. State: `text`,
-##               `cursor` (in RUNES, never bytes or cells), `disabled`.
+##               `cursor` (in CLUSTERS — user-perceived characters — never
+##               bytes, code units or cells), `disabled`.
 ##               Behaviour: insert, delete before/after the caret, caret
 ##               motion, `submit`. Multi-line editing is deliberately NOT here
 ##               — see "what is not in the vocabulary" below.
@@ -230,7 +231,8 @@ type
     expanded*: bool
       ## `Collapsible`, and every `Tree` node.
     cursor*: int
-      ## `Input` — the caret, in RUNES. `Tree` — the index into the flattened
+      ## `Input` — the caret, in CLUSTERS as the host's `ClusterBoundaries`
+      ## segments the text (see there). `Tree` — the index into the flattened
       ## visible rows. `Table` — the row.
     column*: int
       ## `Table` — the column.
@@ -318,10 +320,45 @@ func viewToggle*(id, label: string; checked = false;
            disabled: disabled, selected: -1, highlight: -1,
            activation: BothMeans)
 
-func viewInput*(id, text: string; cursor = -1; disabled = false): ViewNode =
+type
+  ClusterBoundaries* = proc (s: string): seq[int] {.nimcall, noSideEffect.}
+    ## Every CLUSTER boundary of `s` as a byte offset, ascending, including 0
+    ## and `s.len`. An `Input`'s caret counts clusters, and a caret motion or a
+    ## deletion moves over exactly one.
+    ##
+    ## **WHY THE VOCABULARY TAKES THIS AS A PARAMETER.** A caret belongs
+    ## between the characters a reader sees, and in Unicode those are extended
+    ## grapheme clusters (UAX #29), not code points: `e` + U+0301 is one
+    ## character and a caret between its two runes is a caret nobody can see.
+    ## Both media measured agree — isonim-tui's `InputWidget` moves over
+    ## grapheme clusters, and so does Chromium's `<input>`
+    ## (`view_vocabulary_chromium_test`'s native-semantics case). Until
+    ## 2026-09-26 the vocabulary counted RUNES instead, and PLAT-3 recorded the
+    ## difference as unreconciled. Segmenting needs the Unicode property
+    ## tables, which live in isonim-tui (`isonim_tui/text/width`) and which
+    ## this package must not import — it compiles in a workspace with no
+    ## isonim-tui checkout. So the segmenter is the HOST's: every front-end
+    ## binding passes the UAX #29 one
+    ## (`frontend/view_vocabulary/graphemes.graphemeBoundaries`), and
+    ## `runeBoundaries` below is the default for a host with none, which is
+    ## exactly the old behaviour.
+
+func runeBoundaries*(s: string): seq[int] =
+  ## The fallback segmenter: one cluster per rune. Agrees with UAX #29 on
+  ## every text with no combining mark, joiner, variation selector or
+  ## regional-indicator pair.
+  result = @[0]
+  var i = 0
+  while i < s.len:
+    i += s.runeLenAt(i)
+    result.add i
+
+func viewInput*(id, text: string; cursor = -1; disabled = false;
+                boundaries: ClusterBoundaries = runeBoundaries): ViewNode =
   ## `cursor = -1` means "at the end", which is where a caret goes when a
-  ## field is filled in from a model rather than typed into.
-  let caret = if cursor < 0: text.runeLen else: cursor
+  ## field is filled in from a model rather than typed into. The end is
+  ## counted in `boundaries`' clusters.
+  let caret = if cursor < 0: boundaries(text).len - 1 else: cursor
   ViewNode(kind: pkInput, id: id, text: text, cursor: caret,
            disabled: disabled, selected: -1, highlight: -1,
            activation: BothMeans)

@@ -38,6 +38,7 @@
 import std/[algorithm, os, strutils, unittest]
 
 import view_vocabulary
+import view_vocabulary/markdown_blocks
 
 var countedAssertions = 0
 
@@ -46,9 +47,18 @@ template ck(condition: untyped) =
   check condition
 
 const
-  ExpectedAssertionsWithGpui = 762
-  ExpectedAssertionsWithoutGpui = 691
+  ExpectedAssertionsWithGpui = 790
+  ExpectedAssertionsWithoutGpui = 719
     ## Both written from a run. See the final case.
+    ##
+    ## **RE-TAKEN ON 2026-09-26** (762 -> 790, 691 -> 719): the new
+    ## `markdown_blocks` suite, the terminal and web mapping cases rewritten
+    ## when the terminal column became complete and the web column was
+    ## regraded by a browser, and nine more "a partial row says why" checks
+    ## in the first mapping case. None of it is in the GPUI arm, so the arm's
+    ## contribution (71) is unchanged and the second value is the first minus
+    ## it — DERIVED, not measured by moving the sibling aside, because that
+    ## sibling checkout is shared with concurrent work.
     ##
     ## **BOTH RE-TAKEN ON 2026-09-15 by PLAT-21** (707 -> 741, 636 -> 670),
     ## and the second one was MEASURED rather than derived from the delta: the
@@ -512,7 +522,7 @@ suite "PLAT-3: the three front-end mappings":
         inc cells
     ck cells == 48
 
-  test "the terminal is complete on fourteen of sixteen, and names the two":
+  test "the terminal is complete on all sixteen, and names what closed the two":
     var complete = 0
     var partial: seq[string] = @[]
     for k in ViewKind:
@@ -520,24 +530,39 @@ suite "PLAT-3: the three front-end mappings":
       of msComplete: inc complete
       of msPartial: partial.add vocabularyName(k)
       of msAbsent: partial.add "ABSENT:" & vocabularyName(k)
-    ck complete == 14
-    # TWO partials, and they are partial for different reasons: Menu has no
-    # widget at all, and Tabs has one that behaves differently. The second was
-    # found by the cross-medium suite rather than by reading the library.
-    ck partial == @["Tabs", "Menu"]
-    ck terminalMapping(pkMenu).note.contains("NO MENU WIDGET")
-    ck terminalMapping(pkTabs).note.contains("THE WIDGET WRAPS")
+    # **FOURTEEN UNTIL 2026-09-26**, with `Tabs` and `Menu` partial for
+    # different reasons: Menu had no widget at all, and Tabs had one that
+    # behaved differently (found by the cross-medium suite rather than by
+    # reading the library). isonim-tui gained `MenuWidget` and
+    # `TabsWidget(wraps = false)`. The notes keep the history, so a reader
+    # who meets the old status elsewhere can find out what moved it.
+    ck complete == 16
+    ck partial.len == 0
+    ck terminalMapping(pkMenu).target.contains("MenuWidget")
+    ck terminalMapping(pkMenu).note.contains("NO MENU")
+    ck terminalMapping(pkTabs).target.contains("wraps = false")
+    ck terminalMapping(pkTabs).note.contains("WRAPS BY DEFAULT")
 
-  test "the web is complete on fifteen of sixteen, and Markdown is the one":
-    var complete = 0
+  test "the web is graded by what the browser does: seven complete, nine partial":
+    var complete: seq[string] = @[]
     var partial: seq[string] = @[]
     for k in ViewKind:
       case webMapping(k).status
-      of msComplete: inc complete
+      of msComplete: complete.add vocabularyName(k)
       of msPartial: partial.add vocabularyName(k)
       of msAbsent: partial.add "ABSENT:" & vocabularyName(k)
-    ck complete == 15
-    ck partial == @["Markdown"]
+    # **FIFTEEN COMPLETE UNTIL 2026-09-26**, graded on whether the TAG existed.
+    # A real browser (`view_vocabulary_chromium_test`, native-semantics case)
+    # says which of those elements ANSWER the entry's keys themselves, which
+    # is what `msComplete` means. A `<ul>` answers none; a checkbox answers
+    # Space and not Enter; a closed `<select>` commits on Down.
+    ck complete == @["Text", "Button", "Input", "Collapsible", "Modal",
+                     "ProgressIndicator", "Image"]
+    ck partial == @["Checkbox", "Toggle", "Select", "List", "Tree", "Table",
+                    "Tabs", "Menu", "Markdown"]
+    ck webMapping(pkCheckbox).note.contains("Enter does NOT")
+    ck webMapping(pkSelect).note.contains("COMMITS")
+    ck webMapping(pkMarkdown).note.contains("markdown_blocks")
 
   test "GPUI is absent on NO entry, and every row is accounted for":
     var absent: seq[string] = @[]
@@ -607,8 +632,12 @@ suite "PLAT-3: the three front-end mappings":
     # absence with the three positive controls above it: the summary was READ,
     # it has seventeen lines, and three rows in it are quoted by name.
     ck not s.contains("ABSENT")
-    ck s.contains("Menu                partial    complete   partial")
-    ck s.contains("Tabs                partial    complete   partial")
+    # `Menu` and `Tabs` read `partial` on the terminal until 2026-09-26; the
+    # web column was regraded by a real browser the same day.
+    ck s.contains("Menu                complete   partial    partial")
+    ck s.contains("Tabs                complete   partial    partial")
+    ck s.contains("Markdown            complete   partial    partial")
+    ck s.contains("Collapsible         complete   complete   partial")
     let a = admissionSummary()
     ck a.splitLines.len == 16
     ck a.contains("Menu: ADMITTED (front-ends having it: terminal, web, gpui)")
@@ -737,6 +766,44 @@ suite "PLAT-3: the GPUI tag table this repository copied":
         ck tag in keys
       for tag in keys:
         ck tag in GpuiTagMap
+
+suite "PLAT-3: the web's Markdown renderer (markdown_blocks)":
+  # The parser the web binding renders `Markdown` with. Its agreement with
+  # isonim-tui's parser is measured by the cross-medium suite, through the
+  # outline each medium's RENDERING reads back as; these cases pin the
+  # outline this module produces on its own, construct by construct, so a
+  # disagreement there can be located.
+
+  proc ol(src: string): seq[string] = outline(parseMdBlocks(src))
+
+  test "headings, ATX and setext, and paragraphs":
+    ck ol("# Title\n\nbody") == @["h1 Title", "p body"]
+    ck ol("### Three ###") == @["h3 Three"]
+    ck ol("Head\n===") == @["h1 Head"]
+    ck ol("Sub\n---") == @["h2 Sub"]
+    # A paragraph continues over a newline as ONE space.
+    ck ol("one\ntwo") == @["p one two"]
+    # `#x` is not a heading: the hashes need a space after them.
+    ck ol("#x") == @["p #x"]
+
+  test "inline structure is spelled, not flattened away":
+    ck ol("a **b** *c* `d` [e](http://f)") ==
+      @["p a [b:b] [i:c] [c:d] [a:http://f:e]"]
+    ck ol("\\*not em\\*") == @["p *not em*"]
+    ck ol("x  \ny") == @["p x\ny"]
+    # An unclosed marker is text.
+    ck ol("a * b") == @["p a * b"]
+
+  test "lists nest by indentation, and an ordered list keeps its start":
+    ck ol("- a\n- b\n  - c\n3. x") == @[
+      "ul{", "li{", "p a", "}", "li{", "p b", "ul{", "li{", "p c", "}", "}",
+      "}", "}", "ol3{", "li{", "p x", "}", "}"]
+
+  test "code, quotes and rules":
+    ck ol("```nim\necho 1\n```") == @["code nim|echo 1"]
+    ck ol("para\n\n    indented") == @["p para", "code |indented"]
+    ck ol("> q\n> r") == @["quote{", "p q r", "}"]
+    ck ol("***") == @["hr"]
 
 suite "PLAT-3: assertion tally":
 

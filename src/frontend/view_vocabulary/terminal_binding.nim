@@ -59,11 +59,12 @@ import isonim_tui/widgets/datatable as w_datatable
 import isonim_tui/widgets/tabs as w_tabs
 import isonim_tui/widgets/collapsible as w_collapsible
 import isonim_tui/widgets/modal as w_modal
-import isonim_tui/widgets/option_list as w_option_list
+import isonim_tui/widgets/menu as w_menu
 import isonim_tui/widgets/progress_bar as w_progress
 import isonim_tui/widgets/markdown as w_markdown
 
 import ../../common/view_vocabulary
+import ../../common/view_vocabulary/markdown_blocks as md_blocks
 
 type
   BoundWidget* = object
@@ -93,11 +94,12 @@ type
     of pkCollapsible: collapsibleW*: CollapsibleWidget
     of pkModal: modalW*: ModalWidget
     of pkMenu:
-      menuListW*: OptionListWidget
-      menuModalW*: ModalWidget
-        ## THE COMPOSITION `mappings.terminalMapping(pkMenu)` names. isonim-tui
-        ## has no menu widget; this is the same pairing `SelectWidget` uses
-        ## internally.
+      menuW*: MenuWidget
+        ## isonim-tui's own `MenuWidget` (widgets/menu.nim). Until 2026-09-26
+        ## this was a hand-made `OptionListWidget` inside a `ModalWidget`,
+        ## because the library had no menu, and that composition did not
+        ## answer `Enter` the way the entry specifies — it ran nothing and
+        ## stayed open. The library's widget runs the command AND closes.
     of pkProgressIndicator: progressW*: ProgressBarWidget
     of pkImage:
       imageAltW*: LabelWidget
@@ -224,7 +226,12 @@ proc bindNode(h: TerminalTestHarness; v: ViewNode): BoundWidget =
     var tabs: seq[Tab] = @[]
     for o in v.options:
       tabs.add Tab(id: o.id, label: o.label, disabled: o.disabled)
-    let w = newTabs(r, tabs, activeIndex = max(v.selected, 0))
+    # `wraps = false`: the vocabulary's Tabs stops at the ends, as every
+    # other selection entry does, and `TabsWidget` wraps unless told not to
+    # (Textual's default, and WAI-ARIA's). The option is the library's; this
+    # line is the wiring. Until 2026-09-26 the widget had no such option and
+    # the cross-medium suite asserted the wrap as a DIVERGENCE.
+    let w = newTabs(r, tabs, activeIndex = max(v.selected, 0), wraps = false)
     BoundWidget(id: v.id, kind: pkTabs, node: w.node, tabsW: w)
   of pkCollapsible:
     var body: seq[string] = @[]
@@ -243,17 +250,14 @@ proc bindNode(h: TerminalTestHarness; v: ViewNode): BoundWidget =
     if v.open: w.open()
     BoundWidget(id: v.id, kind: pkModal, node: w.node, modalW: w)
   of pkMenu:
-    var rows: seq[OptionRow] = @[]
+    var items: seq[MenuItem] = @[]
     for o in v.options:
-      rows.add OptionRow(kind: orkOption, id: o.id, label: o.label,
-                         disabled: o.disabled)
-    let list = newOptionList(r, rows)
-    list.highlightedIndex = v.highlight
-    let holder = newModal(h, "")
-    holder.installEscapeHandler()
-    if v.open: holder.open()
-    BoundWidget(id: v.id, kind: pkMenu, node: list.node,
-                menuListW: list, menuModalW: holder)
+      items.add MenuItem(id: o.id, label: o.label, disabled: o.disabled)
+    let w = newMenu(h, items)
+    if v.open:
+      w.open()
+      if v.highlight >= 0: w.setHighlight(v.highlight)
+    BoundWidget(id: v.id, kind: pkMenu, node: w.node, menuW: w)
   of pkProgressIndicator:
     let w = newProgressBar(h, 100.0,
       (if v.progress == ProgressIndeterminate: 0.0 else: float64(v.progress)))
@@ -313,13 +317,24 @@ proc bindView*(h: TerminalTestHarness; model: ViewNode): TerminalBinding =
 # Driving
 # ---------------------------------------------------------------------------
 
+proc sendKeyPress*(b: TerminalBinding; id: string; kp: KeyPress): bool
+
 proc sendKey*(b: TerminalBinding; id: string; k: Key; ch = ' '): bool =
   ## Fire a real `keydown` at the widget bound to `id`, spelled the way
   ## isonim-tui spells it. Returns whether a widget was found; what the key DID
   ## is read back with `readTerminalFacts`, from the widget, not from here.
+  sendKeyPress(b, id, if k == kChar: typeChar(ch) else: press(k))
+
+proc sendKey*(b: TerminalBinding; id: string; k: Key; ch: string): bool =
+  ## The same, for a `kChar` that is any ONE RUNE — a combining mark, an
+  ## emoji — rather than an ASCII character.
+  sendKeyPress(b, id,
+    if k == kChar and ch.len > 0: typeRune(ch.runeAt(0)) else: press(k))
+
+proc sendKeyPress*(b: TerminalBinding; id: string; kp: KeyPress): bool =
   if id notin b.byId: return false
   let bw = b.bound[b.byId[id]]
-  let kp = if k == kChar: typeChar(ch) else: press(k)
+  let k = kp.key
   let ev = toTerminalEvent(kp)
   case bw.kind
   of pkSelect:
@@ -332,15 +347,13 @@ proc sendKey*(b: TerminalBinding; id: string; k: Key; ch = ' '): bool =
     else:
       fireEventWith(bw.node, "keydown", ev)
   of pkMenu:
-    if k == kEscape:
-      # THE PANEL, NOT THE OVERLAY NODE. `installEscapeHandler` registers on
-      # `m.panel`, which is the trapped region a real reader's focus is inside;
-      # `m.node` is the outer overlay. Firing at the overlay reached no handler
-      # and the modal stayed open — measured, and the reason this line names
-      # `panel` explicitly rather than reusing `bw.node`.
-      fireEventWith(bw.menuModalW.panel, "keydown", ev)
-    else:
-      fireEventWith(bw.menuListW.node, "keydown", ev)
+    # A CLOSED MENU IS NOT IN THE DOCUMENT — its list lives inside the
+    # modal's overlay, which `ModalWidget.close` unmounts — so no reader's key
+    # can reach it, and none is delivered. Firing at the detached list anyway
+    # would move a highlight nobody can see, which the vocabulary (a closed
+    # Menu ignores every key) correctly does not do.
+    if bw.menuW.isOpen:
+      fireEventWith(bw.menuW.node, "keydown", ev)
   of pkModal:
     fireEventWith(bw.modalW.panel, "keydown", ev)
   else:
@@ -377,13 +390,12 @@ proc widgetFacts(bw: BoundWidget): seq[StateFact] =
   of pkToggle:
     @[fact(bw.id, "checked", $bw.switchW.value)]
   of pkInput:
-    # `InputWidget.selection.cursor` is a GRAPHEME-CLUSTER index and the
-    # vocabulary's `Input.cursor` is a RUNE index. They agree on everything
-    # that is not a combining sequence or an emoji ZWJ join, and they diverge
-    # on those — a real difference between the two definitions, recorded here
-    # and in `mappings.terminalMapping(pkInput)` rather than papered over by
-    # converting one into the other. The cross-medium suite drives ASCII, and
-    # says so.
+    # `InputWidget.selection.cursor` is a GRAPHEME-CLUSTER index, and since
+    # 2026-09-26 so is the vocabulary's `Input.cursor` as every binding drives
+    # it (`vocabulary.ClusterBoundaries`). Until then the vocabulary counted
+    # RUNES and the two disagreed on every combining sequence and emoji join;
+    # the cross-medium suite drove ASCII only and said so. It now types a
+    # combining mark and compares.
     @[fact(bw.id, "text", bw.inputW.value),
       fact(bw.id, "cursor", $bw.inputW.selection.cursor)]
   of pkSelect:
@@ -420,21 +432,74 @@ proc widgetFacts(bw: BoundWidget): seq[StateFact] =
   of pkModal:
     @[fact(bw.id, "open", $(bw.modalW.state in {msOpen, msOpening}))]
   of pkMenu:
-    @[fact(bw.id, "highlight", $bw.menuListW.highlightedIndex),
-      fact(bw.id, "open", $(bw.menuModalW.state in {msOpen, msOpening}))]
+    @[fact(bw.id, "highlight", $bw.menuW.highlightedIndex),
+      fact(bw.id, "open", $bw.menuW.isOpen)]
   of pkProgressIndicator:
     @[fact(bw.id, "progress", $int(bw.progressW.progress))]
   of pkImage:
     @[fact(bw.id, "mediaType", bw.imageMediaType),
       fact(bw.id, "alt", bw.imageAlt)]
   of pkMarkdown:
-    # The library's MarkdownWidget parses the source into an `MdDocument` and
-    # does not keep the source, so the SOURCE is not readable back out of the
-    # widget. Reported as "" rather than echoed from the model, and the suite
-    # excludes Markdown's `text` from the comparison BY NAME with this reason
-    # beside it — an unexplained exclusion is how a suite stops covering the
-    # thing it claims to cover.
-    @[fact(bw.id, "text", "")]
+    # `MarkdownWidget.source` is the text the widget last PARSED, kept by the
+    # library since 2026-09-26. Before that the widget kept only the parsed
+    # `MdDocument`, this arm reported "", and the cross-medium suite excluded
+    # Markdown's `text` by name. What the widget made OF the source is
+    # compared separately, by `markdownOutlineOf` below.
+    @[fact(bw.id, "text", bw.markdownW.source)]
+
+proc mdInlineOutline(xs: seq[MdInline]): string =
+  ## isonim-tui's inline nodes, spelled the way `markdown_blocks.inlineToken`
+  ## spells an inline element — the ONE spelling both media's outlines use.
+  for x in xs:
+    case x.kind
+    of miText: result.add inlineToken(mskText, x.text, "")
+    of miCode: result.add inlineToken(mskCode, x.text, "")
+    of miEmphasis: result.add inlineToken(mskEmphasis,
+                                          mdInlineOutline(x.children), "")
+    of miStrong: result.add inlineToken(mskStrong,
+                                        mdInlineOutline(x.children), "")
+    of miLink: result.add inlineToken(mskLink,
+                                      mdInlineOutline(x.linkChildren), x.url)
+    of miBreak: result.add inlineToken(mskBreak, "", "")
+
+proc mdBlockOutline(blocks: seq[MdBlock]; acc: var seq[string]) =
+  for blk in blocks:
+    case blk.kind
+    of mbHeading:
+      acc.add "h" & $blk.level & " " & mdInlineOutline(blk.headingInlines)
+    of mbParagraph: acc.add "p " & mdInlineOutline(blk.paragraph)
+    of mbCodeBlock:
+      var body = ""
+      for i, l in blk.codeLines:
+        if i > 0: body.add "\n"
+        body.add l
+      acc.add "code " & blk.info & "|" & body
+    of mbHr: acc.add "hr"
+    of mbQuote:
+      acc.add "quote{"
+      mdBlockOutline(blk.quoted, acc)
+      acc.add "}"
+    of mbList:
+      acc.add (if blk.ordered: "ol" & $blk.startNumber & "{" else: "ul{")
+      for item in blk.items:
+        acc.add "li{"
+        mdBlockOutline(item.blocks, acc)
+        acc.add "}"
+      acc.add "}"
+    of mbBlank: discard   # vertical rhythm, not structure
+
+proc markdownOutlineOf*(b: TerminalBinding; id: string): seq[string] =
+  ## **What isonim-tui's parser made of a bound `Markdown` entry**, in
+  ## `markdown_blocks`'s outline spelling — read from the widget's own
+  ## `MdDocument`, which the library built from the source with a parser this
+  ## repository did not write. The web binding's `webMarkdownOutline` reads
+  ## the same shape back off the elements IT drew with a parser written
+  ## separately, and the cross-medium suite compares the two. Empty when `id`
+  ## is not a bound Markdown entry.
+  if id notin b.byId: return
+  let bw = b.bound[b.byId[id]]
+  if bw.kind != pkMarkdown: return
+  mdBlockOutline(bw.markdownW.document.blocks, result)
 
 proc treeLabelOf*(b: TerminalBinding; treeId, nodeId: string): string =
   ## **The LABEL isonim-tui's own `TreeNodeRef` holds** for one node of one

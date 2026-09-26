@@ -89,6 +89,7 @@ import isonim_gpui/bindings
 
 import ../../common/view_vocabulary
 import ./fact_reader
+import ./graphemes
 
 export fact_reader.factAttributeName
 
@@ -363,7 +364,9 @@ proc keyHandler(b: GpuiBinding; nodeId: string): GpuiEventHandler =
     b.lastKeyReceived = ev
     for n in walk(b.model):
       if n.id == nodeId:
-        b.lastOutcome = applyKey(n, keyFromGpuiEvent(ev))
+        # The UAX #29 segmenter, the same one the web binding passes, so an
+        # `Input`'s caret counts the clusters the terminal's widget counts.
+        b.lastOutcome = applyKey(n, keyFromGpuiEvent(ev), graphemeBoundaries)
         break
 
 proc installKeys(b: GpuiBinding; el: GpuiElement; v: ViewNode) =

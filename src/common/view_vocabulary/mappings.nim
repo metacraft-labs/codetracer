@@ -28,14 +28,15 @@
 ##
 ## ## THE THREE FRONT-ENDS, AS SURVEYED ON 2026-09-07
 ##
-## TERMINAL — `isonim-tui`, 36 widget modules under
-## `src/isonim_tui/widgets/`. Fifteen of the sixteen entries land on a
-## dedicated widget. `Menu` is the exception: there is no `menu.nim`, and the
-## closest construct is `command/palette.nim`, which is a fuzzy command
-## palette rather than a menu. The terminal `Menu` is therefore a COMPOSITION
-## of `OptionListWidget` inside `ModalWidget` — which is, notably, exactly how
-## `SelectWidget` is built, so the composition is the library's own idiom
-## rather than an invention here.
+## TERMINAL — `isonim-tui`, widget modules under `src/isonim_tui/widgets/`.
+## All sixteen entries land on a dedicated widget, and all sixteen are
+## `msComplete` since 2026-09-26. Until then two were partial: `Menu`, because
+## the library had no menu (the terminal binding hand-built an
+## `OptionListWidget` inside a `ModalWidget`, which ran nothing on `Enter` and
+## stayed open), and `Tabs`, because `TabsWidget` wraps at the ends and the
+## entry does not — a divergence the cross-medium suite found and asserted.
+## isonim-tui now has `widgets/menu.nim` and `TabsWidget(wraps = false)`, and
+## each row below says which.
 ##
 ## WEB — there is NO general DOM component library, and this was measured
 ## rather than assumed. `codetracer-design-system`'s 116 components are
@@ -45,10 +46,13 @@
 ## actually has is HTML elements reached through isonim's `ui()` DSL, whose
 ## `htmlElements` list carries ~110 tags. That is the mapping target, and it is
 ## also §3.1's own diagnosis ("a view can be written renderer-agnostically
-## today only if it restricts itself to primitives"). Two product modules are
-## named below where they already implement an entry:
-## `viewmodel/views/isonim_toggle_view.renderToggle` and
-## `viewmodel/views/isonim_menu_shell_view`.
+## today only if it restricts itself to primitives"). Product modules are
+## named below where they already implement an entry
+## (`viewmodel/views/isonim_toggle_view.renderToggle`,
+## `viewmodel/views/isonim_menu_shell_view`, ...) — as evidence the product
+## needs the entry, not as the grade: the grade is what the ELEMENT does in a
+## browser, measured, and `webMapping`'s own doc comment says how that moved
+## the column on 2026-09-26.
 ##
 ## GPUI — `isonim-gpui`'s `GpuiRenderer` satisfies `RendererBackend` and
 ## translates HTML tags through a **35-entry** `tagMap` in
@@ -99,13 +103,22 @@
 ##
 ## ## WHAT THIS TABLE IS NOT
 ##
-## It is not a claim that every mapping has been RENDERED. The cross-medium
-## suite (`src/frontend/tui/tests/test_view_vocabulary_cross_medium.nim`)
-## renders the terminal and web columns for real and drives their keyboard
-## contracts; the GPUI column is verified structurally, against the tag table,
-## because linking `isonim_gpui` requires the Rust cdylib at load time and
-## `isonim-gpui` is an ADVISORY sibling of this repository (see
-## `scripts/require-siblings.sh`). PLAT-21 is the milestone that renders it.
+## It is a table of claims, and each column is checked by RENDERING it, not
+## by reading it:
+##
+##   terminal  `src/frontend/tui/tests/test_view_vocabulary_cross_medium.nim`
+##             builds real isonim-tui widgets and reads state out of them;
+##   web       the same suite on isonim's `MockRenderer`, and
+##             `src/frontend/tests/view_vocabulary_chromium_test.nim` (the
+##             `renderer-chromium` lane) in a real document in headless
+##             Chromium, driven by keys Chromium's own input pipeline delivers;
+##   GPUI      `src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim`
+##             through the real Rust shim (PLAT-21), and
+##             `test_gpui_key_delivery.nim` with keys through a compositor's
+##             `wl_seat` (PLAT-38).
+##
+## (Until PLAT-21 the GPUI column was verified only against the tag table
+## below, and until 2026-09-26 the web column only on `MockRenderer`.)
 
 import std/strutils
 
@@ -178,7 +191,9 @@ func terminalMapping*(k: ViewKind): Mapping =
   of pkInput: m(msComplete, "isonim_tui.InputWidget (widgets/input.nim)",
     "a SUPERSET: the widget also answers ctrl+a/e/u/w/k/d and shift-extended " &
     "selection. A superset is not a conflict — the contract is what a view " &
-    "may RELY on, not what a widget may offer")
+    "may RELY on, not what a widget may offer. Its caret counts GRAPHEME " &
+    "CLUSTERS, which is the entry's unit since 2026-09-26 (it counted runes " &
+    "before, and the two disagreed on every combining sequence)")
   of pkSelect: m(msComplete, "isonim_tui.SelectWidget (widgets/select.nim)",
     "itself a composition of ModalWidget + OptionListWidget; the widget " &
     "keeps the highlight/commit split the entry specifies")
@@ -192,24 +207,19 @@ func terminalMapping*(k: ViewKind): Mapping =
     "a SUPERSET: the widget adds a sortable header band reached with Tab. " &
     "The vocabulary does not specify sorting, so a view that needs it needs " &
     "a native view")
-  of pkTabs: m(msPartial, "isonim_tui.TabsWidget (widgets/tabs.nim)",
-    "THE WIDGET WRAPS AND THE ENTRY DOES NOT. `moveRight` at the last tab " &
-    "sets the first, and `moveLeft` at the first sets the last " &
-    "(widgets/tabs.nim, the two lines commented `# wrap`). No other WIDGET " &
-    "wraps its selection — ListView, OptionList, Tree, DataTable, RadioSet, " &
-    "ContentSwitcher and MarkdownViewer all CLAMP, checked by reading each " &
-    "one's motion rather than by grepping (`grep -n wrap widgets/*.nim` " &
-    "returns 34 lines, and all but these two are TEXT wrapping or the word " &
-    "`wrapper`, so the grep is not the evidence). Two non-widget sites DO " &
-    "wrap and are named so the claim is not overstated: `command/palette.nim` " &
-    "moves `selectedIdx` modularly, and `focus/manager.nim` wraps Tab " &
-    "traversal and reports it in a `wrapped` field. So this is a local " &
-    "choice among widgets rather than a widget-library convention, and the " &
-    "vocabulary does not adopt it. FOUND BY " &
-    "test_view_vocabulary_cross_medium.nim, which is what that suite is " &
-    "for, and asserted there as a divergence so it cannot change without " &
-    "notice. TabbedContentWidget pairs the widget with ContentSwitcherWidget " &
-    "when the pages are also the library's")
+  of pkTabs: m(msComplete,
+    "isonim_tui.TabsWidget (widgets/tabs.nim), with wraps = false",
+    "THE WIDGET WRAPS BY DEFAULT AND THE ENTRY DOES NOT, and the library now " &
+    "says so in an option: `newTabs(..., wraps = false)` stops at both ends. " &
+    "Until 2026-09-26 the row was msPartial and this note was a DIVERGENCE — " &
+    "`moveRight` at the last tab set the first and nothing could stop it — " &
+    "found by test_view_vocabulary_cross_medium.nim and asserted there as a " &
+    "difference. The default still wraps (Textual's behaviour, and the " &
+    "WAI-ARIA tabs pattern's), so the binding passing the option is what " &
+    "keeps the entry's contract; the cross-medium suite asserts both the " &
+    "agreement at the ends and that the library default still wraps, so the " &
+    "option cannot quietly stop mattering. Every other isonim-tui selection " &
+    "widget — ListView, OptionList, Tree, DataTable, RadioSet — clamps")
   of pkCollapsible: m(msComplete,
     "isonim_tui.CollapsibleWidget (widgets/collapsible.nim)",
     "animates the expansion; the entry specifies the end states and not the " &
@@ -217,13 +227,15 @@ func terminalMapping*(k: ViewKind): Mapping =
   of pkModal: m(msComplete, "isonim_tui.ModalWidget (widgets/modal.nim)",
     "the focus trap is the library's own, which is what makes the entry's " &
     "exclusivity real rather than drawn")
-  of pkMenu: m(msPartial,
-    "isonim_tui.OptionListWidget inside isonim_tui.ModalWidget",
-    "THERE IS NO MENU WIDGET IN isonim-tui. The 36 widget modules include no " &
-    "menubar, context menu or dropdown menu; command/palette.nim is a fuzzy " &
-    "command palette, which is a different thing. The composition used here " &
-    "is the same one SelectWidget uses internally, so the Escape binding " &
-    "comes from the Modal and the motion from the OptionList")
+  of pkMenu: m(msComplete, "isonim_tui.MenuWidget (widgets/menu.nim)",
+    "added to isonim-tui on 2026-09-26. Until then the library had NO MENU " &
+    "WIDGET and this row was msPartial: the binding hand-built an " &
+    "OptionListWidget inside a ModalWidget, and that composition did not " &
+    "answer Enter the way the entry specifies — it neither closed nor ran " &
+    "anything, which no case asserted because none pressed Enter on the " &
+    "menu. MenuWidget is the same two parts (the pairing SelectWidget uses), " &
+    "plus the part neither has alone: Enter runs the highlighted command AND " &
+    "closes, Escape closes without running")
   of pkProgressIndicator: m(msComplete,
     "isonim_tui.ProgressBarWidget / isonim_tui.LoadingIndicatorWidget",
     "two widgets for one entry: the bar for a known fraction, the spinner " &
@@ -243,56 +255,104 @@ func terminalMapping*(k: ViewKind): Mapping =
 # ---------------------------------------------------------------------------
 
 func webMapping*(k: ViewKind): Mapping =
+  ## GRADED BY WHAT THE BROWSER DOES, since 2026-09-26. Every "measured"
+  ## below is a case in `src/frontend/tests/view_vocabulary_chromium_test.nim`
+  ## ("what the browser does on its own"): bare HTML elements in headless
+  ## Chromium, trusted keys, no binding. Until then this column was graded on
+  ## whether the TAG existed, and read "complete on fifteen" — but the header
+  ## above names HTML elements as the web's target, and `msComplete` requires
+  ## the construct to ANSWER the entry's keyboard contract. A `<ul>` answers
+  ## no key at all; `role="listbox"` declares a pattern, it does not implement
+  ## one. Nine rows moved to `msPartial` on that reading — the same reading,
+  ## and for the same reason, as GPUI's `ul -> div`. Nothing about what the
+  ## web front-end DOES changed with the grade; the grade now says who does it.
   case k
   of pkText: m(msComplete, "<span>")
-  of pkButton: m(msComplete, "<button>")
-  of pkCheckbox: m(msComplete, "<input type=\"checkbox\">")
-  of pkToggle: m(msComplete,
+  of pkButton: m(msComplete, "<button>",
+    "measured: Enter and Space both activate a focused <button>, which is " &
+    "the entry's contract exactly")
+  of pkCheckbox: m(msPartial, "<input type=\"checkbox\">",
+    "MEASURED: Space toggles a focused checkbox and Enter does NOT. The " &
+    "entry answers both, so Enter is the binding's. msComplete until " &
+    "2026-09-26, before anything had pressed a key in a browser")
+  of pkToggle: m(msPartial,
     "<input type=\"checkbox\" role=\"switch\">",
     "the DOM has no switch ELEMENT, so the difference from Checkbox is " &
-    "carried by the role and the styling. The product already has this: " &
+    "carried by the role and the styling — and the role adds no behaviour, " &
+    "so this is Checkbox's element with Checkbox's gap: Enter is the " &
+    "binding's (measured on the checkbox). The product already has a toggle: " &
     "viewmodel/views/isonim_toggle_view.renderToggle is a data-checked / " &
     "data-size / data-disabled CSS toggle")
-  of pkInput: m(msComplete, "<input type=\"text\">")
-  of pkSelect: m(msComplete, "<select> / <option>",
-    "the native element commits on change and dismisses on Escape, which is " &
-    "the entry's highlight/commit split. The product's own dropdown " &
-    "(viewmodel/views/isonim_event_log_filter_dropdown_view.nim) reproduces " &
-    "it over divs where the native element cannot be styled")
-  of pkList: m(msComplete, "<ul> / <li> with a roving tabindex",
-    "roving tabindex rather than one tabindex per item, because the entry " &
-    "specifies ONE highlight for the list and not one focus per row")
-  of pkTree: m(msComplete, "<ul role=\"tree\"> / <li role=\"treeitem\">",
-    "aria-expanded carries the per-node expansion the entry specifies")
-  of pkTable: m(msComplete, "<table> / <tr> / <td>",
-    "the cell cursor is a roving tabindex over cells; ui/datatable.nim is " &
-    "the product's existing consumer")
-  of pkTabs: m(msComplete,
-    "<div role=\"tablist\"> / <button role=\"tab\">",
+  of pkInput: m(msComplete, "<input type=\"text\">",
+    "the element edits and moves its caret itself, over GRAPHEME CLUSTERS as " &
+    "the entry does (measured: `e` + U+0301 is one step of Right). It also " &
+    "moves the caret on Up and Down, which the entry does not claim, so the " &
+    "binding prevents those two defaults " &
+    "(web_binding.nativeDefaultChangesState). The binding applies the " &
+    "vocabulary's editing and keeps the model the source of truth; what makes " &
+    "the row complete is that the medium answers the same contract")
+  of pkSelect: m(msPartial, "<select> / <option>",
+    "MEASURED: a closed, focused <select> COMMITS on Up / Down, Home / End " &
+    "and type-ahead, with no highlight step. The entry's highlight/commit " &
+    "split exists natively only inside the opened popup, which a page can " &
+    "neither style nor read, so `open` and `highlight` are the binding's, " &
+    "and it prevents those defaults. This row used to say the native element " &
+    "\"commits on change and dismisses on Escape, which is the entry's " &
+    "highlight/commit split\" — true of the popup, false of the closed " &
+    "control; the browser suite found the difference as a real defect (Down " &
+    "on a closed Select showed the second option while the model held the " &
+    "first). The product's own dropdown " &
+    "(viewmodel/views/isonim_event_log_filter_dropdown_view.nim) builds the " &
+    "split over divs for the same reason")
+  of pkList: m(msPartial, "<ul role=\"listbox\"> / <li role=\"option\">",
+    "the DOM has no highlight and answers no key on these elements; motion, " &
+    "the disabled-member skip and the bounds are the binding's, over a " &
+    "roving tabindex (ONE element in the tab order, because the entry " &
+    "specifies one highlight for the list, not one focus per row)")
+  of pkTree: m(msPartial, "<ul role=\"tree\"> / nested <ul>",
+    "aria-expanded DECLARES the per-node expansion; the cursor, the " &
+    "expand/collapse keys and the visible-row order are the binding's")
+  of pkTable: m(msPartial, "<table> / <tr> / <td>",
+    "the rows and cells are the medium's; the cell cursor and its keys are " &
+    "the binding's. ui/datatable.nim, the product's existing consumer, " &
+    "supplies its own for the same reason")
+  of pkTabs: m(msPartial,
+    "<div role=\"tablist\"> / <div role=\"tab\">",
+    "no element answers a key; the selection motion is the binding's. " &
+    "(WAI-ARIA's tabs pattern WRAPS at the ends; the entry stops, as " &
+    "isonim-tui's TabsWidget does with wraps = false.) " &
     "viewmodel/views/isonim_session_tabs_view.nim is the product's")
-  of pkCollapsible: m(msComplete, "<details> / <summary>")
-  of pkModal: m(msComplete, "<dialog>",
-    "showModal() supplies the exclusivity and the Escape binding")
-  of pkMenu: m(msComplete,
-    "<div role=\"menu\"> / <div role=\"menuitem\">",
-    "the product has this already: viewmodel/views/isonim_menu_shell_view.nim " &
-    "plus ui/menu.nim and viewmodel/views/context_menu_bridge.nim. This is " &
-    "the entry the TERMINAL is missing, which is why the admission test's " &
-    "second half — does at least one front-end already have it — matters")
+  of pkCollapsible: m(msComplete, "<details> / <summary>",
+    "measured: Enter and Space on the <summary> disclose and close. The " &
+    "binding renders the label as the summary and keeps `open` in step")
+  of pkModal: m(msComplete, "<dialog>, shown with showModal()",
+    "measured: showModal() makes the rest of the page INERT — a key aimed " &
+    "outside lands inside the dialog — and Escape dismisses. The binding " &
+    "calls showModal() once the element is in a document " &
+    "(web_binding.mountModals); the entry's exclusivity is the medium's")
+  of pkMenu: m(msPartial,
+    "<div role=\"menu\"> / <div role=\"menuitem\">, hidden while closed",
+    "no element answers a key; motion, run-and-close on Enter and dismissal " &
+    "are the binding's. The product has a menu of its own " &
+    "(viewmodel/views/isonim_menu_shell_view.nim, ui/menu.nim, " &
+    "viewmodel/views/context_menu_bridge.nim), which supplies them the same " &
+    "way")
   of pkProgressIndicator: m(msComplete, "<progress>",
-    "omitting the value attribute is the DOM's own spelling of " &
-    "ProgressIndeterminate")
+    "measured: with no value attribute its position is -1 — the DOM's own " &
+    "spelling of ProgressIndeterminate")
   of pkImage: m(msComplete, "<img alt=\"…\">",
     "alt is required by the entry and by HTML, for the same reason")
   of pkMarkdown: m(msPartial,
     "a <div> holding the block elements the rendering produces: <p>, " &
-    "<h1>..<h6>, <ul>, <code>, <pre>, <a>",
-    "THERE IS NO MARKDOWN RENDERER IN THE WEB FRONT-END. isonim-tui ships a " &
-    "1,241-line CommonMark parser; the DOM side has none, so a binding must " &
-    "bring one or reuse isonim-tui's parser for its AST. The TARGET is " &
-    "complete — every element the render needs is an ordinary tag — and the " &
-    "RENDERER is what is absent, which is why this is partial rather than " &
-    "absent")
+    "<h1>..<h6>, <ul> / <ol> / <li>, <pre><code>, <blockquote>, <hr>, and " &
+    "the inline <strong>, <em>, <code>, <a>",
+    "every element is the medium's and the PARSER is not: the web has no " &
+    "Markdown renderer, and view_vocabulary/markdown_blocks.nim is the one " &
+    "the binding brings — a CommonMark-subset parser written independently " &
+    "of isonim-tui's, and compared with it by the cross-medium suite through " &
+    "the block outline each medium's RENDERING reads back as. Until " &
+    "2026-09-26 there was no renderer at all and the web drew the source as " &
+    "one text node")
 
 # ---------------------------------------------------------------------------
 # GPUI — isonim-gpui
