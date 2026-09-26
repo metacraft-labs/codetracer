@@ -3853,9 +3853,38 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
   * `lcSplit` HAS A `splitMovesPane` FLAG.  False (every PLAT-4 caller) means
     the new pane must NOT be in the tree; true means it must be, and the
     split MOVES it.  It exists because `commit` yields ONE command and
-    "drag a tab onto a pane's edge" had no single-command spelling.  A
-    DOCKED source still has none — `lcSplit` refuses a pane in `docked`, so
-    `dropTargetsFor` offers a docked pane no split target at all.
+    "drag a tab onto a pane's edge" had no single-command spelling.  Since
+    PLAT-4's closing pass (2026-09-26) a DOCKED source is legal too: the pane
+    leaves `docked` (strip title kept) and becomes the new sibling, so
+    `dropTargetsFor` offers a docked pane all four edge strips.  A layout
+    whose pane is BOTH placed and docked is still refused.
+  * `validate(Layout, owned)` / `validate(WindowSet, owned)` (and `isValid`)
+    HAVE NO DEFAULT `owned` any more.  `{}` makes the owned-but-nowhere check
+    vacuous, so a caller must write `{}` itself; `test_layout_algebra.nim`
+    asserts `not compiles(validate(layout))`.  `validate(LayoutNode)` is
+    unchanged (it never took the argument).  Per-window layout defects and
+    owned-nowhere panes in a `WindowSet` are `wpLayoutInvalid`.
+  * `HeadlessSessionSlot.layout` IS A WHOLE `Layout` (tree + docked), not a
+    `LayoutNode`.  Tree queries go through `slot.layout.tree`;
+    `saveLayouts` writes a `docked` array per session entry (always, even
+    empty) and `restoreLayouts` decodes each entry through
+    `restoreLayoutDocument`, treating a missing `docked` (older documents) as
+    empty.  `gpui/app/shell.syncSessionLayouts` copies the WHOLE layout —
+    copying only `.tree` silently dropped docked panes from the session.
+    `openSession` has a `layout: Layout` overload beside the `LayoutNode` one.
+    `codetracer-gpui --layout=` decodes with `restoreLayoutDocument` (NOT the
+    tree-only `restoreLayout`, which refuses any docked pane) and opens the
+    session over that `Layout`; `gpui/tests/test_gpui_layout_flag.nim` runs
+    the shipped binary on `calc` and reads the docked pane's `bottom/` slot
+    path out of the `--report-plan` output.
+  * PLAT-4 HAS A MUTATION HARNESS NOW:
+    `viewmodel/tests/unit/run-plat4-layout-mutations.py` (needle scan, control
+    digests, one suite per arm).  Editing `layout_model.nim`, `window_set.nim`,
+    `headless_app.nim`, `gpui/app/shell.nim` or `tui/app/tui_app.nim` makes it
+    stale — re-record and regrade along with plat5/6/9/20/21/22/34/41.  Its
+    session-sync and terminal-seed arms are graded by the REAL-backend case in
+    `tui/tests/test_cross_renderer_panes.nim` (tui lane flags, calc recording,
+    `REPLAY_SERVER_BIN` required), not by a mocked GPUI-shell case.
   * THE TERMINAL LAYOUT BINDING (PLAT-6) IS `tui/app/layout/binding.nim`, and
     the two directions of its hit-test READ ONE TABLE.  `pointerAt` (cells ->
     `LayoutPointer`) and `cellsFor` (`DropRegion` -> cells) both measure edge
@@ -3886,11 +3915,13 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     not a seventeenth row in §4.3's published table, which
     `test_gdb_command_surface.nim` parses out of `CodeTracer-TUI.md`.
     WITHOUT THE FLAG NOTHING CHANGES: `layoutBinding` is nil, `shellModel`
-    carries the session's own `LayoutNode`, and those words are unknown
+    carries the session's own tree (`slot.layout.tree`), and those words are unknown
     commands.  It is an opt-in rather than the default because a binding's tree
     is a CLONE of the session's, so enabling one by default would give the
-    terminal two layout authorities; flipping it needs `HeadlessSessionSlot` to
-    hold a `Layout` rather than a `LayoutNode`.
+    terminal two layout authorities.  The slot now holds a `Layout` (PLAT-4's
+    closing pass) and `enableLayoutBinding` seeds from it, docked panes
+    included; the binding still works on its own copy, and making the
+    gestures write back / flipping the default is PLAT-45 deliverable 8.
   * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED, behind the same
     `--layout-binding` opt-in: `runPromptLine` takes the twelve `:` verbs and
     `handleToken` -> `routeMouseReport` takes a decoded SGR-1006 report into

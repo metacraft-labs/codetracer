@@ -265,7 +265,7 @@ suite "PLAT-20: the dock projection writes gpui-kit's persisted schema":
     # projection has no such obligation: the window has not opened.
     let dup = row([pane(paneEditor), pane(paneEditor)])
     let layout = initLayout(dup)
-    ck layout.validate().len > 0
+    ck layout.validate({}).len > 0
     let invalidProjection = projectDock(layout, Viewport)
     ck invalidProjection.status == dpsRefused
     let invalidProblems = problemsOf(invalidProjection)

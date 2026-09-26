@@ -21,7 +21,9 @@
 ##   * **the session set** — several `DebuggerSession`s in one process, which
 ##     is CodeTracer-Embed-SDK.md §3.1's "multi-session in one page";
 ##   * **which one is active**, and
-##   * **each session's layout**, as a `layout_model.LayoutNode`.
+##   * **each session's layout**, as a `layout_model.Layout` — the tree AND
+##     its docked panes (a bare `LayoutNode` until PLAT-4's closing pass,
+##     2026-09-26; see the slot's field).
 ##
 ## The last of those is the point. The desktop keeps the same state in
 ## `ReplaySession.savedLayoutConfig`, whose type is
@@ -62,11 +64,21 @@ type
       ## What a host would put on the session tab.
     session*: DebuggerSession
       ## The SDK session. Owns the ViewModel graph and the lifecycle phase.
-    layout*: LayoutNode
+    layout*: Layout
       ## This session's arrangement. Owned per slot — never shared, so
       ## activating a tab in one session cannot move it in another. `clone`
       ## in `layout_model` is what makes that true for a caller who passes
       ## the same tree twice.
+      ##
+      ## A WHOLE `Layout` — tree, docked panes, version — and not the bare
+      ## `LayoutNode` it was until PLAT-4's closing pass (2026-09-26). While
+      ## it was a node, a front-end that docked a pane could not hand that
+      ## arrangement to the session: the GPUI shell synchronised only
+      ## `layout.tree` back onto the slot, so `saveLayouts` wrote a document
+      ## with the docked pane in NEITHER place, and a terminal binding had to
+      ## hold its own `Layout` beside the session's node — two authorities
+      ## for one screen (Layout-ViewModel §5.1). Holding the `Layout` here is
+      ## what makes the session's arrangement and a binding's ONE value.
 
   HeadlessApp* = ref object
     ## The application. Not reactive, on purpose: every *pane's* state is
@@ -138,6 +150,10 @@ proc activeSlot*(app: HeadlessApp): HeadlessSessionSlot =
 proc activeSessionId*(app: HeadlessApp): HeadlessSessionId =
   if app.isNil: NoHeadlessSession else: app.activeId
 
+proc openSessionWith(app: HeadlessApp; backend: BackendService;
+                     title: string; source: Layout; clock: ClockBase;
+                     adopt: DebuggerSession): HeadlessSessionSlot
+
 proc openSession*(app: HeadlessApp; backend: BackendService;
                   title: string = "";
                   layout: LayoutNode = nil;
@@ -186,11 +202,30 @@ proc openSession*(app: HeadlessApp; backend: BackendService;
   ## `adopt.backend`: the argument is what says which transport this slot
   ## belongs to, and a shell that read it off the session would have no way to
   ## refuse a session belonging to another one.
+  let tree = if layout.isNil: defaultReplayLayout() else: layout.clone()
+  openSessionWith(app, backend, title, initLayout(tree), clock, adopt)
+
+proc openSession*(app: HeadlessApp; backend: BackendService;
+                  title: string = "";
+                  layout: Layout;
+                  clock: ClockBase = nil;
+                  adopt: DebuggerSession = nil): HeadlessSessionSlot =
+  ## `openSession` over a whole `Layout` — docked panes included — for a
+  ## host that restored or built one. Deep-copied, for the tree overload's
+  ## reason, and validated as a whole: a layout whose docked pane is also
+  ## placed is refused here exactly as a malformed tree is.
+  openSessionWith(app, backend, title, layout.clone(), clock, adopt)
+
+proc openSessionWith(app: HeadlessApp; backend: BackendService;
+                     title: string; source: Layout; clock: ClockBase;
+                     adopt: DebuggerSession): HeadlessSessionSlot =
   app.requireLive()
   if backend.isNil:
     raiseApp("openSession requires a BackendService; the shell never builds one")
-  let source = if layout.isNil: defaultReplayLayout() else: layout.clone()
-  let problems = source.validate()
+  # `{}`: the shell declares no owned-pane set of its own — a session may
+  # open over any arrangement the host chose — and says so here rather than
+  # inheriting it (`validate(Layout)`'s `owned` has no default).
+  let problems = source.validate({})
   if problems.len > 0:
     raiseApp("openSession was given an invalid layout: " & $problems[0].kind &
              " at '" & problems[0].path & "'")
@@ -334,8 +369,10 @@ proc visiblePanes*(slot: HeadlessSessionSlot): seq[PaneKind] =
   if slot.isNil: @[] else: slot.layout.visiblePanes()
 
 proc activatePane*(slot: HeadlessSessionSlot; kind: PaneKind): bool =
-  ## Bring a pane to the front of whatever stack holds it.
-  if slot.isNil: false else: slot.layout.activate(kind)
+  ## Bring a pane to the front of whatever stack holds it. False for a pane
+  ## that is not placed — a DOCKED pane included, since it has no region to
+  ## come to the front of.
+  if slot.isNil: false else: slot.layout.tree.activate(kind)
 
 proc livePanes*(slot: HeadlessSessionSlot): seq[PaneKind] =
   ## Every pane placed in the layout that also has a ViewModel behind it.
@@ -343,7 +380,7 @@ proc livePanes*(slot: HeadlessSessionSlot): seq[PaneKind] =
   result = @[]
   if slot.isNil:
     return
-  for p in slot.layout.allPanes():
+  for p in slot.layout.tree.allPanes():
     if slot.paneIsLive(p):
       result.add(p)
 
@@ -355,6 +392,10 @@ proc saveLayouts*(app: HeadlessApp): JsonNode =
   ## Every session's layout, plus which one was active, as one versioned
   ## document. Titles are included because they are shell state too; a
   ## `TraceSource` is not, because re-opening a trace is the host's decision.
+  ##
+  ## Each session entry carries its tree under `layout` and its docked panes
+  ## under `docked` — the two halves of a §6 layout document, beside the
+  ## entry's `id` and `title`. `docked` is always present, even empty.
   result = newJObject()
   result["version"] = %LayoutSchemaVersion
   var arr = newJArray()
@@ -363,7 +404,13 @@ proc saveLayouts*(app: HeadlessApp): JsonNode =
       var entry = newJObject()
       entry["id"] = %int(s.id)
       entry["title"] = %s.title
-      entry["layout"] = s.layout.toJson()
+      entry["layout"] = s.layout.tree.toJson()
+      # ALWAYS written, even empty, by §6's rule for `docked`: a session
+      # gaining a docked pane later must not change the document's shape.
+      var docked = newJArray()
+      for d in s.layout.docked:
+        docked.add(d.toJson())
+      entry["docked"] = docked
       arr.add(entry)
   result["sessions"] = arr
   result["active"] = %int(app.activeSessionId)
@@ -387,11 +434,12 @@ proc restoreLayouts*(app: HeadlessApp; doc: JsonNode): int =
       kind: ldeMissingField, detail: "version",
       msg: "restoreLayouts: missing or non-integer 'version'")
   # A range rather than an equality since PLAT-4 gave `layout_model` a forward
-  # migration chain. This document's per-session payload is a bare node, whose
-  # encoding did not change between schema versions 1 and 2, so a v1 document
-  # is readable here for the same reason `restoreLayoutDocument` can migrate
-  # one. A version ABOVE this build's is still refused, loudly: an older build
-  # meeting a newer layout has nothing to fall forward to.
+  # migration chain. Each per-session payload is a tree plus (since PLAT-4's
+  # closing pass) a `docked` list, and is decoded through that chain below,
+  # so a v1 document is readable here for the same reason
+  # `restoreLayoutDocument` can migrate one. A version ABOVE this build's is
+  # still refused, loudly: an older build meeting a newer layout has nothing
+  # to fall forward to.
   if doc["version"].getInt > LayoutSchemaVersion or
      doc["version"].getInt < FirstLayoutSchemaVersion:
     raise (ref LayoutDecodeError)(
@@ -407,7 +455,7 @@ proc restoreLayouts*(app: HeadlessApp; doc: JsonNode): int =
   # session is undecodable must not leave the first four rearranged and the
   # rest as they were — a half-restored shell is harder to reason about than
   # one that did not restore.
-  var pending = initTable[int, LayoutNode]()
+  var pending = initTable[int, Layout]()
   var titles = initTable[int, string]()
   for entry in doc["sessions"]:
     if entry.kind != JObject:
@@ -421,7 +469,18 @@ proc restoreLayouts*(app: HeadlessApp; doc: JsonNode): int =
       raise (ref LayoutDecodeError)(
         kind: ldeMissingField, detail: "layout",
         msg: "restoreLayouts: session entry has no 'layout'")
-    pending[entry["id"].getInt] = fromJson(entry["layout"])
+    # Each entry is decoded as a §6 layout document at THIS document's
+    # version, so the docked list gets `restoreLayoutDocument`'s whole
+    # decoder — migration chain, typed refusals, `revealed` forced false —
+    # rather than a second copy of it. An entry with no `docked` is one
+    # written before the slot held a `Layout` (every earlier build wrote the
+    # bare tree), and it means exactly what it meant then: nothing docked.
+    var perSession = newJObject()
+    perSession["version"] = doc["version"]
+    perSession["layout"] = entry["layout"]
+    perSession["docked"] =
+      if entry.hasKey("docked"): entry["docked"] else: newJArray()
+    pending[entry["id"].getInt] = restoreLayoutDocument(perSession)
     if entry.hasKey("title") and entry["title"].kind == JString:
       titles[entry["id"].getInt] = entry["title"].getStr
   result = 0
