@@ -445,6 +445,19 @@ type
         ## layout. The same shape as `mergeWholeRegion`: a flag on the command
         ## rather than a tenth command kind, because it is the same operation
         ## with a different source of the pane.
+        ##
+        ## **A DOCKED pane is a legal source too** (PLAT-4's closing pass,
+        ## 2026-09-26). PLAT-5 recorded that "drag a pane out of its auto-hide
+        ## strip and drop it on an edge" had no single-command spelling: the
+        ## flag demanded a PLACED pane and a docked one was refused
+        ## `lpPaneBothPlacedAndDocked`, so the gesture was two commands
+        ## (restore, then split) and the transient layer may not sequence two.
+        ## The decision is that "the pane comes from somewhere else in this
+        ## layout" covers the strip as well as the tree: a docked source
+        ## leaves `docked` (its strip title carried, as `ahRestore` carries
+        ## it) and becomes the new sibling. Nothing is detached from the tree,
+        ## so no collapse rule fires, and the outcome is never `loNoOp` — the
+        ## tree always gains a pane.
     of lcMergeIntoStack:
       mergedPane*: PaneKind
       mergeBeside*: PaneKind
@@ -1303,9 +1316,9 @@ proc cmdSplit*(target: PaneKind; newPane: PaneKind; axis: SplitAxis;
 
 proc cmdSplitMove*(target: PaneKind; movedPane: PaneKind; axis: SplitAxis;
                    side: SplitSide = ssAfter; title = ""): LayoutCommand =
-  ## `lcSplit` over a pane that is ALREADY in the tree: the drop gesture
-  ## "drag this tab to the right-hand edge of that pane". See
-  ## `splitMovesPane`.
+  ## `lcSplit` over a pane that is ALREADY in the layout — placed in the tree
+  ## or docked on a strip: the drop gesture "drag this tab to the right-hand
+  ## edge of that pane". See `splitMovesPane`.
   LayoutCommand(kind: lcSplit, splitTarget: target, splitNewPane: movedPane,
                 splitNewTitle: title, splitAxis: axis, splitSide: side,
                 splitMovesPane: true)
@@ -1572,18 +1585,28 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # rules with it exactly as `lcMoveTab`'s cross-stack path does.
       if cmd.splitNewPane == cmd.splitTarget:
         return refusedFor(lpDuplicatePane, cmd.splitNewPane)
-      if next.dockedIndex(cmd.splitNewPane) >= 0:
-        return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+      let dockedAt = next.dockedIndex(cmd.splitNewPane)
       let moving = tree.find(cmd.splitNewPane)
-      if moving.isNil:
+      if dockedAt >= 0 and not moving.isNil:
+        # Both at once is §3.3's invariant broken on the INPUT; which copy
+        # would move is not a question this command can answer.
+        return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+      if dockedAt < 0 and moving.isNil:
         return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
       if tree.find(cmd.splitTarget).isNil:
         return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
-      if movedTitle.len == 0:
-        movedTitle = moving.title
-      discard detachPane(tree, cmd.splitNewPane)
-      if not normaliseInPlace(tree):
-        return refusedFor(lpEmptyRoot, cmd.splitNewPane)
+      if dockedAt >= 0:
+        # From the auto-hide strip: leave `docked`, keep the strip's title.
+        # The tree loses nothing, so there is nothing to collapse.
+        if movedTitle.len == 0:
+          movedTitle = next.docked[dockedAt].title
+        next.docked.delete(dockedAt)
+      else:
+        if movedTitle.len == 0:
+          movedTitle = moving.title
+        discard detachPane(tree, cmd.splitNewPane)
+        if not normaliseInPlace(tree):
+          return refusedFor(lpEmptyRoot, cmd.splitNewPane)
     else:
       if tree.contains(cmd.splitNewPane):
         return refusedFor(lpDuplicatePane, cmd.splitNewPane)
@@ -1952,7 +1975,7 @@ proc singleChildContainers(node: LayoutNode; path: string;
     singleChildContainers(c, (if path.len == 0: $i else: path & "/" & $i),
                           problems)
 
-proc validate*(layout: Layout; owned: set[PaneKind] = {}): seq[LayoutProblem] =
+proc validate*(layout: Layout; owned: set[PaneKind]): seq[LayoutProblem] =
   ## Every structural defect in a whole layout: the seven `validate(LayoutNode)`
   ## reports about the tree, plus Layout-ViewModel §7's five, which need the
   ## `docked` list and therefore cannot live on the node overload.
@@ -1960,11 +1983,16 @@ proc validate*(layout: Layout; owned: set[PaneKind] = {}): seq[LayoutProblem] =
   ## `owned` is the set of panes the SHELL says this layout is responsible
   ## for, and it is what makes `lpPaneNeitherPlacedNorDocked` answerable.
   ## Nothing in this module can know it: a layout is a description of an
-  ## arrangement, and "which panes should be arranged" is the shell's. The
-  ## default is the empty set, which makes that one check VACUOUS — stated
-  ## here rather than left to be discovered, because a check that cannot fail
-  ## is worse than no check (Verification-Harness-Traps §4). The model's own
-  ## suite passes a non-empty set.
+  ## arrangement, and "which panes should be arranged" is the shell's.
+  ##
+  ## **`owned` HAS NO DEFAULT, and that is the point of it** (PLAT-4's closing
+  ## pass, 2026-09-26). It used to default to `{}`, which makes this one check
+  ## VACUOUS — and the default is what an unqualified `validate(layout)` got,
+  ## so a caller could reach the vacuous behaviour without having said so.
+  ## Now every caller spells its set: `{}` is still a legal answer, but it is
+  ## a statement the call site makes ("this caller declares no owned panes")
+  ## rather than one it inherits. `test_layout_algebra.nim` asserts that the
+  ## unqualified call does not compile.
   result = validate(layout.tree)
   singleChildContainers(layout.tree, "", result)
   if layout.tree.isNil or paneCount(layout.tree) == 0:
@@ -1987,7 +2015,9 @@ proc validate*(layout: Layout; owned: set[PaneKind] = {}): seq[LayoutProblem] =
       result.add(LayoutProblem(kind: lpPaneNeitherPlacedNorDocked, path: "",
                                pane: some(p)))
 
-proc isValid*(layout: Layout; owned: set[PaneKind] = {}): bool =
+proc isValid*(layout: Layout; owned: set[PaneKind]): bool =
+  ## `validate` as a predicate. `owned` has no default, for `validate`'s
+  ## reason.
   validate(layout, owned).len == 0
 
 # ---------------------------------------------------------------------------

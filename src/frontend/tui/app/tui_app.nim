@@ -218,8 +218,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   ## The CTUI-3 screen model for this application at this terminal size.
   ##
   ## THE LAYOUT TREE IS THE SESSION'S OWN. When a session is open, the model
-  ## carries `slot.layout` — the very `LayoutNode` `HeadlessApp` created for
-  ## it, the one `saveLayouts` persists and the one a desktop tab click would
+  ## carries `slot.layout`'s tree — the very `LayoutNode` `HeadlessApp` created
+  ## for it, the one `saveLayouts` persists and the one a desktop tab click would
   ## `activate`. Copying it, or building a fresh one from the profile, would
   ## give the terminal a second layout that looked identical until the first
   ## `Alt+1`, which is exactly the divergence CTUI-3 exists to prevent.
@@ -263,8 +263,10 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     layout: (if not registered.isNil: registered
              elif bound: boundLayout.tree
              elif active.isNil: layoutForMode(app.modes.product, selected)
-             else: active.layout),
-    docked: (if bound: boundLayout.docked else: @[]),
+             else: active.layout.tree),
+    docked: (if bound: boundLayout.docked
+             elif not registered.isNil or active.isNil: @[]
+             else: active.layout.docked),
     interaction: (if bound: app.layoutBinding.interaction
                   else: noInteraction()),
     profile: selected,
@@ -286,7 +288,9 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
 proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   ## Give this application a layout the user can rearrange (PLAT-6).
   ##
-  ## Seeded from the ACTIVE SESSION's own tree when there is one, so enabling
+  ## Seeded from the ACTIVE SESSION's own `Layout` — tree AND docked panes,
+  ## since `HeadlessSessionSlot.layout` holds the whole value — when there is
+  ## one, so enabling
   ## the binding changes nothing on screen at the moment it is enabled: the
   ## first frame after this call is the frame that would have been painted
   ## without it. With no session open it starts from the profile's default,
@@ -298,9 +302,10 @@ proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   let selected = selectProfile(width, height)
   let active = app.shell.activeSlot()
   let seed =
-    if active.isNil or active.layout.isNil: profileLayout(selected)
+    if active.isNil or active.layout.tree.isNil:
+      initLayout(profileLayout(selected))
     else: active.layout
-  app.layoutBinding = newLayoutBinding(initLayout(seed), selected)
+  app.layoutBinding = newLayoutBinding(seed, selected)
   app.layoutBinding
 
 proc renderScreen*(app: TuiApp; r: TerminalRenderer;

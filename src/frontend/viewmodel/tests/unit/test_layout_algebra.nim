@@ -81,7 +81,7 @@ template checkApplied(outcome: LayoutOutcome) =
 
 template checkValid(l: Layout) =
   let v = l
-  let problems = validate(v)
+  let problems = validate(v, {})
   var kinds: seq[string] = @[]
   for p in problems:
     kinds.add($p.kind & "@'" & p.path & "'")
@@ -230,6 +230,113 @@ suite "Layout algebra — apply never mutates its argument":
 # ---------------------------------------------------------------------------
 # §2.2 / §2.3 — every command against every shape
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# §2.2 / §2.3 — the whole matrix, with its answer written down
+# ---------------------------------------------------------------------------
+
+proc withDockedShape(): Layout =
+  ## `stackedLayout` with the Event Log docked to the bottom: the sixth
+  ## structural shape, the one every docked-source arm needs.
+  let o = apply(stackedLayout(), cmdDock(paneEventLog, leBottom))
+  if o.kind == loApplied: o.layout else: stackedLayout()
+
+const MatrixShapes = ["bare pane", "two-pane row", "stacked", "two stacks",
+                      "deep tree", "with docked"]
+
+proc matrixShape(name: string): Layout =
+  if name == "with docked": withDockedShape() else: shape(name)
+
+proc matrixCommands(): seq[LayoutCommand] =
+  ## One command per kind of the §2.2 table, both `lcSplit` flavours and both
+  ## `lcSetAutoHide` directions — thirteen, over the same panes on every
+  ## shape, so what differs between cells is the SHAPE and nothing else.
+  @[cmdActivateTab(paneEventLog),
+    cmdSetWeight(paneEditor, 9.0),
+    cmdAddPane(paneShell, "Shell"),
+    cmdRemovePane(paneCalltrace),
+    cmdMoveTab(paneEditor, paneState, 0),
+    cmdSplit(paneEditor, paneScratchpad, saColumn),
+    cmdSplitMove(paneState, paneEditor, saRow),
+    cmdSplitMove(paneEditor, paneEventLog, saColumn),
+    cmdMergeIntoStack(paneEditor, paneState),
+    cmdDock(paneEditor, leBottom),
+    cmdRestoreDocked(paneEventLog),
+    cmdRename(paneEditor, "Renamed"),
+    cmdMergeIntoStack(paneEditor, paneState, wholeRegion = true)]
+
+proc outcomeCell(o: LayoutOutcome): string =
+  case o.kind
+  of loApplied: "A"
+  of loNoOp: "="
+  of loRefused: $o.problem.kind
+
+proc paneSet(l: Layout): set[PaneKind] =
+  for p in l.allPanes():
+    result.incl p
+
+suite "Layout algebra — every command against every shape (the matrix)":
+
+  test "every (shape, command) cell has the outcome written down for it":
+    # The milestone's first real-stack row, as ONE table rather than as a
+    # scatter of cases: 6 shapes x 13 commands = 78 cells, each with its
+    # expected outcome — `A` applied, `=` no-op, or the refusal's problem KIND
+    # — written down below and compared cell by cell. A refusal is therefore
+    # asserted AS A REFUSAL, for the right reason, in every cell where one is
+    # due, and a cell that silently turned from a refusal into an application
+    # (or the reverse) is named by shape and command in the failure.
+    const Expected = [
+      # bare pane: only the editor exists, so every command naming another
+      # pane as its subject or anchor is refused for THAT pane, and docking
+      # the last pane is rule 3.
+      "PaneNotPlaced A A PaneNotPlaced PaneNotPlaced A PaneNotPlaced " &
+        "PaneNotPlaced PaneNotPlaced EmptyRoot PaneNotDocked A PaneNotPlaced",
+      # two-pane row: the State pane's parent is a ROW, so moving a tab
+      # beside it has no stack to land in.
+      "PaneNotPlaced A A PaneNotPlaced TargetNotAStack A A PaneNotPlaced A A " &
+        "PaneNotDocked A StackChildNotPane",
+      # stacked: the Event Log is a hidden tab, so activating it applies.
+      "A A A PaneNotPlaced A A A A A A PaneNotDocked A StackChildNotPane",
+      # two stacks
+      "A A A PaneNotPlaced A A A A A A PaneNotDocked A StackChildNotPane",
+      # deep tree: the one shape holding the Call Trace, so removing it
+      # applies here and nowhere else.
+      "A A A A A A A A A A PaneNotDocked A StackChildNotPane",
+      # with docked: the Event Log is on a strip — it cannot be activated
+      # (it has no region), it CAN be split into the tree (the closing pass's
+      # decision), and restoring it applies.
+      "PaneNotPlaced A A PaneNotPlaced A A A A A A A A StackChildNotPane"]
+    let commands = matrixCommands()
+    var cells = 0
+    var appliedCells = 0
+    for si, name in MatrixShapes:
+      var actual: seq[string] = @[]
+      for cmd in commands:
+        let before = matrixShape(name)
+        let o = apply(before, cmd)
+        actual.add(outcomeCell(o))
+        inc cells
+        if o.kind == loApplied:
+          inc appliedCells
+          # EVERY APPLIED CELL VALIDATES, WITH `owned` NON-VACUOUS: the set a
+          # command must conserve is exactly the input's panes, plus the one
+          # `lcAddPane` (or a non-moving `lcSplit`) places, minus the one
+          # `lcRemovePane` removes. So a command that DROPPED a pane on the
+          # way (neither placed nor docked) fails here by kind, and one that
+          # invented a pane fails the equality below it.
+          var conserved = paneSet(before)
+          if cmd.kind == lcAddPane: conserved.incl cmd.addedPane
+          if cmd.kind == lcSplit and not cmd.splitMovesPane:
+            conserved.incl cmd.splitNewPane
+          if cmd.kind == lcRemovePane: conserved.excl cmd.removedPane
+          checkpoint(name & " / " & $cmd & " -> " & $o)
+          check validate(o.layout, conserved).len == 0
+          check paneSet(o.layout) == conserved
+      checkpoint(name & ": " & actual.join(" "))
+      check actual.join(" ") == Expected[si]
+    # Positive control: the table covers what it says it covers.
+    check cells == 78
+    check appliedCells == 52
 
 suite "Layout algebra — activate":
 
@@ -556,6 +663,45 @@ suite "Layout algebra — split":
       checkRefused apply(shape(name), cmdSplit(paneEditor, paneEditor, saRow)),
                    lpDuplicatePane
 
+  test "a DOCKED pane can be split into the tree, in one command":
+    # PLAT-4's closing pass (2026-09-26): `splitMovesPane` takes its pane from
+    # the auto-hide strip as well as from the tree, so "drag a pane out of its
+    # strip onto an edge" is ONE command — the gesture PLAT-5 recorded as
+    # missing because restore-then-split is two.
+    let docked = withDockedShape()
+    check docked.placement(paneEventLog) == plDocked
+    let o = apply(docked, cmdSplitMove(paneEditor, paneEventLog, saColumn,
+                                       ssBefore))
+    checkApplied o
+    if o.kind == loApplied:
+      checkValid o.layout
+      check o.layout.docked.len == 0
+      check o.layout.placement(paneEventLog) == plPlaced
+      # The strip's title travels, as `ahRestore`'s does.
+      check o.layout.tree.find(paneEventLog).title == "Event Log"
+      # Split BEFORE the editor, on a column: the pane sits above it, in a
+      # column that took the editor's share.
+      let editorParent = parentOf(o.layout.tree, o.layout.tree.find(paneEditor))
+      check editorParent.kind == lnColumn
+      check editorParent.children[0].pane == paneEventLog
+      check editorParent.weight == 3.0
+      # Nothing was detached from the tree, so no collapse rule fired: the
+      # one-tab stack the dock left behind is still a one-tab stack.
+      check o.layout.tree.find(paneState) != nil
+      check parentOf(o.layout.tree, o.layout.tree.find(paneState)).kind ==
+        lnStack
+    # The non-moving split keeps its rule: the new pane must be in NEITHER.
+    checkRefused apply(docked, cmdSplit(paneEditor, paneEventLog, saColumn)),
+      lpPaneBothPlacedAndDocked
+    # A layout that ALREADY breaks §3.3 is refused, not guessed at.
+    let both = initLayout(stackedLayout().tree, @[DockedPane(
+      pane: paneEventLog, title: "Event Log", edge: leBottom, order: 0)])
+    checkRefused apply(both, cmdSplitMove(paneEditor, paneEventLog, saColumn)),
+      lpPaneBothPlacedAndDocked
+    # And a pane that is nowhere cannot be moved from anywhere.
+    checkRefused apply(docked, cmdSplitMove(paneEditor, paneShell, saColumn)),
+      lpPaneNotPlaced
+
 suite "Layout algebra — merge into stack":
 
   test "merging a pane into an adjacent stack makes it a tab":
@@ -741,15 +887,15 @@ suite "Layout algebra — invariants (§7)":
     let bad = initLayout(row([pane(paneEditor), pane(paneState)]),
                          @[DockedPane(pane: paneState, edge: leLeft, order: 0)])
     var kinds: seq[LayoutProblemKind] = @[]
-    for p in validate(bad):
+    for p in validate(bad, {}):
       kinds.add(p.kind)
     checkpoint($kinds)
     check lpPaneBothPlacedAndDocked in kinds
-    check not bad.isValid()
+    check not bad.isValid({})
 
   test "a pane the shell owns that is nowhere fails validate":
     let l = initLayout(row([pane(paneEditor), pane(paneState)]))
-    check l.isValid()
+    check l.isValid({})
     var kinds: seq[LayoutProblemKind] = @[]
     for p in validate(l, owned = {paneEditor, paneState, paneCalltrace}):
       kinds.add(p.kind)
@@ -761,32 +907,57 @@ suite "Layout algebra — invariants (§7)":
                                            order: 0)])
     check withDock.isValid(owned = {paneEditor, paneState, paneCalltrace})
 
+  test "validate(Layout) has no default owned set — the vacuous call is unspellable":
+    # PLAT-4's audit recorded that `owned` defaulted to `{}`, which makes
+    # `lpPaneNeitherPlacedNorDocked` VACUOUS, and that the default was what an
+    # unqualified `validate(layout)` got. The closing pass removed the default
+    # from all four entry points; this is the assertion that a caller cannot
+    # reach the vacuous behaviour without writing `{}` down.
+    let l = initLayout(row([pane(paneEditor), pane(paneState)]))
+    let ws = singleWindow(l)
+    check not compiles(validate(l))
+    check not compiles(isValid(l))
+    check not compiles(validate(ws))
+    check not compiles(isValid(ws))
+    # Positive controls — the SPELLED calls compile, and the owned set is
+    # read: the same layout is valid for `{}` and invalid for a set naming a
+    # pane it does not hold.
+    check compiles(validate(l, {}))
+    check compiles(validate(ws, {}))
+    check l.isValid({})
+    check not l.isValid({paneCalltrace})
+    check ws.isValid({})
+    check not ws.isValid({paneCalltrace})
+    # The node overload is untouched: a bare tree has no `docked` to be owned
+    # by, and `validate(LayoutNode)` never took the argument.
+    check compiles(validate(l.tree))
+
   test "a single-child row or column fails validate":
     for tree in [row([pane(paneEditor)]), column([pane(paneEditor)])]:
       var kinds: seq[LayoutProblemKind] = @[]
-      for p in validate(initLayout(tree)):
+      for p in validate(initLayout(tree), {}):
         kinds.add(p.kind)
       checkpoint($tree & " -> " & $kinds)
       check lpSingleChildContainer in kinds
     # A single-TAB stack is not a defect: one tab is an arrangement.
-    check initLayout(stack([pane(paneEditor)])).isValid()
+    check initLayout(stack([pane(paneEditor)])).isValid({})
 
   test "two docked panes on the same (edge, order) fail validate":
     let bad = initLayout(pane(paneEditor), @[
       DockedPane(pane: paneState, edge: leBottom, order: 2),
       DockedPane(pane: paneShell, edge: leBottom, order: 2)])
     var kinds: seq[LayoutProblemKind] = @[]
-    for p in validate(bad):
+    for p in validate(bad, {}):
       kinds.add(p.kind)
     check lpDockOrderCollision in kinds
     # The same orders on DIFFERENT edges are two strips, not a collision.
     check initLayout(pane(paneEditor), @[
       DockedPane(pane: paneState, edge: leBottom, order: 2),
-      DockedPane(pane: paneShell, edge: leTop, order: 2)]).isValid()
+      DockedPane(pane: paneShell, edge: leTop, order: 2)]).isValid({})
 
   test "an empty root fails validate":
     var kinds: seq[LayoutProblemKind] = @[]
-    for p in validate(initLayout(column([]))):
+    for p in validate(initLayout(column([])), {}):
       kinds.add(p.kind)
     check lpEmptyRoot in kinds
 
@@ -1043,7 +1214,7 @@ suite "Layout algebra — persistence (§6)":
     check restored.docked.len == 0
     check restored.tree.allPanes() == @[paneEditor, paneState]
     check restored.tree.find(paneEditor).weight == 3.0
-    check restored.isValid()
+    check restored.isValid({})
 
   test "a version above this build's is still refused, loudly":
     # There is no backward migration and there must not be one: an older
@@ -1149,7 +1320,7 @@ suite "WindowSet — one window is not a degraded case (§3A.1)":
     let ws = singleWindow(defaultReplayLayoutValue())
     check ws.windows.len == 1
     check ws.capacity == wcSingleWindow
-    check ws.isValid()
+    check ws.isValid({})
     # Every ordinary layout command reaches it unchanged — there is no
     # single-window arm anywhere in the module.
     let o = ws.applyIn(WindowId(0), cmdActivateTab(paneEventLog))
@@ -1185,10 +1356,10 @@ suite "WindowSet — moving a tab between windows (§3A.1)":
       check not src.tree.contains(paneEventLog)
       check dst.tree.contains(paneEventLog)
       check dst.tree.find(paneEventLog).title == "Event Log"
-      check o.windows.isValid()
+      check o.windows.isValid({})
       # The source inherited §2.4 for free: the stack it left had two tabs and
       # is now a one-tab stack, and the row is untouched.
-      check src.isValid()
+      check src.isValid({})
 
   test "the source's collapse rules apply without this layer knowing them":
     var ws = multiWindow([
@@ -1199,7 +1370,7 @@ suite "WindowSet — moving a tab between windows (§3A.1)":
     check o.kind == wsApplied
     if o.kind == wsApplied:
       check o.windows.windows[0].layout.tree.kind == lnPane
-      check o.windows.isValid()
+      check o.windows.isValid({})
 
   test "dragging a window's LAST pane away is refused, by the layout's kind":
     var ws = multiWindow([initLayout(pane(paneEditor)),
@@ -1242,9 +1413,44 @@ suite "WindowSet — moving a tab between windows (§3A.1)":
     var ws = multiWindow([initLayout(row([pane(paneEditor), pane(paneState)])),
                           initLayout(pane(paneState))])
     var kinds: seq[WindowSetProblemKind] = @[]
-    for p in validate(ws):
+    for p in validate(ws, {}):
       kinds.add(p.kind)
     check wpPaneInTwoWindows in kinds
+
+  test "a window's OWN invalid layout is reported as that, not as a duplicate":
+    # Found by PLAT-4's closing pass (2026-09-26): `validate(WindowSet)`
+    # reported every per-window layout defect under `wpPaneInTwoWindows`, so
+    # a window holding a single-child row read as "a pane in two windows" —
+    # a defect it did not have. It is `wpLayoutInvalid` now, naming the
+    # window, with the layout's own problem carried verbatim.
+    var ws = multiWindow([initLayout(row([pane(paneEditor)])),
+                          initLayout(pane(paneShell))])
+    let problems = validate(ws, {})
+    var kinds: seq[WindowSetProblemKind] = @[]
+    for p in problems:
+      kinds.add(p.kind)
+    checkpoint($kinds)
+    check kinds == @[wpLayoutInvalid]
+    if problems.len == 1:
+      check problems[0].window == some(WindowId(0))
+      check problems[0].layoutProblem.isSome
+      check problems[0].layoutProblem.get.kind == lpSingleChildContainer
+    check wpPaneInTwoWindows notin kinds
+
+  test "an owned pane that is in NO window is reported by the layout's kind":
+    # The same pass's second finding: an owned pane found nowhere came back
+    # as `wpUnknownWindow` — "an operation named a window id that is not in
+    # the set" — about a set in which no id was named at all.
+    let ws = multiWindow([initLayout(row([pane(paneEditor), pane(paneState)])),
+                          initLayout(pane(paneShell))])
+    check ws.isValid({paneEditor, paneState, paneShell})
+    let problems = validate(ws, {paneEditor, paneCalltrace})
+    check problems.len == 1
+    if problems.len == 1:
+      check problems[0].kind == wpLayoutInvalid
+      check problems[0].window.isNone
+      check problems[0].pane == some(paneCalltrace)
+      check problems[0].layoutProblem.get.kind == lpPaneNeitherPlacedNorDocked
 
 suite "WindowSet — persistence restores the window SET (§3A.1)":
 
@@ -1267,7 +1473,7 @@ suite "WindowSet — persistence restores the window SET (§3A.1)":
       check restored.windows[0].layout.docked.len == 1
       check restored.windows[1].bounds.isSome
       check restored.windows[1].bounds.get.width == 800
-      check restored.isValid()
+      check restored.isValid({})
 
   test "a single-window set records its capacity across a restore":
     let ws = singleWindow(defaultReplayLayoutValue())

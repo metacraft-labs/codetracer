@@ -690,7 +690,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ck editorPath.isSome
       checkpoint("after the drag, editor sits at '" & editorPath.get & "'")
       ck editorPath.get == "0"
-      ck validate(b.layout).len == 0
+      ck validate(b.layout, {}).len == 0
 
     # Rule 1's STACK EXEMPTION, and rule 2, in one sequence — because the
     # difference between them is exactly what a binding is most likely to get
@@ -726,7 +726,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                  " with " & $parent.get.childCount & " child(ren)")
       ck parent.get.kind == lnStack          ## the exemption, asserted
       ck parent.get.childCount == 1
-      ck validate(b.layout).len == 0
+      ck validate(b.layout, {}).len == 0
 
       # Rule 2: the last tab leaves and the emptied stack is removed.
       let geom = b.geometry(bodyFor(80, 24))
@@ -746,7 +746,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       checkpoint("stacks left in the tree: " & $stacks)
       ck stacks == 0
       ck b.layout.tree.contains(paneState)
-      ck validate(b.layout).len == 0
+      ck validate(b.layout, {}).len == 0
 
     # Rule 3: removing the LAST pane is refused. Docking every pane but one
     # leaves a bare pane; docking that one must be refused, by kind, and the
@@ -899,7 +899,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
             ck r.pane notin seen
             seen.incl r.pane
           ck geom.projection.regions.len == visiblePanes(b.layout.tree).len
-          ck validate(b.layout).len == 0
+          ck validate(b.layout, {}).len == 0
     checkpoint($commandsApplied & " command(s) applied, " & $refusals &
                " refused, " & $projectionsChecked & " projection(s) checked")
     # The positive control: the sweep really ran, and it really CHANGED things.

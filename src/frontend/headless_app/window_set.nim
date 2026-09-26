@@ -103,6 +103,19 @@ type
       ## reason verbatim. Wrapping rather than flattening is what lets a
       ## caller report "the source window refused: EmptyRoot" instead of "the
       ## move failed".
+    wpLayoutInvalid = "LayoutInvalid"
+      ## `validate` found a defect that is a `Layout`'s rather than the set's:
+      ## one window's own layout fails `validate(Layout)` (`window` names it),
+      ## or a pane the shell owns is in NO window (`window` is `none`, and
+      ## `layoutProblem` is `lpPaneNeitherPlacedNorDocked`). `layoutProblem`
+      ## carries the typed reason verbatim.
+      ##
+      ## ADDED BY PLAT-4's CLOSING PASS (2026-09-26), because both of those
+      ## used to be reported under kinds that meant something else: a
+      ## window's single-child row came back as `wpPaneInTwoWindows`, and an
+      ## owned pane that was nowhere as `wpUnknownWindow` — so a caller
+      ## branching on the kind was told "duplicate" or "no such window" about
+      ## a layout that had neither.
     wpSameWindow = "SameWindow"
       ## A cross-window move whose source and destination are the same
       ## window. `moveTabToWindow` refuses it by kind rather than falling
@@ -332,9 +345,12 @@ proc focus*(ws: WindowSet; id: WindowId): WindowSetOutcome =
 # Validation
 # ---------------------------------------------------------------------------
 
-proc validate*(ws: WindowSet; owned: set[PaneKind] = {}): seq[WindowSetProblem] =
+proc validate*(ws: WindowSet; owned: set[PaneKind]): seq[WindowSetProblem] =
   ## Every way the set is wrong. Layout-level defects are reported through
   ## `layoutProblem`, so one walk answers both levels.
+  ##
+  ## `owned` has no default, for `validate(Layout)`'s reason: `{}` makes the
+  ## "owned but nowhere" check vacuous, and a caller must now SAY so.
   result = @[]
   if ws.windows.len == 0:
     result.add(WindowSetProblem(kind: wpNoWindows, window: none(WindowId),
@@ -351,8 +367,10 @@ proc validate*(ws: WindowSet; owned: set[PaneKind] = {}): seq[WindowSetProblem] 
         result.add(WindowSetProblem(kind: wpDuplicateWindowId,
                                     window: some(w.id), pane: none(PaneKind),
                                     layoutProblem: none(LayoutProblem)))
-    for p in validate(w.layout):
-      result.add(WindowSetProblem(kind: wpPaneInTwoWindows, window: some(w.id),
+    # `{}` is exact here, not a shortcut: ownership spans the SET (below), so
+    # asking each window alone would report every pane another window holds.
+    for p in validate(w.layout, {}):
+      result.add(WindowSetProblem(kind: wpLayoutInvalid, window: some(w.id),
                                   pane: p.pane, layoutProblem: some(p)))
   # A pane may appear in exactly one window. `panel_transfer.nim` removes
   # before it adds for this reason; a set in which it did not would render the
@@ -376,11 +394,11 @@ proc validate*(ws: WindowSet; owned: set[PaneKind] = {}): seq[WindowSetProblem] 
         found = true
     if not found:
       result.add(WindowSetProblem(
-        kind: wpUnknownWindow, window: none(WindowId), pane: some(p),
+        kind: wpLayoutInvalid, window: none(WindowId), pane: some(p),
         layoutProblem: some(LayoutProblem(kind: lpPaneNeitherPlacedNorDocked,
                                           path: "", pane: some(p)))))
 
-proc isValid*(ws: WindowSet; owned: set[PaneKind] = {}): bool =
+proc isValid*(ws: WindowSet; owned: set[PaneKind]): bool =
   validate(ws, owned).len == 0
 
 # ---------------------------------------------------------------------------

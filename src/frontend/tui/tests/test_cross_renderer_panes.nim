@@ -88,7 +88,8 @@
 ##
 ## ## COUNTED ASSERTIONS (Verification-Harness-Traps §4c)
 
-import std/[algorithm, options, os, sequtils, sets, strutils, tables, unittest]
+import std/[algorithm, json, options, os, sequtils, sets, strutils, tables,
+            unittest]
 
 import isonim/core/[signals, computation]
 import isonim/viewmodel
@@ -107,6 +108,7 @@ import viewmodels/point_list_vm
 import viewmodels/point_collection_source
 import headless_app/layout_model
 import gpui/app/shell as gpui_shell
+import ../app/tui_app
 
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
@@ -847,7 +849,7 @@ suite "PLAT-21: PLAT-20 residue 7 — syncSessionLayouts, with a REAL backend":
     # there, which is the module's own purity working rather than a defect.
     let removal = slot.layout.apply(cmdRemovePane(paneSearch))
     ck removal.kind == loApplied
-    slot.layout = removal.layout.tree
+    slot.layout = removal.layout
     ck paneSearch notin slot.layout.allPanes()
     let idx = shell.windows.indexOf(WindowId(1))
     ck idx >= 0
@@ -862,6 +864,64 @@ suite "PLAT-21: PLAT-20 residue 7 — syncSessionLayouts, with a REAL backend":
     # later cases still need it.
     discard shell.app.closeSession(sessionId.id, disconnectBackend = false)
     expectCount(12)
+
+  liveTest "a pane DOCKED in a GPUI window reaches the session, its saved document, and a terminal binding":
+    # `HeadlessSessionSlot.layout` is a whole `Layout` (tree + docked). While
+    # it was a bare `LayoutNode`, `syncSessionLayouts` copied only the window's
+    # TREE onto the slot, so a pane docked in a GPUI window was in NEITHER half
+    # of `HeadlessApp.saveLayouts`' document — gone from the session's
+    # arrangement with nothing reporting it — and a terminal binding enabled
+    # over that session could only start from the tree. Same real transport as
+    # the case above; nothing here is mocked.
+    let shell = newGpuiShell()
+    let slot = shell.app.openSession(
+      live.session.backend.toBackendService(), title = "docked")
+    ck slot != nil
+    ck shell.openWindowForSession(WindowId(2), slot.id).kind == wsApplied
+    ck slot.layout.placement(paneEventLog) == plPlaced
+    ck shell.applyIn(WindowId(2), cmdDock(paneEventLog, leBottom)).kind ==
+      wsApplied
+    let idx = shell.windows.indexOf(WindowId(2))
+    ck idx >= 0
+    # The window has it docked, and so does the session — as ONE value.
+    ck slot.layout.placement(paneEventLog) == plDocked
+    ck $slot.layout == $shell.windows.windows[idx].layout
+    # Owned and somewhere: NON-vacuous, the Event Log is on its strip.
+    ck slot.layout.validate(ReplayCorePanes).len == 0
+    # The app-level document carries it.
+    let doc = shell.app.saveLayouts()
+    var entry: JsonNode = nil
+    for e in doc["sessions"]:
+      if e["id"].getInt == int(slot.id):
+        entry = e
+    ck not entry.isNil
+    ck not entry.isNil and entry["docked"].len == 1 and
+      entry["docked"][0]["pane"].getStr == $paneEventLog
+    # And it round-trips through that document onto another session.
+    let revived = newGpuiShell()
+    let other = revived.app.openSession(
+      live.session.backend.toBackendService(), title = "revived")
+    ck revived.app.restoreLayouts(doc) == 1
+    ck other.layout.placement(paneEventLog) == plDocked
+    # THE TERMINAL: a session opened over that `Layout` hands its docked pane
+    # to the screen model while no binding is enabled, and a binding enabled
+    # over it starts from the WHOLE layout rather than from the tree.
+    let app = newTuiApp()
+    let tslot = app.shell.openSession(
+      live.session.backend.toBackendService(), title = "terminal",
+      layout = slot.layout)
+    ck tslot.layout.placement(paneEventLog) == plDocked
+    let unbound = app.shellModel(120, 40)
+    ck unbound.docked.len == 1 and unbound.docked[0].pane == paneEventLog
+    let binding = app.enableLayoutBinding(120, 40)
+    ck binding.layout.placement(paneEventLog) == plDocked
+    ck $binding.layout == $tslot.layout
+    # The sessions are closed WITHOUT disconnecting: the DAP pipe is this
+    # file's, and later cases still need `replay-server`.
+    discard app.shell.closeSession(tslot.id, disconnectBackend = false)
+    discard revived.app.closeSession(other.id, disconnectBackend = false)
+    discard shell.app.closeSession(slot.id, disconnectBackend = false)
+    expectCount(16)
 
 suite "PLAT-21: the three-way comparison CAN go red":
 
@@ -926,7 +986,7 @@ suite "PLAT-21: the session is closed":
 # above (43 - 19): PLAT-41 expressed five more panes, added the timeline as the
 # second native escape, and replaced one flow assertion with a loop over the two
 # accepted exceptions. No other case changed.
-const ExpectedAssertions = 277
+const ExpectedAssertions = 293
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

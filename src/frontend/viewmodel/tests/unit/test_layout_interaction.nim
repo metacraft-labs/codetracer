@@ -92,7 +92,7 @@ template checkApplied(outcome: LayoutOutcome) =
 
 template checkValid(l: Layout) =
   let v = l
-  let problems = validate(v)
+  let problems = validate(v, {})
   var kinds: seq[string] = @[]
   for p in problems:
     kinds.add($p.kind & "@'" & p.path & "'")
@@ -585,25 +585,57 @@ suite "dropTargetsFor — refusals asserted as refusals (§4.2)":
     checkRefused apply(l, cmdSplitMove(paneEditor, paneEditor, saRow)),
       lpDuplicatePane
 
-  test "a docked pane cannot be split into the tree in one command":
+  test "a docked pane is split into the tree in one command":
+    # PLAT-5 recorded this gesture as MISSING: `lcSplit` refused a docked
+    # source, and restore-then-split is two commands, which §4.3 forbids this
+    # layer to sequence. PLAT-4's closing pass (2026-09-26) made the decision
+    # it was waiting on — `splitMovesPane` takes the pane from the strip as
+    # well as from the tree — so the absence this case used to assert is now
+    # a presence, over EVERY pane and EVERY edge, each one applied.
     let l = withDocked()
     check l.dockedIndex(paneEventLog) >= 0
+    var offered = 0
     for path in panePaths(l):
-      for zone in [dzLeftEdge, dzRightEdge, dzTopEdge, dzBottomEdge]:
+      # `dropTargetsFor` offers a node's FOUR edge strips whichever zone the
+      # pointer is in (the zone picks the hovered one), so one zone per node.
+      block:
+        var splits = 0
         for target in dropTargetsFor(l, paneEventLog,
-                                     LayoutPointer(path: path, zone: zone)):
-          checkpoint("unexpected candidate: " & $target)
-          check target.kind notin {dtSplitBefore, dtSplitAfter}
-    # `commandFor` says "not expressible"; the algebra says why a naive
-    # attempt would fail. Both statements, because they are different.
-    let strip = DropTarget(kind: dtSplitAfter, splitTarget: paneEditor,
-                           axis: saRow,
-                           region: DropRegion(kind: drNodeStrip, path: "0",
-                                              side: leRight))
-    check commandFor(l, paneEventLog, strip).isNone
+                                     LayoutPointer(path: path, zone: dzLeftEdge)):
+          if target.kind notin {dtSplitBefore, dtSplitAfter}:
+            continue
+          inc splits
+          let cmd = commandFor(l, paneEventLog, target)
+          check cmd.isSome
+          if cmd.isNone:
+            continue
+          check cmd.get.kind == lcSplit
+          check cmd.get.splitMovesPane
+          let outcome = apply(l, cmd.get)
+          checkpoint($target & " -> " & $outcome)
+          checkApplied outcome
+          if outcome.kind == loApplied:
+            checkValid outcome.layout
+            check outcome.layout.placement(paneEventLog) == plPlaced
+            check outcome.layout.docked.len == 0
+            # The strip's title travels with the pane, as `ahRestore`'s does.
+            check outcome.layout.tree.find(paneEventLog).title == "Event Log"
+        checkpoint("path " & path & ": " & $splits & " split target(s)")
+        # Four edge strips, four split targets, every one of them legal.
+        check splits == 4
+        offered += splits
+    check offered == 4 * panePaths(l).len
+    # What is STILL refused, by kind: the non-moving split keeps "must not be
+    # in the layout", a pane that is nowhere cannot be moved, and a layout
+    # that already breaks §3.3 (both placed AND docked) is not guessed at.
     checkRefused apply(l, cmdSplit(paneEditor, paneEventLog, saRow)),
       lpPaneBothPlacedAndDocked
-    checkRefused apply(l, cmdSplitMove(paneEditor, paneEventLog, saRow)),
+    checkRefused apply(l, cmdSplitMove(paneEditor, paneShell, saRow)),
+      lpPaneNotPlaced
+    let both = Layout(tree: stackedLayout().tree, docked: @[DockedPane(
+      pane: paneEventLog, title: "Event Log", edge: leBottom, order: 0)],
+      version: LayoutSchemaVersion)
+    checkRefused apply(both, cmdSplitMove(paneEditor, paneEventLog, saRow)),
       lpPaneBothPlacedAndDocked
 
   test "a docked pane is never offered the first tab slot":

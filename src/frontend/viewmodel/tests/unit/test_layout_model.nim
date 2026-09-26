@@ -199,7 +199,7 @@ suite "Layout model — adding and removing panes":
     # The collapse is what keeps lpEmptyContainer unreachable through
     # ordinary use, so the tree must still validate afterwards.
     check l.validate().len == 0
-    check validate(initLayout(l)).len == 0
+    check validate(initLayout(l), {}).len == 0
 
   test "removing the last pane is refused rather than emptying the tree":
     # §2.4 rule 3. There is no valid layout with no panes, and a shell that
@@ -222,10 +222,10 @@ suite "Layout model — adding and removing panes":
     # stacks — a one-tab stack is an arrangement, not a hole). Without the
     # gate this empties to `stack()`, an empty root.
     let l = stack([pane(paneEditor)])
-    check initLayout(l).isValid()
+    check initLayout(l).isValid({})
     check not l.removePane(paneEditor)
     check l.allPanes() == @[paneEditor]
-    check initLayout(l).isValid()
+    check initLayout(l).isValid({})
 
   test "adding a pane that is already placed is refused":
     let l = column([pane(paneEditor), pane(paneState)])
