@@ -16,13 +16,13 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
-7e8b13c5ea6d82f4ed2fc938eb2eb37e0085b3c1e52f090eb5337a63f84f3b07  src/frontend/gpui/app/dock_projection.nim
-0a773dddf183082cb66450177b10f95f630a546ecda245b3398b925156623165  src/frontend/gpui/app/shell.nim
+d813dc3d32c43ab969ef7cea9fa03cf02886472b9269eb24594cf19c3d1e4253  src/frontend/gpui/app/dock_projection.nim
+f84807195ed48c1422ad629f33cfbfb88804f388d42921ff5abf64ce968266cd  src/frontend/gpui/app/shell.nim
 7192de86b54786bc019d3daf79c47eea6397c6ae75fadfee68d2fcd91c2a8a43  src/frontend/gpui/app/leaves.nim
 17936a2eb728f155e928a4c892a979829cfa9a7dec7dc6cbff3299d03076496e  src/frontend/headless_app/extent_distribution.nim
 b2228c55e583ffd48ebf6edd410123cb4d00bb3567cbe6020192b402a5a2f1bb  src/ct/ui_selection.nim
 28f08e816325d93094b2a8b90e3ded35894fea639ee31e9c42a0406e1fb5ca8d  src/ct/launch/ui_dispatch.nim
-0a712d12801bf7f0a296bc965b3d81ba26540b0ccd879e38cdc49bdc9eeea592  src/frontend/gpui/tests/test_gpui_dock_projection.nim
+7477341152c3d54fd4b84b9b4d43646afb52728d214a9929da382bb5bd6fa964  src/frontend/gpui/tests/test_gpui_dock_projection.nim
 a39592b861f19c4267396fec03c0adeb65e2357811b1fd70228ba899d9e98902  src/frontend/gpui/tests/test_gpui_shell_split.nim
 784e3610abf3cde2286f3873f3cf1c9078de667c5f1346d73c1d9a5fb0871266  src/frontend/tui/tests/test_cross_frontend_layout.nim
 a43a6186b5a8d8b0c1f7121464947b8a7a23987ce1741f6996e18991e2c4b0f2  src/ct/ui_selection_test.nim
