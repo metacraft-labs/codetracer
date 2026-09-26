@@ -2829,12 +2829,17 @@ cross-test-go-flow:
 # specific sibling revision, set the RR_BACKEND_REF override or use the
 # workflow_dispatch inputs.
 
+# Regenerate BOTH consumers of codetracer-design-system from the pinned
+# submodule revision, in one resolver run: the desktop's stylus and the
+# terminal front-end's resolved token module (`design_tokens.nim`).
+# `ci/test/design-tokens-fresh.sh` is the gate that says when this is owed.
 sync-design-tokens:
     rm -rf ./src/frontend/styles/generated
     mkdir -p ./src/frontend/styles/generated
     bash scripts/tokens-to-styl.sh \
       ./libs/codetracer-design-system \
-      ./src/frontend/styles/generated
+      ./src/frontend/styles/generated \
+      --nim-out ./src/frontend/styles/generated/design_tokens.nim
 
 # One-time developer machine setup. Configures the local environment for
 # iterative development of CodeTracer, including BPF script development.

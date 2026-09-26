@@ -719,6 +719,12 @@ lint_step "Value presentation boundary: one pipeline, pure, with no surface bypa
 lint_step "TUI layer split: the decision half of each decide/perform pair does no I/O" \
 	bash ci/test/tui-layer-split-boundary.sh
 
+# The desktop's stylus AND the terminal front-end's `design_tokens.nim` are
+# regenerated from the pinned `libs/codetracer-design-system` revision in one
+# resolver run; the gate fails when either committed output differs.
+lint_step "Design tokens: the committed stylus and the TUI token module are what the pinned design system generates" \
+	bash ci/test/design-tokens-fresh.sh
+
 # PLAT-39's LAW-R4 and PLAT-40's production-caller gate. Both are source scans
 # with their own positive and negative controls, need no build and no
 # toolchain beyond coreutils, grep and sed, and were wired into no lane — which

@@ -1,10 +1,34 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: a code generator, not a check on one.
+# A code generator, not a check on one — and it IS reachable from CI, through
+# the check on it: `ci/test/design-tokens-fresh.sh` (run by `ci/lint/nim.sh`)
+# regenerates BOTH outputs below from the pinned `libs/codetracer-design-system`
+# revision and diffs them against the committed files.
 #
-# Design tokens in, stylus out, into src/frontend/styles/generated/.
-# Whether that output is stale is a real question and a good gate to
-# have -- but it is a question ABOUT this script, not one it answers.
+# Design tokens in, TWO outputs out, from ONE resolution of the token layers:
+#
+#   * stylus, into src/frontend/styles/generated/ — the desktop's stylesheets
+#     import it. The stylus keeps its references symbolic (`a = b`) and lets
+#     stylus resolve them; its bytes are unchanged by the second emitter.
+#   * (optional, `--nim-out FILE`) a Nim module of RESOLVED token constants,
+#     every colour token of the `mapped` layer resolved through `alias` and
+#     `brand` to a `#rrggbb` hex in BOTH colour modes (Dark and Light). The
+#     terminal front-end paints from it, so the terminal and the desktop read
+#     one design-system revision through one resolver.
+#
+# Usage: tokens-to-styl.sh <design-system-root> <stylus-out-dir> [<mode>]
+#                          [--nim-out <file.nim>]
 set -euo pipefail
+
+POSITIONAL=()
+NIM_OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --nim-out) NIM_OUT="${2:?--nim-out needs a file path}"; shift 2 ;;
+    --nim-out=*) NIM_OUT="${1#--nim-out=}"; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 ROOT_DIR="${1:-.}"
 OUT_DIR="${2:-$ROOT_DIR/stylus}"
@@ -13,11 +37,12 @@ OUT_DIR="${2:-$ROOT_DIR/stylus}"
 # it falls back to its default $value. With NO mode arg the output is identical
 # to the single-value export (so existing consumers are untouched). This is the
 # consumer half of the design-system "axes" campaign (color-mode + density).
+# The mode applies to the STYLUS only: the Nim module always carries every mode.
 SELECT_MODE="${3:-}"
 
 mkdir -p "$OUT_DIR"
 
-python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" <<'PY'
+python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" "$NIM_OUT" <<'PY'
 import json
 import os
 import re
@@ -27,6 +52,7 @@ from pathlib import Path
 ROOT_DIR = Path(sys.argv[1]).resolve()
 OUT_DIR = Path(sys.argv[2]).resolve()
 SELECT_MODE = sys.argv[3] if len(sys.argv) > 3 else ""
+NIM_OUT = sys.argv[4] if len(sys.argv) > 4 else ""
 
 EXPECTED_FOLDERS = ["brand", "alias", "mapped"]
 
@@ -115,7 +141,11 @@ def stylus_value(value, indent=0):
 
     return quote_string(str(value))
 
-def flatten_tokens(node, path=None, out=None):
+def flatten_tokens(node, path=None, out=None, mode=None):
+    # `mode=None` means "the stylus's mode" (SELECT_MODE). The Nim emitter
+    # passes each colour mode explicitly; the stylus path is unchanged.
+    if mode is None:
+        mode = SELECT_MODE
     if path is None:
         path = []
     if out is None:
@@ -127,10 +157,10 @@ def flatten_tokens(node, path=None, out=None):
             # Mode selection (additive): if a mode was requested and this token
             # carries $extensions.modes[<mode>], use that per-mode value; else
             # fall back to the default $value. No mode → always $value.
-            if SELECT_MODE:
+            if mode:
                 modes = (node.get("$extensions") or {}).get("modes") or {}
-                if SELECT_MODE in modes:
-                    value = modes[SELECT_MODE]
+                if mode in modes:
+                    value = modes[mode]
             out[tuple(path)] = {
                 "type": node.get("$type"),
                 "value": value,
@@ -140,7 +170,7 @@ def flatten_tokens(node, path=None, out=None):
         for key, value in node.items():
             if key.startswith("$"):
                 continue
-            flatten_tokens(value, path + [key], out)
+            flatten_tokens(value, path + [key], out, mode)
 
     return out
 
@@ -205,7 +235,10 @@ for name in OPTIONAL_LAYERS:
     if (ROOT_DIR / name).is_dir():
         layers.append(name)
 
-flats = {name: flatten_tokens(load_json(find_single_json(ROOT_DIR / name))) for name in layers}
+# ONE LOAD of the layers. Both emitters below read these documents; neither
+# re-reads the design system.
+documents = {name: load_json(find_single_json(ROOT_DIR / name)) for name in layers}
+flats = {name: flatten_tokens(documents[name]) for name in layers}
 known_vars = collect_all_vars(*flats.values())
 
 for name in layers:
@@ -285,4 +318,113 @@ for name in emitted_layers:
     print(f"[OK] wrote      : {OUT_DIR / (name + '.styl')}")
 print(f"[OK] wrote      : {OUT_DIR / 'fonts.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'index.styl'}")
+
+# ---------------------------------------------------------------------------
+# The Nim emitter: every `mapped` colour token, resolved to a hex, per mode.
+# ---------------------------------------------------------------------------
+
+NIM_MODES = ["Dark", "Light"]
+  # The design system's two colour modes. A mode the design system stops
+  # publishing is a loud failure below, not a silent fallback to $value.
+
+def nim_ident(path_parts):
+    words = []
+    for part in path_parts:
+        for w in re.split(r"[^A-Za-z0-9]+", str(part)):
+            if w:
+                words.append(w[0].upper() + w[1:].lower())
+    return "dt" + "".join(words)
+
+def resolve_hex(var_name, stack, below=None, trail=()):
+    # Follow `{a.b.c}` references to a literal colour.
+    #
+    # `stack` is one {var: value} map per layer, in import order. A reference
+    # resolves to the LATEST layer at or below the referring token's own layer
+    # that defines it — and a token that re-exports a same-named token of an
+    # earlier layer (`alias`'s `colors.base.white = {colors.base.white}`)
+    # resolves to that earlier layer. That is the reading stylus gives the same
+    # files when index.styl imports them in this order.
+    #
+    # A dangling or cyclic reference, or a non-hex terminal value, fails the
+    # whole run rather than emitting a guess.
+    top = len(stack) - 1 if below is None else below
+    layer = next((i for i in range(top, -1, -1) if var_name in stack[i]), None)
+    if layer is None:
+        raise SystemExit(f"[ERROR] unresolved token reference: {var_name}"
+                         + (f" (from {trail[0]})" if trail else ""))
+    if (var_name, layer) in trail:
+        raise SystemExit("[ERROR] reference cycle at " + var_name)
+    value = stack[layer][var_name]
+    if isinstance(value, str) and REF_RE.fullmatch(value.strip()):
+        ref = ref_to_var(value.strip())
+        nxt = layer - 1 if ref == var_name else layer
+        return resolve_hex(ref, stack, nxt, trail + ((var_name, layer),))
+    if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value.strip()):
+        return value.strip().lower()
+    raise SystemExit(f"[ERROR] {var_name} resolves to {value!r}, which is not a #rrggbb colour")
+
+def emit_nim(out_file):
+    per_mode = {}
+    for mode in NIM_MODES:
+        per_mode[mode] = [
+            {path_to_var(tp): t["value"]
+             for tp, t in flatten_tokens(documents[name], mode=mode).items()}
+            for name in layers]
+    mapped_modes = set()
+    def collect_modes(node):
+        if isinstance(node, dict):
+            if "$value" in node:
+                mapped_modes.update(((node.get("$extensions") or {}).get("modes") or {}).keys())
+                return
+            for k, v in node.items():
+                if not k.startswith("$"):
+                    collect_modes(v)
+    collect_modes(documents["mapped"])
+    for mode in NIM_MODES:
+        if mode not in mapped_modes:
+            raise SystemExit(f"[ERROR] the mapped layer publishes no '{mode}' mode (has: {sorted(mapped_modes)})")
+    colour_paths = sorted(
+        [p for p, t in flats["mapped"].items() if t["type"] == "color"],
+        key=lambda p: [sanitize_part(x) for x in p])
+    idents = {}
+    for p in colour_paths:
+        ident = nim_ident(p)
+        # Nim identifiers are style-insensitive after the first letter.
+        key = ident[0] + ident[1:].lower().replace("_", "")
+        if key in idents:
+            raise SystemExit(f"[ERROR] tokens {'/'.join(idents[key])} and {'/'.join(p)} map to one Nim identifier {ident}")
+        idents[key] = p
+    lines = [
+        "## AUTO-GENERATED by scripts/tokens-to-styl.sh from codetracer-design-system",
+        "## (the `libs/codetracer-design-system` revision this checkout pins). DO NOT",
+        "## EDIT: `just sync-design-tokens` regenerates it together with the stylus,",
+        "## and `ci/test/design-tokens-fresh.sh` fails when either is stale.",
+        "##",
+        "## Every colour token of the `mapped` layer, resolved through `alias` and",
+        "## `brand` to a `#rrggbb` hex, in each colour mode the design system",
+        "## publishes. `$value` (what the desktop's stylus uses) equals the Dark mode.",
+        "",
+        "type",
+        "  DesignMode* = enum",
+        "    ## The design system's colour modes (`$extensions.modes`).",
+    ]
+    for mode in NIM_MODES:
+        lines.append(f"    dm{mode} = \"{mode}\"")
+    lines += ["", "  DesignToken* = enum", "    ## One member per `mapped` colour token, named by its token path."]
+    for p in colour_paths:
+        lines.append(f"    {nim_ident(p)} = \"{'/'.join(p)}\"")
+    lines += ["", "const", "  DesignTokenCount* = " + str(len(colour_paths)),
+              "  DesignTokenHex*: array[DesignToken, array[DesignMode, string]] = ["]
+    for i, p in enumerate(colour_paths):
+        var = path_to_var(p)
+        hexes = [resolve_hex(var, per_mode[m]) for m in NIM_MODES]
+        sep = "," if i + 1 < len(colour_paths) else "]"
+        lines.append(f"    {nim_ident(p)}: [" + ", ".join(f'"{h}"' for h in hexes) + "]" + sep)
+    lines.append("")
+    Path(out_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_file).write_text("\n".join(lines), encoding="utf-8")
+    print(f"[OK] wrote      : {Path(out_file).resolve()}")
+
+if NIM_OUT:
+    emit_nim(NIM_OUT)
 PY
