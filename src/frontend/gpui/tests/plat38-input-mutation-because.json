@@ -5,7 +5,7 @@
   "B4": "Check failed: sameNode(focusTrapElement(), b.nodes[\"dlg\"])",
   "G1": "Check failed: taken == filed",
   "G2": "Check failed: dirExists(dir)",
-  "G3": "/home/zahary/m/codetracer-gui/codetracer-harness/src/frontend/gpui/tests/test_gpui_key_delivery.nim(567) test_gpui_key_delivery",
+  "G3": "/home/zahary/m/codetracer-gui/codetracer-plat3/src/frontend/gpui/tests/test_gpui_key_delivery.nim(583) test_gpui_key_delivery",
   "R1": "Check failed: s.arrivals.len >= 1",
   "R2": "Check failed: s.expectModifier in s.arrivals[^1].modifiers",
   "R3": "Check failed: record.negativeTwin.deliverySeq == 0",

@@ -15,7 +15,7 @@
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
 8f3d9aba3c326e6f5045acdbfd1be52a703d32d6239a64c0f928e9d361f23833  src/tests/visual/plat38-keystrokes.json
-b66ff5f08969ede9732086e4675f762a02e60be1927890b7a78e892cc45b05ce  src/frontend/view_vocabulary/gpui_binding.nim
+9ac0078ecfb9ac88e2410d2a4abd96cfc3947ba7d33c6f466edf7abf494aadfd  src/frontend/view_vocabulary/gpui_binding.nim
 e6cbb30b6b657c1e14ab3965b10398a6bdfc236a423ef52366a45a96b38ac558  src/common/view_vocabulary/gpui_gaps.nim
 64419c7909c6446d5984345f786a9aae6be6fe3364b2238df0c777d8812420e1  src/frontend/gpui/tests/plat38_keys.nim
 facc8c58aee7b6b00f53666bb4d796e0c9560aee3c4c988177b804a1123ba0bd  src/frontend/gpui/tests/test_gpui_key_delivery.nim

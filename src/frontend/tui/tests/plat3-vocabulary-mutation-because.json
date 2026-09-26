@@ -1,0 +1,17 @@
+{
+  "B1": "Check failed: d.len == 0",
+  "G1": "Check failed: complete ==",
+  "G2": "Check failed: complete == 16",
+  "M1": "Check failed: ol(\"a **b** *c* `d` [e](http://f)\") ==",
+  "M2": "Check failed: ol(\"```nim\\necho 1\\n```\") == @[\"code nim|echo 1\"]",
+  "T1": "Check failed: tf`gensym356 == \"0\"",
+  "T2": "Check failed: tf`gensym1206 == \"1\"",
+  "T3": "Check failed: tf`gensym1252 == MarkdownSource",
+  "W1": "Check failed: nm.len == 0",
+  "W2": "Check failed: grew ==",
+  "W3": "Check failed: matchesSel(qs(\"[data-view-id=\\\"dlg\\\"]\"), \":modal\")",
+  "W4": "Check failed: grew ==",
+  "W5": "Check failed: nm.len == 0",
+  "W6": "Check failed: \"p Some [b:bold] text and [c:code].\" in outline",
+  "W7": "Check failed: nm.len == 0"
+}
