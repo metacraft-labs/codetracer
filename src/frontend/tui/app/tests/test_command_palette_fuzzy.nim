@@ -418,20 +418,20 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
     # The selected row carries the highlight background on every cell.
     var highlighted = 0
     for col in 0 ..< width:
-      if g.styleAt(2, col).bg == command_palette.SelectedBackground:
+      if g.styleAt(2, col).surface == command_palette.SelectedBackground:
         inc highlighted
     checkpoint("highlighted cells on the selected row: " & $highlighted)
     ck highlighted == width
     # …and the row BELOW it does not, which is the positive twin.
     var spill = 0
     for col in 0 ..< width:
-      if g.styleAt(3, col).bg == command_palette.SelectedBackground:
+      if g.styleAt(3, col).surface == command_palette.SelectedBackground:
         inc spill
     ck spill == 0
     # The matched characters are accented, one cell per query character.
     var accented = 0
     for col in 0 ..< width:
-      if g.styleAt(2, col).fg == command_palette.MatchStyle.fg:
+      if g.styleAt(2, col).role == command_palette.MatchStyle.role:
         inc accented
     checkpoint("accented cells: " & $accented)
     ck accented == IntendedQuery.len

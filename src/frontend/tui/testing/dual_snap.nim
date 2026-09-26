@@ -768,8 +768,13 @@ proc newestSourceTime*(stem: string): float =
   ## red CTUI-5 measured, with a different subject. It is a six-file directory
   ## that changes rarely, so the rebuild cost is nearer to
   ## `test_app_runtime.nim`'s than to `isonim-tui`'s.
+  ## **`src/frontend/styles/generated/` IS IN THE STAMP AS OF PLAT-46**: every
+  ## colour a child paints is resolved from `design_tokens.nim` there, so a
+  ## token change (a `just sync-design-tokens`, or PLAT-46's derivation
+  ## mutation arms) must rebuild the children like a change under `app/`.
   for dir in [tui / "app", tui / "host",
-              repoRoot() / "src" / "common" / "terminal_graphics"]:
+              repoRoot() / "src" / "common" / "terminal_graphics",
+              repoRoot() / "src" / "frontend" / "styles" / "generated"]:
     if not dirExists(dir):
       continue
     for path in walkDirRec(dir):

@@ -154,12 +154,15 @@ suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
         checkpoint("line " & $line & " styles: " & $styles)
         ck styles.len > 0
         for st in styles:
-          ck st.fg == FlowNotTakenStyle.fg
+          # PLAT-46: a not-taken line's CODE is the not-taken role; an inline
+          # value annotation after it keeps the annotation's own muted role.
+          # Before roles both were `bright_black`, and this compared the colour.
+          ck st.role in [FlowNotTakenStyle.role, AnnotationStyle.role]
       # The header ran: it keeps at least one syntax colour.
       let header = codeStylesOf(screen, model, expected[0] - 1)
       var coloured = 0
       for st in header:
-        if st.fg != FlowNotTakenStyle.fg and st.fg.len > 0: inc coloured
+        if st.role != FlowNotTakenStyle.role and st.role != srNone: inc coloured
       ck coloured > 0
 
       # NEGATIVE TWIN — the overlay hidden, the same stop.
@@ -171,7 +174,7 @@ suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
       var recoloured = 0
       for line in expected:
         for st in codeStylesOf(hiddenScreen, hidden, line):
-          if st.fg != FlowNotTakenStyle.fg and st.fg.len > 0: inc recoloured
+          if st.role != FlowNotTakenStyle.role and st.role != srNone: inc recoloured
       ck recoloured > 0
 
   test "CHECKS":

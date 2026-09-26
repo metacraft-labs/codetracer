@@ -162,14 +162,14 @@ const
     ## holding a scrubber AND an event log — and `app/views/shell.nim` gives the
     ## rest to `app/views/event_log.nim`.
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  TitleDetailStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
-  BoundsStyle* = CellStyle(fg: "white", bold: true)
-  TrackStyle* = CellStyle(fg: "bright_black")
-  SpanStyle* = CellStyle(fg: "blue")
-  MarkStyle* = CellStyle(fg: "yellow", bold: true)
-  NeedleStyle* = CellStyle(fg: "bright_cyan", bold: true)
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  TitleDetailStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
+  BoundsStyle* = CellStyle(role: srTimelineBounds)
+  TrackStyle* = CellStyle(role: srTimelineTrack)
+  SpanStyle* = CellStyle(role: srTimelineSpan)
+  MarkStyle* = CellStyle(role: srTimelineMark)
+  NeedleStyle* = CellStyle(role: srTimelineNeedle)
     ## Five glyphs, five distinguishable colours, all of them ANSI NAMES so both
     ## tiers report the same indexed value — 7, 8, 4, 3 and 14. Every one is
     ## asserted as a NUMBER in `tests/real_terminal/test_real_timeline.nim`,
@@ -177,7 +177,7 @@ const
     ## blind to a defect both tiers share.
 
   UnknownBoundsText* = "no recorded bounds"
-  UnknownBoundsStyle* = CellStyle(fg: "bright_black", italic: true)
+  UnknownBoundsStyle* = CellStyle(role: srChromeMuted, italic: true)
 
 # ---------------------------------------------------------------------------
 # THE QUANTIZATION. Pure, integer, and the subject of its own suite.

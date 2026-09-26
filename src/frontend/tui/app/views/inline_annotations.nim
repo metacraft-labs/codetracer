@@ -82,7 +82,7 @@ const
   AnnotationGap* = 2
     ## Cells between the end of the code and the start of the annotation.
 
-  AnnotationStyle* = CellStyle(fg: "bright_black", italic: true)
+  AnnotationStyle* = CellStyle(role: srChromeMuted, italic: true)
     ## Muted and italic, so the annotation reads as commentary rather than as
     ## source. Distinct from the comment token class (`bright_black`, italic)
     ## ONLY by... nothing — and that is deliberate: an inline annotation IS a

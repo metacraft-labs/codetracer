@@ -315,8 +315,8 @@ template checkFrameAgreesWithTheBackend(h: StepHarness;
   let visible = groundTruth.strip()
   ck text.contains(visible[0 ..< min(visible.len, screen.codeWidth - 4)])
   # The pointer cell really carries the accent style, in the same frame.
-  ck rowStyleAt(row, pointerFieldColumn(screen)).fg ==
-     ExecutionPointerStyle.fg
+  ck rowStyleAt(row, pointerFieldColumn(screen)).role ==
+     ExecutionPointerStyle.role
 
 template checkRetracesExactly(forward, backward: seq[(string, int)]) =
   ## Stepping back re-visits the forward trail in reverse, position for
@@ -523,9 +523,9 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
           heatWrong.add "line " & $line & ": field '" & fieldText.strip() &
             "', expected '" & want & "'"
         let style = rowStyleAt(row, GutterMarkCells)
-        if style.fg != heat.heatStyle(line).fg:
-          heatWrong.add "line " & $line & ": flame fg '" & style.fg &
-            "', expected '" & heat.heatStyle(line).fg & "'"
+        if style.role != heat.heatStyle(line).role:
+          heatWrong.add "line " & $line & ": flame role '" & $style.role &
+            "', expected '" & $heat.heatStyle(line).role & "'"
         if heat.countFor(line) > 0: inc countedVisible
         else: inc uncountedVisible
       if heatWrong.len > 0:
@@ -571,7 +571,7 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
       ck bpRow >= 1
       ck bpRow < markedScreen.rows.len
       ck rowRuneAt(markedScreen.rows[bpRow], 0) == BreakpointGlyph
-      ck rowStyleAt(markedScreen.rows[bpRow], 0).fg == BreakpointStyle.fg
+      ck rowStyleAt(markedScreen.rows[bpRow], 0).role == BreakpointStyle.role
 
       # ---- THE SHELL PAINTS THE PANE INTO THE `editor` RECTANGLE ----------
       # CTUI-3 delivered the rectangle and left it empty ("the panes are

@@ -193,27 +193,27 @@ const
 
   PendingText* = "…"
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  TitleDetailStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
-  TickStyle* = CellStyle(fg: "bright_black")
-  LocationStyle* = CellStyle(fg: "bright_black")
-  ContentStyle* = CellStyle(fg: "white")
-  SelectedBackground* = "bright_black"
-  CurrentTickStyle* = CellStyle(fg: "bright_cyan", bold: true)
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  TitleDetailStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
+  TickStyle* = CellStyle(role: srChromeMuted)
+  LocationStyle* = CellStyle(role: srChromeMuted)
+  ContentStyle* = CellStyle(role: srChromeText)
+  SelectedBackground* = srSurfaceSelection
+  CurrentTickStyle* = CellStyle(role: srChromeAccent)
     ## The row at the debugger's own tick, in the SAME colour
     ## `timeline_bar.NeedleStyle` paints `▲` — one fact, one colour, on two
     ## panes.
   EmptyLogText* = "no recorded events"
-  EmptyLogStyle* = CellStyle(fg: "bright_black", italic: true)
-  PendingStyle* = CellStyle(fg: "bright_black", italic: true)
+  EmptyLogStyle* = CellStyle(role: srChromeMuted, italic: true)
+  PendingStyle* = CellStyle(role: srChromeMuted, italic: true)
 
-  OutputStyle* = CellStyle(fg: "green")
-  MutationStyle* = CellStyle(fg: "yellow")
-  SyscallStyle* = CellStyle(fg: "cyan")
-  FaultStyle* = CellStyle(fg: "red", bold: true)
-  TracepointStyle* = CellStyle(fg: "magenta")
-  UnknownStyle* = CellStyle(fg: "bright_black")
+  OutputStyle* = CellStyle(role: srEventOutput)
+  MutationStyle* = CellStyle(role: srEventMutation)
+  SyscallStyle* = CellStyle(role: srEventSyscall)
+  FaultStyle* = CellStyle(role: srEventFault)
+  TracepointStyle* = CellStyle(role: srEventTracepoint)
+  UnknownStyle* = CellStyle(role: srEventUnknown)
 
 # ---------------------------------------------------------------------------
 # The wire's event kinds
@@ -529,13 +529,13 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
     # CTUI-7's first draft of `tree_node.treeRow` painted the selection over
     # every span and ate the one badge the row existed to show; this pane has
     # the same shape and takes the fix rather than the defect.
-    if selected and style.bg.len == 0:
+    if selected and not style.hasOwnBackground:
       style = style.withBackground(SelectedBackground)
     result.add StyledSpan(text: fitted, style: style)
     used += cellWidthOf(fitted)
   if selected and used < width:
     result.add StyledSpan(text: repeat(' ', width - used),
-                          style: CellStyle(bg: SelectedBackground))
+                          style: CellStyle(surface: SelectedBackground))
 
 proc paintEventLog*(g: var StyledGrid; area: CellArea;
                     model: EventLogModel): EventLogScreen =

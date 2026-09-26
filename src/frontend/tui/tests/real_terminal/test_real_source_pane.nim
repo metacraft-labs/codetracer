@@ -58,6 +58,7 @@ import ../../app/views/source_pane
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_source_pane as paneApp
+import ./derived_colours
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -168,14 +169,14 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       checkpoint("pointer cell (" & $row0 & "," & $ptrCol & "): " &
                  describeCell(ptrCell))
       ck $ptrCell.rune == "-"
-      # `bright_yellow` is ANSI 11, which libvterm reports as indexed 11.
+      # PLAT-46: the execution pointer's role, on the DERIVED 16-colour rung
+      # (`derived_colours`), which libvterm reports as an index.
       ck ptrCell.fg.kind == ckIndexed
-      ck ptrCell.fg.idx == 11'u8
+      ck ptrCell.fg.idx == ansiIndexOf(srGutterExecutionPointer)
       ck caBold in ptrCell.attrs
       # …and the execution line's background highlight really reached it.
-      # `blue` is ANSI 4.
       ck ptrCell.bg.kind == ckIndexed
-      ck ptrCell.bg.idx == 4'u8
+      ck ptrCell.bg.idx == ansiIndexOf(srLineExecution, background = true)
 
       # ---- BREAKPOINT RED, TRACEPOINT CYAN, DISABLED MUTED ------------------
       # All three §3.3.2 indicators, on the same real screen.
@@ -190,17 +191,17 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
         of gmBreakpoint:
           ck $cell.rune == BreakpointGlyph
           ck cell.fg.kind == ckIndexed
-          ck cell.fg.idx == 1'u8          # `red`
+          ck cell.fg.idx == ansiIndexOf(srGutterBreakpoint)
           ck caBold in cell.attrs
         of gmBreakpointDisabled:
           ck $cell.rune == BreakpointDisabledGlyph
           ck cell.fg.kind == ckIndexed
-          ck cell.fg.idx == 8'u8          # `bright_black`, §3.3.2's "muted"
+          ck cell.fg.idx == ansiIndexOf(srGutterBreakpointDisabled)
           ck caBold notin cell.attrs
         of gmTracepoint:
           ck $cell.rune == TracepointGlyph
           ck cell.fg.kind == ckIndexed
-          ck cell.fg.idx == 6'u8          # `cyan`
+          ck cell.fg.idx == ansiIndexOf(srGutterTracepoint)
           ck caBold in cell.attrs
         of gmNone:
           ck false                        # unreachable; the table has no gmNone
@@ -227,9 +228,9 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       checkpoint("verified line number:   " & describeCell(verifiedNumber))
       checkpoint("unverified line number: " & describeCell(unverifiedNumber))
       ck verifiedNumber.fg.kind == ckIndexed
-      ck verifiedNumber.fg.idx == 8'u8     # `bright_black`
+      ck verifiedNumber.fg.idx == ansiIndexOf(srLineNumber)
       ck unverifiedNumber.fg.kind == ckIndexed
-      ck unverifiedNumber.fg.idx == 3'u8   # `yellow`
+      ck unverifiedNumber.fg.idx == ansiIndexOf(srLineNumberUnverified)
       # THE WHOLE POINT, as one assertion: the two do not look the same.
       ck verifiedNumber.fg.idx != unverifiedNumber.fg.idx
 
@@ -243,7 +244,7 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
                  describeCell(keywordCell))
       ck $keywordCell.rune == "i"
       ck keywordCell.fg.kind == ckIndexed
-      ck keywordCell.fg.idx == 5'u8        # `magenta`
+      ck keywordCell.fg.idx == ansiIndexOf(srSyntaxKeyword)
       ck caBold in keywordCell.attrs
 
       # ---- THE STEP ---------------------------------------------------------
@@ -272,7 +273,7 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       let ptrCell1 = sess.cellAt(row1, pointerColumn(Cols, model1))
       ck $ptrCell1.rune == "-"
       ck ptrCell1.fg.kind == ckIndexed
-      ck ptrCell1.fg.idx == 11'u8
+      ck ptrCell1.fg.idx == ansiIndexOf(srGutterExecutionPointer)
       ck caBold in ptrCell1.attrs
       # …and the vacated row's gutter is back to the terminal default there.
       let vacatedCell = sess.cellAt(row0, pointerColumn(Cols, model0))

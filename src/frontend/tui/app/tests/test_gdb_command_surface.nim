@@ -156,7 +156,13 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 82
+  ExpectedAppModules = 86
+    ## RE-COUNTED ON 2026-09-26: 82 → 86. PLAT-46 painted the terminal from the
+    ## design system and added four `app/theme/` modules: `roles.nim` (every
+    ## role and the token it paints with), `cell_style.nim` (the role-carrying
+    ## `CellStyle`, moved out of `views/styled_row.nim`), `colour_math.nim`
+    ## (OKLab, WCAG) and `palette.nim` (the derived rungs).
+    ##
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -225,7 +231,15 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 192
+  ExpectedStyleLiterals = 166
+    ## RE-COUNTED ON 2026-09-26: 192 → 166 and 24 → 26, PLAT-46. Every literal
+    ## is now a ROLE (`CellStyle(role: …)`), and the count moved for three
+    ## reasons, none of them a colour: `degradation.nim` lost its four
+    ## hand-written tint tables and `roleFor`, `cell_style.nim` and
+    ## `palette.nim` are two new files that name the type, and the shell
+    ## paints its title rows, tab strips and status indicators with roles of
+    ## its own.
+    ##
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -268,7 +282,7 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 24
+  ExpectedStyledFiles = 26
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour
@@ -292,6 +306,10 @@ const
     ##
     ## Both numbers are asserted so the report stops being true — and this
     ## suite says so — the day a theme registry arrives.
+    ##
+    ## 2026-09-26: every literal now names a design-system ROLE, and `:theme`
+    ## switches the design-system MODE through a host seam
+    ## (`TuiRuntime.themeService`) rather than through a registry.
 
   Garbage = [
     "", "   ", ":", "  :  ", ":teleport", ":nex", ":NEXT", ":n3xt",
@@ -754,9 +772,12 @@ suite "CTUI-10: §4.3's command surface is the published one":
     ck byNothing.message.contains("no_such_function")
     ck log.breakpoints.len == 2                  # the refusal sent nothing
 
-    # AND THE TWO §4.3 PUBLISHES THAT NOTHING IN THIS WORKSPACE IMPLEMENTS.
-    # Accepted, dispatched, and REPORTED as unsupported — never silent, and
-    # never a green pass over a stub. See `interpreter.nim`'s header table.
+    # A HOST WITH NO MODE SWITCH, AND THE ONE §4.3 PUBLISH NOTHING IN THIS
+    # WORKSPACE IMPLEMENTS. Accepted, dispatched, and REPORTED as unsupported
+    # — never silent, and never a green pass over a stub. See
+    # `interpreter.nim`'s header table. (The shipped host DOES install a
+    # `:theme` switch — `TuiRuntime.themeService`, read back off a real
+    # terminal by `tests/real_terminal/test_plat46_design_tokens.nim`.)
     let noTheme = runCommand(bareDispatcher(), ctx, ":theme dark")
     checkpoint(":theme with no host -> " & noTheme.message)
     ck noTheme.invocation.status == csOk
@@ -775,12 +796,13 @@ suite "CTUI-10: §4.3's command surface is the published one":
     # resolved tier — that pass is the theme hook, and a theme is a different
     # tint table behind it.
     #
-    # So what `:theme` still lacks is not a palette. It is a way to change
-    # `TerminalCapabilities.theme` on a LIVE session and repaint, which is a
-    # host act: the capability set is resolved once, before the first paint,
-    # and `app/` is handed the answer. That is why this arm still reads
-    # `unsupported` while §6.2's flag works, and the day it stops is the day a
-    # host seam exists — not the day a literal count moves.
+    # So what `:theme` lacked was not a palette. It was a way to change
+    # the capabilities on a LIVE session and repaint, which is a host act.
+    # 2026-09-26: that seam exists (`TuiRuntime.themeService` →
+    # `host/terminal_probe.switchTheme`), because the terminal is now painted
+    # from design-system ROLES resolved per mode; a bare dispatcher still has
+    # no host and still reads `unsupported`. The counts below stay as the
+    # measurement of the literal surface; `ThemeRegistry` stays unused.
     var styleLiterals = 0
     var filesWithStyles = 0
     var themeReferences = 0

@@ -149,7 +149,7 @@ const
   NoCompletionText* = "no completion"
   EmptyHistoryText* = "no history"
 
-  PromptStyle* = CellStyle(fg: "white")
+  PromptStyle* = CellStyle(role: srChromeText, surface: srSurfaceInput)
 
 proc initCommandLineModel*(kind = pkCommand;
                            history: seq[string] = @[]): CommandLineModel =

@@ -64,7 +64,9 @@ proc readTerminalEnv*(fd: cint = STDOUT_FILENO): TerminalEnv =
     lcCtype: getEnv("LC_CTYPE", ""),
     lang: getEnv("LANG", ""),
     noColor: getEnv("NO_COLOR", ""),
-    isTty: isatty(fd) == 1)
+    isTty: isatty(fd) == 1,
+    colorFgBg: getEnv("COLORFGBG", ""),
+    tmux: getEnv("TMUX", ""))
 
 proc negotiateCapabilities*(flags: CapabilityFlags;
                             fd: cint = STDOUT_FILENO): TerminalCapabilities =

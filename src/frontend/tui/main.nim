@@ -77,6 +77,7 @@ import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
 import ./host/terminal_driver
+import ./host/terminal_probe
 import ./host/tui_session
 import ../viewmodel/host/keymap_preference
 
@@ -232,6 +233,20 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
                prologue = cursorControlBytes(rt.modal.mode),
                epilogue = epilogue)
 
+proc themeSwitch(negotiation: StartupNegotiation; driver: TerminalDriver;
+                 rt: TuiRuntime): proc(name: string): bool {.closure.} =
+  ## §4.3's `:theme <dark|light>`: the interpreter has already validated the
+  ## name against `ThemeNames`; this pins that design-system mode, re-resolves
+  ## and hands the runtime the new capabilities. The loop's paint after the
+  ## command is then a FULL frame (`adoptCapabilities` forgot the screen).
+  result = proc(name: string): bool =
+    let (known, theme) = parseTheme(name)
+    if not known or theme == utPlain:
+      return false
+    discard negotiation.switchTheme(driver, theme)
+    rt.caps = negotiation.caps
+    true
+
 proc interactive(command: TuiCommand): int =
   ## Open a trace and run the loop until the user quits or the terminal goes
   ## away. Returns the process's exit status; nothing here calls `quit`.
@@ -285,10 +300,18 @@ proc interactive(command: TuiCommand): int =
   # including an exception. `nim-termctl`'s signal handlers and `atexit` hook
   # cover a kill and a crash; this covers a normal return and a raise.
   defer: driver.stop()
+  # PLAT-46: THE ONE START-UP QUERY ROUND — the terminal's real background
+  # (OSC 11) and whether it keeps 24-bit colour (DECRQSS / XTGETTCAP, tmux's
+  # `RGB`) — in raw mode, before frame 0, bounded by one short wait. Late
+  # replies are taken by the loop below.
+  let negotiation = driver.negotiateOnTerminal(command.flags)
 
   var size = driver.size()
   let app = newTuiApp()
-  app.notification = "opening " & folder & " …"
+  # The negotiation's note FIRST: the status line clips a long notification
+  # from the right, and a trace folder's path is long.
+  app.notification = capabilityNote(negotiation.caps) & " | opening " &
+                     folder & " …"
   # PLAT-16: THE PROJECT A REPLAY SESSION EDITS IS THE WORKING DIRECTORY, and
   # that is a decision rather than a fallback, so it is written down here.
   #
@@ -317,7 +340,8 @@ proc interactive(command: TuiCommand): int =
   # inside CTUI-11's cold-start budget for a mode most sessions never enter.
   let projectRoot = getCurrentDir()
   app.projectRoot = projectRoot
-  let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  rt.themeService = themeSwitch(negotiation, driver, rt)
   let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
     let listing = listProjectFiles(projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
@@ -423,6 +447,11 @@ proc interactive(command: TuiCommand): int =
   session.learnExtent()
   session.refresh(rt)
   app.notification = describe(session)
+  if negotiation.caps.tmuxRgbWithheld:
+    # THE ONE CAPABILITY FINDING THAT OUTLIVES FRAME 0: a user whose tmux is
+    # painting their 24-bit terminal at 256 colours needs the remedy, and it
+    # is one line of tmux configuration.
+    app.notification.add " | " & tmuxRgbRemedy(negotiation.caps)
 
   # §6.2's `--goto=<tick>`: BEFORE THE FIRST DEBUGGER FRAME, which is the whole
   # of what the flag adds over typing `:goto` — `session.seekToStartupTick`
@@ -466,6 +495,7 @@ proc interactive(command: TuiCommand): int =
       # is gone, and the only correct thing left is to give the tty back.
       running = false
     of dekIdle:
+      negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
       # exactly `editInteractive`'s rule and for §5's reason. A replay session
       # that switched to Edit mode and typed `:build` owns a process, and a
@@ -485,6 +515,15 @@ proc interactive(command: TuiCommand): int =
       session.refresh(rt)
       paint(driver, rt)
     of dekToken:
+      # PLAT-46: A TERMINAL'S LATE ANSWER TO THE START-UP ROUND IS NOT A KEY.
+      # It re-decides the capabilities and repaints; it is never journalled.
+      let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
+      if wasReply:
+        if changed:
+          rt.caps = negotiation.caps
+          app.notification = capabilityNote(negotiation.caps)
+          paint(driver, rt)
+        continue
       # RECORDED BEFORE IT IS HANDLED, so the journal of a session that quit on
       # this token still contains it. A `q` written down only after the loop
       # decided to stop would be a journal that replays to a different screen
@@ -595,6 +634,7 @@ proc editInteractive(command: TuiCommand): int =
   let driver = newTerminalDriver(caps)
   driver.start()
   defer: driver.stop()
+  let negotiation = driver.negotiateOnTerminal(command.editFlags)
 
   var size = driver.size()
   let app = newTuiApp()
@@ -606,7 +646,9 @@ proc editInteractive(command: TuiCommand): int =
   app.modes = initModeRegister(pmEdit)
   app.projectRoot = root
 
-  let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  rt.themeService = themeSwitch(negotiation, driver, rt)
+  rt.dispatcher.services.setTheme = rt.themeService
 
   # THE HOST'S FOUR CAPABILITIES, INJECTED — one function, shared with
   # `interactive`. See `wireEditServices`.
@@ -644,6 +686,7 @@ proc editInteractive(command: TuiCommand): int =
     of dekEof:
       loop = false
     of dekIdle:
+      negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, which
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
@@ -656,6 +699,13 @@ proc editInteractive(command: TuiCommand): int =
       rt.resize(size.cols, size.rows)
       paint(driver, rt)
     of dekToken:
+      let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
+      if wasReply:
+        if changed:
+          rt.caps = negotiation.caps
+          app.notification = capabilityNote(negotiation.caps)
+          paint(driver, rt)
+        continue
       let outcome = rt.handleToken(ev.token, nowMs())
       if outcome.quit:
         loop = false

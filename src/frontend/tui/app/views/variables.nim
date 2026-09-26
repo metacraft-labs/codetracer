@@ -246,11 +246,11 @@ const
     ## expansion set into `StateVM.expandedPaths`, which the desktop keys by the
     ## variable path alone.
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  TitleDetailStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  TitleDetailStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
   EmptyPaneText* = "no variables reported"
-  EmptyPaneStyle* = CellStyle(fg: "bright_black", italic: true)
+  EmptyPaneStyle* = CellStyle(role: srChromeMuted, italic: true)
 
 proc scopePath*(kind: ScopeKind): string =
   ScopePathPrefix & $kind

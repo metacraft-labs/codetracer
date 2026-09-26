@@ -6269,3 +6269,39 @@ Two traps in the same area, both live:
   `gpui-backend` shim and captured a painted window on gpu-server-002
   (run 35834753536, 2026-09-23). "Unmeasured runner capability" is not a
   valid reason to record a window-capture gate dark.
+- TUI COLOURS COME FROM codetracer-design-system ONLY (PLAT-46). Views paint
+  `CellStyle(role: srX)` / `.surface`, never `fg: "red"`/hex;
+  `ci/test/tui-design-tokens-boundary.sh` (in `ci/lint/nim.sh`) forbids both
+  under `tui/app/` (tests excepted). Role -> token table: `app/theme/roles.nim`;
+  tokens: `src/frontend/styles/generated/design_tokens.nim`, generated with the
+  stylus by `just sync-design-tokens` (`scripts/tokens-to-styl.sh --nim-out`).
+  `ci/test/design-tokens-fresh.sh` regenerates both from the INDEX gitlink of
+  `libs/codetracer-design-system` — in a worktree the submodule is not checked
+  out; it falls back to `../codetracer-design-system` (git archive of the pin).
+  The pin is 3d0703d (ui-design-improvements-part4), NOT the design system's
+  dev: the committed stylus encodes that commit.
+- A Tier-1 row that never goes through `degradeRows` (test apps under
+  `tests/apps/`, `renderShellTree`) is resolved by `styledRowNode` at the
+  16-colour Dark rung, so cross-tier suites still see ANSI indices. Tests that
+  compare view styles must compare `.role`, not `.fg`.
+- The TUI's start-up query round (`host/terminal_probe.nim`) writes OSC 11,
+  XTGETTCAP, a 24-bit SGR + DECRQSS and DA1 after raw mode. `nim-libvterm`
+  (TermAssert) answers NONE of them, so every pty suite pays
+  `CT_TUI_PROBE_TIMEOUT_MS` (default 10 ms) before frame 0 and lands in Dark
+  from the default unless the test types the reply itself. Inside tmux the
+  probe spawns `tmux display -p '#{client_termfeatures}'`; a detached session
+  has no client and answers nothing.
+- The workspace's own shells export COLORTERM=truecolor from the login profile,
+  so a tmux pane started from here is truecolor by ENVIRONMENT; tests that mean
+  to exercise detection must `env -u COLORTERM` inside the pane.
+- The TUI's derived colour rungs are computed at module init. Any per-search
+  OKLab conversion of the xterm palette there is paid on EVERY cold start
+  (measured ~25 ms, enough to redden CTUI-11's 50 ms first-frame gate); keep
+  palette conversions in `colour_math.XtermLab`.
+- `:theme <dark|light>` is a HOST seam: `TuiRuntime.themeService` (set in
+  `tui/main.nim`, copied into `dispatcher.services.setTheme` by
+  `tui_session.refresh`, which rebuilds the dispatcher on every refresh — so
+  a service set directly on `rt.dispatcher` in replay mode is lost). It pins
+  the mode via `terminal_probe.switchTheme` and `adoptCapabilities` forces a
+  full repaint. `tmux capture-pane -e` is DIFFERENTIAL across lines (SGR state
+  carries from the previous line) and trims trailing cells unless `-N`.

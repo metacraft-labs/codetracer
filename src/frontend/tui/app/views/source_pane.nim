@@ -159,20 +159,20 @@ const
     ## What a visible-but-unheld line shows. See this module's header: never a
     ## blank, because a blank is how a source pane lies about a working
     ## debugger.
-  SourceLoadingStyle* = CellStyle(fg: "bright_black", italic: true)
+  SourceLoadingStyle* = CellStyle(role: srChromeMuted, italic: true)
 
   VerifiedMarker* = "[verified]"
   UnverifiedMarker* = "[UNVERIFIED]"
   AbsentMarker* = "[NO SOURCE]"
-  VerifiedMarkerStyle* = CellStyle(fg: "green")
-  UnverifiedMarkerStyle* = CellStyle(fg: "yellow", bold: true)
-  AbsentMarkerStyle* = CellStyle(fg: "red", bold: true)
+  VerifiedMarkerStyle* = CellStyle(role: srSourceVerified)
+  UnverifiedMarkerStyle* = CellStyle(role: srSourceUnverified)
+  AbsentMarkerStyle* = CellStyle(role: srSourceAbsent)
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  PathStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
-  DegradedStyle* = CellStyle(fg: "red", bold: true)
-  FlowNotTakenStyle* = CellStyle(fg: "bright_black")
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  PathStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
+  DegradedStyle* = CellStyle(role: srChromeError)
+  FlowNotTakenStyle* = CellStyle(role: srLineNotTaken)
     ## A line the run did not reach, de-emphasised. `bright_black` is the
     ## colour this pane already uses for text that is present but not the
     ## subject (the path, the rule, the loading placeholder); the syntax
@@ -181,14 +181,14 @@ const
 
   TokenStyles*: array[TokenClass, CellStyle] = [
     tcPlain: DefaultCellStyle,
-    tcKeyword: CellStyle(fg: "magenta", bold: true),
-    tcType: CellStyle(fg: "cyan"),
-    tcString: CellStyle(fg: "green"),
-    tcNumber: CellStyle(fg: "yellow"),
-    tcComment: CellStyle(fg: "bright_black", italic: true),
-    tcIdentifier: CellStyle(fg: "white"),
-    tcOperator: CellStyle(fg: "bright_blue"),
-    tcPunctuation: CellStyle(fg: "blue")]
+    tcKeyword: CellStyle(role: srSyntaxKeyword),
+    tcType: CellStyle(role: srSyntaxType),
+    tcString: CellStyle(role: srSyntaxString),
+    tcNumber: CellStyle(role: srSyntaxNumber),
+    tcComment: CellStyle(role: srSyntaxComment),
+    tcIdentifier: CellStyle(role: srSyntaxIdentifier),
+    tcOperator: CellStyle(role: srSyntaxOperator),
+    tcPunctuation: CellStyle(role: srSyntaxPunctuation)]
     ## §3.3.2's "per-language token highlighting mapped ... to terminal ANSI
     ## colors (keywords, types, strings, comments, identifiers)".
     ##
@@ -457,7 +457,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         restyleClamped(g, row, lo, hi - lo, codeCol, codeCol + codeW,
                        proc(s: CellStyle): CellStyle =
                          var out2 = style
-                         out2.bg = s.bg
+                         out2.surface = s.surface
                          out2)
       # THE FLOW OVERLAY. Applied after the syntax colours so it replaces
       # them, and before the execution-line background so a stop inside a
@@ -466,7 +466,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       if line in model.notTakenLines and shown > 0:
         g.restyle(row, codeCol, shown, proc(s: CellStyle): CellStyle =
           var out2 = FlowNotTakenStyle
-          out2.bg = s.bg
+          out2.surface = s.surface
           out2)
       # The inline annotation, for the EXECUTION line only. §3.3.2 renders the
       # evaluated values "at the current step", and a value printed beside a

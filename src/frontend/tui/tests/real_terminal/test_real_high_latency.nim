@@ -77,6 +77,13 @@ import ../../app/cli
 import ../../host/key_journal
 import ../fixtures/fixture_provider
 import ./lifecycle_support
+import ../../app/theme/colour_math
+import ../../../styles/generated/design_tokens
+
+let borderIndex = uint8(nearestXterm256(parseHexColour(
+  DesignTokenHex[dtColorsUiBorderSecondary][dmDark])))
+  ## The pane-border role on the 256-colour rung, in the Dark mode a pty with
+  ## no OSC 11 answer resolves to.
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -317,14 +324,15 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
         inc glyphs
       if cell.fg.kind != ckDefault or cell.bg.kind != ckDefault:
         inc coloured
-      if cell.fg.kind == ckIndexed and cell.fg.idx == 244'u8:
+      if cell.fg.kind == ckIndexed and cell.fg.idx == borderIndex:
         inc mutedRule
     checkpoint("slow screen: " & $glyphs & " glyphs, " & $coloured &
-               " coloured cells, " & $mutedRule & " at indexed:244")
+               " coloured cells, " & $mutedRule & " in the border role's index")
     ck glyphs > 200
     ck coloured > 0
-    # `indexed:244` is `degradation.ansi256Style(srChromeMuted)`'s published
-    # value, and every pane rule is painted in it. A diffed stream that lost or
+    # PLAT-46: every pane rule is painted with the pane-border role, whose
+    # 256-colour rung is the nearest xterm entry to `colors/ui/border/secondary`
+    # (`borderIndex`, derived from the token, not restated). A diffed stream that lost or
     # smeared its SGR transitions loses this while the two runs still agree.
     ck mutedRule > 0
 

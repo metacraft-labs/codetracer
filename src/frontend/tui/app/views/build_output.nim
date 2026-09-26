@@ -38,9 +38,9 @@ type
 const
   BuildPaneTitle* = "BUILD"
   BuildPaneRule* = "─"
-  BuildRuleStyle* = CellStyle(fg: "bright_black")
-  BuildOutputStyle* = CellStyle(fg: "white")
-  BuildTruncatedStyle* = CellStyle(fg: "yellow", italic: true)
+  BuildRuleStyle* = CellStyle(role: srBorderPane)
+  BuildOutputStyle* = CellStyle(role: srChromeText)
+  BuildTruncatedStyle* = CellStyle(role: srChromeNotification, italic: true)
   TruncatedNote* = "… earlier output dropped"
 
 proc verdictStyle*(verdict: BuildVerdict): CellStyle =
@@ -49,11 +49,11 @@ proc verdictStyle*(verdict: BuildVerdict): CellStyle =
   ## say which verdict it is looking at, and two verdicts sharing a colour
   ## would be indistinguishable to that assertion.
   case verdict
-  of bvIdle: CellStyle(fg: "bright_black", bold: true)
-  of bvRunning: CellStyle(fg: "cyan", bold: true)
-  of bvSucceeded: CellStyle(fg: "green", bold: true)
-  of bvFailed: CellStyle(fg: "red", bold: true)
-  of bvCancelled: CellStyle(fg: "yellow", bold: true)
+  of bvIdle: CellStyle(role: srBuildIdle)
+  of bvRunning: CellStyle(role: srBuildRunning)
+  of bvSucceeded: CellStyle(role: srBuildSucceeded)
+  of bvFailed: CellStyle(role: srBuildFailed)
+  of bvCancelled: CellStyle(role: srBuildCancelled)
 
 proc initBuildPaneModel*(verdict = bvIdle; headline = "";
                          lines: seq[string] = @[]; truncated = false;

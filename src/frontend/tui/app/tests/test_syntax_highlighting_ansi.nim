@@ -64,12 +64,13 @@ import std/[strutils, unittest]
 import isonim_tui
 
 import ../syntax/highlighter
+import ../theme/degradation
 import ../views/source_pane
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 141
+const ExpectedAssertions = 144
 
 var countedAssertions = 0
 
@@ -240,8 +241,14 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
         for span in paneRows[rowIndex]:
           if span.style == tokenStyle(tcKeyword) and span.text.strip().len > 0:
             let cell = h.cellAt(rowIndex, col)
+            # PLAT-46: the keyword's colour is the design system's
+            # `colors/editor/syntax/keyword` (Dracula pink, `#ff79c6`), and a
+            # row composited without `degradeRows` is resolved on the
+            # 16-colour rung — the NEAREST xterm entry to that hex, which is
+            # bright magenta. Checked against the derivation, not restated.
+            ck roleStyle(srSyntaxKeyword, cdAnsi16).fg == "bright_magenta"
             ck cell.fg.kind == ckAnsi
-            ck cell.fg.ansi == acMagenta
+            ck cell.fg.ansi == acBrightMagenta
             ck attrBold in cell.attrs
             inc found
           col += cellWidthOf(span.text)

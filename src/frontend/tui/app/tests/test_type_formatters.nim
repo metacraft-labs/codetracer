@@ -172,7 +172,9 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
     var styled = 0
     for class in PresentationClass:
       let style = valueStyle(class)
-      ck style.fg.len > 0
+      # PLAT-46: a value is painted with a ROLE, resolved to a colour on
+      # the negotiated tier by `degradeRows`.
+      ck style.role != srNone
       inc styled
     ck styled == 20
     ck valueStyle(pcInteger) == NumberStyle

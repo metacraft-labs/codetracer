@@ -111,8 +111,8 @@ proc productStyle*(product: ProductMode): CellStyle =
   ## `bold` is deliberately OFF: the input mode is the primary indicator and
   ## the product mode qualifies it, so they must not compete.
   case product
-  of pmDebug: CellStyle(fg: "white", bold: false)
-  of pmEdit: CellStyle(fg: "bright_yellow", bold: false)
+  of pmDebug: CellStyle(role: srModeDebug)
+  of pmEdit: CellStyle(role: srModeEdit)
 
 proc keyHints*(mode: UiMode; profile: LayoutProfile;
                product = pmDebug): string =
@@ -173,12 +173,12 @@ proc modeStyle*(mode: UiMode): CellStyle =
   ## both tiers report. `bold` on all of them, so the indicator reads as a
   ## label rather than as coloured prose.
   case mode
-  of umNormal: CellStyle(fg: "green", bold: true)
-  of umCommand: CellStyle(fg: "yellow", bold: true)
-  of umSearch: CellStyle(fg: "magenta", bold: true)
-  of umInspect: CellStyle(fg: "cyan", bold: true)
-  of umVisual: CellStyle(fg: "blue", bold: true)
-  of umSeek: CellStyle(fg: "bright_blue", bold: true)
+  of umNormal: CellStyle(role: srModeNormal)
+  of umCommand: CellStyle(role: srModeCommand)
+  of umSearch: CellStyle(role: srModeSearch)
+  of umInspect: CellStyle(role: srModeInspect)
+  of umVisual: CellStyle(role: srModeVisual)
+  of umSeek: CellStyle(role: srModeSeek)
 
 proc promptSigil*(mode: UiMode): string =
   ## The character §3.3.6 says each interactive prompt opens with.

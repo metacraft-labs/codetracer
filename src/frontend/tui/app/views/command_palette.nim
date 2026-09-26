@@ -135,11 +135,11 @@ const
     ## fit", so the pane's height is a property of a named constant and the
     ## fuzzy sweep's cost does not depend on the terminal's size.
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  PromptStyle* = CellStyle(fg: "yellow", bold: true)
-  MatchStyle* = CellStyle(fg: "bright_cyan", bold: true)
-  SelectedBackground* = "bright_black"
-  EmptyStyle* = CellStyle(fg: "bright_black", italic: true)
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  PromptStyle* = CellStyle(role: srChromePrompt)
+  MatchStyle* = CellStyle(role: srChromeAccent)
+  SelectedBackground* = srSurfaceSelection
+  EmptyStyle* = CellStyle(role: srChromeMuted, italic: true)
 
   KindLabels*: array[PaletteEntryKind, string] = [":", "ƒ", "▤"]
     ## One glyph per kind, so a row says what it will do before it is run.
@@ -390,7 +390,7 @@ proc paint*(g: var StyledGrid; model: PaletteModel; top, left,
       # its execution line, and for the same reason.
       g.restyle(row, left, width, proc(s: CellStyle): CellStyle =
         var out2 = s
-        out2.bg = SelectedBackground
+        out2.surface = SelectedBackground
         out2)
     # The matched characters, accented at the columns the row's label puts
     # them at: the kind glyph and one separating space precede the text.
@@ -402,6 +402,6 @@ proc paint*(g: var StyledGrid; model: PaletteModel; top, left,
       if column >= left and column < left + width:
         g.restyle(row, column, 1, proc(s: CellStyle): CellStyle =
           var out2 = s
-          out2.fg = MatchStyle.fg
+          out2.role = MatchStyle.role
           out2.bold = true
           out2)

@@ -44,12 +44,12 @@ type
 const
   FileTreeTitle* = "FILES"
   FileTreeRule* = "─"
-  FileTreeTitleStyle* = CellStyle(fg: "bright_yellow", bold: true)
-  FileTreeRuleStyle* = CellStyle(fg: "bright_black")
-  FileTreeOpenStyle* = CellStyle(fg: "white", bold: true)
-  FileTreePlainStyle* = CellStyle(fg: "bright_black")
-  FileTreeSelectedBackground* = "black"
-  FileTreeTruncatedStyle* = CellStyle(fg: "yellow")
+  FileTreeTitleStyle* = CellStyle(role: srModeEdit, bold: true)
+  FileTreeRuleStyle* = CellStyle(role: srBorderPane)
+  FileTreeOpenStyle* = CellStyle(role: srChromeText, bold: true)
+  FileTreePlainStyle* = CellStyle(role: srChromeMuted)
+  FileTreeSelectedBackground* = srSurfaceSelection
+  FileTreeTruncatedStyle* = CellStyle(role: srChromeNotification)
   OpenMarker* = "•"
     ## Beside the file the editor holds. One cell, so the paths stay aligned.
 
@@ -98,7 +98,7 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
       g.restyle(row, area.col, area.width,
                 proc(s: CellStyle): CellStyle =
                   var out2 = s
-                  out2.bg = FileTreeSelectedBackground
+                  out2.surface = FileTreeSelectedBackground
                   out2)
     inc result.renderedRows
     result.rows.add @[StyledSpan(text: text, style: style)]

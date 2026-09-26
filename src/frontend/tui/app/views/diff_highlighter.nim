@@ -120,14 +120,14 @@ const
     ## answer on that fixture carries a 600-entry mapping, and holding every
     ## stop is how a front-end grows by tens of megabytes per step.
 
-  ModifiedTagStyle* = CellStyle(fg: "black", bg: "green", bold: true)
+  ModifiedTagStyle* = CellStyle(role: srValueModifiedTag)
     ## §3.3.4's `[MOD]` marker: a BADGE, not a tinted word — black on green,
     ## bold. Both halves are asserted absolutely out of a real terminal by
     ## `tests/real_terminal/test_real_variables_pane.nim`, because a
     ## differential check between two tiers is blind to a colour both of them
     ## get wrong (`docs/tui-testing.md`, "What cross-tier equality cannot
     ## catch").
-  ModifiedNameStyle* = CellStyle(fg: "green", bold: true)
+  ModifiedNameStyle* = CellStyle(role: srValueModified)
     ## §3.3.4's "distinct background/foreground accent (Green/Bold)" on the
     ## changed row's name. A second, independent signal: the badge says WHICH
     ## rows changed at a glance across the pane, and the accent survives a

@@ -68,12 +68,16 @@
 ##   * `:info registers` reaches `services.registers`, and NOTHING IMPLEMENTS
 ##     IT: `dap_server.rs`'s `handle_request` has no register arm and no
 ##     ViewModel carries a register. See below.
-##   * `:theme <dark|light>` reaches `services.setTheme`, and NOTHING
-##     IMPLEMENTS IT: every style in `app/views/` is a `const CellStyle`
-##     literal. See below.
+##   * `:theme <dark|light>` reaches `services.setTheme`, which the shipped
+##     host fills with `TuiRuntime.themeService`: every view paints a
+##     `SemanticRole` bound to a design-system token, so switching the theme
+##     is re-resolving the capabilities in the other design-system mode and
+##     repainting (`host/terminal_probe.switchTheme`). A host that installs
+##     no switch gets the report below.
 ##
-## **`:info registers` and `:theme` are accepted, validated and dispatched, and
-## then report that nothing is behind them.** A command §4.3 publishes must fail
+## **`:info registers` is accepted, validated and dispatched, and then reports
+## that nothing is behind it; `:theme` does the same only in a host without a
+## mode switch.** A command §4.3 publishes must fail
 ## in `test_gdb_command_surface.nim` rather than in a user's terminal, and the
 ## honest failure of a capability nobody built is a REPORT, not a silent no-op
 ## and not a green assertion over a stub.
@@ -84,20 +88,14 @@
 ##     register arm and no ViewModel carries one. This is the shape CTUI-6 used
 ##     for the thread selector and CTUI-7 for the hex inspector, and nothing in
 ##     this repo closes it.
-##   * `:theme` is UNBUILT HERE. `isonim-tui` DOES ship a theme registry
-##     (`isonim_tui/theme/cascade.nim`: `ThemeRegistry`, `newThemeRegistry`,
-##     `setTheme`, `subscribe`, with `textual-dark` / `textual-light` builtins,
-##     described by `theme.nim` as "runtime theme switching"). What is missing
-##     is that every style CTUI-3..CTUI-10 painted is a `const CellStyle`
-##     literal, so there is nothing reading a registry to switch. That is a
-##     REFACTOR THIS REPO OWNS across 18 files, deferred — not a capability the
-##     workspace lacks.
-##
-## `:theme`'s claim is MEASURED rather than asserted in prose: the suite counts
-## the `const CellStyle` literals under `app/` (121, in 18 files) and the
-## references to `isonim-tui`'s `ThemeRegistry` (zero), as equalities — so the
-## day either number moves, the run goes red and says the report has stopped
-## being true.
+##   * `:theme` WAS unbuilt here until the terminal was painted from the
+##     design system: every style CTUI-3..CTUI-10 painted was a `const
+##     CellStyle` literal in one of the sixteen ANSI names, so there was
+##     nothing to switch. Views now paint ROLES, each bound to a
+##     design-system token resolved per mode (`app/theme/roles.nim`), so a
+##     theme is a MODE and the switch is the host's: re-resolve and repaint.
+##     `isonim-tui`'s `ThemeRegistry` is still not used — the design system,
+##     not Textual's builtins, is where this front-end's colours come from.
 ##
 ## ## CASE, AND WHY THERE IS NO ABBREVIATION MATCHING
 ##
@@ -305,8 +303,8 @@ const
   InfoSubcommands* = ["threads", "registers"]
 
   NoThemeSurfaceNote* =
-    "no theme registry is wired: every style in app/views/ is a `const " &
-    "CellStyle` literal, so there is nothing for a theme to switch"
+    "this host cannot switch the theme on a live session: it installed no " &
+    "mode switch (TuiRuntime.themeService)"
   NoRegisterSurfaceNote* =
     "no register surface exists in this workspace: dap_server.rs's " &
     "handle_request has no register arm and no ViewModel carries one"

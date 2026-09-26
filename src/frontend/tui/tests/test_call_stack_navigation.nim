@@ -274,8 +274,8 @@ template checkSourceFollowsFrame(h: NavHarness; frame: StackFrame;
   ck inspectionRows.len == 1
   let wantRow = 1 + frame.line - model.viewportTop
   ck (if inspectionRows.len == 1: inspectionRows[0] else: -1) == wantRow
-  ck rowStyleAt(screen.rows[wantRow], pointerFieldColumn(screen) + 1).fg ==
-     InspectionPointerStyle.fg
+  ck rowStyleAt(screen.rows[wantRow], pointerFieldColumn(screen) + 1).role ==
+     InspectionPointerStyle.role
   if executionVisible:
     ck executionRows.len == 1
     ck (if executionRows.len == 1: executionRows[0] else: -1) ==

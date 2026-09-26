@@ -141,11 +141,11 @@ const
     ## line. A gutter that shrank on every line but one would make a step look
     ## like a horizontal jump.
 
-  BreakpointStyle* = CellStyle(fg: "red", bold: true)
-  BreakpointDisabledStyle* = CellStyle(fg: "bright_black")
-  TracepointStyle* = CellStyle(fg: "cyan", bold: true)
-  ExecutionPointerStyle* = CellStyle(fg: "bright_yellow", bold: true)
-  InspectionPointerStyle* = CellStyle(fg: "cyan", bold: true)
+  BreakpointStyle* = CellStyle(role: srGutterBreakpoint)
+  BreakpointDisabledStyle* = CellStyle(role: srGutterBreakpointDisabled)
+  TracepointStyle* = CellStyle(role: srGutterTracepoint)
+  ExecutionPointerStyle* = CellStyle(role: srGutterExecutionPointer)
+  InspectionPointerStyle* = CellStyle(role: srGutterInspectionPointer)
     ## The same cyan and the same bold as `frame_item.InspectedFrameStyle`, so
     ## the call stack pane's `>` and the source pane's ` > ` are visibly the one
     ## cursor in two places.
@@ -155,14 +155,14 @@ const
     ## 0 and the inspection cursor in the pointer field, so no row can show two
     ## cyan glyphs whose meaning a reader has to disambiguate by position alone
     ## — they are different columns with different glyphs.
-  VerifiedLineNumberStyle* = CellStyle(fg: "bright_black")
-  UnverifiedLineNumberStyle* = CellStyle(fg: "yellow")
+  VerifiedLineNumberStyle* = CellStyle(role: srLineNumber)
+  UnverifiedLineNumberStyle* = CellStyle(role: srLineNumberUnverified)
     ## THE PROVENANCE TINT. `savUnverified` source is rendered — CTUI-4's seam
     ## says it must be — but it is never rendered as though it were the
     ## recording's own copy, and this is the half of that distinction which is
     ## visible on every row.
-  AbsentLineNumberStyle* = CellStyle(fg: "red")
-  ExecutionLineBackground* = "blue"
+  AbsentLineNumberStyle* = CellStyle(role: srLineNumberAbsent)
+  ExecutionLineBackground* = srLineExecution
     ## §3.3.2's "background highlight on current active execution line".
     ## Applied by `source_pane.nim` over the whole row.
 

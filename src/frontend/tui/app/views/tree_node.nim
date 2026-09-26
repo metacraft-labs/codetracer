@@ -142,14 +142,14 @@ const
   MoreRowPrefix* = "… "
   MoreRowSuffix* = " more"
 
-  ExpanderStyle* = CellStyle(fg: "bright_cyan", bold: true)
-  ScopeTitleStyle* = CellStyle(fg: "white", bold: true)
-  ScopeCountStyle* = CellStyle(fg: "bright_black")
-  NameStyle* = CellStyle(fg: "white")
-  TypeStyle* = CellStyle(fg: "bright_black")
-  MoreRowStyle* = CellStyle(fg: "bright_black", italic: true)
-  NoteStyle* = CellStyle(fg: "bright_black", italic: true)
-  SelectedRowBackground* = "bright_black"
+  ExpanderStyle* = CellStyle(role: srChromeAccent)
+  ScopeTitleStyle* = CellStyle(role: srChromeTitle)
+  ScopeCountStyle* = CellStyle(role: srChromeMuted)
+  NameStyle* = CellStyle(role: srChromeText)
+  TypeStyle* = CellStyle(role: srChromeMuted)
+  MoreRowStyle* = CellStyle(role: srChromeMuted, italic: true)
+  NoteStyle* = CellStyle(role: srChromeMuted, italic: true)
+  SelectedRowBackground* = srSurfaceSelection
     ## The inspection cursor's row highlight. The SAME background
     ## `frame_item.InspectedRowBackground` uses, deliberately: it means the same
     ## thing — "this is the row you are on" — in both panes, and two panes that
@@ -349,7 +349,7 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
     # exactly the row a reader looks at first. That is CTUI-6's expander-column
     # defect in a different pane.
     for i in 0 ..< spans.len:
-      if spans[i].style.bg.len == 0:
+      if not spans[i].style.hasOwnBackground:
         spans[i].style = spans[i].style.withBackground(SelectedRowBackground)
 
   result = spans

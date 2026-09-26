@@ -77,11 +77,13 @@ import ../../app/views/styled_row
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_keybindings as keysApp
+import ../../app/theme/degradation
+import ./derived_colours
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 110
+const ExpectedAssertions = 104
 
 const
   Cols = 90
@@ -91,8 +93,8 @@ const
   FrameTimeoutMs = 20000
   LabelTimeoutMs = 10000
 
-  Green = 2'u8      ## NORMAL's indicator colour.
-  Yellow = 3'u8     ## COMMAND's.
+  # The mode indicators' colours are the DERIVED 16-colour rung of the mode
+  # roles since PLAT-46 (`derived_colours.ansiIndexOf`).
 
   # Real xterm bytes this file writes itself, because `sendKey` cannot.
   ShiftF10Bytes = "\x1b[21;2~"
@@ -213,7 +215,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
           checkpoint(m)
       ck mismatched.len == 0
       ck rowsCompared == Rows
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
       checkField(sess, keysApp.ActionRow, keysApp.ActionLabel, $kaNone)
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "")
       checkField(sess, keysApp.PendingRow, keysApp.PendingLabel, "")
@@ -225,7 +227,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "F10")
       checkField(sess, keysApp.ActionRow, keysApp.ActionLabel, $kaStepOver)
       checkField(sess, keysApp.KindRow, keysApp.KindLabel, $krAction)
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       # ---- `sendKey("shift+f10")`: THE HARNESS DROPS THE MODIFIER ---------
       # Driven because CTUI-9 names it, and asserted for what it ACTUALLY
@@ -245,7 +247,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       # …and it is a DIFFERENT action from the unmodified key, which is the
       # whole point of sending the bytes by hand.
       ck $kaReverseStepOver != $kaStepOver
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       # ---- Ctrl+p: the palette, and therefore COMMAND ----------------------
       sess.sendKey("ctrl+p")
@@ -253,7 +255,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "Ctrl+p")
       checkField(sess, keysApp.ActionRow, keysApp.ActionLabel,
                  $kaCommandPalette)
-      checkMode(sess, mmCommand, Yellow)
+      checkMode(sess, mmCommand, ansiIndexOf(srModeCommand))
       # THE CURSOR CHANGED, and both fields did. A terminal that had never
       # parsed the DECSCUSR would still be showing NORMAL's block.
       ck sess.cursorShape() == csBar
@@ -265,7 +267,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "Esc")
       checkField(sess, keysApp.ActionRow, keysApp.ActionLabel,
                  $kaReturnToNormal)
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
       ck sess.cursorShape() == csBlock
       ck not sess.cursorVisible()
 
@@ -307,7 +309,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       checkpoint("status bar while pending: '" & bar & "'")
       ck bar.endsWith("Ctrl+w-")
       # The mode did NOT change: a prefix is not a mode.
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       # `l` completes it — §4.2's "Focus the pane to the … right".
       sess.send("l")
@@ -343,18 +345,22 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
     # assertions wrong without a red run.
     var seen: seq[string] = @[]
     var modesChecked = 0
+    # PLAT-46: each mode is its own ROLE, and the roles are six distinct
+    # appearances on the 16-colour rung the screen above was read at — by
+    # colour, or, where the derived rung merged two hues, by the monochrome
+    # weight `palette.CollapsedOnRung` gives both.
     for m in [umNormal, umCommand, umSearch, umInspect, umVisual, umSeek]:
       inc modesChecked
       let style = modeStyle(m)
-      checkpoint($m & " -> " & describe(style))
-      ck style.bold
-      ck style.fg.len > 0
-      ck style.fg notin seen
-      seen.add style.fg
+      let resolved = roleStyle(style.role, cdAnsi16)
+      checkpoint($m & " -> " & describe(style) & " -> " & describe(resolved))
+      ck resolved.fg.len > 0
+      ck describe(resolved) notin seen
+      seen.add describe(resolved)
     ck modesChecked == 6
     ck seen.len == 6
-    ck modeStyle(umNormal).fg == "green"
-    ck modeStyle(umCommand).fg == "yellow"
+    ck modeStyle(umNormal).role == srModeNormal
+    ck modeStyle(umCommand).role == srModeCommand
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

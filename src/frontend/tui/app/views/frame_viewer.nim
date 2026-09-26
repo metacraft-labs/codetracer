@@ -222,12 +222,12 @@ type
 const
   FrameViewerTitle* = "FRAME VIEWER"
   PixelHistoryTitle* = "PIXEL HISTORY"
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  MutedStyle* = CellStyle(fg: "bright_black")
-  DegradedStyle* = CellStyle(fg: "red", bold: true)
-  PassStyle* = CellStyle(fg: "green")
-  FailStyle* = CellStyle(fg: "red", bold: true)
-  SelectedStyle* = CellStyle(fg: "white", bold: true, reverse: true)
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  MutedStyle* = CellStyle(role: srChromeMuted)
+  DegradedStyle* = CellStyle(role: srChromeError)
+  PassStyle* = CellStyle(role: srChromeSuccess)
+  FailStyle* = CellStyle(role: srChromeError)
+  SelectedStyle* = CellStyle(role: srChromeText, surface: srSurfaceSelection, bold: true)
   PassGlyph* = "+"
   FailGlyph* = "x"
     ## ASCII, deliberately. §2.5's tier exists for `TERM=dumb` and a CI log,

@@ -46,15 +46,16 @@
 ## with no source pane on it emits precisely the bytes it emitted before this
 ## milestone.
 ##
-## ## Colours are ANSI NAMES, and that is a cross-tier decision
+## ## Views paint ROLES, not colours (PLAT-46)
 ##
-## `compositor.parseColorOrDefault` accepts `default`, the sixteen ANSI names
-## and `#RRGGBB`. Only the sixteen names are used here, because
-## `testing/dual_snap.nim`'s `ansi16-is-indexed` canonicalisation maps Tier 1's
-## `ckAnsi n` and Tier 2's `ckIndexed n` onto one value — so a name is a colour
-## the cross-tier comparison still FAILS on when it differs, while `#RRGGBB`
-## would land as `cckRgb` on one side and as whatever the terminal's palette
-## approximated on the other.
+## A cell's `CellStyle` (now in `app/theme/cell_style.nim`, re-exported here)
+## carries a `role` — what the text means — and a `surface` — what it sits on —
+## and never a colour. `app/theme/degradation.degradeRows` resolves both onto
+## the negotiated tier from the design system's tokens. A row handed to the
+## compositor WITHOUT going through `degradeRows` (the Tier-1 snapshot apps) is
+## resolved by `styledRowNode` at the 16-colour rung in the Dark mode, which is
+## what those rows spelled by hand before PLAT-46 — so both tiers of a
+## cross-tier comparison still see ANSI indices.
 ##
 ## `dim` is deliberately NOT in `CellStyle`. libvterm's cell model has no dim
 ## bit (`dual_snap.CrossTierExclusions`, `dim-has-no-tier-2-representation`), so
@@ -66,21 +67,12 @@ import std/[sequtils, strutils, unicode]
 
 import isonim_tui
 
-type
-  CellStyle* = object
-    ## Everything one cell can carry that both tiers can observe.
-    ##
-    ## A value with `==` derived, because the row encoder below groups adjacent
-    ## cells by style equality and a hand-written comparison would be one more
-    ## thing to keep true.
-    fg*: string
-      ## An ANSI colour name, or "" for the terminal default.
-    bg*: string
-    bold*: bool
-    italic*: bool
-    underline*: bool
-    reverse*: bool
+import ../theme/capabilities
+import ../theme/palette
 
+export palette
+
+type
   StyledSpan* = object
     ## A run of cells sharing one style.
     text*: string
@@ -102,47 +94,6 @@ type
     height*: int
     cells: seq[StyledCell]
 
-const DefaultCellStyle* = CellStyle()
-  ## The terminal's own colours and no attributes. Named so a caller can say
-  ## "unstyled" rather than spelling an empty object.
-
-# ---------------------------------------------------------------------------
-# Style helpers
-# ---------------------------------------------------------------------------
-
-func isDefault*(s: CellStyle): bool =
-  ## Whether this style asks the renderer for nothing at all. A span with a
-  ## default style contributes no `setStyle` call, which is what lets a whole
-  ## row of them fuse into one `LayoutEntry`.
-  s == DefaultCellStyle
-
-func attrNames*(s: CellStyle): seq[string] =
-  ## The boolean attributes set on `s`, as the style names
-  ## `compositor.styleFor` reads. Sorted by declaration order rather than
-  ## alphabetically, so a failure message lists them the same way twice.
-  result = @[]
-  if s.bold: result.add "bold"
-  if s.italic: result.add "italic"
-  if s.underline: result.add "underline"
-  if s.reverse: result.add "reverse"
-
-func describe*(s: CellStyle): string =
-  ## One line for a failure message. Never used to make a decision.
-  var parts: seq[string] = @[]
-  parts.add "fg=" & (if s.fg.len > 0: s.fg else: "default")
-  parts.add "bg=" & (if s.bg.len > 0: s.bg else: "default")
-  let attrs = s.attrNames()
-  parts.add "attrs={" & attrs.join(",") & "}"
-  parts.join(" ")
-
-func withBackground*(s: CellStyle; bg: string): CellStyle =
-  ## `s` with its background replaced. The execution line's highlight is
-  ## applied this way — over the gutter's and the syntax highlighter's own
-  ## foregrounds — so that "the current line is highlighted" does not throw
-  ## away "this token is a string literal".
-  result = s
-  result.bg = bg
-
 # ---------------------------------------------------------------------------
 # The grid
 # ---------------------------------------------------------------------------
@@ -161,6 +112,10 @@ proc paint*(g: var StyledGrid; row, col: int; text: string;
   ## Wide glyphs occupy their first cell and put a ZERO-WIDTH marker in the
   ## second, exactly as CTUI-3's grid does, so a pane that prints a CJK
   ## identifier does not shift every cell after it.
+  ##
+  ## A style that names no SURFACE keeps the surface already under the cell —
+  ## the one the shell filled the region with — so a pane painting its text
+  ## never has to know which region it is in.
   if row < 0 or row >= g.height:
     return
   var c = col
@@ -169,10 +124,37 @@ proc paint*(g: var StyledGrid; row, col: int; text: string;
       break
     let w = displayWidth($r)
     if c >= 0:
-      g.cells[row * g.width + c] = StyledCell(rune: $r, style: style)
+      let i = row * g.width + c
+      var s = style
+      if s.surface == srNone: s.surface = g.cells[i].style.surface
+      g.cells[i] = StyledCell(rune: $r, style: s)
       if w == 2 and c + 1 < g.width:
-        g.cells[row * g.width + c + 1] = StyledCell(rune: "", style: style)
+        var s2 = style
+        if s2.surface == srNone: s2.surface = g.cells[i + 1].style.surface
+        g.cells[i + 1] = StyledCell(rune: "", style: s2)
     c += max(1, w)
+
+proc fillSurface*(g: var StyledGrid; row, col, width, height: int;
+                  surface: SemanticRole) =
+  ## Put `surface` under every cell of a rectangle, leaving runes and every
+  ## other part of the style alone. PLAT-46 deliverable 4: the shell calls this
+  ## for the header, each pane body, the editor, tab strips and the status line
+  ## BEFORE the panes paint, so every cell of the screen has a surface and the
+  ## terminal's own background is never what shows.
+  for r in max(0, row) ..< min(g.height, row + height):
+    for c in max(0, col) ..< min(g.width, col + width):
+      g.cells[r * g.width + c].style.surface = surface
+
+proc restyleRole*(g: var StyledGrid; row, col, width: int;
+                  fromRole, toRole: SemanticRole) =
+  ## Swap one role for another over `[col, col+width)` on `row` — how the
+  ## focused pane's border roles are applied over a title row a pane painted.
+  if row < 0 or row >= g.height:
+    return
+  for c in max(0, col) ..< min(g.width, col + width):
+    let i = row * g.width + c
+    if g.cells[i].style.role == fromRole:
+      g.cells[i].style.role = toRole
 
 proc restyle*(g: var StyledGrid; row, col, width: int;
               transform: proc(s: CellStyle): CellStyle) =
@@ -285,11 +267,14 @@ proc styledRowNode*(r: TerminalRenderer; row: StyledRow): TerminalNode =
     if span.text.len == 0:
       continue
     let node = r.createTextNode(span.text)
-    if span.style.fg.len > 0:
-      r.setStyle(node, "color", span.style.fg)
-    if span.style.bg.len > 0:
-      r.setStyle(node, "background-color", span.style.bg)
-    for a in span.style.attrNames():
+    # A row that did not go through `degradeRows` still carries roles; see
+    # this module's header for why the 16-colour Dark rung is the answer.
+    let style = resolveRoles(span.style, cdAnsi16, dmDark)
+    if style.fg.len > 0:
+      r.setStyle(node, "color", style.fg)
+    if style.bg.len > 0:
+      r.setStyle(node, "background-color", style.bg)
+    for a in style.attrNames():
       r.setStyle(node, a, "true")
     r.appendChild(result, node)
 

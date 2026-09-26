@@ -4770,6 +4770,32 @@ plat35-capture-electron *args:
       ;;
   esac
 
+# PLAT-46: the desktop's computed colour for every role the TUI also paints,
+# written to src/tests/visual/answers/plat46-token-parity.electron.json for
+# `tests/real_terminal/test_plat46_desktop_parity.nim`. Same Xvfb arrangement
+# as `plat35-capture-electron` (its own server, `-dpi 96`), for its reasons.
+plat46-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
+      ;;
+    *)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
+      ;;
+  esac
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh

@@ -219,6 +219,13 @@ type
       ##
       ## A nil field is a reportable state and not a crash: `:w` in a session
       ## with no writer says so, which is the state a Debug-only session is in.
+    themeService*: proc(name: string): bool {.closure.}
+      ## The HOST's live mode switch behind §4.3's `:theme <dark|light>`: it
+      ## re-resolves the terminal capabilities with the named design-system
+      ## mode pinned, adopts them on the driver (so the next frame is a full
+      ## repaint) and updates `caps`. Nil in a host that cannot repaint, where
+      ## `:theme` answers `unsupported` by name. The host installs it into
+      ## `dispatcher.services.setTheme` wherever it builds the dispatcher.
     layoutDocumentQuarantined*: bool
       ## Whether this session started from a document it could NOT read.
       ##
@@ -1386,6 +1393,10 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
     model.layout = rt.maximize.layoutFor(model.profile)
   if rt.app.notification.len > 0:
     model.status.notification = rt.app.notification
+  # PLAT-46: the focused pane gets the focused border role.
+  let (hasFocus, focused) = rt.focus.focusedPane()
+  model.hasFocus = hasFocus
+  model.focused = focused
   result = shellScreen(model, rt.width, rt.height)
   if rt.prompt.open and result.rows.len > 0:
     # §3.3.6's prompt replaces the status row while it is open. Painted over the

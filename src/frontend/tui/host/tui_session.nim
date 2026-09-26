@@ -375,7 +375,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     originNav: s.originNav,
     services: CommandServices(
       setBreakpoint: proc(path: string; line: int): bool =
-        sess.toggleBreakpoint(path, line)))
+        sess.toggleBreakpoint(path, line),
+      setTheme: rt.themeService))
   rt.context = CommandContext(
     file: s.session.getCurrentFile(),
     line: s.session.getCurrentLine(),

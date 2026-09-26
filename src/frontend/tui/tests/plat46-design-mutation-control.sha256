@@ -1,0 +1,19 @@
+# Control digests for run-plat46-design-mutations.py —
+# the subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the needle
+# scan (§39a).
+712ded07b277546114ed9d717e08205146555c69cfe5db3560ddfe2483917598  src/frontend/tui/app/theme/roles.nim
+3a78fc1d60a28e60c21569d4c8f9184d5ea7b0bb7c122ab06536f07dfdfde43a  src/frontend/tui/app/theme/palette.nim
+5f7d1406dd9c5d1f5cee07e55c25cd9ecc56f336fdd83ea3f537ce20afad308c  src/frontend/tui/app/theme/capabilities.nim
+ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
+01f494c6c52c71435c7724ed39042c8698d992aa9c394dacaa33bb9a65770fc2  src/frontend/tui/app/views/shell.nim
+651fca95092c7b7d1ece4ef97b097e20ebd9deee511b5a6c4cd2855673b10d2e  src/frontend/tui/app/views/gutter.nim
+175eca883065a1489ab4502e9210db520e71ef513a1835385bb0fe360e92d887  src/frontend/tui/app/views/source_pane.nim
+81c4fc54101ab04e1f1083fbc63e22d9da9105d12cbc36564abf3e5c810285b7  src/frontend/tui/host/terminal_probe.nim
+f77f8228d20d94606e7f2df53f78bd4d33229968efabbd64f2b00f511b0531c1  scripts/tokens-to-styl.sh
+27a9120ea9943e7ce0aaf2f4794eba0cb068db4ff7bc7cefe26021f3747926ef  src/frontend/tui/app/tests/test_degraded_style_tables.nim
+ed5805619f344174bd0670186b90281a3221c91b8273db1f54ae5883963dddfb  src/frontend/tui/app/tests/test_capability_resolution.nim
+43f8243f4031dbc6c1b2613377a33803c03c2729e59b1b0700bbdca64bdfa366  src/frontend/tui/tests/test_plat46_terminal_probe.nim
+3030aba0bbadfb01b15e3c246af72cda8922c1ae360f38fb2f53b8cff9f446e9  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim
+09b62f366cca1170b7f9748e6b2ddd1ae46dd2be621438a19c7d94aca0377d05  ci/test/tui-design-tokens-boundary.sh
+6034bb519201470ee71680fda964e01bf67d9f6025276494aa5058eee59f5768  ci/test/design-tokens-fresh.sh

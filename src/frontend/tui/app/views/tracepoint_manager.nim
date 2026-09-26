@@ -182,23 +182,23 @@ const
   TracepointKeyDelete* = "d"
   TracepointKeyBackspace* = "\x7f"
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  TitleDetailStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  TitleDetailStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
   TracepointMarkStyle* = timeline_bar.MarkStyle
     ## THE SAME YELLOW `◆` THE SCRUBBER PAINTS. One fact, one glyph, one colour,
     ## on two panes — a dialog that chose its own would let a reader believe the
     ## diamond on the track and the diamond in the list were different things.
-  DraftStyle* = CellStyle(fg: "bright_black", italic: true)
-  VerifiedStyle* = CellStyle(fg: "green")
-  RejectedStyle* = CellStyle(fg: "red", bold: true)
-  DisabledStyle* = CellStyle(fg: "bright_black")
-  ExpressionStyle* = CellStyle(fg: "white")
-  HitStyle* = CellStyle(fg: "cyan")
-  EditingBackground* = "blue"
-  SelectedBackground* = "bright_black"
+  DraftStyle* = CellStyle(role: srChromeMuted, italic: true)
+  VerifiedStyle* = CellStyle(role: srChromeSuccess)
+  RejectedStyle* = CellStyle(role: srChromeError)
+  DisabledStyle* = CellStyle(role: srChromeMuted)
+  ExpressionStyle* = CellStyle(role: srChromeText)
+  HitStyle* = CellStyle(role: srChromeInfo)
+  EditingBackground* = srSurfaceInput
+  SelectedBackground* = srSurfaceSelection
   EmptyText* = "no tracepoints — press e to add one"
-  EmptyStyle* = CellStyle(fg: "bright_black", italic: true)
+  EmptyStyle* = CellStyle(role: srChromeMuted, italic: true)
 
 proc initTracepointDraft*(path = ""; line = 0; column = 0; expression = "";
                           enabled = true): TracepointDraft =
@@ -468,13 +468,13 @@ proc entryRowSpans*(model: TracepointManagerModel; index: int;
     if fitted.len == 0:
       continue
     var style = span.style
-    if selected and style.bg.len == 0:
+    if selected and not style.hasOwnBackground:
       style = style.withBackground(SelectedBackground)
     result.add StyledSpan(text: fitted, style: style)
     used += cellWidthOf(fitted)
   if selected and used < width:
     result.add StyledSpan(text: repeat(' ', width - used),
-                          style: CellStyle(bg: SelectedBackground))
+                          style: CellStyle(surface: SelectedBackground))
 
 proc draftRowSpans*(model: TracepointManagerModel; width: int): StyledRow =
   ## The editable line: `> line 31  col 0  expr log(left)`.
@@ -500,7 +500,7 @@ proc draftRowSpans*(model: TracepointManagerModel; width: int): StyledRow =
     let active = model.editing and model.field == field
     spans.add StyledSpan(
       text: value & " ",
-      style: (if active: CellStyle(fg: "white", bg: EditingBackground,
+      style: (if active: CellStyle(role: srChromeText, surface: EditingBackground,
                                    bold: true)
               else: ExpressionStyle))
   var used = 0

@@ -66,6 +66,7 @@ import ../../app/views/variables
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_variables as varsApp
+import ./derived_colours
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -83,16 +84,22 @@ const
   FrameTimeoutMs = 20000
   LabelTimeoutMs = 10000
 
-  Black = 0'u8
-  Green = 2'u8
-  Yellow = 3'u8
-  Magenta = 5'u8
-  Cyan = 6'u8
-  White = 7'u8
-  BrightBlack = 8'u8
-  BrightGreen = 10'u8
-  BrightBlue = 12'u8
-  BrightCyan = 14'u8
+
+# PLAT-46: each colour below is a ROLE's DERIVED 16-colour index
+# (`derived_colours.ansiIndexOf`), not an ANSI number a view spelled.
+let
+  TagFg = ansiIndexOf(srValueModifiedTag)
+  TagBg = ansiIndexOf(srValueModifiedTag, background = true)
+  ModifiedFg = ansiIndexOf(srValueModified)
+  SelectionBg = ansiIndexOf(srSurfaceSelection, background = true)
+  NameFg = ansiIndexOf(srChromeText)
+  ExpanderFg = ansiIndexOf(srChromeAccent)
+  NumberFg = ansiIndexOf(srValueNumber)
+  StringFg = ansiIndexOf(srValueString)
+  BooleanFg = ansiIndexOf(srValueBoolean)
+  NoneFg = ansiIndexOf(srValueNoneValue)
+  PointerFg = ansiIndexOf(srValuePointer)
+  CompoundFg = ansiIndexOf(srValueCompound)
 
 var countedAssertions = 0
 
@@ -218,13 +225,13 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
                  describeCell(badgeEnd))
       ck $badgeStart.rune == "["
       ck badgeStart.fg.kind == ckIndexed
-      ck badgeStart.fg.idx == Black
+      ck badgeStart.fg.idx == TagFg
       ck badgeStart.bg.kind == ckIndexed
-      ck badgeStart.bg.idx == Green
+      ck badgeStart.bg.idx == TagBg
       ck caBold in badgeStart.attrs
       ck $badgeEnd.rune == "]"
-      ck badgeEnd.fg.idx == Black
-      ck badgeEnd.bg.idx == Green
+      ck badgeEnd.fg.idx == TagFg
+      ck badgeEnd.bg.idx == TagBg
       ck sess.regionText(modifiedRow, screen.diffColumn, ModifiedTagCells, 1)
              .split('\n')[0] == ModifiedTag
 
@@ -233,7 +240,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       checkpoint("changed name cell " & describeCell(modifiedName))
       ck $modifiedName.rune == $varsApp.ModifiedName[0]
       ck modifiedName.fg.kind == ckIndexed
-      ck modifiedName.fg.idx == Green
+      ck modifiedName.fg.idx == ModifiedFg
       ck caBold in modifiedName.attrs
 
       # ---- THE CURSOR'S HIGHLIGHT DOES NOT EAT THE BADGE -------------------
@@ -243,7 +250,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       let gap = sess.cellAt(modifiedRow, screen.nameColumn - 1)
       checkpoint("gap cell between badge and name " & describeCell(gap))
       ck gap.bg.kind == ckIndexed
-      ck gap.bg.idx == BrightBlack
+      ck gap.bg.idx == SelectionBg
       ck badgeStart.bg.idx != gap.bg.idx
 
       # ---- THE NEGATIVE TWIN, through the same reader ----------------------
@@ -259,7 +266,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       ck plainBadge.bg.kind == ckDefault
       ck caBold notin plainBadge.attrs
       ck $plainName.rune == $varsApp.UnmodifiedName[0]
-      ck plainName.fg.idx == White
+      ck plainName.fg.idx == NameFg
       ck caBold notin plainName.attrs
       ck plainName.fg.idx != modifiedName.fg.idx
 
@@ -272,7 +279,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
                  describeCell(leaf))
       ck $expander.rune == CollapsedGlyph
       ck expander.fg.kind == ckIndexed
-      ck expander.fg.idx == BrightCyan
+      ck expander.fg.idx == ExpanderFg
       ck caBold in expander.attrs
       ck $leaf.rune == " "
       ck leaf.fg.kind == ckDefault
@@ -280,26 +287,32 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       # ---- §3.3.4'S TYPE FORMATTERS, IN A TERMINAL'S OWN COLOURS -----------
       # Five classes, five numbers, read at the value column the LAYOUT
       # computes. Four of them have no fixture in CTUI-1's corpus.
-      checkValueColour(sess, screen, plainRow, "4", Cyan)
+      checkValueColour(sess, screen, plainRow, "4", NumberFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.label"),
-                       "\"", BrightGreen)
+                       "\"", StringFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.flag"),
-                       "t", Magenta)
+                       "t", BooleanFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.missing"),
-                       "n", BrightBlack)
+                       "n", NoneFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.handle"),
-                       "0", BrightBlue)
-      checkValueColour(sess, screen, collapsedNode, "P", Yellow)
+                       "0", PointerFg)
+      checkValueColour(sess, screen, collapsedNode, "P", CompoundFg)
       # …and the numeric row really carries BOTH bases, which is §3.3.4's
       # "decimal and hexadecimal simultaneously upon focus" on a real screen.
       ck paneRow(sess, modifiedRow).contains("(0x")
       # THE POINT, as one assertion: the classes do not look the same.
-      var distinctColours: seq[uint8] = @[]
+      # PLAT-46: an APPEARANCE is the colour AND the weight. The 16-colour rung
+      # is derived from design-system tokens, and where it merges two hues of
+      # one group both carry their monochrome weight there
+      # (`palette.CollapsedOnRung`) — so "do not look the same" is read as
+      # colour plus attributes, off the cell.
+      var distinctColours: seq[string] = @[]
       for row in [plainRow, bodyRowForPath(screen, "@Locals.label"),
                   bodyRowForPath(screen, "@Locals.flag"),
                   bodyRowForPath(screen, "@Locals.missing"),
                   bodyRowForPath(screen, "@Locals.handle")]:
-        let idx = sess.cellAt(row, valueColumn(screen)).fg.idx
+        let cell = sess.cellAt(row, valueColumn(screen))
+        let idx = $cell.fg.idx & $cell.attrs & $cell.underline
         if idx notin distinctColours:
           distinctColours.add idx
       checkpoint("distinct value colours: " & $distinctColours)
@@ -330,7 +343,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       checkPaneMatchesModel(sess, variablesText(opened, Cols, Rows), "opened")
       let openedRow = bodyRowForPath(openedScreen, "@Locals.point")
       ck $sess.cellAt(openedRow, 0).rune == ExpandedGlyph
-      ck sess.cellAt(openedRow, 0).fg.idx == BrightCyan
+      ck sess.cellAt(openedRow, 0).fg.idx == ExpanderFg
       # …and the struct's two fields are on the screen, under it, indented.
       ck paneRow(sess, openedRow + 1).contains("x")
       ck paneRow(sess, openedRow + 2).contains("y")

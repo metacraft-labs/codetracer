@@ -41,8 +41,8 @@ type
 
 const
   EmptyPointsText* = "no breakpoints or tracepoints"
-  EmptyPointsStyle* = CellStyle(fg: "bright_black", italic: true)
-  DisabledPointStyle* = CellStyle(fg: "bright_black")
+  EmptyPointsStyle* = CellStyle(role: srChromeMuted, italic: true)
+  DisabledPointStyle* = CellStyle(role: srChromeMuted)
 
 proc initPointListPaneModel*(rows: seq[PointListPaneRow] = @[];
                              loaded = false): PointListPaneModel =

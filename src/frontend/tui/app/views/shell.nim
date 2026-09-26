@@ -198,6 +198,13 @@ type
     build*: BuildPaneModel
       ## PLAT-16. Edit mode's `paneBuildOutput`, as a value. Its zero verdict is
       ## `bvIdle`, which is what a project nobody has built is in.
+    focused*: PaneKind
+    hasFocus*: bool
+      ## PLAT-46. The pane the keyboard's focus is in (the runtime's
+      ## `PaneFocus`), so the shell can give it the FOCUSED border role —
+      ## the focused pane is distinguished by its border's colour and weight,
+      ## not only by the glyphs every pane shares. `hasFocus` false (the zero
+      ## value) paints every pane with the ordinary border role.
     edit*: EditPaneModel
       ## PLAT-16. Edit mode's Source pane, as a value.
       ##
@@ -512,6 +519,39 @@ proc tracepointOverlayArea*(body: CellArea): CellArea =
            row: body.row + (body.height - h) div 2,
            width: w, height: h)
 
+const
+  TitleRowStyle = CellStyle(role: srChromeTitle)
+  PaneRuleStyle = CellStyle(role: srBorderPane)
+
+proc paintTitleRow(g: var StyledGrid; row, col: int; title: string;
+                   width: int) =
+  ## `titleRow`, painted with ROLES: the title in the title role and the rule
+  ## glyphs in the pane-border role, so the rule takes the focused border's
+  ## colour on the focused pane.
+  let text = titleRow(title, width)
+  let label = toUpperAscii(title)
+  let labelCells = min(textCells(label), width)
+  g.paint(row, col, text, PaneRuleStyle)
+  g.paint(row, col, fitCells(label, labelCells), TitleRowStyle)
+
+proc paintTabRow(g: var StyledGrid; row, col: int; tabs: seq[string];
+                 active, width: int) =
+  ## A tab strip: the strip on its own surface, the active tab lifted onto the
+  ## pane's surface and every other tab on the strip's — PLAT-46 deliverable 4,
+  ## the desktop's GoldenLayout strip in cells. The TEXT is `tabRow`'s,
+  ## unchanged, so every column the hit-test reads is where it was.
+  let text = tabRow(tabs, active, width)
+  g.fillSurface(row, col, width, 1, srTabBar)
+  g.paint(row, col, text, CellStyle(role: srTabBar))
+  for span in tabSpans(tabs, active):
+    let start = col + span.startCol
+    let w = min(span.width, col + width - start)
+    if w <= 0:
+      continue
+    let tabRole = if span.index == active: srTabActive else: srTabInactive
+    g.fillSurface(row, start, w, 1, tabRole)
+    g.restyleRole(row, start, w, srTabBar, tabRole)
+
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea) =
   ## One pane, into its own rectangle and no other.
@@ -520,6 +560,16 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     return
   let flushRight = a.col + a.width >= body.col + body.width
   let inner = if flushRight: a.width else: a.width - 1
+  # PLAT-46: THE PANE'S SURFACE FIRST, under every cell of its rectangle, so
+  # whatever the painter below leaves blank is the pane's body and not the
+  # terminal's background. The editor rectangle is the editor surface.
+  #
+  # The editor's TITLE ROW stays on the panel surface: it is chrome (the file
+  # name, the provenance verdict, the rule), and the editor surface is for
+  # code — the desktop's editor tab sits on its strip, not in the editor.
+  g.fillSurface(a.row, a.col, a.width, a.height, srSurfacePanel)
+  if region.pane == paneEditor and a.height > 1:
+    g.fillSurface(a.row + 1, a.col, inner, a.height - 1, srSurfaceEditor)
 
   # THE SOURCE PANE OWNS ITS WHOLE RECTANGLE, title row included. CTUI-5's
   # provenance marker lives in that title row, so a shell that painted the
@@ -581,7 +631,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # stacked panes is on screen and CTUI-9 will make it clickable.
   elif region.pane == paneState and not model.variables.isEmpty:
     if region.activeTab >= 0 and region.tabs.len > 0:
-      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+      paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
       if a.height >= 2:
         discard paintVariables(
           g, CellArea(col: a.col, row: a.row + 1, width: inner,
@@ -596,7 +646,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # the third. This arm is the first two; the third is below.
   elif region.pane == paneEventLog and model.eventLog.hasContent:
     if region.activeTab >= 0 and region.tabs.len > 0:
-      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+      paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
       if a.height >= 2:
         discard paintEventLog(
           g, CellArea(col: a.col, row: a.row + 1, width: inner,
@@ -610,7 +660,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # arm the pane reached the terminal as a title over an empty rectangle.
   elif region.pane == panePointList and model.points.loaded:
     if region.activeTab >= 0 and region.tabs.len > 0:
-      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+      paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
       if a.height >= 2:
         discard paintPointList(
           g, CellArea(col: a.col, row: a.row + 1, width: inner,
@@ -621,9 +671,9 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
         g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
         model.points)
   elif region.activeTab >= 0 and region.tabs.len > 0:
-    g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+    paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
   else:
-    g.paint(a.row, a.col, titleRow(paneTitle(region.pane, region.title), inner))
+    paintTitleRow(g, a.row, a.col, paneTitle(region.pane, region.title), inner)
 
   # THE TIMELINE RECTANGLE HOLDS TWO PANES, which is what §3.3.5 describes and
   # what the Standard and Ultra-wide layouts call "Timeline & Tracepoints". The
@@ -646,7 +696,13 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                                inner))
   if not flushRight:
     for row in a.row ..< a.row + a.height:
-      g.paint(row, a.col + a.width - 1, PaneSeparatorGlyph)
+      g.paint(row, a.col + a.width - 1, PaneSeparatorGlyph, PaneRuleStyle)
+  # PLAT-46: THE FOCUSED PANE'S BORDERS take the focused border role — its
+  # title rule and its separator — after the painter has run, so no painter
+  # has to know which pane has the focus.
+  if model.hasFocus and region.pane == model.focused:
+    for row in a.row ..< a.row + a.height:
+      g.restyleRole(row, a.col, a.width, srBorderPane, srBorderFocused)
 
 proc degradedBanner(status: ProjectionStatus; width: int): string =
   ## What a non-`prOk` projection puts on the first body row. It names the
@@ -685,6 +741,11 @@ proc shellScreen*(model: ShellModel; width, height: int;
     return
 
   var g = newStyledGrid(width, height)
+  # PLAT-46 deliverable 8: EVERY CELL HAS A SURFACE. The canvas under all of
+  # it, the header on a card; each pane fills its own rectangle in `paintPane`
+  # and the status line its row below.
+  g.fillSurface(0, 0, width, height, srSurfaceCanvas)
+  g.fillSurface(0, 0, width, HeaderRows, srSurfaceCard)
   g.paint(0, 0, headerText(model.header, width))
 
   for region in projection.regions:
@@ -704,12 +765,14 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # over it would obscure the field a user is typing into. The frame viewer is
   # painted first and the dialog, when both are open, is on top.
   if model.frameViewer.open:
-    result.frameViewer = paintFrameViewer(g, frameViewerOverlayArea(body),
-                                          model.frameViewer)
+    let area = frameViewerOverlayArea(body)
+    g.fillSurface(area.row, area.col, area.width, area.height, srSurfaceCard)
+    result.frameViewer = paintFrameViewer(g, area, model.frameViewer)
 
   if model.tracepoints.open:
-    discard paintTracepointManager(g, tracepointOverlayArea(body),
-                                   model.tracepoints)
+    let area = tracepointOverlayArea(body)
+    g.fillSurface(area.row, area.col, area.width, area.height, srSurfaceCard)
+    discard paintTracepointManager(g, area, model.tracepoints)
 
   # PLAT-6's transient state, painted LAST over the body, on exactly the rule
   # above: the drag ghost, the highlighted drop target, the resize guide, the
@@ -723,7 +786,20 @@ proc shellScreen*(model: ShellModel; width, height: int;
   if projection.status != prOk and status.notification.len == 0:
     status.notification = "layout " & $projection.status
   if height > HeaderRows:
+    g.fillSurface(height - 1, 0, width, 1, srSurfaceStatusLine)
     g.paint(height - 1, 0, statusBarText(status, width))
+    # The two indicators in their own roles: the input mode, then the product
+    # mode, exactly where `statusBarText` put them (it never drops them).
+    let modeCells = min(width, textCells($status.mode))
+    g.paint(height - 1, 0, fitCells($status.mode, modeCells),
+            modeStyle(status.mode))
+    let productText = productIndicator(status.product)
+    let productCol = textCells($status.mode) + 1
+    if productCol < width:
+      g.paint(height - 1, productCol,
+              fitCells(productText, min(textCells(productText),
+                                        width - productCol)),
+              productStyle(status.product))
 
   for row in 0 ..< height:
     result.rows.add g.rowText(row)

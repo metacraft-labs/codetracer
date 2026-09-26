@@ -74,6 +74,8 @@ import nim_libvterm
 import term_assert
 
 import ../../app/theme/capabilities
+import ../../app/theme/colour_math
+import ../../app/theme/roles
 import ../../app/views/borders
 import ../../host/terminal_driver
 # `waitForCompleteFrame` and its diagnosis-not-a-timeout failure. Imported for
@@ -366,10 +368,10 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # colour at all, on any terminal.
     #
     # `docs/tui-testing.md`: "every colour a Tier-2 case relies on for its
-    # MEANING must also be asserted ABSOLUTELY". `indexed:244` is what
-    # `app/theme/degradation.ansi256Style(srChromeMuted)` publishes for the
-    # muted chrome every pane rule is painted in, so the assertion is the
-    # published number and not "some colour".
+    # MEANING must also be asserted ABSOLUTELY". PLAT-46: the pane rules are
+    # painted with the pane-border role, whose 256-colour rung is DERIVED from
+    # `colors/ui/border/secondary` — the nearest xterm-256 entry to its hex,
+    # computed here from the token rather than restated as a number.
     var sess = baseSession(@[tracePath], term = "xterm-256color").spawn()
     settleOnDebugger(sess)
     let cells = screenCells(sess)
@@ -379,12 +381,14 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     for cell in cells:
       if cell.fg.kind != ckDefault or cell.bg.kind != ckDefault:
         inc coloured
-      if cell.fg.kind == ckIndexed and cell.fg.idx == 244'u8:
+      if cell.fg.kind == ckIndexed and cell.fg.idx == uint8(nearestXterm256(
+          parseHexColour(DesignTokenHex[dtColorsUiBorderSecondary][dmDark]))):
         inc mutedRule
       if cell.fg.kind == ckRgb:
         inc rgb
     checkpoint("256-colour screen: " & $coloured & " coloured cells, " &
-               $mutedRule & " at indexed:244, " & $rgb & " truecolor")
+               $mutedRule & " in the border role's derived index, " & $rgb &
+               " truecolor")
     ck coloured > 0
     ck mutedRule > 0
     # …and a 256-colour terminal is NOT sent 24-bit SGR, which is the whole

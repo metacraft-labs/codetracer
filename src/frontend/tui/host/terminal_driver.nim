@@ -94,6 +94,9 @@ export ssh_tuning
 const
   Esc* = '\x1b'
   MaxSequenceBytes* = 64
+  MaxStringBytes* = 512
+    ## An OSC/DCS/APC string longer than this is dropped rather than held: a
+    ## reply to this program's queries is a few dozen bytes.
     ## A CSI longer than this is not a sequence, it is a stuck terminal or a
     ## paste of binary. Dropped rather than accumulated, so one bad byte cannot
     ## make the front-end stop responding to the keyboard for the rest of the
@@ -102,6 +105,14 @@ const
 type
   InputFramer* = object
     ## The byte-to-token state machine, as a value.
+    ##
+    ## PLAT-46: while `expectStrings` is set — the start-up query round is
+    ## outstanding — `ESC ]` (OSC), `ESC P` (DCS) and `ESC _` (APC) begin a
+    ## STRING that runs to BEL or ST (`ESC \`) and is delivered as one token,
+    ## because that is the shape of a terminal's answer to OSC 11, DECRQSS and
+    ## XTGETTCAP. Outside the round those two-byte prefixes keep their old
+    ## meaning (the `ESC` is dropped and the byte honoured), so an Alt+`]` or
+    ## Alt+Shift+`P` typed later is never swallowed as the start of a reply.
     ##
     ## A VALUE AND NOT A LOOP, which is what makes it assertable without a
     ## terminal: `app/input/keymap.keyName` takes a whole token, so the framing
@@ -112,6 +123,8 @@ type
       ## When a LONE `ESC` began to be held, on `nowMs`'s clock; `0` when
       ## nothing is. Set by the driver, which owns the clock — `feed` stays a
       ## pure function of the bytes.
+    expectStrings*: bool
+      ## See above. Set by `TerminalDriver.expectReplies`.
 
 const
   EscDelayMs* = 50'i64
@@ -130,9 +143,11 @@ const
     ## which the framing turns into one `Esc` and which no keyboard sends.
 
 proc initInputFramer*(): InputFramer =
-  InputFramer(pending: "", escSinceMs: 0)
+  InputFramer(pending: "", escSinceMs: 0, expectStrings: false)
 
 proc reset*(f: var InputFramer) =
+  ## Forget the sequence being assembled. `expectStrings` is the DRIVER's
+  ## state, not the sequence's, and survives.
   f.pending = ""
   f.escSinceMs = 0
 
@@ -165,11 +180,26 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
     return (false, "")
 
   f.pending.add b
+  if f.pending.len > 2 and f.pending[1] in {']', 'P', '_'}:
+    # A STRING (only reachable while `expectStrings`): BEL or ST ends it.
+    if b == '\x07' or (b == '\\' and f.pending[^2] == Esc):
+      let token = f.pending
+      f.reset()
+      return (true, token)
+    if f.pending.len > MaxStringBytes:
+      f.reset()
+    return (false, "")
   if f.pending.len == 2:
     case b
     of '[', 'O':
       # A CSI or an SS3 is starting; keep accumulating.
       return (false, "")
+    of ']', 'P', '_':
+      if f.expectStrings:
+        return (false, "")
+      let broke = $b
+      f.reset()
+      return (true, broke)
     else:
       # NOT AN ESCAPE SEQUENCE. Drop the `ESC` and honour the byte that broke
       # it, exactly as the runtime always has: `\x1b\x1b` therefore yields one
@@ -404,6 +434,22 @@ proc newTerminalDriver*(caps: TerminalCapabilities;
                  framesPainted: 0, bytesEmitted: 0,
                  started: false, mouseOwned: false, altOwned: false,
                  rawOwned: false)
+
+proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
+  ## PLAT-46. Replace the negotiated capabilities after the start-up query
+  ## round answered — a 24-bit terminal behind a conservative `TERM`, or a
+  ## light background — and forget what the terminal is showing, so the next
+  ## frame is a full one painted in the new colours rather than a diff against
+  ## cells painted in the old.
+  d.caps = caps
+  d.emitter.caps = caps
+  d.emitter.reset()
+
+proc expectReplies*(d: TerminalDriver; on: bool) =
+  ## Whether `ESC ]` / `ESC P` / `ESC _` begin a terminal's reply string. On
+  ## from the moment the start-up queries are written until their DA1 fence
+  ## comes back (or the reply window closes) — see `InputFramer`.
+  d.framer.expectStrings = on
 
 proc size*(d: TerminalDriver): TerminalSize =
   ## The terminal's current geometry, through the watcher when one exists so a

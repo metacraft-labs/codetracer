@@ -70,6 +70,7 @@ import ../../app/views/tracepoint_manager
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_timeline as timelineApp
+import ./derived_colours
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -87,18 +88,22 @@ const
   FrameTimeoutMs = 20000
   LabelTimeoutMs = 10000
 
-  Blue = 4'u8
-  Yellow = 3'u8
-  White = 7'u8
-  BrightBlack = 8'u8
-  BrightCyan = 14'u8
-
   ClickColumn = 60
     ## A TRACK cell, chosen to be inside no other field and to be far from both
     ## ends: the needle starts at track cell 21 and the diamonds are at 5 and 60
     ## on this geometry, so a click here lands on a cell that already carries a
     ## `◆` — which is the case where the needle's precedence over a mark is
     ## observable on a real screen.
+
+# PLAT-46: each colour below is a ROLE's DERIVED 16-colour index
+# (`derived_colours.ansiIndexOf`), not an ANSI number a view spelled.
+let
+  SpanFg = ansiIndexOf(srTimelineSpan)
+  MarkFg = ansiIndexOf(srTimelineMark)
+  BoundsFg = ansiIndexOf(srTimelineBounds)
+  TrackFg = ansiIndexOf(srTimelineTrack)
+  NeedleFg = ansiIndexOf(srTimelineNeedle)
+  SelectionBg = ansiIndexOf(srSurfaceSelection, background = true)
 
 var countedAssertions = 0
 
@@ -197,9 +202,9 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
       ck $openCell.rune == BoundsOpenGlyph
       ck $closeCell.rune == BoundsCloseGlyph
       ck openCell.fg.kind == ckIndexed
-      ck openCell.fg.idx == White
+      ck openCell.fg.idx == BoundsFg
       ck caBold in openCell.attrs
-      ck closeCell.fg.idx == White
+      ck closeCell.fg.idx == BoundsFg
       ck caBold in closeCell.attrs
 
       # ---- THE NEEDLE ------------------------------------------------------
@@ -207,20 +212,20 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
         columnForTick(timelineApp.InitialTick, 0'u64, timelineApp.MaxTick,
                       screen.trackWidth)
       checkGlyphCell(sess, screen, screen.needleColumn, NeedleGlyph,
-                     BrightCyan, true, "needle")
+                     NeedleFg, true, "needle")
 
       # ---- A CALL SPAN -----------------------------------------------------
       # `█` at a cell the model says a recorded call covers, and NOT at a cell
       # it does not — the negative twin through the same reader.
       ck screen.spanColumns.len > 0
       ck screen.paintedSpans > 0
-      checkGlyphCell(sess, screen, screen.spanColumns[0], SpanGlyph, Blue,
+      checkGlyphCell(sess, screen, screen.spanColumns[0], SpanGlyph, SpanFg,
                      false, "call span")
 
       # ---- A TRACEPOINT DIAMOND -------------------------------------------
       ck screen.markColumns.len == 2
       ck screen.paintedMarks == 2
-      checkGlyphCell(sess, screen, screen.markColumns[0], MarkGlyph, Yellow,
+      checkGlyphCell(sess, screen, screen.markColumns[0], MarkGlyph, MarkFg,
                      true, "tracepoint mark")
 
       # ---- EMPTY TRACK -----------------------------------------------------
@@ -234,18 +239,25 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
           plainColumn = c
           break
       ck plainColumn >= 0
-      checkGlyphCell(sess, screen, plainColumn, TrackGlyph, BrightBlack, false,
+      checkGlyphCell(sess, screen, plainColumn, TrackGlyph, TrackFg, false,
                      "empty track")
 
       # ---- THE POINT, as one assertion: five glyphs, five colours ----------
-      var distinctColours: seq[uint8] = @[]
+      # PLAT-46: an APPEARANCE is the colour AND the weight. The 16-colour rung
+      # is derived from design-system tokens, and where it merges two hues of
+      # one group both carry their monochrome weight there
+      # (`palette.CollapsedOnRung`) — so "do not look the same" is read as
+      # colour plus attributes, off the cell.
+      var distinctColours: seq[string] = @[]
       for c in [screen.needleColumn, screen.markColumns[0],
                 screen.spanColumns[0], plainColumn]:
-        let idx = sess.cellAt(screen.barRow, screen.trackCol + c).fg.idx
+        let cell = sess.cellAt(screen.barRow, screen.trackCol + c)
+        let idx = $cell.fg.idx & $cell.attrs & $cell.underline
         if idx notin distinctColours:
           distinctColours.add idx
-      let boundsColour = sess.cellAt(screen.barRow,
-                                     screen.boundsColumns[0]).fg.idx
+      let boundsCell = sess.cellAt(screen.barRow, screen.boundsColumns[0])
+      let boundsColour = $boundsCell.fg.idx & $boundsCell.attrs &
+                         $boundsCell.underline
       if boundsColour notin distinctColours:
         distinctColours.add boundsColour
       checkpoint("distinct scrubber colours: " & $distinctColours)
@@ -268,7 +280,7 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
       # The cell about to be clicked carries a DIAMOND before the click, so the
       # move is a change of glyph as well as a change of column.
       ck ClickColumn in before.markColumns
-      checkGlyphCell(sess, before, ClickColumn, MarkGlyph, Yellow, true,
+      checkGlyphCell(sess, before, ClickColumn, MarkGlyph, MarkFg, true,
                      "the cell about to be clicked")
 
       # THE CLICK. Real SGR-1006 bytes on a real fd, which is the whole reason
@@ -289,7 +301,7 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
       # THE NEEDLE IS THERE, ON THE TERMINAL, in the needle's own colour —
       # and it has taken the diamond's cell, which is the precedence rule
       # `paintTimelineBar` states.
-      checkGlyphCell(sess, after, ClickColumn, NeedleGlyph, BrightCyan, true,
+      checkGlyphCell(sess, after, ClickColumn, NeedleGlyph, NeedleFg, true,
                      "needle after the click")
       # …AND IT HAS LEFT WHERE IT WAS. A pane that painted a second needle
       # would satisfy the assertion above.
@@ -346,7 +358,7 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
                                      logScreen.tickColumn)
       checkpoint("selected row's first cell " & describeCell(selectedCell))
       ck selectedCell.bg.kind == ckIndexed
-      ck selectedCell.bg.idx == BrightBlack
+      ck selectedCell.bg.idx == SelectionBg
       # THE NEGATIVE TWIN: an unselected row has no background at all.
       let plainCell = sess.cellAt(logScreen.selectedRow - 1,
                                   logScreen.tickColumn)
@@ -359,7 +371,7 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
       checkpoint("category cell " & describeCell(categoryCell))
       ck $categoryCell.rune == "o"
       ck categoryCell.fg.kind == ckIndexed
-      ck categoryCell.fg.idx == 2'u8
+      ck categoryCell.fg.idx == ansiIndexOf(srEventOutput)
 
       # THE TRACEPOINT DIALOG. Its `◆` is the SAME yellow the scrubber's is —
       # one fact, one colour, on two panes.
@@ -370,7 +382,7 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
       checkpoint("dialog diamond " & describeCell(dialogMark))
       ck $dialogMark.rune == MarkGlyph
       ck dialogMark.fg.kind == ckIndexed
-      ck dialogMark.fg.idx == Yellow
+      ck dialogMark.fg.idx == MarkFg
       ck caBold in dialogMark.attrs
       # …and a HIT ROW names the tick the sweep reported and the value it read.
       let hitText = paneRow(sess, dialog.selectedRow + 1)

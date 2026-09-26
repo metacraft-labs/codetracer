@@ -210,8 +210,8 @@ const
     ## that owns it.
     ##
     ## **EMPTY AS OF CTUI-14, and that is a state this list is written to be
-    ## able to reach.** The four it carried are built: `--theme` resolves a
-    ## palette through `app/theme/degradation.tintsFor`, `--goto` seeks before
+    ## able to reach.** The four it carried are built: `--theme` selects a
+    ## design-system colour mode (PLAT-46), `--goto` seeks before
     ## the first debugger frame, and `--record-keys` / `--replay-keys` are
     ## `host/key_journal.nim`. The mechanism is deliberately NOT deleted with
     ## its last entry — a published option that is not built is a state this
@@ -295,7 +295,13 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
-  -t, --theme=NAME   dark (default), light, plain, monokai
+  -t, --theme=NAME   dark, light (the design system's two colour modes;
+                     detected from the terminal's background when absent),
+                     plain (no colour)
+  --palette=NAME     design (default: the design system's colours, 24-bit
+                     where the terminal has it) or terminal (only the sixteen
+                     ANSI colours and the terminal's own foreground and
+                     background, so your terminal theme decides)
   --image-tier=NAME  pin the image rendering tier: protocol, half-block,
                      quadrant, sextant, octant, braille, ascii (detected)
   --goto=TICK        seek to TICK before the first debugger frame
@@ -369,6 +375,14 @@ proc optionValue(arg: string; name: string): (bool, string) =
   if arg.startsWith(name & "="):
     return (true, arg[name.len + 1 .. ^1])
   (false, "")
+
+proc themeRefusal(name: string): string =
+  ## Why `--theme=<name>` was refused: a RETIRED theme names its replacement
+  ## (PLAT-46 retired `monokai`), anything else lists the valid names.
+  let retired = retiredThemeMessage(name)
+  if retired.len > 0:
+    return retired
+  "unknown theme '" & name & "'; pick one of " & themeNames()
 
 proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   ## Classify `args` — the arguments AFTER the program name.
@@ -453,11 +467,10 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       let (ok, theme) = parseTheme(args[i])
       inc i
       if not ok:
-        return TuiCommand(
-          kind: tckUsageError,
-          message: "unknown theme '" & args[i - 1] & "'; pick one of " &
-                   themeNames())
+        return TuiCommand(kind: tckUsageError,
+                          message: themeRefusal(args[i - 1]))
       flags.theme = theme
+      flags.themePinned = true
     else:
       if arg.startsWith("-"):
         block options:
@@ -471,11 +484,21 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
           if isTheme:
             let (ok, theme) = parseTheme(themeName)
             if not ok:
+              return TuiCommand(kind: tckUsageError,
+                                message: themeRefusal(themeName))
+            flags.theme = theme
+            flags.themePinned = true
+            break options
+          # PLAT-46 deliverable 9.
+          let (isPalette, paletteName) = optionValue(arg, "--palette")
+          if isPalette:
+            let (okPalette, palette) = parsePalette(paletteName)
+            if not okPalette:
               return TuiCommand(
                 kind: tckUsageError,
-                message: "unknown theme '" & themeName & "'; pick one of " &
-                         themeNames())
-            flags.theme = theme
+                message: "unknown palette '" & paletteName &
+                         "'; pick one of " & paletteNames())
+            flags.palette = palette
             break options
           # PLAT-14 / CodeTracer-TUI-Graphics.md §2.2. An explicit tier beats
           # every probe, including the multiplexer and SSH ones

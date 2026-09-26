@@ -127,8 +127,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-09-23"
-  MeasuredBinaryBytes = 15_066_024
+  MeasurementDate = "2026-09-26"
+  MeasuredBinaryBytes = 15_247_872
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -183,8 +183,24 @@ const
     ## this binary gained, and no data: no corpus, fixture or `staticRead`
     ## table is linked in. Stripped: 14_143_088. The ceiling keeps the band's
     ## 8.02% over the new anchor.
+    ##
+    ##   15_224_400  2026-09-26: `dev` at 83a11a590, built fresh for the
+    ##               comparison below (PLAT-4/6/45 growth since 09-23, never
+    ##               re-anchored; inside the band)
+    ##   15_247_872  2026-09-26: PLAT-46, the terminal painted from the design
+    ##               system
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. PLAT-46 costs +23_472 bytes (+0.154%) over
+    ## the same `dev` built the same way: the generated token module
+    ## (`src/frontend/styles/generated/design_tokens.nim`, 137 tokens x 2
+    ## modes of `#rrggbb` strings and their enum names), the role table
+    ## (`app/theme/roles.nim`), the derived-rung cache and OKLab arithmetic
+    ## (`palette.nim`, `colour_math.nim`; ~62 KB of symbols between them, most
+    ## of it two 24 KB `.bss` tables that occupy no file bytes), and the query
+    ## round (`host/terminal_probe.nim`), less the four hand-written tint
+    ## tables and `roleFor` it deleted. The ceiling keeps 8.02% over the anchor.
 
-  BinaryCeilingBytes = 16_274_000
+  BinaryCeilingBytes = 16_470_000
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

@@ -719,9 +719,16 @@ lint_step "Value presentation boundary: one pipeline, pure, with no surface bypa
 lint_step "TUI layer split: the decision half of each decide/perform pair does no I/O" \
 	bash ci/test/tui-layer-split-boundary.sh
 
-# The desktop's stylus AND the terminal front-end's `design_tokens.nim` are
-# regenerated from the pinned `libs/codetracer-design-system` revision in one
-# resolver run; the gate fails when either committed output differs.
+# PLAT-46: the terminal front-end paints from the design system and nothing
+# else. The first gate is a source scan with its own positive controls (no
+# hand-written `#rrggbb` under `tui/app/`, no ANSI colour name painted by a view,
+# no reverse lookup); the second regenerates the desktop's stylus AND the TUI's
+# `design_tokens.nim` from the pinned `libs/codetracer-design-system` revision
+# in one resolver run and fails when either committed output differs — the
+# staleness question the generator's header said was a good gate to have.
+lint_step "TUI design tokens: no hand-written colour, no ANSI-name painting under tui/app" \
+	bash ci/test/tui-design-tokens-boundary.sh
+
 lint_step "Design tokens: the committed stylus and the TUI token module are what the pinned design system generates" \
 	bash ci/test/design-tokens-fresh.sh
 
