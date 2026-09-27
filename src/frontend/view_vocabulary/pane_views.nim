@@ -134,7 +134,11 @@ const
     ## NAME in `admission.Rejections` — "Editor" and "Timeline / scrubber" —
     ## so this set is that table's consequence rather than a preference.
 
-  PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput}
+  PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
+                                            # PLAT-45 — the desktop's panes.
+                                            paneVcs, paneAgentActivity,
+                                            paneTerminalOutput,
+                                            paneTestResults, paneConstraints}
     ## **Panes this front-end deliberately does not draw, with the reason
     ## recorded at the dispatch arm.**
     ##
@@ -144,8 +148,12 @@ const
     ## having to be justified out loud and counted against `PaneKind`, not a
     ## reader trusting that somebody thought about it.
     ##
-    ## Both are edit-mode panes whose subject is the working tree, and the only
-    ## session in scope is a replay one. See the dispatch arm.
+    ## `paneBuildOutput` is an edit-mode pane whose subject is the working
+    ## tree, and the only session in scope is a replay one. The five PLAT-45
+    ## added are the desktop's own panes — placed by the shared default in
+    ## every front-end so every product opens with the same panes — whose
+    ## ViewModels the headless replay session does not own. See the two
+    ## dispatch arms.
 
   PaneAccountedFor*: set[PaneKind] =
     PaneVocabularyPanes + PaneNativePanes + PaneAcceptedExceptions
@@ -685,3 +693,21 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
         "not build the working tree and will not claim to"),
       entries: {pkText},
       report: "accepted exception: edit-mode pane, no replay-session source")
+  of paneVcs, paneAgentActivity, paneTerminalOutput, paneTestResults,
+     paneConstraints:
+    # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
+    #
+    # The shared default (`layout_model.sharedDefaultLayout`) places these five
+    # because the desktop's default did, and "every product opens with the
+    # same panes" is only literally true if a front-end without a view still
+    # puts the pane where it goes. Their ViewModels are the desktop's; the
+    # headless replay session owns none (`headless_app.paneViewModel` answers
+    # nil for each). So this is a REPORT that names the pane and why — the
+    # same rule the GPUI capability (`gpui/app/capability.nim`) states.
+    PaneView(
+      pane: kind,
+      root: viewText($kind & ".report",
+        "the " & $kind & " pane is drawn by the desktop front-end; this " &
+        "front-end has no view for it yet"),
+      entries: {pkText},
+      report: "accepted exception: desktop pane, no native view")

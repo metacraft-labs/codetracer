@@ -357,6 +357,18 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # replay session has no ViewModel for that pane* — and `paneIsLive`
     # reports false.
     nil
+  of paneVcs, paneAgentActivity, paneTerminalOutput, paneTestResults,
+     paneConstraints:
+    # PLAT-45. NIL, FOR THE SAME REASON AS THE BUILD PANE AND SAID AS PLAINLY.
+    #
+    # These are the five panes the desktop's default places and the shared
+    # default therefore places everywhere. Their ViewModels are the desktop's
+    # (GoldenLayout components with their own services), and the headless
+    # replay session owns none of them — so a native front-end draws each as
+    # a REPORT leaf naming the pane and the reason
+    # (`layout_model.PaneCapability`), and this answers what is true: no
+    # ViewModel here, `paneIsLive` false.
+    nil
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =
   ## Whether the pane has a ViewModel to render. False for every pane of a

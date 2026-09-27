@@ -732,6 +732,9 @@ lint_step "TUI design tokens: no hand-written colour, no ANSI-name painting unde
 lint_step "Design tokens: the committed stylus and the TUI token module are what the pinned design system generates" \
 	bash ci/test/design-tokens-fresh.sh
 
+lint_step "Default layout: the committed desktop default is what the shared default arrangement generates" \
+	bash ci/test/default-layout-fresh.sh
+
 # PLAT-39's LAW-R4 and PLAT-40's production-caller gate. Both are source scans
 # with their own positive and negative controls, need no build and no
 # toolchain beyond coreutils, grep and sed, and were wired into no lane — which

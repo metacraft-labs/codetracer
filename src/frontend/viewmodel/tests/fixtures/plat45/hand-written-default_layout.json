@@ -29,6 +29,7 @@
                         "content": [
                             {
                                 "type": "component",
+                                "size": "100%",
                                 "componentType": "genericUiComponent",
                                 "componentState": {
                                     "id": 0,
@@ -53,7 +54,6 @@
             },
             {
                 "type": "column",
-                "size": "55%",
                 "content": [
                     {
                         "type": "row",
@@ -115,7 +115,6 @@
                     },
                     {
                         "type": "stack",
-                        "size": "50%",
                         "content": [
                             {
                                 "type": "component",
@@ -149,7 +148,8 @@
                             }
                         ]
                     }
-                ]
+                ],
+                "size": "55%"
             },
             {
                 "type": "column",

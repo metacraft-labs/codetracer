@@ -56,11 +56,15 @@ type
     ## exactly the failure mode the GoldenLayout config has today, where an
     ## unrecognised `componentName` produces a blank tab.
     ##
-    ## The set is the panes `SessionViewModel` actually owns, not a wish list:
-    ## the eleven mounted by `viewmodel/app/isonim_app.nim` plus the editor
-    ## and the debug controls, which that module mounts elsewhere. The five
-    ## that make a replay navigable are the first five values, and
-    ## `ReplayCorePanes` below names them.
+    ## The set is the panes `SessionViewModel` actually owns — the eleven
+    ## mounted by `viewmodel/app/isonim_app.nim` plus the editor and the debug
+    ## controls, which that module mounts elsewhere — the two edit-mode panes
+    ## PLAT-16 added, and (PLAT-45) the five panes the desktop's default
+    ## places that no native front-end has a view for yet. Those five are
+    ## placed everywhere and drawn as REPORT leaves where a front-end cannot
+    ## draw them (`PaneCapability`), which is what lets every product open
+    ## with the same panes. The five that make a replay navigable are the
+    ## first five values, and `ReplayCorePanes` below names them.
     paneEditor = "editor"
     paneCalltrace = "calltrace"
     paneState = "state"
@@ -97,6 +101,27 @@ type
       ## in a pane, not a modal. A compiler error list is something a user
       ## navigates while editing, which is the argument for `paneBuildOutput`
       ## over an overlay."*
+    paneVcs = "vcs"
+      ## PLAT-45. The desktop's version-control pane (`Content.VCS`).
+      ##
+      ## THE FIVE VALUES BELOW ARE THE PANES `src/config/default_layout.json`
+      ## PLACED AND THIS ENUM LACKED, and they are here so the shared default
+      ## (`sharedDefaultLayout`) can say "the same panes" and mean it. Adding
+      ## them is the persisted-format change that takes `LayoutSchemaVersion`
+      ## to 4 (see its version history). They are LAST, for the reason the two
+      ## PLAT-16 values above give: no existing member's ordinal moves.
+      ##
+      ## Where they meet the desktop's `Content` ordinals is ONE table,
+      ## `headless_app/desktop_panes.PaneContent`, and nowhere else.
+    paneAgentActivity = "agentActivity"
+      ## PLAT-45. The desktop's Agent Activity pane (`Content.AgentActivity`).
+    paneTerminalOutput = "terminalOutput"
+      ## PLAT-45. The recorded program's terminal output
+      ## (`Content.TerminalOutput`).
+    paneTestResults = "testResults"
+      ## PLAT-45. The desktop's Test Results pane (`Content.TestResults`).
+    paneConstraints = "constraints"
+      ## PLAT-45. The desktop's Constraints pane (`Content.Constraints`).
 
   PaneRefKind* = enum
     ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
@@ -577,7 +602,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 3
+  LayoutSchemaVersion* = 4
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -616,6 +641,11 @@ const
     ## | 2 | adds `docked: []` (PLAT-4). The tree encoding is unchanged, so
     ##       the v1→v2 migration only supplies the missing array. |
     ## | 3 | `PaneKind` gains `fileTree` and `buildOutput` (PLAT-16). |
+    ## | 4 | `PaneKind` gains `vcs`, `agentActivity`, `terminalOutput`,
+    ##       `testResults` and `constraints` (PLAT-45) — the panes the
+    ##       desktop's default placed and the shared vocabulary could not
+    ##       name. The document's shape is unchanged, so `migrateV3toV4` is the
+    ##       identity that re-stamps the version, for the v2→v3 reason below. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -2197,6 +2227,17 @@ proc migrateV2toV3(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %3
 
+proc migrateV3toV4(doc: JsonNode): JsonNode =
+  ## PLAT-45. `PaneKind` gained the five panes the desktop's default places
+  ## (`vcs`, `agentActivity`, `terminalOutput`, `testResults`,
+  ## `constraints`). As with v2→v3 nothing about the SHAPE of a document
+  ## changed, so this re-stamps the version and touches nothing else: every
+  ## v3 document decodes unchanged, and the bump exists to make an OLDER build
+  ## refuse a v4 document that names one of the new panes as a whole
+  ## (`ldeUnknownVersion`) instead of dropping that pane (`ldeUnknownPane`).
+  result = copy(doc)
+  result["version"] = %4
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2217,6 +2258,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV1toV2(result)
     of 2:
       result = migrateV2toV3(result)
+    of 3:
+      result = migrateV3toV4(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -2390,3 +2433,293 @@ proc redo*(h: var LayoutHistory): bool =
   inc h.cursor
   h.value = h.replayPrefix()
   true
+
+# ---------------------------------------------------------------------------
+# PLAT-45 — ONE default arrangement, shared by every front-end, and the fold
+# ---------------------------------------------------------------------------
+#
+# Until PLAT-45 there were three defaults that shared nothing but this
+# module's tree type: the desktop's hand-written `src/config/default_layout.json`
+# (GoldenLayout, `Content` ordinals), the GPUI window's `defaultReplayLayout()`
+# and the terminal's three hand-written profile trees. A change to "the
+# default" had to be made three times, by hand, with nothing checking that it
+# was. What follows is the replacement: ONE authored arrangement
+# (`sharedDefaultLayout`), and each front-end's first screen a DERIVATION of it
+# — the desktop translates it into GoldenLayout's config at build time
+# (`headless_app/desktop_panes`), GPUI docks it, and the terminal lays it out
+# as it is, folding only when its cells cannot give some pane its minimum.
+#
+# ## Why the fold order is in the model and the cell arithmetic is not
+#
+# Layout-ViewModel §8.2 (PLAT-6) refused to make the terminal's profiles
+# re-flows of a shared default, because that would mean "either the shared
+# default learns what a cell is … or the terminal renders panes it cannot
+# fit". PLAT-45 avoids both horns rather than accepting one. The model gains a
+# UNITLESS fold order — which region gives up its own place first: a RANKING,
+# not a size — and the terminal's binding keeps every cell: it decides HOW
+# MANY folds its cells require (`tui/app/layout/profile.depthFor`). A folded
+# pane is never dropped; it becomes a tab of the region it folds into.
+
+type
+  FoldStep* = object
+    ## One step of the fold: the region holding `region` gives up its own
+    ## place and its panes become tabs of the region holding `into`.
+    ##
+    ## Regions are named BY A PANE THEY HOLD rather than by a path, because a
+    ## path is exactly what the earlier steps of a fold change. A pane is
+    ## stable under every step (the fold's first law), so "the region that
+    ## holds the constraints pane" means the same region at every depth.
+    region*: PaneKind
+    into*: PaneKind
+
+  SharedLayout* = object
+    ## The authored default: a tree and its fold order.
+    tree*: LayoutNode
+    folds*: seq[FoldStep]
+      ## LOWEST-RANKED FIRST: `folds[0]` is the first region to give up its
+      ## own place when a front-end is too small to show everything. The
+      ## order is DATA (PLAT-45's risk note: "if the folded compact result is
+      ## worse … the order changes, not the rule").
+
+  FrontEndKind* = enum
+    ## The three products that open the shared default.
+    feDesktop = "desktop"
+    feGpui = "gpui"
+    feTerminal = "terminal"
+
+  PaneCapability* = object
+    ## Which `PaneKind` values a front-end can DRAW, stated by the front-end
+    ## (PLAT-45 deliverable 2). A pane of the shared default that a front-end
+    ## cannot draw is still PLACED — as a report leaf naming the pane and the
+    ## reason (`reportLeaves`) — never silently omitted, so "every product
+    ## opens with the same panes" is literally true and an absent view is
+    ## visible rather than a gap. PLAT-41's data-or-report rule, one level up.
+    frontEnd*: FrontEndKind
+    drawable*: set[PaneKind]
+    reasons*: array[PaneKind, string]
+      ## Why each pane NOT in `drawable` is not drawn. Empty for a drawable
+      ## pane. A test asserts every undrawable pane has one, so a report leaf
+      ## can never say nothing.
+
+  ReportLeaf* = object
+    ## A placed pane a front-end draws as a report instead of data.
+    pane*: PaneKind
+    frontEnd*: FrontEndKind
+    reason*: string
+
+const
+  EditModeHiddenPanes*: set[PaneKind] = {
+    paneState, paneScratchpad, paneEventLog, paneTimeline, paneTerminalOutput,
+    paneCalltrace, paneAgentActivity}
+    ## The replay-only panes an EDITING session does not show — the
+    ## `PaneKind` image of the desktop's
+    ## `frontend.editModeHiddenContentIds()` through the one table where the
+    ## two id spaces meet (`desktop_panes.PaneContent`). Written out here
+    ## because this module must not import the desktop's `Content`; the
+    ## equality with the desktop's set is asserted, not assumed
+    ## (`test_shared_default_layout.nim`).
+
+proc sharedDefaultLayout*(): SharedLayout =
+  ## **THE ONE AUTHORED DEFAULT.** Every product — the desktop, the GPUI
+  ## window and the terminal — opens with this arrangement; each then lets the
+  ## user rearrange freely and remembers its OWN last layout in its own file.
+  ##
+  ## ## Its content (PLAT-45 deliverable 3, recorded in the milestone's Status)
+  ##
+  ## The desktop's arrangement as users already know it — the hand-written
+  ## `default_layout.json` this replaces, plus the editor GoldenLayout inserts
+  ## at runtime (`utils.openNewLayoutContainer` puts it at index 1 of the root
+  ## row with an equal share):
+  ##
+  ##   Files | VCS  ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent Activity)
+  ##                           over Event Log | Timeline | Terminal Output
+  ##                         ‖ Test Results over Constraints
+  ##
+  ## (`|` separates tabs of one stack, `‖` side-by-side regions.)
+  ##
+  ## ## The weights are the desktop's RENDERED shares
+  ##
+  ## The hand-written file declared 20% / 55% / 25% for the three columns it
+  ## held, and GoldenLayout's `addChild` then gave the editor `1/4` of the row
+  ## and scaled the others by `3/4` — so what a desktop user sees is 15 / 25 /
+  ## 41.25 / 18.75. Those are the weights here, because they are what the
+  ## arrangement looks like; `desktop_panes.layoutNodeToGoldenConfig`
+  ## re-derives the 20 / 55 / 25 the desktop's config must declare for the
+  ## runtime to arrive at them. Zero weights (the right column's two stacks)
+  ## are the model's "equal share", which is exactly what an unsized
+  ## GoldenLayout child means.
+  ##
+  ## ## Titles are empty on purpose
+  ##
+  ## `LayoutNode.title` empty means "use the pane's own default, which this
+  ## module does not decide". Each front-end names its panes (the terminal
+  ## says "Call Stack", the desktop "CALLTRACE"); what is shared is WHERE the
+  ## pane is, not what its tab says.
+  ##
+  ## ## The fold order
+  ##
+  ## Lowest-ranked first. The right column's two NS9 panes go first (into one
+  ## stack, then into the event stack) because they are the least-used in a
+  ## replay; the file tree next (into the call-trace stack, which is also
+  ## navigation); then the call trace behind the state pane, the event stack
+  ## behind it too, and last everything behind the editor — the one pane a
+  ## replay cannot be read without, so it is the one that never becomes a
+  ## hidden tab.
+  let tree = row([
+    stack([pane(paneFileTree), pane(paneVcs)], weight = 15.0),
+    pane(paneEditor, weight = 25.0),
+    column([
+      row([
+        stack([pane(paneState), pane(paneScratchpad)], weight = 50.0),
+        stack([pane(paneCalltrace), pane(paneAgentActivity)], weight = 50.0)],
+        weight = 50.0),
+      stack([pane(paneEventLog), pane(paneTimeline),
+             pane(paneTerminalOutput)], weight = 50.0)],
+      weight = 41.25),
+    column([
+      stack([pane(paneTestResults)]),
+      stack([pane(paneConstraints)])],
+      weight = 18.75)])
+  SharedLayout(tree: tree, folds: @[
+    FoldStep(region: paneConstraints, into: paneTestResults),
+    FoldStep(region: paneTestResults, into: paneEventLog),
+    FoldStep(region: paneFileTree, into: paneCalltrace),
+    FoldStep(region: paneCalltrace, into: paneState),
+    FoldStep(region: paneEventLog, into: paneState),
+    FoldStep(region: paneState, into: paneEditor)])
+
+proc sharedEditLayout*(): SharedLayout =
+  ## EDIT MODE'S shared default (PLAT-45 deliverable 5's second half).
+  ##
+  ## The same arrangement with the replay-only panes gone — which is what the
+  ## desktop's edit mode shows, because it derives its edit layout from the
+  ## debug default by hiding `editModeHiddenContentIds` — plus the terminal's
+  ## build pane in front of the Test Results stack, where `:build`'s verdict
+  ## lands. Its weights are the desktop's edit-mode shares (the hidden middle
+  ## column leaves Files 20 / Editor 55 / NS9 25). The placement relation is
+  ## asserted equal to "the debug default minus `EditModeHiddenPanes`, plus
+  ## the build pane" by `test_shared_default_layout.nim`, so the two trees
+  ## cannot drift apart silently.
+  let tree = row([
+    stack([pane(paneFileTree), pane(paneVcs)], weight = 20.0),
+    pane(paneEditor, weight = 55.0),
+    column([
+      stack([pane(paneBuildOutput), pane(paneTestResults)]),
+      stack([pane(paneConstraints)])],
+      weight = 25.0)])
+  SharedLayout(tree: tree, folds: @[
+    FoldStep(region: paneConstraints, into: paneBuildOutput),
+    FoldStep(region: paneFileTree, into: paneBuildOutput),
+    FoldStep(region: paneBuildOutput, into: paneEditor)])
+
+proc regionOf*(tree: LayoutNode; kind: PaneKind): LayoutNode =
+  ## The REGION holding `kind`: its stack when it is a tab, else its own leaf.
+  ## nil when the pane is not placed.
+  let leaf = find(tree, kind)
+  if leaf.isNil:
+    return nil
+  let parent = parentOf(tree, leaf)
+  if not parent.isNil and parent.kind == lnStack: parent else: leaf
+
+proc visibleRegionCount*(tree: LayoutNode): int =
+  ## How many regions occupy space: stacks, and leaves that are not tabs. The
+  ## quantity the fold's monotonicity law is stated over.
+  if tree.isNil:
+    return 0
+  case tree.kind
+  of lnPane, lnStack: 1
+  of lnRow, lnColumn:
+    var n = 0
+    for c in tree.children:
+      n += visibleRegionCount(c)
+    n
+
+proc foldStep(tree: LayoutNode; step: FoldStep) =
+  ## One step, in place. A step whose two regions are already one (or whose
+  ## panes are absent) changes nothing — `foldLayout` is TOTAL.
+  let r = regionOf(tree, step.region)
+  let t = regionOf(tree, step.into)
+  if r.isNil or t.isNil or r == t:
+    return
+  let parent = parentOf(tree, r)
+  if parent.isNil:
+    return
+  var moved: seq[LayoutNode] = @[]
+  if r.kind == lnStack:
+    for c in r.children:
+      moved.add clone(c)
+  else:
+    moved.add clone(r)
+  for m in moved:
+    m.weight = 0.0
+  # INTO THE TARGET FIRST, then detach: the collapse below may rewrite the
+  # target's parent IN PLACE with the target's contents (`becomes`), and it
+  # must copy the target as it is after the panes arrived.
+  if t.kind == lnStack:
+    for m in moved:
+      t.children.add m
+  else:
+    let inner = copyOf(t)
+    inner.weight = 0.0
+    t.becomes(LayoutNode(kind: lnStack, weight: t.weight, activeIndex: 0,
+                         children: @[inner] & moved))
+  var kept: seq[LayoutNode] = @[]
+  var totalBefore = 0.0
+  for c in parent.children:
+    totalBefore += effectiveWeight(c)
+    if c != r:
+      kept.add c
+  if parent.kind != lnStack:
+    renormalise(kept, totalBefore)
+  parent.children = kept
+  discard normaliseInPlace(tree)
+
+proc maxFoldDepth*(s: SharedLayout): int =
+  ## The deepest meaningful fold. `foldLayout` clamps to it.
+  s.folds.len
+
+proc foldLayout*(s: SharedLayout; depth: int): LayoutNode =
+  ## **THE FOLD** (PLAT-45 deliverable 4). Pure and total: a fresh tree, the
+  ## input untouched, any integer accepted (negative is 0, beyond the order is
+  ## the deepest fold).
+  ##
+  ## Laws, each asserted over every depth by `test_shared_default_layout.nim`
+  ## and each with a mutation arm in `run-plat45-layout-mutations.py`:
+  ##
+  ##   1. every pane of the input is in every output (a folded pane is a tab,
+  ##      never dropped);
+  ##   2. depth 0 is the identity;
+  ##   3. folding is monotone — depth n+1 has no more visible regions than
+  ##      depth n;
+  ##   4. the result validates.
+  result = clone(s.tree)
+  let steps = min(max(depth, 0), s.folds.len)
+  for i in 0 ..< steps:
+    foldStep(result, s.folds[i])
+
+proc paneCapability*(frontEnd: FrontEndKind; drawable: set[PaneKind];
+                     reasons: openArray[(PaneKind, string)]): PaneCapability =
+  ## A front-end's capability declaration.
+  result = PaneCapability(frontEnd: frontEnd, drawable: drawable)
+  for (p, why) in reasons:
+    result.reasons[p] = why
+
+proc canDraw*(c: PaneCapability; kind: PaneKind): bool =
+  kind in c.drawable
+
+proc reportLeaves*(tree: LayoutNode; c: PaneCapability): seq[ReportLeaf] =
+  ## Every placed pane this front-end cannot draw, in tree order — the slots
+  ## it fills with a report rather than data. Never a pane it can draw, and
+  ## never a pane that is not placed.
+  for p in allPanes(tree):
+    if not c.canDraw(p):
+      result.add ReportLeaf(pane: p, frontEnd: c.frontEnd,
+                            reason: c.reasons[p])
+
+proc reportText*(r: ReportLeaf; name = ""): string =
+  ## What the slot says. Names the pane AND the reason, because a report that
+  ## said only "unavailable" would name nothing a user can act on. `name` is
+  ## the front-end's own name for the pane (the terminal says "Test Results");
+  ## empty means the pane's vocabulary spelling.
+  (if name.len > 0: name else: $r.pane) & ": not drawn by the " &
+    $r.frontEnd & " front-end — " & r.reason
