@@ -2,11 +2,6 @@
   pkgs,
   rustPkgs ? null,
 }:
-let
-  # Anything inside a committed `.ct` container directory: the payload
-  # a recorder wrote, plus the source snapshot it copied alongside.
-  recordedTraceArtifacts = "\\.ct/";
-in
 {
   # Exclude third-party and generated files from all hooks
   excludes = [
@@ -263,22 +258,38 @@ in
 
     # General hooks
     #
-    # Committed recordings are recorder *output*, not source, and must
-    # stay byte-for-byte what the recorder wrote — that is the whole
-    # basis on which a fixture recording can be trusted as evidence.
-    # Whitespace hooks would silently edit them: `end-of-file-fixer`
-    # appends a newline the writer did not emit, so a regenerated
-    # recording never matches the committed one; and
-    # `trim-trailing-whitespace` would corrupt any trace carrying a
-    # recorded string value that ends in a space.
-    trim-trailing-whitespace = {
-      enable = true;
-      excludes = [ recordedTraceArtifacts ];
-    };
-    end-of-file-fixer = {
-      enable = true;
-      excludes = [ recordedTraceArtifacts ];
-    };
+    # THERE IS DELIBERATELY NO `.ct` EXEMPTION ON THE TWO WHITESPACE HOOKS,
+    # AND THAT IS A CORRECTION, NOT AN OVERSIGHT. Read this before adding one
+    # back.
+    #
+    # Both hooks used to carry `excludes = [ "\\.ct/" ]`, introduced with the
+    # reasoning that a committed recording is recorder *output* and must stay
+    # byte-for-byte what the recorder wrote. The reasoning is sound; the
+    # exemption was not, on two independent counts, both measured on this tree.
+    #
+    # 1. IT MATCHED NOTHING. `\.ct/` needs a `/` after `.ct`, i.e. a path
+    #    *inside* a `.ct` directory. Every committed recording here is a `.ct`
+    #    *file*, so at `c6c45fd13` `git ls-files | grep -cE '\.ct/'` is 0 while
+    #    `grep -cE '\.ct($|/)'` is 21. The exemption has never been in
+    #    force for a single path, so removing it changes no behaviour — and
+    #    "correcting" the regex to `\.ct($|/)` would not restore an intended
+    #    behaviour, it would newly exempt 21 files that the committed-binary
+    #    policy (metacraft-dev-guidelines/policies/repo-requirements.md §4.3)
+    #    exists to retire.
+    #
+    # 2. IT WAS NEVER NEEDED. Both hooks are `types = [ "text" ]`, and every
+    #    one of those 21 recordings is binary (git reports `-` for their
+    #    numstat; `file` says `data`), so pre-commit's `identify` never tags
+    #    them `text` and never passes them to either hook. The type filter,
+    #    not the exclude, is what protects a recording — and it protects it
+    #    whatever the file is called.
+    #
+    # Verified both directions on an isolated repo with the same pre-commit
+    # 4.3.0 / pre-commit-hooks 6.0.0 entry points: a *text* `foo.ct` is
+    # rewritten under `\.ct/` and under no exclude at all, and skipped under
+    # `\.ct($|/)`; a *binary* `foo.ct` is untouched in all three cases.
+    trim-trailing-whitespace.enable = true;
+    end-of-file-fixer.enable = true;
     check-yaml.enable = true;
     check-added-large-files = {
       enable = true;
