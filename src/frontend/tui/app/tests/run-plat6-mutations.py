@@ -266,14 +266,12 @@ ROUTE_CASES = [R_OFF, R_SAME, R_DOCK, R_FOCUS, R_SPEC43, R_VERBS, R_RESIZE,
                R_CLICKWHEEL, R_PROMPT, R_EDGES, C_COUNT]
 
 # The persistence suite (Tier 1) — the layout DOCUMENT.
-P_KEY = ("the document is keyed by the recording, so two recordings never "
-         "share one")
+P_KEY = "ONE document for the terminal product, never keyed by the recording"
 P_TRIP = "a docked pane survives a restart, through the product's own `:` prompt"
 P_FREEZE = "a restored arrangement freezes the responsive profile"
 P_BAD = "an unreadable document is reported BY KIND and is never overwritten"
 P_RESET = "no gesture, no document — and `:reset-layout` deletes a stale one"
-P_OFF = ("OFF BY DEFAULT: with no binding nothing is read and nothing is "
-         "written")
+P_OFF = "WITH NO BINDING nothing is read and nothing is written"
 
 # THE PROPERTY GUARDING THE USER'S FILE ON THE ONE PATH `adoptLayoutDocument`
 # CANNOT REACH. Every other unreadable arm sets the quarantine flag inside
@@ -686,16 +684,16 @@ MUTATIONS = [
         "M22", BIND,
         "  if b.userModified:\n"
         "    return false\n"
-        "  b.history = newLayoutHistory(initLayout(profileLayout(selected)))",
-        "  b.history = newLayoutHistory(initLayout(profileLayout(selected)))",
+        "  if depthFor(pmDebug, selected) == before:",
+        "  if depthFor(pmDebug, selected) == before:",
         C_PROFILE,
         "a resize re-flows a layout the user has modified",
     ),
     Mutation(
         "M23", BIND,
         "  b.userModified = false\n"
-        "  action(lasApplied, \"layout reset to the \" & $b.profile & \" profile\")",
-        "  action(lasApplied, \"layout reset to the \" & $b.profile & \" profile\")",
+        "  action(lasApplied, \"layout reset to the shared default\")",
+        "  action(lasApplied, \"layout reset to the shared default\")",
         C_PROFILE,
         "`:reset-layout` does not un-freeze the profile",
     ),
@@ -921,15 +919,14 @@ MUTATIONS = [
         suite=PERSIST,
     ),
     Mutation(
-        "M40", DOC,
-        '  layoutDocumentSlug(canonicalTraceFolder) & "-" &\n'
-        "    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & "
-        "LayoutDocumentExt",
-        "  layoutDocumentSlug(canonicalTraceFolder) & LayoutDocumentExt",
+        "M40", STORE,
+        "  layoutStateRoot() / LayoutDocumentFileName",
+        "  layoutStateRoot() / \"tui-layouts\" / LayoutDocumentFileName",
         P_KEY,
-        "the key loses its digest and becomes the recording's BASENAME, so "
-        "`/a/calc.ct` and `/b/calc.ct` share one document and one recording's "
-        "arrangement silently applies to another",
+        "PLAT-45 re-pointed this arm when the per-recording key it guarded was "
+        "deleted: the document leaves the state root for PLAT-6's old "
+        "`tui-layouts/` subdirectory, so the terminal no longer keeps its ONE "
+        "document where every product's state lives",
         suite=PERSIST,
     ),
     Mutation(
@@ -948,9 +945,13 @@ MUTATIONS = [
     Mutation(
         "M42", STORE,
         "  if not rt.layoutBindingEnabled():\n"
-        "    # WITH THE FLAG OFF NOTHING IS READ, and no path is even computed "
-        "— so the\n"
-        "    # state directory is not touched, not even by a `stat`.\n"
+        "    # WITH NO BINDING NOTHING IS READ, and no path is even computed — "
+        "so the\n"
+        "    # state directory is not touched, not even by a `stat`. The "
+        "shipped binary\n"
+        "    # always has one since PLAT-45; a Tier-1 host that built a runtime "
+        "without\n"
+        "    # one is a session with nothing to restore into.\n"
         '    return LayoutRestoreReport(status: lrsNoDocument, path: "", '
         'message: "")',
         "  if false:\n"
@@ -1367,15 +1368,13 @@ DECLARED_SURVIVORS = [
         suite=PERSIST,
     ),
     Mutation(
-        "S13", DOC,
-        "    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & "
-        "LayoutDocumentExt",
-        "    digest[0 ..< min(digest.len, LayoutKeyDigestChars)] & "
-        "LayoutDocumentExt",
+        "S13", STORE,
+        "  layoutStateRoot() / LayoutDocumentFileName",
+        "  joinPath(layoutStateRoot(), LayoutDocumentFileName)",
         "",
-        "`min`'s arguments commuted — the same integer for every input. IT "
-        "MUST SURVIVE, and it is THE CONTROL FOR M40, which rewrites the "
-        "expression this slice is part of.",
+        "`/` spelled as the `joinPath` it is. IT MUST SURVIVE, and it is THE "
+        "CONTROL FOR M40, which rewrites the same expression (re-pointed with "
+        "M40 by PLAT-45).",
         suite=PERSIST,
     ),
     Mutation(
