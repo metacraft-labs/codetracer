@@ -312,7 +312,13 @@ type
     # the program exits.
     #
     # Appended at the end, for the reason every note above gives.
-    aLaunchUnderHcr               # Build > Launch Under Live Edit (HCR)…
+    aLaunchUnderHcr,              # Build > Launch Under Live Edit (HCR)…
+    # PLAT-45. View > Reset Layout: return THIS product to the one shared
+    # default arrangement every CodeTracer front-end opens with, deleting only
+    # the desktop's own saved layout files (the terminal and the GPUI window
+    # keep theirs, and are not touched). Appended at the end, for the reason
+    # every note above gives.
+    aResetLayout                  # View > Reset Layout
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

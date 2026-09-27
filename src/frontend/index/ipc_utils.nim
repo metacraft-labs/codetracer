@@ -467,6 +467,9 @@ proc configureIpcMain* =
     # `ui/layout.nim`'s `initLayout`.
     "save-auto-hide-state"
     "request-auto-hide-state"
+    # PLAT-45: View > Reset Layout — `index/window.onResetLayout` deletes the
+    # desktop's own saved layout files and answers `reset-layout-done`.
+    "reset-layout"
     "exit-error"
     "started"
     "open-tab"

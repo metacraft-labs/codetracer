@@ -3738,6 +3738,27 @@ jobs:
         # against an all-skipped run).
         run: nix develop .#devShells.x86_64-linux.default --command just test-cli-record
 
+      - name: The desktop opens the one shared default arrangement, and follows it
+        if: ${{ !cancelled() }}
+        # The desktop's first-run default is GENERATED from the arrangement the
+        # terminal and the GPUI window also open with, and `ci/lint/nim.sh`
+        # already fails when the committed file is stale. This is the half a
+        # staleness check cannot see: that the REAL Electron app, launched with
+        # no saved layout, opens exactly that file's arrangement; that a
+        # rearrangement is remembered across a restart in the desktop's own
+        # file; that View > Reset Layout returns the shared default in place;
+        # and — through a SCRATCH build of the generator with one pane moved
+        # in the shared tree — that the desktop's default follows the shared
+        # tree rather than a hand-kept file.
+        #
+        # Here because this job has what it needs and the GUI jobs do not:
+        # `just build-once` above produced `src/build-debug`, which the
+        # prefix the recipe assembles is built from (the GUI jobs launch a
+        # packaged, wrapped `ct` whose main script cannot be swapped), and the
+        # dev shell's interpreter carries the Python recorder the specs record
+        # `test-programs/calc` with. The recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat45-capture-electron
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

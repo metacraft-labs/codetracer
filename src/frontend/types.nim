@@ -2132,6 +2132,14 @@ type
     openViewOnCompleteMove*: array[EditorView, bool]
     openComponentIds*:        array[Content, seq[int]]
     saveLayout*:     bool
+    layoutResetPending*: bool
+      ## PLAT-45. Set by View > Reset Layout between asking the index process
+      ## to delete the saved layout files and applying the shared default it
+      ## sends back (in place — the window is not reloaded). While it
+      ## is set NOTHING persists the layout — neither the `stateChanged`
+      ## write-through nor the `beforeunload` snapshot — or the arrangement
+      ## being reset would be written straight back into the file the reset
+      ## just deleted.
     isReparenting*:  bool
     isLoadingLayout*: bool
       ## Set while GoldenLayout is being handed a WHOLE new layout, so the

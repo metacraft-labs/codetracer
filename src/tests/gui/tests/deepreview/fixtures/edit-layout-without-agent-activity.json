@@ -29,7 +29,6 @@
                         "content": [
                             {
                                 "type": "component",
-                                "size": "100%",
                                 "componentType": "genericUiComponent",
                                 "componentState": {
                                     "id": 0,

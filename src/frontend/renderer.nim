@@ -326,6 +326,9 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # those panels.  Never persist a review's layout.
   if data.deepReviewActive:
     return
+  # PLAT-45: a reset in flight persists nothing (see `layoutResetPending`).
+  if data.ui.layoutResetPending:
+    return
   let isEditMode = data.ui.mode == EditMode
   ipc.send "CODETRACER::save-config", js{
     name: cstring"default_layout",
@@ -356,6 +359,10 @@ proc saveCurrentLayoutConfig*(data: Data) =
   ## bytes, and the reload came back at 317px. The drag was the arrangement,
   ## and it was the arrangement that was lost.
   if data.ui.isNil or data.ui.layout.isNil or data.ui.layoutConfig.isNil:
+    return
+  # PLAT-45: the window is being reloaded onto the default; the snapshot this
+  # would take is the arrangement being thrown away.
+  if data.ui.layoutResetPending:
     return
   try:
     data.ui.resolvedConfig = data.ui.layout.saveLayout()

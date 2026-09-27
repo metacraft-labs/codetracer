@@ -75,6 +75,20 @@ export function ensureDefaultLayout(codetracerInstallDir: string): void {
 }
 
 /**
+ * PLAT-45: remove the user's saved `default_layout.json` (and its `.broken`
+ * sibling) so the next launch takes the product's own first-run path — the
+ * index process copies `<prefix>/config/default_layout.json` itself.
+ */
+export function removeUserLayout(): void {
+  const { userLayoutPath } = currentLayoutPaths();
+  for (const victim of [userLayoutPath, userLayoutPath + ".broken"]) {
+    if (fs.existsSync(victim)) {
+      fs.unlinkSync(victim);
+    }
+  }
+}
+
+/**
  * Drop the saved auto-hide state so the next launch starts with nothing
  * pinned.
  *

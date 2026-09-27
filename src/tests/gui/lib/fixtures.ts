@@ -36,6 +36,7 @@ import { requiresRR } from "./lang-support";
 import {
   ensureDefaultConfig,
   ensureDefaultLayout,
+  removeUserLayout,
   resetAutoHideState,
   resetEditLayout,
   restoreUserLayout,
@@ -324,6 +325,31 @@ interface CodetracerOptions {
    * the reset does not undo them.
    */
   preserveEditLayout: boolean;
+  /**
+   * PLAT-45: launch with NO saved layout at all — the user's
+   * `default_layout.json` is removed rather than replaced with the bundled
+   * one, so the index process copies `<prefix>/config/default_layout.json`
+   * itself on first run, exactly as it does on a machine that has never run
+   * CodeTracer. This is what makes "the generated default is the one the
+   * desktop loads" a statement about the product's own first-run path.
+   */
+  noUserLayout: boolean;
+  /**
+   * PLAT-45: leave the user's saved `default_layout.json` exactly as an
+   * earlier test of the same worker left it — neither replaced with the
+   * bundled default nor removed — so a spec can observe the desktop
+   * RESTORING its own last layout on the next start.
+   */
+  preserveUserLayout: boolean;
+  /**
+   * PLAT-45: the `CODETRACER_PREFIX` the launched `ct` resolves its
+   * `config/` (and every other prefix-relative asset) from. Empty means the
+   * default — the prefix `ct` derives from its own location. The capture lane
+   * points it at a prefix whose `config/default_layout.json` came from a
+   * scratch build of the shared default, to show the desktop's default
+   * follows the shared tree.
+   */
+  codetracerPrefixOverride: string;
 }
 
 /**
@@ -672,6 +698,26 @@ async function getEditorWindow(app: ElectronApplication): Promise<Page> {
   throw new Error("timed out waiting for Electron's editor window to navigate");
 }
 
+/** PLAT-45: the running test's `codetracerPrefixOverride`, or "". */
+let activePrefixOverride = "";
+
+/**
+ * The `ct` a launch runs. With a `codetracerPrefixOverride` it is the
+ * PREFIX'S OWN `bin/ct`, not the build's: `ct` derives the Electron main
+ * script it starts (`<prefix>/src/index.js`, `common/paths.nim`
+ * `electronIndexPath`) from its OWN location (`getAppDir().parentDir`), not
+ * from `CODETRACER_PREFIX`. Launching the build's `ct` with an overridden
+ * prefix therefore runs the build's main process against the prefix's
+ * renderer — two different `ClientAction` enums on the two ends of the
+ * config IPC, which is exactly the mismatch a prefix is not allowed to be.
+ */
+function launchCt(): string {
+  if (activePrefixOverride.length > 0) {
+    return path.join(activePrefixOverride, "bin", ctBinaryName);
+  }
+  return codetracerPath;
+}
+
 /**
  * Creates a clean environment for launching CodeTracer,
  * free of leftover trace-related vars.
@@ -698,6 +744,11 @@ function makeCleanEnv(
     env.CODETRACER_PREFIX = codetracerPrefix;
   } else {
     delete env.CODETRACER_PREFIX;
+  }
+  // PLAT-45: a test that asked for a specific prefix gets it (see the
+  // `codetracerPrefixOverride` option).
+  if (activePrefixOverride.length > 0) {
+    env.CODETRACER_PREFIX = activePrefixOverride;
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
@@ -1180,7 +1231,7 @@ async function launchTraceElectron(
   // On Windows, ct.exe spawns Electron as a child process (no execv),
   // which prevents Playwright from connecting via CDP.  Launch Electron
   // directly and pass the app directory so it picks up package.json.
-  const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const launchExe = (isWindows && electronExePath) ? electronExePath : launchCt();
   const launchArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
 
   const { result: app, durationMs: launchMs } = await timed(
@@ -1322,7 +1373,7 @@ async function launchTraceFolderElectron(traceFolderPath: string): Promise<Launc
     async () => importTraceFolder(traceFolder),
   );
 
-  const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const launchExe = (isWindows && electronExePath) ? electronExePath : launchCt();
   const launchArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
 
   const { result: app, durationMs: launchMs } = await timed(
@@ -1657,7 +1708,7 @@ async function launchWelcomeScreen(
   clearElectronSingletonLocks();
   console.log("# launching welcome screen");
 
-  const welcomeExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const welcomeExe = (isWindows && electronExePath) ? electronExePath : launchCt();
   const welcomeArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
 
   const app = await _electron.launch({
@@ -1706,7 +1757,7 @@ async function launchEditMode(
   clearElectronSingletonLocks();
   console.log(`# launching edit mode for ${folderPath}`);
 
-  const editExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const editExe = (isWindows && electronExePath) ? electronExePath : launchCt();
   const editArgs = (isWindows && electronExePath)
     ? [codetracerPrefix, "edit", folderPath]
     : ["edit", folderPath];
@@ -1753,7 +1804,7 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   // Windows branch launches ELECTRON directly rather than `ct`, so it passes
   // the internal ct -> Electron argument that `src/frontend/index/args.nim`
   // parses, which is unchanged and is not the retired option.
-  const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const drExe = (isWindows && electronExePath) ? electronExePath : launchCt();
   const drArgs = (isWindows && electronExePath)
     ? [codetracerPrefix, "--deepreview", jsonPath]
     : ["review", jsonPath];
@@ -1812,6 +1863,12 @@ export const test = base.extend<
   preserveAutoHideState: [false, { option: true }],
   editLayoutPath: ["", { option: true }],
   preserveEditLayout: [false, { option: true }],
+  noUserLayout: [false, { option: true }],
+  preserveUserLayout: [false, { option: true }],
+  // `CODETRACER_TEST_PREFIX` runs EVERY spec against a prepared prefix (e.g.
+  // one from `scripts/plat45-desktop-prefix.sh` carrying this checkout's
+  // desktop JavaScript) instead of the build's own; a spec's `test.use` wins.
+  codetracerPrefixOverride: [process.env.CODETRACER_TEST_PREFIX ?? "", { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -1889,11 +1946,15 @@ export const test = base.extend<
         preserveAutoHideState,
         editLayoutPath: seedEditLayoutFrom,
         preserveEditLayout,
+        noUserLayout,
+        preserveUserLayout,
+        codetracerPrefixOverride,
       },
       use,
       testInfo,
     ) => {
       let result: LaunchResult;
+      activePrefixOverride = codetracerPrefixOverride;
 
       // Ensure each test starts with the bundled default layout in the
       // worker-local config directory.  Earlier tests in the same worker may
@@ -1904,7 +1965,13 @@ export const test = base.extend<
       // may be missing the components they require (filesystem, state, etc.).
       try {
         ensureDefaultConfig(codetracerInstallDir);
-        ensureDefaultLayout(codetracerInstallDir);
+        if (preserveUserLayout) {
+          // PLAT-45: the saved arrangement is the subject; leave it.
+        } else if (noUserLayout) {
+          removeUserLayout();
+        } else {
+          ensureDefaultLayout(codetracerInstallDir);
+        }
         // The saved auto-hide state is the other half of the saved
         // arrangement — see `resetAutoHideState`. Without this a test that
         // pins a panel leaves it pinned for every later test in the worker.

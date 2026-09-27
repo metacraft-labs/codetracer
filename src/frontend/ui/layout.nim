@@ -1230,6 +1230,26 @@ proc swapLayout*(data: Data, config: GoldenLayoutResolvedConfig) =
   finally:
     data.ui.isLoadingLayout = false
 
+proc unpinAllPanels*(data: Data) =
+  ## Put every panel pinned to a screen edge back into the GoldenLayout tree.
+  ##
+  ## PLAT-45's desktop reset calls this BEFORE it swaps in the shared default:
+  ## a pinned panel lives outside the tree, so a swap alone would leave it
+  ## pinned AND bring a second copy of it back with the default arrangement.
+  ## Unpinned first, it is an ordinary tab of the outgoing tree, and the swap
+  ## replaces it like every other pane. `unpinPanel` owns the reparenting and
+  ## the auto-hide bookkeeping; this only walks a copy of the list, because
+  ## each unpin removes its panel from `autoHideState.panels`.
+  if autoHideState.isNil or data.ui.isNil or data.ui.layout.isNil:
+    return
+  let pinned = autoHideState.panels
+  for panel in pinned:
+    try:
+      unpinPanel(data.ui.layout, panel)
+    except CatchableError:
+      cwarn "layout: reset could not unpin '" & $panel.title & "': " &
+        getCurrentExceptionMsg()
+
 proc closeLayoutTab*(data: Data, content: Content, id: int) =
   ## A TAB WITH NO COMPONENT BEHIND IT IS CLOSED, NOT AN ERROR.
   ##

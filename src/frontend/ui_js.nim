@@ -836,6 +836,12 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # lists as UNREACHABLE and whose contrast is a separate, real defect —
           # that button should come back with its contrast fixed, not before.
           element "Notifications", aNotifications
+          # PLAT-45. Back to the one arrangement every CodeTracer front-end
+          # opens with. The desktop's own saved layout files are deleted and
+          # the window reloads onto the generated default; the terminal's and
+          # the GPUI window's remembered layouts are other files and are not
+          # touched.
+          element "Reset Layout", aResetLayout
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -1575,6 +1581,27 @@ proc reportLayoutDegraded(data: Data; sentence: string) =
     cerror "mode-layout: the degradation notice could not be shown: " &
       getCurrentExceptionMsg()
 
+proc constructDeclaredComponents(data: Data; config: js) =
+  ## Construct every component a layout config names that does not exist yet.
+  ##
+  ## GoldenLayout builds containers, not components: a layout installed after
+  ## startup names panes `renderer.createUIComponents` never made, and they
+  ## come up empty. Only the missing ones — constructing a component that
+  ## already exists makes a SECOND one, and for the menu that is a second
+  ## render-gate owner. Shared by the mode switch and the PLAT-45 reset, the
+  ## two paths that install a whole layout after startup.
+  for declared in mode_layouts.layoutComponents(config):
+    if declared.content == ord(Content.Trace): continue
+    if declared.content < 0 or declared.content > ord(Content.high): continue
+    if data.ui.componentMapping[Content(declared.content)].hasKey(declared.id):
+      continue
+    try:
+      discard data.makeComponent(Content(declared.content), declared.id)
+    except CatchableError as e:
+      cerror "layout: component " & $declared.content & ": " & e.msg
+    except:
+      cerror "layout: component " & $declared.content & " failed"
+
 proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
   ## THE LAYOUT MOVES WITH THE MODE, in both directions and every time.
   ##
@@ -1674,17 +1701,7 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
   # `renderer.createUIComponents` never made, and they come up empty. Only the
   # ones that do not exist yet — constructing a component that already exists
   # makes a SECOND one, and for the menu that is a second render-gate owner.
-  for declared in mode_layouts.layoutComponents(resolution.config):
-    if declared.content == ord(Content.Trace): continue
-    if declared.content < 0 or declared.content > ord(Content.high): continue
-    if data.ui.componentMapping[Content(declared.content)].hasKey(declared.id):
-      continue
-    try:
-      discard data.makeComponent(Content(declared.content), declared.id)
-    except CatchableError as e:
-      cerror "mode-layout: component " & $declared.content & ": " & e.msg
-    except:
-      cerror "mode-layout: component " & $declared.content & " failed"
+  data.constructDeclaredComponents(resolution.config)
 
   # A REGISTER OR STORE ENTRY IS A *RESOLVED* CONFIG; A DEFAULT IS NOT.
   #
@@ -5390,6 +5407,93 @@ proc installM5ColumnAwareServiceMethods() =
 
 installM5ColumnAwareServiceMethods()
 
+proc applySharedDefaultLayout(data: Data; config: js) =
+  ## Install `config` — the desktop's default, as the index process just
+  ## re-read it — IN PLACE, the second half of View > Reset Layout.
+  ##
+  ## In place, and not by reloading the window: the index process sends the
+  ## renderer its `CODETRACER::init` (and starts the replay) exactly once, so a
+  ## reloaded window waits for an init that never comes — measured, a blank
+  ## window. The swap is the mode switch's own mechanism (`swapLayout`,
+  ## `constructDeclaredComponents`, the editor share recomputed from the new
+  ## layout), and the editor comes back the way the first run creates it:
+  ## `showTab` finds no live container for the open source tab and re-creates
+  ## it at the root row's index 1 (`utils.openNewLayoutContainer`).
+  ##
+  ## Persistence stays off until the new arrangement is live, and is then
+  ## switched back on with one save, so the desktop's own file holds the
+  ## default from this moment on.
+  if data.ui.isNil or data.ui.layout.isNil or config.isNil or config.isUndefined:
+    if not data.ui.isNil:
+      data.ui.layoutResetPending = false
+    cerror "reset-layout: no layout to install; the workspace was left as it was"
+    return
+  # Pinned panels back into the outgoing tree first, or the default would
+  # bring a second copy of each back beside its edge tab.
+  data.unpinAllPanels()
+  var reopen: seq[cstring] = @[]
+  for name, _ in data.ui.editors:
+    reopen.add(name)
+  let active = data.services.editor.active
+  data.ui.editorAreaPercent = max(0, unclaimedTopLevelPercent(config))
+  data.constructDeclaredComponents(config)
+  try:
+    # The default is plain JSON — UNRESOLVED, which is what `loadLayout` takes
+    # (see `restoreSavedLayout`'s header on the two shapes).
+    let resolved = cast[GoldenLayoutResolvedConfig](config)
+    data.swapLayout(resolved)
+    data.ui.resolvedConfig = resolved
+  except:
+    cerror "reset-layout: GoldenLayout rejected the default layout: " &
+      getCurrentExceptionMsg()
+  # The auxiliary-panel records describe a tree that no longer exists (see the
+  # same two lines at the foot of `applyModeLayout`).
+  data.ui.editModeHiddenPanels.setLen(0)
+  data.ui.layoutBeforeAuxiliaryClose = nil
+  for name in reopen:
+    if name != active:
+      data.showTab(name)
+  if not active.isNil and active.len > 0 and data.ui.editors.hasKey(active):
+    data.showTab(active)
+  data.ui.layoutResetPending = false
+  data.saveCurrentLayoutConfig()
+
+proc resetLayoutToSharedDefault(data: Data) =
+  ## PLAT-45 deliverable 8, the desktop's `reset-layout`: return this window to
+  ## the ONE shared default arrangement (the generated
+  ## `config/default_layout.json`), deleting only the desktop's OWN saved
+  ## layout files — the terminal's and the GPUI window's remembered layouts
+  ## live under another directory and are other files.
+  ##
+  ## The index process deletes the files and re-reads the default through the
+  ## same loader the first run uses (`index/config.loadLayoutConfig`, which
+  ## copies the bundled file when the user's is absent), and hands it back on
+  ## `CODETRACER::reset-layout-done`; `applySharedDefaultLayout` installs it.
+  ## There is therefore ONE place the default comes from, the first run's.
+  ##
+  ## Persistence is switched off FIRST (`layoutResetPending`), so no
+  ## `stateChanged` write-through lands the arrangement being discarded in the
+  ## file the index process is about to delete; the per-mode stores and this
+  ## session's per-mode registers are forgotten, so a later mode switch does
+  ## not bring the old arrangement back either.
+  if data.ui.isNil:
+    return
+  data.ui.layoutResetPending = true
+  for mode in LayoutMode:
+    data.ui.modeLayouts[mode] = nil
+    try:
+      mode_layouts.forgetStoredLayoutForMode(mode)
+    except:
+      cwarn "reset-layout: could not forget the stored " & $mode & " layout"
+  if inElectron:
+    ipc.send "CODETRACER::reset-layout", js{
+      edit: mode_layouts.isEditingMode(data.ui.mode)}
+  else:
+    # A browser has no index process and no layout FILE: its default is the
+    # mode's bundled layout, installed the same way.
+    let bundled = mode_layouts.bundledLayoutForMode(data.ui.mode)
+    data.applySharedDefaultLayout(bundled)
+
 const ClientActionCount = ClientAction.high.int - ClientAction.low.int + 1
 
 # static:
@@ -5933,6 +6037,9 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## error (`invalid order in array constructor`) rather than a silent
     ## re-pointing of every handler after it.
     launchUnderHcr(actionData),
+  aResetLayout: proc(actionData: JsObject) = # aResetLayout
+    ## PLAT-45. View > Reset Layout — see `resetLayoutToSharedDefault`.
+    resetLayoutToSharedDefault(data),
 ]
 
 data.actions = actions
@@ -7440,6 +7547,14 @@ if inElectron:
     configureIPC(data)
     configure(data)
     cast[JsObject](dom.window)["__CODETRACER_DATA__"] = data.toJs
+
+    # PLAT-45: the index process has deleted the desktop's saved layout files
+    # and re-read the default the first run installs
+    # (`index/window.onResetLayout`); put it on screen. See
+    # `resetLayoutToSharedDefault`.
+    ipc.on(cstring"CODETRACER::reset-layout-done",
+           proc(event: JsObject, payload: JsObject) =
+      data.applySharedDefaultLayout(cast[js](payload[cstring"layout"])))
 
     # THE DESKTOP TEST-RUNNER HOST, and this is the "elsewhere" the Electron
     # arm was told it may point at (`test_results_vm.nim`, "`runTests` is the
