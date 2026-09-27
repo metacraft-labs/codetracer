@@ -377,6 +377,14 @@ csources_v1/
 # Compiled test program binaries and build artifacts
 test-programs/*/main
 test-programs/*/sudoku
+# Same rule, third binary name. test-programs/rs_rr_gdb/rr_gdb (4,020,152 B)
+# escaped the two lines above only because its executable is not called
+# `main` or `sudoku`. It was the ONLY tracked ELF executable under
+# test-programs/, arrived in a single unrelated commit (af2b5759a), was
+# referenced by nothing, and linked an absolute
+# /nix/store/lmn7lwydprqibdkghw7wgcn21yhllz13-glibc-2.40-66 interpreter that
+# is absent even here. rr_gdb.rs beside it is retained.
+test-programs/*/rr_gdb
 test-programs/lean_sudoku_solver/.lake/
 test-programs/lean_sudoku_solver/lake-manifest.json
 test-programs/lean_sudoku_solver/*_build/
