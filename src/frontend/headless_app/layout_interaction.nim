@@ -434,28 +434,24 @@ proc commandFor*(layout: Layout; source: PaneKind;
   ## different statement from "the command would be refused". The refusals
   ## belong to `apply` and are asked for separately, so that a target which is
   ## merely illegal right now still has a command to be refused by kind.
-  let placed = layout.tree.contains(source)
-  let docked = layout.dockedIndex(source) >= 0
-  if not placed and not docked:
+  if layout.placement(source) == plAbsent:
     return none(LayoutCommand)
   case target.kind
   of dtIntoStack:
-    if placed:
-      # The anchor's parent decides which command says "become a tab here":
-      # a stack takes `lcMoveTab` at an index, a bare pane has to BECOME a
-      # stack first and that is `lcMergeIntoStack`.
-      let anchorLeaf = layout.tree.find(target.stackAnchor)
-      if anchorLeaf.isNil:
-        return none(LayoutCommand)
-      let parent = parentOf(layout.tree, anchorLeaf)
-      if not parent.isNil and parent.kind == lnStack:
-        return some(cmdMoveTab(source, target.stackAnchor, target.index))
-      return some(cmdMergeIntoStack(source, target.stackAnchor))
-    # A DOCKED source rejoins the tree through `ahRestore`, which places it
-    # with `lcAddPane`'s semantics — beside the anchor, inside the anchor's
-    # own container. `dropTargetsFor` only offers this when that container is
-    # a stack, so "beside" and "a tab of" are the same placement.
-    some(cmdRestoreDocked(source, some(target.stackAnchor)))
+    # The anchor's parent decides which command says "become a tab here": a
+    # stack takes `lcMoveTab` at an index, a bare pane has to BECOME a stack
+    # first and that is `lcMergeIntoStack`. PLACED OR DOCKED, THE SAME TWO
+    # COMMANDS: both take their pane from an auto-hide strip as well as from
+    # the tree (PLAT-5's closing pass, 2026-09-27). Until then a docked source
+    # rejoined a stack through `ahRestore`, which places AFTER an anchor — so
+    # the first slot and a bare-pane anchor were not reachable at all.
+    let anchorLeaf = layout.tree.find(target.stackAnchor)
+    if anchorLeaf.isNil:
+      return none(LayoutCommand)
+    let parent = parentOf(layout.tree, anchorLeaf)
+    if not parent.isNil and parent.kind == lnStack:
+      return some(cmdMoveTab(source, target.stackAnchor, target.index))
+    some(cmdMergeIntoStack(source, target.stackAnchor))
   of dtSplitBefore, dtSplitAfter:
     let side = if target.kind == dtSplitBefore: ssBefore else: ssAfter
     # PLACED OR DOCKED, ONE COMMAND EITHER WAY. `lcSplit`'s `splitMovesPane`
@@ -471,40 +467,30 @@ proc commandFor*(layout: Layout; source: PaneKind;
 proc intoStackCandidates(layout: Layout; source: PaneKind; leaf: LayoutNode;
                          leafPath: string): seq[DropTarget] =
   ## Every "become a tab here" target the node under the pointer offers.
+  ##
+  ## THE SAME LIST FOR A PLACED AND A DOCKED SOURCE. `lcMoveTab` and
+  ## `lcMergeIntoStack` both take a docked pane since PLAT-5's closing pass,
+  ## so a pane dragged out of an auto-hide strip is offered every slot —
+  ## the first included — and a bare pane's body, exactly as a placed one is.
   result = @[]
   let parent = parentOf(layout.tree, leaf)
-  let placed = layout.tree.contains(source)
   if not parent.isNil and parent.kind == lnStack:
     let anchor = parent.children[0].pane
     let stackPath = nodePath(layout.tree, parent)
     if stackPath.isNone:
       return
-    if placed:
-      # One slot per insertion point. `apply` decides which of them are legal
-      # — dragging within the source's own stack has one fewer.
-      for slot in 0 .. parent.children.len:
-        result.add(DropTarget(
-          kind: dtIntoStack, stackAnchor: anchor, index: slot,
-          region: DropRegion(kind: drTabSlot, path: stackPath.get,
-                             slot: slot)))
-    else:
-      # `ahRestore` inserts AFTER its anchor, so a docked pane can name every
-      # slot EXCEPT THE VERY FIRST: slot `i` is "after tab `i - 1`". Slot 0
-      # is not offered rather than offered and refused, because there is no
-      # command that reaches it — advertising it would be a highlighted drop
-      # zone that does nothing.
-      for slot in 1 .. parent.children.len:
-        result.add(DropTarget(
-          kind: dtIntoStack, stackAnchor: parent.children[slot - 1].pane,
-          index: slot,
-          region: DropRegion(kind: drTabSlot, path: stackPath.get,
-                             slot: slot)))
+    # One slot per insertion point. `apply` decides which of them are legal
+    # — dragging within the source's own stack has one fewer.
+    for slot in 0 .. parent.children.len:
+      result.add(DropTarget(
+        kind: dtIntoStack, stackAnchor: anchor, index: slot,
+        region: DropRegion(kind: drTabSlot, path: stackPath.get,
+                           slot: slot)))
     return
-  if placed:
-    # A bare pane: dropping onto its body turns it into a two-tab stack.
-    result.add(DropTarget(
-      kind: dtIntoStack, stackAnchor: leaf.pane, index: 1,
-      region: DropRegion(kind: drWholeNode, path: leafPath)))
+  # A bare pane: dropping onto its body turns it into a two-tab stack.
+  result.add(DropTarget(
+    kind: dtIntoStack, stackAnchor: leaf.pane, index: 1,
+    region: DropRegion(kind: drWholeNode, path: leafPath)))
 
 proc splitCandidates(leaf: LayoutNode; leafPath: string): seq[DropTarget] =
   ## The four edge strips of a node's region, as split targets. The mapping

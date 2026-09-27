@@ -142,6 +142,26 @@ proc withDocked(): Layout =
   let o = apply(stackedLayout(), cmdDock(paneEventLog, leBottom))
   if o.kind == loApplied: o.layout else: stackedLayout()
 
+proc dockedBesideStacks(): Layout =
+  ## `twoStacks` with Flow docked to the left: a docked source, and a
+  ## destination stack with TWO tabs, so it has three insertion slots.
+  let o = apply(twoStacks(), cmdDock(paneFlow, leLeft))
+  if o.kind == loApplied: o.layout else: twoStacks()
+
+proc threeInARow(): Layout =
+  ## Three panes with equal weights: the smallest shape in which a divider
+  ## drag and a one-node share resize are different gestures.
+  initLayout(row([pane(paneEditor, "Editor", weight = 1.0),
+                  pane(paneState, "State", weight = 1.0),
+                  pane(paneFlow, "Flow", weight = 1.0)]))
+
+proc rowOfColumns(): Layout =
+  ## A divider between two CONTAINERS, neither of which is a pane or a stack.
+  initLayout(row([
+    column([pane(paneEditor, "Editor"), pane(paneFlow, "Flow")], weight = 2.0),
+    column([pane(paneState, "State"), pane(paneCalltrace, "Call Trace")],
+           weight = 1.0)]))
+
 const
   AllShapes = ["bare pane", "two-pane row", "stacked", "two stacks",
                "deep tree", "with docked"]
@@ -638,31 +658,91 @@ suite "dropTargetsFor — refusals asserted as refusals (§4.2)":
     checkRefused apply(both, cmdSplitMove(paneEditor, paneEventLog, saRow)),
       lpPaneBothPlacedAndDocked
 
-  test "a docked pane is never offered the first tab slot":
-    # `ahRestore` places the pane AFTER an anchor, so slot 0 has no anchor to
-    # sit after. It is not offered rather than offered-and-refused, because a
-    # highlighted zone that does nothing is worse than one that is not drawn.
-    let l = withDocked()
+  test "a docked pane is offered every tab slot, the first included":
+    # PLAT-5 recorded this as deliberate: `ahRestore` places AFTER an anchor,
+    # so a docked pane had no command reaching a stack's first slot, and slot
+    # 0 was not offered. The closing pass (2026-09-27) gave `lcMoveTab` a
+    # docked source — PLAT-4's `splitMovesPane` decision, applied to the tab
+    # strip — so the absence this case used to assert is now a presence, over
+    # EVERY slot, each one committed, applied, validated and landed where the
+    # slot says.
+    let l = dockedBesideStacks()
+    check l.placement(paneFlow) == plDocked
     var slots: seq[int] = @[]
     for zone in AllZones:
-      for target in dropTargetsFor(l, paneEventLog,
+      for target in dropTargetsFor(l, paneFlow,
                                    LayoutPointer(path: "1/0", zone: zone)):
-        if target.kind == dtIntoStack:
+        if target.kind == dtIntoStack and target.index notin slots:
           slots.add(target.index)
     checkpoint("slots offered to the docked pane: " & $slots)
-    check slots.len > 0
-    check 0 notin slots
-    # And the reason, from the algebra: there is no `beside` that lands first.
-    let first = DropTarget(kind: dtIntoStack, stackAnchor: paneState, index: 0,
-                           region: DropRegion(kind: drTabSlot, path: "1",
-                                              slot: 0))
-    let cmd = commandFor(l, paneEventLog, first)
-    check cmd.isSome
-    if cmd.isSome:
-      # It restores BESIDE State, which is slot 1 — the command exists, it
-      # just does not honour the index a slot-0 target would claim.
-      checkApplied apply(l, cmd.get)
-      check cmd.get.autoHideRestoreBeside == some(paneState)
+    check slots == @[0, 1, 2]
+    var landed = 0
+    for slot in slots:
+      let target = DropTarget(kind: dtIntoStack, stackAnchor: paneState,
+                              index: slot,
+                              region: DropRegion(kind: drTabSlot, path: "1",
+                                                 slot: slot))
+      let cmd = commandFor(l, paneFlow, target)
+      check cmd.isSome
+      if cmd.isNone:
+        continue
+      check cmd.get.kind == lcMoveTab
+      check cmd.get.moveIndex == slot
+      let outcome = apply(l, cmd.get)
+      checkpoint("slot " & $slot & " -> " & $outcome)
+      checkApplied outcome
+      if outcome.kind == loApplied:
+        checkValid outcome.layout
+        check outcome.layout.docked.len == 0
+        let stackNode = nodeAtPath(outcome.layout.tree, "1")
+        check stackNode.kind == lnStack
+        check stackNode.children.len == 3
+        check stackNode.children[slot].pane == paneFlow
+        check stackNode.activeIndex == slot
+        # The strip's title travels with the pane.
+        check stackNode.children[slot].title == "Flow"
+        inc landed
+    check landed == 3
+    # The body of a BARE pane is offered too, and makes a two-tab stack.
+    let bare = withDocked()   # Editor is a bare pane, Event Log is docked
+    var merges = 0
+    for target in dropTargetsFor(bare, paneEventLog,
+                                 LayoutPointer(path: "0", zone: dzCentre)):
+      if target.kind != dtIntoStack:
+        continue
+      inc merges
+      let cmd = commandFor(bare, paneEventLog, target)
+      check cmd.isSome
+      if cmd.isSome:
+        check cmd.get.kind == lcMergeIntoStack
+        let outcome = apply(bare, cmd.get)
+        checkApplied outcome
+        if outcome.kind == loApplied:
+          checkValid outcome.layout
+          let merged = nodeAtPath(outcome.layout.tree, "0")
+          check merged.kind == lnStack
+          check merged.children.len == 2
+          check merged.children[1].pane == paneEventLog
+          check merged.children[1].title == "Event Log"
+          check outcome.layout.docked.len == 0
+    check merges == 1
+    # What is STILL refused, by kind: an index past the end, a pane that is
+    # nowhere, and a layout already breaking §3.3 (placed AND docked).
+    checkRefused apply(l, cmdMoveTab(paneFlow, paneState, 3)),
+      lpIndexOutOfRange
+    checkRefused apply(l, cmdMoveTab(paneFlow, paneState, -1)),
+      lpIndexOutOfRange
+    checkRefused apply(l, cmdMoveTab(paneShell, paneState, 0)),
+      lpPaneNotPlaced
+    checkRefused apply(bare, cmdMergeIntoStack(paneShell, paneEditor)),
+      lpPaneNotPlaced
+    let both = Layout(tree: twoStacks().tree, docked: @[DockedPane(
+      pane: paneFlow, title: "Flow", edge: leLeft, order: 0)],
+      version: LayoutSchemaVersion)
+    checkRefused apply(both, cmdMoveTab(paneFlow, paneState, 0)),
+      lpPaneBothPlacedAndDocked
+    checkRefused apply(both, cmdMergeIntoStack(paneFlow, paneState)),
+      lpPaneBothPlacedAndDocked
 
   test "moving a tab out of its own stack at an index that does not exist is refused":
     let l = stackedLayout()
@@ -871,8 +951,8 @@ suite "commit — a command, or nothing (§4.3)":
           check outcome.layout.placement(paneEventLog) == plDocked
 
     # dtIntoStack — a DOCKED pane dragged back into a stack. The body of the
-    # tabbed region is "append a tab", which is the slot past the last one and
-    # the one `ahRestore` can name (slot 0 has no anchor to sit after).
+    # tabbed region is "append a tab", the slot past the last one; the
+    # command is `lcMoveTab` from the strip, the same one a placed pane gets.
     block:
       let l = withDocked()
       let gesture = beginDragTab(l, paneEventLog).get.hoverAt(
@@ -883,8 +963,9 @@ suite "commit — a command, or nothing (§4.3)":
       let produced = commit(l, gesture)
       check produced.isSome
       if produced.isSome:
-        check produced.get.kind == lcSetAutoHide
-        check produced.get.autoHideDirection == ahRestore
+        check produced.get.kind == lcMoveTab
+        check produced.get.movedPane == paneEventLog
+        check produced.get.moveIndex == 1
         let outcome = apply(l, produced.get)
         checkApplied outcome
         if outcome.kind == loApplied:

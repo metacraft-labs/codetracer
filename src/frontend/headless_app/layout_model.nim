@@ -444,6 +444,13 @@ type
       removedPane*: PaneKind
     of lcMoveTab:
       movedPane*: PaneKind
+        ## Placed in the tree, OR DOCKED on an auto-hide strip (PLAT-5's
+        ## closing pass, 2026-09-27 — the same decision PLAT-4's took for
+        ## `splitMovesPane`). A docked source leaves `docked` with its strip
+        ## title and lands at `moveIndex`, any slot from `0` to `len`; before
+        ## this, `ahRestore` was its only way back and it places AFTER an
+        ## anchor, so a stack's first slot was unreachable in one command. A
+        ## pane in both places is `lpPaneBothPlacedAndDocked`.
       moveBeside*: PaneKind
         ## A pane in the DESTINATION stack. Named by pane rather than by path
         ## because a path is a renderer's way of pointing and this module has
@@ -485,6 +492,8 @@ type
         ## tree always gains a pane.
     of lcMergeIntoStack:
       mergedPane*: PaneKind
+        ## Placed or DOCKED, as `movedPane` — a docked pane dropped onto a
+        ## bare pane makes the same two-tab stack a placed one does.
       mergeBeside*: PaneKind
       mergeWholeRegion*: bool
         ## The §8-decision-1 gesture: drag a whole SPLIT into a tab, rather
@@ -1562,7 +1571,12 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
 
   of lcMoveTab:
     let source = tree.find(cmd.movedPane)
-    if source.isNil:
+    let dockedFrom = next.dockedIndex(cmd.movedPane)
+    if dockedFrom >= 0 and not source.isNil:
+      # §3.3 broken on the INPUT; which copy would move is not a question
+      # this command can answer — `lcSplit`'s move arm refuses it the same way.
+      return refusedFor(lpPaneBothPlacedAndDocked, cmd.movedPane)
+    if source.isNil and dockedFrom < 0:
       return refusedFor(lpPaneNotPlaced, cmd.movedPane)
     let anchor = tree.find(cmd.moveBeside)
     if anchor.isNil:
@@ -1570,6 +1584,22 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     let destination = parentOf(tree, anchor)
     if destination.isNil or destination.kind != lnStack:
       return refusedFor(lpTargetNotAStack, cmd.moveBeside)
+    if dockedFrom >= 0:
+      # FROM AN AUTO-HIDE STRIP, at any index — including 0. The same
+      # decision PLAT-4's closing pass took for `splitMovesPane`: "the pane
+      # comes from somewhere else in this layout" covers the strip as well as
+      # the tree. `ahRestore` can only place AFTER an anchor, so before this
+      # a docked pane could not be dropped into a stack's first slot in one
+      # command. Nothing leaves the tree, so no collapse rule fires and the
+      # outcome is never `loNoOp`; the strip's title travels with the pane.
+      if cmd.moveIndex < 0 or cmd.moveIndex > destination.children.len:
+        return refusedFor(lpIndexOutOfRange, cmd.movedPane)
+      let entry = next.docked[dockedFrom]
+      next.docked.delete(dockedFrom)
+      destination.children.insert(pane(entry.pane, entry.title),
+                                  cmd.moveIndex)
+      destination.activeIndex = cmd.moveIndex
+      return appliedTo(next)
     let sourceParent = parentOf(tree, source)
     let sameStack = sourceParent == destination
     let finalLen =
@@ -1676,7 +1706,10 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     if cmd.mergedPane == cmd.mergeBeside:
       return refusedFor(lpDuplicatePane, cmd.mergedPane)
     let source = tree.find(cmd.mergedPane)
-    if source.isNil:
+    let mergedFrom = next.dockedIndex(cmd.mergedPane)
+    if mergedFrom >= 0 and not source.isNil:
+      return refusedFor(lpPaneBothPlacedAndDocked, cmd.mergedPane)
+    if source.isNil and mergedFrom < 0:
       return refusedFor(lpPaneNotPlaced, cmd.mergedPane)
     if tree.find(cmd.mergeBeside).isNil:
       return refusedFor(lpPaneNotPlaced, cmd.mergeBeside)
@@ -1687,15 +1720,24 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # restriction stays until a user asks for it to be lifted, and this is
       # the typed outcome that says so.
       return refusedFor(lpStackChildNotPane, cmd.mergedPane)
-    let sourceParent = parentOf(tree, source)
-    let anchorParent = parentOf(tree, tree.find(cmd.mergeBeside))
-    if not anchorParent.isNil and anchorParent.kind == lnStack and
-       sourceParent == anchorParent:
-      return noOp()
-    let moved = copyOf(source)
-    discard detachPane(tree, cmd.mergedPane)
-    if not normaliseInPlace(tree):
-      return refusedFor(lpEmptyRoot, cmd.mergedPane)
+    var moved: LayoutNode
+    if mergedFrom >= 0:
+      # From an auto-hide strip — `lcMoveTab`'s docked arm, for a bare-pane
+      # anchor: nothing leaves the tree, so there is nothing to collapse and
+      # the outcome is never `loNoOp`.
+      let entry = next.docked[mergedFrom]
+      next.docked.delete(mergedFrom)
+      moved = pane(entry.pane, entry.title)
+    else:
+      let sourceParent = parentOf(tree, source)
+      let anchorParent = parentOf(tree, tree.find(cmd.mergeBeside))
+      if not anchorParent.isNil and anchorParent.kind == lnStack and
+         sourceParent == anchorParent:
+        return noOp()
+      moved = copyOf(source)
+      discard detachPane(tree, cmd.mergedPane)
+      if not normaliseInPlace(tree):
+        return refusedFor(lpEmptyRoot, cmd.mergedPane)
     let anchorAgain = tree.find(cmd.mergeBeside)
     if anchorAgain.isNil:
       return refusedFor(lpPaneNotPlaced, cmd.mergeBeside)
