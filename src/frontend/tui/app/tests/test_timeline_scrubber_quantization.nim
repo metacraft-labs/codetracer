@@ -64,7 +64,7 @@ import ../views/timeline_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 86
+const ExpectedAssertions = 89
 
 var countedAssertions = 0
 
@@ -465,6 +465,11 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
     const Width = 120
     const Height = 40
     var plain = newShellModel(Width, Height)
+    # PLAT-45: the shared default holds the timeline as a TAB of the event
+    # stack, so its rectangle exists once that tab is active — a tab click,
+    # `LayoutNode.activate`, the desktop's own operation. The strip takes the
+    # rectangle's first row; the scrubber and the log are painted under it.
+    ck plain.layout.activate(paneTimeline)
     let before = shellRows(plain, Width, Height)
     ck plain.profile == lpStandard
     ck plain.timeline.isEmpty
@@ -511,16 +516,23 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
     # THE TWO ROWS THE BAR OWNS really changed — a shell that painted nothing
     # would also change nothing outside.
     ck changedInside >= TimelineBarRows
-    ck after.rows[timelineArea.row].contains(TimelineTitle)
-    ck after.rows[timelineArea.row + 1].contains(BoundsOpenGlyph)
-    ck after.rows[timelineArea.row + 1].contains(NeedleGlyph)
-    ck after.rows[timelineArea.row + 1].contains(MarkGlyph)
-    ck after.rows[timelineArea.row + 1].contains(SpanGlyph)
+    # The strip, then the bar's two rows under it.
+    ck after.rows[timelineArea.row].contains("[Timeline]")
+    let bar = timelineArea.row + 1
+    ck after.rows[bar].contains(TimelineTitle)
+    ck after.rows[bar + 1].contains(BoundsOpenGlyph)
+    ck after.rows[bar + 1].contains(NeedleGlyph)
+    ck after.rows[bar + 1].contains(MarkGlyph)
+    ck after.rows[bar + 1].contains(SpanGlyph)
     # …and the needle is at the column the pure mapping says, on the SHELL's
     # own row, at the shell's own rectangle offset.
-    let shellTrack = trackWidthFor(timelineArea.width)
+    # The pane is painted `width - 1` wide when a separator column follows it
+    # (`shell.paintPane`'s `inner`), and the track is laid out in THAT width.
+    let flushRight = timelineArea.col + timelineArea.width >= Width
+    let paneWidth = if flushRight: timelineArea.width else: timelineArea.width - 1
+    let shellTrack = trackWidthFor(paneWidth)
     let needleCell = columnForTick(320'u64, 0'u64, 1314'u64, shellTrack)
-    ck cellSlice(after.rows[timelineArea.row + 1],
+    ck cellSlice(after.rows[bar + 1],
                  timelineArea.col + 1 + needleCell,
                  timelineArea.col + 2 + needleCell) == NeedleGlyph
 
@@ -535,15 +547,20 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
       pageSize = 16)
     withLog.eventLog.ensureWindow(0, 16)
     let logged = shellScreen(withLog, Width, Height)
-    ck logged.rows[timelineArea.row + TimelineBarRows].contains(EventLogTitle)
-    ck logged.rows[timelineArea.row + TimelineBarRows + 1].contains(
-      "Positive Test Case")
+    ck logged.rows[bar + TimelineBarRows].contains(EventLogTitle)
+    # The event's location and not its content: at 120x40 the shared default
+    # gives the event stack 34 columns, and the log's fixed columns leave the
+    # content one cell before the region's edge cuts it.
+    checkpoint("event log rows under the bar:\n  '" &
+               logged.rows[bar + TimelineBarRows] & "'\n  '" &
+               logged.rows[bar + TimelineBarRows + 1] & "'")
+    ck logged.rows[bar + TimelineBarRows + 1].contains("main.nr:13")
     # The scrubber's own two rows are untouched by the log below it.
-    ck logged.rows[timelineArea.row] == after.rows[timelineArea.row]
-    ck logged.rows[timelineArea.row + 1] == after.rows[timelineArea.row + 1]
+    ck logged.rows[bar] == after.rows[bar]
+    ck logged.rows[bar + 1] == after.rows[bar + 1]
 
     # ---- THE COMPACT PROFILE STACKS IT BEHIND CTUI-3'S TAB STRIP ---------
-    # `paneTimeline` is a tab of the `state` stack at 80x24, so the rectangle
+    # `paneTimeline` is a tab of the event stack at 80x24, so the rectangle
     # only exists when that tab is active — which is `LayoutNode.activate`, the
     # same operation a desktop tab click performs.
     const CompactWidth = 80
@@ -564,8 +581,11 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
     checkpoint("compact timeline rows:\n  '" &
                compactScreen.rows[compactArea.row] & "'\n  '" &
                compactScreen.rows[compactArea.row + 1] & "'")
-    ck compactScreen.rows[compactArea.row].contains(TimelineTitle)
-    ck compactScreen.rows[compactArea.row + 1].contains(NeedleGlyph)
+    # The event stack is 20 columns wide at 80x24, so the active tab's label
+    # is cut at the region's edge.
+    ck compactScreen.rows[compactArea.row].contains("[Timelin")
+    ck compactScreen.rows[compactArea.row + 1].contains(TimelineTitle)
+    ck compactScreen.rows[compactArea.row + 2].contains(NeedleGlyph)
 
   test "the tracepoint dialog is an overlay the shell reports the extent of":
     # It takes no share of the layout — see `shell.shellScreen`'s comment — so

@@ -106,12 +106,19 @@ const
   Rows = mouseApp.Rows
   FrameTimeoutMs = 20000
 
-  DraggedPane = paneCalltrace
-    ## The Compact profile's first projected region, and therefore the pane
-    ## `newPaneFocus` starts on. It is a BARE pane — no tab strip — which is
-    ## what makes its own title row the cell a press picks it up by.
-  DraggedPaneTitle = "Call Stack"
-  DraggedPaneTitleRow = "CALL STACK"
+  DraggedPane = paneEditor
+    ## The shared default's one BARE region at 80x24 (the Source pane, no tab
+    ## strip), which is what makes its own title row the cell a press picks it
+    ## up by — and makes the drag ghost the pane's whole rectangle, wide enough
+    ## for the decoration probe below to read a glyph cell past the ghost's
+    ## label. A stacked pane's ghost is only its tab's cells, which its label
+    ## covers entirely, so the probe would have nothing to read.
+  DraggedPaneTitle = "Source"
+  DraggedPaneTitleRow = "SOURCE"
+  FocusedAtStart = paneFileTree
+    ## Where `newPaneFocus` starts: the shared default's first region. Asserted
+    ## so a change of the default that moved it is seen here; the drag itself
+    ## does not depend on focus.
 
   DropRow = 0
   DropCol = 40
@@ -296,14 +303,14 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       let (hadFocus, focused) = model.focus.focusedPane()
       ck hadFocus
       checkpoint("the focused pane is " & $focused)
-      ck focused == DraggedPane
+      ck focused == FocusedAtStart
 
       # ---- THE UNGESTURED SCREEN -------------------------------------------
       ckScreenMatches(sess, model.shellScreenOf().rows, "before the gesture")
       let before = sess.screenContents()
       ck not before.contains(DockStripGlyph)
       ck before.contains(DraggedPaneTitleRow)
-      ck before.contains("[Variables]")     ## the Compact profile's tab stack
+      ck before.contains("[Variables]")     ## the shared default's Variables stack
       ck model.app.layoutBinding.interaction.kind == ikNone
 
       let source = model.layoutGeometry().regionOfPane(DraggedPane)

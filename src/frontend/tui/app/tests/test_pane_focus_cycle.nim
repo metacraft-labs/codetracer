@@ -48,7 +48,7 @@ import ../layout/project
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 243
+const ExpectedAssertions = 262
 
 var countedAssertions = 0
 
@@ -66,24 +66,26 @@ type
 
 const
   Geometries = [
-    # 80x24 — §3.1's Compact drawing. Height decides first (see
-    # `app/layout/profile.nim`'s header), so this is Compact at any width.
+    # 80x24 — PLAT-45: the shared default, FOLDED four times so the source
+    # pane gets its 56-cell minimum: Source | (Variables over Event Log), with
+    # the Call Stack and Files as tabs of the Variables stack.
     Geometry(name: "compact 80x24", profile: lpCompact, cols: 80, rows: 24,
-             panes: @[paneCalltrace, paneEditor, paneState]),
-    # 120x40 — §3.1's Standard drawing: Call Stack | Source | Variables over a
-    # Timeline & Tracepoints strip.
+             panes: @[paneEditor, paneState, paneEventLog]),
+    # 120x40 — the shared default unfolded: the desktop's arrangement, with
+    # Test Results over Constraints on the right.
     Geometry(name: "standard 120x40", profile: lpStandard, cols: 120, rows: 40,
-             panes: @[paneCalltrace, paneEditor, paneState, paneTimeline]),
-    # 200x50 — Ultra-wide: the Event Log gets a column of its own.
+             panes: @[paneFileTree, paneEditor, paneState, paneCalltrace,
+                      paneEventLog, paneTestResults, paneConstraints]),
+    # 200x50 — the same arrangement, wider.
     Geometry(name: "ultra-wide 200x50", profile: lpUltraWide, cols: 200,
              rows: 50,
-             panes: @[paneCalltrace, paneEditor, paneState, paneEventLog,
-                      paneTimeline]),
+             panes: @[paneFileTree, paneEditor, paneState, paneCalltrace,
+                      paneEventLog, paneTestResults, paneConstraints]),
   ]
 
   GeometryCount = 3
-  TotalVisiblePanes = 12
-    ## 3 + 4 + 5. The NON-VACUITY FLOOR for every per-geometry sweep below: a
+  TotalVisiblePanes = 17
+    ## 3 + 7 + 7. The NON-VACUITY FLOOR for every per-geometry sweep below: a
     ## projection that produced no regions would satisfy "each pane visited
     ## once" for free.
 
@@ -93,7 +95,7 @@ proc focusFor(g: Geometry): PaneFocus =
 
 suite "CTUI-9: Tab cycles every visible pane once, in every profile":
 
-  test "the three profiles are the three §3.2 describes, at these sizes":
+  test "the three sizes open the shared default, folded as their cells require":
     var checkedGeometries = 0
     var totalPanes = 0
     for g in Geometries:
@@ -166,11 +168,11 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
       checkpoint(g.name & " second lap: " & $secondLap)
       ck secondLap == expectedSecond
     ck checkedGeometries == GeometryCount
-    # The sweep's own size, from its parameters: 3 + 4 + 5 panes means
-    # (n-1) + 1 + n steps per geometry = 2n steps, so 6 + 8 + 10 = 24.
+    # The sweep's own size, from its parameters: 3 + 7 + 7 panes means
+    # (n-1) + 1 + n steps per geometry = 2n steps, so 6 + 14 + 14 = 34.
     checkpoint("Tab presses: " & $stepsTaken)
     ck stepsTaken == 2 * TotalVisiblePanes
-    ck stepsTaken == 24
+    ck stepsTaken == 34
 
   test "Shift+Tab is exactly the reverse cycle":
     var checkedGeometries = 0
@@ -225,37 +227,45 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     ck checkedGeometries == GeometryCount
     ck selections == GeometryCount * 4
     ck selections == 12
-    # THE NEGATIVE THAT MATTERS, named: the Compact profile shows the Timeline
-    # only as a tab of a stack, so §4.2's `4` has nothing to focus there and
-    # reports that rather than focusing something else.
+    # THE NEGATIVE THAT MATTERS, named: the shared default shows the Timeline
+    # only as a tab of the event stack, so §4.2's `4` has nothing to focus
+    # there and reports that rather than focusing something else.
     let compact = focusFor(Geometries[0])
     ck not compact.focusPaneKind(paneTimeline)
     let (stillThere, unchanged) = compact.focusedPane()
     ck stillThere
-    ck unchanged == paneCalltrace
+    ck unchanged == paneEditor
     # …and an action that is not a pane selection is refused by the same
     # function, so `directSelectPane` cannot be a constant that always answers.
     let (notSelect, _) = directSelectPane(kaStepOver)
     ck not notSelect
 
   test "`Ctrl+w` h/j/k/l moves by geometry, and stops at the edge":
-    # Every expectation is §3.2's layout read as a picture; none is computed.
-    # Standard: [Call Stack | Source | Variables] over [Timeline].
+    # Every expectation is the shared default read as a picture; none is
+    # computed. Standard (120x40): Files | Source | (Variables | Call Stack
+    # over Event Log) | (Test Results over Constraints). Only moves with ONE
+    # neighbour in their direction are probed — a region beside two stacked
+    # regions is a tie-break question, not a geometry one.
     let standard = focusFor(Geometries[1])
-    ck standard.focusPaneKind(paneEditor)
     var moves = 0
-    for probe in [(fdLeft, true, paneCalltrace), (fdRight, true, paneState),
-                  (fdDown, true, paneTimeline), (fdUp, false, paneEditor)]:
+    for probe in [(paneEditor, fdLeft, true, paneFileTree),
+                  (paneState, fdLeft, true, paneEditor),
+                  (paneState, fdRight, true, paneCalltrace),
+                  (paneState, fdDown, true, paneEventLog),
+                  (paneCalltrace, fdRight, true, paneTestResults),
+                  (paneTestResults, fdDown, true, paneConstraints),
+                  (paneEditor, fdUp, false, paneEditor),
+                  (paneEditor, fdDown, false, paneEditor)]:
       inc moves
-      let (found, kind) = standard.paneInDirection(probe[0])
-      checkpoint("standard, from Source, " & $probe[0] & " -> found=" &
-                 $found & " " & $kind)
-      ck found == probe[1]
-      if probe[1]:
-        ck kind == probe[2]
-    # The edges do not wrap: nothing is above the top row of panes, and nothing
-    # is left of the Call Stack.
-    ck standard.focusPaneKind(paneCalltrace)
+      ck standard.focusPaneKind(probe[0])
+      let (found, kind) = standard.paneInDirection(probe[1])
+      checkpoint("standard, from " & $probe[0] & ", " & $probe[1] &
+                 " -> found=" & $found & " " & $kind)
+      ck found == probe[2]
+      if probe[2]:
+        ck kind == probe[3]
+    # The edges do not wrap: nothing is left of the Files column.
+    ck standard.focusPaneKind(paneFileTree)
     let (leftOfLeftmost, _) = standard.paneInDirection(fdLeft)
     ck not leftOfLeftmost
     # …and a refused move leaves focus exactly where it was, which is what
@@ -264,47 +274,35 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     ck not unmoved
     let (has, still) = standard.focusedPane()
     ck has
-    ck still == paneCalltrace
+    ck still == paneFileTree
     ck stayed == paneEditor      # the sentinel `focusDirection` returns
 
-    # From the timeline strip, `Ctrl+w k` lands on the column whose centre is
-    # nearest — the Source pane, which is the middle of three.
-    ck standard.focusPaneKind(paneTimeline)
-    let (up, above) = standard.paneInDirection(fdUp)
-    checkpoint("standard, from Timeline, up -> " & $above)
-    ck up
-    ck above == paneEditor
-    let (movedUp, landed) = standard.focusDirection(fdUp)
-    ck movedUp
-    ck landed == paneEditor
-
-    # Compact: [Call Stack | Source] over the tab stack.
+    # Compact (80x24): Source | (Variables over Event Log).
     let compact = focusFor(Geometries[0])
     ck compact.focusPaneKind(paneEditor)
-    let (cLeft, cLeftPane) = compact.paneInDirection(fdLeft)
-    ck cLeft
-    ck cLeftPane == paneCalltrace
+    let (cRightOfSource, cRightPane) = compact.paneInDirection(fdRight)
+    ck cRightOfSource
+    ck cRightPane == paneState
+    ck compact.focusPaneKind(paneState)
     let (cDown, cDownPane) = compact.paneInDirection(fdDown)
     ck cDown
-    ck cDownPane == paneState
+    ck cDownPane == paneEventLog
     let (cRight, _) = compact.paneInDirection(fdRight)
     ck not cRight
 
-    # Ultra-wide: [Call Stack | Source | Variables | Event Log] over
-    # [Timeline]. `l` from Variables is the Event Log, which exists in no
-    # other profile — so the four columns are really four.
+    # Ultra-wide (200x50): the right column is really there, and is the edge.
     let wide = focusFor(Geometries[2])
-    ck wide.focusPaneKind(paneState)
+    ck wide.focusPaneKind(paneCalltrace)
     let (wRight, wRightPane) = wide.paneInDirection(fdRight)
     ck wRight
-    ck wRightPane == paneEventLog
-    ck wide.focusPaneKind(paneEventLog)
+    ck wRightPane == paneTestResults
+    ck wide.focusPaneKind(paneTestResults)
     let (wRight2, _) = wide.paneInDirection(fdRight)
     ck not wRight2
     let (wLeft, wLeftPane) = wide.paneInDirection(fdLeft)
     ck wLeft
-    ck wLeftPane == paneState
-    ck moves == 4
+    ck wLeftPane == paneCalltrace
+    ck moves == 8
 
     # THE DIRECTIONS ARE THE KEYMAP's. `Ctrl+w` h/j/k/l map onto the four
     # directions and nothing else does.
@@ -351,7 +349,7 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     ck not toggleMaximize(state, paneState)
     ck not state.active
     let restored = projectLayout(layoutFor(state, lpStandard), body)
-    ck restored.regions.len == 4
+    ck restored.regions.len == 7
     var kinds: seq[PaneKind] = @[]
     for region in restored.regions:
       kinds.add region.pane
@@ -418,9 +416,11 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     # `describeFocusOrder` and `sortedPaneNames` are what a red run prints, so
     # they are asserted rather than trusted.
     let pf = focusFor(Geometries[1])
-    ck describeFocusOrder(pf) == "calltrace -> editor -> state -> timeline"
+    ck describeFocusOrder(pf) == "fileTree -> editor -> state -> calltrace " &
+       "-> eventLog -> testResults -> constraints"
     ck sortedPaneNames(Geometries[2].panes) ==
-       @["calltrace", "editor", "eventLog", "state", "timeline"]
+       @["calltrace", "constraints", "editor", "eventLog", "fileTree", "state",
+         "testResults"]
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

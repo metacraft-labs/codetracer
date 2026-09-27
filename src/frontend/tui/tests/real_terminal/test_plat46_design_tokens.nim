@@ -79,9 +79,11 @@ const
   Wide = (cols: 120, rows: 40)
     ## Standard profile: the source shows `def add` (line 29) and the panes sit
     ## side by side.
-  Stacked = (cols: 120, rows: 30)
-    ## Compact profile: the state column is a TAB STACK
-    ## (`[Variables]  Timeline   Tracepoints`), so the tab surfaces are on screen.
+  Stacked = (cols: 200, rows: 30)
+    ## The shared default's Variables stack (`[Variables]  Scratchpad`) with
+    ## room to spell its inactive tab, and a rightmost strip with bar left over
+    ## past its label (PLAT-45 sizes every region minimum-first, so at 120
+    ## columns the strips are cut at their labels).
   MinSurfaceDistance = 0.03
     ## OKLab distance two surfaces the design distinguishes must keep on the
     ## screen. About 1.5 just-noticeable differences.
@@ -215,16 +217,28 @@ type
     currentLineBg, panelBg, editorBg: string
     unfilled, cells: int
 
+proc lastColBeforeRule(sess: var TuiTestSession; row, fromCol, cols: int): int =
+  ## The column just left of the first `│` at or right of `fromCol` on `row`
+  ## — the last body cell of the region `fromCol` is in — or `cols - 2` when
+  ## the region runs to the screen's edge.
+  for c in fromCol ..< cols:
+    if $sess.cellAt(row, c).rune == "│":
+      return max(fromCol, c - 1)
+  cols - 2
+
 proc readWide(sess: var TuiTestSession): Fidelity =
   let (cols, rows) = Wide
   let defRow = rowOf(sess, cols, rows, "def add")
   if defRow >= 0:
     result.keywordFg = hexOfColor(sess.cellAt(defRow, colOf(sess, defRow, cols, "def add")).fg)
-  # Title row 1: every rule glyph is a pane border — the focused pane's in
-  # the focus role, the others in the ordinary one. Both are collected.
+  # Title row 1: every rule and separator glyph is a pane border — the
+  # focused pane's in the focus role, the others in the ordinary one. Both are
+  # collected. The separator (`│`) counts too: in the shared default (PLAT-45)
+  # the focused region at start is the Files STACK, whose row 1 is a tab strip,
+  # so its focus-role border on that row is its right-hand separator.
   for c in 0 ..< cols:
     let cell = sess.cellAt(1, c)
-    if $cell.rune == "─":
+    if $cell.rune == "─" or $cell.rune == "│":
       let h = hexOfColor(cell.fg)
       if h notin result.ruleFgs:
         result.ruleFgs.add h
@@ -234,14 +248,21 @@ proc readWide(sess: var TuiTestSession): Fidelity =
     result.currentLineBg = hexOfColor(sess.cellAt(execRow, c).bg)
   result.statusBg = hexOfColor(sess.cellAt(rows - 1, cols - 1).bg)
   result.modeFg = hexOfColor(sess.cellAt(rows - 1, 0).fg)
-  # A pane body: the VARIABLES pane's last column, two rows under its title.
+  # A pane body: the VARIABLES pane's last column before its separator, two
+  # rows under its title. Found by the separator rather than by the screen's
+  # edge: since PLAT-45 the Variables pane is not the rightmost region.
   let varRow = rowOf(sess, cols, rows, "VARIABLES")
   if varRow >= 0:
-    result.panelBg = hexOfColor(sess.cellAt(varRow + 3, cols - 2).bg)
-  # The editor body: far right of a short source line (line 3 is empty).
+    let c = lastColBeforeRule(sess, varRow + 3,
+                              colOf(sess, varRow, cols, "VARIABLES"), cols)
+    result.panelBg = hexOfColor(sess.cellAt(varRow + 3, c).bg)
+  # The editor body: the last cell of a short source line (line 3 is empty)
+  # before the Source pane's separator — found by the separator, because the
+  # shared default's Source pane is narrower than a fixed offset.
   let srcRow = rowOf(sess, cols, rows, "   3 ")
   if srcRow >= 0:
-    let c = colOf(sess, srcRow, cols, "   3 ") + 30
+    let c = lastColBeforeRule(sess, srcRow,
+                              colOf(sess, srcRow, cols, "   3 "), cols)
     result.editorBg = hexOfColor(sess.cellAt(srcRow, c).bg)
   for r in 0 ..< rows:
     for c in 0 ..< cols:
@@ -267,7 +288,9 @@ proc readTabs(sess: var TuiTestSession): TabRead =
   let r = rowOf(sess, cols, rows, "[Variables]")
   if r < 0: return
   let active = colOf(sess, r, cols, "Variables")
-  let inactive = colOf(sess, r, cols, "Timeline")
+  # The Variables stack's inactive tab: Scratchpad, in the shared default
+  # (PLAT-45) — the Timeline is a tab of the events stack, on another row.
+  let inactive = colOf(sess, r, cols, "Scratch")
   result.activeBg = hexOfColor(sess.cellAt(r, active).bg)
   result.activeFg = hexOfColor(sess.cellAt(r, active).fg)
   result.inactiveBg = hexOfColor(sess.cellAt(r, inactive).bg)

@@ -100,11 +100,9 @@ const
   FixtureName = "calc"
   Cols = 120
   Rows = 40
-    ## 120x40 selects the STANDARD profile: `app/layout/profile.selectProfile`
-    ## takes `lpCompact` below `TallProfileMinHeight` (35) whatever the width,
-    ## and `lpStandard` at `StandardMinWidth` (120). Chosen so the timeline gets
-    ## a rectangle of its own — in the Compact profile it is a TAB of the state
-    ## stack, and `TIMELINE` is not a pane title on the screen at all.
+    ## 120x40 is where the shared default (PLAT-45) opens unfolded, so every
+    ## region's strip is on the screen — the timeline is a tab of the events
+    ## stack there, labelled `Timeline`.
   ExitNoTerminalStatus = 3
     ## `main.nim`'s `ExitNoTerminal`. Spelled here rather than imported: this
     ## file must not pull the entrypoint's module graph in to read one integer,
@@ -248,7 +246,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     ck text.contains("CALL STACK")
     ck text.contains("SOURCE")
     ck text.contains("VARIABLES")
-    ck text.contains("TIMELINE")
+    ck text.contains("Timeline")
 
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))

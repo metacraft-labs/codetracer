@@ -587,7 +587,15 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
                                      bodyArea(80, 24)).regionFor(paneEditor)
       ck editorArea.width > 0
       ck editorArea.height > 0
-      let standalone = sourcePaneText(shellModel.source, editorArea.width,
+      # PLAT-45: in the shared default the editor is the SECOND column, not
+      # flush right, so the shell keeps its last column for the separator and
+      # hands the pane `width - 1` — derived exactly as `shell.paintPane`
+      # derives it.
+      let screenBody = bodyArea(80, 24)
+      let flushRight = editorArea.col + editorArea.width >=
+                       screenBody.col + screenBody.width
+      let paneWidth = if flushRight: editorArea.width else: editorArea.width - 1
+      let standalone = sourcePaneText(shellModel.source, paneWidth,
                                       editorArea.height, h.cache)
       ck standalone.len == editorArea.height
       let shellText = shellRows(shellModel, 80, 24)
@@ -600,7 +608,7 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
         var at = 0
         for r in screenRow.runes:
           let w = max(1, displayWidth($r))
-          if at >= editorArea.col and at < editorArea.col + editorArea.width:
+          if at >= editorArea.col and at < editorArea.col + paneWidth:
             slice.add $r
           at += w
         if slice == standalone[i]:
@@ -612,8 +620,10 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
         checkpoint(paneMismatches[0 .. min(2, paneMismatches.high)].join("\n"))
       ck paneRowsMatched == editorArea.height
       # …and the OTHER panes are still there, so the source pane took its own
-      # rectangle and nobody else's.
-      ck shellText[1].contains("CALL STACK")
+      # rectangle and nobody else's: at 80x24 the side column's first strip
+      # is the Variables stack (the call stack is a tab of it — PLAT-45's
+      # fold).
+      ck shellText[1].contains("[Variables]")
       ck shellText[editorArea.row].contains(SourcePaneTitle)
 
       # ---- FINE-GRAINED SUBSCRIPTION, measured ----------------------------

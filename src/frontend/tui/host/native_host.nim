@@ -329,6 +329,21 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
       result.children.add FilesystemEntryNode(text: root.extractFilename,
                                               path: "/" & root)
 
+proc recordingFileList*(traceFolder: string): seq[string] =
+  ## `recordingFileTree` flattened to the file paths a list pane draws, in the
+  ## tree's own order (folders first, each group sorted), without the leading
+  ## `/` the tree's paths carry. PLAT-45: the terminal's Files pane in a
+  ## REPLAY session — the shared default places it in every mode, and this is
+  ## the same tree the desktop and the GPUI window draw there.
+  proc walk(n: FilesystemEntryNode; acc: var seq[string]) =
+    if not n.isFolder:
+      var p = n.path
+      if p.startsWith("/"): p = p[1 .. ^1]
+      acc.add p
+    for c in n.children:
+      walk(c, acc)
+  walk(recordingFileTree(traceFolder), result)
+
 proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-RECORDING producers, asked once at open: the event log's first
   ## window and the call trace. Both decode into the store, which is the one

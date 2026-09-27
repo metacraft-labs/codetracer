@@ -13,7 +13,7 @@
 ## It differs from the mouse app in exactly two calls, and they are the two
 ## `main.nim` makes:
 ##
-##   * `host/layout_store.restoreLayoutForSession(rt, folder)` before the first
+##   * `host/layout_store.restoreLayoutForSession(rt)` before the first
 ##     frame, right after `enableLayoutBinding`;
 ##   * `host/layout_store.persistLayoutForSession(rt)` after the input loop
 ##     returns, before the process exits.
@@ -27,14 +27,14 @@
 ## ## THE TWO ENVIRONMENT VARIABLES, AND WHY THEY ARE ENVIRONMENT VARIABLES
 ##
 ##   * `CODETRACER_TUI_LAYOUT_TRACE` stands in for `main.nim`'s trace folder.
-##     The layout store never opens it — it only keys the document by its
-##     canonical path — so a directory is a faithful stand-in for a recording
-##     here, and everything that DOES read a recording (`traceFolderProblem`,
-##     `openTuiSession`) runs before this in the real binary.
-##   * `CODETRACER_TUI_LAYOUT_BINDING` stands in for `--layout-binding`. Set,
-##     this app is the bound child; unset, it is the same child minus one call,
-##     which is what makes the OFF arm a comparison of one difference rather
-##     than of two programs.
+##     Since PLAT-45 the layout store does not even key the document by it —
+##     the terminal keeps ONE document for the product — so it is read by
+##     nothing here and is kept only so the suite's spawn line is unchanged.
+##   * `CODETRACER_TUI_LAYOUT_BINDING` selects the bound child — what the
+##     shipped binary always is since PLAT-45. Unset, it is the same child minus
+##     one call (a host that built its runtime without a binding), which is
+##     what makes the unbound arm a comparison of one difference rather than of
+##     two programs.
 ##
 ## `CODETRACER_TUI_LAYOUT_DIR` is read by `host/layout_store.nim` itself and is
 ## not this module's business; the suite sets all three on the child.
@@ -102,7 +102,7 @@ proc ensureRuntime(cols, rows: int) =
       # message is put on the status line exactly as `main.nim` puts it there,
       # which is what makes "the user is told" observable on a real terminal.
       current = gestureApp.newBoundRuntime(cols, rows)
-      let restored = restoreLayoutForSession(current, getEnv(TraceEnvVar))
+      let restored = restoreLayoutForSession(current)
       if restored.message.len > 0:
         current.app.notification = restored.message
     else:
@@ -113,7 +113,7 @@ proc ensureRuntime(cols, rows: int) =
       # it would prove that this app does not persist, rather than that the
       # PRODUCT does not persist without the flag.
       current = gestureApp.newUnboundRuntime(cols, rows)
-      discard restoreLayoutForSession(current, getEnv(TraceEnvVar))
+      discard restoreLayoutForSession(current)
   elif current.width != cols or current.height != rows:
     current.resize(cols, rows)
 

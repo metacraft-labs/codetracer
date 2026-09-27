@@ -34,8 +34,8 @@
 ## comparison below is paired with assertions made against the SPECIFICATION of
 ## the decoration rather than against the model's rendering of it: after the
 ## gesture, the body's last row must be `binding.DockStripGlyph` in every cell
-## the pane's own title does not occupy, and the pane's `CALL STACK ───` title
-## row must be gone from the screen entirely. A binding that had stopped docking
+## the pane's own title does not occupy, and the pane's `[Files]` tab label
+## must be gone from the screen entirely. A binding that had stopped docking
 ## — and a renderer that had stopped drawing strips — would fail those whatever
 ## the two tiers agreed about.
 ##
@@ -93,13 +93,15 @@ const
     ## directly.
   UndoLine = "undo-layout"
 
-  DockedPaneKind = paneCalltrace
-    ## The Compact profile's first projected region, and therefore the pane
-    ## `newPaneFocus` starts on. Spelled as a constant and ASSERTED below rather
-    ## than assumed: a profile change that moved the first region would
-    ## otherwise silently make this case about a different pane.
-  DockedPaneTitle = "Call Stack"
-  DockedPaneTitleRow = "CALL STACK"
+  DockedPaneKind = paneFileTree
+    ## The shared default's first region at 80x24 (the Files/VCS stack, with
+    ## Files the active tab), and therefore the pane `newPaneFocus` starts on.
+    ## Spelled as a constant and ASSERTED below rather than assumed: a change
+    ## to the shared default that moved the first region would otherwise
+    ## silently make this case about a different pane. Its "title row" is its
+    ## tab label, `[Files]`, which the dock takes off the body.
+  DockedPaneTitle = "Files"
+  DockedPaneTitleRow = "[Files]"
 
 var countedAssertions = 0
 
@@ -217,7 +219,7 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       let before = sess.screenContents()
       ck not before.contains(DockStripGlyph)
       ck before.contains(DockedPaneTitleRow)
-      # …and the Compact profile's tab stack is there, which is what says this
+      # …and the shared default's Variables stack is there, which is what says this
       # is the arrangement the case was written against.
       ck before.contains("[Variables]")
       ck model.bottomStripRow() < 0

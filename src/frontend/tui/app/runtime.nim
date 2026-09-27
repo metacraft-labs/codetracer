@@ -226,6 +226,13 @@ type
       ## repaint) and updates `caps`. Nil in a host that cannot repaint, where
       ## `:theme` answers `unsupported` by name. The host installs it into
       ## `dispatcher.services.setTheme` wherever it builds the dispatcher.
+    layoutCommitted*: proc(rt: TuiRuntime) {.closure.}
+      ## PLAT-45 deliverable 8: the HOST's write-through, called after every
+      ## layout command or gesture that COMMITTED a change (`lasApplied`), so
+      ## a crash loses nothing. `host/layout_store.nim` is what it runs in a
+      ## shipped binary; nil in a host that does not persist, where nothing
+      ## happens. A hook rather than a call, because `app/` may not open a
+      ## file.
     layoutDocumentQuarantined*: bool
       ## Whether this session started from a document it could NOT read.
       ##
@@ -416,6 +423,25 @@ proc layoutPersistPlanOf*(rt: TuiRuntime): LayoutPersistPlan =
     return LayoutPersistPlan(intent: lpiQuarantine, text: "")
   layoutPersistPlan(rt.app.layoutBinding, rt.layoutDocumentQuarantined)
 
+proc afterLayoutCommit(rt: TuiRuntime) =
+  ## A layout command or gesture committed a change. Two consequences, both
+  ## PLAT-45 deliverable 8 (and the half PLAT-4 handed forward):
+  ##
+  ##   * **the session's own slot is told**, when there is one, so the
+  ##     arrangement a `HeadlessApp.saveLayouts` would write is the one on
+  ##     screen — the binding and the session no longer diverge after the
+  ##     first gesture;
+  ##   * **the host writes it through** (`layoutCommitted`), so the terminal's
+  ##     remembered arrangement is current after every change rather than only
+  ##     after a clean exit.
+  if not rt.layoutBindingEnabled():
+    return
+  let slot = rt.app.shell.activeSlot()
+  if not slot.isNil:
+    slot.layout = rt.app.layoutBinding.layout.clone()
+  if not rt.layoutCommitted.isNil:
+    rt.layoutCommitted(rt)
+
 proc resize*(rt: TuiRuntime; width, height: int) =
   ## Adopt a new terminal geometry, re-deriving the focus ring from the layout
   ## the new size projects to.
@@ -517,6 +543,8 @@ proc runPromptLine(rt: TuiRuntime; line: string;
                                                         line)
       outcome.detail = acted.message
       rt.note(acted.message)
+      if acted.status == lasApplied:
+        rt.afterLayoutCommit()
       # A layout command can take a pane off the screen (`:dock`) or put one
       # back (`:undock`), so the focus ring is re-derived from the arrangement
       # the next frame will paint rather than from the one before the command.
@@ -791,6 +819,8 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   let acted = binding.onMouse(rt.layoutGeometry(), event)
   outcome.detail = acted.message
   rt.note(acted.message)
+  if acted.status == lasApplied:
+    rt.afterLayoutCommit()
   # A gesture can take a pane off the screen (a drop on a dock strip) or put one
   # back, so the ring is re-derived from the arrangement the NEXT frame will
   # paint — the same reason `runPromptLine` rebuilds it after a layout command —

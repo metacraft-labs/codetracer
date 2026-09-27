@@ -105,7 +105,9 @@ type
 proc initAppState*(): AppState =
   AppState(modal: initModalState(), pending: initPendingState(), lastKey: "",
            lastSpelling: "", lastAction: kaNone, lastKind: krNone,
-           quitRequested: false, focused: paneCalltrace,
+           # The shared default's first region (PLAT-45): the Files stack,
+           # whose right-hand neighbour is the Source pane.
+           quitRequested: false, focused: paneFileTree,
            maximize: initMaximizeState())
 
 var current = initAppState()

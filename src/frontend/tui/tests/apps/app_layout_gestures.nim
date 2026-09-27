@@ -43,12 +43,14 @@ import ../../app/runtime
 import ../../app/theme/capabilities
 
 const
-  Cols* = 80
-  Rows* = 24
+  Cols* = 120
+  Rows* = 40
     ## The geometry this app's Tier-2 suite drives it at, published so the
-    ## suite and the app cannot disagree about which profile is on screen.
-    ## 80x24 selects Compact, which is the profile with a tab stack — the one
-    ## arrangement in which every layout verb has something to act on.
+    ## suite and the app cannot disagree about which arrangement is on screen.
+    ## 120x40 shows the shared default UNFOLDED (PLAT-45): every region —
+    ## the Files stack the suites dock among them — is on screen, and several
+    ## are tab stacks, so every layout verb has something to act on. (At 80x24
+    ## the source pane's minimum folds Files into a tab.)
 
 var current: TuiRuntime = nil
 

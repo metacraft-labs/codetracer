@@ -66,6 +66,15 @@ template ck(cond: untyped) =
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let rec = parseJson(readFile(repo / "src/tests/visual/plat41-readings.json"))
 
+const Plat41Panes = {PaneKind.low .. paneBuildOutput}
+  ## THE THIRTEEN PANES PLAT-41's RECORD MEASURED — every `PaneKind` that
+  ## existed when `plat41-readings.json` was taken. PLAT-45 added five more
+  ## (the desktop's own panes, placed by the shared default); they are
+  ## accepted exceptions the native front-ends REPORT by capability, and their
+  ## three-media placement is PLAT-45's own suite's subject
+  ## (`test_plat45_three_media.nim`), not this record's. Iterating the whole
+  ## enum here would ask a committed record about panes it predates.
+
 const NewPanes = [paneDebugControls, paneFlow, paneTimeline, paneSearch,
                   paneScratchpad, paneShell, paneFileTree, paneBuildOutput]
   ## The eight PLAT-41 owed — every `PaneKind` outside the five PLAT-40 and
@@ -92,7 +101,7 @@ suite "PLAT-41 1 — the parity table, both columns from runs":
 
   test "the eight are exactly the panes outside PLAT-40's four and the editor":
     var derived = initHashSet[PaneKind]()
-    for p in PaneKind:
+    for p in Plat41Panes:
       if p notin {paneEditor, paneCalltrace, paneState, paneEventLog,
                   panePointList}:
         derived.incl p
@@ -104,14 +113,14 @@ suite "PLAT-41 1 — the parity table, both columns from runs":
     for k, _ in rec["gpuiCensus"]: native.incl k
     for r in rec["electron"]["rows"]: desktop.incl r["pane"].getStr
     var enumNames = initHashSet[string]()
-    for p in PaneKind: enumNames.incl $p
+    for p in Plat41Panes: enumNames.incl $p
     ck native == enumNames
     ck desktop == enumNames
     ck native.len == 13
     ck desktop.len == 13
 
   test "every native row's state is its category's: data, a named exception, or the editor":
-    for p in PaneKind:
+    for p in Plat41Panes:
       let st = gpuiState(p)
       checkpoint($p & ": " & st & " " & $gpuiText(p))
       if p in PaneAcceptedExceptions:
@@ -122,7 +131,7 @@ suite "PLAT-41 1 — the parity table, both columns from runs":
 
   test "G3 — no pane where the desktop draws data and the native window does not":
     var regressions: seq[string] = @[]
-    for p in PaneKind:
+    for p in Plat41Panes:
       let e = electronRow(p)
       checkpoint($p & ": desktop " & e["state"].getStr & " (" &
                  e["detail"].getStr & "), native " & gpuiState(p))

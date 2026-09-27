@@ -94,6 +94,9 @@ import std/[json, options, strutils]
 import headless_app/layout_interaction
 import headless_app/layout_model
 
+# PLAT-45: `pmDebug`, for the fold depth `resize` compares.
+import codetracer_embed
+
 import ../input/motions
 import ../input/mouse
 import ../views/header
@@ -373,7 +376,8 @@ proc geometryOf*(layout: Layout; body: CellArea;
     let areas = slotAreas(area, edge, docked.len)
     for i, d in docked:
       strip.slots.add DockStripSlot(
-        pane: d.pane, title: (if d.title.len > 0: d.title else: $d.pane),
+        pane: d.pane, title: (if d.title.len > 0: d.title
+                              else: terminalPaneName(d.pane)),
         order: d.order,
         area: (if i < areas.len: areas[i] else: CellArea()))
     result.strips.add strip
@@ -1285,7 +1289,7 @@ proc resetToProfile*(b: LayoutBinding): LayoutAction =
   b.history = newLayoutHistory(initLayout(profileLayout(b.profile)))
   b.interaction = noInteraction()
   b.userModified = false
-  action(lasApplied, "layout reset to the " & $b.profile & " profile")
+  action(lasApplied, "layout reset to the shared default")
 
 proc runLayoutCommand*(b: LayoutBinding; geom: LayoutGeometry;
                        line: string): LayoutAction =
@@ -1387,10 +1391,20 @@ proc resize*(b: LayoutBinding; width, height: int): bool =
   ## a reflow that silently reset what the user chose is indistinguishable from
   ## a bug.
   let selected = selectProfile(width, height)
-  if selected == b.profile:
-    return false
+  # PLAT-45: THE DEFAULT CHANGES ONLY WHEN THE FOLD DEPTH DOES. A profile is
+  # now a size, and two sizes that need the same depth produce the same
+  # default — so re-flowing on every resize would throw away the active tab
+  # for nothing. The depth is Debug mode's: the binding holds the Debug
+  # arrangement (Edit mode's is the mode register's).
+  let before = depthFor(pmDebug, b.profile)
   b.profile = selected
   if b.userModified:
+    return false
+  if depthFor(pmDebug, selected) == before:
+    # The same arrangement, re-shared for the new size in place: the active
+    # tabs stay as the user chose them, and the editor keeps its minimum
+    # rather than the old size's cell counts. Not a re-flow.
+    resizeShares(b.layout.tree, pmDebug, selected)
     return false
   b.history = newLayoutHistory(initLayout(profileLayout(selected)))
   b.interaction = noInteraction()

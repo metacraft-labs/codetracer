@@ -74,6 +74,12 @@ type
       ## `pmDebug` is the zero value, so every `StatusBarModel` constructed
       ## before this milestone means what it meant.
     profile*: LayoutProfile
+    fold*: string
+      ## PLAT-45. `profile.foldNote`'s answer: empty when the screen shows the
+      ## shared default as every product opens it, else how many of its
+      ## regions this terminal folded into tabs. Drawn right after the two
+      ## mode indicators and, like them, never dropped: a user looking at
+      ## fewer regions than the desktop shows must be able to see why.
     notification*: string
       ## A transient message. Empty means "nothing to say", and nothing is then
       ## drawn — an empty notification area that always reserves its columns
@@ -83,11 +89,12 @@ type
       ## strip in `umCommand` / `umSearch`, because the prompt is what the user
       ## is looking at and the hints are what they no longer need.
 
-proc initStatusBarModel*(mode = umNormal; profile = lpCompact;
+proc initStatusBarModel*(mode = umNormal;
+                         profile = selectProfile(80, 24);
                          notification = ""; prompt = "";
-                         product = pmDebug): StatusBarModel =
+                         product = pmDebug; fold = ""): StatusBarModel =
   StatusBarModel(mode: mode, product: product, profile: profile,
-                 notification: notification, prompt: prompt)
+                 notification: notification, prompt: prompt, fold: fold)
 
 proc productIndicator*(product: ProductMode): string =
   ## §1.2's separate indicator, in its separate position.
@@ -130,10 +137,10 @@ proc keyHints*(mode: UiMode; profile: LayoutProfile;
   ## keyboard. The prompt modes are unchanged because a `:` prompt is the same
   ## prompt in both product modes.
   if mode == umNormal and product == pmEdit:
-    return case profile
-      of lpCompact:
+    return case profile.hintDensity
+      of hdCompact:
         "Ctrl+F5:debug F9:break | :run :build :w"
-      of lpStandard, lpUltraWide:
+      of hdStandard, hdUltraWide:
         "Ctrl+F5:debug  F9:breakpoint  Ctrl+z/Ctrl+y:undo/redo | " &
         ":run :build :w"
   case mode
@@ -152,10 +159,10 @@ proc keyHints*(mode: UiMode; profile: LayoutProfile;
   of umSeek:
     "Left/Right:scrub  Enter:jump  Esc:cancel"
   of umNormal:
-    case profile
-    of lpCompact:
+    case profile.hintDensity
+    of hdCompact:
       "F5:Cont F10:Next F11:Step Shift+F10:Prev | :help"
-    of lpStandard, lpUltraWide:
+    of hdStandard, hdUltraWide:
       "'n':step-over 'p':rev-step 's':step-into 'b':rev-into 'o':origin | " &
       ":command /:find"
 
@@ -203,7 +210,8 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   # below — "the mode indicator is never dropped" — covers the pair rather than
   # just the input half. A product mode that vanished at 14 columns would leave
   # a user editing a file on a screen that says NORMAL and nothing else.
-  let mode = $m.mode & " " & productIndicator(m.product)
+  let mode = $m.mode & " " & productIndicator(m.product) &
+             (if m.fold.len > 0: " " & m.fold else: "")
   let middle =
     if m.prompt.len > 0 or promptSigil(m.mode).len > 0:
       promptSigil(m.mode) & m.prompt

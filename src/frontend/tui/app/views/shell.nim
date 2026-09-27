@@ -35,7 +35,7 @@
 ## an ordinary single-pane layout would be indistinguishable from a deliberate
 ## one, which is the failure the rule is written against.
 
-import std/strutils
+import std/[strutils, wordwrap]
 
 import isonim_tui
 
@@ -283,25 +283,18 @@ const
 
 proc paneTitle*(kind: PaneKind; fallback: string): string =
   ## What a pane calls itself. The `LayoutNode`'s own title wins — it is what a
-  ## saved layout carries — and the constant below is only the default
+  ## saved layout carries — and `cells.terminalPaneName` is only the default
   ## `layout_model` documents as "use the pane's own default, which this module
-  ## does not decide either".
+  ## does not decide either". Every pane of the shared default (PLAT-45) takes
+  ## that default: its titles are empty on purpose.
   if fallback.len > 0:
     return fallback
-  case kind
-  of paneEditor: "Source"
-  of paneCalltrace: "Call Stack"
-  of paneState: "Variables"
-  of paneEventLog: "Event Log"
-  of paneTimeline: "Timeline"
-  of paneDebugControls: "Debug Controls"
-  of paneFlow: "Flow"
-  of paneSearch: "Search"
-  of panePointList: "Points"
-  of paneScratchpad: "Scratchpad"
-  of paneShell: "Shell"
-  of paneFileTree: "Files"
-  of paneBuildOutput: "Build & Run"
+  terminalPaneName(kind)
+
+const TerminalCaps = terminalCapability()
+  ## PLAT-45 deliverable 2: what this front-end can draw, evaluated once. A
+  ## placed pane outside it is painted as a REPORT (`paintReport`), never as an
+  ## empty rectangle.
 
 proc newShellModel*(width, height: int; hdr = initHeaderModel();
                     mode = umNormal; notification = "";
@@ -316,7 +309,8 @@ proc newShellModel*(width, height: int; hdr = initHeaderModel();
     header: hdr,
     status: initStatusBarModel(mode = mode, profile = selected,
                                notification = notification,
-                               product = product),
+                               product = product,
+                               fold = foldNote(product, selected)),
     layout: layoutForMode(product, selected),
     profile: selected,
     product: product)
@@ -327,18 +321,23 @@ proc newShellModel*(width, height: int; hdr = initHeaderModel();
 
 
 proc reprofile*(model: var ShellModel; width, height: int): bool =
-  ## Re-select the profile for a new terminal size, replacing the layout tree
-  ## only when the profile actually changed.
+  ## Re-derive the default for a new terminal size, replacing the layout tree
+  ## only when the DEFAULT actually changed — i.e. when the new size needs a
+  ## different fold depth (PLAT-45).
   ##
-  ## Returns whether it changed, and the guard is the point: a resize inside
-  ## one profile's band must NOT throw away which tab the user selected, and a
-  ## reflow that rebuilt the tree unconditionally would silently reset
+  ## Returns whether it changed, and the guard is the point: a resize that
+  ## needs the same depth must NOT throw away which tab the user selected, and
+  ## a reflow that rebuilt the tree unconditionally would silently reset
   ## `activeIndex` to 0 on every column of a drag.
   let selected = selectProfile(width, height)
+  let before = depthFor(model.product, model.profile)
+  let after = depthFor(model.product, selected)
   model.status.profile = selected
-  if selected == model.profile:
-    return false
+  model.status.fold = foldNote(model.product, selected)
   model.profile = selected
+  if before == after:
+    resizeShares(model.layout, model.product, selected)
+    return false
   model.layout = layoutForMode(model.product, selected)
   true
 
@@ -587,17 +586,30 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # data would paint the edit pane in Debug mode for any session that had ever
   # opened a file, which is the silent cross-mode leak §2.1 consequence 2 warns
   # a user must be able to SEE rather than guess at.
-  if region.pane == paneEditor and model.product == pmEdit and
-     region.activeTab < 0:
-    discard paintEditPane(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.edit, model.highlighting)
-  elif region.pane == paneFileTree and not model.fileTree.isEmpty and
-       region.activeTab < 0:
-    discard paintFileTree(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.fileTree)
-  elif region.pane == paneBuildOutput and region.activeTab < 0:
+  # PLAT-45: A PANE THAT OWNS ITS TITLE ROW MAY NOW BE A TAB. The shared
+  # default stacks the call stack with Agent Activity and the file tree with
+  # VCS, and a fold stacks the build pane and even the editor, so each of the
+  # four painters below runs in either shape: unstacked it owns the whole
+  # rectangle (title row included, CTUI-5's provenance rule), stacked it gets
+  # the rectangle under the tab strip — the same split the Variables arm below
+  # has always made, for the same reason: the strip says which tab is showing.
+  let stacked = region.activeTab >= 0 and region.tabs.len > 0
+  let content =
+    if stacked: CellArea(col: a.col, row: a.row + 1, width: inner,
+                         height: a.height - 1)
+    else: CellArea(col: a.col, row: a.row, width: inner, height: a.height)
+  template underStrip(body: untyped) =
+    if stacked:
+      paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
+    if content.height > 0:
+      body
+  if region.pane == paneEditor and model.product == pmEdit:
+    underStrip:
+      discard paintEditPane(g, content, model.edit, model.highlighting)
+  elif region.pane == paneFileTree and not model.fileTree.isEmpty:
+    underStrip:
+      discard paintFileTree(g, content, model.fileTree)
+  elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD, and that is the difference between this pane and
     # every other one. An empty call stack means "no session", which is what
     # the generic title row says perfectly well; an idle BUILD pane is a
@@ -605,23 +617,18 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     # pressed `:build` needs to see the verdict change from it. A pane that
     # painted a generic title until the first line of output arrived would show
     # nothing at all for the whole of a cold compile.
-    discard paintBuildOutput(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.build)
-  elif region.pane == paneEditor and not model.source.isEmpty and
-     region.activeTab < 0:
-    discard paintSourcePane(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.source, model.highlighting)
+    underStrip:
+      discard paintBuildOutput(g, content, model.build)
+  elif region.pane == paneEditor and not model.source.isEmpty:
+    underStrip:
+      discard paintSourcePane(g, content, model.source, model.highlighting)
   # THE CALL STACK PANE OWNS ITS WHOLE RECTANGLE, title row included, on the
   # same rule and for the same reason: its title carries the frame count and the
   # thread the backend named, and a shell that painted a generic title first
   # would show a 51-frame stack and a 4-frame one identically at the top.
-  elif region.pane == paneCalltrace and not model.callStack.isEmpty and
-       region.activeTab < 0:
-    discard paintCallStack(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.callStack)
+  elif region.pane == paneCalltrace and not model.callStack.isEmpty:
+    underStrip:
+      discard paintCallStack(g, content, model.callStack)
   # THE VARIABLES PANE IS THE FIRST ONE THAT CAN BE IN A TAB STACK, and that is
   # why this arm is shaped differently from the two above. `paneState` sits in a
   # `stack` with `paneEventLog` in every profile's layout, so the rectangle
@@ -670,6 +677,29 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
       discard paintPointList(
         g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
         model.points)
+  elif not TerminalCaps.canDraw(region.pane):
+    # PLAT-45: A REPORT LEAF. The shared default places this pane and the
+    # terminal has no view for it, so the slot says which pane it is and why
+    # it is not drawn — never an empty rectangle that looks like a pane with
+    # nothing in it (PLAT-41's data-or-report rule).
+    var top = a.row
+    if region.activeTab >= 0 and region.tabs.len > 0:
+      paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
+    else:
+      paintTitleRow(g, a.row, a.col, paneTitle(region.pane, region.title),
+                    inner)
+    top = a.row + 1
+    let report = reportText(
+      ReportLeaf(pane: region.pane, frontEnd: feTerminal,
+                 reason: TerminalCaps.reasons[region.pane]),
+      terminalPaneName(region.pane))
+    var line = 0
+    if inner > 0:
+      for piece in wrapWords(report, max(1, inner)).splitLines():
+        if top + line >= a.row + a.height:
+          break
+        g.paint(top + line, a.col, fitCells(piece, inner))
+        inc line
   elif region.activeTab >= 0 and region.tabs.len > 0:
     paintTabRow(g, a.row, a.col, region.tabs, region.activeTab, inner)
   else:
@@ -680,18 +710,21 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # scrubber takes the top `TimelineBarRows` rows and the event log takes the
   # rest. CTUI-3's own one-line `timelineScrubber` stays as the fallback for a
   # shell with no bounds — see `ShellModel.timeline`.
-  if region.pane == paneTimeline and a.height >= 2:
+  #
+  # PLAT-45: THE TIMELINE IS A TAB in the shared default (of the event stack),
+  # so it is painted UNDER the strip rather than over it — `content`, not the
+  # whole rectangle — and the strip stays the thing that says which tab this
+  # is, as every other stacked pane's does.
+  if region.pane == paneTimeline and content.height >= 2:
     if model.timeline.boundsKnown:
-      discard paintTimelineBar(
-        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-        model.timeline)
-      if a.height > TimelineBarRows:
+      discard paintTimelineBar(g, content, model.timeline)
+      if content.height > TimelineBarRows:
         discard paintEventLog(
-          g, CellArea(col: a.col, row: a.row + TimelineBarRows, width: inner,
-                      height: a.height - TimelineBarRows),
+          g, CellArea(col: content.col, row: content.row + TimelineBarRows,
+                      width: inner, height: content.height - TimelineBarRows),
           model.eventLog)
     else:
-      g.paint(a.row + 1, a.col,
+      g.paint(content.row + 1, content.col,
               timelineScrubber(model.header.tick, model.header.totalTicks,
                                inner))
   if not flushRight:

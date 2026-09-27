@@ -74,7 +74,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 113
+const ExpectedAssertions = 114
 
 var countedAssertions = 0
 
@@ -114,7 +114,9 @@ const
   ChecksCalltraceCursor = 4
   ChecksSameFileArm = 10
   ChecksLatency = 7
-  ChecksShellIntegration = 5
+  ChecksShellIntegration = 6
+    ## PLAT-45 added one: the call stack is a TAB of its stack in the shared
+    ## default, and the strip naming it is asserted.
   ChecksSummary = 4
   ChecksSkippedFixture = 2
 
@@ -664,9 +666,12 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # CTUI-3 delivered the rectangle and left it empty; CTUI-5 filled the
       # `editor` one. This is the assertion that the `calltrace` one is no
       # longer empty and that what fills it is EXACTLY this pane.
-      var shellModel = newShellModel(80, 24)
+      # At 120x40, where the shared default is unfolded and the call stack
+      # has a rectangle of its own; at 80x24 the source pane's minimum folds
+      # it into a tab of the Variables stack (PLAT-45).
+      var shellModel = newShellModel(120, 40)
       shellModel.callStack = deepModel
-      let screenBody = bodyArea(80, 24)
+      let screenBody = bodyArea(120, 40)
       let stackArea = projectLayout(shellModel.layout,
                                     screenBody).regionFor(paneCalltrace)
       ck stackArea.width > 0
@@ -679,8 +684,14 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # defect.
       let flushRight = stackArea.col + stackArea.width >= screenBody.col + screenBody.width
       let inner = if flushRight: stackArea.width else: stackArea.width - 1
-      let shellText = shellRows(shellModel, 80, 24)
-      let standalone = callStackText(deepModel, inner, stackArea.height)
+      let shellText = shellRows(shellModel, 120, 40)
+      # PLAT-45: the call stack is the first TAB of its stack in the shared
+      # default, so the rectangle's first row is the strip and the pane owns
+      # the rows under it — `shell.paintPane`'s `content`.
+      let paneTop = stackArea.row + 1
+      let paneRows = stackArea.height - 1
+      ck shellText[stackArea.row].contains("[Call Stack]")
+      let standalone = callStackText(deepModel, inner, paneRows)
       var matched = 0
       var separators = 0
       for i in 0 ..< stackArea.height:
@@ -695,15 +706,15 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
           elif at == stackArea.col + stackArea.width - 1:
             edge = $r
           at += w
-        if slice == standalone[i]:
+        if i >= 1 and slice == standalone[i - 1]:
           inc matched
         if flushRight or edge == PaneSeparatorGlyph:
           inc separators
-      ck matched == stackArea.height
+      ck matched == paneRows
       ck separators == stackArea.height
       # …and the pane still says what CTUI-3's plain title row said, so every
       # assertion written against that row keeps reading it.
-      ck shellText[stackArea.row].contains(CallStackTitle)
+      ck shellText[paneTop].contains(CallStackTitle)
 
   test "every fixture was examined, and the assertion tally proves it":
     ck examinedFixtures == 1

@@ -109,6 +109,9 @@ proc runHeadless*(traceFolder: string; flags: app_capabilities.CapabilityFlags;
     return ExitUsage
   defer: session.close()
 
+  # PLAT-45: the recording's own sources in the Files pane, exactly as the
+  # tty path (`main.interactive`) fills it — one screen, two readings.
+  app.fileTree = initFileTreeModel(recordingFileList(folder))
   session.header(rt)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()

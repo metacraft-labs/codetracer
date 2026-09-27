@@ -56,9 +56,12 @@ template ck(condition: untyped) =
   check condition
 
 const
-  Cols = 120
+  Cols = 200
   Rows = 30
-    ## The Compact profile, so a tab stack is on screen for the tab roles.
+    ## Wide enough that the Variables stack's strip spells its inactive tab
+    ## and the rightmost strip has bar left over past its label: the shared
+    ## default gives every region its minimum first, and at 120 columns the
+    ## strips are cut at their labels (PLAT-45).
   TallRows = 40
   CaptureRecipe = "just plat46-capture-electron"
   SharedRoles = ["tab-active-bg", "tab-active-fg", "tab-inactive-fg",
@@ -96,13 +99,25 @@ proc colOf(sess: var TuiTestSession; row: int; needle: string): int =
   if at < 0: return -1
   text[0 ..< at].runeLen
 
+proc lastColBeforeRule(sess: var TuiTestSession; row, fromCol: int): int =
+  ## The last body cell of the region `fromCol` is in: the column left of the
+  ## first `│` at or right of it, or `Cols - 2` at the screen's edge. Since
+  ## PLAT-45 the Variables and Source panes are not the rightmost regions, so
+  ## a fixed offset from the edge lands in a neighbour.
+  for c in fromCol ..< Cols:
+    if $sess.cellAt(row, c).rune == "│":
+      return max(fromCol, c - 1)
+  Cols - 2
+
 proc terminalColumn(sess: var TuiTestSession): Table[string, string] =
   ## Each shared role's colour as the terminal painted it.
   result = initTable[string, string]()
   let tabs = rowOf(sess, "[Variables]")
   if tabs >= 0:
     let active = sess.cellAt(tabs, colOf(sess, tabs, "Variables"))
-    let inactive = sess.cellAt(tabs, colOf(sess, tabs, "Timeline"))
+    # The Variables stack's inactive tab — Scratchpad in the shared default
+    # (PLAT-45); the Timeline is a tab of the events stack, on another row.
+    let inactive = sess.cellAt(tabs, colOf(sess, tabs, "Scratch"))
     result["tab-active-bg"] = hexOfColor(active.bg)
     result["tab-active-fg"] = hexOfColor(active.fg)
     result["tab-inactive-bg"] = hexOfColor(inactive.bg)
@@ -114,11 +129,13 @@ proc terminalColumn(sess: var TuiTestSession): Table[string, string] =
     result["surface-canvas"] = hexOfColor(sess.cellAt(tabs, Cols - 3).bg)
   let varRow = rowOf(sess, "VARIABLES")
   if varRow >= 0:
-    result["surface-panel"] = hexOfColor(sess.cellAt(varRow + 2, Cols - 2).bg)
+    result["surface-panel"] = hexOfColor(sess.cellAt(varRow + 2,
+      lastColBeforeRule(sess, varRow + 2, colOf(sess, varRow, "VARIABLES"))).bg)
   let srcRow = rowOf(sess, "   3 ")
   if srcRow >= 0:
     result["surface-editor"] = hexOfColor(
-      sess.cellAt(srcRow, colOf(sess, srcRow, "   3 ") + 30).bg)
+      sess.cellAt(srcRow,
+        lastColBeforeRule(sess, srcRow, colOf(sess, srcRow, "   3 "))).bg)
   # `ui/text/primary/body` on a pane body: the call stack's frame name.
   let frameRow = rowOf(sess, "<__main__>")
   if frameRow >= 0:

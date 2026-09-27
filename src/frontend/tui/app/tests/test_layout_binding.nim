@@ -62,11 +62,12 @@ import ../layout/profile
 import ../layout/project
 import ../layout/tab_strip
 import ../views/shell
+import ./plat45_old_profiles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2053
+const ExpectedAssertions = 2714
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -91,11 +92,22 @@ template ck(condition: untyped) =
 
 proc bodyFor(cols, rows: int): CellArea = bodyArea(cols, rows)
 
-proc compact(): Layout = initLayout(profileLayout(lpCompact))
-proc standard(): Layout = initLayout(profileLayout(lpStandard))
-proc ultraWide(): Layout = initLayout(profileLayout(lpUltraWide))
+# PLAT-45: THE GESTURE FIXTURES ARE THE OLD THREE PROFILE TREES.
+#
+# Until PLAT-45 `compact()` / `standard()` / `ultraWide()` were the product's
+# own defaults. The product's default is now the ONE shared arrangement folded
+# for the size (`profileLayout`), and the gesture cases below are about
+# GESTURES — a tab moved, a pane docked, a split dragged — on arrangements
+# whose every rectangle they name. So they keep the three trees they were
+# written against, from `plat45_old_profiles.nim`, where PLAT-45 keeps them
+# as fixtures on purpose; the cases that are about THE DEFAULT (the resize
+# re-flow, the reset) use `sharedAt`, the product's own.
+proc compact(): Layout = initLayout(oldProfileLayout(opCompact))
+proc standard(): Layout = initLayout(oldProfileLayout(opStandard))
+proc ultraWide(): Layout = initLayout(oldProfileLayout(opUltraWide))
 
-proc layoutFor(profile: LayoutProfile): Layout =
+proc sharedAt(profile: LayoutProfile): Layout =
+  ## The product's default at a size: the shared arrangement, folded.
   initLayout(profileLayout(profile))
 
 proc allEdgesDocked(): Layout =
@@ -311,7 +323,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var resolved = 0
     var zonesSeen: set[DropZone] = {}
     for g in Geometries:
-      for l in [layoutFor(selectProfile(g.cols, g.rows)), allEdgesDocked()]:
+      for l in [sharedAt(selectProfile(g.cols, g.rows)), allEdgesDocked()]:
         let geom = geometryOf(l, bodyFor(g.cols, g.rows))
         ckPartition(geom, $g.cols & "x" & $g.rows)
         ckStripsTileTheBody(l, geom, $g.cols & "x" & $g.rows)
@@ -379,7 +391,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var noTarget = 0
     var mismatches: seq[string] = @[]
     for g in Geometries:
-      let l = layoutFor(selectProfile(g.cols, g.rows))
+      let l = sharedAt(selectProfile(g.cols, g.rows))
       let geom = geometryOf(l, bodyFor(g.cols, g.rows))
       for row in geom.inner.row ..< geom.inner.row + geom.inner.height:
         for col in geom.inner.col ..< geom.inner.col + geom.inner.width:
@@ -522,7 +534,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var disagreements: seq[string] = @[]
     for g in Geometries:
       let profile = selectProfile(g.cols, g.rows)
-      let l = layoutFor(profile)
+      let l = sharedAt(profile)
       let geom = geometryOf(l, bodyFor(g.cols, g.rows))
       for region in geom.projection.regions:
         if region.activeTab < 0 or region.tabs.len == 0:
@@ -532,8 +544,18 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
         let painted = shellRows(model, g.cols, g.rows)
         let strip = painted[region.area.row]
         let spans = tabSpans(region.tabs, region.activeTab)
+        # PLAT-45: A STRIP NARROWER THAN ITS TABS. The shared default puts
+        # stacks in regions narrower than their labels (the 80x24 fold gives
+        # the Variables/Scratchpad stack 20 columns), so the span table runs
+        # past the region. The painter clips at the region's inner width and
+        # so must this walk: a column beyond it is the neighbour's, and a tab
+        # whose label was cut is still that tab up to the cut.
+        let clip = innerWidthOf(geom, region.area)
         for span in spans:
-          for offset in 0 ..< span.width:
+          let visible = min(span.width, clip - span.startCol)
+          if visible <= 0:
+            continue
+          for offset in 0 ..< visible:
             let col = region.area.col + span.startCol + offset
             inc columnsChecked
             let where = $g.cols & "x" & $g.rows & " col " & $col
@@ -552,11 +574,12 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                 " rather than index " & $span.index
           # …and the label the painter actually wrote is at those columns.
           # BY CELL, NOT BY BYTE — see `sliceCells`.
-          let label = tabLabel(region.tabs[span.index],
-                               span.index == region.activeTab)
+          let label = sliceCells(tabLabel(region.tabs[span.index],
+                                          span.index == region.activeTab),
+                                 0, visible)
           inc labelledColumns
           let onScreen = sliceCells(strip, region.area.col + span.startCol,
-                                    span.width)
+                                    visible)
           if onScreen != label:
             disagreements.add "painted '" & onScreen & "' where tab " &
               $span.index & " should read '" & label & "'"
@@ -858,8 +881,12 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var projectionsChecked = 0
     var refusals = 0
     for g in Geometries:
-      for profile in LayoutProfile:
-        let b = bindingOn(layoutFor(profile), profile)
+      # The three old trees AND the product's own default at this size — four
+      # arrangements, so the gate covers the shape the product now opens with.
+      for source in [compact(), standard(), ultraWide(),
+                     sharedAt(selectProfile(g.cols, g.rows))]:
+        let profile = selectProfile(g.cols, g.rows)
+        let b = bindingOn(source, profile)
         let body = bodyFor(g.cols, g.rows)
         # Every command kind the binding can issue, over a real arrangement.
         let sweep = @[
@@ -903,7 +930,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     checkpoint($commandsApplied & " command(s) applied, " & $refusals &
                " refused, " & $projectionsChecked & " projection(s) checked")
     # The positive control: the sweep really ran, and it really CHANGED things.
-    ck projectionsChecked == 3 * 3 * 11
+    ck projectionsChecked == 3 * 4 * 11
     ck commandsApplied > 0
     ck refusals > 0
 
@@ -979,7 +1006,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var comparisons = 0
     for g in Geometries:
       let profile = selectProfile(g.cols, g.rows)
-      let b = bindingOn(layoutFor(profile), profile)
+      let b = bindingOn(sharedAt(profile), profile)
       let before = $b.saveDocument()
       let geom = b.geometry(bodyFor(g.cols, g.rows))
       for region in geom.projection.regions:
@@ -1114,7 +1141,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       verbsRun.incl lvRedoLayout
       let reset = b.runLayoutCommand(geom, ":reset-layout")
       ck reset.status == lasApplied
-      ck $b.saveDocument() == before
+      # PLAT-45: the way back is the SHARED DEFAULT at this size, not the
+      # arrangement the binding happened to start from (here a fixture).
+      ck $b.saveDocument() == $saveLayout(sharedAt(b.profile))
       ck not b.userModified
       verbsRun.incl lvResetLayout
 
@@ -1206,15 +1235,18 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # is re-flowed only while the user has not touched it, and `:reset-layout`
     # is the way back.
     block:
-      let b = bindingOn(compact(), lpCompact)
+      # PLAT-45: the DEFAULT is re-derived only when the size needs a
+      # different fold depth — 80x24 folds four times, 120x40 and 200x60 not at
+      # all — and the profile (the size) always tracks.
+      let b = bindingOn(sharedAt(lpCompact), lpCompact)
       ck not b.userModified
       ck b.resize(120, 40)
       ck b.profile == lpStandard
-      ck shapeOf(b.layout) == shapeOf(standard())
-      ck b.resize(200, 60)
-      ck b.profile == lpUltraWide
-      ck shapeOf(b.layout) == shapeOf(ultraWide())
-      ck not b.resize(200, 60)   ## the same profile is not a re-flow
+      ck shapeOf(b.layout) == shapeOf(sharedAt(lpStandard))
+      ck not b.resize(200, 60)   ## the same depth is not a re-flow
+      ck b.profile == selectProfile(200, 60)
+      ck shapeOf(b.layout) == shapeOf(sharedAt(selectProfile(200, 60)))
+      ck not b.resize(200, 60)
 
     block:
       let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
@@ -1224,18 +1256,18 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       let mine = shapeOf(b.layout)
       ck not b.resize(120, 40)
       checkpoint("after a modified resize the profile is " & $b.profile)
-      ck b.profile == lpStandard      ## the status bar still says Standard…
+      ck b.profile == lpStandard      ## the status bar still tracks the size…
       ck shapeOf(b.layout) == mine    ## …and the arrangement is still theirs
       ck not b.resize(200, 60)
       ck shapeOf(b.layout) == mine
       # And it is still a layout that PROJECTS at the new size.
       ckPartition(b.geometry(bodyFor(200, 60)), "user layout at 200x60")
-      # The explicit way back.
+      # The explicit way back — to the SHARED DEFAULT at this size.
       ck b.resetToProfile().status == lasApplied
       ck not b.userModified
-      ck shapeOf(b.layout) == shapeOf(layoutFor(b.profile))
+      ck shapeOf(b.layout) == shapeOf(sharedAt(b.profile))
       ck b.resize(80, 24)
-      ck shapeOf(b.layout) == shapeOf(compact())
+      ck shapeOf(b.layout) == shapeOf(sharedAt(lpCompact))
 
   test "the binding holds no LayoutNode reference, structurally":
     # PLAT-6's second handed-forward item. `nodeAtPath` hands out a live `ref`
@@ -1244,7 +1276,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # has to enforce.
     var checkedFields = 0
     var referenceFields: seq[string] = @[]
-    let sample = nodeInfoAtPath(profileLayout(lpCompact), "1/0")
+    let sample = nodeInfoAtPath(compact().tree, "1/0")
     ck sample.isSome
     ck sample.get.kind == lnPane
     ck sample.get.pane == paneState

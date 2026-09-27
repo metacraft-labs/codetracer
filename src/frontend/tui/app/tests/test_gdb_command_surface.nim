@@ -156,7 +156,12 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 86
+  ExpectedAppModules = 88
+    ## RE-COUNTED ON 2026-09-26 (PLAT-45): 86 → 88. `layout/cells.nim` (the
+    ## terminal's cell vocabulary, split out of `profile.nim` so the fold can
+    ## project) and `tests/plat45_old_profiles.nim` (the old three profile trees,
+    ## kept as a comparison fixture).
+    ##
     ## RE-COUNTED ON 2026-09-26: 82 → 86. PLAT-46 painted the terminal from the
     ## design system and added four `app/theme/` modules: `roles.nim` (every
     ## role and the token it paints with), `cell_style.nim` (the role-carrying

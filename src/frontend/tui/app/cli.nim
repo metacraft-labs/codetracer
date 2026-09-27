@@ -124,33 +124,19 @@ type
         ## default (`FlowOverlayShownByDefault`); this is the GPUI binary's
         ## flag of the same name, so the two can be asked for the same screen.
       layoutBinding*: bool
-        ## `--layout-binding` — PLAT-6's rearrangeable layout, OFF BY DEFAULT.
+        ## `--layout-binding` — accepted, and since PLAT-45 it asks for what
+        ## is already the default.
         ##
-        ## A MODE RATHER THAN A CAPABILITY, which is why it is a `bool` here
-        ## and not a field of `CapabilityFlags`: it says nothing about what the
-        ## terminal can do. With it the front-end gives itself a
-        ## `LayoutBinding` (`app/runtime.enableLayoutBinding`), the `:`
-        ## prompt's twelve layout verbs — `:move-tab`, `:dock`, `:resize`, … —
-        ## reach it, and so does the MOUSE: `runtime.handleToken` decodes an
-        ## SGR-1006 report and hands it to `binding.onMouse`, so a tab can be
-        ## dragged, a pane docked and a tab strip scrolled with a pointer.
-        ## **And the arrangement is REMEMBERED**, per recording, under the
-        ## user's own state directory — `app/layout/persistence.nim` decides
-        ## where and what happens to a document this build cannot read, and
-        ## `host/layout_store.nim` is the only thing that opens it.
-        ## Without it the shell paints the session's own `LayoutNode` exactly as
-        ## CTUI-3 painted it, those words are unknown commands, and a mouse
-        ## report is the inert token it has always been — the decoder is not
-        ## even called, and **no layout document is read, written or removed**:
-        ## `host/layout_store` computes no path without a binding, so the state
-        ## directory is not touched, not even by a `stat`.
-        ##
-        ## OPT-IN, and the reason is recorded at `app/runtime
-        ## .enableLayoutBinding`: a binding's tree is a CLONE of the session's,
-        ## so enabling one by default would give the terminal a second layout
-        ## authority. The divergence that would cause is latent today (nothing
-        ## calls `headless_app.activatePane`), and the flag is what keeps it
-        ## latent while the gesture surface is reachable for anybody who asks.
+        ## PLAT-6 made the rearrangeable layout an opt-in: with the flag the
+        ## `:` prompt's layout verbs and the mouse reached a `LayoutBinding`,
+        ## and the arrangement was remembered per recording. PLAT-45
+        ## deliverable 8 made both the DEFAULT — every product lets the user
+        ## rearrange freely and remembers its own last layout — so the shipped
+        ## binary enables the binding on every interactive session and keeps
+        ## ONE document for the terminal (`host/layout_store.nim`). The flag
+        ## still parses, still needs a trace and still contradicts
+        ## `--headless` (a settled screen has no prompt to rearrange from), so
+        ## a command line written for PLAT-6 means what it meant.
     of tckEditProject:
       projectPath*: string
         ## The project folder, exactly as it was written. Resolved by `host/`,
@@ -307,7 +293,7 @@ options:
   --goto=TICK        seek to TICK before the first debugger frame
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
-  --layout-binding   let : and the mouse rearrange the panes, and remember them
+  --layout-binding   (default) : and the mouse rearrange panes; remembered
   --no-flow-overlay  do not dim the lines the run did not reach
   --headless         render one screen as plain text and exit — for CI
 

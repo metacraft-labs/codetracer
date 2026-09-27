@@ -49,6 +49,7 @@ import std/[strutils, unicode, unittest]
 import isonim_tui
 
 import headless_app/layout_model
+import codetracer_embed
 
 import ../layout/profile
 import ../layout/project
@@ -57,7 +58,7 @@ import ../views/shell
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 500
+const ExpectedAssertions = 506
 
 const
   Waypoints = [
@@ -147,32 +148,37 @@ suite "CTUI-3: reflow across ten resize increments":
     ck visited == 11
     ck checkedRows == 24 + 26 + 28 + 31 + 33 + 35 + 37 + 39 + 41 + 43 + 45
     ck staleCells == 0
-    # EXACTLY ONE profile change over the walk: Compact until the size clears
-    # both §3.2 clauses, Standard after. Asserting the COUNT rather than "at
-    # least one" is what catches a `reprofile` that rebuilt the tree on every
-    # frame — which would also reset the active tab on every frame.
-    ck profileChanges == 1
+    # EXACTLY THREE default changes over the walk — one per fold depth the walk
+    # crosses (4 -> 3 -> 2 -> 0, measured in the next case). Asserting the
+    # COUNT rather than "at least one" is what catches a `reprofile` that
+    # rebuilt the tree on every frame — which would also reset the active tab
+    # on every frame.
+    ck profileChanges == 3
     h.dispose()
 
-  test "the profile changes where §3.2 says it does, and not before":
+  test "the default changes where the fold depth does, and not before":
+    # PLAT-45: the default is the shared arrangement folded for the size, so
+    # it changes exactly where `depthFor` answers differently — measured, not
+    # tabulated: the source pane's 60-cell minimum folds 80x24 four times,
+    # and each few columns more gives regions back until 116x37 needs none.
     var changedAt: seq[string] = @[]
-    var previous = selectProfile(Waypoints[0].cols, Waypoints[0].rows)
-    ck previous == lpCompact
+    var previous = depthFor(pmDebug, Waypoints[0].cols, Waypoints[0].rows)
+    ck previous == 4
     for i in 1 ..< Waypoints.len:
       let w = Waypoints[i]
-      let now = selectProfile(w.cols, w.rows)
+      let now = depthFor(pmDebug, w.cols, w.rows)
       if now != previous:
-        changedAt.add $w.cols & "x" & $w.rows & " -> " & $now
+        changedAt.add $w.cols & "x" & $w.rows & " -> depth " & $now
       previous = now
     checkpoint("transitions: " & changedAt.join(", "))
-    ck changedAt.len == 1
-    ck changedAt[0] == "122x39 -> standard"
-    # 116x37 is the waypoint before it: tall enough for a wide profile, but
-    # four columns short of §3.2's 120. Both clauses are therefore exercised by
-    # this walk, which is why the heights step unevenly.
-    ck selectProfile(116, 37) == lpCompact
-    ck selectProfile(116, 34) == lpCompact
-    ck previous == lpStandard
+    ck changedAt.len == 3
+    ck changedAt[0] == "92x28 -> depth 3"
+    ck changedAt[2] == "116x37 -> depth 0"
+    # The waypoint before it, and the same width a little shorter: the fold
+    # is decided by the cells, not by one axis.
+    ck depthFor(pmDebug, 110, 35) == 2
+    ck depthFor(pmDebug, 116, 37) == 0
+    ck previous == 0
 
   test "no coordinate drifts: the walk backwards reproduces the walk forwards":
     # THE DRIFT ARM. A projection that carried state between frames — a cached
@@ -221,27 +227,37 @@ suite "CTUI-3: reflow across ten resize increments":
     # column wider must not throw away which tab they selected. A shell that
     # rebuilt the tree from the profile on every frame would look correct in
     # every screenshot and be wrong the moment somebody pressed Alt+2 first.
-    var model = demoModel(80, 24)
-    ck model.profile == lpCompact
+    # Opened at 86x26 and dragged NARROWER, so a tree that kept the opening
+    # size's cell counts would be measured where it hurts (PLAT-45).
+    var model = demoModel(86, 26)
+    ck depthFor(pmDebug, model.profile) == depthFor(pmDebug, lpCompact)
     ck model.layout.activate(paneTimeline)
     ck isVisible(model.layout, paneTimeline)
     var widened = 0
-    for cols in [82, 90, 100, 110, 118]:
-      ck not model.reprofile(cols, 30)
+    # Every size here needs the same four folds as 80x24 (PLAT-45), so the
+    # default's arrangement does not change — only its cell shares do — and
+    # the tab the user chose must survive.
+    for cols in [84, 83, 82, 81, 80]:
+      ck not model.reprofile(cols, 26)
       inc widened
       ck isVisible(model.layout, paneTimeline)
-      ck not isVisible(model.layout, paneState)
-      let body = bodyArea(cols, 30)
+      ck not isVisible(model.layout, paneEventLog)
+      let body = bodyArea(cols, 26)
       let proj = projectLayout(model.layout, body)
       ck coverageProblems(proj.regions, body).len == 0
       ck paneTimeline in proj.visiblePaneKinds()
+      # THE SHARES FOLLOW THE SIZE even though the arrangement does not: a
+      # tree that kept 86 columns' cell counts would hand the source pane
+      # 62/86 of 80 columns, below its minimum.
+      ck proj.regionFor(paneEditor).width >= minPaneWidth(paneEditor)
     ck widened == 5
-    # And crossing INTO another profile does replace the tree — the Standard
-    # profile has no stack, so there is no tab to keep.
+    # And crossing to a size that needs a DIFFERENT fold does replace the tree
+    # — the default is re-derived, and its event stack opens on its own first
+    # tab again.
     ck model.reprofile(140, 45)
-    ck model.profile == lpStandard
-    ck profileTabs(lpStandard).len == 0
-    ck isVisible(model.layout, paneTimeline)
+    ck model.profile == selectProfile(140, 45)
+    ck isVisible(model.layout, paneEventLog)
+    ck not isVisible(model.layout, paneTimeline)
 
   test "the reflowed screen is repainted, not merely resized":
     # `h.resize` repaints the EXISTING tree into the new buffer. For this shell

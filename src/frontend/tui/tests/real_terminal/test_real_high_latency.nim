@@ -267,7 +267,7 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     ck fast.plain.contains("SOURCE")
     ck fast.plain.contains("CALL STACK")
     ck fast.plain.contains("VARIABLES")
-    ck fast.plain.contains("TIMELINE")
+    ck fast.plain.contains("Timeline")
     ck fast.cells.len == Cols * Rows
     var fastGlyphs = 0
     for cell in fast.cells:

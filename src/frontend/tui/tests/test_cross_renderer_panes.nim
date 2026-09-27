@@ -551,11 +551,13 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
       ck ex.report.len > 0
       ck ex.entries == {pkText}
       ck ex.report.contains("accepted exception")
-    # 43 = the 9 vocabulary panes x 3 assertions each (portable, visited, not
-    # native) + 5 for the source escape + 5 for the timeline escape + the 2
+    # 58 = the 10 vocabulary panes x 3 assertions each (portable, visited, not
+    # native) + 5 for the source escape + 5 for the timeline escape + the 6
     # accepted exceptions x 3. It was 19 when the loop covered 4 panes and the
-    # only escape was the source pane; PLAT-41 moved every term.
-    expectCount(43)
+    # only escape was the source pane; PLAT-41 moved every term, and PLAT-45
+    # added the five desktop panes the shared default places (each an accepted
+    # exception that reports rather than renders blank).
+    expectCount(58)
 
   liveTest "the entries each pane uses are the ones the module declares":
     publishTracepoints()
@@ -985,8 +987,9 @@ suite "PLAT-21: the session is closed":
 # 277 = 253 + 24. The 24 is exactly the growth of the expressibility case
 # above (43 - 19): PLAT-41 expressed five more panes, added the timeline as the
 # second native escape, and replaced one flow assertion with a loop over the two
-# accepted exceptions. No other case changed.
-const ExpectedAssertions = 293
+# accepted exceptions. No other case changed. PLAT-45 adds 15 more (293 -> 308):
+# the five desktop panes it added are accepted exceptions, three assertions each.
+const ExpectedAssertions = 308
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

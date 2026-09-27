@@ -82,7 +82,7 @@ import term_assert
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 
-const ExpectedAssertions = 61
+const ExpectedAssertions = 62
 
 var countedAssertions = 0
 
@@ -236,6 +236,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck screen.contains("BUILD")
       ck screen.contains(ProjectFile)
       ck not screen.contains("CALL STACK")
+      ck not screen.contains("[Call Stack]")
       # The build pane is a statement rather than a blank.
       ck screen.contains("[idle]")
     finally:
@@ -351,7 +352,10 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       # …and the pane set moved with it (Mode-Transitions.md §4 requirement 4:
       # mode and layout change together or not at all).
       ck not debug.contains("EDIT " & ProjectFile)
-      ck debug.contains("CALL STACK")
+      # The Call Stack's tab label: in the shared default (PLAT-45) it is a
+      # tab of a stack, and a session with no frames paints the strip, not a
+      # `CALL STACK` title row.
+      ck debug.contains("[Call Stack]")
 
       # BACK, and the editor is the one that was there — §6's reversibility,
       # through a real terminal.

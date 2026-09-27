@@ -107,9 +107,9 @@ const
   Rows = persistApp.Rows
   FrameTimeoutMs = 20000
 
-  DraggedPane = paneCalltrace
-  DraggedPaneTitle = "Call Stack"
-  DraggedPaneTitleRow = "CALL STACK"
+  DraggedPane = paneFileTree
+  DraggedPaneTitle = "Files"
+  DraggedPaneTitleRow = "[Files]"
 
   DropRow = 0
   DropCol = 40
@@ -196,7 +196,8 @@ proc newRecording(): Recording =
   # developer's own `$XDG_STATE_HOME/codetracer` would be a suite that changes
   # the machine it runs on, and the override exists for exactly that reason.
   putEnv(LayoutDirEnvVar, result.root)
-  result.document = layoutDocumentPathFor(result.trace)
+  # ONE document for the terminal product (PLAT-45), not one per recording.
+  result.document = layoutDocumentPath()
 
 proc dispose(rec: Recording) =
   delEnv(LayoutDirEnvVar)
@@ -278,7 +279,7 @@ template ckArrangementIsDefault(sess: var TuiTestSession; label: string) =
     let contents = sess.screenContents()
     checkpoint(label & ": default arrangement expected")
     ck contents.contains(DraggedPaneTitleRow)
-    ck contents.contains("[Variables]")     ## the Compact profile's tab stack
+    ck contents.contains("[Variables]")     ## the shared default's Variables stack
     ck not contents.contains(DockStripGlyph)
 
 template ckQuitsCleanly(sess: var TuiTestSession; label: string) =
@@ -339,7 +340,7 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
       checkpoint("after process 1 the state root holds " &
                  $filesUnder(rec.root))
       ck filesUnder(rec.root) ==
-        @[LayoutDocumentDirName / rec.document.extractFilename]
+        @[LayoutDocumentFileName]
       let written = readFile(rec.document)
       let doc = parseJson(written)
       ck doc["version"].getInt == LayoutSchemaVersion
@@ -372,7 +373,7 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
       ck fileExists(rec.document)
       ck readFile(rec.document) == written
       ck filesUnder(rec.root) ==
-        @[LayoutDocumentDirName / rec.document.extractFilename]
+        @[LayoutDocumentFileName]
     finally:
       rec.dispose()
 
@@ -419,7 +420,7 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
         # older binary once.
         ck readFile(rec.document) == planted
         ck filesUnder(rec.root) ==
-          @[LayoutDocumentDirName / rec.document.extractFilename]
+          @[LayoutDocumentFileName]
       finally:
         rec.dispose()
     checkpoint("unreadable-document arms driven on a real terminal: " &

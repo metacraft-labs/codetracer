@@ -620,8 +620,9 @@ suite "CTUI-11 Tier 1: degraded style tables":
           inc unfilled
     checkpoint("spans with no 24-bit background: " & $unfilled)
     ck unfilled == 0
-    # THE TAB STRIP (the sample is the Compact profile's stacked state column):
-    # the active tab lifted onto the panel, the others on the strip.
+    # THE TAB STRIP (the sample is the shared default's Variables/Scratchpad
+    # stack, PLAT-45): the active tab lifted onto the panel, the others on the
+    # strip.
     var tabRow = -1
     for i in 0 ..< truecolor.len:
       if rowText(truecolor[i]).contains("[Variables]"):
@@ -632,7 +633,9 @@ suite "CTUI-11 Tier 1: degraded style tables":
       for span in truecolor[tabRow]:
         if span.text.contains("Variables") and activeBg.len == 0:
           activeBg = span.style.bg
-        if span.text.contains("Timeline") and inactiveBg.len == 0:
+        # The stack is 16 cells wide at 120x30 (15 inside its separator), so
+        # the inactive label is cut to its first two letters at the edge.
+        if span.text.contains("Sc") and inactiveBg.len == 0:
           inactiveBg = span.style.bg
       checkpoint("tabs: active " & activeBg & " inactive " & inactiveBg)
       ck activeBg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark)

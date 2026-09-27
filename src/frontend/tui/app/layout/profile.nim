@@ -5,315 +5,424 @@
 ## terminal. Nothing else. `src/frontend/tui/tests/test_tui_facade_boundary.nim`
 ## walks this directory's import graph on every run.
 ##
-## This module imports LESS than that rule allows, and deliberately: it needs
-## `headless_app/layout_model`, `std/strutils` and — since PLAT-16 —
-## `codetracer_embed` for `ProductMode`, and nothing more. Profile selection is
-## a pure function of two integers, and a module that could not reach a
-## renderer cannot accidentally make it one.
+## app/layout/profile.nim — which arrangement the screen opens with, decided
+## from its size alone.
 ##
-## app/layout/profile.nim — CTUI-3. Which shape the screen takes, decided from
-## its size alone.
+## ## PLAT-45: THE TERMINAL DERIVES ITS DEFAULT, IT DOES NOT AUTHOR ONE
 ##
-## ## What this owns
+## Until PLAT-45 this module held three hand-written trees — Compact,
+## Standard and Ultra-wide — selected by breakpoints (CodeTracer-TUI.md §3.2 as
+## it then read). The desktop and the GPUI window each had a default of their
+## own, and the three shared nothing but the tree type. Now every product opens
+## with ONE arrangement, `layout_model.sharedDefaultLayout()`, and this module's
+## job is to say how much of it this terminal can show:
 ##
-## Three things, all of them values:
+##   profileLayout(p) == foldLayout(sharedDefaultLayout(), depthFor(w, h))
 ##
-##   1. `selectProfile(width, height)` — the Compact / Standard / Ultra-wide
-##      breakpoint rule of CodeTracer-TUI.md §3.2, as a PURE FUNCTION. The
-##      milestone asks for it to be tested as one, independently of rendering,
-##      and that is only possible because nothing here draws.
-##   2. `bodyArea(width, height)` — where the multi-pane body sits once the
-##      header and the status bar have taken their rows.
-##   3. `profileLayout(profile)` — the `LayoutNode` for a profile. THE SAME
-##      TYPE THE DESKTOP PERSISTS (`headless_app/layout_model`), not a second
-##      layout model. `app/layout/project.nim` puts it onto Yoga.
+## `depthFor` is the smallest fold depth whose PROJECTION gives every visible
+## region at least its panes' `minPaneWidth` / `minPaneHeight` — the cell
+## contract CTUI-3 wrote, now a search over depths instead of three
+## breakpoints. At any size that fits, depth is 0 and the terminal's first
+## screen is the arrangement the desktop opens with; only when some pane cannot
+## get its minimum does the lowest-ranked region fold into tabs, and the status
+## line says so (`foldNote`). The cells stay here, in the binding; the shared
+## model knows only the unitless fold ORDER (Layout-ViewModel §8.2 as PLAT-45
+## rewrote it).
 ##
-## ## THE SPEC'S BREAKPOINTS OVERLAP, AND THIS RESOLVES THE OVERLAP EXPLICITLY
+## Two things are the terminal's own, not the shared model's (PLAT-45's
+## review): the ORDER the fold is applied in — every step whose region holds
+## only panes this front-end cannot draw goes first (`terminalFolds`), so a
+## region of report leaves never keeps its cells while a region of data gives
+## its up — and the SHARES: the folded tree is sized minimums-first
+## (`sizeForCells`), because the desktop's proportions give the source pane a
+## quarter of the width however far the fold goes. The ARRANGEMENT (what is
+## beside, above and tabbed with what) is the shared one at every size that
+## fits; the cells are the medium's.
 ##
-## §3.2 reads, verbatim:
+## Edit mode gets the same treatment over `sharedEditLayout()`.
 ##
-##   1. Compact Profile (80 <= width < 120, **or height < 35**)
-##   2. Standard Profile (120 <= width < 180, **and height >= 35**)
-##   3. Ultra-Wide Profile (**width >= 180**)
+## The old three trees are kept as TEST FIXTURES
+## (`app/tests/plat45_old_profiles.nim`), not as product code: PLAT-45's risk
+## note compares the folded compact result against them.
 ##
-## Rules 1 and 3 both claim `width >= 180, height < 35` — a 200x30 terminal,
-## which is an ordinary shape on a wide monitor with a short window. Rule 2 is
-## explicitly conjunctive about height and rule 3 is silent, so the reading
-## taken here is that rule 1's height clause is the general one and rule 3
-## inherits it: **height decides first**. Below 35 rows there is no room for a
-## three-column body plus an eight-row timeline strip whatever the width is,
-## which is the reason the clause exists at all.
+## ## WHAT A "PROFILE" IS NOW
 ##
-## Written down rather than left to the implementation, because a breakpoint
-## table that disagrees with itself is exactly the kind of thing that gets
-## resolved differently by the next person who reads it.
+## `LayoutProfile` is the terminal SIZE the default is derived for — a value
+## that answers "which depth" per product mode — plus `hintDensity`, the one
+## thing the old breakpoint table still decides: how much of the key-hint strip
+## fits on the status line. The breakpoints no longer choose an arrangement.
 ##
-## ## WHY `profileLayout` TAKES NO GEOMETRY
+## ## THIS MODULE NOW IMPORTS THE PROJECTION
 ##
-## `LayoutNode.weight` is a unitless relative share — `layout_model.nim` says
-## so about itself and refuses to learn what axis it is measured in. So the
-## tree for a profile is a constant, and every cell count in it comes from
-## `project.nim` dividing a real area by those shares. The alternative — a tree
-## whose weights are recomputed from the terminal's height so that a strip
-## lands on exactly eight rows — would put a measurement in the model, which is
-## the one thing the model is written to keep out.
-##
-## The 4:1 body-to-timeline share is chosen so that the Standard profile's
-## strip is EIGHT rows at 120x40, which is the height §3.2 names. That is a
-## property of the projection at one geometry, asserted in
-## `app/tests/test_layout_profiles.nim`, not a promise at every geometry.
+## `depthFor` has to project a candidate to know whether it fits, so this
+## module imports `project.nim`; the cycle that would have made is broken by
+## `cells.nim`, which holds what `project.nim` used to take from here.
 
 import std/strutils
 
 import headless_app/layout_model
 
-# PLAT-16. `ProductMode` from the core, for `layoutForMode` below.
-#
-# THIS IS THE SECOND IMPORT THE MODULE HEADER SAYS IT DOES NOT HAVE, and the
-# header is corrected rather than the import hidden: a mode's default layout is
-# a function OF THE MODE (Mode-Transitions.md §4a), so the module that answers
-# "what does this profile look like" cannot answer it without knowing which
-# mode is asking. Profile selection itself is untouched and is still a pure
-# function of two integers with no renderer in sight.
+# PLAT-16. `ProductMode` from the core: a mode's default layout is a function
+# OF THE MODE (Mode-Transitions.md §4a).
 import codetracer_embed
 
-type
-  LayoutProfile* = enum
-    ## The three arrangements of CodeTracer-TUI.md §3.2.
-    ##
-    ## An enum with explicit strings rather than an int, because the profile
-    ## appears in the status bar and in every failure message this milestone
-    ## prints, and `$` on an unnamed enum is how a report becomes unreadable.
-    lpCompact = "compact"
-    lpStandard = "standard"
-    lpUltraWide = "ultra-wide"
+import ./cells
+import ./project
 
-  CellArea* = object
-    ## A rectangle of terminal cells, in ABSOLUTE screen coordinates.
-    ##
-    ## Distinct from `isonim_tui`'s `CellRect` on purpose: that one is a
-    ## renderer's type and lives behind the layout engine, and this module —
-    ## which is where the screen's shape is decided — must not need a renderer
-    ## to say where the body is. `project.nim` converts.
-    col*: int
-    row*: int
+export cells
+
+type
+  LayoutProfile* = object
+    ## The terminal size a default arrangement is derived for. A VALUE, so two
+    ## sizes compare equal exactly when they would produce the same default.
     width*: int
     height*: int
 
+  HintDensity* = enum
+    ## How much of §3.3.6's key-hint strip the status line has room for. The
+    ## ONE decision the old breakpoint table still makes: it no longer picks an
+    ## arrangement (the fold does), only which hint strip is drawn.
+    hdCompact = "compact"
+    hdStandard = "standard"
+    hdUltraWide = "ultra-wide"
+
 const
-  HeaderRows* = 1
-    ## The session header (§3.3.1). One row in every profile: both ASCII
-    ## drawings in §3.1 show one, and the session tabs share it rather than
-    ## claiming a second — see `app/views/header.nim`.
-
-  StatusRows* = 1
-    ## The command line and status bar (§3.3.6).
-
-  ChromeRows* = HeaderRows + StatusRows
-    ## Everything the shell takes before the body gets a row.
-
   StandardMinWidth* = 120
-    ## §3.2 rule 2's lower bound.
+    ## The widest terminal whose status line gets the function-key hint strip
+    ## (§3.1's 80x24 drawing); from here the letter strip (its 120x40 drawing)
+    ## fits.
   UltraWideMinWidth* = 180
-    ## §3.2 rule 3's lower bound.
   TallProfileMinHeight* = 35
-    ## §3.2 rule 1's height clause. Below this the Compact profile is selected
-    ## at every width — see the module header on the overlap.
+    ## Below this height the compact hint strip is kept at every width, as the
+    ## old §3.2 height clause did.
 
-  MinShellWidth* = 20
-    ## Below this no profile can be laid out at all: the Compact body needs two
-    ## columns and the header needs something legible in each. `project.nim`
-    ## reports `prNoSpace` rather than drawing a hole.
-  MinShellHeight* = ChromeRows + 2
-    ## A header, a status bar, and at least one row for each of the Compact
-    ## profile's two body rows.
+const
+  lpCompact* = LayoutProfile(width: 80, height: 24)
+    ## THE THREE SIZES THE OLD §3.2 NAMED, kept as named sizes. Before PLAT-45
+    ## these were an enum of three hand-written arrangements; now a profile is
+    ## a size and the arrangement is the shared default folded for it, so the
+    ## names survive as the sizes each old profile was drawn for — the ones
+    ## `test_plat45_fold.nim` and the real-PTY suite measure the change at.
+  lpStandard* = LayoutProfile(width: 120, height: 40)
+  lpUltraWide* = LayoutProfile(width: 200, height: 50)
 
 proc selectProfile*(width, height: int): LayoutProfile =
-  ## Which profile a `width` x `height` terminal gets. A pure function, with no
-  ## state, no I/O and no renderer — which is what lets
-  ## `app/tests/test_layout_profiles.nim` assert it over a grid of sizes
-  ## instead of over screenshots.
-  ##
-  ## Height decides first; see the module header for why, and for the §3.2
-  ## overlap that decision resolves.
-  if height < TallProfileMinHeight:
-    lpCompact
-  elif width >= UltraWideMinWidth:
-    lpUltraWide
-  elif width >= StandardMinWidth:
-    lpStandard
-  else:
-    lpCompact
+  ## The profile for a `width` x `height` terminal. A pure function with no
+  ## state, no I/O and no renderer.
+  LayoutProfile(width: width, height: height)
 
-proc bodyArea*(width, height: int): CellArea =
-  ## The multi-pane region: everything between the header and the status bar.
+proc `$`*(p: LayoutProfile): string =
+  $p.width & "x" & $p.height
+
+proc hintDensity*(p: LayoutProfile): HintDensity =
+  ## The old breakpoint rule, kept for the hint strip only. Height decides
+  ## first, as it did (see git history for the §3.2 overlap it resolved).
+  if p.height < TallProfileMinHeight: hdCompact
+  elif p.width >= UltraWideMinWidth: hdUltraWide
+  elif p.width >= StandardMinWidth: hdStandard
+  else: hdCompact
+
+# ---------------------------------------------------------------------------
+# PLAT-45 deliverable 2 — what the terminal can draw
+# ---------------------------------------------------------------------------
+
+proc terminalCapability*(): PaneCapability =
+  ## The terminal's declared capability. Every pane of the shared default that
+  ## is not in `drawable` is still PLACED, and `views/shell.paintPane` fills
+  ## its slot with `reportText` — the pane's name and the reason below — so an
+  ## absent view is visible rather than a gap.
+  paneCapability(feTerminal,
+    {paneEditor, paneCalltrace, paneState, paneEventLog, paneTimeline,
+     panePointList, paneFileTree, paneBuildOutput},
+    [(paneDebugControls, "the terminal steps from the keyboard and names " &
+                         "the keys on its status line"),
+     (paneFlow, "the terminal draws flow inside the source pane"),
+     (paneSearch, "search results open in the command line, not a pane"),
+     (paneScratchpad, "the terminal has no scratchpad view yet"),
+     (paneShell, "the terminal has no embedded shell view yet"),
+     (paneVcs, "the terminal has no version-control view yet"),
+     (paneAgentActivity, "the terminal has no agent-activity view yet"),
+     (paneTerminalOutput, "the recorded program's terminal output has no " &
+                          "terminal view yet"),
+     (paneTestResults, "the terminal has no test-results view yet"),
+     (paneConstraints, "the terminal has no constraints view yet")])
+
+# ---------------------------------------------------------------------------
+# PLAT-45 deliverable 5 — the fold depth this terminal needs
+# ---------------------------------------------------------------------------
+
+proc sharedFor*(product: ProductMode): SharedLayout =
+  ## The shared default a product mode folds.
+  case product
+  of pmDebug: sharedDefaultLayout()
+  of pmEdit: sharedEditLayout()
+
+proc regionPanes(tree: LayoutNode; visible: PaneKind): seq[PaneKind] =
+  ## Every pane of the region `visible` is shown in: the whole stack when it
+  ## is a tab. The minimum a region must honour is its WIDEST tab's, so that
+  ## switching tabs never lands on a pane the region cannot draw — the same
+  ## rule CTUI-3's `minimumWidth` applied to a stack.
+  let region = regionOf(tree, visible)
+  if region.isNil:
+    return @[visible]
+  if region.kind == lnStack:
+    for c in region.children:
+      if c.kind == lnPane and not c.isContributed:
+        result.add c.pane
+  else:
+    result.add visible
+
+proc fitProblems*(tree: LayoutNode; width, height: int): seq[string] =
+  ## Why `tree` does not fit a `width` x `height` terminal: one entry per
+  ## visible region whose rectangle is smaller than its panes' minimum, or the
+  ## projection's own refusal. Empty exactly when it fits.
+  let projection = projectLayout(tree, bodyArea(width, height), ppDegrade)
+  if projection.status != prOk:
+    return @["the projection answered " & $projection.status]
+  for r in projection.regions:
+    var needW = 0
+    var needH = 0
+    for p in regionPanes(tree, r.pane):
+      needW = max(needW, minPaneWidth(p))
+      needH = max(needH, minPaneHeight(p))
+    if r.area.width < needW or r.area.height < needH:
+      result.add $r.pane & " has " & $r.area.width & "x" & $r.area.height &
+                 ", needs " & $needW & "x" & $needH
+
+proc fitsAt*(tree: LayoutNode; width, height: int): bool =
+  fitProblems(tree, width, height).len == 0
+
+# ---------------------------------------------------------------------------
+# The terminal's fold ORDER: panes it cannot draw give up their space first
+# ---------------------------------------------------------------------------
+
+proc drawsAny(tree: LayoutNode; region: PaneKind; c: PaneCapability): bool =
+  ## Whether the region holding `region` has at least one pane this front-end
+  ## can DRAW. A region that has none is nothing but report leaves.
+  for p in regionPanes(tree, region):
+    if c.canDraw(p):
+      return true
+  false
+
+proc terminalFolds*(shared: SharedLayout;
+                    c: PaneCapability = terminalCapability()): SharedLayout =
+  ## The shared fold order as the terminal applies it: **every step whose
+  ## region holds only panes the terminal cannot draw comes first**, and the
+  ## shared order is kept among the rest (and among those).
   ##
-  ## Clamped at zero rather than allowed to go negative, because a negative
-  ## height would propagate into the projection as a rectangle that contains
-  ## nothing and overlaps everything. A zero-height body is a reportable
-  ## condition (`project.prNoSpace`); a negative one is a bug that hides.
-  CellArea(col: 0, row: HeaderRows, width: max(0, width),
-           height: max(0, height - ChromeRows))
+  ## A region of report leaves spends cells on a sentence saying a view is
+  ## missing; a drawable region spends them on data. When the terminal has to
+  ## give something up it gives up the sentences first — they stay reachable
+  ## as tabs, and the report is still read when the tab is chosen — before
+  ## any region that shows the user something. The rule is the terminal's (it
+  ## is about ITS capability), so it lives here and the shared order stays the
+  ## desktop's ranking. Evaluated step by step on the tree as it folds, because
+  ## a step can turn a drawable region into a report-only one and back.
+  ##
+  ## Depth 0 is untouched by construction: this reorders steps, it adds none.
+  result = SharedLayout(tree: shared.tree, folds: @[])
+  var remaining = shared.folds
+  var tree = clone(shared.tree)
+  while remaining.len > 0:
+    var pick = 0
+    for i, step in remaining:
+      let r = regionOf(tree, step.region)
+      if not r.isNil and not drawsAny(tree, step.region, c):
+        pick = i
+        break
+    let step = remaining[pick]
+    remaining.delete(pick)
+    result.folds.add step
+    tree = foldLayout(SharedLayout(tree: shared.tree, folds: result.folds),
+                      result.folds.len)
+
+# ---------------------------------------------------------------------------
+# The terminal's SIZING: every region its minimum first, then the rest
+# ---------------------------------------------------------------------------
+
+proc nodeMinWidth(n: LayoutNode): int =
+  if n.isNil:
+    return 0
+  case n.kind
+  of lnPane: minPaneWidth(n.pane)
+  of lnRow:
+    var total = 0
+    for c in n.children:
+      total += nodeMinWidth(c)
+    total
+  of lnColumn, lnStack:
+    var widest = 0
+    for c in n.children:
+      widest = max(widest, nodeMinWidth(c))
+    widest
+
+proc nodeMinHeight(n: LayoutNode): int =
+  if n.isNil:
+    return 0
+  case n.kind
+  of lnPane: minPaneHeight(n.pane)
+  of lnColumn:
+    var total = 0
+    for c in n.children:
+      total += nodeMinHeight(c)
+    total
+  of lnRow, lnStack:
+    var tallest = 0
+    for c in n.children:
+      tallest = max(tallest, nodeMinHeight(c))
+    tallest
+
+proc shareOf(n: LayoutNode): float =
+  ## The projection's own reading of a weight (`project.weightShare`): `0` is
+  ## an equal share, and one is the neutral share.
+  if n.weight <= 0.0: 1.0 else: n.weight
+
+proc sizeForCells(n: LayoutNode; width, height: int) =
+  ## In place: give every child of every row and column AT LEAST ITS MINIMUM,
+  ## then share what is left by the tree's own weights, and write the result
+  ## back as the children's weights (cell counts are a valid unitless share —
+  ## the projection divides the parent's extent by them and gets these counts
+  ## back exactly).
+  ##
+  ## Without this the folded tree kept the desktop's PROPORTIONS, and the
+  ## desktop gives the editor a quarter of the window: at 80 columns that was
+  ## 20 cells whatever the fold did, because every step handed the space it
+  ## freed to the editor's neighbours in proportion. The ARRANGEMENT is the
+  ## shared one (what is beside, above and tabbed with what); the shares are
+  ## the medium's, like every cell count — Layout-ViewModel §8.2.
+  ##
+  ## A container that cannot give every child its minimum is left as it is;
+  ## `fitProblems` reports it and `depthFor` folds further.
+  if n.isNil or n.kind == lnPane:
+    return
+  if n.kind == lnStack:
+    for c in n.children:
+      sizeForCells(c, width, height)
+    return
+  let horizontal = n.kind == lnRow
+  let total = if horizontal: width else: height
+  var mins: seq[int] = @[]
+  var shares: seq[float] = @[]
+  var need = 0
+  for c in n.children:
+    let m = if horizontal: nodeMinWidth(c) else: nodeMinHeight(c)
+    mins.add m
+    shares.add shareOf(c)
+    need += m
+  var cells: seq[int] = @[]
+  if need <= total:
+    let extra = distributeCells(total - need + n.children.len,
+                                shares)
+    # `distributeCells` never hands out a zero (its second property), so it is
+    # asked for `children.len` more cells than the slack and each child gives
+    # one back: a child whose share rounds to nothing gets exactly its minimum.
+    for i in 0 ..< n.children.len:
+      cells.add mins[i] + extra[i] - 1
+  else:
+    cells = distributeCells(total, shares)
+    if cells.len != n.children.len:
+      return
+  for i, c in n.children:
+    c.weight = float(max(cells[i], 1))
+    if horizontal: sizeForCells(c, cells[i], height)
+    else: sizeForCells(c, width, cells[i])
+
+proc terminalDefaultAt*(product: ProductMode; width, height,
+                        depth: int): LayoutNode =
+  ## `product`'s shared default folded to `depth` in the terminal's order and
+  ## sized for a `width` x `height` terminal. A fresh tree.
+  result = foldLayout(terminalFolds(sharedFor(product)), depth)
+  let body = bodyArea(width, height)
+  sizeForCells(result, body.width, body.height)
+
+proc depthFor*(product: ProductMode; width, height: int): int =
+  ## **THE SEARCH.** The smallest fold depth of `product`'s shared default
+  ## whose projection gives every visible region its minimum at this size.
+  ## When no depth fits — a terminal narrower than the deepest fold's widest
+  ## pane — the deepest fold, which is the most the terminal can do; the
+  ## projection then degrades rather than drawing a hole.
+  let deepest = maxFoldDepth(sharedFor(product))
+  for d in 0 .. deepest:
+    if fitsAt(terminalDefaultAt(product, width, height, d), width, height):
+      return d
+  deepest
+
+proc depthFor*(product: ProductMode; p: LayoutProfile): int =
+  depthFor(product, p.width, p.height)
 
 proc profileLayout*(profile: LayoutProfile): LayoutNode =
-  ## The `LayoutNode` a profile arranges its panes with.
-  ##
-  ## Column percentages are §3.2's, spelled as weights: they are relative
-  ## shares, so 25/50/25 and 1/2/1 are the same tree. The literal percentages
-  ## are kept because they are what the specification says and a reader
-  ## comparing the two should not have to divide.
-  ##
-  ## THE COMPACT PROFILE'S BOTTOM ROW IS A `stack`, which is the milestone's
-  ## load-bearing contract: `Alt+1/2/3` is `LayoutNode.activate`, the same
-  ## operation `session_switch.nim` performs on a desktop tab click, rather
-  ## than a second tab mechanism that only the terminal has.
-  case profile
-  of lpCompact:
-    column([
-      row([
-        pane(paneCalltrace, "Call Stack", weight = 30.0),
-        pane(paneEditor, "Source", weight = 70.0)],
-        weight = 3.0),
-      stack([
-        pane(paneState, "Variables"),
-        pane(paneTimeline, "Timeline"),
-        pane(paneEventLog, "Tracepoints")],
-        activeIndex = 0, weight = 1.0)])
-  of lpStandard:
-    column([
-      row([
-        pane(paneCalltrace, "Call Stack", weight = 25.0),
-        pane(paneEditor, "Source", weight = 50.0),
-        pane(paneState, "Variables", weight = 25.0)],
-        weight = 4.0),
-      pane(paneTimeline, "Timeline & Tracepoints", weight = 1.0)])
-  of lpUltraWide:
-    column([
-      row([
-        pane(paneCalltrace, "Call Stack", weight = 20.0),
-        pane(paneEditor, "Source", weight = 45.0),
-        pane(paneState, "Variables", weight = 20.0),
-        pane(paneEventLog, "Event Log", weight = 15.0)],
-        weight = 4.0),
-      pane(paneTimeline, "Timeline & Tracepoints", weight = 1.0)])
+  ## Debug mode's default at this size: the shared default, folded exactly as
+  ## far as the terminal's cells require. A fresh tree on every call.
+  terminalDefaultAt(pmDebug, profile.width, profile.height,
+                    depthFor(pmDebug, profile))
 
 proc editProfileLayout*(profile: LayoutProfile): LayoutNode =
-  ## PLAT-16. EDIT MODE'S arrangement of the same three profiles.
-  ##
-  ## CodeTracer-TUI-Edit-Mode.md §4: *"Debug mode's panes are Call Stack,
-  ## Source, Variables, Timeline, Event Log. Edit mode's are a file tree,
-  ## Source, and a build/run output surface — and of those, **only Source is
-  ## shared**, and even it changes model (§2)."*
-  ##
-  ## ## WHY THIS IS A SECOND FUNCTION AND NOT A SUPPRESSION LIST
-  ##
-  ## Mode-Transitions.md §4a is explicit that a mode's layout is a function of
-  ## the mode rather than a reading of one tree: *"A layout system that derives
-  ## every mode from one bundled tree by removing panes gives every mode the
-  ## same arrangement with different panes missing. When the bundled tree is
-  ## drawn for one mode's needs, every other mode inherits that mode's
-  ## furniture."* Deriving Edit mode from `profileLayout` by dropping the call
-  ## stack would leave Source in a 70%-wide column with the build output in a
-  ## tab stack beside Variables — the debug arrangement with holes in it.
-  ##
-  ## ## THE FILE TREE IS HERE, AND §8 OPEN DECISION 3 RECOMMENDED IT LATER
-  ##
-  ## That recommendation ("palette first, tree later") is about which
-  ## affordance a user OPENS A FILE with, and the palette is CTUI-10's and
-  ## already built. This is about what the mode's default arrangement is, and a
-  ## mode whose only navigation surface is an overlay has nothing on screen
-  ## that says which project is open. The tree is narrow — a quarter of the
-  ## body at most — and the palette still opens over it.
-  case profile
-  of lpCompact:
-    column([
-      row([
-        pane(paneFileTree, "Files", weight = 25.0),
-        pane(paneEditor, "Source", weight = 75.0)],
-        weight = 3.0),
-      pane(paneBuildOutput, "Build", weight = 1.0)])
-  of lpStandard:
-    column([
-      row([
-        pane(paneFileTree, "Files", weight = 20.0),
-        pane(paneEditor, "Source", weight = 80.0)],
-        weight = 4.0),
-      pane(paneBuildOutput, "Build & Run", weight = 1.0)])
-  of lpUltraWide:
-    column([
-      row([
-        pane(paneFileTree, "Files", weight = 15.0),
-        pane(paneEditor, "Source", weight = 60.0),
-        pane(paneBuildOutput, "Build & Run", weight = 25.0)],
-        weight = 1.0)])
+  ## Edit mode's default at this size: `sharedEditLayout()` folded by the same
+  ## rule. Mode-Transitions.md §4a still holds — the edit default is a tree of
+  ## its own, not the debug tree with holes — it is simply the shared one.
+  terminalDefaultAt(pmEdit, profile.width, profile.height,
+                    depthFor(pmEdit, profile))
 
 proc layoutForMode*(product: ProductMode; profile: LayoutProfile): LayoutNode =
-  ## A mode's DEFAULT arrangement — §4b's third tier, the one that exists
-  ## forever and is the fallback §4c obligation 1 names ("the fallback is the
-  ## entering mode's default, not the bundled tree").
-  ##
-  ## ONE ENTRY POINT FOR BOTH MODES, so a caller cannot reach one mode's
-  ## default while believing it asked for the other's. That is not decoration:
-  ## §4's requirement 4 — *"Mode and layout are changed together or not at
-  ## all"* — is only checkable if there is a single function that answers "what
-  ## does THIS mode look like", and `shell.switchProductMode` is its only
-  ## production caller.
+  ## A mode's DEFAULT arrangement — §4b's third tier, and the fallback §4c
+  ## obligation 1 names. ONE entry point for both modes, so a caller cannot
+  ## reach one mode's default while believing it asked for the other's.
   case product
   of pmDebug: profileLayout(profile)
   of pmEdit: editProfileLayout(profile)
 
-proc profileTabs*(profile: LayoutProfile): seq[PaneKind] =
-  ## The panes `Alt+1` / `Alt+2` / `Alt+3` select, in that order, or an empty
-  ## sequence for a profile whose tree carries no stack.
-  ##
-  ## Read out of the tree rather than written down beside it: a second list
-  ## would be a second thing to keep true, and the whole point of the contract
-  ## above is that the tabs ARE the stack's children.
-  # A local rather than `result`: Nim refuses to capture `result` in a closure,
-  # and the walk below is recursive so it has to be one.
-  var found: seq[PaneKind] = @[]
-  let node = profileLayout(profile)
+proc resizeShares*(tree: LayoutNode; product: ProductMode;
+                   profile: LayoutProfile) =
+  ## In place: the shares of `tree` — an UNMODIFIED default at the same fold
+  ## depth — re-derived for a new size, leaving every stack's active tab as the
+  ## user left it. A resize inside one depth must not throw away the chosen
+  ## tab (`shell.reprofile`'s guard), and must not keep the old size's cell
+  ## counts either, or a window shrunk from 200 to 120 columns would hand the
+  ## editor 40% of 120.
+  let fresh = layoutForMode(product, profile)
+  proc copy(dst, src: LayoutNode) =
+    if dst.isNil or src.isNil or dst.kind != src.kind or
+       dst.children.len != src.children.len:
+      return
+    dst.weight = src.weight
+    for i in 0 ..< dst.children.len:
+      copy(dst.children[i], src.children[i])
+  copy(tree, fresh)
+
+proc foldNote*(product: ProductMode; profile: LayoutProfile): string =
+  ## What the status line says when the terminal FOLDED the shared default:
+  ## `""` at depth 0 (the arrangement is the one every product opens with, and
+  ## there is nothing to say), else `[folded N]` — N of the shared default's
+  ## regions became tabs because this terminal cannot give every pane its
+  ## minimum. Short on purpose: it sits beside the mode indicators, which the
+  ## status line never drops.
+  let d = depthFor(product, profile)
+  if d == 0: ""
+  else: "[folded " & $d & "]"
+
+proc stackTabs*(tree: LayoutNode): seq[seq[PaneKind]] =
+  ## Every stack's tabs, in reading order — read out of the tree rather than
+  ## written down beside it.
+  var found: seq[seq[PaneKind]] = @[]
   proc walk(n: LayoutNode) =
     if n.isNil:
       return
     if n.kind == lnStack:
+      var tabs: seq[PaneKind] = @[]
       for c in n.children:
-        if c.kind == lnPane:
-          found.add c.pane
+        if c.kind == lnPane and not c.isContributed:
+          tabs.add c.pane
+      found.add tabs
       return
     for c in n.children:
       walk(c)
-  walk(node)
+  walk(tree)
   found
 
-proc minPaneWidth*(kind: PaneKind): int =
-  ## The narrowest column a pane can be given and still say anything.
-  ##
-  ## THE MINIMUM-SIZE CONTRACT IS EXPLICIT, which is CTUI-3's risk mitigation
-  ## verbatim: "an explicit minimum-size contract per pane that the projection
-  ## test enforces rather than discovers". These are cell counts, they are
-  ## asserted at all three geometries, and a profile that cannot honour them at
-  ## a size is a profile that must not be selected at that size.
-  case kind
-  of paneEditor: 24     ## a line number gutter, a pointer and some source
-  of paneCalltrace: 14  ## `#0 process_item()` truncated but still legible
-  of paneState: 14      ## `ptr: 0x7ffd98`
-  of paneEventLog: 12
-  of paneTimeline: 20   ## a scrubber with two ends and a marker
-  else: 8
-
-proc minPaneHeight*(kind: PaneKind): int =
-  ## The shortest a pane can be: a title row plus at least one row of content.
-  case kind
-  of paneTimeline: 3    ## title, scrubber, one event line
-  else: 2
-
-proc minimumWidth*(profile: LayoutProfile): int =
-  ## The narrowest terminal this profile's widest row can be laid out in.
-  ##
-  ## Derived from the tree rather than tabulated, so a profile whose columns
-  ## change carries its own answer with it.
-  let node = profileLayout(profile)
+proc minimumWidth*(tree: LayoutNode): int =
+  ## The narrowest body `tree`'s widest row can be laid out in, from the
+  ## per-pane contract alone (a lower bound; `fitsAt` is the real test, since
+  ## weights can starve a pane in a body wider than this).
   proc walk(n: LayoutNode): int =
     if n.isNil:
       return 0
@@ -325,22 +434,17 @@ proc minimumWidth*(profile: LayoutProfile): int =
       for c in n.children:
         total += walk(c)
       total
-    of lnColumn:
+    of lnColumn, lnStack:
       var widest = 0
       for c in n.children:
         widest = max(widest, walk(c))
       widest
-    of lnStack:
-      var widest = 0
-      for c in n.children:
-        widest = max(widest, walk(c))
-      widest
-  walk(node)
+  walk(tree)
 
-proc minimumHeight*(profile: LayoutProfile): int =
-  ## The shortest terminal this profile fits in, INCLUDING the header and the
-  ## status bar, so it is comparable with a terminal's own height.
-  let node = profileLayout(profile)
+proc minimumHeight*(tree: LayoutNode): int =
+  ## The shortest terminal `tree` fits in by the per-pane contract, INCLUDING
+  ## the header and the status bar, so it is comparable with a terminal's own
+  ## height.
   proc walk(n: LayoutNode): int =
     if n.isNil:
       return 0
@@ -352,32 +456,23 @@ proc minimumHeight*(profile: LayoutProfile): int =
       for c in n.children:
         total += walk(c)
       total
-    of lnRow:
+    of lnRow, lnStack:
       var tallest = 0
       for c in n.children:
         tallest = max(tallest, walk(c))
       tallest
-    of lnStack:
-      var tallest = 0
-      for c in n.children:
-        tallest = max(tallest, walk(c))
-      tallest
-  walk(node) + ChromeRows
+  walk(tree) + ChromeRows
 
-proc profileFits*(profile: LayoutProfile; width, height: int): bool =
-  ## Whether `profile`'s minimum-size contract is satisfiable at this size.
-  width >= minimumWidth(profile) and height >= minimumHeight(profile)
-
-proc describeProfile*(profile: LayoutProfile; width, height: int): string =
-  ## One line for a status bar or a failure message: what was selected, at what
-  ## size, and what that profile needs.
-  $profile & " " & $width & "x" & $height & " (min " &
-    $minimumWidth(profile) & "x" & $minimumHeight(profile) & ")"
+proc describeProfile*(profile: LayoutProfile;
+                      product: ProductMode = pmDebug): string =
+  ## One line for a status bar or a failure message: the size, the fold depth
+  ## it chose, and what the deepest fold would need.
+  $profile & " depth " & $depthFor(product, profile) & "/" &
+    $maxFoldDepth(sharedFor(product))
 
 proc profileSummary*(): string =
-  ## Every profile with its minimums, for a report that has to show what the
-  ## breakpoint table actually resolved to.
+  ## The fold depth each of the three sizes the old §3.2 named resolves to.
   var parts: seq[string] = @[]
-  for p in LayoutProfile:
-    parts.add $p & ":" & $minimumWidth(p) & "x" & $minimumHeight(p)
+  for (w, h) in [(80, 24), (120, 40), (200, 50)]:
+    parts.add $w & "x" & $h & ":depth " & $depthFor(pmDebug, w, h)
   parts.join(" ")

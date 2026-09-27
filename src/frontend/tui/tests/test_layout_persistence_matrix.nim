@@ -701,7 +701,7 @@ proc newSandbox(tag: string): Sandbox =
   result = Sandbox(root: base / "state", trace: base / "recording.ct")
   createDir(result.trace)
   putEnv(LayoutDirEnvVar, result.root)
-  result.document = layoutDocumentPathFor(result.trace)
+  result.document = layoutDocumentPath()
 
 proc restorePermissions(path: string) =
   ## Put a document's ordinary permissions back.
@@ -776,7 +776,7 @@ proc runCell(row: MatrixRow): CellResult =
       if row.session == sNoBinding: newRuntime(80, 24)
       else: newBoundRuntime(80, 24)
     if row.session != sUnnamed:
-      let report = restoreLayoutForSession(rt, box.trace)
+      let report = restoreLayoutForSession(rt)
       result.status = report.status
       result.kind = report.kind
     result.quarantined = rt.layoutDocumentQuarantined
@@ -858,12 +858,12 @@ template assertCell(row: MatrixRow) =
       # because "the file is still there" is satisfied by a file this build
       # rewrote to the same length.
       ck got.after == got.planted
-      ck got.files == @[LayoutDocumentDirName / got.documentName]
+      ck got.files == @[got.documentName]
     of faWritten:
       ck got.afterExists
       # EXACTLY ONE FILE: a `.new` left behind means the rename did not happen
       # and the next launch reads a half-written document.
-      ck got.files == @[LayoutDocumentDirName / got.documentName]
+      ck got.files == @[got.documentName]
       # PRODUCED BY THIS BUILD, and different from whatever was there.
       ck (not got.plantedExisted) or got.after != got.planted
 
@@ -1067,7 +1067,7 @@ suite "PLAT-6: the persistence decision, enumerated":
       ck before["version"].getInt == 1
       ck not before.hasKey("docked")
       let rt = newBoundRuntime(80, 24)
-      ck restoreLayoutForSession(rt, box.trace).status == lrsRestored
+      ck restoreLayoutForSession(rt).status == lrsRestored
       ck persistLayoutForSession(rt).outcome == lpoWritten
       let after = parseJson(readFile(box.document))
       checkpoint("v" & $before["version"].getInt & " -> v" &
@@ -1099,7 +1099,7 @@ suite "PLAT-6: the persistence decision, enumerated":
       writeFile(box.document, documentText(dFuture))
       let planted = readFile(box.document)
       let rt = newBoundRuntime(80, 24)
-      ck restoreLayoutForSession(rt, box.trace).status == lrsUnreadable
+      ck restoreLayoutForSession(rt).status == lrsUnreadable
       discard rt.typeLine("dock bottom")
       ck rt.layoutDocumentQuarantined
       ck rt.app.layoutBinding.userModified
@@ -1126,7 +1126,7 @@ suite "PLAT-6: the persistence decision, enumerated":
       writeFile(box.document, documentText(dFuture))
       let planted = readFile(box.document)
       let rt = newBoundRuntime(80, 24)
-      ck restoreLayoutForSession(rt, box.trace).status == lrsUnreadable
+      ck restoreLayoutForSession(rt).status == lrsUnreadable
       ck rt.layoutDocumentQuarantined
       # NOT modified — the restore failed, so nothing set the flag.
       ck not rt.app.layoutBinding.userModified
@@ -1176,11 +1176,11 @@ suite "PLAT-6: the persistence decision, enumerated":
         writeFile(box.document, documentText(dUnopenable))
         setFilePermissions(box.document, {})
         let blocked = newBoundRuntime(80, 24)
-        ck restoreLayoutForSession(blocked, box.trace).kind == UnreadableFileKind
+        ck restoreLayoutForSession(blocked).kind == UnreadableFileKind
         ck blocked.layoutDocumentQuarantined
         restorePermissions(box.document)
         let after = newBoundRuntime(80, 24)
-        let good = restoreLayoutForSession(after, box.trace)
+        let good = restoreLayoutForSession(after)
         checkpoint("with the permission back, restore -> " & $good.status)
         ck good.status == lrsRestored
         ck not after.layoutDocumentQuarantined
@@ -1228,7 +1228,7 @@ suite "PLAT-6: the persistence decision, enumerated":
       let rt = newBoundRuntime(80, 24)
       # A RESTORE SETS `userModified`, so this session's plan is a WRITE with
       # no gesture at all — the same plan the `lReadable` rows carry.
-      ck restoreLayoutForSession(rt, box.trace).status == lrsRestored
+      ck restoreLayoutForSession(rt).status == lrsRestored
       ck rt.layoutPersistPlanOf().intent == row.intent
       ck rt.layoutPersistPlanOf().text.len > 0
       let failed = persistLayoutForSession(rt)
@@ -1264,7 +1264,7 @@ suite "PLAT-6: the persistence decision, enumerated":
       # visible here rather than inferred.
       ck not fileExists(temp)
       ck filesUnder(box.root) ==
-         @[LayoutDocumentDirName / box.document.extractFilename]
+         @[box.document.extractFilename]
     finally:
       box.dispose()
 
@@ -1307,7 +1307,7 @@ suite "PLAT-6: the persistence decision, enumerated":
         writeFile(box.document, documentText(dCurrent))
         let planted = readFile(box.document)
         let rt = newBoundRuntime(80, 24)
-        ck restoreLayoutForSession(rt, box.trace).status == lrsRestored
+        ck restoreLayoutForSession(rt).status == lrsRestored
         # `:reset-layout` clears `userModified`, so the plan is the REMOVE the
         # `lReadable` rows reach — this case obstructs it and they do not.
         discard rt.typeLine("reset-layout")

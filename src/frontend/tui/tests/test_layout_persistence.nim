@@ -81,7 +81,7 @@ import ../host/layout_store
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 217
+const ExpectedAssertions = 167
 
 const UnreadableFileArmAssertions = 15
   ## What the `UnreadableFile` case contributes to the count above.
@@ -135,6 +135,10 @@ proc newRuntime(cols, rows: int): TuiRuntime =
   newTuiRuntime(newTuiApp(), caps(), cols, rows)
 
 proc newBoundRuntime(cols, rows: int): TuiRuntime =
+  ## The cases below run at 120x40, where the shared default is unfolded and
+  ## the call stack — the pane they dock — is a region of its own. At 80x24
+  ## the source pane's minimum folds it into a tab (PLAT-45), and a case about
+  ## persistence would then be measuring the fold instead.
   result = newRuntime(cols, rows)
   discard result.enableLayoutBinding()
 
@@ -181,9 +185,14 @@ proc overlaysOnScreen(rt: TuiRuntime): int =
     if d.kind == ldRevealOverlay:
       inc result
 
-proc titleRowsFor(rt: TuiRuntime; prefix: string): int =
-  for row in rt.shellScreenOf().rows:
-    if row.startsWith(prefix):
+proc onScreen(rt: TuiRuntime; pane: PaneKind): int =
+  ## How many regions of the frame the runtime would paint show `pane`.
+  ## PLAT-45: read from the frame's own projection rather than from a title
+  ## row at column 0 — the shared default puts no pane's title at the left
+  ## edge but the Files stack's, and a stacked pane paints a tab strip, not
+  ## its title.
+  for r in rt.shellScreenOf().projection.regions:
+    if r.pane == pane:
       inc result
 
 proc mentionsKey(node: JsonNode; key: string): bool =
@@ -222,9 +231,6 @@ proc newSandbox(tag: string): Sandbox =
   createDir(result.trace)
   putEnv(LayoutDirEnvVar, result.root)
 
-proc documentOf(box: Sandbox): string =
-  layoutDocumentPathFor(box.trace)
-
 proc allowReading(path: string) =
   ## Put a document's ordinary permissions back.
   ##
@@ -249,59 +255,29 @@ proc dispose(box: Sandbox) =
 
 suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
 
-  test "the document is keyed by the recording, so two recordings never share one":
-    # THE KEY RULE. A layout saved for one recording must not silently apply to
-    # another, which is the decision `app/layout/persistence.nim`'s header
-    # records; this is that decision as a measurement.
-    let a = layoutDocumentFileName("/home/u/traces/calc.ct")
-    let b = layoutDocumentFileName("/home/u/other/calc.ct")
-    let again = layoutDocumentFileName("/home/u/traces/calc.ct")
-    checkpoint("calc.ct in two places -> " & a & " and " & b)
-    # SAME PATH, SAME DOCUMENT — the property a restart depends on.
-    ck a == again
-    # SAME BASENAME, DIFFERENT PARENT, DIFFERENT DOCUMENT. This is the half a
-    # slug-only key would fail, and it is why the digest is over the whole path.
-    ck a != b
-    # …and they still LOOK the same to a human reading the state directory,
-    # which is why the slug is there at all.
-    ck a.startsWith("calc.ct-")
-    ck b.startsWith("calc.ct-")
-    ck a.endsWith(LayoutDocumentExt)
-    ck b.endsWith(LayoutDocumentExt)
-
-    # A NAME NO FILESYSTEM WOULD ACCEPT VERBATIM still produces one component.
-    var slugged = 0
-    for folder in ["/tmp/a b/c:d*/e?f", "/tmp/../", "/", "",
-                   "/tmp/" & repeat("x", 200)]:
-      inc slugged
-      let name = layoutDocumentFileName(folder)
-      checkpoint(folder & " -> " & name)
-      ck name.len > 0
-      ck not name.contains('/')
-      ck not name.contains('\\')
-      ck not name.contains(':')
-      ck not name.contains('*')
-      ck not name.contains('?')
-      ck not name.contains(' ')
-      ck name.endsWith(LayoutDocumentExt)
-      # THE NON-VACUITY FLOOR on the digest: a key that had collapsed to the
-      # slug alone would be shorter than this and would collide.
-      ck name.len > LayoutKeyDigestChars + LayoutDocumentExt.len
-    ck slugged == 5
-
-    # AND THE PATH IS UNDER THE STATE ROOT THE HOST RESOLVES, in its own
-    # directory, so a user can find it and delete it.
+  test "ONE document for the terminal product, never keyed by the recording":
+    # PLAT-45 DELIVERABLE 8 REPLACED PLAT-6'S KEY RULE. The terminal remembers
+    # ITS OWN last layout — one document for the product — because every
+    # product now opens with the same panes (the shared default), so an
+    # arrangement is a preference about the terminal rather than about one
+    # recording's pane set. `app/layout/persistence.nim`'s header, decision 3.
     let box = newSandbox("key")
     try:
-      let path = box.documentOf()
-      checkpoint("the document for " & box.trace & " is " & path)
-      ck path.parentDir == box.root / LayoutDocumentDirName
-      ck path.extractFilename ==
-        layoutDocumentFileName(canonicalTraceFolder(box.trace))
-      # TWO SPELLINGS OF ONE RECORDING KEY TO ONE DOCUMENT, which is what
-      # canonicalising in the host buys.
-      ck layoutDocumentPathFor(box.trace & "/") == path
-      ck layoutDocumentPathFor(box.trace & "/./") == path
+      let path = layoutDocumentPath()
+      checkpoint("the terminal's document is " & path)
+      # DIRECTLY UNDER THE STATE ROOT THE HOST RESOLVES, with its one name.
+      ck path.parentDir == box.root
+      ck path.extractFilename == LayoutDocumentFileName
+      # TWO RECORDINGS, ONE DOCUMENT: a session bound on either names it.
+      let a = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(a)
+      let b = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(b)
+      ck a.layoutDocument == path
+      ck b.layoutDocument == path
+      # AND NEVER ANOTHER PRODUCT'S FILE: the GPUI window keeps
+      # `gpui-layout.json` beside it, and the two names differ.
+      ck LayoutDocumentFileName != "gpui-layout.json"
     finally:
       box.dispose()
 
@@ -314,12 +290,16 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
     try:
       ck filesUnder(box.root).len == 0
 
-      let first = newBoundRuntime(80, 24)
-      let restoredNothing = restoreLayoutForSession(first, box.trace)
+      let first = newBoundRuntime(120, 40)
+      let restoredNothing = restoreLayoutForSession(first)
       # A FIRST RUN HAS NOTHING TO SAY, and says nothing.
       ck restoredNothing.status == lrsNoDocument
       ck restoredNothing.message.len == 0
-      ck first.layoutDocument == box.documentOf()
+      ck first.layoutDocument == layoutDocumentPath()
+      # THE CALL STACK IS THE PANE THIS CASE DOCKS, focused explicitly: since
+      # PLAT-45 the ring starts at the shared default's leftmost region (the
+      # Files stack), not at the call stack.
+      ck first.focus.focusPaneKind(paneCalltrace)
       let docked = first.focusedPaneOf()
       ck docked == paneCalltrace
       ck first.app.layoutBinding.layout.tree.contains(docked)
@@ -332,7 +312,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       checkpoint("persist -> " & $saved.outcome & " " & saved.path)
       ck saved.outcome == lpoWritten
       ck saved.message.len == 0
-      ck fileExists(box.documentOf())
+      ck fileExists(layoutDocumentPath())
       # EXACTLY ONE FILE. A `.new` left behind would mean the rename did not
       # happen and the next launch would read a half-written document.
       #
@@ -345,11 +325,11 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       # is STAGED at `<path>.new` and renamed onto the document"*, which
       # obstructs the staging path and requires the write to FAIL. Arm `M58`.
       ck filesUnder(box.root) ==
-        @[LayoutDocumentDirName / box.documentOf().extractFilename]
+        @[LayoutDocumentFileName]
 
       # THE DOCUMENT ITSELF, before anything reads it back: versioned, with the
       # docked pane in it, and WITHOUT `revealed` (Layout-ViewModel §3.2).
-      let doc = parseJson(readFile(box.documentOf()))
+      let doc = parseJson(readFile(layoutDocumentPath()))
       ck doc["version"].getInt == LayoutSchemaVersion
       ck doc["docked"].len == 1
       ck doc["docked"][0]["pane"].getStr == $docked
@@ -362,22 +342,22 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       ck doc.mentionsKey("pane")
 
       # ---- THE SECOND SESSION -------------------------------------------
-      let second = newBoundRuntime(80, 24)
+      let second = newBoundRuntime(120, 40)
       ck second.app.layoutBinding.layout.tree.contains(docked)
       ck second.stripsOnScreen() == 0
-      ck second.titleRowsFor("CALL STACK") == 1
-      let report = restoreLayoutForSession(second, box.trace)
+      ck second.onScreen(paneCalltrace) == 1
+      let report = restoreLayoutForSession(second)
       checkpoint("restore -> " & $report.status & " | " & report.message)
       ck report.status == lrsRestored
       ck report.kind.len == 0
-      ck report.message.contains(box.documentOf())
+      ck report.message.contains(layoutDocumentPath())
       # THE MODEL: the pane is docked, exactly as the first session left it.
       ck second.app.layoutBinding.layout.dockedIndex(docked) >= 0
       ck not second.app.layoutBinding.layout.tree.contains(docked)
       ck second.app.layoutBinding.layout.dockedAt(leBottom).len == 1
       # THE SCREEN: the strip is there and the pane's own title row is gone.
       ck second.stripsOnScreen() == 1
-      ck second.titleRowsFor("CALL STACK") == 0
+      ck second.onScreen(paneCalltrace) == 0
       # `revealed` IS NOT PERSISTED: no overlay is open and no gesture is in
       # flight, whatever the previous session was doing when it exited.
       ck second.overlaysOnScreen() == 0
@@ -400,34 +380,37 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
     # see `app/layout/persistence.nim`'s header.
     let box = newSandbox("freeze")
     try:
-      let first = newBoundRuntime(80, 24)
-      discard restoreLayoutForSession(first, box.trace)
+      let first = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(first)
       discard first.typeLine("dock bottom")
       ck persistLayoutForSession(first).outcome == lpoWritten
 
-      let second = newBoundRuntime(80, 24)
-      ck restoreLayoutForSession(second, box.trace).status == lrsRestored
+      let second = newBoundRuntime(120, 40)
+      ck restoreLayoutForSession(second).status == lrsRestored
       ck second.app.layoutBinding.userModified
-      ck second.app.layoutBinding.profile == lpCompact
+      ck second.app.layoutBinding.profile == lpStandard
       let mine = $second.app.layoutBinding.saveDocument()
       second.resize(200, 60)
       checkpoint("after a resize the profile is " &
                  $second.app.layoutBinding.profile)
       # The profile TRACKS the size — the status bar names it — and the TREE is
       # the user's.
-      ck second.app.layoutBinding.profile == lpUltraWide
+      ck second.app.layoutBinding.profile == selectProfile(200, 60)
       ck $second.app.layoutBinding.saveDocument() == mine
       ck second.app.layoutBinding.layout.dockedAt(leBottom).len == 1
 
       # THE NEGATIVE TWIN, through the same code path: a session that restored
       # NOTHING re-flows, so the assertion above is about the freeze rather than
       # about a `resize` that never rebuilds anything.
-      let untouched = newBoundRuntime(80, 24)
-      discard restoreLayoutForSession(untouched, layoutStateRoot() / "absent")
+      # One document for the product (PLAT-45), so "restored nothing" means
+      # the document is gone — removed here, as `:reset-layout` would.
+      removeFile(layoutDocumentPath())
+      let untouched = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(untouched)
       ck not untouched.app.layoutBinding.userModified
       let before = $untouched.app.layoutBinding.saveDocument()
       untouched.resize(200, 60)
-      ck untouched.app.layoutBinding.profile == lpUltraWide
+      ck untouched.app.layoutBinding.profile == selectProfile(200, 60)
       ck $untouched.app.layoutBinding.saveDocument() != before
     finally:
       box.dispose()
@@ -452,12 +435,12 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       inc armsChecked
       let box = newSandbox("bad")
       try:
-        createDir(box.documentOf().parentDir)
-        writeFile(box.documentOf(), arm[1])
-        let planted = readFile(box.documentOf())
+        createDir(layoutDocumentPath().parentDir)
+        writeFile(layoutDocumentPath(), arm[1])
+        let planted = readFile(layoutDocumentPath())
 
-        let rt = newBoundRuntime(80, 24)
-        let report = restoreLayoutForSession(rt, box.trace)
+        let rt = newBoundRuntime(120, 40)
+        let report = restoreLayoutForSession(rt)
         checkpoint(arm[0] & " -> " & $report.status & " [" & report.kind &
                    "] " & report.message)
         ck report.status == lrsUnreadable
@@ -468,11 +451,11 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         # tail: a diagnosis behind a 90-character path is a warning the user
         # cannot see.
         ck report.message.startsWith("saved layout ignored (" & arm[2] & ")")
-        ck report.message.contains(box.documentOf())
+        ck report.message.contains(layoutDocumentPath())
         # THE SESSION IS USABLE, on the profile's own arrangement.
         ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
         ck rt.stripsOnScreen() == 0
-        ck rt.titleRowsFor("CALL STACK") == 1
+        ck rt.onScreen(paneCalltrace) == 1
         # AND THE DOCUMENT IS QUARANTINED. Overwriting a document written by a
         # NEWER build would destroy a user's arrangement because they opened an
         # older binary once, which is the whole reason the schema chain refuses
@@ -480,9 +463,9 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         ck rt.layoutDocumentQuarantined
         let persisted = persistLayoutForSession(rt)
         ck persisted.outcome == lpoQuarantined
-        ck readFile(box.documentOf()) == planted
+        ck readFile(layoutDocumentPath()) == planted
         ck filesUnder(box.root) ==
-          @[LayoutDocumentDirName / box.documentOf().extractFilename]
+          @[LayoutDocumentFileName]
       finally:
         box.dispose()
     checkpoint("unreadable-document arms: " & $armsChecked)
@@ -493,25 +476,25 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
     # assertion above is satisfied by a store that refuses everything.
     let box = newSandbox("good")
     try:
-      let first = newBoundRuntime(80, 24)
-      discard restoreLayoutForSession(first, box.trace)
+      let first = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(first)
       discard first.typeLine("dock right")
       ck persistLayoutForSession(first).outcome == lpoWritten
-      let written = readFile(box.documentOf())
+      let written = readFile(layoutDocumentPath())
 
-      let second = newBoundRuntime(80, 24)
-      let report = restoreLayoutForSession(second, box.trace)
+      let second = newBoundRuntime(120, 40)
+      let report = restoreLayoutForSession(second)
       ck report.status == lrsRestored
       ck not second.layoutDocumentQuarantined
       discard second.typeLine("dock top")
       let rewritten = persistLayoutForSession(second)
       ck rewritten.outcome == lpoWritten
-      ck readFile(box.documentOf()) != written
+      ck readFile(layoutDocumentPath()) != written
       # The restored pane is still docked right AND the second session's own
       # gesture is in the document too, so what was rewritten is the union
       # rather than a fresh default.
       var edges: seq[string] = @[]
-      for entry in parseJson(readFile(box.documentOf()))["docked"]:
+      for entry in parseJson(readFile(layoutDocumentPath()))["docked"]:
         edges.add entry["edge"].getStr
       edges.sort()
       checkpoint("after a second session's gesture the edges are " & $edges)
@@ -540,7 +523,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
     # only way the `except CatchableError` arm in `restoreLayoutForSession` is
     # entered by the thing it was written for.
     let box = newSandbox("eacces")
-    let doc = box.documentOf()
+    let doc = layoutDocumentPath()
     createDir(doc.parentDir)
     # A document THIS BUILD CAN READ. The permission is the only thing wrong
     # with it, which is what makes the failure transient and the deletion
@@ -570,8 +553,8 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
           unreadableFileArmRan = false
           skip()
         else:
-          let rt = newBoundRuntime(80, 24)
-          let report = restoreLayoutForSession(rt, box.trace)
+          let rt = newBoundRuntime(120, 40)
+          let report = restoreLayoutForSession(rt)
           checkpoint("restore -> " & $report.status & " [" & report.kind &
                      "] " & report.message)
           # THE USER IS TOLD, in the same vocabulary the four decoder arms use
@@ -585,7 +568,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
           # THE SESSION IS USABLE, on the profile's own arrangement.
           ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
           ck rt.stripsOnScreen() == 0
-          ck rt.titleRowsFor("CALL STACK") == 1
+          ck rt.onScreen(paneCalltrace) == 1
           # THE FLAG NOTHING ELSE ON THIS PATH SETS, and the plan that follows
           # from it. Asserted as two facts because `markLayoutDocumentUnreadable`
           # sets the first and `layoutPersistPlan` reads it: a defect in either
@@ -601,7 +584,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
           # and this is that sentence as a measurement rather than as prose.
           ck fileExists(doc)
           ck filesUnder(box.root) ==
-            @[LayoutDocumentDirName / doc.extractFilename]
+            @[doc.extractFilename]
           allowReading(doc)
           let survived = if fileExists(doc): readFile(doc) else: ""
           ck survived == planted
@@ -612,8 +595,8 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
           # permission is now back and NOTHING else changed, so the same path
           # RESTORES and does NOT quarantine. That is what says the arm above is
           # about the open failing.
-          let after = newBoundRuntime(80, 24)
-          let good = restoreLayoutForSession(after, box.trace)
+          let after = newBoundRuntime(120, 40)
+          let good = restoreLayoutForSession(after)
           checkpoint("with the permission back, restore -> " & $good.status)
           ck good.status == lrsRestored
           ck not after.layoutDocumentQuarantined
@@ -629,54 +612,58 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
     # the user having touched anything.
     let box = newSandbox("reset")
     try:
-      let untouched = newBoundRuntime(80, 24)
-      discard restoreLayoutForSession(untouched, box.trace)
+      # One document for the product (PLAT-45), so "restored nothing" means
+      # the document is gone — removed here, as `:reset-layout` would.
+      removeFile(layoutDocumentPath())
+      let untouched = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(untouched)
       ck not untouched.app.layoutBinding.userModified
       let nothing = persistLayoutForSession(untouched)
       checkpoint("an untouched session persists as " & $nothing.outcome)
       ck nothing.outcome == lpoRemoved
-      ck not fileExists(box.documentOf())
+      ck not fileExists(layoutDocumentPath())
       ck filesUnder(box.root).len == 0
 
       # Now rearrange, save, and reset: the explicit way back reaches the DISK,
       # so the next launch cannot restore an arrangement the user abandoned.
-      let rt = newBoundRuntime(80, 24)
-      discard restoreLayoutForSession(rt, box.trace)
+      let rt = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(rt)
       discard rt.typeLine("dock bottom")
       ck persistLayoutForSession(rt).outcome == lpoWritten
-      ck fileExists(box.documentOf())
+      ck fileExists(layoutDocumentPath())
 
-      let after = newBoundRuntime(80, 24)
-      ck restoreLayoutForSession(after, box.trace).status == lrsRestored
+      let after = newBoundRuntime(120, 40)
+      ck restoreLayoutForSession(after).status == lrsRestored
       discard after.typeLine("reset-layout")
       checkpoint(":reset-layout -> " & after.app.notification)
       ck not after.app.layoutBinding.userModified
       let removed = persistLayoutForSession(after)
       ck removed.outcome == lpoRemoved
-      ck not fileExists(box.documentOf())
+      ck not fileExists(layoutDocumentPath())
       ck filesUnder(box.root).len == 0
 
       # …and a THIRD launch is on the profile's own arrangement again.
-      let fresh = newBoundRuntime(80, 24)
-      ck restoreLayoutForSession(fresh, box.trace).status == lrsNoDocument
+      let fresh = newBoundRuntime(120, 40)
+      ck restoreLayoutForSession(fresh).status == lrsNoDocument
       ck fresh.app.layoutBinding.layout.tree.contains(paneCalltrace)
       ck fresh.stripsOnScreen() == 0
     finally:
       box.dispose()
 
-  test "OFF BY DEFAULT: with no binding nothing is read and nothing is written":
-    # THE ARM THE WHOLE OPT-IN RESTS ON, for persistence as for the gestures.
-    # A document is planted at exactly the path a bound session would use, and a
-    # session without `--layout-binding` neither reads it nor writes it — and
-    # never computes the path, so the state directory is not touched even by a
-    # `stat`.
+  test "WITH NO BINDING nothing is read and nothing is written":
+    # Since PLAT-45 the shipped binary always enables the binding, so this is
+    # no longer the flag-off arm; it is the guard that keeps a runtime a host
+    # built WITHOUT one (a Tier-1 host, `--headless`) off the disk. A document
+    # is planted at exactly the path a bound session would use, and an unbound
+    # runtime neither reads it nor writes it — and never computes the path, so
+    # the state directory is not touched even by a `stat`.
     let box = newSandbox("off")
     try:
-      let source = newBoundRuntime(80, 24)
-      discard restoreLayoutForSession(source, box.trace)
+      let source = newBoundRuntime(120, 40)
+      discard restoreLayoutForSession(source)
       discard source.typeLine("dock bottom")
       ck persistLayoutForSession(source).outcome == lpoWritten
-      let planted = readFile(box.documentOf())
+      let planted = readFile(layoutDocumentPath())
       let plantedFiles = filesUnder(box.root)
       ck plantedFiles.len == 1
 
@@ -686,7 +673,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         let rt = newRuntime(size[0], size[1])
         ck not rt.layoutBindingEnabled()
         ck not rt.layoutPersistenceEnabled()
-        let report = restoreLayoutForSession(rt, box.trace)
+        let report = restoreLayoutForSession(rt)
         checkpoint("with no binding, restore -> " & $report.status &
                    " path '" & report.path & "'")
         ck report.status == lrsNoDocument
@@ -697,12 +684,15 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         let persisted = persistLayoutForSession(rt)
         ck persisted.outcome == lpoDisabled
         ck persisted.path.len == 0
-        # The screen is the one a session with no binding has always painted.
+        # The screen is the one a session with no binding has always painted:
+        # the shared default, where the call stack is a region of its own —
+        # except at 80x24, where the source pane's minimum folds it into a tab
+        # of the Variables stack (PLAT-45's fold), and it paints no region.
         ck rt.stripsOnScreen() == 0
-        ck rt.titleRowsFor("CALL STACK") == 1
+        ck rt.onScreen(paneCalltrace) == (if size[0] >= 120: 1 else: 0)
       ck sessionsChecked == 3
       # NOT ONE BYTE MOVED, and nothing was created beside it.
-      ck readFile(box.documentOf()) == planted
+      ck readFile(layoutDocumentPath()) == planted
       ck filesUnder(box.root) == plantedFiles
     finally:
       box.dispose()

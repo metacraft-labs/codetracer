@@ -41,6 +41,7 @@ import std/[os, strutils, unicode, unittest]
 import isonim_tui
 
 import headless_app/layout_model
+import codetracer_embed
 
 import ../layout/profile
 import ../layout/project
@@ -49,7 +50,7 @@ import ../views/shell
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 309
+const ExpectedAssertions = 332
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -136,33 +137,43 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # NO HARNESS, NO TREE, NO PROJECTION. The milestone asks for this to be
     # testable independently of rendering, and the only way to demonstrate that
     # is a case that does not render.
+    #
+    # PLAT-45: a profile is now the SIZE the default is derived for, and the
+    # old breakpoint table decides one thing only — how much of the key-hint
+    # strip fits (`hintDensity`). The arrangement is the shared default folded
+    # for the size (`depthFor`), asserted by the cases below and swept by
+    # `tests/test_plat45_fold.nim`.
     ck selectProfile(80, 24) == lpCompact
     ck selectProfile(120, 40) == lpStandard
-    ck selectProfile(200, 60) == lpUltraWide
+    ck selectProfile(200, 50) == lpUltraWide
+    ck selectProfile(200, 60) == LayoutProfile(width: 200, height: 60)
+    ck hintDensity(selectProfile(80, 24)) == hdCompact
+    ck hintDensity(selectProfile(120, 40)) == hdStandard
+    ck hintDensity(selectProfile(200, 60)) == hdUltraWide
 
     # THE BOUNDARIES, on both sides, because a breakpoint table is exactly
     # where an off-by-one lives and neither of the three sizes above is near
     # one.
-    ck selectProfile(119, 40) == lpCompact
-    ck selectProfile(120, 40) == lpStandard
-    ck selectProfile(179, 40) == lpStandard
-    ck selectProfile(180, 40) == lpUltraWide
-    ck selectProfile(200, 34) == lpCompact     ## height decides first
-    ck selectProfile(200, 35) == lpUltraWide
-    ck selectProfile(120, 34) == lpCompact
-    ck selectProfile(120, 35) == lpStandard
+    ck hintDensity(selectProfile(119, 40)) == hdCompact
+    ck hintDensity(selectProfile(120, 40)) == hdStandard
+    ck hintDensity(selectProfile(179, 40)) == hdStandard
+    ck hintDensity(selectProfile(180, 40)) == hdUltraWide
+    ck hintDensity(selectProfile(200, 34)) == hdCompact     ## height first
+    ck hintDensity(selectProfile(200, 35)) == hdUltraWide
+    ck hintDensity(selectProfile(120, 34)) == hdCompact
+    ck hintDensity(selectProfile(120, 35)) == hdStandard
 
     # PURITY, asserted rather than asserted about: the same arguments give the
     # same answer after every other call in this case, and the answer does not
     # depend on the order the grid is walked.
-    var forward: seq[LayoutProfile] = @[]
-    var backward: seq[LayoutProfile] = @[]
+    var forward: seq[int] = @[]
+    var backward: seq[int] = @[]
     for w in countup(60, 220, 20):
       for h in countup(10, 70, 10):
-        forward.add selectProfile(w, h)
+        forward.add depthFor(pmDebug, selectProfile(w, h))
     for w in countdown(220, 60, 20):
       for h in countdown(70, 10, 10):
-        backward.add selectProfile(w, h)
+        backward.add depthFor(pmDebug, selectProfile(w, h))
     ck forward.len == 9 * 7
     ck backward.len == forward.len
     var matched = 0
@@ -170,29 +181,33 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
       if forward[i] == backward[backward.len - 1 - i]:
         inc matched
     ck matched == forward.len
-    # And the grid really did contain all three profiles — otherwise the
-    # symmetry above holds for free over a constant function.
-    ck lpCompact in forward
-    ck lpStandard in forward
-    ck lpUltraWide in forward
+    # And the grid really did contain an unfolded and a folded answer —
+    # otherwise the symmetry above holds for free over a constant function.
+    ck 0 in forward
+    ck maxFoldDepth(sharedDefaultLayout()) in forward
 
-  test "each profile's minimum-size contract is satisfied at its geometry":
+  test "each size's fold satisfies the minimum-size contract":
     # CTUI-3's risk mitigation asks for "an explicit minimum-size contract per
-    # pane that the projection test enforces rather than discovers". The
-    # contract is `profile.minPaneWidth` / `minPaneHeight`; this is where it is
-    # checked against the sizes the milestone names.
-    checkpoint("profile minimums: " & profileSummary())
-    ck profileFits(lpCompact, 80, 24)
-    ck profileFits(lpStandard, 120, 40)
-    ck profileFits(lpUltraWide, 200, 60)
-    # The negative twin, through the same function: a profile whose columns do
-    # not fit must SAY so rather than be laid out into slivers.
-    ck not profileFits(lpUltraWide, 60, 60)
-    ck not profileFits(lpStandard, 40, 40)
-    ck minimumWidth(lpUltraWide) > minimumWidth(lpStandard)
-    ck minimumWidth(lpStandard) > minimumWidth(lpCompact)
+    # pane that the projection test enforces rather than discovers". PLAT-45
+    # makes that contract the thing that DECIDES the arrangement: the fold is
+    # exactly as deep as it requires.
+    checkpoint("fold depths: " & profileSummary())
+    ck fitsAt(profileLayout(lpCompact), 80, 24)
+    ck fitsAt(profileLayout(lpStandard), 120, 40)
+    ck fitsAt(profileLayout(selectProfile(200, 60)), 200, 60)
+    # The negative twin, through the same function: the UNFOLDED default at
+    # 80x24 starves the editor, and says so rather than being laid out into a
+    # sliver.
+    ck not fitsAt(sharedDefaultLayout().tree, 80, 24)
+    ck fitProblems(sharedDefaultLayout().tree, 80, 24).len > 0
+    ck depthFor(pmDebug, lpCompact) == 4
+    ck depthFor(pmDebug, lpStandard) == 0
+    ck depthFor(pmDebug, lpUltraWide) == 0
+    # The per-pane lower bound grows with every region the fold gives back.
+    let s = sharedDefaultLayout()
+    ck minimumWidth(foldLayout(s, 0)) > minimumWidth(foldLayout(s, 3))
 
-  test "80x24 selects Compact and partitions the body exactly":
+  test "80x24 folds four times and partitions the body exactly":
     let (w, h) = (80, 24)
     let body = bodyArea(w, h)
     let proj = projectLayout(profileLayout(selectProfile(w, h)), body)
@@ -201,84 +216,89 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     ck body == CellArea(col: 0, row: 1, width: 80, height: 22)
     # THE PANE SET AS A WHOLE SEQUENCE, in projection order. Comparing the set
     # member by member would pass over a fourth pane nobody expected.
-    ck proj.visiblePaneKinds() == @[paneCalltrace, paneEditor, paneState]
-    ckRegion(proj, paneCalltrace, 0, 1, 24, 17)
-    ckRegion(proj, paneEditor, 24, 1, 56, 17)
-    ckRegion(proj, paneState, 0, 18, 80, 5)
+    # The source pane first, at its 60-cell minimum; the rest of the shared
+    # default in one side column of two stacks.
+    ck proj.visiblePaneKinds() == @[paneEditor, paneState, paneEventLog]
+    ckRegion(proj, paneEditor, 0, 1, 60, 22)
+    ckRegion(proj, paneState, 60, 1, 20, 11)
+    ckRegion(proj, paneEventLog, 60, 12, 20, 11)
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
-  test "120x40 selects Standard, three columns and an eight-row strip":
+  test "120x40 is the shared default unfolded, seven regions":
     let (w, h) = (120, 40)
     let body = bodyArea(w, h)
     let proj = projectLayout(profileLayout(selectProfile(w, h)), body)
     checkpoint(describe(proj))
     ck proj.status == prOk
     ck proj.visiblePaneKinds() ==
-       @[paneCalltrace, paneEditor, paneState, paneTimeline]
-    ckRegion(proj, paneCalltrace, 0, 1, 30, 30)
-    ckRegion(proj, paneEditor, 30, 1, 60, 30)
-    ckRegion(proj, paneState, 90, 1, 30, 30)
-    # §3.2: "Bottom row (height: 8 rows)". The 4:1 weight in
-    # `profile.profileLayout` is chosen so this lands on eight AT THIS
-    # GEOMETRY, and this is the assertion that keeps that true.
-    ckRegion(proj, paneTimeline, 0, 31, 120, 8)
+       @[paneFileTree, paneEditor, paneState, paneCalltrace, paneEventLog,
+         paneTestResults, paneConstraints]
+    # Every region its minimum first, then the desktop's shares of the rest.
+    ckRegion(proj, paneFileTree, 0, 1, 9, 38)
+    ckRegion(proj, paneEditor, 9, 1, 62, 38)
+    ckRegion(proj, paneState, 71, 1, 16, 19)
+    ckRegion(proj, paneCalltrace, 87, 1, 18, 19)
+    ckRegion(proj, paneEventLog, 71, 20, 34, 19)
+    ckRegion(proj, paneTestResults, 105, 1, 15, 19)
+    ckRegion(proj, paneConstraints, 105, 20, 15, 19)
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
-  test "200x60 selects Ultra-wide and gives the fourth column its own pane":
+  test "200x60 is the shared default unfolded, minimums first":
     let (w, h) = (200, 60)
     let body = bodyArea(w, h)
     let proj = projectLayout(profileLayout(selectProfile(w, h)), body)
     checkpoint(describe(proj))
     ck proj.status == prOk
     ck proj.visiblePaneKinds() ==
-       @[paneCalltrace, paneEditor, paneState, paneEventLog, paneTimeline]
-    ckRegion(proj, paneCalltrace, 0, 1, 40, 46)
-    ckRegion(proj, paneEditor, 40, 1, 90, 46)
-    ckRegion(proj, paneState, 130, 1, 40, 46)
-    ckRegion(proj, paneEventLog, 170, 1, 30, 46)
-    ckRegion(proj, paneTimeline, 0, 47, 200, 12)
+       @[paneFileTree, paneEditor, paneState, paneCalltrace, paneEventLog,
+         paneTestResults, paneConstraints]
+    # Every region gets its minimum (8 / 60 / 30 / 14 columns — a region's
+    # minimum is its widest tab's, and never less than that tab's label), and
+    # the 88 columns left over are shared 15 / 25 / 41.25 / 18.75 — the
+    # desktop's rendered shares. The ARRANGEMENT is the desktop's; the cells
+    # are the terminal's.
+    ckRegion(proj, paneFileTree, 0, 1, 21, 58)
+    ckRegion(proj, paneEditor, 21, 1, 82, 58)
+    ckRegion(proj, paneState, 103, 1, 33, 29)
+    ckRegion(proj, paneCalltrace, 136, 1, 34, 29)
+    ckRegion(proj, paneEventLog, 103, 30, 67, 29)
+    ckRegion(proj, paneTestResults, 170, 1, 30, 29)
+    ckRegion(proj, paneConstraints, 170, 30, 30, 29)
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
-  test "the Compact bottom row is a stack, and Alt+1/2/3 is LayoutNode.activate":
+  test "the shared default's stacks are stacks, and a tab switch is LayoutNode.activate":
     # THE MILESTONE'S LOAD-BEARING CONTRACT. Not "the TUI has tabs" — that
     # the tab operation IS the desktop's operation, performed on the desktop's
     # own type.
     let node = profileLayout(lpCompact)
-    var stacks = 0
-    proc countStacks(n: LayoutNode) =
-      if n.isNil: return
-      if n.kind == lnStack: inc stacks
-      for c in n.children: countStacks(c)
-    countStacks(node)
-    ck stacks == 1
-    ck profileTabs(lpCompact) == @[paneState, paneTimeline, paneEventLog]
-    # The wider profiles carry no stack at all, which is what makes the tab
-    # keys Compact-only rather than universally bound to nothing.
-    ck profileTabs(lpStandard).len == 0
-    ck profileTabs(lpUltraWide).len == 0
+    ck stackTabs(node) == @[
+      @[paneState, paneScratchpad, paneCalltrace, paneAgentActivity,
+        paneFileTree, paneVcs],
+      @[paneEventLog, paneTimeline, paneTerminalOutput, paneTestResults,
+        paneConstraints]]
 
-    # `allPanes` sees all five; `visiblePanes` sees three. That difference IS
-    # the stack, and it is the reason a shell need not load an invisible tab.
-    ck allPanes(node).len == 5
-    ck visiblePanes(node) == @[paneCalltrace, paneEditor, paneState]
+    # `allPanes` sees all twelve; `visiblePanes` sees three. That difference IS
+    # the stacks, and it is the reason a shell need not load an invisible tab.
+    ck allPanes(node).len == 12
+    ck visiblePanes(node) == @[paneEditor, paneState, paneEventLog]
 
     let body = bodyArea(80, 24)
     let before = projectLayout(node, body)
-    ck before.regionFor(paneState).height == 5
+    ck before.regionFor(paneEventLog).height == 11
     ck before.regionFor(paneTimeline).cellCount() == 0
 
-    # Alt+2 — `activate(paneTimeline)`, the same call `session_switch.nim`
-    # makes through GoldenLayout on the desktop.
+    # A tab click — `activate(paneTimeline)`, the same call
+    # `session_switch.nim` makes through GoldenLayout on the desktop.
     ck node.activate(paneTimeline)
     let after = projectLayout(node, body)
-    ck after.visiblePaneKinds() == @[paneCalltrace, paneEditor, paneTimeline]
+    ck after.visiblePaneKinds() == @[paneEditor, paneState, paneTimeline]
     # THE REGION IS THE SAME CELLS. A tab switch moves which pane owns the
     # slot; it must not move the slot.
-    ck after.regionFor(paneTimeline) == before.regionFor(paneState)
-    ck after.regionFor(paneState).cellCount() == 0
+    ck after.regionFor(paneTimeline) == before.regionFor(paneEventLog)
+    ck after.regionFor(paneEventLog).cellCount() == 0
     ck coverageProblems(after.regions, body).len == 0
 
   test "the tab strip on the composited screen follows activate":
@@ -289,20 +309,26 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     let h = newTerminalTestHarness(80, 24)
     h.mount(proc(r: TerminalRenderer): TerminalNode =
       renderShellTree(model, r, 80, 24))
-    let stackRow = bodyArea(80, 24).row + 17
-    let firstTabs = rowText(h, stackRow, 80)
+    # The event stack's strip: row 12, from column 60 (the 80x24 case above).
+    let stackRow = bodyArea(80, 24).row + 11
+    proc strip(h: TerminalTestHarness): string =
+      rowText(h, stackRow, 80).runeSubStr(60)
+    let firstTabs = strip(h)
     checkpoint("tab strip: '" & firstTabs.strip() & "'")
-    ck firstTabs.startsWith("[Variables]")
-    ck firstTabs.contains("Timeline")
-    ck firstTabs.contains("Tracepoints")
+    ck firstTabs.startsWith("[Event Log]")
+    # The strip is 20 cells wide at 80x24 and cuts at the region's edge — the
+    # second label to `Timelin`, the rest entirely; the stack still holds
+    # them, in the shared default's order.
+    ck firstTabs.startsWith("[Event Log]  Timelin")
+    ck stackTabs(model.layout)[^1][2] == paneTerminalOutput
 
     ck model.layout.activate(paneTimeline)
     h.mount(proc(r: TerminalRenderer): TerminalNode =
       renderShellTree(model, r, 80, 24))
-    let secondTabs = rowText(h, stackRow, 80)
-    checkpoint("tab strip after Alt+2: '" & secondTabs.strip() & "'")
-    ck secondTabs.contains("[Timeline]")
-    ck not secondTabs.contains("[Variables]")
+    let secondTabs = strip(h)
+    checkpoint("tab strip after the click: '" & secondTabs.strip() & "'")
+    ck secondTabs.startsWith(" Event Log  [Timelin")
+    ck not secondTabs.contains("[Event Log]")
     # The two strips differ ONLY in the brackets — a repaint that rebuilt the
     # layout from the profile would have reset the active tab and produced the
     # first string again, which is the failure `shell.reprofile` guards.
@@ -328,7 +354,11 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # PLAT-16: TWO INDICATORS, IN TWO POSITIONS, AND THE INPUT ONE IS STILL
     # FIRST. `NORMAL` is the input mode and `[DEBUG]` is the product mode; the
     # brackets are what keep them from reading as one two-word mode name.
-    ck compact[^1].startsWith("NORMAL [DEBUG] |")
+    # PLAT-45: an 80x24 terminal FOLDED the shared default, and the status
+    # line says so right after the two indicators; 120x40 did not, and says
+    # nothing.
+    ck compact[^1].startsWith("NORMAL [DEBUG] [folded 4] |")
+    ck standard[^1].startsWith("NORMAL [DEBUG] |")
 
   test "the header and the status bar are exactly `width` cells at every width":
     # A SWEEP, not three sizes. Both rows are built by fitting several fields

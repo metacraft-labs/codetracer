@@ -293,7 +293,10 @@ suite "PLAT-16: the transition preserves what §5 says it preserves":
     ck firstEdit.contains(paneBuildOutput)
     ck not firstEdit.contains(paneCalltrace)
     ck debugTree.contains(paneCalltrace)
-    ck not debugTree.contains(paneFileTree)
+    # PLAT-45: the Debug default is the shared arrangement, which has a Files
+    # column as the desktop's does — so the discriminating pane is the build
+    # pane, which only Edit mode's shared default places.
+    ck not debugTree.contains(paneBuildOutput)
 
     # The user rearranges EDIT mode…
     let rearranged = column([

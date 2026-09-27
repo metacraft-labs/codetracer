@@ -90,7 +90,7 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 415
+const ExpectedAssertions = 421
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -270,10 +270,17 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     # every byte, `command_line.applyKey` for the buffer, `runPromptLine` for
     # the submit, `binding.runLayoutCommand` for the verb. Asserted on the
     # resulting `Layout` AND on the painted screen.
-    let rt = newRuntime(80, 24)
+    # At 120x40, where the shared default is unfolded and the call stack has
+    # a region of its own (at 80x24 it is a tab of the Variables stack).
+    let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
+    # PLAT-45: the ring starts at the shared default's first region (the Files
+    # stack); this case docks the call stack, so it is focused first — the
+    # way a user would, by pane.
+    ck rt.focusedPaneOf() == paneFileTree
+    ck rt.focus.focusPaneKind(paneCalltrace)
     let focused = rt.focusedPaneOf()
-    ck focused == paneCalltrace          ## the Compact profile's first region
+    ck focused == paneCalltrace
     ck rt.app.layoutBinding.layout.tree.contains(focused)
     ck rt.app.layoutBinding.layout.dockedIndex(focused) < 0
     ck rt.dockStripRowOf() < 0
@@ -303,11 +310,12 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     checkpoint("dock strip row: '" & painted & "'")
     ck painted.contains(DockStripGlyph)
     ck painted.contains("Call Stack")
-    # …and the pane's own title row is gone from the body, which is the half a
-    # strip-only assertion would miss.
+    # …and the pane's own tab is gone from the body, which is the half a
+    # strip-only assertion would miss. (In the shared default the call stack
+    # is the first tab of its stack, so its label is `[Call Stack]`.)
     var titlesLeft = 0
     for row in screen.rows:
-      if row.startsWith("CALL STACK"):
+      if row.contains("[Call Stack]"):
         inc titlesLeft
     ck titlesLeft == 0
 
@@ -319,7 +327,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.dockStripRowOf() < 0
     var titlesBack = 0
     for row in rt.shellScreenOf().rows:
-      if row.startsWith("CALL STACK"):
+      if row.contains("[Call Stack]"):
         inc titlesBack
     ck titlesBack == 1
 
@@ -432,7 +440,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
       discard rt.enableLayoutBinding()
       ck rt.app.layoutBinding.profile == lpCompact
       rt.resize(200, 60)
-      ck rt.app.layoutBinding.profile == lpUltraWide
+      ck rt.app.layoutBinding.profile == selectProfile(200, 60)
       ck not rt.app.layoutBinding.userModified
       # The Ultra-wide tree really is what is on screen now.
       ck rt.bodyRows() == newRuntime(200, 60).bodyRows()
@@ -444,7 +452,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
       ck rt.app.layoutBinding.userModified
       let mine = $rt.app.layoutBinding.saveDocument()
       rt.resize(200, 60)
-      ck rt.app.layoutBinding.profile == lpUltraWide
+      ck rt.app.layoutBinding.profile == selectProfile(200, 60)
       ck $rt.app.layoutBinding.saveDocument() == mine
       # …and it still PROJECTS at the new size: the strip is still one row and
       # the screen still has the right number of them.
@@ -483,8 +491,10 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     # so with `--layout-binding` on a typed command rearranged a terminal and a
     # drag did nothing. This is the gesture, driven the way the product drives
     # it — the exact bytes a terminal delivers, through `handleToken`.
-    let rt = newRuntime(80, 24)
+    # At 120x40, where the call stack is a region of its own (PLAT-45).
+    let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
+    ck rt.focus.focusPaneKind(paneCalltrace)
     let source = rt.layoutGeometry().regionOfPane(paneCalltrace)
     checkpoint("the call-stack pane is at " & $source)
     ck not source.isEmptyArea
@@ -540,8 +550,9 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     # user focuses it with a pointer — so `routeMouseReport` carries the answer
     # back. Without the return leg `Tab` continues the ring from wherever the
     # keyboard left it and the status bar names a pane the user is not on.
-    let rt = newRuntime(80, 24)
+    let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
+    ck rt.focus.focusPaneKind(paneCalltrace)
     ck rt.focusedPaneOf() == paneCalltrace
     let editor = rt.layoutGeometry().regionOfPane(paneEditor)
     checkpoint("the editor pane is at " & $editor)
@@ -573,8 +584,10 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     # "the pane a verb acts on is the one Tab moved to" ends with `offered == 0`
     # after a `:dock right` — and the mouse path did not. It does now, and
     # `run-plat6-mutations.py`'s M37 is the arm (control: S10).
-    let rt = newRuntime(80, 24)
+    # At 120x40, where the call stack is a region of its own (PLAT-45).
+    let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
+    ck rt.focus.focusPaneKind(paneCalltrace)
     let dragged = rt.focusedPaneOf()
     ck dragged == paneCalltrace
     let source = rt.layoutGeometry().regionOfPane(dragged)
@@ -612,7 +625,11 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.focusedPaneOf() != dragged
     # …AND IT IS NOT EMPTY, which is the second half of the same control: a
     # rebuild that produced nothing would satisfy `offeredAfter == 0` too.
-    ck rt.focus.focusOrder().len == ringBefore - 1
+    # PLAT-45: the call stack was the first TAB of its stack, so its region
+    # stays — Agent Activity takes it — and the ring keeps its length with a
+    # different pane in that slot.
+    ck rt.focus.focusOrder().len == ringBefore
+    ck paneAgentActivity in rt.focus.focusOrder()
     # Every pane the ring still offers has a rectangle on this screen, which is
     # the property "Tab offers a pane that is on screen" actually means.
     var offScreen = 0
@@ -636,14 +653,16 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     var stackCol = -1
     var tabs: seq[string] = @[]
     var active = -1
+    # PLAT-45: the shared default has several stacks; this case wants one
+    # with at least three tabs — the event stack.
     for r in rt.layoutGeometry().projection.regions:
-      if r.activeTab >= 0 and r.tabs.len > 0:
+      if r.activeTab >= 0 and r.tabs.len >= 3:
         stackRow = r.area.row
         stackCol = r.area.col
         tabs = r.tabs
         active = r.activeTab
         break
-    checkpoint("the Compact profile's stack is " & $tabs & ", active " & $active)
+    checkpoint("the event stack is " & $tabs & ", active " & $active)
     ck tabs.len >= 3
     ck active == 0
     ck stackRow >= 0
@@ -660,7 +679,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.app.layoutBinding.interaction.kind == ikNone
     var activeNow = -1
     for r in rt.layoutGeometry().projection.regions:
-      if r.activeTab >= 0 and r.tabs.len > 0:
+      if r.activeTab >= 0 and r.tabs.len >= 3:
         activeNow = r.activeTab
         break
     ck activeNow == 1
@@ -671,7 +690,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck scrolled.repaint
     var activeAfter = -1
     for r in rt.layoutGeometry().projection.regions:
-      if r.activeTab >= 0 and r.tabs.len > 0:
+      if r.activeTab >= 0 and r.tabs.len >= 3:
         activeAfter = r.activeTab
         break
     ck activeAfter == 2
@@ -681,8 +700,9 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     # of the prompt because it is not a prompt key — `command_line.applyKey`
     # answers `claUnhandled` for one, its printable arm requiring
     # `token.len == 1` — so the prompt keeps its buffer and stays open while the
-    # gesture happens underneath it.
-    let rt = newRuntime(80, 24)
+    # gesture happens underneath it. At 120x40, where the call stack is a
+    # region of its own (PLAT-45).
+    let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
     discard rt.handleToken(":", 0'i64)
     for ch in "dock bo":
@@ -706,9 +726,12 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     # lands outside the tree area, and a terminal has no column left of column
     # 0. That was written about a gesture no input path reached. It is swept
     # here over every cell of the screen and then COMMITTED for real.
+    # The pane dragged is the Variables stack's own (the state pane): at
+    # 80x24 the shared default folds the call stack into that stack's tabs
+    # (PLAT-45), and a drag picks up the tab under the pointer.
     let rt = newRuntime(80, 24)
     discard rt.enableLayoutBinding()
-    let reached = rt.dockEdgesADropCanReach(paneCalltrace, 80, 24)
+    let reached = rt.dockEdgesADropCanReach(paneState, 80, 24)
     checkpoint("with nothing docked, a drop reaches: " & $reached)
     # EXACT, not "does not contain left" — trap 4's rule: a sweep that resolved
     # nothing would satisfy every negative assertion over it, and the set's
@@ -726,11 +749,11 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
       inc dragsMade
       let r = newRuntime(80, 24)
       discard r.enableLayoutBinding()
-      let src = r.layoutGeometry().regionOfPane(paneCalltrace)
+      let src = r.layoutGeometry().regionOfPane(paneState)
       discard r.handleToken(sgrReport(0, src.row, src.col, true), 0'i64)
       let o = r.handleToken(sgrReport(0, probe[0], probe[1], false), 0'i64)
       checkpoint("a drag onto " & probe[3] & " -> " & o.detail)
-      ck (r.app.layoutBinding.layout.dockedIndex(paneCalltrace) >= 0) == probe[2]
+      ck (r.app.layoutBinding.layout.dockedIndex(paneState) >= 0) == probe[2]
     ck dragsMade == 4
 
     # THE CLAIM'S SECOND HALF, and it is the positive twin that stops the first

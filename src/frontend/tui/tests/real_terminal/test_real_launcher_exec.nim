@@ -113,17 +113,18 @@ const
   FixtureName = "calc"
   Cols = 120
   Rows = 40
-    ## 120x40 selects the STANDARD profile (`app/layout/profile.selectProfile`:
-    ## `lpCompact` below 35 rows whatever the width, `lpStandard` at 120
-    ## columns), so TIMELINE gets a rectangle of its own instead of being a tab
-    ## of the state stack. The same geometry CTUI-11's suite uses, so a frame
-    ## that differs between the two files differs for a reason other than size.
+    ## 120x40 is where the shared default (PLAT-45) opens UNFOLDED — every
+    ## region of it gets its cell minimum. The same geometry CTUI-11's suite
+    ## uses, so a frame that differs between the two files differs for a
+    ## reason other than size.
   NoHandlerText = "ct: no component handles 'tui'"
     ## `S_ERR_NO_HANDLER` + the command, from
     ## `codetracer-launcher/src/install.nim`'s emit block. Not importable: that
     ## string lives in C inside an `--os:standalone` module.
-  PaneTitles: array[4, string] = ["CALL STACK", "SOURCE", "VARIABLES", "TIMELINE"]
-    ## §3.1's screen, as the pane titles a real frame carries. Asserted as a
+  PaneTitles: array[4, string] = ["CALL STACK", "SOURCE", "VARIABLES",
+                                  "Timeline"]
+    ## §3.1's screen, as the shared default draws it: the panes' own titles,
+    ## and the timeline as a tab label of the events stack (PLAT-45). Asserted as a
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 

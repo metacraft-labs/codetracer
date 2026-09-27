@@ -86,7 +86,10 @@ import ./derived_colours
 const ExpectedAssertions = 104
 
 const
-  Cols = 90
+  Cols = 120
+    ## Wide enough that the shared default is unfolded (PLAT-45), so the Files
+    ## stack the app starts focused on is a region with Source to its right;
+    ## 24 rows keeps the compact key-hint strip.
   Rows = 24
   Label = "keybindings"
   Stem = "app_keybindings"
@@ -295,7 +298,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
     var sess = spawnChild()
     try:
       discard settledFrame(sess, 0)
-      checkField(sess, keysApp.FocusRow, keysApp.FocusLabel, "calltrace")
+      checkField(sess, keysApp.FocusRow, keysApp.FocusLabel, "fileTree")
 
       # `Ctrl+w` alone: PENDING, and it says so — in the field line AND in the
       # status bar's notification area, which is the row that is on screen in

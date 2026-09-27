@@ -170,7 +170,9 @@ suite "CTUI-14: --headless honours --goto and refuses what it cannot honour":
       ck plainFrame.len > 1000
       ck plainFrame.contains("CALL STACK")
       ck plainFrame.contains("SOURCE")
-      ck plainFrame.contains("TIMELINE")
+      # PLAT-45: the shared default's event stack opens on the Event Log tab
+      # (the timeline is its second tab), so the frame names the event stack.
+      ck plainFrame.contains("[Event Log]")
 
       # ---- the recording's own extent, read off that frame ----------------
       let (minTick, maxTick) = extentOf(plainFrame)

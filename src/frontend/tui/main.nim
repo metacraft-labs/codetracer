@@ -353,34 +353,34 @@ proc interactive(command: TuiCommand): int =
   # reverse) — its pending writes finish while the shared wake pipe is open.
   let files = startFiles(rt, projectRoot, highlights)
   defer: files.stop()
-  # PLAT-6's OPT-IN, and it is the only thing that turns the layout binding on
-  # in a shipped binary. `app/runtime.enableLayoutBinding` records why it is an
-  # opt-in and what would have to be true to flip the default; what matters
-  # here is the shape: one guarded line, before the first frame, so the binding
-  # is seeded from the arrangement this session would have painted anyway.
+  # PLAT-45: THE LAYOUT IS THE USER'S BY DEFAULT, AND IT IS REMEMBERED.
   #
-  # WITHOUT THE FLAG NOTHING BELOW CHANGES. `shellModel` carries the session's
-  # own `LayoutNode`, an empty `docked` and no `Interaction`, which is exactly
-  # the model CTUI-3 built, and the `:` prompt routes to §4.3's interpreter as
-  # it always has.
-  var layoutRestore = LayoutRestoreReport()
-  if command.layoutBinding:
-    discard rt.enableLayoutBinding()
-    # AND THE ARRANGEMENT COMES BACK. PLAT-6's Goal sentence promises "move
-    # tabs, resize splits, dock panes, SAVE AND RESTORE", and until this line
-    # the fourth clause was the one a user did not get: `binding.saveDocument`
-    # and `binding.restoreDocument` existed and nothing in the product called
-    # either, so an arrangement did not survive a restart.
-    #
-    # KEYED BY THE RECORDING, held under the user's own state directory, and
-    # behind the SAME opt-in as the gestures — with the flag off
-    # `restoreLayoutForSession` computes no path and opens no file at all.
-    # `app/layout/persistence.nim`'s header carries the reasoning for each of
-    # those three; what matters here is that this is the only place a shipped
-    # binary reads one.
-    layoutRestore = restoreLayoutForSession(rt, folder)
-    if layoutRestore.message.len > 0:
-      app.notification = layoutRestore.message
+  # Until PLAT-45 this was PLAT-6's opt-in: only `--layout-binding` gave the
+  # terminal a rearrangeable layout, and only then was it saved — per
+  # recording. PLAT-45 deliverable 8 flips both: every session starts on the
+  # shared default (or on the arrangement the user last left the TERMINAL in),
+  # the `:` layout verbs and the mouse can rearrange it, and every committed
+  # change is written through to ONE document for the terminal product under
+  # the user's state directory (`host/layout_store.layoutDocumentPath`). The
+  # desktop and the GPUI window keep files of their own and never read this
+  # one. `--layout-binding` is still accepted, and asks for what is now the
+  # default. What made PLAT-6 keep this an opt-in — the session slot holding a
+  # bare tree — is gone since PLAT-4's closing pass, and a committed gesture is
+  # now written back onto the slot (`runtime.afterLayoutCommit`).
+  #
+  # The binding is enabled before the first frame, seeded from the arrangement
+  # this session would have painted anyway, so frame 0 is unchanged by it.
+  discard rt.enableLayoutBinding()
+  rt.layoutCommitted = proc(rt: TuiRuntime) =
+    # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
+    # know about, on the status line, and is not fatal: the arrangement is
+    # still on screen and the exit save below tries again.
+    let saved = persistLayoutForSession(rt)
+    if saved.outcome == lpoFailed:
+      rt.app.notification = saved.message
+  let layoutRestore = restoreLayoutForSession(rt)
+  if layoutRestore.message.len > 0:
+    app.notification = layoutRestore.message
   # FRAME 0, BEFORE THE ENGINE. See this module's header on why the order is
   # this way round.
   paint(driver, rt)
@@ -549,16 +549,18 @@ proc interactive(command: TuiCommand): int =
            not driver.holdFrame(journal.pendingReplay > 0):
           paint(driver, rt)
 
-  # THE ARRANGEMENT IS SAVED HERE, AND ONLY IF IT IS THE USER'S. Once per
-  # session rather than once per gesture: a drag is a press and a release, and
-  # writing through on each would put two file writes inside one pointer
-  # movement for a document nobody reads until the next launch.
+  # THE ARRANGEMENT IS SAVED AGAIN ON THE WAY OUT, AND ONLY IF IT IS THE
+  # USER'S. PLAT-45 added the write-through on every committed change (a drag
+  # commits once, on release, so a pointer movement costs no writes); this
+  # final save is what makes a session that ended with the default in place —
+  # untouched, or reset — remove a stale document.
   #
-  # `persistLayoutForSession` answers `lpoDisabled` and touches nothing when
-  # `--layout-binding` is off, `lpoQuarantined` when this session started from
-  # a document it could not read, and `lpoRemoved` when the arrangement is the
-  # profile's own — which is what makes `:reset-layout` reach all the way to
-  # the disk instead of leaving a stale document behind.
+  # `persistLayoutForSession` answers `lpoQuarantined` when this session
+  # started from a document it could not read, and `lpoRemoved` when the
+  # arrangement is the shared default's own — which is what makes
+  # `:reset-layout` reach all the way to the disk instead of leaving a stale
+  # document behind. Every committed change was already written through
+  # (`rt.layoutCommitted` above); this is the last word.
   #
   # BEFORE `driver.stop()` runs from its `defer`, so a failure message is
   # composed while the screen is still ours; it is REPORTED ON STDERR after the

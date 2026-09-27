@@ -259,7 +259,14 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     header: header,
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
-                               product = app.modes.product),
+                               product = app.modes.product,
+                               # PLAT-45: say so when the screen is the shared
+                               # default FOLDED — and only then. An arrangement
+                               # the user made is theirs, not a fold.
+                               fold = (if bound and
+                                          app.layoutBinding.userModified: ""
+                                       else: foldNote(app.modes.product,
+                                                      selected))),
     layout: (if not registered.isNil: registered
              elif bound: boundLayout.tree
              elif active.isNil: layoutForMode(app.modes.product, selected)
