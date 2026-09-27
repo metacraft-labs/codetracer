@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 43
+# RECORDED-DARK-CEILING: 44
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -580,8 +580,19 @@ ci/test/plat38-keystroke.sh
 # **THESE ARE BLOCKED, NOT UNWIRED.** Every one has its `just` recipe
 # (`plat40-capture-window`, `plat41-capture-window`, `plat42-frame-budget`,
 # `plat42-frames-record`, `plat42-surfaces-record`, `plat42-surfaces-window`,
-# `plat44-edit-window`, `plat44-sequences-window`, `plat44-sequences-record`);
-# what is missing is a runner that can execute them.
+# `plat44-edit-window`, `plat44-sequences-window`, `plat44-sequences-record`,
+# `plat45-arrangement-window`); what is missing is a runner that can execute
+# them.
+#
+# `ci/test/plat45-arrangement-window.sh` (43 -> 44) frames the GPUI window's
+# FIRST screen on `calc` with no remembered layout, for the "same panes, same
+# places, three media" row: its reading
+# (`src/tests/visual/plat45-gpui-arrangement.json`, `just plat45-window-record`)
+# is asserted by `test_plat45_three_media.nim`. Blocked on the same two
+# capabilities — a built windowed shim and a compositor — and on nothing else;
+# codetracer-specs `issues/2026-09-26-window-capture-gates-recorded-blocked-
+# although-ci-can-run-them.md` argues this whole group is wireable on the
+# self-hosted GPU hosts, and it goes with them when they are wired.
 #
 # THE GATES THAT READ THESE CAPTURES ARE *NOT* DARK, which is the design the
 # PLAT-37 entry describes: `ci/test/editor-model-case-floor.sh` PLAT-40
@@ -610,6 +621,7 @@ ci/test/plat42-surfaces-window.sh
 ci/test/plat44-edit-window.sh
 ci/test/plat44_sequences_window_record.py
 ci/test/plat44-sequences-window.sh
+ci/test/plat45-arrangement-window.sh
 
 # ---------------------------------------------------------------------------
 # HCR H6 — THE LAUNCH-UNDER-HCR ARMS. **BLOCKED on a sibling and two build

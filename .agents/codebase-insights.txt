@@ -3908,25 +3908,23 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     rule written out a second time, calling nothing in the module under test.
     M5 (painter stops following the table) dies in the differential half; M26
     (`TabGapCells` widened) dies only in the absolute one.
-  * PLAT-6'S LAYOUT BINDING IS AN OPT-IN: `codetracer-tui --layout-binding`.
-    `main.nim` calls `app/runtime.enableLayoutBinding`, and `runPromptLine`
-    then routes the twelve layout verbs (`:dock`, `:move-tab`, `:resize`, …)
-    into `binding.runLayoutCommand` — a PREFIX on the `:` path, deliberately
-    not a seventeenth row in §4.3's published table, which
-    `test_gdb_command_surface.nim` parses out of `CodeTracer-TUI.md`.
-    WITHOUT THE FLAG NOTHING CHANGES: `layoutBinding` is nil, `shellModel`
-    carries the session's own tree (`slot.layout.tree`), and those words are unknown
-    commands.  It is an opt-in rather than the default because a binding's tree
-    is a CLONE of the session's, so enabling one by default would give the
-    terminal two layout authorities.  The slot now holds a `Layout` (PLAT-4's
-    closing pass) and `enableLayoutBinding` seeds from it, docked panes
-    included; the binding still works on its own copy, and making the
-    gestures write back / flipping the default is PLAT-45 deliverable 8.
-  * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED, behind the same
-    `--layout-binding` opt-in: `runPromptLine` takes the twelve `:` verbs and
-    `handleToken` -> `routeMouseReport` takes a decoded SGR-1006 report into
-    `binding.onMouse`.  With the flag OFF `decodeMouse` is not even called and a
-    mouse report takes the path it always took — `keyName` answers "" and
+  * SINCE PLAT-45 THE TERMINAL LAYOUT BINDING IS ON BY DEFAULT. `main.nim`
+    always calls `app/runtime.enableLayoutBinding`; `--layout-binding` is still
+    accepted (old scripts) and asks for what is now the default. `runPromptLine`
+    routes the twelve layout verbs (`:dock`, `:move-tab`, `:resize`, …) into
+    `binding.runLayoutCommand` — a PREFIX on the `:` path, deliberately not a
+    seventeenth row in §4.3's published table, which `test_gdb_command_surface
+    .nim` parses out of `CodeTracer-TUI.md`. There is ONE layout authority: an
+    applied gesture calls `runtime.afterLayoutCommit`, which writes
+    `binding.layout.clone()` back onto the active slot and fires
+    `rt.layoutCommitted` (main.nim's write-through to the document). In-process
+    harnesses that build a `TuiRuntime` WITHOUT `enableLayoutBinding` still get
+    a nil binding and the old unknown-command behaviour.
+  * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED whenever a binding is
+    enabled (the shipped binary always): `runPromptLine` takes the twelve `:`
+    verbs and `handleToken` -> `routeMouseReport` takes a decoded SGR-1006
+    report into `binding.onMouse`.  With no binding `decodeMouse` is not even
+    called and a mouse report takes the old path — `keyName` answers "" and
     `keymap.resolve` reports `krNone`.
     THE LAYOUT BINDING IS THE ONLY MOUSE CONSUMER IN THIS FRONT-END, and that
     was measured rather than assumed: `call_stack_keys.applyMouse` and
@@ -3945,33 +3943,38 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     CLOSED: `test_layout_command_routing.nim`'s "a mouse DROP rebuilds the focus
     ring, so Tab cannot offer a docked pane" is the assertion and M37 is the
     arm, with S10 as its behaviour-preserving control.)
-  * A REARRANGED TERMINAL LAYOUT IS PERSISTED, PER RECORDING, BEHIND THE SAME
-    `--layout-binding` OPT-IN.  `main.nim` calls
-    `host/layout_store.restoreLayoutForSession` before the first frame and
-    `persistLayoutForSession` after the input loop.  The split is
-    `host/capabilities` -> `app/theme/capabilities` again:
-    `app/layout/persistence.nim` decides the file's NAME, what an unreadable
-    document MEANS and whether there is anything to write, and does NO I/O — no
-    `getEnv`, no file, no fd, no `std/os` in its imports; `host/layout_store.nim`
-    owns the environment, the read, the atomic write (`<path>.new` then
-    `moveFile`) and the remove.  Four rules worth knowing before touching it:
-      - the document is `<state root>/tui-layouts/<slug>-<sha1 prefix>.json`,
-        keyed by the recording's CANONICAL path.  Not in the trace folder (a
-        recording is shared, archived and may be read-only); state rather than
-        config; per recording so one arrangement never silently applies to
-        another.  Slug AND digest, because `/a/calc.ct` and `/b/calc.ct` share a
-        basename and a directory of bare hex is unauditable;
+  * THE TERMINAL REMEMBERS ONE LAYOUT (PLAT-45), NOT ONE PER RECORDING.
+    `main.nim` calls `host/layout_store.restoreLayoutForSession` before the
+    first frame, writes THROUGH on every applied gesture (`rt.layoutCommitted`
+    -> `persistLayoutForSession`, a failure reported on the status line) and
+    once more after the input loop. The split is `host/capabilities` ->
+    `app/theme/capabilities` again: `app/layout/persistence.nim` decides the
+    file's NAME, what an unreadable document MEANS and whether there is
+    anything to write, and does NO I/O; `host/layout_store.nim` owns the
+    environment, the read, the atomic write (`<path>.new` then `moveFile`) and
+    the remove.  Rules worth knowing before touching it:
+      - the document is `<state root>/tui-layout.json` (`LayoutDocumentFileName`),
+        state root = `CODETRACER_TUI_LAYOUT_DIR`, else `$XDG_STATE_HOME/codetracer`,
+        else `~/.local/state/codetracer`. The GPUI window's is `gpui-layout.json`
+        in the same directory (`gpui/layout_memory.nim`); the desktop's stays
+        under `userLayoutDir`. Each product's reset deletes its own file only;
       - AN UNREADABLE DOCUMENT IS REPORTED BY KIND ON THE STATUS LINE AND LEFT
         ALONE.  The message leads with the kind because `statusBarText`
         truncates the tail, and the file is QUARANTINED — a document from a
         NEWER build is `UnknownVersion` here, and overwriting it would destroy a
         user's arrangement for having opened an older binary once;
-      - A RESTORED DOCUMENT SETS `userModified`, so it freezes the responsive
-        profile.  Which is why AN UNTOUCHED SESSION WRITES NOTHING: persisting a
-        profile default would pin the Compact tree on a wide terminal for ever.
-        `:reset-layout` clears the flag and the exit DELETES the document;
-      - with the flag off `restoreLayoutForSession` refuses before it computes a
-        path, so the state directory is not touched, not even by a `stat`.
+      - A RESTORED DOCUMENT SETS `userModified`, so it freezes the fold.  AN
+        UNTOUCHED SESSION WRITES NOTHING: persisting the default would pin one
+        terminal size's fold for ever. `:reset-layout` clears the flag and
+        deletes the document;
+      - `ci/lib/run-nim-test-lane.sh` exports `CODETRACER_TUI_LAYOUT_DIR` to a
+        fresh temp dir PER TEST FILE when unset, so no lane reads or writes the
+        developer's own `~/.local/state/codetracer` and a suite that docked a
+        pane cannot hand its arrangement to the next file.
+      - Tests that assume where a pane sits must be written against the shared
+        default (e.g. at 80x24 the first focus stop is the Files stack; the
+        Source pane is the only bare region; the Timeline is a TAB of the
+        events stack, so read `Timeline`, not a `TIMELINE` title).
     `CODETRACER_TUI_LAYOUT_DIR` overrides the state root; that is how the two
     persistence suites point a real spawned binary at a directory of their own.
     THE "file would not OPEN at all" PATH IS THE ONE ONLY
@@ -5576,7 +5579,11 @@ together and rerun that suite.
 * In the terminal the `calltrace` PaneKind is painted as the CALL STACK (the
   TUI spec's choice); there is no call-trace pane there.
 * `codetracer-gpui --layout=<file>` opens a saved layout document; the terminal
-  adopts the same JSON through `LayoutBinding.adoptLayoutDocument`.
+  adopts the same JSON through `LayoutBinding.adoptLayoutDocument`. Without
+  `--layout` GPUI restores its own `gpui-layout.json`, else opens the shared
+  default; `--layout-ops=` applies scripted gestures (activate/dock/merge/
+  remove) and saves, `--reset-layout` deletes its file, `--dock-out=` writes the
+  arrangement it opened with.
 * Reading panes off a frame: `vision_producer.readProducerPanes` (pixels) and
   `terminal_reading` (a `plainFrame` text screen, in CELLS not bytes — rows
   carry `│`/`─`). Tesseract groups narrow aligned table columns column-wise;
@@ -6305,3 +6312,62 @@ Two traps in the same area, both live:
   the mode via `terminal_probe.switchTheme` and `adoptCapabilities` forces a
   full repaint. `tmux capture-pane -e` is DIFFERENTIAL across lines (SGR state
   carries from the previous line) and trims trailing cells unless `-N`.
+
+- PLAT-45, ONE DEFAULT ARRANGEMENT. `headless_app/layout_model.sharedDefaultLayout()`
+  is the tree every front-end opens with (plus a fold order);
+  `sharedEditLayout()` is edit mode's. `foldLayout(s, depth)` turns the lowest
+  ranked regions into tabs. The terminal picks the SMALLEST depth at which every
+  pane gets its cell minimum (`tui/app/layout/profile.depthFor`, minimums in
+  `layout/cells.nim`) and shows `[folded N]` on the status line; `lpCompact` /
+  `lpStandard` / `lpUltraWide` are now just named sizes (80x24/120x40/200x50).
+  `LayoutSchemaVersion` is 4 (five desktop panes added to `PaneKind`; v3
+  documents migrate by re-stamping).
+- `src/config/default_layout.json` IS GENERATED: `just generate-default-layout`
+  (`headless_app/generate_default_layout.nim`, translation table in
+  `headless_app/desktop_panes.nim`). `ci/test/default-layout-fresh.sh` (a
+  `ci/lint/nim.sh` step) fails when the committed file is stale. Edit the
+  shared tree, never the JSON.
+- `ct` STARTS THE ELECTRON MAIN SCRIPT FROM ITS OWN LOCATION
+  (`paths.electronIndexPath` = `getAppDir().parentDir/src/index.js`,
+  symlinks resolved), NOT from `CODETRACER_PREFIX`. A test prefix that must run
+  its own `index.js` needs a real COPY of `bin/ct` inside it, and the GUI
+  fixture launches `<codetracerPrefixOverride>/bin/ct` for exactly this reason.
+  Running the build's `ct` against a prefix's renderer mismatches the
+  `ClientAction` enum across the config IPC and dies in
+  `configureShortcuts` with an IndexDefect before anything renders (blank
+  window, no console error in the fixture's bucket).
+- A PREFIX WITH REAL (not symlinked) `index.js`/`ui.js` must live INSIDE the
+  checkout (e.g. `test-logs/`): Node resolves their `require`s by walking up
+  from the file. `scripts/plat45-desktop-prefix.sh` builds one.
+- The desktop's View > Reset Layout (`aResetLayout`) is IN PLACE: the index
+  deletes the desktop's files, re-reads the default through the first-run
+  loader and sends it on `reset-layout-done`; `ui_js.applySharedDefaultLayout`
+  swaps it in. Do not implement a reset by `location.reload()` — the index
+  sends `CODETRACER::init` only once, so a reloaded window stays blank.
+- THE TERMINAL DOES NOT KEEP THE DESKTOP'S PROPORTIONS. `profile.terminalDefaultAt`
+  folds in the terminal's own ORDER (`terminalFolds`: steps whose region holds
+  only panes the terminal cannot draw — report leaves — go first) and then
+  SIZES the tree for the cells (`sizeForCells`): every row/column child gets
+  its minimum first and the slack by the shared weights, written back as cell
+  counts (the projection divides by them and gets the counts back exactly).
+  Keeping the desktop's 25% editor share made the source pane 20 cells at
+  80x24. `minPaneWidth` is the content minimum (editor 60 — the old standard
+  profile's source width) floored at the pane's bracketed tab label, so a
+  report region too narrow to name itself folds instead of drawing "[Test Re".
+  A same-depth resize re-shares in place (`profile.resizeShares`, called by
+  `binding.resize` and `shell.reprofile`) so a shrink cannot leave the editor
+  under its minimum and the active tabs survive.
+- THE GPUI WINDOW LAYS ITS LEAVES OUT BY THE DOCK DOCUMENT
+  (`gpui/main.paintWindowChrome`, from `shell.projectionFor(windowId).state`).
+  gpui-kit's dock is not linked (`data-ct-dock` = `flex-placeholder`), and
+  until PLAT-45's review the window tiled EVERY leaf — inactive tabs included —
+  in one row of equal columns while `--dock-out` described the arrangement. The
+  shim's `apply_styles_to_div` takes `100%` or pixels only, so StackPanel sizes
+  are divided into pixels here; a TabPanel paints a strip naming its tabs and
+  only the active leaf. `--report-plan`/`--plan-out` still list every leaf (the
+  plan is written before the window restructures the tree). The pixel reading
+  of the window's first screen is `ci/test/plat45-arrangement-window.sh` +
+  `just plat45-window-record` -> `src/tests/visual/plat45-gpui-arrangement.json`.
+- A TERMINAL TAB STRIP DOES NOT SCROLL TO ITS ACTIVE TAB: `tabRow` lays the
+  labels out left to right and the region's edge cuts them, so in a narrow
+  stack the active label can be clipped ("Event Log  [Timelin" at 80x24).

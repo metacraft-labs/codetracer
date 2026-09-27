@@ -109,6 +109,27 @@ else
 	cache_root="/tmp/ct-nim-cache/$(basename "${_ct_checkout}")-${_ct_tag}"
 fi
 lane_timeout="${CT_LANE_TIMEOUT:-1800}"
+
+# THE NATIVE FRONT-ENDS' STATE ROOT IS THE LANE'S OWN, not the developer's.
+#
+# Since PLAT-45 the terminal and the GPUI window REMEMBER their last layout by
+# default (`<state root>/tui-layout.json`, `<state root>/gpui-layout.json`), and
+# restore it on the next start. A suite that spawns either shipped binary
+# without naming a state directory would therefore read — and, if it
+# rearranged anything, write — the machine's own `~/.local/state/codetracer`,
+# so its screen would depend on what a developer last did and the suite would
+# change the machine it runs on. `CODETRACER_TUI_LAYOUT_DIR` is the one
+# override both hosts honour (`viewmodel/host/native_state`); a suite that
+# sets its own still wins, because this only fills it when it is unset.
+#
+# ONE DIRECTORY PER FILE, not per lane (see the loop below): a suite that docks
+# a pane leaves `tui-layout.json` behind, and the next FILE would otherwise open
+# that docked arrangement instead of the shared default.
+_ct_lane_state=""
+if [ -z "${CODETRACER_TUI_LAYOUT_DIR:-}" ]; then
+	_ct_lane_state="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-state.XXXXXX")"
+	trap 'rm -rf "${_ct_lane_state}"' EXIT
+fi
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
 # Expanded below as ${extra_flags[@]+"${extra_flags[@]}"}, not
@@ -175,6 +196,10 @@ while read -r f; do
 	files=$((files + 1))
 	name="$(basename "${f}" .nim)"
 	cache="${cache_root}/${lane}-${name}"
+	if [ -n "${_ct_lane_state}" ]; then
+		mkdir -p "${_ct_lane_state}/${name}"
+		export CODETRACER_TUI_LAYOUT_DIR="${_ct_lane_state}/${name}"
+	fi
 	printf '  %s ... ' "${f}"
 
 	if [ "${backend}" = "js" ]; then

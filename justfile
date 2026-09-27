@@ -2829,6 +2829,22 @@ cross-test-go-flow:
 # specific sibling revision, set the RR_BACKEND_REF override or use the
 # workflow_dispatch inputs.
 
+# PLAT-45: regenerate the desktop's default layout from the ONE shared default
+# arrangement (`headless_app/layout_model.sharedDefaultLayout()`). The committed
+# `src/config/default_layout.json` is this recipe's output; never edit it by
+# hand — `ci/test/default-layout-fresh.sh` (run by `ci/lint/nim.sh`) fails when
+# the two differ.
+generate-default-layout:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    nim c --hints:off --warnings:off --nimcache:"$scratch/nimcache" \
+      -o:"$scratch/generate_default_layout" \
+      src/frontend/headless_app/generate_default_layout.nim
+    "$scratch/generate_default_layout" --out=src/config/default_layout.json
+    echo "wrote src/config/default_layout.json"
+
 # Regenerate BOTH consumers of codetracer-design-system from the pinned
 # submodule revision, in one resolver run: the desktop's stylus and the
 # terminal front-end's resolved token module (`design_tokens.nim`).
@@ -4769,6 +4785,35 @@ plat35-capture-electron *args:
       just test-e2e tests/visual/visual-alignment-capture.spec.ts {{args}}
       ;;
   esac
+
+# PLAT-45: the arrangement the REAL Electron front-end opens `calc` with on its
+# first-run path — once over the committed (generated) default and once over a
+# scratch build of the shared tree with one edit — written to
+# src/tests/visual/answers/plat45-default-arrangement.electron.json for
+# `src/frontend/tui/tests/test_plat45_three_media.nim`; and the desktop's
+# remember / restart / View > Reset Layout spec
+# (`tests/layout/plat45-desktop-remembers-own.spec.ts`). Both run THIS
+# checkout's desktop JavaScript (`scripts/plat45-desktop-prefix.sh`). Its own
+# Xvfb, as `plat35-capture-electron` does, when no display is set.
+plat45-capture-electron *args:
+  bash scripts/plat45-capture-electron.sh {{args}}
+
+# PLAT-45: the GPUI window's FIRST SCREEN, on a headless sway, with no
+# remembered layout — the frame `plat45-window-record` reads the arrangement
+# off. Needs the windowed binary (`-d:gpuiShimPath=<windowed shim>`,
+# `CODETRACER_WINDOW_BIN_PINS_SHIM=1`) and the `calc` recording.
+plat45-arrangement-window:
+  bash ci/test/plat45-arrangement-window.sh
+
+# Read the window's frames through PLAT-39's pixel reader and commit the
+# record `test_plat45_three_media.nim` asserts over. Needs `tesseract`.
+plat45-window-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --path:src/frontend --path:src/frontend/viewmodel \
+    --nimcache:nimcache/plat45rec -o:build/plat45_window_record \
+    src/tests/visual/screen_oracle/plat45_window_record.nim
 
 # PLAT-46: the desktop's computed colour for every role the TUI also paints,
 # written to src/tests/visual/answers/plat46-token-parity.electron.json for
