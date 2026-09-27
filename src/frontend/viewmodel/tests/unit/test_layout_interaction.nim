@@ -194,6 +194,29 @@ proc panePaths(l: Layout): seq[string] =
   result = @[]
   panePathsAux(l.tree, "", result)
 
+proc dividersAux(node: LayoutNode; prefix: string;
+                 acc: var seq[(string, int)]) =
+  ## Collects every (container path, divider index) of a tree. No `check`.
+  if node.isNil or node.kind == lnPane:
+    return
+  if node.kind in {lnRow, lnColumn}:
+    for d in 0 ..< node.children.len - 1:
+      acc.add((prefix, d))
+  for i, c in node.children:
+    dividersAux(c, (if prefix.len == 0: $i else: prefix & "/" & $i), acc)
+
+proc dividers(l: Layout): seq[(string, int)] =
+  result = @[]
+  dividersAux(l.tree, "", result)
+
+proc weightsOf(l: Layout; containerPath: string): seq[float] =
+  ## The effective weights of a container's children, read off the tree.
+  result = @[]
+  let c = nodeAtPath(l.tree, containerPath)
+  if not c.isNil:
+    for child in c.children:
+      result.add(effectiveWeight(child))
+
 proc renderTargets(targets: seq[DropTarget]): string =
   ## A stable rendering of a whole candidate list, for byte comparison.
   var parts: seq[string] = @[]
@@ -1073,3 +1096,225 @@ suite "Interaction — resizing a split (§4.1)":
     check idle.proposeShare(twoPaneRow(), 0.5).kind == ikNone
     check idle.hoverAt(twoPaneRow(),
                        LayoutPointer(path: "0", zone: dzCentre)).kind == ikNone
+
+# ---------------------------------------------------------------------------
+# §4.3 — dragging ONE divider. PLAT-5 recorded "a resize moves one node's
+# share against its siblings, not a divider between two" as a documented
+# generalisation; the closing pass (2026-09-27) makes the divider drag a
+# gesture of its own, still committing ONE command.
+# ---------------------------------------------------------------------------
+
+suite "Interaction — dragging one divider (§4.3)":
+
+  test "a divider drag moves the two weights beside it and no other":
+    let l = threeInARow()
+    let before = $saveLayout(l)
+    # The divider between State (child 1) and Flow (child 2).
+    let started = beginResizeDivider(l, "", 1)
+    check started.isSome
+    if started.isSome:
+      check started.get.kind == ikResizingSplit
+      check started.get.node == "1"
+      check started.get.divider == some(ssAfter)
+      check started.get.proposed == @[1.0, 1.0, 1.0]
+      # Where the divider already is (two thirds along) commits none, and
+      # `apply` agrees that it is a no-op.
+      let still = started.get.proposeDivider(l, 2.0 / 3.0)
+      check still.proposed == @[1.0, 1.0, 1.0]
+      check commit(l, still).isNone
+      let stillCmd = pendingCommand(l, still)
+      check stillCmd.isSome
+      if stillCmd.isSome:
+        checkNoOp apply(l, stillCmd.get)
+      # The same move asked as a SHARE of the row: the neighbour absorbs it
+      # too, rather than every sibling.
+      let byShare = started.get.proposeShare(l, 0.5 / 3.0)
+      checkpoint($byShare)
+      check byShare.proposed.len == 3
+      check byShare.proposed[0] == 1.0
+      check abs(byShare.proposed[1] - 0.5) < 1e-9
+      check abs(byShare.proposed[2] - 1.5) < 1e-9
+      # Halfway along the row: State shrinks to half a share, Flow takes it.
+      let moved = started.get.proposeDivider(l, 0.5)
+      checkpoint($moved)
+      check moved.proposed == @[1.0, 0.5, 1.5]
+      let produced = commit(l, moved)
+      check produced.isSome
+      if produced.isSome:
+        check produced.get.kind == lcSetWeight
+        check produced.get.weightTarget == paneState
+        check produced.get.weightDivider == some(ssAfter)
+        check produced.get.weightLevel == 0
+        let outcome = apply(l, produced.get)
+        checkApplied outcome
+        if outcome.kind == loApplied:
+          checkValid outcome.layout
+          # Every weight is the proposal's — and the one NOT beside the
+          # divider is exactly what it was, which is the whole claim.
+          check weightsOf(outcome.layout, "") == moved.proposed
+          check weightsOf(outcome.layout, "")[0] == 1.0
+    # The SAME share asked of the one-node resize moves the far pane too:
+    # this is the difference, measured rather than described.
+    let shared = beginResize(l, paneState)
+    check shared.isSome
+    if shared.isSome:
+      let proposal = shared.get.proposeShare(l, 0.5 / 3.0)
+      let cmd = commit(l, proposal)
+      check cmd.isSome
+      if cmd.isSome:
+        let o = apply(l, cmd.get)
+        checkApplied o
+        if o.kind == loApplied:
+          let w = weightsOf(o.layout, "")
+          let editorShare = w[0] / (w[0] + w[1] + w[2])
+          checkpoint("editor share after a one-node resize: " & $editorShare)
+          check abs(editorShare - 1.0 / 3.0) > 0.01
+    # And none of it touched the committed layout.
+    check $saveLayout(l) == before
+
+  test "a divider between stacks, or between whole containers, is draggable":
+    # `beginResize` names a PANE and refuses a tab; a divider is named by its
+    # container and index, so the two sides may be stacks or nested rows —
+    # the default layout's tabbed region included. The command stays
+    # pane-named: the node is `weightLevel` levels above a pane's leaf.
+    for spec in [("two stacks", 1), ("row of columns", 1), ("deep tree", 0),
+                 ("default", 0)]:
+      let l =
+        case spec[0]
+        of "two stacks": twoStacks()
+        of "row of columns": rowOfColumns()
+        of "deep tree": deepTree()
+        else: initLayout(defaultReplayLayout())
+      let container =
+        if spec[0] == "default": "1/1" else: ""
+      let started = beginResizeDivider(l, container, 0)
+      checkpoint(spec[0] & " @ '" & container & "'")
+      check started.isSome
+      if started.isNone:
+        continue
+      let moved = started.get.proposeDivider(l, 0.3)
+      let produced = commit(l, moved)
+      check produced.isSome
+      if produced.isNone:
+        continue
+      checkpoint($produced.get)
+      check produced.get.weightLevel == spec[1]
+      let outcome = apply(l, produced.get)
+      checkApplied outcome
+      if outcome.kind == loApplied:
+        checkValid outcome.layout
+        let after = weightsOf(outcome.layout, container)
+        check after.len == moved.proposed.len
+        for i in 0 ..< after.len:
+          check abs(after[i] - moved.proposed[i]) < 1e-9
+        # The divider sits where it was asked to: 30% along the container.
+        var total = 0.0
+        for w in after:
+          total += w
+        check abs(after[0] / total - 0.3) < 1e-9
+
+  test "every divider of every shape: cancelled untouched, committed as proposed":
+    # The sweep form of the two claims above, over every divider the fixture
+    # shapes have and five positions each — including both ends, which clamp.
+    var swept = 0
+    var noOps = 0
+    for name in AllShapes:
+      let l = shape(name)
+      let bytes = $saveLayout(l)
+      let treeBefore = l.tree
+      for (path, d) in dividers(l):
+        let started = beginResizeDivider(l, path, d)
+        check started.isSome
+        if started.isNone:
+          continue
+        for position in [-1.0, 0.0, 0.25, 0.75, 2.0]:
+          let gesture = started.get.proposeDivider(l, position)
+          checkpoint(name & " / '" & path & "' #" & $d & " @ " & $position &
+                     " -> " & $gesture)
+          # Exactly two entries may differ, and their sum is conserved.
+          var changed = 0
+          for i in 0 ..< gesture.proposed.len:
+            if gesture.proposed[i] != started.get.proposed[i]:
+              inc changed
+            check gesture.proposed[i] > 0.0
+          check changed in {0, 2}
+          let pending = pendingCommand(l, gesture)
+          check pending.isSome
+          if pending.isNone:
+            continue
+          let outcome = apply(l, pending.get)
+          let produced = commit(l, gesture)
+          check produced.isSome == (outcome.kind == loApplied)
+          check outcome.kind != loRefused
+          if outcome.kind == loNoOp:
+            inc noOps
+          if outcome.kind == loApplied:
+            checkValid outcome.layout
+            let after = weightsOf(outcome.layout, path)
+            for i in 0 ..< after.len:
+              check abs(after[i] - gesture.proposed[i]) < 1e-9
+          inc swept
+          discard cancel(gesture)
+      check $saveLayout(l) == bytes
+      check l.tree == treeBefore
+    checkpoint("divider proposals swept: " & $swept & ", no-ops: " & $noOps)
+    # Positive controls: the fixture shapes have SEVEN dividers between them
+    # (0 + 1 + 1 + 1 + 3 + 1), five positions each — and at least one
+    # position is where its divider already sits (the two-pane row's 3:1 is
+    # 0.75), so the `loNoOp` arm of the agreement above actually ran.
+    check swept == 7 * 5
+    check noOps > 0
+
+  test "there is no divider in a stack, past either end, or at the root":
+    let l = stackedLayout()
+    check beginResizeDivider(l, "", 0).isSome
+    check beginResizeDivider(l, "", 1).isNone       # past the last divider
+    check beginResizeDivider(l, "", -1).isNone
+    check beginResizeDivider(l, "1", 0).isNone      # a stack: tabs share
+    check beginResizeDivider(l, "0", 0).isNone      # a pane
+    check beginResizeDivider(l, "7", 0).isNone      # nothing
+    check beginResizeDivider(barePane(), "", 0).isNone
+    # And the command's own refusals, by kind.
+    checkRefused apply(l, cmdSetDivider(paneEditor, 1.0, ssBefore)),
+      lpNoDivider                                   # the first child's left
+    checkRefused apply(l, cmdSetDivider(paneState, 1.0, ssAfter)),
+      lpNoDivider                                   # a tab, at level 0
+    checkApplied apply(l, cmdSetDivider(paneState, 0.5, ssBefore, level = 1))
+    checkRefused apply(l, cmdSetDivider(paneState, 1.0, ssAfter, level = 3)),
+      lpNoDivider                                   # climbed past the root
+    checkRefused apply(l, cmdSetDivider(paneEditor, 1.0, ssAfter, level = -1)),
+      lpNoDivider
+    checkRefused apply(l, cmdSetDivider(paneEditor, 0.0, ssAfter)),
+      lpNegativeWeight
+    checkRefused apply(l, cmdSetDivider(paneEditor, 4.0, ssAfter)),
+      lpNegativeWeight                              # squeezes State to 0
+    checkRefused apply(l, cmdSetDivider(paneShell, 1.0, ssAfter)),
+      lpPaneNotPlaced
+    # A divider proposal on anything but a divider drag changes nothing.
+    let shared = beginResize(l, paneEditor)
+    check shared.isSome
+    if shared.isSome:
+      check shared.get.proposeDivider(l, 0.5).proposed == shared.get.proposed
+    check noInteraction().proposeDivider(l, 0.5).kind == ikNone
+
+  test "a region holding only contributed panes is dragged from its neighbour's side":
+    # Every command but PLAT-9's contributed pair is typed on `PaneKind`, so a
+    # contributed leaf cannot anchor `cmdSetDivider`. The SAME divider is
+    # named from the other side instead, and moves the same two weights.
+    let l = initLayout(row([contributedPaneNode("acme.graph", "Graph"),
+                            pane(paneState, "State")]))
+    let started = beginResizeDivider(l, "", 0)
+    check started.isSome
+    if started.isSome:
+      let moved = started.get.proposeDivider(l, 0.25)
+      let produced = commit(l, moved)
+      check produced.isSome
+      if produced.isSome:
+        check produced.get.weightTarget == paneState
+        check produced.get.weightDivider == some(ssBefore)
+        let outcome = apply(l, produced.get)
+        checkApplied outcome
+        if outcome.kind == loApplied:
+          let after = weightsOf(outcome.layout, "")
+          check abs(after[0] - moved.proposed[0]) < 1e-9
+          check abs(after[1] - moved.proposed[1]) < 1e-9

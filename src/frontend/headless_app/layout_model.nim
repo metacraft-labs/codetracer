@@ -290,6 +290,12 @@ type
       ## `lcMoveTab` named a destination whose enclosing node is not a stack.
     lpIndexOutOfRange = "IndexOutOfRange"
       ## `lcMoveTab` named an insertion index outside `0 .. len`.
+    lpNoDivider = "NoDivider"
+      ## A divider resize (`lcSetWeight` with `weightDivider`) named a side of
+      ## a node that has no divider on it: the node is the root, a tab of a
+      ## stack (tabs share one region), or the first/last child of its row or
+      ## column on the side named. Also a `weightLevel` that climbs past the
+      ## root, or is negative.
 
   LayoutProblemSource* = enum
     ## Where a `LayoutProblemKind` can come from. A kind may have both
@@ -431,6 +437,28 @@ type
     of lcSetWeight:
       weightTarget*: PaneKind
       weightValue*: float
+      weightDivider*: Option[SplitSide]
+        ## `none` — every caller before this field existed — sets the weight
+        ## of `weightTarget`'s own leaf and nothing else, so the node's share
+        ## moves against ALL its siblings, which keep their proportions to
+        ## each other.
+        ##
+        ## `some(side)` is a DIVIDER DRAG: the node named by `weightTarget` and
+        ## `weightLevel` takes `weightValue` as its (effective) weight, and the
+        ## ONE sibling across the divider on `side` absorbs the difference, so
+        ## the pair's sum — and therefore every other sibling's share — is
+        ## unchanged. Layout-ViewModel §4.3 needs this because `commit` yields
+        ## ONE command and a divider between two of three panes moves two
+        ## weights; two `lcSetWeight`s would make the transient layer sequence
+        ## layout changes, which §4.3 forbids. A flag rather than a new
+        ## command kind, for `splitMovesPane`'s reason: the same operation.
+      weightLevel*: int
+        ## Divider drags only. How many levels ABOVE `weightTarget`'s leaf the
+        ## resized node sits: `0` is the leaf, `1` its parent, and so on.
+        ## Every node holds at least one pane, so every node — a stack, a
+        ## row of stacks — is some pane's ancestor at some level; this is how
+        ## a pane-named command reaches a divider between two containers
+        ## without a path, which is a renderer's way of pointing.
     of lcAddPane:
       addedPane*: PaneKind
       addedTitle*: string
@@ -1333,7 +1361,16 @@ proc cmdActivateTab*(pane: PaneKind): LayoutCommand =
   LayoutCommand(kind: lcActivateTab, activateTarget: pane)
 
 proc cmdSetWeight*(pane: PaneKind; weight: float): LayoutCommand =
-  LayoutCommand(kind: lcSetWeight, weightTarget: pane, weightValue: weight)
+  LayoutCommand(kind: lcSetWeight, weightTarget: pane, weightValue: weight,
+                weightDivider: none(SplitSide), weightLevel: 0)
+
+proc cmdSetDivider*(pane: PaneKind; weight: float; side: SplitSide;
+                    level = 0): LayoutCommand =
+  ## `lcSetWeight` as a DIVIDER DRAG: the node `level` levels above `pane`'s
+  ## leaf takes `weight`, and its sibling on `side` absorbs the difference.
+  ## See `weightDivider`.
+  LayoutCommand(kind: lcSetWeight, weightTarget: pane, weightValue: weight,
+                weightDivider: some(side), weightLevel: level)
 
 proc cmdAddPane*(pane: PaneKind; title = ""; weight = 0.0;
                  after: Option[PaneKind] = none(PaneKind)): LayoutCommand =
@@ -1404,7 +1441,11 @@ proc `$`*(cmd: LayoutCommand): string =
   case cmd.kind
   of lcActivateTab: "activateTab(" & $cmd.activateTarget & ")"
   of lcSetWeight:
-    "setWeight(" & $cmd.weightTarget & ", " & $cmd.weightValue & ")"
+    if cmd.weightDivider.isSome:
+      "setDivider(" & $cmd.weightTarget & "^" & $cmd.weightLevel & ", " &
+        $cmd.weightValue & ", " & $cmd.weightDivider.get & ")"
+    else:
+      "setWeight(" & $cmd.weightTarget & ", " & $cmd.weightValue & ")"
   of lcAddPane:
     "addPane(" & $cmd.addedPane & ", after=" &
       (if cmd.addAfter.isSome: $cmd.addAfter.get else: "root") & ")"
@@ -1502,6 +1543,42 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     return appliedTo(next)
 
   of lcSetWeight:
+    if cmd.weightDivider.isSome:
+      # A DIVIDER DRAG: two weights move, their sum does not, so every other
+      # sibling keeps its share exactly. Compared and computed on EFFECTIVE
+      # weights (a zero is "one neutral share"), because that is what a
+      # renderer divides by and therefore what "did not move" means.
+      let leaf = tree.find(cmd.weightTarget)
+      if leaf.isNil:
+        return refusedFor(lpPaneNotPlaced, cmd.weightTarget)
+      if cmd.weightLevel < 0:
+        return refusedFor(lpNoDivider, cmd.weightTarget)
+      var node = leaf
+      for _ in 0 ..< cmd.weightLevel:
+        node = parentOf(tree, node)
+        if node.isNil:
+          return refusedFor(lpNoDivider, cmd.weightTarget)
+      let parent = parentOf(tree, node)
+      if parent.isNil or parent.kind == lnStack:
+        return refusedFor(lpNoDivider, cmd.weightTarget)
+      let at = indexIn(parent, node)
+      let across = if cmd.weightDivider.get == ssBefore: at - 1 else: at + 1
+      if at < 0 or across < 0 or across >= parent.children.len:
+        return refusedFor(lpNoDivider, cmd.weightTarget)
+      let sibling = parent.children[across]
+      if cmd.weightValue <= 0.0:
+        return refusedFor(lpNegativeWeight, cmd.weightTarget)
+      let pair = effectiveWeight(node) + effectiveWeight(sibling)
+      let rest = pair - cmd.weightValue
+      if rest <= 0.0:
+        # The neighbour would be squeezed to nothing or less: refused by the
+        # same kind a negative weight is, because that is what it would be.
+        return refusedFor(lpNegativeWeight, cmd.weightTarget)
+      if effectiveWeight(node) == cmd.weightValue:
+        return noOp()
+      node.weight = cmd.weightValue
+      sibling.weight = rest
+      return appliedTo(next)
     if cmd.weightValue < 0.0:
       return refusedFor(lpNegativeWeight, cmd.weightTarget)
     let leaf = tree.find(cmd.weightTarget)
@@ -2026,7 +2103,8 @@ proc problemSources*(kind: LayoutProblemKind): set[LayoutProblemSource] =
     {lpsStructural, lpsRefusal}
   of lpPaneNeitherPlacedNorDocked:
     {lpsStructural, lpsRefusal}
-  of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack, lpIndexOutOfRange:
+  of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack, lpIndexOutOfRange,
+     lpNoDivider:
     {lpsRefusal}
   of lpMalformedContributedPane:
     ## Both, and PLAT-9 needs both: a hand-built or hand-edited tree can hold

@@ -758,6 +758,12 @@ proc resizeGuideFor(layout: Layout; geom: LayoutGeometry;
   ## including `distributeCells`'s rounding, instead of a preview that is off
   ## by a cell at some geometries. The proposal is applied to a COPY through
   ## `apply`, so nothing here touches the committed layout.
+  ##
+  ## The resized node is measured by its PATH (`boundsOfPath`), not as a pane,
+  ## so a divider drag between two stacks or two nested rows
+  ## (`beginResizeDivider`) draws its guide exactly as a pane resize does. A
+  ## weight change never restructures the tree, so the path names the same
+  ## node in the proposed layout.
   let pending = pendingCommand(layout, interaction)
   if pending.isNone:
     return CellArea()
@@ -765,13 +771,13 @@ proc resizeGuideFor(layout: Layout; geom: LayoutGeometry;
   if outcome.kind != loApplied:
     return CellArea()
   let info = nodeInfoAtPath(layout.tree, interaction.node)
-  if info.isNone or info.get.kind != lnPane:
+  if info.isNone:
     return CellArea()
   let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy)
-  let now = after.regionOfPane(info.get.pane)
+  let now = after.boundsOfPath(interaction.node)
   if now.isEmptyArea:
     return CellArea()
-  let before = geom.regionOfPane(info.get.pane)
+  let before = geom.boundsOfPath(interaction.node)
   if before.isEmptyArea:
     return CellArea()
   # The moved edge is the one that is no longer where it was. A pane keeps its
@@ -1023,6 +1029,85 @@ proc tabAtCell(b: LayoutBinding; geom: LayoutGeometry;
     return none(PaneKind)
   some(info.get.pane)
 
+proc dividerAt(b: LayoutBinding; geom: LayoutGeometry;
+               row, col: int): Option[(string, int)] =
+  ## The divider a cell sits on, as `(container path, divider index)` — the
+  ## pair `beginResizeDivider` takes — or `none`.
+  ##
+  ## A region's LAST column is on the divider to its right when the cell just
+  ## past it belongs to a different region and the two panes are adjacent
+  ## children (i and i + 1) of one ROW; its last row is on the divider below
+  ## it the same way for a COLUMN. Answered from the two panes' node paths
+  ## (their deepest common container, and the child each sits under), so
+  ## a divider between two stacks or two nested rows is found exactly as one
+  ## between two panes is. A cell where the two regions meet only at a corner,
+  ## or across a container of the other axis, is on no divider this gesture
+  ## can move.
+  let idx = geom.regionIndexAt(row, col)
+  if idx < 0:
+    return none((string, int))
+  let pane = geom.projection.regions[idx].pane
+  let area = geom.regionOfPane(pane)
+  let here = geom.pathOfPane(pane)
+  if here.isNone:
+    return none((string, int))
+  for (vertical, r, c) in [(true, row, col + 1), (false, row + 1, col)]:
+    if vertical and col != area.col + area.width - 1:
+      continue
+    if not vertical and row != area.row + area.height - 1:
+      continue
+    let other = geom.regionIndexAt(r, c)
+    if other < 0 or other == idx:
+      continue
+    let there = geom.pathOfPane(geom.projection.regions[other].pane)
+    if there.isNone:
+      continue
+    let a = here.get.split('/')
+    let z = there.get.split('/')
+    var k = 0
+    while k < a.len and k < z.len and a[k] == z[k]:
+      inc k
+    if k >= a.len or k >= z.len:
+      continue
+    let container = a[0 ..< k].join("/")
+    var ia, iz: int
+    try:
+      ia = parseInt(a[k])
+      iz = parseInt(z[k])
+    except ValueError:
+      continue
+    let info = nodeInfoAtPath(b.layout.tree, container)
+    if info.isNone or iz != ia + 1:
+      continue
+    if info.get.kind != (if vertical: lnRow else: lnColumn):
+      continue
+    return some((container, ia))
+  none((string, int))
+
+proc dropDivider(b: LayoutBinding; geom: LayoutGeometry;
+                 row, col: int): LayoutAction =
+  ## Release a divider drag at `(row, col)`: the divider goes to that cell's
+  ## edge, as a FRACTION of its container's extent — the model's own unit —
+  ## and `commit` decides whether that is a change.
+  let gesture = b.interaction
+  b.interaction = b.interaction.cancel()
+  let container = parentPath(gesture.node)
+  if container.isNone:
+    return action(lasNoOp, "the divider has no container")
+  let info = nodeInfoAtPath(b.layout.tree, container.get)
+  let bounds = geom.boundsOfPath(container.get)
+  if info.isNone or bounds.isEmptyArea:
+    return action(lasNoOp, "the divider's container is not on screen")
+  let fraction =
+    if info.get.kind == lnRow:
+      float(col - bounds.col + 1) / float(bounds.width)
+    else:
+      float(row - bounds.row + 1) / float(bounds.height)
+  let cmd = commit(b.layout, gesture.proposeDivider(b.layout, fraction))
+  if cmd.isNone:
+    return action(lasNoOp, "the divider did not move")
+  b.dispatch(cmd.get)
+
 proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
               event: MouseEvent): LayoutAction =
   ## One decoded SGR-1006 report, as a layout gesture.
@@ -1041,6 +1126,12 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
   ##                                   rule the commonest shape on screen would
   ##                                   be undraggable
   ##   * press on a dock slot       -> pick that docked pane up
+  ##   * press on a region's last
+  ##     column / row where the
+  ##     neighbour across it is its
+  ##     sibling                    -> pick that DIVIDER up (PLAT-5's divider
+  ##                                   drag); release elsewhere moves it there,
+  ##                                   release on the same cell is a click
   ##   * press elsewhere in a pane  -> focus it; no gesture
   ##   * release on the press cell  -> a click: activate the tab, or reveal the
   ##                                   docked pane
@@ -1112,11 +1203,26 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       if region.activeTab < 0 and event.row == region.area.row:
         # A pane with no tab strip is picked up by its own title row.
         return b.beginDrag(region.pane)
+      let divider = b.dividerAt(geom, event.row, event.col)
+      if divider.isSome:
+        let started = beginResizeDivider(b.layout, divider.get[0],
+                                         divider.get[1])
+        if started.isSome:
+          b.interaction = started.get
+          return action(lasPending, "dragging the divider after " &
+                                    $b.focus)
       return action(lasNoGesture, "focus " & $b.focus)
     # Release.
     let sameCell = event.row == b.pressRow and event.col == b.pressCol
     b.pressRow = -1
     b.pressCol = -1
+    if b.interaction.kind == ikResizingSplit and b.interaction.divider.isSome:
+      if sameCell:
+        # A click on the divider cell is what it was before the divider was
+        # draggable: a focus, and nothing committed.
+        b.interaction = b.interaction.cancel()
+        return action(lasNoGesture, "focus " & $b.focus)
+      return b.dropDivider(geom, event.row, event.col)
     if b.interaction.kind != ikDraggingTab:
       return action(lasNoGesture, "release with no drag in flight")
     let source = b.interaction.source

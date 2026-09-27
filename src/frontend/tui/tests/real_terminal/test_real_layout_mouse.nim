@@ -98,7 +98,7 @@ import ../apps/app_layout_mouse as mouseApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 40
+const ExpectedAssertions = 54
 
 const
   Stem = "app_layout_mouse"
@@ -469,6 +469,65 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck wanted.contains(";" & $(probeCol + 1) & ";" & $(probeRow + 1) & "M")
       sess.terminate()
     finally:
+      sess.close()
+
+  test "a mouse drag on a DIVIDER moves it on a real terminal":
+    # PLAT-5's divider drag, through the product's own input loop: a press on
+    # the last column of a region whose neighbour across it is its sibling,
+    # then a release further left, as real SGR-1006 bytes on a real pty.
+    var sess = spawnChild()
+    try:
+      waitForCursorAt(sess, 0, mouseApp.cursorParkColumn(0, Cols),
+                      FrameTimeoutMs)
+      ck sess.screenContents().strip().len > 0
+      let model = gestureApp.newBoundRuntime(Cols, Rows)
+      let geom = model.layoutGeometry()
+      # FIND a divider cell with a scratch runtime, so the child and the twin
+      # below both see exactly one press and one release. A region's middle
+      # row, never its title row, so the press is not a pane pick-up.
+      var pressRow = -1
+      var pressCol = -1
+      for r in geom.projection.regions:
+        if pressRow >= 0:
+          break
+        let row = r.area.row + r.area.height div 2
+        let col = r.area.col + r.area.width - 1
+        if col + 1 >= Cols or r.area.width < 12:
+          continue
+        let scratch = gestureApp.newBoundRuntime(Cols, Rows)
+        discard scratch.handleToken(sgrReport(0, row, col, true), 0'i64)
+        if scratch.app.layoutBinding.interaction.kind == ikResizingSplit:
+          pressRow = row
+          pressCol = col
+      checkpoint("divider cell: (" & $pressRow & "," & $pressCol & ")")
+      ck pressRow >= 0
+      if pressRow >= 0:
+        let before = sess.screenContents()
+        let leftPane = geom.projection.regions[
+          geom.regionIndexAt(pressRow, pressCol)].pane
+        let was = geom.regionOfPane(leftPane)
+        ckBothSaw(sess, model, sgrReport(0, pressRow, pressCol, true), 1,
+                  "press on the divider")
+        ck model.app.layoutBinding.interaction.kind == ikResizingSplit
+        ckBothSaw(sess, model, sgrReport(0, pressRow, pressCol - 6, false), 2,
+                  "release six columns to the left")
+        ck model.app.layoutBinding.interaction.kind == ikNone
+        ck model.app.layoutBinding.userModified
+        ck model.app.layoutBinding.history.log.len == 1
+        let now = model.layoutGeometry().regionOfPane(leftPane)
+        checkpoint($leftPane & ": " & $was & " -> " & $now)
+        # Cell rounding may land the edge one cell either side of the release.
+        ck abs((now.col + now.width - 1) - (pressCol - 6)) <= 1
+        # The terminal, differentially against the twin, and absolutely: the
+        # screen is not the one before the drag.
+        ckScreenMatches(sess, model.shellScreenOf().rows, "after the drag")
+        ck sess.screenContents() != before
+      sess.send($TestAppQuitByte)
+      let status = sess.waitExit(initDuration(seconds = 10))
+      ck status.isSome
+      ck status.get() == TestAppExitOk
+    finally:
+      sess.terminate()
       sess.close()
 
   test "assertion count":

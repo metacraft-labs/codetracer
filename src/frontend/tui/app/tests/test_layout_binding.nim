@@ -67,7 +67,7 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2714
+const ExpectedAssertions = 2738
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -999,6 +999,96 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
         ck d.area.width == 1 or d.area.height == 1
     checkpoint("resize guides drawn: " & $guides)
     ck guides == 1
+
+  test "the mouse drags a divider between two stacks, and only that divider moves":
+    # The terminal's own divider gesture: press on the last column of the left
+    # region (its neighbour across that column is its sibling in the row),
+    # release further left. ONE command reaches the undo log, the two stacks
+    # trade weight, and the far-right pane keeps its share exactly.
+    let layout = initLayout(row([
+      stack([pane(paneEditor, "Editor"), pane(paneFlow, "Flow")],
+            activeIndex = 0, weight = 1.0),
+      stack([pane(paneState, "State"), pane(paneEventLog, "Event Log")],
+            activeIndex = 0, weight = 1.0),
+      pane(paneCalltrace, "Call Trace", weight = 1.0)]))
+    let b = bindingOn(layout, lpStandard)
+    let geom = b.geometry(bodyFor(120, 40))
+    let left = geom.regionOfPane(paneEditor)
+    let edgeCol = left.col + left.width - 1
+    let midRow = left.row + left.height div 2
+    let pressed = b.onMouse(geom, press(midRow, edgeCol))
+    checkpoint("press on the divider -> " & pressed.message)
+    ck pressed.status == lasPending
+    ck b.interaction.kind == ikResizingSplit
+    ck b.interaction.divider == some(ssAfter)
+    # A click on the divider is still just a focus.
+    let clicked = b.onMouse(geom, release(midRow, edgeCol))
+    ck clicked.status == lasNoGesture
+    ck b.interaction.kind == ikNone
+    ck b.history.log.len == 0
+    # The drag: release ten columns to the left.
+    discard b.onMouse(geom, press(midRow, edgeCol))
+    let dropped = b.onMouse(geom, release(midRow, edgeCol - 10))
+    checkpoint("release -> " & dropped.message)
+    ck dropped.status == lasApplied
+    ck dropped.command.isSome
+    ck dropped.command.get.kind == lcSetWeight
+    ck dropped.command.get.weightDivider == some(ssAfter)
+    ck b.history.log.len == 1
+    ck b.interaction.kind == ikNone
+    let after = b.geometry(bodyFor(120, 40))
+    let nowLeft = after.regionOfPane(paneEditor)
+    checkpoint("left region " & $left & " -> " & $nowLeft)
+    ck nowLeft.col + nowLeft.width - 1 == edgeCol - 10
+    # The pane NOT beside the divider is exactly where it was.
+    ck after.regionOfPane(paneCalltrace) == geom.regionOfPane(paneCalltrace)
+    # A press on a cell that is on no divider (the last column of the whole
+    # row) is a focus, as it always was.
+    let right = geom.regionOfPane(paneCalltrace)
+    let focus = b.onMouse(after, press(midRow, right.col + right.width - 1))
+    ck focus.status == lasNoGesture
+
+  test "a divider drag between two tabbed regions draws its guide at the new edge":
+    # PLAT-5's closing pass: a divider is dragged by its CONTAINER and index,
+    # so its two sides may be stacks — which `beginResize` (a pane, never a
+    # tab) cannot name. The guide is measured by the node's PATH, so it is
+    # drawn for a stack exactly as for a pane, at the edge the commit would
+    # produce.
+    let layout = initLayout(row([
+      stack([pane(paneEditor, "Editor"), pane(paneFlow, "Flow")],
+            activeIndex = 0, weight = 2.0),
+      stack([pane(paneState, "State"), pane(paneEventLog, "Event Log")],
+            activeIndex = 0, weight = 1.0)]))
+    let started = beginResizeDivider(layout, "", 0)
+    ck started.isSome
+    let gesture = started.get.proposeDivider(layout, 0.5)
+    let cmd = commit(layout, gesture)
+    ck cmd.isSome
+    let applied = apply(layout, cmd.get)
+    ck applied.kind == loApplied
+    let body = bodyFor(120, 40)
+    let beforeGeom = geometryOf(layout, body)
+    let afterGeom = geometryOf(applied.layout, body)
+    let was = beforeGeom.boundsOfPath("0")
+    let now = afterGeom.boundsOfPath("0")
+    checkpoint("left region was " & $was & ", will be " & $now)
+    ck now.width < was.width
+    var model = newShellModel(120, 40)
+    model.layout = layout.tree
+    model.interaction = gesture
+    let screen = shellScreen(model, 120, 40)
+    var guides: seq[CellArea] = @[]
+    for d in screen.decorations:
+      if d.kind == ldResizeGuide:
+        guides.add d.area
+    checkpoint("resize guides drawn: " & $guides)
+    ck guides.len == 1
+    if guides.len == 1:
+      # The right edge of the left region AFTER the commit, full height.
+      ck guides[0].width == 1
+      ck guides[0].col == now.col + now.width - 1
+      ck guides[0].row == now.row
+      ck guides[0].height == now.height
 
   test "a cancelled gesture leaves the committed layout byte-identical":
     # PLAT-5 asserts this of `cancel`; this asserts it of the BINDING, which is

@@ -6371,3 +6371,29 @@ Two traps in the same area, both live:
 - A TERMINAL TAB STRIP DOES NOT SCROLL TO ITS ACTIVE TAB: `tabRow` lays the
   labels out left to right and the region's edge cuts them, so in a narrow
   stack the active label can be clipped ("Event Log  [Timelin" at 80x24).
+
+- Layout drag/resize (PLAT-5 closing pass, 2026-09-27):
+  * A DOCKED pane is a legal source for `lcMoveTab`, `lcMergeIntoStack` and
+    `lcSplit(splitMovesPane)`; `layout_interaction.commandFor` /
+    `intoStackCandidates` no longer branch on placed-vs-docked. `ahRestore` is
+    no longer what a drag commits — it remains an explicit front-end command.
+  * Two resize gestures: `beginResize(pane)` + `proposeShare` (one weight moves,
+    all siblings shrink proportionally — the TUI's `:resize N`) and
+    `beginResizeDivider(containerPath, i)` + `proposeDivider(fraction)` (two
+    adjacent weights trade, sum conserved). The latter commits
+    `cmdSetDivider(pane, w, side, level)` = `lcSetWeight` with `weightDivider`
+    set; the node is `level` ancestors above the pane's leaf, so stacks and
+    nested rows are resizable. Refusal kind `lpNoDivider` (refusal-only; the
+    algebra suite's witness table and `refusalCovered` count must track it).
+  * `binding.resizeGuideFor` measures the resized node by PATH (`boundsOfPath`),
+    so guides draw for container nodes too. TUI mouse: press on a region's last
+    column/row whose neighbour is its sibling = divider drag (`dividerAt`);
+    release elsewhere drops (`dropDivider`), same cell = click/focus.
+  * `ci/test/frontend-reachability.sh` ratchet (1296) counts exported symbols no
+    PRODUCT code reaches — a new exported API used only by tests fails
+    `ci/lint/nim.sh`; wire it (or remove the last product use of an old one and
+    you strand it: `regionOfPane` nearly went that way).
+  * `run-plat5-mutations.py` now has `--needle-scan`, a digest file
+    (`plat5-interaction-mutation-control.sha256`) and per-arm suites; editing
+    `layout_model.nim` stales PLAT-4, PLAT-5, PLAT-9, PLAT-45 (digest files) and
+    PLAT-6 (no digest file; its TOUCHED includes both layout modules).

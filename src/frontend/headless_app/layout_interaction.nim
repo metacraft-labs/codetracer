@@ -193,6 +193,15 @@ type
         ## Candidate weights for the affected siblings — the whole child list
         ## of the resized node's parent, in its own order, so index `i` here
         ## is child `i` there.
+      divider*: Option[SplitSide]
+        ## `none` for `beginResize`: the node's share moves against ALL its
+        ## siblings, and `proposed` differs from the committed weights in one
+        ## entry. `some(side)` for `beginResizeDivider`: a DIVIDER DRAG — the
+        ## node and its one neighbour on `side` trade weight, `proposed`
+        ## differs in exactly those two entries, and every other sibling keeps
+        ## its share. §4.1's field set plus this one, because "which divider"
+        ## is a fact about the gesture that neither `node` nor `proposed` can
+        ## carry (a proposal equal to the committed weights names no pair).
     of ikRevealingDock:
       edge*: LayoutEdge
       pane*: PaneKind
@@ -408,7 +417,8 @@ proc `$`*(i: Interaction): string =
     var parts: seq[string] = @[]
     for w in i.proposed:
       parts.add($w)
-    "resizingSplit('" & i.node & "', [" & parts.join(", ") & "])"
+    "resizingSplit('" & i.node & "', [" & parts.join(", ") & "]" &
+      (if i.divider.isSome: ", divider " & $i.divider.get else: "") & ")"
   of ikRevealingDock:
     "revealingDock(" & $i.pane & "@" & $i.edge & ")"
 
@@ -680,19 +690,133 @@ proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
   var weights: seq[float] = @[]
   for c in parent.children:
     weights.add(effectiveWeight(c))
-  some(Interaction(kind: ikResizingSplit, node: path.get, proposed: weights))
+  some(Interaction(kind: ikResizingSplit, node: path.get, proposed: weights,
+                   divider: none(SplitSide)))
+
+proc beginResizeDivider*(layout: Layout; containerPath: string;
+                         divider: int): Option[Interaction] =
+  ## Start dragging ONE DIVIDER: the one between children `divider` and
+  ## `divider + 1` of the row or column at `containerPath`.
+  ##
+  ## This is the gesture a pointer on a divider actually makes, and it is what
+  ## `beginResize` is not: there, one node's share moves against ALL its
+  ## siblings, so in a row of three, dragging the edge between the second and
+  ## third pane would also shrink the first. Here exactly two weights move and
+  ## their sum does not, so every other sibling keeps its share — and the two
+  ## sides may be any nodes, a stack or a whole nested row included, not only
+  ## panes.
+  ##
+  ## Named by the CONTAINER's path and a divider index because that is what a
+  ## front-end's hit-test on a divider resolves to; the command `commit`
+  ## issues is pane-named (`cmdSetDivider`), as every command is.
+  ##
+  ## `none` when there is no such divider: the path names nothing, a pane, or
+  ## a STACK (tabs share one region), or `divider` is not in
+  ## `0 ..< children.len - 1`.
+  let container = nodeAtPath(layout.tree, containerPath)
+  if container.isNil or container.kind notin {lnRow, lnColumn}:
+    return none(Interaction)
+  if divider < 0 or divider + 1 >= container.children.len:
+    return none(Interaction)
+  var weights: seq[float] = @[]
+  for c in container.children:
+    weights.add(effectiveWeight(c))
+  some(Interaction(kind: ikResizingSplit,
+                   node: childPathOf(containerPath, divider),
+                   proposed: weights, divider: some(ssAfter)))
+
+proc dividerPair(interaction: Interaction; parent, node: LayoutNode):
+    tuple[at, across: int] =
+  ## The two children a divider interaction trades weight between, or
+  ## `(-1, -1)`.
+  result = (-1, -1)
+  let at = node.parentIndex(parent)
+  if at < 0 or interaction.divider.isNone:
+    return
+  let across = if interaction.divider.get == ssBefore: at - 1 else: at + 1
+  if across < 0 or across >= parent.children.len:
+    return
+  result = (at, across)
+
+proc proposeDividerWeight(interaction: Interaction; parent, node: LayoutNode;
+                          wanted: float): Interaction =
+  ## The divider arm shared by `proposeShare` and `proposeDivider`: the node
+  ## takes `wanted` (an effective weight), its neighbour takes the rest of the
+  ## pair, and both are clamped to at least `MinResizeShare` of the whole axis.
+  let (at, across) = dividerPair(interaction, parent, node)
+  if at < 0:
+    return interaction
+  var weights: seq[float] = @[]
+  var total = 0.0
+  for c in parent.children:
+    weights.add(effectiveWeight(c))
+    total += effectiveWeight(c)
+  let pair = weights[at] + weights[across]
+  let floor = MinResizeShare * total
+  if pair - floor < floor:
+    # The two sides together are already thinner than two minimum shares:
+    # there is no position this divider can move to.
+    return interaction
+  var mine = wanted
+  if mine < floor:
+    mine = floor
+  if mine > pair - floor:
+    mine = pair - floor
+  weights[at] = mine
+  weights[across] = pair - mine
+  Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights,
+              divider: interaction.divider)
+
+proc proposeDivider*(interaction: Interaction; layout: Layout;
+                     position: float): Interaction =
+  ## Propose where a DIVIDER sits, as a fraction of its container's axis from
+  ## the container's start (`0.0` its left or top edge, `1.0` its right or
+  ## bottom). A fraction and not a cell or a pixel, for `LayoutPointer`'s
+  ## reason: a front-end divides its own measurement by its own extent, and
+  ## from here down there is no medium to disagree about.
+  ##
+  ## Only for a divider interaction (`beginResizeDivider`); any other
+  ## interaction is returned unchanged. The result differs from the committed
+  ## weights in EXACTLY TWO entries — the two sides of the divider — or in
+  ## none, when the position is where the divider already is.
+  if interaction.kind != ikResizingSplit or interaction.divider.isNone:
+    return interaction
+  let node = nodeAtPath(layout.tree, interaction.node)
+  if node.isNil:
+    return interaction
+  let parent = parentOf(layout.tree, node)
+  if parent.isNil or parent.kind == lnStack:
+    return interaction
+  let (at, across) = dividerPair(interaction, parent, node)
+  if at < 0:
+    return interaction
+  var total = 0.0
+  var before = 0.0
+  for i, c in parent.children:
+    total += effectiveWeight(c)
+    if i < min(at, across):
+      before += effectiveWeight(c)
+  # The divider's position is the end of the EARLIER of the two children, so
+  # the earlier one's weight is `position * total - before`. The node is the
+  # earlier one when the divider is after it.
+  let earlier = position * total - before
+  let pair = effectiveWeight(parent.children[at]) +
+             effectiveWeight(parent.children[across])
+  let wanted = if at < across: earlier else: pair - earlier
+  proposeDividerWeight(interaction, parent, node, wanted)
 
 proc proposeShare*(interaction: Interaction; layout: Layout;
                    share: float): Interaction =
   ## Propose that the resized node take `share` of its parent's axis, as a
-  ## fraction. Returns a new interaction whose `proposed` differs from the
-  ## committed weights in EXACTLY ONE entry.
+  ## fraction.
   ##
-  ## One entry and not two, because `lcSetWeight` changes one node's share and
-  ## `commit` yields one command. The siblings keep their weights and
-  ## therefore their proportions relative to each other, which is what a
-  ## divider drag means when there are exactly two of them and is the
-  ## documented generalisation when there are more.
+  ## For `beginResize`'s interaction the result differs from the committed
+  ## weights in EXACTLY ONE entry: `lcSetWeight` changes one node's weight,
+  ## so the siblings keep theirs and therefore their proportions relative to
+  ## each other — the node's share moves against all of them. For a divider
+  ## interaction (`beginResizeDivider`) it differs in the two entries either
+  ## side of the divider, and only there: the neighbour absorbs the
+  ## difference, which is what dragging that one divider means.
   if interaction.kind != ikResizingSplit:
     return interaction
   let leaf = nodeAtPath(layout.tree, interaction.node)
@@ -701,6 +825,13 @@ proc proposeShare*(interaction: Interaction; layout: Layout;
   let parent = parentOf(layout.tree, leaf)
   if parent.isNil or parent.children.len < 2:
     return interaction
+  if interaction.divider.isSome:
+    if parent.kind == lnStack:
+      return interaction
+    var total = 0.0
+    for c in parent.children:
+      total += effectiveWeight(c)
+    return proposeDividerWeight(interaction, parent, leaf, share * total)
   var clamped = share
   if clamped < MinResizeShare:
     clamped = MinResizeShare
@@ -719,7 +850,8 @@ proc proposeShare*(interaction: Interaction; layout: Layout;
   for c in parent.children:
     weights.add(effectiveWeight(c))
   weights[at] = clamped / (1.0 - clamped) * others
-  Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights)
+  Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights,
+              divider: none(SplitSide))
 
 proc beginReveal*(layout: Layout; pane: PaneKind): Option[Interaction] =
   ## Reveal a docked pane as an overlay. `none` when the pane is not docked.
@@ -743,6 +875,56 @@ proc isRevealed*(interaction: Interaction; pane: PaneKind): bool =
 # §4.3 — commit and cancel
 # ---------------------------------------------------------------------------
 
+proc builtInPaneBelow(node: LayoutNode; depth: int;
+                      found: var PaneKind; level: var int): bool =
+  ## A BUILT-IN pane somewhere under `node`, and how many levels below it the
+  ## pane's leaf sits — the `(pane, level)` pair `cmdSetDivider` names a node
+  ## by. A contributed leaf is skipped: every command but the contributed
+  ## pair is typed on `PaneKind` (PLAT-9), so it cannot anchor one.
+  if node.isNil:
+    return false
+  if node.kind == lnPane:
+    if node.isContributed:
+      return false
+    found = node.pane
+    level = depth
+    return true
+  for c in node.children:
+    if builtInPaneBelow(c, depth + 1, found, level):
+      return true
+  false
+
+proc dividerCommand(layout: Layout;
+                    interaction: Interaction): Option[LayoutCommand] =
+  ## The ONE command a divider drag commits: `cmdSetDivider`, naming the
+  ## node by a pane beneath it and the level it sits above that pane's leaf.
+  ##
+  ## If the node holds no built-in pane (a region of contributed panes only),
+  ## the SAME divider is named from the other side — the neighbour, with the
+  ## side reversed and the neighbour's proposed weight — which moves the same
+  ## two weights to the same place.
+  let node = nodeAtPath(layout.tree, interaction.node)
+  if node.isNil:
+    return none(LayoutCommand)
+  let parent = parentOf(layout.tree, node)
+  if parent.isNil or parent.kind == lnStack or
+     parent.children.len != interaction.proposed.len:
+    return none(LayoutCommand)
+  let (at, across) = dividerPair(interaction, parent, node)
+  if at < 0:
+    return none(LayoutCommand)
+  var anchor = PaneKind.low
+  var level = 0
+  if builtInPaneBelow(node, 0, anchor, level):
+    return some(cmdSetDivider(anchor, interaction.proposed[at],
+                              interaction.divider.get, level))
+  let other = parent.children[across]
+  if builtInPaneBelow(other, 0, anchor, level):
+    let reversed = if interaction.divider.get == ssBefore: ssAfter else: ssBefore
+    return some(cmdSetDivider(anchor, interaction.proposed[across], reversed,
+                              level))
+  none(LayoutCommand)
+
 proc pendingCommand*(layout: Layout;
                      interaction: Interaction): Option[LayoutCommand] =
   ## The command this gesture WOULD issue, before asking whether it would do
@@ -757,6 +939,8 @@ proc pendingCommand*(layout: Layout;
     else:
       commandFor(layout, interaction.source, interaction.hover.get)
   of ikResizingSplit:
+    if interaction.divider.isSome:
+      return dividerCommand(layout, interaction)
     let leaf = nodeAtPath(layout.tree, interaction.node)
     if leaf.isNil or leaf.kind != lnPane:
       return none(LayoutCommand)
