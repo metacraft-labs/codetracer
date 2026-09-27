@@ -68,7 +68,7 @@
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
-import std/[cpuinfo, json, os, strutils, times]
+import std/[cpuinfo, json, os, strutils, tables, times]
 
 import isonim_gpui/renderer
 # `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
@@ -80,6 +80,7 @@ import isonim_gpui/bindings
 
 import ./chrome
 import ./replay_ops
+import ./layout_memory
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
 # below OPENS a document rather than handing a string to a derivation, so the
@@ -88,6 +89,7 @@ import codetracer_embed
 
 import ./app/shell
 import ./app/leaves
+import ./app/pane_names
 import ./app/edit_arm
 import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
 import ../viewmodel/host/keymap_preference
@@ -120,6 +122,19 @@ OPTIONS:
                     layout model writes) instead of the default one. A
                     document this build cannot read is an error, not a
                     silent fallback.
+  --layout-ops=<spec>
+                    PLAT-45. Rearrange the window before it is drawn, and
+                    remember the result: a comma-separated list of
+                      activate:<pane>  dock:<pane>:<edge>
+                      merge:<pane>:<beside>  remove:<pane>
+                    applied through the shell (the window's scripted
+                    gesture), then written to this product's own layout
+                    file — <state root>/gpui-layout.json — which the next
+                    start restores. The terminal's and the desktop's
+                    remembered layouts are other files and are not read.
+  --reset-layout    PLAT-45. Delete this product's remembered layout and open
+                    the shared default arrangement.
+  --dock-out=<file> PLAT-45. Write the window's projected dock document.
   --replay-ops=<spec>
                     Advance the recording before the window is drawn.
                     <spec> is a comma-separated list over the SAME closed
@@ -238,6 +253,19 @@ type
       ## versioned JSON, docked panes included) to open the recording's
       ## window with, instead of `defaultReplayLayout()`. Empty means the
       ## default.
+    layoutOps: seq[LayoutCommand]
+      ## PLAT-45. `--layout-ops`: layout commands applied through the shell
+      ## before the window is drawn — the window's scripted gesture — and
+      ## written through to this product's remembered layout.
+    resetLayout: bool
+      ## PLAT-45. `--reset-layout`: delete this product's remembered layout
+      ## (and only it) and open the shared default.
+    dockOut: string
+      ## PLAT-45. A path to write the window's projected DOCK DOCUMENT to —
+      ## the persisted `DockAreaState` this front-end hands gpui-kit, with
+      ## its stack axes and pixel sizes. The three-media arrangement test
+      ## reads the window's arrangement out of it (the GPUI front-end's OWN
+      ## output) rather than out of the model.
     noFlowOverlay: bool
       ## PLAT-42. Open with the flow overlay hidden — the user's
       ## `EditorVM.showFlowOverlay` toggle, from the command line; the window
@@ -310,6 +338,19 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       if result.layoutFile.len == 0:
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --layout needs a path")
+    elif arg.startsWith("--layout-ops="):
+      try:
+        result.layoutOps = parseLayoutOps(arg["--layout-ops=".len .. ^1])
+      except ValueError as e:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --layout-ops: " & e.msg)
+    elif arg == "--reset-layout":
+      result.resetLayout = true
+    elif arg.startsWith("--dock-out="):
+      result.dockOut = arg["--dock-out=".len .. ^1]
+      if result.dockOut.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --dock-out needs a path")
     elif arg.startsWith("--frame-report="):
       result.frameReport = arg["--frame-report=".len .. ^1]
       if result.frameReport.len == 0:
@@ -402,6 +443,10 @@ type
     kind: string
     seqNo: int
 
+const TabStripPx = 30
+  ## PLAT-45. The height of a stack's tab strip in the window: one line of
+  ## the pane-title face plus the strip's own padding.
+
 var
   openArm: GpuiEditArm = nil
     ## PLAT-44. The open document of an EDIT-mode window, or nil in a replay
@@ -413,6 +458,11 @@ var
     ## The leaf tree, built BEFORE `gpui_launch` so `--report-plan` and the
     ## window path derive from one render rather than two.
   pendingViewportWidth = 0
+  pendingViewportHeight = 0
+  pendingDock: JsonNode = nil
+    ## The window's projected dock document (`shell.projectionFor`), which the
+    ## root builder lays the leaves out by. nil when the projection refused,
+    ## and then the leaves are tiled in one row as before.
   builderCalls = 0
   probeEnabled = false
   probeTarget: GpuiElement = nil
@@ -609,15 +659,16 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   # Reading the input and calling it an observation is §4a; the renderer is
   # handed what the tree holds, so the tree is what the widths are computed
   # from.
-  let panes = childCount(container)
-  let paneW = paneWidthPx(pendingViewportWidth, panes)
-  for i in 0 ..< panes:
+  var leaves: seq[GpuiElement] = @[]
+  for i in 0 ..< childCount(container):
     let pane = nthChild(container, i)
-    if pane.isNil: continue
+    if not pane.isNil: leaves.add pane
+  var painted = 0
+  proc stylePane(pane: GpuiElement; w, h: int) =
     r.setStyle(pane, "background-color", chromeOf(crPaneBackground))
     r.setStyle(pane, "color", chromeOf(crWindowForeground))
-    r.setStyle(pane, "width", $paneW & "px")
-    r.setStyle(pane, "height", "100%")
+    r.setStyle(pane, "width", $max(1, w) & "px")
+    r.setStyle(pane, "height", (if h > 0: $h & "px" else: "100%"))
     # A PANE CLIPS ITS OWN CONTENT (PLAT-41). A table wider than its pane —
     # the flow pane's five columns — drew over the three panes beside it on
     # the shipped binary; the pane is the boundary a reader expects.
@@ -625,7 +676,6 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     r.setStyle(pane, "flex-direction", "column")
     r.setStyle(pane, "padding", $ChromePaddingPx & "px")
     r.setStyle(pane, "rounded", "4px")
-    # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
     # PLAT-38 — THE INPUT PROBE. The first pane is declared FOCUSABLE and is
     # given element focus, and a `keydown` listener records what the RUST
     # element store held when it ran.
@@ -637,11 +687,12 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     # pane because "the key reached the focused element and nothing else" is
     # the claim, and a listener on every pane would make the negative half
     # unobservable.
-    if probeEnabled and i == 0:
+    if probeEnabled and painted == 0:
       setFocusable(pane)
       discard focusElement(pane)
       probeTarget = pane
       r.addEventListener(pane, "keydown", probeHandler(pane))
+    inc painted
     # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
     # first, so index 0 is it — and a leaf that drew no heading (a refusal,
     # or an unloaded extension) has a text node there instead, which takes
@@ -650,6 +701,115 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
       let heading = nthChild(pane, 0)
       if not heading.isNil:
         r.setStyle(heading, "color", chromeOf(crPaneTitleForeground))
+
+  # PLAT-45 — THE WINDOW DRAWS THE ARRANGEMENT IT WAS GIVEN.
+  #
+  # Until PLAT-45's review this tiled every leaf of the projected document in
+  # ONE ROW of equal columns — tabs included — so the window a user saw was
+  # not the arrangement the dock document described, and the document was
+  # written to `--dock-out` for a reader while nothing on screen followed it.
+  # Measured on `calc` with the shared default: twelve equal columns, VCS and
+  # Scratchpad beside Files and State instead of behind them. gpui-kit's dock
+  # is not linked into this build (`data-ct-dock` says `flex-placeholder`), so
+  # the arrangement is laid out HERE, from the same document: a `StackPanel`
+  # is a flex row or column whose children get its `sizes` in pixels (the
+  # shim takes `100%` or pixels and nothing else — `chrome.paneWidthPx`), and
+  # a `TabPanel` shows its ACTIVE leaf under a strip naming every tab. An
+  # inactive tab is not painted, exactly as a desktop tab is not.
+  var byPane = initTable[string, GpuiElement]()
+  for pane in leaves:
+    let id = getAttribute(pane, "data-ct-pane")
+    if id.len > 0 and id notin byPane: byPane[id] = pane
+  let dock = pendingDock
+  let usableW = max(1, pendingViewportWidth - 2 * ChromePaddingPx)
+  let usableH = max(1, pendingViewportHeight - 2 * ChromePaddingPx)
+  var laidOut = false
+  if not dock.isNil and dock.kind == JObject and dock.hasKey("center") and
+     byPane.len > 0:
+    for pane in leaves:
+      r.removeChild(container, pane)
+    proc region(n: JsonNode; w, h: int): GpuiElement =
+      let kind = n{"panel_name"}.getStr
+      if kind == "StackPanel":
+        let info = n{"info", "stack"}
+        let horizontal = info{"axis"}.getInt == 0
+        let box = r.createElement("div")
+        r.setStyle(box, "flex-direction", if horizontal: "row" else: "column")
+        r.setStyle(box, "gap", $ChromeGapPx & "px")
+        r.setStyle(box, "width", $max(1, w) & "px")
+        r.setStyle(box, "height", $max(1, h) & "px")
+        let kids = n{"children"}.getElems
+        var total = 0.0
+        for i in 0 ..< kids.len:
+          total += max(0.0, info{"sizes"}[i].getFloat)
+        let extent = (if horizontal: w else: h) - (kids.len - 1) * ChromeGapPx
+        var used = 0
+        for i, c in kids:
+          let share =
+            if total > 0.0: info{"sizes"}[i].getFloat / total
+            else: 1.0 / float(kids.len)
+          let cells = if i == kids.high: extent - used
+                      else: int(float(extent) * share)
+          used += cells
+          let child = if horizontal: region(c, cells, h) else: region(c, w, cells)
+          if not child.isNil: r.appendChild(box, child)
+        return box
+      if kind == "TabPanel":
+        let tabs = n{"children"}.getElems
+        let active = max(0, min(n{"info", "tabs", "active_index"}.getInt,
+                                tabs.high))
+        var names: seq[string] = @[]
+        var activePane = ""
+        for i, t in tabs:
+          let id = t{"info", "panel", "pane"}.getStr
+          var label = id
+          for k in PaneKind:
+            if $k == id: label = gpuiPaneName(k)
+          names.add label
+          if i == active: activePane = id
+        let leaf = byPane.getOrDefault(activePane)
+        if tabs.len <= 1:
+          if leaf.isNil: return nil
+          stylePane(leaf, w, h)
+          return leaf
+        # A STACK: the strip, then the active tab's own pane beneath it.
+        let box = r.createElement("div")
+        r.setStyle(box, "flex-direction", "column")
+        r.setStyle(box, "width", $max(1, w) & "px")
+        r.setStyle(box, "height", $max(1, h) & "px")
+        r.setStyle(box, "background-color", chromeOf(crPaneBackground))
+        r.setStyle(box, "rounded", "4px")
+        let strip = r.createElement("div")
+        r.setAttribute(strip, "data-ct-tabs", names.join(","))
+        r.setStyle(strip, "flex-direction", "row")
+        r.setStyle(strip, "gap", $(2 * ChromeGapPx) & "px")
+        r.setStyle(strip, "padding", $(ChromePaddingPx div 2) & "px")
+        r.setStyle(strip, "height", $TabStripPx & "px")
+        for i, name in names:
+          let tab = r.createElement("div")
+          r.setStyle(tab, "color", if i == active: chromeOf(crPaneTitleForeground)
+                                   else: chromeOf(crWindowForeground))
+          r.appendChild(tab, r.createTextNode(name))
+          r.appendChild(strip, tab)
+        r.appendChild(box, strip)
+        if not leaf.isNil:
+          stylePane(leaf, w, h - TabStripPx)
+          r.appendChild(box, leaf)
+        return box
+      nil
+    let top = region(dock["center"], usableW, usableH)
+    if not top.isNil:
+      r.appendChild(container, top)
+      laidOut = true
+    else:
+      for pane in leaves:
+        r.appendChild(container, pane)
+  if not laidOut:
+    # No document to follow (a refused projection draws its refusal as its
+    # one leaf): the leaves tile one row, as they always have.
+    let paneW = paneWidthPx(pendingViewportWidth, leaves.len)
+    for pane in leaves:
+      stylePane(pane, paneW, 0)
 
   # PLAT-44 — THE EDITOR TAKES KEYS. Attached here for the probe's reason:
   # `leaves.nim` is digested into four harnesses' controls.
@@ -738,7 +898,7 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
     false
 
 proc launchWindow(cmd: GpuiCommand; title: string;
-                  outcome: LeafRenderOutcome): int =
+                  outcome: LeafRenderOutcome; dock: JsonNode = nil): int =
   ## Open the window, run the event loop, and return when it stops.
   ##
   ## Returns the process exit code. The event loop's own termination is the
@@ -748,6 +908,8 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   ## the window does.
   pendingOutcome = outcome
   pendingViewportWidth = cmd.width
+  pendingViewportHeight = cmd.height
+  pendingDock = dock
   builderCalls = 0
   probeEnabled = cmd.inputProbe.len > 0
   probeArrivals = @[]
@@ -859,7 +1021,11 @@ proc runEdit(cmd: GpuiCommand): int =
   # mode's subject is the working tree and a `HeadlessSessionSlot` is a replay
   # session.
   let windowId = WindowId(0)
-  let opened = shell.openWindow(windowId, initLayout(defaultReplayLayout()))
+  # PLAT-45: EDIT MODE OPENS THE SHARED EDIT DEFAULT — the arrangement the
+  # desktop's edit mode and the terminal's show — at depth 0 (this front-end
+  # has no pixel minimums, so it never folds). Not remembered: this product's
+  # remembered file holds its Debug arrangement, as the terminal's does.
+  let opened = shell.openWindow(windowId, initLayout(sharedEditLayout().tree))
   if opened.kind == wsRefused:
     stderr.writeLine("codetracer-gpui: could not open a window: " &
                      $opened.problem.kind)
@@ -894,13 +1060,22 @@ proc runEdit(cmd: GpuiCommand): int =
                          "' reached no focused element")
         return 1
     gpui_reset_windows()
+  # PLAT-45: the edit window's dock document, as `runOpen` writes its own.
+  if cmd.dockOut.len > 0:
+    try:
+      writeFile(cmd.dockOut, pretty(shell.projectionFor(windowId).state) & "\n")
+    except IOError as e:
+      stderr.writeLine("codetracer-gpui: --dock-out: " & e.msg)
+      return 1
   if cmd.reportPlan:
     if not leafPlanIsValid(r, drawn):
       stderr.writeLine("codetracer-gpui: the render plan did not verify")
       return 1
     echo leafPlanJson(r, drawn)
     return 0
-  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder & " [EDIT]", drawn)
+  let editDock = shell.projectionFor(windowId)
+  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder & " [EDIT]", drawn,
+               if editDock.status == dpsRefused: nil else: editDock.state)
 
 proc runOpen(cmd: GpuiCommand): int =
   ## Open the recording, build the shell, draw the leaves.
@@ -981,14 +1156,34 @@ proc runOpen(cmd: GpuiCommand): int =
   # saved after `:dock bottom`, or one this front-end's own window wrote after
   # a dock, could not be opened here. The session slot holds a whole `Layout`,
   # and `openSession`'s `Layout` overload validates it as one.
-  var layout = initLayout(defaultReplayLayout())
-  if cmd.layoutFile.len > 0:
+  #
+  # PLAT-45 DELIVERABLES 6 AND 8: WITHOUT `--layout`, THE WINDOW OPENS WHAT
+  # THIS PRODUCT REMEMBERS — or the ONE SHARED DEFAULT every product opens
+  # with (`layout_model.sharedDefaultLayout()`, at depth 0: this front-end has
+  # no pixel minimums, so it never folds). The remembered arrangement is this
+  # product's OWN file (`layout_memory.gpuiLayoutDocumentPath`), never the
+  # terminal's or the desktop's. An unreadable one is REPORTED by kind and
+  # left alone, and the window opens on the default rather than failing.
+  var layout = sharedDefaultValue()
+  var quarantined = false
+  if cmd.resetLayout:
+    let failed = resetGpuiLayout()
+    if failed.len > 0:
+      stderr.writeLine("codetracer-gpui: the remembered layout could not be " &
+                       "removed: " & failed)
+  elif cmd.layoutFile.len > 0:
     try:
       layout = restoreLayoutDocument(parseJson(readFile(cmd.layoutFile)))
     except CatchableError as e:
       stderr.writeLine("codetracer-gpui: --layout: cannot open '" &
                        cmd.layoutFile & "': " & e.msg.splitLines()[0])
       return 1
+  else:
+    let remembered = restoreGpuiLayout()
+    layout = remembered.layout
+    if remembered.status == grsUnreadable:
+      quarantined = true
+      stderr.writeLine("codetracer-gpui: " & remembered.message)
   let slot = shell.app.openSession(session.backend.toBackendService(),
                                    title = cmd.traceFolder,
                                    layout = layout,
@@ -999,6 +1194,27 @@ proc runOpen(cmd: GpuiCommand): int =
     stderr.writeLine("codetracer-gpui: could not open a window: " &
                      $opened.problem.kind)
     return 1
+
+  # PLAT-45: THE WINDOW'S SCRIPTED GESTURE, through the shell's one door, and
+  # WRITTEN THROUGH to this product's remembered layout — unless this session
+  # started from a file it could not read, which is left exactly as it was
+  # (the terminal's quarantine rule). No gesture, no document.
+  if cmd.layoutOps.len > 0:
+    for op in cmd.layoutOps:
+      let applied = shell.applyIn(windowId, op)
+      if applied.kind == wsRefused:
+        stderr.writeLine("codetracer-gpui: --layout-ops: " & $op &
+                         " was refused: " & $applied.problem.kind)
+        return 1
+    if quarantined:
+      stderr.writeLine("codetracer-gpui: the rearranged layout was not " &
+                       "saved: the remembered file could not be read and " &
+                       "was left alone")
+    else:
+      let failed = saveGpuiLayoutDocument(shell.saveWindowLayout(windowId))
+      if failed.len > 0:
+        stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
+                         failed)
 
   # PLAT-22. THE PRODUCT MODE DECIDES WHICH PANE IS IN FRONT, and it does it
   # through `headless_app.activatePane` — which, measured on 2026-09-16, had
@@ -1014,7 +1230,12 @@ proc runOpen(cmd: GpuiCommand): int =
   # that only one command word reaches is one command word away from being no
   # production caller again.
   discard slot.activatePane(
-    if cmd.product == pmEdit: paneEditor else: paneDebugControls)
+    # PLAT-45: the shared default carries no debug-controls pane (the
+    # desktop draws them as its toolbar), so Debug mode brings the call trace
+    # to the front — the first tab of its stack, which it already is, so
+    # this is the ordinary path doing nothing visible rather than a special
+    # case.
+    if cmd.product == pmEdit: paneEditor else: paneCalltrace)
 
   # The source window. PLAT-22: the editor is wired to the same `SourceVM` the
   # terminal's editor uses, and the host is what fills it — see
@@ -1093,6 +1314,16 @@ proc runOpen(cmd: GpuiCommand): int =
   let leafSet = shell.leavesFor(windowId)
   let drawn = renderLeaves(r, leafSet, surface)
 
+  # PLAT-45: the window's projected dock document, for a reader that must
+  # take the arrangement from this front-end's OWN output.
+  if cmd.dockOut.len > 0:
+    let projection = shell.projectionFor(windowId)
+    try:
+      writeFile(cmd.dockOut, pretty(projection.state) & "\n")
+    except IOError as e:
+      stderr.writeLine("codetracer-gpui: --dock-out: " & e.msg)
+      return 1
+
   if cmd.reportPlan:
     # No window and no event loop: print what GPUI would execute and stop.
     # `verifyRenderPlan` is asserted rather than assumed, because a plan that
@@ -1139,7 +1370,9 @@ proc runOpen(cmd: GpuiCommand): int =
   # BINDING from a key to a replay operation — that is PLAT-23's `--ui=gui`
   # contract, and `--replay-ops` is what stands in for it meanwhile.
   # `--input-probe` is the instrument that shows the delivery half works.
-  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder, drawn)
+  let dock = shell.projectionFor(windowId)
+  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder, drawn,
+               if dock.status == dpsRefused: nil else: dock.state)
 
 proc main() =
   let cmd = parseGpuiCommand(commandLineParams())

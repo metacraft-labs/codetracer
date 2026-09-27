@@ -66,6 +66,7 @@ import codetracer_embed
 import headless_app/headless_app
 import headless_app/window_set
 import ./dock_projection
+import ./pane_names
 
 export headless_app, window_set, dock_projection
 
@@ -319,6 +320,10 @@ proc leavesFor*(shell: GpuiShell; id: WindowId;
         let node = tree.find(leaf.builtin)
         if not node.isNil:
           leaf.title = node.title
+      # PLAT-45: an untitled leaf (every pane of the shared default) takes
+      # this window's own name for its pane, never the enum's spelling.
+      if leaf.kind == glkBuiltin and leaf.title.len == 0:
+        leaf.title = gpuiPaneName(leaf.builtin)
     result.leaves.add leaf
 
 # ---------------------------------------------------------------------------

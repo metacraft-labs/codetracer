@@ -94,8 +94,9 @@ suite "PLAT-20: the shell is renderer-free":
     ck fileExists(path)
     let imports = importLinesOf(path)
     # §4's positive control: a reader that found nothing satisfies every
-    # "does not import" assertion below for free.
-    ck imports.len == 5
+    # "does not import" assertion below for free. Six since PLAT-45, which
+    # added `./pane_names` (the window's names for untitled panes).
+    ck imports.len == 6
     var renderers = 0
     for line in imports:
       if "isonim_gpui" in line or "isonim_tui" in line or
@@ -130,8 +131,10 @@ suite "PLAT-20: the shell is renderer-free":
     # dock_projection.nim, shell.nim, leaves.nim — and, since PLAT-44
     # (2026-09-23), edit_arm.nim and gpui_keys.nim, neither of which imports
     # GPUI: the edit arm reaches the renderer only through `leaves`, and the
-    # key decoder is pure.
-    ck scanned == 5
+    # key decoder is pure — and, since PLAT-45, capability.nim (what the
+    # window can draw, derived from `pane_views`' sets) and pane_names.nim
+    # (the window's names for untitled panes), neither of which imports GPUI.
+    ck scanned == 7
     ck importers.len == 1
     ck importers[0] == "leaves.nim"
     expectCount(3)
@@ -163,8 +166,10 @@ suite "PLAT-20: the shell is renderer-free":
         if "gpui" in line.toLowerAscii or "isonim" in line.toLowerAscii or
            "tui" in line.toLowerAscii:
           inc importers
-    ck scanned == 5   # headless_app, layout_model, layout_interaction,
-                      # window_set, extent_distribution
+    ck scanned == 8   # headless_app, layout_model, layout_interaction,
+                      # window_set, extent_distribution — and PLAT-45's
+                      # desktop_panes, arrangement_relation and
+                      # generate_default_layout
     ck importers == 0
     # The positive twin over the same reader (§4a): the scanner really is
     # reading import lines, so `importers == 0` is not an empty scan.

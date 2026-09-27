@@ -1,0 +1,118 @@
+{
+  "_comment": [
+    "PLAT-45 — the GPUI window's first screen on `calc` (no remembered",
+    "layout) and a blank compositor, read through PLAT-39's pixel reader.",
+    "Regenerate: `just plat45-arrangement-window` then",
+    "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
+  ],
+  "takenAt": "2026-09-27T02:34:43Z",
+  "host": "gpu-server-001",
+  "frames": {
+    "shared": {
+      "frame": "shared.ppm",
+      "located": true,
+      "reason": "",
+      "width": 1920,
+      "height": 1080,
+      "regions": [
+        {
+          "x": 0,
+          "y": 12,
+          "w": 292,
+          "h": 1056,
+          "strip": "Files VCS",
+          "tabs": [
+            "Files",
+            "VCS"
+          ],
+          "heading": "Files",
+          "active": "Files"
+        },
+        {
+          "x": 300,
+          "y": 12,
+          "w": 468,
+          "h": 1056,
+          "strip": "Editor",
+          "tabs": [
+            "Editor"
+          ],
+          "heading": "",
+          "active": "Editor"
+        },
+        {
+          "x": 776,
+          "y": 12,
+          "w": 382,
+          "h": 524,
+          "strip": "State Scratchpad",
+          "tabs": [
+            "State",
+            "Scratchpad"
+          ],
+          "heading": "State",
+          "active": "State"
+        },
+        {
+          "x": 1166,
+          "y": 12,
+          "w": 382,
+          "h": 524,
+          "strip": "Call Trace  Agent Activity",
+          "tabs": [
+            "Call Trace",
+            "Agent Activity"
+          ],
+          "heading": "Call Trace",
+          "active": "Call Trace"
+        },
+        {
+          "x": 776,
+          "y": 544,
+          "w": 772,
+          "h": 524,
+          "strip": "Event Log Timeline Terminal Output",
+          "tabs": [
+            "Event Log",
+            "Timeline",
+            "Terminal Output"
+          ],
+          "heading": "Event Log",
+          "active": "Event Log"
+        },
+        {
+          "x": 1556,
+          "y": 12,
+          "w": 364,
+          "h": 524,
+          "strip": "Test Results.",
+          "tabs": [
+            "Test Results"
+          ],
+          "heading": "",
+          "active": "Test Results"
+        },
+        {
+          "x": 1556,
+          "y": 544,
+          "w": 364,
+          "h": 524,
+          "strip": "Constraints",
+          "tabs": [
+            "Constraints"
+          ],
+          "heading": "",
+          "active": "Constraints"
+        }
+      ]
+    },
+    "blank": {
+      "frame": "blank.ppm",
+      "located": false,
+      "reason": "frame-blank: every column or row median is identical: the frame carries no layout",
+      "width": 1920,
+      "height": 1080,
+      "regions": []
+    }
+  }
+}
