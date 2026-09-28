@@ -104,8 +104,10 @@ proc submitWatchExpression(self: StateComponent) =
 method restart*(self: StateComponent) =
   discard
 
+proc tryMountIsoNimStatePanel*()
+
 when defined(ctInExtension):
-  var stateComponentForExtension* {.exportc.}: StateComponent = makeStateComponent(data, 0, inExtension = true)
+  var stateComponentForExtension* {.exportc.}: StateComponent
 
   proc bindStateExtensionHost(component: StateComponent) =
     if component.extensionRendererId.len == 0:
@@ -115,11 +117,16 @@ when defined(ctInExtension):
     if host.isNil:
       return
 
-    # The extension state surface has no panel markup of its own; keep the
-    # exported component usable without retaining an empty Karax renderer.
-    host.innerHTML = cstring""
+    # Mount the IsoNim state panel into the container the extension webview
+    # provides.  tryMountIsoNimStatePanel is idempotent — it skips the work
+    # if the panel is already mounted and still in the document.
+    tryMountIsoNimStatePanel()
 
   proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
+    if stateComponentForExtension.isNil:
+      if data.sessions.len == 0:
+        return
+      stateComponentForExtension = makeStateComponent(data, 0, inExtension = true)
     if stateComponentForExtension.extensionRendererId.len == 0:
       stateComponentForExtension.extensionRendererId = id
       stateComponentForExtension.bindStateExtensionHost()
@@ -499,7 +506,11 @@ proc initStateVM() =
   originChainVMInstance = createOriginChainVM(stateVMStore)
   wireOriginChainBridges(stateVMInstance, originChainVMInstance)
   setOriginChainVM(originChainVMInstance)
-  tryMountOriginSidePanel()
+  # The origin side panel mounts into a floating aside appended to
+  # document.body and expects the full desktop DOM.  Extension webviews
+  # have a minimal, panel-only DOM, so skip this in that context.
+  when not defined(ctInExtension):
+    tryMountOriginSidePanel()
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()
 
@@ -1011,9 +1022,7 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   for _, value in self.values:
     value.location = response.location
 
-  # Mirror the debugger position into the parallel ViewModel store.
   syncStoreDebuggerPosition(
     response.location.rrTicks, response.location.path, response.location.line,
     response.location.sourceGeneration, response.location.sourceDigest)
-
   await self.onMove()

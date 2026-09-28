@@ -168,6 +168,28 @@ when defined(ctIndex) or defined(ctTest) or
     var future = newPromise(futureHandler)
     return future
 
+  proc readProcessOutputAnyExit*(
+      path: cstring,
+      args: seq[cstring],
+      options: JsObject = js{}): Future[cstring] =
+    ## Like ``readProcessOutput`` but always resolves with whatever stdout was
+    ## captured, regardless of the process exit code. Use when the caller needs
+    ## output lines (e.g. "Saved trace to <path>") even from a process that exits
+    ## with a non-zero code (e.g. a recorder that partially succeeds).
+    var raw = cstring""
+    let futureHandler = proc(resolve: proc(res: cstring)) =
+      setupLdLibraryPath()
+      options.windowsHide = true
+      let process = nodeStartProcess.spawn(path, args, options)
+      process.stdout.setEncoding(cstring"utf8")
+      process.stdout.toJs.on("data", proc(data: cstring) =
+        raw.add(data))
+      process.toJs.on("error", proc(error: JsObject) =
+        resolve(raw))
+      process.toJs.on("exit", proc(code: int, signal: cstring) =
+        resolve(raw))
+    return newPromise(futureHandler)
+
   proc readProcessOutputStreaming*(
       path: cstring,
       args: seq[cstring],

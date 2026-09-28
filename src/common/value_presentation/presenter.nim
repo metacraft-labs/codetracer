@@ -915,7 +915,13 @@ func builtinInlineText(v: PValue; ctx: PresentationContext; depth: int;
   of "builtin.scalar":
     case v.kind
     of pvkNil: "nil"
-    of pvkString, pvkCString: "\"" & v.text & "\""
+    of pvkString, pvkCString:
+      # A `String`-encoded field element (`0x…` — Noir's `Field`, Aztec's
+      # address) is a number, not a string literal; show it without quotes and
+      # with leading zeros stripped so a reader can see the value at a glance.
+      # The annotated budget adds the other base alongside it.
+      if isHexLiteralText(v.text): normalisedHexLiteral(v.text)
+      else: "\"" & v.text & "\""
     of pvkChar: "'" & v.text & "'"
     else:
       # AN EMPTY PAYLOAD IS NAMED, NOT LEFT BLANK.

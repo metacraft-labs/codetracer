@@ -706,7 +706,7 @@ for kind, tags in kindTags:
     tagKinds[tag].add(kind)
 
 when defined(ctInExtension):
-  var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
+  var eventLogComponentForExtension* {.exportc.}: EventLogComponent
 
   proc bindEventLogExtensionHost(component: EventLogComponent) =
     if component.extensionRendererId.len == 0:
@@ -721,6 +721,10 @@ when defined(ctInExtension):
     tryMountIsoNimEventLogPanel()
 
   proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
+    if eventLogComponentForExtension.isNil:
+      if data.sessions.len == 0:
+        return
+      eventLogComponentForExtension = makeEventLogComponent(data, 0, inExtension = true)
     if eventLogComponentForExtension.extensionRendererId.len == 0:
       eventLogComponentForExtension.extensionRendererId = id
       eventLogComponentForExtension.bindEventLogExtensionHost()

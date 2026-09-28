@@ -10,7 +10,7 @@ fn main(x: Field, y: pub Field, z: Field) {
 
 fn looper(x: Field, y: Field) -> Field {
     let mut result = x;
-    for i in 0..10 {
+    for i in 0..11 {
         println(i + 1);
         println(i + 1);
         if i % 3 == 0 {

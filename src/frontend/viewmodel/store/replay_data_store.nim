@@ -1097,16 +1097,24 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
                              sourceDigest: string = "") =
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
-  # Always construct and assign a new DebuggerState so the signal fires.
-  # DB-based traces have rrTicks=0 for every position, so the old
-  # `if current.rrTicks != rrTicks` guard prevented the signal from
-  # ever triggering. Deduplication of redundant backend requests is
-  # handled by RequestTracker, not here.
   let current = store.debugger.val
   when defined(js):
     vmDebug "[PIPELINE] updateDebuggerPosition: storeId=" &
       $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
       $current.rrTicks & ") file=" & file & " line=" & $line
+  # Multiple components (Debug, State, Calltrace, EventLog, EditorView) all
+  # subscribe to CtCompleteMove and each call this proc. Only the first call
+  # per step carries new position data; subsequent calls are identical.
+  # Guard against firing reactive effects 5× per step: check all position
+  # fields (rrTicks, file, line, sourceGeneration) so DB-based traces that
+  # keep rrTicks=0 but change file/line are still handled correctly.
+  if current.rrTicks == rrTicks and
+     current.location.file == file and
+     current.location.line == line and
+     current.location.sourceGeneration == sourceGeneration:
+    if geid.isSome:
+      store.currentGeid.val = geid
+    return
   # Construct a NEW object — on JS backend, var = signal.val gets a
   # reference, so mutating and writing back the same object doesn't
   # trigger the signal's equality check (it compares to itself).

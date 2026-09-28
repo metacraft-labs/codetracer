@@ -121,6 +121,35 @@ when defined(ctInExtension):
             options
           )
 
+    proc getRecentTracesFromFs(): seq[JsObject] =
+      ## List the most recent trace folders from the codetracer store directory.
+      ## Used as fallback when trace-metadata --recent returns empty (e.g. after
+      ## a DB migration that reset the recording index).
+      var results: seq[JsObject] = @[]
+      {.emit: """
+        (function() {
+          var path = require('path');
+          var fs = require('fs');
+          var os = require('os');
+          var storeDir = path.join(os.homedir(), '.local', 'share', 'codetracer');
+          var entries = [];
+          try {
+            entries = fs.readdirSync(storeDir, { withFileTypes: true })
+              .filter(function(e) { return e.isDirectory(); })
+              .map(function(e) {
+                var p = path.join(storeDir, e.name);
+                var mtime = 0;
+                try { mtime = fs.statSync(p).mtimeMs; } catch(e) {}
+                return { outputFolder: p, program: e.name, mtime: mtime };
+              })
+              .sort(function(a, b) { return b.mtime - a.mtime; })
+              .slice(0, 10);
+          } catch(e) {}
+          `results` = entries;
+        })();
+      """.}
+      return results
+
     proc getRecentTraces*(codetracerExe: cstring, isNixOS: bool): Future[seq[JsObject]] {.async, exportc.} =
       let res = await readCTOutput(
         codetracerExe.cstring,
@@ -131,9 +160,14 @@ when defined(ctInExtension):
       if res.isOk:
         let raw = res.value
         let traces = cast[seq[JsObject]](parseCTJson(raw))
-        return traces
+        if traces.len > 0:
+          return traces
       else:
-        echo "error: trying to run the codetracer trace metadata command: ", res.error
+        echo "[CodeTracer] trace-metadata --recent failed: ", res.error
+
+      # Index is empty (e.g. after DB migration) — fall back to filesystem listing.
+      echo "[CodeTracer] falling back to filesystem trace listing"
+      return getRecentTracesFromFs()
 
     proc getRecentTransactions*(codetracerExe: cstring, isNixOS: bool): Future[seq[JsObject]] {.async, exportc.} =
       let res = await readCTOutput(
@@ -186,45 +220,87 @@ when defined(ctInExtension):
       return cast[JsObject](output)
 
     proc extractRecordingId(output: cstring): string =
-      ## Pull the recording-id (UUIDv7 string) out of a ``ct record``
-      ## stdout dump.  Returns "" when the ``recordingId:`` marker is
-      ## absent — callers treat that as "no recording produced".
-      ##
-      ## M-REC-6: marker renamed to ``recordingId:``; payload is a
-      ## UUIDv7 string (M-REC-2 / M-REC-3) so we pass it through
-      ## without coercion.
+      ## Pull the recording-id out of a ``ct record`` stdout dump.
+      ## Accepts both ``recordingId:<uuid>`` (M-REC-6 UUIDv7) and
+      ## ``traceId:<int>`` (older integer-ID builds).
+      ## Returns "" when neither marker is present.
       let outputString = $output
-      let idx = outputString.find("recordingId:")
+      for marker in ["recordingId:", "traceId:"]:
+        let idx = outputString.find(marker)
+        if idx != NO_INDEX:
+          let colon = outputString.find(":", idx)
+          if colon != NO_INDEX:
+            return outputString[colon + 1..^1].strip()
+      return ""
+
+    proc extractTracePath(output: cstring): string =
+      ## Extract the trace folder path from ``ct record`` output lines like
+      ## "Saved trace to /path/to/<uuid>"
+      ## Only captures the path itself (first line after the marker).
+      let outputString = $output
+      let marker = "Saved trace to "
+      let idx = outputString.find(marker)
       if idx != NO_INDEX:
-        let traceIdx = outputString.find(":", idx)
-        if traceIdx != NO_INDEX:
-          return outputString[traceIdx + 1..^1].strip()
+        let pathStart = idx + marker.len
+        var lineEnd = outputString.find("\n", pathStart)
+        if lineEnd == NO_INDEX:
+          lineEnd = outputString.len
+        return outputString[pathStart..<lineEnd].strip()
       return ""
 
     proc getFlowList*() {.async, exportc.}=
       discard
 
+    proc readCTRecordOutput(
+        codetracerExe: cstring,
+        workDir: cstring,
+        isNixOS: bool = false
+      ): Future[cstring] =
+      ## Run ``ct record <workDir>`` and return the full stdout, even if the
+      ## recorder exits with a non-zero code. Recorders like Noir may produce
+      ## "Saved trace to <path>" on stdout before failing (e.g. meta.dat version
+      ## mismatch), so we must not discard stdout on non-zero exit.
+      if not isNixOS or not ($codetracerExe).endsWith(".AppImage"):
+        readProcessOutputAnyExit(
+          codetracerExe,
+          @[cstring"record", workDir]
+        )
+      else:
+        readProcessOutputAnyExit(
+          "appimage-run",
+          @[codetracerExe, cstring"record", workDir]
+        )
+
     proc getCurrentTrace*(codetracerExe: cstring, workDir: cstring, isNixOS: bool): Future[JsObject] {.async, exportc.} =
-      let outputResult = await readCTOutput(
-        codetracerExe,
-        @[cstring"record", workDir],
-        isNixOS
-      )
+      echo "[CodeTracer] getCurrentTrace: exe=", codetracerExe, " workDir=", workDir
+      let output = await readCTRecordOutput(codetracerExe, workDir, isNixOS)
+      echo "[CodeTracer] ct record output: ", output
 
-      if outputResult.isOk:
-        let recordingId = extractRecordingId(outputResult.value)
-        if recordingId.len > 0:
-          let res = await readCTOutput(
-            codetracerExe.cstring,
-            @[cstring"trace-metadata", cstring(fmt"--id={recordingId}")],
-            isNixOS
-          )
-
-          if res.isOk:
-            let raw = res.value
-            return cast[JsObject](parseCTJson(raw))
-          else:
-            echo "error: trying to run the codetracer trace metadata command: ", res.error
+      # M-REC-6: ct record emits `recordingId:<uuid>` on the last (non-empty)
+      # line.  Resolve the folder by querying `ct trace-metadata --id=<uuid>`,
+      # which returns a JSON Trace object whose `outputFolder` field is the
+      # folder path the extension passes on to the DAP launch request.
+      let recordingId = extractRecordingId(output)
+      if recordingId.len > 0:
+        echo "[CodeTracer] getCurrentTrace: got recordingId=", recordingId
+        let res = await readCTOutput(
+          codetracerExe,
+          @[cstring"trace-metadata", cstring(fmt"--id={recordingId}")],
+          isNixOS
+        )
+        if res.isOk:
+          let raw = res.value
+          echo "[CodeTracer] getCurrentTrace: trace-metadata raw=", raw
+          return cast[JsObject](parseCTJson(raw))
         else:
-          echo "error: couldn't manage to get the trace id!"
+          echo "[CodeTracer] getCurrentTrace: trace-metadata failed: ", res.error
+        return js{}
+
+      # Legacy fallback: older builds print "Saved trace to <path>".
+      let tracePath = extractTracePath(output)
+      if tracePath.len > 0:
+        echo "[CodeTracer] getCurrentTrace: using legacy trace folder: ", tracePath
+        return cast[JsObject](js{ outputFolder: cstring(tracePath), program: cstring("") })
+
+      echo "[CodeTracer] getCurrentTrace: no recordingId or trace path in output: ", output
       return js{}

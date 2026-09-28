@@ -91,9 +91,10 @@ when defined(ctInExtension):
     if host.isNil:
       return
 
-    # The extension scratchpad surface is an empty compatibility host; keep the
-    # exported component usable without retaining a Karax renderer.
-    host.innerHTML = cstring""
+    # Mount the IsoNim scratchpad panel into the container the extension webview
+    # provides.  tryMountIsoNimScratchpadPanel is idempotent — it skips the work
+    # if the panel is already mounted and still in the document.
+    tryMountIsoNimScratchpadPanel()
 
   proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
     if scratchpadComponentForExtension.extensionRendererId.len == 0:

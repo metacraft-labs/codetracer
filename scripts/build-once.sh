@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Bootstrap the dev-shell PATH when key build tools (tup, nim, node) are not
+# already available.  The .direnv/flake-profile-*.rc file is the nix-direnv
+# cached evaluation of the codetracer flake — sourcing it is instant (no
+# network, no nix evaluation) and sets PATH, NIX_*, etc. exactly as the dev
+# shell would.  This makes `just build-once` work from a plain terminal that
+# hasn't run `direnv allow` or `nix develop`.
+if ! command -v tup >/dev/null 2>&1 || ! command -v nim >/dev/null 2>&1; then
+	for _direnv_rc in "$CT_ROOT/.direnv"/flake-profile-*.rc; do
+		if [ -f "$_direnv_rc" ]; then
+			# shellcheck source=/dev/null
+			source "$_direnv_rc"
+			break
+		fi
+	done
+fi
+
 # Generate isonim's build/tailwind-styles.json before any frontend Nim
 # compile. ``src/frontend/ui_js.nim`` transitively imports
 # ``isonim/dsl/tailwind``, which ``staticRead``s that file at Nim compile
@@ -11,7 +30,6 @@ set -euo pipefail
 # ``.nim`` sources so frontend-only utility classes are not silently
 # dropped. Failures must propagate — the uncatchable staticRead otherwise
 # resurfaces as an opaque Nim compile error several minutes later.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Sibling repos first -- before ANY build step, including build-tailwind.sh,
 # which itself drives an extract over ../isonim's sources. Every consumer of a
