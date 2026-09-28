@@ -166,7 +166,7 @@ proc addTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: i
   self.currentLine += 1
 
 when defined(ctInExtension):
-  var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent = makeTerminalOutputComponent(data, 0, inExtension = true)
+  var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent
 
   proc bindTerminalOutputExtensionHost(component: TerminalOutputComponent) =
     if component.extensionRendererId.len == 0:
@@ -176,11 +176,15 @@ when defined(ctInExtension):
     if host.isNil:
       return
 
-    # The extension terminal-output surface has no panel markup of its own; keep
-    # the exported component usable without retaining an empty Karax renderer.
-    host.innerHTML = cstring""
+    # Mount the IsoNim terminal-output panel into the container the extension
+    # webview provides.  tryMountIsoNimTerminalOutputPanel is idempotent.
+    tryMountIsoNimTerminalOutputPanel()
 
   proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
+    if terminalOutputComponentForExtension.isNil:
+      if data.sessions.len == 0:
+        return
+      terminalOutputComponentForExtension = makeTerminalOutputComponent(data, 0, inExtension = true)
     if terminalOutputComponentForExtension.extensionRendererId.len == 0:
       terminalOutputComponentForExtension.extensionRendererId = id
       terminalOutputComponentForExtension.bindTerminalOutputExtensionHost()
@@ -317,12 +321,20 @@ proc syncTerminalOutputDebuggerPosition(rrTicks: int) =
   ## Mirror the debugger's rrTicks into the VM's ``currentRRTicks``
   ## signal. Triggers the IsoNim view's per-fragment colour effect so
   ## past/active/future classes track the user's position.
-  if terminalOutputVMStore.isNil:
+  ##
+  ## NOTE: We do NOT call terminalOutputVMStore.updateDebuggerPosition here.
+  ## When the shared store is active, terminalOutputVMStore IS the same object
+  ## as calltraceVMStore / stateVMStore. Calling updateDebuggerPosition with
+  ## file="" would overwrite the real file/line written by syncCalltraceDebuggerPosition
+  ## and syncStoreDebuggerPosition, firing the calltrace/state reactive effects
+  ## with an empty position and causing repeated spurious loads (CPU spin).
+  ## The createEffect in terminal_output_vm.nim already mirrors rrTicks from
+  ## store.debugger.val automatically; setCurrentRRTicks is a direct update as
+  ## a belt-and-suspenders path for the stub-backed case.
+  if terminalOutputVMInstance.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  terminalOutputVMStore.updateDebuggerPosition(ticks, "", 0)
-  if not terminalOutputVMInstance.isNil:
-    terminalOutputVMInstance.setCurrentRRTicks(ticks)
+  terminalOutputVMInstance.setCurrentRRTicks(ticks)
 
 # ---------------------------------------------------------------------------
 # Component event handlers

@@ -18,6 +18,7 @@ nim \
 	js src/frontend/ui_js.nim
 
 nim \
+	-d:ctRenderer \
 	-d:ctInExtension \
 	-d:ctInCentralExtensionContext \
 	--out:"$2" \

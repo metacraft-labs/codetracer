@@ -75,8 +75,10 @@ proc calltraceValueDomHostId(prefix: cstring, parts: varargs[cstring]): cstring
 proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent)
 proc renderCallExpandedValuesDom*(self: CallExpandedValuesComponent): Node
 
+proc initCalltraceVM()
+
 when defined(ctInExtension):
-  var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
+  var calltraceComponentForExtension* {.exportc.}: CalltraceComponent
 
   proc bindCalltraceExtensionHost(component: CalltraceComponent) =
     if component.extensionRendererId.len == 0:
@@ -86,11 +88,16 @@ when defined(ctInExtension):
     if host.isNil:
       return
 
-    # The extension calltrace surface has no panel markup of its own; keep the
-    # exported component usable without retaining an empty Karax renderer.
-    host.innerHTML = cstring""
+    # Initialise the calltrace VM and mount it into the container the extension
+    # webview provides.  initCalltraceVM is idempotent — it returns early if the
+    # VM was already created, and always calls tryMountIsoNimCalltrace at the end.
+    initCalltraceVM()
 
   proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
+    if calltraceComponentForExtension.isNil:
+      if data.sessions.len == 0:
+        return
+      calltraceComponentForExtension = makeCalltraceComponent(data, 0, inExtension = true)
     if calltraceComponentForExtension.extensionRendererId.len == 0:
       calltraceComponentForExtension.extensionRendererId = id
       calltraceComponentForExtension.bindCalltraceExtensionHost()
@@ -1023,16 +1030,9 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
   let hasIgnorePatterns = hasVM and not self.rawIgnorePatterns.isNil
   let ignorePatterns = if hasIgnorePatterns: $self.rawIgnorePatterns else: ""
   isoBatch.batch proc() =
-    # Mirror the debugger position into the parallel ViewModel store.
-    # Triggers the CalltraceVM's auto-load effect which calls
-    # store.requestCalltraceSection.  The backend will respond with
-    # CtUpdatedCalltrace handled by the existing onUpdatedCalltrace
-    # subscription.
     syncCalltraceDebuggerPosition(
       location.rrTicks, location.path, location.line,
       location.sourceGeneration, location.sourceDigest)
-    # Sync the viewport dimensions and filter patterns to the VM so the
-    # auto-load effect can include them in its request.
     if hasVM:
       vm.setViewportHeight(viewportHeight)
       vm.setViewportDepth(viewportDepth)
@@ -1107,8 +1107,17 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     # DOM during navigation tests (python/ruby sudoku — TODO 5.1(a)).
     # Skip the legacy call when the VM is wired; the legacy path is
     # only needed for the (unused) Karax-only fallback.
-    if calltraceVMInstance.isNil:
+    # Exception: in the extension the CalltraceVM uses a stub backend —
+    # it resolves requests immediately with no data.  `loadLines` is the
+    # only path that emits CtLoadCalltraceSection via the VS Code
+    # messaging channel, which the extension middleware routes to the
+    # real DAP server.  Without this call the calltrace panel stays
+    # empty even though calltraceVMInstance is non-nil.
+    when defined(ctInExtension):
       self.loadLines(fromScroll=false)
+    else:
+      if calltraceVMInstance.isNil:
+        self.loadLines(fromScroll=false)
   self.redraw()
 
 proc setContinuationLinks*(self: CalltraceComponent, links: seq[ContinuationLinkInfo]) =

@@ -836,6 +836,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # lists as UNREACHABLE and whose contrast is a separate, real defect —
           # that button should come back with its contrast fixed, not before.
           element "Notifications", aNotifications
+          element "Shell", aShell
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -859,11 +860,10 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # (Notifications is live, above, beside the other View entries.)
           # element "Start Window", aStartWindow, false
           # element "Full Screen Toggle", aFullScreen, false
-          # folder "Choose App Theme":
-            # element "Mac Classic Theme", aTheme0
-            # element "Default White Theme", aTheme1
-            # element "Default Black Theme", aTheme2
-            # element "Default Dark Theme", aTheme3
+          --sub
+          folder "Theme":
+            element "Default Dark Theme", aTheme3
+            element "Default White Theme", aTheme1
           # folder "Choose Monaco Theme":
             # element "vs-light", aMonacoTheme0, false
             # element "etc",

@@ -312,13 +312,13 @@ suite "PLAT-2: the budget is an input, and the presenter returns what fits":
     let field = str("0x00000000000000000000000000000000000000000000000000000000000007d0",
                     "Field")
     ck present(field, tuiRowBudget(80, focused = false)).root.text ==
-       "\"0x00000000000000000000000000000000000000000000000000000000000007d0\""
+       "0x7d0"
     ck present(field, tuiRowBudget(80, focused = true)).root.text ==
        "0x7d0 (2000)"
     # And the SAME value at a narrower row is the same rendering, clipped —
-    # not a different one.
+    # not a different one. "0x7d0" is 5 chars so it is never clipped at 20.
     ck present(field, tuiRowBudget(20, focused = false)).root.text ==
-       "\"0x0000000000000000…"
+       "0x7d0"
 
 suite "PLAT-2: presentation is pure":
 

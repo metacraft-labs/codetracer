@@ -172,12 +172,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
   dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
   dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) =
-    viewsApi.emit(CtUpdatedCalltrace, value)
-    # Feed calltrace data directly into the ViewModel store so the IsoNim
-    # calltrace view receives it. This bridges the gap when the legacy
-    # CalltraceComponent's register() subscription hasn't fired yet.
-    syncCalltraceData(value)
-  )
+    viewsApi.emit(CtUpdatedCalltrace, value))
   dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
   dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
   # RS-M3 — the HTTP Request panel's live tail.  The body is a span delta

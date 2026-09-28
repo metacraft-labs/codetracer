@@ -2598,15 +2598,21 @@ when defined(ctRenderer):
   console.log data.viewsApi
 
   data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-    discard data.services.debugger.onCompleteMove(data.services.debugger, value)
-    discard data.services.editor.onCompleteMove(data.services.editor, value))
+    # Guard against -1 sentinel: activeSessionIndex is -1 when no session is
+    # active (e.g. extension webview receives a CtCompleteMove before the
+    # session is fully initialized).  Dropping the event is safe; the component
+    # path (register -> api.subscribe) handles it independently.
+    if data.activeSessionIndex >= 0:
+      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
+      discard data.services.editor.onCompleteMove(data.services.editor, value))
 
   data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
     ## Handle the macro expansion response from the backend (S6).
     ## Delegates to the editor service callback which handles both the
     ## expanded case (open inline) and the non-expanded case (navigate to
     ## the resolved high-level location).
-    discard data.services.editor.onExpansionResponse(data.services.editor, value))
+    if data.activeSessionIndex >= 0:
+      discard data.services.editor.onExpansionResponse(data.services.editor, value))
 
   # Expose the global `data` object on `window` as a debugging aid in the
   # renderer / webview.  The VS Code central extension context
@@ -2811,24 +2817,41 @@ when defined(ctRenderer):
     component.data = data
     component.content = content
 
-    let existing =
-      if data.ui.componentMapping[content].hasKey(component.id):
-        data.ui.componentMapping[content][component.id]
-      else:
-        nil
+    # data.ui and data.viewsApi are templates that expand to
+    # data.sessions[data.activeSessionIndex].*. When there are no sessions yet
+    # (e.g. VS Code extension module-level init runs before any debug session is
+    # created), accessing them raises an IndexError and leaves the component
+    # global undefined. Guard the entire session-dependent block so that
+    # registerComponent is always safe to call regardless of session state.
+    # The component is still returned to the caller with data/content bound;
+    # the componentMapping entry and api registration happen later when a session
+    # exists (or on the DOMContentLoaded re-registration path in VS Code webviews).
+    if data.sessions.len > 0:
+      # componentMapping entries default to nil (Nim's JS backend uses null for
+      # JsAssoc defaults in fixed arrays).  Guard every access so that the very
+      # first registerComponent call for a given Content slot does not crash with
+      # "Cannot read properties of null".
+      if data.ui.componentMapping[content].isNil:
+        data.ui.componentMapping[content] = JsAssoc[int, Component]{}
 
-    if not existing.isNil and not (existing == component):
-      echo fmt"WARNING: replacing the component for {content} with id {component.id}"
-      try:
-        existing.unregister()
-      except CatchableError:
-        echo fmt"WARNING: unregister of the replaced {content} #{component.id} failed"
+      let existing =
+        if data.ui.componentMapping[content].hasKey(component.id):
+          data.ui.componentMapping[content][component.id]
+        else:
+          nil
 
-    if not data.viewsApi.isNil and component.api.isNil:
-      let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-      component.register(componentToMiddlewareApi)
-    echo "register component ", content, " ", component.id
-    data.ui.componentMapping[content][component.id] = component
+      if not existing.isNil and not (existing == component):
+        echo fmt"WARNING: replacing the component for {content} with id {component.id}"
+        try:
+          existing.unregister()
+        except CatchableError:
+          echo fmt"WARNING: unregister of the replaced {content} #{component.id} failed"
+
+      if not data.viewsApi.isNil and component.api.isNil:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
+        component.register(componentToMiddlewareApi)
+      echo "register component ", content, " ", component.id
+      data.ui.componentMapping[content][component.id] = component
 
   proc projectPath*(project: cstring, path: string): cstring =
     return data.startOptions.app & cstring("/") & project & cstring(path)
