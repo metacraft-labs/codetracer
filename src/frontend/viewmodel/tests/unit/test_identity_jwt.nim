@@ -132,8 +132,17 @@ suite "a verified signature is not the whole check":
   test "an audience array containing ours is accepted":
     # `aud` may be a string or an array; a client handling only one would
     # reject half of a conformant issuer's tokens.
-    checkClaims(parseJson("""{"iss":"""" & Issuer & """","aud":["x","""" & Aud &
+    checkClaims(parseJson("""{"iss":"""" & Issuer & """","aud":["""" & Aud &
                           """"],"exp":2000000000}"""), Issuer, Aud, 1_000_000_000)
+
+    # THIS CASE USED TO ASSERT `["x", ours]` WITHOUT AN `azp`, AND THAT WAS THE
+    # PERMISSIVENESS OIDC FORBIDS. Membership in a multi-audience list is not
+    # enough — see the `azp` suite below — so the plural form needs the issuer
+    # to name which client the token was for. It is still accepted; it just has
+    # to say so.
+    checkClaims(parseJson("""{"iss":"""" & Issuer & """","aud":["x","""" & Aud &
+                          """"],"azp":"""" & Aud &
+                          """","exp":2000000000}"""), Issuer, Aud, 1_000_000_000)
 
   test "another issuer's token is refused":
     expect JwtError:
@@ -216,3 +225,60 @@ suite "a malformed token is refused, not thrown":
     check parts.alg == "RS256"
     check parts.claims{"sub"}.getStr() == "acct"
     check parseJwks("""{"keys":[{"kty":"RSA","kid":"k1","n":"AQAB","e":"AQAB"}]}""").len == 1
+
+suite "a multi-audience token needs the issuer to name which client it is for":
+  ## OIDC Core §3.1.3.7 rule 4. "Ours is in the `aud` list" looks sufficient
+  ## and is not: a multi-audience token is one the issuer minted for a client
+  ## to pass ON to another party, and that other party is in the list too. On
+  ## membership alone, any co-audience could replay a token at us as though its
+  ## holder had signed in here. `azp` is the issuer naming the single client the
+  ## token was actually for.
+
+  proc claimsWith(audJson, extra: string): JsonNode =
+    parseJson("""{"iss":"https://i.test","aud":""" & audJson &
+              ""","exp":2000000000""" & extra & "}")
+
+  test "a single audience needs no azp — the rule is about the plural case":
+    # THE POSITIVE CONTROL, and it is load-bearing here: demanding `azp`
+    # unconditionally would refuse the ordinary token every issuer mints.
+    checkClaims(claimsWith("\"us\"", ""), "https://i.test", "us", 1000)
+    checkClaims(claimsWith("[\"us\"]", ""), "https://i.test", "us", 1000)
+
+  test "two audiences and no azp is refused":
+    expect JwtError:
+      checkClaims(claimsWith("[\"us\",\"them\"]", ""),
+                  "https://i.test", "us", 1000)
+
+  test "two audiences with azp naming another client is refused":
+    # The replay this rule prevents, stated as a case: the token is genuine,
+    # unexpired, correctly signed, and lists us — and it was minted for `them`.
+    expect JwtError:
+      checkClaims(claimsWith("[\"us\",\"them\"]", ""","azp":"them""""),
+                  "https://i.test", "us", 1000)
+
+  test "two audiences with azp naming us is accepted":
+    checkClaims(claimsWith("[\"us\",\"them\"]", ""","azp":"us""""),
+                "https://i.test", "us", 1000)
+
+  test "a token larger than the bound is refused before it is decoded":
+    # The bound exists because this parser runs on every admission over input
+    # from an attacker's direction. `token.nim` had the same reasoning as
+    # `MaxPayloadLen` and it did not survive the move to a compact JWS — which
+    # is how a bound gets lost: the code it guarded was replaced and the guard
+    # was not part of the replacement.
+    let huge = "a".repeat(MaxCompactJwsLen + 1)
+    var named = false
+    try:
+      discard parseJwt(huge, ["RS256"])
+    except JwtError as e:
+      named = "at most" in e.msg
+    check named
+
+    # And the bound does not refuse a real token. Without this the case above
+    # is satisfied by a `parseJwt` that refuses everything.
+    let ok = parseJwt(
+      encode("""{"alg":"RS256","kid":"k1"}""").replace("+", "-")
+        .replace("/", "_").replace("=", "") & "." &
+      encode("""{"sub":"a"}""").replace("+", "-").replace("/", "_")
+        .replace("=", "") & ".c2ln", ["RS256"])
+    check ok.kid == "k1"

@@ -34,6 +34,19 @@
 
 import std/[base64, json, strutils]
 
+const
+  MaxCompactJwsLen* = 16 * 1024
+    ## A bound BEFORE anything decodes. An ID token is a handful of claims; a
+    ## conformant one from this issuer is under 2 KiB. Without a limit,
+    ## `decodeSegment` and `parseJson` will happily work through a segment of
+    ## any size, and this parser runs on every admission over input that
+    ## arrives from an attacker's direction — an unbounded parser there is a
+    ## denial-of-service surface no legitimate token needs.
+    ##
+    ## `token.nim` had this reasoning as `MaxPayloadLen` and it did not survive
+    ## the move to a compact JWS, which is how a bound gets lost: the code it
+    ## guarded was replaced and the guard was not part of the replacement.
+
 type
   JwtError* = object of CatchableError
     ## Every failure here means the token is not usable. Raised rather than
@@ -84,6 +97,11 @@ proc parseJwt*(compact: string; allowedAlgs: openArray[string]): JwtParts =
   ## Split and decode, and refuse anything whose header does not name an
   ## algorithm the ISSUER advertised. See the module header for why `alg` is
   ## not the token's to choose.
+  if compact.len > MaxCompactJwsLen:
+    raise newException(JwtError,
+      "the token is " & $compact.len & " bytes and this client accepts at most " &
+      $MaxCompactJwsLen & ". Refused before decoding: an unbounded parser on " &
+      "every admission is a denial-of-service surface")
   let parts = compact.strip().split('.')
   if parts.len != 3:
     raise newException(JwtError,
@@ -213,6 +231,29 @@ proc checkClaims*(claims: JsonNode; issuer, audience: string; nowUnix: int64;
     raise newException(JwtError,
       "the token's audience is not '" & audience & "'. A token minted for " &
       "another client of the same issuer is a valid token and not ours")
+
+  # OIDC Core §3.1.3.7 rule 4: when `aud` names more than one audience, `azp`
+  # MUST be present and MUST be this client.
+  #
+  # WHY THE RULE EXISTS, because "ours is in the list" looks sufficient and is
+  # not. A multi-audience token is one the issuer minted for a client to send
+  # ON to another party — that other party is in the list too. Accepting it on
+  # the strength of membership alone lets any co-audience replay a token at us
+  # as though its holder had signed in here. `azp` is the issuer naming which
+  # single client the token was actually FOR.
+  if aud != nil and aud.kind == JArray and aud.getElems().len > 1:
+    let azp = claims{"azp"}.getStr()
+    if azp.len == 0:
+      raise newException(JwtError,
+        "the token names " & $aud.getElems().len & " audiences and no azp. " &
+        "OIDC Core §3.1.3.7 requires one, because a multi-audience token is " &
+        "meant to be passed on and every co-audience could otherwise replay " &
+        "it here")
+    if azp != audience:
+      raise newException(JwtError,
+        "the token's authorized party is '" & azp & "', not '" & audience &
+        "'. It was minted for that client to use, and we are only a " &
+        "co-audience")
 
   let exp = claims{"exp"}.getBiggestInt(0)
   if exp == 0:
