@@ -1129,6 +1129,162 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 9b'. EVERY FLAKE INPUT IS FETCHED BEFORE THE JOB'S TOKEN CAN EXPIRE.
+#
+# The installation token nix fetches with lives 60 minutes and a job may mint
+# only one. Desktop-edge run 36407231861 lost its ruby and beam arms to that:
+# `Build ct-print` first evaluated codetracer-trace-format-nim's flake 83-85
+# minutes after the mint and GitHub answered `401 Bad credentials` for its
+# private `codetracer-toolchains` input. The prefetch step evaluates every dev
+# shell a later step enters while the token is fresh. Pinned here:
+#   a. ORDER: no `run:` step before it invokes nix -- DERIVED from the YAML,
+#      so a nix-using step inserted above it is caught;
+#   b. COVERAGE: EXECUTED with a stub nix, it evaluates codetracer's `ci` and
+#      `default` shells, the trace-format-nim and recorder `default` shells,
+#      each in its own checkout as `.?submodules=1` with
+#      `--no-write-lock-file`; and every `#<shell>` a later step passes to
+#      `nix develop` is among codetracer's prefetched shells (derived);
+#   c. a sibling without a flake.nix is skipped, not an error;
+#   d. an evaluation that fails stops the step, naming the shell and checkout;
+#   e. the step touches no credential: no `secrets.` or token in its block.
+# ---------------------------------------------------------------------------
+echo
+echo "every flake input later steps evaluate is fetched before the token can expire"
+
+readonly PREFETCH_STEP="Fetch every flake input later steps evaluate, while the token is valid"
+
+# step_names FILE -> the reusable workflow's step names, in order.
+step_names() {
+	strip_cr "$1" | sed -n 's/^      - name: //p'
+}
+# step_block NAME FILE -> the whole step (keys, comments, env, run), verbatim.
+step_block() {
+	strip_cr "$2" | awk -v want="      - name: $1" '
+		$0 == want { p=1; print; next }
+		p && /^      - name: / { exit }
+		p { print }'
+}
+
+pf_names="$(step_names "$REUSABLE")"
+if grep -qxF "$PREFETCH_STEP" <<<"$pf_names"; then
+	ok "the reusable workflow has the prefetch step"
+else
+	fail "the reusable workflow has the prefetch step" "no step named '$PREFETCH_STEP'"
+fi
+
+# a. Every `run:` step ABOVE the prefetch step must be nix-free.
+pf_early_nix=""
+while IFS= read -r name; do
+	[ "$name" = "$PREFETCH_STEP" ] && break
+	if extract_step_script "$name" "$REUSABLE" | grep -v '^[[:space:]]*#' |
+		grep -qE '(^|[^A-Za-z0-9_-])nix( |$)'; then
+		pf_early_nix="${pf_early_nix} '${name}'"
+	fi
+done <<<"$pf_names"
+if [ -z "$pf_early_nix" ]; then
+	ok "no step before the prefetch invokes nix"
+else
+	fail "no step before the prefetch invokes nix" "nix runs before the prefetch in:${pf_early_nix}"
+fi
+
+PF="$TMP/prefetch-step"
+mkdir -p "$PF/bin" "$PF/ws/codetracer" "$PF/ws/codetracer-trace-format-nim" \
+	"$PF/ws/codetracer-ruby-recorder" "$PF/ws/codetracer-norepo-recorder"
+: >"$PF/ws/codetracer/flake.nix"
+: >"$PF/ws/codetracer-trace-format-nim/flake.nix"
+: >"$PF/ws/codetracer-ruby-recorder/flake.nix"
+PF_STEP="$PF/step.sh"
+extract_step_script "$PREFETCH_STEP" "$REUSABLE" >"$PF_STEP"
+
+cat >"$PF/bin/nix" <<'STUB'
+#!/usr/bin/env bash
+# Records "<cwd>|<argv>" for each call; fails an eval run in $NIX_FAIL_IN.
+printf '%s|%s\n' "$(pwd -P)" "$*" >>"$NIX_LOG"
+case "$*" in
+	*"--expr builtins.currentSystem"*) printf 'x86_64-linux'; exit 0 ;;
+esac
+if [ -n "${NIX_FAIL_IN:-}" ] && [ "$(pwd -P)" = "$NIX_FAIL_IN" ]; then
+	echo "error: unable to download 'https://api.github.com/repos/o/r/tarball/0': HTTP error 401" >&2
+	exit 1
+fi
+printf '/nix/store/00000000000000000000000000000000-stub.drv'
+STUB
+chmod +x "$PF/bin/nix"
+
+# run_prefetch_step RECORDER [FAIL_IN] -> "<exit>|<combined output>"
+run_prefetch_step() {
+	local out rc
+	: >"$PF/nix.log"
+	out="$(PATH="$PF/bin:$PATH" NIX_LOG="$PF/nix.log" NIX_FAIL_IN="${2:-}" \
+		CT_DIR="$PF/ws/codetracer" RECORDER_REPO="$1" bash "$PF_STEP" 2>&1)"
+	rc=$?
+	printf '%s|%s' "$rc" "$out"
+}
+
+PFW="$(cd "$PF/ws" && pwd -P)"
+pf_out="$(run_prefetch_step codetracer-ruby-recorder)"
+pf_missing=""
+for want in "codetracer:ci" "codetracer:default" \
+	"codetracer-trace-format-nim:default" "codetracer-ruby-recorder:default"; do
+	d="${want%%:*}" s="${want##*:}"
+	grep -qxF "$PFW/$d|eval --raw --no-write-lock-file .?submodules=1#devShells.x86_64-linux.$s.drvPath" \
+		"$PF/nix.log" || pf_missing="${pf_missing} ${d}#${s}"
+done
+if [ "${pf_out%%|*}" = 0 ] && [ -z "$pf_missing" ]; then
+	ok "the prefetch evaluates codetracer #ci/#default, trace-format-nim and the recorder, in their checkouts"
+else
+	fail "the prefetch evaluates codetracer #ci/#default, trace-format-nim and the recorder, in their checkouts" \
+		"not evaluated:${pf_missing:- (none)}; exit ${pf_out%%|*}" "nix calls: $(tr '\n' ';' <"$PF/nix.log")"
+fi
+
+# Every codetracer shell a later step enters through `nix develop` is one the
+# prefetch evaluated.
+pf_dev_shells="$(strip_cr "$REUSABLE" | grep -v '^[[:space:]]*#' |
+	grep -oE "nix develop '\.\?submodules=1#[A-Za-z0-9_-]+'" |
+	sed "s/.*#//; s/'\$//" | sort -u)"
+pf_uncovered=""
+for s in $pf_dev_shells; do
+	grep -qxF "$PFW/codetracer|eval --raw --no-write-lock-file .?submodules=1#devShells.x86_64-linux.$s.drvPath" \
+		"$PF/nix.log" || pf_uncovered="${pf_uncovered} #${s}"
+done
+if [ -n "$pf_dev_shells" ] && [ -z "$pf_uncovered" ]; then
+	ok "every codetracer shell a later step enters through nix develop is prefetched"
+else
+	fail "every codetracer shell a later step enters through nix develop is prefetched" \
+		"not prefetched:${pf_uncovered:- (no nix develop call found -- the derivation is vacuous)}"
+fi
+
+pf_out="$(run_prefetch_step codetracer-norepo-recorder)"
+if [ "${pf_out%%|*}" = 0 ] && grep -q "no flake.nix in .*codetracer-norepo-recorder" <<<"$pf_out" &&
+	! grep -q "codetracer-norepo-recorder|" "$PF/nix.log"; then
+	ok "a sibling without a flake.nix is skipped, not evaluated and not an error"
+else
+	fail "a sibling without a flake.nix is skipped, not evaluated and not an error" "got: ${pf_out}"
+fi
+
+pf_out="$(run_prefetch_step codetracer-ruby-recorder "$PFW/codetracer-trace-format-nim")"
+if [ "${pf_out%%|*}" != 0 ] &&
+	grep -q "::error::could not evaluate devShells.x86_64-linux.default of .*codetracer-trace-format-nim" <<<"$pf_out" &&
+	grep -q "HTTP error 401" <<<"$pf_out" &&
+	! grep -q "^$PFW/codetracer-ruby-recorder|" "$PF/nix.log"; then
+	ok "a failed evaluation stops the step, passing nix's cause through and naming the shell and checkout"
+else
+	fail "a failed evaluation stops the step, passing nix's cause through and naming the shell and checkout" \
+		"got: ${pf_out}"
+fi
+
+# Credential PLUMBING, not prose: a `secrets.` or step-output token reference,
+# an env key or shell variable named *TOKEN*, or a nix/git credential setting.
+readonly PF_CRED_RE='secrets\.|outputs\.token|[A-Za-z_]*TOKEN[A-Za-z_]*[[:space:]]*:|\$\{?[A-Za-z_]*TOKEN|access-tokens|extraHeader|netrc'
+pf_block="$(step_block "$PREFETCH_STEP" "$REUSABLE" | grep -v '^[[:space:]]*#')"
+if [ -n "$pf_block" ] && ! grep -qE "$PF_CRED_RE" <<<"$pf_block"; then
+	ok "the prefetch step handles no credential (nix reads the one setup-nix configured)"
+else
+	fail "the prefetch step handles no credential (nix reads the one setup-nix configured)" \
+		"$(grep -E "$PF_CRED_RE" <<<"$pf_block")"
+fi
+
+# ---------------------------------------------------------------------------
 # 9c. THE CORE BUILD'S WORKSPACE: complete, pinned, and on flake.lock's revs.
 #
 # `Build the codetracer-desktop core` runs `just build-once`, whose tup build
@@ -1699,7 +1855,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=28
+readonly EXPECTED_ASSERTIONS=35
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
