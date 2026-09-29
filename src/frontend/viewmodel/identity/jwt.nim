@@ -92,13 +92,35 @@ proc parseJwt*(compact: string; allowedAlgs: openArray[string]): JwtParts =
   result.signingInput = parts[0] & "." & parts[1]
   for b in decodeSegment(parts[2]): result.signature.add(byte(b))
 
+  # `decodeSegment` raises `JwtError`, which must propagate with its own
+  # sentence rather than be re-wrapped as "not JSON" — so it is done OUTSIDE
+  # the guard below. A bare `except:` cannot re-raise selectively, and putting
+  # the decode inside would report a base64url problem as a JSON one.
+  let headerText = decodeSegment(parts[0])
+  let claimsText = decodeSegment(parts[1])
   try:
-    result.header = parseJson(decodeSegment(parts[0]))
-    result.claims = parseJson(decodeSegment(parts[1]))
-  except JwtError:
-    raise
-  except CatchableError as e:
-    raise newException(JwtError, "a token segment is not JSON: " & e.msg)
+    result.header = parseJson(headerText)
+    result.claims = parseJson(claimsText)
+  except:
+    # THE BARE `except:` IS DELIBERATE, AND IT IS NOT STYLE. On the C backend
+    # `parseJson` raises `JsonParsingError`, a `CatchableError`. On the JS
+    # backend it defers to V8's `JSON.parse` (see `std/json`'s `when
+    # defined(js)` branch and its `importjs: "JSON.parse(#)"`), which throws a
+    # raw `SyntaxError` that NO Nim exception type matches — so
+    # `except CatchableError` catches NOTHING there and the exception escapes
+    # into the renderer.
+    #
+    # Measured on this checkout's Nim rather than argued: a `try/except
+    # CatchableError` around `parseJson("{not json")` answers "caught" under
+    # `nim c` and lets the exception ESCAPE under `nim js -d:nodejs`. The bare
+    # form catches it on both.
+    #
+    # This module runs on both backends by design and parses input that
+    # arrives over the network from an attacker's direction, so the narrow form
+    # is a crash on the backend the renderer ships on. `token.nim:405` and
+    # `device_grant.nim:176` already carry this comment's ancestor;
+    # `identity-token-mutation.sh`'s M17 and G9 arms exist to keep it.
+    raise newException(JwtError, "a token segment is not JSON")
 
   result.alg = result.header{"alg"}.getStr()
   result.kid = result.header{"kid"}.getStr()
@@ -124,8 +146,26 @@ proc parseJwks*(doc: string): seq[JwkKey] =
   var j: JsonNode
   try:
     j = parseJson(doc)
-  except CatchableError as e:
-    raise newException(JwtError, "the JWKS is not JSON: " & e.msg)
+  except:
+    # THE BARE `except:` IS DELIBERATE, AND IT IS NOT STYLE. On the C backend
+    # `parseJson` raises `JsonParsingError`, a `CatchableError`. On the JS
+    # backend it defers to V8's `JSON.parse` (see `std/json`'s `when
+    # defined(js)` branch and its `importjs: "JSON.parse(#)"`), which throws a
+    # raw `SyntaxError` that NO Nim exception type matches — so
+    # `except CatchableError` catches NOTHING there and the exception escapes
+    # into the renderer.
+    #
+    # Measured on this checkout's Nim rather than argued: a `try/except
+    # CatchableError` around `parseJson("{not json")` answers "caught" under
+    # `nim c` and lets the exception ESCAPE under `nim js -d:nodejs`. The bare
+    # form catches it on both.
+    #
+    # This module runs on both backends by design and parses input that
+    # arrives over the network from an attacker's direction, so the narrow form
+    # is a crash on the backend the renderer ships on. `token.nim:405` and
+    # `device_grant.nim:176` already carry this comment's ancestor;
+    # `identity-token-mutation.sh`'s M17 and G9 arms exist to keep it.
+    raise newException(JwtError, "the JWKS is not JSON")
   for k in j{"keys"}.getElems():
     if k{"kty"}.getStr() != "RSA": continue
     if k.hasKey("use") and k{"use"}.getStr() != "sig": continue

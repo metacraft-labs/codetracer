@@ -15,7 +15,7 @@
 ## real rather than commented.
 
 import std/[strutils, unittest]
-import ../../frontend/viewmodel/identity/issuer
+import ../../identity/issuer
 
 const LiveDocument = """
 {
@@ -108,3 +108,28 @@ suite "a document that cannot support a client is refused, not half-used":
   test "a document that is not JSON is refused with that reason":
     expect DiscoveryError:
       discard parseDiscovery("<html>a login page, not metadata</html>")
+
+  test "a malformed document does not escape as an exception the caller cannot name":
+    ## THE BACKEND IS THE POINT OF THIS CASE. On the C backend `parseJson`
+    ## raises `JsonParsingError`, a `CatchableError`, and any guard catches it.
+    ## On the JS backend it defers to V8's `JSON.parse`, which throws a raw
+    ## `SyntaxError` that matches NO Nim exception type — so a
+    ## `try/except CatchableError` catches nothing and the exception escapes
+    ## into the renderer.
+    ##
+    ## This module shipped with the narrow guard and therefore crashed the tab
+    ## on attacker-shaped input. Measured on this checkout's Nim: the same
+    ## `except CatchableError` answers "caught" under `nim c` and lets the
+    ## exception ESCAPE under `nim js -d:nodejs`.
+    ##
+    ## So the assertion is not "it refuses" — it is "it refuses with OUR
+    ## exception type", which is the half that only fails on one backend, and
+    ## this suite runs on both.
+    for hostile in ["<html>a login page, not metadata</html>", "{not json",
+                    "", "{\"issuer\": ", "[[[", "\x00\x01\x02"]:
+      expect DiscoveryError:
+        discard parseDiscovery(hostile)
+
+    # THE POSITIVE CONTROL. Without it a `parseDiscovery` that raised
+    # `DiscoveryError` unconditionally would satisfy every line above.
+    check parseDiscovery(LiveDocument).issuer == DefaultIssuer

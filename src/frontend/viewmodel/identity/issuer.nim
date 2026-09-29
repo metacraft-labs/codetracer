@@ -88,9 +88,26 @@ proc parseDiscovery*(doc: string; expectedIssuer = DefaultIssuer): IssuerConfig 
   var j: JsonNode
   try:
     j = parseJson(doc)
-  except CatchableError as e:
-    raise newException(DiscoveryError,
-      "the discovery document is not JSON: " & e.msg)
+  except:
+    # THE BARE `except:` IS DELIBERATE, AND IT IS NOT STYLE. On the C backend
+    # `parseJson` raises `JsonParsingError`, a `CatchableError`. On the JS
+    # backend it defers to V8's `JSON.parse` (see `std/json`'s `when
+    # defined(js)` branch and its `importjs: "JSON.parse(#)"`), which throws a
+    # raw `SyntaxError` that NO Nim exception type matches — so
+    # `except CatchableError` catches NOTHING there and the exception escapes
+    # into the renderer.
+    #
+    # Measured on this checkout's Nim rather than argued: a `try/except
+    # CatchableError` around `parseJson("{not json")` answers "caught" under
+    # `nim c` and lets the exception ESCAPE under `nim js -d:nodejs`. The bare
+    # form catches it on both.
+    #
+    # This module runs on both backends by design and parses input that
+    # arrives over the network from an attacker's direction, so the narrow form
+    # is a crash on the backend the renderer ships on. `token.nim:405` and
+    # `device_grant.nim:176` already carry this comment's ancestor;
+    # `identity-token-mutation.sh`'s M17 and G9 arms exist to keep it.
+    raise newException(DiscoveryError, "the discovery document is not JSON")
   if j.kind != JObject:
     raise newException(DiscoveryError,
       "the discovery document is not a JSON object")

@@ -12,7 +12,7 @@
 ## specific rather than a parser that rejects everything.
 
 import std/[base64, json, strutils, unittest]
-import ../../frontend/viewmodel/identity/jwt
+import ../../identity/jwt
 
 proc b64u(s: string): string =
   encode(s).replace('+', '-').replace('/', '_').strip(chars = {'='})
@@ -159,3 +159,60 @@ suite "a verified signature is not the whole check":
     expect JwtError:
       checkClaims(parseJson("""{"iss":"""" & Issuer & """","aud":"""" & Aud &
                             """"}"""), Issuer, Aud, 1_000_000_000)
+
+suite "a malformed token is refused, not thrown":
+  ## THE BACKEND IS THE POINT OF THIS SUITE. On the C backend `parseJson`
+  ## raises `JsonParsingError`, a `CatchableError`, and any guard catches it.
+  ## On the JS backend it defers to V8's `JSON.parse`, which throws a raw
+  ## `SyntaxError` that matches NO Nim exception type — so a
+  ## `try/except CatchableError` catches nothing and the exception escapes into
+  ## the renderer.
+  ##
+  ## `jwt.nim` shipped with the narrow guard and therefore crashed the tab on
+  ## attacker-shaped input, which is the whole class of input this module
+  ## exists to handle. Measured on this checkout's Nim: the same
+  ## `except CatchableError` answers "caught" under `nim c` and lets the
+  ## exception ESCAPE under `nim js -d:nodejs`.
+  ##
+  ## So the assertion is not "it refuses" — it is "it refuses with OUR
+  ## exception type", which is the half that only fails on one backend, and
+  ## this suite runs on both.
+
+  proc seg(s: string): string =
+    encode(s).replace("+", "-").replace("/", "_").replace("=", "")
+
+  test "a token segment that is not JSON raises JwtError, on every backend":
+    let goodHeader = seg("""{"alg":"RS256","kid":"k1"}""")
+    for hostile in ["{not json", "[[[", "\"unterminated", "{\"a\":}"]:
+      expect JwtError:
+        discard parseJwt(goodHeader & "." & seg(hostile) & ".c2ln",
+                         ["RS256"])
+      expect JwtError:
+        discard parseJwt(seg(hostile) & "." & seg("{}") & ".c2ln", ["RS256"])
+
+  test "a JWKS that is not JSON raises JwtError, on every backend":
+    for hostile in ["<html>not a key set</html>", "{not json", "[[["]:
+      expect JwtError:
+        discard parseJwks(hostile)
+
+  test "a base64url problem keeps its own sentence, not the JSON one":
+    # The decode happens OUTSIDE the JSON guard so that a segment using
+    # standard base64 is reported as that, rather than as "not JSON". A bare
+    # `except:` cannot re-raise selectively, so the ordering is the mechanism.
+    var named = false
+    try:
+      discard parseJwt("ab+d.ab+d.ab+d", ["RS256"])
+    except JwtError as e:
+      named = "base64url" in e.msg
+    check named
+
+  test "the refusals above are not a parser that refuses everything":
+    # THE POSITIVE CONTROL. Without it every `expect JwtError` is satisfied by
+    # a `parseJwt` that raises unconditionally.
+    let parts = parseJwt(
+      seg("""{"alg":"RS256","kid":"k1"}""") & "." &
+      seg("""{"sub":"acct"}""") & "." & seg("sig"), ["RS256"])
+    check parts.kid == "k1"
+    check parts.alg == "RS256"
+    check parts.claims{"sub"}.getStr() == "acct"
+    check parseJwks("""{"keys":[{"kty":"RSA","kid":"k1","n":"AQAB","e":"AQAB"}]}""").len == 1

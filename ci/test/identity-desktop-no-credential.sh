@@ -50,6 +50,13 @@ SIGNIN_PATH="src/ct/online_sharing/authenticate.nim"
 SIGNIN_SUPPORT="src/ct/online_sharing/remote_config.nim"
 DEVICE_GRANT="src/frontend/viewmodel/identity/device_grant.nim"
 IDENTITY_DIR="src/frontend/viewmodel/identity"
+# The suites, and their PATH IS LOAD-BEARING. `ci/lib/test-lane-files.sh`
+# collects `src/frontend/viewmodel/tests/unit/test_*.nim` by glob and collects
+# nothing else in this area, so a suite written anywhere else runs only by
+# hand. Two identity suites were written under `src/tests/identity/` and did
+# exactly that: 32 cases that had never once executed in CI. Anything added
+# here must sit where a lane will find it.
+IDENTITY_SUITES="src/frontend/viewmodel/tests/unit/test_identity_*.nim"
 # 74 files in `src/` mention a credential-shaped word anywhere, comments
 # included. The number moved from 52 while nobody was updating it, which is the
 # ratchet doing its job late rather than not at all: this gate was red for ten
@@ -167,6 +174,15 @@ kind_of() {
 	src/frontend/ui/agent_activity.nim) printf 'debuggee' ;;
 	src/frontend/viewmodel/viewmodels/agent_activity_vm.nim) printf 'debuggee' ;;
 	src/frontend/viewmodel/identity/*) printf 'identitybearer' ;;
+	# The identity suites. Their hits are comments explaining the forgeries the
+	# modules refuse — where a user types a password, why an RSA public key
+	# must not be read as an HMAC secret. Step 4 scans these files for CODE
+	# that names or collects a credential, so this kind covers the prose only.
+	#
+	# They sit in the UNIT LANE's directory, and this rule sits ABOVE the
+	# `src/frontend/viewmodel/*` one, or they would classify as `platform` and
+	# an identity suite would be indistinguishable from any viewmodel file.
+	src/frontend/viewmodel/tests/unit/test_identity_*) printf 'identitytest' ;;
 	src/tests/gui/tests/agent-activity/*) printf 'debuggee' ;;
 	src/frontend/tests/*) printf 'platform' ;;
 	src/frontend/viewmodel/views/isonim_agent_activity_view.nim) printf 'provider' ;;
@@ -192,11 +208,6 @@ kind_of() {
 	src/common/value_visualisers_test.nim) printf 'debuggee' ;;
 	# "secretly", in a sentence about two media behaving differently.
 	src/common/view_vocabulary/admission.nim) printf 'prose' ;;
-	# The identity suites. Their hits are comments explaining the forgeries the
-	# modules refuse — where a user types a password, why an RSA public key
-	# must not be read as an HMAC secret. Step 4 scans these files for CODE
-	# that names or collects a credential, so this kind covers the prose only.
-	src/tests/identity/*) printf 'identitytest' ;;
 	*) printf 'UNCLASSIFIED' ;;
 	esac
 }
@@ -315,7 +326,7 @@ id_named=0
 # gate that looked only at `src/frontend/viewmodel/identity/` would not see it.
 # It costs nothing: `scan_code` skips comment lines, and the suites' hits are
 # all prose about the forgeries the modules refuse.
-for f in "${IDENTITY_DIR}"/*.nim src/tests/identity/*.nim; do
+for f in "${IDENTITY_DIR}"/*.nim ${IDENTITY_SUITES}; do
 	[ -f "${f}" ] || continue
 	c="$(count_of "$(scan_code "${f}" "${COLLECTION_PATTERN}")")"
 	if [ "${c}" -gt 0 ]; then
@@ -333,7 +344,7 @@ if [ "${id_named}" -eq "${EXPECTED_IDENTITY_CREDENTIAL_NAMES}" ]; then
 	ok "the identity layer carries ${id_named} budgeted credential-shaped name(s)"
 else
 	bad "the identity layer names a credential in ${id_named} place(s), budget is ${EXPECTED_IDENTITY_CREDENTIAL_NAMES} — a new one is a decision about what this layer may hold, not an oversight"
-	for f in "${IDENTITY_DIR}"/*.nim src/tests/identity/*.nim; do
+	for f in "${IDENTITY_DIR}"/*.nim ${IDENTITY_SUITES}; do
 		[ -f "${f}" ] || continue
 		scan_code "${f}" "${CREDENTIAL_PATTERN}" | sed "s|^|      ${f}:|"
 	done
