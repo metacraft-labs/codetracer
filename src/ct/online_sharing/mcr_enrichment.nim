@@ -55,6 +55,7 @@ type
     blockSize: uint64
     fileBlocks: uint64      ## whole blocks the file actually contains
     trailingBytes: uint64   ## bytes past the last whole block
+    rootBlocks: uint64      ## blocks the header + entry array occupy (§1)
 
 proc base40Decode(value: uint64): string =
   var remaining = value
@@ -92,7 +93,8 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
   ## runs on the `ct upload` path against the user's real recording, which is
   ## routinely gigabytes; slurping it (twice: once as a `string`, once as a
   ## `seq[byte]`) would cost several times the trace's size in RAM for four
-  ## numbers per entry that all live in block 0.
+  ## numbers per entry that all live in the root region (block 0, or the
+  ## `root_blocks` it overflows into).
   var f: File
   if not f.open(path, fmRead):
     return (false, CtfsRootDir(), "cannot open " & path)
@@ -123,13 +125,19 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
   if blockSize == 0:
     return (false, CtfsRootDir(), path & " declares a zero block size")
 
-  # The entry array cannot extend past block 0, and cannot claim more entries
-  # than the file holds bytes for.
+  # `ctfs-container.md` §1: the entry array starts in block 0 and, when the
+  # declared count does not fit there, continues into the contiguous blocks
+  # after it -- `root_blocks = ceil((16 + R + MaxRootEntries * 24) /
+  # BlockSize)`, R = 7 * max_shards * 6.  A recording that takes periodic
+  # checkpoints declares such a region (three members per checkpoint).  This
+  # used to clamp the count to block 0, which read an overflowed directory
+  # SHORT without saying so: every member past entry 170 invisible to the
+  # comparison below.  The count is still bounded by the bytes the file holds.
   var maxRootEntries = int(readU32LE(header, 12))
-  let entriesRoom = int((blockSize - uint64(FixedHeader)) div
-                        uint64(CtfsFileEntrySize))
-  if maxRootEntries > entriesRoom:
-    maxRootEntries = entriesRoom
+  let rootBlocks = max(1'u64,
+    (uint64(FixedHeader) + 7'u64 * uint64(header[7]) * 6'u64 +
+     uint64(maxRootEntries) * uint64(CtfsFileEntrySize) + blockSize - 1) div
+    blockSize)
   let onDiskRoom = int((totalLen - uint64(FixedHeader)) div
                        uint64(CtfsFileEntrySize))
   if maxRootEntries > onDiskRoom:
@@ -158,7 +166,8 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
                            mapBlock: readU64LE(entries, off + 8)))
   (true, CtfsRootDir(members: members, blockSize: blockSize,
                      fileBlocks: totalLen div blockSize,
-                     trailingBytes: totalLen mod blockSize), "")
+                     trailingBytes: totalLen mod blockSize,
+                     rootBlocks: rootBlocks), "")
 
 proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
     tuple[ok: bool, reason: string] =
@@ -176,7 +185,8 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
   ##
   ##   * a container is a whole number of blocks (§5d);
   ##   * an entry with `Size > 0` has a non-null mapping root inside the file;
-  ##   * and the file has at least one root block, plus one mapping block and
+  ##   * and the file has its root blocks (one, or `root_blocks` when the entry
+  ##     array overflows block 0), plus one mapping block and
   ##     `ceil(Size / BlockSize)` data blocks for every non-empty member.
   ##
   ## The last is a strict lower bound — a multi-level mapping needs *more*
@@ -187,7 +197,7 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
                    " bytes past a whole block, so its tail write did not " &
                    "complete")
 
-  var needed = 1'u64  # the root block
+  var needed = dir.rootBlocks  # the root region
   for m in dir.members:
     if m.size == 0:
       continue
@@ -195,6 +205,10 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
       return (false, "'" & m.name & "' declares " & $m.size &
                      " bytes but has no mapping root, so none of its " &
                      "content is reachable")
+    if m.mapBlock < dir.rootBlocks:
+      return (false, "'" & m.name & "' has its mapping root at block " &
+                     $m.mapBlock & ", inside the " & $dir.rootBlocks &
+                     "-block root directory")
     if m.mapBlock >= dir.fileBlocks:
       return (false, "'" & m.name & "' has its mapping root at block " &
                      $m.mapBlock & ", past the " & $dir.fileBlocks &
