@@ -266,6 +266,10 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
 # Call trace
 # ---------------------------------------------------------------------------
 
+const CalltraceFallbackCaption* =
+  "call stack — this recording has no call trace"
+  ## What the calltrace pane says when it lists the stack instead (PLAT-47).
+
 proc calltracePaneView*(vm: CalltraceVM): PaneView =
   ## The call trace: a `List`, one option per visible call line.
   ##
@@ -285,10 +289,28 @@ proc calltracePaneView*(vm: CalltraceVM): PaneView =
   let lines = vm.visibleLines.val
   var options: seq[ViewOption] = @[]
   for line in lines:
+    # THE DESKTOP'S `.call-text`: `name #index` (PLAT-47), indented by the
+    # call's depth, so a row reads the same in every front-end.
     let label = repeat("  ", max(line.depth, 0)) &
-      (if line.displayName.len > 0: line.displayName else: line.name)
+      (if line.displayName.len > 0: line.displayName else: line.name) &
+      " #" & $line.index
     options.add ViewOption(id: $line.index, label: label)
   if options.len == 0:
+    # PLAT-47: THE CALL-STACK FALLBACK, captioned. A recording with no call
+    # trace still has a stack at every stop, and the host hands it over
+    # (`CalltraceVM.fallbackStack`); the pane lists it under a caption that
+    # says what it is, rather than a trace-shaped list that is not one.
+    let stack = vm.fallbackStack.val
+    if stack.len > 0:
+      var frames: seq[ViewOption] = @[]
+      for i, name in stack:
+        frames.add ViewOption(id: "frame-" & $i, label: "#" & $i & " " & name)
+      result.report = CalltraceFallbackCaption
+      result.root = viewCollapsible("calltrace", CalltraceFallbackCaption,
+        @[viewList("calltrace.stack", frames, highlight = 0)],
+        expanded = true)
+      result.entries = entriesOf(result.root)
+      return
     result.report = "no call trace has been loaded"
     result.root = viewText("calltrace.report", result.report)
     result.entries = entriesOf(result.root)

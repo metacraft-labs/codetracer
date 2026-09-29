@@ -318,8 +318,148 @@ proc layoutNodeToGoldenConfig*(tree: LayoutNode): JsonNode =
   result["openPopouts"] = newJArray()
 
 proc generatedDefaultLayoutText*(): string =
-  ## The exact bytes `src/config/default_layout.json` must hold: the shared
-  ## default at depth 0, translated, pretty-printed with the four-space indent
-  ## the hand-written file used, and a trailing newline.
-  pretty(layoutNodeToGoldenConfig(sharedDefaultLayout().tree), indent = 4) &
-    "\n"
+  ## The exact bytes `src/config/default_layout.json` must hold: the BUNDLED
+  ## tree (`layout_model.sharedBundledLayout`), translated, pretty-printed
+  ## with the four-space indent the hand-written file used, and a trailing
+  ## newline.
+  pretty(layoutNodeToGoldenConfig(sharedBundledLayout()), indent = 4) & "\n"
+
+# ---------------------------------------------------------------------------
+# The inverse translation: a GoldenLayout config the desktop loads, read back
+# into the shared vocabulary (PLAT-47 deliverable 1)
+# ---------------------------------------------------------------------------
+#
+# `layoutNodeToGoldenConfig` writes the BUNDLED tree; the desktop then derives
+# each mode's default from it (`index/mode_default_layout.modeDefaultLayout`).
+# The default every front-end opens with is the desktop's DEBUG-mode default,
+# so the generator reads that config back through this function and writes the
+# result as the shared default. It undoes exactly the three runtime facts the
+# forward translation encodes (module header): top-level columns holding one
+# region become that region, and the editor the runtime inserts at index 1 of
+# the root row is put back there with the share the runtime gives it.
+
+proc sizePercent(item: JsonNode): float =
+  ## An item's declared `size` in percent, or 0 for none (an equal share).
+  if item.isNil or item.kind != JObject or not item.hasKey("size"):
+    return 0.0
+  let raw = item["size"]
+  case raw.kind
+  of JString:
+    var text = raw.getStr.strip
+    if text.endsWith("%"):
+      text.setLen(text.len - 1)
+      try:
+        return parseFloat(text)
+      except ValueError:
+        return 0.0
+    0.0
+  of JInt: float(raw.getInt)
+  of JFloat: raw.getFloat
+  else: 0.0
+
+proc roundWeight(x: float): float =
+  ## Two decimals, which is what `percentText` writes: a weight read back is
+  ## the number the config said, not a binary neighbour of it.
+  round(x * 100.0) / 100.0
+
+proc goldenItemToNode(item: JsonNode): LayoutNode =
+  if item.isNil or item.kind != JObject:
+    raise newException(ValueError, "a layout item is not an object")
+  let kind = item{"type"}.getStr
+  case kind
+  of "component":
+    let content = item{"componentState", "content"}
+    if content.isNil or content.kind != JInt:
+      raise newException(ValueError, "a component names no content ordinal")
+    let p = paneOfContent(content.getInt)
+    if p.isNone:
+      raise newException(ValueError, "content ordinal " & $content.getInt &
+        " names no pane of the shared vocabulary")
+    result = pane(p.get)
+  of "stack":
+    var kids: seq[LayoutNode] = @[]
+    for c in item{"content"}.getElems:
+      kids.add goldenItemToNode(c)
+    let active = if item.hasKey("activeItemIndex"): item["activeItemIndex"].getInt
+                 else: 0
+    result = stack(kids, activeIndex = max(0, min(active, max(0, kids.high))))
+  of "row", "column":
+    var kids: seq[LayoutNode] = @[]
+    let items = item{"content"}.getElems
+    var explicit = false
+    for c in items:
+      if sizePercent(c) > 0.0: explicit = true
+    for c in items:
+      let child = goldenItemToNode(c)
+      child.weight = if explicit: roundWeight(sizePercent(c)) else: 0.0
+      kids.add child
+    result = if kind == "row": row(kids) else: column(kids)
+  else:
+    raise newException(ValueError, "unknown layout item type '" & kind & "'")
+
+proc unwrapRegion(n: LayoutNode): LayoutNode =
+  ## A container of ONE child is that child, keeping the container's weight —
+  ## rule 3's column around a top-level stack, undone.
+  result = n
+  while result.kind in {lnRow, lnColumn} and result.children.len == 1:
+    let w = result.weight
+    result = result.children[0]
+    result.weight = w
+
+proc goldenConfigToLayoutNode*(config: JsonNode): LayoutNode =
+  ## **THE INVERSE TRANSLATION.** The arrangement a desktop user sees for
+  ## `config` — the config plus what the runtime does with it — as a
+  ## `LayoutNode`. Raises `ValueError` for a config that names a pane the
+  ## shared vocabulary does not, or that has no root row.
+  ##
+  ## The editor's share is the runtime's (`utils.openNewLayoutContainer`):
+  ## when the root row's declared sizes leave room
+  ## (`unclaimedTopLevelPercent`, 0 < free < 100) the editor takes that room
+  ## and the others keep their declared percentages; when they claim all of
+  ## it, GoldenLayout's `addChild` gives the editor `1/n` and scales the rest
+  ## by `(n-1)/n`.
+  if config.isNil or config.kind != JObject:
+    raise newException(ValueError, "the layout config is not an object")
+  let root = if config.hasKey("root"): config["root"] else: config
+  if root.isNil or root{"type"}.getStr != "row":
+    raise newException(ValueError, "the layout config's root is not a row")
+  let items = root{"content"}.getElems
+  var declared: seq[float] = @[]
+  var total = 0.0
+  for c in items:
+    let s = sizePercent(c)
+    declared.add s
+    total += s
+  var regions: seq[LayoutNode] = @[]
+  for c in items:
+    regions.add unwrapRegion(goldenItemToNode(c))
+  let free = 100.0 - total
+  let n = items.len + 1
+  let editorShare =
+    if free > 0.0 and free < 100.0: round(free)
+    else: 100.0 / float(n)
+  var kids: seq[LayoutNode] = @[]
+  for i, r in regions:
+    if i == DesktopEditorIndex:
+      kids.add pane(paneEditor, weight = roundWeight(editorShare))
+    r.weight =
+      if total > 0.0: roundWeight(declared[i] / total * (100.0 - editorShare))
+      else: 0.0
+    kids.add r
+  if regions.len < DesktopEditorIndex + 1:
+    kids.add pane(paneEditor, weight = roundWeight(editorShare))
+  result = row(kids)
+
+proc generatedSharedDefaultText*(debugModeConfig: JsonNode): string =
+  ## The exact bytes `headless_app/shared_default_layout.generated.json` must
+  ## hold, given the desktop's DEBUG-mode default config
+  ## (`mode_default_layout.modeDefaultLayout(bundled, DebugMode)`): that
+  ## config read back into the shared vocabulary, validated, as a layout
+  ## document node.
+  let tree = goldenConfigToLayoutNode(debugModeConfig)
+  discard normaliseInPlace(tree)
+  let problems = validate(tree)
+  if problems.len > 0:
+    raise newException(ValueError, "the debug-mode default does not " &
+      "validate: " & $problems[0].kind & " at '" & problems[0].path & "'")
+  pretty(toJson(tree), indent = 2) & "\n"

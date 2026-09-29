@@ -379,9 +379,12 @@ proc noirStudioDebugLayout*(): JsObject =
   ##
   ## "Full surface, returnable" still holds, and the difference between the two
   ## modes is no longer only the SUPPRESSION. Debug mode also declares where
-  ## TEST RESULTS and CONSTRAINTS live (`paneHomesForMode`), because the
-  ## bundled tree gives them a column of their own for the EDITING surface §1a
-  ## draws, and a replay inheriting that column was the defect this replaced.
+  ## TEST RESULTS lives (`paneHomesForMode`: a tab of FILES) and does not start
+  ## with CONSTRAINTS at all (`modeDefaultOmittedContentIds`, the user's
+  ## decision of 2026-09-27), because the bundled tree gives them a column of
+  ## their own for the EDITING surface §1a draws, and a replay inheriting that
+  ## column was the defect this replaced. It is the arrangement every
+  ## CodeTracer front-end opens a replay with.
   cast[JsObject](bundledLayoutForMode(DebugMode))
 
 # `layoutComponents` MOVED to `ui/mode_layouts.nim` and is re-exported below.

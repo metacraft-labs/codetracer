@@ -2839,11 +2839,13 @@ generate-default-layout:
     set -euo pipefail
     scratch="$(mktemp -d)"
     trap 'rm -rf "$scratch"' EXIT
-    nim c --hints:off --warnings:off --nimcache:"$scratch/nimcache" \
-      -o:"$scratch/generate_default_layout" \
+    # A node program: the per-mode derivation it runs is the desktop's own
+    # JavaScript (`index/mode_default_layout.modeDefaultLayout`).
+    nim js -d:nodejs --hints:off --warnings:off --nimcache:"$scratch/nimcache" \
+      -o:"$scratch/generate_default_layout.js" \
       src/frontend/headless_app/generate_default_layout.nim
-    "$scratch/generate_default_layout" --out=src/config/default_layout.json
-    echo "wrote src/config/default_layout.json"
+    node "$scratch/generate_default_layout.js" --out=.
+    echo "wrote src/config/default_layout.json and src/frontend/headless_app/shared_default_layout.generated.json"
 
 # Regenerate BOTH consumers of codetracer-design-system from the pinned
 # submodule revision, in one resolver run: the desktop's stylus and the
@@ -2855,7 +2857,8 @@ sync-design-tokens:
     bash scripts/tokens-to-styl.sh \
       ./libs/codetracer-design-system \
       ./src/frontend/styles/generated \
-      --nim-out ./src/frontend/styles/generated/design_tokens.nim
+      --nim-out ./src/frontend/styles/generated/design_tokens.nim \
+      --editor-theme ./src/public/third_party/monaco-themes/themes/customThemes/json
 
 # One-time developer machine setup. Configures the local environment for
 # iterative development of CodeTracer, including BPF script development.
@@ -4840,6 +4843,15 @@ plat46-capture-electron *args:
       just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
       ;;
   esac
+
+# PLAT-47: what the desktop shows on the `calc` recording — the first-run
+# (Debug-mode) arrangement, the editor's colours as rendered, the focused
+# panel's outline, the Files pane's entries and the calltrace pane's calls —
+# written to src/tests/visual/answers/plat47-desktop-parity.electron.json for
+# the terminal's and GPUI's parity suites. Runs this checkout's desktop
+# JavaScript in a prefix of its own (scripts/plat45-desktop-prefix.sh).
+plat47-capture-electron *args:
+  bash scripts/plat47-capture-electron.sh {{args}}
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:

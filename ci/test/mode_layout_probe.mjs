@@ -24,10 +24,11 @@
 //   1. Does a mode switch CHANGE the layout? Before this work it did not — the
 //      previous mode's arrangement was carried across, which is what the
 //      report is about.
-//   2. Are TEST RESULTS and CONSTRAINTS *tabs of* the stacks the request named
-//      (FILES in both modes; the EVENT LOG in debug mode), rather than panes
-//      of their own? Asked by comparing the boxes of the stack headers, not by
-//      reading the layout config the page was handed.
+//   2. Is TEST RESULTS a *tab of* the FILES stack in both modes, rather than a
+//      pane of its own — and is CONSTRAINTS absent from the debug default (the
+//      user's decision of 2026-09-27; it keeps its column in edit mode)? Asked
+//      by comparing the boxes of the stack headers, not by reading the layout
+//      config the page was handed.
 //   3. Does an arrangement SURVIVE A RELOAD? This is the half of the request
 //      most likely to be quietly missing — a layout that applies on switch and
 //      resets on reload satisfies the letter and fails the ask — so the probe

@@ -243,7 +243,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # every "does not contain" below for free.
     let text = screenText(sess)
     checkpoint("status row: " & statusRowText(sess))
-    ck text.contains("CALL STACK")
+    ck text.contains("CALL TRACE")
     ck text.contains("SOURCE")
     ck text.contains("VARIABLES")
     ck text.contains("Timeline")
@@ -268,7 +268,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # …and the screen is otherwise the same debugger, so the flag turned off a
     # protocol and not the application.
     let text = screenText(sess)
-    ck text.contains("CALL STACK")
+    ck text.contains("CALL TRACE")
     ck text.contains("SOURCE")
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))

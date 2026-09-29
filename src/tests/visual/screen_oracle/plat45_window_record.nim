@@ -21,7 +21,7 @@
 ##
 ## Run: `just plat45-window-record` (needs `tesseract`; see PLAT-39).
 
-import std/[json, nativesockets, os, strutils, times]
+import std/[json, math, nativesockets, os, strutils, times]
 
 import ./screen_reading
 import ./vision_producer
@@ -65,8 +65,59 @@ proc labelsIn(text: string): seq[string] =
       continue
     for k in known:
       if cmpIgnoreCase(k, words[i]) == 0: matched = k
+    # A two-word label the OCR engine read as ONE word ("Eventlog"): since
+    # PLAT-47 the window draws the ACTIVE tab bold, and tesseract closes the
+    # gap of a bold two-word label. Matched with its space (and case) removed.
+    if matched.len == 0:
+      for k in known:
+        if k.contains(' ') and
+           cmpIgnoreCase(k.replace(" ", ""), words[i]) == 0:
+          matched = k
     if matched.len > 0: result.add matched
     inc i
+
+const FocusOutlineHex = "#565656"
+  ## PLAT-47: the desktop's selected-panel outline, measured
+  ## (`src/tests/visual/answers/plat47-desktop-parity.electron.json`,
+  ## `focus.outline`) — what the GPUI window must outline its focused region
+  ## in. Read as a GRAY level, because the frame is decoded to gray.
+
+proc grayOf(hex: string): int =
+  ## The 8-bit luma ffmpeg's `gray` conversion gives an sRGB colour (BT.601).
+  let r = parseHexInt(hex[1 .. 2]).float
+  let g = parseHexInt(hex[3 .. 4]).float
+  let b = parseHexInt(hex[5 .. 6]).float
+  int(round(0.299 * r + 0.587 * g + 0.114 * b))
+
+proc edgeOutlined(img: GrayImage; x0, y0, x1, y1: int; want: int): bool =
+  ## Whether a line of pixels (inclusive ends, horizontal or vertical) is in
+  ## the outline's gray along at least 90% of its length.
+  var hits, total = 0
+  let horizontal = y0 == y1
+  let n = if horizontal: x1 - x0 + 1 else: y1 - y0 + 1
+  for i in 0 ..< n:
+    let x = if horizontal: x0 + i else: x0
+    let y = if horizontal: y0 else: y0 + i
+    if x < 0 or y < 0 or x >= img.width or y >= img.height: continue
+    inc total
+    if abs(int(img.pixels[y * img.width + x]) - want) <= 3: inc hits
+  total > 0 and hits * 10 >= total * 9
+
+proc outlineOf(img: GrayImage; x, y, w, h: int): JsonNode =
+  ## PLAT-47: for each edge of a located cell, whether the focus outline runs
+  ## along it — on the cell's own boundary line or the line just outside it
+  ## (the reader's gutter search may or may not include the one-pixel frame).
+  let want = grayOf(FocusOutlineHex)
+  proc either(a, b: bool): bool = a or b
+  %*{
+    "top": either(edgeOutlined(img, x + 4, y, x + w - 5, y, want),
+                  edgeOutlined(img, x + 4, y - 1, x + w - 5, y - 1, want)),
+    "bottom": either(edgeOutlined(img, x + 4, y + h - 1, x + w - 5, y + h - 1, want),
+                     edgeOutlined(img, x + 4, y + h, x + w - 5, y + h, want)),
+    "left": either(edgeOutlined(img, x, y + 4, x, y + h - 5, want),
+                   edgeOutlined(img, x - 1, y + 4, x - 1, y + h - 5, want)),
+    "right": either(edgeOutlined(img, x + w - 1, y + 4, x + w - 1, y + h - 5, want),
+                    edgeOutlined(img, x + w, y + 4, x + w, y + h - 5, want))}
 
 proc ocrLine(img: GrayImage; r: Rect; scratch: string): string =
   var words: seq[string] = @[]
@@ -109,7 +160,8 @@ proc readFrame(path, scratch: string): JsonNode =
       active = tabs[0]
     regions.add %*{"x": cell.x, "y": cell.y, "w": cell.w, "h": cell.h,
                    "strip": strip, "tabs": tabs, "heading": heading,
-                   "active": active}
+                   "active": active,
+                   "outline": outlineOf(img, cell.x, cell.y, cell.w, cell.h)}
   result["regions"] = regions
   result["located"] = %(regions.len > 0)
 
@@ -146,7 +198,7 @@ proc main() =
   for r in record["frames"]["shared"]["regions"]:
     echo "  (", r["x"].getInt, ",", r["y"].getInt, " ", r["w"].getInt, "x",
       r["h"].getInt, ") tabs=", r["tabs"], " active=", r["active"].getStr,
-      " strip='", r["strip"].getStr, "'"
+      " strip='", r["strip"].getStr, "' outline=", r["outline"]
   echo "  blank: located=", record["frames"]["blank"]["located"].getBool,
     " ", record["frames"]["blank"]["reason"].getStr
 

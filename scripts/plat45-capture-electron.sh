@@ -44,28 +44,36 @@ echo "== a scratch build of the generator, with the shared tree edited"
 scratch_src="$work/scratch-src/src/frontend"
 mkdir -p "$scratch_src"
 cp -r src/frontend/headless_app "$scratch_src/"
+ln -s "$repo/src/frontend/index" "$scratch_src/index"
 ln -s "$repo/src/common" "$work/scratch-src/src/common"
+ln -s "$repo/src/config" "$work/scratch-src/src/config"
 python3 - "$scratch_src/headless_app/layout_model.nim" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = """      stack([pane(paneTestResults)]),
-      stack([pane(paneConstraints)])],
-      weight = 18.75)])"""
-new = """      stack([pane(paneConstraints)]),
-      stack([pane(paneTestResults)])],
-      weight = 18.75)])"""
+# PLAT-47: the edit is to the BUNDLED tree the desktop derives every mode's
+# default from, in a region the Debug-mode default keeps (the right column the
+# PLAT-45 version swapped is re-homed away in Debug mode): the state and
+# call-trace stacks change places.
+old = """        stack([pane(paneState), pane(paneScratchpad)], weight = 50.0),
+        stack([pane(paneCalltrace), pane(paneAgentActivity)], weight = 50.0)],"""
+new = """        stack([pane(paneCalltrace), pane(paneAgentActivity)], weight = 50.0),
+        stack([pane(paneState), pane(paneScratchpad)], weight = 50.0)],"""
 if s.count(old) != 1:
-    sys.exit("the scratch edit's anchor is not in sharedDefaultLayout() exactly once")
+    sys.exit("the scratch edit's anchor is not in sharedBundledLayout() exactly once")
 open(p, "w").write(s.replace(old, new))
 PY
-nim c --hints:off --warnings:off --nimcache:"$work/nimcache" \
-  -o:"$work/generate_scratch" \
+# A node program (PLAT-47): the generator runs the desktop's own per-mode
+# derivation, and writes both generated files under a scratch root.
+mkdir -p "$work/scratch-root/src/config" "$work/scratch-root/src/frontend/headless_app"
+nim js -d:nodejs --hints:off --warnings:off --nimcache:"$work/nimcache" \
+  -o:"$work/generate_scratch.js" \
   "$scratch_src/headless_app/generate_default_layout.nim" >"$work/build.log" 2>&1 || {
     cat "$work/build.log" >&2
     exit 1
   }
-"$work/generate_scratch" --out="$work/scratch-default_layout.json"
+node "$work/generate_scratch.js" --out="$work/scratch-root"
+cp "$work/scratch-root/src/config/default_layout.json" "$work/scratch-default_layout.json"
 if cmp -s "$work/scratch-default_layout.json" src/config/default_layout.json; then
   echo "FAIL: the scratch edit did not change the generated default" >&2
   exit 1

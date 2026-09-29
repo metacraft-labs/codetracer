@@ -109,9 +109,10 @@ proc runHeadless*(traceFolder: string; flags: app_capabilities.CapabilityFlags;
     return ExitUsage
   defer: session.close()
 
-  # PLAT-45: the recording's own sources in the Files pane, exactly as the
-  # tty path (`main.interactive`) fills it — one screen, two readings.
-  app.fileTree = initFileTreeModel(recordingFileList(folder))
+  # The recording's own sources reach the Files pane through
+  # `session.refresh` (PLAT-47) — the one path the tty loop takes too. PLAT-45
+  # filled the pane HERE only, so `--headless` showed files the interactive
+  # terminal never did.
   session.header(rt)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()

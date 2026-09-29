@@ -1324,8 +1324,10 @@ inside the directory.
     LOAD. Reasoning about the read path alone is not enough.
   * CodeTracer ships NO `default_edit_layout.json` (`src/config/` has only
     `default_layout.json`), so the edit-layout loader ALWAYS takes its
-    fallback on a fresh install. The fallback reads the debugging layout and
-    sanitises it, which is fine — but the loader's `resetLayoutToDefault`
+    fallback on a fresh install. Since PLAT-47 the fallback derives the
+    EDIT-mode default from the BUNDLED config (`config.installModeDefault`,
+    through `index/mode_default_layout.modeDefaultLayout`), not from the
+    user's debug file — but the loader's `resetLayoutToDefault`
     paths (corrupt / unrepairable / incompatible file) used to return the
     debugging layout RAW. They now go through
     `resetHiddenPanelLayoutToDefault`, which applies the caller's hidden set.
@@ -6314,7 +6316,19 @@ Two traps in the same area, both live:
   carries from the previous line) and trims trailing cells unless `-N`.
 
 - PLAT-45, ONE DEFAULT ARRANGEMENT. `headless_app/layout_model.sharedDefaultLayout()`
-  is the tree every front-end opens with (plus a fold order);
+  is the tree every front-end opens with (plus a fold order). Since PLAT-47 it
+  is NOT authored: it `staticRead`s `headless_app/shared_default_layout.generated.json`,
+  the desktop's DEBUG-MODE layout (bundled config -> `modeDefaultLayout`:
+  sanitize minus hidden+omitted panes, `nestPanesIntoHosts` by
+  `paneHomesForMode`) read back by `desktop_panes.goldenConfigToLayoutNode`.
+  The authored tree is `sharedBundledLayout()` and only generates
+  `default_layout.json`. `modeDefaultLayout` is a TEMPLATE (frontend/types and
+  common/types each `include common_types`, so `LayoutMode` exists twice and a
+  proc would bind one); callers import their own types module.
+  `modeDefaultOmittedContentIds` (Constraints in Debug) is NOT the hidden set:
+  it only leaves the pane out of the starting layout, a user's saved layout
+  keeps it.
+  `sharedEditLayout()` is edit mode's;
   `sharedEditLayout()` is edit mode's. `foldLayout(s, depth)` turns the lowest
   ranked regions into tabs. The terminal picks the SMALLEST depth at which every
   pane gets its cell minimum (`tui/app/layout/profile.depthFor`, minimums in
@@ -6322,11 +6336,17 @@ Two traps in the same area, both live:
   `lpStandard` / `lpUltraWide` are now just named sizes (80x24/120x40/200x50).
   `LayoutSchemaVersion` is 4 (five desktop panes added to `PaneKind`; v3
   documents migrate by re-stamping).
-- `src/config/default_layout.json` IS GENERATED: `just generate-default-layout`
-  (`headless_app/generate_default_layout.nim`, translation table in
-  `headless_app/desktop_panes.nim`). `ci/test/default-layout-fresh.sh` (a
-  `ci/lint/nim.sh` step) fails when the committed file is stale. Edit the
-  shared tree, never the JSON.
+- `src/config/default_layout.json` AND `shared_default_layout.generated.json`
+  ARE GENERATED: `just generate-default-layout` compiles
+  `headless_app/generate_default_layout.nim` with `nim js` and runs it under
+  NODE (the derivation is `importjs` code the desktop runs; `--out=`/`--check=`).
+  The generated JSON must exist for `layout_model` to compile (staticRead), so
+  a bootstrap needs a placeholder. `ci/test/default-layout-fresh.sh` (a
+  `ci/lint/nim.sh` step) diffs both. Edit the bundled tree / pane homes, never
+  the JSON. A TUI started with a `tui-layout.json` remembered before PLAT-47
+  keeps the old arrangement until `:reset-layout` — isolate
+  `CODETRACER_TUI_LAYOUT_DIR` / `XDG_STATE_HOME` in any test that spawns the
+  binary.
 - `ct` STARTS THE ELECTRON MAIN SCRIPT FROM ITS OWN LOCATION
   (`paths.electronIndexPath` = `getAppDir().parentDir/src/index.js`,
   symlinks resolved), NOT from `CODETRACER_PREFIX`. A test prefix that must run
@@ -6352,8 +6372,8 @@ Two traps in the same area, both live:
   counts (the projection divides by them and gets the counts back exactly).
   Keeping the desktop's 25% editor share made the source pane 20 cells at
   80x24. `minPaneWidth` is the content minimum (editor 60 — the old standard
-  profile's source width) floored at the pane's bracketed tab label, so a
-  report region too narrow to name itself folds instead of drawing "[Test Re".
+  profile's source width) floored at the pane's padded tab label, so a
+  report region too narrow to name itself folds instead of drawing a fragment.
   A same-depth resize re-shares in place (`profile.resizeShares`, called by
   `binding.resize` and `shell.reprofile`) so a shrink cannot leave the editor
   under its minimum and the active tabs survive.
@@ -6370,7 +6390,36 @@ Two traps in the same area, both live:
   `just plat45-window-record` -> `src/tests/visual/plat45-gpui-arrangement.json`.
 - A TERMINAL TAB STRIP DOES NOT SCROLL TO ITS ACTIVE TAB: `tabRow` lays the
   labels out left to right and the region's edge cuts them, so in a narrow
-  stack the active label can be clipped ("Event Log  [Timelin" at 80x24).
+  stack the active label can be clipped. Since PLAT-47 `tabRow`'s TEXT does not
+  mark the active tab at all (no brackets, no `─` rule); only the painter's
+  role (`shell.paintTabRow`: srTabActive vs srTabInactive) does, so a test
+  that wants the active tab must read styles, not text.
+
+- PLAT-47 part A (desktop parity):
+  * The TUI editor's colours are GENERATED from the desktop's Monaco theme
+    JSONs (`scripts/tokens-to-styl.sh --editor-theme DIR` -> `dtEditorTheme*`
+    in design_tokens.nim; each theme file has a `codetracer` block for ground,
+    line numbers, execution line, selection). TokenClass -> Monaco scope is ONE
+    table, `tui/app/theme/editor_theme.TokenClassScope`; `UnmappedCaptures`
+    (in `tests/test_plat47_editor_theme.nim`, its only reader) lists
+    lexical-looking grammar categories with no class (coverage test).
+  * Pane frames: `shell.paneFrame` gives each pane a right `│` AND a bottom `─`
+    divider when not flush; `paintDividers` joins junctions and paints the
+    focus ring (`focusRing`: all four sides, whoever owns the divider) in
+    srBorderFocused = `ui/border/primary` (desktop's measured outline).
+  * FILES was empty in the tty because only `host/headless.nim` filled
+    `app.fileTree`; `tui_session.refresh` fills it now (and the call trace
+    from the session's `CalltraceVM`). `TuiSession.calltrace` is NOT
+    `session.session.session.calltraceVM` (the one GPUI's leaf renders).
+  * `source_vm.followExecutionPointer` centres a stop outside the viewport
+    (`topCentringIfOutside`, Monaco's revealLineInCenterIfOutsideViewport).
+    `test_editor_text_store`'s corpus includes source_vm.nim, so editing it
+    moves that suite's ExpectedAssertions.
+  * The GPUI windowed shim (`apply_styles_to_div`) draws fills and padding
+    but NO border and NO font-weight: the focus outline is a padded fill
+    frame (`chrome.paneOutlineStyle`), and bold tabs are plan-only.
+  * `capabilities.AutoDetectSelectsLight = false`: a light OSC 11/COLORFGBG
+    background is reported, the mode stays Dark.
 
 - Layout drag/resize (PLAT-5 closing pass, 2026-09-27):
   * A DOCKED pane is a legal source for `lcMoveTab`, `lcMergeIntoStack` and
@@ -6397,3 +6446,7 @@ Two traps in the same area, both live:
     (`plat5-interaction-mutation-control.sha256`) and per-arm suites; editing
     `layout_model.nim` stales PLAT-4, PLAT-5, PLAT-9, PLAT-45 (digest files) and
     PLAT-6 (no digest file; its TOUCHED includes both layout modules).
+- TUI call trace pages (tui_session.pageCallTrace): the store holds ONE section of the trace (startLineIndex/lines/totalCallsCount); only HeadlessDebugSession.requestAndLoadCalltrace writes it. CalltraceVM's auto-load effect also sends ct/load-calltrace-section on every stop in headless sessions, but nothing applies that answer to the store (no updated-calltrace subscriber), so it cannot clobber a paged section. A section may list one row past totalCallsCount (`<end of program>`); CallTraceModel.total takes the max.
+- The TUI's Python highlighting is a port of monaco-editor 0.54's Python Monarch tokenizer (highlighter.pythonLineSpans), state carried line to line from the WINDOW's first line; tests/test_plat47_editor_theme.nim compares every char of calc with `monaco.editor.tokenize` captured by plat47-desktop-parity-capture.spec.ts. Monaco's offsets are UTF-16 units, the TUI's are cells.
+- The desktop's light theme (config `theme: default_white`) keeps the DARK panels (#282828) and only switches Monaco to codetracerWhite; codetracerWhite.json's `codetracer` block holds the values MEASURED in that state (plat47-desktop-parity-light.electron.json). Launch a light desktop in Playwright with the fixture option `configTheme: "default_white"`.
+- Real-PTY suites launched without CODETRACER_TUI_LAYOUT_DIR read/write the user's ~/.local/state/codetracer/tui-layout.json; a remembered non-default arrangement then fails layout/colour read-backs. Export CODETRACER_TUI_LAYOUT_DIR (and XDG_STATE_HOME) to a scratch dir when running them by hand.

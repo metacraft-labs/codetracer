@@ -83,6 +83,15 @@ type
       ## CTUI-5's risk mitigation for tree-sitter cost; `nil` parses every
       ## frame.
     callStack*: CallStackModel
+    callTrace*: CallTraceModel
+      ## PLAT-47: the recording's call trace (see `views/call_trace.nim`).
+    callTraceLoaded*: bool
+      ## A session asked for the call trace; an empty `callTrace` then means
+      ## the recording has none, and the pane says so.
+    callTraceScrolled*: bool
+      ## The reader scrolled the call trace away from the current call; the
+      ## pane keeps its own position (`callTrace.scrollTop`) until `.` asks
+      ## it to follow again.
     variables*: VariablesModel
     timeline*: TimelineBarModel
     eventLog*: EventLogModel
@@ -280,6 +289,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     source: app.source,
     highlighting: app.highlighting,
     callStack: app.callStack,
+    callTrace: app.callTrace,
+    callTraceLoaded: app.callTraceLoaded,
     variables: app.variables,
     timeline: app.timeline,
     eventLog: app.eventLog,

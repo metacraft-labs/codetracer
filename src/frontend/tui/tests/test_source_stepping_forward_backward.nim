@@ -623,7 +623,7 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
       # rectangle and nobody else's: at 80x24 the side column's first strip
       # is the Variables stack (the call stack is a tab of it — PLAT-45's
       # fold).
-      ck shellText[1].contains("[Variables]")
+      ck shellText[1].contains(" Variables ")
       ck shellText[editorArea.row].contains(SourcePaneTitle)
 
       # ---- FINE-GRAINED SUBSCRIPTION, measured ----------------------------

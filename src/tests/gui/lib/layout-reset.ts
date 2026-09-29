@@ -39,7 +39,7 @@ function bundledDefaultConfigPath(codetracerInstallDir: string): string {
   return path.join(codetracerInstallDir, "src", "config", "default_config.yaml");
 }
 
-export function ensureDefaultConfig(codetracerInstallDir: string): void {
+export function ensureDefaultConfig(codetracerInstallDir: string, theme = ""): void {
   const { userLayoutDir } = currentLayoutPaths();
   const bundled = bundledDefaultConfigPath(codetracerInstallDir);
   if (!fs.existsSync(bundled)) {
@@ -48,7 +48,19 @@ export function ensureDefaultConfig(codetracerInstallDir: string): void {
   if (!fs.existsSync(userLayoutDir)) {
     fs.mkdirSync(userLayoutDir, { recursive: true });
   }
-  fs.copyFileSync(bundled, path.join(userLayoutDir, ".config.yaml"));
+  const target = path.join(userLayoutDir, ".config.yaml");
+  fs.copyFileSync(bundled, target);
+  if (theme.length > 0) {
+    // The bundled config names its theme on one top-level `theme:` line; a
+    // config without exactly one is a changed schema, and silently launching
+    // in the default theme would make a light capture a dark one.
+    const text = fs.readFileSync(target, "utf8");
+    const line = /^theme:.*$/m;
+    if ((text.match(/^theme:.*$/gm) ?? []).length !== 1) {
+      throw new Error(`${bundled} does not carry exactly one top-level 'theme:' line`);
+    }
+    fs.writeFileSync(target, text.replace(line, `theme: "${theme}"`));
+  }
 }
 
 /**

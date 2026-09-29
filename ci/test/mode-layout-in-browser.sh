@@ -429,16 +429,19 @@ import json, sys
 r = json.load(open(sys.argv[1]))
 d = {l["leg"]: l for l in r["legs"]}["debug"]["strips"]
 c, e = d.get("CONSTRAINTS", {}), d.get("EVENT LOG", {})
-if not c.get("present") or not e.get("present"):
-    print("no"); print("debug mode is missing CONSTRAINTS or EVENT LOG entirely")
-elif c.get("stackKey") != e.get("stackKey"):
+if not e.get("present"):
+    print("no"); print("debug mode is missing the EVENT LOG entirely")
+elif c.get("present"):
+    # The user, 2026-09-27: CONSTRAINTS does not belong in the default replay
+    # layout (it was a tab of the EVENT LOG stack until then) —
+    # `frontend.modeDefaultOmittedContentIds(DebugMode)`.
     print("no")
-    print("CONSTRAINTS is in [%s], EVENT LOG is in [%s]"
-          % (c.get("stackKey"), e.get("stackKey")))
+    print("debug mode's default places CONSTRAINTS in [%s]" % c.get("stackKey"))
 else:
-    print("ok"); print("both are tabs of [%s]" % c.get("stackKey"))
+    print("ok"); print("the EVENT LOG is in [%s] and CONSTRAINTS is not placed"
+                       % e.get("stackKey"))
 ')"
-check "$(printf '%s' "${out}" | head -1)" "CONSTRAINTS is a tab OF the EVENT LOG stack in debug mode"
+check "$(printf '%s' "${out}" | head -1)" "debug mode's default does not place CONSTRAINTS"
 note "$(printf '%s' "${out}" | tail -n +2)"
 
 # A pane GoldenLayout has parked in the overflow dropdown is in the DOM, has an

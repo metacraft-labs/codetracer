@@ -78,7 +78,7 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 320
+const ExpectedAssertions = 260
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -229,10 +229,10 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
         ck r.area.width >= minPaneWidth(r.pane)
         ck r.area.height >= minPaneHeight(r.pane)
     checkpoint("panes checked: " & $checkedPanes)
-    # PLAT-45: 80x24 folds the shared default four times (three regions —
-    # the source pane at its 56-cell minimum and one side column); 120x40
-    # and 200x60 show it unfolded (seven each).
-    ck checkedPanes == 3 + 7 + 7
+    # PLAT-47: 80x24 folds the shared default (the desktop's Debug layout)
+    # twice (three regions — the source pane at its minimum and one side
+    # column); 120x40 and 200x60 show it unfolded (five each).
+    ck checkedPanes == 3 + 5 + 5
 
   test "the invariants hold across a sweep of terminal sizes, not three":
     # Three geometries cannot find a rounding defect that only bites at a
@@ -265,10 +265,11 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
   test "a stack gives its slot to the active tab and nothing to the others":
     let body = bodyFor(80, 24)
     let node = profileLayout(lpCompact)
-    # The event stack — the last region in reading order at 80x24, where the
-    # fold has put the two NS9 panes behind its three own tabs.
+    # The event stack — the last region in reading order at 80x24: its three
+    # own tabs (PLAT-47: the NS9 panes are no longer folded into it — TESTS is
+    # a tab of FILES and CONSTRAINTS is not in the default).
     let tabs = stackTabs(node)[^1]
-    ck tabs.len == 5
+    ck tabs.len == 3
     var slot = CellArea()
     var checkedTabs = 0
     for i, kind in tabs:
@@ -294,8 +295,8 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
       let region = proj.regions[proj.regions.len - 1]
       ck region.pane == kind
       ck region.activeTab == i
-      ck region.tabs.len == 5
-    ck checkedTabs == 5
+      ck region.tabs.len == 3
+    ck checkedTabs == 3
 
   test "the desktop's own default layout projects faithfully":
     # `defaultReplayLayout()` is what a replay session opens with on the

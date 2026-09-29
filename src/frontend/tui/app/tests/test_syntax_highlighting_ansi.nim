@@ -19,7 +19,7 @@
 ##      reachable and parse their own language — asserted as the COUNT ten,
 ##      because the archive holds exactly ten and a loop that skipped one would
 ##      satisfy "at least one";
-##   2. the nine token classes map to nine DISTINCT `CellStyle`s — the count
+##   2. the twelve token classes map to twelve DISTINCT `CellStyle`s — the count
 ##      again, not a spot check of two of them;
 ##   3. a real Nim file through the real tree-sitter grammar produces at least
 ##      four distinct classes, and the cells the compositor paints carry the
@@ -70,7 +70,7 @@ import ../views/source_pane
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 144
+const ExpectedAssertions = 147
 
 var countedAssertions = 0
 
@@ -166,7 +166,7 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
     ck reached.len == 10
     ck parsed == 10
 
-  test "the nine token classes carry nine distinct styles":
+  test "the twelve token classes carry twelve distinct styles":
     # Not a spot check. A palette with one repeat renders two classes
     # identically on screen while every span-level assertion stays green, and
     # the only assertion that catches it is over the whole palette.
@@ -175,8 +175,11 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
       let style = tokenStyle(class)
       ck style notin seen
       seen.add style
-    ck seen.len == 9
-    ck ord(high(TokenClass)) - ord(low(TokenClass)) + 1 == 9
+    # Twelve since PLAT-47: a string's quote, a square bracket and a
+    # decorator, the scopes the desktop's Monaco Python tokenizer colours on
+    # their own.
+    ck seen.len == 12
+    ck ord(high(TokenClass)) - ord(low(TokenClass)) + 1 == 12
     # And the default class really is the terminal default, so unhighlighted
     # text is unstyled rather than styled-to-look-unstyled.
     ck tokenStyle(tcPlain).isDefault
@@ -241,14 +244,15 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
         for span in paneRows[rowIndex]:
           if span.style == tokenStyle(tcKeyword) and span.text.strip().len > 0:
             let cell = h.cellAt(rowIndex, col)
-            # PLAT-46: the keyword's colour is the design system's
-            # `colors/editor/syntax/keyword` (Dracula pink, `#ff79c6`), and a
-            # row composited without `degradeRows` is resolved on the
-            # 16-colour rung — the NEAREST xterm entry to that hex, which is
-            # bright magenta. Checked against the derivation, not restated.
-            ck roleStyle(srSyntaxKeyword, cdAnsi16).fg == "bright_magenta"
+            # PLAT-47: the keyword's colour is the DESKTOP'S — its Monaco
+            # theme's `keyword` rule (`#5a9dd4`, generated into
+            # `editor-theme/rule/keyword`) — and a row composited without
+            # `degradeRows` is resolved on the 16-colour rung, the nearest
+            # xterm entry in that hex's family: cyan. Checked against the
+            # derivation, not restated.
+            ck roleStyle(srSyntaxKeyword, cdAnsi16).fg == "cyan"
             ck cell.fg.kind == ckAnsi
-            ck cell.fg.ansi == acBrightMagenta
+            ck cell.fg.ansi == acCyan
             ck attrBold in cell.attrs
             inc found
           col += cellWidthOf(span.text)

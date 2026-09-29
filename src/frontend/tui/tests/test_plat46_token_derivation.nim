@@ -10,10 +10,13 @@
 ## rung from a table that happens to agree with today's tokens. So this suite
 ## changes a token for real:
 ##
-##   1. copies the pinned `codetracer-design-system` into a scratch directory;
-##   2. rewrites `colors/editor/syntax/keyword` in `mapped/mapped.json` to two
-##      colours nothing else in the system uses (one per mode);
-##   3. runs the REAL generator (`scripts/tokens-to-styl.sh --nim-out`) over it;
+##   1. copies the desktop's Monaco theme documents into a scratch directory
+##      (since PLAT-47 the keyword role is painted from them, generated beside
+##      the pinned `codetracer-design-system`);
+##   2. rewrites their `keyword` rule to two colours nothing else in the
+##      system uses (one per mode);
+##   3. runs the REAL generator (`scripts/tokens-to-styl.sh --nim-out
+##      --editor-theme`) over the pinned design system and the scratch themes;
 ##   4. compiles a probe against the REAL `app/theme/` modules, copied into a
 ##      scratch tree beside the regenerated `design_tokens.nim`, and the same
 ##      probe against the committed one;
@@ -54,7 +57,7 @@ const
     ## Colours no token of the system resolves to, so a rung that still shows
     ## the old keyword pink could not have come from the new hex by accident.
   ThemeModules = ["roles.nim", "cell_style.nim", "colour_math.nim",
-                  "palette.nim", "capabilities.nim"]
+                  "palette.nim", "capabilities.nim", "editor_theme.nim"]
   ProbeSource = """
 import ./palette
 import ./capabilities
@@ -117,6 +120,10 @@ proc buildProbe(scratchTree, tokensNim, root: string): string =
   createDir(scratchTree / "src" / "common" / "terminal_graphics")
   for m in ThemeModules:
     copyFile(root / "src" / "frontend" / "tui" / "app" / "theme" / m, theme / m)
+  let syntax = scratchTree / "src" / "frontend" / "tui" / "app" / "syntax"
+  createDir(syntax)
+  copyFile(root / "src" / "frontend" / "tui" / "app" / "syntax" /
+             "token_class.nim", syntax / "token_class.nim")
   for m in ["tiers.nim", "oklab.nim", "raster.nim"]:
     copyFile(root / "src" / "common" / "terminal_graphics" / m,
              scratchTree / "src" / "common" / "terminal_graphics" / m)
@@ -145,22 +152,30 @@ suite "PLAT-46 deliverable 6: every rung is derived from the token":
     createDir(scratch)
     defer: removeDir(scratch)
 
+    # PLAT-47: the keyword role is painted from the DESKTOP'S Monaco theme
+    # (`codetracerDark.json` / `codetracerWhite.json`), which the same
+    # generator reads beside the pinned design system. So the edit is to a
+    # scratch copy of those two files — the keyword rule — and the design
+    # system is the pinned one, untouched.
     let ds = designSystemSource(root, scratch)
-    let mutated = scratch / "ds-mutated"
-    copyDir(ds, mutated)
-    let mappedPath = mutated / "mapped" / "mapped.json"
-    var mapped = parseFile(mappedPath)
-    let keyword = mapped["colors"]["editor"]["syntax"]["keyword"]
-    keyword["$value"] = %NewDark
-    keyword["$extensions"]["modes"]["Dark"] = %NewDark
-    keyword["$extensions"]["modes"]["Light"] = %NewLight
-    writeFile(mappedPath, pretty(mapped))
+    let themes = scratch / "monaco-themes"
+    createDir(themes)
+    let themeSrc = root / "src" / "public" / "third_party" / "monaco-themes" /
+                   "themes" / "customThemes" / "json"
+    for (name, hex) in [("codetracerDark.json", NewDark),
+                        ("codetracerWhite.json", NewLight)]:
+      var doc = parseFile(themeSrc / name)
+      for rule in doc["rules"]:
+        if rule{"token"}.getStr == "keyword":
+          rule["foreground"] = %hex[1 .. ^1]
+      writeFile(themes / name, pretty(doc))
 
     let tokensNim = scratch / "gen" / "design_tokens.nim"
     let (genOut, genCode) = run("bash " &
       quoteShell(root / "scripts" / "tokens-to-styl.sh") & " " &
-      quoteShell(mutated) & " " & quoteShell(scratch / "gen") &
-      " --nim-out " & quoteShell(tokensNim))
+      quoteShell(ds) & " " & quoteShell(scratch / "gen") &
+      " --nim-out " & quoteShell(tokensNim) &
+      " --editor-theme " & quoteShell(themes))
     checkpoint(genOut)
     ck genCode == 0
     ck readFile(tokensNim).contains(NewDark)

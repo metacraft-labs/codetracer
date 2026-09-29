@@ -664,6 +664,27 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     let pane = nthChild(container, i)
     if not pane.isNil: leaves.add pane
   var painted = 0
+  # PLAT-47 — THE FOCUSED PANE, outlined as the desktop outlines its selected
+  # panel: the pane the window's keys reach (`armEditorPane` gives the editor
+  # element focus), so the editor. Every region sits in a FRAME one pixel
+  # wider on each side (`FocusOutlinePx`) whose fill is the outline — the
+  # desktop's selected-panel colour around the focused region, the window's
+  # own background (invisible) around the rest — so the outline is closed on
+  # all four sides, drawn around the tab strip and the body together as the
+  # desktop's is, and focus moving never moves content. A frame rather than a
+  # border because the shim's `apply_styles_to_div` draws fills and padding
+  # and no border.
+  let focusedId = $paneEditor
+  proc framed(inner: GpuiElement; w, h: int; focused: bool): GpuiElement =
+    let frame = r.createElement("div")
+    r.setAttribute(frame, "data-ct-focus-frame", $focused)
+    for (key, value) in paneOutlineStyle(focused):
+      r.setStyle(frame, key, value)
+    r.setStyle(frame, "width", $max(1, w) & "px")
+    r.setStyle(frame, "height", $max(1, h) & "px")
+    r.setStyle(frame, "rounded", "4px")
+    r.appendChild(frame, inner)
+    frame
   proc stylePane(pane: GpuiElement; w, h: int) =
     r.setStyle(pane, "background-color", chromeOf(crPaneBackground))
     r.setStyle(pane, "color", chromeOf(crWindowForeground))
@@ -768,15 +789,16 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
           names.add label
           if i == active: activePane = id
         let leaf = byPane.getOrDefault(activePane)
+        let inset = 2 * FocusOutlinePx
         if tabs.len <= 1:
           if leaf.isNil: return nil
-          stylePane(leaf, w, h)
-          return leaf
+          stylePane(leaf, w - inset, h - inset)
+          return framed(leaf, w, h, activePane == focusedId)
         # A STACK: the strip, then the active tab's own pane beneath it.
         let box = r.createElement("div")
         r.setStyle(box, "flex-direction", "column")
-        r.setStyle(box, "width", $max(1, w) & "px")
-        r.setStyle(box, "height", $max(1, h) & "px")
+        r.setStyle(box, "width", $max(1, w - inset) & "px")
+        r.setStyle(box, "height", $max(1, h - inset) & "px")
         r.setStyle(box, "background-color", chromeOf(crPaneBackground))
         r.setStyle(box, "rounded", "4px")
         let strip = r.createElement("div")
@@ -785,17 +807,21 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
         r.setStyle(strip, "gap", $(2 * ChromeGapPx) & "px")
         r.setStyle(strip, "padding", $(ChromePaddingPx div 2) & "px")
         r.setStyle(strip, "height", $TabStripPx & "px")
+        # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), as the desktop's:
+        # every tab on the pane's surface, the active one in the label tier
+        # and bold, the others in the disabled tier — no brackets, no rule.
         for i, name in names:
           let tab = r.createElement("div")
-          r.setStyle(tab, "color", if i == active: chromeOf(crPaneTitleForeground)
-                                   else: chromeOf(crWindowForeground))
+          r.setAttribute(tab, "data-ct-tab-active", $(i == active))
+          for (key, value) in tabStyle(i == active):
+            r.setStyle(tab, key, value)
           r.appendChild(tab, r.createTextNode(name))
           r.appendChild(strip, tab)
         r.appendChild(box, strip)
         if not leaf.isNil:
-          stylePane(leaf, w, h - TabStripPx)
+          stylePane(leaf, w - inset, h - inset - TabStripPx)
           r.appendChild(box, leaf)
-        return box
+        return framed(box, w, h, activePane == focusedId)
       nil
     let top = region(dock["center"], usableW, usableH)
     if not top.isNil:

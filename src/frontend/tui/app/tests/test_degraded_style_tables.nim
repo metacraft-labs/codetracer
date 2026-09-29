@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2561
+const ExpectedAssertions = 2665
 
 var countedAssertions = 0
 
@@ -80,10 +80,14 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 96
-    ## `srNone` plus 95 painted roles.
+  ExpectedRoleCount = 100
+    ## PLAT-47 added `srLineNumberActive` (the execution line's number, the
+    ## desktop's active line number) and the three syntax roles the desktop's
+    ## Monaco Python tokenizer colours on their own (a string's quote, a
+    ## square bracket, a decorator).
+    ## `srNone` plus 99 painted roles.
   ExpectedGroupCount = 18
-  ExpectedMergeCount = 1
+  ExpectedMergeCount = 4
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.
 
@@ -225,9 +229,14 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # surface/base/panel, the editor on editor/surface/primary, the current
     # line on editor/syntax/current-line), and the desktop's GoldenLayout strip
     # for the tabs. Pointing any of these at another token reddens this case.
-    const Fg = [(srSyntaxKeyword, dtColorsEditorSyntaxKeyword),
+    # PLAT-47 re-bound four of them, each to what the DESKTOP measures: the
+    # editor to its Monaco theme (keyword, the editor ground, the execution
+    # line, the selection — generated `editor-theme/*` tokens), the focused
+    # border to the desktop's selected-panel outline (ui/border/primary), and
+    # the tab strip onto the pane's surface.
+    const Fg = [(srSyntaxKeyword, dtEditorThemeRuleKeyword),
                 (srBorderPane, dtColorsUiBorderSecondary),
-                (srBorderFocused, dtColorsUiBorderFocus),
+                (srBorderFocused, dtColorsUiBorderPrimary),
                 (srChromeTitle, dtColorsUiTextPrimaryLabel),
                 (srChromeMuted, dtColorsUiTextPrimaryCaptionSubtle),
                 (srTabActive, dtColorsUiTextPrimaryLabel),
@@ -235,15 +244,15 @@ suite "CTUI-11 Tier 1: degraded style tables":
     const Bg = [(srSurfaceCanvas, dtColorsUiSurfaceBaseCanvas),
                 (srSurfacePanel, dtColorsUiSurfaceBasePanel),
                 (srSurfaceCard, dtColorsUiSurfaceBaseCard),
-                (srSurfaceEditor, dtColorsEditorSurfacePrimary),
+                (srSurfaceEditor, dtEditorThemeGround),
                 (srSurfaceStatusLine, dtColorsUiSurfaceBaseRaised),
                 (srSurfaceInput, dtColorsUiSurfaceInputDefault),
-                (srSurfaceSelection, dtColorsEditorSyntaxSelection),
-                (srSurfaceCurrentLine, dtColorsEditorSyntaxCurrentLine),
-                (srLineExecution, dtColorsEditorSyntaxCurrentLine),
-                (srTabBar, dtColorsUiSurfacePrimaryDefault),
+                (srSurfaceSelection, dtEditorThemeSelection),
+                (srSurfaceCurrentLine, dtEditorThemeExecutionLine),
+                (srLineExecution, dtEditorThemeExecutionLine),
+                (srTabBar, dtColorsUiSurfaceBasePanel),
                 (srTabActive, dtColorsUiSurfaceBasePanel),
-                (srTabInactive, dtColorsUiSurfacePrimaryDefault)]
+                (srTabInactive, dtColorsUiSurfaceBasePanel)]
     for (role, token) in Fg:
       ck spec(role).hasFg and spec(role).fg == token
     for (role, token) in Bg:
@@ -625,26 +634,36 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # strip.
     var tabRow = -1
     for i in 0 ..< truecolor.len:
-      if rowText(truecolor[i]).contains("[Variables]"):
+      if rowText(truecolor[i]).contains(" Variables "):
         tabRow = i
     ck tabRow >= 0
     if tabRow >= 0:
-      var activeBg, inactiveBg = ""
+      var activeBg, inactiveBg, activeFg, inactiveFg = ""
       for span in truecolor[tabRow]:
         if span.text.contains("Variables") and activeBg.len == 0:
           activeBg = span.style.bg
+          activeFg = span.style.fg
         # The stack is 16 cells wide at 120x30 (15 inside its separator), so
         # the inactive label is cut to its first two letters at the edge.
         if span.text.contains("Sc") and inactiveBg.len == 0:
           inactiveBg = span.style.bg
-      checkpoint("tabs: active " & activeBg & " inactive " & inactiveBg)
+          inactiveFg = span.style.fg
+      checkpoint("tabs: active " & activeFg & " on " & activeBg &
+                 ", inactive " & inactiveFg & " on " & inactiveBg)
+      # PLAT-47: both on the pane's surface, as the desktop's strip measures…
       ck activeBg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark)
-      ck inactiveBg == tokenHex(dtColorsUiSurfacePrimaryDefault, dmDark)
+      ck inactiveBg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark)
+      # …and told apart by their FOREGROUNDS (the label tier for the active
+      # tab, the disabled tier for the rest), which is the only colour the
+      # painter's role choice now moves.
+      ck activeFg == tokenHex(dtColorsUiTextPrimaryLabel, dmDark)
+      ck inactiveFg == tokenHex(dtColorsUiTextPrimaryDisabled, dmDark)
     # A PANE sits on the panel surface — its title row as much as its body —
     # and the header on its card: the shell's fills, read off the emitter.
     var paneRow = -1
     for i in 0 ..< truecolor.len:
-      if rowText(truecolor[i]).contains("CALL STACK"):
+      if rowText(truecolor[i]).contains("CALL STACK") or
+         rowText(truecolor[i]).contains("CALL TRACE"):
         paneRow = i
     ck paneRow > 0
     if paneRow > 0:

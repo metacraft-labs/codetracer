@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 88
+  ExpectedAppModules = 91
     ## RE-COUNTED ON 2026-09-26 (PLAT-45): 86 → 88. `layout/cells.nim` (the
     ## terminal's cell vocabulary, split out of `profile.nim` so the fold can
     ## project) and `tests/plat45_old_profiles.nim` (the old three profile trees,
@@ -236,7 +236,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 166
+  ExpectedStyleLiterals = 177
+    ## 2026-09-28: +4, all roles — the three syntax classes the desktop's
+    ## Monaco Python tokenizer colours on their own (`source_pane.TokenStyles`)
+    ## and the call trace's not-yet-loaded row (`call_trace.CallTraceLoadingStyle`).
     ## RE-COUNTED ON 2026-09-26: 192 → 166 and 24 → 26, PLAT-46. Every literal
     ## is now a ROLE (`CellStyle(role: …)`), and the count moved for three
     ## reasons, none of them a colour: `degradation.nim` lost its four
@@ -287,7 +290,7 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 26
+  ExpectedStyledFiles = 27
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour

@@ -109,7 +109,9 @@ const
 
   DraggedPane = paneFileTree
   DraggedPaneTitle = "Files"
-  DraggedPaneTitleRow = "[Files]"
+  DraggedPaneTitleRow = " Files   VC"
+    ## The Files stack's strip in its 12-cell region (`VCS` cut at the edge);
+    ## PLAT-47: padded labels, no brackets.
 
   DropRow = 0
   DropCol = 40
@@ -279,7 +281,7 @@ template ckArrangementIsDefault(sess: var TuiTestSession; label: string) =
     let contents = sess.screenContents()
     checkpoint(label & ": default arrangement expected")
     ck contents.contains(DraggedPaneTitleRow)
-    ck contents.contains("[Variables]")     ## the shared default's Variables stack
+    ck contents.contains(" Variables ")     ## the shared default's Variables stack
     ck not contents.contains(DockStripGlyph)
 
 template ckQuitsCleanly(sess: var TuiTestSession; label: string) =

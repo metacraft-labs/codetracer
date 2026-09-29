@@ -310,7 +310,7 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       let before = sess.screenContents()
       ck not before.contains(DockStripGlyph)
       ck before.contains(DraggedPaneTitleRow)
-      ck before.contains("[Variables]")     ## the shared default's Variables stack
+      ck before.contains(" Variables ")     ## the shared default's Variables stack
       ck model.app.layoutBinding.interaction.kind == ikNone
 
       let source = model.layoutGeometry().regionOfPane(DraggedPane)

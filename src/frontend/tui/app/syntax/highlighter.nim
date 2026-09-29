@@ -70,24 +70,15 @@ import std/[strutils, tables, unicode]
 
 import isonim_tui
 
-type
-  TokenClass* = enum
-    ## The palette a terminal source pane can actually distinguish.
-    ##
-    ## Deliberately small. §3.3.2 names "keywords, types, strings, comments,
-    ## identifiers"; operators and punctuation are added because every grammar
-    ## emits them as anonymous leaves and leaving them `tcPlain` makes a line
-    ## of code read as one undifferentiated run.
-    tcPlain
-    tcKeyword
-    tcType
-    tcString
-    tcNumber
-    tcComment
-    tcIdentifier
-    tcOperator
-    tcPunctuation
+import ./token_class
 
+# `TokenClass` lives in `token_class.nim` (PLAT-47), a module with no imports,
+# because the theme (`app/theme/editor_theme.nim`) maps each class to the
+# desktop's Monaco token scope and must not pull the tree-sitter runtime in
+# with it. Re-exported, so every caller that named it here still does.
+export token_class
+
+type
   SyntaxSpan* = object
     ## One classified run of a single line, in CELL columns relative to the
     ## line's first character.
@@ -196,7 +187,7 @@ proc tree_sitter_move_on_aptos(): ptr TSLanguage {.importc.}
 proc tree_sitter_sway(): ptr TSLanguage {.importc.}
 proc tree_sitter_tolk(): ptr TSLanguage {.importc.}
 
-proc languageFor(grammar: GrammarId): Language =
+proc languageFor*(grammar: GrammarId): Language =
   ## The `TSLanguage*` handle for a grammar. `giNone` never reaches here — the
   ## caller branches on the mode first — and a `doAssert` says so rather than
   ## returning a null handle that `ts_parser_set_language` would refuse with an
@@ -636,6 +627,272 @@ proc lexicalSpansForLine(lexer: LexerId; line: string): seq[SyntaxSpan] =
   result = mergeSpans(raw)
 
 # ---------------------------------------------------------------------------
+# Tier 2, Python: the desktop's own tokenizer, ported
+# ---------------------------------------------------------------------------
+#
+# PLAT-47 requires the terminal's editor to look like the desktop's, and the
+# desktop colours Python with Monaco's Monarch tokenizer
+# (`monaco-editor/esm/vs/basic-languages/python/python.js`, monaco-editor
+# 0.54.0, the copy `src/public/third_party/monaco-editor` links). Sharing the
+# THEME is not enough: the generic line scanner below classified 57% of the
+# non-blank characters of the `calc` fixture differently from Monaco (every
+# docstring line after the first, the builtins Monaco calls keywords, the
+# operators Monaco leaves in the default colour, capitalised names), measured
+# against `monaco.editor.tokenize` captured from the real Electron app.
+#
+# So Python is lexed by a port of THAT tokenizer: the same states, the same
+# rules in the same order, the same keyword list, the same scopes. Each branch
+# below cites the Monarch rule it implements. Monarch matches each rule at the
+# current position of the line (`^(?:rule)` over `line.substr(pos)`), so a
+# rule's `^` is "here" and its `$` is "the end of this line"; a position no
+# rule matches is ONE character in the default scope (`defaultToken: ""`).
+# The state survives the end of a line, which is how a docstring stays a
+# string across lines.
+#
+# The class of each scope (`tcKeyword` for `keyword`, `tcStringEscape` for
+# `string.escape`, ...) goes back to a scope through
+# `editor_theme.TokenClassScope`, so a character's colour is the rule Monaco
+# resolves for the scope the desktop gives it.
+# `tests/test_plat47_editor_theme.nim` compares every character of `calc`
+# with the desktop's capture.
+
+type
+  PyState = enum
+    ## Monarch's tokenizer states for Python (the `tokenizer` object's keys).
+    psRoot            ## `root` (with `whitespace`, `numbers`, `strings`)
+    psDocSingle       ## `endDocString`
+    psDocDouble       ## `endDblDocString`
+    psStringSingle    ## `stringBody`
+    psStringDouble    ## `dblStringBody`
+    psFStringSingle   ## `fStringBody`
+    psFStringDouble   ## `fDblStringBody`
+    psFStringDetail   ## `fStringDetail`
+
+  PythonLexState* = object
+    ## Monarch's state stack, carried from one line to the next.
+    stack: seq[PyState]
+
+const
+  MonacoPythonKeywords = [
+    "False", "None", "True", "_", "and", "as", "assert", "async", "await",
+    "break", "case", "class", "continue", "def", "del", "elif", "else",
+    "except", "exec", "finally", "for", "from", "global", "if", "import",
+    "in", "is", "lambda", "match", "nonlocal", "not", "or", "pass", "print",
+    "raise", "return", "try", "type", "while", "with", "yield", "int",
+    "float", "long", "complex", "hex", "abs", "all", "any", "apply",
+    "basestring", "bin", "bool", "buffer", "bytearray", "callable", "chr",
+    "classmethod", "cmp", "coerce", "compile", "delattr", "dict", "dir",
+    "divmod", "enumerate", "eval", "execfile", "file", "filter", "format",
+    "frozenset", "getattr", "globals", "hasattr", "hash", "help", "id",
+    "input", "intern", "isinstance", "issubclass", "iter", "len", "locals",
+    "list", "map", "max", "memoryview", "min", "next", "object", "oct",
+    "open", "ord", "pow", "property", "reversed", "range", "raw_input",
+    "reduce", "reload", "repr", "round", "self", "set", "setattr", "slice",
+    "sorted", "staticmethod", "str", "sum", "super", "tuple", "unichr",
+    "unicode", "vars", "xrange", "zip", "__dict__", "__methods__",
+    "__members__", "__class__", "__bases__", "__name__", "__mro__",
+    "__subclasses__", "__init__", "__import__"]
+    ## Monarch's `keywords` for Python, verbatim (it names builtins such as
+    ## `len`, `print` and `self` too, and the desktop colours them as
+    ## keywords). Its repeats (`complex`, `print`, `reversed`, `type`) are
+    ## listed once here; membership is all that is asked.
+  JsSpace = {' ', '\t', '\v', '\f', '\r'}
+    ## JavaScript's `\s` over the bytes a source line can hold (a line has no
+    ## `\n`); a non-ASCII space falls to the default scope, one rune.
+  PyIdentStart = {'a'..'z', 'A'..'Z', '_'}
+  PyWordChars = {'a'..'z', 'A'..'Z', '0'..'9', '_'}
+  PyDetailStops = {'}', '\'', ':', '!', '='}
+
+func initPythonLexState*(): PythonLexState =
+  PythonLexState(stack: @[psRoot])
+
+func oneChar(line: string; i: int): int =
+  ## One rune's bytes at `i`: Monarch's "one character" default token (a
+  ## UTF-16 unit there; the colour is the default either way).
+  max(1, int(runeLenAt(line, i)))
+
+func runUntil(line: string; start: int; stops: set[char]): int =
+  var j = start
+  while j < line.len and line[j] notin stops: inc j
+  j - start
+
+func charAt(line: string; i: int): char =
+  if i >= 0 and i < line.len: line[i] else: '\0'
+
+func matchPythonNumber(line: string; pos: int): int =
+  ## The length of Monarch's `numbers` match at `pos`, or 0:
+  ##   /-?0x([abcdef]|[ABCDEF]|\d)+[lL]?/            number.hex
+  ##   /-?(\d*\.)?\d+([eE][+\-]?\d+)?[jJ]?[lL]?/     number
+  ## (with JavaScript's backtracking out of the optional `(\d*\.)` group).
+  var i = pos
+  if charAt(line, i) == '-': inc i
+  if charAt(line, i) == '0' and charAt(line, i + 1) == 'x':
+    var j = i + 2
+    while j < line.len and line[j] in {'0'..'9', 'a'..'f', 'A'..'F'}: inc j
+    if j > i + 2:
+      if charAt(line, j) in {'l', 'L'}: inc j
+      return j - pos
+  var ends = -1
+  var k = i
+  while k < line.len and line[k] in {'0'..'9'}: inc k
+  if charAt(line, k) == '.':
+    var m = k + 1
+    while m < line.len and line[m] in {'0'..'9'}: inc m
+    if m > k + 1: ends = m          # (\d*\.)\d+
+  if ends < 0:
+    if k > i: ends = k              # \d+
+    else: return 0
+  var e = ends
+  if charAt(line, e) in {'e', 'E'}:
+    var x = e + 1
+    if charAt(line, x) in {'+', '-'}: inc x
+    var y = x
+    while y < line.len and line[y] in {'0'..'9'}: inc y
+    if y > x: e = y
+  if charAt(line, e) in {'j', 'J'}: inc e
+  if charAt(line, e) in {'l', 'L'}: inc e
+  e - pos
+
+proc pythonLineSpans*(line: string; state: var PythonLexState): seq[SyntaxSpan] =
+  ## One line of Python, classified as the desktop's Monaco tokenizer
+  ## classifies it, starting in `state` and leaving `state` as the line
+  ## leaves it.
+  if state.stack.len == 0:
+    state.stack = @[psRoot]
+  var raw: seq[SyntaxSpan] = @[]
+  var pos = 0
+  template emit(n: int; cls: TokenClass) =
+    let stop = min(line.len, pos + n)
+    if cls != tcPlain:
+      raw.add SyntaxSpan(startCell: cellOffsetAtByte(line, pos),
+                         endCell: cellOffsetAtByte(line, stop), class: cls)
+    pos = stop
+  template popAll() = state.stack = @[psRoot]
+  template push(s: PyState) = state.stack.add s
+
+  while pos < line.len:
+    let c = line[pos]
+    case state.stack[^1]
+    of psRoot:
+      # ---- `whitespace` ----
+      if c in JsSpace:                                   # /\s+/  white
+        var j = pos
+        while j < line.len and line[j] in JsSpace: inc j
+        emit(j - pos, tcPlain)
+      elif c == '#':                                     # /(^#.*$)/  comment
+        emit(line.len - pos, tcComment)
+      elif line.continuesWith("'''", pos):               # /'''/  @endDocString
+        emit(3, tcString)
+        push psDocSingle
+      elif line.continuesWith("\"\"\"", pos):            # /"""/  @endDblDocString
+        emit(3, tcString)
+        push psDocDouble
+      # ---- `numbers` ----
+      elif matchPythonNumber(line, pos) > 0:             # number / number.hex
+        emit(matchPythonNumber(line, pos), tcNumber)
+      # ---- `strings` ----
+      elif c == '\'' and pos == line.high:               # /'$/  string.escape, @popall
+        emit(1, tcStringEscape)
+        popAll()
+      elif c == 'f' and charAt(line, pos + 1) == '\'':   # /f'{1,3}/  @fStringBody
+        var n = 1
+        while n < 3 and charAt(line, pos + 1 + n) == '\'': inc n
+        emit(1 + n, tcStringEscape)
+        push psFStringSingle
+      elif c == '\'':                                    # /'/  @stringBody
+        emit(1, tcStringEscape)
+        push psStringSingle
+      elif c == '"' and pos == line.high:                # /"$/  string.escape, @popall
+        emit(1, tcStringEscape)
+        popAll()
+      elif c == 'f' and charAt(line, pos + 1) == '"':    # /f"{1,3}/  @fDblStringBody
+        var n = 1
+        while n < 3 and charAt(line, pos + 1 + n) == '"': inc n
+        emit(1 + n, tcStringEscape)
+        push psFStringDouble
+      elif c == '"':                                     # /"/  @dblStringBody
+        emit(1, tcStringEscape)
+        push psStringDouble
+      # ---- `root` ----
+      elif c in {',', ':', ';'}:                         # /[,:;]/  delimiter
+        emit(1, tcPunctuation)
+      elif c in {'[', ']'}:                              # @brackets: delimiter.bracket
+        emit(1, tcBracket)
+      elif c in {'{', '}', '(', ')'}:                    # @brackets: .curly / .parenthesis
+        emit(1, tcPunctuation)
+      elif c == '@' and charAt(line, pos + 1) in PyIdentStart:   # /@[a-zA-Z_]\w*/  tag
+        var j = pos + 2
+        while j < line.len and line[j] in PyWordChars: inc j
+        emit(j - pos, tcTag)
+      elif c in PyIdentStart:                            # /[a-zA-Z_]\w*/  keyword | identifier
+        var j = pos + 1
+        while j < line.len and line[j] in PyWordChars: inc j
+        let cls = if line[pos ..< j] in MonacoPythonKeywords: tcKeyword
+                  else: tcIdentifier
+        emit(j - pos, cls)
+      else:                                              # no rule: defaultToken ""
+        emit(oneChar(line, pos), tcPlain)
+    of psDocSingle, psDocDouble:
+      let q = if state.stack[^1] == psDocSingle: '\'' else: '"'
+      if c != q:                                         # /[^']+/  string
+        emit(runUntil(line, pos, {q}), tcString)
+      elif charAt(line, pos + 1) == q and charAt(line, pos + 2) == q:
+        emit(3, tcString)                                # /'''/  string, @popall
+        popAll()
+      else:                                              # /'/  string
+        emit(1, tcString)
+    of psStringSingle, psStringDouble:
+      let q = if state.stack[^1] == psStringSingle: '\'' else: '"'
+      let run = runUntil(line, pos, {'\\', q})
+      if run > 0 and pos + run == line.len:              # /[^\\']+$/  string, @popall
+        emit(run, tcString)
+        popAll()
+      elif run > 0:                                      # /[^\\']+/  string
+        emit(run, tcString)
+      elif c == '\\' and pos + 1 < line.len:             # /\\./  string
+        emit(1 + oneChar(line, pos + 1), tcString)
+      elif c == q:                                       # /'/  string.escape, @popall
+        emit(1, tcStringEscape)
+        popAll()
+      else:                                              # /\\$/  string (state goes on)
+        emit(1, tcString)
+    of psFStringSingle, psFStringDouble:
+      let q = if state.stack[^1] == psFStringSingle: '\'' else: '"'
+      let run = runUntil(line, pos, {'\\', q, '{', '}'})
+      if run > 0 and pos + run == line.len:              # /[^\\'\{\}]+$/  string, @popall
+        emit(run, tcString)
+        popAll()
+      elif run > 0:                                      # /[^\\'\{\}]+/  string
+        emit(run, tcString)
+      elif c == '{' and pos + 1 < line.len and line[pos + 1] notin PyDetailStops:
+        var j = pos + 1                                  # /\{[^\}':!=]+/  identifier, @fStringDetail
+        while j < line.len and line[j] notin PyDetailStops: inc j
+        emit(j - pos, tcIdentifier)
+        push psFStringDetail
+      elif c == '\\' and pos + 1 < line.len:             # /\\./  string
+        emit(1 + oneChar(line, pos + 1), tcString)
+      elif c == q:                                       # /'/  string.escape, @popall
+        emit(1, tcStringEscape)
+        popAll()
+      elif c == '\\':                                    # /\\$/  string
+        emit(1, tcString)
+      else:                                              # no rule: defaultToken ""
+        emit(1, tcPlain)
+    of psFStringDetail:
+      if c == ':' and pos + 1 < line.len and line[pos + 1] != '}':
+        emit(1 + runUntil(line, pos + 1, {'}'}), tcString)   # /[:][^}]+/  string
+      elif c == '!' and charAt(line, pos + 1) in {'a', 'r', 's'}:
+        emit(2, tcString)                                # /[!][ars]/  string
+      elif c == '=':                                     # /=/  string
+        emit(1, tcString)
+      elif c == '}':                                     # /\}/  identifier, @pop
+        emit(1, tcIdentifier)
+        state.stack.setLen(state.stack.len - 1)
+      else:                                              # no rule: defaultToken ""
+        emit(oneChar(line, pos), tcPlain)
+  result = mergeSpans(raw)
+
+# ---------------------------------------------------------------------------
 # The public entry point
 # ---------------------------------------------------------------------------
 
@@ -658,8 +915,17 @@ proc highlightWindow*(path: string; firstLine: int;
     result.lines = treeSitterSpans(result.grammar, lines)
   of hmLexical:
     result.lines = newSeq[seq[SyntaxSpan]](lines.len)
-    for i, line in lines:
-      result.lines[i] = lexicalSpansForLine(result.lexer, line)
+    if result.lexer == lxPython:
+      # The desktop's tokenizer, whose state runs on from line to line. It
+      # starts at the WINDOW's first line in Monarch's initial state, which is
+      # Monaco's state there whenever the window starts at line 1 or outside
+      # a multi-line string (see `pythonLineSpans`).
+      var state = initPythonLexState()
+      for i, line in lines:
+        result.lines[i] = pythonLineSpans(line, state)
+    else:
+      for i, line in lines:
+        result.lines[i] = lexicalSpansForLine(result.lexer, line)
 
 proc spansForLine*(h: FileHighlight; line: int): seq[SyntaxSpan] =
   ## The spans of one 1-based line, or none when it is outside the window.

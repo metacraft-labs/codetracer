@@ -168,11 +168,14 @@ suite "CTUI-14: --headless honours --goto and refuses what it cannot honour":
       # frame that came back empty would satisfy the inequality at the end for
       # free, which is the shape Verification-Harness-Traps §4 is about.
       ck plainFrame.len > 1000
-      ck plainFrame.contains("CALL STACK")
+      # PLAT-47: the calltrace pane lists the recording's call TRACE.
+      ck plainFrame.contains("CALL TRACE")
       ck plainFrame.contains("SOURCE")
       # PLAT-45: the shared default's event stack opens on the Event Log tab
       # (the timeline is its second tab), so the frame names the event stack.
-      ck plainFrame.contains("[Event Log]")
+      # PLAT-47: a tab is its padded label; which one is active is a matter of
+      # colour and weight, not of brackets in the text.
+      ck plainFrame.contains(" Event Log ")
 
       # ---- the recording's own extent, read off that frame ----------------
       let (minTick, maxTick) = extentOf(plainFrame)

@@ -108,8 +108,9 @@
       "gpuiStoppedLine": 56,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "_whyGpuiEditorRows": "PLAT-47 (2026-09-27): a stop outside the viewport is CENTRED, as the desktop's revealLineInCenterIfOutsideViewport does (source_vm.topCentringIfOutside). This pin used to put the stopped line on the last row.",
       "gpuiEditorRows": [
-        "rows=45;first=12;last=56"
+        "rows=45;first=34;last=78"
       ],
       "electronEditorRows": [
         "rows=38;first=37;last=74"
@@ -121,8 +122,9 @@
       "gpuiStoppedLine": 110,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "_whyGpuiEditorRows": "PLAT-47 (2026-09-27): a stop outside the viewport is CENTRED, as the desktop's revealLineInCenterIfOutsideViewport does (source_vm.topCentringIfOutside). This pin used to put the stopped line on the last row.",
       "gpuiEditorRows": [
-        "rows=45;first=66;last=110"
+        "rows=45;first=72;last=116"
       ],
       "electronEditorRows": [
         "rows=36;first=82;last=117",
@@ -137,8 +139,9 @@
       "gpuiStoppedLine": 113,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "_whyGpuiEditorRows": "PLAT-47 (2026-09-27): a stop outside the viewport is CENTRED, as the desktop's revealLineInCenterIfOutsideViewport does (source_vm.topCentringIfOutside). This pin used to put the stopped line on the last row.",
       "gpuiEditorRows": [
-        "rows=54;first=60;last=113"
+        "rows=54;first=63;last=116"
       ],
       "electronEditorRows": [
         "rows=45;first=73;last=117",

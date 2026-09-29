@@ -120,7 +120,7 @@ suite "CTUI-14 Tier 2: signals during a live session":
     # are painted and the terminal is in raw mode on the alternate screen.
     let screen = sess.screenContents()
     ck screen.contains("SOURCE")
-    ck screen.contains("CALL STACK")
+    ck screen.contains("CALL TRACE")
     let before = altScreenCounts(sess)
     ck before.enters == 1
     ck before.leaves == 0

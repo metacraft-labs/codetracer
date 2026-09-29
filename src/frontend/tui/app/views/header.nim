@@ -128,7 +128,9 @@ proc tickCoordinates*(m: HeaderModel): string =
     result.add " [" & formatFloat(pct, ffDecimal, 1) & "%]"
 
 proc sessionTabsText*(m: HeaderModel): string =
-  ## The §3.3.1 tab strip: the active session in brackets, the rest bare.
+  ## The §3.3.1 tab strip: every session's title padded by one cell. The
+  ## active one is told apart by its ROLE, not by brackets (PLAT-47): the
+  ## shell paints the span `sessionTabSpans` reports as the active tab.
   ##
   ## Empty for a single session, on purpose. Tabs that are always drawn make
   ## "one session" and "the tab strip failed to render" the same picture, and
@@ -138,8 +140,9 @@ proc sessionTabsText*(m: HeaderModel): string =
     return ""
   var parts: seq[string] = @[]
   for s in m.sessions:
-    parts.add(if s.active: "[" & s.title & "]" else: " " & s.title & " ")
+    parts.add " " & s.title & " "
   parts.join("")
+
 
 type HeaderDetail* = enum
   ## How much of the header is shown. Not a style — a WIDTH BUDGET, applied in
@@ -201,3 +204,20 @@ proc headerText*(m: HeaderModel; width: int): string =
   if tabs.len > 0 and textCells(line) + 2 + textCells(tabs) + 1 <= room:
     line.add "  " & tabs
   fitCells(fitCells(line, max(0, room - 1)) & " ", room) & badge
+
+proc sessionTabSpans*(m: HeaderModel; width: int): seq[tuple[col, width: int;
+                                                         active: bool]] =
+  ## Where each session tab sits on the header row `headerText(m, width)`
+  ## paints — empty when the strip is not shown (one session, or no room).
+  let text = headerText(m, width)
+  let tabs = sessionTabsText(m)
+  if tabs.len == 0:
+    return
+  let at = text.find("  " & tabs)
+  if at < 0:
+    return
+  var col = textCells(text[0 ..< at]) + 2
+  for s in m.sessions:
+    let w = textCells(" " & s.title & " ")
+    result.add (col: col, width: w, active: s.active)
+    col += w

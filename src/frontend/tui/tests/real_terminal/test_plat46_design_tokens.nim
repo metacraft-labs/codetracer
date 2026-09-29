@@ -66,7 +66,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 128
+const ExpectedAssertions = 148
 
 var countedAssertions = 0
 
@@ -96,7 +96,7 @@ type
 const
   ContrastIssue = "codetracer-specs/issues/2026-09-26-design-system-contrast-failures.md"
   CurrentLineIssue = "codetracer-specs/issues/2026-09-26-design-system-current-line-equals-comment.md"
-  FiledContrastFailures: array[32, FiledPair] = [
+  FiledContrastFailures: array[33, FiledPair] = [
     (dmDark, dtColorsUiBorderSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue),
     (dmDark, dtColorsUiBorderSecondary, dtColorsEditorSurfacePrimary, ContrastIssue),
     (dmDark, dtColorsUiDividerSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue),
@@ -128,11 +128,41 @@ const
     (dmLight, dtColorsUiTextSuccessPrimary, dtColorsEditorSyntaxSelection, ContrastIssue),
     (dmLight, dtColorsEditorSyntaxComment, dtColorsEditorSyntaxCurrentLine, CurrentLineIssue),
     (dmLight, dtColorsEditorSyntaxPrimary, dtColorsEditorSyntaxCurrentLine, CurrentLineIssue),
-    (dmLight, dtColorsEditorSyntaxTertiary, dtColorsEditorSyntaxCurrentLine, CurrentLineIssue)]
+    (dmLight, dtColorsEditorSyntaxTertiary, dtColorsEditorSyntaxCurrentLine, CurrentLineIssue),
+    # Not new: the design system's yellow on its own light panel was matched,
+    # until the light editor ground was measured (2026-09-28), by the
+    # desktop register's (action/secondary, editor ground) entry, because the
+    # composed light ground WAS the light panel. Filed where it belongs.
+    (dmLight, dtColorsEditorActionSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue)]
     ## THE PAIRS THE DESIGN SYSTEM ITSELF FAILS, where this front-end paints
     ## them — filed, not silently adjusted (PLAT-46's contrast requirement).
     ## COUNTED: a new failing pair reddens the sweep until it is filed here
     ## and in the issue.
+
+  DesktopIssue = "codetracer-specs/issues/2026-09-27-desktop-editor-and-focus-contrast-below-aa.md"
+  DesktopParityPairs: array[10, FiledPair] = [
+    (dmDark, dtColorsUiBorderPrimary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
+    (dmDark, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
+    (dmDark, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
+    (dmLight, dtColorsUiBorderPrimary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
+    (dmLight, dtColorsUiBorderSecondary, dtColorsUiSurfaceBaseCanvas, DesktopIssue),
+    (dmLight, dtColorsEditorActionSecondary, dtEditorThemeExecutionLine, DesktopIssue),
+    (dmLight, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
+    (dmLight, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
+    (dmLight, dtEditorThemeRuleString, dtEditorThemeGround, DesktopIssue),
+    (dmLight, dtEditorThemeRuleDefault, dtEditorThemeGround, DesktopIssue)]
+    ## PLAT-47: THE PAIRS THE DESKTOP ITSELF RENDERS BELOW THE FLOOR, which the
+    ## terminal now reproduces because it must EQUAL the desktop: its editor is
+    ## the desktop's Monaco theme (measured resting line numbers 2.04:1, a
+    ## comment on the execution line 3.80:1), and its focused pane carries the
+    ## desktop's selected-panel outline (`ui/border/primary`, 2.01:1 against
+    ## the desktop's own panel, 2.35:1 against the terminal's divider ground).
+    ## Light is opt-in (`--theme=light`; detection never selects it) and its
+    ## editor is the desktop's `codetracerWhite` theme on the ground the
+    ## desktop's light theme measurably draws (its dark panel, #282828). A
+    ## SEPARATE register from the design system's, which does
+    ## not grow: these are the desktop's pairs, filed against the desktop.
+    ## COUNTED, like the other.
 
   ChromeTokens = [dtColorsUiBorderSecondary, dtColorsUiBorderFocus,
                   dtColorsUiBorderPrimary, dtColorsUiDividerSecondary,
@@ -140,7 +170,8 @@ const
                   dtColorsUiTextPrimaryCaptionSubtle,
                   dtColorsUiTextPrimaryDisabled, dtColorsEditorSyntaxTertiary,
                   dtColorsEditorSyntaxSubtle, dtColorsEditorSyntaxDisabled,
-                  dtColorsEditorActionSecondary]
+                  dtColorsEditorActionSecondary,
+                  dtEditorThemeLineNumber, dtEditorThemeActiveLineNumber]
     ## Tokens painted as CHROME (borders, rules, muted captions, line numbers,
     ## de-emphasised code, the gutter's execution pointer), held to WCAG's
     ## 3:1 rather than 4.5:1.
@@ -282,10 +313,11 @@ proc focusedBorders(sess: var TuiTestSession; cols, rows: int;
 type
   TabRead = object
     activeBg, inactiveBg, barBg, activeFg, inactiveFg: string
+    activeBold, inactiveBold: bool
 
 proc readTabs(sess: var TuiTestSession): TabRead =
   let (cols, rows) = Stacked
-  let r = rowOf(sess, cols, rows, "[Variables]")
+  let r = rowOf(sess, cols, rows, " Variables ")
   if r < 0: return
   let active = colOf(sess, r, cols, "Variables")
   # The Variables stack's inactive tab: Scratchpad, in the shared default
@@ -296,6 +328,8 @@ proc readTabs(sess: var TuiTestSession): TabRead =
   result.inactiveBg = hexOfColor(sess.cellAt(r, inactive).bg)
   result.inactiveFg = hexOfColor(sess.cellAt(r, inactive).fg)
   result.barBg = hexOfColor(sess.cellAt(r, cols - 3).bg)
+  result.activeBold = caBold in sess.cellAt(r, active).attrs
+  result.inactiveBold = caBold in sess.cellAt(r, inactive).attrs
 
 proc tokensWithHex(hex: string; mode: DesignMode): seq[DesignToken] =
   for t in DesignToken:
@@ -304,6 +338,9 @@ proc tokensWithHex(hex: string; mode: DesignMode): seq[DesignToken] =
 
 proc isFiled(mode: DesignMode; fgHex, bgHex: string): bool =
   for f in FiledContrastFailures:
+    if f.mode == mode and hexT(f.fg, mode) == fgHex and hexT(f.bg, mode) == bgHex:
+      return true
+  for f in DesktopParityPairs:
     if f.mode == mode and hexT(f.fg, mode) == fgHex and hexT(f.bg, mode) == bgHex:
       return true
   false
@@ -365,22 +402,31 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       settleOnDebugger(sess, Wide.cols, Wide.rows)
       let f = readWide(sess)
       checkpoint(modeName & " read back: " & $f)
-      ck f.keywordFg == hexT(dtColorsEditorSyntaxKeyword, mode)
+      # PLAT-47: the editor is the desktop's Monaco theme, and the focused
+      # pane's outline is the desktop's selected-panel colour.
+      ck f.keywordFg == hexT(dtEditorThemeRuleKeyword, mode)
       ck hexT(dtColorsUiBorderSecondary, mode) in f.ruleFgs
-      ck hexT(dtColorsUiBorderFocus, mode) in f.ruleFgs
+      ck hexT(dtColorsUiBorderPrimary, mode) in f.ruleFgs
       ck focusedBorders(sess, Wide.cols, Wide.rows,
-                        hexT(dtColorsUiBorderFocus, mode)) > 0
+                        hexT(dtColorsUiBorderPrimary, mode)) > 0
       ck f.statusBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
       ck f.modeFg == hexT(dtColorsUiTextSuccessPrimary, mode)
-      ck f.currentLineBg == hexT(dtColorsEditorSyntaxCurrentLine, mode)
+      ck f.currentLineBg == hexT(dtEditorThemeExecutionLine, mode)
       ck f.panelBg == hexT(dtColorsUiSurfaceBasePanel, mode)
-      ck f.editorBg == hexT(dtColorsEditorSurfacePrimary, mode)
+      ck f.editorBg == hexT(dtEditorThemeGround, mode)
       # DELIVERABLE 8: NO CELL shows the terminal's own background.
       ck f.cells == Wide.cols * Wide.rows
       ck f.unfilled == 0
-      # SURFACES DISTINCT: editor against panel.
-      ck oklabDistance(parseHexColour(f.editorBg), parseHexColour(f.panelBg)) >=
-         MinSurfaceDistance
+      # THE EDITOR SITS WHERE THE DESKTOP'S DOES (PLAT-47). Dark: on the
+      # pane's own surface — the desktop renders Monaco transparent over its
+      # pane (PLAT-46 had kept the two apart by OKLab distance). Light: on the
+      # ground the desktop's light theme MEASURABLY draws, its dark panel
+      # (`plat47-desktop-parity-light.electron.json`), which is not the design
+      # system's light panel the terminal's chrome uses.
+      if mode == dmDark:
+        ck f.editorBg == f.panelBg
+      else:
+        ck f.editorBg != f.panelBg
       # CONTRAST, over every painted pair on this screen.
       var pairs = 0
       let bad = contrastViolations(sess, Wide.cols, Wide.rows, mode, pairs)
@@ -396,17 +442,17 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       settleOnDebugger(tabs, Stacked.cols, Stacked.rows)
       let t = readTabs(tabs)
       checkpoint(modeName & " tabs: " & $t)
+      # PLAT-47: the desktop's strip, measured — every tab and the strip on
+      # the pane's own surface; the active tab told apart by its text colour
+      # and (the terminal's weight cue) bold.
       ck t.activeBg == hexT(dtColorsUiSurfaceBasePanel, mode)
-      ck t.inactiveBg == hexT(dtColorsUiSurfacePrimaryDefault, mode)
-      ck t.barBg == hexT(dtColorsUiSurfacePrimaryDefault, mode)
+      ck t.inactiveBg == hexT(dtColorsUiSurfaceBasePanel, mode)
+      ck t.barBg == hexT(dtColorsUiSurfaceBasePanel, mode)
       ck t.activeFg == hexT(dtColorsUiTextPrimaryLabel, mode)
       ck t.inactiveFg == hexT(dtColorsUiTextPrimaryDisabled, mode)
-      # The tab bar differs from the pane body; the active tab from the
-      # inactive ones — as read off the cells.
-      ck oklabDistance(parseHexColour(t.barBg), parseHexColour(t.activeBg)) >=
-         MinSurfaceDistance
-      ck oklabDistance(parseHexColour(t.activeBg),
-                       parseHexColour(t.inactiveBg)) >= MinSurfaceDistance
+      ck t.activeBold and not t.inactiveBold
+      ck oklabDistance(parseHexColour(t.activeFg),
+                       parseHexColour(t.inactiveFg)) >= MinSurfaceDistance
       var tabPairs = 0
       let tabBad = contrastViolations(tabs, Stacked.cols, Stacked.rows, mode,
                                       tabPairs)
@@ -419,7 +465,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     # The register may not become a place to park a pair that PASSES: every
     # entry is recomputed from the tokens and must fail its floor (4.5:1, or
     # 3:1 for a chrome token), and must name its issue.
-    ck FiledContrastFailures.len == 32
+    ck FiledContrastFailures.len == 33   # 32 + the pair the composed light ground masked
     var genuine = 0
     for f in FiledContrastFailures:
       let ratio = contrastRatio(parseHexColour(hexT(f.fg, f.mode)),
@@ -431,17 +477,35 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         inc genuine
       ck f.issue.startsWith("codetracer-specs/issues/2026-09-26-design-system-")
     ck genuine == FiledContrastFailures.len
+    # …and the desktop's own pairs (PLAT-47), on the same terms.
+    ck DesktopParityPairs.len == 10
+    var desktopGenuine = 0
+    for f in DesktopParityPairs:
+      let ratio = contrastRatio(parseHexColour(hexT(f.fg, f.mode)),
+                                parseHexColour(hexT(f.bg, f.mode)))
+      let floor = if f.fg in ChromeTokens: 3.0 else: 4.5
+      if ratio >= floor:
+        checkpoint("NOT A FAILURE: " & $f & " ratio " & $ratio)
+      else:
+        inc desktopGenuine
+      ck f.issue == DesktopIssue
+    ck desktopGenuine == DesktopParityPairs.len
 
-  test "OSC 11: a light answer paints Light, a dark answer Dark":
+  test "OSC 11: a light answer is REPORTED and still paints Dark; a dark answer Dark":
+    # PLAT-47: the user's decision of 2026-09-27 — background detection does
+    # not select Light until the design system's Light editor surface is fixed
+    # (`capabilities.AutoDetectSelectsLight`); the answer is still read and
+    # named on the status line, with the flag that selects Light.
     for (reply, hex, expectMode) in [
-        ("\x1b]11;rgb:ffff/ffff/ffff\x1b\\", "#ffffff", dmLight),
+        ("\x1b]11;rgb:ffff/ffff/ffff\x1b\\", "#ffffff", dmDark),
         ("\x1b]11;rgb:1e1e/1e1e/2e2e\x07", "#1e1e2e", dmDark)]:
       var sess = builderFor(@[tracePath], Wide.cols, Wide.rows).spawn()
       let asked = waitForTranscript(sess, "\x1b]11;?")
       ck asked
       sess.send(reply)
-      let want = "bg: osc11 " & hex & " -> " &
-                 (if expectMode == dmLight: "light" else: "dark")
+      let want = "bg: osc11 " & hex &
+                 (if hex == "#ffffff": " (light; --theme=light to use it)"
+                  else: "") & " -> dark"
       let status = waitForStatus(sess, Wide.cols, Wide.rows, want)
       checkpoint("status after " & hex & ": " & status)
       ck status.contains(want)
@@ -450,19 +514,20 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       # frame is what the cells are read from.
       settleOnDebugger(sess, Wide.cols, Wide.rows)
       let f = readWide(sess)
-      ck f.editorBg == hexT(dtColorsEditorSurfacePrimary, expectMode)
+      ck f.editorBg == hexT(dtEditorThemeGround, expectMode)
       ck f.panelBg == hexT(dtColorsUiSurfaceBasePanel, expectMode)
       finish(sess)
 
-  test "COLORFGBG alone decides, and no answer at all is Dark in time":
+  test "COLORFGBG is read but does not select Light, and no answer at all is Dark in time":
     var fgbg = builderFor(@[tracePath], Wide.cols, Wide.rows,
                           colorFgBg = "0;15").spawn()
     waitForOpeningFrame(fgbg, Wide.cols, Wide.rows)
     let opening = statusRowText(fgbg, Wide.cols, Wide.rows)
     checkpoint("COLORFGBG=0;15 frame 0: " & opening)
-    ck opening.contains("bg: colorfgbg -> light")
+    # PLAT-47: read, reported, and Dark (`AutoDetectSelectsLight`).
+    ck opening.contains("bg: colorfgbg -> dark")
     settleOnDebugger(fgbg, Wide.cols, Wide.rows)
-    ck readWide(fgbg).editorBg == hexT(dtColorsEditorSurfacePrimary, dmLight)
+    ck readWide(fgbg).editorBg == hexT(dtEditorThemeGround, dmDark)
     finish(fgbg)
 
     let started = getMonoTime()
@@ -476,7 +541,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     # and the rest of a cold start fits in far less than the 5 s allowed here.
     ck frame0Ms < 5000
     settleOnDebugger(silent, Wide.cols, Wide.rows)
-    ck readWide(silent).editorBg == hexT(dtColorsEditorSurfacePrimary, dmDark)
+    ck readWide(silent).editorBg == hexT(dtEditorThemeGround, dmDark)
     finish(silent)
 
   test "--theme overrides every detected background":
@@ -489,7 +554,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     sess.send("\x1b]11;rgb:ffff/ffff/ffff\x1b\\")
     settleOnDebugger(sess, Wide.cols, Wide.rows)
     discard sess.drainOutput(300)
-    ck readWide(sess).editorBg == hexT(dtColorsEditorSurfacePrimary, dmDark)
+    ck readWide(sess).editorBg == hexT(dtEditorThemeGround, dmDark)
     finish(sess)
 
   test "--palette=terminal: only the sixteen colours and the defaults":
@@ -548,7 +613,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     checkpoint("unanswered: keyword fg kind " & $cell.fg.kind)
     ck cell.fg.kind == ckIndexed
     ck cell.fg.idx.int == nearestAnsi16Family(
-      parseHexColour(hexT(dtColorsEditorSyntaxKeyword, dmDark)))
+      parseHexColour(hexT(dtEditorThemeRuleKeyword, dmDark)))
     finish(plain)
 
     var answered = builderFor(@[tracePath], Wide.cols, Wide.rows,
@@ -560,7 +625,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     waitForCompleteFrame(answered, Wide.cols, Wide.rows)
     let f = readWide(answered)
     checkpoint("answered: " & $f)
-    ck f.keywordFg == hexT(dtColorsEditorSyntaxKeyword, dmDark)
+    ck f.keywordFg == hexT(dtEditorThemeRuleKeyword, dmDark)
     ck f.unfilled == 0
     finish(answered)
 
@@ -613,12 +678,18 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         ck not capture.contains("38;2;")
       of "rgb":
         ck not status.contains("tmux withholds")
-        let kw = parseHexColour(hexT(dtColorsEditorSyntaxKeyword, dmDark))
+        let kw = parseHexColour(hexT(dtEditorThemeRuleKeyword, dmDark))
         ck capture.contains("38;2;" & $kw.r & ";" & $kw.g & ";" & $kw.b)
       else:
-        # tmux answers OSC 11 with the pane's own background.
-        let ed = parseHexColour(hexT(dtColorsEditorSurfacePrimary, dmLight))
+        # tmux answers OSC 11 with the pane's own background — reported, and
+        # (PLAT-47, `AutoDetectSelectsLight`) still painted Dark.
+        let ed = parseHexColour(hexT(dtEditorThemeGround, dmDark))
         ck capture.contains("48;2;" & $ed.r & ";" & $ed.g & ";" & $ed.b)
+        # The LIGHT panel is the marker: the light editor's ground is the
+        # desktop's measured #282828, the same as the dark one.
+        let light = parseHexColour(hexT(dtColorsUiSurfaceBasePanel, dmLight))
+        ck not capture.contains("48;2;" & $light.r & ";" & $light.g & ";" &
+                                $light.b)
       discard execCmdEx(quoteShell(tmuxBin) & " -L " & sock & " kill-server")
       client.close()
 
@@ -627,12 +698,13 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     # screen is repainted from the other mode's tokens, read back off the
     # cells — and back again. A name §4.3 does not publish changes nothing.
     # The session starts on a DETECTED mode (`COLORFGBG` says light, no
-    # `--theme`), so the command must pin its mode over the detection rather
-    # than merely agree with a flag that was already pinned.
+    # `--theme`; since PLAT-47 the detection keeps it Dark), so the command
+    # must pin its mode over the detection rather than merely agree with a
+    # flag that was already pinned.
     var sess = builderFor(@[tracePath], Wide.cols, Wide.rows,
                           colorFgBg = "0;15").spawn()
     settleOnDebugger(sess, Wide.cols, Wide.rows)
-    ck readWide(sess).editorBg == hexT(dtColorsEditorSurfacePrimary, dmLight)
+    ck readWide(sess).editorBg == hexT(dtEditorThemeGround, dmDark)
     proc typeCommand(sess: var TuiTestSession; line: string) =
       sess.send(":")
       discard sess.drainOutput(100)
@@ -640,7 +712,8 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         sess.send($ch)
         discard sess.drainOutput(10)
       sess.send("\r")
-    for (name, mode) in [("dark", dmDark), ("light", dmLight)]:
+    for (name, mode) in [("light", dmLight), ("dark", dmDark),
+                         ("light", dmLight)]:
       typeCommand(sess, "theme " & name)
       let status = waitForStatus(sess, Wide.cols, Wide.rows, "theme " & name)
       checkpoint(":theme " & name & " -> " & status)
@@ -649,9 +722,9 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       waitForCompleteFrame(sess, Wide.cols, Wide.rows)
       let f = readWide(sess)
       checkpoint(":theme " & name & " read back: " & $f)
-      ck f.editorBg == hexT(dtColorsEditorSurfacePrimary, mode)
+      ck f.editorBg == hexT(dtEditorThemeGround, mode)
       ck f.panelBg == hexT(dtColorsUiSurfaceBasePanel, mode)
-      ck f.keywordFg == hexT(dtColorsEditorSyntaxKeyword, mode)
+      ck f.keywordFg == hexT(dtEditorThemeRuleKeyword, mode)
       ck f.statusBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
       ck f.unfilled == 0
     typeCommand(sess, "theme neon")
@@ -659,7 +732,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     checkpoint(":theme neon -> " & refused)
     ck refused.contains("neon")
     discard sess.drainOutput(200)
-    ck readWide(sess).editorBg == hexT(dtColorsEditorSurfacePrimary, dmLight)
+    ck readWide(sess).editorBg == hexT(dtEditorThemeGround, dmLight)
     finish(sess)
 
   test "assertion count":

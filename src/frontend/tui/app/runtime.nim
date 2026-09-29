@@ -153,6 +153,11 @@ type
       ## The engine's state changed WITHOUT a move — a breakpoint was set or
       ## cleared — so the host rebuilds the panes from the session, but must
       ## not pump for a `stopped` event that is not coming.
+    pagesCallTrace*: bool
+      ## PLAT-47. The reader scrolled the call trace: the host loads the
+      ## section of the trace the pane now shows, if it does not hold it
+      ## (`tui_session.pageCallTrace`), and nothing else — no pump, no
+      ## rebuild of the other panes.
     action*: KeyAction
       ## What fired, for the status line and for a test that wants to assert
       ## the binding rather than its effect.
@@ -252,6 +257,10 @@ proc sourcePaneRows*(rt: TuiRuntime): int
   ## viewport, the second to follow the caret — and the definition sits with
   ## the other screen readers at the end of this module, where every reader of
   ## the projection is together.
+
+proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
+  ## FORWARD-DECLARED for the call trace's scroll keys; defined beside
+  ## `sourcePaneRows`.
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
   ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
@@ -767,6 +776,26 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     outcome.awaitsMove = movesTheDebugger(outcome.action)
     outcome.refreshesSession = changesSessionState(outcome.action)
 
+const CallTraceWheelRows* = 3
+  ## Rows one wheel notch scrolls the call trace — the common terminal
+  ## default (xterm, VTE and tmux all scroll three lines a notch).
+
+proc scrollCallTrace(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-47: scroll the call trace by `delta` rows (down is positive), from
+  ## where it is drawn now, and stop following the current call. The host
+  ## loads the section the pane then shows (`RuntimeOutcome.pagesCallTrace`),
+  ## as the desktop's calltrace pane loads a section when it is scrolled.
+  let body = max(1, rt.paneBodyRows(paneCalltrace))
+  let m = rt.app.callTrace
+  let top = m.clampTop(m.visibleTop(body) + delta, body)
+  rt.app.callTrace.scrollTop = top
+  rt.app.callTrace.follow = false
+  rt.app.callTraceScrolled = true
+  outcome.pagesCallTrace = true
+  outcome.repaint = true
+  rt.note("call trace " & $(top + 1) & "-" & $min(m.total, top + body) &
+          " of " & $m.total)
+
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
   ## **PLAT-6's MOUSE HALF.** One decoded SGR-1006 report, as a layout gesture.
@@ -782,7 +811,10 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   ##
   ## ## PRECEDENCE, WHICH IS THE PART THAT IS A DECISION RATHER THAN A WIRING
   ##
-  ## **Nothing else in this front-end consumes a mouse report today**, and that
+  ## (PLAT-47: the call trace now takes the wheel over its body, through the
+  ## `lasNoGesture` seam described below.)
+  ##
+  ## **Nothing else in this front-end consumed a mouse report then**, and that
   ## is measured rather than assumed. CTUI-6's `input/call_stack_keys.applyMouse`
   ## and CTUI-8's `input/timeline_keys.applyMouse` exist and are asserted, and
   ## each is reached from exactly one place: its own module's `applyKey` /
@@ -816,9 +848,22 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   let (had, focused) = rt.focus.focusedPane()
   if had:
     binding.focus = focused
-  let acted = binding.onMouse(rt.layoutGeometry(), event)
+  let geometry = rt.layoutGeometry()
+  let acted = binding.onMouse(geometry, event)
   outcome.detail = acted.message
   rt.note(acted.message)
+  # PLAT-47: A WHEEL OVER THE CALL TRACE'S BODY SCROLLS IT — the hand-off
+  # `lasNoGesture` exists for (the binding takes a wheel only over a tab
+  # strip).
+  if acted.status == lasNoGesture and event.kind == mekPress and
+     event.button in {mbWheelUp, mbWheelDown}:
+    let idx = geometry.regionIndexAt(event.row, event.col)
+    if idx >= 0 and geometry.projection.regions[idx].pane == paneCalltrace and
+       not rt.app.callTrace.isEmpty:
+      rt.scrollCallTrace(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
   if acted.status == lasApplied:
     rt.afterLayoutCommit()
   # A gesture can take a pane off the screen (a drop on a dock strip) or put one
@@ -1070,6 +1115,27 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
               buf.path & ":" & $line)
     outcome.detail = rt.app.notification
     outcome.repaint = true
+    true
+  of kaScrollLineDown, kaScrollLineUp, kaHalfPageDown, kaHalfPageUp,
+     kaCenterOnPointer:
+    # PLAT-47: THE CALL TRACE SCROLLS, and loads as it scrolls. These are
+    # pane-local actions (`interpreter.paneLocal`); the call trace is the
+    # pane that answers them here. Any other focused pane leaves them to the
+    # dispatcher, exactly as before.
+    let (had, focused) = rt.focus.focusedPane()
+    if not had or focused != paneCalltrace or rt.app.callTrace.isEmpty:
+      return false
+    if action == kaCenterOnPointer:
+      # `.`: follow the current call again.
+      rt.app.callTraceScrolled = false
+      rt.app.callTrace.follow = true
+      outcome.pagesCallTrace = true
+      outcome.repaint = true
+      rt.note("call trace follows the current call")
+      return true
+    let (_, delta) = scrollDelta(action,
+                                 max(1, rt.paneBodyRows(paneCalltrace)))
+    rt.scrollCallTrace(delta, outcome)
     true
   of kaQuit:
     outcome.quit = true
@@ -1437,6 +1503,24 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
     let text = promptText(rt.prompt, rt.width)
     result.rows[last] = text
     result.styledRows[last] = @[StyledSpan(text: text, style: PromptStyle)]
+
+proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
+  ## How many rows `pane` has for its content on the CURRENT screen, under
+  ## its title row (and under its tab strip when it is a tab): the rectangle
+  ## `shell.paintPane` hands its painter, less the divider row a pane with a
+  ## neighbour below gives up (`shell.paneFrame`). Zero when the pane is not
+  ## on the screen.
+  let model = rt.app.shellModel(rt.width, rt.height)
+  let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
+               else: model.layout
+  let body = bodyArea(rt.width, rt.height)
+  let projection = projectLayout(layout, body)
+  for region in projection.regions:
+    if region.pane == pane:
+      let frame = paneFrame(region.area, body)
+      let stacked = region.activeTab >= 0 and region.tabs.len > 0
+      return max(0, frame.box.height - 1 - (if stacked: 1 else: 0))
+  0
 
 proc sourcePaneRows*(rt: TuiRuntime): int =
   ## How many rows the `editor` rectangle has on the CURRENT screen, minus its

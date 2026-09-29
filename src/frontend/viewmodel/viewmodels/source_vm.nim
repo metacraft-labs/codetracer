@@ -247,6 +247,29 @@ func topFollowingCursor*(currentTop, cursorLine, viewportHeight,
   else:
     clampTop(currentTop, viewportHeight, totalLineCount)
 
+func topCentringIfOutside*(currentTop, line, viewportHeight,
+                           totalLineCount: int): int =
+  ## Monaco's `revealLineInCenterIfOutsideViewport`, in lines: leave the
+  ## viewport where it is when `line` is already inside it, and otherwise
+  ## scroll so `line` sits in its MIDDLE.
+  ##
+  ## This is what the desktop does after every debugger stop
+  ## (`renderer.gotoLine`, `ui/editor.nim`'s complete-move handler): a step
+  ## within the visible lines does not move the view, and a stop OUTSIDE it —
+  ## a jump, a `--goto`, a continue to a far breakpoint — brings the execution
+  ## line to the centre, with context on both sides. The front-ends that draw
+  ## `SourceVM` used `topFollowingCursor` (the SMALLEST scroll) for the
+  ## execution pointer too, which put a far stop on the viewport's last row
+  ## with nothing below it; the user reported it on 2026-09-27 (PLAT-47).
+  if viewportHeight <= 0 or line <= 0:
+    return clampTop(currentTop, viewportHeight, totalLineCount)
+  let bottom = currentTop + viewportHeight - 1
+  if line >= currentTop and line <= bottom:
+    clampTop(currentTop, viewportHeight, totalLineCount)
+  else:
+    clampTop(line - (viewportHeight - 1) div 2, viewportHeight,
+             totalLineCount)
+
 # ---------------------------------------------------------------------------
 # Reading the window
 # ---------------------------------------------------------------------------
@@ -328,12 +351,13 @@ proc followCursor*(vm: SourceVM) =
     vm.viewportHeight.val, vm.totalLineCount.val)
 
 proc followExecutionPointer*(vm: SourceVM) =
-  ## Scroll the least amount that brings the line the BACKEND reports for the
-  ## current stop into view.
+  ## Bring the line the BACKEND reports for the current stop into view the
+  ## way the desktop's editor does (`topCentringIfOutside`): not at all while
+  ## it is visible, centred when it is not.
   ##
   ## This is the one a stepping front-end calls after every stop. See
   ## `executionLine` for why it is not the same call as `followCursor`.
-  vm.viewportTop.val = topFollowingCursor(
+  vm.viewportTop.val = topCentringIfOutside(
     vm.viewportTop.val, vm.executionLine.val,
     vm.viewportHeight.val, vm.totalLineCount.val)
 

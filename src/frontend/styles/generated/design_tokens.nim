@@ -152,9 +152,61 @@ type
     dtColorsUiTextWarningOnColorHover = "colors/ui/text/warning/on-color-hover"
     dtColorsUiTextWarningPrimary = "colors/ui/text/warning/primary"
     dtColorsUiTextWarningPrimaryHover = "colors/ui/text/warning/primary-hover"
+    # ---- the EDITOR THEME (PLAT-47): the desktop's Monaco theme
+    # documents, resolved per mode (see the generator's header).
+    dtEditorThemeGround = "editor-theme/ground"
+    dtEditorThemeLineNumber = "editor-theme/lineNumber"
+    dtEditorThemeActiveLineNumber = "editor-theme/activeLineNumber"
+    dtEditorThemeExecutionLine = "editor-theme/executionLine"
+    dtEditorThemeSelection = "editor-theme/selection"
+    dtEditorThemeRuleDefault = "editor-theme/rule/"
+    dtEditorThemeRuleAttributeName = "editor-theme/rule/attribute.name"
+    dtEditorThemeRuleAttributeValue = "editor-theme/rule/attribute.value"
+    dtEditorThemeRuleComment = "editor-theme/rule/comment"
+    dtEditorThemeRuleCommentDoc = "editor-theme/rule/comment.doc"
+    dtEditorThemeRuleCommentTag = "editor-theme/rule/comment.tag"
+    dtEditorThemeRuleConstant = "editor-theme/rule/constant"
+    dtEditorThemeRuleDelimiter = "editor-theme/rule/delimiter"
+    dtEditorThemeRuleDelimiterBacktick = "editor-theme/rule/delimiter.backtick"
+    dtEditorThemeRuleDelimiterBracket = "editor-theme/rule/delimiter.bracket"
+    dtEditorThemeRuleEntityNameFunction = "editor-theme/rule/entity.name.function"
+    dtEditorThemeRuleEntityNameType = "editor-theme/rule/entity.name.type"
+    dtEditorThemeRuleIdentifierFunction = "editor-theme/rule/identifier.function"
+    dtEditorThemeRuleKeyword = "editor-theme/rule/keyword"
+    dtEditorThemeRuleKeywordOperator = "editor-theme/rule/keyword.operator"
+    dtEditorThemeRuleKeywordType = "editor-theme/rule/keyword.type"
+    dtEditorThemeRuleMetatag = "editor-theme/rule/metatag"
+    dtEditorThemeRuleModifierExport = "editor-theme/rule/modifier.export"
+    dtEditorThemeRuleNamespace = "editor-theme/rule/namespace"
+    dtEditorThemeRuleNamespaceExcept = "editor-theme/rule/namespace.except"
+    dtEditorThemeRuleNamespaceLibrary = "editor-theme/rule/namespace.library"
+    dtEditorThemeRuleNamespaceStd = "editor-theme/rule/namespace.std"
+    dtEditorThemeRuleNamespaceSystem = "editor-theme/rule/namespace.system"
+    dtEditorThemeRuleNumber = "editor-theme/rule/number"
+    dtEditorThemeRuleNumberBinary = "editor-theme/rule/number.binary"
+    dtEditorThemeRuleNumberFloat = "editor-theme/rule/number.float"
+    dtEditorThemeRuleNumberHex = "editor-theme/rule/number.hex"
+    dtEditorThemeRuleNumberOctal = "editor-theme/rule/number.octal"
+    dtEditorThemeRuleOperator = "editor-theme/rule/operator"
+    dtEditorThemeRuleRegexp = "editor-theme/rule/regexp"
+    dtEditorThemeRuleString = "editor-theme/rule/string"
+    dtEditorThemeRuleStringEscape = "editor-theme/rule/string.escape"
+    dtEditorThemeRuleSupportFunction = "editor-theme/rule/support.function"
+    dtEditorThemeRuleTag = "editor-theme/rule/tag"
+    dtEditorThemeRuleType = "editor-theme/rule/type"
+    dtEditorThemeRuleTypeIdentifier = "editor-theme/rule/type.identifier"
+    dtEditorThemeRuleVariable = "editor-theme/rule/variable"
+    dtEditorThemeRuleVariableLanguage = "editor-theme/rule/variable.language"
+    dtEditorThemeRuleVariableMember = "editor-theme/rule/variable.member"
+    dtEditorThemeRuleVariableMemberFunction = "editor-theme/rule/variable.member.function"
+    dtEditorThemeRuleVariableName = "editor-theme/rule/variable.name"
+    dtEditorThemeRuleVariableParameter = "editor-theme/rule/variable.parameter"
+    dtEditorThemeRuleVariableReadonly = "editor-theme/rule/variable.readOnly"
 
 const
   DesignTokenCount* = 137
+    ## The design system's own `mapped` colour tokens; the editor-theme
+    ## members follow them in the enum.
   DesignTokenHex*: array[DesignToken, array[DesignMode, string]] = [
     dtColorsEditorActionPrimary: ["#818cf8", "#818cf8"],
     dtColorsEditorActionSecondary: ["#facc15", "#facc15"],
@@ -292,4 +344,100 @@ const
     dtColorsUiTextWarningOnColor: ["#fed7aa", "#fdba74"],
     dtColorsUiTextWarningOnColorHover: ["#fdba74", "#fb923c"],
     dtColorsUiTextWarningPrimary: ["#fdba74", "#ea580c"],
-    dtColorsUiTextWarningPrimaryHover: ["#fb923c", "#c2410c"]]
+    dtColorsUiTextWarningPrimaryHover: ["#fb923c", "#c2410c"],
+    dtEditorThemeGround: ["#282828", "#282828"],
+    dtEditorThemeLineNumber: ["#575757", "#26505e"],
+    dtEditorThemeActiveLineNumber: ["#c8c8c8", "#c8c8c8"],
+    dtEditorThemeExecutionLine: ["#404040", "#c5ca88"],
+    dtEditorThemeSelection: ["#353535", "#4f5b66"],
+    dtEditorThemeRuleDefault: ["#f3f3f3", "#464646"],
+    dtEditorThemeRuleAttributeName: ["#8fcbee", "#0070c1"],
+    dtEditorThemeRuleAttributeValue: ["#d6a38d", "#464646"],
+    dtEditorThemeRuleComment: ["#78a96c", "#eb4f64"],
+    dtEditorThemeRuleCommentDoc: ["#86b77a", "#eb4f64"],
+    dtEditorThemeRuleCommentTag: ["#6fb6d9", "#eb4f64"],
+    dtEditorThemeRuleConstant: ["#7aa2d6", "#0070c1"],
+    dtEditorThemeRuleDelimiter: ["#b6c0cb", "#464646"],
+    dtEditorThemeRuleDelimiterBacktick: ["#b6c0cb", "#464646"],
+    dtEditorThemeRuleDelimiterBracket: ["#c5cfda", "#464646"],
+    dtEditorThemeRuleEntityNameFunction: ["#d7c98a", "#795e26"],
+    dtEditorThemeRuleEntityNameType: ["#4ec9b0", "#267f99"],
+    dtEditorThemeRuleIdentifierFunction: ["#d7c98a", "#795e26"],
+    dtEditorThemeRuleKeyword: ["#5a9dd4", "#56a3e8"],
+    dtEditorThemeRuleKeywordOperator: ["#c7d0da", "#56a3e8"],
+    dtEditorThemeRuleKeywordType: ["#63cbb6", "#56a3e8"],
+    dtEditorThemeRuleMetatag: ["#d7ba7d", "#e50000"],
+    dtEditorThemeRuleModifierExport: ["#ffa657", "#cf222e"],
+    dtEditorThemeRuleNamespace: ["#c586c0", "#af00db"],
+    dtEditorThemeRuleNamespaceExcept: ["#8b949e", "#57606a"],
+    dtEditorThemeRuleNamespaceLibrary: ["#a5d6ff", "#0550ae"],
+    dtEditorThemeRuleNamespaceStd: ["#ff7b72", "#cf222e"],
+    dtEditorThemeRuleNamespaceSystem: ["#ffa657", "#953800"],
+    dtEditorThemeRuleNumber: ["#bfd8b0", "#599f89"],
+    dtEditorThemeRuleNumberBinary: ["#bfd8b0", "#599f89"],
+    dtEditorThemeRuleNumberFloat: ["#bfd8b0", "#599f89"],
+    dtEditorThemeRuleNumberHex: ["#bfd8b0", "#599f89"],
+    dtEditorThemeRuleNumberOctal: ["#bfd8b0", "#599f89"],
+    dtEditorThemeRuleOperator: ["#c7d0da", "#464646"],
+    dtEditorThemeRuleRegexp: ["#d47e7e", "#464646"],
+    dtEditorThemeRuleString: ["#d6a38d", "#0b6ae6"],
+    dtEditorThemeRuleStringEscape: ["#d0b07a", "#0b6ae6"],
+    dtEditorThemeRuleSupportFunction: ["#d7c98a", "#795e26"],
+    dtEditorThemeRuleTag: ["#66a7dd", "#464646"],
+    dtEditorThemeRuleType: ["#63cbb6", "#2dc079"],
+    dtEditorThemeRuleTypeIdentifier: ["#cdd6df", "#2dc079"],
+    dtEditorThemeRuleVariable: ["#cdd3de", "#464646"],
+    dtEditorThemeRuleVariableLanguage: ["#79c0ff", "#0550ae"],
+    dtEditorThemeRuleVariableMember: ["#cdd3de", "#464646"],
+    dtEditorThemeRuleVariableMemberFunction: ["#d7c98a", "#795e26"],
+    dtEditorThemeRuleVariableName: ["#cdd3de", "#464646"],
+    dtEditorThemeRuleVariableParameter: ["#d9e2d4", "#001080"],
+    dtEditorThemeRuleVariableReadonly: ["#b38bc8", "#464646"]]
+
+  EditorThemeRules*: array[43, tuple[scope: string, token: DesignToken]] = [
+    ## Every token rule of either Monaco theme, by scope (`""` is the
+    ## default rule). `editor_theme.editorScopeToken` resolves a scope
+    ## against it the way Monaco does.
+    (scope: "", token: dtEditorThemeRuleDefault),
+    (scope: "attribute.name", token: dtEditorThemeRuleAttributeName),
+    (scope: "attribute.value", token: dtEditorThemeRuleAttributeValue),
+    (scope: "comment", token: dtEditorThemeRuleComment),
+    (scope: "comment.doc", token: dtEditorThemeRuleCommentDoc),
+    (scope: "comment.tag", token: dtEditorThemeRuleCommentTag),
+    (scope: "constant", token: dtEditorThemeRuleConstant),
+    (scope: "delimiter", token: dtEditorThemeRuleDelimiter),
+    (scope: "delimiter.backtick", token: dtEditorThemeRuleDelimiterBacktick),
+    (scope: "delimiter.bracket", token: dtEditorThemeRuleDelimiterBracket),
+    (scope: "entity.name.function", token: dtEditorThemeRuleEntityNameFunction),
+    (scope: "entity.name.type", token: dtEditorThemeRuleEntityNameType),
+    (scope: "identifier.function", token: dtEditorThemeRuleIdentifierFunction),
+    (scope: "keyword", token: dtEditorThemeRuleKeyword),
+    (scope: "keyword.operator", token: dtEditorThemeRuleKeywordOperator),
+    (scope: "keyword.type", token: dtEditorThemeRuleKeywordType),
+    (scope: "metatag", token: dtEditorThemeRuleMetatag),
+    (scope: "modifier.export", token: dtEditorThemeRuleModifierExport),
+    (scope: "namespace", token: dtEditorThemeRuleNamespace),
+    (scope: "namespace.except", token: dtEditorThemeRuleNamespaceExcept),
+    (scope: "namespace.library", token: dtEditorThemeRuleNamespaceLibrary),
+    (scope: "namespace.std", token: dtEditorThemeRuleNamespaceStd),
+    (scope: "namespace.system", token: dtEditorThemeRuleNamespaceSystem),
+    (scope: "number", token: dtEditorThemeRuleNumber),
+    (scope: "number.binary", token: dtEditorThemeRuleNumberBinary),
+    (scope: "number.float", token: dtEditorThemeRuleNumberFloat),
+    (scope: "number.hex", token: dtEditorThemeRuleNumberHex),
+    (scope: "number.octal", token: dtEditorThemeRuleNumberOctal),
+    (scope: "operator", token: dtEditorThemeRuleOperator),
+    (scope: "regexp", token: dtEditorThemeRuleRegexp),
+    (scope: "string", token: dtEditorThemeRuleString),
+    (scope: "string.escape", token: dtEditorThemeRuleStringEscape),
+    (scope: "support.function", token: dtEditorThemeRuleSupportFunction),
+    (scope: "tag", token: dtEditorThemeRuleTag),
+    (scope: "type", token: dtEditorThemeRuleType),
+    (scope: "type.identifier", token: dtEditorThemeRuleTypeIdentifier),
+    (scope: "variable", token: dtEditorThemeRuleVariable),
+    (scope: "variable.language", token: dtEditorThemeRuleVariableLanguage),
+    (scope: "variable.member", token: dtEditorThemeRuleVariableMember),
+    (scope: "variable.member.function", token: dtEditorThemeRuleVariableMemberFunction),
+    (scope: "variable.name", token: dtEditorThemeRuleVariableName),
+    (scope: "variable.parameter", token: dtEditorThemeRuleVariableParameter),
+    (scope: "variable.readOnly", token: dtEditorThemeRuleVariableReadonly)]

@@ -484,10 +484,12 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
       ck area.height > 1
       ck before.len == after.len
 
+      # The pane's own box: its rectangle minus the dividers to its right and
+      # (PLAT-47) below it — `shell.paneFrame`, the one place that says so.
+      let frame = paneFrame(area, body)
       let paneTop = if stacked: area.row + 1 else: area.row
-      let paneHeight = if stacked: area.height - 1 else: area.height
-      let flushRight = area.col + area.width >= body.col + body.width
-      let inner = if flushRight: area.width else: area.width - 1
+      let paneHeight = if stacked: frame.box.height - 1 else: frame.box.height
+      let inner = frame.box.width
       let paneRowsText = variablesText(model, inner, paneHeight)
 
       var changedRows = 0

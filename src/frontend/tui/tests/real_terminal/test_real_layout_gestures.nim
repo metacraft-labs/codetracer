@@ -99,9 +99,12 @@ const
     ## Spelled as a constant and ASSERTED below rather than assumed: a change
     ## to the shared default that moved the first region would otherwise
     ## silently make this case about a different pane. Its "title row" is its
-    ## tab label, `[Files]`, which the dock takes off the body.
+    ## tab label, ` Files `, which the dock takes off the body.
   DockedPaneTitle = "Files"
-  DockedPaneTitleRow = "[Files]"
+  DockedPaneTitleRow = " Files   VC"
+    ## The strip as the 12-cell region shows it (11 inside its divider): the
+    ## two padded labels, `VCS` cut at the edge. PLAT-47: a tab is its padded
+    ## label, not `[Files]`.
 
 var countedAssertions = 0
 
@@ -221,7 +224,7 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       ck before.contains(DockedPaneTitleRow)
       # …and the shared default's Variables stack is there, which is what says this
       # is the arrangement the case was written against.
-      ck before.contains("[Variables]")
+      ck before.contains(" Variables ")
       ck model.bottomStripRow() < 0
 
       # ---- THE GESTURE, ONE BYTE AT A TIME ---------------------------------

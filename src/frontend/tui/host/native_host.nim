@@ -329,20 +329,6 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
       result.children.add FilesystemEntryNode(text: root.extractFilename,
                                               path: "/" & root)
 
-proc recordingFileList*(traceFolder: string): seq[string] =
-  ## `recordingFileTree` flattened to the file paths a list pane draws, in the
-  ## tree's own order (folders first, each group sorted), without the leading
-  ## `/` the tree's paths carry. PLAT-45: the terminal's Files pane in a
-  ## REPLAY session — the shared default places it in every mode, and this is
-  ## the same tree the desktop and the GPUI window draw there.
-  proc walk(n: FilesystemEntryNode; acc: var seq[string]) =
-    if not n.isFolder:
-      var p = n.path
-      if p.startsWith("/"): p = p[1 .. ^1]
-      acc.add p
-    for c in n.children:
-      walk(c, acc)
-  walk(recordingFileTree(traceFolder), result)
 
 proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-RECORDING producers, asked once at open: the event log's first
@@ -366,6 +352,29 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
     files.setRoot(recordingFileTree(s.tracePath))
     result.files = files.rootEntry.val.children.len > 0
 
+proc refreshCallStackFallback*(s: HeadlessDebugSession) =
+  ## PLAT-47: hand the calltrace pane the call STACK when — and only when —
+  ## the recording provides no call trace (`CalltraceVM.fallbackStack`). Per
+  ## stop, because the stack is a fact about the stop. A recording WITH a
+  ## trace pays nothing here: the store's lines are checked first.
+  let vm = s.session.calltraceVM
+  if vm.isNil:
+    return
+  if s.session.store.calltrace.lines.val.len > 0:
+    if vm.fallbackStack.val.len > 0:
+      vm.fallbackStack.val = newSeq[string]()
+    return
+  var names: seq[string] = @[]
+  try:
+    let response = s.sendRawDapRequest("stackTrace", %*{
+      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
+    discard s.drainEvents()
+    for f in response{"body", "stackFrames"}.getElems:
+      names.add f{"name"}.getStr("")
+  except CatchableError:
+    names = @[]
+  vm.fallbackStack.val = names
+
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-STOP producer: the values in scope where the debugger now is,
   ## which the state pane and the editor's inline values both read.
@@ -374,6 +383,7 @@ proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
     result.locals = true
   except CatchableError:
     result.locals = false
+  refreshCallStackFallback(s)
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

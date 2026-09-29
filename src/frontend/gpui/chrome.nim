@@ -44,6 +44,8 @@
 
 import std/[strutils, math]
 
+import ../styles/generated/design_tokens
+
 type
   ChromeRole* = enum
     ## The closed set of things this front-end paints. Closed on purpose: a
@@ -53,6 +55,13 @@ type
     crWindowForeground = "window.foreground"
     crPaneBackground = "pane.background"
     crPaneTitleForeground = "pane.title.foreground"
+    crTabActiveForeground = "tab.active.foreground"
+      ## PLAT-47. The active tab of a strip: the desktop's label tier.
+    crTabInactiveForeground = "tab.inactive.foreground"
+      ## PLAT-47. Every other tab: the desktop's disabled title tier.
+    crFocusOutline = "focus.outline"
+      ## PLAT-47. The focused pane's 1px outline: the desktop's selected-panel
+      ## stroke (`SELECTED_PANEL_BORDER_COLOR`, ui/border/primary).
 
 const
   WindowChrome*: array[ChromeRole, string] = [
@@ -60,8 +69,20 @@ const
     "#e6edf3", # crWindowForeground — body text
     "#1b222c", # crPaneBackground — one pane's fill, lifted off the surface
     "#7ee3c8", # crPaneTitleForeground — the pane heading
+    # PLAT-47: the tab strip and the focus outline are the DESKTOP'S, read
+    # from the design system the desktop's stylesheets are generated from
+    # (Dark), not chosen here — see `components/golden_layout.styl`.
+    DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark],
+    DesignTokenHex[dtColorsUiTextPrimaryDisabled][dmDark],
+    DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
   ]
     ## Indexed by `ChromeRole`, so a role with no colour does not compile.
+
+  FocusOutlinePx* = 1
+    ## The focused pane's outline width, in device pixels — the desktop's
+    ## `SELECTED_PANEL_BORDER` (0.0625rem, measured 1px). Every pane carries
+    ## an outline this wide so focus moving never moves a pane's content;
+    ## an unfocused pane's is the window's own background, i.e. invisible.
 
   MinimumContrastRatio* = 4.5
     ## WCAG 2.x AA for body text. It is a FLOOR on a computed quantity and not
@@ -121,3 +142,27 @@ func paneWidthPx*(viewportWidth, paneCount: int): int =
     return max(1, viewportWidth - 2 * ChromePaddingPx)
   let usable = viewportWidth - 2 * ChromePaddingPx - (paneCount - 1) * ChromeGapPx
   max(1, usable div paneCount)
+
+func tabStyle*(active: bool): seq[(string, string)] =
+  ## PLAT-47 deliverable 8, GPUI's half: how one tab of a strip is styled.
+  ## Shaped by colour and weight alone, as the desktop's GoldenLayout strip is
+  ## — the active tab in the label tier and bold, every other in the disabled
+  ## tier; no brackets and no rule (a tab is its label, nothing else). The
+  ## window's chrome applies exactly this list (`main.paintWindowChrome`).
+  if active:
+    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold")]
+  else:
+    @[("color", chromeOf(crTabInactiveForeground))]
+
+func paneOutlineStyle*(focused: bool): seq[(string, string)] =
+  ## PLAT-47 deliverable 9, GPUI's half: the FRAME every region sits in — a
+  ## fill one pixel wider than the region on each side (`FocusOutlinePx` of
+  ## padding) — in the desktop's selected-panel colour around the focused
+  ## region and in the window's own background, invisible, around the rest.
+  ## Closed on all four sides by construction, the same width around every
+  ## region, so focus moving never moves content. A fill-and-padding frame
+  ## rather than a border: the shim's `apply_styles_to_div` draws fills and
+  ## padding and no border.
+  @[("background-color",
+     chromeOf(if focused: crFocusOutline else: crWindowBackground)),
+    ("padding", $FocusOutlinePx & "px")]

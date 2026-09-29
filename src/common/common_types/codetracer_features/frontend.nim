@@ -706,21 +706,19 @@ proc paneHomesForMode*(mode: LayoutMode): seq[seq[int]] =
   ##   the FILES strip with a box of its own. The gate was restated, not
   ##   weakened: it still fails if the layout drifts from what §1a draws.
   ##
-  ## * **CONSTRAINTS with the EVENT LOG, in debug mode only.** The event log's
-  ##   stack is the replay's "what happened" column, which is what a constraint
-  ##   count is a fact about once there is an execution to attribute it to.
-  ##   And it is debug-mode-only for a reason the table itself cannot state but
-  ##   which is checkable: `modeHiddenContentIds(EditMode)` hides
-  ##   `Content.EventLog`, so in edit mode there is no such stack, and
-  ##   `nestPanesIntoHosts` would skip the row. Declaring it only where it can
-  ##   be honoured keeps the table a statement about the mode rather than a
-  ##   wish, and CONSTRAINTS keeps the column §1a gives it on the editing
-  ##   surface, which is where a circuit's cost is a thing you act on.
+  ## * **CONSTRAINTS has no home in debug mode — it is not in the debug
+  ##   default at all** (`modeDefaultOmittedContentIds` below). It used to be a
+  ##   tab of the EVENT LOG stack here. The user decided otherwise on
+  ##   2026-09-27: CONSTRAINTS was reworked for the Noir studio's editing
+  ##   surface and does not belong in the default REPLAY layout, and the
+  ##   desktop's debug-mode default is the arrangement every CodeTracer
+  ##   front-end opens with (`headless_app/layout_model.sharedDefaultLayout`
+  ##   is generated from it). CONSTRAINTS keeps the column §1a gives it on the
+  ##   editing surface, which is where a circuit's cost is a thing you act on.
   case mode
   of DebugMode, CalltraceLayoutMode:
     @[
-      @[ord(Content.TestResults), ord(Content.Filesystem)],
-      @[ord(Content.Constraints), ord(Content.EventLog)]
+      @[ord(Content.TestResults), ord(Content.Filesystem)]
     ]
   of EditMode, QuickEditMode, InteractiveEditMode:
     # CONSTRAINTS keeps its column here and TESTS does not: the editing surface
@@ -729,3 +727,29 @@ proc paneHomesForMode*(mode: LayoutMode): seq[seq[int]] =
     @[
       @[ord(Content.TestResults), ord(Content.Filesystem)]
     ]
+
+proc modeDefaultOmittedContentIds*(mode: LayoutMode): seq[int] =
+  ## Which panes a mode's DEFAULT LAYOUT does not place, although the mode
+  ## shows them.
+  ##
+  ## Distinct from `modeHiddenContentIds`, and the difference is the reason
+  ## this is a second table rather than a row in the first: a HIDDEN pane is
+  ## one the mode cannot show at all, so the hidden set is also applied to a
+  ## user's own saved layout for that mode (`mode_layouts` sanitises every
+  ## stored snapshot with it). An OMITTED pane is only absent from the
+  ## starting point — a user who opens CONSTRAINTS in a replay and arranges it
+  ## keeps it, because nothing strips it from their saved layout.
+  ##
+  ## Debug mode omits CONSTRAINTS: the user decided on 2026-09-27 that it was
+  ## reworked for the Noir studio's editing surface and does not belong in the
+  ## default replay layout, which every CodeTracer front-end opens with.
+  case mode
+  of DebugMode, CalltraceLayoutMode:
+    @[ord(Content.Constraints)]
+  of EditMode, QuickEditMode, InteractiveEditMode:
+    @[]
+
+proc modeDefaultHiddenContentIds*(mode: LayoutMode): seq[int] =
+  ## Everything a mode's default layout leaves out: what the mode hides and
+  ## what its default omits. The one set `modeDefaultLayout` removes.
+  modeHiddenContentIds(mode) & modeDefaultOmittedContentIds(mode)

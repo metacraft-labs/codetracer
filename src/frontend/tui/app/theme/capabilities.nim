@@ -568,18 +568,33 @@ type
       ## tmux's `client_termfeatures` includes `RGB`.
     tmuxClientTerm*: string
 
+const AutoDetectSelectsLight* = false
+  ## **WHETHER BACKGROUND DETECTION MAY CHOOSE LIGHT — it may not.** A product
+  ## decision (the user, 2026-09-27, PLAT-47): the design system's Light
+  ## editor surface is poorly legible (PLAT-46's review measured every editor
+  ## glyph below 4.5:1 on it), so a terminal whose background is light still
+  ## opens in DARK until the design system fixes that surface in Figma.
+  ## `--theme=light` (and `:theme light`) still select Light: a user who asks
+  ## for it gets it. The detection itself still runs and is still REPORTED on
+  ## the status line (`backgroundNote`), so the day this becomes `true` the
+  ## only change is this constant.
+
 proc resolveMode(env: TerminalEnv; flags: CapabilityFlags;
                  probe: TerminalProbe): (DesignMode, BackgroundSource, string) =
-  ## PLAT-46 deliverable 8: `--theme` wins; else the terminal's ACTUAL
-  ## background (OSC 11); else `$COLORFGBG`; else Dark.
+  ## PLAT-46 deliverable 8, as amended by PLAT-47: `--theme` wins; else the
+  ## mode the terminal's ACTUAL background (OSC 11), else `$COLORFGBG`,
+  ## implies — which, while `AutoDetectSelectsLight` is false, is Dark
+  ## whatever the background; else Dark.
+  proc gated(m: DesignMode): DesignMode =
+    if m == dmLight and not AutoDetectSelectsLight: dmDark else: m
   if flags.themePinned:
     return ((if flags.theme == utLight: dmLight else: dmDark), bsFlag, "")
   if probe.hasBackground:
-    return (modeForBackground(probe.background), bsOsc11,
+    return (gated(modeForBackground(probe.background)), bsOsc11,
             hexOf(probe.background))
   let (known, mode) = parseColorFgBg(env.colorFgBg)
   if known:
-    return (mode, bsColorFgBg, "")
+    return (gated(mode), bsColorFgBg, "")
   (dmDark, bsDefault, "")
 
 proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
@@ -640,6 +655,19 @@ proc backgroundNote*(caps: TerminalCapabilities): string =
   result = "bg: " & $caps.modeFrom
   if caps.background.len > 0:
     result.add " " & caps.background
+  # A light background that did NOT select Light says so, so a user on a
+  # light terminal knows the Dark screen is a decision and how to override it.
+  var detectedLight = false
+  if caps.modeFrom == bsOsc11 and caps.background.len == 7:
+    try:
+      detectedLight = isLightBackground((
+        fromHex[int](caps.background[1 .. 2]),
+        fromHex[int](caps.background[3 .. 4]),
+        fromHex[int](caps.background[5 .. 6])))
+    except ValueError:
+      detectedLight = false
+  if detectedLight and caps.mode == dmDark:
+    result.add " (light; --theme=light to use it)"
   result.add " -> " & (if caps.mode == dmLight: "light" else: "dark")
 
 proc tmuxRgbRemedy*(caps: TerminalCapabilities): string =

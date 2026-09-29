@@ -249,23 +249,34 @@ suite "PLAT-45: the terminal's fold at every size":
         else: ck not sawDrawable
     let shipped = sharedDefaultLayout()
     checkOrder(shipped)
-    var shuffled = shipped
-    shuffled.folds = @[shipped.folds[2], shipped.folds[3], shipped.folds[0],
-                       shipped.folds[4], shipped.folds[1], shipped.folds[5]]
+    # PLAT-47: the shipped default (the desktop's Debug layout) has no
+    # report-only REGION left — VCS and Tests are tabs of the FILES panel, Agent
+    # Activity of the call trace's, Terminal Output of the event log's — so the
+    # rule is exercised on the BUNDLED tree, whose right column of report
+    # leaves (Test Results over Constraints) is exactly the case it exists
+    # for, with PLAT-45's order for it, and on a shuffle of that order.
+    let bundled = SharedLayout(tree: sharedBundledLayout(), folds: @[
+      FoldStep(region: paneConstraints, into: paneTestResults),
+      FoldStep(region: paneTestResults, into: paneEventLog),
+      FoldStep(region: paneFileTree, into: paneCalltrace),
+      FoldStep(region: paneCalltrace, into: paneState),
+      FoldStep(region: paneEventLog, into: paneState),
+      FoldStep(region: paneState, into: paneEditor)])
+    checkOrder(bundled)
+    var shuffled = bundled
+    shuffled.folds = @[bundled.folds[2], bundled.folds[3], bundled.folds[0],
+                       bundled.folds[4], bundled.folds[1], bundled.folds[5]]
     checkOrder(shuffled)
     # The shuffled order's first two terminal steps are the report-only ones.
     let t = terminalFolds(shuffled, cap)
     ck t.folds[0].region == paneConstraints
     ck t.folds[1].region == paneTestResults
-    # And at every size, when the terminal folds at all, the right column of
-    # report leaves (Test Results, Constraints) is the first thing gone.
+    # And at every size the shipped default keeps TESTS where the desktop
+    # keeps it — a tab of the FILES panel — whatever the terminal folds.
     for w in countup(80, 300, 20):
       for h in countup(24, 100, 8):
-        let d = depthFor(pmDebug, w, h)
-        if d >= 1:
-          let tree = profileLayout(selectProfile(w, h))
-          ck regionOf(tree, paneConstraints) == regionOf(tree, paneTestResults)
-          if d >= 2:
-            ck regionOf(tree, paneConstraints) == regionOf(tree, paneEventLog)
+        let tree = profileLayout(selectProfile(w, h))
+        ck regionOf(tree, paneTestResults) == regionOf(tree, paneFileTree)
+        ck not tree.contains(paneConstraints)
 
 echo "CHECKS: ", CHECKS

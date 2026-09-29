@@ -374,13 +374,24 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     h.vm.followCursor()
     check h.vm.visibleFirstLine.val == 1
 
-    # Following the EXECUTION POINTER scrolls to it.
+    # Following the EXECUTION POINTER scrolls to it — and, since PLAT-47, the
+    # way the desktop's editor does (`revealLineInCenterIfOutsideViewport`):
+    # a stop outside the viewport lands in its MIDDLE (line 250 of a 20-line
+    # viewport: rows 241 .. 260), not on its last row.
     h.vm.followExecutionPointer()
-    check h.vm.visibleFirstLine.val == 231
-    check h.vm.visibleLastLine.val == 250
+    check h.vm.visibleFirstLine.val == 241
+    check h.vm.visibleLastLine.val == 260
     discard h.fillWindow()
-    h.checkHeldRangeIs(226, 255)
+    h.checkHeldRangeIs(236, 265)
     h.checkLineIsHeld(250)
+    # A stop INSIDE the viewport does not move it.
+    h.store.updateDebuggerPosition(rrTicks = 2, file = RecordedPath, line = 258)
+    h.vm.followExecutionPointer()
+    check h.vm.visibleFirstLine.val == 241
+    # …and one just outside it is centred again, not scrolled by one line.
+    h.store.updateDebuggerPosition(rrTicks = 3, file = RecordedPath, line = 262)
+    h.vm.followExecutionPointer()
+    check h.vm.visibleFirstLine.val == 262 - 9
 
   test "a line outside the window is a REQUEST, never an empty string":
     let h = newHarness()

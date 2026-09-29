@@ -67,7 +67,7 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2738
+const ExpectedAssertions = 2684
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -189,10 +189,10 @@ proc sliceCells(line: string; col, width: int): string =
 
 proc specStrip(tabs: seq[string]; active, width: int): string =
   ## §3.1's tab strip, WRITTEN FROM THE SPECIFICATION and from nothing in
-  ## `app/layout/tab_strip.nim`: the active tab in brackets, every other one
-  ## padded with one space on each side so the strip does not reflow when a tab
-  ## is activated, one space between neighbours, then a space and the rule glyph
-  ## out to the pane's width.
+  ## `app/layout/tab_strip.nim`: EVERY tab padded with one space on each side
+  ## (PLAT-47: no brackets — the active one is told apart by its role, which
+  ## `activeRoleOk` below checks), one space between neighbours, then blank
+  ## cells out to the pane's width (PLAT-47: no rule through the strip).
   ##
   ## **THIS IS THE ORACLE THE STRUCTURAL CHANGE MADE NECESSARY.** `tabRow` now
   ## assembles the row from `tabSpans`, so the painter and the hit-test read one
@@ -205,12 +205,8 @@ proc specStrip(tabs: seq[string]; active, width: int): string =
     return ""
   var parts: seq[string] = @[]
   for i, t in tabs:
-    parts.add(if i == active: "[" & t & "]" else: " " & t & " ")
-  var line = parts.join(" ")
-  if textCells(line) + 1 <= width:
-    line.add " "
-    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
-  fitCells(line, width)
+    parts.add " " & t & " "
+  fitCells(parts.join(" "), width)
 
 proc innerWidthOf(geom: LayoutGeometry; area: CellArea): int =
   ## The width `views/shell.paintPane` paints a pane's rows at: its whole
@@ -531,6 +527,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var columnsChecked = 0
     var labelledColumns = 0
     var stripsComparedAbsolutely = 0
+    var roleCellsChecked = 0
     var disagreements: seq[string] = @[]
     for g in Geometries:
       let profile = selectProfile(g.cols, g.rows)
@@ -541,8 +538,24 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
           continue
         var model = newShellModel(g.cols, g.rows)
         model.layout = l.tree
-        let painted = shellRows(model, g.cols, g.rows)
+        let screen = shellScreen(model, g.cols, g.rows)
+        let painted = screen.rows
         let strip = painted[region.area.row]
+        # THE ACTIVE TAB IS A ROLE (PLAT-47): every cell of the active tab's
+        # visible label is in the active-tab role, and no cell of another tab
+        # is. Read off the styled row the painter wrote.
+        var at = 0
+        for sp in screen.styledRows[region.area.row]:
+          for r in sp.text.runes:
+            let rel = at - region.area.col
+            let tab = tabSpanAt(region.tabs, region.activeTab, rel)
+            if rel >= 0 and rel < innerWidthOf(geom, region.area) and
+               tab >= 0:
+              inc roleCellsChecked
+              if (sp.style.role == srTabActive) != (tab == region.activeTab):
+                disagreements.add $g.cols & "x" & $g.rows & " col " & $at &
+                  ": tab " & $tab & " painted in role " & $sp.style.role
+            inc at
         let spans = tabSpans(region.tabs, region.activeTab)
         # PLAT-45: A STRIP NARROWER THAN ITS TABS. The shared default puts
         # stacks in regions narrower than their labels (the 80x24 fold gives
@@ -614,9 +627,14 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     let sample = @["Variables", "Timeline", "Tracepoints"]
     ck specStrip(sample, 0, 40) == tabRow(sample, 0, 40)
     ck specStrip(sample, 1, 40) == tabRow(sample, 1, 40)
-    ck specStrip(sample, 0, 40) != specStrip(sample, 1, 40)
-    ck specStrip(sample, 0, 40).startsWith("[Variables]")
-    ck specStrip(sample, 1, 40).contains("[Timeline]")
+    # PLAT-47: the TEXT no longer says which tab is active — no brackets, no
+    # rule — so two strips differing only in the active tab read the same; the
+    # role check above is what tells them apart, and it ran.
+    ck specStrip(sample, 0, 40) == specStrip(sample, 1, 40)
+    ck specStrip(sample, 0, 40).startsWith(" Variables   Timeline ")
+    ck not specStrip(sample, 0, 40).contains("[")
+    ck not specStrip(sample, 0, 40).contains("─")
+    ck roleCellsChecked > 0
 
   test "every drop-target kind is reachable THROUGH the binding":
     # PLAT-6: "every drop-target kind … must be exercised through the terminal

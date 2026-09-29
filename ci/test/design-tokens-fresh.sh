@@ -7,7 +7,11 @@
 #
 #   * src/frontend/styles/generated/*.styl        — the desktop's stylesheets
 #   * src/frontend/styles/generated/design_tokens.nim — the terminal
-#     front-end's resolved token constants (Dark and Light)
+#     front-end's resolved token constants (Dark and Light), and (PLAT-47) the
+#     desktop's Monaco editor theme
+#     (`src/public/third_party/monaco-themes/themes/customThemes/json/`)
+#     resolved the same way, so an edit of the desktop's editor theme that is
+#     not regenerated fails here too
 #
 # Both are generated files that are committed, so each can go stale in two
 # ways: someone edits the output by hand (the stylus was, once: fc3a76ed5
@@ -77,7 +81,9 @@ fi
 
 echo "design system: $pinned ($origin)"
 bash scripts/tokens-to-styl.sh "$src" "$scratch/out" \
-  --nim-out "$scratch/out/design_tokens.nim" >/dev/null
+  --nim-out "$scratch/out/design_tokens.nim" \
+  --editor-theme src/public/third_party/monaco-themes/themes/customThemes/json \
+  >/dev/null
 
 status=0
 for f in "$scratch/out"/*; do

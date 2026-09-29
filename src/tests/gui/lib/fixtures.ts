@@ -350,6 +350,16 @@ interface CodetracerOptions {
    * follows the shared tree.
    */
   codetracerPrefixOverride: string;
+  /**
+   * PLAT-47: the `theme:` the launch's `.config.yaml` names (`default_white`
+   * for the desktop's light theme). Empty keeps the bundled config's
+   * (`default_dark`). The launch fixture copies the bundled
+   * `default_config.yaml` into the test's `XDG_CONFIG_HOME` before every
+   * launch; this rewrites that copy's `theme:` line, so the desktop starts
+   * in the named theme through its own configuration path — the stylesheet
+   * and the Monaco theme both — exactly as a user's config would select it.
+   */
+  configTheme: string;
 }
 
 /**
@@ -1869,6 +1879,7 @@ export const test = base.extend<
   // one from `scripts/plat45-desktop-prefix.sh` carrying this checkout's
   // desktop JavaScript) instead of the build's own; a spec's `test.use` wins.
   codetracerPrefixOverride: [process.env.CODETRACER_TEST_PREFIX ?? "", { option: true }],
+  configTheme: ["", { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -1949,6 +1960,7 @@ export const test = base.extend<
         noUserLayout,
         preserveUserLayout,
         codetracerPrefixOverride,
+        configTheme,
       },
       use,
       testInfo,
@@ -1964,7 +1976,7 @@ export const test = base.extend<
       // via default_layout.json and subsequent tests see a stale layout that
       // may be missing the components they require (filesystem, state, etc.).
       try {
-        ensureDefaultConfig(codetracerInstallDir);
+        ensureDefaultConfig(codetracerInstallDir, configTheme);
         if (preserveUserLayout) {
           // PLAT-45: the saved arrangement is the subject; leave it.
         } else if (noUserLayout) {

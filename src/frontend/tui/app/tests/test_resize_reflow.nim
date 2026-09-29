@@ -148,22 +148,23 @@ suite "CTUI-3: reflow across ten resize increments":
     ck visited == 11
     ck checkedRows == 24 + 26 + 28 + 31 + 33 + 35 + 37 + 39 + 41 + 43 + 45
     ck staleCells == 0
-    # EXACTLY THREE default changes over the walk — one per fold depth the walk
-    # crosses (4 -> 3 -> 2 -> 0, measured in the next case). Asserting the
+    # EXACTLY TWO default changes over the walk — one per fold depth the walk
+    # crosses (2 -> 1 -> 0, measured in the next case; PLAT-47's default, the
+    # desktop's Debug layout, has two fold steps fewer). Asserting the
     # COUNT rather than "at least one" is what catches a `reprofile` that
     # rebuilt the tree on every frame — which would also reset the active tab
     # on every frame.
-    ck profileChanges == 3
+    ck profileChanges == 2
     h.dispose()
 
   test "the default changes where the fold depth does, and not before":
     # PLAT-45: the default is the shared arrangement folded for the size, so
     # it changes exactly where `depthFor` answers differently — measured, not
-    # tabulated: the source pane's 60-cell minimum folds 80x24 four times,
-    # and each few columns more gives regions back until 116x37 needs none.
+    # tabulated: the source pane's 60-cell minimum folds 80x24 twice, and a
+    # few columns more give the regions back until 98x31 needs none.
     var changedAt: seq[string] = @[]
     var previous = depthFor(pmDebug, Waypoints[0].cols, Waypoints[0].rows)
-    ck previous == 4
+    ck previous == 2
     for i in 1 ..< Waypoints.len:
       let w = Waypoints[i]
       let now = depthFor(pmDebug, w.cols, w.rows)
@@ -171,13 +172,13 @@ suite "CTUI-3: reflow across ten resize increments":
         changedAt.add $w.cols & "x" & $w.rows & " -> depth " & $now
       previous = now
     checkpoint("transitions: " & changedAt.join(", "))
-    ck changedAt.len == 3
-    ck changedAt[0] == "92x28 -> depth 3"
-    ck changedAt[2] == "116x37 -> depth 0"
+    ck changedAt.len == 2
+    ck changedAt[0] == "92x28 -> depth 1"
+    ck changedAt[1] == "98x31 -> depth 0"
     # The waypoint before it, and the same width a little shorter: the fold
     # is decided by the cells, not by one axis.
-    ck depthFor(pmDebug, 110, 35) == 2
-    ck depthFor(pmDebug, 116, 37) == 0
+    ck depthFor(pmDebug, 92, 28) == 1
+    ck depthFor(pmDebug, 98, 31) == 0
     ck previous == 0
 
   test "no coordinate drifts: the walk backwards reproduces the walk forwards":

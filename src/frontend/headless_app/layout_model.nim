@@ -2639,53 +2639,50 @@ const
     ## equality with the desktop's set is asserted, not assumed
     ## (`test_shared_default_layout.nim`).
 
-proc sharedDefaultLayout*(): SharedLayout =
-  ## **THE ONE AUTHORED DEFAULT.** Every product — the desktop, the GPUI
-  ## window and the terminal — opens with this arrangement; each then lets the
-  ## user rearrange freely and remembers its OWN last layout in its own file.
+proc sharedBundledLayout*(): LayoutNode =
+  ## **THE BUNDLED TREE** — the one authored arrangement, and the INPUT every
+  ## mode's default is derived from; nobody's layout as it stands.
   ##
-  ## ## Its content (PLAT-45 deliverable 3, recorded in the milestone's Status)
+  ## `src/config/default_layout.json` is its GoldenLayout translation
+  ## (`desktop_panes.layoutNodeToGoldenConfig`, written by
+  ## `generate_default_layout`), and the desktop derives each MODE's default
+  ## from that file (`index/mode_default_layout.modeDefaultLayout`: the
+  ## panes a mode hides or does not start with removed, the panes it homes
+  ## elsewhere moved). What every front-end OPENS with is the DEBUG mode's
+  ## default, read back from that derivation — `sharedDefaultLayout` below —
+  ## not this tree. Until PLAT-47 it was this tree, and the terminal and GPUI
+  ## window drew the standing TEST RESULTS / CONSTRAINTS column the desktop's
+  ## own code calls "nobody's layout" (the user's report of 2026-09-27).
+  ##
+  ## ## Its content
   ##
   ## The desktop's arrangement as users already know it — the hand-written
-  ## `default_layout.json` this replaces, plus the editor GoldenLayout inserts
-  ## at runtime (`utils.openNewLayoutContainer` puts it at index 1 of the root
-  ## row with an equal share):
+  ## `default_layout.json` PLAT-45 replaced, plus the editor GoldenLayout
+  ## inserts at runtime (`utils.openNewLayoutContainer` puts it at index 1 of
+  ## the root row):
   ##
   ##   Files | VCS  ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent Activity)
   ##                           over Event Log | Timeline | Terminal Output
   ##                         ‖ Test Results over Constraints
   ##
-  ## (`|` separates tabs of one stack, `‖` side-by-side regions.)
+  ## (`|` separates tabs of one stack, `‖` side-by-side regions.) The right
+  ## column exists for the EDITING surface (the Noir studio's §1a keeps
+  ## CONSTRAINTS in a column of its own there); the debug mode re-homes TESTS
+  ## into the FILES stack and does not start with CONSTRAINTS.
   ##
   ## ## The weights are the desktop's RENDERED shares
   ##
-  ## The hand-written file declared 20% / 55% / 25% for the three columns it
-  ## held, and GoldenLayout's `addChild` then gave the editor `1/4` of the row
-  ## and scaled the others by `3/4` — so what a desktop user sees is 15 / 25 /
-  ## 41.25 / 18.75. Those are the weights here, because they are what the
-  ## arrangement looks like; `desktop_panes.layoutNodeToGoldenConfig`
-  ## re-derives the 20 / 55 / 25 the desktop's config must declare for the
-  ## runtime to arrive at them. Zero weights (the right column's two stacks)
-  ## are the model's "equal share", which is exactly what an unsized
-  ## GoldenLayout child means.
+  ## With every top-level size declared, GoldenLayout's `addChild` gives the
+  ## runtime editor `1/4` of the row and scales the others by `3/4`, so the
+  ## declared 20 / 55 / 25 render as 15 / 25 / 41.25 / 18.75 — the weights
+  ## here. `layoutNodeToGoldenConfig` re-derives the percentages the config
+  ## must declare. Zero weights are the model's "equal share", which is what
+  ## an unsized GoldenLayout child means.
   ##
   ## ## Titles are empty on purpose
   ##
-  ## `LayoutNode.title` empty means "use the pane's own default, which this
-  ## module does not decide". Each front-end names its panes (the terminal
-  ## says "Call Stack", the desktop "CALLTRACE"); what is shared is WHERE the
-  ## pane is, not what its tab says.
-  ##
-  ## ## The fold order
-  ##
-  ## Lowest-ranked first. The right column's two NS9 panes go first (into one
-  ## stack, then into the event stack) because they are the least-used in a
-  ## replay; the file tree next (into the call-trace stack, which is also
-  ## navigation); then the call trace behind the state pane, the event stack
-  ## behind it too, and last everything behind the editor — the one pane a
-  ## replay cannot be read without, so it is the one that never becomes a
-  ## hidden tab.
-  let tree = row([
+  ## Each front-end names its panes; what is shared is WHERE a pane is.
+  row([
     stack([pane(paneFileTree), pane(paneVcs)], weight = 15.0),
     pane(paneEditor, weight = 25.0),
     column([
@@ -2700,9 +2697,41 @@ proc sharedDefaultLayout*(): SharedLayout =
       stack([pane(paneTestResults)]),
       stack([pane(paneConstraints)])],
       weight = 18.75)])
+
+const SharedDefaultLayoutJson* =
+  staticRead("shared_default_layout.generated.json")
+  ## THE SHARED DEFAULT, AS GENERATED: the desktop's debug-mode default
+  ## (`index/mode_default_layout.modeDefaultLayout(bundled, DebugMode)`) read
+  ## back into this vocabulary by `desktop_panes.goldenConfigToLayoutNode`.
+  ## Written by `generate_default_layout` (run under node, because the
+  ## per-mode derivation is the desktop's own JavaScript) and checked fresh by
+  ## `ci/test/default-layout-fresh.sh`, beside `default_layout.json`. A
+  ## committed generated file rather than a computation here, because the
+  ## derivation this vocabulary must equal is the desktop's, and the desktop's
+  ## is JavaScript.
+
+proc sharedDefaultLayout*(): SharedLayout =
+  ## **THE DEFAULT EVERY PRODUCT OPENS WITH** — the desktop's DEBUG-mode
+  ## layout (PLAT-47 deliverable 1): the bundled tree above with TESTS as a
+  ## tab of the FILES panel beside VCS and no CONSTRAINTS, exactly as the
+  ## desktop's per-mode layout draws it. The user, 2026-09-27: "The default
+  ## layout of desktop is the shared arrangement. It has been reviewed and
+  ## used for a long time." Each product then lets the user rearrange freely
+  ## and remembers its OWN last layout in its own file.
+  ##
+  ##   Files | VCS | Tests ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent
+  ##                                   Activity) over Event Log | Timeline |
+  ##                                   Terminal Output
+  ##
+  ## ## The fold order
+  ##
+  ## Lowest-ranked first: the file tree (into the call-trace stack, which is
+  ## also navigation); then the call trace behind the state pane, the event
+  ## stack behind it too, and last everything behind the editor — the one
+  ## pane a replay cannot be read without, so it is the one that never becomes
+  ## a hidden tab.
+  let tree = fromJson(parseJson(SharedDefaultLayoutJson))
   SharedLayout(tree: tree, folds: @[
-    FoldStep(region: paneConstraints, into: paneTestResults),
-    FoldStep(region: paneTestResults, into: paneEventLog),
     FoldStep(region: paneFileTree, into: paneCalltrace),
     FoldStep(region: paneCalltrace, into: paneState),
     FoldStep(region: paneEventLog, into: paneState),

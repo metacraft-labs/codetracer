@@ -57,6 +57,8 @@ import headless_session
 import ../../viewmodel/store/types as store_types
 import ../../viewmodel/viewmodels/inline_value_timeline
 
+import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
+import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import ../app/call_stack_binding
 import ../app/runtime
 import ../app/source_binding
@@ -97,6 +99,19 @@ type
     mutations*: seq[uint64]
     maxRRTicks*: uint64
     originNav*: ref OriginNavigator
+    callTraceStack*: seq[string]
+      ## PLAT-47. The call stack's frame names at the current stop, innermost
+      ## first — what marks the current call in a section loaded later, when
+      ## the reader scrolls (`pageCallTrace`).
+    callTraceAsked*: bool
+      ## PLAT-47. `learnExtent` asked the backend for the call trace. With no
+      ## rows arrived, the calltrace pane then says the recording has none.
+    files*: FileTreeModel
+      ## PLAT-47. The recording's source tree, as the Files pane lists it —
+      ## read ONCE, at open (`learnExtent`), off the session's `FilesystemVM`,
+      ## which `loadRecordingPanes` filled with the same tree the desktop's
+      ## Files pane renders. Until PLAT-47 only `--headless` filled the pane;
+      ## the interactive terminal showed an empty FILES pane on every replay.
     valueGate*: InlineValueGate
       ## PLAT-29. The inline values are drawn only when the locals they come
       ## from are about the stop the debugger is at — reconciled against the
@@ -239,6 +254,22 @@ proc loadedEventRows(s: TuiSession; offset, limit: int): seq[EventRow] =
   for row in s.session.session.store.eventLog.rows.val:
     result.add eventRowOf(row)
 
+proc fileTreeModelOf*(vm: FilesystemVM): FileTreeModel =
+  ## The Files pane's rows for a replay: the `FilesystemVM`'s tree, root
+  ## included, depth-first in the tree's own order — the rows the desktop's
+  ## Files pane draws for the same VM content, with the same labels.
+  var entries: seq[FileTreeEntry] = @[]
+  proc walk(n: FilesystemEntryNode; depth: int) =
+    if n.text.len == 0 and n.children.len == 0:
+      return
+    entries.add FileTreeEntry(text: n.text, depth: depth,
+                              isFolder: n.isFolder, path: n.path)
+    for c in n.children:
+      walk(c, depth + 1)
+  if not vm.isNil:
+    walk(vm.rootEntry.val, 0)
+  initFileTreeModel(entries)
+
 proc learnExtent*(s: TuiSession) =
   ## Read the recording's extent and its seek targets ONCE, at open.
   ##
@@ -257,6 +288,8 @@ proc learnExtent*(s: TuiSession) =
   # silently `@[]` — "empty because nothing asked" and "empty because the
   # request failed" produced the same value. `PaneLoad` now says which.
   let loaded = s.session.loadRecordingPanes()
+  s.files = fileTreeModelOf(s.session.session.fileTreeVM)
+  s.callTraceAsked = true
   var rows: seq[EventRow] = @[]
   for row in s.session.session.store.eventLog.rows.val:
     rows.add eventRowOf(row)
@@ -285,6 +318,66 @@ proc points*(s: TuiSession): seq[SourcePoint] =
   ## writes, so the gutter shows what every other surface shows.
   sourcePointsOf(s.session.session.store.pointList.rows.val)
 
+const
+  CallTraceBuffer* = CALLTRACE_BUFFER
+    ## Rows loaded above and below the ones the pane shows: the desktop's
+    ## `CalltraceVM` pre-fetch (`calltrace_vm.CALLTRACE_BUFFER`), so a step of
+    ## a line or a half page usually needs no request at all.
+
+proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
+  ## The pane's model over the section the store holds, at the current stop,
+  ## keeping the reader's scroll position and whether the pane follows the
+  ## current call.
+  let store = s.session.session.store
+  var rows: seq[CallTraceRow] = @[]
+  for line in store.calltrace.lines.val:
+    rows.add CallTraceRow(
+      index: line.index,
+      name: (if line.displayName.len > 0: line.displayName else: line.name),
+      depth: line.depth, rrTicks: line.rrTicks)
+  initCallTraceModel(rows, s.session.getCurrentRRTicks(), s.callTraceStack,
+                     firstIndex = store.calltrace.startLineIndex.val,
+                     total = int(store.calltrace.totalCallsCount.val),
+                     scrollTop = rt.app.callTrace.scrollTop,
+                     follow = not rt.app.callTraceScrolled)
+
+proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
+  ## PLAT-47: **the call trace, a section at a time.** Build the pane's model
+  ## from the section the store holds and, when the rows the pane shows are
+  ## not all in it, load the section around them — the rows on screen plus
+  ## `CallTraceBuffer` either side, through `ct/load-calltrace-section`, the
+  ## request the desktop's `CalltraceVM` pages with — and build it again.
+  ##
+  ## So there is no cap on the trace: the store holds one section, the title
+  ## counts the whole trace (`totalCallsCount`), and scrolling past the
+  ## section loads the next. A row the store does not hold is drawn as
+  ## loading, never as the end of the trace.
+  var model = s.callTraceModelOf(rt)
+  rt.app.callTrace = model
+  if model.total == 0 or s.calltrace.isNil:
+    return
+  let body = rt.paneBodyRows(paneCalltrace)
+  if body <= 0:
+    return
+  let top = model.visibleTop(body)
+  let first = model.firstIndex.int
+  let last = top + min(body, model.total - top)
+  if top >= first and last <= first + model.rows.len:
+    return
+  let start = max(0, top - CallTraceBuffer)
+  try:
+    s.session.requestAndLoadCalltrace(
+      startIndex = start.int64, height = body + 2 * CallTraceBuffer,
+      depth = RecordingCalltraceDepth)
+  except CatchableError:
+    # The rows stay drawn as loading; the next scroll asks again.
+    return
+  rt.app.callTrace = s.callTraceModelOf(rt)
+  if not rt.app.callTraceScrolled:
+    return
+  # The reader's position is kept exactly across the load.
+  rt.app.callTrace.scrollTop = top
+
 proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## Rebuild every pane's model from the CURRENT stop, and re-point the
   ## dispatcher and the command context at it.
@@ -301,6 +394,18 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # `EditorVM.showFlowOverlay` toggle.
   let frames = framesFromStackTrace(s.stackBody())
   rt.app.callStack = callStackModelFor(frames, s.entryFile)
+  # PLAT-47: THE CALL TRACE — the section of it the store holds, which the
+  # pane pages through as the reader scrolls (`pageCallTrace`).
+  s.callTraceStack = @[]
+  for f in frames:
+    s.callTraceStack.add f.name
+  s.pageCallTrace(rt)
+  rt.app.callTraceLoaded = s.callTraceAsked
+  # PLAT-47: the replay's Files pane. Only when the pane holds nothing else —
+  # Edit mode fills it with the project walk (`runtime.enterEdit…`), and a
+  # stop must not replace that with the recording's tree.
+  if rt.app.fileTree.isEmpty:
+    rt.app.fileTree = s.files
 
   # THE LOCALS ARE LOADED BEFORE THE SOURCE MODEL IS BUILT, because the source
   # pane's inline values are read from them. Until 2026-09-23 the model was
@@ -403,6 +508,8 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
     s.refresh(rt)
   elif outcome.refreshesSession:
     s.refresh(rt)
+  elif outcome.pagesCallTrace:
+    s.pageCallTrace(rt)
 
 proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## Take the ESCAPE HATCH off the DAP channel now that the session is open,

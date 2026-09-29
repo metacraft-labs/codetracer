@@ -188,11 +188,15 @@ const
     tcComment: CellStyle(role: srSyntaxComment),
     tcIdentifier: CellStyle(role: srSyntaxIdentifier),
     tcOperator: CellStyle(role: srSyntaxOperator),
-    tcPunctuation: CellStyle(role: srSyntaxPunctuation)]
+    tcPunctuation: CellStyle(role: srSyntaxPunctuation),
+    tcStringEscape: CellStyle(role: srSyntaxStringEscape),
+    tcBracket: CellStyle(role: srSyntaxBracket),
+    tcTag: CellStyle(role: srSyntaxTag)]
     ## §3.3.2's "per-language token highlighting mapped ... to terminal ANSI
     ## colors (keywords, types, strings, comments, identifiers)".
     ##
-    ## NINE DISTINCT STYLES, and `test_syntax_highlighting_ansi.nim` asserts
+    ## TWELVE DISTINCT STYLES (the last three since PLAT-47, the scopes the
+    ## desktop's Monaco Python tokenizer colours on their own), and `test_syntax_highlighting_ansi.nim` asserts
     ## the number rather than spot-checking two of them: a palette with a
     ## repeat renders two token classes identically while every span-level
     ## assertion stays green.
@@ -422,15 +426,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       g.paint(row, at, fitted, span.style)
       at += cellWidthOf(fitted)
 
-    # How far the execution-line highlight reaches on this row. Grown as the
-    # code and the annotation are painted; see the `restyle` call below for the
-    # measurement that decided it is not the whole row.
-    var highlightCells = gutW
-
     if codeW <= 0:
-      if line == model.executionLine and line > 0:
-        g.restyle(row, area.col, highlightCells, proc(s: CellStyle): CellStyle =
-          s.withBackground(ExecutionLineBackground))
       continue
 
     let codeCol = area.col + gutW
@@ -438,14 +434,12 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       inc result.loadingLines
       let loading = truncateToCells(SourceLoadingText, codeW)
       g.paint(row, codeCol, loading, SourceLoadingStyle)
-      highlightCells += cellWidthOf(loading)
     else:
       inc result.materializedLines
       let raw = model.heldTextAt(line)
       let text = truncateToCells(raw, codeW)
       g.paint(row, codeCol, text, DefaultCellStyle)
       let shown = cellWidthOf(text)
-      highlightCells += shown
       for span in file.spansForLine(line):
         if span.class == tcPlain:
           continue
@@ -476,48 +470,32 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         if span.text.len > 0:
           inc result.annotatedLines
           g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)
-          highlightCells += AnnotationGap + cellWidthOf(span.text)
 
     if line == model.executionLine and line > 0:
-      # §3.3.2's "background highlight on current active execution line".
+      # §3.3.2's "background highlight on current active execution line",
+      # DRAWN AS THE DESKTOP DRAWS IT (PLAT-47): Monaco's stop decoration is a
+      # whole-line band across the editor's content area, from the first code
+      # column to the editor's right edge, whatever the line's length — and
+      # not under the line numbers (measured off the Electron app on `calc`:
+      # `plat47-desktop-parity.electron.json` reads the band 30px inside the
+      # editor's right edge, past the end of the line). So the band covers
+      # the code column, text, annotation and trailing blanks alike, to the
+      # pane's right edge, and the gutter keeps its own colours (the active
+      # line number and the `-->` pointer mark the line there).
       #
-      # APPLIED LAST, so it keeps every foreground the gutter and the
-      # highlighter decided — see `styled_row.restyle`'s docstring on why this
-      # is not painted first.
+      # APPLIED LAST, so it keeps every foreground the highlighter decided —
+      # see `styled_row.restyle`'s docstring on why this is not painted first.
       #
-      # AND APPLIED TO THE LINE'S EXTENT RATHER THAN TO THE WHOLE ROW, which is
-      # a MEASURED decision against CTUI-5's < 250-byte single-step emission
-      # gate rather than a taste one. A step changes two rows: the one the
-      # pointer left and the one it reached. With the highlight spanning the
-      # full pane the compositor's diff is 2 x paneWidth cells, and the
-      # emission was measured at 224 bytes on a 56-column pane and 292 on a
-      # 90-column one, over 40 short lines — over the gate at the width the
-      # Ultra-wide profile gives this pane. Ending the highlight at the end of
-      # the line's own text (plus the gutter, plus the inline annotation) keeps
-      # the syntax colours and brings the same step to 149 bytes at BOTH
-      # widths, because the cost stops depending on the pane and starts
-      # depending on the line.
-      #
-      # THIS IS A TRADE, NOT A CONVENTION MATCH, and saying so is the honest
-      # form. The mainstream GUI editors — VS Code, IntelliJ, Vim's
-      # `cursorline`, Emacs's `hl-line` — all highlight the FULL row, so the
-      # ragged right edge here is a visible departure from what a reader
-      # arriving from one of them expects. What buys it is that a terminal pane
-      # pays per emitted cell over a link this front-end is specified to run
-      # across (SSH, container shells), and §3.3.2's own sentence asks for "a
-      # background highlight on the current active execution line" without
-      # saying how far right it reaches. The line stays unambiguous either way:
-      # the `-->` pointer, the gutter tint and the highlight all agree on it.
-      #
-      # WHAT THAT DOES NOT BUY, stated because the gate is a number and this
-      # is the condition under which it is still missed: a line long enough to
-      # FILL the code column and dense in tokens costs 344 bytes at 56 columns
-      # and 348 at 90 — the runes are 112 of that and the rest is one SGR
-      # transition per token, on both the row the pointer left and the row it
-      # reached. The measurement on the real `calc` fixture is in CTUI-5's
-      # Implementation section; this comment records the worst case rather
-      # than leaving it to be found.
-      g.restyle(row, area.col, min(highlightCells, area.width),
+      # THE EMISSION COST. CTUI-5 (2026-09) ended the band at the end of the
+      # line's text to keep a one-line step under its 250-byte gate: a band
+      # that ends with the text makes a step's cost depend on the line rather
+      # than on the pane. Parity with the desktop is the stronger requirement
+      # now, and the cost is measured, not assumed:
+      # `test_source_stepping_forward_backward.nim` still asserts the gate at
+      # its 56-column pane with the full-width band, and
+      # `test_plat47_desktop_parity.nim` reads the band back off a real PTY
+      # to the pane's last column.
+      g.restyle(row, codeCol, area.col + area.width - codeCol,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
 

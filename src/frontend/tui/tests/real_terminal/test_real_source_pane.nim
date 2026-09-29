@@ -63,7 +63,7 @@ import ./derived_colours
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 71
+const ExpectedAssertions = 72
 
 const
   Cols = 90
@@ -174,9 +174,14 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       ck ptrCell.fg.kind == ckIndexed
       ck ptrCell.fg.idx == ansiIndexOf(srGutterExecutionPointer)
       ck caBold in ptrCell.attrs
-      # …and the execution line's background highlight really reached it.
-      ck ptrCell.bg.kind == ckIndexed
-      ck ptrCell.bg.idx == ansiIndexOf(srLineExecution, background = true)
+      # …and the execution line's background highlight is the desktop's
+      # Monaco band (PLAT-47): it reaches the pane's LAST column, past the
+      # end of the line's text, and leaves the gutter (the pointer) alone.
+      let bandCell = sess.cellAt(row0, Cols - 1)
+      ck bandCell.bg.kind == ckIndexed and
+         bandCell.bg.idx == ansiIndexOf(srLineExecution, background = true)
+      ck not (ptrCell.bg.kind == ckIndexed and
+              ptrCell.bg.idx == ansiIndexOf(srLineExecution, background = true))
 
       # ---- BREAKPOINT RED, TRACEPOINT CYAN, DISABLED MUTED ------------------
       # All three §3.3.2 indicators, on the same real screen.
@@ -280,6 +285,10 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       checkpoint("vacated pointer cell: " & describeCell(vacatedCell))
       ck vacatedCell.fg.kind == ckDefault
       ck vacatedCell.bg.kind == ckDefault
+      # …and the band left the vacated row to its last column.
+      let vacatedEnd = sess.cellAt(row0, Cols - 1)
+      ck not (vacatedEnd.bg.kind == ckIndexed and
+              vacatedEnd.bg.idx == ansiIndexOf(srLineExecution, background = true))
 
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))

@@ -41,6 +41,13 @@ import headless_app/desktop_panes
 import headless_app/arrangement_relation
 import ../../../../common/types
 
+when defined(js):
+  import std/jsffi
+  import ../../../index/mode_default_layout
+
+  proc jsParse(raw: cstring): js {.importjs: "JSON.parse(#)".}
+  proc jsText(value: js): cstring {.importjs: "JSON.stringify(#)".}
+
 var CHECKS = 0
 template ck(cond: untyped) =
   inc CHECKS
@@ -258,8 +265,8 @@ suite "PLAT-45 deliverable 2 — a declared capability per front-end":
 
 suite "PLAT-45 deliverable 3 — the shared default's content":
 
-  test "it is the desktop's arrangement: the panes the desktop placed, plus the editor":
-    let tree = sharedDefaultLayout().tree
+  test "the BUNDLED tree is the desktop's arrangement: the panes it placed, plus the editor":
+    let tree = sharedBundledLayout()
     var desktop: set[PaneKind] = {paneEditor}
     for r in desktopRuntimeRegions(parseJson(HandWrittenDefault)):
       for t in r.tabs:
@@ -275,11 +282,11 @@ suite "PLAT-45 deliverable 3 — the shared default's content":
       ck step.into in panesOf(s.tree)
       ck step.region != paneEditor
 
-  test "the edit default is the debug default minus the replay-only panes, plus the build pane":
-    let debugRel = ofTree(sharedDefaultLayout().tree)
+  test "the edit default is the bundled tree minus the replay-only panes, plus the build pane":
+    let debugRel = ofTree(sharedBundledLayout())
     let editRel = ofTree(sharedEditLayout().tree)
     ck panesOf(sharedEditLayout().tree) ==
-       (panesOf(sharedDefaultLayout().tree) - EditModeHiddenPanes) +
+       (panesOf(sharedBundledLayout()) - EditModeHiddenPanes) +
          {paneBuildOutput}
     # Placement: every BEFORE pair between panes both defaults show is the same.
     for pair in editRel.before:
@@ -333,11 +340,12 @@ suite "PLAT-45 deliverable 4 — foldLayout and its laws":
   test "a folded pane becomes a tab of its target, never a region of its own":
     let s = sharedDefaultLayout()
     let one = foldLayout(s, 1)
-    let host = regionOf(one, paneTestResults)
+    let host = regionOf(one, paneCalltrace)
     ck host.kind == lnStack
-    ck regionOf(one, paneConstraints) == host
+    ck regionOf(one, paneFileTree) == host
+    ck regionOf(one, paneTestResults) == host
     # The target keeps its visible tab.
-    ck host.children[host.activeIndex].pane == paneTestResults
+    ck host.children[host.activeIndex].pane == paneCalltrace
 
 suite "PLAT-45 deliverable 7 — the desktop default is GENERATED":
 
@@ -352,9 +360,9 @@ suite "PLAT-45 deliverable 7 — the desktop default is GENERATED":
     ck generated.problem.len == 0
     ck handWritten.problem.len == 0
     ck sameArrangement(generated, handWritten)
-    # AND IT IS THE SHARED TREE'S, which is the claim that makes it generated
+    # AND IT IS THE BUNDLED TREE'S, which is the claim that makes it generated
     # rather than merely equal.
-    ck sameArrangement(generated, ofTree(sharedDefaultLayout().tree))
+    ck sameArrangement(generated, ofTree(sharedBundledLayout()))
 
   test "and the rendered SHARES are the shared tree's weights":
     # The generator writes the percentages that make the desktop's runtime
@@ -381,6 +389,77 @@ suite "PLAT-45 deliverable 7 — the desktop default is GENERATED":
     # `index/config.isValidLayoutConfig` resets a layout with no Files panel;
     # the generated one must never trip it.
     ck CommittedDefault.contains("\"content\": " & $ord(Content.Filesystem))
+
+suite "PLAT-47 deliverable 1 — the shared default is the desktop's Debug-mode layout":
+
+  const GeneratedShared = staticRead(
+    "../../../headless_app/shared_default_layout.generated.json")
+
+  test "TESTS is a tab of the FILES panel beside VCS, and there is no CONSTRAINTS":
+    let tree = sharedDefaultLayout().tree
+    let files = regionOf(tree, paneFileTree)
+    ck files.kind == lnStack
+    var tabs: seq[PaneKind] = @[]
+    for c in files.children: tabs.add c.pane
+    ck tabs == @[paneFileTree, paneVcs, paneTestResults]
+    ck files.children[files.activeIndex].pane == paneFileTree
+    ck paneConstraints notin panesOf(tree)
+    # No standing column for either: the root row is FILES | editor | the
+    # replay column, exactly the desktop's Debug-mode row.
+    ck tree.kind == lnRow
+    ck tree.children.len == 3
+
+  test "its relation is the desktop Debug layout's, stated once":
+    ck ofTree(sharedDefaultLayout().tree).canonical ==
+      "row(stack[fileTree*,vcs,testResults],editor," &
+      "column(row(stack[state*,scratchpad],stack[calltrace*,agentActivity])," &
+      "stack[eventLog*,timeline,terminalOutput]))"
+
+  test "it is the generated file, read back, not a tree authored here":
+    ck equalTrees(sharedDefaultLayout().tree,
+                  fromJson(parseJson(GeneratedShared)))
+    # The weights are the desktop's rendered Debug-mode shares: FILES and the
+    # replay column keep their declared 20% and 55%, and the editor takes the
+    # 25% they leave unclaimed (`utils.openNewLayoutContainer`).
+    let tree = sharedDefaultLayout().tree
+    ck tree.children[0].weight == 20.0
+    ck tree.children[1].pane == paneEditor
+    ck tree.children[1].weight == 25.0
+    ck tree.children[2].weight == 55.0
+
+  test "the inverse translation undoes the forward one on the bundled tree":
+    # `goldenConfigToLayoutNode` is what reads the desktop's Debug-mode config
+    # back; on the bundled config it must give back the bundled tree's
+    # arrangement AND its rendered shares (the runtime's 1/4 editor).
+    let back = goldenConfigToLayoutNode(parseJson(CommittedDefault))
+    ck sameArrangement(ofTree(back), ofTree(sharedBundledLayout()))
+    ck back.children[0].weight == 15.0
+    ck back.children[1].weight == 25.0
+
+  test "the inverse translation refuses what it cannot read":
+    var refused = 0
+    for bad in ["{}", """{"root": {"type": "column", "content": []}}""",
+                """{"root": {"type": "row", "content": [{"type": "stack",
+                   "content": [{"type": "component", "componentState":
+                   {"content": 9999}}]}]}}"""]:
+      try:
+        discard goldenConfigToLayoutNode(parseJson(bad))
+      except ValueError:
+        inc refused
+    ck refused == 3
+
+  when defined(js):
+    # THE ONE DERIVATION, run here on the JS backend where it lives: the
+    # desktop's own `modeDefaultLayout` over the committed bundled config,
+    # read back, must be byte-for-byte the committed shared default. The C
+    # lane cannot run it (the derivation is `importjs`); this is the lane that
+    # can, and `ci/test/default-layout-fresh.sh` runs the same check under
+    # node at lint time.
+    test "the desktop's Debug-mode derivation generates the committed default":
+      let debugConfig = modeDefaultLayout(jsParse(cstring(CommittedDefault)),
+                                          DebugMode)
+      ck generatedSharedDefaultText(parseJson($jsText(debugConfig))) ==
+        GeneratedShared
 
 suite "PLAT-45 — the medium-independent relation can fail":
 

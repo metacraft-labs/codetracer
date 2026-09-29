@@ -5,7 +5,7 @@
     "Regenerate: `just plat45-arrangement-window` then",
     "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
   ],
-  "takenAt": "2026-09-27T02:34:43Z",
+  "takenAt": "2026-09-27T11:27:29Z",
   "host": "gpu-server-001",
   "frames": {
     "shared": {
@@ -17,92 +17,99 @@
       "regions": [
         {
           "x": 0,
-          "y": 12,
-          "w": 292,
-          "h": 1056,
-          "strip": "Files VCS",
+          "y": 13,
+          "w": 387,
+          "h": 1054,
+          "strip": "Files VCS Tests",
           "tabs": [
             "Files",
-            "VCS"
+            "VCS",
+            "Tests"
           ],
           "heading": "Files",
-          "active": "Files"
+          "active": "Files",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
         },
         {
-          "x": 300,
-          "y": 12,
-          "w": 468,
-          "h": 1056,
+          "x": 396,
+          "y": 13,
+          "w": 470,
+          "h": 1054,
           "strip": "Editor",
           "tabs": [
             "Editor"
           ],
           "heading": "",
-          "active": "Editor"
+          "active": "Editor",
+          "outline": {
+            "top": true,
+            "bottom": true,
+            "left": true,
+            "right": true
+          }
         },
         {
-          "x": 776,
-          "y": 12,
-          "w": 382,
-          "h": 524,
+          "x": 875,
+          "y": 13,
+          "w": 511,
+          "h": 522,
           "strip": "State Scratchpad",
           "tabs": [
             "State",
             "Scratchpad"
           ],
           "heading": "State",
-          "active": "State"
+          "active": "State",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
         },
         {
-          "x": 1166,
-          "y": 12,
-          "w": 382,
-          "h": 524,
+          "x": 1396,
+          "y": 13,
+          "w": 524,
+          "h": 522,
           "strip": "Call Trace  Agent Activity",
           "tabs": [
             "Call Trace",
             "Agent Activity"
           ],
           "heading": "Call Trace",
-          "active": "Call Trace"
+          "active": "Call Trace",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
         },
         {
-          "x": 776,
-          "y": 544,
-          "w": 772,
-          "h": 524,
-          "strip": "Event Log Timeline Terminal Output",
+          "x": 875,
+          "y": 545,
+          "w": 1045,
+          "h": 522,
+          "strip": "Eventlog Timeline Terminal Output",
           "tabs": [
             "Event Log",
             "Timeline",
             "Terminal Output"
           ],
           "heading": "Event Log",
-          "active": "Event Log"
-        },
-        {
-          "x": 1556,
-          "y": 12,
-          "w": 364,
-          "h": 524,
-          "strip": "Test Results.",
-          "tabs": [
-            "Test Results"
-          ],
-          "heading": "",
-          "active": "Test Results"
-        },
-        {
-          "x": 1556,
-          "y": 544,
-          "w": 364,
-          "h": 524,
-          "strip": "Constraints",
-          "tabs": [
-            "Constraints"
-          ],
-          "heading": "",
-          "active": "Constraints"
+          "active": "Event Log",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
         }
       ]
     },

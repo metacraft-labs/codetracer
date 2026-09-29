@@ -3759,6 +3759,17 @@ jobs:
         # `test-programs/calc` with. The recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat45-capture-electron
 
+      - name: The desktop shows what the terminal and GPUI front-ends must equal
+        if: ${{ !cancelled() }}
+        # The desktop column of the terminal's and GPUI's desktop-parity
+        # suites: the first-run arrangement, the editor's colours as the eye
+        # sees them, the focused panel's outline, the Files pane's entries and
+        # the calltrace pane's calls, captured from the REAL Electron app on
+        # the terminal lanes' own `calc` recording (recorded here when absent)
+        # with this checkout's desktop JavaScript. Here for the reasons the
+        # step above gives; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat47-capture-electron
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

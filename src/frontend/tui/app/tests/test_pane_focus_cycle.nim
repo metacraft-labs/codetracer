@@ -48,7 +48,7 @@ import ../layout/project
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 262
+const ExpectedAssertions = 248
 
 var countedAssertions = 0
 
@@ -66,26 +66,27 @@ type
 
 const
   Geometries = [
-    # 80x24 — PLAT-45: the shared default, FOLDED four times so the source
-    # pane gets its 56-cell minimum: Source | (Variables over Event Log), with
-    # the Call Stack and Files as tabs of the Variables stack.
+    # 80x24 — the shared default (PLAT-47: the desktop's Debug layout),
+    # FOLDED twice so the source pane gets its minimum: Source | (Variables
+    # over Event Log), with the Call Trace and Files as tabs of the Variables
+    # stack.
     Geometry(name: "compact 80x24", profile: lpCompact, cols: 80, rows: 24,
              panes: @[paneEditor, paneState, paneEventLog]),
-    # 120x40 — the shared default unfolded: the desktop's arrangement, with
-    # Test Results over Constraints on the right.
+    # 120x40 — the shared default unfolded: the desktop's Debug arrangement,
+    # FILES (with VCS and TESTS as tabs) | Source | the replay column.
     Geometry(name: "standard 120x40", profile: lpStandard, cols: 120, rows: 40,
              panes: @[paneFileTree, paneEditor, paneState, paneCalltrace,
-                      paneEventLog, paneTestResults, paneConstraints]),
+                      paneEventLog]),
     # 200x50 — the same arrangement, wider.
     Geometry(name: "ultra-wide 200x50", profile: lpUltraWide, cols: 200,
              rows: 50,
              panes: @[paneFileTree, paneEditor, paneState, paneCalltrace,
-                      paneEventLog, paneTestResults, paneConstraints]),
+                      paneEventLog]),
   ]
 
   GeometryCount = 3
-  TotalVisiblePanes = 17
-    ## 3 + 7 + 7. The NON-VACUITY FLOOR for every per-geometry sweep below: a
+  TotalVisiblePanes = 13
+    ## 3 + 5 + 5. The NON-VACUITY FLOOR for every per-geometry sweep below: a
     ## projection that produced no regions would satisfy "each pane visited
     ## once" for free.
 
@@ -168,11 +169,11 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
       checkpoint(g.name & " second lap: " & $secondLap)
       ck secondLap == expectedSecond
     ck checkedGeometries == GeometryCount
-    # The sweep's own size, from its parameters: 3 + 7 + 7 panes means
-    # (n-1) + 1 + n steps per geometry = 2n steps, so 6 + 14 + 14 = 34.
+    # The sweep's own size, from its parameters: 3 + 5 + 5 panes means
+    # (n-1) + 1 + n steps per geometry = 2n steps, so 6 + 10 + 10 = 26.
     checkpoint("Tab presses: " & $stepsTaken)
     ck stepsTaken == 2 * TotalVisiblePanes
-    ck stepsTaken == 34
+    ck stepsTaken == 26
 
   test "Shift+Tab is exactly the reverse cycle":
     var checkedGeometries = 0
@@ -242,8 +243,8 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
 
   test "`Ctrl+w` h/j/k/l moves by geometry, and stops at the edge":
     # Every expectation is the shared default read as a picture; none is
-    # computed. Standard (120x40): Files | Source | (Variables | Call Stack
-    # over Event Log) | (Test Results over Constraints). Only moves with ONE
+    # computed. Standard (120x40): Files | Source | (Variables | Call Trace
+    # over Event Log) — the desktop's Debug layout (PLAT-47). Only moves with ONE
     # neighbour in their direction are probed — a region beside two stacked
     # regions is a tie-break question, not a geometry one.
     let standard = focusFor(Geometries[1])
@@ -252,8 +253,8 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
                   (paneState, fdLeft, true, paneEditor),
                   (paneState, fdRight, true, paneCalltrace),
                   (paneState, fdDown, true, paneEventLog),
-                  (paneCalltrace, fdRight, true, paneTestResults),
-                  (paneTestResults, fdDown, true, paneConstraints),
+                  (paneCalltrace, fdDown, true, paneEventLog),
+                  (paneCalltrace, fdRight, false, paneCalltrace),
                   (paneEditor, fdUp, false, paneEditor),
                   (paneEditor, fdDown, false, paneEditor)]:
       inc moves
@@ -290,18 +291,17 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     let (cRight, _) = compact.paneInDirection(fdRight)
     ck not cRight
 
-    # Ultra-wide (200x50): the right column is really there, and is the edge.
+    # Ultra-wide (200x50): the replay column is the right edge.
     let wide = focusFor(Geometries[2])
     ck wide.focusPaneKind(paneCalltrace)
-    let (wRight, wRightPane) = wide.paneInDirection(fdRight)
-    ck wRight
-    ck wRightPane == paneTestResults
-    ck wide.focusPaneKind(paneTestResults)
+    let (wRight, _) = wide.paneInDirection(fdRight)
+    ck not wRight
+    ck wide.focusPaneKind(paneEventLog)
     let (wRight2, _) = wide.paneInDirection(fdRight)
     ck not wRight2
     let (wLeft, wLeftPane) = wide.paneInDirection(fdLeft)
     ck wLeft
-    ck wLeftPane == paneCalltrace
+    ck wLeftPane == paneEditor
     ck moves == 8
 
     # THE DIRECTIONS ARE THE KEYMAP's. `Ctrl+w` h/j/k/l map onto the four
@@ -349,7 +349,7 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     ck not toggleMaximize(state, paneState)
     ck not state.active
     let restored = projectLayout(layoutFor(state, lpStandard), body)
-    ck restored.regions.len == 7
+    ck restored.regions.len == 5
     var kinds: seq[PaneKind] = @[]
     for region in restored.regions:
       kinds.add region.pane
@@ -417,10 +417,9 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     # they are asserted rather than trusted.
     let pf = focusFor(Geometries[1])
     ck describeFocusOrder(pf) == "fileTree -> editor -> state -> calltrace " &
-       "-> eventLog -> testResults -> constraints"
+       "-> eventLog"
     ck sortedPaneNames(Geometries[2].panes) ==
-       @["calltrace", "constraints", "editor", "eventLog", "fileTree", "state",
-         "testResults"]
+       @["calltrace", "editor", "eventLog", "fileTree", "state"]
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

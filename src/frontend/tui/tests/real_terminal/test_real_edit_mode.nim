@@ -82,7 +82,7 @@ import term_assert
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 
-const ExpectedAssertions = 62
+const ExpectedAssertions = 63
 
 var countedAssertions = 0
 
@@ -236,7 +236,8 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck screen.contains("BUILD")
       ck screen.contains(ProjectFile)
       ck not screen.contains("CALL STACK")
-      ck not screen.contains("[Call Stack]")
+      ck not screen.contains(" Call Trace ")
+      ck not screen.contains("CALL TRACE")
       # The build pane is a statement rather than a blank.
       ck screen.contains("[idle]")
     finally:
@@ -352,10 +353,10 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       # …and the pane set moved with it (Mode-Transitions.md §4 requirement 4:
       # mode and layout change together or not at all).
       ck not debug.contains("EDIT " & ProjectFile)
-      # The Call Stack's tab label: in the shared default (PLAT-45) it is a
+      # The calltrace pane's tab label: in the shared default (PLAT-45) it is a
       # tab of a stack, and a session with no frames paints the strip, not a
-      # `CALL STACK` title row.
-      ck debug.contains("[Call Stack]")
+      # title row. PLAT-47: the tab reads `Call Trace`, padded, not bracketed.
+      ck debug.contains(" Call Trace ")
 
       # BACK, and the editor is the one that was there — §6's reversibility,
       # through a real terminal.
@@ -407,7 +408,7 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
       settleOnDebugger(sess, Cols, Rows)
       let opened = sess.screenContents()
       ck opened.contains("NORMAL [DEBUG]")
-      ck opened.contains("CALL STACK")
+      ck opened.contains("CALL TRACE")
       # THE POSITIVE CONTROL ON THE ABSENCE BELOW: the notice is not on screen
       # before the edit, so "it appeared" is an event rather than a constant.
       ck not opened.contains("predates")

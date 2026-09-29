@@ -47,7 +47,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 13
+const ExpectedAssertions = 14
 
 var countedAssertions = 0
 
@@ -65,24 +65,18 @@ const
   TallRows = 40
   CaptureRecipe = "just plat46-capture-electron"
   SharedRoles = ["tab-active-bg", "tab-active-fg", "tab-inactive-fg",
-                 "surface-canvas", "surface-panel", "chrome-text"]
-    ## Roles both front-ends paint with ONE token.
-  KnownDivergences: array[3, (string, string)] = [
-    ("syntax-keyword",
-     "the desktop's Monaco syntax theme (`src/public/third_party/monaco-themes/" &
-     "themes/customThemes/json/codetracerDark.json`) is hand-written, not " &
-     "generated from `colors/editor/syntax/*` — codetracer-specs/issues/" &
-     "2026-09-26-desktop-editor-syntax-not-from-design-tokens.md"),
-    ("surface-editor",
-     "the desktop's editor background is transparent over the pane " &
-     "(`ui/surface/base/panel`); the terminal paints " &
-     "`editor/surface/primary`, which PLAT-46 names for the editor — " &
-     "recorded in codetracer-design-system docs/DESIGN-DIVERGENCES.md"),
-    ("tab-inactive-bg",
-     "the desktop's inactive GoldenLayout tab resolves to the panel surface; " &
-     "the terminal puts inactive tabs on the strip's own " &
-     "`ui/surface/primary/default` so the active tab is distinguished by " &
-     "surface (PLAT-46 deliverable 4) — recorded in DESIGN-DIVERGENCES.md")]
+                 "surface-canvas", "surface-panel", "chrome-text",
+                 "syntax-keyword", "syntax-identifier", "surface-editor",
+                 "tab-inactive-bg"]
+    ## Every role the capture measures, and every one agrees (PLAT-47).
+  KnownDivergences: array[0, (string, string)] = []
+    ## EMPTY SINCE PLAT-47, and the count below is asserted, so a divergence
+    ## that reappears reddens this suite until it is filed here with its
+    ## reason. The three PLAT-46 counted — the editor's syntax, the editor's
+    ## surface and the inactive tab's surface — closed when the terminal's
+    ## editor was generated from the desktop's own Monaco theme documents
+    ## (`app/theme/editor_theme.nim`) and its tab strip moved onto the surface
+    ## the desktop's strip measures.
 
 proc hexOfColor(c: Color): string =
   if c.kind == ckRgb: hexOf((c.r.int, c.g.int, c.b.int)) else: ""
@@ -112,7 +106,7 @@ proc lastColBeforeRule(sess: var TuiTestSession; row, fromCol: int): int =
 proc terminalColumn(sess: var TuiTestSession): Table[string, string] =
   ## Each shared role's colour as the terminal painted it.
   result = initTable[string, string]()
-  let tabs = rowOf(sess, "[Variables]")
+  let tabs = rowOf(sess, " Variables ")
   if tabs >= 0:
     let active = sess.cellAt(tabs, colOf(sess, tabs, "Variables"))
     # The Variables stack's inactive tab — Scratchpad in the shared default
@@ -123,10 +117,13 @@ proc terminalColumn(sess: var TuiTestSession): Table[string, string] =
     result["tab-inactive-bg"] = hexOfColor(inactive.bg)
     result["tab-inactive-fg"] = hexOfColor(inactive.fg)
     # THE LAYOUT'S OWN GROUND. The desktop's `.lm_goldenlayout` background
-    # (`ui/surface/primary/default`) is what shows through its tab strip; the
-    # terminal paints its strip with the same token (`srTabBar`), read here
-    # past the last tab.
-    result["surface-canvas"] = hexOfColor(sess.cellAt(tabs, Cols - 3).bg)
+    # (`ui/surface/primary/default`) is what shows between its panels — its
+    # splitters; the terminal's splitters are its dividers, painted on the
+    # same ground (PLAT-47), read here at the divider left of the Variables
+    # stack.
+    let divider = colOf(sess, tabs, "Variables") - 2
+    if divider >= 0:
+      result["surface-canvas"] = hexOfColor(sess.cellAt(tabs, divider).bg)
   let varRow = rowOf(sess, "VARIABLES")
   if varRow >= 0:
     result["surface-panel"] = hexOfColor(sess.cellAt(varRow + 2,
@@ -179,6 +176,9 @@ suite "PLAT-46: the terminal and the desktop paint one design system":
     if defRow >= 0:
       terminal["syntax-keyword"] = hexOfColor(
         tall.cellAt(defRow, colOf(tall, defRow, "def add")).fg)
+      # The function's name: an identifier, the default token colour.
+      terminal["syntax-identifier"] = hexOfColor(
+        tall.cellAt(defRow, colOf(tall, defRow, "def add") + 4).fg)
     tall.send("q")
     discard tall.waitExit(initDuration(seconds = 15))
     tall.close()

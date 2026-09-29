@@ -265,7 +265,7 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     # THE NON-VACUITY FLOOR, and it is the important one in this file: two
     # blank screens are equal. The reconstructed screen has to be the DEBUGGER.
     ck fast.plain.contains("SOURCE")
-    ck fast.plain.contains("CALL STACK")
+    ck fast.plain.contains("CALL TRACE")
     ck fast.plain.contains("VARIABLES")
     ck fast.plain.contains("Timeline")
     ck fast.cells.len == Cols * Rows

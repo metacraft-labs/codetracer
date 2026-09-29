@@ -107,32 +107,34 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
 
   test "the three old §3.2 sizes: the shared default, folded only at 80x24":
     # The strips are the shared default's regions, read off the screen. At
-    # 80x24 the source pane's 60-cell minimum folds four regions, leaving the
-    # Variables and Event Log stacks beside it (Files and the Call Stack are
-    # tabs of the first, the NS9 panes of the second); the unfolded sizes
-    # show every region as its own, and only the folded one says so on the
-    # status line.
-    for (cols, rows, folded) in [(80, 24, 4), (120, 40, 0), (200, 50, 0)]:
+    # 80x24 the source pane's 60-cell minimum folds two regions, leaving the
+    # Variables and Event Log stacks beside it (Files and the Call Trace are
+    # tabs of the first); the unfolded sizes show every region as its own,
+    # and only the folded one says so on the status line. PLAT-47: the
+    # default is the desktop's Debug layout — TESTS a tab of FILES, no
+    # CONSTRAINTS anywhere — and a tab is its padded label, not `[label]`.
+    for (cols, rows, folded) in [(80, 24, 2), (120, 40, 0), (200, 50, 0)]:
       let dir = freshStateDir("fold")
       var sess = spawnTui(dir, cols, rows)
       settleOnDebugger(sess, cols, rows)
       let screen = sess.screenContents()
       let status = statusRowText(sess, cols, rows)
       checkpoint($cols & "x" & $rows & " status: " & status)
-      ck screen.contains("[Variables]")
-      ck screen.contains("[Event Log]")
+      ck screen.contains(" Variables ")
+      ck screen.contains(" Event Log ")
+      ck not screen.contains("Constraints")
       if folded > 0:
         ck status.contains("[folded " & $folded & "]")
         # Folded regions are tabs now, not regions of their own.
-        ck not screen.contains("[Files]")
-        ck not screen.contains("[Call Stack]")
-        ck not screen.contains("[Test Results]")
+        ck not screen.contains(" Files ")
+        ck not screen.contains(" Call Trace ")
       else:
         ck not status.contains("[folded")
-        ck screen.contains("[Files]")
-        ck screen.contains("[Call Stack]")
-        ck screen.contains("[Test Results]")
-        ck screen.contains("[Constraints]")
+        ck screen.contains(" Files ")
+        ck screen.contains(" Call Trace ")
+        if cols >= 200:
+          # Wide enough for the FILES strip to spell its third tab.
+          ck screen.contains(" Files   VCS   Tests ")
       ck quit(sess) == some(0)
       # AN UNTOUCHED SESSION WRITES NOTHING — no gesture, no document.
       ck not fileExists(dir / TuiDocument)
@@ -155,7 +157,7 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
     var first = spawnTui(dir, Cols, Rows)
     settleOnDebugger(first, Cols, Rows)
     # THE SHARED DEFAULT, with nothing remembered.
-    ck first.screenContents().contains("[Files]")
+    ck first.screenContents().contains(" Files ")
     ck not fileExists(dir / TuiDocument)
     # Focus the Files region (the first `Tab` stop) and dock it.
     first.send(":dock bottom\r")
@@ -175,11 +177,13 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
     settleOnDebugger(second, Cols, Rows)
     let restoredScreen = second.screenContents()
     checkpoint("restored: " & statusRowText(second, Cols, Rows))
-    # The docked pane is no longer a region: its strip is gone.
-    ck not restoredScreen.contains("[Files]")
+    # The docked pane is no longer a tab of its region: its stack's strip
+    # starts at VCS now.
+    ck not restoredScreen.contains(" Files   VCS ")
+    ck restoredScreen.contains(" VCS ")
     # :reset-layout — the way back — deletes the terminal's document.
     second.send(":reset-layout\r")
-    discard waitForScreen(second, "[Files]")
+    discard waitForScreen(second, " Files   VC")
     let gone = getMonoTime() + initDuration(seconds = 10)
     while fileExists(dir / TuiDocument) and getMonoTime() < gone:
       discard second.drainOutput(40)
@@ -193,7 +197,7 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
     # A THIRD START after the reset: the shared default again.
     var third = spawnTui(dir, Cols, Rows)
     settleOnDebugger(third, Cols, Rows)
-    ck third.screenContents().contains("[Files]")
+    ck third.screenContents().contains(" Files ")
     ck quit(third) == some(0)
     removeDir(dir)
 
@@ -210,8 +214,8 @@ suite "PLAT-45 Tier 2: the shared default on a real terminal":
     # THE USER IS TOLD, BY KIND — and the launch did not fail.
     ck status.contains("saved layout ignored (NotJson)")
     # The screen is the shared default.
-    ck sess.screenContents().contains("[Files]")
-    ck sess.screenContents().contains("[Test Results]")
+    ck sess.screenContents().contains(" Files ")
+    ck not sess.screenContents().contains("Constraints")
     # A rearrangement in a quarantined session does not overwrite the file.
     sess.send(":dock bottom\r")
     discard sess.drainOutput(200)

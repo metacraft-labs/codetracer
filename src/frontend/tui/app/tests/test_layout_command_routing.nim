@@ -309,13 +309,14 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     let painted = screen.rows[stripRow]
     checkpoint("dock strip row: '" & painted & "'")
     ck painted.contains(DockStripGlyph)
-    ck painted.contains("Call Stack")
+    ck painted.contains("Call Trace")
     # …and the pane's own tab is gone from the body, which is the half a
-    # strip-only assertion would miss. (In the shared default the call stack
-    # is the first tab of its stack, so its label is `[Call Stack]`.)
+    # strip-only assertion would miss. (In the shared default the call trace
+    # is the first tab of its stack, so its padded label ` Call Trace ` starts
+    # the strip — PLAT-47: padded, not bracketed.)
     var titlesLeft = 0
     for row in screen.rows:
-      if row.contains("[Call Stack]"):
+      if row.contains(" Call Trace "):
         inc titlesLeft
     ck titlesLeft == 0
 
@@ -327,7 +328,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.dockStripRowOf() < 0
     var titlesBack = 0
     for row in rt.shellScreenOf().rows:
-      if row.contains("[Call Stack]"):
+      if row.contains(" Call Trace "):
         inc titlesBack
     ck titlesBack == 1
 

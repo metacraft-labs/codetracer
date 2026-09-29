@@ -52,7 +52,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 427
+const ExpectedAssertions = 428
 
 const
   LandedThroughMilestone = 14
@@ -1044,10 +1044,15 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck not parseOsc11Reply("\x1b]11;?\x1b\\")[0]
     let lightCaps = resolveCapabilities(env, initCapabilityFlags(),
       TerminalProbe(attempted: true, hasBackground: true, background: light))
-    ck lightCaps.mode == dmLight
+    # PLAT-47: the user's decision of 2026-09-27 — a light background is
+    # READ and REPORTED, and does not select Light
+    # (`AutoDetectSelectsLight`); `--theme=light` does.
+    ck not AutoDetectSelectsLight
+    ck lightCaps.mode == dmDark
     ck lightCaps.modeFrom == bsOsc11
     checkpoint(backgroundNote(lightCaps))
-    ck backgroundNote(lightCaps) == "bg: osc11 #ffffff -> light"
+    ck backgroundNote(lightCaps) ==
+       "bg: osc11 #ffffff (light; --theme=light to use it) -> dark"
     let darkCaps = resolveCapabilities(env, initCapabilityFlags(),
       TerminalProbe(attempted: true, hasBackground: true, background: darkBg))
     ck darkCaps.mode == dmDark
@@ -1065,7 +1070,7 @@ suite "CTUI-11 Tier 1: capability resolution":
       if known: ck m == mode
     let fgbg = resolveCapabilities(
       initTerminalEnv(term = "xterm", colorFgBg = "0;15"), initCapabilityFlags())
-    ck fgbg.mode == dmLight
+    ck fgbg.mode == dmDark
     ck fgbg.modeFrom == bsColorFgBg
     # OSC 11 BEATS COLORFGBG (it is the terminal's actual background) …
     let both = resolveCapabilities(

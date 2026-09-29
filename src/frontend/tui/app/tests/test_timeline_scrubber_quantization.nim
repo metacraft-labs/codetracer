@@ -64,7 +64,7 @@ import ../views/timeline_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 89
+const ExpectedAssertions = 90
 
 var countedAssertions = 0
 
@@ -516,8 +516,14 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
     # THE TWO ROWS THE BAR OWNS really changed — a shell that painted nothing
     # would also change nothing outside.
     ck changedInside >= TimelineBarRows
-    # The strip, then the bar's two rows under it.
-    ck after.rows[timelineArea.row].contains("[Timeline]")
+    # The strip, then the bar's two rows under it. PLAT-47: the tab is its
+    # padded label; that it is the ACTIVE one is its role, read off the paint.
+    ck after.rows[timelineArea.row].contains(" Timeline ")
+    var timelineActive = false
+    for sp in after.styledRows[timelineArea.row]:
+      if sp.style.role == srTabActive and sp.text.contains("Timeline"):
+        timelineActive = true
+    ck timelineActive
     let bar = timelineArea.row + 1
     ck after.rows[bar].contains(TimelineTitle)
     ck after.rows[bar + 1].contains(BoundsOpenGlyph)
@@ -583,7 +589,7 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
                compactScreen.rows[compactArea.row + 1] & "'")
     # The event stack is 20 columns wide at 80x24, so the active tab's label
     # is cut at the region's edge.
-    ck compactScreen.rows[compactArea.row].contains("[Timelin")
+    ck compactScreen.rows[compactArea.row].contains(" Timelin")
     ck compactScreen.rows[compactArea.row + 1].contains(TimelineTitle)
     ck compactScreen.rows[compactArea.row + 2].contains(NeedleGlyph)
 

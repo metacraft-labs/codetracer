@@ -30,5 +30,5 @@ func gpuiPaneName*(kind: PaneKind): string =
   of paneVcs: "VCS"
   of paneAgentActivity: "Agent Activity"
   of paneTerminalOutput: "Terminal Output"
-  of paneTestResults: "Test Results"
+  of paneTestResults: "Tests"
   of paneConstraints: "Constraints"

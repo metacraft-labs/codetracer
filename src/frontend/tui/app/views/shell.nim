@@ -35,7 +35,7 @@
 ## an ordinary single-pane layout would be indistinguishable from a deliberate
 ## one, which is the failure the rule is written against.
 
-import std/[strutils, wordwrap]
+import std/[sets, strutils, wordwrap]
 
 import isonim_tui
 
@@ -52,6 +52,7 @@ import ../syntax/highlighter
 import codetracer_embed
 import ./build_output
 import ./call_stack
+import ./call_trace
 import ./edit_pane
 import ./file_tree
 import ./event_log
@@ -72,7 +73,7 @@ export header, status_bar, profile, project, source_pane, styled_row
 # CTUI-3 call site must keep resolving.
 export tab_strip
 export binding
-export call_stack, variables
+export call_stack, call_trace, variables
 export event_log, timeline_bar, tracepoint_manager
 # PLAT-15's frame viewer, on exactly the rule the four lines above follow: a
 # `ShellModel` field is painted by this module, so every consumer that builds
@@ -114,6 +115,14 @@ type
       ## strip CTUI-3 painted, `app_shell.nim`'s cross-tier golden is unchanged,
       ## and every CTUI-3, CTUI-5 and CTUI-6 assertion that reads that row still
       ## reads it.
+    callTraceLoaded*: bool
+      ## Whether a session asked for the call trace (so an empty `callTrace`
+      ## means "this recording has none", not "nothing asked yet").
+    callTrace*: CallTraceModel
+      ## PLAT-47. The recording's call TRACE, as the desktop's calltrace pane
+      ## lists it. When it has rows the `calltrace` rectangle draws it; when
+      ## the recording provides none, the rectangle falls back to `callStack`
+      ## below and says so (`call_trace.StackFallbackTitle`).
     callStack*: CallStackModel
       ## CTUI-6's call stack pane, as a value.
       ##
@@ -551,14 +560,123 @@ proc paintTabRow(g: var StyledGrid; row, col: int; tabs: seq[string];
     g.fillSurface(row, start, w, 1, tabRole)
     g.restyleRole(row, start, w, srTabBar, tabRole)
 
+type
+  PaneFrame* = object
+    ## Where a pane's own box ends and its dividers begin (PLAT-47).
+    box*: CellArea
+      ## The cells the pane's painters get: its rectangle minus its dividers.
+    rightDivider*: bool
+      ## The rectangle's last column is a `│` divider: another pane is to the
+      ## right. A pane flush with the body's right edge has none.
+    bottomDivider*: bool
+      ## The rectangle's last row is a `─` divider: another pane is below.
+      ## New in PLAT-47. Until then vertically adjacent panes had no line
+      ## between them — the lower pane's tab strip, whose `────` rule ran
+      ## through it, did that job — and the strip is now shaped by colour
+      ## alone (deliverable 8), so the line moved to where the desktop has its
+      ## splitter: BETWEEN the panes. It is also what gives the focused pane
+      ## an outline on all four sides.
+
+proc paneFrame*(area, body: CellArea): PaneFrame =
+  ## A pane's frame inside `body`. A rectangle one cell wide or tall keeps
+  ## that cell for its content rather than giving it to a divider.
+  let right = area.col + area.width < body.col + body.width and area.width > 1
+  let bottom = area.row + area.height < body.row + body.height and
+               area.height > 1
+  PaneFrame(
+    box: CellArea(col: area.col, row: area.row,
+                  width: area.width - (if right: 1 else: 0),
+                  height: area.height - (if bottom: 1 else: 0)),
+    rightDivider: right, bottomDivider: bottom)
+
+proc dividerCells*(regions: seq[PaneRegion]; body: CellArea): HashSet[(int, int)] =
+  ## Every divider cell of the screen, as `(row, col)`.
+  result = initHashSet[(int, int)]()
+  for region in regions:
+    let a = region.area
+    if a.width <= 0 or a.height <= 0:
+      continue
+    let f = paneFrame(a, body)
+    if f.rightDivider:
+      for row in a.row ..< a.row + a.height:
+        result.incl (row, a.col + a.width - 1)
+    if f.bottomDivider:
+      for col in a.col ..< a.col + f.box.width:
+        result.incl (a.row + a.height - 1, col)
+
+proc junctionGlyph*(up, down, left, right: bool): string =
+  ## The box-drawing glyph that joins a divider cell to the neighbouring
+  ## divider cells it touches. `borders.asciiFor` degrades each to `+`, `|`
+  ## or `-`.
+  let vertical = up or down
+  let horizontal = left or right
+  if vertical and not horizontal: return PaneSeparatorGlyph
+  if horizontal and not vertical: return PaneRuleGlyph
+  if up and down and left and right: return "┼"
+  if up and down: return (if left: "┤" else: "├")
+  if left and right: return (if up: "┴" else: "┬")
+  if up: return (if left: "┘" else: "└")
+  if left: "┐" else: "┌"
+
+proc focusRing*(focused: CellArea; body: CellArea): HashSet[(int, int)] =
+  ## The cells ALL AROUND the focused pane's box — the column left of it, the
+  ## column right of it, the row above and the row below, corners included —
+  ## whichever pane's divider happens to be in each. Intersected with the
+  ## divider cells by the caller, this is the focused pane's outline, closed
+  ## and symmetric whichever neighbour OWNS a shared divider: the defect the
+  ## user reported on 2026-09-27 was a highlight on the sides the focused pane
+  ## drew itself and not on the ones its neighbours drew.
+  result = initHashSet[(int, int)]()
+  let box = paneFrame(focused, body).box
+  let top = box.row - 1
+  let bottom = box.row + box.height
+  let left = box.col - 1
+  let right = box.col + box.width
+  for col in left .. right:
+    result.incl (top, col)
+    result.incl (bottom, col)
+  for row in top .. bottom:
+    result.incl (row, left)
+    result.incl (row, right)
+
+proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
+                   body: CellArea; focused: CellArea; hasFocus: bool) =
+  ## Settle every divider cell once all panes are painted: the glyph that
+  ## joins it to its neighbours (a `┬` where a vertical divider meets a
+  ## horizontal one, …), and — for the cells around the focused pane — the
+  ## focused border role (`focusRing`).
+  let cells = dividerCells(regions, body)
+  var ring = initHashSet[(int, int)]()
+  if hasFocus and focused.width > 0 and focused.height > 0:
+    ring = focusRing(focused, body)
+  for cell in cells:
+    let (row, col) = cell
+    if row < 0 or row >= g.height or col < 0 or col >= g.width:
+      continue
+    let glyph = junctionGlyph(
+      up = (row - 1, col) in cells, down = (row + 1, col) in cells,
+      left = (row, col - 1) in cells, right = (row, col + 1) in cells)
+    let role = if cell in ring: srBorderFocused else: srBorderPane
+    # ON THE CANVAS: a divider is the terminal's splitter, and the desktop's
+    # splitters are the layout's own ground showing between panels.
+    g.paint(row, col, glyph, CellStyle(role: role, surface: srSurfaceCanvas))
+
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea) =
   ## One pane, into its own rectangle and no other.
-  let a = region.area
-  if a.width <= 0 or a.height <= 0:
+  ##
+  ## THE RECTANGLE'S LAST COLUMN AND LAST ROW ARE DIVIDERS when another pane
+  ## is beyond them (`paneFrame`): the column a `│`, the row a `─` (PLAT-47).
+  ## `a` below is the pane's own box — the rectangle without them — and is
+  ## what every painter is handed.
+  let full = region.area
+  if full.width <= 0 or full.height <= 0:
     return
-  let flushRight = a.col + a.width >= body.col + body.width
-  let inner = if flushRight: a.width else: a.width - 1
+  let frame = paneFrame(full, body)
+  let flushRight = not frame.rightDivider
+  let inner = frame.box.width
+  let a = CellArea(col: full.col, row: full.row, width: full.width,
+                   height: frame.box.height)
   # PLAT-46: THE PANE'S SURFACE FIRST, under every cell of its rectangle, so
   # whatever the painter below leaves blank is the pane's body and not the
   # terminal's background. The editor rectangle is the editor surface.
@@ -566,7 +684,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # The editor's TITLE ROW stays on the panel surface: it is chrome (the file
   # name, the provenance verdict, the rule), and the editor surface is for
   # code — the desktop's editor tab sits on its strip, not in the editor.
-  g.fillSurface(a.row, a.col, a.width, a.height, srSurfacePanel)
+  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)
   if region.pane == paneEditor and a.height > 1:
     g.fillSurface(a.row + 1, a.col, inner, a.height - 1, srSurfaceEditor)
 
@@ -626,9 +744,18 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # same rule and for the same reason: its title carries the frame count and the
   # thread the backend named, and a shell that painted a generic title first
   # would show a 51-frame stack and a 4-frame one identically at the top.
+  elif region.pane == paneCalltrace and not model.callTrace.isEmpty:
+    underStrip:
+      discard paintCallTrace(g, content, model.callTrace)
   elif region.pane == paneCalltrace and not model.callStack.isEmpty:
     underStrip:
       discard paintCallStack(g, content, model.callStack)
+      # THE FALLBACK SAYS SO (PLAT-47): the pane where the desktop lists the
+      # recording's calls is showing only the stack, because this recording
+      # carries no call trace. Only once a session is open — `callTraceLoaded`
+      # is the session's statement that it asked and got nothing.
+      if model.callTraceLoaded:
+        paintFallbackCaption(g, content)
   # THE VARIABLES PANE IS THE FIRST ONE THAT CAN BE IN A TAB STACK, and that is
   # why this arm is shaped differently from the two above. `paneState` sits in a
   # `stack` with `paneEventLog` in every profile's layout, so the rectangle
@@ -727,15 +854,16 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
       g.paint(content.row + 1, content.col,
               timelineScrubber(model.header.tick, model.header.totalTicks,
                                inner))
-  if not flushRight:
-    for row in a.row ..< a.row + a.height:
-      g.paint(row, a.col + a.width - 1, PaneSeparatorGlyph, PaneRuleStyle)
-  # PLAT-46: THE FOCUSED PANE'S BORDERS take the focused border role — its
-  # title rule and its separator — after the painter has run, so no painter
-  # has to know which pane has the focus.
-  if model.hasFocus and region.pane == model.focused:
-    for row in a.row ..< a.row + a.height:
-      g.restyleRole(row, a.col, a.width, srBorderPane, srBorderFocused)
+  # THE DIVIDERS, in the pane-border role. Their junction glyphs and the
+  # focused pane's outline are settled once every pane is painted
+  # (`paintDividers`), because both depend on the NEIGHBOURS' dividers.
+  if frame.rightDivider:
+    for row in full.row ..< full.row + full.height:
+      g.paint(row, full.col + full.width - 1, PaneSeparatorGlyph,
+              PaneRuleStyle)
+  if frame.bottomDivider:
+    g.paint(full.row + full.height - 1, full.col,
+            repeatGlyph(PaneRuleGlyph, inner), PaneRuleStyle)
 
 proc degradedBanner(status: ProjectionStatus; width: int): string =
   ## What a non-`prOk` projection puts on the first body row. It names the
@@ -780,9 +908,27 @@ proc shellScreen*(model: ShellModel; width, height: int;
   g.fillSurface(0, 0, width, height, srSurfaceCanvas)
   g.fillSurface(0, 0, width, HeaderRows, srSurfaceCard)
   g.paint(0, 0, headerText(model.header, width))
+  # The session tabs, shaped by role like every other tab strip (PLAT-47).
+  for tab in sessionTabSpans(model.header, width):
+    let w = min(tab.width, width - tab.col)
+    if w > 0:
+      let role = if tab.active: srTabActive else: srTabInactive
+      g.fillSurface(0, tab.col, w, 1, role)
+      g.restyle(0, tab.col, w,
+                proc(s: CellStyle): CellStyle =
+                  var r = s
+                  r.role = role
+                  r)
 
   for region in projection.regions:
     paintPane(g, region, model, geometry.inner)
+  var focusedArea = CellArea()
+  if model.hasFocus:
+    for region in projection.regions:
+      if region.pane == model.focused:
+        focusedArea = region.area
+  paintDividers(g, projection.regions, geometry.inner, focusedArea,
+                model.hasFocus)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))
 

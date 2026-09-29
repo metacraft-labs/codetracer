@@ -50,7 +50,7 @@ import ../views/shell
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 332
+const ExpectedAssertions = 319
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -200,14 +200,17 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # sliver.
     ck not fitsAt(sharedDefaultLayout().tree, 80, 24)
     ck fitProblems(sharedDefaultLayout().tree, 80, 24).len > 0
-    ck depthFor(pmDebug, lpCompact) == 4
+    # PLAT-47: the shared default is the desktop's Debug layout (TESTS a tab
+    # of FILES, no CONSTRAINTS), so it has two fold steps fewer and 80x24 is
+    # reached at depth 2 — the same three regions the depth-4 fold gave.
+    ck depthFor(pmDebug, lpCompact) == 2
     ck depthFor(pmDebug, lpStandard) == 0
     ck depthFor(pmDebug, lpUltraWide) == 0
     # The per-pane lower bound grows with every region the fold gives back.
     let s = sharedDefaultLayout()
     ck minimumWidth(foldLayout(s, 0)) > minimumWidth(foldLayout(s, 3))
 
-  test "80x24 folds four times and partitions the body exactly":
+  test "80x24 folds twice and partitions the body exactly":
     let (w, h) = (80, 24)
     let body = bodyArea(w, h)
     let proj = projectLayout(profileLayout(selectProfile(w, h)), body)
@@ -225,23 +228,21 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
-  test "120x40 is the shared default unfolded, seven regions":
+  test "120x40 is the shared default unfolded, five regions":
     let (w, h) = (120, 40)
     let body = bodyArea(w, h)
     let proj = projectLayout(profileLayout(selectProfile(w, h)), body)
     checkpoint(describe(proj))
     ck proj.status == prOk
     ck proj.visiblePaneKinds() ==
-       @[paneFileTree, paneEditor, paneState, paneCalltrace, paneEventLog,
-         paneTestResults, paneConstraints]
-    # Every region its minimum first, then the desktop's shares of the rest.
-    ckRegion(proj, paneFileTree, 0, 1, 9, 38)
-    ckRegion(proj, paneEditor, 9, 1, 62, 38)
-    ckRegion(proj, paneState, 71, 1, 16, 19)
-    ckRegion(proj, paneCalltrace, 87, 1, 18, 19)
-    ckRegion(proj, paneEventLog, 71, 20, 34, 19)
-    ckRegion(proj, paneTestResults, 105, 1, 15, 19)
-    ckRegion(proj, paneConstraints, 105, 20, 15, 19)
+       @[paneFileTree, paneEditor, paneState, paneCalltrace, paneEventLog]
+    # Every region its minimum first, then the desktop's Debug-mode shares of
+    # the rest (FILES 20 / editor 25 / the replay column 55).
+    ckRegion(proj, paneFileTree, 0, 1, 12, 38)
+    ckRegion(proj, paneEditor, 12, 1, 65, 38)
+    ckRegion(proj, paneState, 77, 1, 21, 19)
+    ckRegion(proj, paneCalltrace, 98, 1, 22, 19)
+    ckRegion(proj, paneEventLog, 77, 20, 43, 19)
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
@@ -252,20 +253,16 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     checkpoint(describe(proj))
     ck proj.status == prOk
     ck proj.visiblePaneKinds() ==
-       @[paneFileTree, paneEditor, paneState, paneCalltrace, paneEventLog,
-         paneTestResults, paneConstraints]
-    # Every region gets its minimum (8 / 60 / 30 / 14 columns — a region's
-    # minimum is its widest tab's, and never less than that tab's label), and
-    # the 88 columns left over are shared 15 / 25 / 41.25 / 18.75 — the
-    # desktop's rendered shares. The ARRANGEMENT is the desktop's; the cells
-    # are the terminal's.
-    ckRegion(proj, paneFileTree, 0, 1, 21, 58)
-    ckRegion(proj, paneEditor, 21, 1, 82, 58)
-    ckRegion(proj, paneState, 103, 1, 33, 29)
-    ckRegion(proj, paneCalltrace, 136, 1, 34, 29)
-    ckRegion(proj, paneEventLog, 103, 30, 67, 29)
-    ckRegion(proj, paneTestResults, 170, 1, 30, 29)
-    ckRegion(proj, paneConstraints, 170, 30, 30, 29)
+       @[paneFileTree, paneEditor, paneState, paneCalltrace, paneEventLog]
+    # Every region gets its minimum (a region's minimum is its widest tab's,
+    # and never less than that tab's label), and the columns left over are
+    # shared 20 / 25 / 55 — the desktop's rendered Debug-mode shares. The
+    # ARRANGEMENT is the desktop's; the cells are the terminal's.
+    ckRegion(proj, paneFileTree, 0, 1, 28, 58)
+    ckRegion(proj, paneEditor, 28, 1, 85, 58)
+    ckRegion(proj, paneState, 113, 1, 43, 29)
+    ckRegion(proj, paneCalltrace, 156, 1, 44, 29)
+    ckRegion(proj, paneEventLog, 113, 30, 87, 29)
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
@@ -276,13 +273,13 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     let node = profileLayout(lpCompact)
     ck stackTabs(node) == @[
       @[paneState, paneScratchpad, paneCalltrace, paneAgentActivity,
-        paneFileTree, paneVcs],
-      @[paneEventLog, paneTimeline, paneTerminalOutput, paneTestResults,
-        paneConstraints]]
+        paneFileTree, paneVcs, paneTestResults],
+      @[paneEventLog, paneTimeline, paneTerminalOutput]]
 
-    # `allPanes` sees all twelve; `visiblePanes` sees three. That difference IS
-    # the stacks, and it is the reason a shell need not load an invisible tab.
-    ck allPanes(node).len == 12
+    # `allPanes` sees all eleven; `visiblePanes` sees three. That difference
+    # IS the stacks, and it is the reason a shell need not load an invisible
+    # tab.
+    ck allPanes(node).len == 11
     ck visiblePanes(node) == @[paneEditor, paneState, paneEventLog]
 
     let body = bodyArea(80, 24)
@@ -313,13 +310,18 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     let stackRow = bodyArea(80, 24).row + 11
     proc strip(h: TerminalTestHarness): string =
       rowText(h, stackRow, 80).runeSubStr(60)
+    proc boldAt(h: TerminalTestHarness; col: int): bool =
+      attrBold in h.cellAt(stackRow, col).attrs
     let firstTabs = strip(h)
     checkpoint("tab strip: '" & firstTabs.strip() & "'")
-    ck firstTabs.startsWith("[Event Log]")
+    # PLAT-47: a tab is its padded label; the active one is BOLD (its role's
+    # weight), not bracketed.
+    ck firstTabs.startsWith(" Event Log ")
+    ck boldAt(h, 61) and not boldAt(h, 73)
     # The strip is 20 cells wide at 80x24 and cuts at the region's edge — the
     # second label to `Timelin`, the rest entirely; the stack still holds
     # them, in the shared default's order.
-    ck firstTabs.startsWith("[Event Log]  Timelin")
+    ck firstTabs.startsWith(" Event Log   Timelin")
     ck stackTabs(model.layout)[^1][2] == paneTerminalOutput
 
     ck model.layout.activate(paneTimeline)
@@ -327,14 +329,12 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
       renderShellTree(model, r, 80, 24))
     let secondTabs = strip(h)
     checkpoint("tab strip after the click: '" & secondTabs.strip() & "'")
-    ck secondTabs.startsWith(" Event Log  [Timelin")
-    ck not secondTabs.contains("[Event Log]")
-    # The two strips differ ONLY in the brackets — a repaint that rebuilt the
-    # layout from the profile would have reset the active tab and produced the
-    # first string again, which is the failure `shell.reprofile` guards.
-    ck firstTabs != secondTabs
-    ck firstTabs.replace("[", " ").replace("]", " ") ==
-       secondTabs.replace("[", " ").replace("]", " ")
+    ck secondTabs.startsWith(" Event Log   Timelin")
+    # The two strips differ ONLY in which tab is bold — a repaint that rebuilt
+    # the layout from the profile would have reset the active tab and left
+    # `Event Log` bold, which is the failure `shell.reprofile` guards.
+    ck firstTabs == secondTabs
+    ck not boldAt(h, 61) and boldAt(h, 73)
     h.dispose()
 
   test "the status bar's hint strip is profile-dependent":
@@ -357,7 +357,7 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # PLAT-45: an 80x24 terminal FOLDED the shared default, and the status
     # line says so right after the two indicators; 120x40 did not, and says
     # nothing.
-    ck compact[^1].startsWith("NORMAL [DEBUG] [folded 4] |")
+    ck compact[^1].startsWith("NORMAL [DEBUG] [folded 2] |")
     ck standard[^1].startsWith("NORMAL [DEBUG] |")
 
   test "the header and the status bar are exactly `width` cells at every width":
@@ -427,7 +427,13 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     ck wide.contains("a-rather-long-trace-name.ct")
     ck wide.contains("aarch64")
     ck wide.contains("987,654 / 1,234,567")
-    ck wide.contains("[demo.ct]")
+    # PLAT-47: the session tabs are padded labels, the active one told apart
+    # by its role on the painted row (`shell` restyles `sessionTabSpans`).
+    ck wide.contains(" demo.ct  calc.ct ")
+    ck not wide.contains("[demo.ct]")
+    let spans = sessionTabSpans(withTabs, 200)
+    ck spans.len == 2 and spans[0].active and not spans[1].active
+    ck wide.runeSubStr(spans[0].col, spans[0].width) == " demo.ct "
     ck wide.contains("[REVERSING]")
     # And the badge is the LAST thing dropped: at a width that fits nothing
     # else, the state is still readable.

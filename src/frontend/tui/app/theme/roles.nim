@@ -44,6 +44,7 @@
 ## colour on the resolved tier.
 
 import ../../../styles/generated/design_tokens
+import ./editor_theme
 
 export design_tokens
 
@@ -120,6 +121,7 @@ type
 
     # ---- dgLineNumber: the gutter's number, tinted by provenance -----------
     srLineNumber = "line-number"
+    srLineNumberActive = "line-number-active"
     srLineNumberUnverified = "line-number-unverified"
     srLineNumberAbsent = "line-number-absent"
 
@@ -151,7 +153,7 @@ type
     srValueMedia = "value-media"
     srValueDefault = "value-default"
 
-    # ---- dgSyntax: CTUI-5's nine token classes ----------------------------
+    # ---- dgSyntax: CTUI-5's nine token classes, and PLAT-47's three --------
     srSyntaxPlain = "syntax-plain"
     srSyntaxIdentifier = "syntax-identifier"
     srSyntaxKeyword = "syntax-keyword"
@@ -161,6 +163,9 @@ type
     srSyntaxComment = "syntax-comment"
     srSyntaxOperator = "syntax-operator"
     srSyntaxPunctuation = "syntax-punctuation"
+    srSyntaxStringEscape = "syntax-string-escape"
+    srSyntaxBracket = "syntax-bracket"
+    srSyntaxTag = "syntax-tag"
 
     # ---- dgTimeline: §3.3.5's scrubber ------------------------------------
     srTimelineTrack = "timeline-track"
@@ -277,20 +282,34 @@ const
                                                      raUnderline}),
 
     srBorderPane: fgOnly(dgBorder, dtColorsUiBorderSecondary),
-    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderFocus,
-                            attrs = {raBold}, mono = {raBold}),
+    # THE FOCUSED PANE'S OUTLINE (PLAT-47 deliverable 9): the desktop's own
+    # focus colour, measured — GoldenLayout's selected panel is outlined by
+    # one 1px stroke of ui/border/primary (`components/golden_layout.styl`,
+    # `SELECTED_PANEL_BORDER_COLOR`), and nothing else about it changes. So
+    # the terminal draws its focused pane's dividers in that token, at normal
+    # weight on every colour rung; PLAT-46 had bound it to ui/border/focus, a
+    # saturated blue the desktop uses only for keyboard focus rings, which the
+    # user reported as far louder than the desktop. Monochrome keeps bold,
+    # the one attribute a divider glyph can carry there.
+    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderPrimary,
+                            mono = {raBold}),
 
-    # The desktop's GoldenLayout strip: the strip and an inactive tab sit on
-    # ui/surface/primary/default with the disabled title tier, the active tab
-    # is lifted onto the pane's own ui/surface/base/panel with the label tier
-    # (`components/golden_layout.styl`, `.lm_tab` / `.lm_active` / `.lm_title`).
+    # The desktop's GoldenLayout strip, MEASURED (PLAT-47): the strip and
+    # every tab sit on the pane's own ui/surface/base/panel — the header is
+    # transparent over the panel, so an inactive tab and the strip's empty
+    # run read #282828 exactly as the active tab does — and the tabs are told
+    # apart by their text: the active tab in the label tier, the others in
+    # the disabled tier (`components/golden_layout.styl`, `.lm_tab` /
+    # `.lm_active` / `.lm_title`). The terminal adds BOLD to the active tab,
+    # its weight cue; where colour is unavailable the active tab is reverse
+    # video + bold (CTUI-11), never brackets.
     srTabBar: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
-                   dtColorsUiSurfacePrimaryDefault, baseSurface = true),
+                   dtColorsUiSurfaceBasePanel, baseSurface = true),
     srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryLabel,
                       dtColorsUiSurfaceBasePanel, attrs = {raBold},
-                      mono = {raBold, raUnderline}, baseSurface = true),
+                      mono = {raBold, raReverse}, baseSurface = true),
     srTabInactive: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
-                        dtColorsUiSurfacePrimaryDefault, baseSurface = true),
+                        dtColorsUiSurfaceBasePanel, baseSurface = true),
 
     srSurfaceCanvas: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                           dtColorsUiSurfaceBaseCanvas, baseSurface = true),
@@ -298,17 +317,20 @@ const
                          dtColorsUiSurfaceBasePanel, baseSurface = true),
     srSurfaceCard: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                         dtColorsUiSurfaceBaseCard, baseSurface = true),
-    srSurfaceEditor: fgbg(dgSurface, dtColorsEditorSyntaxPrimary,
-                          dtColorsEditorSurfacePrimary, baseSurface = true),
+    # THE EDITOR IS THE DESKTOP'S (PLAT-47): its ground and default text are
+    # the desktop's Monaco theme's, generated from the same file
+    # (`theme/editor_theme.nim`), not the design system's `colors/editor/*`.
+    srSurfaceEditor: fgbg(dgSurface, dtEditorThemeRuleDefault,
+                          dtEditorThemeGround, baseSurface = true),
     srSurfaceStatusLine: fgbg(dgSurface, dtColorsUiTextPrimaryCaption,
                               dtColorsUiSurfaceBaseRaised,
                               baseSurface = true),
     srSurfaceInput: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                          dtColorsUiSurfaceInputDefault, mono = {raUnderline},
                          baseSurface = true),
-    srSurfaceSelection: bgOnly(dgSurface, dtColorsEditorSyntaxSelection,
+    srSurfaceSelection: bgOnly(dgSurface, dtEditorThemeSelection,
                                mono = {raReverse}),
-    srSurfaceCurrentLine: bgOnly(dgSurface, dtColorsEditorSyntaxCurrentLine,
+    srSurfaceCurrentLine: bgOnly(dgSurface, dtEditorThemeExecutionLine,
                                  mono = {raReverse}),
 
     srGutterNoMark: bare(dgGutter),
@@ -326,7 +348,9 @@ const
                                       attrs = {raBold},
                                       mono = {raItalic, raUnderline}),
 
-    srLineNumber: fgOnly(dgLineNumber, dtColorsEditorSyntaxTertiary),
+    srLineNumber: fgOnly(dgLineNumber, dtEditorThemeLineNumber),
+    srLineNumberActive: fgOnly(dgLineNumber, dtEditorThemeActiveLineNumber,
+                               mono = {raBold}),
     srLineNumberUnverified: fgOnly(dgLineNumber, dtColorsUiTextWarningPrimary,
                                    mono = {raBold, raItalic}),
     srLineNumberAbsent: fgOnly(dgLineNumber, dtColorsUiTextErrorPrimary,
@@ -339,7 +363,7 @@ const
                            attrs = {raBold}, mono = {raBold, raUnderline}),
 
     srLineOrdinary: bare(dgLine),
-    srLineExecution: bgOnly(dgLine, dtColorsEditorSyntaxCurrentLine,
+    srLineExecution: bgOnly(dgLine, dtEditorThemeExecutionLine,
                             mono = {raReverse}),
     srLineSearchMatch: fgbg(dgLine, dtColorsEditorSyntaxOnColor,
                             dtColorsEditorActionSecondary,
@@ -374,28 +398,38 @@ const
                          mono = {raReverse}),
     srValueDefault: fgOnly(dgValueKind, dtColorsEditorSyntaxPrimary),
 
-    srSyntaxPlain: fgOnly(dgSyntax, dtColorsEditorSyntaxPlain),
-    srSyntaxIdentifier: fgOnly(dgSyntax, dtColorsEditorSyntaxPrimary),
-    srSyntaxKeyword: fgOnly(dgSyntax, dtColorsEditorSyntaxKeyword,
-                            attrs = {raBold}, mono = {raBold}),
-    srSyntaxType: fgOnly(dgSyntax, dtColorsEditorSyntaxType,
+    # THE SYNTAX COLOURS ARE THE DESKTOP'S MONACO THEME'S (PLAT-47): each
+    # class through `editor_theme.TokenClassScope` to the rule Monaco applies
+    # to the same scope. No weight or slant on the colour rungs — the theme's
+    # rules carry no `fontStyle`, so the desktop draws every token upright at
+    # normal weight; the monochrome attributes are CTUI-11's and stay.
+    srSyntaxPlain: fgOnly(dgSyntax, tokenClassToken(tcPlain)),
+    srSyntaxIdentifier: fgOnly(dgSyntax, tokenClassToken(tcIdentifier)),
+    srSyntaxKeyword: fgOnly(dgSyntax, tokenClassToken(tcKeyword),
+                            mono = {raBold}),
+    srSyntaxType: fgOnly(dgSyntax, tokenClassToken(tcType),
                          mono = {raBold, raItalic}),
-    srSyntaxString: fgOnly(dgSyntax, dtColorsEditorSyntaxString,
+    srSyntaxString: fgOnly(dgSyntax, tokenClassToken(tcString),
                            mono = {raItalic}),
-    srSyntaxNumber: fgOnly(dgSyntax, dtColorsEditorSyntaxNumber,
+    srSyntaxNumber: fgOnly(dgSyntax, tokenClassToken(tcNumber),
                            mono = {raUnderline}),
-    srSyntaxComment: fgOnly(dgSyntax, dtColorsEditorSyntaxComment,
-                            attrs = {raItalic},
+    srSyntaxComment: fgOnly(dgSyntax, tokenClassToken(tcComment),
                             mono = {raItalic, raUnderline}),
-    # NO OPERATOR TOKEN EXISTS in `colors/editor/syntax/*` (filed:
-    # codetracer-specs/issues/2026-09-26-design-system-no-operator-syntax-token.md).
-    # Operators paint with the punctuation tier they are nearest to in meaning
-    # and are kept apart from punctuation by WEIGHT on every colour rung, which
-    # is the distinction the retired Monokai palette made with a hue.
-    srSyntaxOperator: fgOnly(dgSyntax, dtColorsEditorSyntaxSecondary,
-                             attrs = {raBold}, mono = {raBold, raUnderline}),
-    srSyntaxPunctuation: fgOnly(dgSyntax, dtColorsEditorSyntaxPunctuation,
+    srSyntaxOperator: fgOnly(dgSyntax, tokenClassToken(tcOperator),
+                             mono = {raBold, raUnderline}),
+    srSyntaxPunctuation: fgOnly(dgSyntax, tokenClassToken(tcPunctuation),
                                 mono = {raBold, raItalic, raUnderline}),
+    # The three scopes the desktop's Monaco Python tokenizer colours on their
+    # own. Monochrome has no attribute combination left for them, so each
+    # takes the attributes of the class it is a part of — a string's quote
+    # the string's, a bracket the punctuation's, a decorator the keyword's —
+    # and `degradation.PermittedMerges` says so, pair by pair.
+    srSyntaxStringEscape: fgOnly(dgSyntax, tokenClassToken(tcStringEscape),
+                                 mono = {raItalic}),
+    srSyntaxBracket: fgOnly(dgSyntax, tokenClassToken(tcBracket),
+                            mono = {raBold, raItalic, raUnderline}),
+    srSyntaxTag: fgOnly(dgSyntax, tokenClassToken(tcTag),
+                        mono = {raBold}),
 
     srTimelineTrack: fgOnly(dgTimeline, dtColorsUiDividerSecondary,
                             mono = {raItalic}),

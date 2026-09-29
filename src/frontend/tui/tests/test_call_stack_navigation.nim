@@ -682,15 +682,21 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # `editor` rectangle CTUI-5 compared IS flush right, so a comparison
       # copied from that suite would fail here for a reason that is not a
       # defect.
-      let flushRight = stackArea.col + stackArea.width >= screenBody.col + screenBody.width
-      let inner = if flushRight: stackArea.width else: stackArea.width - 1
+      let frame = paneFrame(stackArea, screenBody)
+      let flushRight = not frame.rightDivider
+      let inner = frame.box.width
       let shellText = shellRows(shellModel, 120, 40)
       # PLAT-45: the call stack is the first TAB of its stack in the shared
       # default, so the rectangle's first row is the strip and the pane owns
       # the rows under it — `shell.paintPane`'s `content`.
+      # PLAT-47: and when another pane is BELOW it, its last row is the
+      # divider between them (`shell.paneFrame`), so the pane owns the rows of
+      # its box under the strip.
       let paneTop = stackArea.row + 1
-      let paneRows = stackArea.height - 1
-      ck shellText[stackArea.row].contains("[Call Stack]")
+      let paneRows = frame.box.height - 1
+      # PLAT-47: the pane's tab reads `Call Trace` (it lists the recording's
+      # trace when there is one; this model carries only a stack).
+      ck shellText[stackArea.row].contains(" Call Trace ")
       let standalone = callStackText(deepModel, inner, paneRows)
       var matched = 0
       var separators = 0
@@ -706,9 +712,12 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
           elif at == stackArea.col + stackArea.width - 1:
             edge = $r
           at += w
-        if i >= 1 and slice == standalone[i - 1]:
+        if i >= 1 and i - 1 < standalone.len and slice == standalone[i - 1]:
           inc matched
-        if flushRight or edge == PaneSeparatorGlyph:
+        # The right divider runs the rectangle's full height; where it meets
+        # the bottom divider it is a junction glyph (`shell.junctionGlyph`).
+        if flushRight or edge in [PaneSeparatorGlyph, "┤", "┼", "├", "┬", "┴",
+                                  "┘", "└", "┐", "┌"]:
           inc separators
       ck matched == paneRows
       ck separators == stackArea.height

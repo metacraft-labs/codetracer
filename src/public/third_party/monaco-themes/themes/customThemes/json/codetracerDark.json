@@ -242,5 +242,13 @@
     "minimapSlider.background": "#A6AEFF40",
     "minimapSlider.hoverBackground": "#A6AEFF59",
     "minimapSlider.activeBackground": "#A6AEFF73"
+  },
+  "codetracer": {
+    "$comment": "PLAT-47. The colours the desktop paints AROUND Monaco, as the eye sees them, so the terminal's editor (generated from this file by scripts/tokens-to-styl.sh --editor-theme) equals the desktop's. The desktop renders Monaco's own surface transparent over its pane (components/text_editor.styl), so the ground is the pane surface token; a resting line number is Monaco's line-number colour at the stylesheet's 50% opacity over that ground; the execution line is the stop decoration (`.on`) under Monaco's line highlight; the selection is editor.selectionBackground over the ground. A hex here was MEASURED from the real Electron app (src/tests/visual/answers/plat47-desktop-parity.electron.json, `just plat47-capture-electron`), and the terminal's parity suite fails when the desktop stops rendering it. Monaco ignores this key.",
+    "ground": "{colors.ui.surface.base.panel}",
+    "lineNumber": "#575757",
+    "activeLineNumber": "{colors.ui.text.primary.label}",
+    "executionLine": "#404040",
+    "selection": "#353535"
   }
 }

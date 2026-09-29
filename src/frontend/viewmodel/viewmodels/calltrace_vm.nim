@@ -103,6 +103,15 @@ type
     # correctly regardless of font-size / em scaling.
     rowHeightPx*: Signal[float]
 
+    # -- The call-stack fallback (PLAT-47) --
+    fallbackStack*: Signal[seq[string]]
+      ## The frames of the call STACK at the current stop, innermost first,
+      ## set by a host ONLY when the recording provides no call trace (the
+      ## store's `calltrace.lines` is empty after the host asked). A pane that
+      ## has no trace to list shows these instead and says so — the terminal's
+      ## and GPUI's calltrace panes; the desktop does not read it. Empty
+      ## whenever the recording has a trace.
+
     # -- Derived state --
     visibleLines*: Memo[seq[CallLine]]
     hasMoreAbove*: Memo[bool]
@@ -414,6 +423,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
     # view once rows have rendered so the virtual-scroll math uses the actual
     # em/rem-derived pixel height rather than the compile-time approximation.
     let rowHeightPx = createSignal(24.0)
+    let fallbackStack = createSignal(newSeq[string]())
 
     # Derived: the §14 degraded state this pane renders.
     let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
@@ -432,6 +442,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       rawIgnorePatterns: rawIgnorePatterns,
       backendSearchResults: backendSearchResults,
       rowHeightPx: rowHeightPx,
+      fallbackStack: fallbackStack,
       visibleLines: visibleLines,
       hasMoreAbove: hasMoreAbove,
       hasMoreBelow: hasMoreBelow,

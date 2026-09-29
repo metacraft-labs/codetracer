@@ -164,15 +164,16 @@ suite "CTUI-3 Tier 2: the shell's geometry on a real terminal":
     checkpoint("panes read back: " & $checkedPanes & ", rows compared: " &
                $checkedRows)
     # EXACT COUNTS, not "more than none" (Verification-Harness-Traps §4b). The
-    # region count is the shared default's (PLAT-45): 3 at 80x24, where the
-    # terminal folds four times, and all 7 at 120x40 and 200x60; the row count is
+    # region count is the shared default's (PLAT-47: the desktop's Debug
+    # layout): 3 at 80x24, where the terminal folds twice, and all 5 at 120x40
+    # and 200x60; the row count is
     # each region's height summed — both knowable, both asserted, so a loop
     # that skipped a region reddens here instead of leaving
     # `mismatches.len == 0` true for free.
-    ck checkedPanes == 3 + 7 + 7
+    ck checkedPanes == 3 + 5 + 5
     ck checkedRows == (22 + 11 + 11) +
-                      (38 + 38 + 19 + 19 + 19 + 19 + 19) +
-                      (58 + 58 + 29 + 29 + 29 + 29 + 29)
+                      (38 + 38 + 19 + 19 + 19) +
+                      (58 + 58 + 29 + 29 + 29)
     ck mismatches.len == 0
 
   test "a real SIGWINCH re-folds the shell from 80x24 to 120x40":
@@ -187,13 +188,13 @@ suite "CTUI-3 Tier 2: the shell's geometry on a real terminal":
       checkpoint("body row at 80x24: '" & firstBody.strip() & "'")
       ck firstBody.strip(leading = false) ==
          before[bodyRow].strip(leading = false)
-      ck firstBody.contains("[Variables]")
+      ck firstBody.contains(" Variables ")
       # At 80x24 the shared default is FOLDED (PLAT-45): the status line says
-      # so and the Test Results region is a tab rather than a column. Both are
-      # on screen before the resize, which is what makes their change
-      # afterwards evidence of a re-fold rather than of a blank screen.
-      ck sess.screenContents().contains("[folded 4]")
-      ck not sess.screenContents().contains("[Test Results]")
+      # so and the FILES region is a tab rather than a column. Both are on
+      # screen before the resize, which is what makes their change afterwards
+      # evidence of a re-fold rather than of a blank screen.
+      ck sess.screenContents().contains("[folded 2]")
+      ck not sess.screenContents().contains(" Files ")
 
       # THE KERNEL-DELIVERED RESIZE. No pump between this call and the wait
       # below, so the baseline `waitForRegionChange` captures is the screen as
@@ -245,10 +246,10 @@ suite "CTUI-3 Tier 2: the shell's geometry on a real terminal":
       ck compared == 40
       ck stale.len == 0
       # And the fold really did change: at 120x40 the shared default fits
-      # unfolded, so the status line drops its note and Test Results is a
-      # region of its own again.
+      # unfolded, so the status line drops its note and FILES is a region of
+      # its own again.
       let screen = sess.screenContents()
-      ck screen.contains("[Test Results]")
+      ck screen.contains(" Files ")
       ck not screen.contains("[folded")
 
       sess.send("q")

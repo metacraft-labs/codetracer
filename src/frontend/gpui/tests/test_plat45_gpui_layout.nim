@@ -195,7 +195,7 @@ suite "PLAT-45: the GPUI window and the shared default":
     # names itself, never an absent slot.
     let cap = gpuiCapability()
     let reports = reportLeaves(sharedDefaultLayout().tree, cap)
-    ck reports.len == 5
+    ck reports.len == 4
     let text = planText(run.plan)
     for r in reports:
       var state = ""
@@ -247,7 +247,7 @@ suite "PLAT-45: the GPUI window and the shared default":
     let state = createTempDir("plat45-gpui-state-", "")
     let config = createTempDir("plat45-gpui-config-", "")
     let (tuiText, desktopText) = otherProductsPlanted(state, config)
-    ck runGpui(state, config, @["--layout-ops=merge:constraints:editor"]).rc == 0
+    ck runGpui(state, config, @["--layout-ops=merge:vcs:editor"]).rc == 0
     ck fileExists(state / GpuiDocument)
     let reset = runGpui(state, config, @["--reset-layout"])
     ck reset.rc == 0

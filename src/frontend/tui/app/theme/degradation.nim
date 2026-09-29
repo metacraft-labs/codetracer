@@ -66,14 +66,27 @@ type
       ## "" for a role that tints text rather than painting a mark.
 
 const
-  PermittedMerges*: array[1, (SemanticRole, SemanticRole, string)] = [
+  PermittedMerges*: array[4, (SemanticRole, SemanticRole, string)] = [
     (srSyntaxPlain, srSyntaxIdentifier,
      "An identifier IS plain text. The design system paints both with" &
      " `colors/editor/syntax/primary` (`plain` is an alias of it), and" &
      " monochrome has no tint to distinguish them FROM. Merging them is what" &
      " leaves the remaining token classes one attribute combination each" &
      " instead of spending `reverse` — which dgLine reserves, so that an" &
-     " execution line over a keyword still reads as an execution line.")]
+     " execution line over a keyword still reads as an execution line."),
+    (srSyntaxString, srSyntaxStringEscape,
+     "A string's quote is part of the string. The desktop's Monaco theme" &
+     " tints the quote (`string.escape`) a shade off the body, and the" &
+     " colour rungs keep that shade; where no tint is left the two are one" &
+     " string, which is what the reader needs to see."),
+    (srSyntaxPunctuation, srSyntaxBracket,
+     "A square bracket is punctuation. The desktop's dark theme gives" &
+     " `delimiter.bracket` a lighter grey than the other delimiters; below" &
+     " the rungs that can show a grey step the two are one delimiter class."),
+    (srSyntaxKeyword, srSyntaxTag,
+     "A decorator (`@name`, Monaco's `tag`) is drawn in a blue next to the" &
+     " keyword blue; where the terminal cannot show the step between two" &
+     " blues it reads as the keyword-like marker it is, never as plain text.")]
     ## Pairs of roles in one group that share an appearance at some tier ON
     ## PURPOSE, each with the argument for it. The COUNT is asserted by
     ## `app/tests/test_degraded_style_tables.nim`.

@@ -1,6 +1,6 @@
 {
   "generated": {
-    "takenAt": "2026-09-27T03:10:12.690Z",
+    "takenAt": "2026-09-27T11:23:09.475Z",
     "prefixDefaultSha256": "316971a1b009fa40e36c509dddac6cf79adb7096aafde3b83a5f7a8954acbe98",
     "loadedConfig": {
       "root": {
@@ -49,6 +49,25 @@
                       "label": "vCSComponent-0",
                       "content": 41
                     }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "testResultsComponent-0",
+                      "content": 48
+                    }
                   }
                 ],
                 "size": 100,
@@ -60,7 +79,7 @@
                 "activeItemIndex": 0
               }
             ],
-            "size": 15,
+            "size": 17.777777777777782,
             "sizeUnit": "%",
             "minSizeUnit": "px",
             "id": "",
@@ -96,7 +115,7 @@
                 }
               }
             ],
-            "size": 25,
+            "size": 33.33333333333333,
             "sizeUnit": "%",
             "minSizeUnit": "px",
             "id": "",
@@ -287,79 +306,7 @@
                 "activeItemIndex": 0
               }
             ],
-            "size": 41.25,
-            "sizeUnit": "%",
-            "minSizeUnit": "px",
-            "id": "",
-            "isClosable": true
-          },
-          {
-            "type": "column",
-            "content": [
-              {
-                "type": "stack",
-                "content": [
-                  {
-                    "type": "component",
-                    "content": [],
-                    "size": 1,
-                    "sizeUnit": "fr",
-                    "minSize": 200,
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "maximised": false,
-                    "isClosable": true,
-                    "reorderEnabled": true,
-                    "title": "genericUiComponent",
-                    "componentType": "genericUiComponent",
-                    "componentState": {
-                      "id": 0,
-                      "label": "testResultsComponent-0",
-                      "content": 48
-                    }
-                  }
-                ],
-                "size": 50,
-                "sizeUnit": "%",
-                "minSizeUnit": "px",
-                "id": "",
-                "isClosable": true,
-                "maximised": false,
-                "activeItemIndex": 0
-              },
-              {
-                "type": "stack",
-                "content": [
-                  {
-                    "type": "component",
-                    "content": [],
-                    "size": 1,
-                    "sizeUnit": "fr",
-                    "minSize": 200,
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "maximised": false,
-                    "isClosable": true,
-                    "reorderEnabled": true,
-                    "title": "genericUiComponent",
-                    "componentType": "genericUiComponent",
-                    "componentState": {
-                      "id": 0,
-                      "label": "constraintsComponent-0",
-                      "content": 49
-                    }
-                  }
-                ],
-                "size": 50,
-                "sizeUnit": "%",
-                "minSizeUnit": "px",
-                "id": "",
-                "isClosable": true,
-                "maximised": false,
-                "activeItemIndex": 0
-              }
-            ],
-            "size": 18.75,
+            "size": 48.88888888888889,
             "sizeUnit": "%",
             "minSizeUnit": "px",
             "id": "",
@@ -411,18 +358,19 @@
       {
         "x": 4,
         "y": 34,
-        "w": 283,
+        "w": 335,
         "h": 1334,
         "contents": [
           9,
-          41
+          41,
+          48
         ],
         "active": 0
       },
       {
-        "x": 291,
+        "x": 343,
         "y": 34,
-        "w": 470,
+        "w": 628,
         "h": 1334,
         "contents": [
           2
@@ -430,9 +378,9 @@
         "active": 0
       },
       {
-        "x": 765,
+        "x": 975,
         "y": 34,
-        "w": 386,
+        "w": 459,
         "h": 665,
         "contents": [
           4,
@@ -441,9 +389,9 @@
         "active": 0
       },
       {
-        "x": 1155,
+        "x": 1438,
         "y": 34,
-        "w": 385,
+        "w": 458,
         "h": 665,
         "contents": [
           6,
@@ -452,34 +400,14 @@
         "active": 0
       },
       {
-        "x": 765,
+        "x": 975,
         "y": 703,
-        "w": 775,
+        "w": 921,
         "h": 665,
         "contents": [
           8,
           19,
           24
-        ],
-        "active": 0
-      },
-      {
-        "x": 1544,
-        "y": 34,
-        "w": 352,
-        "h": 665,
-        "contents": [
-          48
-        ],
-        "active": 0
-      },
-      {
-        "x": 1544,
-        "y": 703,
-        "w": 352,
-        "h": 665,
-        "contents": [
-          49
         ],
         "active": 0
       }
@@ -490,8 +418,8 @@
     }
   },
   "scratch": {
-    "takenAt": "2026-09-27T03:10:19.584Z",
-    "prefixDefaultSha256": "15f3dfdbf701bed93a0a9094c1871ac13bb78a81ba8eabe4a96c5b4d6b101794",
+    "takenAt": "2026-09-27T11:23:18.736Z",
+    "prefixDefaultSha256": "08f974a1cf8ac730e1136ee601f22a7fe53fb297f437e986f0c7f018029ad83a",
     "loadedConfig": {
       "root": {
         "type": "row",
@@ -539,6 +467,25 @@
                       "label": "vCSComponent-0",
                       "content": 41
                     }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "testResultsComponent-0",
+                      "content": 48
+                    }
                   }
                 ],
                 "size": 100,
@@ -550,7 +497,7 @@
                 "activeItemIndex": 0
               }
             ],
-            "size": 15,
+            "size": 17.777777777777782,
             "sizeUnit": "%",
             "minSizeUnit": "px",
             "id": "",
@@ -586,7 +533,7 @@
                 }
               }
             ],
-            "size": 25,
+            "size": 33.33333333333333,
             "sizeUnit": "%",
             "minSizeUnit": "px",
             "id": "",
@@ -600,56 +547,6 @@
               {
                 "type": "row",
                 "content": [
-                  {
-                    "type": "stack",
-                    "content": [
-                      {
-                        "type": "component",
-                        "content": [],
-                        "size": 1,
-                        "sizeUnit": "fr",
-                        "minSize": 200,
-                        "minSizeUnit": "px",
-                        "id": "",
-                        "maximised": false,
-                        "isClosable": true,
-                        "reorderEnabled": true,
-                        "title": "genericUiComponent",
-                        "componentType": "genericUiComponent",
-                        "componentState": {
-                          "id": 0,
-                          "label": "stateComponent-0",
-                          "content": 4
-                        }
-                      },
-                      {
-                        "type": "component",
-                        "content": [],
-                        "size": 1,
-                        "sizeUnit": "fr",
-                        "minSize": 200,
-                        "minSizeUnit": "px",
-                        "id": "",
-                        "maximised": false,
-                        "isClosable": true,
-                        "reorderEnabled": true,
-                        "title": "genericUiComponent",
-                        "componentType": "genericUiComponent",
-                        "componentState": {
-                          "id": 0,
-                          "label": "scratchpadComponent-0",
-                          "content": 17
-                        }
-                      }
-                    ],
-                    "size": 50,
-                    "sizeUnit": "%",
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "isClosable": true,
-                    "maximised": false,
-                    "activeItemIndex": 0
-                  },
                   {
                     "type": "stack",
                     "content": [
@@ -689,6 +586,56 @@
                           "id": 0,
                           "label": "agentActivityComponent-0",
                           "content": 35
+                        }
+                      }
+                    ],
+                    "size": 50,
+                    "sizeUnit": "%",
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "isClosable": true,
+                    "maximised": false,
+                    "activeItemIndex": 0
+                  },
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "stateComponent-0",
+                          "content": 4
+                        }
+                      },
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "scratchpadComponent-0",
+                          "content": 17
                         }
                       }
                     ],
@@ -777,79 +724,7 @@
                 "activeItemIndex": 0
               }
             ],
-            "size": 41.25,
-            "sizeUnit": "%",
-            "minSizeUnit": "px",
-            "id": "",
-            "isClosable": true
-          },
-          {
-            "type": "column",
-            "content": [
-              {
-                "type": "stack",
-                "content": [
-                  {
-                    "type": "component",
-                    "content": [],
-                    "size": 1,
-                    "sizeUnit": "fr",
-                    "minSize": 200,
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "maximised": false,
-                    "isClosable": true,
-                    "reorderEnabled": true,
-                    "title": "genericUiComponent",
-                    "componentType": "genericUiComponent",
-                    "componentState": {
-                      "id": 0,
-                      "label": "constraintsComponent-0",
-                      "content": 49
-                    }
-                  }
-                ],
-                "size": 50,
-                "sizeUnit": "%",
-                "minSizeUnit": "px",
-                "id": "",
-                "isClosable": true,
-                "maximised": false,
-                "activeItemIndex": 0
-              },
-              {
-                "type": "stack",
-                "content": [
-                  {
-                    "type": "component",
-                    "content": [],
-                    "size": 1,
-                    "sizeUnit": "fr",
-                    "minSize": 200,
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "maximised": false,
-                    "isClosable": true,
-                    "reorderEnabled": true,
-                    "title": "genericUiComponent",
-                    "componentType": "genericUiComponent",
-                    "componentState": {
-                      "id": 0,
-                      "label": "testResultsComponent-0",
-                      "content": 48
-                    }
-                  }
-                ],
-                "size": 50,
-                "sizeUnit": "%",
-                "minSizeUnit": "px",
-                "id": "",
-                "isClosable": true,
-                "maximised": false,
-                "activeItemIndex": 0
-              }
-            ],
-            "size": 18.75,
+            "size": 48.88888888888889,
             "sizeUnit": "%",
             "minSizeUnit": "px",
             "id": "",
@@ -901,18 +776,19 @@
       {
         "x": 4,
         "y": 34,
-        "w": 283,
+        "w": 335,
         "h": 1334,
         "contents": [
           9,
-          41
+          41,
+          48
         ],
         "active": 0
       },
       {
-        "x": 291,
+        "x": 343,
         "y": 34,
-        "w": 470,
+        "w": 628,
         "h": 1334,
         "contents": [
           2
@@ -920,20 +796,9 @@
         "active": 0
       },
       {
-        "x": 765,
+        "x": 975,
         "y": 34,
-        "w": 386,
-        "h": 665,
-        "contents": [
-          4,
-          17
-        ],
-        "active": 0
-      },
-      {
-        "x": 1155,
-        "y": 34,
-        "w": 385,
+        "w": 459,
         "h": 665,
         "contents": [
           6,
@@ -942,34 +807,25 @@
         "active": 0
       },
       {
-        "x": 765,
+        "x": 1438,
+        "y": 34,
+        "w": 458,
+        "h": 665,
+        "contents": [
+          4,
+          17
+        ],
+        "active": 0
+      },
+      {
+        "x": 975,
         "y": 703,
-        "w": 775,
+        "w": 921,
         "h": 665,
         "contents": [
           8,
           19,
           24
-        ],
-        "active": 0
-      },
-      {
-        "x": 1544,
-        "y": 34,
-        "w": 352,
-        "h": 665,
-        "contents": [
-          49
-        ],
-        "active": 0
-      },
-      {
-        "x": 1544,
-        "y": 703,
-        "w": 352,
-        "h": 665,
-        "contents": [
-          48
         ],
         "active": 0
       }

@@ -621,8 +621,12 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       `reasonlessDisabledStartOptions` (asserted by
 #       `welcome_screen_vm_test.nim`); `flow_vm.FlowWireTakenOrdinal` (the
 #       sibling of the `FlowWireNotTakenOrdinal` carried above).
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1296 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1296 bash ci/test/frontend-reachability.sh
+#
+# 1296 -> 1292 ON 2026-09-28: the terminal and GPUI desktop-parity work reached
+# four exports nothing had reached (and removed or moved into their tests the
+# ones it added and nothing reads); the ceiling follows the tree down.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1292 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1292 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

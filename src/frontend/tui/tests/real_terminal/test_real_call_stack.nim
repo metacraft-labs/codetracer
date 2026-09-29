@@ -422,11 +422,16 @@ suite "CTUI-6 Tier 2: the call stack pane on a real terminal":
       # …and the execution line still carries its background highlight, which
       # the inspection line does not. TWO DIFFERENT NUMBERS is what "rendered
       # distinctly" means to a reader looking at a screen rather than at a
-      # style struct.
-      ck executionCell.bg.kind == ckIndexed
-      ck executionCell.bg.idx == ansiIndexOf(srLineExecution, background = true)
-      ck not (inspectionCell.bg.kind == ckIndexed and
-              inspectionCell.bg.idx == ansiIndexOf(srLineExecution,
+      # style struct. Read on the line's CODE (its first code cell): since
+      # PLAT-47 the band is the desktop's Monaco band, across the code column
+      # and not under the gutter where the pointers are.
+      let codeCol = stackWidth + gutter.gutterWidth
+      let executionCode = sess.cellAt(executionRow, codeCol)
+      let inspectionCode = sess.cellAt(inspectionRow, codeCol)
+      ck executionCode.bg.kind == ckIndexed
+      ck executionCode.bg.idx == ansiIndexOf(srLineExecution, background = true)
+      ck not (inspectionCode.bg.kind == ckIndexed and
+              inspectionCode.bg.idx == ansiIndexOf(srLineExecution,
                                                    background = true))
       ck inspectionCell.fg.idx != executionCell.fg.idx
 

@@ -15,16 +15,32 @@
 #     terminal front-end paints from it, so the terminal and the desktop read
 #     one design-system revision through one resolver.
 #
+#   * (with `--nim-out` and `--editor-theme DIR`, PLAT-47) the EDITOR THEME in
+#     the same Nim module: the desktop's Monaco theme documents
+#     (`DIR/codetracerDark.json` for Dark, `DIR/codetracerWhite.json` for
+#     Light — the files `renderer.nim` feeds to `monaco.editor.defineTheme`)
+#     resolved to `#rrggbb` per mode, as more `DesignToken` members: every
+#     token rule's scope (`editor-theme/rule/<scope>`, resolved the way Monaco
+#     resolves a scope — the rule itself, else its longest dotted prefix, else
+#     the default rule), and the colours the desktop paints around Monaco
+#     (the file's `codetracer` block: the editor ground, line numbers, the
+#     execution line, the selection; a value is a hex or a `{token.path}`
+#     reference into the design system, resolved by the same resolver). The
+#     terminal's editor is painted from these, so it equals the desktop's.
+#
 # Usage: tokens-to-styl.sh <design-system-root> <stylus-out-dir> [<mode>]
-#                          [--nim-out <file.nim>]
+#                          [--nim-out <file.nim>] [--editor-theme <dir>]
 set -euo pipefail
 
 POSITIONAL=()
 NIM_OUT=""
+EDITOR_THEME_DIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --nim-out) NIM_OUT="${2:?--nim-out needs a file path}"; shift 2 ;;
     --nim-out=*) NIM_OUT="${1#--nim-out=}"; shift ;;
+    --editor-theme) EDITOR_THEME_DIR="${2:?--editor-theme needs a directory}"; shift 2 ;;
+    --editor-theme=*) EDITOR_THEME_DIR="${1#--editor-theme=}"; shift ;;
     *) POSITIONAL+=("$1"); shift ;;
   esac
 done
@@ -42,7 +58,7 @@ SELECT_MODE="${3:-}"
 
 mkdir -p "$OUT_DIR"
 
-python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" "$NIM_OUT" <<'PY'
+python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" "$NIM_OUT" "$EDITOR_THEME_DIR" <<'PY'
 import json
 import os
 import re
@@ -53,6 +69,7 @@ ROOT_DIR = Path(sys.argv[1]).resolve()
 OUT_DIR = Path(sys.argv[2]).resolve()
 SELECT_MODE = sys.argv[3] if len(sys.argv) > 3 else ""
 NIM_OUT = sys.argv[4] if len(sys.argv) > 4 else ""
+EDITOR_THEME_DIR = sys.argv[5] if len(sys.argv) > 5 else ""
 
 EXPECTED_FOLDERS = ["brand", "alias", "mapped"]
 
@@ -413,17 +430,116 @@ def emit_nim(out_file):
     lines += ["", "  DesignToken* = enum", "    ## One member per `mapped` colour token, named by its token path."]
     for p in colour_paths:
         lines.append(f"    {nim_ident(p)} = \"{'/'.join(p)}\"")
+    editor = editor_theme_entries(per_mode) if EDITOR_THEME_DIR else []
+    if editor:
+        lines.append("    # ---- the EDITOR THEME (PLAT-47): the desktop's Monaco theme")
+        lines.append("    # documents, resolved per mode (see the generator's header).")
+        for ident, path, _hexes in editor:
+            lines.append(f"    {ident} = \"{path}\"")
     lines += ["", "const", "  DesignTokenCount* = " + str(len(colour_paths)),
+              "    ## The design system's own `mapped` colour tokens; the editor-theme",
+              "    ## members follow them in the enum.",
               "  DesignTokenHex*: array[DesignToken, array[DesignMode, string]] = ["]
-    for i, p in enumerate(colour_paths):
-        var = path_to_var(p)
-        hexes = [resolve_hex(var, per_mode[m]) for m in NIM_MODES]
-        sep = "," if i + 1 < len(colour_paths) else "]"
-        lines.append(f"    {nim_ident(p)}: [" + ", ".join(f'"{h}"' for h in hexes) + "]" + sep)
+    rows = [(nim_ident(p), [resolve_hex(path_to_var(p), per_mode[m]) for m in NIM_MODES])
+            for p in colour_paths]
+    rows += [(ident, hexes) for ident, _path, hexes in editor]
+    for i, (ident, hexes) in enumerate(rows):
+        sep = "," if i + 1 < len(rows) else "]"
+        lines.append(f"    {ident}: [" + ", ".join(f'"{h}"' for h in hexes) + "]" + sep)
+    if editor:
+        rule_rows = [(path[len("editor-theme/rule/"):], ident)
+                     for ident, path, _h in editor if path.startswith("editor-theme/rule/")]
+        lines += ["",
+                  "  EditorThemeRules*: array[" + str(len(rule_rows)) +
+                  ", tuple[scope: string, token: DesignToken]] = [",
+                  "    ## Every token rule of either Monaco theme, by scope (`\"\"` is the",
+                  "    ## default rule). `editor_theme.editorScopeToken` resolves a scope",
+                  "    ## against it the way Monaco does."]
+        for i, (scope, ident) in enumerate(rule_rows):
+            sep = "," if i + 1 < len(rule_rows) else "]"
+            lines.append(f"    (scope: \"{scope}\", token: {ident}){sep}")
     lines.append("")
     Path(out_file).parent.mkdir(parents=True, exist_ok=True)
     Path(out_file).write_text("\n".join(lines), encoding="utf-8")
     print(f"[OK] wrote      : {Path(out_file).resolve()}")
+
+EDITOR_THEME_FILES = {"Dark": "codetracerDark.json", "Light": "codetracerWhite.json"}
+  # Which Monaco theme document is which design-system mode: the pair
+  # `renderer.monacoThemeName` maps the desktop's dark and light themes onto.
+
+EDITOR_GROUND_ROLES = [
+    # (the `codetracer` block's key, the Nim identifier's suffix)
+    ("ground", "Ground"),
+    ("lineNumber", "LineNumber"),
+    ("activeLineNumber", "ActiveLineNumber"),
+    ("executionLine", "ExecutionLine"),
+    ("selection", "Selection"),
+]
+
+def monaco_hex(value, where):
+    v = str(value).strip()
+    if not v.startswith("#"):
+        v = "#" + v
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+        return v.lower()
+    raise SystemExit(f"[ERROR] {where}: {value!r} is not an opaque #rrggbb colour")
+
+def resolve_scope(rules, scope):
+    # Monaco's reading of a token scope against a theme's rules: the rule for
+    # the scope itself, else the rule for its longest dotted prefix, else the
+    # default rule (`""`).
+    parts = scope.split(".") if scope else []
+    while parts:
+        key = ".".join(parts)
+        if key in rules:
+            return rules[key]
+        parts.pop()
+    if "" not in rules:
+        raise SystemExit("[ERROR] an editor theme has no default ('') token rule")
+    return rules[""]
+
+def editor_theme_entries(per_mode):
+    docs = {}
+    for mode, name in EDITOR_THEME_FILES.items():
+        path = Path(EDITOR_THEME_DIR) / name
+        if not path.is_file():
+            raise SystemExit(f"[ERROR] editor theme {path} is missing")
+        docs[mode] = load_json(path)
+    rules = {}
+    scopes = set()
+    for mode, doc in docs.items():
+        rules[mode] = {}
+        for r in doc.get("rules", []):
+            if "foreground" not in r:
+                continue
+            scope = str(r.get("token", ""))
+            rules[mode][scope] = monaco_hex(r["foreground"], f"{EDITOR_THEME_FILES[mode]} rule '{scope}'")
+            scopes.add(scope)
+    entries = []
+    for key, suffix in EDITOR_GROUND_ROLES:
+        hexes = []
+        for mode in NIM_MODES:
+            block = docs[mode].get("codetracer") or {}
+            if key not in block:
+                raise SystemExit(f"[ERROR] {EDITOR_THEME_FILES[mode]} has no codetracer.{key}")
+            v = str(block[key]).strip()
+            if REF_RE.fullmatch(v):
+                hexes.append(resolve_hex(ref_to_var(v), per_mode[mode]))
+            else:
+                hexes.append(monaco_hex(v, f"{EDITOR_THEME_FILES[mode]} codetracer.{key}"))
+        entries.append(("dtEditorTheme" + suffix, "editor-theme/" + key, hexes))
+    seen = {}
+    for scope in sorted(scopes):
+        ident = "dtEditorThemeRule" + ("".join(
+            w[0].upper() + w[1:].lower()
+            for w in re.split(r"[^A-Za-z0-9]+", scope) if w) or "Default")
+        key = ident[0] + ident[1:].lower()
+        if key in seen:
+            raise SystemExit(f"[ERROR] editor scopes '{seen[key]}' and '{scope}' map to one Nim identifier {ident}")
+        seen[key] = scope
+        hexes = [resolve_scope(rules[m], scope) for m in NIM_MODES]
+        entries.append((ident, "editor-theme/rule/" + scope, hexes))
+    return entries
 
 if NIM_OUT:
     emit_nim(NIM_OUT)

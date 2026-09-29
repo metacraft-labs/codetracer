@@ -7,20 +7,21 @@
  * Two launches of the real Electron app on the `calc` recording, one worker,
  * one `XDG_CONFIG_HOME` (the fixture's), in order:
  *
- *   1. FIRST RUN — no saved layout at all: the index process copies the
- *      prefix's generated `config/default_layout.json`, and the arrangement
- *      is that file's, stack for stack (the runtime-inserted editor aside).
- *      The test then REARRANGES — the Constraints
- *      pane is closed through GoldenLayout's own API, exactly what the tab's ×
- *      does — and the desktop's write-through persists it.
+ *   1. FIRST RUN — no saved layout at all: the index process installs the
+ *      DEBUG MODE'S DEFAULT of the prefix's generated
+ *      `config/default_layout.json` (PLAT-47: TESTS a tab of FILES, no
+ *      CONSTRAINTS — the arrangement every front-end opens with), stack for
+ *      stack (the runtime-inserted editor aside). The test then REARRANGES —
+ *      the VCS pane is closed through GoldenLayout's own API, exactly what the
+ *      tab's × does — and the desktop's write-through persists it.
  *   2. RESTART — the saved file is left as the first run left it
- *      (`preserveUserLayout`): the arrangement comes back without Constraints.
+ *      (`preserveUserLayout`): the arrangement comes back without VCS.
  *      Native layout files planted under `$XDG_STATE_HOME/codetracer/` are the
  *      terminal's and the GPUI window's; View > Reset Layout is invoked, the
- *      same window shows the shared default (Constraints back, the editor
+ *      same window shows the shared default (VCS back, the editor
  *      re-created), the desktop's
- *      saved file holds the prefix default's stacks again — and the two native
- *      files are byte-identical.
+ *      saved file holds the Debug-mode default's stacks again — and the two
+ *      native files are byte-identical.
  *
  * The prefix (`PLAT45_DESKTOP_PREFIX`) must carry THIS checkout's desktop
  * JavaScript — the reset action is new — and its generated default; the
@@ -37,6 +38,12 @@ import * as path from "path";
 import { expect, test } from "../../lib/fixtures";
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
+// The pane the case rearranges away: VCS (`Content.VCS`). PLAT-45 closed
+// CONSTRAINTS; since PLAT-47 the first run's Debug-mode default does not place
+// CONSTRAINTS at all, so the case closes a pane that default does place.
+const ClosedContent = 41;
+const FilesystemContent = 9;
+const TestResultsContent = 48;
 const ConstraintsContent = 49;
 
 // THE RECORDING IS MADE BY THE RUN ITSELF: `launchMode: "trace"` records
@@ -144,6 +151,21 @@ function fileStacks(file: string): number[][] {
   return configStacks(JSON.parse(fs.readFileSync(file, "utf8")));
 }
 
+// THE DEBUG MODE'S DEFAULT, from the bundled file, by the rule the product
+// states (`frontend.paneHomesForMode` / `modeDefaultOmittedContentIds`) —
+// written out here, not imported: TESTS joins the FILES stack as its last tab,
+// CONSTRAINTS is not placed, and a stack left empty is gone. The first run and
+// View > Reset Layout both install this (PLAT-47): it is the arrangement every
+// CodeTracer front-end opens with.
+function debugDefaultStacks(bundled: number[][]): number[][] {
+  const out = bundled
+    .map((s) => s.filter((c) => c !== TestResultsContent && c !== ConstraintsContent))
+    .filter((s) => s.length > 0);
+  const files = out.find((s) => s.includes(FilesystemContent));
+  if (files) files.push(TestResultsContent);
+  return out;
+}
+
 test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets to the shared default", () => {
   test.describe("first run, then a rearrangement", () => {
     test.use({
@@ -158,19 +180,22 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       prefix();
       await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
       const before = await stackContents(ctPage);
-      expect(hasContent(before, ConstraintsContent)).toBe(true);
-      // THE FIRST RUN OPENED THE GENERATED DEFAULT: the live arrangement is
-      // the prefix's `config/default_layout.json`, stack for stack, and the
-      // desktop's own saved file (copied on first run, then re-saved by the
+      expect(hasContent(before, ClosedContent)).toBe(true);
+      expect(hasContent(before, ConstraintsContent)).toBe(false);
+      // THE FIRST RUN OPENED THE DEBUG MODE'S DEFAULT of the generated bundled
+      // tree (PLAT-47): the live arrangement is `debugDefaultStacks` of the
+      // prefix's `config/default_layout.json`, stack for stack, and the
+      // desktop's own saved file (written on first run, then re-saved by the
       // write-through in its one-line form) holds the same stacks. Not a byte
       // comparison: the write-through rewrites the file as soon as the layout
       // settles.
-      const shipped = fileStacks(path.join(prefix(), "config", "default_layout.json"));
+      const shipped = debugDefaultStacks(
+        fileStacks(path.join(prefix(), "config", "default_layout.json")));
       expect(withoutEditor(before)).toEqual(shipped);
       expect(fs.existsSync(userLayoutPath())).toBe(true);
       expect(fileStacks(userLayoutPath())).toEqual(shipped);
 
-      // REARRANGE: close the Constraints pane, as its tab's × would.
+      // REARRANGE: close the VCS pane, as its tab's × would.
       await ctPage.evaluate((content) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const gl = (window as any).data.ui.layout;
@@ -189,10 +214,10 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
         };
         const target = find(gl.rootItem);
         target.parent.removeChild(target);
-      }, ConstraintsContent);
+      }, ClosedContent);
       // THE WRITE-THROUGH: the saved file loses the pane without a restart.
       await expect.poll(() => fs.readFileSync(userLayoutPath(), "utf8")
-        .includes(`"content":${ConstraintsContent}`), { timeout: 30_000 }).toBe(false);
+        .includes(`"content":${ClosedContent}`), { timeout: 30_000 }).toBe(false);
     });
   });
 
@@ -218,7 +243,7 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
       // THE RESTART RESTORED THE DESKTOP'S OWN LAST LAYOUT.
       const restored = await stackContents(ctPage);
-      expect(hasContent(restored, ConstraintsContent)).toBe(false);
+      expect(hasContent(restored, ClosedContent)).toBe(false);
 
       // View > Reset Layout — the menu element exists, and its action runs.
       const menuHasIt = await ctPage.evaluate(() => {
@@ -241,13 +266,14 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
         data.actions[data.actions.length - 1](null);
       });
       // THE SHARED DEFAULT IS BACK, in place — the same window, no restart…
-      await expect.poll(async () => hasContent(await stackContents(ctPage), ConstraintsContent),
+      await expect.poll(async () => hasContent(await stackContents(ctPage), ClosedContent),
         { timeout: 30_000 }).toBe(true);
       // …WITH THE EDITOR, re-created where the first run creates it…
       await ctPage.waitForSelector(".view-line", { timeout: 30_000 });
       const reset = await stackContents(ctPage);
       expect(reset.some((s) => s.includes(EditorContent))).toBe(true);
-      const shipped = fileStacks(path.join(prefix(), "config", "default_layout.json"));
+      const shipped = debugDefaultStacks(
+        fileStacks(path.join(prefix(), "config", "default_layout.json")));
       expect(withoutEditor(reset)).toEqual(shipped);
       // …THE DESKTOP'S SAVED FILE IS THE DEFAULT AGAIN (deleted, re-copied by
       // the first run's own loader, then re-saved from the live layout)…

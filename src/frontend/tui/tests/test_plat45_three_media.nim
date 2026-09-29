@@ -74,25 +74,29 @@ const
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
 const PinnedArrangement =
-  "row(stack[fileTree*,vcs],editor,column(row(stack[state*,scratchpad]," &
-  "stack[calltrace*,agentActivity]),stack[eventLog*,timeline,terminalOutput])," &
-  "column(testResults,constraints))"
-  ## **THE PRODUCT DECISION, PINNED** (PLAT-45 deliverable 3): the shared
-  ## default's arrangement as the milestone recorded it — the desktop's, as
-  ## users already knew it. Each medium is compared with this AS WELL AS with
-  ## the model's own relation, so an edit to `sharedDefaultLayout()` that the
-  ## front-ends faithfully follow still turns every one of them red here: the
-  ## default moved, and moving it is a decision a reviewer must see.
+  "row(stack[fileTree*,vcs,testResults],editor,column(row(" &
+  "stack[state*,scratchpad],stack[calltrace*,agentActivity])," &
+  "stack[eventLog*,timeline,terminalOutput]))"
+  ## **THE PRODUCT DECISION, PINNED**: the shared default's arrangement — the
+  ## desktop's DEBUG-mode layout (PLAT-47 deliverable 1; the user, 2026-09-27:
+  ## "The default layout of desktop is the shared arrangement. It has been
+  ## reviewed and used for a long time."): TESTS a tab of the FILES panel
+  ## beside VCS, no CONSTRAINTS. Each medium is compared with this AS WELL AS
+  ## with the model's own relation, so an edit that the front-ends faithfully
+  ## follow still turns every one of them red here: the default moved, and
+  ## moving it is a decision a reviewer must see.
 
 proc sharedRelation(): Arrangement = ofTree(sharedDefaultLayout().tree)
 
 proc scratchTree(): LayoutNode =
-  ## The shared default with the scratch build's one edit applied: the right
-  ## column's two stacks in the other order.
+  ## The shared default with the scratch build's one edit applied
+  ## (`scripts/plat45-capture-electron.sh`, to the BUNDLED tree the desktop
+  ## derives its Debug-mode default from): the state and call-trace stacks in
+  ## the other order.
   result = clone(sharedDefaultLayout().tree)
-  let right = result.children[3]
-  doAssert right.kind == lnColumn and right.children.len == 2
-  swap(right.children[0], right.children[1])
+  let upper = result.children[2].children[0]
+  doAssert upper.kind == lnRow and upper.children.len == 2
+  swap(upper.children[0], upper.children[1])
 
 # ---------------------------------------------------------------------------
 # Each medium, from its own output
@@ -103,10 +107,17 @@ proc paneOfTerminalName(name: string): string =
     if terminalPaneName(k) == name: return $k
   "unknown:" & name
 
-proc stripLabels(row: string): seq[string] =
-  for raw in row.replace("─", " ").split("  "):
-    let t = raw.strip(chars = {' ', '-', '|', '[', ']'})
-    if t.len > 0: result.add t
+proc activeTabLabel(row: StyledRow; col, width: int): string =
+  ## The label the terminal PAINTED as the active tab on a strip: the cells in
+  ## the active-tab role (PLAT-47: a tab strip carries no brackets, so which
+  ## tab is active is read off the paint, not off the text).
+  var at = 0
+  for span in row:
+    let w = span.text.runeLen
+    if span.style.role == srTabActive and at + w > col and at < col + width:
+      result.add span.text
+    at += w
+  result = result.strip()
 
 proc terminalRelation(tracePath: string; paintedActive: var seq[string]):
     Arrangement =
@@ -116,7 +127,6 @@ proc terminalRelation(tracePath: string; paintedActive: var seq[string]):
                     lang = "en_US.UTF-8"), initCapabilityFlags())
   let app = newTuiApp()
   let rt = newTuiRuntime(app, caps, Cols, Rows)
-  app.fileTree = initFileTreeModel(recordingFileList(tracePath))
   let session = openTuiSession(tracePath, viewportHeight = Rows - 6)
   defer: session.close()
   session.header(rt)
@@ -131,9 +141,9 @@ proc terminalRelation(tracePath: string; paintedActive: var seq[string]):
       for t in r.tabs: tabs.add paneOfTerminalName(t)
       active = r.activeTab
       # THE ACTIVE TAB, READ BACK OFF THE PAINTED STRIP.
-      let painted = stripLabels(screen.rows[r.area.row].runeSubStr(
-        r.area.col, r.area.width))
-      if painted.len > 0: paintedActive.add paneOfTerminalName(painted[0])
+      let painted = activeTabLabel(screen.styledRows[r.area.row], r.area.col,
+                                   r.area.width)
+      if painted.len > 0: paintedActive.add paneOfTerminalName(painted)
     else:
       tabs.add $r.pane
     regions.add RegionRect(x: float(r.area.col), y: float(r.area.row),
@@ -284,7 +294,7 @@ suite "PLAT-45: same panes, same places, three media":
         for t in g[6 ..< g.len - 1].split(','):
           if t.endsWith("*"): activeFromRelation.incl t[0 ..< t.len - 1]
       else:
-        # A one-tab stack reduces to its bare pane, and paints `[Name]`.
+        # A one-tab stack reduces to its bare pane, painted as the active tab.
         activeFromRelation.incl g
     ck painted.len > 0
     for p in painted:

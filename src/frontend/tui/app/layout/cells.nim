@@ -99,7 +99,7 @@ proc terminalPaneName*(kind: PaneKind): string =
   ## and each front-end names its own tabs.
   case kind
   of paneEditor: "Source"
-  of paneCalltrace: "Call Stack"
+  of paneCalltrace: "Call Trace"
   of paneState: "Variables"
   of paneEventLog: "Event Log"
   of paneTimeline: "Timeline"
@@ -114,7 +114,7 @@ proc terminalPaneName*(kind: PaneKind): string =
   of paneVcs: "VCS"
   of paneAgentActivity: "Agent Activity"
   of paneTerminalOutput: "Terminal Output"
-  of paneTestResults: "Test Results"
+  of paneTestResults: "Tests"
   of paneConstraints: "Constraints"
 
 proc minPaneWidth*(kind: PaneKind): int =

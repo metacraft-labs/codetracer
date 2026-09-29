@@ -5,6 +5,7 @@ import
   ../lib/[ jslib, electron_lib, misc_lib ],
   ./bootstrap_cache,
   ./layout_config_repair,
+  ./mode_default_layout,
   ../../common/[ paths, ct_logging, trace_source_paths, review_source_paths ]
 
 type
@@ -679,9 +680,76 @@ const bundledDefaultLayoutJson = staticRead("../../config/default_layout.json")
   ## unreadable one never depends on a file being present on disk. Mirrors the
   ## renderer-side copy in `ui/layout.nim`.
 
-proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
-  ## Move the unusable layout file aside and copy the bundled default.
-  ## Returns the fresh default config.
+proc readBundledLayout(): Future[js] {.async.} =
+  ## The BUNDLED tree (`<prefix>/config/default_layout.json`), or the
+  ## compiled-in copy when the installed one cannot be read. nil only when
+  ## neither parses, which is a build defect.
+  ##
+  ## `configDir` points at the INSTALLED tree (`codetracerPrefix / "config"`),
+  ## which does not exist in a plain `build-debug` checkout — so the read can
+  ## legitimately fail, and recovering must never depend on a file that may
+  ## not be deployed. `ui/layout.nim` keeps the same compiled-in copy for the
+  ## renderer side.
+  let (bundledData, bundledErr) =
+    await fsreadFileWithErr(cstring(fmt"{configDir / defaultLayoutPath}"))
+  if bundledErr.isNil:
+    let parsedBundled = parseLayoutJson(bundledData,
+      "Bundled layout config JSON parse error")
+    if not parsedBundled.isNil:
+      return parsedBundled
+  warnPrint "No readable default layout on disk; using the compiled-in copy"
+  return parseLayoutJson(cstring(bundledDefaultLayoutJson),
+                         "Compiled-in layout config parse error")
+
+proc installModeDefault(filename: string; mode: LayoutMode;
+                        hiddenOverride: seq[int] = @[];
+                        overrideHidden = false): Future[js] {.async.} =
+  ## Write `mode`'s DEFAULT layout to `filename` and return it.
+  ##
+  ## `overrideHidden` replaces the mode's own hidden set with
+  ## `hiddenOverride` — the DeepReview dataset launch, which is edit mode
+  ## minus its own pillars (`reviewModeHiddenContentIds`), keeps the Agent
+  ## Activity panel edit mode hides.
+  ##
+  ## The default is `mode_default_layout.modeDefaultLayout` over the bundled
+  ## tree — the one function the renderer's mode switch and the default-layout
+  ## generator call — and NOT the bundled tree itself. Until 2026-09-27 the
+  ## first run and View > Reset Layout copied the bundled file verbatim, so a
+  ## desktop that had never been used opened on a standing TEST RESULTS /
+  ## CONSTRAINTS column that no mode draws, while the same desktop after a
+  ## mode switch did not. The desktop's debug-mode default is the arrangement
+  ## every CodeTracer front-end opens with, so this is also where "the desktop
+  ## opens with the shared default" is made true.
+  let bundled = await readBundledLayout()
+  if bundled.isNil:
+    errorPrint "index: critical - cannot load any layout config"
+    quit(1)
+  let derived =
+    if overrideHidden:
+      modeDefaultLayoutConfig(bundled, ord(Content.EditorView),
+                              hiddenOverride, paneHomesForMode(mode))
+    else:
+      modeDefaultLayout(bundled, mode)
+  let directory = filename.parentDir
+  var mkdirOpts = newJsObject()
+  mkdirOpts["recursive"] = true
+  let errMkdir = await fsMkdirWithErr(cstring(directory), mkdirOpts)
+  if not errMkdir.isNil:
+    warnPrint "mkdir for layout config folder error: ", errMkdir
+  let errWrite = await fsWriteFileWithErr(cstring(filename),
+                                          stringifyJson(derived))
+  if not errWrite.isNil:
+    # The layout is still usable for this session; only its persistence
+    # failed, and the next save will try again.
+    warnPrint "Could not write the default layout to ", filename, ": ", errWrite
+  return derived
+
+proc resetLayoutToDefault*(filename: string;
+                           mode: LayoutMode = DebugMode;
+                           hiddenOverride: seq[int] = @[];
+                           overrideHidden = false): Future[js] {.async.} =
+  ## Move the unusable layout file aside and install `mode`'s default layout
+  ## (`installModeDefault`). Returns the fresh default config.
   warnPrint "Resetting layout to default due to corrupt/incompatible config: ", filename
 
   # Keep a copy rather than destroying the user's arrangement outright: this
@@ -701,57 +769,8 @@ proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
   if not errUnlink.isNil:
     warnPrint "Could not delete corrupt layout file (may not exist): ", errUnlink
 
-  let directory = filename.parentDir
-  # Use newJsObject with []= to avoid jsffi gensym collisions
-  var mkdirOpts = newJsObject()
-  mkdirOpts["recursive"] = true
-  let errMkdir = await fsMkdirWithErr(cstring(directory), mkdirOpts)
-  if not errMkdir.isNil:
-    errorPrint "mkdir for layout config folder error: ", errMkdir
-    # Don't quit - try to continue with bundled default
-
-  let errCopy = await fsCopyFileWithErr(
-    cstring(fmt"{configDir / defaultLayoutPath}"),
-    cstring(filename)
-  )
-
-  if errCopy.isNil:
-    # Read the fresh copy
-    let (freshData, freshErr) = await fsreadFileWithErr(cstring(filename))
-    if freshErr.isNil:
-      let parsedFresh = parseLayoutJson(freshData,
-        "Layout config JSON parse error after reset")
-      if not parsedFresh.isNil:
-        return parsedFresh
-
-  # Next: read the installed default directly, without saving.
-  warnPrint "Could not copy default layout, reading bundled default directly"
-  let (bundledData, bundledErr) = await fsreadFileWithErr(cstring(fmt"{configDir / defaultLayoutPath}"))
-  if bundledErr.isNil:
-    let parsedBundled = parseLayoutJson(bundledData,
-      "Bundled layout config JSON parse error")
-    if not parsedBundled.isNil:
-      return parsedBundled
-
-  # Last resort: the compiled-in copy.
-  #
-  # `configDir` points at the INSTALLED tree (`codetracerPrefix / "config"`),
-  # which does not exist in a plain `build-debug` checkout — so every branch
-  # above can legitimately fail and this proc used to `quit(1)` there, taking
-  # the whole index process down. A layout file the user cannot even see is
-  # then fatal at startup with no way back except deleting it by hand, which
-  # is the failure #608 was reported for. Recovering from a corrupt layout
-  # must never depend on a file that may not be deployed; embed it instead.
-  # `ui/layout.nim` already keeps the same compiled-in copy for the renderer
-  # side of this fallback.
-  warnPrint "No readable default layout on disk; using the compiled-in copy"
-  let parsedEmbedded = parseLayoutJson(
-    cstring(bundledDefaultLayoutJson), "Compiled-in layout config parse error")
-  if not parsedEmbedded.isNil:
-    return parsedEmbedded
-
-  errorPrint "index: critical - cannot load any layout config"
-  quit(1)
+  return await installModeDefault(filename, mode, hiddenOverride,
+                                  overrideHidden)
 
 proc repairAndPersistLayout(config: js; filename: string;
                             context: string): Future[js] {.async.} =
@@ -801,22 +820,12 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
       return await resetLayoutToDefault(filename)
     return ensureReplayLayoutPanels(config)
   else:
-    let directory = filename.parentDir
-    let errMkdir = await fsMkdirWithErr(cstring(directory), js{recursive: true})
-    if not errMkdir.isNil:
-      errorPrint "mkdir for layout config folder error: exiting: ", errMkdir
-      quit(1)
-
-    let errCopy = await fsCopyFileWithErr(
-      cstring(fmt"{configDir / defaultLayoutPath}"),
-      cstring(filename)
-    )
-
-    if errCopy.isNil:
-      return await loadLayoutConfig(main, filename)
-    else:
-      errorPrint "index: load layout config error: ", errCopy
-      quit(1)
+    # THE FIRST RUN: no saved layout, so the desktop starts on the DEBUG
+    # mode's default — the arrangement every CodeTracer front-end opens with
+    # (see `installModeDefault`), written to the user's file so the next start
+    # restores it like any other saved layout.
+    let installed = await installModeDefault(filename, DebugMode)
+    return ensureReplayLayoutPanels(installed)
 
 proc resetHiddenPanelLayoutToDefault(filename: string;
                                      hiddenContents: seq[int]): Future[js] {.async.} =
@@ -835,7 +844,8 @@ proc resetHiddenPanelLayoutToDefault(filename: string;
   ##
   ## Every recovery path therefore ends in the same sanitiser as the happy
   ## path, with the caller's own hidden set.
-  let config = await resetLayoutToDefault(filename)
+  let config = await resetLayoutToDefault(filename, EditMode, hiddenContents,
+                                          overrideHidden = true)
   if config.isNil:
     # `resetLayoutToDefault` exits rather than returning nil, but a nil here
     # must not become a crash inside the sanitiser.
@@ -868,35 +878,21 @@ proc loadEditLayoutConfig*(main: js, filename: string;
     return sanitizeEditLayoutConfig(
       config, ord(Content.EditorView), hiddenContents)
   else:
-    # Edit mode layout file doesn't exist yet - use default debug layout as fallback
-    let defaultLayoutFile = userLayoutDir / "default_layout.json"
-    let (defaultData, defaultErr) = await fsreadFileWithErr(cstring(defaultLayoutFile))
-    if defaultErr.isNil:
-      let parsedDefault = parseLayoutJson(defaultData,
-        "Default layout config JSON parse error")
-      if parsedDefault.isNil:
-        return await resetHiddenPanelLayoutToDefault(defaultLayoutFile, hiddenContents)
-      let config = await repairAndPersistLayout(
-        parsedDefault, defaultLayoutFile, "replay layout")
-      if config.isNil:
-        return await resetHiddenPanelLayoutToDefault(defaultLayoutFile, hiddenContents)
-      let autoHide = await loadAutoHideState()
-      if not isValidLayoutConfig(config, autoHide):
-        warnPrint "Default layout config is invalid: ", defaultLayoutFile
-        return await resetHiddenPanelLayoutToDefault(defaultLayoutFile, hiddenContents)
-      return sanitizeEditLayoutConfig(
-        ensureReplayLayoutPanels(config), ord(Content.EditorView), hiddenContents)
-    else:
-      # Fall back to the bundled default layout
-      let errCopy = await fsCopyFileWithErr(
-        cstring(fmt"{configDir / defaultLayoutPath}"),
-        cstring(filename)
-      )
-      if errCopy.isNil:
-        return await loadEditLayoutConfig(main, filename, hiddenContents)
-      else:
-        errorPrint "index: load edit layout config error: ", errCopy
-        quit(1)
+    # THE EDIT LAYOUT'S FIRST RUN: the edit mode's own default, derived from
+    # the bundled tree by the one function every mode's default comes from
+    # (`installModeDefault`), with the caller's hidden set (a DeepReview
+    # dataset keeps its Agent Activity pillar).
+    #
+    # It used to be derived from the user's saved DEBUG layout instead. That
+    # stopped being possible without loss on 2026-09-27: the debug default no
+    # longer carries CONSTRAINTS (it does not belong in the replay layout), so
+    # an edit layout derived from it would have lost the column the editing
+    # surface keeps CONSTRAINTS in. One layout per mode, from one tree.
+    let installed = await installModeDefault(filename, EditMode,
+                                             hiddenContents,
+                                             overrideHidden = true)
+    return sanitizeEditLayoutConfig(
+      installed, ord(Content.EditorView), hiddenContents)
 
 proc loadReviewLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   ## Load the layout a DeepReview session over an exported dataset opens in.
