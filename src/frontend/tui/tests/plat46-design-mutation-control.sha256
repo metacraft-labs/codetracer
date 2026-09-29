@@ -2,18 +2,18 @@
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-712ded07b277546114ed9d717e08205146555c69cfe5db3560ddfe2483917598  src/frontend/tui/app/theme/roles.nim
+65ad5927942c7ec3dde32f0ec63082c9c5b8293dca70224baf6ea2105b938f61  src/frontend/tui/app/theme/roles.nim
 3a78fc1d60a28e60c21569d4c8f9184d5ea7b0bb7c122ab06536f07dfdfde43a  src/frontend/tui/app/theme/palette.nim
-5f7d1406dd9c5d1f5cee07e55c25cd9ecc56f336fdd83ea3f537ce20afad308c  src/frontend/tui/app/theme/capabilities.nim
+5e82d0b58e65edc5c05d73eb25d7a070076ad92da84cce6af99cd76ba80286d0  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-f8ddcdf246fae024146479400905dd39ba5ab61139a96797825b9ef1699ec167  src/frontend/tui/app/views/shell.nim
-651fca95092c7b7d1ece4ef97b097e20ebd9deee511b5a6c4cd2855673b10d2e  src/frontend/tui/app/views/gutter.nim
-175eca883065a1489ab4502e9210db520e71ef513a1835385bb0fe360e92d887  src/frontend/tui/app/views/source_pane.nim
+162e58650171a5b467c80ecdd7f03c2e935c698f2807e5c7f1b2ae421eeb6fb9  src/frontend/tui/app/views/shell.nim
+704b1ad3389bd76e8f03d2409b160ba06d11657e278811a828556406db7b9527  src/frontend/tui/app/views/gutter.nim
+778c964e98cb2ebf1558066eed32b5f5a17cca8a517ce50759bb06a9677ae57f  src/frontend/tui/app/views/source_pane.nim
 81c4fc54101ab04e1f1083fbc63e22d9da9105d12cbc36564abf3e5c810285b7  src/frontend/tui/host/terminal_probe.nim
-f77f8228d20d94606e7f2df53f78bd4d33229968efabbd64f2b00f511b0531c1  scripts/tokens-to-styl.sh
-a34e2fa9e688dfb9e94853f20f8afeb4c44e05c547345f2caba0653f830c4131  src/frontend/tui/app/tests/test_degraded_style_tables.nim
-ed5805619f344174bd0670186b90281a3221c91b8273db1f54ae5883963dddfb  src/frontend/tui/app/tests/test_capability_resolution.nim
+ed71c14e100d7b7b0b4670cd047e4018b766148b847d9a3618d94de5222d3243  scripts/tokens-to-styl.sh
+60bec4140308b41e1377a1505312e844ce134d38e13701a167602bfee247511b  src/frontend/tui/app/tests/test_degraded_style_tables.nim
+3fad25afeaef25119fbb676154a7729180bf7f8e49cde3e19d5227af224eeae8  src/frontend/tui/app/tests/test_capability_resolution.nim
 43f8243f4031dbc6c1b2613377a33803c03c2729e59b1b0700bbdca64bdfa366  src/frontend/tui/tests/test_plat46_terminal_probe.nim
-ecdf0e854b4dcfd8ebb591d7ec07f53e6839082b4d5d49a83dec7a4b20448b54  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim
+c001e30719c8e6866419e5b3a266f52dc67a5553b8c9aa04699162c40c289d36  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim
 09b62f366cca1170b7f9748e6b2ddd1ae46dd2be621438a19c7d94aca0377d05  ci/test/tui-design-tokens-boundary.sh
-6034bb519201470ee71680fda964e01bf67d9f6025276494aa5058eee59f5768  ci/test/design-tokens-fresh.sh
+037f8d69d9864c8c0730b1784e91fc460ae4348b2f000f368a9fea17fb0881a6  ci/test/design-tokens-fresh.sh

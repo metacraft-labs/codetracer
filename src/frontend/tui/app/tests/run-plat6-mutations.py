@@ -144,6 +144,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 STORE = "src/frontend/tui/host/layout_store.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
+SHELL = "src/frontend/tui/app/views/shell.nim"
 
 # THE HARNESS'S OWN INSTRUMENTS, held to the same restoration check as the
 # subject (Verification-Harness-Traps §7: an instrument is the last thing anyone
@@ -196,7 +197,7 @@ HARNESS = [DUAL, APPRT, APP_GEST, APP_MOUSE, APP_PERSIST, APP_TRANS]
 #     behaving oddly with no local edit to explain it, those three are where to
 #     look.
 TOUCHED = [SUITE, ROUTE, PERSIST, MATRIX, GEST, TRANS, MOUSE_SUITE, RELAUNCH,
-           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL] + HARNESS
+           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL, SHELL] + HARNESS
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -490,11 +491,16 @@ MUTATIONS = [
         "again — the exact defect making the assembly structural removes",
     ),
     Mutation(
-        "M6", TABS,
-        "    line.add tabLabel(tabs[span.index], span.index == active)",
-        "    line.add tabLabel(tabs[span.index], false)",
+        "M6", SHELL,
+        "    let tabRole = if span.index == active: srTabActive else: srTabInactive",
+        "    let tabRole = srTabInactive",
         C_STRIP,
-        "the active tab is painted without its brackets",
+        # SINCE PLAT-47 a tab is shaped by colour and weight alone — the
+        # desktop's strip has no brackets, so `tabLabel` pads the active tab
+        # exactly as an inactive one and the old arm (paint it inactive in
+        # TEXT) became equivalent. The active tab is now told apart by its
+        # ROLE, chosen here, and that is what this arm takes away.
+        "the active tab is painted with the inactive tab's role",
     ),
     Mutation(
         "M26", TABS,

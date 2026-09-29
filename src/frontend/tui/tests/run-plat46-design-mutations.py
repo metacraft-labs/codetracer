@@ -81,14 +81,17 @@ BINARY_SUITES = {TIER2}
 TIER2_FILTER = "token fidelity and surfaces, read back, in the dark mode"
   # The one Tier-2 case a binary arm is graded by, so the arm costs one
   # screen rather than the whole suite…
-TIER2_FILTERS = {"P5": ":theme switches the design-system mode on a live session"}
+TIER2_FILTERS = {"P5": ":theme switches the design-system mode on a live session",
+                 # S4: the editor's fill is visible in the LIGHT mode, where the
+                 # editor's measured ground (the desktop's) is not the panel.
+                 "S4": "token fidelity and surfaces, read back, in the light mode"}
   # …unless the arm names its own.
 
 # (id, subject, find, replace, suite, what it breaks)
 ARMS = [
     ("T1", ROLES,
-     "    srSyntaxKeyword: fgOnly(dgSyntax, dtColorsEditorSyntaxKeyword,",
-     "    srSyntaxKeyword: fgOnly(dgSyntax, dtColorsEditorSyntaxString,",
+     "    srSyntaxKeyword: fgOnly(dgSyntax, tokenClassToken(tcKeyword),",
+     "    srSyntaxKeyword: fgOnly(dgSyntax, tokenClassToken(tcString),",
      TABLES, "the keyword role points at the string token"),
     ("T2", ROLES,
      "    srBorderPane: fgOnly(dgBorder, dtColorsUiBorderSecondary),",
@@ -107,7 +110,7 @@ ARMS = [
      "    tcKeyword: CellStyle(fg: \"magenta\", bold: true),",
      SOURCE_GATE, "a view paints an ANSI name again"),
     ("S1", SHELL,
-     "  g.fillSurface(a.row, a.col, a.width, a.height, srSurfacePanel)",
+     "  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)",
      "  discard", TABLES, "panes are no longer filled with the panel surface"),
     ("S3", SHELL,
      "    g.restyleRole(row, start, w, srTabBar, tabRole)",
@@ -155,6 +158,11 @@ ARMS = [
 
 UNGRADED: set = set()
 DECLARED_SURVIVORS = {"N1"}
+  # S4 is NOT a survivor. In the dark mode the editor's ground and text ARE
+  # the pane's surface and body text (#282828 / #f3f3f3 both), so dropping the
+  # editor fill changes no dark cell — but the light mode's editor is the
+  # desktop's measured light editor, on #282828, which the light panel is
+  # not. S4 is therefore graded by the light case (`TIER2_FILTERS`).
 
 
 def sha(rel):

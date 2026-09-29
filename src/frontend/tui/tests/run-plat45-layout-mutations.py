@@ -17,8 +17,10 @@ ONE ARM PER CLAIM OF THE VERIFICATION GATE, each naming the case that must die:
 
   | gate row | arms |
   |---|---|
-  | one source: moving a pane in `sharedDefaultLayout()` moves ALL THREE
+  | one source: moving a pane in `sharedDefaultLayout()` (since PLAT-47 the
+  |   generated `shared_default_layout.generated.json`) moves ALL THREE
   |   front-ends' observed default | S1 (terminal), S1g (GPUI) |
+  | one source: an edit of the authored bundled tree fails the staleness check | S1b |
   | one source: a hand edit of `default_layout.json` fails the staleness check | S2 |
   | one source: a hand-written terminal profile tree fails three-media | S3 |
   | one product reading another's layout file | R1 (GPUI), R2 (terminal) |
@@ -82,6 +84,7 @@ ROOT = HERE.parents[3]            # .../codetracer
 MODEL = "src/frontend/headless_app/layout_model.nim"
 DESK = "src/frontend/headless_app/desktop_panes.nim"
 DEFAULT = "src/config/default_layout.json"
+GENERATED = "src/frontend/headless_app/shared_default_layout.generated.json"
 PROFILE = "src/frontend/tui/app/layout/profile.nim"
 PERSIST = "src/frontend/tui/app/layout/persistence.nim"
 TUIMAIN = "src/frontend/tui/main.nim"
@@ -98,15 +101,15 @@ GPUI = "src/frontend/gpui/tests/test_plat45_gpui_layout.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_real_plat45_layout.nim"
 REFLOW = "src/frontend/tui/app/tests/test_resize_reflow.nim"
 
-SUBJECTS = [MODEL, DESK, DEFAULT, PROFILE, PERSIST, TUIMAIN, GMEM, GMAIN,
+SUBJECTS = [MODEL, DESK, DEFAULT, GENERATED, PROFILE, PERSIST, TUIMAIN, GMEM, GMAIN,
             GSHELL, CELLS, TSHELL]
 SUITES = [VM, FOLD, THREE, GPUI, PTY, REFLOW]
 TOUCHED = SUBJECTS + SUITES
 
 # Which binary a subject is compiled into (a subject in neither is read by the
 # suites' own compile).
-IN_GPUI_BINARY = {MODEL, DESK, GMEM, GMAIN, GSHELL}
-IN_TUI_BINARY = {MODEL, PROFILE, PERSIST, TUIMAIN, CELLS, TSHELL}
+IN_GPUI_BINARY = {MODEL, GENERATED, DESK, GMEM, GMAIN, GSHELL}
+IN_TUI_BINARY = {MODEL, GENERATED, PROFILE, PERSIST, TUIMAIN, CELLS, TSHELL}
 
 CONTROL_HASHES = HERE / "plat45-layout-mutation-control.sha256"
 SUITE_TIMEOUT = int(os.environ.get("CT_P45_SUITE_TIMEOUT", "2400"))
@@ -161,20 +164,70 @@ class Arm:
 
 ARMS = [
     # --- one source -----------------------------------------------------------
-    Arm("S1", MODEL,
+    # SINCE PLAT-47 the shared default the front-ends open is GENERATED from
+    # the desktop's own Debug-mode layout (`shared_default_layout.generated.json`,
+    # read into `layout_model.sharedDefaultLayout`); the authored tree in
+    # `layout_model.sharedBundledLayout` now generates only the desktop's bundled
+    # file. So the arrangement arms edit the generated document, and the
+    # authored tree has its own arm, graded by freshness.
+    Arm("S1", GENERATED,
+        '''                  "pane": "state"
+                },
+                {
+                  "kind": "pane",
+                  "pane": "scratchpad"
+                }
+              ]
+            },
+            {
+              "kind": "stack",
+              "activeIndex": 0,
+              "weight": 50.0,
+              "children": [
+                {
+                  "kind": "pane",
+                  "pane": "calltrace"''',
+        '''                  "pane": "calltrace"
+                },
+                {
+                  "kind": "pane",
+                  "pane": "scratchpad"
+                }
+              ]
+            },
+            {
+              "kind": "stack",
+              "activeIndex": 0,
+              "weight": 50.0,
+              "children": [
+                {
+                  "kind": "pane",
+                  "pane": "state"''',
+        C_TERM,
+        "a pane moved in the ONE shared default: the terminal's first screen "
+        "moves with it, and the pinned decision notices"),
+    Arm("S1g", GENERATED,
+        '''          "pane": "fileTree"
+        },
+        {
+          "kind": "pane",
+          "pane": "vcs"''',
+        '''          "pane": "vcs"
+        },
+        {
+          "kind": "pane",
+          "pane": "fileTree"''',
+        C_GPUI3,
+        "the Files stack's tabs reordered in the shared default: the GPUI "
+        "window's dock document follows, and the pinned decision notices"),
+    Arm("S1b", MODEL,
         "      stack([pane(paneTestResults)]),\n"
         "      stack([pane(paneConstraints)])],\n      weight = 18.75)])",
         "      stack([pane(paneConstraints)]),\n"
         "      stack([pane(paneTestResults)])],\n      weight = 18.75)])",
-        C_TERM,
-        "a pane moved in the ONE authored tree: the terminal's first screen "
-        "moves with it, and the pinned decision notices"),
-    Arm("S1g", MODEL,
-        "    stack([pane(paneFileTree), pane(paneVcs)], weight = 15.0),",
-        "    stack([pane(paneVcs), pane(paneFileTree)], weight = 15.0),",
-        C_GPUI3,
-        "the Files stack's tabs reordered in the shared tree: the GPUI "
-        "window's dock document follows, and the pinned decision notices"),
+        C_FRESH,
+        "a pane moved in the authored bundled tree: the desktop's committed "
+        "file is no longer what the tree generates"),
     Arm("S2", DEFAULT,
         '                "size": "25%",\n',
         '                "size": "30%",\n',
@@ -286,7 +339,7 @@ ARMS = [
     Arm("C2", GSHELL,
         "  for slot in arrangement.slots:\n    var leaf = GpuiLeaf(",
         "  for slot in arrangement.slots:\n"
-        "    if slot.pane == \"constraints\": continue\n"
+        "    if slot.pane == \"testResults\": continue\n"
         "    var leaf = GpuiLeaf(",
         C_GPUI3,
         "the GPUI window silently omits an undrawable pane from its plan "

@@ -16,7 +16,7 @@
 # along with the bytes.
 67fcb092ab1a29d8c299b8a303084b15127ce9b81b68c841c907fe7ac401a010  src/tests/visual/plat37-measurements.json
 6691efa7f680d879a9ffc9f4ceb4b95f0c07c5550f982c206658b9ffeb4e60df  src/tests/visual/plat37-thresholds.json
-36348345231bb5feac93c525e3edb2048b0faaceca33153451b55a922672b7c1  src/frontend/gpui/chrome.nim
+fabe018cf7a7b6443951e8a0dc0165d63219736f369e52ab86097d9d154cff72  src/frontend/gpui/chrome.nim
 cb6c5462e917d2e9e33645f68bbcb97e97bbfc7535260fa0a0f1ca8718e7329c  src/frontend/gpui/replay_ops.nim
 537bad8b46fe9204aa13d05791e6ec93273861fe3f6d3871c2db66e4614d6811  src/tests/visual/scenarios.json
 2a40e3c1a1a61aa73f4b97188e29713ae938eab9f935159fc6b4134235e79b45  src/frontend/gpui/tests/plat37_vision.nim
