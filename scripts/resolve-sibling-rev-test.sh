@@ -3,10 +3,11 @@
 # resolve-sibling-rev-test.sh — contract suite for resolve-sibling-rev.sh.
 #
 # `metacraft-github-actions` is a SHARED action repo: several Metacraft
-# projects consume `clone-siblings`, and they are not all on the same
-# workspace tooling.  The resolver therefore has to serve two lock layouts
-# at once during the repo-workspaces -> reprobuild migration, and neither
-# may regress the other.  This suite pins both.
+# projects consume `clone-siblings`.  The resolver reads ONE lock format,
+# reprobuild's `<sha>.toml`.  The legacy repo-workspaces `<sha>.xml` records
+# were dropped on 2026-09-29 (and erased from metacraft-manifests), and
+# section 1 pins what that means: an .xml is never a lock, alone or beside a
+# .toml.
 #
 # It is pure bash + git — no bats, no jq, no coreutils beyond `git` and
 # `mkdir`/`rm` — because it must be runnable in the same minimal shells the
@@ -32,7 +33,7 @@ if [[ ! -x $RESOLVER && ! -f $RESOLVER ]]; then
 	exit 3
 fi
 
-EXPECTED_ASSERTIONS=89
+EXPECTED_ASSERTIONS=98
 
 PASS=0
 FAIL=0
@@ -57,9 +58,10 @@ mkparent() {
 	mkdir -p "$d"
 }
 
-# A `repo manifest -r` snapshot, as the repo-workspaces `workspace lock`
-# hook writes it.  Note `nim` is at path `codetracer-nim`: the sibling's
-# identity is its NAME, not its path, in both formats.
+# A `repo manifest -r` snapshot, as the retired repo-workspaces
+# `workspace lock` hook wrote it.  It is a fixture for what the resolver must
+# IGNORE, and it carries valid, distinct revisions so that a resolver still
+# reading it would print one of them and fail the assertion.
 mk_xml_lock() {
 	local file="$1" nb="$2" nim="$3"
 	mkparent "$file"
@@ -172,29 +174,98 @@ expect_fail() {
 }
 
 # =========================================================================
-# 1. repo-workspaces XML layout — MUST NOT REGRESS
+# 1. Legacy repo-workspaces XML records are NOT locks (removed 2026-09-29)
 # =========================================================================
+#
+# The resolver used to read `locks/<project>/<repo>/<sha>.xml` beside the TOML
+# records. That support is gone, with no fallback, and every arm below asserts
+# a consequence of it. The XML fixtures carry VALID, distinct revisions
+# (`REV_*_XML`), so a resolver that still read them would print one and fail
+# the arm, rather than failing for some unrelated parse reason.
 
+# (a) An XML-only commit is UNLOCKED: exit 3 with the usual loud "no workspace
+#     lock" diagnostic, and nothing on stdout.
 X="$TMPROOT/xml/manifests"
 mk_xml_lock "$X/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-
-expect_rev "xml/nested: resolves sibling by name" "$REV_NB_XML" -- \
+expect_fail "xml-only (nested): the commit has NO lock, exit 3" 3 "no workspace lock found" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$X" --sha "$SHA_SELF" --no-walk
 
-expect_rev "xml/nested: name differs from path (nim -> codetracer-nim)" "$REV_NIM_XML" -- \
-	--repo codetracer --sibling nim \
+# (b) ...and the diagnostic names the ignored file and says why, so that a
+#     reader who can see a file for this commit is not left guessing.
+expect_fail "xml-only: the diagnostic names the ignored .xml file" 3 \
+	"locks/codetracer/codetracer/$SHA_SELF.xml" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$X" --sha "$SHA_SELF" --no-walk
+expect_fail "xml-only: the diagnostic says XML records are not supported" 3 \
+	"XML lock records are not supported" -- \
+	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$X" --sha "$SHA_SELF" --no-walk
 
 XF="$TMPROOT/xmlflat/manifests"
 mk_xml_lock "$XF/locks/codetracer/codetracer-$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-expect_rev "xml/flat: locks/<project>/<repo>-<sha>.xml still resolves" "$REV_NB_XML" -- \
+expect_fail "xml-only (flat): locks/<project>/<repo>-<sha>.xml is not a lock either" 3 \
+	"no workspace lock found" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$XF" --sha "$SHA_SELF" --no-walk
 
-expect_fail "xml: sibling absent from the lock fails loudly" 4 "not present in lock" -- \
-	--repo codetracer --sibling codetracer-rr \
-	--manifest-dir "$X" --sha "$SHA_SELF" --no-walk
+# (c) An XML record beside a TOML record for the same commit, in the same
+#     project, is ignored: the TOML answers, even though the XML disagrees.
+#     This used to be an exit-6 "conflicting locks".
+XT="$TMPROOT/xml-beside-toml/manifests"
+mk_xml_lock "$XT/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$XT/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "xml beside toml (same project): the toml answers, the xml is ignored" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$XT" --sha "$SHA_SELF" --no-walk
+expect_rev "xml beside toml (same project): name differs from path still resolves" "$REV_NIM_TOML" -- \
+	--repo codetracer --sibling nim \
+	--manifest-dir "$XT" --sha "$SHA_SELF" --no-walk
+
+# (d) THE FIELD FAILURE. codetracer-python-recorder@377e03bb and
+#     codetracer-ruby-recorder@8bacef81 carried a stale `locks/dev/` XML record,
+#     and the fresh `locks/codetracer/` TOML record beside it was not read: the
+#     glob listed every .xml before any .toml, and for a repo whose canonical
+#     project is not a directory in the store, the first project the glob met
+#     became the only one searched. Here SELF's own name is not a project, the
+#     XML sits under `dev` and the TOML under `codetracer`, exactly as in the
+#     manifest repo.
+XS="$TMPROOT/xml-shadow/manifests"
+mk_xml_lock "$XS/locks/dev/codetracer-python-recorder/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$XS/locks/codetracer/codetracer-python-recorder/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "xml under another project does not shadow the toml record" "$REV_NB_TOML" -- \
+	--repo codetracer-python-recorder --sibling codetracer-native-backend \
+	--manifest-dir "$XS" --sha "$SHA_SELF" --no-walk
+expect_rev "...and the created-at reported is the toml record's" "2026-08-10T11:55:29Z" -- \
+	--repo codetracer-python-recorder --print-created-at \
+	--manifest-dir "$XS" --sha "$SHA_SELF" --no-walk
+
+# (e) An XML record's CONTENT is never read: one that would have been a
+#     malformed lock (exit 5) or an injection attempt is simply not a lock.
+XM="$TMPROOT/xml-malformed/manifests"
+mkdir -p "$XM/locks/codetracer/codetracer"
+{
+	printf '%s\n' '<manifest>'
+	printf '%s\n' '  <project name="codetracer-native-backend" revision="--upload-pack=touch /tmp/resolve-sibling-rev-pwned" />'
+	printf '%s\n' '</manifest>'
+} >"$XM/locks/codetracer/codetracer/$SHA_SELF.xml"
+expect_fail "xml-only, malformed: exit 3 (not a lock), never exit 5 (a broken lock)" 3 \
+	"no workspace lock found" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$XM" --sha "$SHA_SELF" --no-walk
+mk_toml_lock "$XM/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "a malformed xml beside a good toml does not fail the resolve" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$XM" --sha "$SHA_SELF" --no-walk
+
+# (f) Candidate fall-through: an XML-only candidate is passed over like any
+#     unlocked commit, and the next candidate's TOML answers.
+XC="$TMPROOT/xml-candidate/manifests"
+mk_xml_lock "$XC/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$XC/locks/codetracer/codetracer/$SHA_OTHER.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "an xml-only leading candidate falls through to the next locked one" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$XC" --sha "$SHA_SELF" --sha "$SHA_OTHER" --no-walk
 
 # =========================================================================
 # 2. reprobuild TOML layout
@@ -232,15 +303,11 @@ expect_fail "no lock at all: exit 3" 3 "no workspace lock found" -- \
 	--manifest-dir "$E" --sha "$SHA_SELF" --no-walk
 run_resolver --repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$E" --sha "$SHA_SELF" --no-walk
-if [[ $_err == *".xml"* && $_err == *".toml"* ]]; then
-	ok "no lock: diagnostic names BOTH layouts it searched"
+if [[ $_err == *"<sha>.toml"* && $_err != *"<sha>.xml"* && $_err != *"legacy repo-workspaces XML"* ]]; then
+	ok "no lock: diagnostic names the .toml paths it searched, and no .xml path"
 else
-	bad "no lock: diagnostic names BOTH layouts it searched" "stderr: $_err"
+	bad "no lock: diagnostic names the .toml paths it searched, and no .xml path" "stderr: $_err"
 fi
-
-expect_fail "lock exists only for an unrelated sha (xml): exit 3" 3 "no workspace lock found" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$X" --sha "$SHA_OTHER" --no-walk
 
 expect_fail "lock exists only for an unrelated sha (toml): exit 3" 3 "no workspace lock found" -- \
 	--repo codetracer --sibling codetracer-native-backend \
@@ -304,19 +371,6 @@ expect_fail "toml: repo entry with no revision is rejected" 5 "revision" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$M/e" --sha "$SHA_SELF" --no-walk
 
-# (f) XML project line with no revision attribute.  This one used to emit a
-# fragment of the XML line as if it were a SHA.
-mkdir -p "$M/f/locks/codetracer/codetracer"
-{
-	printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>'
-	printf '%s\n' '<manifest>'
-	printf '%s\n' '  <project name="codetracer-native-backend" remote="metacraft-labs" />'
-	printf '%s\n' '</manifest>'
-} >"$M/f/locks/codetracer/codetracer/$SHA_SELF.xml"
-expect_fail "xml: project with no revision attribute is rejected" 5 "revision" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$M/f" --sha "$SHA_SELF" --no-walk
-
 # (g) A revision that is not a full commit SHA. The resolved value is
 # substituted straight into `git fetch <remote> <rev>`, so anything that is not
 # a 40-hex SHA must be refused rather than handed on:
@@ -329,7 +383,6 @@ expect_fail "xml: project with no revision attribute is rejected" 5 "revision" -
 #   '"<sha>" # comment'     -> quoting/syntax the scanners do not model, leaking
 #   '["<sha>"]'                out as plausible-looking garbage.
 #
-# Checked on both sides, because both feed the same `git fetch`.
 _bad_rev_toml() {
 	local dir="$1" rev="$2"
 	mkdir -p "$dir/locks/codetracer/codetracer"
@@ -339,15 +392,6 @@ _bad_rev_toml() {
 		printf '%s\n' 'name = "codetracer-native-backend"'
 		printf '%s\n' "revision = $rev"
 	} >"$dir/locks/codetracer/codetracer/$SHA_SELF.toml"
-}
-_bad_rev_xml() {
-	local dir="$1" rev="$2"
-	mkdir -p "$dir/locks/codetracer/codetracer"
-	{
-		printf '%s\n' '<manifest>'
-		printf '%s\n' "  <project name=\"codetracer-native-backend\" revision=\"$rev\" />"
-		printf '%s\n' '</manifest>'
-	} >"$dir/locks/codetracer/codetracer/$SHA_SELF.xml"
 }
 
 _bad_rev_toml "$M/g1" '"main"'
@@ -382,16 +426,6 @@ _bad_rev_toml "$M/g5b" '"-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
 expect_fail "toml: 40 chars is not enough — a leading '-' is not hex" 5 "hexadecimal" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$M/g5b" --sha "$SHA_SELF" --no-walk
-
-_bad_rev_xml "$M/g6" 'main'
-expect_fail "xml: a branch name is not a revision (no silent tip fallback)" 5 "SHA" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$M/g6" --sha "$SHA_SELF" --no-walk
-
-_bad_rev_xml "$M/g7" '--upload-pack=touch /tmp/resolve-sibling-rev-pwned'
-expect_fail "xml: an option-shaped revision is rejected (git argv injection)" 5 "SHA" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$M/g7" --sha "$SHA_SELF" --no-walk
 
 # (h) Two [[repo]] entries pinning the same name. One repo cannot have two
 # revisions in one workspace; answering with whichever came first would be a
@@ -428,59 +462,13 @@ expect_rev "toml: sibling names match exactly, never as a substring" "$REV_NB_TO
 	--manifest-dir "$M/i" --sha "$SHA_SELF" --no-walk
 
 # =========================================================================
-# 5. Both layouts present for the same commit
+# 5. Nested and flat spellings for the same commit
 # =========================================================================
 
-B="$TMPROOT/both-agree/manifests"
-mk_xml_lock "$B/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-mk_toml_lock "$B/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_XML" "$REV_NIM_XML"
-expect_rev "both layouts agree: resolves" "$REV_NB_XML" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$B" --sha "$SHA_SELF" --no-walk
-
-C="$TMPROOT/both-conflict/manifests"
-mk_xml_lock "$C/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-mk_toml_lock "$C/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
-expect_fail "both layouts disagree: refuses to pick one" 6 "conflicting" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$C" --sha "$SHA_SELF" --no-walk
-run_resolver --repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$C" --sha "$SHA_SELF" --no-walk
-if [[ $_err == *".xml"* && $_err == *".toml"* && $_err == *"$REV_NB_XML"* && $_err == *"$REV_NB_TOML"* ]]; then
-	ok "conflict diagnostic names both files and both revisions"
-else
-	bad "conflict diagnostic names both files and both revisions" "stderr: $_err"
-fi
-
-# A sibling that only ONE of the two locks knows about is also a conflict:
-# the two locks describe the same commit and must not disagree on membership.
-C2="$TMPROOT/both-partial/manifests"
-mk_xml_lock "$C2/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-mkdir -p "$C2/locks/codetracer/codetracer"
-{
-	printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
-	printf '%s\n' '[[repo]]'
-	printf '%s\n' 'name = "nim"'
-	printf '%s\n' "revision = \"$REV_NIM_XML\""
-} >"$C2/locks/codetracer/codetracer/$SHA_SELF.toml"
-expect_fail "one layout omits the sibling entirely: refuses" 6 "conflicting" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$C2" --sha "$SHA_SELF" --no-walk
-
-# ...but a nested and a flat lock of the SAME extension are NOT a conflict, even
-# when they disagree. The flat spelling is the historical one, and the manifest
-# repo genuinely carries such pairs with the flat member stale by dozens of
-# revisions; the nested file has always won and must keep winning. Treating this
-# as unresolvable would turn commits that resolve correctly today into hard CI
-# failures for every repo still on the XML layout.
-N="$TMPROOT/nested-beats-flat/manifests"
-mk_xml_lock "$N/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-mk_xml_lock "$N/locks/codetracer/codetracer-$SHA_SELF.xml" "$REV_NB_TOML" "$REV_NIM_TOML"
-expect_rev "xml: nested wins over a stale flat lock for the same commit" "$REV_NB_XML" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$N" --sha "$SHA_SELF" --no-walk
-
-# The same precedence in the TOML layout.
+# A nested and a flat lock for the SAME commit are NOT a conflict, even when
+# they disagree. The flat spelling is the historical one, and where the tooling
+# wrote both the nested file is the later, canonical one; the nested file has
+# always won and must keep winning.
 N2="$TMPROOT/nested-beats-flat-toml/manifests"
 mk_toml_lock "$N2/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
 mk_toml_lock "$N2/locks/codetracer/codetracer-$SHA_SELF.toml" "$REV_NB_XML" "$REV_NIM_XML"
@@ -488,12 +476,12 @@ expect_rev "toml: nested wins over a stale flat lock for the same commit" "$REV_
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$N2" --sha "$SHA_SELF" --no-walk
 
-# A flat lock is still cross-checked against a flat lock of the OTHER extension:
-# layout precedence resolves nested-vs-flat, never xml-vs-toml.
+# A flat .xml beside a flat .toml is not cross-checked any more: the .xml is
+# not a lock, so the .toml answers. (It used to be an exit-6 conflict.)
 N3="$TMPROOT/flat-both-ext/manifests"
 mk_xml_lock "$N3/locks/codetracer/codetracer-$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
 mk_toml_lock "$N3/locks/codetracer/codetracer-$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
-expect_fail "flat layout: xml and toml still cross-check" 6 "conflicting" -- \
+expect_rev "flat layout: an xml beside the toml is ignored, the toml answers" "$REV_NB_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$N3" --sha "$SHA_SELF" --no-walk
 
@@ -508,16 +496,9 @@ expect_rev "toml: canonical project wins over another workspace" "$REV_NB_TOML" 
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$P" --sha "$SHA_SELF" --no-walk
 
-PX="$TMPROOT/preferx/manifests"
-mk_xml_lock "$PX/locks/aaa-other/codetracer/$SHA_SELF.xml" "$REV_NIM_XML" "$REV_NIM_XML"
-mk_xml_lock "$PX/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-expect_rev "xml: canonical project wins over another workspace" "$REV_NB_XML" -- \
+expect_rev "--prefer-project overrides the default preference" "$REV_NIM_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$PX" --sha "$SHA_SELF" --no-walk
-
-expect_rev "--prefer-project overrides the default preference" "$REV_NIM_XML" -- \
-	--repo codetracer --sibling codetracer-native-backend \
-	--manifest-dir "$PX" --sha "$SHA_SELF" --no-walk --prefer-project aaa-other
+	--manifest-dir "$P" --sha "$SHA_SELF" --no-walk --prefer-project aaa-other
 
 # A lock in another workspace, with none in the canonical one, is still used.
 O="$TMPROOT/otheronly/manifests"
@@ -526,8 +507,17 @@ expect_rev "toml: lock from a non-canonical workspace is used when it is the onl
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$O" --sha "$SHA_SELF" --no-walk
 
+# An .xml under the CANONICAL project does not outrank a .toml under another
+# one: the .xml is not a lock, so the preference never sees it.
+PX="$TMPROOT/preferx/manifests"
+mk_xml_lock "$PX/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$PX/locks/mcr/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "an xml in the canonical project does not outrank a toml elsewhere" "$REV_NB_TOML" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$PX" --sha "$SHA_SELF" --no-walk
+
 # =========================================================================
-# 7. Manifest-dir auto-discovery: .repro/ (reprobuild) and .repo/ (legacy)
+# 7. Manifest-dir auto-discovery: .repro/manifests and the older .repo/manifests
 # =========================================================================
 
 WR="$TMPROOT/ws-repro"
@@ -539,16 +529,25 @@ expect_rev "auto-discovery finds .repro/manifests walking up from the repo" "$RE
 
 WO="$TMPROOT/ws-repo"
 mkdir -p "$WO/codetracer"
-mk_xml_lock "$WO/.repo/manifests/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
-expect_rev "auto-discovery still finds legacy .repo/manifests" "$REV_NB_XML" -- \
+mk_toml_lock "$WO/.repo/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "auto-discovery still finds .repo/manifests (it holds .toml records)" "$REV_NB_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--repo-dir "$WO/codetracer" --sha "$SHA_SELF" --no-walk
+
+# A .repo/manifests layer holding only legacy .xml records is discovered, and
+# has no lock in it.
+WOX="$TMPROOT/ws-repo-xml"
+mkdir -p "$WOX/codetracer"
+mk_xml_lock "$WOX/.repo/manifests/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+expect_fail "auto-discovery: a .repo/manifests with only .xml records has no lock" 3 "no workspace lock found" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--repo-dir "$WOX/codetracer" --sha "$SHA_SELF" --no-walk
 
 # Both present in one workspace: .repro is the migrated layer and wins.
 WB="$TMPROOT/ws-both"
 mkdir -p "$WB/codetracer"
 mk_toml_lock "$WB/.repro/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
-mk_xml_lock "$WB/.repo/manifests/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$WB/.repo/manifests/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_XML" "$REV_NIM_XML"
 expect_rev "auto-discovery prefers .repro over a stale .repo layer" "$REV_NB_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--repo-dir "$WB/codetracer" --sha "$SHA_SELF" --no-walk
@@ -563,7 +562,7 @@ expect_rev "CT_MANIFEST_DIR overrides auto-discovery" "$REV_NB_TOML" -- \
 unset CT_MANIFEST_DIR
 
 # =========================================================================
-# 8. Ancestry walk (local, non-shallow) — format agnostic
+# 8. Ancestry walk (local, non-shallow)
 # =========================================================================
 
 GW="$TMPROOT/walk"
@@ -610,8 +609,11 @@ mkdir -p "$GX/codetracer"
 ) >/dev/null 2>&1
 XBASE="$(git -C "$GX/codetracer" rev-parse HEAD~1)"
 XTIP="$(git -C "$GX/codetracer" rev-parse HEAD)"
-mk_xml_lock "$GX/.repo/manifests/locks/codetracer/codetracer/$XBASE.xml" "$REV_NB_XML" "$REV_NIM_XML"
-expect_rev "walk: nearest locked first-parent ancestor is used (xml)" "$REV_NB_XML" -- \
+# The walk passes over an XML-only commit exactly as over an unlocked one: the
+# tip carries only an .xml, so the answer comes from the parent's .toml.
+mk_xml_lock "$GX/.repo/manifests/locks/codetracer/codetracer/$XTIP.xml" "$REV_NB_XML" "$REV_NIM_XML"
+mk_toml_lock "$GX/.repo/manifests/locks/codetracer/codetracer/$XBASE.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "walk: an xml-only commit is walked past to the nearest toml lock" "$REV_NB_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--repo-dir "$GX/codetracer" --sha "$XTIP"
 
@@ -746,13 +748,13 @@ expect_fail "layers: a schema-less private layer is refused, not skipped" 5 "sch
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$LPUB" --manifest-dir "$LBAD2" --sha "$SHA_SELF" --no-walk
 
-# (f) A layer that contradicts ITSELF (xml vs toml for one commit) is still an
-# unresolvable conflict. Layer precedence orders LAYERS; it never arbitrates
-# inside one.
-LSELF="$TMPROOT/layers/private-self-conflict"
+# (f) An .xml inside a layer does not make that layer contradict itself (this
+# used to be exit 6): the .xml is not a lock, so the layer's .toml is its only
+# answer, and as the more specific layer it overrides the public one.
+LSELF="$TMPROOT/layers/private-with-xml"
 mk_xml_lock "$LSELF/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
 mk_toml_lock "$LSELF/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_PRIVATE" "$REV_NIM_TOML"
-expect_fail "layers: a layer that contradicts itself is still exit 6" 6 "conflicting" -- \
+expect_rev "layers: an .xml inside a layer is ignored; the layer's .toml overrides" "$REV_PRIVATE" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$LPUB" --manifest-dir "$LSELF" --sha "$SHA_SELF" --no-walk
 
@@ -977,21 +979,33 @@ expect_fail "participation: the exit-3 diagnostic names the ignored record" 3 \
 # (c) A routed record must not poison a REAL lock written for the same commit.
 # Before this was recognised, the record was collected alongside the lock and
 # failed the whole resolve at exit 5 even though the answer was right there.
-mk_xml_lock "$P/c/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+# The record sits in the canonical project, so it would also have outranked
+# the real lock under another project had it been taken for one.
 mk_participation_record "$P/c/locks/codetracer/codetracer/$SHA_SELF.toml" \
 	"codetracer" "codetracer" "$SHA_SELF"
-expect_rev "participation: a routed record does not poison a real xml lock" "$REV_NB_XML" -- \
+mk_toml_lock "$P/c/locks/mcr/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "participation: a routed record does not poison a real lock" "$REV_NB_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$P/c" --sha "$SHA_SELF" --no-walk
 
 # (d) The same in the flat legacy spelling, so the recognition is not attached
 # to one layout.
-mk_xml_lock "$P/d/locks/codetracer/codetracer-$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
 mk_participation_record "$P/d/locks/codetracer/codetracer-$SHA_SELF.toml" \
 	"codetracer" "codetracer" "$SHA_SELF"
-expect_rev "participation: recognised in the flat layout too" "$REV_NB_XML" -- \
+mk_toml_lock "$P/d/locks/mcr/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_rev "participation: recognised in the flat layout too" "$REV_NB_TOML" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$P/d" --sha "$SHA_SELF" --no-walk
+
+# (d2) A routed record beside a legacy .xml: neither is a lock, so the commit
+# is unlocked (exit 3) rather than resolved from the .xml.
+mk_participation_record "$P/d2/locks/codetracer/codetracer/$SHA_SELF.toml" \
+	"codetracer" "codetracer" "$SHA_SELF"
+mk_xml_lock "$P/d2/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+expect_fail "participation: a routed record beside an .xml is still exit 3" 3 \
+	"no workspace lock found" -- \
+	--repo codetracer --sibling codetracer-native-backend \
+	--manifest-dir "$P/d2" --sha "$SHA_SELF" --no-walk
 
 # (e) Candidate FALL-THROUGH. This is what parsing the record into an exit 4
 # would NOT have bought: a caller probing HEAD then its parent must move past
@@ -1169,6 +1183,137 @@ expect_fail "remedy: says where routed mode DOES publish the lock document" 3 \
 	"one per routed partition" -- \
 	--repo codetracer --sibling codetracer-native-backend \
 	--manifest-dir "$P/a" --sha "$SHA_SELF" --no-walk
+
+# =========================================================================
+# N. --print-created-at — WHEN the pins were generated
+#
+# The consumer of a lock sees revisions and nothing else, so a set of pins
+# generated months ago is indistinguishable, in a log, from one generated this
+# morning. `[lock] created_at` is the field that says which, and it was already
+# in the file this resolver has open.
+#
+# What is contracted here is that the resolver REPORTS the recorded value and
+# never a derived one. Every arm below that expects `unknown` is an arm where a
+# date could have been invented from something nearby — a `[[repo]]` table, a
+# missing field, a format that has no such field at all — and inventing one
+# would be worse than the silence this replaces, because a reader acts on it.
+# =========================================================================
+
+# expect_created_at DESC EXPECTED -- <resolver args...>
+expect_created_at() {
+	local desc="$1" want="$2"
+	shift 3
+	run_resolver "$@"
+	if [[ $_rc -ne 0 ]]; then
+		bad "$desc" "exit $_rc (expected 0); stderr: $_err"
+		return
+	fi
+	if [[ $_out != "$want" ]]; then
+		bad "$desc" "got '$_out', want '$want'"
+		return
+	fi
+	ok "$desc"
+}
+
+CA="$TMPROOT/createdat"
+
+# 1. The ordinary case: a reprobuild lock, read verbatim. `mk_toml_lock` writes
+#    created_at = "2026-08-10T11:55:29Z".
+mk_toml_lock "$CA/one/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+expect_created_at "created-at: reports the lock's recorded generation time" \
+	"2026-08-10T11:55:29Z" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/one" --sha "$SHA_SELF" --no-walk
+
+# 2. It is a question about the LOCK, not about a sibling, so no --sibling is
+#    required. Asking for one that the lock does not pin must not change the
+#    answer either: the record's age does not depend on who is asking.
+expect_created_at "created-at: needs no --sibling" \
+	"2026-08-10T11:55:29Z" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/one" --sha "$SHA_SELF" --no-walk
+expect_created_at "created-at: a sibling absent from the lock does not change it" \
+	"2026-08-10T11:55:29Z" -- \
+	--repo codetracer --sibling not-in-this-lock --print-created-at \
+	--manifest-dir "$CA/one" --sha "$SHA_SELF" --no-walk
+
+# 3. Without the flag, --sibling stays REQUIRED. The new mode must not have
+#    loosened the old one.
+expect_fail "created-at: --sibling is still required for a revision query" 2 \
+	"missing required value for SIBLING" -- \
+	--repo codetracer \
+	--manifest-dir "$CA/one" --sha "$SHA_SELF" --no-walk
+
+# 4. An XML-only commit has no lock at all, so there is no generation time to
+#    report: exit 3, like any unlocked commit — not `unknown`, which would say
+#    a lock was found.
+mk_xml_lock "$CA/xmlonly/locks/codetracer/codetracer/$SHA_SELF.xml" "$REV_NB_XML" "$REV_NIM_XML"
+expect_fail "created-at: an xml-only commit is unlocked, exit 3" 3 \
+	"no workspace lock found" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/xmlonly" --sha "$SHA_SELF" --no-walk
+
+# 5. A reprobuild lock whose [lock] table simply has no created_at.
+mkdir -p "$CA/nofield/locks/codetracer/codetracer"
+{
+	printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
+	printf '%s\n' '[lock]'
+	printf '%s\n' 'project = "codetracer"'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer-native-backend"'
+	printf '%s\n' "revision = \"$REV_NB_TOML\""
+} >"$CA/nofield/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_created_at "created-at: a lock with no created_at answers unknown" \
+	"unknown" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/nofield" --sha "$SHA_SELF" --no-walk
+
+# 6. THE ONE THAT MAKES THE PARSER'S TABLE SCOPING LOAD-BEARING. A created_at
+#    inside a [[repo]] table is that repo's, not the lock's. Reading it as the
+#    lock's would print a real-looking date for a record that never recorded
+#    one — the exact shape of invented provenance this field exists to prevent.
+mkdir -p "$CA/repofield/locks/codetracer/codetracer"
+{
+	printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
+	printf '%s\n' '[lock]'
+	printf '%s\n' 'project = "codetracer"'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer-native-backend"'
+	printf '%s\n' 'created_at = "1999-01-01T00:00:00Z"'
+	printf '%s\n' "revision = \"$REV_NB_TOML\""
+} >"$CA/repofield/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_created_at "created-at: a [[repo]] created_at is not the lock's" \
+	"unknown" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/repofield" --sha "$SHA_SELF" --no-walk
+
+# 7. Layer precedence is the same as for revisions: least specific first, and
+#    the most specific layer that carries one wins.
+mk_toml_lock "$CA/layers/pub/locks/codetracer/codetracer/$SHA_SELF.toml" "$REV_NB_TOML" "$REV_NIM_TOML"
+mkdir -p "$CA/layers/priv/locks/codetracer/codetracer"
+{
+	printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
+	printf '%s\n' '[lock]'
+	printf '%s\n' 'project = "codetracer"'
+	printf '%s\n' 'created_at = "2026-09-09T12:55:52Z"'
+	printf '%s\n' '[[repo]]'
+	printf '%s\n' 'name = "codetracer-native-backend"'
+	printf '%s\n' "revision = \"$REV_NB_TOML\""
+} >"$CA/layers/priv/locks/codetracer/codetracer/$SHA_SELF.toml"
+expect_created_at "created-at: the most specific layer's value wins" \
+	"2026-09-09T12:55:52Z" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/layers/pub" --manifest-dir "$CA/layers/priv" \
+	--sha "$SHA_SELF" --no-walk
+
+# 8. No lock at all is still exit 3 — the resolver's one "this commit is not
+#    locked" answer — and prints nothing on stdout. A caller must never be able
+#    to mistake a missing lock for a lock of unknown age.
+mkdir -p "$CA/empty/locks"
+expect_fail "created-at: an unlocked commit is exit 3, not 'unknown'" 3 \
+	"no workspace lock found" -- \
+	--repo codetracer --print-created-at \
+	--manifest-dir "$CA/empty" --sha "$SHA_SELF" --no-walk
 
 # =========================================================================
 

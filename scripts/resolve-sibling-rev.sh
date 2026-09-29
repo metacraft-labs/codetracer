@@ -16,27 +16,30 @@
 # for local cross-repo test runs. It reads the per-commit lock snapshot that the
 # workspace tooling produces for the commit under test.
 #
-# TWO LOCK LAYOUTS ARE SUPPORTED, because the Metacraft workspaces are midway
-# through migrating from `repo-workspaces` to `reprobuild` and this action is
-# shared by projects on both:
+# ONE LOCK FORMAT IS READ: reprobuild's.
 #
-#   repo-workspaces (legacy)  <manifest-repo>/locks/<project>/<repo>/<sha>.xml
-#     a ``repo manifest -r`` snapshot; one ``<project name=... revision=.../>``
-#     element per line.
-#
-#   reprobuild (current)      <manifest-repo>/locks/<project>/<repo>/<sha>.toml
+#   <manifest-repo>/locks/<project>/<repo>/<sha>.toml
 #     a ``schema = "reprobuild.workspace.lock.v1"`` document: a ``[lock]``
 #     header table plus one ``[[repo]]`` table per pinned repo, carrying
 #     ``name`` / ``path`` / ``remote`` / ``revision`` / ``branch``.
 #
-# The two agree on everything that matters here: the same directory key
-# (project / trigger repo / full commit SHA), and the same identity for a
-# sibling — its repo NAME, which may differ from its workspace path (``nim``
-# lives at ``codetracer-nim``). Only the file extension and the body syntax
-# differ, so both are read through one code path with two small parsers.
+# A sibling is identified by its repo NAME, which may differ from its
+# workspace path (``nim`` lives at ``codetracer-nim``).
 #
-# The historical flat spelling ``locks/<project>/<repo>-<sha>.<ext>`` is also
-# accepted, for both extensions.
+# The historical flat spelling ``locks/<project>/<repo>-<sha>.toml`` is also
+# accepted.
+#
+# LEGACY XML RECORDS ARE NOT READ, AT ALL (removed 2026-09-29). The old
+# repo-workspaces tooling wrote ``locks/<project>/<repo>/<sha>.xml`` (a
+# ``repo manifest -r`` snapshot). This resolver used to read those beside the
+# TOML records, and that hurt: the discovery glob met every ``.xml`` before any
+# ``.toml`` and settled on the first project it saw, so a stale XML record
+# under ``locks/dev/`` hid a fresh TOML record under ``locks/codetracer/`` for
+# the same commit. The XML records have been erased from the manifest repo. A
+# ``.xml`` file that is still lying around is not a lock: it is never globbed,
+# never parsed, and never cross-checked. A commit whose only record is an
+# ``.xml`` is UNLOCKED (exit 3), and an ``.xml`` beside a ``.toml`` changes
+# nothing about how the ``.toml`` resolves. There is no fallback.
 #
 # A THIRD kind of file shares that ``.toml`` namespace and is NOT a lock: the
 # per-repo participation record reprobuild's ROUTED locking mode writes (see
@@ -84,8 +87,7 @@
 #     and is NOT the intra-layer exit-4 condition;
 #   * when more than one layer pins the sibling, the MOST SPECIFIC (last) one
 #     wins and the shadowing is reported on stderr. This is the spec's override
-#     rule, not a coin toss: unlike the xml-vs-toml case inside one layer, the
-#     layers are explicitly ordered by the caller;
+#     rule, not a coin toss: the layers are explicitly ordered by the caller;
 #   * when NO layer pins it although some layer had a lock, that is exit 4.
 #
 # Usage:
@@ -113,8 +115,9 @@
 # nearest enclosing workspace root:
 #
 #   .repro/manifests              the public manifest checkout (reprobuild), or
-#   .repo/manifests               the legacy repo-workspaces one when the
-#                                 reprobuild layer carries no locks/
+#   .repo/manifests               the older checkout location, when the
+#                                 ``.repro`` layer carries no locks/. Only its
+#                                 ``.toml`` records are read, like any layer's.
 #   .repro/manifests-<n>-<slug>   URL-backed ``[[manifest]]`` layers, ordered by
 #                                 ``<n>`` NUMERICALLY (the layer's index in the
 #                                 workspace's ``[[manifest]]`` array) — not by
@@ -125,7 +128,7 @@
 #                                 ``.repro-workspace-private.toml``)
 #
 # The extra layers are picked up under ``.repro/`` whichever base won, so a
-# legacy ``.repo/manifests`` base does not silently drop a private companion.
+# ``.repo/manifests`` base does not silently drop a private companion.
 # A ``.repro/manifests-<name>`` directory whose name does NOT encode an index
 # (a hand-written ``local_path`` such as ``manifests-team``) cannot be ordered
 # from disk at all, so auto-discovery REFUSES (exit 3) and asks for explicit
@@ -140,10 +143,9 @@
 #      work even when HEAD is unpushed (hence unlocked): siblings are unchanged
 #      since the last locked ancestor, so its pin is correct.
 #
-# ``--no-walk`` remains correct for CI under both layouts. It exists because CI
-# checkouts are shallow, so ``git rev-list --first-parent`` sees only HEAD and
-# the walk would be a no-op that merely hides the real diagnosis. Nothing in the
-# reprobuild lock changes that: like the XML snapshot it records only the pinned
+# ``--no-walk`` is correct for CI. It exists because CI checkouts are shallow,
+# so ``git rev-list --first-parent`` sees only HEAD and the walk would be a
+# no-op that merely hides the real diagnosis. A lock records only the pinned
 # revisions of the workspace at one commit, carrying no ancestry of its own, so
 # it cannot substitute for history the checkout does not have.
 #
@@ -156,7 +158,11 @@
 #   3  no manifest dir, or no lock for any candidate commit
 #   4  a lock was found but no layer mentions the sibling
 #   5  a lock was found but is malformed / carries no usable revision
-#   6  two locks for the SAME commit IN ONE LAYER disagree about the sibling
+#   6  two locks for the SAME commit IN ONE LAYER disagree about the sibling.
+#      Since the XML format was dropped the tie-breaks below leave at most one
+#      lock per layer, so nothing produces this code any more. It stays
+#      reserved, with its meaning, so that callers treating it as fatal keep
+#      doing so.
 #
 # Codes 4/5/6 all mean "a lock exists but cannot be trusted to answer". They are
 # deliberately distinct from 3 so a caller probing several candidate commits can
@@ -172,6 +178,9 @@ SIBLING=""
 REPO_DIR="."
 PREFER_PROJECT=""
 NO_WALK=0
+# When 1, print the selected lock's `[lock] created_at` on stdout instead of a
+# revision. See "WHEN THE PINS WERE GENERATED" below for why this exists.
+PRINT_CREATED_AT=0
 declare -a SHAS=()
 # Manifest layers, least specific first. `--manifest-dir` appends; when none is
 # given, $CT_MANIFEST_DIR and then auto-discovery fill this in below.
@@ -207,6 +216,10 @@ while [[ $# -gt 0 ]]; do
 		NO_WALK=1
 		shift
 		;;
+	--print-created-at)
+		PRINT_CREATED_AT=1
+		shift
+		;;
 	*)
 		echo "resolve-sibling-rev: unknown argument: $1" >&2
 		exit 2
@@ -214,10 +227,18 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-for v in SELF_REPO SIBLING; do
+# `--sibling` names the thing whose revision is being asked for, so it is
+# required for every question except one: `--print-created-at` asks about the
+# LOCK, not about a repo in it, and a lock that pins no sibling at all still has
+# a creation time. Requiring a sibling name there would make the answer depend
+# on a repo the question is not about.
+REQUIRED_ARGS=(SELF_REPO SIBLING)
+[[ $PRINT_CREATED_AT -eq 1 ]] && REQUIRED_ARGS=(SELF_REPO)
+for v in "${REQUIRED_ARGS[@]}"; do
 	if [[ -z ${!v} ]]; then
 		echo "resolve-sibling-rev: missing required value for $v" >&2
 		echo "usage: resolve-sibling-rev.sh --repo SELF --sibling NAME [--manifest-dir DIR] [--sha COMMIT]... [--repo-dir DIR] [--prefer-project P] [--no-walk]" >&2
+		echo "       resolve-sibling-rev.sh --repo SELF --print-created-at [--manifest-dir DIR] [--sha COMMIT]... [--repo-dir DIR] [--prefer-project P] [--no-walk]" >&2
 		exit 2
 	fi
 done
@@ -226,10 +247,11 @@ done
 
 # --- locate the manifest layers (locks/ trees) ----------------------------
 #
-# `.repro/manifests` (reprobuild) is checked before `.repo/manifests`
-# (repo-workspaces): a workspace that has migrated keeps the old `.repo`
-# directory around for a while, and the stale layer must not shadow the live
-# one. A layer that exists but has no `locks/` loses to one that has it.
+# `.repro/manifests` is checked before `.repo/manifests` (the older checkout
+# location): a workspace that has moved keeps the old `.repo` directory around
+# for a while, and the stale layer must not shadow the live one. A layer that
+# exists but has no `locks/` loses to one that has it. Whichever wins, only its
+# `.toml` records are read.
 #
 # On top of that PUBLIC base, auto-discovery also picks up the private layers a
 # reprobuild workspace materialises next to it (Workspace-And-Develop-Mode.md
@@ -304,12 +326,11 @@ if [[ ${#MANIFEST_DIRS[@]} -eq 0 ]]; then
 		MANIFEST_DIRS+=("$base")
 		AUTO_LOOKED="$base"
 		# The extra layers always live under `.repro/`, whichever base won.
-		# A legacy `.repo/manifests` base does NOT suppress them: a workspace
-		# midway through the migration can easily have a lock-carrying
-		# `.repo/manifests` beside a `.repro/manifests-private`, and dropping
-		# the private layer because the BASE happens to be the legacy one is
-		# exactly the silent downgrade to public-only that the CI path treats
-		# as fatal.
+		# An older `.repo/manifests` base does NOT suppress them: a workspace
+		# can easily have a lock-carrying `.repo/manifests` beside a
+		# `.repro/manifests-private`, and dropping the private layer because
+		# the BASE happens to be the older one is exactly the silent downgrade
+		# to public-only that the CI path treats as fatal.
 		wsroot="${base%/*}" # .../.repo or .../.repro
 		wsroot="${wsroot%/*}"
 		declare -a XD=() XN=()
@@ -398,8 +419,7 @@ if [[ ${#LOCKS_ROOTS[@]} -eq 0 ]]; then
 		echo "resolve-sibling-rev: cannot locate the manifest repo locks/ tree."
 		echo "  Pass --manifest-dir <metacraft-manifests checkout> (repeatable, least-"
 		echo "  specific layer first), set CT_MANIFEST_DIR, or run from inside a"
-		echo "  workspace with .repro/manifests (reprobuild) or .repo/manifests"
-		echo "  (repo-workspaces)."
+		echo "  workspace with .repro/manifests or .repo/manifests."
 		for md in ${MANIFEST_DIRS[@]+"${MANIFEST_DIRS[@]}"}; do
 			[[ -n $md ]] && echo "  (looked at: $md, which has no locks/ subtree)"
 		done
@@ -418,29 +438,28 @@ if [[ ${#SHAS[@]} -eq 0 ]]; then
 	fi
 fi
 
-# Find the lock file(s) for a given repo@sha across all workspaces, and leave
-# them in LOCK_FILES.
+# Find the lock file for a given repo@sha across all workspaces, and leave it
+# in LOCK_FILES.
 #
-#   nested: locks/<project>/<repo>/<sha>.{xml,toml}
-#   flat:   locks/<project>/<repo>-<sha>.{xml,toml}
+#   nested: locks/<project>/<repo>/<sha>.toml
+#   flat:   locks/<project>/<repo>-<sha>.toml
 #
-# Three tie-breaks, applied in this order, narrow a commit's locks down to the
-# set that must agree:
+# ONLY `.toml` IS GLOBBED. A legacy repo-workspaces `<sha>.xml` beside it (or
+# instead of it) is invisible here, by construction rather than by a filter
+# that could be got wrong: see "LEGACY XML RECORDS ARE NOT READ" at the top.
+# The globs used to list every `.xml` before any `.toml`, and the first project
+# a glob met became the only non-preferred project searched, so a stale
+# `locks/dev/<repo>/<sha>.xml` shadowed a fresh `locks/codetracer/<repo>/
+# <sha>.toml` for the same commit. That is the failure this removes.
+#
+# Two tie-breaks, applied in this order, narrow a commit's locks to one:
 #
 #   1. project — locks under the canonical project win outright over locks under
 #      any other workspace.
 #   2. layout — within the winning project, the nested layout wins outright over
 #      the flat one. They are not two descriptions of one state: `locks/<proj>/
-#      <repo>-<sha>.xml` is the HISTORICAL spelling, and where the tooling wrote
-#      both for one commit the nested file is the later, canonical one. The
-#      manifest repo really does carry such pairs, with the flat member stale by
-#      dozens of revisions, and the flat file has always lost. Treating that as
-#      an unresolvable conflict would fail commits that resolve correctly today.
-#   3. extension — whatever survives is returned for ALL extensions present, so
-#      an .xml and a .toml written for the same commit by the two workspace
-#      tools are cross-checked against each other rather than silently resolved
-#      by glob order. THIS is the migration hazard worth refusing: neither
-#      spelling is the elder, so there is no basis for preferring one.
+#      <repo>-<sha>.toml` is the HISTORICAL spelling, and where the tooling wrote
+#      both for one commit the nested file is the later, canonical one.
 # ROUTED PER-REPO PARTICIPATION RECORDS (not locks)
 # -------------------------------------------------
 #
@@ -561,11 +580,9 @@ find_locks() {
 	local locks_root="$1" sha="$2" f proj
 	local -a pref_nested=() pref_flat=() other_nested=() other_flat=()
 	local other_project=""
-	for f in \
-		"$locks_root"/*/"$SELF_REPO"/"$sha.xml" \
-		"$locks_root"/*/"$SELF_REPO"/"$sha.toml"; do
+	for f in "$locks_root"/*/"$SELF_REPO"/"$sha.toml"; do
 		[[ -f $f ]] || continue
-		if [[ $f == *.toml ]] && is_participation_record "$f"; then
+		if is_participation_record "$f"; then
 			SKIPPED_PARTICIPATION+=("$f")
 			continue
 		fi
@@ -578,11 +595,9 @@ find_locks() {
 		[[ -z $other_project ]] && other_project="$proj"
 		[[ $proj == "$other_project" ]] && other_nested+=("$f")
 	done
-	for f in \
-		"$locks_root"/*/"$SELF_REPO-$sha.xml" \
-		"$locks_root"/*/"$SELF_REPO-$sha.toml"; do
+	for f in "$locks_root"/*/"$SELF_REPO-$sha.toml"; do
 		[[ -f $f ]] || continue
-		if [[ $f == *.toml ]] && is_participation_record "$f"; then
+		if is_participation_record "$f"; then
 			SKIPPED_PARTICIPATION+=("$f")
 			continue
 		fi
@@ -619,8 +634,8 @@ find_locks() {
 
 # --- lock parsers ---------------------------------------------------------
 #
-# Both parsers answer the same question — "what revision does this lock pin for
-# the repo NAMED $2?" — and share a calling convention rather than printing to
+# The parser answers one question — "what revision does this lock pin for the
+# repo NAMED $2?" — through a calling convention rather than by printing to
 # stdout, so their diagnostics survive (a command substitution would run them in
 # a subshell and lose PARSE_ERR).
 #
@@ -634,8 +649,8 @@ PARSE_REV=""
 PARSE_ERR=""
 
 # A lock pins a REVISION, and in this model a revision is a full 40-hex commit
-# SHA — every one of the ~494k revisions currently in the manifest repo is,
-# across both layouts. Checking the shape is not pedantry; it is the last place
+# SHA — every revision the manifest repo carried was one when this check was
+# written. Checking the shape is not pedantry; it is the last place
 # a wrong value can be stopped, because the caller substitutes this straight
 # into `git fetch <remote> <rev>`:
 #
@@ -645,7 +660,7 @@ PARSE_ERR=""
 #   * a value starting with `-` is not a refspec at all: `git fetch origin
 #     --upload-pack=<cmd>` runs <cmd>. git parses options after the remote, so
 #     this is remote code execution on the runner.
-#   * quoting and syntax the small parsers below do not model — a trailing
+#   * quoting and syntax the small parser below does not model — a trailing
 #     `# comment`, an array, a `"""multi-line"""` string — otherwise survive as
 #     plausible-looking garbage that fails much later, far from the cause.
 #
@@ -667,40 +682,6 @@ check_rev_shape() {
 			;;
 		esac
 	done
-	return 0
-}
-
-# repo-workspaces XML: a `repo manifest -r` snapshot, one <project .../> per
-# line.
-rev_from_xml() {
-	local lock="$1" sibling="$2" l line="" rev
-	PARSE_REV=""
-	PARSE_ERR=""
-	while IFS= read -r l || [[ -n $l ]]; do
-		if [[ $l == *"<project"* && $l == *"name=\"$sibling\""* ]]; then
-			line="$l"
-			break
-		fi
-	done <"$lock"
-	if [[ -z $line ]]; then
-		return 1
-	fi
-	# Guard the attribute's PRESENCE before slicing it out: `${line#*revision="}`
-	# leaves the line untouched when there is no such attribute, and the
-	# following `%%"*` would then hand back a fragment of the XML tag that looks
-	# enough like a value to be passed to `git fetch`.
-	if [[ $line != *'revision="'* ]]; then
-		PARSE_ERR="<project name=\"$sibling\"> has no revision attribute"
-		return 2
-	fi
-	rev="${line#*revision=\"}"
-	rev="${rev%%\"*}"
-	if [[ -z $rev ]]; then
-		PARSE_ERR="<project name=\"$sibling\"> has an empty revision attribute"
-		return 2
-	fi
-	check_rev_shape "$rev" "<project name=\"$sibling\"> revision" || return 2
-	PARSE_REV="$rev"
 	return 0
 }
 
@@ -852,12 +833,31 @@ if [[ -z $CHOSEN_SHA ]]; then
 		echo "  candidate SHAs: ${SHAS[*]}"
 		echo "  searched, for each candidate <sha>, in every manifest layer:"
 		for lr in "${LOCKS_ROOTS[@]}"; do
-			echo "    $lr/*/$SELF_REPO/<sha>.xml    (repo-workspaces)"
-			echo "    $lr/*/$SELF_REPO/<sha>.toml   (reprobuild)"
-			echo "    $lr/*/$SELF_REPO-<sha>.xml    (legacy flat)"
-			echo "    $lr/*/$SELF_REPO-<sha>.toml   (legacy flat)"
+			echo "    $lr/*/$SELF_REPO/<sha>.toml"
+			echo "    $lr/*/$SELF_REPO-<sha>.toml   (historical flat spelling)"
 		done
 		[[ $NO_WALK -eq 0 ]] && echo "  (also walked first-parent ancestry of ${SHAS[0]})"
+		# Name any legacy XML record that is sitting where a lock would be, so
+		# that a reader who can SEE a file for this commit is told why it did
+		# not count. Its existence is reported; its content is never read.
+		declare -a IGNORED_XML=()
+		for sha in "${SHAS[@]}"; do
+			for lr in "${LOCKS_ROOTS[@]}"; do
+				for f in "$lr"/*/"$SELF_REPO"/"$sha.xml" "$lr"/*/"$SELF_REPO-$sha.xml"; do
+					[[ -f $f ]] && IGNORED_XML+=("$f")
+				done
+			done
+		done
+		if [[ ${#IGNORED_XML[@]} -gt 0 ]]; then
+			echo "  Ignored ${#IGNORED_XML[@]} legacy repo-workspaces XML record(s):"
+			for f in "${IGNORED_XML[@]}"; do
+				echo "    $f"
+			done
+			echo "  XML lock records are not supported. Support was removed on 2026-09-29"
+			echo "  and the records were erased from metacraft-manifests; an .xml file is"
+			echo "  never read as a lock, with or without a .toml beside it. Publish a"
+			echo "  reprobuild record for this commit with 'repro workspace lock'."
+		fi
 		if [[ ${#SKIPPED_PARTICIPATION[@]} -gt 0 ]]; then
 			echo "  Ignored ${#SKIPPED_PARTICIPATION[@]} routed per-repo participation record(s):"
 			for f in "${SKIPPED_PARTICIPATION[@]}"; do
@@ -877,19 +877,90 @@ if [[ -z $CHOSEN_SHA ]]; then
 			echo "  'repro workspace lock' in the workspace and push the manifest repo."
 		fi
 		echo "  Every commit under cross-repo CI must be locked by the workspace tooling"
-		echo "  ('repro workspace lock' / the reprobuild post-commit + pre-push hooks, or"
-		echo "  legacy 'workspace lock'). A missing lock means the commit was not published"
-		echo "  through that tooling, or its lock was not pushed to the manifest repo."
+		echo "  ('repro workspace lock' / the reprobuild post-commit + pre-push hooks)."
+		echo "  A missing lock means the commit was not published through that tooling,"
+		echo "  or its lock was not pushed to the manifest repo."
 	} >&2
 	exit 3
 fi
 
+# --- WHEN THE PINS WERE GENERATED ------------------------------------------
+#
+# `--print-created-at` answers a different question from the rest of this
+# script: not "what revision does the lock pin for X" but "how old is the
+# statement of fact the pins come from".
+#
+# A lock record is a claim about a workspace that EXISTED at a moment in time.
+# The consumer sees only the revisions, so a set of pins generated months ago
+# is indistinguishable, in a log, from one generated this morning -- and the
+# difference is exactly what matters when the fix you just landed does not
+# appear in a build. Six CI runs were diagnosed by hand against the manifests
+# repo for want of this one line; `created_at` was in the file the whole time,
+# already open in the loop below.
+#
+# The value is reported VERBATIM, not reformatted. It is written by
+# `repro workspace lock` and the only honest thing to do with a timestamp
+# somebody else wrote is to repeat it.
+#
+# A lock whose `[lock]` table has no `created_at` answers `unknown`, which is a
+# true statement about the record, and never a fabricated date.
+created_at_from_toml() { # <lock>
+	local lock="$1" l key val in_lock=0
+	CREATED_AT=""
+	while IFS= read -r l || [[ -n $l ]]; do
+		l="${l%$'\r'}"
+		while [[ $l == [[:space:]]* ]]; do l="${l#?}"; done
+		while [[ $l == *[[:space:]] ]]; do l="${l%?}"; done
+		[[ -z $l ]] && continue
+		[[ ${l:0:1} == "#" ]] && continue
+		if [[ ${l:0:1} == "[" ]]; then
+			# `[lock]` only. `[[repo]]` entries have no created_at, and a
+			# future table that grows one must not be read as the lock's.
+			if [[ $l == "[lock]" ]]; then in_lock=1; else in_lock=0; fi
+			continue
+		fi
+		[[ $in_lock -eq 1 ]] || continue
+		key="${l%%=*}"
+		[[ $key == "$l" ]] && continue
+		val="${l#*=}"
+		while [[ $key == *[[:space:]] ]]; do key="${key%?}"; done
+		while [[ $val == [[:space:]]* ]]; do val="${val#?}"; done
+		case "$val" in
+		\"*\") val="${val#\"}" && val="${val%\"}" ;;
+		\'*\') val="${val#\'}" && val="${val%\'}" ;;
+		esac
+		if [[ $key == "created_at" ]]; then
+			CREATED_AT="$val"
+			return 0
+		fi
+	done <"$lock"
+	return 1
+}
+
+if [[ $PRINT_CREATED_AT -eq 1 ]]; then
+	# The MOST SPECIFIC layer that carries one wins, which is the same
+	# precedence the revision lookup below uses: the layers are read least
+	# specific first and each answer replaces the previous one.
+	FOUND_CREATED_AT=""
+	for lr in "${LOCKS_ROOTS[@]}"; do
+		find_locks "$lr" "$CHOSEN_SHA" || continue
+		for LOCK in "${LOCK_FILES[@]}"; do
+			if created_at_from_toml "$LOCK"; then
+				FOUND_CREATED_AT="$CREATED_AT"
+			fi
+		done
+	done
+	printf '%s\n' "${FOUND_CREATED_AT:-unknown}"
+	exit 0
+fi
+
 # --- read the sibling's revision, layer by layer --------------------------
 #
-# Within ONE layer: when both a .xml and a .toml lock exist for the same commit
-# they are two descriptions of one workspace state and must agree. If they do
-# not, there is no basis for choosing between them, and picking either would
-# hand CI a revision that half the tooling disputes — so refuse (exit 6).
+# Within ONE layer, `find_locks` leaves exactly one lock. The loop below still
+# refuses (exit 6) if it were ever handed two that disagree, rather than picking
+# one: that guard used to fire for an .xml and a .toml written for the same
+# commit, and it is kept so that a future second record kind cannot be resolved
+# by glob order either.
 #
 # Across layers: the caller ordered them, so a more specific layer legitimately
 # OVERRIDES a less specific one (Workspace-And-Develop-Mode.md §"Layering
@@ -906,11 +977,7 @@ for lr in "${LOCKS_ROOTS[@]}"; do
 		CONSULTED="${CONSULTED}
     ${LOCK}"
 		rc=0
-		if [[ $LOCK == *.toml ]]; then
-			rev_from_toml "$LOCK" "$SIBLING" || rc=$?
-		else
-			rev_from_xml "$LOCK" "$SIBLING" || rc=$?
-		fi
+		rev_from_toml "$LOCK" "$SIBLING" || rc=$?
 		if [[ $rc -eq 2 ]]; then
 			echo "resolve-sibling-rev: malformed lock $LOCK: $PARSE_ERR" >&2
 			exit 5

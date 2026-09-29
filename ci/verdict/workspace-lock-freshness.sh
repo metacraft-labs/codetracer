@@ -59,9 +59,10 @@
 #      rather than listed here.
 #
 # Resolution is delegated to `scripts/resolve-sibling-rev.sh`, the repo's
-# existing resolver — it already knows both lock layouts (nested and flat) and
-# both spellings (repo-workspaces `.xml`, reprobuild `.toml`), and it carries
-# its own 51-assertion contract suite. Its exit 3 is its only "this commit is
+# existing resolver — it already knows both lock layouts (nested and flat) of
+# the reprobuild `.toml` record, and it carries its own contract suite. It does
+# NOT read legacy repo-workspaces `.xml` records (dropped 2026-09-29): a commit
+# whose only record is an `.xml` is unlocked here too. Its exit 3 is its only "this commit is
 # not locked" answer; its 4 is "the lock exists and does not name this repo",
 # which is question 2 above; its 5/6 mean the lock exists but is malformed or
 # self-contradictory, which is a different and worse report than either.
@@ -637,7 +638,7 @@ refresh_manifest() {
 
 started_at="$(date +%s)"
 deadline=$((started_at + GRACE_SECONDS))
-waited=0  # set once the loop exits, from started_at
+waited=0 # set once the loop exits, from started_at
 
 while :; do
 	probe_candidates && break
