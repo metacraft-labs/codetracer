@@ -64,9 +64,15 @@ IDENTITY_DIR="src/frontend/viewmodel/identity"
 #   token.nim               claims, and what the client considers acceptable
 #   session.nim             admission, refresh, revocation transport
 #   device_grant.nim        RFC 8628, the desktop sign-in flow
-#   webcrypto_verifier.nim  the RS256 signature seam
+#   rs256_verifier.nim      the RS256 signature seam, both backends
 #   issuer.nim              WHERE THE ISSUER IS, and what it advertises   (new)
 #   jwt.nim                 the ID token's structure and claims           (new)
+#
+# The file was called `webcrypto_verifier.nim` while it answered "unsupported"
+# on anything that was not a browser. It now verifies on both — `crypto.subtle`
+# in a tab, `nim_everywhere/rs256`'s runtime-loaded libcrypto natively — so the
+# old name pointed a reader checking whether the desktop verifies signatures at
+# a file named after the browser.
 #
 # `issuer.nim` is the one this gate exists for now. It holds `DefaultIssuer`
 # as a compiled-in constant, and an environment variable that could move it
@@ -76,13 +82,13 @@ IDENTITY_DIR="src/frontend/viewmodel/identity"
 # a stronger version of the `CT_LICENSE_DEV_NO_FFI` hazard in the header —
 # that one turns verification off, this one turns it around.
 EXPECTED_MODULES=6
-# `when defined(...)` is legitimate here — `webcrypto_verifier.nim` needs it to
+# `when defined(...)` is legitimate here — `rs256_verifier.nim` needs it to
 # tell a browser from a native build — but every one of them is a place where
 # two different behaviours ship, so the number is budgeted. A new one is then a
 # decision recorded in this file rather than a silent second code path through
 # a verifier.
 EXPECTED_WHEN_DEFINED=3
-WHEN_DEFINED_OWNER="webcrypto_verifier.nim"
+WHEN_DEFINED_OWNER="rs256_verifier.nim"
 
 # POSIX ERE only — `\b`, `\d`, `\w`, `\s` are GNU/PCRE and `git grep` does not
 # speak them (trap 4, part 1). Nothing here is handed to `git grep`, but the

@@ -151,20 +151,26 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # than of that milestone: THE SCAN IS BY NAME, so a symbol added anywhere in
 # `src/frontend` marks every unreached export of the same name as reached.
 #
-# `viewmodel/identity/token.nim:254 issuedAt` — an accessor on `IdentityClaims`
+# `viewmodel/identity/token.nim:153 issuedAt` — an accessor on `IdentityClaims`
 # that no product module reaches — is now masked, because the indicator's
 # disclosure reads `cert.issuedAt` off a test certificate. Those are unrelated
 # symbols in unrelated modules. The masking is not fixable from the milestone's
 # side either: `issued_at` is the certificate standard's own field name and the
 # disclosure is required to show it.
 #
-# A SECOND MASKING WAS FOUND THE SAME WAY AND WAS FIXED. `token.nim:234`
-# exports its own `SignatureVerifier`, and SB-1's verifier seam was first
-# called the same thing, which masked it and would have taken this to 1224.
-# The seam is now `CertificateSignatureVerifier`, so token.nim's export is
-# counted again. Two unrelated types of one name in one import graph was worth
-# separating on its own terms; that it also un-masked a finding is how it was
-# noticed.
+# A SECOND MASKING WAS FOUND THE SAME WAY AND WAS FIXED. `token.nim` exported
+# its own `SignatureVerifier`, and SB-1's verifier seam was first called the
+# same thing, which masked it and would have taken this to 1224. The seam is
+# now `CertificateSignatureVerifier`, so token.nim's export was counted again.
+#
+# 2026-09-30: token.nim's `SignatureVerifier` NO LONGER EXISTS. It was the
+# synchronous Ed25519 seam of the retired `CTI\x01` container; the identity
+# layer verifies RS256 asynchronously through `IdentityTransport` now. So the
+# collision this paragraph is about is gone, and the paragraph is kept for one
+# reason: do NOT rename `CertificateSignatureVerifier` back. Its other argument
+# stands on its own — two unrelated types of one name in one import graph is a
+# reading hazard — and reverting would re-create a collision that this guard
+# can only report as a lowered ceiling.
 #
 # THE LESSON FOR THE NEXT READER: a DROP in this number is not automatically
 # progress. Check whether a name went away or a name merely arrived somewhere

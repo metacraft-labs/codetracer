@@ -208,11 +208,15 @@ proc selectKey*(keys: openArray[JwkKey]; kid, alg: string): JwkKey =
     "the issuer publishes no key with id '" & kid & "'. A token naming an " &
     "unknown key is refused rather than tried against the others")
 
-proc checkClaims*(claims: JsonNode; issuer, audience: string; nowUnix: int64;
-                  skewSeconds = 60'i64) =
-  ## `iss`, `aud`, `exp` and `nbf`. A verified signature only says the issuer
-  ## produced this token — not that it was produced for this client, or that
-  ## it is still valid.
+proc checkIssuerAndAudience*(claims: JsonNode; issuer, audience: string) =
+  ## `iss`, `aud` and `azp`. **CLOCK-FREE, and that is the reason it is its own
+  ## proc**: these are the checks a pure inspection can make, and `token.nim`'s
+  ## inspection path takes no clock by construction. Bundling them with `exp`
+  ## and `nbf` would either drag a clock in there or make expiry decided in two
+  ## places that can disagree about the same instant.
+  ##
+  ## A verified signature only says the issuer produced this token — not that
+  ## it was produced for this client.
   let iss = claims{"iss"}.getStr()
   if iss.strip(chars = {'/'}) != issuer.strip(chars = {'/'}):
     raise newException(JwtError,
@@ -255,6 +259,10 @@ proc checkClaims*(claims: JsonNode; issuer, audience: string; nowUnix: int64;
         "'. It was minted for that client to use, and we are only a " &
         "co-audience")
 
+proc checkValidityWindow*(claims: JsonNode; nowUnix: int64;
+                          skewSeconds = 60'i64) =
+  ## `exp` and `nbf`. The half that needs a clock, so it is separate — see
+  ## `checkIssuerAndAudience`.
   let exp = claims{"exp"}.getBiggestInt(0)
   if exp == 0:
     raise newException(JwtError, "the token states no expiry")
@@ -264,3 +272,12 @@ proc checkClaims*(claims: JsonNode; issuer, audience: string; nowUnix: int64;
   let nbf = claims{"nbf"}.getBiggestInt(0)
   if nbf != 0 and nowUnix + skewSeconds < nbf:
     raise newException(JwtError, "the token is not valid until " & $nbf)
+
+proc checkClaims*(claims: JsonNode; issuer, audience: string; nowUnix: int64;
+                  skewSeconds = 60'i64) =
+  ## Both halves, for a caller that has a clock and wants one call. The split
+  ## exists for `token.nim`'s pure inspection, not because anybody needs to skip
+  ## a check: a caller that ran only one of these would have verified half a
+  ## token.
+  checkIssuerAndAudience(claims, issuer, audience)
+  checkValidityWindow(claims, nowUnix, skewSeconds)

@@ -1,4 +1,9 @@
-## The browser end of the identity signature seam — RS256 via WebCrypto.
+## The identity signature seam — RS256, on whichever backend this is.
+##
+## It was called `webcrypto_verifier.nim` and answered `unsupported` on
+## anything that was not a browser. It now has both halves, so the name would
+## have been a lie in the direction that matters: a reader checking whether the
+## desktop verifies signatures would have found a file named after the browser.
 ##
 ## `session.IdentityTransport.verifySignature` is asynchronous precisely so
 ## that this file can exist: `crypto.subtle.verify` returns a promise and there
@@ -54,8 +59,20 @@
 ## CONTRIBUTING.md records for `parseJson`. So the JS side catches its own
 ## rejection and returns `-1`, and nothing throws across the seam.
 
+import nim_everywhere/rs256
 import ../platform/outcome
 import ./jwt
+
+export rs256.Rs256Verdict
+
+func bytesToString(b: seq[byte]): string =
+  ## The shared verifier takes the signing input and the signature as raw
+  ## bytes-in-a-string, which is what libcrypto wants; this seam speaks
+  ## `seq[byte]`, which is what WebCrypto wants. One conversion, here, rather
+  ## than two representations threaded through the module.
+  result = newString(b.len)
+  for i, x in b:
+    result[i] = char(x)
 
 export jwt.JwkKey
 
@@ -175,17 +192,38 @@ proc newWebCryptoVerifier*(keys: seq[JwkKey]): proc(
     when defined(js):
       verifyThroughWebCrypto(key, message, signature)
     else:
-      # Not a browser. The native end of this seam is `ct_license_ffi`, and
-      # answering `false` here rather than `unsupported` would be worse than
-      # useless: it would make a desktop build silently reject every valid
-      # token instead of saying that its verifier is missing.
-      resolvedUnsupported[bool]("RS256 verification through WebCrypto")
+      # NOT A BROWSER, AND NO LONGER UNSUPPORTED. `nim_everywhere/rs256`
+      # verifies the same RSASSA-PKCS1-v1_5 through libcrypto, opened at
+      # runtime, and its verdict maps onto this seam one-for-one.
+      #
+      # It could not have been `ct_license_ffi`, which is where an earlier
+      # version of this comment pointed. That crate cannot be built on Windows
+      # at all — it depends transitively on `lldb-sys` through
+      # `ct-native-replay`, which is why `licensing_ffi.nim` carries a
+      # `CT_LICENSE_DEV_NO_FFI` escape hatch in the first place — so an
+      # identity verifier behind it would have been absent on a whole platform.
+      #
+      # THE THREE-STATE ANSWER IS PRESERVED EXACTLY, and it is the reason the
+      # shared module returns a verdict rather than a bool. `rs256Unavailable`
+      # becomes `pkNotSupported`, never `false`: a host with no libcrypto must
+      # say its verifier is missing, not that every valid token is forged.
+      case verifyRs256(bytesToString(message), bytesToString(signature),
+                       key.n, key.e)
+      of rs256Valid: resolvedOk(true)
+      of rs256Rejected: resolvedOk(false)
+      of rs256Unavailable:
+        resolvedUnsupported[bool]("RS256 verification through libcrypto")
 
-proc webCryptoIsAvailable*(): bool =
+proc rs256IsAvailableHere*(): bool =
   ## Whether this backend can verify at all. A product should ask before
   ## admitting a token so that "your token is invalid" is never shown for
   ## "this build has no verifier".
+  ##
+  ## On a browser this is true by construction — `crypto.subtle` is in the
+  ## platform. Natively it is a MEASUREMENT: `rs256IsAvailable` tries to open
+  ## libcrypto and answers what actually happened, which is the honest answer
+  ## on a host that does not ship one.
   when defined(js):
     true
   else:
-    false
+    rs256IsAvailable()

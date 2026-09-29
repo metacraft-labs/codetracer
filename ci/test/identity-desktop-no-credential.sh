@@ -63,10 +63,17 @@ IDENTITY_SUITES="src/frontend/viewmodel/tests/unit/test_identity_*.nim"
 # checks before the identity work touched it, and the drift came in through
 # `src/common/` and the two editor hosts.
 #
-# Every one of the 74 now resolves to a declared kind and none of them resolves
+# Every one of the 75 now resolves to a declared kind and none of them resolves
 # to `identity`, which is the claim that actually matters. The count is the
 # ratchet around it.
-EXPECTED_SURFACES=74
+#
+# 74 -> 75 on 2026-09-30, and the one file is named rather than the number
+# bumped blind: `test_identity_token.nim`, whose rewrite for the JWS format
+# explains in a comment why HS256 against an RSA issuer invites verifying the
+# public key as an HMAC secret. Prose, in a file the `identitytest` rule
+# classifies, and step 4 scans it for CODE that names or collects a credential
+# and finds none.
+EXPECTED_SURFACES=75
 
 # Credential-shaped NAMES the identity layer is allowed to carry, and why.
 # Budgeted rather than forbidden, because the layer legitimately holds bearer

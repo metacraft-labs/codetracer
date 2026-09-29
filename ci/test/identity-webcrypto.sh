@@ -2,7 +2,7 @@
 #
 # identity-webcrypto.sh — ID1's browser signature seam, executed and mutated.
 #
-# `viewmodel/identity/webcrypto_verifier.nim` is the browser end of the
+# `viewmodel/identity/rs256_verifier.nim` is the browser end of the
 # `IdentityTransport.verifySignature` seam. It cannot be exercised by a
 # `vm-unit-js` suite: `crypto.subtle.verify` is a real V8 microtask and
 # `drainPlatformCallbacks` drains nim-everywhere's queue rather than V8's, as
@@ -37,7 +37,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
-MODULE="src/frontend/viewmodel/identity/webcrypto_verifier.nim"
+MODULE="src/frontend/viewmodel/identity/rs256_verifier.nim"
 PROBE="ci/test/identity_webcrypto_probe.nim"
 EXPECTED_CHECKS=22
 

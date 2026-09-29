@@ -25,7 +25,7 @@
 ## real JWT signing input. Everything after that is the shipped path:
 ## `jwt.parseJwks` reads the published key, `jwt.parseJwt` splits the token and
 ## refuses an algorithm the issuer did not advertise, `jwt.selectKey` picks the
-## key by `kid`, `webcrypto_verifier` checks the signature, and
+## key by `kid`, `rs256_verifier` checks the signature, and
 ## `jwt.checkClaims` binds the result to this issuer and this audience. A probe
 ## that called only the verifier would leave the four seams between them
 ## untested, and they are where a token gets accepted for the wrong reason.
@@ -46,7 +46,7 @@ import std/[asyncjs, base64, json, strutils]
 import ../../src/frontend/viewmodel/platform/outcome
 import ../../src/frontend/viewmodel/identity/issuer
 import ../../src/frontend/viewmodel/identity/jwt
-import ../../src/frontend/viewmodel/identity/webcrypto_verifier
+import ../../src/frontend/viewmodel/identity/rs256_verifier
 
 const ProbeAudience = "codetracer-probe"
 const ProbeKid = "probe-1"
@@ -91,7 +91,7 @@ proc jsGenerateAndSign(signingInput: cstring): Future[cstring] {.importjs: """
 })(#)
 """.}
 
-# The hazard `webcrypto_verifier`'s two-string seam exists for, demonstrated
+# The hazard `rs256_verifier`'s two-string seam exists for, demonstrated
 # against WebCrypto itself rather than asserted in a comment: a JWK forwarded
 # as published, carrying a `key_ops` that does not include "verify", is
 # REFUSED by `importKey`. Returns 1 when the import succeeds, -1 when it does
@@ -317,7 +317,7 @@ proc main() {.async.} =
          endToEnd)
   report("the token's claims bind to this issuer and this audience", claimsBind)
 
-  report("this backend reports WebCrypto as available", webCryptoIsAvailable())
+  report("this backend reports WebCrypto as available", rs256IsAvailableHere())
 
   echo "PROBE-DONE checks=", checks, " failures=", failures
   if failures > 0:
