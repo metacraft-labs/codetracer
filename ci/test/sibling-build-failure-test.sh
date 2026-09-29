@@ -32,7 +32,10 @@
 #       unchanged, so build-siblings' own `bash -c 'cd … && eval …'` wrapper
 #       and its log redirection are exercised for real.  The real `repro`
 #       would provision a Nix/reprobuild dev shell, which needs the network
-#       and minutes of work and is not what is under test.
+#       and minutes of work and is not what is under test.  With
+#       STUB_TOOLCHAIN=fail it instead fails the toolchain lookup's entry into
+#       the codetracer environment, because a real activation cannot be made
+#       to fail on demand either.
 #     * `just` stands in for the recorder's `just build-extension`: it prints a
 #       numbered transcript ending in a cause line and exits 101 (cargo's exit
 #       code), or builds the artifact when asked to succeed.  A real recorder
@@ -87,6 +90,14 @@ cat >"$TMP/bin/repro" <<'EOF'
 #!/usr/bin/env bash
 # pass-through stub: repro exec <dir> -- <cmd...>
 [[ $1 == exec && $3 == -- ]] || { echo "repro stub: unexpected args: $*" >&2; exit 2; }
+# STUB_TOOLCHAIN=fail: entering the codetracer environment (build-siblings'
+# up-front toolchain lookup) fails the way a dev-env activation does, with its
+# cause on the LAST line of stderr.
+if [[ ${STUB_TOOLCHAIN:-pass} == fail && ${2%/} == */codetracer ]]; then
+	for ((i = 1; i <= 100; i++)); do printf 'stub-toolchain-line-%03d|\n' "$i" >&2; done
+	echo "error: STUB-TOOLCHAIN-CAUSE unable to download: HTTP error 401" >&2
+	exit 1
+fi
 shift 3
 exec "$@"
 EOF
@@ -159,6 +170,40 @@ if [[ $rc -ne 0 ]] && ! has "STALE-LOG-FROM-AN-EARLIER-RUN" "$TMP/verbose.err" &
 else
 	t_fail "verbose mode: rc=$rc, or a stale log was tailed, or no 'streamed above' note"
 fi
+
+echo "build-siblings.sh: a failed toolchain lookup prints the tail of its log"
+# The toolchain lookup runs before any sibling build, so there is no summary
+# and no per-repo log: its own log is the only place the cause exists.  The
+# beam arm of desktop-edge run 36407231861 ended on the ERROR line alone.
+run_bs "$TMP/tc.err" STUB_TOOLCHAIN=fail
+rc=$?
+if [[ $rc -ne 0 ]] && has "required toolchain lookup failed" "$TMP/tc.err"; then
+	t_pass "a failed toolchain lookup still exits non-zero ($rc) and says so"
+else
+	t_fail "a failed toolchain lookup: rc=$rc, or the ERROR line is gone"
+fi
+expect_has "$TMP/tc.err" "  | error: STUB-TOOLCHAIN-CAUSE" \
+	"the cause at the END of the toolchain log is printed" \
+	"the toolchain lookup's cause is not in the output"
+if has "stub-toolchain-line-042|" "$TMP/tc.err" && ! has "stub-toolchain-line-041|" "$TMP/tc.err"; then
+	t_pass "the toolchain tail is the last 60 lines by default"
+else
+	t_fail "the toolchain tail is not the last 60 lines"
+fi
+run_bs "$TMP/tc0.err" STUB_TOOLCHAIN=fail BUILD_SIBLINGS_FAIL_TAIL_LINES=0
+rc=$?
+if [[ $rc -ne 0 ]] && ! has "STUB-TOOLCHAIN-CAUSE" "$TMP/tc0.err"; then
+	t_pass "BUILD_SIBLINGS_FAIL_TAIL_LINES=0 suppresses the toolchain tail"
+else
+	t_fail "BUILD_SIBLINGS_FAIL_TAIL_LINES=0 still printed the toolchain tail (or the run passed)"
+fi
+# Through the driver: build-siblings' own output is all it has here, and the
+# cause must be inside the part of it the driver shows.
+run_bs "$TMP/tc-out.log" STUB_TOOLCHAIN=fail
+report_sibling_build_failure "$TMP/tc-out.log" 2>"$TMP/tc-report.err"
+expect_has "$TMP/tc-report.err" "  |   | error: STUB-TOOLCHAIN-CAUSE" \
+	"the driver shows the toolchain lookup's cause" \
+	"the toolchain lookup's cause did not reach the driver's output"
 
 run_bs "$TMP/pass.err" STUB_BUILD=pass
 rc=$?

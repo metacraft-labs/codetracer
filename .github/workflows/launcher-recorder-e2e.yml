@@ -779,6 +779,91 @@ jobs:
           fi
           echo "  OK   ${FIXTURE}"
 
+      - name: Fetch every flake input later steps evaluate, while the token is valid
+        # THE JOB'S ONE GITHUB CREDENTIAL DIES 60 MINUTES AFTER IT IS MINTED,
+        # AND THIS JOB OUTLIVES IT.  `setup-dev-env` hands the installation
+        # token minted above to nix as `access-tokens = github.com=<token>`
+        # (and to its netrc).  GitHub installation tokens "expire one hour
+        # from the time you create them", and this job may mint only one
+        # (metacraft-dev-guidelines/policies/ci-workflow-standards.md, "Two
+        # token-mint steps in one job"; ci/test/sibling-provisioning-test.sh
+        # enforces it).  After that hour nix still presents the dead token on
+        # every github.com fetch it has not already cached, and GitHub answers
+        # `401 Bad credentials` -- for PUBLIC repos as well as private ones.
+        #
+        # Desktop-edge run 36407231861 is what that costs.  Two arms died in
+        # `Build ct-print`, which is the first step that evaluates the
+        # codetracer-trace-format-nim flake (through `repro exec`):
+        #
+        #   ruby  mcl-003  minted 10:39:59  ct-print's fetch ~12:05 (+85 min)
+        #     unable to download 'https://api.github.com/repos/metacraft-labs/
+        #     nix-codetracer-toolchains/tarball/8e48d78a...': HTTP error 401
+        #     "message": "Bad credentials"
+        #   beam  garm     minted 10:54:44  ct-print step 12:17  (+83 min)
+        #     build-siblings.sh: ERROR: required toolchain lookup failed
+        #
+        # "Bad credentials", not "Not Found", is the tell: nix sent a token and
+        # GitHub rejected it; a missing credential gets a 404 for a private
+        # repo.  The two arms that passed reached the same fetch inside the
+        # hour (python, mcl-004: ct-print done 17 min after its mint) or had
+        # that revision cached from an earlier job on a persistent host (js,
+        # mcl-005, whose ct-print ran past its expiry and still passed).  So
+        # whether an arm survives depends on the host's cache and load, not
+        # on the commit under test.
+        #
+        # THE ORG'S ANSWER IS TO DO EVERY AUTHENTICATED FETCH NEAR THE TOP OF
+        # THE JOB (codetracer.yml's "THE THREE SIBLING CLONES ... ARE
+        # DELIBERATELY ADJACENT" is the git-clone instance of it), and this is
+        # the nix instance.  Each dev shell a later step enters is EVALUATED
+        # here -- evaluation is what fetches flake inputs, and builds do not
+        # use this token -- so every input lands in the store and in nix's
+        # fetcher cache (under this job's $HOME, which repro's nix inherits:
+        # the 401 above proves it read the same nix.conf) while the token is
+        # good.  A later evaluation of the same locked revision is answered
+        # from that cache instead of GitHub -- which is exactly how the js arm
+        # survived its expiry on a host that had fetched it before:
+        #
+        #   codetracer                  #ci      every `nix develop` below
+        #   codetracer                  default  build-siblings' toolchain lookup
+        #                                        (`repro exec` on codetracer)
+        #   codetracer-trace-format-nim default  `Build ct-print`
+        #   <recorder>                  default  the gate's recorder build
+        #
+        # `.?submodules=1` and `--no-write-lock-file` are how both `nix develop`
+        # below and repro's `useFlakeDevShell()` spell the flake, so the lock
+        # resolution here is the one those steps repeat.  Evaluation only: no
+        # dev shell is built, so the work the later steps do is not moved or
+        # duplicated.  A sibling with no flake.nix has nothing for a later step
+        # to evaluate and is skipped.
+        #
+        # NO CREDENTIAL IS HANDLED HERE.  nix reads the token from the
+        # user-level nix.conf `setup-nix` wrote (mode 600); this step never
+        # names it, and nix's diagnostics carry the URL, never the header.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          RECORDER_REPO: ${{ inputs.recorder-repo }}
+        run: |
+          set -euo pipefail
+          SYSTEM="$(nix eval --impure --raw --expr builtins.currentSystem)"
+          PARENT="$(cd "${CT_DIR}/.." && pwd)"
+          dirs=("${CT_DIR}" "${CT_DIR}" "${PARENT}/codetracer-trace-format-nim" "${PARENT}/${RECORDER_REPO}")
+          shells=(ci default default default)
+          for i in "${!dirs[@]}"; do
+            dir="${dirs[$i]}"
+            attr="devShells.${SYSTEM}.${shells[$i]}"
+            if [ ! -f "${dir}/flake.nix" ]; then
+              echo "no flake.nix in ${dir} (nothing a later step evaluates there)"
+              continue
+            fi
+            started="${SECONDS}"
+            if ! (cd "${dir}" && nix eval --raw --no-write-lock-file ".?submodules=1#${attr}.drvPath" >/dev/null); then
+              echo "::error::could not evaluate ${attr} of ${dir} while this job's GitHub token is still valid; nix's own diagnostic is above this line and names the input. A later step evaluates exactly this, after the token has expired, so it would fail the same way or worse. An 'HTTP error 401' or '404' here means the CI Token Provider installation cannot read that input's repository."
+              exit 1
+            fi
+            echo "fetched: ${dir} #${attr} ($((SECONDS - started))s)"
+          done
+
       - name: Provision the musl/zig toolchain for the launcher link
         # INHERITED LRC-3 DELIVERABLE (runner prerequisites).
         #
