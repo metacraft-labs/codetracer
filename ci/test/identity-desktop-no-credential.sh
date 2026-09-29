@@ -86,7 +86,20 @@ EXPECTED_SURFACES=74
 #                     euphemism is worse than a budgeted hit, because the
 #                     message is what tells a reader which forgery was
 #                     attempted. So it is budgeted.
-EXPECTED_IDENTITY_CREDENTIAL_NAMES=2
+#   device_grant.nim  `secretAccessToken` and `secretRefreshToken` on
+#                     `TokenGrant` — RFC 6749 §5.1's token response. Both ARE
+#                     bearer credentials and the flow cannot work without
+#                     holding them, so they follow `secretDeviceCode`'s naming
+#                     rather than hiding behind `token2`.
+#
+#                     THE THIRD FIELD IS DELIBERATELY NOT NAMED THIS WAY.
+#                     `idToken` is an ASSERTION — signed, audience-scoped,
+#                     short-lived, and useless to an attacker as anything but a
+#                     claim about who someone was. The refresh token mints new
+#                     ones without the user present and is the longest-lived
+#                     thing this flow produces. Giving all three the same name
+#                     shape would have said they carry the same risk.
+EXPECTED_IDENTITY_CREDENTIAL_NAMES=4
 
 # POSIX ERE. `\b`/`\d`/`\w` are GNU-or-PCRE and the engine is part of the
 # scanner (Verification-Harness-Traps.md 4).

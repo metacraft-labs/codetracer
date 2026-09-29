@@ -23,7 +23,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 162
+const ExpectedAssertions = 180
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -227,7 +227,19 @@ suite "device authorization grant (ID2)":
     counted classifyPollResponse("""{"error":"slow_down"}""") == poSlowDown
     counted classifyPollResponse("""{"error":"access_denied"}""") == poDenied
     counted classifyPollResponse("""{"error":"expired_token"}""") == poExpired
-    counted classifyPollResponse("""{"access_token":"tok"}""") == poComplete
+    counted classifyPollResponse("""{"id_token":"h.p.s"}""") == poComplete
+
+    # IT IS THE ID TOKEN THAT DECIDES, NOT THE ACCESS TOKEN. The two answer
+    # different questions — an access token authorises calls, an ID token says
+    # whose they are — and this flow exists for the second. A response with
+    # only the first is terminal, and it is its own outcome rather than
+    # `poMalformed`, because what it means is that this client is registered
+    # without the `openid` scope. Calling it malformed would send whoever is
+    # debugging it to read a parser.
+    counted classifyPollResponse("""{"access_token":"tok"}""") == poNoIdentity
+    counted classifyPollResponse("""{"access_token":"tok","id_token":"h.p.s"}""") ==
+      poComplete
+    counted terminalDetail(poNoIdentity).contains("openid")
 
     # An unknown error code stops the loop rather than being guessed at.
     counted classifyPollResponse("""{"error":"something_new"}""") == poMalformed
@@ -236,21 +248,28 @@ suite "device authorization grant (ID2)":
     # token, not the absence of an error — the same shape as trap 2, where a
     # chain of `success: true` was green over a session that opened nothing.
     counted classifyPollResponse("{}") == poMalformed
+    counted classifyPollResponse("""{"id_token":""}""") == poMalformed
     counted classifyPollResponse("""{"access_token":""}""") == poMalformed
     counted classifyPollResponse("""{"scope":"all"}""") == poMalformed
-    counted classifyPollResponse("""{"access_token":123}""") == poMalformed
+    counted classifyPollResponse("""{"id_token":123}""") == poMalformed
 
-    # Each of the five outcomes is produced by exactly one input above, so no
+    # Each of the six outcomes is produced by exactly one input above, so no
     # two collapse.
     var seen: set[PollOutcome] = {}
     for payload in ["""{"error":"authorization_pending"}""",
                     """{"error":"slow_down"}""",
                     """{"error":"access_denied"}""",
                     """{"error":"expired_token"}""",
-                    """{"access_token":"tok"}"""]:
+                    """{"access_token":"tok"}""",
+                    """{"id_token":"h.p.s"}"""]:
       seen.incl classifyPollResponse(payload)
-    counted seen == {poPending, poSlowDown, poDenied, poExpired, poComplete}
-    counted card(seen) == 5
+    counted seen == {poPending, poSlowDown, poDenied, poExpired, poNoIdentity,
+                     poComplete}
+    counted card(seen) == 6
+
+    # And neither terminal-but-unsuccessful outcome keeps the loop going.
+    counted not shouldKeepPolling(poNoIdentity, parsed(authJson())[1], T0)
+    counted not shouldKeepPolling(poMalformed, parsed(authJson())[1], T0)
 
   # -------------------------------------------------------------------------
   test "slow_down raises the interval and the rise persists":
@@ -438,5 +457,51 @@ suite "device authorization grant (ID2)":
     counted determined == 6
 
   # -------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  test "the token response yields an identity, a deadline and two secrets":
+    ## The exchange's own half of the flow. `classifyPollResponse` says the
+    ## poll finished; this is what it finished WITH, and the fields are not
+    ## interchangeable — one is an assertion about a person, one authorises
+    ## calls, one mints more of both.
+    proc grantOf(payload: string; nowUnix = T0): (string, TokenGrant) =
+      var g = TokenGrant()
+      let err = parseTokenGrant(payload, nowUnix, g)
+      (err, g)
+
+    let (err, g) = grantOf("""{"id_token":"h.p.s","access_token":"at",
+                              "refresh_token":"rt","expires_in":3600}""")
+    counted err == ""
+    counted g.idToken() == "h.p.s"
+    counted g.secretAccessToken() == "at"
+    counted g.secretRefreshToken() == "rt"
+    counted g.hasRefresh()
+    # ABSOLUTE, not relative: converted here against the clock passed in, so
+    # nothing downstream has to remember when the exchange happened.
+    counted g.expiresAt() == T0 + 3600
+
+    # No `id_token` is a refusal, because the whole point of the flow is to
+    # learn who signed in. Named in the sentence, so a reader is not left
+    # guessing which field was missing.
+    let (noId, _) = grantOf("""{"access_token":"at"}""")
+    counted noId.contains("id_token")
+
+    # An issuer may decline a refresh token — `offline_access` is a scope a
+    # user can refuse — and that is a usable grant, not an error. A client
+    # that assumed one would silently stop renewing.
+    let (okNoRefresh, g2) = grantOf("""{"id_token":"h.p.s"}""")
+    counted okNoRefresh == ""
+    counted not g2.hasRefresh()
+
+    # ZERO IS A VALID `expires_in` HERE, unlike in the device authorization
+    # response where its absence means a poll that never ends. The ID token
+    # carries its own `exp` and `jwt.checkClaims` refuses one without it, so
+    # refusing the grant over a missing optional field would reject a
+    # conformant issuer.
+    counted g2.expiresAt() == 0
+
+    # Not JSON, and not an object, are both refusals rather than empty grants.
+    counted grantOf("not json")[0].len > 0
+    counted grantOf("[]")[0].len > 0
+
   test "assertion count":
     check countedAssertions == ExpectedAssertions

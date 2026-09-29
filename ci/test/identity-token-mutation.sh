@@ -91,7 +91,7 @@ use_pair() {
 	devicegrant)
 		active_module="${MODULE3}"
 		active_suite="${SUITE3}"
-		active_cases=14
+		active_cases=15
 		;;
 	esac
 }
@@ -532,9 +532,23 @@ arm "G5  the poll window closes one second late" \
 
 # G6: trap 2, exactly. Success must be the PRESENCE of a token, never the
 # absence of an error — an empty object must not read as "signed in".
+# G6 WAS RE-AIMED, not deleted. It used to mutate
+# `if token.isNil or token.kind != JString or token.getStr.len == 0:` — the
+# `access_token` guard — and that line is gone: success is now decided by the
+# `id_token`, through a `present` helper, because an access token authorises
+# calls without saying whose they are. The property is unchanged and the line
+# holding it moved, so the arm follows it.
 arm "G6  an empty response reads as signed in" \
 	"poll responses classify to RFC 8628's outcomes" \
-	's/    if token.isNil or token.kind != JString or token.getStr.len == 0:/    if false:/'
+	's/      not (f.isNil or f.kind != JString or f.getStr.len == 0)/      true/'
+
+arm "G10 an access token with no identity reads as signed in" \
+	"poll responses classify to RFC 8628's outcomes" \
+	's/    if present("id_token"):/    if present("id_token") or present("access_token"):/'
+
+arm "G11 a token response with no id_token is accepted" \
+	"the token response yields an identity, a deadline and two secrets" \
+	's/  if grant.idTokenField.len == 0:/  if false:/'
 
 # G7: expires_in is RELATIVE. Storing it as absolute makes every deadline
 # 1970, so polling stops immediately — or, with the comparison flipped, never.

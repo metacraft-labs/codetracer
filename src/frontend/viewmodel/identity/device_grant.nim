@@ -100,7 +100,22 @@ type
     poSlowDown
       ## `slow_down`. Keep polling, but slower — and the increase PERSISTS.
     poComplete
-      ## A token was issued.
+      ## An ID token was issued.
+    poNoIdentity
+      ## The issuer returned a token response with NO `id_token`. Terminal,
+      ## and deliberately not `poComplete` or `poMalformed`.
+      ##
+      ## It is not complete: this flow exists to learn who the user is, and a
+      ## response carrying only an `access_token` authorises calls without
+      ## saying whose they are. Treating it as success would leave the client
+      ## signed in to nobody.
+      ##
+      ## It is not malformed either, and the difference is what a person gets
+      ## told. The response is a perfectly well-formed RFC 6749 §5.1 token
+      ## response; what is missing is the `openid` scope, which is a
+      ## CONFIGURATION fact about how this client is registered at the issuer.
+      ## "the authorization server sent a response this client does not
+      ## understand" would send whoever is debugging it to read a parser.
     poDenied
       ## `access_denied`. The person said no; stop.
     poExpired
@@ -222,13 +237,24 @@ proc classifyPollResponse*(payload: string): PollOutcome =
 
   let errorNode = node{"error"}
   if errorNode.isNil or errorNode.kind != JString:
-    # Success is the absence of an error AND the presence of a token. A
+    # Success is the absence of an error AND the presence of an ID TOKEN. A
     # response with neither is malformed rather than complete — an empty JSON
     # object must never read as "signed in".
-    let token = node{"access_token"}
-    if token.isNil or token.kind != JString or token.getStr.len == 0:
-      return poMalformed
-    return poComplete
+    #
+    # IT IS THE `id_token` THAT DECIDES, NOT THE `access_token`. This flow
+    # exists to learn who the user is, and the two answer different questions:
+    # an access token authorises calls, an ID token says whose they are. A
+    # client that read success from the access token would sign in to nobody
+    # and then verify nothing, because there would be nothing to verify.
+    func present(key: string): bool =
+      let f = node{key}
+      not (f.isNil or f.kind != JString or f.getStr.len == 0)
+
+    if present("id_token"):
+      return poComplete
+    if present("access_token"):
+      return poNoIdentity
+    return poMalformed
 
   case errorNode.getStr
   of "authorization_pending": poPending
@@ -236,6 +262,88 @@ proc classifyPollResponse*(payload: string): PollOutcome =
   of "access_denied": poDenied
   of "expired_token": poExpired
   else: poMalformed
+
+# ---------------------------------------------------------------------------
+# The token response.
+#
+# `classifyPollResponse` says WHETHER the poll finished; this says what it
+# yielded. Two passes over the same payload, deliberately, and the same split
+# `parseDeviceAuthorization` already has: a classifier that also returned data
+# would make every caller handle a half-filled record for the four outcomes
+# that carry none.
+# ---------------------------------------------------------------------------
+type
+  TokenGrant* = object
+    ## RFC 6749 §5.1's token response as an OpenID Connect issuer returns it.
+    ##
+    ## Fields unexported, for the reason `DeviceAuthorization`'s are: these are
+    ## not equally sensitive. The ID token is an ASSERTION — signed, audience
+    ## scoped, short lived, and useless to an attacker as anything but a claim
+    ## about who someone was. The refresh token is a long-lived credential that
+    ## mints new ones. A type whose fields are all equally reachable invites
+    ## logging the wrong one.
+    idTokenField: string
+    accessTokenField: string
+    refreshTokenField: string
+    expiresAtField: int64
+
+func idToken*(g: TokenGrant): string = g.idTokenField
+  ## The signed identity assertion. Not trusted until `jwt.parseJwt`,
+  ## `jwt.selectKey`, a signature check and `jwt.checkClaims` have all run —
+  ## this accessor hands over bytes, not a verdict.
+
+func secretAccessToken*(g: TokenGrant): string = g.accessTokenField
+  ## Named conspicuously, like `secretDeviceCode`, so a call site reads as
+  ## handling a bearer credential. `ci/test/identity-desktop-no-credential.sh`
+  ## budgets these names rather than forbidding them.
+
+func secretRefreshToken*(g: TokenGrant): string = g.refreshTokenField
+  ## The longest-lived thing this flow produces and the one worth being most
+  ## careful with: it mints ID tokens without the user present.
+
+func expiresAt*(g: TokenGrant): int64 = g.expiresAtField
+  ## An ABSOLUTE deadline, converted here from `expires_in` against the clock
+  ## passed in, so that nothing downstream has to remember when the exchange
+  ## happened. Same conversion `parseDeviceAuthorization` does, for the same
+  ## reason.
+
+func hasRefresh*(g: TokenGrant): bool = g.refreshTokenField.len > 0
+  ## Whether this grant can renew without the user. An issuer may decline to
+  ## return one — `offline_access` is a scope the user can refuse — and a
+  ## client that assumed one would silently stop renewing.
+
+proc parseTokenGrant*(payload: string; nowUnix: int64;
+                      grant: var TokenGrant): string =
+  ## Returns an error sentence, or "" and fills `grant`.
+  var node: JsonNode
+  try:
+    node = parseJson(payload)
+  except:
+    return "the token response is not valid JSON"
+  if node.kind != JObject:
+    return "the token response is not a JSON object"
+
+  func str(n: JsonNode; key: string): string =
+    let f = n{key}
+    if f.isNil or f.kind != JString: "" else: f.getStr
+
+  grant.idTokenField = str(node, "id_token")
+  grant.accessTokenField = str(node, "access_token")
+  grant.refreshTokenField = str(node, "refresh_token")
+
+  if grant.idTokenField.len == 0:
+    return "the token response carries no id_token, so nothing says who signed in"
+
+  let f = node{"expires_in"}
+  let expiresIn = if f.isNil or f.kind != JInt: 0'i64 else: f.getBiggestInt
+  # ZERO IS A VALID ANSWER HERE, unlike in the device authorization response.
+  # There, no `expires_in` means a poll that never ends. Here it means the
+  # issuer did not say, and the ID token carries its own `exp` which is the
+  # authority anyway — `jwt.checkClaims` refuses a token without one. Refusing
+  # the whole grant over a missing optional field would reject a conformant
+  # issuer.
+  grant.expiresAtField = if expiresIn > 0: nowUnix + expiresIn else: 0
+  ""
 
 # ---------------------------------------------------------------------------
 # The polling rules.
@@ -269,6 +377,8 @@ func terminalDetail*(outcome: PollOutcome): string =
   of poDenied: "the sign-in was declined"
   of poExpired: "the code expired before it was entered"
   of poMalformed: "the authorization server sent a response this client does not understand"
+  of poNoIdentity: "the authorization server issued a token but no identity; " &
+    "this client is registered without the openid scope"
   of poPending, poSlowDown: ""
 
 # ---------------------------------------------------------------------------
