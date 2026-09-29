@@ -56,7 +56,26 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}" || exit 2
 
 IDENTITY_DIR="src/frontend/viewmodel/identity"
-EXPECTED_MODULES=4
+# Six modules, and the count is a ratchet rather than a fact about the
+# directory: adding one has to be a moment where somebody says whether the new
+# module may read the environment. The two most recent additions are the two
+# that most needed saying it out loud.
+#
+#   token.nim               claims, and what the client considers acceptable
+#   session.nim             admission, refresh, revocation transport
+#   device_grant.nim        RFC 8628, the desktop sign-in flow
+#   webcrypto_verifier.nim  the RS256 signature seam
+#   issuer.nim              WHERE THE ISSUER IS, and what it advertises   (new)
+#   jwt.nim                 the ID token's structure and claims           (new)
+#
+# `issuer.nim` is the one this gate exists for now. It holds `DefaultIssuer`
+# as a compiled-in constant, and an environment variable that could move it
+# would be a complete authentication bypass wearing different clothes: the
+# issuer determines `jwks_uri`, so whoever sets it chooses the key that
+# validates every token, and no signature check downstream would notice. It is
+# a stronger version of the `CT_LICENSE_DEV_NO_FFI` hazard in the header —
+# that one turns verification off, this one turns it around.
+EXPECTED_MODULES=6
 # `when defined(...)` is legitimate here — `webcrypto_verifier.nim` needs it to
 # tell a browser from a native build — but every one of them is a place where
 # two different behaviours ship, so the number is budgeted. A new one is then a
