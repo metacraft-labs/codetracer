@@ -400,8 +400,10 @@ fi
 # distinction the rest of this file is built on, taken one step further.
 #
 # `clone-siblings` resolves a bare name against the per-commit WORKSPACE lock
-# in metacraft-labs/metacraft-manifests. A workspace lock is a `repo manifest
-# -r` snapshot of the repo SET a developer had checked out when they pushed --
+# in metacraft-labs/metacraft-manifests. A workspace lock is a snapshot (a
+# `locks/<project>/<repo>/<sha>.toml` record; the repo-workspaces `repo
+# manifest -r` XML records were retired and erased on 2026-09-29) of the repo
+# SET a developer had checked out when they pushed --
 # a convenience for standing a workspace up, and deliberately a superset of
 # what any one build needs. It is not this repo's statement of what this repo
 # depends on, and treating it as one cost this repo two outages:
