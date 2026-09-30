@@ -293,6 +293,31 @@ test_lane_backend() {
 	esac
 }
 
+# test_lane_is_compile_only ID — whether this lane's files are NEVER executed.
+#
+# The runner already forces this for `js-browser` and says why in as many
+# words: compile-only "BY CONSTRUCTION, not by the caller remembering a flag",
+# so that "`just`, CI and a developer typing the command by hand cannot
+# disagree". That reasoning is not specific to browsers, and until 2026-09-30
+# the two lanes below were compile-only only because their `just` recipes
+# passed `--compile-only`. A bare `run-nim-test-lane.sh <lane>` ran them.
+#
+# Measured at codetracer `26b6c2fd4`: `bash ci/lib/run-nim-test-lane.sh
+# identity-device-grant-live` compiled the probe, RAN it with no arguments,
+# got exit 2 and its usage text, and reported `0 file(s) passed, 1 failed`.
+# `online-sharing-live` had the same hole and a worse consequence — its suite
+# performs a live upload/download/delete round trip against the sharing
+# service, so running it by accident is a write to production.
+#
+# So the property lives with the lane, as data, and the caller's flag can only
+# ADD compile-only, never remove it.
+test_lane_is_compile_only() {
+	case "$1" in
+	online-sharing-live | identity-device-grant-live) echo 1 ;;
+	*) echo 0 ;;
+	esac
+}
+
 # test_lane_parity_partner ID — the lane that deliberately compiles the SAME
 # files on the other backend, or empty.
 #

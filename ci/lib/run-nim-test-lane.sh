@@ -179,6 +179,16 @@ if [ "${backend}" = "js-browser" ]; then
 	compile_only=1
 fi
 
+# And a lane may declare the same property for itself, for the same reason.
+# `test_lane_is_compile_only` in ci/lib/test-lane-files.sh carries the argument
+# and the measurement that prompted it. The flag can only ADD compile-only:
+# there is deliberately no way for a caller to switch it off, because the two
+# lanes that declare it are a live upload to the sharing service and a probe
+# that needs a running issuer and a browser.
+if [ "$(test_lane_is_compile_only "${lane}")" = "1" ]; then
+	compile_only=1
+fi
+
 # A WASM lane needs `emcc` ON THE PATH, and its absence must be a FAILURE
 # rather than a skip.
 #
@@ -634,7 +644,10 @@ if [ "${_ct_user_state_after}" != "${_ct_user_state_before}" ]; then
 			"it spawned) deleted real per-user state. (If CodeTracer state was" \
 			"cleared on this machine during the run, that is the other possible" \
 			"cause.)" >&2
-		printf '    %s\n' ${_ct_removed} >&2
+		# One line per path, indented. Unquoted word splitting did this until
+		# 2026-09-30 and would have split a filename containing a space into two
+		# nonexistent ones, in the middle of a message about lost user state.
+		printf '%s\n' "${_ct_removed}" | sed 's/^/    /' >&2
 	fi
 	if [ -n "${_ct_written}" ]; then
 		echo "ERROR: lane '${lane}' WROTE the user's own state directory" \
