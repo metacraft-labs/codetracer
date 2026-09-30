@@ -37,7 +37,7 @@ template ck(cond: untyped) =
 
 const
   Record = "src/tests/visual/plat48-gpui-window.json"
-  ExpectedAssertions = 119
+  ExpectedAssertions = 120
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -163,13 +163,15 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
     # it was pinned from, beside Scratchpad as in the shared default, not
     # appended to the root.
     ck not rec["unpinnedFooterOcr"].getStr.contains("State")
+    # State goes back IN FRONT of Scratchpad, where it was.
     let tabs = rec["unpinnedTabsOcr"].getStr
     ck tabs.contains("State") and tabs.contains("Scratchpad")
+    ck tabs.find("State") < tabs.find("Scratchpad")
     let rep = rec["reportedByWindow"]
     ck rep["pinnedDocked"].getBool and rep["unpinnedPlaced"].getBool
     var stack: seq[string] = @[]
     for p in rep["unpinnedStack"]: stack.add p.getStr
-    ck "state" in stack and "scratchpad" in stack
+    ck stack == @["state", "scratchpad"]
 
   test "the TOP edge: a drag docks there, the strip reveals, Esc restores, a drag back":
     let rep = rec["reportedByWindow"]

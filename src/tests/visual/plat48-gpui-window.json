@@ -138,7 +138,7 @@
  "controlHoverOcr": "Next (F10)",
  "omnibarQueryOcr": "o :sym add|",
  "omnibarAttempts": {
-  "#42": 1,
+  "#42": 2,
   ":sym add": 1
  },
  "omnibarSymOcr": "add main.py:29",
@@ -162,7 +162,7 @@
  "keyRevealOcr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to",
  "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State",
  "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS",
- "unpinnedTabsOcr": "Scratchpad State N",
+ "unpinnedTabsOcr": "State Scratchpad N",
  "topStrip": {
   "rect": [
    12,
@@ -207,8 +207,8 @@
   "pinnedDocked": true,
   "unpinnedPlaced": true,
   "unpinnedStack": [
-   "scratchpad",
-   "state"
+   "state",
+   "scratchpad"
   ],
   "topDocked": true,
   "topRevealPane": "state",
