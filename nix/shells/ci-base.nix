@@ -698,6 +698,11 @@ with pkgs;
     # via the `.envrc` override. `scripts/build-once.sh` calls `repro`
     # which reads these.
     export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
+    # The package catalog `repro.nim`'s `uses: "sqlite3"` resolves from (see
+    # the `reprobuild-packages` input in flake.nix). When it is set, reprobuild
+    # consults no other location, so this is also the catalog every lane of
+    # this shell agrees on.
+    export REPROBUILD_PACKAGES_ROOT=${inputs.reprobuild-packages}
     export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
     export BLAKE3_PREFIX=${pkgs.libblake3}
     export RUNQUOTA_SRC=${inputs.runquota}

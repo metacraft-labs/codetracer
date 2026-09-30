@@ -5068,6 +5068,22 @@
         "type": "github"
       }
     },
+    "reprobuild-packages": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790692480,
+        "owner": "metacraft-labs",
+        "repo": "reprobuild-packages",
+        "rev": "9d9176bff5c5aee175efcaa5d667c9ed7b9b8043",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "reprobuild-packages",
+        "type": "github"
+      }
+    },
     "reprobuild-test-adapters-src": {
       "flake": false,
       "locked": {
@@ -5124,6 +5140,7 @@
         ],
         "noir": "noir",
         "reprobuild": "reprobuild",
+        "reprobuild-packages": "reprobuild-packages",
         "runquota": "runquota",
         "wazero": "wazero"
       }

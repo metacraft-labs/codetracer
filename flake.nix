@@ -292,6 +292,22 @@
       flake = false;
     };
 
+    # Non-flake input: the reprobuild-packages catalog. `repro.nim` declares
+    # `uses: "sqlite3 >=0"` off Windows, and sqlite3 is no longer bundled with
+    # reprobuild's stdlib: reprobuild looks it up in this catalog, as
+    # `packages/interfaces/sqlite3/repro.nim`, and a recipe that uses a moved
+    # package with no catalog reachable does not compile. Every dev shell that
+    # runs `repro` on this recipe exports it as REPROBUILD_PACKAGES_ROOT
+    # (`nix/shells/ci-base.nix`), because in CI nothing clones the catalog
+    # beside this checkout and the `repro` this flake pins is built from a store
+    # path, beside which there is no catalog either. `.envrc` overrides it with
+    # a `../reprobuild-packages` sibling when one exists, so a workspace uses
+    # its own checkout.
+    reprobuild-packages = {
+      url = "github:metacraft-labs/reprobuild-packages/dev";
+      flake = false;
+    };
+
     # Non-flake input: the metacraft-labs/langserver fork (a.k.a. nim-langserver),
     # branch `codetracer`.  Carries patches on top of upstream nim-lang/langserver
     # that the CodeTracer GUI depends on — currently `nim/traceExpandMacro`
