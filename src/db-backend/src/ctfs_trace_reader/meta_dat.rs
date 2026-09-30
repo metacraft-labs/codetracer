@@ -598,6 +598,10 @@ pub enum MetaDatError {
     /// 5) were set that this reader does not know. Same contract as
     /// [`MetaDatError::UnknownFlags`]: the writer is newer than this reader
     /// and the container declares a stream shape it cannot decode.
+    /// A version 5 header whose `flags_ext` word is zero: a schema version
+    /// spent on nothing, which is what an unconditional version bump produces
+    /// (`internal-files.md` §"Extended flags").
+    EmptyExtendedFlags,
     UnknownExtendedFlags {
         /// The full `flags_ext` word as parsed from the header.
         ext_flags: u32,
@@ -693,6 +697,11 @@ impl fmt::Display for MetaDatError {
                 f,
                 "meta.dat: unknown flag bits set (flags=0x{flags:04x}, unknown=0x{unknown_bits:04x}); \
                  the writer is newer than this reader",
+            ),
+            MetaDatError::EmptyExtendedFlags => write!(
+                f,
+                "meta.dat: schema version {META_DAT_VERSION_EXTENDED_FLAGS} with an all-zero flags_ext word; a \
+                 container with no extended flag is written at version {META_DAT_VERSION}"
             ),
             MetaDatError::UnknownExtendedFlags {
                 ext_flags,
@@ -911,6 +920,9 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
                 ext_flags: ext,
                 unknown_bits: unknown_ext,
             });
+        }
+        if ext == 0 {
+            return Err(MetaDatError::EmptyExtendedFlags);
         }
         (ext, 12usize)
     } else {
@@ -1249,6 +1261,23 @@ mod tests {
             Err(MetaDatError::UnknownExtendedFlags { .. }) => {}
             other => panic!("expected UnknownExtendedFlags, got {other:?}"),
         }
+    }
+
+    /// A version 5 header whose `flags_ext` is zero is refused
+    /// (`codetracer-trace-format-spec/internal-files.md` §"Extended flags"):
+    /// it is what an unconditional version bump produces.
+    #[test]
+    fn a_v5_header_with_a_zero_ext_word_is_refused() {
+        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
+        buf[8] = 0;
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::EmptyExtendedFlags) => {}
+            other => panic!("a v5 header with flags_ext == 0 must be refused; got {other:?}"),
+        }
+        assert!(
+            MetaDatError::EmptyExtendedFlags.to_string().contains("flags_ext"),
+            "the refusal names the word"
+        );
     }
 
     #[test]
