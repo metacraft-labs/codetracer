@@ -1,5 +1,5 @@
 import
-  std / [ async, jsffi, macros, jsconsole, strformat, strutils ],
+  std / [ async, json, jsffi, macros, jsconsole, strformat, strutils ],
   electron_vars, base_handlers, config, idle_timeout, facade_endpoint,
   ../lib/[ jslib, electron_lib, misc_lib ],
   ../[ types ],
@@ -8,6 +8,7 @@ import
 # `cacheClassFor` / `headerFor` — the Pages deployment's own, so `ct host` and
 # the CDN cannot disagree about what a path may be cached for.
 from ../viewmodel/platform/web_deployment import cacheClassFor, headerFor
+import ../viewmodel/platform/deployment_descriptor
 
 proc nodeRelative(fromPath, toPath: cstring): cstring {.importjs:
   "require('path').relative(require('path').resolve(#), #)".}
@@ -89,10 +90,41 @@ when defined(server):
     var httpServer = require("http").createServer()
     var server = express.call()
 
+    # §7'S DESCRIPTOR, SERVED AND SENT — WD1c.
+    #
+    # `views/server_index.ejs` interpolated `frontendSocketPort` and
+    # `frontendSocketParameters` into the page, which is precisely why the
+    # entry document could not be cached: two values that change per session
+    # were compiled into the artefact that does not.
+    #
+    # §7 says the descriptor "arrives differently per deployment and is the
+    # SAME document". Both spellings are built HERE from one value, so they
+    # cannot disagree: `GET /deployment.json` for the page's first fetch, and
+    # `welcome.deployment` for a client that already has the socket open and
+    # should not pay a second round trip before first paint.
+    proc hostDescriptor(): SessionDescriptor =
+      SessionDescriptor(
+        session: SessionCoordinates(
+          # Empty for `ct host`: the trace is the one the process was started
+          # on and the page already addresses it, and a project runtime is
+          # WD4's per-project record, which this deployment does not read. An
+          # invented value here would be a statement nothing acts on.
+          traceId: "", projectId: "",
+          runtime: ProjectRuntime(kind: prkStatic)),
+        connection: ConnectionParameters(
+          frontendSocketPort: data.startOptions.frontendSocket.port,
+          # `.isNil` first: the field is a `cstring` and its default is null,
+          # which `$` turns into a crash rather than into "".
+          frontendSocketParameters:
+            (if data.startOptions.frontendSocket.parameters.isNil: ""
+             else: $data.startOptions.frontendSocket.parameters),
+          backendSocketPort: data.startOptions.backendSocket.port))
+
     # Built ONCE per server rather than per connection: it holds the settings
     # root and the temp root, and a per-connection endpoint would give two tabs
     # of one session two different settings stores.
-    let facadeEndpoint = newFacadeEndpoint()
+    let facadeEndpoint = newFacadeEndpoint(
+      deployment = encodeDescriptor(hostDescriptor()))
 
     server.toJs.set(cstring"view engine", cstring"ejs")
     server.get(cstring"/", proc(request: JsObject, response: JsObject) =
@@ -152,6 +184,16 @@ when defined(server):
           response.setHeader(cstring"Cache-Control",
                              headerFor(cacheClassFor(url)).cstring)
       })
+
+    server.get(cstring"/deployment.json", proc(request: JsObject, response: JsObject) =
+      # Uncacheable BY CLASS, not by a header written here: it is the mutable
+      # pointer the immutable document is cacheable because of, and
+      # `cacheClassFor` is what decides that for every other path this server
+      # answers.
+      response.setHeader(cstring"Cache-Control",
+                         headerFor(cacheClassFor("/deployment.json")).cstring)
+      response.setHeader(cstring"Content-Type", cstring"application/json")
+      response.send(($encodeDescriptor(hostDescriptor())).cstring))
 
     debugPrint codetracerExeDir & cstring"/frontend/styles/"
     server.use(cstring"/golden-layout", cached("/golden-layout", codetracerInstallDir & cstring"/libs/golden-layout"))

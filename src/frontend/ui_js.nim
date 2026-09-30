@@ -7595,7 +7595,41 @@ when not defined(ctInExtension) and not defined(ctWeb):
             of cbPending:
               discard)
 
-    startIPC()
+    # THE COORDINATES COME FROM THE DESCRIPTOR, NOT FROM THE DOCUMENT — WD1c,
+    # §7.
+    #
+    # `views/server_index.ejs` used to render `frontendSocketPort` and
+    # `frontendSocketParameters` into the page, and that is the whole reason
+    # the entry document was uncacheable: two values that change per session
+    # compiled into the artefact that does not. `GET /deployment.json` is the
+    # mutable pointer the immutable document is cacheable because of.
+    #
+    # **A failed fetch is not fatal and must not be.** The globals the
+    # document declares are the fallback — port `-1` and no parameters, which
+    # is already spelled "use this page's own origin" below — so a deployment
+    # that does not serve the descriptor connects exactly as it did before.
+    # Blocking the socket on a fetch would turn a missing endpoint into a
+    # dead page.
+    proc fetchDescriptorThen(done: proc()) {.importjs: """(function (done) {
+  try {
+    fetch('/deployment.json', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && d.connection) {
+          if (typeof d.connection.frontendSocketPort === 'number') {
+            frontendSocketPort = d.connection.frontendSocketPort;
+          }
+          if (typeof d.connection.frontendSocketParameters === 'string') {
+            frontendSocketParameters = d.connection.frontendSocketParameters;
+          }
+        }
+        done();
+      })
+      .catch(function () { done(); });
+  } catch (e) { done(); }
+})(#)""".}
+
+    fetchDescriptorThen(proc() = startIPC())
 
 when defined(ctInExtension):
   once:

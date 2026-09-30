@@ -866,7 +866,15 @@ test_lane_files() {
 		# and nothing under `src/frontend/index/` called it. It writes two probe
 		# files under `codetracerExeDir` and removes them.
 		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
+		#
+		# `index_serves_one_deployment_descriptor_test.nim` is §7's "it arrives
+		# differently per deployment and is the SAME document": it fetches
+		# `/deployment.json` over HTTP, reads `welcome.deployment` over a real
+		# socket, and compares the two to EACH OTHER rather than each to a
+		# shape — two deliveries of one value can drift, and a shape check
+		# passes while they do.
 		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
+		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
 		;;
 
 	frontend-native-units)
