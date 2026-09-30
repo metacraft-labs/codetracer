@@ -345,7 +345,12 @@ echo
 # ---------------------------------------------------------------------------
 echo "Step 2b: the third-party bundle, the theme, and the renderer's own tree"
 echo "    The assets whose ABSENCE is why a correct-looking deployment painted"
-echo "    nothing. \`ui.js\` reads \`monaco\` at module scope; without the webpack"
+# Backticks in prose, not a substitution. `shfmt -s` rewrites this line's
+# escaped-backtick double quotes into single quotes, and shellcheck then reads
+# the backticks as an expansion that will not expand. The two hooks disagree
+# about one sentence; this says which of them is right about it.
+# shellcheck disable=SC2016
+echo '    nothing. `ui.js` reads `monaco` at module scope; without the webpack'
 echo "    bundle it raises ReferenceError during module init and stops."
 # ---------------------------------------------------------------------------
 # PRODUCTION MODE, and the reason is a hard limit rather than a preference.
@@ -796,8 +801,16 @@ if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
 	bad "the deployment renderer did not compile"
 	grep -E 'Error:' "${cache}/render.log" | head -3 | sed 's/^/      /'
 else
+	# WD4's front door goes BESIDE the publish directory, never inside it.
+	# wrangler resolves Functions from `./functions` relative to its CWD, and
+	# this product's deploy workflow `cd`s to `$RUNNER_TEMP` and passes the
+	# staged publish directory as an argument — so `CT_WEB_FUNCTIONS_ROOT` is
+	# `$RUNNER_TEMP` there. Inside `out_dir` the file would be uploaded as a
+	# static asset AND leave wrangler with no Functions: `No Functions.
+	# Shimming...`, every signed-in request answered by the static page, 200,
+	# no error anywhere.
 	if "${cache}/render-bin" "${origin}" "${revision}" "${out_dir}" \
-		"${language_origins}" \
+		"${language_origins}" "${CT_WEB_FUNCTIONS_ROOT:-}" \
 		<"${descriptor_tsv}" >"${cache}/render-out.log" 2>&1; then
 		ok "rendered index.html, _headers and _redirects for ${origin} @ ${revision}"
 		sed 's/^/      /' "${cache}/render-out.log"

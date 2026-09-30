@@ -642,6 +642,15 @@ jobs:
           CT_WEB_PROJECT: web-codetracer
           CT_WEB_RUN_ID: ${{ github.run_id }}
           CT_WEB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          # WD4's front door. `$RUNNER_TEMP` and NOT the staged publish
+          # directory: the deploy step below does `cd "$RUNNER_TEMP"` and hands
+          # wrangler the staged tree as an argument, and wrangler resolves
+          # Functions from `./functions` relative to its CWD. Inside the staged
+          # tree the file uploads as a static asset and wrangler finds no
+          # Functions — `No Functions. Shimming...` — so every signed-in request
+          # is answered by the static page, 200, with no error anywhere. The
+          # gate after the deploy asserts both halves of that.
+          CT_WEB_FUNCTIONS_ROOT: ${{ runner.temp }}
         run: |
           set -euo pipefail
           nix develop .#ci --command bash -c '
@@ -1059,6 +1068,30 @@ jobs:
               --branch=cloud \
               --commit-dirty=true
           ' | tee "$log"
+          # THE PLACEMENT GATE — WD4, and it is the whole reason this is checked
+          # rather than assumed. A misplaced Functions directory does not fail:
+          # wrangler logs `No Functions. Shimming...`, the deploy reports
+          # success, and every signed-in request is answered by the static page
+          # with a 200. Both halves are asserted — the file is where this
+          # workflow's wrangler looks, and wrangler says it found Functions.
+          if [ ! -f "$RUNNER_TEMP/functions/_middleware.js" ]; then
+            echo "::error::the front door is not at \$RUNNER_TEMP/functions/_middleware.js;" \
+                 "wrangler resolves Functions from ./functions relative to its CWD," \
+                 "which this step sets to \$RUNNER_TEMP" >&2
+            exit 1
+          fi
+          if [ -e "$staged/functions" ]; then
+            echo "::error::a functions/ directory is INSIDE the staged publish tree;" \
+                 "it would upload as static assets and wrangler would still find none" >&2
+            exit 1
+          fi
+          if grep -qi 'No Functions' "$log"; then
+            echo "::error::wrangler reported no Functions and shimmed them;" \
+                 "the front door is not in the request path and every signed-in" \
+                 "request is being answered by the static page" >&2
+            sed 's/^/    /' "$log" >&2
+            exit 1
+          fi
           url="$(grep -oE 'https://[a-z0-9.-]+\.pages\.dev' "$log" | tail -1 || true)"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to: $url"
