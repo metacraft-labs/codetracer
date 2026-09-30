@@ -4615,12 +4615,14 @@ impl TestRecording {
     /// For interpreted languages, the "binary_path" is the source path itself.
     ///
     /// The temp-dir name is a function of `(language, trace_format,
-    /// version_label, process_id, source_path_hash)` so concurrent
-    /// tests within the same crate get distinct trace bundles. The
-    /// M3 origin-DAP test suites in particular invoke this helper
-    /// multiple times per process (once per fixture); reusing a
-    /// single `temp_dir` made concurrent tests stomp on each other's
-    /// trace artefacts and racing the `/tmp/codetracer/last` symlink.
+    /// version_label, process_id, source_path_hash, call_sequence)` so
+    /// every call gets its own trace bundle. The M3 origin-DAP test
+    /// suites invoke this helper once per fixture, and suites such as
+    /// `noir_flow_dap_test` record the SAME source from several tests
+    /// that run concurrently in one process; a shared `temp_dir` let one
+    /// test's cleanup delete the bundle another was replaying, and raced
+    /// the `/tmp/codetracer/last` symlink. The per-process call sequence
+    /// is what separates two calls with identical arguments.
     pub fn create_db_trace_with_format(
         source_path: &Path,
         language: Language,
@@ -4639,13 +4641,16 @@ impl TestRecording {
             source_path.hash(&mut h);
             format!("{:016x}", h.finish())
         };
+        static CALL_SEQUENCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let call_sequence = CALL_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp_dir = std::env::temp_dir().join(format!(
-            "flow_test_{}_{}_{}_{}_{}",
+            "flow_test_{}_{}_{}_{}_{}_{}",
             language.extension(),
             trace_format,
             version_label.replace('.', "_"),
             std::process::id(),
-            source_hash
+            source_hash,
+            call_sequence
         ));
 
         // Clean up any existing temp directory. In sandboxed builds (nix),
