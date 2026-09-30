@@ -138,10 +138,25 @@ jobs:
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
 
+      # The job's first token expires after an hour, and a cold runner spends
+      # most of that provisioning (see .github/actions/refresh-github-token).
+      # Every later step that reaches GitHub gets a fresh one first.
+      - name: Refresh the GitHub token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Allow direnv in cloned codetracer-native-recorder
         run: |
           nix develop .#devShells.x86_64-linux.default -c \
             direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Refresh the GitHub token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Resolve ct_emulator nimble dependencies
         run: |
@@ -149,23 +164,14 @@ jobs:
             direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
               bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
-      # GitHub App installation tokens expire after one hour, and a cold build
-      # outlasts the one minted at the start of the job: the 26.10.1 dry run
-      # (36761623351) failed 100 minutes in, when nix, still holding the first
-      # token, fetched a flake input and got "401 Bad credentials". So the
-      # build gets a token minted immediately before it, passed to nix through
-      # NIX_CONFIG, which takes precedence over the configured one.
-      - name: Mint a fresh token for the build
-        id: build_token
-        uses: actions/create-github-app-token@v2
+      - name: Refresh the GitHub token
+        uses: ./.github/actions/refresh-github-token
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
 
       - name: Build the AppImage
         env:
-          NIX_CONFIG: access-tokens = github.com=${{ steps.build_token.outputs.token }}
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           set -euo pipefail

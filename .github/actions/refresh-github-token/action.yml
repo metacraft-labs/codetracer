@@ -1,0 +1,36 @@
+name: Refresh the GitHub token
+description: >
+  Mint a new GitHub App installation token and put it everywhere the job's
+  earlier setup stored the previous one: nix.conf's access-tokens, the Nix
+  netrc, the git extraHeader that setup-dev-env exports through GITHUB_ENV,
+  and the credential actions/checkout persisted in the checkout.
+
+  Installation tokens expire after one hour, and the release build's steps
+  add up to far more than that on a cold runner. A dry run of the 26.10.1
+  release failed 66 minutes in, when nix fetched a flake input with the
+  token minted at the start of the job ("401 Bad credentials"). Run this
+  before every step that can reach GitHub after the first hour. Each step
+  on its own must still finish within the hour.
+inputs:
+  app-id:
+    description: The GitHub App id (the CI_TOKEN_PROVIDER_APP_ID secret).
+    required: true
+  private-key:
+    description: The GitHub App private key (the CI_TOKEN_PROVIDER_PRIVATE_KEY secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Mint the token
+      id: token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: metacraft-labs
+
+    - name: Replace the stored token
+      shell: bash
+      env:
+        NEW_TOKEN: ${{ steps.token.outputs.token }}
+      run: bash "${GITHUB_ACTION_PATH}/refresh.sh"
