@@ -2100,9 +2100,7 @@ impl CTFSTraceReader {
         // structured `funcs.dat` record (`global_line_index, name_len, name`,
         // `internal-files.md`) also carries its declaration site. That site is
         // decoded from the same container by the pure-Rust interning reader,
-        // which resolves it against this container's own position space. A
-        // plain-layout container (name bytes only, `meta.dat` bit 12 clear)
-        // stores no site, so its functions keep `(PathId(0), Line(0))`.
+        // which resolves it against this container's own position space.
         //
         // A container that is still being written (the follow path) can carry
         // `paths.dat` before the other tables exist; the writer emits those at
@@ -2113,12 +2111,9 @@ impl CTFSTraceReader {
             .iter()
             .all(|name| ctfs.has_file(name));
         let declared_sites = if has_all_interning_tables {
-            match interning_tables::InterningTables::open_from_ctfs(ctfs)
+            interning_tables::InterningTables::open_from_ctfs(ctfs)
                 .map_err(|e| format!("interning tables: {e}"))?
-            {
-                Some(tables) if tables.layout == interning_tables::RecordLayout::Structured => Some(tables.functions),
-                _ => None,
-            }
+                .map(|tables| tables.functions)
         } else {
             None
         };
