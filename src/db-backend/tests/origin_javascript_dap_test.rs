@@ -2,7 +2,10 @@
 //! against materialized traces (M3 of the Value Origin Tracking
 //! milestones).
 //!
-//! Tests SKIP cleanly when the JS recorder is missing.
+//! When the JS recorder is missing, each test goes through
+//! `common/origin_dap_gate.rs`: a loud "asserted NOTHING" skip on a developer
+//! box, and a failure under `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
+//! `CT_ORIGIN_DAP_REQUIRED=1`.
 //!
 //! The shared per-DAP helper lives in `tests/common/origin_dap.rs`.
 //!
@@ -33,21 +36,26 @@ mod test_harness;
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use db_backend::task::{OriginChain, OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
     fixture_source, load_fixture_and_query_or_skip,
 };
+use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
 
 /// Skip reason emitted when the JS recorder is unavailable. Returns
 /// the Node.js version string used as the trace-dir label on success.
 fn require_js_recorder() -> Option<String> {
     if test_harness::find_js_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: JavaScript recorder not found (set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder)"
+        return unavailable(
+            required_mode(),
+            "JavaScript recorder prerequisite",
+            "JavaScript recorder not found (set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder)",
         );
-        return None;
     }
     let version = std::process::Command::new("node")
         .arg("--version")
@@ -74,10 +82,7 @@ fn js_config(scenario: &str, version: &str, line: u32, variable: &str) -> Origin
 fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
     match load_fixture_and_query_or_skip(config) {
         QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: javascript/{}: {}", scenario, reason);
-            None
-        }
+        QueryOutcome::Skipped(reason) => unavailable(required_mode(), &format!("javascript/{scenario}"), &reason),
     }
 }
 

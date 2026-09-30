@@ -2493,6 +2493,31 @@ pub fn skip_or_fail_missing_prerequisite(test_name: &str, what: &str, remedy: &s
          to make a missing prerequisite fail instead.\n",
         test_name, what, remedy
     );
+    record_skip(test_name, what);
+}
+
+/// Append one line to the lane's skip report, when the lane asked for one.
+///
+/// A skipped test is tallied by cargo and nextest as a PASS, and nextest does
+/// not print a passing test's stderr, so a loud banner alone is invisible in a
+/// CI log. `just test-rust` points `CODETRACER_TEST_SKIP_REPORT` at a file and
+/// prints every line of it after the run, so each skip is reported by the lane
+/// that took it. `test_harness::record_skip` and
+/// `common::origin_dap_gate::record_skip_to` are the two writers; keep them alike.
+pub fn record_skip(context: &str, reason: &str) {
+    let Some(report) = std::env::var_os("CODETRACER_TEST_SKIP_REPORT") else {
+        return;
+    };
+    // A lane that asked for the report and cannot get it would be back to
+    // counting this skip as a pass, so failing to write it fails the test.
+    let line = format!("{context}: {}\n", reason.replace('\n', " "));
+    use std::io::Write as _;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&report)
+        .and_then(|mut file| file.write_all(line.as_bytes()))
+        .unwrap_or_else(|e| panic!("cannot append to the skip report {}: {e}", report.to_string_lossy()));
 }
 
 /// Find the JavaScript recorder CLI entry point via CARGO_MANIFEST_DIR.

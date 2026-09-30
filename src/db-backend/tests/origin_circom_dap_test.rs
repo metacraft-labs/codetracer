@@ -8,26 +8,34 @@
 //! §7.2: a bare-name signal-assignment classifies as `TrivialCopy`,
 //! integer-literal signal-assignment classifies as `Literal`.
 //!
-//! The test SKIPs cleanly when the Circom recorder isn't available.
+//! When the Circom recorder isn't available, the test goes through
+//! `common/origin_dap_gate.rs`: a loud "asserted NOTHING" skip on a developer
+//! box, and a failure under `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
+//! `CT_ORIGIN_DAP_REQUIRED=1`.
 
 mod test_harness;
 
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use db_backend::task::{OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
     fixture_source, load_fixture_and_query_or_skip,
 };
+use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
 
 fn require_circom_recorder() -> Option<String> {
     if test_harness::find_circom_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Circom recorder not found (set CODETRACER_CIRCOM_RECORDER_PATH or build codetracer-circom-recorder)"
+        return unavailable(
+            required_mode(),
+            "Circom recorder prerequisite",
+            "Circom recorder not found (set CODETRACER_CIRCOM_RECORDER_PATH or build codetracer-circom-recorder)",
         );
-        return None;
     }
     Some("circom-2.0".to_string())
 }
@@ -47,10 +55,7 @@ fn circom_config(scenario: &str, version: &str, line: u32, variable: &str) -> Or
 fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
     match load_fixture_and_query_or_skip(config) {
         QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: circom/{}: {}", scenario, reason);
-            None
-        }
+        QueryOutcome::Skipped(reason) => unavailable(required_mode(), &format!("circom/{scenario}"), &reason),
     }
 }
 
