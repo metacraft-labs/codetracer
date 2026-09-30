@@ -30,9 +30,9 @@
 //! (`codetracer-trace-format-spec/internal-files.md`): a `funcs.dat` record is
 //! `global_line_index: varint, name_len: varint, name`, a `types.dat` record is
 //! `kind: u8, lang_type_len: varint, lang_type, specific_info`. The Nim writer
-//! once appended raw name bytes to all four tables and left bit 12 clear; the
-//! local reader still decodes that older plain layout when the bit is clear,
-//! which `RecordLayout::Plain` documents.
+//! once appended raw name bytes to all four tables and left bit 12 clear; every
+//! reader now refuses such a record by name
+//! (`interning_tables_record_shape_test.rs`).
 //!
 //! `a_production_bundle_advertises_its_interning_tables` and
 //! `a_production_bundle_uses_the_structured_record_layout` pin both, including
@@ -246,12 +246,6 @@ fn a_production_bundle_uses_the_structured_record_layout() {
     let tables = InterningTables::open_from_ctfs(&mut ctfs)
         .expect("no error")
         .expect("tables");
-
-    assert_eq!(
-        tables.layout,
-        db_backend::ctfs_trace_reader::interning_tables::RecordLayout::Structured,
-        "a bundle from the production Nim writer uses the spec's structured record layout"
-    );
 
     let path_a = tables
         .paths
