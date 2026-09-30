@@ -220,23 +220,33 @@ proc probeDecorationsOnTheTerminal(sess: var TuiTestSession;
     kindsProbed.incl d.kind
     if d.area.isEmptyArea:
       continue
-    let probeRow = d.area.row + d.area.height - 1
-    let probeCol = d.area.col + d.area.width - 1
+    var probeRow = d.area.row + d.area.height - 1
+    var probeCol = d.area.col + d.area.width - 1
+    # PLAT-47: the drag ghost is a LABEL over the frame that follows the
+    # pointer, its text the dragged pane's name — probed at its last
+    # character, which must be that character.
+    let ghostText = if d.kind == ldDragGhost: d.label.strip(leading = false)
+                    else: ""
+    if d.kind == ldDragGhost:
+      probeCol = d.area.col + ghostText.runeLen - 1
     var covered = false
     for j in i + 1 ..< decorations.len:
       if decorations[j].area.contains(probeRow, probeCol):
         covered = true
-    if probeRow == d.area.row and probeCol < d.area.col + labelCellsOf(d):
+    if d.kind != ldDragGhost and probeRow == d.area.row and
+       probeCol < d.area.col + labelCellsOf(d):
       covered = true
     if covered or probeRow >= Rows or probeCol >= Cols:
       inc skipped
       continue
     inc probesMade
     let rune = $sess.cellAt(probeRow, probeCol).rune
-    if rune != glyphFor(d.kind):
+    let want = if d.kind == ldDragGhost: ghostText.runeAt(
+                 ghostText.runeOffset(ghostText.runeLen - 1)).`$`
+               else: glyphFor(d.kind)
+    if rune != want:
       probeMismatches.add label & ": " & $d.kind & " at (" & $probeRow & "," &
-        $probeCol & ") reads '" & rune & "' rather than '" &
-        glyphFor(d.kind) & "'"
+        $probeCol & ") reads '" & rune & "' rather than '" & want & "'"
   probeNotes.add label & ": " & $decorations.len & " decoration(s), " &
     $skipped & " skipped"
   if decorations.len == 0:
@@ -306,7 +316,7 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck focused == FocusedAtStart
 
       # ---- THE UNGESTURED SCREEN -------------------------------------------
-      ckScreenMatches(sess, model.shellScreenOf().rows, "before the gesture")
+      ckScreenMatches(sess, model.shellScreenOf().visibleRows, "before the gesture")
       let before = sess.screenContents()
       ck not before.contains(DockStripGlyph)
       ck before.contains(DraggedPaneTitleRow)
@@ -322,7 +332,7 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
                 "press on the pane's title row")
       ck model.app.layoutBinding.interaction.kind == ikDraggingTab
       ck model.app.layoutBinding.interaction.source == DraggedPane
-      ckScreenMatches(sess, model.shellScreenOf().rows, "while dragging")
+      ckScreenMatches(sess, model.shellScreenOf().visibleRows, "while dragging")
       probeDecorationsOnTheTerminal(sess, model, "while dragging")
 
       # ---- THE RELEASE, ON A CELL OUTSIDE THE TREE AREA --------------------
@@ -336,7 +346,7 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck model.app.layoutBinding.layout.dockedAt(leTop).len == 1
 
       # THE TERMINAL, differentially…
-      ckScreenMatches(sess, model.shellScreenOf().rows, "after the drop")
+      ckScreenMatches(sess, model.shellScreenOf().visibleRows, "after the drop")
       probeDecorationsOnTheTerminal(sess, model, "after the drop")
 
       # …AND ABSOLUTELY. The strip's cells are asserted against
@@ -405,7 +415,9 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
     # probe able to see a collapsed glyph table at all. One kind, or two kinds
     # sharing a glyph, and this case would be as blind as the differential one.
     ck kindsProbed == {ldDragGhost, ldDockStrip}
-    ck glyphFor(ldDragGhost) != glyphFor(ldDockStrip)
+    # Since PLAT-47 the ghost is a label (the pane's name) and the strip a
+    # glyph: the two probes still read two different things.
+    ck ghostLabelFor(paneCalltrace).strip != glyphFor(ldDockStrip)
 
   test "the bytes this file writes are the bytes the harness writes":
     # THE POSITIVE CONTROL ON THE INPUT HELPER (Verification-Harness-Traps §9):
@@ -520,7 +532,7 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
         ck abs((now.col + now.width - 1) - (pressCol - 6)) <= 1
         # The terminal, differentially against the twin, and absolutely: the
         # screen is not the one before the drag.
-        ckScreenMatches(sess, model.shellScreenOf().rows, "after the drag")
+        ckScreenMatches(sess, model.shellScreenOf().visibleRows, "after the drag")
         ck sess.screenContents() != before
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))

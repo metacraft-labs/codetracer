@@ -179,7 +179,8 @@ proc dockRegions(n: JsonNode; x, y, w, h: float; into: var seq[RegionRect]) =
 proc gpuiRun(): (int, JsonNode, JsonNode, string) =
   ## The shipped window on `calc`: `(rc, plan, dock document, stderr)`.
   let bin = repo / "build/bin/codetracer-gpui"
-  let shimDir = repo.parentDir / "isonim-gpui/rust/target/debug"
+  let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
+                   repo.parentDir / "isonim-gpui/rust/target/debug")
   let state = createTempDir("plat45-three-", "")
   var env = newStringTable()
   for k, v in envPairs(): env[k] = v

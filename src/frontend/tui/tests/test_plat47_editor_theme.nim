@@ -329,13 +329,68 @@ suite "PLAT-47: the terminal's Python is tokenised as the desktop's":
     # The whole file, twice, was compared — not a prefix.
     ck compared > 2 * 3000
 
+  test "a calc window that starts inside the module docstring is coloured as the desktop colours it":
+    ## PLAT-47 B4. The source pane holds a WINDOW, and a window can start in
+    ## the middle of `calc`'s module docstring (lines 2..60). Monaco tokenises
+    ## the whole model, so on the desktop those lines are string; the
+    ## terminal's window starts in the context the provider computed from the
+    ## file's earlier lines (`lexerContexts`, what `SourceFetch.lineContexts`
+    ## carries) and must colour every character of it as the capture does.
+    let root = repoRoot()
+    let path = root / Answers[0]
+    if not fileExists(path):
+      checkpoint(Answers[0] & " is absent: run `just plat47-capture-electron`")
+    ck fileExists(path)
+    let tokens = parseJson(readFile(path))["monacoTokens"]
+    let rules = rulesOf(docs[dmDark])
+    let lines = readFile(root / CalcSource).split('\n')
+    const First = 5
+    const Last = 40
+    let contexts = lexerContexts(CalcSource, lines, First, Last)
+    ck contexts.len == Last - First + 1
+    let h = highlightWindow(CalcSource, First, lines[First - 1 .. Last - 1],
+                            contexts[0])
+    # Without the context the same window starts at Monarch's root and the
+    # docstring's prose is lexed as code — which is the difference asserted.
+    let bare = highlightWindow(CalcSource, First, lines[First - 1 .. Last - 1])
+    var compared = 0
+    var mismatches = 0
+    var bareMismatches = 0
+    for line in First .. Last:
+      let toks = tokens["lines"][line - 1]
+      var ti = 0
+      var cell = 0
+      var utf16 = 0
+      for r in lines[line - 1].runes:
+        while ti + 1 < toks.len and toks[ti + 1][0].getInt <= utf16:
+          inc ti
+        let scope = if toks.len > 0: toks[ti][1].getStr else: ""
+        let desk = monacoResolve(rules, scope.replace(".python", ""))
+        proc colourAt(f: FileHighlight): string =
+          var cls = tcPlain
+          for sp in f.spansForLine(line):
+            if cell >= sp.startCell and cell < sp.endCell:
+              cls = sp.class
+          DesignTokenHex[tokenClassToken(cls)][dmDark]
+        inc compared
+        if colourAt(h) != desk: inc mismatches
+        if colourAt(bare) != desk: inc bareMismatches
+        utf16 += (if int(r) > 0xFFFF: 2 else: 1)
+        cell += max(1, displayWidth($r))
+    checkpoint("window " & $First & ".." & $Last & ": " & $compared &
+               " characters, " & $mismatches & " differ with the context, " &
+               $bareMismatches & " without it")
+    ck compared > 1000
+    ck mismatches == 0
+    ck bareMismatches > 100
+
   test "a docstring stays a string on every line, as it does on the desktop":
-    var st = initPythonLexState()
+    var st = initialContext(lxPython)
     let doc = ["def f():", "    \"\"\"First line", "    middle, with def and 1",
                "    last\"\"\"", "    return f\"{x:>5}\" + 'a'"]
     var spans: seq[seq[SyntaxSpan]] = @[]
     for l in doc:
-      spans.add pythonLineSpans(l, st)
+      spans.add lexicalLineSpans(lxPython, l, st)
     ck spans[2].len == 1 and spans[2][0].class == tcString and
        spans[2][0].startCell == 0 and spans[2][0].endCell == doc[2].len
     # After the closing quotes the state is back at the root: `return` is a

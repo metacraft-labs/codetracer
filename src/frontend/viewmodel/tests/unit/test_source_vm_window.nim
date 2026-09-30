@@ -151,6 +151,18 @@ proc serve(h: Harness; request: SourceLineRequest): SourceFetch =
   discard h.store.applySourceFetch(h.vm, captured)
   captured
 
+proc serveWithContexts(h: Harness; request: SourceLineRequest) =
+  ## `serve`, handing the VM a line context for every fetched line — here a
+  ## label naming the line (`ctx<N>`), so the test can see which line's
+  ## context sits at which held index. A highlighter's real contexts are
+  ## tokenizer states; the VM carries them opaquely.
+  var captured: SourceFetch
+  h.provider.fetch(request, proc(fetch: SourceFetch) = captured = fetch)
+  var contexts: seq[string] = @[]
+  for i in 0 ..< captured.lines.len:
+    contexts.add "ctx" & $(captured.firstLine + i)
+  discard h.store.applySourceFetch(h.vm, captured, contexts)
+
 proc fillWindow(h: Harness): seq[SourceLineRequest] =
   ## Ask the VM what it needs, serve every request, and return what was asked.
   result = h.vm.requestMissing()
@@ -288,6 +300,34 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     h.checkHeldRangeIs(115, 144)
     h.checkHeldTextIsCorrect()
     check h.vm.heldLines.val.len == 30
+
+  test "each held line keeps the context it was fetched with, through scrolls both ways":
+    ## PLAT-47 B4: the state each line STARTS in travels with the line
+    ## (`heldLineContexts`), so a window that opens inside a docstring is
+    ## coloured from the right state — after a fill, a scroll that trims one
+    ## end and extends the other, and back.
+    let h = newHarness()
+    defer: h.teardown()
+    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.scrollTo(100)
+    for r in h.vm.requestMissing(): h.serveWithContexts(r)
+    for delta in [20, -35, 7]:
+      h.vm.scrollBy(delta)
+      for r in h.vm.requestMissing(): h.serveWithContexts(r)
+      let first = h.vm.heldFirstLine.val
+      check h.vm.heldLineContexts.val.len == h.vm.heldLines.val.len
+      var aligned = true
+      for i, c in h.vm.heldLineContexts.val:
+        if c != "ctx" & $(first + i): aligned = false
+      check aligned
+    # A NEW REVISION drops the old window's contexts with its text (the trim
+    # `requestMissing` runs first): never the previous build's states held
+    # for lines the next build's text will fill.
+    h.store.updateDebuggerPosition(rrTicks = 1, file = RecordedPath, line = 100,
+                                   sourceGeneration = 1)
+    discard h.vm.requestMissing()
+    check h.vm.heldLines.val.len == 0
+    check h.vm.heldLineContexts.val.len == 0
 
   test "scrolling up requests exactly the newly visible lines":
     let h = newHarness()

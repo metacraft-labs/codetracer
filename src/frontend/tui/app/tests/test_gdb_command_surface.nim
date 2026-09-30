@@ -156,7 +156,12 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 91
+  ExpectedAppModules = 97
+    ## RE-COUNTED ON 2026-09-29 (PLAT-47 part B): 91 → 97. The desktop's Monaco
+    ## tokenizers (`syntax/lexical.nim`, `syntax/monarch.nim`,
+    ## `syntax/js_regex.nim`, `syntax/json_tokens.nim`), the VCS pane
+    ## (`views/vcs_pane.nim`) and the drop overlay (`views/frame_overlay.nim`).
+    ##
     ## RE-COUNTED ON 2026-09-26 (PLAT-45): 86 → 88. `layout/cells.nim` (the
     ## terminal's cell vocabulary, split out of `profile.nim` so the fold can
     ## project) and `tests/plat45_old_profiles.nim` (the old three profile trees,
@@ -236,7 +241,12 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 177
+  ExpectedStyleLiterals = 198
+    ## 2026-09-29 (PLAT-47 part B): +21, all roles — the eight scopes the
+    ## other Monaco tokenizers colour on their own (`source_pane.TokenStyles`),
+    ## the VCS pane's styles (`views/vcs_pane.nim`, a new file) and the drop
+    ## overlay's ghost label (`views/frame_overlay.nim`/`shell.nim`, a new
+    ## file).
     ## 2026-09-28: +4, all roles — the three syntax classes the desktop's
     ## Monaco Python tokenizer colours on their own (`source_pane.TokenStyles`)
     ## and the call trace's not-yet-loaded row (`call_trace.CallTraceLoadingStyle`).
@@ -290,7 +300,9 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 27
+  ExpectedStyledFiles = 29
+    ## 2026-09-29 (PLAT-47 part B): +2, `views/vcs_pane.nim` and
+    ## `views/frame_overlay.nim`.
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour

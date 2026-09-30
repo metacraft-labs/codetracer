@@ -731,7 +731,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["deepReviewMode", "headerTitle", "headerIcon", "statsText",
      "traceContexts", "isGitRepo",
      "errorMessage", "currentBranch", "branches", "commits", "changedFiles",
-     "diffFiles"],
+     "diffFiles", "workingTreeFiles"],
     vscBackendAuthoritative,
     "VCS rows/status are local repository facts.")
   entries.addEntry("VCSVM", "selectedTraceContextId", vscRendererLocal,

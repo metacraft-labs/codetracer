@@ -1,0 +1,23 @@
+{
+  "takenAt": "2026-09-30T00:38:10.665Z",
+  "fixture": "scripts/plat47-vcs-fixture.sh",
+  "rows": [
+    [
+      "A",
+      "added.txt"
+    ],
+    [
+      "M",
+      "notes.txt"
+    ],
+    [
+      "?",
+      "scratch.txt"
+    ]
+  ],
+  "header": "Working Tree (3)",
+  "branch": "plat47-vcs",
+  "commits": [
+    "Initial fixture commit"
+  ]
+}

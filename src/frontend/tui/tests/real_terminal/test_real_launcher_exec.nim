@@ -128,8 +128,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-09-26"
-  MeasuredBinaryBytes = 15_247_872
+  MeasurementDate = "2026-09-29"
+  MeasuredBinaryBytes = 15_855_880
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -200,8 +200,29 @@ const
     ## of it two 24 KB `.bss` tables that occupy no file bytes), and the query
     ## round (`host/terminal_probe.nim`), less the four hand-written tint
     ## tables and `roleFor` it deleted. The ceiling keeps 8.02% over the anchor.
+    ##
+    ##   15_371_840  2026-09-29: `agents` at 836efe206 (PLAT-47 part A),
+    ##               built fresh for the comparison below; inside the band
+    ##   15_855_880  2026-09-29: PLAT-47 part B
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Part B costs +484_040 bytes (+3.15%) over
+    ## part A built the same way, attributed by summing `nm -S` per Nim
+    ## module: the desktop's Monaco tokenizers — the generated Monarch
+    ## definitions `staticRead` into read-only data (~87 KB,
+    ## `app/syntax/monarch_languages.json`), the Monarch engine and its
+    ## JavaScript-regex matcher (`monarch.nim`, `js_regex.nim`, ~104 KB of
+    ## code between them) and `lexical.nim`, less the hand port of Python's
+    ## tokenizer they replace (-19 KB in `highlighter.nim`); the VCS pane on
+    ## the desktop's `VCSVM` (`vcs_vm`, `platform/vcs`, `host/native_vcs`,
+    ## `views/vcs_pane`, ~85 KB); and the drop overlay (isonim-tui's
+    ## `overlay.nim` and the compositor's overlay pass, ~15 KB). A data table
+    ## this time, and said so: the Monarch definitions are the one thing linked
+    ## in as data, deliberately — they ARE the desktop's tokenizers, exported
+    ## from the pinned `monaco-editor` and gated fresh
+    ## (`ci/test/monarch-languages-fresh.sh`). The ceiling keeps 8.02% over the
+    ## anchor.
 
-  BinaryCeilingBytes = 16_470_000
+  BinaryCeilingBytes = 17_127_600
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

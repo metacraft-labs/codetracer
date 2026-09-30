@@ -133,14 +133,15 @@ proc terminalCapability*(): PaneCapability =
   ## absent view is visible rather than a gap.
   paneCapability(feTerminal,
     {paneEditor, paneCalltrace, paneState, paneEventLog, paneTimeline,
-     panePointList, paneFileTree, paneBuildOutput},
+     panePointList, paneFileTree, paneBuildOutput,
+     # PLAT-47 deliverable 4: the VCS pane (`views/vcs_pane.nim`).
+     paneVcs},
     [(paneDebugControls, "the terminal steps from the keyboard and names " &
                          "the keys on its status line"),
      (paneFlow, "the terminal draws flow inside the source pane"),
      (paneSearch, "search results open in the command line, not a pane"),
      (paneScratchpad, "the terminal has no scratchpad view yet"),
      (paneShell, "the terminal has no embedded shell view yet"),
-     (paneVcs, "the terminal has no version-control view yet"),
      (paneAgentActivity, "the terminal has no agent-activity view yet"),
      (paneTerminalOutput, "the recorded program's terminal output has no " &
                           "terminal view yet"),

@@ -66,7 +66,7 @@ type
       ## "" for a role that tints text rather than painting a mark.
 
 const
-  PermittedMerges*: array[4, (SemanticRole, SemanticRole, string)] = [
+  PermittedMerges*: array[18, (SemanticRole, SemanticRole, string)] = [
     (srSyntaxPlain, srSyntaxIdentifier,
      "An identifier IS plain text. The design system paints both with" &
      " `colors/editor/syntax/primary` (`plain` is an alias of it), and" &
@@ -86,7 +86,54 @@ const
     (srSyntaxKeyword, srSyntaxTag,
      "A decorator (`@name`, Monaco's `tag`) is drawn in a blue next to the" &
      " keyword blue; where the terminal cannot show the step between two" &
-     " blues it reads as the keyword-like marker it is, never as plain text.")]
+     " blues it reads as the keyword-like marker it is, never as plain text."),
+    # PLAT-47 B4: the scopes the desktop's other Monaco tokenizers colour on
+    # their own. Several of these pairs are ONE colour in one of the desktop's
+    # two themes (said per pair), so they are merged at every rung there by
+    # the desktop itself; the rest share their family's monochrome
+    # attributes because monochrome has no combination left.
+    (srSyntaxComment, srSyntaxCommentDoc,
+     "A documentation comment is a comment. The light theme paints both" &
+     " its `comment` rule's colour; the dark theme a green one step lighter for `comment.doc`."),
+    (srSyntaxPlain, srSyntaxVariable,
+     "A shell variable is text in the light theme (both the" &
+     " default rule's colour); the dark theme greys it a step off the default."),
+    (srSyntaxIdentifier, srSyntaxVariable,
+     "A variable is an identifier: the light theme paints both the default" &
+     " rule's colour, and monochrome draws both upright and unweighted."),
+    (srSyntaxType, srSyntaxKeywordType,
+     "A primitive type keyword (`keyword.type`) is a type name in the dark" &
+     " theme — both its `type` rule's colour — and the keyword blue in the light one."),
+    (srSyntaxType, srSyntaxTypeIdentifier,
+     "A type identifier is a type: the light theme paints both its `type` rule's" &
+     " colour," &
+     " the dark theme only lightens `type.identifier` to a near-grey."),
+    (srSyntaxKeywordType, srSyntaxTypeIdentifier,
+     "Both are type names; monochrome gives every type the type's bold" &
+     " italic, and no attribute combination is left to split them."),
+    (srSyntaxType, srSyntaxNamespace,
+     "A namespace (`Geometry::`, a YAML tag) names a type-like scope;" &
+     " monochrome draws it in the type's bold italic."),
+    (srSyntaxKeywordType, srSyntaxNamespace,
+     "The type family's third member at the monochrome rung: bold italic."),
+    (srSyntaxTypeIdentifier, srSyntaxNamespace,
+     "The type family's fourth member at the monochrome rung: bold italic."),
+    (srSyntaxString, srSyntaxRegexp,
+     "A regular-expression literal is a string-like literal; where no tint" &
+     " is left it reads as one, in the string's italic."),
+    (srSyntaxStringEscape, srSyntaxRegexp,
+     "A string's quote and a regex literal share the string's italic at the" &
+     " monochrome rung, as the quote and the string body already do."),
+    (srSyntaxOperator, srSyntaxAttributeName,
+     "A command-line option (`-e`, `--force`, shell's `attribute.name`) is" &
+     " dash-led syntax; monochrome draws it with the operator's bold" &
+     " underline."),
+    (srSyntaxKeyword, srSyntaxMetatag,
+     "A shebang (`#!`, shell's `metatag`) is an interpreter directive and" &
+     " reads as a keyword-like marker in monochrome's bold."),
+    (srSyntaxTag, srSyntaxMetatag,
+     "The shebang and a decorator are both markers: bold, at the monochrome" &
+     " rung, as the decorator and the keyword already are.")]
     ## Pairs of roles in one group that share an appearance at some tier ON
     ## PURPOSE, each with the argument for it. The COUNT is asserted by
     ## `app/tests/test_degraded_style_tables.nim`.

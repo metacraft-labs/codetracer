@@ -24,6 +24,8 @@
 ## cannot fetch from a host that does not send CORS headers (§6.2a). A UI that
 ## treats "has git" as one bit shows a Push button that cannot work.
 
+import std/strutils
+
 import ./outcome
 import ./capabilities
 
@@ -119,6 +121,74 @@ type
     fetch*: proc(repository, remote: string): PlatformFuture[PlatformOutcome[Nothing]]
     push*: proc(repository, remote,
                 refspec: string): PlatformFuture[PlatformOutcome[Nothing]]
+
+func porcelainCode(c: char): VcsFileStatus =
+  case c
+  of 'M': vfsModified
+  of 'A': vfsAdded
+  of 'D': vfsDeleted
+  of 'R': vfsRenamed
+  of 'C': vfsCopied
+  of 'U': vfsConflicted
+  else: vfsUnmodified
+
+func parsePorcelainV2*(text: string): VcsStatus =
+  ## `git status --porcelain=v2 --branch`, read.
+  ##
+  ## ONE READER, TWO CALLERS: the native instantiation's `status` (below the
+  ## facade, `host/desktop_native.nim`) and the desktop's VCS panel
+  ## (`ui/vcs.nim`, which still runs git through the process facade) read the
+  ## same output through this, so the terminal's VCS pane, GPUI's and the
+  ## desktop's cannot disagree about a file's state (PLAT-47 deliverable 4).
+  ## Pure and backend-neutral, so it compiles on both.
+  ##
+  ## Lines (https://git-scm.com/docs/git-status#_porcelain_format_version_2):
+  ## `# branch.head <name>`, `# branch.upstream <ref>`, `# branch.ab +A -B`,
+  ## `1 XY ... <path>` (ordinary), `2 XY ... <path>\t<orig>` (renamed or
+  ## copied), `u XY ...` (unmerged) and `? <path>` (untracked).
+  for line in text.splitLines():
+    if line.len == 0: continue
+    if line.startsWith("# branch.head "):
+      result.branch = line[14 .. ^1]
+      result.detached = result.branch == "(detached)"
+    elif line.startsWith("# branch.upstream "):
+      result.upstream = line[18 .. ^1]
+    elif line.startsWith("# branch.ab "):
+      let parts = line[12 .. ^1].split(' ')
+      if parts.len == 2:
+        try:
+          result.ahead = parseInt(parts[0].strip(chars = {'+'}))
+          result.behind = parseInt(parts[1].strip(chars = {'-'}))
+        except ValueError:
+          discard
+    elif line.startsWith("? "):
+      result.changes.add VcsFileChange(
+        path: line[2 .. ^1], workingTreeStatus: vfsUntracked,
+        indexStatus: vfsUnmodified)
+    elif line.startsWith("1 ") or line.startsWith("2 "):
+      # `1 XY sub mH mI mW hH hI <path>` / `2 XY sub mH mI mW hH hI Xs
+      # <path><TAB><origPath>`: a fixed number of space-separated fields,
+      # then the path, which may itself contain spaces.
+      let parts = line.split(' ', maxsplit = if line[0] == '1': 8 else: 9)
+      if parts.len >= 9:
+        let xy = parts[1]
+        var path = parts[^1]
+        var previous = ""
+        let tab = path.find('\t')
+        if tab >= 0:
+          previous = path[tab + 1 .. ^1]
+          path = path[0 ..< tab]
+        result.changes.add VcsFileChange(
+          path: path, previousPath: previous,
+          indexStatus: porcelainCode(xy[0]),
+          workingTreeStatus: porcelainCode(xy[1]))
+    elif line.startsWith("u "):
+      # `u XY sub m1 m2 m3 mW h1 h2 h3 <path>`.
+      let parts = line.split(' ', maxsplit = 10)
+      if parts.len == 11:
+        result.changes.add VcsFileChange(
+          path: parts[^1], indexStatus: vfsConflicted,
+          workingTreeStatus: vfsConflicted)
 
 proc unavailableVcs*(profile: PlatformProfile): VcsFacade =
   VcsFacade(

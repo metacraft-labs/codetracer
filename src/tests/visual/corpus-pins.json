@@ -82,8 +82,9 @@
       "gpuiStoppedLine": 1,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
       "gpuiEditorRows": [
-        "rows=54;first=1;last=54"
+        "rows=33;first=1;last=33"
       ],
       "electronEditorRows": [
         "rows=45;first=1;last=45"
@@ -95,8 +96,9 @@
       "gpuiStoppedLine": 44,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
       "gpuiEditorRows": [
-        "rows=54;first=1;last=54"
+        "rows=33;first=28;last=60"
       ],
       "electronEditorRows": [
         "rows=46;first=21;last=66"
@@ -108,9 +110,9 @@
       "gpuiStoppedLine": 56,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
-      "_whyGpuiEditorRows": "PLAT-47 (2026-09-27): a stop outside the viewport is CENTRED, as the desktop's revealLineInCenterIfOutsideViewport does (source_vm.topCentringIfOutside). This pin used to put the stopped line on the last row.",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
       "gpuiEditorRows": [
-        "rows=45;first=34;last=78"
+        "rows=27;first=43;last=69"
       ],
       "electronEditorRows": [
         "rows=38;first=37;last=74"
@@ -122,9 +124,9 @@
       "gpuiStoppedLine": 110,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
-      "_whyGpuiEditorRows": "PLAT-47 (2026-09-27): a stop outside the viewport is CENTRED, as the desktop's revealLineInCenterIfOutsideViewport does (source_vm.topCentringIfOutside). This pin used to put the stopped line on the last row.",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
       "gpuiEditorRows": [
-        "rows=45;first=72;last=116"
+        "rows=27;first=90;last=116"
       ],
       "electronEditorRows": [
         "rows=36;first=82;last=117",
@@ -139,9 +141,9 @@
       "gpuiStoppedLine": 113,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
-      "_whyGpuiEditorRows": "PLAT-47 (2026-09-27): a stop outside the viewport is CENTRED, as the desktop's revealLineInCenterIfOutsideViewport does (source_vm.topCentringIfOutside). This pin used to put the stopped line on the last row.",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
       "gpuiEditorRows": [
-        "rows=54;first=63;last=116"
+        "rows=33;first=84;last=116"
       ],
       "electronEditorRows": [
         "rows=45;first=73;last=117",
@@ -157,8 +159,9 @@
       "gpuiStoppedLine": 44,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
       "gpuiEditorRows": [
-        "rows=45;first=1;last=45"
+        "rows=27;first=31;last=57"
       ],
       "electronEditorRows": [
         "rows=38;first=25;last=62"

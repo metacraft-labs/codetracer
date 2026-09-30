@@ -39,7 +39,8 @@ const CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
-let shimDir = repo.parentDir / "isonim-gpui/rust/target/debug"
+let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
+                   repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = repo / CalcFixture
 
 proc requirePrereq(ok: bool; what: string) =

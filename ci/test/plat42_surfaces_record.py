@@ -26,7 +26,8 @@ import hashlib, json, os, socket, subprocess, sys, time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIN = os.path.join(ROOT, "build/bin/codetracer-gpui")
-SHIM = os.path.abspath(os.path.join(ROOT, "..", "isonim-gpui/rust/target/debug"))
+SHIM = os.environ.get("ISONIM_GPUI_SHIM_DIR",
+                      os.path.abspath(os.path.join(ROOT, "..", "isonim-gpui/rust/target/debug")))
 TRACE = os.environ.get("CODETRACER_PLAT42_TRACE",
                        os.path.join(ROOT, "test-logs/tui-fixtures/calc-2f0db4f45192"))
 OUT = os.path.join(ROOT, "src/tests/visual/plat42-surfaces.json")
@@ -67,6 +68,12 @@ def text(n):
     return (n.get("text") or "") + "".join(text(c) for c in n.get("children", []))
 
 
+def descendants(n):
+    for c in n.get("children", []):
+        yield c
+        yield from descendants(c)
+
+
 def read_surfaces(plan):
     rows = []
     def walk(n):
@@ -82,12 +89,18 @@ def read_surfaces(plan):
                 # span's opacity in the plan, "" when unset (fully opaque).
                 "codeOpacity": next(
                     (c.get("styles", {}).get("opacity", "")
-                     for c in n.get("children", [])
+                     for c in descendants(n)
                      if c.get("attributes", {}).get("data-ct-text-role") == "editor-code"),
                     ""),
-                # The row's own background in the plan: the execution band
-                # (`leaves.ExecutionRowBand`), "" on every other row.
-                "rowBackground": n.get("styles", {}).get("bg", ""),
+                # The execution band as the plan carries it: on the row's
+                # CODE COLUMN since PLAT-47 B1 (`leaves.ExecutionRowBand`,
+                # Monaco's current-line band, not under the gutter), "" on
+                # every other row.
+                "rowBackground": next(
+                    (c.get("styles", {}).get("bg", "")
+                     for c in descendants(n)
+                     if c.get("attributes", {}).get("data-ct-code-column")),
+                    ""),
                 "text": text(n).strip()[:80],
             })
         for c in n.get("children", []):

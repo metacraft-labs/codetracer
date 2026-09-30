@@ -67,7 +67,7 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2684
+const ExpectedAssertions = 2685
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -976,26 +976,41 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     ck ldDragGhost in kinds
     ck ldDropTarget in kinds
 
+    # PLAT-47: THE DROP TARGET IS A TINT, NOT A FILL. On the composited
+    # screen every cell of the region the drop would occupy keeps the glyph
+    # the undecorated frame has there and carries a different background;
+    # the ghost's label is drawn over the frame.
     let h = newTerminalTestHarness(120, 40)
     h.mount(proc (r: TerminalRenderer): TerminalNode =
       renderShellTree(model, r, 120, 40))
-    var ghostCells = 0
+    var plainModel = model
+    plainModel.interaction = noInteraction()
+    let plain = newTerminalTestHarness(120, 40)
+    plain.mount(proc (r: TerminalRenderer): TerminalNode =
+      renderShellTree(plainModel, r, 120, 40))
     var targetCells = 0
+    var retinted = 0
+    var ghostSeen = false
     for d in screen.decorations:
-      let glyph = glyphFor(d.kind)
-      for row in d.area.row ..< d.area.row + d.area.height:
-        for col in d.area.col ..< d.area.col + d.area.width:
-          let painted = $h.cellAt(row, col).rune
-          if d.kind == ldDragGhost and painted == glyph: inc ghostCells
-          if d.kind == ldDropTarget and painted == glyph: inc targetCells
-    checkpoint("ghost cells on the composited screen: " & $ghostCells &
-               ", drop-target cells: " & $targetCells)
-    # Not "at least one": the rectangles are known, and every cell of each is
-    # the glyph except the ones the label overwrote on the first row.
-    ck ghostCells > 0
+      if d.kind == ldDropTarget:
+        for row in d.area.row ..< d.area.row + d.area.height:
+          for col in d.area.col ..< d.area.col + d.area.width:
+            inc targetCells
+            let before = plain.cellAt(row, col)
+            let after = h.cellAt(row, col)
+            if after.rune == before.rune and after.bg != before.bg:
+              inc retinted
+      if d.kind == ldDragGhost:
+        var text = ""
+        for i in 0 ..< d.label.len:
+          text.add $h.cellAt(d.area.row, d.area.col + i).rune
+        ghostSeen = text == d.label
+    checkpoint("drop-target cells: " & $targetCells & ", re-tinted with the " &
+               "glyph kept: " & $retinted)
     ck targetCells > 0
-    let hovered = b.interaction.hover.get
-    ck geom.cellsFor(hovered) ==
+    ck retinted == targetCells
+    ck ghostSeen
+    ck geom.dropIndicationCells(dropIndicationOf(b.interaction)).tint ==
        (block:
           var found = CellArea()
           for d in screen.decorations:

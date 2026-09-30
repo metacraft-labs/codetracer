@@ -80,6 +80,7 @@ import nim_termctl
 import ../app/input/modal_state
 import ../app/theme/degradation
 import ../app/views/styled_row
+import ../app/views/frame_overlay
 import ./capabilities
 import ./resize
 import ./ssh_tuning
@@ -285,6 +286,10 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
 # `test_real_call_stack.nim`'s hyperlink identity assertion resolve and read
 # exactly as they did.
 
+const
+  MotionTrackingOnBytes* = "\x1b[?1002h"
+  MotionTrackingOffBytes* = "\x1b[?1002l"
+
 proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
   ##
@@ -304,6 +309,25 @@ proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   let driver = newHeadlessDriver(cols, height)
   let comp = newCompositor(cols, height)
   comp.paint(styledRowsTree(renderer, rows), driver)
+  driver.buffer
+
+proc composite*(rows: seq[StyledRow]; cols, height: int;
+                overlays: seq[FrameOverlay];
+                caps: TerminalCapabilities): ScreenBuffer =
+  ## `composite`, with the frame's overlays applied OVER the composited rows
+  ## (PLAT-47): a drop tint re-colours cells without replacing a glyph, and
+  ## the ghost label is drawn above the tint. With no overlays this is the
+  ## same call, byte for byte.
+  if overlays.len == 0:
+    return composite(rows, cols, height)
+  resetNodeIds()
+  let renderer = TerminalRenderer()
+  let driver = newHeadlessDriver(cols, height)
+  let comp = newCompositor(cols, height)
+  let tree = styledRowsTree(renderer, rows)
+  for node in overlayNodes(renderer, overlays, caps):
+    renderer.appendChild(tree, node)
+  comp.paint(tree, driver)
   driver.buffer
 
 proc plainScreen*(buf: ScreenBuffer): string =
@@ -491,6 +515,11 @@ proc start*(d: TerminalDriver) =
     # `--no-mouse` — the negotiation, observed from the terminal's side.
     d.mouseCapture = enableMouseCapture(d.outFd)
     d.mouseOwned = true
+    # PLAT-47: BUTTON-EVENT TRACKING (`?1002`) too — a motion report while a
+    # button is held — so a drag's drop indication and ghost follow the
+    # pointer and a divider previews where it would land. Only while a
+    # button is down: no report for a pointer merely passing over.
+    writeAll(d.outFd, MotionTrackingOnBytes)
   # NOTHING IS SENT FOR THE KITTY KEYBOARD PROTOCOL OR FOR modifyOtherKeys,
   # on a terminal that advertises either. See
   # `app/theme/capabilities.TerminalCapabilities.kittyKeyboard`: both change
@@ -508,6 +537,7 @@ proc stop*(d: TerminalDriver) =
   ## SIGTERM leave the terminal in the same state: mouse off, alternate screen
   ## left, cursor shown, termios restored last.
   if d.mouseOwned:
+    writeAll(d.outFd, MotionTrackingOffBytes)
     disableMouseCapture(d.mouseCapture)
     d.mouseOwned = false
   if d.altOwned:
@@ -520,7 +550,8 @@ proc stop*(d: TerminalDriver) =
   d.started = false
 
 proc paint*(d: TerminalDriver; rows: seq[StyledRow];
-            prologue = ""; epilogue = "") =
+            prologue = ""; epilogue = "";
+            overlays: seq[FrameOverlay] = @[]) =
   ## One frame, degraded to the negotiated tier and written in ONE `write(2)`
   ## loop.
   ##
@@ -540,7 +571,7 @@ proc paint*(d: TerminalDriver; rows: seq[StyledRow];
   ## diffed frame and a full frame leave a terminal in the same state.
   let sz = d.size()
   let degraded = degradeRows(rows, d.caps)
-  let buf = composite(degraded, sz.cols, sz.rows)
+  let buf = composite(degraded, sz.cols, sz.rows, overlays, d.caps)
   let stream = d.emitter.emit(buf, prologue, epilogue)
   writeAll(d.outFd, stream)
   d.coalescer.noteFlush()

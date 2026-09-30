@@ -76,7 +76,9 @@ proc buildTree*(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
   ## arrive.
   currentStep = step
   ensureRuntime(cols, rows)
-  styledRowsTree(r, current.shellScreenOf().styledRows)
+  # The frame as the terminal draws it: its rows and (PLAT-47) its
+  # overlays — the drag ghost is a label over the rows.
+  frameTree(r, current.shellScreenOf())
 
 proc buildTree*(r: TerminalRenderer; cols, rows: int): TerminalNode =
   buildTree(r, cols, rows, 0)

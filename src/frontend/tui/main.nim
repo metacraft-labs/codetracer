@@ -79,6 +79,7 @@ import ./host/native_host
 import ./host/terminal_driver
 import ./host/terminal_probe
 import ./host/tui_session
+import ./host/vcs_source
 import ../viewmodel/host/keymap_preference
 
 const
@@ -231,7 +232,8 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
     epilogue = "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" & ShowCursorBytes
   driver.paint(screen.styledRows,
                prologue = cursorControlBytes(rt.modal.mode),
-               epilogue = epilogue)
+               epilogue = epilogue,
+               overlays = screen.frameOverlays)
 
 proc themeSwitch(negotiation: StartupNegotiation; driver: TerminalDriver;
                  rt: TuiRuntime): proc(name: string): bool {.closure.} =
@@ -446,6 +448,11 @@ proc interactive(command: TuiCommand): int =
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
   session.refresh(rt)
+  # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
+  # panel reads for a replay — the process's own working directory.
+  let vcs = newVcsSource(projectRoot)
+  defer: vcs.close()
+  vcs.refresh(rt)
   app.notification = describe(session)
   if negotiation.caps.tmuxRgbWithheld:
     # THE ONE CAPABILITY FINDING THAT OUTLIVES FRAME 0: a user whose tmux is
@@ -502,7 +509,8 @@ proc interactive(command: TuiCommand): int =
       # loop that never polled it would leave that build running with no
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
-      if drainHighlights(rt, highlights, files) or built:
+      let vcsChanged = vcs.tick(rt)
+      if drainHighlights(rt, highlights, files) or built or vcsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size
@@ -678,6 +686,11 @@ proc editInteractive(command: TuiCommand): int =
   if furnished.len > 0:
     app.notification = furnished
   discard rt.focus.focusPaneKind(paneEditor)
+  # PLAT-47 deliverable 4: in Edit mode the VCS pane reads the project, the
+  # folder the desktop's edit mode hands its VCS panel.
+  let vcs = newVcsSource(root)
+  defer: vcs.close()
+  vcs.refresh(rt)
 
   paint(driver, rt)
 
@@ -694,7 +707,8 @@ proc editInteractive(command: TuiCommand): int =
       # read while the compiler runs, and the clock that bounds an unattended
       # session is checked on every tick. See `host/build_runner.pollBuild`.
       let built = advanceBuild(rt, edit, report = true)
-      if drainHighlights(rt, highlights, files) or built:
+      let vcsChanged = vcs.tick(rt)
+      if drainHighlights(rt, highlights, files) or built or vcsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size

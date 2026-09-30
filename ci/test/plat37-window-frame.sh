@@ -106,7 +106,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${root}" || exit 1
 
 WS="$(cd "${root}/.." && pwd)"
-ISONIM_GPUI="${WS}/isonim-gpui"
+# `ISONIM_GPUI_DIR` names a differently placed isonim-gpui checkout (a
+# worktree beside this one); the default is the workspace sibling.
+ISONIM_GPUI="${ISONIM_GPUI_DIR:-${WS}/isonim-gpui}"
 GUI_ASSERT="${WS}/GuiAssert"
 OUT="${root}/build/plat37"
 BIN="${root}/build/bin/codetracer-gpui"

@@ -99,7 +99,6 @@ proc wait*(duration: int): Future[void] =
     discard windowSetTimeout(resolve, duration)
 
 proc chr*(i: int): cstring {.importcpp: "String.fromCharCode(#)".}
-proc charAt*(s: cstring, index: int): cstring {.importcpp: "#.charAt(#)".}
 
 proc parseJSInt*(s: cstring): int {.importcpp: "parseInt(#)".}
 proc parseJSInt*(i: int): int {.importcpp: "parseInt(#)".}
@@ -113,7 +112,7 @@ proc slice*[T](s: seq[T], start: int, finish: int): seq[T] {.importcpp: "#.slice
 
 proc toLowerCase*(s: cstring): cstring {.importcpp.}
 proc toUpperCase*(s: cstring): cstring {.importcpp.}
-proc capitalize*(s: cstring): cstring = s.charAt(0).toUpperCase() & s.slice(1)
+proc capitalize*(s: cstring): cstring = s.slice(0, 1).toUpperCase() & s.slice(1)
 
 proc trim*(s: cstring): cstring {.importcpp: "#.trim()".}
 

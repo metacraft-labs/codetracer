@@ -1,0 +1,600 @@
+{
+ "_comment": [
+  "PLAT-47 part B \u2014 the GPUI window, read from its own pixels.",
+  "Captured by `just plat47-gpui-window` (headless sway, a virtual",
+  "pointer device, wtype) and measured by `just plat47-gpui-window-record`",
+  "(ci/test/plat47_gpui_window.py). Asserted by",
+  "src/frontend/gpui/tests/test_plat47_gpui_window.nim."
+ ],
+ "frame": [
+  1920,
+  1080
+ ],
+ "settled": {
+  "base": true,
+  "resize-live": true,
+  "resize-done": true,
+  "press-body": true,
+  "drop-base": true,
+  "drop-split": true,
+  "drop-whole": true,
+  "drop-slot": true,
+  "drop-dock": true,
+  "drop-cancel": true,
+  "drop-released": true,
+  "drop-commit": true,
+  "vcs": true,
+  "vcs-refresh": true,
+  "dock-committed": true,
+  "dock-revealed": true,
+  "dock-dismissed": true,
+  "pages-base": true,
+  "pages-end": true
+ },
+ "focusRing": {
+  "bbox": [
+   396,
+   12,
+   470,
+   1056
+  ],
+  "sides": {
+   "top": {
+    "ring": 462,
+    "of": 462,
+    "inside": 0
+   },
+   "bottom": {
+    "ring": 462,
+    "of": 462,
+    "inside": 0
+   },
+   "left": {
+    "ring": 1048,
+    "of": 1048,
+    "inside": 0
+   },
+   "right": {
+    "ring": 1048,
+    "of": 1048,
+    "inside": 0
+   }
+  }
+ },
+ "editor": {
+  "body": [
+   397,
+   13,
+   468,
+   1054
+  ],
+  "pixelsByDesktopColour": {
+   "keyword": 105,
+   "string": 4055,
+   "comment": 127,
+   "identifier": 258,
+   "delimiter": 2,
+   "lineNumber": 1197,
+   "activeLineNumber": 68,
+   "ground": 430775,
+   "oldBand4f4f4f": 0,
+   "chromePaneFill": 0
+  },
+  "desktop": {
+   "background": "#282828",
+   "keyword": "#5a9dd4",
+   "string": "#d6a38d",
+   "comment": "#78a96c",
+   "number": "",
+   "identifier": "#f3f3f3",
+   "delimiter": "#b6c0cb",
+   "lineNumber": "#575757",
+   "activeLineNumber": "#c8c8c8",
+   "executionLine": "#404040",
+   "selection": "#353535"
+  },
+  "text": "Editor\n\nthe recording's source\n\np\u00bb 1 #!/usr/binfenv python3\n\"\"\"calc \u2014 the small, fast, deterministic program b\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS\n"
+ },
+ "band": {
+  "rows": [
+   77,
+   102
+  ],
+  "startX": 462,
+  "endX": 852,
+  "activeNumberMaxX": 439,
+  "gutterAtBandRow": "#282828",
+  "afterBandAtRow": "#282828",
+  "bodyLeft": 397,
+  "bodyRight": 864
+ },
+ "tabs": {
+  "fileTree": {
+   "rect": [
+    19,
+    13,
+    70,
+    30
+   ],
+   "base": {
+    "mass": 233.9,
+    "ink": "#c8c8c8",
+    "ground": "#1b222c"
+   },
+   "vcs": {
+    "mass": 124.1,
+    "ink": "#727272",
+    "ground": "#1b222c"
+   }
+  },
+  "vcs": {
+   "rect": [
+    89,
+    13,
+    50,
+    30
+   ],
+   "base": {
+    "mass": 112.3,
+    "ink": "#727272",
+    "ground": "#1b222c"
+   },
+   "vcs": {
+    "mass": 198.6,
+    "ink": "#c8c8c8",
+    "ground": "#1b222c"
+   }
+  }
+ },
+ "resize": {
+  "baseRingLeft": 396,
+  "liveRingLeft": 476,
+  "doneRingLeft": 476,
+  "pressBodyRingLeft": 476,
+  "pressBodyChanged": 0,
+  "savedLayout": {
+   "version": 4,
+   "layout": {
+    "kind": "row",
+    "children": [
+     {
+      "kind": "stack",
+      "activeIndex": 1,
+      "weight": 24.25531914893617,
+      "children": [
+       {
+        "kind": "pane",
+        "pane": "fileTree"
+       },
+       {
+        "kind": "pane",
+        "pane": "vcs"
+       },
+       {
+        "kind": "pane",
+        "pane": "testResults"
+       }
+      ]
+     },
+     {
+      "kind": "pane",
+      "pane": "editor",
+      "weight": 20.74468085106383
+     },
+     {
+      "kind": "column",
+      "weight": 55.0,
+      "children": [
+       {
+        "kind": "row",
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "scratchpad"
+           }
+          ]
+         },
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "calltrace"
+           },
+           {
+            "kind": "pane",
+            "pane": "agentActivity"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "kind": "stack",
+        "activeIndex": 0,
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "pane",
+          "pane": "eventLog"
+         },
+         {
+          "kind": "pane",
+          "pane": "timeline"
+         },
+         {
+          "kind": "pane",
+          "pane": "terminalOutput"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "docked": [
+    {
+     "pane": "state",
+     "edge": "left",
+     "order": 0
+    }
+   ]
+  }
+ },
+ "drop": {
+  "editorBody": [
+   477,
+   13,
+   387,
+   1054
+  ],
+  "pointers": {
+   "drop-split": [
+    860,
+    540
+   ],
+   "drop-whole": [
+    670,
+    540
+   ],
+   "drop-slot": [
+    1601,
+    28
+   ],
+   "drop-dock": [
+    4,
+    540
+   ]
+  },
+  "drop-split": {
+   "tintBBox": [
+    670,
+    13,
+    194,
+    1054
+   ],
+   "changedPixels": 204476,
+   "ghostChangedPixels": 888,
+   "ghostCentre": [
+    27,
+    34,
+    44
+   ]
+  },
+  "drop-whole": {
+   "tintBBox": [
+    477,
+    13,
+    387,
+    1054
+   ],
+   "changedPixels": 402778,
+   "ghostChangedPixels": 5120,
+   "ghostCentre": [
+    27,
+    34,
+    44
+   ]
+  },
+  "drop-slot": {
+   "tintBBox": [
+    1395,
+    13,
+    512,
+    30
+   ],
+   "changedPixels": 14880,
+   "ghostChangedPixels": 851,
+   "ghostCentre": [
+    27,
+    34,
+    44
+   ]
+  },
+  "drop-dock": {
+   "tintBBox": [
+    12,
+    12,
+    48,
+    1056
+   ],
+   "changedPixels": 49280,
+   "ghostChangedPixels": 669,
+   "ghostCentre": [
+    27,
+    34,
+    44
+   ]
+  },
+  "cancelChangedPixels": 0,
+  "releasedChangedPixels": 0,
+  "commitRing": [
+   476,
+   12,
+   190,
+   1056
+  ],
+  "commitArrangement": [
+   {
+    "panes": [
+     "fileTree",
+     "vcs",
+     "testResults"
+    ],
+    "rect": [
+     12,
+     12,
+     456,
+     1056
+    ]
+   },
+   {
+    "panes": [
+     "editor"
+    ],
+    "rect": [
+     476,
+     12,
+     190,
+     1056
+    ]
+   },
+   {
+    "panes": [
+     "state"
+    ],
+    "rect": [
+     674,
+     12,
+     191,
+     1056
+    ]
+   },
+   {
+    "panes": [
+     "scratchpad"
+    ],
+    "rect": [
+     873,
+     12,
+     513,
+     524
+    ]
+   },
+   {
+    "panes": [
+     "calltrace",
+     "agentActivity"
+    ],
+    "rect": [
+     1394,
+     12,
+     514,
+     524
+    ]
+   },
+   {
+    "panes": [
+     "eventLog",
+     "timeline",
+     "terminalOutput"
+    ],
+    "rect": [
+     873,
+     544,
+     1035,
+     524
+    ]
+   }
+  ]
+ },
+ "vcs": {
+  "text": "VCS\n\nplat47-vcs\n\nWorking Tree (3)\n\nA added.txt\n\nM notes.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
+  "active": "vcs"
+ },
+ "vcsRefresh": {
+  "text": "VCS\n\nplat47-vcs\n\nWorking Tree (4)\n\nA added.txt\n\nM notes.txt\n\n? late.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
+  "refreshes": 1,
+  "changedPixels": 4544,
+  "changedBBox": [
+   25,
+   114,
+   239,
+   168
+  ],
+  "paneBody": [
+   13,
+   43,
+   454,
+   1024
+  ]
+ },
+ "dock": {
+  "strips": [
+   {
+    "edge": "left",
+    "rect": [
+     12,
+     12,
+     24,
+     1056
+    ],
+    "slots": [
+     {
+      "pane": "state",
+      "label": "State",
+      "rect": [
+       12,
+       18,
+       24,
+       100
+      ]
+     }
+    ]
+   }
+  ],
+  "treePanes": [
+   "agentActivity",
+   "calltrace",
+   "editor",
+   "eventLog",
+   "fileTree",
+   "scratchpad",
+   "terminalOutput",
+   "testResults",
+   "timeline",
+   "vcs"
+  ],
+  "stripGround": "#1b222c",
+  "stripInk": 161,
+  "slotText": "=\nt\na\nt\ne\n",
+  "savedLayout": {
+   "version": 4,
+   "layout": {
+    "kind": "row",
+    "children": [
+     {
+      "kind": "stack",
+      "activeIndex": 1,
+      "weight": 24.25531914893617,
+      "children": [
+       {
+        "kind": "pane",
+        "pane": "fileTree"
+       },
+       {
+        "kind": "pane",
+        "pane": "vcs"
+       },
+       {
+        "kind": "pane",
+        "pane": "testResults"
+       }
+      ]
+     },
+     {
+      "kind": "pane",
+      "pane": "editor",
+      "weight": 20.74468085106383
+     },
+     {
+      "kind": "column",
+      "weight": 55.0,
+      "children": [
+       {
+        "kind": "row",
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "scratchpad"
+           }
+          ]
+         },
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "calltrace"
+           },
+           {
+            "kind": "pane",
+            "pane": "agentActivity"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "kind": "stack",
+        "activeIndex": 0,
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "pane",
+          "pane": "eventLog"
+         },
+         {
+          "kind": "pane",
+          "pane": "timeline"
+         },
+         {
+          "kind": "pane",
+          "pane": "terminalOutput"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "docked": [
+    {
+     "pane": "state",
+     "edge": "left",
+     "order": 0
+    }
+   ]
+  },
+  "revealed": {
+   "pane": "state",
+   "rect": [
+    44,
+    12,
+    621,
+    1056
+   ]
+  },
+  "revealChangedBBox": [
+   18,
+   12,
+   647,
+   1056
+  ],
+  "revealChangedPixels": 194452,
+  "revealText": "State\nState\nLocals\nGlobals\n",
+  "dismissChangedPixels": 0
+ },
+ "calltrace": {
+  "baseText": "Call Trace 603 call(s)\n<toplevel> #0\n<_ main_ > #1\nmain #2\nstep #3\nleaf #4\nstep #5\nleaf #6\nstep #7\nleaf #8\nstep #9\nleaf #10\nstep #11\nleaf #12\nstep #13\nleaf #14\nstep #15\nleaf #16\n",
+  "endText": "Call Trace 603 call(s)\nleaf #586\nstep #587\nleaf #588\nstep #589\nleaf #590\nstep #591\nleaf #592\nstep #593\nleaf #594\nstep #595\nleaf #596\nstep #597\nleaf #598\nstep #599\nleaf #600\nstep #601\nleaf #602\n",
+  "sectionLoads": 9,
+  "lastTop": "gesture calltrace top=586 rows=17 total=603"
+ }
+}

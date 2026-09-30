@@ -551,9 +551,10 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
       ck ex.report.len > 0
       ck ex.entries == {pkText}
       ck ex.report.contains("accepted exception")
-    # 58 = the 10 vocabulary panes x 3 assertions each (portable, visited, not
-    # native) + 5 for the source escape + 5 for the timeline escape + the 6
-    # accepted exceptions x 3. It was 19 when the loop covered 4 panes and the
+    # 58 = the 11 vocabulary panes x 3 assertions each (portable, visited, not
+    # native) + 5 for the source escape + 5 for the timeline escape + the 5
+    # accepted exceptions x 3 (PLAT-47 moved `paneVcs` from the second group
+    # to the first, which leaves the sum where it was). It was 19 when the loop covered 4 panes and the
     # only escape was the source pane; PLAT-41 moved every term, and PLAT-45
     # added the five desktop panes the shared default places (each an accepted
     # exception that reports rather than renders blank).

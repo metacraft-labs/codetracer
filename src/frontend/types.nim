@@ -894,6 +894,10 @@ type
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
     changedFiles*: seq[VCSChangedFile]
+    workingTreeChanges*: seq[VCSChangedFile]
+      ## PLAT-47: the working tree's changed files (`git status`), each with
+      ## the one-letter state `vcs_vm.workingTreeStatusLetter` gives it — the
+      ## list the terminal's and GPUI's VCS panes draw from the same reader.
     selectedCommitIndices*: seq[int]   ## all expanded commit indices (multi-select)
     lastClickedCommitIndex*: int       ## anchor for shift-click range (-1 = none)
     commitFilesCache*: JsAssoc[int, seq[VCSChangedFile]]

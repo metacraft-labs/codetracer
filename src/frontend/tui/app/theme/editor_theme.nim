@@ -62,7 +62,18 @@ const
     tcPunctuation: "delimiter",
     tcStringEscape: "string.escape",
     tcBracket: "delimiter.bracket",
-    tcTag: "tag"]
+    tcTag: "tag",
+    # PLAT-47 B4: the scopes the other Monaco tokenizers (Rust, C/C++, Go,
+    # JavaScript/TypeScript, Java, Ruby, shell, YAML) give text the desktop
+    # colours on its own.
+    tcTypeIdentifier: "type.identifier",
+    tcKeywordType: "keyword.type",
+    tcCommentDoc: "comment.doc",
+    tcRegexp: "regexp",
+    tcVariable: "variable",
+    tcNamespace: "namespace",
+    tcAttributeName: "attribute.name",
+    tcMetatag: "metatag"]
     ## **THE TABLE.** Indexed by `TokenClass`, so a class added without a row
     ## does not compile.
 
@@ -88,3 +99,62 @@ func editorScopeToken*(scope: string): DesignToken =
 func tokenClassToken*(c: TokenClass): DesignToken =
   ## The generated token a syntax class is painted with.
   editorScopeToken(TokenClassScope[c])
+
+
+# ---------------------------------------------------------------------------
+# PLAT-47 B4: a Monaco token TYPE -> the class that paints it
+# ---------------------------------------------------------------------------
+
+const MonacoScopeClass*: seq[(string, TokenClass)] = @[
+  ("", tcPlain),
+  ("keyword", tcKeyword), ("keyword.type", tcKeywordType),
+  ("type", tcType), ("type.identifier", tcTypeIdentifier),
+  ("string", tcString), ("string.escape", tcStringEscape),
+  ("number", tcNumber), ("number.hex", tcNumber), ("number.octal", tcNumber),
+  ("number.binary", tcNumber), ("number.float", tcNumber),
+  ("comment", tcComment), ("comment.doc", tcCommentDoc),
+  ("operator", tcOperator),
+  ("delimiter", tcPunctuation), ("delimiter.bracket", tcBracket),
+  ("tag", tcTag), ("regexp", tcRegexp), ("variable", tcVariable),
+  ("namespace", tcNamespace), ("attribute.name", tcAttributeName),
+  ("metatag", tcMetatag)]
+  ## Every theme rule a token of the exported tokenizers can resolve to, and
+  ## the class painted for it. A rule the tokenizers cannot reach has no row;
+  ## `tests/test_plat47_monaco_lexers.nim` walks every token the definitions
+  ## can produce and asserts each resolves to a rule with a row here whose
+  ## class is painted the rule's colour in BOTH themes. (The number variants
+  ## share `tcNumber` because both themes paint them the number colour; that
+  ## test is what keeps it true.)
+
+func themeRuleOf*(tokenType: string): string =
+  ## The theme rule Monaco applies to a token type: the rule for the type,
+  ## else for its longest dotted prefix, else the default (`""`). Monaco's
+  ## theme trie matches a type segment by segment from the start, which picks
+  ## the same rule.
+  var s = tokenType
+  while s.len > 0:
+    for r in EditorThemeRules:
+      if r.scope == s:
+        return s
+    var cut = -1
+    for i in countdown(s.high, 0):
+      if s[i] == '.':
+        cut = i
+        break
+    s = if cut < 0: "" else: s[0 ..< cut]
+  ""
+
+func classForMonacoToken*(tokenType: string): TokenClass =
+  ## The class that paints a Monaco token type as the desktop's theme does.
+  ## An identifier (no rule of its own, the default colour) keeps its own
+  ## class so the terminal can still tell a name from punctuation-free
+  ## whitespace; it is painted the default colour.
+  let rule = themeRuleOf(tokenType)
+  if rule.len == 0:
+    return (if tokenType.len >= 10 and tokenType[0 ..< 10] == "identifier":
+              tcIdentifier
+            else: tcPlain)
+  for (scope, cls) in MonacoScopeClass:
+    if scope == rule:
+      return cls
+  tcPlain

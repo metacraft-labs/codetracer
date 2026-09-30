@@ -35,7 +35,7 @@
 ## an ordinary single-pane layout would be indistinguishable from a deliberate
 ## one, which is the failure the rule is written against.
 
-import std/[sets, strutils, wordwrap]
+import std/[options, sets, strutils, unicode, wordwrap]
 
 import isonim_tui
 
@@ -64,6 +64,8 @@ import ./status_bar
 import ./styled_row
 import ./timeline_bar
 import ./tracepoint_manager
+import ./vcs_pane
+import ./frame_overlay
 import ./variables
 
 export header, status_bar, profile, project, source_pane, styled_row
@@ -142,6 +144,11 @@ type
       ## with no session open paints CTUI-3's own `timelineScrubber` row and
       ## every CTUI-3 assertion that reads it still reads it.
     eventLog*: EventLogModel
+    vcs*: VcsPaneModel
+      ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
+      ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
+      ## loaded by default, so a shell with no repository read paints the
+      ## generic title it always did.
     points*: PointListPaneModel
       ## PLAT-40. The Points pane, as a value. NOT LOADED BY DEFAULT, so a shell
       ## with no session paints the plain `POINTS ────` title row it always did.
@@ -188,6 +195,10 @@ type
       ## per frame and break that identity. `binding.geometryOf` recombines the
       ## two, and an empty `docked` recombines to exactly the projection CTUI-3
       ## drew, so every golden written before PLAT-6 is byte-identical.
+    dragPointer*: Option[(int, int)]
+      ## PLAT-47: the pointer's cell during a drag (row, column) — the
+      ## binding's measurement, where the ghost label is drawn. `none` when no
+      ## drag is in flight or no pointer is known.
     interaction*: Interaction
       ## PLAT-6. The gesture in flight, READ and never stored: §5's third
       ## obligation is that a binding draws transient state from `Interaction`,
@@ -262,6 +273,11 @@ type
     decorations*: seq[LayoutDecoration]
       ## What was painted over the panes: the strips, and whatever the gesture
       ## in flight asked for. Empty when there is no gesture and nothing docked.
+    frameOverlays*: seq[FrameOverlay]
+      ## PLAT-47 deliverable 6: what the compositor draws OVER this frame's
+      ## cells — a drag's drop tint and insertion caret (re-colouring, never
+      ## replacing, the cells of the region the drop would occupy) and the
+      ## ghost label following the pointer. Derived from `decorations`.
 
 const
   PaneSeparatorGlyph* = "│"
@@ -727,6 +743,9 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneFileTree and not model.fileTree.isEmpty:
     underStrip:
       discard paintFileTree(g, content, model.fileTree)
+  elif region.pane == paneVcs and model.vcs.loaded:
+    underStrip:
+      discard paintVcsPane(g, content, model.vcs)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD, and that is the difference between this pane and
     # every other one. An empty call stack means "no session", which is what
@@ -874,6 +893,30 @@ proc degradedBanner(status: ProjectionStatus; width: int): string =
 # The screen
 # ---------------------------------------------------------------------------
 
+const
+  DragGhostStyle* = CellStyle(role: srTabActive, surface: srTabActive,
+                              bold: true, reverse: true)
+    ## The ghost label: an active tab, lifted off the strip by reverse video.
+
+proc frameOverlaysOf*(decorations: seq[LayoutDecoration]): seq[FrameOverlay] =
+  ## The decorations a frame draws as OVERLAYS (`OverlayDecorations`), in
+  ## paint order: the tint, the caret over it, the ghost over both.
+  for kind in [ldDropTarget, ldDropCaret, ldDragGhost]:
+    for d in decorations:
+      if d.kind != kind or d.area.isEmptyArea:
+        continue
+      case kind
+      of ldDropTarget:
+        result.add FrameOverlay(kind: foTint, row: d.area.row, col: d.area.col,
+                                width: d.area.width, height: d.area.height)
+      of ldDropCaret:
+        result.add FrameOverlay(kind: foCaret, row: d.area.row, col: d.area.col,
+                                width: d.area.width, height: d.area.height)
+      else:
+        result.add FrameOverlay(kind: foLabel, row: d.area.row, col: d.area.col,
+                                width: d.area.width, height: 1,
+                                text: d.label, style: DragGhostStyle)
+
 proc shellScreen*(model: ShellModel; width, height: int;
                   policy = DefaultProjectionPolicy): ShellScreen =
   ## The whole frame: `height` rows of exactly `width` cells, plus the geometry
@@ -887,8 +930,10 @@ proc shellScreen*(model: ShellModel; width, height: int;
   let composed = initLayout(model.layout, model.docked)
   let geometry = geometryOf(composed, body, model.interaction, policy)
   let projection = geometry.projection
-  let decorations = decorationsFor(composed, geometry, model.interaction,
-                                   policy)
+  let decorations = decorationsFor(
+    composed, geometry, model.interaction, policy,
+    pointerRow = (if model.dragPointer.isSome: model.dragPointer.get[0] else: -1),
+    pointerCol = (if model.dragPointer.isSome: model.dragPointer.get[1] else: -1))
   result = ShellScreen(rows: @[], styledRows: @[], body: body,
                        projection: projection,
                        overlay: (if model.tracepoints.open:
@@ -897,7 +942,8 @@ proc shellScreen*(model: ShellModel; width, height: int;
                        frameViewerOverlay: (if model.frameViewer.open:
                                               frameViewerOverlayArea(body)
                                             else: CellArea()),
-                       geometry: geometry, decorations: decorations)
+                       geometry: geometry, decorations: decorations,
+                       frameOverlays: frameOverlaysOf(decorations))
   if width <= 0 or height <= 0:
     return
 
@@ -990,11 +1036,36 @@ proc shellRows*(model: ShellModel; width, height: int;
   ## against, unchanged by CTUI-5.
   shellScreen(model, width, height, policy).rows
 
-proc shellStyledRows*(model: ShellModel; width, height: int;
-                      policy = DefaultProjectionPolicy): seq[StyledRow] =
-  ## The rows with their style. What CTUI-5's pane assertions and the component
-  ## tree below both read.
-  shellScreen(model, width, height, policy).styledRows
+proc frameTree*(r: TerminalRenderer; screen: ShellScreen): TerminalNode =
+  ## A composed frame as a component tree: its rows, then (PLAT-47) its
+  ## overlays over them — the drop tint and caret, the drag ghost — at the
+  ## 16-colour Dark rung `styledRowNode` resolves an undegraded row at (see
+  ## `styled_row`'s header).
+  result = styledRowsTree(r, screen.styledRows)
+  if screen.frameOverlays.len > 0:
+    for node in overlayNodes(r, screen.frameOverlays, HarnessOverlayCaps):
+      r.appendChild(result, node)
+
+proc visibleRows*(screen: ShellScreen): seq[string] =
+  ## The frame's rows as a terminal SHOWS them: `rows` with the label
+  ## overlays (PLAT-47's drag ghost) written over the cells they cover. Tints
+  ## change colours only, so they move no character.
+  var grid: seq[seq[string]] = @[]
+  for line in screen.rows:
+    var row: seq[string] = @[]
+    for r in runes(line):
+      row.add $r
+    grid.add row
+  for o in screen.frameOverlays:
+    if o.kind != foLabel or o.row < 0 or o.row >= grid.len:
+      continue
+    var c = o.col
+    for r in runes(o.text):
+      if c >= 0 and c < grid[o.row].len:
+        grid[o.row][c] = $r
+      inc c
+  for row in grid:
+    result.add row.join("")
 
 proc renderShellTree*(model: ShellModel; r: TerminalRenderer;
                       width, height: int;
@@ -1004,4 +1075,4 @@ proc renderShellTree*(model: ShellModel; r: TerminalRenderer;
   ## Built through the renderer's own element API rather than the `ui` DSL, for
   ## the reason `app/tui_app.nim` records — this milestone's compile must not
   ## depend on `isonim`'s tailwind style map being generated.
-  styledRowsTree(r, shellStyledRows(model, width, height, policy))
+  frameTree(r, shellScreen(model, width, height, policy))

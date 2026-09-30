@@ -87,6 +87,7 @@ import viewmodels/search_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
+import viewmodels/vcs_vm
 
 import headless_app/layout_model
 
@@ -122,7 +123,10 @@ const
                                          # PLAT-41's measured correction: the
                                          # replay file tree is the recording's
                                          # sources, as the desktop draws it.
-                                         paneFileTree}
+                                         paneFileTree,
+                                         # PLAT-47 deliverable 4: the VCS pane,
+                                         # from the desktop's own `VCSVM`.
+                                         paneVcs}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -135,8 +139,9 @@ const
     ## so this set is that table's consequence rather than a preference.
 
   PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
-                                            # PLAT-45 — the desktop's panes.
-                                            paneVcs, paneAgentActivity,
+                                            # PLAT-45 — the desktop's panes
+                                            # (PLAT-47 drew `paneVcs`).
+                                            paneAgentActivity,
                                             paneTerminalOutput,
                                             paneTestResults, paneConstraints}
     ## **Panes this front-end deliberately does not draw, with the reason
@@ -149,10 +154,11 @@ const
     ## reader trusting that somebody thought about it.
     ##
     ## `paneBuildOutput` is an edit-mode pane whose subject is the working
-    ## tree, and the only session in scope is a replay one. The five PLAT-45
-    ## added are the desktop's own panes — placed by the shared default in
-    ## every front-end so every product opens with the same panes — whose
-    ## ViewModels the headless replay session does not own. See the two
+    ## tree, and the only session in scope is a replay one. The four PLAT-45
+    ## added that remain (it added five; PLAT-47 drew the VCS pane from the
+    ## desktop's `VCSVM`) are the desktop's own panes — placed by the shared
+    ## default in every front-end so every product opens with the same panes —
+    ## whose ViewModels the headless replay session does not own. See the two
     ## dispatch arms.
 
   PaneAccountedFor*: set[PaneKind] =
@@ -669,6 +675,59 @@ proc fileTreePaneView*(vm: FilesystemVM): PaneView =
   result.root = fileTreeNode(root, "fileTree")
   result.entries = entriesOf(result.root)
 
+# ---------------------------------------------------------------------------
+# VCS — PLAT-47 deliverable 4
+# ---------------------------------------------------------------------------
+
+const VcsCommitsTitle* = "Commits"
+  ## The caption of the commit history section.
+
+proc vcsPaneView*(vm: VCSVM): PaneView =
+  ## The VCS pane, from the desktop's own ViewModel (`VCSVM`, which the
+  ## desktop's VCS panel draws): the branch, the working tree's changed files
+  ## with their states — the desktop's `Working Tree (N)` section, one
+  ## `<state> <path>` row each — and the commit history.
+  ##
+  ## Until PLAT-47 an accepted exception: a native front-end placed the pane
+  ## and reported that it had no view. The host now fills a `VCSVM` through
+  ## the platform's VCS facade (`vcs_vm.refreshFromFacade`, the parse the
+  ## desktop reads `git status` with), so the pane shows the repository.
+  result.pane = paneVcs
+  if vm.isNil:
+    result.report = "the VCS pane has no ViewModel; this front-end's host " &
+                    "did not open a repository"
+    result.root = viewText("vcs.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  if not vm.isGitRepo.val:
+    let why = vm.errorMessage.val
+    result.report = if why.len > 0: why else: "Not a git repository"
+    result.root = viewText("vcs.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let files = vm.workingTreeFiles.val
+  var fileRows: seq[ViewOption] = @[]
+  for i, f in files:
+    fileRows.add ViewOption(id: "file-" & $i, label: f.status & " " & f.path)
+  let tree =
+    if fileRows.len == 0: @[viewText("vcs.workingTree.clean", VCSCleanTreeText)]
+    else: @[viewList("vcs.workingTree.files", fileRows)]
+  var commitRows: seq[ViewOption] = @[]
+  for i, c in vm.commits.val:
+    commitRows.add ViewOption(id: "commit-" & $i,
+                              label: c.hash & " " & c.message)
+  # The branch is the section's own caption, as the desktop's panel heads
+  # its lists with it.
+  result.root = viewCollapsible("vcs.branch", vm.currentBranch.val, @[
+    viewCollapsible("vcs.workingTree",
+                    VCSWorkingTreeTitle & " (" & $files.len & ")", tree,
+                    expanded = true),
+    viewCollapsible("vcs.commits",
+                    VcsCommitsTitle & " (" & $commitRows.len & ")",
+                    @[viewList("vcs.commits.list", commitRows)],
+                    expanded = true)], expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
                medium: string): PaneView =
   ## **The ONE entry point a front-end calls.**
@@ -715,11 +774,13 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
         "not build the working tree and will not claim to"),
       entries: {pkText},
       report: "accepted exception: edit-mode pane, no replay-session source")
-  of paneVcs, paneAgentActivity, paneTerminalOutput, paneTestResults,
+  # PLAT-47 deliverable 4.
+  of paneVcs: vcsPaneView(VCSVM(vm))
+  of paneAgentActivity, paneTerminalOutput, paneTestResults,
      paneConstraints:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     #
-    # The shared default (`layout_model.sharedDefaultLayout`) places these five
+    # The shared default (`layout_model.sharedDefaultLayout`) places these four (five until PLAT-47 drew the VCS pane)
     # because the desktop's default did, and "every product opens with the
     # same panes" is only literally true if a front-end without a view still
     # puts the pane where it goes. Their ViewModels are the desktop's; the

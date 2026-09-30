@@ -280,6 +280,8 @@ proc sourcePaneModelFor*(vm: SourceVM;
     provenance = provenanceFor(availability),
     firstHeldLine = vm.heldFirstLine.val,
     heldLines = vm.heldLines.val,
+    entryContext = (if vm.heldLineContexts.val.len > 0:
+                      vm.heldLineContexts.val[0] else: ""),
     totalLineCount = vm.totalLineCount.val,
     viewportTop = vm.visibleFirstLine.val,
     executionLine = vm.executionLine.val,

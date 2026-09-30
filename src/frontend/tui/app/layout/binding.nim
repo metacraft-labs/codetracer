@@ -104,6 +104,7 @@ import ../views/styled_row
 import ./profile
 import ./project
 import ./tab_strip
+import ./cells
 
 export layout_interaction, layout_model
 export profile, project, tab_strip
@@ -159,11 +160,20 @@ type
     ## What a renderer draws that is not a pane. §5's third obligation.
     ldDockStrip = "dockStrip"
     ldDragGhost = "dragGhost"
-      ## Where the dragged pane currently lives — the thing the user is
-      ## "carrying".
+      ## The thing the user is "carrying": since PLAT-47 a small label with
+      ## the dragged pane's name that FOLLOWS THE POINTER (GoldenLayout's drag
+      ## proxy), drawn above the drop tint; where no pointer is known (a
+      ## keyboard-started drag) it marks the pane's origin as before.
     ldDropTarget = "dropTarget"
-      ## The one candidate the pointer is on. Highlighted without re-checking
-      ## anything, because `dropTargetsFor` already filtered through `apply`.
+      ## The region the drop would OCCUPY (PLAT-47, GoldenLayout's drop
+      ## zone): the half of a pane a split would take, the tab strip a join
+      ## would enter, a bare pane a join would stack, the edge a dock would
+      ## use (`layout_interaction.dropIndicationOf`). Highlighted without
+      ## re-checking anything, because `dropTargetsFor` already filtered
+      ## through `apply`. Drawn as a TINT of the cells, never over them.
+    ldDropCaret = "dropCaret"
+      ## For a join, the insertion point in the tab strip: one cell, drawn
+      ## as a stronger tint than the strip.
     ldResizeGuide = "resizeGuide"
       ## Where the divider would land if the resize committed now.
     ldRevealOverlay = "revealOverlay"
@@ -223,6 +233,12 @@ type
     pressCol*: int
       ## Where the last press landed, so a release at the SAME cell can be told
       ## from a drag. -1 when no button is down.
+    pointerRow*: int
+    pointerCol*: int
+      ## PLAT-47: where the pointer is during a drag — the press, then every
+      ## motion report — so the ghost label follows it. A MEASUREMENT, and so
+      ## held here in the terminal's binding, never in the `Interaction`
+      ## (PLAT-5's purity law). -1 when no drag is in flight.
 
 const
   DockStripThickness* = 1
@@ -710,6 +726,69 @@ proc cellsFor*(geom: LayoutGeometry; target: DropTarget): CellArea =
   geom.cellsFor(target.region)
 
 # ---------------------------------------------------------------------------
+# PLAT-47 deliverable 6: the drop indication, as cells
+# ---------------------------------------------------------------------------
+
+proc halfOf(area: CellArea; side: LayoutEdge): CellArea =
+  ## The half of `area` on `side` — what a split's new pane would take. The
+  ## odd cell of an odd extent goes to the side named (a 9-column pane's left
+  ## half is 5 wide), so a one-cell pane still shows a one-cell half.
+  if area.isEmptyArea:
+    return CellArea()
+  case side
+  of leLeft:
+    CellArea(col: area.col, row: area.row, width: (area.width + 1) div 2,
+             height: area.height)
+  of leRight:
+    let w = (area.width + 1) div 2
+    CellArea(col: area.col + area.width - w, row: area.row, width: w,
+             height: area.height)
+  of leTop:
+    CellArea(col: area.col, row: area.row, width: area.width,
+             height: (area.height + 1) div 2)
+  of leBottom:
+    let h = (area.height + 1) div 2
+    CellArea(col: area.col, row: area.row + area.height - h,
+             width: area.width, height: h)
+
+proc dropIndicationCells*(geom: LayoutGeometry; ind: DropIndication):
+    tuple[tint, caret: CellArea] =
+  ## **The drop indication, resolved against the terminal's geometry**: the
+  ## cells the drop would occupy (`tint`) and, for a join, the insertion caret
+  ## on the tab strip (`caret`). The one place the terminal turns
+  ## `dropIndicationOf`'s logical value into cells, as GoldenLayout sizes its
+  ## `lm_dropTargetIndicator`:
+  ##
+  ##   * a split tints the HALF of the target pane on the drop's side (the
+  ##     pane's own rectangle below its tab strip, `dropAreaOfPath`);
+  ##   * a join tints the stack's whole tab strip and marks the insertion
+  ##     point — the column `tabSlotCaret` gives the slot — with a caret;
+  ##   * a join onto a bare pane tints the whole pane;
+  ##   * a dock tints the strip along that layout edge (`stripAreaOf`).
+  case ind.kind
+  of diNone:
+    (tint: CellArea(), caret: CellArea())
+  of diSplitHalf:
+    (tint: halfOf(geom.dropAreaOfPath(ind.path), ind.side), caret: CellArea())
+  of diWholeNode:
+    (tint: geom.dropAreaOfPath(ind.path), caret: CellArea())
+  of diLayoutEdge:
+    (tint: geom.stripAreaOf(ind.side), caret: CellArea())
+  of diTabSlot:
+    let strip = geom.tabStripOf(ind.path)
+    if not strip.found:
+      (tint: CellArea(), caret: CellArea())
+    else:
+      let at = tabSlotCaret(strip.tabs, strip.active, ind.slot)
+      (tint: strip.area,
+       caret: CellArea(col: strip.area.col + min(at, max(0, strip.area.width - 1)),
+                       row: strip.area.row, width: 1, height: 1))
+
+proc ghostLabelFor*(source: PaneKind): string =
+  ## The dragged pane's name as the ghost shows it, padded like a tab.
+  " " & terminalPaneName(source) & " "
+
+# ---------------------------------------------------------------------------
 # §5 obligation 3: drawing the transient state
 # ---------------------------------------------------------------------------
 
@@ -794,14 +873,17 @@ proc resizeGuideFor(layout: Layout; geom: LayoutGeometry;
 
 proc decorationsFor*(layout: Layout; geom: LayoutGeometry;
                      interaction: Interaction;
-                     policy: ProjectionPolicy = DefaultProjectionPolicy):
+                     policy: ProjectionPolicy = DefaultProjectionPolicy;
+                     pointerRow = -1; pointerCol = -1):
     seq[LayoutDecoration] =
   ## Everything a frame draws that is not a pane, **derived from
-  ## `Interaction`** and stored by nobody (§5, obligation 3).
+  ## `Interaction`** and stored by nobody (§5, obligation 3) — plus, for a
+  ## drag, the pointer's cell (`pointerRow` / `pointerCol`, the binding's
+  ## measurement), which is where the ghost label goes.
   ##
   ## The order is the paint order: strips first (they are chrome), then the
-  ## ghost, then the highlighted target over it, then the guide, then the
-  ## reveal overlay last because an overlay is by definition on top.
+  ## drop tint and its caret, then the ghost over them, then the guide, then
+  ## the reveal overlay last because an overlay is by definition on top.
   result = @[]
   for strip in geom.strips:
     result.add LayoutDecoration(kind: ldDockStrip, area: strip.area,
@@ -810,16 +892,29 @@ proc decorationsFor*(layout: Layout; geom: LayoutGeometry;
   of ikNone:
     discard
   of ikDraggingTab:
-    let ghost = ghostAreaFor(geom, interaction.source, interaction.origin)
-    if not ghost.isEmptyArea:
-      result.add LayoutDecoration(kind: ldDragGhost, area: ghost,
-                                  label: $interaction.source)
-    if interaction.hover.isSome:
-      let target = interaction.hover.get
-      let area = geom.cellsFor(target)
-      if not area.isEmptyArea:
-        result.add LayoutDecoration(kind: ldDropTarget, area: area,
-                                    label: $target.kind)
+    let indication = dropIndicationOf(interaction)
+    let cells = geom.dropIndicationCells(indication)
+    if not cells.tint.isEmptyArea:
+      result.add LayoutDecoration(kind: ldDropTarget, area: cells.tint,
+                                  label: $indication.kind)
+    if not cells.caret.isEmptyArea:
+      result.add LayoutDecoration(kind: ldDropCaret, area: cells.caret,
+                                  label: "slot " & $indication.slot)
+    let label = ghostLabelFor(interaction.source)
+    if pointerRow >= 0 and pointerCol >= 0:
+      # GoldenLayout's drag proxy: beside the pointer, not under it, so the
+      # cell being pointed at stays visible.
+      let w = cellWidthOf(label)
+      let col = max(0, min(pointerCol + 1, geom.body.col + geom.body.width - w))
+      result.add LayoutDecoration(kind: ldDragGhost,
+                                  area: CellArea(col: col, row: pointerRow,
+                                                 width: w, height: 1),
+                                  label: label)
+    else:
+      let ghost = ghostAreaFor(geom, interaction.source, interaction.origin)
+      if not ghost.isEmptyArea:
+        result.add LayoutDecoration(kind: ldDragGhost, area: ghost,
+                                    label: $interaction.source)
   of ikResizingSplit:
     let guide = resizeGuideFor(layout, geom, interaction, policy)
     if not guide.isEmptyArea:
@@ -835,6 +930,7 @@ proc glyphFor*(kind: LayoutDecorationKind): string =
   of ldDockStrip: DockStripGlyph
   of ldDragGhost: DragGhostGlyph
   of ldDropTarget: DropTargetGlyph
+  of ldDropCaret: DropTargetGlyph
   of ldResizeGuide: ResizeGuideGlyph
   of ldRevealOverlay: RevealOverlayGlyph
 
@@ -854,6 +950,10 @@ proc healWideEdges(g: var StyledGrid; row, left, right: int) =
     g.paint(row, right - 1, " ")
     g.paint(row, right, " ")
 
+const OverlayDecorations* = {ldDropTarget, ldDropCaret, ldDragGhost}
+  ## The decorations a frame carries as OVERLAYS (PLAT-47): the drop tint and
+  ## caret re-colour the composited cells, the ghost is a label above them.
+
 proc paintDecorations*(g: var StyledGrid;
                        decorations: seq[LayoutDecoration]) =
   ## Composite decorations onto a painted screen, in place.
@@ -869,6 +969,11 @@ proc paintDecorations*(g: var StyledGrid;
   ## well as where.
   for d in decorations:
     if d.area.isEmptyArea:
+      continue
+    if d.kind in OverlayDecorations:
+      # PLAT-47: drawn by the compositor OVER the finished frame
+      # (`frameOverlaysOf`), not into it — a tint keeps the glyphs under it,
+      # and the ghost is above the tint.
       continue
     let glyph = glyphFor(d.kind)
     let right = d.area.col + d.area.width
@@ -903,7 +1008,7 @@ proc newLayoutBinding*(layout: Layout; profile: LayoutProfile;
                        focus = paneEditor): LayoutBinding =
   LayoutBinding(history: newLayoutHistory(layout), interaction: noInteraction(),
                 profile: profile, focus: focus, userModified: false,
-                pressRow: -1, pressCol: -1)
+                pressRow: -1, pressCol: -1, pointerRow: -1, pointerCol: -1)
 
 proc newLayoutBinding*(profile: LayoutProfile): LayoutBinding =
   ## A binding on the profile's own default arrangement — the tree
@@ -974,6 +1079,8 @@ proc dropDrag*(b: LayoutBinding): LayoutAction =
     return action(lasNoGesture, "no drag in flight")
   let cmd = commit(b.layout, b.interaction)
   b.interaction = b.interaction.cancel()
+  b.pointerRow = -1
+  b.pointerCol = -1
   if cmd.isNone:
     return action(lasNoOp, "the drop changed nothing")
   b.dispatch(cmd.get)
@@ -984,6 +1091,8 @@ proc cancelGesture*(b: LayoutBinding): LayoutAction =
   if b.interaction.kind == ikNone:
     return action(lasNoGesture, "no gesture in flight")
   b.interaction = b.interaction.cancel()
+  b.pointerRow = -1
+  b.pointerCol = -1
   action(lasCancelled, "gesture cancelled")
 
 proc beginRevealDock*(b: LayoutBinding; pane: PaneKind): LayoutAction =
@@ -1084,6 +1193,34 @@ proc dividerAt(b: LayoutBinding; geom: LayoutGeometry;
     return some((container, ia))
   none((string, int))
 
+proc dividerFraction(b: LayoutBinding; geom: LayoutGeometry; node: string;
+                     row, col: int): Option[float] =
+  ## The divider of the container of `node`, moved to the cell `(row, col)`,
+  ## as a FRACTION of the container's extent — the model's own unit.
+  let container = parentPath(node)
+  if container.isNone:
+    return none(float)
+  let info = nodeInfoAtPath(b.layout.tree, container.get)
+  let bounds = geom.boundsOfPath(container.get)
+  if info.isNone or bounds.isEmptyArea:
+    return none(float)
+  some(if info.get.kind == lnRow:
+         float(col - bounds.col + 1) / float(bounds.width)
+       else:
+         float(row - bounds.row + 1) / float(bounds.height))
+
+proc previewDivider(b: LayoutBinding; geom: LayoutGeometry;
+                    row, col: int): LayoutAction =
+  ## PLAT-47: a divider drag's LIVE preview — the pointer moved with the
+  ## button down, so the proposal follows it and the guide
+  ## (`resizeGuideFor`) is redrawn where the divider would now land. Nothing
+  ## is committed; the release does that.
+  let fraction = b.dividerFraction(geom, b.interaction.node, row, col)
+  if fraction.isNone:
+    return action(lasPending, "the divider's container is not on screen")
+  b.interaction = b.interaction.proposeDivider(b.layout, fraction.get)
+  action(lasPending, "dragging the divider")
+
 proc dropDivider(b: LayoutBinding; geom: LayoutGeometry;
                  row, col: int): LayoutAction =
   ## Release a divider drag at `(row, col)`: the divider goes to that cell's
@@ -1091,19 +1228,10 @@ proc dropDivider(b: LayoutBinding; geom: LayoutGeometry;
   ## and `commit` decides whether that is a change.
   let gesture = b.interaction
   b.interaction = b.interaction.cancel()
-  let container = parentPath(gesture.node)
-  if container.isNone:
-    return action(lasNoOp, "the divider has no container")
-  let info = nodeInfoAtPath(b.layout.tree, container.get)
-  let bounds = geom.boundsOfPath(container.get)
-  if info.isNone or bounds.isEmptyArea:
+  let fraction = b.dividerFraction(geom, gesture.node, row, col)
+  if fraction.isNone:
     return action(lasNoOp, "the divider's container is not on screen")
-  let fraction =
-    if info.get.kind == lnRow:
-      float(col - bounds.col + 1) / float(bounds.width)
-    else:
-      float(row - bounds.row + 1) / float(bounds.height)
-  let cmd = commit(b.layout, gesture.proposeDivider(b.layout, fraction))
+  let cmd = commit(b.layout, gesture.proposeDivider(b.layout, fraction.get))
   if cmd.isNone:
     return action(lasNoOp, "the divider did not move")
   b.dispatch(cmd.get)
@@ -1112,12 +1240,14 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
               event: MouseEvent): LayoutAction =
   ## One decoded SGR-1006 report, as a layout gesture.
   ##
-  ## THE PROTOCOL GIVES PRESS AND RELEASE AND NOTHING BETWEEN, so a click and a
-  ## drag are told apart by WHERE the button came up: released on the cell it
-  ## went down on is a click, released anywhere else is a drop. That is the
-  ## whole state machine, and it needs no motion reports — which matters,
-  ## because this decoder does not request them and a terminal that does not
-  ## send them would otherwise make dragging impossible.
+  ## A click and a drag are told apart by WHERE the button came up: released
+  ## on the cell it went down on is a click, released anywhere else is a
+  ## drop. That state machine needs no motion reports — a terminal that does
+  ## not send them can still drag. Since PLAT-47 the driver ALSO asks for
+  ## button-event motion (`?1002`), and a motion report while a drag is in
+  ## flight moves the hover (the drop tint and the ghost label follow the
+  ## pointer, GoldenLayout's feedback) and while a divider is held previews
+  ## the divider; the release still decides, exactly as before.
   ##
   ##   * press on a tab             -> pick that tab up (a drag begins)
   ##   * press on a bare pane's own
@@ -1183,9 +1313,26 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       return action(lasNoGesture, "no tab there")
     b.dispatch(cmdActivateTab(info.get.pane))
   of mbLeft:
+    if event.kind == mekMotion:
+      # PLAT-47: THE POINTER MOVED WITH THE BUTTON DOWN (`?1002` motion). A
+      # drag's drop indication and ghost follow it, and a divider's guide
+      # previews where it would land; nothing else listens to motion.
+      case b.interaction.kind
+      of ikDraggingTab:
+        b.pointerRow = event.row
+        b.pointerCol = event.col
+        return b.hoverAt(geom, event.row, event.col)
+      of ikResizingSplit:
+        if b.interaction.divider.isSome:
+          return b.previewDivider(geom, event.row, event.col)
+        return action(lasNoGesture, "motion during a share resize")
+      else:
+        return action(lasNoGesture, "the pointer moved; no gesture in flight")
     if event.kind == mekPress:
       b.pressRow = event.row
       b.pressCol = event.col
+      b.pointerRow = event.row
+      b.pointerCol = event.col
       let tab = b.tabAtCell(geom, event.row, event.col)
       if tab.isSome:
         return b.beginDrag(tab.get)

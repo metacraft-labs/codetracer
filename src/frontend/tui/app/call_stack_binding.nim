@@ -72,6 +72,7 @@ import codetracer_embed
 
 import ./source_binding
 import ./views/call_stack
+import ./syntax/highlighter
 
 export call_stack, source_binding
 
@@ -265,6 +266,14 @@ proc sourcePaneModelForFrame*(frame: StackFrame;
   ## silence is the honest rendering.
   let showsExecution = frame.path.len > 0 and frame.path == debuggerPath
   let total = fetch.totalLineCount
+  # PLAT-47 B4: the window starts in the highlighter state the frame's file
+  # leaves at its first line, derived from the whole file the provider read.
+  let entry =
+    if fetch.fileLines.len > 0 and fetch.lines.len > 0:
+      let c = lexerContexts(frame.path, fetch.fileLines, fetch.firstLine,
+                            fetch.firstLine)
+      if c.len > 0: c[0] else: ""
+    else: ""
   let top = frameViewportTop(frame.line, viewportHeight, total)
   result = initSourcePaneModel(
     path = frame.path,
@@ -272,6 +281,7 @@ proc sourcePaneModelForFrame*(frame: StackFrame;
     provenance = provenanceFor(availability),
     firstHeldLine = fetch.firstLine,
     heldLines = fetch.lines,
+    entryContext = entry,
     totalLineCount = total,
     viewportTop = top,
     executionLine = (if showsExecution: debuggerLine else: 0),

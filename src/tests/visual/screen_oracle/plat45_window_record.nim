@@ -120,8 +120,12 @@ proc outlineOf(img: GrayImage; x, y, w, h: int): JsonNode =
                     edgeOutlined(img, x + w, y + 4, x + w, y + h - 5, want))}
 
 proc ocrLine(img: GrayImage; r: Rect; scratch: string): string =
+  ## One line of labels, upscaled 2x for the OCR engine (PLAT-42's row reader
+  ## does the same): at 1x tesseract read the thin inactive "VCS" as "V(S"
+  ## once the window named its font (measured 2026-09-29); at 2x every label
+  ## of the first screen reads exactly, so no misreading is tolerated.
   var words: seq[string] = @[]
-  for w in ocrRegion(img, r, scratch, psm = 7):
+  for w in ocrRegion(img, r, scratch, psm = 7, upscale = 2.0):
     words.add w.text
   words.join(" ").strip()
 

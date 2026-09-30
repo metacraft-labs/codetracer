@@ -117,7 +117,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1690
+const ExpectedAssertions = 1693
+  ## *1690 -> 1693 on 2026-09-29: §35's enumeration over `viewmodel/` — PLAT-47
+  ## part B's one new production module x three assertions:
+  ## `host/native_vcs.nim` (the system-git VCS facade, moved out of
+  ## `desktop_native.nim` so the terminal and GPUI hosts share it). It calls
+  ## no `rebase(` and spells no `mapOver`.*
   ## *1687 -> 1690 on 2026-09-24: §35's enumeration over `viewmodel/` again —
   ## M50's one new production module x three assertions:
   ## `viewmodels/desktop_test_host.nim` (the desktop Test Results host, issue

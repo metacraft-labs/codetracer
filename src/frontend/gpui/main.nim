@@ -68,7 +68,7 @@
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
-import std/[cpuinfo, json, os, strutils, tables, times]
+import std/[cpuinfo, json, math, options, os, strutils, tables, times]
 
 import isonim_gpui/renderer
 # `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
@@ -81,6 +81,9 @@ import isonim_gpui/bindings
 import ./chrome
 import ./replay_ops
 import ./layout_memory
+import ./window_geometry
+import ./window_gestures
+import ../styles/generated/design_tokens
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
 # below OPENS a document rather than handing a string to a derivation, so the
@@ -94,6 +97,7 @@ import ./app/edit_arm
 import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
 import ../viewmodel/host/keymap_preference
 import ./host/gpui_host
+import ../viewmodel/viewmodels/vcs_vm   # `VCSVM`, `VCSRefreshIntervalMs`: the VCS pane's tick
 
 const GpuiHelpText = """
 codetracer-gpui — CodeTracer's GPUI front-end (PLAT-20: the shell)
@@ -443,10 +447,6 @@ type
     kind: string
     seqNo: int
 
-const TabStripPx = 30
-  ## PLAT-45. The height of a stack's tab strip in the window: one line of
-  ## the pane-title face plus the strip's own padding.
-
 var
   openArm: GpuiEditArm = nil
     ## PLAT-44. The open document of an EDIT-mode window, or nil in a replay
@@ -511,6 +511,8 @@ proc probeHandler(el: GpuiElement): GpuiEventHandler =
       kind: (case el.lastEventKind()
              of gekKeyDown: "keydown"
              of gekKeyUp: "keyup"
+             of gekPointerDown, gekPointerMove, gekPointerUp, gekWheel:
+               "pointer"
              of gekOther: "other"),
       seqNo: el.lastEventSeq())
     if probeSentinel.len > 0 and el.lastEventKey() == probeSentinel:
@@ -582,6 +584,9 @@ proc redrawEditor() =
   discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
                        openArm.surfaceOf(editViewportRows))
 
+proc cancelWindowGesture(): bool
+  ## PLAT-47: `Esc` during a layout gesture (defined with the gestures below).
+
 proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
   ## The editor pane's `keydown` listener. Built by a separate proc so `el`
   ## is captured by value — `probeHandler`'s recorded defect.
@@ -589,6 +594,9 @@ proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
     discard ev
     if openArm.isNil or el.lastEventKind() != gekKeyDown: return
     let key = el.lastEventKey()
+    # PLAT-47: `Esc` cancels a layout gesture in flight, and is not typed.
+    if key.toLowerAscii in ["escape", "esc"] and cancelWindowGesture():
+      return
     let started = epochTime()
     let applied = openArm.applyGpuiKey(key,
       modifierNamesOf(el.lastEventModifiers()),
@@ -615,6 +623,537 @@ proc armEditorPane(r: GpuiRenderer) =
   discard focusElement(editPane)
   r.addEventListener(editPane, "keydown", editKeyHandler(editPane))
 
+
+# ---------------------------------------------------------------------------
+# PLAT-47 part B — the arrangement, drawn from its geometry, and the pointer
+# ---------------------------------------------------------------------------
+
+var
+  gShell: GpuiShell = nil
+    ## The window's shell: the committed layout lives in its `WindowSet`, and
+    ## every gesture's command goes through its one door (`applyIn`).
+  gWindow = WindowId(0)
+  gRemember = false
+    ## Write a committed rearrangement through to this product's remembered
+    ## layout: a Debug window whose remembered file was readable. Edit mode
+    ## opens its shared default and remembers nothing (PLAT-45).
+  gRoot: GpuiElement = nil
+  gContainer: GpuiElement = nil
+  gTop: GpuiElement = nil
+    ## The drawn arrangement's outermost element, replaced on every redraw.
+  gOverlay: seq[GpuiElement] = @[]
+    ## The drop tint, its caret and the drag ghost: absolutely placed on the
+    ## root, above everything.
+  gPanes = initTable[string, GpuiElement]()
+    ## Every leaf element by pane id — the leaves are built once and MOVED
+    ## between arrangements, never rebuilt, so a pane's own state survives a
+    ## drop.
+  gGeom: WindowGeometry
+  gGestures = idle()
+  gSession: HeadlessDebugSession = nil
+  gLeafSet: GpuiLeafSet
+  gCalltraceLoads = 0
+    ## How many call-trace sections the window has read (the first, at open,
+    ## included) — reported for the paging test.
+  gestureTrace = getEnv("CODETRACER_GPUI_GESTURE_TRACE", "") == "1"
+    ## One stderr line per gesture step, for a window lane's record.
+
+const
+  DropTintAlpha = "59"
+    ## 0.35 of 255: the translucent quad over the region a drop would take —
+    ## the terminal overlay's `DropTintAlpha`, as a GPU colour's alpha byte.
+  DropCaretAlpha = "d9"
+    ## 0.85: the insertion caret on a tab strip, stronger than the strip's tint.
+  CalltraceRowPx = 26
+    ## The pixel pitch of one call-trace row in the window — one line of the
+    ## pane's text face, measured off the window (26 px from one row to the
+    ## next at the shim's default text size). The pane pages by it: the rows
+    ## it asks the ViewModel for are the rows that fit, so the last call
+    ## scrolled to is on screen, not clipped below the pane.
+
+proc traceGesture(line: string) =
+  if gestureTrace and line.len > 0:
+    stderr.writeLine("gesture " & line)
+
+proc committedLayout(): Layout =
+  let idx = gShell.windows.indexOf(gWindow)
+  gShell.windows.windows[idx].layout
+
+proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int) =
+  ## One leaf's own box: its size, its fill, its clip.
+  let isEditor = getAttribute(pane, EditorMediumAttribute).len > 0
+  r.setStyle(pane, "background-color",
+             if isEditor: EditorGround else: chromeOf(crPaneBackground))
+  r.setStyle(pane, "color", chromeOf(crWindowForeground))
+  r.setStyle(pane, "width", $max(1, w) & "px")
+  r.setStyle(pane, "height", (if h > 0: $h & "px" else: "100%"))
+  # A PANE CLIPS ITS OWN CONTENT (PLAT-41). A table wider than its pane —
+  # the flow pane's five columns — drew over the three panes beside it on
+  # the shipped binary; the pane is the boundary a reader expects.
+  r.setStyle(pane, "overflow", "hidden")
+  r.setStyle(pane, "flex-direction", "column")
+  r.setStyle(pane, "padding", $ChromePaddingPx & "px")
+  r.setStyle(pane, "rounded", "4px")
+  # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
+  # first, so index 0 is it — and a leaf that drew no heading (a refusal,
+  # or an unloaded extension) has a text node there instead, which takes
+  # no style and is harmless.
+  if childCount(pane) > 0:
+    let heading = nthChild(pane, 0)
+    if not heading.isNil:
+      r.setStyle(heading, "color", chromeOf(crPaneTitleForeground))
+
+proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
+  ## One node of the geometry, as elements sized exactly as it says.
+  let n = gGeom.nodes[i]
+  case n.kind
+  of gnSplit:
+    let box = r.createElement("div")
+    r.setStyle(box, "flex-direction", if n.horizontal: "row" else: "column")
+    r.setStyle(box, "gap", $ChromeGapPx & "px")
+    r.setStyle(box, "width", $n.rect.w & "px")
+    r.setStyle(box, "height", $n.rect.h & "px")
+    for c in n.children:
+      r.appendChild(box, drawNode(r, c))
+    box
+  of gnTabs:
+    let activePane = n.panes[n.active]
+    let leaf = gPanes.getOrDefault(activePane)
+    let isEditor = activePane == $paneEditor
+    # THE PANE BOX: the tab strip and the pane under it, inside a 1px BORDER
+    # — the desktop's selected-panel colour around the focused pane (the
+    # editor, where the window's keys go), invisible around the rest
+    # (`chrome.paneOutlineStyle`, PLAT-47 B2).
+    let box = r.createElement("div")
+    r.setAttribute(box, "data-ct-focus-frame", $isEditor)
+    r.setStyle(box, "flex-direction", "column")
+    r.setStyle(box, "width", $n.rect.w & "px")
+    r.setStyle(box, "height", $n.rect.h & "px")
+    r.setStyle(box, "background-color",
+               if isEditor: EditorGround else: chromeOf(crPaneBackground))
+    r.setStyle(box, "rounded", "4px")
+    for (key, value) in paneOutlineStyle(isEditor):
+      r.setStyle(box, key, value)
+    if not n.strip.isEmpty:
+      let strip = r.createElement("div")
+      r.setAttribute(strip, "data-ct-tabs", n.labels.join(","))
+      r.setStyle(strip, "flex-direction", "row")
+      r.setStyle(strip, "flex-shrink", "0")
+      r.setStyle(strip, "padding-left", $StripInsetPx & "px")
+      r.setStyle(strip, "height", $TabStripPx & "px")
+      r.setStyle(strip, "items", "center")
+      # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), as the desktop's:
+      # every tab on the pane's surface, the active one in the label tier
+      # and bold, the others in the disabled tier — no brackets, no rule.
+      # Each tab is exactly as wide as the geometry says, so a click and a
+      # drop caret land where the tab is drawn.
+      for t, label in n.labels:
+        let tab = r.createElement("div")
+        r.setAttribute(tab, "data-ct-tab-active", $(t == n.active))
+        r.setStyle(tab, "width", $n.tabs[t].w & "px")
+        r.setStyle(tab, "flex-shrink", "0")
+        r.setStyle(tab, "padding-left", $TabPadPx & "px")
+        r.setStyle(tab, "white-space", "nowrap")
+        r.setStyle(tab, "overflow", "hidden")
+        for (key, value) in tabStyle(t == n.active):
+          r.setStyle(tab, key, value)
+        r.appendChild(tab, r.createTextNode(label))
+        r.appendChild(strip, tab)
+      r.appendChild(box, strip)
+    if not leaf.isNil:
+      stylePaneBox(r, leaf, n.body.w, n.body.h)
+      r.appendChild(box, leaf)
+    box
+
+proc drawStrip(r: GpuiRenderer; st: GeomStrip;
+               revealed: Option[PaneKind]): GpuiElement =
+  ## One AUTO-HIDE STRIP: a band on the tab-strip surface along its edge, one
+  ## label per docked pane — the revealed one in the active tab's weight, the
+  ## others in the inactive tier (PLAT-47's colour-and-weight tabs). A left or
+  ## right strip's labels read top to bottom, one character per row.
+  let horizontal = st.edge in {leTop, leBottom}
+  result = r.createElement("div")
+  r.setAttribute(result, "data-ct-dock-strip", $st.edge)
+  r.setStyle(result, "flex-direction", if horizontal: "row" else: "column")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "width", $st.rect.w & "px")
+  r.setStyle(result, "height", $st.rect.h & "px")
+  r.setStyle(result, "background-color", chromeOf(crPaneBackground))
+  r.setStyle(result, "rounded", "4px")
+  if horizontal:
+    r.setStyle(result, "padding-left", $StripInsetPx & "px")
+  else:
+    r.setStyle(result, "padding-top", $StripInsetPx & "px")
+  for sl in st.slots:
+    let shown = revealed.isSome and $revealed.get == sl.pane
+    let slot = r.createElement("div")
+    r.setAttribute(slot, "data-ct-dock-slot", sl.pane)
+    r.setAttribute(slot, "data-ct-tab-active", $shown)
+    r.setStyle(slot, "flex-shrink", "0")
+    r.setStyle(slot, "width", $sl.rect.w & "px")
+    r.setStyle(slot, "height", $sl.rect.h & "px")
+    r.setStyle(slot, "items", "center")
+    for (key, value) in tabStyle(shown):
+      r.setStyle(slot, key, value)
+    if horizontal:
+      r.setStyle(slot, "flex-direction", "row")
+      r.setStyle(slot, "padding-left", $TabPadPx & "px")
+      r.setStyle(slot, "white-space", "nowrap")
+      r.appendChild(slot, r.createTextNode(sl.label))
+    else:
+      r.setStyle(slot, "flex-direction", "column")
+      r.setStyle(slot, "padding-top", $TabPadPx & "px")
+      for ch in sl.label:
+        let cell = r.createElement("div")
+        r.setStyle(cell, "height", $DockCharPx & "px")
+        r.setStyle(cell, "flex-shrink", "0")
+        r.appendChild(cell, r.createTextNode($ch))
+        r.appendChild(slot, cell)
+    r.appendChild(result, slot)
+
+proc drawWindowBody(r: GpuiRenderer; revealed: Option[PaneKind]): GpuiElement =
+  ## The tree, and — when panes are docked — the auto-hide strips around it,
+  ## exactly where `windowGeometryOf` put them: a row of [left strip]
+  ## [column of [top strip] [tree] [bottom strip]] [right strip], each gap
+  ## `ChromeGapPx`, so the drawn strips and the hit-test's agree to the pixel.
+  let tree = drawNode(r, gGeom.root)
+  if gGeom.strips.len == 0:
+    return tree
+  var byEdge: array[LayoutEdge, GpuiElement]
+  for st in gGeom.strips:
+    byEdge[st.edge] = drawStrip(r, st, revealed)
+  result = r.createElement("div")
+  r.setAttribute(result, "data-ct-window-body", "strips")
+  r.setStyle(result, "flex-direction", "row")
+  r.setStyle(result, "gap", $ChromeGapPx & "px")
+  r.setStyle(result, "width", $gGeom.area.w & "px")
+  r.setStyle(result, "height", $gGeom.area.h & "px")
+  if not byEdge[leLeft].isNil: r.appendChild(result, byEdge[leLeft])
+  let column = r.createElement("div")
+  r.setStyle(column, "flex-direction", "column")
+  r.setStyle(column, "gap", $ChromeGapPx & "px")
+  r.setStyle(column, "width", $gGeom.inner.w & "px")
+  r.setStyle(column, "height", $gGeom.area.h & "px")
+  if not byEdge[leTop].isNil: r.appendChild(column, byEdge[leTop])
+  r.appendChild(column, tree)
+  if not byEdge[leBottom].isNil: r.appendChild(column, byEdge[leBottom])
+  r.appendChild(result, column)
+  if not byEdge[leRight].isNil: r.appendChild(result, byEdge[leRight])
+
+proc quad(r: GpuiRenderer; rect: PxRect; colour: string): GpuiElement =
+  ## An absolutely placed, translucent rectangle on the root.
+  result = r.createElement("div")
+  r.setStyle(result, "position", "absolute")
+  r.setStyle(result, "left", $rect.x & "px")
+  r.setStyle(result, "top", $rect.y & "px")
+  r.setStyle(result, "width", $max(1, rect.w) & "px")
+  r.setStyle(result, "height", $max(1, rect.h) & "px")
+  r.setStyle(result, "background-color", colour)
+
+proc drawOverlay(r: GpuiRenderer) =
+  ## The drag's transient state, drawn over the arrangement: the drop tint
+  ## over exactly the region the drop would take and — for a join — the
+  ## insertion caret (both from `dropIndicationRects`, i.e. from the model's
+  ## `dropIndicationOf`), and the ghost label following the pointer.
+  for e in gOverlay:
+    r.removeChild(gRoot, e)
+  gOverlay = @[]
+  # A REVEALED DOCKED PANE, over the tree against its own edge, in the
+  # focused pane's outline — never reflowing the arrangement behind it.
+  if gGestures.revealing:
+    let pane = gPanes.getOrDefault($gGestures.reveal.pane)
+    if not pane.isNil:
+      let rect = gGeom.revealRectOf(gGestures.reveal.edge)
+      let box = r.createElement("div")
+      r.setAttribute(box, "data-ct-revealed", $gGestures.reveal.pane)
+      r.setStyle(box, "position", "absolute")
+      r.setStyle(box, "left", $rect.x & "px")
+      r.setStyle(box, "top", $rect.y & "px")
+      r.setStyle(box, "width", $rect.w & "px")
+      r.setStyle(box, "height", $rect.h & "px")
+      r.setStyle(box, "flex-direction", "column")
+      r.setStyle(box, "background-color", chromeOf(crPaneBackground))
+      r.setStyle(box, "rounded", "4px")
+      for (key, value) in paneOutlineStyle(true):
+        r.setStyle(box, key, value)
+      let parent = r.parentNode(pane)
+      if not parent.isNil:
+        r.removeChild(parent, pane)
+      stylePaneBox(r, pane, rect.w - 2 * FocusOutlinePx,
+                   rect.h - 2 * FocusOutlinePx)
+      r.appendChild(box, pane)
+      gOverlay.add box
+  let ind = gGestures.indication()
+  let action = DesignTokenHex[dtColorsUiBorderAction][dmDark]
+  if ind.kind != diNone:
+    let (tint, caret) = gGeom.dropIndicationRects(ind)
+    if not tint.isEmpty:
+      let q = quad(r, tint, action & DropTintAlpha)
+      r.setAttribute(q, "data-ct-drop", $ind.kind)
+      gOverlay.add q
+    if not caret.isEmpty:
+      let c = quad(r, caret, action & DropCaretAlpha)
+      r.setAttribute(c, "data-ct-drop-caret", $ind.slot)
+      gOverlay.add c
+  if gGestures.kind == gkDragTab and gGestures.moved:
+    # GoldenLayout's drag proxy: the dragged tab's label beside the pointer.
+    let label = labelOf($gGestures.source)
+    let ghost = r.createElement("div")
+    r.setAttribute(ghost, "data-ct-drag-ghost", label)
+    r.setStyle(ghost, "position", "absolute")
+    r.setStyle(ghost, "left", $(gGestures.pointerX + 12) & "px")
+    r.setStyle(ghost, "top", $(gGestures.pointerY + 12) & "px")
+    r.setStyle(ghost, "width", $tabWidthPx(label) & "px")
+    r.setStyle(ghost, "height", $TabStripPx & "px")
+    r.setStyle(ghost, "padding-left", $TabPadPx & "px")
+    r.setStyle(ghost, "items", "center")
+    r.setStyle(ghost, "white-space", "nowrap")
+    r.setStyle(ghost, "background-color", chromeOf(crPaneBackground))
+    r.setStyle(ghost, "border-width", "1px")
+    r.setStyle(ghost, "border-color", action)
+    for (key, value) in tabStyle(true):
+      r.setStyle(ghost, key, value)
+    r.appendChild(ghost, r.createTextNode(label))
+    gOverlay.add ghost
+  for e in gOverlay:
+    r.appendChild(gRoot, e)
+
+let geometryOut = getEnv("CODETRACER_GPUI_GEOMETRY_OUT", "")
+  ## A window lane's instrument: where the window drew every pane, tab and
+  ## divider, rewritten after every redraw — so a lane can AIM a pointer
+  ## (which tab to press, where a divider is). What a gesture did is read
+  ## back from the window's pixels, never from this file.
+
+proc writeGeometry() =
+  if geometryOut.len == 0:
+    return
+  proc rect(p: PxRect): JsonNode = %*[p.x, p.y, p.w, p.h]
+  var nodes = newJArray()
+  for n in gGeom.nodes:
+    var j = %*{"path": n.path, "rect": rect(n.rect)}
+    case n.kind
+    of gnSplit:
+      j["kind"] = %"split"
+      j["horizontal"] = %n.horizontal
+    of gnTabs:
+      j["kind"] = %"tabs"
+      j["panes"] = %n.panes
+      j["active"] = %n.active
+      j["strip"] = rect(n.strip)
+      j["body"] = rect(n.body)
+      var tabs = newJArray()
+      for t in n.tabs: tabs.add rect(t)
+      j["tabs"] = tabs
+    nodes.add j
+  var dividers = newJArray()
+  for d in gGeom.dividers:
+    dividers.add %*{"container": d.container, "index": d.index,
+                    "horizontal": d.horizontal, "rect": rect(d.rect)}
+  var strips = newJArray()
+  for st in gGeom.strips:
+    var slots = newJArray()
+    for sl in st.slots:
+      slots.add %*{"pane": sl.pane, "label": sl.label, "rect": rect(sl.rect)}
+    strips.add %*{"edge": $st.edge, "rect": rect(st.rect), "slots": slots}
+  let revealed =
+    if gGestures.revealing:
+      %*{"pane": $gGestures.reveal.pane,
+         "rect": rect(gGeom.revealRectOf(gGestures.reveal.edge))}
+    else: newJNull()
+  try:
+    writeFile(geometryOut, $(%*{"area": rect(gGeom.area),
+                                "inner": rect(gGeom.inner), "nodes": nodes,
+                                "dividers": dividers, "strips": strips,
+                                "revealed": revealed}))
+  except IOError:
+    discard
+
+proc drawArrangement(r: GpuiRenderer): bool =
+  ## Lay the window out from the layout it should show NOW — the committed
+  ## one, or, while a divider is dragged, the committed one with the pending
+  ## resize applied (`previewLayout`, the model's own `pendingCommand` and
+  ## `apply`) — and draw the gesture's overlay over it. Answers whether an
+  ## arrangement was drawn (a refused projection leaves the last one).
+  let layout = gGestures.previewLayout(committedLayout())
+  let projection = projectDock(layout, gShell.viewport)
+  if projection.status == dpsRefused:
+    return false
+  gGeom = windowGeometryOf(layout, projection.state, pendingViewportWidth,
+                           pendingViewportHeight)
+  if gGeom.root < 0:
+    return false
+  # The leaves are MOVED into the new arrangement, never rebuilt.
+  for _, pane in gPanes:
+    let parent = r.parentNode(pane)
+    if not parent.isNil:
+      r.removeChild(parent, pane)
+  if not gTop.isNil:
+    r.removeChild(gContainer, gTop)
+  gTop = drawWindowBody(r, (if gGestures.revealing: some(gGestures.reveal.pane)
+                            else: none(PaneKind)))
+  r.appendChild(gContainer, gTop)
+  if not gRoot.isNil:
+    drawOverlay(r)
+  writeGeometry()
+  true
+
+proc applyGestureCommand(r: GpuiRenderer; cmd: LayoutCommand) =
+  ## A committed gesture, through the shell's one door, and — in a Debug
+  ## window whose remembered layout was readable — written through to this
+  ## product's remembered layout, as `--layout-ops` is.
+  let applied = gShell.applyIn(gWindow, cmd)
+  if applied.kind == wsRefused:
+    traceGesture("refused " & $cmd & ": " & $applied.problem.kind)
+    return
+  traceGesture("applied " & $cmd)
+  if gRemember:
+    let failed = saveGpuiLayoutDocument(gShell.saveWindowLayout(gWindow))
+    if failed.len > 0:
+      stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
+                       failed)
+
+proc calltraceHeading(): string =
+  ## The call-trace pane's title: its name and the WHOLE trace's call count,
+  ## the terminal's `Call Trace N call(s)` (the pane holds one section).
+  let total =
+    if gSession.isNil: 0
+    else: int(gSession.session.store.calltrace.totalCallsCount.val)
+  gpuiPaneName(paneCalltrace) &
+    (if total > 0: " " & $total & " call(s)" else: "")
+
+proc redrawCalltrace(r: GpuiRenderer) =
+  let pane = gPanes.getOrDefault($paneCalltrace)
+  if pane.isNil:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneCalltrace:
+      redrawLeafBody(r, pane, leaf, calltraceHeading())
+      break
+
+proc scrollCalltrace(r: GpuiRenderer; rows: int) =
+  ## PLAT-47 B3: the wheel over the call-trace pane scrolls it a row per
+  ## `CalltraceRowPx`, reading a section past the one held as it scrolls
+  ## (`gpui_host.pageCalltrace`, the desktop's paging), then draws the pane
+  ## again.
+  if gSession.isNil or rows == 0:
+    return
+  let i = gGeom.tabsNodeOfPane($paneCalltrace)
+  if i < 0:
+    return
+  # The rows the pane shows: its body inside the pane's padding and below
+  # its heading row, at the row pitch.
+  let body = max(1, (gGeom.nodes[i].body.h - 2 * ChromePaddingPx -
+                     CalltraceRowPx) div CalltraceRowPx)
+  let page = gSession.pageCalltrace(body, rows)
+  if page.loaded:
+    inc gCalltraceLoads
+    traceGesture("calltrace-section top=" & $page.top & " loads=" &
+                 $gCalltraceLoads)
+  traceGesture("calltrace top=" & $page.top & " rows=" & $body & " total=" &
+               $page.total)
+  redrawCalltrace(r)
+
+proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
+  ## The root's pointer listener: every pointer event of the window.
+  result = proc(ev: GpuiEvent) =
+    var r = r0
+    let p = pointerOf(ev)
+    if not p.valid or gShell.isNil:
+      return
+    let x = int(p.x)
+    let y = int(p.y)
+    var step: GestureStep
+    case ev.kind
+    of gekPointerDown:
+      step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
+    of gekPointerMove:
+      if not gGestures.active: return
+      step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
+    of gekPointerUp:
+      if not gGestures.active: return
+      step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
+      if step.command.isSome:
+        applyGestureCommand(r, step.command.get)
+    of gekWheel:
+      if gGeom.activePaneAt(x, y) == $paneCalltrace:
+        # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
+        # (scroll down) moves the content up, a negative `dy`.
+        scrollCalltrace(r, int(round(-p.dy / float(CalltraceRowPx))))
+      return
+    else:
+      return
+    traceGesture(step.status)
+    if step.changed:
+      discard drawArrangement(r)
+
+proc gestureKeyHandler(el: GpuiElement): GpuiEventHandler =
+  ## A replay window's `keydown` listener: `Esc` cancels a layout gesture.
+  ## (An edit window's editor listener does the same before typing a key.)
+  result = proc(ev: GpuiEvent) =
+    discard ev
+    if el.lastEventKind() != gekKeyDown: return
+    if el.lastEventKey().toLowerAscii in ["escape", "esc"]:
+      discard cancelWindowGesture()
+
+proc armPointer(r: GpuiRenderer; root: GpuiElement) =
+  if gShell.isNil:
+    return
+  let handler = pointerHandler(r)
+  for name in ["mousedown", "mousemove", "mouseup", "wheel"]:
+    r.addEventListener(root, name, handler)
+  # A REPLAY window's keys: the editor pane takes focus (the pane the focus
+  # outline marks) and `Esc` cancels a gesture. Not while the input probe
+  # owns focus — its claim is that a key reached the pane IT focused — and
+  # not in an edit window, whose editor listener is already armed.
+  if openArm.isNil and not probeEnabled:
+    let editor = gPanes.getOrDefault($paneEditor)
+    if not editor.isNil:
+      setFocusable(editor)
+      discard focusElement(editor)
+      r.addEventListener(editor, "keydown", gestureKeyHandler(editor))
+
+proc cancelWindowGesture(): bool =
+  ## `Esc` while a gesture is in flight: cancel it and redraw the committed
+  ## arrangement. Answers whether there was one (so the key is consumed).
+  if not gGestures.active and not gGestures.revealing:
+    return false
+  var r: GpuiRenderer
+  let step = gGestures.cancelGesture()
+  traceGesture(step.status)
+  discard drawArrangement(r)
+  true
+
+var gVcsDirectory = ""
+  ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
+  ## by `vcsTick`; "" when the window has no VCS pane.
+
+proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
+  ## Hand the VCS leaf, when the arrangement places one, the ViewModel the
+  ## host read `directory` into. The headless replay session owns no VCS
+  ## ViewModel (`headless_app.paneViewModel`), so the host supplies it.
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVcs:
+      leaf.vm = ViewModel(openGpuiVcs(directory))
+      gVcsDirectory = directory
+
+proc vcsTick() {.cdecl.} =
+  ## THE VCS PANE REFRESHES AS THE DESKTOP'S DOES: every
+  ## `VCSRefreshIntervalMs` the loop calls this (`gpui_set_tick`, on the
+  ## loop's own thread), the repository is read again, and the pane is drawn
+  ## again when what it shows changed — so a file edited, added or committed
+  ## in another program appears here as it does on the desktop and in the
+  ## terminal, instead of the pane keeping the state it was opened with.
+  if gVcsDirectory.len == 0:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
+       not leaf.vm.isNil:
+      if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
+        var r: GpuiRenderer
+        redrawLeafBody(r, gPanes.getOrDefault($paneVcs), leaf)
+        traceGesture("vcs refreshed")
+      break
+
 proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   ## The `root_builder` handed to `gpui_launch`, called from inside the shim
   ## before the event loop starts.
@@ -628,12 +1167,12 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   ##
   ## **IT STYLES FROM HERE AND NOT FROM `leaves.nim`.** The chrome is applied
   ## to the launch root and to the children of the leaf container, read back
-  ## out of the shadow tree, so `gpui/app/leaves.nim` is untouched by this
-  ## milestone. That matters for a reason that is not aesthetic:
+  ## out of the shadow tree. That matters for a reason that is not aesthetic:
   ## `run-plat20-mutations.py`, `run-plat21-mutations.py`,
   ## `run-plat22-mutations.py` and `run-plat35-visual-mutations.py` all digest
-  ## that file into their control comparators, and an edit here would have
-  ## staled four harnesses' controls at once (§39a).
+  ## `leaves.nim` into their control comparators (§39a), so the chrome stays
+  ## here. (PLAT-47 B1 did edit `leaves.nim` — the editor's colours are the
+  ## editor's own — and those harnesses were regraded for it.)
   inc builderCalls
   var r: GpuiRenderer
   # The window surface. `apply_styles_to_div` in `gpui_app.rs` reads `bg`,
@@ -643,6 +1182,7 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   # tree as built carries no visual instruction at all.
   r.setStyle(root, "background-color", chromeOf(crWindowBackground))
   r.setStyle(root, "color", chromeOf(crWindowForeground))
+  r.setStyle(root, "font-family", WindowFontFamily)
   r.setStyle(root, "width", "100%")
   r.setStyle(root, "height", "100%")
   r.setStyle(root, "flex-direction", "row")
@@ -664,39 +1204,14 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     let pane = nthChild(container, i)
     if not pane.isNil: leaves.add pane
   var painted = 0
-  # PLAT-47 — THE FOCUSED PANE, outlined as the desktop outlines its selected
-  # panel: the pane the window's keys reach (`armEditorPane` gives the editor
-  # element focus), so the editor. Every region sits in a FRAME one pixel
-  # wider on each side (`FocusOutlinePx`) whose fill is the outline — the
-  # desktop's selected-panel colour around the focused region, the window's
-  # own background (invisible) around the rest — so the outline is closed on
-  # all four sides, drawn around the tab strip and the body together as the
-  # desktop's is, and focus moving never moves content. A frame rather than a
-  # border because the shim's `apply_styles_to_div` draws fills and padding
-  # and no border.
-  let focusedId = $paneEditor
-  proc framed(inner: GpuiElement; w, h: int; focused: bool): GpuiElement =
-    let frame = r.createElement("div")
-    r.setAttribute(frame, "data-ct-focus-frame", $focused)
-    for (key, value) in paneOutlineStyle(focused):
-      r.setStyle(frame, key, value)
-    r.setStyle(frame, "width", $max(1, w) & "px")
-    r.setStyle(frame, "height", $max(1, h) & "px")
-    r.setStyle(frame, "rounded", "4px")
-    r.appendChild(frame, inner)
-    frame
+  gRoot = root
+  gContainer = container
+  gPanes = initTable[string, GpuiElement]()
+  for pane in leaves:
+    let id = getAttribute(pane, "data-ct-pane")
+    if id.len > 0 and id notin gPanes: gPanes[id] = pane
   proc stylePane(pane: GpuiElement; w, h: int) =
-    r.setStyle(pane, "background-color", chromeOf(crPaneBackground))
-    r.setStyle(pane, "color", chromeOf(crWindowForeground))
-    r.setStyle(pane, "width", $max(1, w) & "px")
-    r.setStyle(pane, "height", (if h > 0: $h & "px" else: "100%"))
-    # A PANE CLIPS ITS OWN CONTENT (PLAT-41). A table wider than its pane —
-    # the flow pane's five columns — drew over the three panes beside it on
-    # the shipped binary; the pane is the boundary a reader expects.
-    r.setStyle(pane, "overflow", "hidden")
-    r.setStyle(pane, "flex-direction", "column")
-    r.setStyle(pane, "padding", $ChromePaddingPx & "px")
-    r.setStyle(pane, "rounded", "4px")
+    stylePaneBox(r, pane, w, h)
     # PLAT-38 — THE INPUT PROBE. The first pane is declared FOCUSABLE and is
     # given element focus, and a `keydown` listener records what the RUST
     # element store held when it ran.
@@ -714,120 +1229,20 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
       probeTarget = pane
       r.addEventListener(pane, "keydown", probeHandler(pane))
     inc painted
-    # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
-    # first, so index 0 is it — and a leaf that drew no heading (a refusal,
-    # or an unloaded extension) has a text node there instead, which takes
-    # no style and is harmless.
-    if childCount(pane) > 0:
-      let heading = nthChild(pane, 0)
-      if not heading.isNil:
-        r.setStyle(heading, "color", chromeOf(crPaneTitleForeground))
 
-  # PLAT-45 — THE WINDOW DRAWS THE ARRANGEMENT IT WAS GIVEN.
-  #
-  # Until PLAT-45's review this tiled every leaf of the projected document in
-  # ONE ROW of equal columns — tabs included — so the window a user saw was
-  # not the arrangement the dock document described, and the document was
-  # written to `--dock-out` for a reader while nothing on screen followed it.
-  # Measured on `calc` with the shared default: twelve equal columns, VCS and
-  # Scratchpad beside Files and State instead of behind them. gpui-kit's dock
-  # is not linked into this build (`data-ct-dock` says `flex-placeholder`), so
-  # the arrangement is laid out HERE, from the same document: a `StackPanel`
-  # is a flex row or column whose children get its `sizes` in pixels (the
-  # shim takes `100%` or pixels and nothing else — `chrome.paneWidthPx`), and
-  # a `TabPanel` shows its ACTIVE leaf under a strip naming every tab. An
-  # inactive tab is not painted, exactly as a desktop tab is not.
-  var byPane = initTable[string, GpuiElement]()
-  for pane in leaves:
-    let id = getAttribute(pane, "data-ct-pane")
-    if id.len > 0 and id notin byPane: byPane[id] = pane
-  let dock = pendingDock
-  let usableW = max(1, pendingViewportWidth - 2 * ChromePaddingPx)
-  let usableH = max(1, pendingViewportHeight - 2 * ChromePaddingPx)
+  # PLAT-45 — THE WINDOW DRAWS THE ARRANGEMENT IT WAS GIVEN, and since
+  # PLAT-47 part B it draws it from `window_geometry.windowGeometryOf` — the
+  # one computation the pointer's hit-test reads too — and draws it AGAIN
+  # whenever a gesture moves it (`drawArrangement`). A `StackPanel` is a flex
+  # row or column whose children get its sizes in pixels; a `TabPanel` shows
+  # its ACTIVE leaf under a strip naming every tab. An inactive tab is not
+  # painted, exactly as a desktop tab is not.
   var laidOut = false
-  if not dock.isNil and dock.kind == JObject and dock.hasKey("center") and
-     byPane.len > 0:
+  if not gShell.isNil and pendingDock != nil and gPanes.len > 0:
     for pane in leaves:
       r.removeChild(container, pane)
-    proc region(n: JsonNode; w, h: int): GpuiElement =
-      let kind = n{"panel_name"}.getStr
-      if kind == "StackPanel":
-        let info = n{"info", "stack"}
-        let horizontal = info{"axis"}.getInt == 0
-        let box = r.createElement("div")
-        r.setStyle(box, "flex-direction", if horizontal: "row" else: "column")
-        r.setStyle(box, "gap", $ChromeGapPx & "px")
-        r.setStyle(box, "width", $max(1, w) & "px")
-        r.setStyle(box, "height", $max(1, h) & "px")
-        let kids = n{"children"}.getElems
-        var total = 0.0
-        for i in 0 ..< kids.len:
-          total += max(0.0, info{"sizes"}[i].getFloat)
-        let extent = (if horizontal: w else: h) - (kids.len - 1) * ChromeGapPx
-        var used = 0
-        for i, c in kids:
-          let share =
-            if total > 0.0: info{"sizes"}[i].getFloat / total
-            else: 1.0 / float(kids.len)
-          let cells = if i == kids.high: extent - used
-                      else: int(float(extent) * share)
-          used += cells
-          let child = if horizontal: region(c, cells, h) else: region(c, w, cells)
-          if not child.isNil: r.appendChild(box, child)
-        return box
-      if kind == "TabPanel":
-        let tabs = n{"children"}.getElems
-        let active = max(0, min(n{"info", "tabs", "active_index"}.getInt,
-                                tabs.high))
-        var names: seq[string] = @[]
-        var activePane = ""
-        for i, t in tabs:
-          let id = t{"info", "panel", "pane"}.getStr
-          var label = id
-          for k in PaneKind:
-            if $k == id: label = gpuiPaneName(k)
-          names.add label
-          if i == active: activePane = id
-        let leaf = byPane.getOrDefault(activePane)
-        let inset = 2 * FocusOutlinePx
-        if tabs.len <= 1:
-          if leaf.isNil: return nil
-          stylePane(leaf, w - inset, h - inset)
-          return framed(leaf, w, h, activePane == focusedId)
-        # A STACK: the strip, then the active tab's own pane beneath it.
-        let box = r.createElement("div")
-        r.setStyle(box, "flex-direction", "column")
-        r.setStyle(box, "width", $max(1, w - inset) & "px")
-        r.setStyle(box, "height", $max(1, h - inset) & "px")
-        r.setStyle(box, "background-color", chromeOf(crPaneBackground))
-        r.setStyle(box, "rounded", "4px")
-        let strip = r.createElement("div")
-        r.setAttribute(strip, "data-ct-tabs", names.join(","))
-        r.setStyle(strip, "flex-direction", "row")
-        r.setStyle(strip, "gap", $(2 * ChromeGapPx) & "px")
-        r.setStyle(strip, "padding", $(ChromePaddingPx div 2) & "px")
-        r.setStyle(strip, "height", $TabStripPx & "px")
-        # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), as the desktop's:
-        # every tab on the pane's surface, the active one in the label tier
-        # and bold, the others in the disabled tier — no brackets, no rule.
-        for i, name in names:
-          let tab = r.createElement("div")
-          r.setAttribute(tab, "data-ct-tab-active", $(i == active))
-          for (key, value) in tabStyle(i == active):
-            r.setStyle(tab, key, value)
-          r.appendChild(tab, r.createTextNode(name))
-          r.appendChild(strip, tab)
-        r.appendChild(box, strip)
-        if not leaf.isNil:
-          stylePane(leaf, w - inset, h - inset - TabStripPx)
-          r.appendChild(box, leaf)
-        return framed(box, w, h, activePane == focusedId)
-      nil
-    let top = region(dock["center"], usableW, usableH)
-    if not top.isNil:
-      r.appendChild(container, top)
-      laidOut = true
-    else:
+    laidOut = drawArrangement(r)
+    if not laidOut:
       for pane in leaves:
         r.appendChild(container, pane)
   if not laidOut:
@@ -836,10 +1251,26 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     let paneW = paneWidthPx(pendingViewportWidth, leaves.len)
     for pane in leaves:
       stylePane(pane, paneW, 0)
+  elif probeEnabled:
+    # The probe's pane: the first one DRAWN, in the arrangement's own order
+    # (the geometry lists its nodes depth first, as they are drawn).
+    for n in gGeom.nodes:
+      if n.kind == gnTabs:
+        let first = gPanes.getOrDefault(n.panes[n.active])
+        if not first.isNil:
+          setFocusable(first)
+          discard focusElement(first)
+          probeTarget = first
+          r.addEventListener(first, "keydown", probeHandler(first))
+        break
 
   # PLAT-44 — THE EDITOR TAKES KEYS. Attached here for the probe's reason:
   # `leaves.nim` is digested into four harnesses' controls.
   armEditorPane(r)
+  # PLAT-47 — THE POINTER: a divider drag, a tab drag, the wheel. On the
+  # window's root, which covers the whole window, so a drag that leaves the
+  # pane it started in keeps reporting.
+  armPointer(r, root)
 
   r.appendChild(root, container)
 
@@ -943,6 +1374,8 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   probeSentinel = getEnv("CODETRACER_GPUI_PROBE_SENTINEL", "")
   if cmd.quitAfterMs > 0'u32:
     gpui_quit_after_ms(cmd.quitAfterMs)
+  if gVcsDirectory.len > 0:
+    gpui_set_tick(uint32(VCSRefreshIntervalMs), vcsTick)
   let loadStart = loadAverage()
   if cmd.frameReport.len > 0:
     gpui_frame_stats_reset()
@@ -967,7 +1400,18 @@ proc launchWindow(cmd: GpuiCommand; title: string;
     return 1
   0
 
-proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
+proc editorRowsFor(layout: Layout; viewport: DockViewport;
+                   cmd: GpuiCommand): int =
+  ## How many source rows the editor pane of `layout` shows in this window:
+  ## the window geometry's own answer (`window_geometry.editorRowsOf`), so
+  ## the fetch window holds exactly the rows drawn, each a full line high.
+  let proj = projectDock(layout, viewport)
+  editorRowsOf(windowGeometryOf(layout,
+                                (if proj.status == dpsRefused: nil
+                                 else: proj.state),
+                                cmd.width, cmd.height))
+
+proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
   ## PLAT-22. **Edit mode's surface: the WORKING TREE, and no recording.**
   ##
   ## `product_mode.sourceContractFor(pmEdit)` is what decides this, and it is
@@ -1033,14 +1477,15 @@ proc editSurfaceFor(cmd: GpuiCommand): EditorSurface =
                            preference.model)
   if preference.status == kplRefused:
     openArm.status = preference.message
-  editViewportRows = editorRowsForViewport(cmd.height)
+  editViewportRows = rows
   openArm.surfaceOf(editViewportRows)
 
 proc runEdit(cmd: GpuiCommand): int =
   ## `ct edit --ui=gpui <project>`, end to end, with NO recording open.
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
-  let surface = editSurfaceFor(cmd)
+  let surface = editSurfaceFor(cmd,
+    editorRowsFor(initLayout(sharedEditLayout().tree), shell.viewport, cmd))
   # `openWindow` and not `openWindowForSession`: there is no session. That is a
   # real product state rather than a test affordance — `shell.openWindow`'s own
   # header says so — and it is exactly the state edit mode is in, because edit
@@ -1057,9 +1502,18 @@ proc runEdit(cmd: GpuiCommand): int =
                      $opened.problem.kind)
     return 1
   var r: GpuiRenderer
-  let leafSet = shell.leavesFor(windowId)
+  var leafSet = shell.leavesFor(windowId)
+  # PLAT-47 deliverable 4: in Edit mode the VCS pane shows the project.
+  if editProjectProblem(cmd.traceFolder).len == 0:
+    attachVcs(leafSet, cmd.traceFolder)
   let drawn = renderLeaves(r, leafSet, surface)
   editPane = findEditorPane(drawn.root)
+  # PLAT-47 part B: the window's gestures act on this shell; edit mode opens
+  # its shared default and remembers nothing (PLAT-45).
+  gShell = shell
+  gWindow = windowId
+  gRemember = false
+  gLeafSet = leafSet
   if cmd.editKeys.len > 0:
     # PLAT-44, HEADLESS. The keys go through the SHIM'S OWN focus dispatch to
     # the editor pane's listener — the path a window's keys take — and not
@@ -1265,11 +1719,12 @@ proc runOpen(cmd: GpuiCommand): int =
 
   # The source window. PLAT-22: the editor is wired to the same `SourceVM` the
   # terminal's editor uses, and the host is what fills it — see
-  # `gpui_host.newGpuiSourceService`. `editorRowsForViewport` is derived from
-  # the window height rather than chosen, so a taller window holds more lines
+  # `gpui_host.newGpuiSourceService`. The row count is the editor pane's own
+  # (`editorRowsFor`, from the window geometry), so a taller pane holds more lines
   # and `followExecutionPointer` scrolls the window the editor actually draws.
   let sourceService = newGpuiSourceService(session, cmd.traceFolder,
-                                           editorRowsForViewport(cmd.height))
+    editorRowsFor(shell.windows.windows[shell.windows.indexOf(windowId)].layout,
+                  shell.viewport, cmd))
   sourceService.serveWindow()
 
   # THE VALUES IN SCOPE AT THE STOP, requested here because nothing else does.
@@ -1337,8 +1792,28 @@ proc runOpen(cmd: GpuiCommand): int =
     points = points)
 
   var r: GpuiRenderer
-  let leafSet = shell.leavesFor(windowId)
+  var leafSet = shell.leavesFor(windowId)
+  # PLAT-47 deliverable 4: the VCS pane draws the desktop's `VCSVM`, filled
+  # from the repository the desktop would show for a replay — the process's
+  # working directory.
+  attachVcs(leafSet, getCurrentDir())
   let drawn = renderLeaves(r, leafSet, surface)
+  # PLAT-47 part B: what the window's gestures and the call trace's paging
+  # act on. A rearrangement is remembered on the terms `--layout-ops` is:
+  # never over a quarantined file, and not for a session opened from a named
+  # `--layout` file.
+  gShell = shell
+  gWindow = windowId
+  gRemember = not quarantined and cmd.layoutFile.len == 0
+  gSession = session
+  gLeafSet = leafSet
+  gCalltraceLoads =
+    if session.session.store.calltrace.lines.val.len > 0: 1 else: 0
+  for i in 0 ..< childCount(drawn.root):
+    let node = nthChild(drawn.root, i)
+    if getAttribute(node, "data-ct-pane") == $paneCalltrace and
+       getAttribute(node, "data-ct-state") == "live":
+      setHeadingText(r, node, calltraceHeading())
 
   # PLAT-45: the window's projected dock document, for a reader that must
   # take the arrangement from this front-end's OWN output.

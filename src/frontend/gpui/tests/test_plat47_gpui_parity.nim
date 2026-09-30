@@ -13,7 +13,16 @@
 ## The panes are read out of the SHIPPED `codetracer-gpui --report-plan`'s own
 ## output on the real recording (Verification-Harness-Traps §4a: never the
 ## model the case built), and compared with the REAL desktop's capture of the
-## same recording. The chrome's tab and outline styles are the lists
+## same recording.
+##
+## PLAT-47 part B adds, over the same plan: the editor painted from the one
+## editor theme (B1 — every token class's colour, the line numbers, the
+## ground and the execution band, against the desktop's measured Monaco
+## colours), the call trace's title counting the whole trace (B3), and the
+## VCS pane over a real git repository with a modified, an added and an
+## untracked file (deliverable 4, against the desktop's VCS capture
+## `plat47-vcs.electron.json`). The same claims from the WINDOW's pixels are
+## `test_plat47_gpui_window.nim`. The chrome's tab and outline styles are the lists
 ## `chrome.tabStyle` / `.paneOutlineStyle` hand the window
 ## (`main.paintWindowChrome` applies exactly them), compared with the colours
 ## the desktop capture measured.
@@ -37,18 +46,21 @@ const
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   Answers = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
+  VcsAnswers = "src/tests/visual/answers/plat47-vcs.electron.json"
+  VcsFixture = "scripts/plat47-vcs-fixture.sh"
   WindowRecord = "src/tests/visual/plat45-gpui-arrangement.json"
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
-let shimDir = repo.parentDir / "isonim-gpui/rust/target/debug"
+let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
+                   repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = repo / CalcFixture
 
 proc requirePrereq(ok: bool; what: string) =
   if not ok:
     raise newException(IOError, "prerequisite missing: " & what)
 
-proc runPlan(): (int, JsonNode, JsonNode, string) =
+proc runPlan(cwd = ""): (int, JsonNode, JsonNode, string) =
   let state = createTempDir("plat47-gpui-state-", "")
   var env = newStringTable()
   for k, v in envPairs():
@@ -62,7 +74,7 @@ proc runPlan(): (int, JsonNode, JsonNode, string) =
                "--dock-out=" & dockFile, calc]
   let p = startProcess("/bin/sh",
     args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
-    env = env, options = {})
+    workingDir = cwd, env = env, options = {})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
   p.close()
@@ -93,6 +105,19 @@ proc paneText(plan: JsonNode; pane: string): seq[string] =
     if n.hasKey("children") and n["children"].kind == JArray:
       for c in n["children"]: walk(c, acc)
   walk(plan, result)
+
+proc nodesWith(plan: JsonNode; attribute: string): seq[JsonNode] =
+  ## Every plan node carrying `attribute`, in plan order.
+  proc walk(n: JsonNode; acc: var seq[JsonNode]) =
+    if n.kind != JObject: return
+    if n{"attributes"}.kind == JObject and n["attributes"].hasKey(attribute):
+      acc.add n
+    for c in n{"children"}.getElems: walk(c, acc)
+  walk(plan, result)
+
+proc textOf(n: JsonNode): string =
+  if n{"kind"}.getStr == "TextNode": return n{"text"}.getStr
+  for c in n{"children"}.getElems: result.add textOf(c)
 
 proc dockRegions(n: JsonNode; x, y, w, h: float;
                  into: var seq[RegionRect]) =
@@ -178,13 +203,17 @@ suite "PLAT-47: the GPUI window at desktop parity":
     for (k, v) in active & inactive:
       # No glyph anywhere: a tab is styled, never framed.
       ck k in ["color", "font-weight"]
-    ck ("background-color", desk{"focus"}{"outline"}.getStr) in
+    # B2: a 1px BORDER of the desktop's outline colour around the focused
+    # pane, the same width — invisible — around every other.
+    ck ("border-color", desk{"focus"}{"outline"}.getStr) in
        paneOutlineStyle(true)
-    ck ("padding", "1px") in paneOutlineStyle(true)
-    ck ("padding", "1px") in paneOutlineStyle(false)
-    ck ("background-color", desk{"focus"}{"outline"}.getStr) notin
+    ck ("border-width", desk{"focus"}{"outlineWidth"}.getStr) in
+       paneOutlineStyle(true)
+    ck ("border-width", desk{"focus"}{"outlineWidth"}.getStr) in
        paneOutlineStyle(false)
-    ck ("background-color", chromeOf(crWindowBackground)) in
+    ck ("border-color", desk{"focus"}{"outline"}.getStr) notin
+       paneOutlineStyle(false)
+    ck ("border-color", chromeOf(crWindowBackground)) in
        paneOutlineStyle(false)
 
   test "the WINDOW outlines its focused region, closed, in the desktop's colour":
@@ -214,5 +243,94 @@ suite "PLAT-47: the GPUI window at desktop parity":
     ck outlined == 1
     # The record's outline gray is the desktop's measured colour.
     ck desk{"focus"}{"outline"}.getStr == chromeOf(crFocusOutline)
+
+  test "B1: the editor's colours are the desktop's Monaco colours, class by class":
+    let ed = desk["editor"]
+    # The desktop scope each class is measured under.
+    const classKey = [("tcKeyword", "keyword"), ("tcString", "string"),
+                      ("tcComment", "comment"), ("tcIdentifier", "identifier"),
+                      ("tcPunctuation", "delimiter"), ("tcPlain", "identifier")]
+    var seen: seq[string] = @[]
+    for run in nodesWith(plan, "data-ct-token-class"):
+      let cls = run["attributes"]["data-ct-token-class"].getStr
+      for (c, key) in classKey:
+        if c == cls:
+          if cls notin seen: seen.add cls
+          if run["styles"]{"text_color"}.getStr != ed[key].getStr:
+            checkpoint(cls & " '" & textOf(run) & "' is " &
+                       run["styles"]{"text_color"}.getStr & ", want " &
+                       ed[key].getStr)
+            ck false
+    checkpoint("classes seen: " & $seen)
+    ck seen.len == classKey.len
+    # The line numbers, resting and on the execution line, and the band on
+    # the CODE COLUMN — never on the row, never on the gutter.
+    var banded = 0
+    var restingNumbers = 0
+    var activeNumbers = 0
+    for row in nodesWith(plan, "data-ct-row"):
+      let gutter = row["children"][0]
+      let column = row["children"][1]
+      ck column{"attributes"}{"data-ct-code-column"}.getStr == "true"
+      ck row["styles"]{"bg"}.getStr == ""
+      ck gutter["styles"]{"bg"}.getStr == ""
+      let execution = row["attributes"]["data-ct-pointer"].getStr == "eptExecution"
+      if execution:
+        inc banded
+        ck column["styles"]{"bg"}.getStr == ed["executionLine"].getStr
+        ck column["styles"]{"flex_grow"}.getStr == "1"
+        ck gutter["styles"]{"text_color"}.getStr == ed["activeLineNumber"].getStr
+        inc activeNumbers
+      else:
+        ck column["styles"]{"bg"}.getStr == ""
+        if gutter["styles"]{"text_color"}.getStr == ed["lineNumber"].getStr:
+          inc restingNumbers
+    ck banded == 1
+    ck activeNumbers == 1
+    ck restingNumbers > 20
+    # The ground: the editor pane's own background.
+    var ground = ""
+    for pane in nodesWith(plan, "data-ct-pane"):
+      if pane["attributes"]["data-ct-pane"].getStr == "editor":
+        ground = pane["styles"]{"bg"}.getStr
+    ck ground == ed["background"].getStr
+
+  test "B3: the call trace's title counts the whole trace":
+    let trace = paneText(plan, "calltrace")
+    ck trace.len > 0
+    ck trace[0].startsWith("Call Trace ") and trace[0].endsWith(" call(s)")
+    ck trace[0] != "Call Trace 0 call(s)"
+
+  test "deliverable 4: the VCS pane over a real repository equals the desktop's VCS panel":
+    requirePrereq(fileExists(repo / VcsAnswers),
+                  VcsAnswers & " (just plat47-capture-electron)")
+    let want = parseFile(repo / VcsAnswers)
+    let dir = createTempDir("plat47-gpui-vcs-", "")
+    let fixture = execCmdEx("bash " & quoteShell(repo / VcsFixture) & " " &
+                            quoteShell(dir / "repo"))
+    ck fixture.exitCode == 0
+    let (vrc, vplan, _, verr) = runPlan(cwd = dir / "repo")
+    if vrc != 0: checkpoint(verr)
+    ck vrc == 0
+    let vcs = paneText(vplan, "vcs")
+    checkpoint("gpui vcs: " & $vcs)
+    ck want["branch"].getStr in vcs
+    ck want["header"].getStr in vcs
+    var rows: seq[string] = @[]
+    for r in want["rows"]:
+      rows.add r[0].getStr & " " & r[1].getStr
+    ck rows.len == 3
+    # The three changed files, with their states, in the desktop's order.
+    var at = -1
+    for r in rows:
+      let i = vcs.find(r)
+      ck i > at
+      at = i
+    for c in want["commits"]:
+      var found = false
+      for line in vcs:
+        if line.endsWith(" " & c.getStr): found = true
+      ck found
+    removeDir(dir)
 
 echo "CHECKS: ", CHECKS

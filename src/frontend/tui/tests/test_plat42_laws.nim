@@ -170,16 +170,20 @@ suite "PLAT-42: LAW-E2 — inline values reflow, on both media":
         if getAttribute(n, EditorRowAttribute).len > 0: rowEl = n
         for i in 0 ..< childCount(n): stack.add nthChild(n, i)
       ck not rowEl.isNil
-      ck childCount(rowEl) == 3            # gutter, code, annotation
-      let code = nthChild(rowEl, 1)
-      let ann = nthChild(rowEl, 2)
+      # gutter, then the code column (PLAT-47 B1: the band's extent), which
+      # holds the code and the annotation.
+      ck childCount(rowEl) == 2
+      let column = nthChild(rowEl, 1)
+      ck childCount(column) == 2
+      let code = nthChild(column, 0)
+      let ann = nthChild(column, 1)
       ck getAttribute(code, TextRoleAttribute) == "editor-code"
       ck textContent(ann).startsWith("/*")
       # No absolute placement anywhere on the annotation: its position is the
       # flex layout's, i.e. the code's width.
       # Read from the RUST side's plan, not from what this case set.
       let plan = parseJson(renderPlanJson(r, rowEl))
-      let annStyles = plan["children"][2]["styles"]
+      let annStyles = plan["children"][1]["children"][1]["styles"]
       ck annStyles{"position"}.getStr notin ["absolute", "fixed"]
       ck annStyles{"left"}.isNil
 
@@ -201,7 +205,7 @@ suite "PLAT-42: the flow overlay as GPUI draws it, read from the Rust plan":
     proc walk(n: JsonNode) =
       let a = n{"attributes"}
       if not a.isNil and a{"data-ct-flow"}.getStr.len > 0:
-        let code = n["children"][1]
+        let code = n["children"][1]["children"][0]
         opacityByFlow.add (a["data-ct-flow"].getStr,
                            code["styles"]{"opacity"}.getStr)
       for c in n{"children"}.getElems: walk(c)
@@ -234,8 +238,16 @@ suite "PLAT-42: the execution row's band and the one-line rows, read from the Ru
       if not a.isNil and a{EditorRowAttribute}.getStr.len > 0:
         let st = n["styles"]
         wraps.add (st{"white_space"}.getStr, st{"overflow"}.getStr)
+        # PLAT-47 B1: the band is Monaco's — on the CODE COLUMN (the row's
+        # second child), not under the gutter. The row itself carries none.
         if st{"bg"}.getStr.len > 0:
-          banded.add (a[EditorRowAttribute].getStr, st{"bg"}.getStr)
+          banded.add (a[EditorRowAttribute].getStr & ":row", st{"bg"}.getStr)
+        let gutterBg = n["children"][0]["styles"]{"bg"}.getStr
+        if gutterBg.len > 0:
+          banded.add (a[EditorRowAttribute].getStr & ":gutter", gutterBg)
+        let column = n["children"][1]["styles"]
+        if column{"bg"}.getStr.len > 0:
+          banded.add (a[EditorRowAttribute].getStr, column{"bg"}.getStr)
       for c in n{"children"}.getElems: walk(c)
     walk(plan)
     checkpoint("banded rows: " & $banded)

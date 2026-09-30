@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 44
+# RECORDED-DARK-CEILING: 47
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -622,6 +622,23 @@ ci/test/plat44-edit-window.sh
 ci/test/plat44_sequences_window_record.py
 ci/test/plat44-sequences-window.sh
 ci/test/plat45-arrangement-window.sh
+# PLAT-47 part B (44 -> 47): `ci/test/plat47-gpui-window.sh` and its driver
+# `ci/test/plat47_gpui_window.py` re-take the GPUI window measurements —
+# a divider drag, the four drop indications, Esc, the VCS tab, the wheel
+# over the call trace — with a virtual pointer DEVICE and `wtype` on a
+# headless sway (`just plat47-gpui-window`, `just plat47-gpui-window-record`).
+# Blocked on the same two capabilities as the group above (a built windowed
+# shim and a compositor) plus isonim-gpui's `build/virtual-pointer`; the
+# committed record (`src/tests/visual/plat47-gpui-window.json`) is asserted
+# by `test_plat47_gpui_window.nim` in the `gpui-shell` lane, which is NOT
+# dark. `scripts/plat47-vcs-fixture.sh` builds the git repository with a
+# modified, an added and an untracked file that the VCS tests read; it is
+# run by Nim suites (`test_plat47_vcs_pane.nim`, `test_plat47_gpui_parity
+# .nim`), the Electron capture and the window driver, none of which this scan
+# follows.
+ci/test/plat47-gpui-window.sh
+ci/test/plat47_gpui_window.py
+scripts/plat47-vcs-fixture.sh
 
 # ---------------------------------------------------------------------------
 # HCR H6 — THE LAUNCH-UNDER-HCR ARMS. **BLOCKED on a sibling and two build

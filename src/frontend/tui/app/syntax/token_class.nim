@@ -34,3 +34,23 @@ type
       ## lexer.
     tcTag
       ## A decorator (`@name`), Monaco's `tag`. Produced by the Python lexer.
+    # PLAT-47 B4: the scopes the desktop's other Monaco tokenizers colour on
+    # their own (see `editor_theme.MonacoScopeClass`).
+    tcTypeIdentifier
+      ## A type name (`type.identifier`: JavaScript, TypeScript, shell).
+    tcKeywordType
+      ## A primitive type keyword (`keyword.type`: Rust's `f64`, `u32`).
+    tcCommentDoc
+      ## A documentation comment (`comment.doc`: `/** */` in C++, Go,
+      ## JavaScript, TypeScript, Java).
+    tcRegexp
+      ## A regular-expression literal (`regexp`: JavaScript, TypeScript,
+      ## Ruby).
+    tcVariable
+      ## A variable (`variable`: shell's `$name`).
+    tcNamespace
+      ## A namespace (`namespace`: Ruby's `::` paths, YAML's anchors).
+    tcAttributeName
+      ## An attribute name (`attribute.name`: shell's options).
+    tcMetatag
+      ## A meta tag (`metatag`: shell's `#!`).

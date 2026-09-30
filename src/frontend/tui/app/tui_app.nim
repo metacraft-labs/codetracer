@@ -43,12 +43,16 @@
 ## is what makes the Tier-1 half of the campaign's testing architecture
 ## possible, and it is why `host/` stays as small as it does.
 
+import std/options
+
 import codetracer_embed
 import headless_app/headless_app
+import headless_app/layout_interaction
 import isonim_tui
 
 import ./edit_binding
 import ./views/shell
+import ./views/vcs_pane
 import ./views/point_list
 
 export headless_app
@@ -156,6 +160,9 @@ type
     fileTree*: FileTreeModel
       ## PLAT-16. `paneFileTree`'s model, as a value, filled by the host from
       ## `edit_host.listProjectFiles`.
+    vcs*: VcsPaneModel
+      ## PLAT-47 deliverable 4. `paneVcs`'s model, as a value, filled by the
+      ## host (`host/vcs_source.nim`) from the shared `VCSVM`.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -285,6 +292,11 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
              else: active.layout.docked),
     interaction: (if bound: app.layoutBinding.interaction
                   else: noInteraction()),
+    dragPointer: (if bound and app.layoutBinding.pointerRow >= 0 and
+                     app.layoutBinding.interaction.kind == ikDraggingTab:
+                    some((app.layoutBinding.pointerRow,
+                          app.layoutBinding.pointerCol))
+                  else: none((int, int))),
     profile: selected,
     source: app.source,
     highlighting: app.highlighting,
@@ -297,6 +309,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     points: app.points,
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
+    vcs: app.vcs,
     build: buildPaneModelFor(app.build),
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()

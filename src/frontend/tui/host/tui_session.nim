@@ -64,6 +64,7 @@ import ../app/runtime
 import ../app/source_binding
 import ../app/timeline_binding
 import ../app/variables_binding
+import ../app/syntax/highlighter   # lexerContexts: the window's entry state
 import ./native_host
 
 export native_host
@@ -112,6 +113,12 @@ type
       ## which `loadRecordingPanes` filled with the same tree the desktop's
       ## Files pane renders. Until PLAT-47 only `--headless` filled the pane;
       ## the interactive terminal showed an empty FILES pane on every replay.
+    lexerContexts*: LexerContextCache
+      ## PLAT-47 B4. The highlighter's state at the start of every line of the
+      ## files this session has fetched windows of, derived from the whole file
+      ## the provider sliced (`SourceFetch.fileLines`) and handed to
+      ## `SourceVM` with each window, so a window that opens inside a
+      ## docstring is coloured as the desktop colours it.
     valueGate*: InlineValueGate
       ## PLAT-29. The inline values are drawn only when the locals they come
       ## from are about the stop the debugger is at — reconciled against the
@@ -152,6 +159,7 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
     controls: createDebugControlsVM(store),
     origin: createOriginChainVM(store),
     provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
+    lexerContexts: newLexerContextCache(),
     valueTimeline: initValueTimeline(),
     entryFile: sess.getCurrentFile(),
     bounds: TimelineBounds(),
@@ -215,7 +223,14 @@ proc serveSourceWindow(s: TuiSession) =
     # second call site rather than because it is likely.
     s.provider.fetch(request, proc(fetch: SourceFetch) = captured = fetch)
     drainSourceCallbacks()
-    discard s.session.session.store.applySourceFetch(s.source, captured)
+    let contexts =
+      if captured.fileLines.len > 0 and captured.lines.len > 0:
+        s.lexerContexts.contextsFor(captured.revision.path, captured.fileLines,
+                                    captured.firstLine,
+                                    captured.firstLine + captured.lines.len - 1)
+      else: @[]
+    discard s.session.session.store.applySourceFetch(s.source, captured,
+                                                      contexts)
 
 proc stackBody(s: TuiSession): JsonNode =
   let response = s.session.sendRawDapRequest("stackTrace", %*{

@@ -103,6 +103,12 @@ import ../../../common/value_presentation
 # siblings `shell.nim` and `edit_arm.nim` import it exactly this way.
 import codetracer_embed
 import isonim/core/[signals, computation]
+# PLAT-47 B1: the editor is classified by the TERMINAL'S tokenizers (the
+# tree-sitter-free half of its highlighter) and painted from the one editor
+# theme — the same `TokenClass`, the same generated tokens.
+import ../../tui/app/syntax/lexical
+import ../../tui/app/theme/editor_theme
+import ../../styles/generated/design_tokens
 
 export shell, editor_surface
 # `value_presentation` is re-exported because the BUDGETS are this medium's
@@ -184,13 +190,26 @@ const
 
   TextRoleAttribute* = "data-ct-text-role"
   TextMetricAttribute* = "data-ct-text-metric"
-  ExecutionRowBand* = "#4f4f4f"
-    ## The execution row's band, drawn as the desktop editor draws it: the
-    ## `.on` line class's `ON_BG_COLOR` in `styles/default_dark_theme.styl`.
-    ## PLAT-39's reader locates the execution line GEOMETRICALLY by exactly
-    ## this band (`vision_producer`'s editor reading); until 2026-09-23 GPUI
-    ## drew none, which PLAT-39 filed as its GAP 3 and which left the pointer
-    ## readable on screen only as a glyph OCR cannot reliably find.
+  ExecutionRowBand* = DesignTokenHex[dtEditorThemeExecutionLine][dmDark]
+    ## The execution row's band, drawn as the desktop's Monaco draws its
+    ## current line: `editor-theme/executionLine` (measured `#404040` in
+    ## Dark), across the CODE COLUMN to the editor's right edge and NOT under
+    ## the line numbers (PLAT-47 B1). Until then GPUI drew the old `.on` line
+    ## class's `#4f4f4f` under the whole row, gutter included. PLAT-39's reader
+    ## locates the execution line GEOMETRICALLY by a band; it now reads it on
+    ## the code column (`EditorCodeColumnAttribute`).
+  EditorGround* = DesignTokenHex[dtEditorThemeGround][dmDark]
+    ## The editor's ground — Monaco's `editor.background` (PLAT-47 B1).
+  EditorLineNumberColour* = DesignTokenHex[dtEditorThemeLineNumber][dmDark]
+  EditorActiveLineNumberColour* =
+    DesignTokenHex[dtEditorThemeActiveLineNumber][dmDark]
+    ## The resting and the active (execution line's) line numbers.
+  EditorCodeColumnAttribute* = "data-ct-code-column"
+    ## Marks a row's CODE COLUMN — everything right of the gutter, grown to
+    ## the pane's right edge — which is what carries the execution band.
+  EditorTokenClassAttribute* = "data-ct-token-class"
+    ## A code run's `TokenClass`, so a plan reader can check the class a run
+    ## was painted as without re-deriving the colour.
   TokenAttribute* = "data-ct-token"
     ## **PLAT-35's tier-3 rows for text metrics and token colour.**
     ##
@@ -265,31 +284,6 @@ proc slotPath(slot: DockPaneSlot): string =
   for i in slot.path:
     parts.add $i
   parts.join("/")
-
-const GpuiNominalLineHeightPx* = 20
-  ## **A NOMINAL line height, and the word is doing work.**
-  ##
-  ## A GPU surface's true line height is a font metric the renderer resolves at
-  ## PAINT time — which is the same fact that makes `gpuiRowBudget().cells` zero
-  ## rather than a number (`value_presentation/surfaces.nim` says so at the
-  ## function, and PLAT-21 recorded that two of the three front-ends decline
-  ## `Budget.cells` for this reason). So this constant is NOT a claim about what
-  ## the window will draw.
-  ##
-  ## It sizes exactly one thing: how many lines `SourceVM`'s FETCH WINDOW holds.
-  ## Being wrong makes the window hold too many lines or too few — a round trip
-  ## more or a few kilobytes more — and `GpuiSourceOverscan` absorbs the
-  ## difference in both directions. It can never make the editor draw a line it
-  ## does not have, because a line outside the window is a REQUEST rather than a
-  ## blank (`EditorRow.held`). A constant whose error is bounded by a cache miss
-  ## is a constant that may be nominal; one that decided what was on screen
-  ## would not be.
-
-func editorRowsForViewport*(heightPx: int): int =
-  ## How many source lines the editor's fetch window should hold for a window
-  ## `heightPx` tall. At least one, because a window of zero lines makes every
-  ## read a request, which reads exactly like a provider that never answers.
-  max(1, heightPx div GpuiNominalLineHeightPx)
 
 func markGlyph*(m: EditorMark): string =
   ## One function, so the glyph table and any assertion over it ask the same
@@ -410,7 +404,12 @@ func gpuiTokenFor*(role: TextRole; row: EditorRow): string =
   of trValueName: "value.name.foreground"
   of trValueText: "value.text.foreground"
 
-proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
+func tokenColour*(cls: TokenClass): string =
+  ## The colour a code run of class `cls` is painted: the editor theme's rule
+  ## for the class's Monaco scope (`editor_theme.tokenClassToken`), Dark.
+  DesignTokenHex[tokenClassToken(cls)][dmDark]
+
+proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1): GpuiElement =
   ## One row of the source editor.
   ##
@@ -419,6 +418,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   ## ViewModels — so a rendering that drifts from the model is a rendering
   ## whose attributes stop matching the surface, which is exactly the
   ## comparison PLAT-22's second named integration test makes.
+  ##
+  ## `runs` is the row's text classified by the terminal's tokenizer
+  ## (`lexical.tokenRuns`); each is painted in its class's theme colour.
   let el = r.createElement("div")
   r.setAttribute(el, EditorRowAttribute, $row.line)
   r.setAttribute(el, EditorPointerAttribute, $row.pointer)
@@ -437,8 +439,11 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   # it (`test_plat42_window.nim`).
   r.setStyle(el, "white-space", "nowrap")
   r.setStyle(el, "overflow", "hidden")
-  if row.pointer == eptExecution:
-    r.setStyle(el, "background", ExecutionRowBand)
+  # A ROW IS ALWAYS A FULL LINE HIGH. The host asks for the rows the pane
+  # shows (`window_geometry.editorRowsOf`); should the pane shrink below them
+  # later, the pane clips the last rows rather than the flex column squeezing
+  # every row and cutting off descenders.
+  r.setStyle(el, "flex-shrink", "0")
 
   let gutter = r.createElement("span")
   r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
@@ -452,14 +457,40 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   r.appendChild(gutter,
     r.createTextNode(gutterText(row, numberWidth)))
   r.setStyle(gutter, "flex-shrink", "0")
+  # The line numbers are Monaco's: resting, and active on the execution line.
+  r.setStyle(gutter, "color",
+             if row.pointer == eptExecution: EditorActiveLineNumberColour
+             else: EditorLineNumberColour)
   r.appendChild(el, gutter)
+
+  # THE CODE COLUMN: the rest of the row, grown to the pane's right edge, so
+  # the execution band covers exactly what Monaco's current-line band covers.
+  let column = r.createElement("div")
+  r.setAttribute(column, EditorCodeColumnAttribute, "true")
+  r.setStyle(column, "display", "flex")
+  r.setStyle(column, "flex-grow", "1")
+  r.setStyle(column, "white-space", "nowrap")
+  r.setStyle(column, "overflow", "hidden")
+  if row.pointer == eptExecution:
+    r.setStyle(column, "background", ExecutionRowBand)
 
   let code = r.createElement("span")
   r.setAttribute(code, TextRoleAttribute, $trEditorCode)
   r.setAttribute(code, TextMetricAttribute, gpuiMetricFor(trEditorCode))
   r.setAttribute(code, TokenAttribute, gpuiTokenFor(trEditorCode, row))
-  r.appendChild(code,
-    r.createTextNode(if row.held: row.text else: EditorLoadingText))
+  r.setStyle(code, "display", "flex")
+  if row.held and runs.len > 0:
+    for run in runs:
+      let piece = r.createElement("span")
+      r.setAttribute(piece, EditorTokenClassAttribute, $run.class)
+      r.setStyle(piece, "color", tokenColour(run.class))
+      r.setStyle(piece, "flex-shrink", "0")
+      r.appendChild(piece, r.createTextNode(run.text))
+      r.appendChild(code, piece)
+  else:
+    r.setStyle(code, "color", tokenColour(tcPlain))
+    r.appendChild(code,
+      r.createTextNode(if row.held: row.text else: EditorLoadingText))
   # THE FLOW OVERLAY, DRAWN AS THE DESKTOP EDITOR DRAWS IT: a line inside an
   # arm the run declined is dimmed to half opacity (`.line-flow-skip` in
   # `styles/components/flow.styl`), and a line that ran is left as it is
@@ -468,7 +499,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   if row.flow == efsNotTaken:
     r.setStyle(code, "opacity", FlowNotTakenOpacity)
   r.setStyle(code, "flex-shrink", "0")
-  r.appendChild(el, code)
+  r.appendChild(column, code)
 
   let annotation = inlineValueText(row.values)
   if annotation.len > 0:
@@ -483,8 +514,25 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
     r.setStyle(ann, "overflow", "hidden")
     r.setStyle(ann, "text-overflow", "ellipsis")
     r.appendChild(ann, r.createTextNode(annotation))
-    r.appendChild(el, ann)
+    r.appendChild(column, ann)
+  r.appendChild(el, column)
   el
+
+proc editorRunsOf*(surface: EditorSurface): seq[seq[TokenRun]] =
+  ## Every row's text classified as the terminal classifies it: the path's
+  ## Monaco tokenizer (`lexical.lexerForPath`; a tree-sitter language or an
+  ## unknown one is left plain), the state running on from row to row from
+  ## the surface's `entryContext`. A row still loading is empty and leaves
+  ## the state where it was.
+  let lexer = if grammarForPath(surface.path) != giNone: lxNone
+              else: lexerForPath(surface.path)
+  var context = if surface.entryContext.len > 0: surface.entryContext
+                else: initialContext(lexer)
+  for row in surface.rows:
+    if lexer == lxNone or not row.held:
+      result.add @[]
+    else:
+      result.add tokenRuns(lexer, row.text, context)
 
 proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    escape: ViewNode; surface: EditorSurface): bool =
@@ -533,8 +581,11 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
   var widest = 1
   for row in surface.rows:
     widest = max(widest, len($row.line))
-  for row in surface.rows:
-    r.appendChild(parent, renderEditorRow(r, row, widest))
+  # PLAT-47 B1: the editor's own ground, Monaco's `editor.background`.
+  r.setStyle(parent, "background-color", EditorGround)
+  let runs = editorRunsOf(surface)
+  for i, row in surface.rows:
+    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest))
   surface.rows.len > 0
 
 const
@@ -712,6 +763,31 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
     # owns what a plugin surface renders, and inventing a tree for it here
     # would be this front-end deciding a question that milestone owns.
     return (node, false)
+
+proc setHeadingText*(r: GpuiRenderer; node: GpuiElement; text: string) =
+  ## Replace a leaf's heading text (its first child's text).
+  if node.isNil or childCount(node) == 0:
+    return
+  let heading = nthChild(node, 0)
+  if heading.isNil or getAttribute(heading, TextRoleAttribute) != $trPaneTitle:
+    return
+  while childCount(heading) > 0:
+    r.removeChild(heading, nthChild(heading, 0))
+  r.appendChild(heading, r.createTextNode(text))
+
+proc redrawLeafBody*(r: GpuiRenderer; node: GpuiElement; leaf: GpuiLeaf;
+                     heading = "") =
+  ## PLAT-47 B3: draw a live pane's view again, in place — everything after
+  ## its heading removed and rebuilt by `renderPaneView`, the function that
+  ## drew it the first time — after its ViewModel moved (a scrolled call
+  ## trace). `heading`, when given, replaces the title's text.
+  if node.isNil or leaf.kind != glkBuiltin:
+    return
+  while childCount(node) > 1:
+    r.removeChild(node, nthChild(node, childCount(node) - 1))
+  discard renderPaneView(r, node, leaf, GpuiPanelBudget)
+  if heading.len > 0:
+    setHeadingText(r, node, heading)
 
 const NoSurfaceSuppliedReport* =
   "no editor surface was supplied to renderLeaves; the host builds one from " &

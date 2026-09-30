@@ -745,6 +745,12 @@ lint_step "Design tokens: the committed stylus and the TUI token module are what
 lint_step "Default layout: the committed desktop default is what the shared default arrangement generates" \
 	bash ci/test/default-layout-fresh.sh
 
+# PLAT-47 B4: the terminal tokenises source with the desktop's own Monaco
+# Monarch definitions, exported to JSON; the committed export must be what the
+# linked `monaco-editor` generates.
+lint_step "Monarch definitions: the terminal's tokenizer table is what the linked monaco-editor exports" \
+	bash ci/test/monarch-languages-fresh.sh
+
 # PLAT-39's LAW-R4 and PLAT-40's production-caller gate. Both are source scans
 # with their own positive and negative controls, need no build and no
 # toolchain beyond coreutils, grep and sed, and were wired into no lane — which

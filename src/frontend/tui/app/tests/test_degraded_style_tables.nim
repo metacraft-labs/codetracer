@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2665
+const ExpectedAssertions = 2901
 
 var countedAssertions = 0
 
@@ -80,14 +80,18 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 100
+  ExpectedRoleCount = 109
     ## PLAT-47 added `srLineNumberActive` (the execution line's number, the
     ## desktop's active line number) and the three syntax roles the desktop's
     ## Monaco Python tokenizer colours on their own (a string's quote, a
-    ## square bracket, a decorator).
-    ## `srNone` plus 99 painted roles.
+    ## square bracket, a decorator); its B4 the eight scopes the other Monaco
+    ## tokenizers colour on their own (type identifier, primitive type
+    ## keyword, doc comment, regexp, variable, namespace, attribute name,
+    ## metatag); its deliverable 6 the drop indication's tint
+    ## (`srSurfaceDropIndicator`, a background-only overlay colour).
+    ## `srNone` plus 108 painted roles.
   ExpectedGroupCount = 18
-  ExpectedMergeCount = 4
+  ExpectedMergeCount = 18
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.
 
@@ -144,7 +148,7 @@ proc differsOnSomeColourRung(a, b: SemanticRole): bool =
 proc sampleScreen(width, height: int): seq[StyledRow] =
   ## A REAL painted screen, not a hand-made row.
   ##
-  ## `newShellModel` + `shellStyledRows` is the same path `app/tui_app.nim`
+  ## `newShellModel` + `shellScreen(...).styledRows` is the same path `app/tui_app.nim`
   ## takes for a frame, so the styles this degrades are the ones eighteen view
   ## modules actually paint. A hand-written row would degrade whatever the test
   ## author remembered to put in it.
@@ -166,7 +170,7 @@ proc sampleScreen(width, height: int): seq[StyledRow] =
     frames = @[StackFrame(name: "main", path: "/tmp/main.py", line: 12),
                StackFrame(name: "evaluate", path: "/tmp/main.py", line: 40)],
     userRoots = @["/tmp"], executionFrame = 0, selected = 0)
-  shellStyledRows(model, width, height)
+  shellScreen(model, width, height).styledRows
 
 suite "CTUI-11 Tier 1: degraded style tables":
 

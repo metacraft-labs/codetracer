@@ -219,7 +219,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   flex-shrink: 0
   user-select: none
 
-.vcs-changed-files-commit
+.vcs-changed-files-commit, .vcs-working-count
   font-family: "SpaceGrotesk"
   font-size: 0.625em
   font-weight: 400
@@ -747,6 +747,20 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 
 .vcs-status-other
   color: #888
+
+.vcs-status-untracked
+  color: #4ec9b0
+
+// PLAT-47: the working tree's changed files, above the commit history.
+.vcs-working-tree
+  display: flex
+  flex-direction: column
+  flex-shrink: 0
+  max-height: 40%
+  min-height: 0
+
+.vcs-working-list
+  flex: 0 1 auto
 
 .vcs-file-name
   flex: 1

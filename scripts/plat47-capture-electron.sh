@@ -11,7 +11,18 @@
 # (`src/tests/gui/tests/visual/plat47-desktop-parity-capture.spec.ts`) writes
 # `src/tests/visual/answers/plat47-desktop-parity.electron.json`, which
 # `src/frontend/tui/tests/real_terminal/test_plat47_desktop_parity.nim` and
-# `src/frontend/gpui/tests/test_plat47_gpui_parity.nim` read.
+# `src/frontend/gpui/tests/test_plat47_gpui_parity.nim` read. The second spec
+# (`plat47-monaco-lexers-capture.spec.ts`) writes what the desktop's Monaco
+# tokenizers make of one sample file per language
+# (`plat47-monaco-lexers.electron.json`), which
+# `src/frontend/tui/tests/test_plat47_monaco_lexers.nim` reads. The third
+# (`plat47-vcs-capture.spec.ts`) opens the desktop on the repository
+# `scripts/plat47-vcs-fixture.sh` builds and writes its VCS panel's rows
+# (`plat47-vcs.electron.json`), which the terminal's and GPUI's VCS suites read.
+# The fourth (`plat47-editor-languages-capture.spec.ts`) opens every lexer
+# sample in the desktop's EDITOR and records the Monaco language it chose
+# (`plat47-editor-languages.electron.json`), read by
+# `src/frontend/tui/tests/test_plat47_monaco_lexers.nim`.
 #
 # Needs: a built frontend (`just build-once`), the `calc` recording under
 # `test-logs/tui-fixtures/` (`just test-tui` records it) and Xvfb, which it
@@ -47,7 +58,10 @@ export PLAT47_DESKTOP_PREFIX="$work/prefix"
 export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
 run_spec() {
-  just test-e2e tests/visual/plat47-desktop-parity-capture.spec.ts "$@"
+  just test-e2e tests/visual/plat47-desktop-parity-capture.spec.ts \
+    tests/visual/plat47-monaco-lexers-capture.spec.ts \
+    tests/visual/plat47-vcs-capture.spec.ts \
+    tests/visual/plat47-editor-languages-capture.spec.ts "$@"
 }
 
 case "$(uname -s)" in

@@ -672,6 +672,73 @@ proc hoverAt*(interaction: Interaction; layout: Layout;
               origin: interaction.origin,
               hover: hoveredTarget(layout, interaction.source, pointer))
 
+type
+  DropIndicationKind* = enum
+    ## WHAT A FRONT-END DRAWS for the drop in flight — the logical shape of
+    ## GoldenLayout's drop zone (PLAT-47 deliverable 6), with no measurement in
+    ## it. Every front-end resolves it against its own geometry.
+    diNone = "none"
+      ## Nothing is being dragged, or the pointer is over no legal drop.
+    diSplitHalf = "splitHalf"
+      ## A split: the HALF of the node at `path` on `side`, where the dragged
+      ## pane would land (GoldenLayout tints the half, not a thin band).
+    diTabSlot = "tabSlot"
+      ## A join: the tab strip of the stack at `path`, with an insertion
+      ## caret before tab `slot` (`slot == tab count` is after the last).
+    diWholeNode = "wholeNode"
+      ## A join onto a bare pane: all of the node at `path`, which becomes a
+      ## two-tab stack.
+    diLayoutEdge = "layoutEdge"
+      ## A dock: the strip along `side` of the whole layout.
+
+  DropIndication* = object
+    ## The drop in flight, as a renderer draws it.
+    kind*: DropIndicationKind
+    source*: PaneKind
+      ## What is being dragged — the ghost label follows the pointer with its
+      ## name.
+    path*: string
+    side*: LayoutEdge
+    slot*: int
+    axis*: SplitAxis
+
+proc dropIndicationOf*(interaction: Interaction): DropIndication =
+  ## **The one mapping from the hovered drop to what is drawn.** A split
+  ## target's region is a strip along one side of the node (the zone its
+  ## pointer hit-tested to); what the drop would OCCUPY is the half on that
+  ## side, and that is what is indicated. A join names the stack's tab slot,
+  ## a bare pane's join its whole region, a dock the layout edge. Pure: no
+  ## geometry, no cell, no pixel — PLAT-5's purity law holds, and the terminal
+  ## (`tui/app/layout/binding.dropIndicationCells`) and GPUI resolve the same
+  ## value against their own layouts.
+  if interaction.kind != ikDraggingTab:
+    return DropIndication(kind: diNone)
+  result = DropIndication(kind: diNone, source: interaction.source)
+  if interaction.hover.isNone:
+    return
+  let t = interaction.hover.get
+  case t.kind
+  of dtSplitBefore, dtSplitAfter:
+    result.kind = diSplitHalf
+    result.path = t.region.path
+    result.axis = t.axis
+    result.side =
+      case t.axis
+      of saRow: (if t.kind == dtSplitBefore: leLeft else: leRight)
+      of saColumn: (if t.kind == dtSplitBefore: leTop else: leBottom)
+  of dtIntoStack:
+    case t.region.kind
+    of drTabSlot:
+      result.kind = diTabSlot
+      result.path = t.region.path
+      result.slot = t.region.slot
+    else:
+      result.kind = diWholeNode
+      result.path = t.region.path
+  of dtDockEdge:
+    result.kind = diLayoutEdge
+    result.side = t.edge
+
 proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
   ## Start resizing the region holding `pane` against its siblings.
   ##

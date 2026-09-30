@@ -30,13 +30,6 @@ proc style*(pairs: varargs[(StyleAttr, cstring)]): VStyle =
 proc style*(attr: StyleAttr; value: cstring): VStyle =
   style((attr, value))
 
-proc setAttr*(s: VStyle; attr: StyleAttr; value: cstring) =
-  let key = attr.attrName
-  for i in 0 ..< s.attrs.len:
-    if s.attrs[i][0] == key:
-      s.attrs[i][1] = value
-      return
-  s.attrs.add((key, value))
 
 proc getAttr*(s: VStyle; attr: StyleAttr): cstring =
   let key = attr.attrName

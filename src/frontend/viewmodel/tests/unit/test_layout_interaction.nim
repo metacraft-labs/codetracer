@@ -1318,3 +1318,68 @@ suite "Interaction — dragging one divider (§4.3)":
           let after = weightsOf(outcome.layout, "")
           check abs(after[0] - moved.proposed[0]) < 1e-9
           check abs(after[1] - moved.proposed[1]) < 1e-9
+
+suite "the drop indication — what a front-end draws (PLAT-47)":
+
+  test "every hovered drop maps to the region it would occupy, with no measurement":
+    # GoldenLayout's drop zone, logically: a split shows the HALF on the
+    # drop's side, a join the stack's tab strip at the insertion slot, a join
+    # onto a bare pane the whole pane, a dock the layout edge. Swept over every
+    # shape, source, pane path and zone, so each mapping is exercised where it
+    # can occur.
+    var seen: set[DropIndicationKind] = {}
+    var checked = 0
+    for name in AllShapes:
+      let l = shape(name)
+      for source in l.allPanes():
+        let started = beginDragTab(l, source)
+        if started.isNone:
+          continue
+        for path in panePaths(l):
+          for zone in AllZones:
+            let moved = started.get.hoverAt(l, LayoutPointer(path: path,
+                                                             zone: zone))
+            let ind = dropIndicationOf(moved)
+            seen.incl ind.kind
+            check ind.source == source
+            if moved.hover.isNone:
+              check ind.kind == diNone
+              continue
+            inc checked
+            let t = moved.hover.get
+            case t.kind
+            of dtSplitBefore, dtSplitAfter:
+              check ind.kind == diSplitHalf
+              check ind.path == t.region.path
+              check ind.axis == t.axis
+              # The half is on the side the pointer's edge strip names.
+              check t.region.kind == drNodeStrip
+              check ind.side == t.region.side
+            of dtIntoStack:
+              if t.region.kind == drTabSlot:
+                check ind.kind == diTabSlot
+                check ind.slot == t.region.slot
+              else:
+                check ind.kind == diWholeNode
+              check ind.path == t.region.path
+            of dtDockEdge:
+              check ind.kind == diLayoutEdge
+              check ind.side == t.edge
+    checkpoint("hovered drops checked: " & $checked)
+    check checked > 100
+    check seen == {diNone, diSplitHalf, diTabSlot, diWholeNode, diLayoutEdge}
+
+  test "nothing is indicated when nothing is dragged":
+    let l = shape(AllShapes[1])
+    check dropIndicationOf(noInteraction()).kind == diNone
+    let resizing = beginResize(l, l.allPanes()[0])
+    if resizing.isSome:
+      check dropIndicationOf(resizing.get).kind == diNone
+
+  test "a DropIndication carries no measurement":
+    # PLAT-5's purity law, for the value a renderer reads: its only integer is
+    # an index into the model (the tab slot), and its only string a path.
+    var names: seq[string] = @[]
+    for name, _ in DropIndication().fieldPairs:
+      names.add name
+    check names == @["kind", "source", "path", "side", "slot", "axis"]

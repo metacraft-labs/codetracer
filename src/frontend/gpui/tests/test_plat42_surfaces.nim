@@ -227,6 +227,21 @@ suite "PLAT-42 — a presentation defect found on the way, FIXED":
       ck "bytes)" notin values
       ck "results=@[5, 7, 42, 17, 2]" in values
 
+suite "PLAT-47 — the window is served until it holds still":
+  for s in Scenarios:
+    test "every row of the editor is held, none drawn as loading — " & s:
+      ## FOUND IN PLAT-47 part B, re-recording this file: after a jump near
+      ## the file's end (`returned-calltrace`, `continued-event-log`) 15 and
+      ## 18 of 54 rows drew as loading, because the window was served ONCE
+      ## and the centring jump re-centred when the first answer told it the
+      ## file's length. `gpui_host.serveWindow` now serves until no request
+      ## remains.
+      var loading = 0
+      for r in rowsOf(s):
+        if r["text"].getStr.endsWith("loading"):
+          inc loading
+      ck loading == 0
+
 suite "PLAT-42 — assertion tally":
   test "CHECKS":
     echo "CHECKS: ", CHECKS

@@ -1,0 +1,11 @@
+# A TOML sample: Monaco has no TOML tokenizer, so the desktop draws it plain.
+[package]
+name = "sample"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+count = 42
+ratio = 1.5
+enabled = true

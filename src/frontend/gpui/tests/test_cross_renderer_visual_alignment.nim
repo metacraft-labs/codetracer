@@ -110,6 +110,7 @@ import ../app/shell as gpui_shell
 import ../app/leaves
 import ../app/dock_projection
 import ../host/gpui_host
+import ../window_geometry
 import ../../view_vocabulary/editor_surface
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_layout_answers
@@ -349,8 +350,16 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
     "the GPUI shell refused a window for scenario " & sc.id
   discard slot.activatePane(paneDebugControls)
 
-  let sourceService = newGpuiSourceService(session, trace,
-                                           editorRowsForViewport(viewport.height))
+  # The rows the window's editor pane shows (`window_geometry.editorRowsOf`),
+  # as the shipped window asks for them.
+  let editorRows = block:
+    let idx = shell.windows.indexOf(windowId)
+    let proj = shell.projectionFor(windowId)
+    editorRowsOf(windowGeometryOf(shell.windows.windows[idx].layout,
+                                  (if proj.status == dpsRefused: nil
+                                   else: proj.state),
+                                  viewport.width, viewport.height))
+  let sourceService = newGpuiSourceService(session, trace, editorRows)
   defer: sourceService.close()
   sourceService.serveWindow()
 

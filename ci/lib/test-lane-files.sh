@@ -948,7 +948,8 @@ test_lane_files() {
 				'/test_plugin_surfaces\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
-				'/test_every_status_surface_has_an_entry_point\.nim$'
+				'/test_every_status_surface_has_an_entry_point\.nim$' \
+				'/test_vcs_working_tree\.nim$'
 		# `test_every_mountable_pane_has_a_factory_arm` and
 		# `test_every_status_surface_has_an_entry_point` (both 2026-09-04) are
 		# the same shape as `test_pane_mount_markers_are_released` below: their
@@ -1058,6 +1059,11 @@ test_lane_files() {
 		# `when defined(js)` guard inside the suites instead would leave two
 		# files reporting green on a backend where they had asserted nothing,
 		# which is the vacuous pass this whole file exists to prevent.
+		# `test_vcs_working_tree` (PLAT-47) runs the SYSTEM `git` through the
+		# native VCS facade (`host/native_vcs.nim`, `std/osproc`) against a
+		# real repository it builds with `scripts/plat47-vcs-fixture.sh`; its
+		# porcelain parser half is backend-independent, but the file's claim is
+		# the facade reading a real repository, which a JS target cannot.
 		# `test_pane_mount_markers_are_released` walks `src/frontend/ui/*.nim`
 		# with `std/os`'s `walkFiles` and reads each file, because its subject
 		# is a property of the SOURCE TREE — which panes declare a mount marker

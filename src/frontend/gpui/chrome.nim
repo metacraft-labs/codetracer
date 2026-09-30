@@ -92,6 +92,16 @@ const
     ##
     ## HISTORY: introduced 2026-09-22 at 4.5. It has never been lowered.
 
+  WindowFontFamily* = "DejaVu Sans"
+    ## The window's text face, named rather than left to GPUI's default
+    ## (`.SystemUIFont`). Measured 2026-09-29 on the window lane: with the
+    ## default alias the text rendered in the fallback sans's Book face and a
+    ## `font-weight: bold` tab drew exactly as heavy as a regular one — the
+    ## alias resolved no bold face — so the active tab was bold in the plan
+    ## and not on screen. Naming the family lets the text system find its
+    ## Bold. DejaVu Sans is what that fallback already was, so no metric
+    ## moves; where it is not installed GPUI falls back as before.
+
   ChromeGapPx* = 8
   ChromePaddingPx* = 12
     ## The window's own padding and the gap between panes, in device pixels.
@@ -155,14 +165,16 @@ func tabStyle*(active: bool): seq[(string, string)] =
     @[("color", chromeOf(crTabInactiveForeground))]
 
 func paneOutlineStyle*(focused: bool): seq[(string, string)] =
-  ## PLAT-47 deliverable 9, GPUI's half: the FRAME every region sits in — a
-  ## fill one pixel wider than the region on each side (`FocusOutlinePx` of
-  ## padding) — in the desktop's selected-panel colour around the focused
-  ## region and in the window's own background, invisible, around the rest.
-  ## Closed on all four sides by construction, the same width around every
-  ## region, so focus moving never moves content. A fill-and-padding frame
-  ## rather than a border: the shim's `apply_styles_to_div` draws fills and
-  ## padding and no border.
-  @[("background-color",
-     chromeOf(if focused: crFocusOutline else: crWindowBackground)),
-    ("padding", $FocusOutlinePx & "px")]
+  ## PLAT-47 deliverable 9, GPUI's half: every pane box's 1px BORDER — the
+  ## desktop's selected-panel colour around the focused pane, the window's
+  ## own background (invisible) around the rest. The same width around every
+  ## pane, so focus moving never moves content, and closed on all four sides
+  ## by construction: the border belongs to the pane's own box, around its
+  ## tab strip and its body together, as the desktop's does.
+  ##
+  ## A BORDER since isonim-gpui's shim draws `border-*` (part B's B2). Until
+  ## then the shim drew fills and padding only, and this was a frame: a fill
+  ## one pixel wider than the pane, padded by `FocusOutlinePx`.
+  @[("border-width", $FocusOutlinePx & "px"),
+    ("border-color",
+     chromeOf(if focused: crFocusOutline else: crWindowBackground))]

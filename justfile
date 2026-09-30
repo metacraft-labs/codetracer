@@ -4679,7 +4679,7 @@ build-gpui:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p build/bin test-logs
-  shim_dir="$(cd .. 2>/dev/null && pwd)/isonim-gpui/rust/target/debug"
+  shim_dir="${ISONIM_GPUI_SHIM_DIR:-$(cd .. 2>/dev/null && pwd)/isonim-gpui/rust/target/debug}"
   if [ ! -e "${shim_dir}/libgpui_nim_shim.so" ] && \
      [ ! -e "${shim_dir}/libgpui_nim_shim.dylib" ]; then
     echo "WARNING: isonim-gpui's Rust shim is not built at ${shim_dir}." >&2
@@ -4821,6 +4821,23 @@ plat45-window-record:
     --path:src/frontend --path:src/frontend/viewmodel \
     --nimcache:nimcache/plat45rec -o:build/plat45_window_record \
     src/tests/visual/screen_oracle/plat45_window_record.nim
+
+# PLAT-47 part B: the GPUI window driven by a REAL pointer device and a REAL
+# key on a headless sway — a divider drag, a tab dragged over the four drop
+# kinds, Esc, the VCS tab, the wheel over the call trace — framed after every
+# step (`ci/test/plat47_gpui_window.py` says what each frame is). Needs the
+# windowed binary (`-d:gpuiShimPath=<windowed shim>`,
+# `CODETRACER_WINDOW_BIN_PINS_SHIM=1`), isonim-gpui's `build/virtual-pointer`,
+# and the compositor tools of isonim-gpui's dev shell.
+plat47-gpui-window:
+  bash ci/test/plat47-gpui-window.sh
+
+# Measure those frames into the committed
+# `src/tests/visual/plat47-gpui-window.json` that
+# `src/frontend/gpui/tests/test_plat47_gpui_window.nim` asserts over. Needs
+# `tesseract`.
+plat47-gpui-window-record:
+  python3 ci/test/plat47_gpui_window.py record
 
 # PLAT-46: the desktop's computed colour for every role the TUI also paints,
 # written to src/tests/visual/answers/plat46-token-parity.electron.json for

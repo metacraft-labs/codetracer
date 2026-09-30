@@ -70,6 +70,9 @@ type
     tsDragging = "dragging"
     tsResizing = "resizing"
     tsRevealing = "revealing"
+    tsDraggingOnStrip = "dragging-on-strip"
+      ## PLAT-47: a tab dragged over another stack's tab STRIP — a join,
+      ## drawn as a tint of the strip and an insertion caret.
 
 const
   TransientStateCount* = ord(high(TransientState)) + 1
@@ -132,6 +135,22 @@ proc modelFor*(state: TransientState; cols, rows: int): ShellModel =
     let revealed = beginReveal(l, paneTimeline)
     if revealed.isSome:
       result.interaction = revealed.get
+  of tsDraggingOnStrip:
+    let geom = geometryOf(l, body)
+    let started = beginDragTab(l, paneEditor)
+    if started.isSome:
+      var interaction = started.get
+      # The first stack whose strip holds more than one tab: the pointer on
+      # its second tab's first cell names that insertion slot.
+      for region in geom.projection.regions:
+        if region.activeTab >= 0 and region.tabs.len > 1 and
+           region.pane != paneEditor:
+          let pointer = pointerAt(l, geom, region.area.row,
+                                  region.area.col + 1)
+          if pointer.isSome:
+            interaction = interaction.hoverAt(l, pointer.get)
+          break
+      result.interaction = interaction
   result.layout = l.tree
   result.docked = l.docked
 

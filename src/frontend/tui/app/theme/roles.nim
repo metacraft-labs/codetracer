@@ -110,6 +110,9 @@ type
     srSurfaceInput = "surface-input"
     srSurfaceSelection = "surface-selection"
     srSurfaceCurrentLine = "surface-current-line"
+    srSurfaceDropIndicator = "surface-drop-indicator"
+      ## PLAT-47: the colour a drag's drop zone is TINTED toward (an
+      ## `isonim_tui` overlay re-colours the cells, it never fills them).
 
     # ---- dgGutter: §3.3.2's marks -----------------------------------------
     srGutterNoMark = "gutter-no-mark"
@@ -166,6 +169,14 @@ type
     srSyntaxStringEscape = "syntax-string-escape"
     srSyntaxBracket = "syntax-bracket"
     srSyntaxTag = "syntax-tag"
+    srSyntaxTypeIdentifier = "syntax-type-identifier"
+    srSyntaxKeywordType = "syntax-keyword-type"
+    srSyntaxCommentDoc = "syntax-comment-doc"
+    srSyntaxRegexp = "syntax-regexp"
+    srSyntaxVariable = "syntax-variable"
+    srSyntaxNamespace = "syntax-namespace"
+    srSyntaxAttributeName = "syntax-attribute-name"
+    srSyntaxMetatag = "syntax-metatag"
 
     # ---- dgTimeline: §3.3.5's scrubber ------------------------------------
     srTimelineTrack = "timeline-track"
@@ -332,6 +343,13 @@ const
                                mono = {raReverse}),
     srSurfaceCurrentLine: bgOnly(dgSurface, dtEditorThemeExecutionLine,
                                  mono = {raReverse}),
+    # PLAT-47: the drop zone. The desktop's GoldenLayout darkens its drop
+    # zone (`lm_dropTargetIndicator .lm_inner`, black at 20%) — a step a
+    # terminal on the dark ground cannot show at 256 or 16 colours — so the
+    # terminal and GPUI tint toward the design system's action colour
+    # instead; monochrome reverses (`isonim_tui/overlay`).
+    srSurfaceDropIndicator: bgOnly(dgSurface, dtColorsUiBorderAction,
+                                   mono = {raReverse}),
 
     srGutterNoMark: bare(dgGutter),
     srGutterBreakpoint: fgOnly(dgGutter, dtColorsEditorSyntaxError,
@@ -430,6 +448,25 @@ const
                             mono = {raBold, raItalic, raUnderline}),
     srSyntaxTag: fgOnly(dgSyntax, tokenClassToken(tcTag),
                         mono = {raBold}),
+    # PLAT-47 B4: the scopes the desktop's other Monaco tokenizers colour on
+    # their own. Monochrome has no attribute combination left for them either,
+    # so each takes the attributes of the class it is a kind of, and
+    # `degradation.PermittedMerges` names each pair.
+    srSyntaxTypeIdentifier: fgOnly(dgSyntax, tokenClassToken(tcTypeIdentifier),
+                                   mono = {raBold, raItalic}),
+    srSyntaxKeywordType: fgOnly(dgSyntax, tokenClassToken(tcKeywordType),
+                                mono = {raBold, raItalic}),
+    srSyntaxCommentDoc: fgOnly(dgSyntax, tokenClassToken(tcCommentDoc),
+                               mono = {raItalic, raUnderline}),
+    srSyntaxRegexp: fgOnly(dgSyntax, tokenClassToken(tcRegexp),
+                           mono = {raItalic}),
+    srSyntaxVariable: fgOnly(dgSyntax, tokenClassToken(tcVariable)),
+    srSyntaxNamespace: fgOnly(dgSyntax, tokenClassToken(tcNamespace),
+                              mono = {raBold, raItalic}),
+    srSyntaxAttributeName: fgOnly(dgSyntax, tokenClassToken(tcAttributeName),
+                                  mono = {raBold, raUnderline}),
+    srSyntaxMetatag: fgOnly(dgSyntax, tokenClassToken(tcMetatag),
+                            mono = {raBold}),
 
     srTimelineTrack: fgOnly(dgTimeline, dtColorsUiDividerSecondary,
                             mono = {raItalic}),

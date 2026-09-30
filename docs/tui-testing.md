@@ -692,7 +692,7 @@ that: those bytes would land on the pty a suite is still parsing, and
 ### An empty shell has no styled spans on it
 
 Measured while writing `app/tests/test_degraded_style_tables.nim`:
-`newShellModel(...)` plus `shellStyledRows` produces a screen with **zero**
+`newShellModel(...)` plus `shellScreen(...).styledRows` produces a screen with **zero**
 cells carrying a colour. `app/views/shell.paintPane` draws CTUI-3's plain
 `TITLE ────` row with the default style and only delegates to a pane's own
 painter when that pane's model has content.

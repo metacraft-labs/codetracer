@@ -26,7 +26,21 @@ import std/strutils
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
+import ../platform/vcs as platform_vcs
+
 const
+  VCSWorkingTreeTitle* = "Working Tree"
+    ## PLAT-47 deliverable 4: the caption of the working tree's changed files
+    ## (`VCSVM.workingTreeFiles`) — the desktop's panel section, and the
+    ## terminal's and GPUI's VCS panes, say the same words.
+  VCSCleanTreeText* = "No changes"
+    ## What that section says when the working tree is clean.
+  VCSRefreshIntervalMs* = 5000
+    ## How often a VCS pane re-reads its repository while it is open: the
+    ## desktop's panel (`ui/vcs.nim`'s periodic refresh), the terminal's
+    ## (`tui/host/vcs_source`) and GPUI's (`gpui/main.nim`'s tick) — one
+    ## interval, so an edit made in another program shows up on every
+    ## front-end within the same time.
   ContextExpandStep* = 10
     ## Lines one press of a context-expansion boundary reveals — VCS-Panel.md,
     ## "Unified Diff View (Editor Integration)": "Context expansion controls
@@ -207,6 +221,13 @@ type
     ## different file lists simultaneously.
     commitFilesMap*: Signal[seq[(int, seq[VCSFileRow])]]
     changedFiles*: Signal[seq[VCSFileRow]]  ## DeepReview mode file list
+    workingTreeFiles*: Signal[seq[VCSFileRow]]
+      ## PLAT-47 deliverable 4: the working tree's changed files — modified,
+      ## added, deleted, renamed and untracked — as `git status` reports
+      ## them, one row each with its state letter (`workingTreeStatusLetter`).
+      ## VCS-Panel.md's normal mode "shows the working tree state of the
+      ## current project"; the desktop's panel, the terminal's VCS pane and
+      ## GPUI's all draw this one list.
     ## What a file click does in the docked panel.  Distinct from
     ## `unifiedDiffActive`: this one never changes what the panel *renders*.
     viewMode*: Signal[VCSViewMode]
@@ -509,6 +530,100 @@ proc syncCommitFilesMap*(vm: VCSVM;
   ## Called by syncLegacyVCSIntoVM to push the full per-commit file cache.
   vm.commitFilesMap.val = @entries
 
+proc setWorkingTreeFiles*(vm: VCSVM; files: openArray[VCSFileRow]) =
+  vm.workingTreeFiles.val = @files
+
+func workingTreeStatusLetter*(change: platform_vcs.VcsFileChange): string =
+  ## The one letter a file's working-tree state is shown with, as git's short
+  ## status and VCS-Panel.md spell them: `M` modified, `A` added, `D`
+  ## deleted, `R` renamed, `C` copied, `U` unmerged, and `?` untracked (git's
+  ## own `??`, one character). A staged state wins over an unstaged one: a
+  ## file added to the index and then edited is still new to the repository.
+  func letter(s: platform_vcs.VcsFileStatus): string =
+    case s
+    of vfsModified: "M"
+    of vfsAdded: "A"
+    of vfsDeleted: "D"
+    of vfsRenamed: "R"
+    of vfsCopied: "C"
+    of vfsConflicted: "U"
+    of vfsUntracked: "?"
+    of vfsIgnored: "!"
+    of vfsUnmodified: ""
+  if change.workingTreeStatus == vfsUntracked:
+    return "?"
+  let staged = letter(change.indexStatus)
+  if staged.len > 0: staged else: letter(change.workingTreeStatus)
+
+func workingTreeRowsOf*(status: platform_vcs.VcsStatus): seq[VCSFileRow] =
+  ## `status`'s changed files as the panel's rows, in git's order.
+  for change in status.changes:
+    let letter = workingTreeStatusLetter(change)
+    if letter.len == 0:
+      continue
+    var base = change.path
+    let slash = base.rfind('/')
+    if slash >= 0: base = base[slash + 1 .. ^1]
+    result.add VCSFileRow(status: letter, path: change.path, baseName: base)
+
+proc applyWorkingTreeStatus*(vm: VCSVM; status: platform_vcs.VcsStatus) =
+  ## A live working tree's state into the panel: it is a repository, its
+  ## branch (the header names it, as the desktop's does) and its changed
+  ## files.
+  vm.setDeepReviewMode(false)
+  vm.setGitRepoState(true)
+  let branch = if status.detached: "(detached)" else: status.branch
+  vm.setHeader(branch)
+  vm.setBranchState(branch, [branch], false)
+  vm.setWorkingTreeFiles(workingTreeRowsOf(status))
+
+proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
+                        directory: string; commitCount = 50) =
+  ## Fill the panel for `directory` through the VCS facade — what a native
+  ## front-end (the terminal, GPUI) calls, with the platform's own `git`. The
+  ## desktop fills the same ViewModel from `ui/vcs.nim`, which runs the same
+  ## `git status --porcelain=v2 --branch` and reads it with the same
+  ## `parsePorcelainV2`.
+  ##
+  ## Settled synchronously (`awaitSync`): the native instantiation's git is a
+  ## synchronous subprocess, so there is nothing to wait for; a facade that
+  ## cannot settle here reports "not a repository" rather than a stale list.
+  if vm.isNil or facade.isNil:
+    return
+  let isRepo = awaitSync(facade.isRepository(directory))
+  if not isRepo.ok or not isRepo.value:
+    vm.setGitRepoState(false, "Not a git repository")
+    vm.setWorkingTreeFiles([])
+    vm.setCommits([], [])
+    return
+  let status = awaitSync(facade.status(directory))
+  if not status.ok:
+    vm.setGitRepoState(false, $status.error)
+    return
+  vm.applyWorkingTreeStatus(status.value)
+  let log = awaitSync(facade.log(directory, commitCount, ""))
+  var rows: seq[VCSCommitRow] = @[]
+  if log.ok:
+    for c in log.value:
+      rows.add VCSCommitRow(hash: c.shortId, message: c.subject,
+                            author: c.authorName, fullHash: c.id, dotLane: -1)
+  vm.setCommits(rows, [])
+
+proc workingStateKey*(vm: VCSVM): string =
+  ## Everything a native VCS pane draws from this ViewModel — repository or
+  ## not and why, the branch, the working tree's rows and the history — as
+  ## one comparable value, so a periodic refresh redraws only when the
+  ## repository actually moved (the desktop compares `git status` / `git log`
+  ## snapshots for the same reason).
+  if vm.isNil:
+    return ""
+  result = $vm.isGitRepo.val & "\x1f" & vm.errorMessage.val & "\x1f" &
+           vm.currentBranch.val
+  for f in vm.workingTreeFiles.val:
+    result.add "\x1e" & f.status & " " & f.path
+  for c in vm.commits.val:
+    result.add "\x1d" & c.fullHash & " " & c.message
+
 proc setChangedFiles*(vm: VCSVM; files: openArray[VCSFileRow]) =
   vm.changedFiles.val = @files
 
@@ -752,6 +867,7 @@ proc clearPanel*(vm: VCSVM) =
   vm.lastClickedIndex.val = -1
   vm.commitFilesMap.val = @[]
   vm.changedFiles.val = @[]
+  vm.workingTreeFiles.val = @[]
   vm.viewMode.val = vmUnifiedDiff
   vm.unifiedDiffActive.val = false
   vm.diffFiles.val = @[]
@@ -793,6 +909,7 @@ proc createVCSVM*(): VCSVM =
       lastClickedIndex: createSignal(-1),
       commitFilesMap: createSignal(newSeq[(int, seq[VCSFileRow])]()),
       changedFiles: changedFiles,
+      workingTreeFiles: createSignal(newSeq[VCSFileRow]()),
       viewMode: createSignal(vmUnifiedDiff),
       unifiedDiffActive: createSignal(false),
       diffFiles: createSignal(newSeq[VCSDiffFileRow]()),

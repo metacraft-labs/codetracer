@@ -73,6 +73,23 @@ import ../theme/palette
 export palette
 
 type
+  FrameOverlayKind* = enum
+    ## PLAT-47: what a frame carries ABOVE its composited cells.
+    foTint     ## re-colour the cells of `area` toward the drop tint
+    foCaret    ## the same, stronger: an insertion point
+    foLabel    ## `text` at `area`'s top-left, drawn over everything
+
+  FrameOverlay* = object
+    ## One overlay of a frame, in cells. Applied by the compositor
+    ## (`host/terminal_driver.composite`, `isonim_tui/overlay`) after the rows
+    ## are composited, so a tint never replaces a glyph and a label is never
+    ## tinted.
+    kind*: FrameOverlayKind
+    row*, col*, width*, height*: int
+    text*: string
+    style*: CellStyle
+      ## A label's style, by role like every painted span.
+
   StyledSpan* = object
     ## A run of cells sharing one style.
     text*: string

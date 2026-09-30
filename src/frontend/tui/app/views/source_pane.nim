@@ -98,6 +98,10 @@ type
       ## `SourceVM`'s window and nothing else. THE PANE HOLDS NO MORE THAN
       ## THIS, which is the memory contract, and it is why the field is the
       ## window rather than the file.
+    entryContext*: string
+      ## The highlighter's state at the start of `heldLines[0]`
+      ## (`SourceVM.heldLineContexts[0]`), "" when none was derived. A few
+      ## bytes, not the text above the window (PLAT-47 B4).
     totalLineCount*: int
     viewportTop*: int
       ## First line the pane shows.
@@ -191,7 +195,15 @@ const
     tcPunctuation: CellStyle(role: srSyntaxPunctuation),
     tcStringEscape: CellStyle(role: srSyntaxStringEscape),
     tcBracket: CellStyle(role: srSyntaxBracket),
-    tcTag: CellStyle(role: srSyntaxTag)]
+    tcTag: CellStyle(role: srSyntaxTag),
+    tcTypeIdentifier: CellStyle(role: srSyntaxTypeIdentifier),
+    tcKeywordType: CellStyle(role: srSyntaxKeywordType),
+    tcCommentDoc: CellStyle(role: srSyntaxCommentDoc),
+    tcRegexp: CellStyle(role: srSyntaxRegexp),
+    tcVariable: CellStyle(role: srSyntaxVariable),
+    tcNamespace: CellStyle(role: srSyntaxNamespace),
+    tcAttributeName: CellStyle(role: srSyntaxAttributeName),
+    tcMetatag: CellStyle(role: srSyntaxMetatag)]
     ## §3.3.2's "per-language token highlighting mapped ... to terminal ANSI
     ## colors (keywords, types, strings, comments, identifiers)".
     ##
@@ -227,12 +239,14 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           gutterMode = gutLineNumbers;
                           degradedMessage = "";
                           inspectionLine = 0;
-                          notTakenLines: seq[int] = @[]): SourcePaneModel =
+                          notTakenLines: seq[int] = @[];
+                          entryContext = ""): SourcePaneModel =
   ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
   ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
     path: path, revisionLabel: revisionLabel, provenance: provenance,
     firstHeldLine: firstHeldLine, heldLines: heldLines,
+    entryContext: entryContext,
     totalLineCount: totalLineCount, viewportTop: viewportTop,
     executionLine: executionLine, inspectionLine: inspectionLine,
     marks: marks, values: values, heat: heat, notTakenLines: notTakenLines,
@@ -390,9 +404,11 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
   # entry point; `highlightWindow` behind it is the parse.
   let file =
     if cache.isNil:
-      highlightWindow(model.path, model.firstHeldLine, model.heldLines)
+      highlightWindow(model.path, model.firstHeldLine, model.heldLines,
+                      model.entryContext)
     else:
-      cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines)
+      cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines,
+                      model.entryContext)
 
   let bodyRows = area.height - 1
   for i in 0 ..< bodyRows:

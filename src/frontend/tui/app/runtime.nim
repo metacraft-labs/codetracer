@@ -1239,6 +1239,18 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     if isMouse:
       rt.routeMouseReport(event, result)
       return
+    # PLAT-47: `Esc` CANCELS A GESTURE IN FLIGHT — a drag's drop tint and
+    # ghost go, a held divider snaps back, and nothing is committed (`cancel`
+    # takes no layout). Only when one is in flight: otherwise `Esc` is the
+    # mode key it has always been.
+    if token == "\x1b" and
+        rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
+                                                  ikResizingSplit}:
+      let cancelled = rt.app.layoutBinding.cancelGesture()
+      rt.note(cancelled.message)
+      result.detail = cancelled.message
+      result.repaint = true
+      return
 
   if rt.prompt.open:
     let before = rt.prompt.buffer

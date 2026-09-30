@@ -6415,9 +6415,15 @@ Two traps in the same area, both live:
     (`topCentringIfOutside`, Monaco's revealLineInCenterIfOutsideViewport).
     `test_editor_text_store`'s corpus includes source_vm.nim, so editing it
     moves that suite's ExpectedAssertions.
-  * The GPUI windowed shim (`apply_styles_to_div`) draws fills and padding
-    but NO border and NO font-weight: the focus outline is a padded fill
-    frame (`chrome.paneOutlineStyle`), and bold tabs are plan-only.
+  * Since PLAT-47 part B the GPUI shim (`apply_styles_to_div`) DRAWS
+    `border-*` (all sides or per side), `font-weight`, `font-family`,
+    `font-size`, `padding-left/right/top/bottom`, `flex-grow` and
+    `position: absolute` + `top/left/right/bottom`, and the plan JSON carries
+    them (`lib.rs push_style!`). A style the shim does not parse is silently
+    dropped from the WINDOW while still set on the node — check
+    `render_sync.rs GpuiStyles::apply` before relying on one. The window's
+    font family is named (`chrome.WindowFontFamily`): with GPUI's default
+    `.SystemUIFont` alias no bold face resolved.
   * `capabilities.AutoDetectSelectsLight = false`: a light OSC 11/COLORFGBG
     background is reported, the mode stays Dark.
 
@@ -6447,6 +6453,72 @@ Two traps in the same area, both live:
     `layout_model.nim` stales PLAT-4, PLAT-5, PLAT-9, PLAT-45 (digest files) and
     PLAT-6 (no digest file; its TOUCHED includes both layout modules).
 - TUI call trace pages (tui_session.pageCallTrace): the store holds ONE section of the trace (startLineIndex/lines/totalCallsCount); only HeadlessDebugSession.requestAndLoadCalltrace writes it. CalltraceVM's auto-load effect also sends ct/load-calltrace-section on every stop in headless sessions, but nothing applies that answer to the store (no updated-calltrace subscriber), so it cannot clobber a paged section. A section may list one row past totalCallsCount (`<end of program>`); CallTraceModel.total takes the max.
-- The TUI's Python highlighting is a port of monaco-editor 0.54's Python Monarch tokenizer (highlighter.pythonLineSpans), state carried line to line from the WINDOW's first line; tests/test_plat47_editor_theme.nim compares every char of calc with `monaco.editor.tokenize` captured by plat47-desktop-parity-capture.spec.ts. Monaco's offsets are UTF-16 units, the TUI's are cells.
+- PLAT-47 part B:
+  * The terminal's (and GPUI's) lexical tier runs MONACO'S OWN Monarch
+    definitions: `scripts/monarch-languages.mjs` exports them from the pinned
+    `node_modules/monaco-editor` into `tui/app/syntax/monarch_languages.json`
+    (staticRead; `ci/test/monarch-languages-fresh.sh` gates it), `monarch.nim`
+    runs them (with `js_regex.nim`, a backtracking JS-regex subset), JSON is a
+    port of the JSON language service's scanner (`json_tokens.nim`). The
+    tree-sitter-FREE half lives in `tui/app/syntax/lexical.nim` (LexerId,
+    `lexerForPath`, `monacoLineTokens`, `lexerContexts`, `tokenRuns`) so GPUI
+    links it without the grammar archive; `highlighter.nim` re-exports it.
+    Monaco's offsets are UTF-16 units, the TUI's cells.
+  * A window's first line starts in the tokenizer state the WHOLE file's
+    earlier lines leave: the host computes `lexerContexts` from
+    `SourceFetch.fileLines` and `SourceVM.heldLineContexts` carries them
+    aligned with `heldLines` (the TUI's `source_binding` and GPUI's
+    `editor_surface.entryContext` read index 0).
+  * GPUI's window is laid out from `gpui/window_geometry.windowGeometryOf`
+    (pixel rects from the projected dock JSON + the Layout for paths); the
+    same geometry hit-tests the pointer (`pointerAt`, `dividerAt`, `tabAt`).
+    `gpui/window_gestures` drives `layout_interaction` (divider drag with a
+    live preview = `pendingCommand` applied to a copy; tab drag; Esc).
+    `main.drawArrangement` MOVES the leaf elements into a fresh arrangement on
+    every redraw (never rebuilds them). `CODETRACER_GPUI_GEOMETRY_OUT` dumps
+    the geometry and `CODETRACER_GPUI_GESTURE_TRACE=1` traces gestures — the
+    window lane (`just plat47-gpui-window`) aims with them.
+  * GPUI pointer events arrive on the ROOT's `mousedown/mousemove/mouseup/
+    wheel` listeners with window coordinates (`renderer.pointerOf`). A wheel
+    turned DOWN arrives with NEGATIVE `dy`. GPUI ignores a continuous wheel
+    `axis`: isonim-gpui's `virtual_pointer` sends `wheel N` as discrete notches.
+  * `gpui_host.serveWindow` serves until no request remains (bounded): the
+    centring jump re-centres once the first answer tells it the file length,
+    and a single round left rows drawn as "loading" after a jump near the end.
+  * Test state isolation: every test directory's `config.nims` force-imports
+    `src/frontend/test_support/state_isolation.nim`, which replaces
+    `XDG_STATE_HOME`/`CODETRACER_TUI_LAYOUT_DIR` when unset or inside the
+    user's state home; the lane runner also checksums the user's state dir
+    before/after and FAILS the lane if a file appeared, was rewritten or
+    disappeared (clearing state by hand during a lane trips it too — rerun).
+    `src/frontend/test_support/` and the four test-tree `config.nims` are
+    re-included in `.gitignore` explicitly: the blanket `*.nims` and
+    `src/frontend/**/test_*` rules (the latter matches the DIRECTORY
+    `test_support`, and git cannot re-include a file below an excluded
+    directory) silently kept them out of every commit.
+  * GPUI host clocks: `gpui_set_tick(ms, cb)` (isonim-gpui) runs a cdecl
+    callback on the loop's main thread every `ms`, then repaints; `0`/nil
+    disarms, and the loop disarms it when it returns. The VCS pane uses it at
+    `vcs_vm.VCSRefreshIntervalMs` (the desktop's `refreshIntervalMs`, the TUI's
+    `VcsRefreshMs`) through `gpui_host.refreshGpuiVcs`, redrawing only when
+    `VCSVM.workingStateKey` moved.
+  * GPUI auto-hide strips: `window_geometry` takes the strips out of the area
+    FIRST (left/right full height, top/bottom between them, `DockStripPx` +
+    a gap) and lays the tree in `inner`; a strip label press is a drag of the
+    docked pane, a click (no motion) reveals it (`WindowGestures.reveal`,
+    which OUTLIVES a gesture: every entry point carries it) over the tree at
+    `revealRectOf` (a third, the terminal's rule); Esc, a second click or a
+    press outside dismisses. gpui-kit has no TOP dock: `projectDock` refuses a
+    top-docked document (PLAT-48's).
+  * GPUI editor rows: the fetch window holds `window_geometry.editorRowsOf`
+    rows (the editor pane's body at `GpuiEditorRowPx` = 26 px, less the
+    heading and the source statement), and each row is `flex-shrink: 0`. It
+    used to be the WINDOW's height over a nominal 20 px (54 rows where 37 fit),
+    and the flex column squeezed every row to 18 px, cutting descenders.
+  * The desktop editor's Monaco language is
+    `diff_document.editorLanguageForPath(path, toCLang(lang))`: the extension's
+    Monaco id from `DiffLanguageByExtension` (TOML excepted — drawn plain, as
+    the terminal does), the recording language only as the fallback.
+    `toCLang` alone has no `.ts/.java/.sh/.json/.yaml` and opened them plain.
 - The desktop's light theme (config `theme: default_white`) keeps the DARK panels (#282828) and only switches Monaco to codetracerWhite; codetracerWhite.json's `codetracer` block holds the values MEASURED in that state (plat47-desktop-parity-light.electron.json). Launch a light desktop in Playwright with the fixture option `configTheme: "default_white"`.
 - Real-PTY suites launched without CODETRACER_TUI_LAYOUT_DIR read/write the user's ~/.local/state/codetracer/tui-layout.json; a remembered non-default arrangement then fails layout/colour read-backs. Export CODETRACER_TUI_LAYOUT_DIR (and XDG_STATE_HOME) to a scratch dir when running them by hand.

@@ -50,7 +50,8 @@ const
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
-let shimDir = repo.parentDir / "isonim-gpui/rust/target/debug"
+let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
+                   repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = repo / CalcFixture
 
 proc requirePrereq(ok: bool; what: string) =
@@ -195,7 +196,8 @@ suite "PLAT-45: the GPUI window and the shared default":
     # names itself, never an absent slot.
     let cap = gpuiCapability()
     let reports = reportLeaves(sharedDefaultLayout().tree, cap)
-    ck reports.len == 4
+    # Four until PLAT-47 part B drew the VCS pane (from the desktop's VCSVM).
+    ck reports.len == 3
     let text = planText(run.plan)
     for r in reports:
       var state = ""

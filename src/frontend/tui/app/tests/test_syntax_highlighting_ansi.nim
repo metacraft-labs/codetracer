@@ -70,7 +70,7 @@ import ../views/source_pane
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 147
+const ExpectedAssertions = 155
 
 var countedAssertions = 0
 
@@ -166,7 +166,7 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
     ck reached.len == 10
     ck parsed == 10
 
-  test "the twelve token classes carry twelve distinct styles":
+  test "the twenty token classes carry twenty distinct styles":
     # Not a spot check. A palette with one repeat renders two classes
     # identically on screen while every span-level assertion stays green, and
     # the only assertion that catches it is over the whole palette.
@@ -177,9 +177,10 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
       seen.add style
     # Twelve since PLAT-47: a string's quote, a square bracket and a
     # decorator, the scopes the desktop's Monaco Python tokenizer colours on
-    # their own.
-    ck seen.len == 12
-    ck ord(high(TokenClass)) - ord(low(TokenClass)) + 1 == 12
+    # their own; twenty since its B4, the eight scopes the desktop's other
+    # Monaco tokenizers colour on their own.
+    ck seen.len == 20
+    ck ord(high(TokenClass)) - ord(low(TokenClass)) + 1 == 20
     # And the default class really is the terminal default, so unhighlighted
     # text is unstyled rather than styled-to-look-unstyled.
     ck tokenStyle(tcPlain).isDefault
@@ -283,8 +284,9 @@ suite "CTUI-5: syntax highlighting and its ANSI styles":
     ck tcKeyword in classes
     ck tcString in classes
     ck tcNumber in classes
-    # Noir takes the same lexer, and it is the OTHER fixture's language.
-    ck lexerForPath("src/main.nr") == lxRustLike
+    # Noir is lexed as Rust — the desktop's editor opens `.nr` with Monaco's
+    # Rust tokenizer — and it is the OTHER fixture's language.
+    ck lexerForPath("src/main.nr") == lxRust
     ck modeForPath("src/main.nr") == hmLexical
     let noir = highlightWindow("src/main.nr", 1,
       @["// a comment", "fn main(x: Field) -> Field {", "    x + 1", "}"])
