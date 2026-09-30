@@ -203,11 +203,11 @@ when defined(server):
       # anything it does not own comes back as "" and is dropped rather than
       # raising, because this connection also carries the index IPC surface and
       # taking it down over someone else's message would end the session.
-      client.on(FacadeChannel) do (frame: cstring):
+      client.on(FacadeChannel.cstring) do (frame: cstring):
         resetActivity()
         let answer = facadeEndpoint.handleFrame($frame)
         if answer.len > 0:
-          client.emit(FacadeChannel, answer.cstring)
+          client.emit(FacadeChannel.cstring, answer.cstring)
 
       client.on(cstring"disconnect") do ():
         debugPrint "socket disconnect"

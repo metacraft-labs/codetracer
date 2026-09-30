@@ -715,7 +715,16 @@ test_lane_files() {
 		# therefore checked at package time rather than on push. That gap is
 		# real and is recorded in the milestone file rather than papered over
 		# with a lane that would lie.
+		# `browser_tab.nim` is here for the same reason `web_browser.nim` is:
+		# it is `importjs` and `{.emit.}` throughout, so `vm-unit` cannot see
+		# it, and the two modules that DO import it — `web_browser.nim` here
+		# and `ui_js.nim` in `renderer-electron` — are each one edit away from
+		# not doing so. It carries the ten operations that belong to the TAB
+		# rather than to the container (§6.6), shared by the web deployment
+		# and the container deployment, which is exactly the shape of module
+		# that loses its last compiler without anyone noticing.
 		echo src/frontend/platform_host.nim
+		echo src/frontend/viewmodel/host/browser_tab.nim
 		echo src/frontend/viewmodel/host/desktop_electron.nim
 		echo src/frontend/viewmodel/host/opfs_volume.nim
 		echo src/frontend/viewmodel/host/web_browser.nim

@@ -284,7 +284,7 @@ proc awaitWelcome(attempt: int) =
     begin()
   elif attempt > 100:
     ck false, "the server answers `hello` with a `welcome` within 2s " &
-      "(nothing arrived on " & $FacadeChannel & " — the dispatcher is not " &
+      "(nothing arrived on " & FacadeChannel & " — the dispatcher is not " &
       "attached to the socket)"
     finish(checks)
   else:

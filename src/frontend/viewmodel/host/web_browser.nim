@@ -37,6 +37,7 @@ import ../platform/capabilities
 import ../platform/clipboard
 import ../platform/download
 import ../platform/shell
+import browser_tab
 import ../platform/store_volume
 import ../platform/memory_volume
 import ../platform/project_store
@@ -86,76 +87,6 @@ proc jsRequestPersistence(): Future[JsObject] {.importjs: """
   }
 })()""".}
 
-proc jsWriteClipboard(text: cstring): Future[JsObject] {.importjs: """
-(async function (t) {
-  try {
-    await navigator.clipboard.writeText(t);
-    return {ok: true};
-  } catch (e) {
-    return {ok: false, message: (e && e.message) || String(e)};
-  }
-})(#)""".}
-
-proc jsWriteClipboardHtml(html, text: cstring): Future[JsObject] {.importjs: """
-(async function (h, t) {
-  try {
-    if (typeof ClipboardItem === 'undefined') {
-      await navigator.clipboard.writeText(t);
-      return {ok: true};
-    }
-    await navigator.clipboard.write([new ClipboardItem({
-      'text/html': new Blob([h], {type: 'text/html'}),
-      'text/plain': new Blob([t], {type: 'text/plain'})
-    })]);
-    return {ok: true};
-  } catch (e) {
-    return {ok: false, message: (e && e.message) || String(e)};
-  }
-})(#, #)""".}
-
-proc jsOfferDownload(name: cstring; data: JsObject;
-                     mimeType: cstring): JsObject {.importjs: """
-(function (n, bytes, mime) {
-  try {
-    var blob = new Blob([bytes], {type: mime});
-    var url = URL.createObjectURL(blob);
-    var anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = n;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
-    return {ok: true};
-  } catch (e) {
-    return {ok: false, message: (e && e.message) || String(e)};
-  }
-})(#, #, #)""".}
-
-proc jsOpenExternal(url: cstring): JsObject {.importjs: """
-(function (u) {
-  try {
-    var opened = window.open(u, '_blank', 'noopener,noreferrer');
-    if (!opened) { return {ok: false, message: 'the browser blocked the pop-up'}; }
-    return {ok: true};
-  } catch (e) {
-    return {ok: false, message: (e && e.message) || String(e)};
-  }
-})(#)""".}
-
-proc jsSetFullscreen(fullscreen: bool): Future[JsObject] {.importjs: """
-(async function (want) {
-  try {
-    if (want) { await document.documentElement.requestFullscreen(); }
-    else if (document.fullscreenElement) { await document.exitFullscreen(); }
-    return {ok: true};
-  } catch (e) {
-    return {ok: false, message: (e && e.message) || String(e)};
-  }
-})(#)""".}
-
-proc jsIsFullscreen(): bool {.importjs: "(!!document.fullscreenElement)".}
-proc jsHasFocus(): bool {.importjs: "(document.hasFocus())".}
 # THE LOCATION READS ARE GUARDED, and they were not until `boot()` began
 # calling them.
 #
@@ -236,37 +167,6 @@ proc jsShareOrigin(): cstring {.importjs: """
   ## `web_platform.webInstantiationProfile` supplies.
 
 # ---------------------------------------------------------------------------
-# Small adapters
-# ---------------------------------------------------------------------------
-
-proc settleVoid(future: Future[JsObject]; what: string
-               ): PlatformFuture[PlatformOutcome[Nothing]] =
-  newPromise(proc(resolve: proc(value: PlatformOutcome[Nothing])) =
-    discard future.then(proc(answer: JsObject) =
-      var ok = false
-      var message: cstring = ""
-      {.emit: "`ok` = !!`answer`.ok; `message` = String(`answer`.message || '');".}
-      if ok: resolve(succeeded())
-      else: resolve(failed[Nothing](pkFailed, what & " failed", $message))))
-
-proc settleSync(answer: JsObject; what: string
-               ): PlatformFuture[PlatformOutcome[Nothing]] =
-  var ok = false
-  var message: cstring = ""
-  {.emit: "`ok` = !!`answer`.ok; `message` = String(`answer`.message || '');".}
-  if ok: resolvedOk()
-  else: resolvedErr[Nothing](pkFailed, what & " failed", $message)
-
-proc toJsBytes(content: seq[byte]): JsObject =
-  var array: JsObject
-  let length = content.len
-  {.emit: "`array` = new Uint8Array(`length`);".}
-  for i in 0 ..< length:
-    let b = content[i].int
-    {.emit: "`array`[`i`] = `b`;".}
-  array
-
-# ---------------------------------------------------------------------------
 # The bridge
 # ---------------------------------------------------------------------------
 
@@ -276,77 +176,6 @@ proc browserWasmHost(delivered: seq[DeliveredWasmModule];
                     ): WasmHost
   ## Forward-declared because the bridge is built above the Worker transport
   ## it may need. Defined with `newBrowserWasmHost`, whose reasons it shares.
-
-proc newBrowserTabBridge*(): BrowserTabBridge =
-  ## The ten operations `platform/browser_facades.nim` builds the clipboard,
-  ## download and shell facades over, wired to the real browser.
-  ##
-  ## Split out of `newBrowserBridge` below when those builders moved down into
-  ## `browser_facades.nim`: the WEB bridge is this plus a project-store volume,
-  ## a `WasmHost` and a share origin, and the CONTAINER deployment is a tab
-  ## with none of those three. Keeping the two records apart is what lets the
-  ## container reach the same three builders without inventing a store.
-  BrowserTabBridge(
-    writeClipboardText: proc(text: string
-                            ): PlatformFuture[PlatformOutcome[Nothing]] =
-      settleVoid(jsWriteClipboard(text.cstring), "copying to the clipboard"),
-    writeClipboardHtml: proc(html, plainText: string
-                            ): PlatformFuture[PlatformOutcome[Nothing]] =
-      settleVoid(jsWriteClipboardHtml(html.cstring, plainText.cstring),
-                 "copying to the clipboard"),
-    offerDownload: proc(suggestedName: string; content: seq[byte];
-                        mimeType: string
-                       ): PlatformFuture[PlatformOutcome[Nothing]] =
-      settleSync(jsOfferDownload(suggestedName.cstring, toJsBytes(content),
-                                 mimeType.cstring), "the download"),
-    pickFiles: proc(options: OpenDialogOptions
-                   ): PlatformFuture[PlatformOutcome[seq[string]]] =
-      # Deliberately not implemented in NS2 and deliberately not faked. Import
-      # is a store operation — the picked file is COPIED into the project — and
-      # the copy path belongs with the templates and the inline-share decoder
-      # that NS6 brings. Refusing by name is better than a picker that hands
-      # back host paths the store cannot address.
-      resolvedUnsupported[seq[string]]("importing files from your computer"),
-    pickDirectory: proc(options: OpenDialogOptions
-                       ): PlatformFuture[PlatformOutcome[string]] =
-      resolvedUnsupported[string]("importing a folder from your computer"),
-    suggestSaveName: proc(options: SaveDialogOptions
-                         ): PlatformFuture[PlatformOutcome[string]] =
-      # A browser download names itself; there is no dialog to consult first.
-      # Answering with the suggestion is correct rather than a refusal: the
-      # question "what will this be called" has a true answer here.
-      resolvedOk(options.suggestedName),
-    openExternalUrl: proc(url: string
-                         ): PlatformFuture[PlatformOutcome[Nothing]] =
-      # The same allow-list `desktop_electron` applies, from the same place.
-      # This arm did NOT have it: the string went straight to `window.open`,
-      # and `javascript:` and `data:text/html` are not uniformly refused there
-      # across browsers.  The rule was written on the facade field as prose and
-      # honoured by one of the two implementations that can open anything.
-      if not allowedExternalUrlScheme(url):
-        refuseExternalUrl(url)
-      else:
-        settleSync(jsOpenExternal(url.cstring), "opening the link"),
-    setFullscreen: proc(fullscreen: bool
-                       ): PlatformFuture[PlatformOutcome[Nothing]] =
-      settleVoid(jsSetFullscreen(fullscreen), "changing full screen"),
-    windowState: proc(): PlatformFuture[PlatformOutcome[WindowState]] =
-      resolvedOk(WindowState(
-        maximized: false, minimized: false,
-        fullscreen: jsIsFullscreen(), focused: jsHasFocus())),
-    onWindowStateChanged: proc(handler: proc(state: WindowState)) =
-      var capturedHandler = handler
-      proc deliver() =
-        capturedHandler(WindowState(
-          maximized: false, minimized: false,
-          fullscreen: jsIsFullscreen(), focused: jsHasFocus()))
-      {.emit: """
-      if (typeof document !== 'undefined') {
-        document.addEventListener('fullscreenchange', function () { `deliver`(); });
-        window.addEventListener('focus', function () { `deliver`(); });
-        window.addEventListener('blur', function () { `deliver`(); });
-      }
-      """.})
 
 proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
                        persistenceAnswered: bool;

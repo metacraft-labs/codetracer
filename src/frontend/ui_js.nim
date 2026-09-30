@@ -53,6 +53,18 @@ import
   # everything variable goes in as text, and that rule is worth being able to
   # test without loading the renderer.
   ui/hcr_live_edit_panel,
+  # THE CONTAINER DEPLOYMENT'S CLIENT — WD1b. `container_boot` performs §6.3's
+  # handshake over the socket `startIPC` opens below and installs the platform
+  # the server describes; `browser_tab` supplies the ten operations that are
+  # the TAB's rather than the container's (§6.6). Both are browser-only and
+  # link no Electron, which is what lets this arm run in a plain tab.
+  viewmodel/host/container_boot,
+  viewmodel/host/browser_tab,
+  # `setGitRefreshHook` — see the call below.
+  ui/git_cli,
+  # `installFrontendPlatform`, which is what makes the handshake's answer the
+  # front end's platform rather than a value nobody reads.
+  platform_host,
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm, point_list_vm],
@@ -7534,6 +7546,54 @@ when not defined(ctInExtension) and not defined(ctWeb):
         data.ipc = ipc
         configureIPC(data)
         configure(data)
+
+        # THE CONTAINER DEPLOYMENT'S PLATFORM — WD1b, §6.3.
+        #
+        # This page is a browser tab with no `require`, and until now that was
+        # the whole of what the front end knew about it: `ctPlatform()` fell
+        # through `desktop_electron`'s `electronAvailable() == false` branch to
+        # `newPlatform(webProfile)`, a profile claiming a filesystem, a process
+        # runner and a VCS over facades that refuse all three.
+        #
+        # A tab cannot tell "served by `ct host`" from "served by the
+        # browsersync dev server" by looking at itself — same bundle, same
+        # origin shape, no `require` in either. §6.3's answer is to ASK: send
+        # `hello` on the socket that is already open and see whether anything
+        # answers `welcome`. Something does exactly when there is a container
+        # endpoint on the other end, and the frame carries the profile that
+        # endpoint serves, declared by the process that will answer the calls.
+        #
+        # Silence is the dev server and is not an error: nothing is installed
+        # and the page keeps the platform it had. A version refusal (§6.5) is
+        # also not silent — it is shown, because a stale cached bundle that
+        # simply degraded would be indistinguishable from a deployment that
+        # cannot do very much.
+        discard beginContainerBoot(
+          ContainerChannel(
+            send: proc(frame: string) =
+              socket.emit(FacadeChannel.cstring, frame.cstring),
+            subscribe: proc(handler: proc(frame: string)) =
+              var captured = handler
+              socket.on(FacadeChannel.cstring, proc(frame: cstring) =
+                captured($frame))),
+          newBrowserTabBridge(),
+          proc(boot: ContainerBoot) =
+            case boot.outcome
+            of cbInstalled:
+              installFrontendPlatform(boot.platform)
+              # `ui/git_cli.nim` answers a render synchronously and re-asks
+              # when the instantiation cannot; this is what brings the panel
+              # back once the answer has arrived. Registered HERE rather than
+              # unconditionally because it is only ever needed for a remote
+              # instantiation — the desktop's git settles inside the call, and
+              # a redraw hook there would fire on nothing.
+              setGitRefreshHook(proc() = redrawAll())
+            of cbRefused, cbMalformed:
+              console.error cstring"CODETRACER::facade: ", boot.message.cstring
+              data.viewsApi.showNotification(newNotification(
+                NotificationKind.NotificationError, boot.message))
+            of cbPending:
+              discard)
 
     startIPC()
 
