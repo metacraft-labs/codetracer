@@ -28,6 +28,16 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIN = os.path.join(ROOT, "build/bin/codetracer-gpui")
 SHIM = os.environ.get("ISONIM_GPUI_SHIM_DIR",
                       os.path.abspath(os.path.join(ROOT, "..", "isonim-gpui/rust/target/debug")))
+# The cdylib's name is the HOST's, not Linux's. `cargo build` emits
+# `libgpui_nim_shim.dylib` on macOS and `libgpui_nim_shim.so` elsewhere, and
+# `isonim_gpui/bindings.nim` bakes the same per-platform absolute path into the
+# binary this script runs (`when defined(macosx): … ".dylib"`). Hardcoding the
+# Linux spelling made this script refuse on macOS with *"the isonim-gpui shim is
+# missing"* while the shim was built and present next to it — a false diagnosis,
+# and the only thing between this recipe and a macOS run: everything else here
+# is `--report-plan`, which opens no window and needs no compositor.
+SHIM_LIB = "libgpui_nim_shim.dylib" if sys.platform == "darwin" \
+    else "libgpui_nim_shim.so"
 TRACE = os.environ.get("CODETRACER_PLAT42_TRACE",
                        os.path.join(ROOT, "test-logs/tui-fixtures/calc-2f0db4f45192"))
 OUT = os.path.join(ROOT, "src/tests/visual/plat42-surfaces.json")
@@ -111,13 +121,20 @@ def read_surfaces(plan):
 
 def main():
     for p, what in ((BIN, "build/bin/codetracer-gpui (just build-gpui)"),
-                    (os.path.join(SHIM, "libgpui_nim_shim.so"), "the isonim-gpui shim"),
+                    (os.path.join(SHIM, SHIM_LIB), "the isonim-gpui shim"),
                     (TRACE, "the calc recording"),
                     (FLOW_TRACE, "the noir_space_ship recording")):
         if not os.path.exists(p):
             sys.exit(f"PLAT-42: refusing to record — {what} is missing at {p}")
     scen = json.load(open(SCEN))
-    env = dict(os.environ, LD_LIBRARY_PATH=SHIM)
+    # The loader variable is the HOST's too. `bindings.nim` tries the baked
+    # absolute path first, so this is the fallback arm rather than the primary
+    # one — but a fallback spelled for the wrong loader is not a fallback.
+    # (macOS additionally strips `DYLD_*` from children of SIP-protected
+    # binaries; that is why the absolute path is what this path relies on.)
+    loader_var = "DYLD_LIBRARY_PATH" if sys.platform == "darwin" \
+        else "LD_LIBRARY_PATH"
+    env = dict(os.environ, **{loader_var: SHIM})
     record = {
         "_comment": [
             "PLAT-42 — the GPUI editor's four debugger surfaces, read from the",
