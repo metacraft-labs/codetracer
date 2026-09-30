@@ -12,21 +12,21 @@ CodeTracer can only be installed on Linux and macOS currently.
 ### Recommended: automatically
 We provide a automatic installer that installs CodeTracer in the best possible way for your current system. You can run it by running the following in a terminal:
 ```
-user $ curl "https://downloads.codetracer.com/install.sh" | sh
+user $ curl -fsSL https://get.codetracer.com/sh | sh
 ```
 
-:::caution
-On macOS it's recommended that you install homebrew beforehand. This is because the installer tries to install ruby from homebrew to enable our ruby recording
-features. Make sure you install homebrew in order to not lose this feature.
-:::
+On Debian, Ubuntu, Fedora and RHEL the installer registers the Metacraft Labs package
+repository (`deb.metacraft-labs.com` / `rpm.metacraft-labs.com`) and installs the `codetracer`
+package, so later updates arrive with `apt upgrade` / `dnf upgrade`. On Arch it uses your AUR
+helper, on Gentoo the metacraft-overlay, and on macOS the release DMG.
 
 ### Manually on Linux
 Here is a list of our Linux packages:
 
-- [Ubuntu (`deb.codetracer.com`)](https://deb.codetracer.com/)
-- [Debian (`deb.codetracer.com`)](https://deb.codetracer.com/)
-- [Red Hat (`rpm.codetracer.com`)](https://rpm.codetracer.com/)
-- [Fedora (`rpm.codetracer.com`)](https://rpm.codetracer.com/)
+- [Ubuntu (`deb.metacraft-labs.com`)](https://deb.metacraft-labs.com/)
+- [Debian (`deb.metacraft-labs.com`)](https://deb.metacraft-labs.com/)
+- [Red Hat (`rpm.metacraft-labs.com`)](https://rpm.metacraft-labs.com/)
+- [Fedora (`rpm.metacraft-labs.com`)](https://rpm.metacraft-labs.com/)
 - [Gentoo (metacraft-overlay)](https://github.com/metacraft-labs/metacraft-overlay)
 - [Arch Linux (AUR)](https://aur.archlinux.org/packages/codetracer)
 - [AppImage (amd64)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage)
@@ -104,7 +104,6 @@ The only dependencies for the macOS build are `git`, `bash` and `homebrew`.
 2. Enter the created directory
 3. Run `./non-nix-build/build.sh` from the root of the cloned repository. This will install all prerequisites like Rust, Nim and others using homebrew
 4. The resulting binary can be found at `./non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct`, and a DMG installer is created at `./non-nix-build/CodeTracer.dmg`.
-
 
 ### Building and running the tests
 

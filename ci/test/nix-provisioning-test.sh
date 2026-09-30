@@ -239,7 +239,10 @@ done
 # assertion that carries the actual invariant -- passed on the merged tree
 # before this number was touched. The count is being reconciled to the code,
 # not the other way round.
-readonly EXPECTED_NIX_JOBS=33
+#
+# 33 -> 36: release.yml's `linux`, `macos` and `publish` jobs. Each runs
+# ./.github/actions/setup-nix right after its checkout.
+readonly EXPECTED_NIX_JOBS=36
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

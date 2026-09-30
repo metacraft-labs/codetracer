@@ -51,7 +51,15 @@
   .foot { color: var(--muted); font-size: 14px; margin-top: 26px; }
   .foot a { color: var(--accent); text-decoration: none; }
   .foot a:hover { text-decoration: underline; }
-  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .note code { display: inline; padding: 2px 6px; white-space: normal; }
+  .cards { display: flex; flex-direction: column; }
+  .card.detected { border-color: var(--accent); }
+  .badge {
+    display: none; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+    background: var(--accent); color: var(--accent-ink); font-size: 11px; letter-spacing: .06em;
+  }
+  .card.detected .badge { display: inline-block; }
 </style>
 </head>
 <body>
@@ -60,21 +68,28 @@
   <h1>Install CodeTracer</h1>
   <p class="lede">One command, any shell. The script is served as plain text — read it before you run it.</p>
 
-  <div class="card">
-    <h2>Linux &middot; macOS &middot; WSL</h2>
+  <div class="cards">
+  <div class="card" id="card-sh">
+    <h2>Linux &middot; macOS &middot; WSL<span class="badge" id="badge-sh">Detected</span></h2>
     <div class="cmd">
       <code id="sh">curl -fsSL https://get.codetracer.com/sh | sh</code>
       <button class="copy" data-target="sh">Copy</button>
     </div>
-    <p class="note">Pin a version: <code style="display:inline;padding:2px 6px">VERSION=v0.1.0 curl -fsSL https://get.codetracer.com/sh | sh</code></p>
+    <p class="note">On Debian, Ubuntu, Fedora and RHEL this adds the Metacraft Labs package
+      repository (<a href="https://deb.metacraft-labs.com">deb.metacraft-labs.com</a>,
+      <a href="https://rpm.metacraft-labs.com">rpm.metacraft-labs.com</a>) and installs the
+      <code>codetracer</code> package, so updates come with <code>apt upgrade</code> or
+      <code>dnf upgrade</code>. Arch installs from the AUR, Gentoo from metacraft-overlay, macOS from the release DMG.</p>
+    <p class="note">Pin a version: <code>curl -fsSL https://get.codetracer.com/sh | sh -s -- --version 26.09.1</code></p>
   </div>
 
-  <div class="card">
-    <h2>Windows &middot; PowerShell</h2>
+  <div class="card" id="card-pwsh">
+    <h2>Windows &middot; PowerShell<span class="badge" id="badge-pwsh">Detected</span></h2>
     <div class="cmd">
       <code id="pwsh">irm https://get.codetracer.com/pwsh | iex</code>
       <button class="copy" data-target="pwsh">Copy</button>
     </div>
+  </div>
   </div>
 
   <p class="foot">
@@ -84,6 +99,24 @@
   </p>
 </main>
 <script>
+  // Lead with the command for the visitor's system. Both stay visible:
+  // detection can be wrong (a Linux browser inside a Windows VM, WSL), and
+  // the page must work without it.
+  (function () {
+    var ua = navigator.userAgentData;
+    var p = ((ua && ua.platform) || navigator.platform || navigator.userAgent || '').toLowerCase();
+    var os = p.indexOf('win') >= 0 ? 'Windows'
+           : (p.indexOf('mac') >= 0 || p.indexOf('iphone') >= 0 || p.indexOf('ipad') >= 0) ? 'macOS'
+           : (p.indexOf('linux') >= 0 || p.indexOf('x11') >= 0 || p.indexOf('bsd') >= 0) ? 'Linux'
+           : '';
+    if (!os) return;
+    var key = os === 'Windows' ? 'pwsh' : 'sh';
+    var card = document.getElementById('card-' + key);
+    card.classList.add('detected');
+    document.getElementById('badge-' + key).textContent = 'Detected: ' + os;
+    card.parentNode.insertBefore(card, card.parentNode.firstChild);
+  })();
+
   document.querySelectorAll('button.copy').forEach(function (b) {
     b.addEventListener('click', function () {
       var t = document.getElementById(b.dataset.target);
