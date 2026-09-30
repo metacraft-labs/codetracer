@@ -31,11 +31,25 @@
 //!     CORRECT, complete answer here, and M22's `[~]` remainder is RESOLVED for
 //!     split bundles: the debugger's locals view (`full_value_locals`) is fully
 //!     served without any cell history.
-//!  4. PARITY (A/B): the same logical recording written as an `events.log`
-//!     bundle (the LEGACY/secondary-Rust-writer path, which forces
-//!     `open_old_format` → `TraceProcessor::postprocess` over `events.log`)
+//!  4. PARITY (A/B): the same logical recording as a LEGACY `events.log`
+//!     bundle (read through `open_old_format` → `TraceProcessor::postprocess`)
 //!     yields the SAME steps and per-step variable values as the split-only
 //!     bundle — so the debugger shows identical data on either format.
+//!
+//! ## Where the legacy bundle comes from
+//!
+//! No writer emits `events.log` any more — the spec defines no such stream and
+//! the Rust writer stopped writing it in codetracer-trace-format `ac413d7` — but
+//! recordings made before that still carry it and the reader still opens them.
+//! The legacy bundle is therefore produced byte-for-byte by
+//! `common::legacy_events_log`, not by a writer switch.
+//!
+//! ## The call tree is rooted at `<toplevel>`
+//!
+//! `start` interns `<toplevel>` as function 0 and opens its call as call 0 at
+//! depth 0 (`trace-events.md`, "Recorder Integration — Starting a Recording").
+//! A recording whose entry point is `main` therefore has BOTH: `<toplevel>` at
+//! depth 0 and `main` below it at depth 1.
 //!
 //! Requires the `nim-reader` feature (the production split-stream reader). It is
 //! in the crate's default feature set, so the regular `cargo test` runs it.
@@ -43,12 +57,12 @@
 #![cfg(feature = "nim-reader")]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
-use codetracer_trace_types::{CallKey, FunctionId, Line, PathId, StepId, TypeId, TypeKind, ValueRecord, VariableId};
+use codetracer_trace_types::{CallKey, Line, StepId, TypeId, TypeKind, ValueRecord};
 
-use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
-use codetracer_trace_writer::trace_writer::TraceWriter as RustTraceWriter;
 use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
@@ -89,12 +103,16 @@ fn write_split_only_bundle(dir: &Path) -> PathBuf {
     writer.finish_writing_trace_paths().unwrap();
 
     let path = Path::new(SRC);
+
+    // `start` is the first writer call after the paths: it interns
+    // `<toplevel>` as function 0, opens its call, and records the entry step.
+    writer.start(path, Line(1));
+
     let fid = writer.ensure_function_id("main", path, Line(1));
     writer.register_function("main", path, Line(1));
 
-    // Leading step at the function definition line, then wrap the run in one
-    // call so the Db carries a non-empty call tree.
-    writer.start(path, Line(1));
+    // A step at the function definition line, then wrap the run in one `main`
+    // call below `<toplevel>`.
     writer.register_step(path, Line(1));
     let int_type = writer.ensure_type_id(TypeKind::Int, "int");
     TraceWriter::register_call(&mut writer, fid, vec![]);
@@ -119,28 +137,19 @@ fn write_split_only_bundle(dir: &Path) -> PathBuf {
     ct_path
 }
 
-/// Produce the EQUIVALENT recording as an `events.log` (legacy/secondary-Rust-
-/// writer) bundle: the Rust `CtfsTraceWriter` with the split streams DISABLED,
-/// so the only event payload is `events.log` and `CTFSTraceReader::open` is
-/// forced onto the `open_old_format` → `TraceProcessor::postprocess` path.
+/// Produce the EQUIVALENT recording as a legacy `events.log` bundle, which
+/// `CTFSTraceReader::open` serves through `open_old_format` →
+/// `TraceProcessor::postprocess` (see `common::legacy_events_log`).
 ///
-/// The event sequence mirrors `write_split_only_bundle`: a leading step + one
-/// wrapping call, then `USER_STEPS` steps each with `var_i = i*100` recorded as
-/// a `Value` event (the materialized-path analogue of the split path's inline
-/// `StepValues`).
+/// The event sequence mirrors `write_split_only_bundle`'s user-visible content:
+/// one wrapping call, a leading step, then `USER_STEPS` steps each with
+/// `var_i = i*100` recorded as a `Value` event (the materialized-path analogue
+/// of the split path's inline `StepValues`).
 fn write_events_log_bundle(dir: &Path) -> PathBuf {
     use codetracer_trace_types::{
-        CallRecord, FullValueRecord, FunctionRecord, ReturnRecord, StepRecord, TraceLowLevelEvent, TypeRecord,
-        TypeSpecificInfo,
+        CallRecord, FullValueRecord, FunctionId, FunctionRecord, PathId, ReturnRecord, StepRecord, TraceLowLevelEvent,
+        TypeRecord, TypeSpecificInfo, VariableId,
     };
-
-    let path_buf = dir.join("events_log");
-    // Split streams OFF ⇒ no steps.dat/values.dat ⇒ events.log is the sole
-    // event payload ⇒ the reader takes the legacy old-format path.
-    let mut writer = CtfsTraceWriter::new("events_log_prog", &[])
-        .with_step_stream(false)
-        .with_value_stream(false);
-    RustTraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();
 
     let int_type = TypeId(1);
     let mut events: Vec<TraceLowLevelEvent> = vec![
@@ -166,8 +175,6 @@ fn write_events_log_bundle(dir: &Path) -> PathBuf {
             function_id: FunctionId(0),
             args: vec![],
         }),
-        // The leading step at the function line (mirrors the split bundle's
-        // start()/register_step at Line(1)).
         TraceLowLevelEvent::Step(StepRecord {
             path_id: PathId(0),
             line: Line(1),
@@ -193,9 +200,7 @@ fn write_events_log_bundle(dir: &Path) -> PathBuf {
         return_value: ValueRecord::None { type_id: TypeId(0) },
     }));
 
-    RustTraceWriter::append_events(&mut writer, &mut events);
-    RustTraceWriter::finish_writing_trace_events(&mut writer).unwrap();
-    path_buf.with_extension("ct")
+    common::legacy_events_log::write_legacy_events_log_bundle(dir, "events_log_prog", &events)
 }
 
 /// Collect a step's `(var_name, int_value)` locals from a reader, projecting the
@@ -262,15 +267,26 @@ fn split_only_bundle_is_events_log_free_and_fully_served() {
         reader.step_count()
     );
 
-    // Calls: the single wrapping `main` call must be present.
-    assert!(
-        reader.call_count() >= 1,
-        "expected at least one call, got {}",
+    // Calls: exactly `<toplevel>` (call 0, the root) and `main` below it.
+    assert_eq!(
+        reader.call_count(),
+        2,
+        "expected the `<toplevel>` root and one `main` call, got {}",
         reader.call_count()
     );
-    let main_call = reader.call(CallKey(0)).expect("call 0 present");
+    let root = reader.call(CallKey(0)).expect("call 0 present");
+    let root_fn = reader.function(root.function_id).expect("root function record");
+    assert_eq!(root_fn.name, "<toplevel>", "call 0 must be the `<toplevel>` root");
+    assert_eq!(root.depth, 0, "the `<toplevel>` root is at depth 0");
+    let main_call = reader.call(CallKey(1)).expect("call 1 present");
     let main_fn = reader.function(main_call.function_id).expect("main function record");
-    assert_eq!(main_fn.name, "main", "the wrapping call should be `main`");
+    assert_eq!(main_fn.name, "main", "the call below the root should be `main`");
+    assert_eq!(main_call.depth, 1, "`main` sits directly below `<toplevel>`");
+    assert_eq!(
+        main_call.parent_key,
+        CallKey(0),
+        "`main`'s parent is the `<toplevel>` root"
+    );
 
     // Values: every user step's inline full value surfaces via variables_at.
     for i in 0..USER_STEPS {
@@ -338,7 +354,7 @@ fn split_only_bundle_cell_history_is_correctly_empty() {
 }
 
 /// Deliverable #4 (PARITY / A/B) — the split-only bundle and the equivalent
-/// `events.log` (legacy) bundle yield the SAME steps and per-step variable
+/// legacy `events.log` bundle yield the SAME steps and per-step variable
 /// values, so the debugger shows identical data whichever format it reads.
 #[test]
 fn split_only_and_events_log_bundles_agree() {
@@ -346,7 +362,7 @@ fn split_only_and_events_log_bundles_agree() {
     let split_ct = write_split_only_bundle(dir.path());
     let log_ct = write_events_log_bundle(dir.path());
 
-    // Confirm the two bundles genuinely took different reader paths.
+    // Confirm the two bundles genuinely take different reader paths.
     {
         let split = CtfsReader::open(&split_ct).expect("open split");
         assert!(split.has_file("steps.dat") && !split.has_file("events.log"));
