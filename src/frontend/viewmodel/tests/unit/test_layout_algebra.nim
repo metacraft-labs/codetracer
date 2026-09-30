@@ -1102,7 +1102,10 @@ suite "Layout algebra — floating panels are not expressible (§3A.2)":
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders too.
     # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
-    check checkedFields == 7 + 5 + 3
+    # PLAT-48 added `DockedPane.beside` (the pane it was docked from) and
+    # `DockedPane.weight` (its share there), so the docked pane's is 7 —
+    # where it goes back to, never where it is drawn.
+    check checkedFields == 7 + 7 + 3
 
   test "every visible pane occupies a distinct region of the split tree":
     # The model's half of the projection's total-and-disjoint invariant: each

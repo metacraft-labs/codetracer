@@ -122,6 +122,16 @@ type
       ## PLAT-45. The desktop's Test Results pane (`Content.TestResults`).
     paneConstraints = "constraints"
       ## PLAT-45. The desktop's Constraints pane (`Content.Constraints`).
+    paneProblems = "problems"
+      ## PLAT-48. The desktop's PROBLEMS footer panel (`Content.BuildErrors`).
+      ##
+      ## THE TWO VALUES BELOW ARE THE DESKTOP'S FOOTER AUTO-HIDE PANELS THIS
+      ## ENUM COULD NOT NAME (BUILD and FIND IN FILES already were
+      ## `paneBuildOutput` and `paneSearch`), added so the shared default can
+      ## carry the footer as docked panes (`sharedDefaultDocked`). Schema
+      ## version 5; LAST, for the ordinal reason the PLAT-16 values give.
+    paneRequests = "requests"
+      ## PLAT-48. The desktop's REQUESTS footer panel (`Content.RequestPanel`).
 
   PaneRefKind* = enum
     ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
@@ -352,6 +362,19 @@ type
       ## that reopened four overlays would be a bug, and `toJson` omitting
       ## this field is what prevents it. It lives here for locality; it
       ## belongs to PLAT-5's transient state.
+    beside*: Option[PaneKind]
+      ## PLAT-48: where the pane came FROM — the placed pane it sat beside when
+      ## it was docked (`pinAnchorOf`, read before the dock took it out of the
+      ## tree). `ahRestore` without an explicit anchor puts it back there
+      ## while that pane is still placed, so "pin, then unpin" — in any
+      ## front-end, across a restart — returns a pane to its own container
+      ## instead of appending it to the root. Persisted (`"beside"`);
+      ## `none` for a pane that was never placed (the shared default's footer
+      ## panels) or was docked alone in its container.
+    weight*: float
+      ## PLAT-48: the share the pane had in its container when it was docked,
+      ## given back on restore (0 — the neutral share — when it had none).
+      ## Persisted (`"weight"`) when positive.
 
   Layout* = object
     ## The persisted unit: a tree, the panes docked beside it, and a version.
@@ -639,7 +662,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 4
+  LayoutSchemaVersion* = 5
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -683,6 +706,9 @@ const
     ##       desktop's default placed and the shared vocabulary could not
     ##       name. The document's shape is unchanged, so `migrateV3toV4` is the
     ##       identity that re-stamps the version, for the v2→v3 reason below. |
+    ## | 5 | `PaneKind` gains `problems` and `requests` (PLAT-48) — the
+    ##       desktop's footer auto-hide panels, which the shared default now
+    ##       docks. Shape unchanged; `migrateV4toV5` re-stamps the version. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -1235,6 +1261,30 @@ proc indexIn(parent: LayoutNode; child: LayoutNode): int =
     if c == child:
       return i
   -1
+
+proc pinAnchorOf*(layout: Layout; pane: PaneKind): Option[PaneKind] =
+  ## PLAT-48: the pane `pane` should come back BESIDE when it is unpinned —
+  ## read BEFORE the pin (`cmdDock`) takes it out of the tree, and handed to
+  ## `cmdRestoreDocked(pane, beside)` on unpin, so "pin, then unpin" puts a
+  ## pane back in the container it left (its stack, or its split) rather
+  ## than appending it to the root, which is `ahRestore`'s answer without an
+  ## anchor. The previous sibling leaf when there is one (the restore lands
+  ## directly after it, which is where the pane was), else the next one;
+  ## `none` when the pane is alone in its container or not placed.
+  let leaf = find(layout.tree, pane)
+  let parent = parentOf(layout.tree, leaf)
+  if leaf.isNil or parent.isNil:
+    return none(PaneKind)
+  let at = indexIn(parent, leaf)
+  for i in countdown(at - 1, 0):
+    let c = parent.children[i]
+    if c.kind == lnPane and not c.isContributed:
+      return some(c.pane)
+  for i in at + 1 ..< parent.children.len:
+    let c = parent.children[i]
+    if c.kind == lnPane and not c.isContributed:
+      return some(c.pane)
+  none(PaneKind)
 
 proc copyOf(n: LayoutNode): LayoutNode =
   ## A shallow structural copy: the same fields, the same child refs. Used
@@ -1842,8 +1892,16 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       let already = next.dockedIndex(cmd.autoHidePane)
       if already >= 0:
         let d = next.docked[already]
+        # A negative order means "the end of that edge's strip" (`cmdDock`).
+        # On the SAME edge that is where the pane already is; moving to
+        # ANOTHER edge it is after that edge's last entry — keeping the old
+        # order there collided with whatever sat at it (PLAT-48 found it: the
+        # shared default docks the footer at bottom orders 0–3, so a pane
+        # redocked from the left strip to the bottom was refused).
         let wanted =
-          if cmd.autoHideOrder < 0: d.order else: cmd.autoHideOrder
+          if cmd.autoHideOrder >= 0: cmd.autoHideOrder
+          elif d.edge == cmd.autoHideEdge: d.order
+          else: maxOrderAt(next, cmd.autoHideEdge) + 1
         if d.edge == cmd.autoHideEdge and d.order == wanted:
           return noOp()
         if orderTaken(next, cmd.autoHideEdge, wanted, cmd.autoHidePane, true):
@@ -1865,12 +1923,16 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpDockOrderCollision, cmd.autoHidePane)
       let title =
         if cmd.autoHideTitle.len > 0: cmd.autoHideTitle else: leaf.title
+      # Where it came from, read before it leaves (PLAT-48).
+      let beside = Layout(tree: tree).pinAnchorOf(cmd.autoHidePane)
+      let weight = leaf.weight
       discard detachPane(tree, cmd.autoHidePane)
       if not normaliseInPlace(tree):
         return refusedFor(lpEmptyRoot, cmd.autoHidePane)
       next.docked.add(DockedPane(pane: cmd.autoHidePane, title: title,
                                  edge: cmd.autoHideEdge, order: order,
-                                 revealed: false))
+                                 revealed: false, beside: beside,
+                                 weight: weight))
       return appliedTo(next)
     of ahRestore:
       let at = next.dockedIndex(cmd.autoHidePane)
@@ -1883,7 +1945,15 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpPaneNotPlaced, cmd.autoHideRestoreBeside.get)
       let entry = next.docked[at]
       let leaf = pane(entry.pane, entry.title)
-      if not insertBeside(tree, cmd.autoHideRestoreBeside, leaf):
+      leaf.weight = entry.weight
+      # No anchor named: back beside the pane it was docked from, while that
+      # pane is placed (PLAT-48); otherwise `lcAddPane`'s root placement.
+      let anchor =
+        if cmd.autoHideRestoreBeside.isSome: cmd.autoHideRestoreBeside
+        elif entry.beside.isSome and tree.contains(entry.beside.get):
+          entry.beside
+        else: none(PaneKind)
+      if not insertBeside(tree, anchor, leaf):
         return refusedFor(lpPaneNotPlaced, cmd.autoHidePane)
       next.docked.delete(at)
       return appliedTo(next)
@@ -2222,6 +2292,10 @@ proc toJson*(d: DockedPane): JsonNode =
   result["order"] = %d.order
   if d.title.len > 0:
     result["title"] = %d.title
+  if d.beside.isSome:
+    result["beside"] = %($d.beside.get)
+  if d.weight > 0.0:
+    result["weight"] = %d.weight
 
 proc saveLayout*(layout: Layout): JsonNode =
   ## A versioned document, which is what a shell persists. `docked` is always
@@ -2358,6 +2432,13 @@ proc migrateV3toV4(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %4
 
+proc migrateV4toV5(doc: JsonNode): JsonNode =
+  ## PLAT-48. `PaneKind` gained `problems` and `requests`, the desktop's
+  ## footer panels. Shape unchanged: re-stamps the version, for the v3→v4
+  ## reason.
+  result = copy(doc)
+  result["version"] = %5
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2380,6 +2461,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV2toV3(result)
     of 3:
       result = migrateV3toV4(result)
+    of 4:
+      result = migrateV4toV5(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -2433,6 +2516,14 @@ proc restoreLayoutDocument*(j: JsonNode): Layout =
       if entry["title"].kind != JString:
         raiseDecode(ldeWrongFieldType, "docked.title is " & $entry["title"].kind)
       d.title = entry["title"].getStr
+    if entry.hasKey("beside"):
+      if entry["beside"].kind != JString:
+        raiseDecode(ldeWrongFieldType, "docked.beside is " & $entry["beside"].kind)
+      d.beside = some(parsePaneKind(entry["beside"].getStr))
+    if entry.hasKey("weight"):
+      if entry["weight"].kind notin {JFloat, JInt}:
+        raiseDecode(ldeWrongFieldType, "docked.weight is " & $entry["weight"].kind)
+      d.weight = max(0.0, entry["weight"].getFloat)
     result.docked.add(d)
 
 proc restoreLayout*(j: JsonNode): LayoutNode =
@@ -2600,6 +2691,10 @@ type
       ## own place when a front-end is too small to show everything. The
       ## order is DATA (PLAT-45's risk note: "if the folded compact result is
       ## worse … the order changes, not the rule").
+    docked*: seq[DockedPane]
+      ## PLAT-48. The panes the default keeps AUTO-HIDDEN beside the tree:
+      ## the desktop's footer panels (`sharedDefaultDocked`). Empty for a
+      ## mode whose default docks nothing.
 
   FrontEndKind* = enum
     ## The three products that open the shared default.
@@ -2710,6 +2805,25 @@ const SharedDefaultLayoutJson* =
   ## derivation this vocabulary must equal is the desktop's, and the desktop's
   ## is JavaScript.
 
+proc sharedDefaultDocked*(): seq[DockedPane] =
+  ## **THE DESKTOP'S FOOTER, AS DOCKED PANES** (PLAT-48 deliverable 6).
+  ##
+  ## The desktop pins four panels to its bottom auto-hide strip on every
+  ## start — BUILD, PROBLEMS, FIND IN FILES, REQUESTS — and until PLAT-48
+  ## that list lived only in `ui/layout.nim`, so the terminal and GPUI opened
+  ## without them. It is the shared default's now: the desktop builds its
+  ## footer from this list (through `desktop_panes.PaneContent`), and the
+  ## terminal and GPUI draw it as their bottom dock strip. The titles are
+  ## the desktop's own strip labels.
+  @[DockedPane(pane: paneBuildOutput, title: "BUILD", edge: leBottom,
+               order: 0),
+    DockedPane(pane: paneProblems, title: "PROBLEMS", edge: leBottom,
+               order: 1),
+    DockedPane(pane: paneSearch, title: "FIND IN FILES", edge: leBottom,
+               order: 2),
+    DockedPane(pane: paneRequests, title: "REQUESTS", edge: leBottom,
+               order: 3)]
+
 proc sharedDefaultLayout*(): SharedLayout =
   ## **THE DEFAULT EVERY PRODUCT OPENS WITH** — the desktop's DEBUG-mode
   ## layout (PLAT-47 deliverable 1): the bundled tree above with TESTS as a
@@ -2731,7 +2845,7 @@ proc sharedDefaultLayout*(): SharedLayout =
   ## pane a replay cannot be read without, so it is the one that never becomes
   ## a hidden tab.
   let tree = fromJson(parseJson(SharedDefaultLayoutJson))
-  SharedLayout(tree: tree, folds: @[
+  SharedLayout(tree: tree, docked: sharedDefaultDocked(), folds: @[
     FoldStep(region: paneFileTree, into: paneCalltrace),
     FoldStep(region: paneCalltrace, into: paneState),
     FoldStep(region: paneEventLog, into: paneState),

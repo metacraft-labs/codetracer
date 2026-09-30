@@ -143,7 +143,10 @@ const
                                             # (PLAT-47 drew `paneVcs`).
                                             paneAgentActivity,
                                             paneTerminalOutput,
-                                            paneTestResults, paneConstraints}
+                                            paneTestResults, paneConstraints,
+                                            # PLAT-48 — the desktop's footer
+                                            # panels the shared default docks.
+                                            paneProblems, paneRequests}
     ## **Panes this front-end deliberately does not draw, with the reason
     ## recorded at the dispatch arm.**
     ##
@@ -777,8 +780,11 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   # PLAT-47 deliverable 4.
   of paneVcs: vcsPaneView(VCSVM(vm))
   of paneAgentActivity, paneTerminalOutput, paneTestResults,
-     paneConstraints:
+     paneConstraints, paneProblems, paneRequests:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
+    # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which
+    # the shared default DOCKS: revealed, each says what it is and why it is
+    # not drawn here, on this rule.)
     #
     # The shared default (`layout_model.sharedDefaultLayout`) places these four (five until PLAT-47 drew the VCS pane)
     # because the desktop's default did, and "every product opens with the
