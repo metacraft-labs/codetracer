@@ -20,12 +20,21 @@ name: Release
 #          codetracer_VERSION-1_amd64.deb      carriers for the AppImage's tree
 #          codetracer-VERSION-1.x86_64.rpm     (scripts/release/ct-build-packages.sh)
 #          resources.tar.xz                    desktop entry + icons, for AUR/Gentoo
-#   macos  CodeTracer-VERSION-arm64.dmg
 #   all    <each asset>.asc, SHA256SUMS, SHA256SUMS.asc
 #
-# Windows is deliberately absent: no Windows build of CodeTracer has been
-# published yet, so a Windows leg would block every release instead of adding
-# one asset. Add it after a Windows build has gone green in codetracer.yml.
+# macOS and Windows are deliberately absent. The release is all-or-nothing,
+# so a leg belongs here only once it has been proven green; a leg that has
+# never produced its artifact blocks every release instead of adding one.
+#
+#   * macOS: the DMG is built through reprobuild (`repro build .#macos-app`,
+#     as dmg-build does in codetracer.yml), and that path does not build on
+#     the aarch64-darwin runners today: reprobuild's project-provider compile
+#     fails with `Security/SecRandom.h: No such file or directory` (dry run
+#     36777381894). reprobuild-macos-smoke fails the same way on PRs cut from
+#     current `dev` (job 109902009060). Add a macOS leg back, producing CodeTracer-VERSION-arm64.dmg,
+#     after dmg-build is green. Until then get.codetracer.com/sh installs the
+#     newest signed DMG from downloads.codetracer.com.
+#   * Windows: no Windows build of CodeTracer has been published yet.
 
 on:
   push:
@@ -205,132 +214,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  macos:
-    name: macOS (arm64) release build
-    needs: plan
-    runs-on: aarch64-darwin
-    timeout-minutes: 120
-    env:
-      VERSION: ${{ needs.plan.outputs.version }}
-    steps:
-      - name: Mint installation token for cross-repo sibling access
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      # These runners keep their work directory between jobs. A previous job
-      # can leave read-only directories behind (actions/checkout then fails to
-      # clean them), so restore owner-write first. See dmg-build in
-      # codetracer.yml for the full diagnosis.
-      - name: Restore owner-write on the persistent work directory
-        run: |
-          set -uo pipefail
-          root="${RUNNER_WORKSPACE:-}"
-          [ -n "$root" ] && [ -d "$root" ] || exit 0
-          for c in chmod /bin/chmod /usr/bin/chmod; do
-            if command -v "$c" >/dev/null 2>&1; then "$c" -R u+w "$root" 2>/dev/null || true; break; fi
-          done
-
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ steps.ci_token.outputs.token }}
-          persist-credentials: false
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          attic-token: ${{ secrets.ATTIC_TOKEN }}
-          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      # The build, the gate and the packaging are dmg-build's in codetracer.yml.
-      # GitHub App installation tokens expire after one hour, and a cold build
-      # outlasts the one minted at the start of the job: the Linux leg of the 26.10.1
-      # dry run (36761623351) failed 100 minutes in, when nix, still holding the first
-      # token, fetched a flake input and got "401 Bad credentials". So the
-      # build gets a token minted immediately before it, passed to nix through
-      # NIX_CONFIG, which takes precedence over the configured one.
-      - name: Mint a fresh token for the build
-        id: build_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Build CodeTracer.app via reprobuild
-        env:
-          NIX_CONFIG: access-tokens = github.com=${{ steps.build_token.outputs.token }}
-          CODETRACER_REPROBUILD_TARGET: .#macos-app
-        run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
-
-      - name: Stage the pinned Electron runtime into the app bundle
-        run: nix develop . --command bash scripts/stage-electron-runtime.sh
-          non-nix-build/CodeTracer.app/Contents/MacOS/node_modules/electron
-
-      - name: Gate the app bundle before packaging it
-        run: |
-          nix develop . --command bash -c '
-            set -eu
-            bash ci/test/desktop-bundle-self-contained.sh non-nix-build/CodeTracer.app
-            bash ci/test/electron-supply-chain.sh non-nix-build/CodeTracer.app
-          '
-
-      - name: Package DMG
-        run: |
-          # The inner script is single-quoted on purpose: it expands in the dev shell.
-          # shellcheck disable=SC2016
-          nix develop . --command bash -c '
-            set -eu
-            export PATH="$PATH:/usr/bin:/usr/sbin"
-            cd non-nix-build
-            rm -f CodeTracer.dmg
-            staging="$(mktemp -d)"
-            trap "rm -rf \"$staging\"" EXIT
-            cp -R CodeTracer.app "$staging/"
-            create-dmg \
-              --volname CodeTracer \
-              --background dmg_background.png \
-              --window-pos 200 120 \
-              --window-size 600 400 \
-              --icon-size 100 \
-              --icon CodeTracer.app 150 200 \
-              --app-drop-link 450 200 \
-              --sandbox-safe \
-              CodeTracer.dmg \
-              "$staging"
-          '
-          mv non-nix-build/CodeTracer.dmg "CodeTracer-${VERSION}-arm64.dmg"
-
-      - name: Verify the DMG's app reports this version
-        run: |
-          set -euo pipefail
-          mnt="$(mktemp -d)"
-          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "CodeTracer-${VERSION}-arm64.dmg" > /dev/null
-          # shellcheck disable=SC2064  # $mnt is fixed; expanding it now is intended
-          trap "hdiutil detach '$mnt' > /dev/null || true" EXIT
-          plist="$mnt/CodeTracer.app/Contents/Info.plist"
-          got="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
-          [ "$got" = "$VERSION" ] || { echo "::error::the DMG's CodeTracer.app says $got, not $VERSION"; exit 1; }
-          echo "CodeTracer.app $got"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos-arm64
-          path: CodeTracer-${{ env.VERSION }}-arm64.dmg
-          if-no-files-found: error
-          retention-days: 7
-
   publish:
     name: Publish release (all-or-nothing)
-    needs: [plan, linux, macos]
+    needs: [plan, linux]
     runs-on: eph-linux-x64-release
     timeout-minutes: 60
     permissions:
@@ -367,7 +253,6 @@ jobs:
             "codetracer_${VERSION}-1_amd64.deb"
             "codetracer-${VERSION}-1.x86_64.rpm"
             "resources.tar.xz"
-            "CodeTracer-${VERSION}-arm64.dmg"
           )
           printf '%s\n' "${expected[@]}" | LC_ALL=C sort > expected.txt
           (cd dist && ls -1) | LC_ALL=C sort > present.txt
@@ -440,8 +325,8 @@ jobs:
 
           On Debian, Ubuntu, Fedora and RHEL this registers the Metacraft Labs package
           repository (\`deb.metacraft-labs.com\` / \`rpm.metacraft-labs.com\`), so later
-          updates arrive through \`apt upgrade\` / \`dnf upgrade\`. The packages, the
-          AppImage and the DMG are also attached below. \`SHA256SUMS\` lists every
+          updates arrive through \`apt upgrade\` / \`dnf upgrade\`. The packages and the
+          AppImage are also attached below. \`SHA256SUMS\` lists every
           asset and is signed, like each asset, with the CodeTracer release key
           [\`0389 4920 AC59 5EDF 9B79 5B0D A941 7A0B 6297 F790\`](https://downloads.codetracer.com/CodeTracer.pub.asc).
           NOTES
@@ -471,10 +356,9 @@ jobs:
           gh release edit "$TAG" --draft=false --latest
           echo "::notice::Published CodeTracer $TAG with $(wc -l < built.txt) assets"
 
-      # downloads.codetracer.com serves the AppImage and the DMG under stable
-      # names. The AUR and Gentoo recipes, and older installers, fetch them
-      # from there.
-      - name: Publish the AppImage and DMG to downloads.codetracer.com
+      # downloads.codetracer.com serves the AppImage under stable names. The AUR
+      # and Gentoo recipes, and older installers, fetch it from there.
+      - name: Publish the AppImage to downloads.codetracer.com
         if: needs.plan.outputs.publish == 'true'
         shell: bash
         env:
@@ -486,10 +370,8 @@ jobs:
           set -euo pipefail
           put() { nix shell nixpkgs#awscli2 -c aws --endpoint-url="$ENDPOINT" s3 cp "dist/$1" "s3://$BUCKET/$2" --checksum-algorithm CRC32 --only-show-errors; }
           for slot in "$VERSION" latest; do
-            for ext in amd64.AppImage arm64.dmg; do
-              put "CodeTracer-${VERSION}-${ext}"     "CodeTracer-${slot}-${ext}"
-              put "CodeTracer-${VERSION}-${ext}.asc" "CodeTracer-${slot}-${ext}.asc"
-            done
+            put "CodeTracer-${VERSION}-amd64.AppImage"     "CodeTracer-${slot}-amd64.AppImage"
+            put "CodeTracer-${VERSION}-amd64.AppImage.asc" "CodeTracer-${slot}-amd64.AppImage.asc"
           done
 
       # Runs AFTER the release is public: the publisher downloads the .deb and

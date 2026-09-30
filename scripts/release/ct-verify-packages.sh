@@ -77,9 +77,8 @@ check_tree() { # check_tree <label> <extracted-root>
     head -40 "$work/pkg.diff" >&2
     die "$1 does not install the AppImage's tree intact under /usr/lib/codetracer"
   fi
-  if find "$_r/usr" -perm -o+w ! -type l | grep -q .; then
-    die "$1 installs world-writable files under /usr"
-  fi
+  _ww="$(find "$_r/usr" -perm -o+w ! -type l | head -5)"
+  [ -z "$_ww" ] || die "$1 installs world-writable files under /usr, e.g.: $_ww"
   log "ok  $1: $n entries, identical to the AppImage"
 }
 
