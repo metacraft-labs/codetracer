@@ -27,12 +27,11 @@
 //! production bundle and checks this module's output name-for-name against the
 //! Nim FFI reader — the production decoder — on native.
 //!
-//! Note that the upstream Rust reader is NOT the comparison target, because it
-//! reads a different record layout from the one production traces carry; see
-//! "Record layouts" below. That difference is exactly what the parity test
-//! found.
+//! The upstream Rust reader is not the comparison target: it keys off the
+//! `meta.dat` flag alone and so cannot read the older plain-layout containers
+//! this reader still accepts (see "Record layouts" below).
 //!
-//! # Record layouts — there are TWO, and real traces use the simpler one
+//! # Record layouts — the spec's, and an older plain one
 //!
 //! Each table is a Variable-Size Record Table (`<name>.dat` + `<name>.off`)
 //! from `codetracer-trace-format-spec/internal-files.md`: `.off` holds
@@ -42,27 +41,26 @@
 //! shared. The RECORD payload is not:
 //!
 //! ```text
-//!  [`RecordLayout::Plain`] — what the production Nim writer emits
-//!    paths.dat / funcs.dat / types.dat / varnames.dat = raw name bytes
-//!    paths.dat, when the trace is column-aware ("Layout A") =
-//!        path_len: varint, path: bytes, line_count: varint,
-//!        line_lengths: varint x line_count (zigzag deltas)
-//!
-//!  [`RecordLayout::Structured`] — M23d, what the secondary Rust writer emits
+//!  [`RecordLayout::Structured`] — the spec's layout, written by both writers
 //!    paths.dat / varnames.dat = raw bytes
 //!    funcs.dat   = global_line_index: varint, name_len: varint, name: bytes
 //!    types.dat   = kind: u8, lang_type_len: varint, lang_type: bytes,
 //!                  specific_info: CBOR of TypeSpecificInfo
+//!
+//!  [`RecordLayout::Plain`] — containers from an older Nim writer
+//!    paths.dat / funcs.dat / types.dat / varnames.dat = raw name bytes
+//!
+//!  Either layout, when the trace is column-aware ("Layout A"):
+//!    paths.dat = path_len: varint, path: bytes, line_count: varint,
+//!                line_lengths: varint x line_count (zigzag deltas)
 //! ```
 //!
 //! Varints are unsigned LEB128, matching `meta.dat`.
 //!
-//! `meta.dat` bit 12 (`has_interning_tables`) selects between them. Note that
-//! it is NOT a presence check: the production Nim writer emits all four tables
-//! and leaves the bit clear, because the bit means "these are M23d structured
-//! records" and its records are plain. Presence is decided by asking the
-//! container for `paths.dat`; see
-//! [`InterningTables::open_from_ctfs`] for the full story.
+//! `meta.dat` bit 12 (`has_interning_tables`) selects between them. It is not
+//! used as the presence check: the older plain-layout containers carry all four
+//! tables with the bit clear. Presence is decided by asking the container for
+//! `paths.dat`; see [`InterningTables::open_from_ctfs`].
 
 use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
 use num_traits::FromPrimitive;
@@ -165,11 +163,10 @@ impl VarSizeTable {
 pub struct InterningTables {
     /// Source file paths, indexed by `PathId`.
     pub paths: Vec<String>,
-    /// Function records, indexed by `FunctionId`. On the [`RecordLayout::Plain`]
-    /// layout only the name is on disk, so `path_id`/`line` are `0` — exactly
-    /// what the Nim FFI path produces. On [`RecordLayout::Structured`] the
-    /// record carries a packed `global_line_index` and the real definition site
-    /// is recovered.
+    /// Function records, indexed by `FunctionId`. On [`RecordLayout::Structured`]
+    /// the record carries a `global_line_index` and the declaration site is
+    /// recovered from it. On [`RecordLayout::Plain`] only the name is on disk,
+    /// so `path_id`/`line` are `0`.
     pub functions: Vec<FunctionRecord>,
     /// Type records, indexed by `TypeId`.
     pub types: Vec<TypeRecord>,
@@ -208,31 +205,27 @@ pub struct InterningTables {
 
 /// Which record layout a container's interning tables use.
 ///
-/// There are TWO, and the difference is not cosmetic — it decides whether a
-/// record is a bare string or a structured blob. Getting it wrong does not
-/// produce wrong names; it produces a decode error or garbage, which is how
-/// this distinction was found.
+/// The difference is not cosmetic — it decides whether a record is a bare
+/// string or a structured blob. Decoding one as the other does not produce
+/// wrong names; it produces a decode error or garbage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordLayout {
-    /// **What every live recorder actually writes.** The Nim
-    /// `MultiStreamTraceWriter` interns through `interning_table.nim`'s
-    /// `ensureId`, which appends the RAW NAME BYTES and nothing else, for all
-    /// four tables. There is no `global_line_index` on a function record and no
-    /// kind byte on a type record, which is precisely why the Nim FFI reader
-    /// exposes only names and why `open_new_format_nim` stubs
-    /// `FunctionRecord::path_id`/`line` to zero and every `TypeRecord::kind` to
-    /// `Raw`. This reader reproduces that faithfully rather than inventing
-    /// data the container does not hold.
+    /// The layout of containers written by the Nim writer before it adopted
+    /// the spec's record shape: its `ensureId` appended the RAW NAME BYTES and
+    /// nothing else, for all four tables, and left `meta.dat` bit 12 clear.
+    /// There is no `global_line_index` on a function record and no kind byte on
+    /// a type record, so this reader reports `(PathId(0), Line(0))` and
+    /// `TypeKind::Raw` rather than inventing data the container does not hold.
     ///
     /// `paths.dat` is the one exception: when the trace is column-aware its
     /// records switch to the self-describing "Layout A" form
     /// (`path_len` varint, path bytes, then a per-line length table).
     Plain,
-    /// The M23d structured layout, which the SECONDARY Rust `CtfsTraceWriter`
-    /// emits and which `meta.dat` bit 12 (`FLAG_HAS_INTERNING_TABLES`)
-    /// advertises: a function record carries a packed `global_line_index`
-    /// before its name, and a type record carries a `TypeKind` ordinal and a
-    /// CBOR `TypeSpecificInfo` tail.
+    /// The spec's layout (`internal-files.md`), advertised by `meta.dat` bit 12
+    /// (`FLAG_HAS_INTERNING_TABLES`) and written by both the Nim and the Rust
+    /// writer: a function record carries a `global_line_index` before its
+    /// name, and a type record carries a `TypeKind` ordinal and a CBOR
+    /// `TypeSpecificInfo` tail.
     Structured,
 }
 
@@ -250,26 +243,13 @@ impl InterningTables {
     /// # Detection is by PRESENCE; the flag selects the LAYOUT
     ///
     /// The spec gates these tables on `meta.dat` bit 12
-    /// (`FLAG_HAS_INTERNING_TABLES`), and
-    /// `codetracer_trace_reader::interning_tables_reader` keys off it alone.
-    /// **The production Nim writer does not stamp that bit** —
-    /// `MultiStreamTraceWriter` calls `initTraceInterningTables` (which creates
-    /// and fills all four tables) but its `writeMetaDat` call passes
-    /// `hasCallStream` / `hasStepStream` / `hasValueStream` /
-    /// `hasIoEventStream` / `hasSpanStream` and simply omits
-    /// `hasInterningTables`, which defaults to `false`.
-    ///
-    /// That is not merely a missing bit. The bit means "these tables are in the
-    /// M23d STRUCTURED layout", and the Nim writer's tables are NOT: its
-    /// `ensureId` appends raw name bytes with no `global_line_index` prefix and
-    /// no kind byte. So the flag is honest about the layout even though it
-    /// looks like a bug about presence, and a reader that took the flag as a
-    /// presence check would find nothing on any real trace — a blank Variables
-    /// pane over data that is sitting on disk.
+    /// (`FLAG_HAS_INTERNING_TABLES`), and both writers now stamp it. Older
+    /// Nim-written containers carry all four tables in the plain layout with
+    /// the bit clear, so taking the flag as a presence check would find nothing
+    /// in them — a blank Variables pane over data that is sitting on disk.
     ///
     /// So: PRESENCE decides whether to read at all (ask the container for
-    /// `paths.dat`), and the FLAG decides how to decode
-    /// ([`RecordLayout`]).
+    /// `paths.dat`), and the FLAG decides how to decode ([`RecordLayout`]).
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<InterningTables>, String> {
         let meta = ctfs.read_file("meta.dat").unwrap_or_default();
         let layout = if meta_dat_has_interning_tables(&meta) {
@@ -349,9 +329,7 @@ impl InterningTables {
                 RecordLayout::Structured => decode_func_record(id, raw, &line_space)?,
                 RecordLayout::Plain => FunctionRecord {
                     name: String::from_utf8_lossy(raw).into_owned(),
-                    // Not on disk in this layout. The Nim FFI reader stubs the
-                    // same two fields to zero, so this is parity rather than
-                    // loss — see `RecordLayout::Plain`.
+                    // Not on disk in this layout — see `RecordLayout::Plain`.
                     path_id: PathId(0),
                     line: Line(0),
                 },
@@ -365,7 +343,7 @@ impl InterningTables {
                 RecordLayout::Structured => decode_type_record(id, raw)?,
                 RecordLayout::Plain => TypeRecord {
                     // The type NAME is all this layout stores, so `Raw` is the
-                    // only honest kind — again matching `open_new_format_nim`.
+                    // only honest kind.
                     kind: TypeKind::Raw,
                     lang_type: String::from_utf8_lossy(raw).into_owned(),
                     specific_info: TypeSpecificInfo::None,

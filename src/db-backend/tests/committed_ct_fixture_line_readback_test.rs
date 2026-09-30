@@ -269,12 +269,17 @@ fn assert_request_panel_run(relative: &str, source_suffix: &str, first: i64, exp
 ///
 /// `codetracer-python-recorder/test-programs/web/flask/app.py`. A one-line-high
 /// reading puts the final `return` on line 38, which is blank.
+///
+/// The step ids are a property of ONE recording. They were read back off the
+/// container recorded by `just record-request-panel-fixture` in the Python
+/// recorder: `create_user` runs from step 11 and the first request's
+/// `after_request` hook from step 8.
 #[test]
 fn python_flask_fixture_steps_land_on_the_handler_statements_they_recorded() {
     assert_request_panel_run(
         "python_flask/serve.ct",
         "test-programs/web/flask/app.py",
-        13,
+        11,
         &[
             (32, r#"@app.post("/api/users")"#),
             (34, "payload = request.get_json(silent=True) or {}"),
@@ -290,7 +295,7 @@ fn python_flask_fixture_steps_land_on_the_handler_statements_they_recorded() {
     assert_request_panel_run(
         "python_flask/serve.ct",
         "test-programs/web/flask/app.py",
-        10,
+        8,
         &[
             (69, "if request.url_rule is not None:"),
             (70, r#"request.environ["codetracer.route"] = str(request.url_rule)"#),
@@ -354,16 +359,18 @@ fn js_express_fixture_steps_land_on_the_handler_statements_they_recorded() {
 
 /// The Ruby row: the `get '/api/users'` block, statement by statement.
 ///
-/// `codetracer-ruby-recorder/test-programs/web/sinatra/app.rb`. This fixture
-/// was regenerated ahead of the other five and is the reference shape the rest
-/// were checked against: under the superseded encode these same steps decoded
-/// to 41..46, ending on line 46, which is blank.
+/// `codetracer-ruby-recorder/test-programs/web/sinatra/app.rb`. A one-line-high
+/// reading decodes this run to 41..46, ending on line 46, which is blank.
+///
+/// The step ids are a property of ONE recording: in the container recorded by
+/// `just record-request-panel-fixture` in the Ruby recorder, the block runs
+/// from step 59, which is also where the first request's span starts.
 #[test]
 fn ruby_sinatra_fixture_steps_land_on_the_handler_statements_they_recorded() {
     assert_request_panel_run(
         "ruby_sinatra/ruby.ct",
         "test-programs/web/sinatra/app.rb",
-        60,
+        59,
         &[
             (40, "get '/api/users' do"),
             (41, "content_type :json"),
