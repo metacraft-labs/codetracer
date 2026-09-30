@@ -359,7 +359,7 @@ test-windows-installer:
     nim r --hints:off --warnings:off --verbosity:0 \
       tests/e2e/t_vm_harness_hyperv_windows_installer_smoke.nim
 
-test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
+test-reprobuild-hcr-mcr-dap:
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -369,6 +369,14 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
     echo "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64 (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
     exit 2
   fi
+
+  # The sibling builds run HERE, after the platform check, not as just
+  # dependencies of this recipe. just runs a recipe's dependencies before its
+  # body, so as dependencies they ran on every host -- including the Linux
+  # CI job that only asserts the UNSUPPORTED exit above -- and a failing
+  # sibling build there replaced the loud exit 2 with an unrelated error.
+  just ensure-ct-mcr
+  just ensure-ct-native-replay
 
   if ! command -v repro >/dev/null 2>&1; then
     echo "SKIP: repro not on PATH (run inside the CodeTracer Nix dev shell)." >&2
@@ -499,7 +507,7 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
     --test reprobuild_hcr_mcr_dap_test -- --nocapture
 
-test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
+test-reprobuild-hcr-in-codetracer:
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -508,6 +516,14 @@ test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
     echo "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
     exit 2
   fi
+
+  # The sibling builds run HERE, after the platform check, not as just
+  # dependencies of this recipe. just runs a recipe's dependencies before its
+  # body, so as dependencies they ran on every host -- including the Linux
+  # CI job that only asserts the UNSUPPORTED exit above -- and a failing
+  # sibling build there replaced the loud exit 2 with an unrelated error.
+  just ensure-ct-mcr
+  just ensure-ct-native-replay
 
   if ! command -v repro >/dev/null 2>&1; then
     echo "SKIP: repro not on PATH (run inside the CodeTracer Nix dev shell)." >&2
@@ -5709,15 +5725,11 @@ ensure-ct-mcr:
         exit 0
     fi
     sibling="$CT_CODETRACER_NATIVE_RECORDER_SIBLING"
-    if command -v repro >/dev/null 2>&1; then
-        # ``repro build`` operates on the project at the current working
-        # directory (the CLI has no ``--cwd`` flag); cd into the sibling
-        # first so the recorder's ``ct-mcr`` target resolves there.
-        # ``--tool-provisioning=nix`` is required: reprobuild refuses an
-        # implicit PATH fallback for ``uses`` declarations and the Nix-based
-        # sibling resolves its toolchain through its flake.
-        ( cd "$sibling" && repro build --tool-provisioning=nix ct-mcr )
-    elif [ "${OS:-}" = "Windows_NT" ]; then
+    # The recorder's own ``just build-ct-mcr`` is the build, on every
+    # platform. There is no reprobuild target called ``ct-mcr``: ``repro
+    # build ct-mcr`` fails with ``unknown_target``, so it cannot be the
+    # first choice whenever ``repro`` happens to be on PATH.
+    if [ "${OS:-}" = "Windows_NT" ]; then
         # Windows DIY: no Nix dev shell, invoke the sibling's
         # Windows-specific build target directly. env.ps1 has already
         # populated nim + MSVC into the current shell, so the sibling's
