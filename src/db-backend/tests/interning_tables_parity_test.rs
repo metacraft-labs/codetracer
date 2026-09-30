@@ -19,31 +19,24 @@
 //! written in another language against the same spec. Agreement between those
 //! two is a far stronger statement than agreement with a hand-written
 //! expectation, and stronger than comparing against the upstream Rust reader
-//! would be (see the next paragraph for why that one cannot be used here).
+//! would be.
 //!
-//! ## The two format findings this suite pins
+//! ## The format facts this suite pins
 //!
-//! **1. `meta.dat` bit 12 is clear on every production bundle.**
-//! `MultiStreamTraceWriter` creates and fills all four interning tables
-//! (`initTraceInterningTables`), but its `writeMetaDat` call omits
-//! `hasInterningTables`, which defaults to `false`.
+//! **1. `meta.dat` bit 12 (`has_interning_tables`) is set on a production
+//! bundle**, and the tables are there.
 //!
-//! **2. That is not a missing bit — it is an honest one.** The bit means "these
-//! records are in the M23d STRUCTURED layout", and the Nim writer's are not:
-//! `interning_table.nim`'s `ensureId` appends RAW NAME BYTES for all four
-//! tables, with no `global_line_index` prefix on a function and no `TypeKind`
-//! ordinal on a type. Decoding a real bundle as M23d fails outright — it did,
-//! with `funcs.dat: record 0 name extends past record`, which is how this was
-//! found.
+//! **2. The records are in the spec's structured shape**
+//! (`codetracer-trace-format-spec/internal-files.md`): a `funcs.dat` record is
+//! `global_line_index: varint, name_len: varint, name`, a `types.dat` record is
+//! `kind: u8, lang_type_len: varint, lang_type, specific_info`. The Nim writer
+//! once appended raw name bytes to all four tables and left bit 12 clear; the
+//! local reader still decodes that older plain layout when the bit is clear,
+//! which `RecordLayout::Plain` documents.
 //!
-//! So the upstream `InterningTablesReader` cannot serve as the comparison
-//! target twice over: it returns `Ok(None)` on a production bundle, and its
-//! decoder expects the other layout. The local reader therefore detects
-//! PRESENCE from the container and selects the LAYOUT from the flag.
-//! `reader_finds_tables_a_real_bundle_does_not_advertise` and
-//! `a_production_bundle_uses_the_plain_record_layout` pin both halves, so a
-//! future "tidy-up" back to a flag-only presence check fails loudly instead of
-//! quietly emptying the Variables pane.
+//! `a_production_bundle_advertises_its_interning_tables` and
+//! `a_production_bundle_uses_the_structured_record_layout` pin both, including
+//! each function's declaration site as BOTH readers report it.
 //!
 //! ## No skip path
 //!
@@ -195,15 +188,14 @@ fn local_reader_and_nim_ffi_reader_agree_on_the_vocabulary() {
     }
 }
 
-/// A real production bundle does NOT stamp `meta.dat` bit 12, yet carries the
-/// tables. This pins both halves: the flag really is clear, and the reader
-/// really does find the tables anyway.
+/// A production bundle stamps `meta.dat` bit 12 (`has_interning_tables`) and
+/// carries the tables, and the reader finds them through the flag.
 ///
-/// If the writer is fixed to stamp the bit, the first assertion here fails by
-/// name and this test becomes the place to record that — which is the point.
-/// A reader change back to flag-only detection fails the second.
+/// `internal-files.md` gates the four tables on that bit. A reader that
+/// detected them by presence alone would still pass here, so presence is
+/// asserted separately: the flag is set AND the files are there.
 #[test]
-fn reader_finds_tables_a_real_bundle_does_not_advertise() {
+fn a_production_bundle_advertises_its_interning_tables() {
     let dir = tempfile::tempdir().unwrap();
     let ct_path = write_bundle(dir.path());
 
@@ -213,42 +205,40 @@ fn reader_finds_tables_a_real_bundle_does_not_advertise() {
     let flagged = parsed.flags & db_backend::ctfs_trace_reader::meta_dat::FLAG_HAS_INTERNING_TABLES != 0;
 
     assert!(
-        !flagged,
-        "meta.dat now stamps has_interning_tables. The writer-side omission this reader works \
-         around has been fixed — update `InterningTables::open_from_ctfs`'s docs and this test."
+        flagged,
+        "meta.dat must stamp has_interning_tables on a bundle that carries the tables \
+         (internal-files.md, meta.dat flags)"
     );
     assert!(
         ctfs.has_file("paths.dat") && ctfs.has_file("funcs.dat"),
-        "the bundle must actually carry the tables, or the point above is moot"
+        "the bundle must actually carry the tables the flag advertises"
     );
 
     let tables = InterningTables::open_from_ctfs(&mut ctfs)
         .expect("no error")
-        .expect("the reader must find tables the container carries even when meta.dat denies them");
+        .expect("the reader must find the tables the container advertises");
     assert!(!tables.functions.is_empty(), "functions must decode");
     assert!(!tables.variable_names.is_empty(), "variable names must decode");
 }
 
-/// A production bundle's tables are in the PLAIN layout, and the reader says so.
+/// A production bundle's `funcs.dat` / `types.dat` records are in the spec's
+/// STRUCTURED shape, and both readers recover each function's declaration site
+/// from it.
 ///
-/// This is the finding that made `RecordLayout` necessary. The M23d structured
-/// layout — `funcs.dat` records prefixed with a packed `global_line_index`,
-/// `types.dat` records prefixed with a `TypeKind` ordinal — is what the spec
-/// describes and what the upstream Rust reader assumes. The Nim writer's
-/// `ensureId` appends RAW NAME BYTES for all four tables, so decoding a real
-/// bundle as M23d fails outright (it did: `funcs.dat: record 0 name extends
-/// past record`).
+/// `codetracer-trace-format-spec/internal-files.md` gives a `funcs.dat` record
+/// as `global_line_index: varint, name_len: varint, name` and a `types.dat`
+/// record as `kind: u8, lang_type_len: varint, lang_type, specific_info`. The
+/// `global_line_index` is the declaration site in the trace's global position
+/// space, so a reader recovers `(path_id, line)` from it. The fixture declares
+/// `main` at `SRC_A:3` and `helper` at `SRC_B:17` — two different files and two
+/// different lines — so a reader that stubbed either field, or resolved the
+/// address against the wrong space, fails here by name.
 ///
-/// Two consequences are asserted here, because both are load-bearing and
-/// neither is guessable from the spec:
-///
-/// 1. Both source files are interned and recoverable — the paths table IS
-///    usable, so the browser reader can resolve `PathId`s.
-/// 2. A function's definition site is NOT on disk in this layout, so both this
-///    reader and the Nim FFI reader report `(PathId(0), Line(0))`. If a writer
-///    starts recording it, this fails and names the fix.
+/// The native reader is checked as well as the local one because the Nim FFI
+/// exposes only a function's NAME; the declaration site reaches the native
+/// `Db` only if the reader recovers it from the container itself.
 #[test]
-fn a_production_bundle_uses_the_plain_record_layout() {
+fn a_production_bundle_uses_the_structured_record_layout() {
     let dir = tempfile::tempdir().unwrap();
     let ct_path = write_bundle(dir.path());
 
@@ -259,41 +249,61 @@ fn a_production_bundle_uses_the_plain_record_layout() {
 
     assert_eq!(
         tables.layout,
-        db_backend::ctfs_trace_reader::interning_tables::RecordLayout::Plain,
-        "a bundle from the production Nim writer uses the plain (name-only) record layout"
+        db_backend::ctfs_trace_reader::interning_tables::RecordLayout::Structured,
+        "a bundle from the production Nim writer uses the spec's structured record layout"
     );
 
-    assert!(
-        tables.paths.iter().any(|p| p == SRC_A),
-        "the first source file must be interned; got {:?}",
-        tables.paths
-    );
-    assert!(
-        tables.paths.iter().any(|p| p == SRC_B),
-        "the second source file must be interned; got {:?}",
-        tables.paths
-    );
+    let path_a = tables
+        .paths
+        .iter()
+        .position(|p| p == SRC_A)
+        .unwrap_or_else(|| panic!("the first source file must be interned; got {:?}", tables.paths));
+    let path_b = tables
+        .paths
+        .iter()
+        .position(|p| p == SRC_B)
+        .unwrap_or_else(|| panic!("the second source file must be interned; got {:?}", tables.paths));
 
-    let main = tables
+    let site = |functions: &[(String, PathId, Line)], name: &str| -> (PathId, Line) {
+        functions
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .map(|(_, p, l)| (*p, *l))
+            .unwrap_or_else(|| panic!("`{name}` must be interned"))
+    };
+
+    let local: Vec<(String, PathId, Line)> = tables
         .functions
         .iter()
-        .find(|f| f.name == "main")
-        .expect("`main` must be interned");
-    let helper = tables
-        .functions
-        .iter()
-        .find(|f| f.name == "helper")
-        .expect("`helper` must be interned");
-
+        .map(|f| (f.name.clone(), f.path_id, f.line))
+        .collect();
     assert_eq!(
-        (main.path_id, main.line),
-        (PathId(0), Line(0)),
-        "the plain layout carries no definition site for a function"
+        site(&local, "main"),
+        (PathId(path_a), Line(3)),
+        "local reader: `main` site"
     );
     assert_eq!(
-        (helper.path_id, helper.line),
-        (PathId(0), Line(0)),
-        "the plain layout carries no definition site for a function"
+        site(&local, "helper"),
+        (PathId(path_b), Line(17)),
+        "local reader: `helper` site"
+    );
+
+    let nim = CTFSTraceReader::open(&ct_path).expect("the Nim FFI reader must open the bundle");
+    let native: Vec<(String, PathId, Line)> = (0..nim.function_count())
+        .map(|id| {
+            let f = nim.function(FunctionId(id)).expect("nim function");
+            (f.name.clone(), f.path_id, f.line)
+        })
+        .collect();
+    assert_eq!(
+        site(&native, "main"),
+        (PathId(path_a), Line(3)),
+        "native reader: `main` site"
+    );
+    assert_eq!(
+        site(&native, "helper"),
+        (PathId(path_b), Line(17)),
+        "native reader: `helper` site"
     );
 }
 

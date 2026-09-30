@@ -204,9 +204,10 @@ fn ct_print() -> PathBuf {
         .unwrap_or_else(|e| {
             panic!(
                 "GDH7-CHECK-FAIL: ct-print not resolvable next to the workspace \
-                 (../../../codetracer-trace-format-nim/ct-print): {e}. It is this harness's \
-                 independent container reader and its absence is an instrument failure, not a \
-                 reason to skip."
+                 (../../../codetracer-trace-format-nim/ct-print): {e}. Build it with \
+                 `scripts/build-siblings.sh --only codetracer-trace-format-nim/ct-print` (or \
+                 `just build-ct-print` in that checkout). It is this harness's independent \
+                 container reader and its absence is an instrument failure, not a reason to skip."
             )
         });
     assert!(
