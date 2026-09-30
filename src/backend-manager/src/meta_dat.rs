@@ -85,6 +85,15 @@ pub const META_DAT_VERSION: u16 = 4;
 /// sets an extended flag.
 pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
 
+/// [`SUPPORTED_META_DAT_VERSIONS`] as a comma-separated list, for refusals.
+fn accepted_versions() -> String {
+    SUPPORTED_META_DAT_VERSIONS
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// GDH-M2 — the schema version a container carries when at least one
 /// EXTENDED flag is set.  Must match the Nim writer's `meta_dat.nim`
 /// `MetaDatVersionExtendedFlags`.
@@ -278,7 +287,8 @@ impl fmt::Display for MetaDatError {
             MetaDatError::UnsupportedVersion(v) => {
                 write!(
                     f,
-                    "meta.dat: unsupported version {v}, expected {META_DAT_VERSION}"
+                    "meta.dat: unsupported version {v} (accepted: {})",
+                    accepted_versions()
                 )
             }
             MetaDatError::UnknownFlags {
@@ -1104,6 +1114,21 @@ mod tests {
             parse_meta_dat(&buf),
             Err(MetaDatError::UnsupportedVersion(99))
         );
+    }
+
+    /// The refusal names every version this parser accepts, from
+    /// [`SUPPORTED_META_DAT_VERSIONS`], so a v5 recording is never told
+    /// that only 4 would have been accepted.
+    #[test]
+    fn unsupported_version_message_names_the_accepted_set() {
+        let msg = MetaDatError::UnsupportedVersion(99).to_string();
+        let expected: Vec<String> = SUPPORTED_META_DAT_VERSIONS.iter().map(u16::to_string).collect();
+        assert!(expected.len() > 1, "the accepted set is not a singleton");
+        assert!(
+            msg.contains(&format!("accepted: {}", expected.join(", "))),
+            "the refusal must list every accepted version; got: {msg}"
+        );
+        assert!(msg.contains("99"), "the refusal must name the version it saw; got: {msg}");
     }
 
     #[test]
