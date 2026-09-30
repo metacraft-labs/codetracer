@@ -3,7 +3,7 @@
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
 b478101cd4734201c2a6b95558c471ab3029b30c70e2219e819ff5d0d47cf0a2  src/frontend/viewmodel/headless_session.nim
-f3ded220ef9a723b8446845c64e5cd25f7f5c5e6c63778bcca9da609ad7319a5  src/frontend/viewmodel/store/replay_data_store.nim
+c4f17bac9fcc48bffc8ff55b6221d76479ea069c79d316ff339c1db0bc8f4ed3  src/frontend/viewmodel/store/replay_data_store.nim
 5b765a7a29ca1e6a1e796e78eb67ebe743ba32234427e16188124aa0af43f8e6  src/frontend/tui/host/native_host.nim
 562ee616b7b94c6c91c562a156249d5843ec1b265342eb81f84cb370bc4359cf  src/frontend/tui/host/tui_session.nim
 9be3ac9bea25f0aeea707ada3231abb375ced7974d8b56ba4465a64ce1496045  src/frontend/tui/app/views/shell.nim

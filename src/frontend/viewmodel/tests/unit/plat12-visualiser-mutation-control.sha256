@@ -12,7 +12,7 @@
 # (Verification-Harness-Traps §16).
 
 d5f84b82eb037366ecd94a8754f1def3e4273d56812ce991254674f02f19347d  src/common/value_presentation/vocabulary.nim
-67d13b8f13e122b095bb03453cbe23fa0bb6bdc65b98e5db47839dc08458c0e0  src/common/value_presentation/presenter.nim
+b4c422d5868d342392928df18640ba00fa36160cb3b0cbd9276dc6bd41ec960d  src/common/value_presentation/presenter.nim
 4469367e1543f8cdc4923b86d9a46dd0561c0f7c65c23701141b4ecdde9368ac  src/common/value_presentation/surfaces.nim
 46ba2e663c98cafe8e7b6ae535aa9854c8561c9381b7d776f55fbbb1335cdf61  src/common/value_visualisers.nim
 e148a728c438e76138e1754cf9ff51ba2aa30ca67bf3740f91559c4b25c0f1b4  src/frontend/viewmodel/store/value_media_degradation.nim
