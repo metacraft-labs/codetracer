@@ -2,6 +2,10 @@ import
   ui_imports,
   editor
 
+from ../viewmodel/viewmodels/omnibar_vm import classifyOmnibarQuery,
+  desktopKindOf, OmnibarMode, omCommand, omProgram, omSymbol, omAgent, omFile,
+  omTick
+
 let
   COMMAND_FUZZY_OPTIONS = FuzzyOptions(
     limit: 20,
@@ -66,24 +70,24 @@ proc parseAgentQuery(self: CommandInterpreter, query: cstring): SearchQuery =
     value: query
   )
 
-func queryMatchesCommand(query: cstring, command: cstring): bool =
-  return query.toLowerCase().startsWith(commandPrefix & command)
-
 proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
-  let isProgramSearch = queryMatchesCommand(query, "grep")
-  let isSymbolSearch = queryMatchesCommand(query, "sym")
-  let isAgentSearch = ($query).startsWith("/ai")
-  let isCommand = (not isProgramSearch and not isSymbolSearch) and ($query).startsWith(commandPrefix)
-
-  if isCommand and query.len > 1:
+  ## What an omnibar query means. PLAT-48: the MODE is decided by the shared
+  ## Omnibar ViewModel's `classifyOmnibarQuery` — the same function the
+  ## terminal's and the GPUI window's omnibars call — so a query cannot mean
+  ## one thing here and another there. This keeps only the desktop's own
+  ## construction of each mode's `SearchQuery` (the value is the query past
+  ## its first character, as it always was). The desktop has no tick search:
+  ## `desktopKindOf` keeps `#…` a file query here.
+  case desktopKindOf(classifyOmnibarQuery($query).mode)
+  of omCommand:
     self.parseCommandQuery(cstring(($query).substr(1)))
-  elif isProgramSearch and query.len > 1:
+  of omProgram:
     SearchQuery(kind: ProgramQuery, value: cstring(($query).substr(1)))
-  elif isSymbolSearch and query.len > 1:
+  of omSymbol:
     SearchQuery(kind: SymbolQuery, value: cstring(($query).substr(1)))
-  elif isAgentSearch:
+  of omAgent:
     self.parseAgentQuery(cstring($query))
-  else:
+  of omFile, omTick:
     self.parseFileQuery(cstring($query))
 
 proc searchProgram*(self: CommandInterpreter, query: cstring) =

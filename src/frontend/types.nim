@@ -5,6 +5,8 @@ import
   lib/[ monaco_lib, jslib ],
   rr_gdb
 
+from viewmodel/viewmodels/menu_vm import MenuVM
+
 type
   defaultstring = cstring
   langstring = cstring
@@ -1907,26 +1909,25 @@ type
     instructions*: Instructions
 
   MenuComponent* = ref object of Component
-    active*: bool
+    ## PLAT-48: the desktop's RENDERER of the program menu. Whether the menu
+    ## is open, the entered folder path, the highlighted item, whether the
+    ## highlight came from the keyboard and the menu's search all live in
+    ## `vm` (`viewmodel/viewmodels/menu_vm.MenuVM`) — the same model the
+    ## terminal and GPUI menus draw — and nowhere here. What stays here is
+    ## the DOM's: measured widths and offsets, the DOM element to refocus.
+    vm*: MenuVM
     activeDomElement*: dom.Node
     elements*: MenuData
-    activePath*: seq[int]
     activePathWidths*: JsAssoc[int, int]
     activePathOffsets*: JsAssoc[int, int]
     prepared*: seq[js]
-    searchResults*: seq[cstring]
     nameMap*: JsAssoc[cstring, ClientAction]
-    activeIndex*: int
-    activeSearchIndex*: int
-    activeLength*: int
-    searchQuery*: cstring
     debug*: DebugComponent
     service*: EditorService
     iconWidth*: int
     mainMenuWidth*: int
     folderArrowCharWidth*: int
     search*: bool
-    keyNavigation*: bool
     skipNextBlur*: bool
     focusByMouse*: bool
 

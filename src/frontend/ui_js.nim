@@ -266,6 +266,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
 import viewmodel/viewmodels/deepreview_layout
+from viewmodel/viewmodels/product_menu import productMenuTree, MenuItem, mikFolder
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
@@ -735,358 +736,39 @@ proc appendLanguageSpecificViewItems(menu: MenuNode, data: Data) =
 
   discard appendToViewFolder(menu)
 
+proc menuNodeOf(item: MenuItem): MenuNode =
+  ## PLAT-48. A `MenuNode` from the shared menu tree
+  ## (`viewmodel/viewmodels/product_menu.productMenuTree`): the node the
+  ## `defineMenu` macro used to spell by hand, field for field — the action
+  ## by its `ClientAction` name, `enabled`, the separator after it
+  ## (`isBeforeNextSubGroup`), the platform bits (`menuOs`) and the macOS
+  ## role. A folder carries the enum's zero value as its action, as the
+  ## macro's folders did.
+  result = MenuNode(
+    kind: (if item.kind == mikFolder: MenuFolder else: MenuElement),
+    name: cstring(item.label),
+    action: (if item.action.len > 0: parseEnum[ClientAction](item.action)
+             else: ClientAction.low),
+    actionData: nil,
+    enabled: item.enabled,
+    elements: @[],
+    isBeforeNextSubGroup: item.separatorAfter,
+    menuOs: item.os,
+    role: cstring(item.role))
+  for child in item.children:
+    result.elements.add menuNodeOf(child)
+
 proc webTechMenu(data: Data, program: cstring): MenuNode =
-  let config = data.config
+  ## THE PROGRAM MENU. Since PLAT-48 its tree is the shared one
+  ## (`product_menu.productMenuTree`) that the terminal and the GPUI window
+  ## put in their Menu ViewModels too, translated into the desktop's
+  ## `MenuNode`s here — which the in-page menu (through its Menu ViewModel),
+  ## the command palette and the native macOS menu all read. The run-time
+  ## additions below (launch configurations, per-language View items) stay
+  ## the desktop's.
+  result = menuNodeOf(productMenuTree($program,
+                                      shellUi = data.startOptions.shellUi))
   if not data.startOptions.shellUi:
-    result = defineMenu:
-      folder program:
-        # Needed for compliance on macOS
-        macfolder "CodeTracer", "":
-          macrole "about"
-          --sub
-          macrole "services"
-          --sub
-          macrole "hide"
-          macrole "hideOthers"
-          macrole "unhide"
-          --sub
-          macrole "quit"
-        folder "File":
-          # element "New File", newTab, false
-          # element "Preferences", preferences
-          # --sub
-          # element "Open File", openFile
-          # element "Open Folder", openFolder, false
-          # element "Open Recent", openRecent, false
-          element "Open Trace...", aOpenTrace
-          element "Open Trace in New Tab...", aOpenTraceInNewTab
-          element "Record New Trace...", aRecordNewTrace
-          element "New Trace Tab", aNewTraceTab
-          # --sub
-          # element "Save", aSave
-          # element "Save As ...", saveAs
-          # element "Save All", saveAll
-          # --sub
-          element "Close Current File", closeTab
-          element "Reopen File", reopenTab
-          element "Next File", switchTabRight
-          element "Previous File", switchTabLeft
-          element "Switch File", switchTabHistory
-          --sub
-          # element "Close All Documents", closeAllDocuments
-          mac_and_host_exclude_element "Exit CodeTracer", aExit
-        folder "Edit":
-          # element "Undo", aUndo, false
-          # element "Redo", aRedo, false
-          # --sub
-          # element "Cut", aCut
-          # element "Copy", aCopy
-          # element "Paste", aPaste
-          # --sub
-          # element "Replace", aReplace, false
-          # --sub
-          element "Find in Files", findInFiles
-          element "Find Symbol", findSymbol
-          # element "Replace in Files", replaceInFiles, false
-          --sub
-          # folder "Code folding":
-            # element "Collapse under cursor", aCollapseUnderCursor, false
-            # element "Expand under cursor", aExpandUnderCursor, false
-          element "Expand All", aExpandAll
-          element "Collapse All", aCollapseAll
-          # --sub
-          # folder "Advanced":
-          #   element "Toggle Comment", aToggleComment, false
-          #   element "Increase Indentation", aIncreaseIndentation, false
-          #   element "Decrease Indentation", aDecreaseIndentation, false
-          #   element "Make Uppercase", aMakeUppercase, false
-          #   element "Make Lowercase", aMakeLowercase, false
-          #   #* (Other suitalbe Monaco commands)
-
-            #* (Other suitable Monaco commands)
-          # element "Delete", ClientAction.del
-        folder "View":
-          # folder "Panes":
-            # folder "New"
-          element "Filesystem", aFilesystem
-          element "Calltrace", aFullCalltrace
-          element "State", aState
-          element "Event Log", aEventLog
-          element "Timeline", aTimeline
-          element "Terminal Output", aTerminal
-          element "Scratchpad", aScratchpad
-          # PLAT-40. The point list's one way in: its `makeComponent` arm was
-          # commented out (constructing the pane raised) and its entry lived
-          # only in the commented-out "Panes" folder, so no user could open it.
-          element "Breakpoints & Tracepoints", aPointList
-          element "Agent Activity", aAgentActivity
-          # VN-M5. The one reachable surface for verification and for the
-          # counterexample it produces. There is deliberately no "Counterexample"
-          # entry beside it: a counterexample is a region of this panel that
-          # exists only while a session is open, and a standing menu entry for
-          # it would promise a walk that usually is not there.
-          element "Verification", aVerification
-          element "Start Agent Worktree Session", aStartAgenticWorktreeSession
-          # NOTIFICATIONS — the history panel's only way in.
-          #
-          # `ui/status.nim` builds the full newest-first history and
-          # `views/isonim_status_view.nim` renders it with per-entry dismiss
-          # and action buttons, all of it behind `showNotifications`. That flag
-          # had NO assignment anywhere in the tree — not even a `= false` — so
-          # it sat at the `bool` default and the panel could not be opened by
-          # any means. The status-bar toggle that used to open it was already
-          # commented out at the open-sourcing commit and its now-uncalled proc
-          # was deleted by `df4d3ef2f`; this entry is the affordance that went
-          # with it.
-          #
-          # In the menu rather than back on the status bar, for the reason
-          # `aKeyboardShortcuts` gives below: one node is all three routes at
-          # once, because `ui/menu.nim`'s `generateNameMap` feeds the command
-          # palette from this tree and `index/menu.nim` builds the native macOS
-          # menu from it. Restoring the status-bar button would also re-render
-          # `.status-button`, which `tests/gui/page-objects/status-footer-contrast.ts`
-          # lists as UNREACHABLE and whose contrast is a separate, real defect —
-          # that button should come back with its contrast fixed, not before.
-          element "Notifications", aNotifications
-          # PLAT-45. Back to the one arrangement every CodeTracer front-end
-          # opens with. The desktop's own saved layout files are deleted and
-          # the window reloads onto the generated default; the terminal's and
-          # the GPUI window's remembered layouts are other files and are not
-          # touched.
-          element "Reset Layout", aResetLayout
-          element "Shell", aShell
-          # element "Step List", aStepList
-            # element "Shell", aShell
-            # element "Find Results", aFindResults, false
-            # element "Build Log", aBuildLog, false
-            # element "File Explorer", aFileExplorer, false
-          # folder "Layouts":
-            # element "Save Layout", aSaveLayout, false
-            # element "Load Layout", aLoadLayout, false
-            # element "Debug (Normal Screen)", switchDebug
-            # element "Debug (Wide Screen)", switchDebugWide, false
-            # element "Edit (Normal Screen)", switchEditNormal, false
-            # element "Edit (Wide Screen)", switchEdit
-            #element "can be also"
-            #element "Normal screen"
-            #element "Wide screen"
-            #element "Debug"
-            #element "Edit"
-          # element "New Horizontal Tab Group", aNewHorizontalTabGroup, false
-          # element "New Vertical Tab Group", aNewVerticalTabGroup, false
-          # --sub
-          # (Notifications is live, above, beside the other View entries.)
-          # element "Start Window", aStartWindow, false
-          # element "Full Screen Toggle", aFullScreen, false
-          --sub
-          folder "Theme":
-            element "Default Dark Theme", aTheme3
-            element "Default White Theme", aTheme1
-          # folder "Choose Monaco Theme":
-            # element "vs-light", aMonacoTheme0, false
-            # element "etc",
-          # --sub
-          # element "Multi-line Preview Mode", aMultiline, false
-          # element "Single-line Preview Mode", aSingleLine, false
-          # element "No Preview", aNoPreview, false
-          # --sub
-          # element "View C Code (here it depends on Lang for project)", aLowLevel0, false
-          # element "View Assembly Code (similar: can be llvm ir)", aLowLevel1, false
-          # --sub
-          # element "Zoom In", zoomIn
-          # element "Zoom Out", zoomOut
-          # element "Show Minimap", aShowMinimap, false
-        # folder "Navigate":
-        #   element "Go to File", aGotoFile, false
-        #   element "Go to Symbol", aGotoSymbol, false
-        #   --sub
-        #   element "Go to Definition", aGotoDefinition, false
-        #   element "Find References", aFindReferences, false
-        #   element "Go to Line", aGotoLine, false
-        #   --sub
-        #   element "Go to Previous Cursor Location", aGotoPreviousCursorLocation, false
-        #   element "Go to Next Cursor Location", aGotoNextCursorLocation, false
-        #   --sub
-        #   element "Go to Previous Edit Location", aGotoPrevious, false
-        #   element "Go to Next Edit Location", aGotoNextEditLocation, false
-        #   --sub
-        #   element "Go to Previous Point in Time", aGotoPreviousPointInTime, false
-        #   element "Go to Next Point in Time", aGotoNextPointInTime, false
-        #   --sub
-        #   element "Go to Next Error", aGotoNextError, false
-        #   element "Go to Previous Error", aGotoPreviousError, false
-        #   --sub
-        #   element "Go to Next Search Result", aGotoNextSearchResult, false
-        #   element "Go to Previous Search Result", aGotoPreviousSearchResult, false
-
-        folder "Build":
-          element "Rebuild/Re-record file", aReRecord, true
-          element "Rebuild/Re-record project", aReRecordProject, true
-          # The in-app apply-edit -> HCR reload command. It sits beside the two
-          # rebuild entries because it is the same verb one step further in:
-          # those re-record the program, this one changes the program that is
-          # already running. Being a menu element is also what puts it in the
-          # command palette — `getCommands` walks this very tree — so the one
-          # declaration buys both surfaces.
-          element "Apply Edit & Hot-Reload", aApplyEditAndReload, true
-          # And the panel that lets you TYPE the edit rather than supply it as
-          # an action argument or an environment variable. Same tree, so the
-          # same one declaration buys the command-palette entry.
-          element "Live Edit (HCR)…", aToggleLiveEditPanel, true
-          # And the entry that produces the program the two above edit.
-          # CodeTracer starts the session coordinator, then starts the program
-          # with its HCR agent pointed at that coordinator — the only order the
-          # wire admits, since the agent dials out once at process start.
-          element "Launch Under Live Edit (HCR)…", aLaunchUnderHcr, true
-          --sub
-          # The chord beside each label comes for free: `menu.nim:424` fills
-          # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
-          # `config.shortcutMap.actionShortcuts` — i.e. the config table only.
-          # That is exactly why these two bindings went in
-          # `default_config.yaml` and not into `ui/shortcuts.nim`'s hard-bound
-          # block: a hard-bound chord cannot be displayed here by
-          # construction, and cannot be rebound by the user.
-          element "Go to Next Error", aGotoNextError, true
-          element "Go to Previous Error", aGotoPreviousError, true
-        #   element "Build Project", aBuild, false
-        #   element "Compile Current File (Nim Check)", aCompile, false
-        #   element "Run Static Analysis (drnim)", aRunStatic, false
-        #   # element "Build tasks (nimble)", nil, false
-
-        # TODO:
-        folder "Reset":
-          element "Restart replay-server", aRestartDbBackend, true
-          element "Restart session-manager", aRestartBackendManager, true
-
-        folder "Debug":
-          # element "Trace Existing Program...", aTrace, false
-          # element "Load Existing Trace...", aLoadTrace, false
-          # folder "Panes":
-          #   folder "New":
-          #     element "Program state explorer", aNewState, false
-          #     element "Event log", aNewEventLog, false
-          #     element "Full call trace", aNewFullCalltrace, false
-          #     element "Terminal output", aNewTerminal, false
-          #   element "Breakpoints/Tracepoints", aPointList, false
-          #   element "Mixed call/stack trace", aLocalCalltrace, false
-          #   element "Full call trace", aFullCalltrace, false
-          #   element "Program state explorer", aState, false
-          #   element "Event log", aEventLog
-          #   element "Terminal output", aTerminal, false
-          # element "Options", aOptions, false
-          # --sub
-          # element "Start Debugging", aDebug, false
-          element "Continue", forwardContinue
-          element "Step Over", forwardNext
-          element "Step In", forwardStep
-          element "Step Out", forwardStepOut
-          element "Reverse Continue", reverseContinue
-          element "Reverse Step Over", reverseNext
-          element "Reverse Step In", reverseStep
-          element "Reverse Step Out", reverseStepOut
-          # STOP — the menu route the spec asks for.
-          #
-          # `codetracer-specs` `latest`
-          # `GUI/Debugging-Features/Debugger-Controls.md` § "Ending a session
-          # from inside it": "*Stop* must be discoverable by all three of the
-          # routes CodeTracer offers a command — a toolbar button, a menu entry
-          # and a chord". Commented out, it was reachable only by `SHIFT+F5`,
-          # and this node is also what feeds the command palette
-          # (`ui/menu.nim`'s `generateNameMap(self.data.ui.menuNode)`) and the
-          # native macOS menu (`index/menu.nim`), so one comment removed all
-          # three at once.
-          #
-          # The toolbar button is the one route still missing, and it is
-          # missing in the SPEC too, not just here: the same document says
-          # "neither the toolbar order nor the wireframe above yet places it.
-          # It needs a mark, which Control Marks does not have". Adding a
-          # button would mean choosing that mark, which is not this change's
-          # to make.
-          #
-          # Named "Stop" rather than "Stop Debugging" to match the name the
-          # spec, the config key and the tooltip all use.
-          element "Stop", stop
-          # TODO dynamic name
-          # element "Pause (currently using stop shortcut?)", stop, false
-          --sub
-          # KEYBOARD SHORTCUTS — the affordance that opens the preset dialog.
-          #
-          # IN THE MENU, NOT ON THE TOPBAR. `Planned-Features/Noir-Studio.md`
-          # §1a.2 settles the topbar's one addition — a Share icon beside the
-          # identity avatar — and counts "the debugger controls, the omnibar,
-          # the tabs" as already part of it. The session tab bar is therefore
-          # topbar, so a gear beside its `+` would be a second addition to the
-          # surface that section closed. §1a.2 names the alternative itself,
-          # about `Deploy`: "the command palette and a project-level menu are
-          # both better candidates" for something rare and consequential.
-          #
-          # This node is all three routes at once — `ui/menu.nim`'s
-          # `generateNameMap` feeds the command palette from it and
-          # `index/menu.nim` builds the native macOS menu from it — so one
-          # entry makes the dialog reachable by menu, by palette and, through
-          # `default_config.yaml`'s `aKeyboardShortcuts`, by chord. The chord
-          # prints beside it because `loadShortcut` reads the same resolved map
-          # the dialog lists.
-          #
-          # In the debugger folder rather than a Preferences one because the
-          # presets govern the stepping commands; `ClientAction.preferences`
-          # exists and is commented out elsewhere, and claiming it here would
-          # promise a settings surface this does not build.
-          element "Keyboard Shortcuts", aKeyboardShortcuts
-          --sub
-          element "Add a Breakpoint", aBreakpoint
-          element "Delete Breakpoint", aDeleteBreakpoint
-          element "Delete All Breakpoints", aDeleteAllBreakpoints
-          element "Enable Breakpoint", aEnableBreakpoint
-          element "Enable All Breakpoints", aEnableAllBreakpoint
-          element "Disable Breakpoint", aDisableBreakpoint
-          element "Disable All Breakpoints", aDisableAllBreakpoints
-          --sub
-          element "Add a Tracepoint", aTracepoint
-          element "Delete Tracepoint", aDeleteTracepoint
-          element "Enable Tracepoint", aEnableTracepoint
-          element "Enable All Tracepoints", aEnableAllTracepoints
-          element "Disable Tracepoint", aDisableTracepoint
-          element "Disable All Tracepoints", aDisableAllTracepoints
-          element "Run All Tracepoints", aCollectEnabledTracepointResults
-          --sub
-          element "Invite to Collaborative Session...", aCollabInvite
-
-        # The standard macOS Window menu
-        macfolder "Window", "window"
-        # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
-        # generated automatically
-        #
-        # REPORT A PROBLEM — the bug report form's only way in, and it is
-        # spelled twice because the Help folder is.
-        #
-        # The form is complete: `views/isonim_status_view.nim` renders the
-        # title and description fields and the send button, rebinds that button
-        # to `sendBugReportFromDom` so the DOM values are actually read, and
-        # `ui/status.nim`'s `sendBugReport` posts them over
-        # `CODETRACER::send-bug-report-and-logs`, which `index/ipc_utils.nim`
-        # registers and `index/online_sharing.nim` handles. All of it hung off
-        # `showBugReport`, whose ONLY assignment in the whole tree set it to
-        # `false` — so the form could not be opened by any route, and
-        # `ClientAction.aReportProblem` had existed as a live enum member with
-        # a `nil` handler and no menu entry.
-        #
-        # In Help because that is where a reader looks for it, and here rather
-        # than as one plain `folder "Help"` because the existing entry is a
-        # `macfolder`: macOS owns its Help menu (role `help`, which supplies
-        # the search field), so a second all-OS folder of the same name would
-        # give macOS two. `macfolder` carries the entry on macOS,
-        # `macexclude_folder` carries it everywhere else, and neither platform
-        # sees both.
-        #
-        # Like `aKeyboardShortcuts`, one node is three routes: menu, command
-        # palette (`ui/menu.nim`'s `generateNameMap` reads this tree) and — if
-        # `default_config.yaml` ever names `aReportProblem` — a chord.
-        macfolder "Help", "help":
-          element "Report a Problem...", aReportProblem
-        macexclude_folder "Help":
-          element "Report a Problem...", aReportProblem
-
     # Add dynamic launch configurations to Debug menu if available
     if not seqIsNil(data.ui.launchConfigs) and data.ui.launchConfigs.len > 0:
       let topLevelMenuNodes =
@@ -1126,38 +808,6 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
     # application menu, and any items not present at registration time
     # silently never appear in the OS menu bar.
     appendLanguageSpecificViewItems(result, data)
-  else:
-    result = defineMenu:
-      folder program:
-        macfolder "CodeTracer", "":
-          macrole "about"
-          --sub
-          macrole "services"
-          --sub
-          macrole "hide"
-          macrole "hideOthers"
-          macrole "unhide"
-          --sub
-          macrole "quit"
-        # element "New Terminal", aTheme0, false
-        folder "Themes":
-          element "Mac Classic Theme", aTheme0
-          element "Default White Theme", aTheme1
-          element "Default Black Theme", aTheme2
-          element "Default Dark Theme", aTheme3
-
-        # The standard macOS Window menu
-        macfolder "Window", "window":
-          macrole "minimize"
-          macrole "zoom"
-          --sub
-          macrole "front"
-          --sub
-          macrole "window"
-        # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
-        # generated automatically
-        macfolder "Help", "help"
-        macexclude_element "Exit CodeTracer", aExit, true
 
   # Register the (possibly mutated) menu with the macOS native menu
   # bar.  Previously `defineMenu`'s macro expansion did this BEFORE

@@ -1,7 +1,10 @@
 from std / dom import Document
+import std / tables
 import
   ui_imports, debug, command
 from shortcut_labels import renderChord
+# PLAT-48: the menu's logical state is the shared Menu ViewModel's.
+import ../viewmodel/viewmodels/menu_vm
 
 # NS1 / Noir-Studio.md §1a.2. Three decisions below used to be build checks
 # (`defined(ctmacos)`, `electron_lib.inElectron`); they are now capability
@@ -113,8 +116,7 @@ when defined(js):
 
   proc handleDocumentMenuMouseDown(ev: dom_api.Event) =
     if not ev.eventTargetInsideMenu() and not activeMenuComponentForDismiss.isNil and
-        activeMenuComponentForDismiss.active:
-      activeMenuComponentForDismiss.active = false
+        activeMenuComponentForDismiss.vm.isOpen:
       activeMenuComponentForDismiss.closeMenu()
       activeMenuComponentForDismiss.data.redraw()
       activeMenuComponentForDismiss.requestMenuRender()
@@ -134,20 +136,18 @@ proc enterElement*(self: MenuComponent, node: MenuNode)
 proc runAction*(self: MenuComponent, action: ClientActionHandler, actionData: JsObject = nil)
 
 proc closeMenu(self: MenuComponent) =
-  self.activePath = @[]
+  ## Close the menu: the ViewModel's `close`, plus the DOM measurements this
+  ## renderer keeps for the submenus it drew.
+  self.vm.close()
   self.activePathWidths = JsAssoc[int, int]{}
   self.activePathOffsets = JsAssoc[int, int]{}
-  self.activeIndex = 0
-  self.activeLength = 0
-  self.searchResults = @[]
-  self.activeSearchIndex = 0
-  self.searchQuery = cstring""
+
+proc syncMenuVM*(self: MenuComponent)
 
 proc openMainMenu(self: MenuComponent) =
   self.data.focusComponent(self)
-  self.activeIndex = 0
-  self.activeLength = menuNodeChildren(self.data.ui.menuNode).len
-  self.activePath = @[]
+  self.syncMenuVM()
+  self.vm.open(keyboard = false)
   self.activePathWidths = JsAssoc[int, int]{}
   self.activePathOffsets = JsAssoc[int, int]{}
 
@@ -183,113 +183,63 @@ proc parentNodeAtPath(self: MenuComponent; path: seq[int]): MenuNode =
     result = elements[index]
 
 proc enterFolder*(self: MenuComponent) =
-  var node = self.data.ui.menuNode
-
-  for index in self.activePath:
-    let elements = menuNodeChildren(node)
-    if index < 0 or index >= elements.len:
-      return
-    node = elements[index]
-
-  let elements = menuNodeChildren(node)
-  if self.activeIndex < 0 or self.activeIndex >= elements.len:
-    return
-  var enteredNode = elements[self.activeIndex]
-
-  if enteredNode.enabled and enteredNode.kind == MenuFolder:
-    self.activePath.add(self.activeIndex)
-    self.activeIndex = 0
-    self.activeLength = menuNodeChildren(enteredNode).len
+  ## `Right`: enter the highlighted folder (the ViewModel's rule).
+  if self.vm.enterFolder():
     self.data.redraw()
 
 proc closeFolder*(self: MenuComponent) =
-  if self.activePath.len > 0:
-    self.activeIndex = self.activePath.pop()
-
-    var node = self.data.ui.menuNode
-
-    for index in self.activePath:
-      let elements = menuNodeChildren(node)
-      if index < 0 or index >= elements.len:
-        self.activeLength = 0
-        self.data.redraw()
-        return
-      node = elements[index]
-
-    self.activeLength = menuNodeChildren(node).len
+  ## `Left` / `Esc` inside a folder: back to its parent.
+  if self.vm.leaveFolder():
     self.data.redraw()
 
 proc runAction*(self: MenuComponent, action: ClientActionHandler, actionData: JsObject = nil) =
   if not action.isNil:
     action(actionData)
-    self.active = false
     self.closeMenu()
 
 proc enterElement*(self: MenuComponent, node: MenuNode) =
-  if node.enabled:
+  if node.enabled and node.kind == MenuElement:
     var action = self.data.actions[node.action]
     self.runAction(action, node.actionData)
 
+proc runActivation(self: MenuComponent; activation: MenuActivation) =
+  ## Run what the ViewModel chose. The action is looked up on the `MenuNode`
+  ## at the chosen path, because the node — not the ViewModel — carries the
+  ## desktop's `actionData` (a launch configuration's index).
+  if not activation.ran:
+    return
+  let node = self.nodeAtPath(activation.path)
+  if not node.isNil:
+    self.enterElement(node)
+
 proc enterElement*(self: MenuComponent) =
-  var enteredNode: MenuNode
-
-  if self.searchResults.len == 0:
-    var node = self.data.ui.menuNode
-
-    for index in self.activePath:
-      let elements = menuNodeChildren(node)
-      if index < 0 or index >= elements.len:
-        return
-      node = elements[index]
-
-    enteredNode = node
-
-    if enteredNode.kind == MenuFolder:
-      let elements = menuNodeChildren(enteredNode)
-      if self.activeIndex < 0 or self.activeIndex >= elements.len:
-        return
-      enteredNode = elements[self.activeIndex]
-
-    if enteredNode.enabled and enteredNode.kind == MenuElement:
-      self.enterElement(enteredNode)
-      self.data.redraw()
-  else:
-    let action = self.data.actions[self.nameMap[self.searchResults[self.activeSearchIndex]]]
-    self.runAction(action)
-    self.data.redraw()
+  ## `Enter`: the ViewModel activates the highlighted item (or search
+  ## result); an action runs, a folder is entered.
+  let activation = self.vm.activate()
+  if activation.ran:
+    self.runActivation(activation)
+  self.data.redraw()
 
 method onUp*(self: MenuComponent) {.async.} =
-  self.keyNavigation = true
-
-  if self.searchResults.len == 0:
-    if self.activeIndex > 0:
-      self.activeIndex -= 1
+  if self.vm.searchResults.len > 0:
+    self.vm.moveSearch(-1)
   else:
-    if self.activeSearchIndex > 0:
-      self.activeSearchIndex -= 1
-
+    self.vm.moveHighlight(-1)
   self.requestMenuRender()
 
 method onDown*(self: MenuComponent) {.async.} =
-  self.keyNavigation = true
-
-  if self.searchResults.len == 0:
-    if self.activeIndex < self.activeLength - 1:
-      self.activeIndex += 1
+  if self.vm.searchResults.len > 0:
+    self.vm.moveSearch(1)
   else:
-    if self.activeSearchIndex < self.searchResults.len:
-      self.activeSearchIndex += 1
-
+    self.vm.moveHighlight(1)
   self.requestMenuRender()
 
 method onRight*(self: MenuComponent) {.async.} =
-  self.keyNavigation = true
-  enterFolder(self)
+  discard self.vm.enterFolder()
   self.requestMenuRender()
 
 method onLeft*(self: MenuComponent) {.async.} =
-  self.keyNavigation = true
-  closeFolder(self)
+  discard self.vm.leaveFolder()
   self.requestMenuRender()
 
 method onEnter*(self: MenuComponent) {.async.} =
@@ -311,12 +261,10 @@ proc countSeparators(node: MenuNode, i: int): int =
 #   threshold: -10000)
 
 proc toggle*(self: MenuComponent) =
-  if self.active:
+  if self.vm.isOpen:
     self.closeMenu()
   else:
     self.openMainMenu()
-
-  self.active = not self.active
   self.data.redraw()
 
 proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode): tuple[name, shortcut: int] =
@@ -402,18 +350,49 @@ when defined(js):
         (node.menuOs and ord(MenuNodeOSMacOS)))
 
   proc activeNodeClass(self: MenuComponent; path: seq[int]): string =
-    # Only highlight with the active class during keyboard navigation.
-    # Mouse hover is handled purely by CSS :hover on .ct-menu-item.
-    if path.len == 0 or not self.keyNavigation:
+    ## Only a KEYBOARD highlight is marked with the active class; a hovered
+    ## item is CSS `:hover` on `.ct-menu-item`. Which items are active — the
+    ## open folders on the path and the highlighted item — is the Menu
+    ## ViewModel's answer (`isOnPath`), not a second copy kept here.
+    if path.len == 0 or not self.vm.keyNavigation:
       return ""
-    let depth = path.len - 1
-    let index = path[^1]
-    if (self.activePath.len == depth and self.activeIndex == index) or
-        (self.activePath.len > 0 and self.activePath.len != depth and
-          depth < self.activePath.len and self.activePath[depth] == index):
-      "menu-active-node"
-    else:
-      ""
+    if self.vm.isOnPath(path): "menu-active-node" else: ""
+
+  proc menuItemOf(node: MenuNode): MenuItem =
+    ## The Menu ViewModel's item for one desktop `MenuNode`, children
+    ## included, with the platform's `hidden` decided by
+    ## `shouldRenderMenuNode` — so a macOS-only folder keeps its index in the
+    ## ViewModel (paths name the same node in both trees) but can never be
+    ## highlighted.
+    result = MenuItem(
+      kind: (if node.kind == MenuFolder: mikFolder else: mikAction),
+      label: $node.name,
+      action: (if node.kind == MenuElement: $node.action else: ""),
+      enabled: node.enabled,
+      hidden: not node.shouldRenderMenuNode(),
+      separatorAfter: node.isBeforeNextSubGroup,
+      os: node.menuOs,
+      role: (if node.role.isNil: "" else: $node.role))
+    for child in menuNodeChildren(node):
+      result.children.add menuItemOf(child)
+
+  proc syncMenuVM*(self: MenuComponent) =
+    ## Hand the ViewModel the tree the desktop built (`data.ui.menuNode`,
+    ## after its run-time additions) and the chords the live config binds.
+    ## Cheap enough to run on every render; `setTree` keeps an open path that
+    ## still names folders.
+    if self.data.ui.menuNode.isNil:
+      return
+    self.vm.setTree(menuItemOf(self.data.ui.menuNode))
+    var chords = initTable[string, string]()
+    for (p, it) in self.vm.root.actionItems():
+      if it.action.len > 0 and not chords.hasKey(it.action):
+        let node = self.nodeAtPath(p)
+        if not node.isNil:
+          let chord = $loadShortcut(node.action, self.data.config)
+          if chord.len > 0:
+            chords[it.action] = chord
+    self.vm.setShortcuts(chords)
 
   proc menuRecord(
       self: MenuComponent;
@@ -505,10 +484,9 @@ when defined(js):
     let topbar = ctTopbar()
     result.showNavigation =
       not self.data.ui.menuNode.isNil and topbar.has(tbaInPageMenu)
-    result.active = self.active
-    result.searchQuery =
-      if self.searchQuery.isNil: ""
-      else: $self.searchQuery
+    self.syncMenuVM()
+    result.active = self.vm.isOpen
+    result.searchQuery = self.vm.searchQuery
     # NS1: we draw the window buttons when the platform hands us the frame and
     # paints nothing over it. Was `inElectron and not defined(ctmacos)` — one
     # runtime check and one build check answering one question between them.
@@ -521,16 +499,17 @@ when defined(js):
     let menu = self.data.ui.menuNode
     result.rootNodes = self.menuRecordsForNode(menu, @[])
 
-    for index, res in self.searchResults:
+    for index, res in self.vm.searchResults:
+      let label = self.vm.searchLabels[index]
       result.searchResults.add(MenuSearchResultRecord(
-        label: $res,
-        shortcut: $loadShortcut(self.nameMap[res], self.data.config),
-        iconClass: $iconClass(res),
-        active: self.activeSearchIndex == index))
+        label: label,
+        shortcut: self.vm.shortcutFor(res.action),
+        iconClass: $iconClass(cstring(label)),
+        active: self.vm.searchIndex == index))
 
     var current = menu
     var sum = 0
-    for depth, index in self.activePath:
+    for depth, index in self.vm.path:
       let currentElements = menuNodeChildren(current)
       if current.isNil or index < 0 or index >= currentElements.len:
         break
@@ -549,50 +528,31 @@ when defined(js):
         id: fmt"menu-nested-elements-{depth + 1}",
         className: fmt"menu-nested-elements menu-top-{sum} {separators}",
         style: self.nestedStyleString(sum, depth + 1, separators, submenuWidth),
-        nodes: self.menuRecordsForNode(current, self.activePath[0 .. depth])))
+        nodes: self.menuRecordsForNode(current, self.vm.path[0 .. depth])))
 
   proc handleNodeMouseOver(self: MenuComponent; path: seq[int]) =
-    let node = self.nodeAtPath(path)
-    let parent = self.parentNodeAtPath(path)
-    if node.isNil or parent.isNil or path.len == 0:
-      return
-
-    let depth = path.len - 1
-    let index = path[^1]
-    let previousActivePath = self.activePath
-    let previousActiveIndex = self.activeIndex
-    let previousActiveLength = self.activeLength
-    self.keyNavigation = false
-    if node.kind == MenuElement:
-      self.activeIndex = index
-      self.activePath.setLen(depth + 1)
-      if self.activePath[depth] != index:
-        self.activePath[depth] = index
-    else:
-      if node.enabled:
-        let elements = menuNodeChildren(node)
-        if elements.len > 0:
-          self.activePath.setLen(depth + 1)
-          self.activeIndex = 0
-          self.activeLength = elements.len
-          if self.activePath[depth] != index:
-            self.activePath[depth] = index
-
-    if self.activePath != previousActivePath or
-        self.activeIndex != previousActiveIndex or
-        self.activeLength != previousActiveLength:
+    ## The pointer is over an item: the ViewModel's `hoverPath` (a folder
+    ## opens, an item is highlighted, not a keyboard highlight). Rendered
+    ## only when that changed something.
+    let before = self.vm.revision
+    self.vm.hoverPath(path)
+    if self.vm.revision != before:
       self.requestMenuRender()
 
   proc handleNodeClick(self: MenuComponent; path: seq[int]) =
-    let node = self.nodeAtPath(path)
-    if not node.isNil:
-      self.enterElement(node)
-      self.requestMenuRender()
+    ## A click: an action runs and the menu closes; a folder opens — the
+    ## Menu ViewModel's `clickPath`, so the desktop, the terminal and GPUI
+    ## answer a click on the same item the same way.
+    let activation = self.vm.clickPath(path)
+    if activation.ran:
+      self.runActivation(activation)
+    self.requestMenuRender()
 
   proc handleSearchResultClick(self: MenuComponent; index: int) =
-    if index >= 0 and index < self.searchResults.len:
-      let action = self.data.actions[self.nameMap[self.searchResults[index]]]
-      self.runAction(action)
+    if index >= 0 and index < self.vm.searchResults.len:
+      self.vm.searchIndex = index
+      let activation = self.vm.activate()
+      self.runActivation(activation)
       self.requestMenuRender()
 
   proc ensureMenuDismissWiring(self: MenuComponent) =
@@ -621,7 +581,6 @@ when defined(js):
     dom_api.addEventListener(dom_api.Node(nav), cstring"keydown",
       proc(ev: dom_api.Event) =
         if ev.eventKeyCode() == ESC_KEY_CODE:
-          self.active = false
           self.closeMenu()
           self.data.redraw())
 
@@ -634,6 +593,36 @@ when defined(js):
         proc(ev: dom_api.Event) =
           ev.stopPropagation())
 
+  proc setWindowProperty(name: cstring; value: JsObject) {.importjs: "window[#] = #".}
+
+  proc exposeMenuViewModel(self: MenuComponent) =
+    ## PLAT-48's VERIFICATION-GATE SEAM: `window.__ctMenuVM` reads and WRITES
+    ## the Menu ViewModel this component renders, so a test can change the
+    ## ViewModel's highlighted item directly and read the highlighted item
+    ## back out of the DOM. If this renderer kept its own copy of the state,
+    ## that write would not reach the screen — which is exactly what the
+    ## gate's mutation arm checks.
+    let component = self
+    setWindowProperty(cstring"__ctMenuVM", js{
+      state: proc(): cstring =
+        cstring("{\"isOpen\":" & $component.vm.isOpen & ",\"path\":[" &
+                component.vm.path.mapIt($it).join(",") & "]" & ",\"highlight\":" &
+                $component.vm.highlight & ",\"keyNavigation\":" &
+                $component.vm.keyNavigation & "}"),
+      setHighlight: proc(path: seq[int]; highlight: int) =
+        component.vm.isOpen = true
+        component.vm.path = path
+        component.vm.highlight = highlight
+        component.vm.keyNavigation = true
+        inc component.vm.revision
+        component.requestMenuRender(),
+      open: proc() =
+        component.openMainMenu()
+        component.requestMenuRender(),
+      close: proc() =
+        component.closeMenu()
+        component.requestMenuRender()})
+
   proc requestMenuRender*(self: MenuComponent) =
     ## Refresh the global menu host directly through IsoNim.
     ##
@@ -641,6 +630,7 @@ when defined(js):
     ## The deeper menu state and action callbacks remain on ``MenuComponent``.
     if self.isNil:
       return
+    self.exposeMenuViewModel()
     let container = dom_api.getElementById(dom_api.document, cstring"menu")
     if dom_api.isNodeNil(dom_api.Node(container)):
       return
@@ -669,7 +659,7 @@ when defined(js):
       menuShellGate.invalidate()
       menuShellGateOwner = self
 
-    let signature = menuRenderSignature(model, extra = $self.keyNavigation)
+    let signature = menuRenderSignature(model, extra = $self.vm.keyNavigation)
     let hostIntact =
       not dom_api.isNodeNil(dom_api.Node(container).firstChild) and
       not dom_api.isNodeNil(dom_api.Node(dom_api.getElementById(
@@ -726,5 +716,5 @@ when defined(js):
         self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
       self.debug.requestDebugControlsRender()
     wireMenuKeyboard(container, self)
-    if self.keyNavigation:
+    if self.vm.keyNavigation:
       focusNavigationSoon()
