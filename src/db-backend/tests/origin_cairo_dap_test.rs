@@ -12,9 +12,10 @@
 //!    (3 hops: TrivialCopy → TrivialCopy → Literal, terminator
 //!    `Literal(felt252, value=10)`, all hops confidence ≥ 0.7).
 //!
-//! The test SKIPs cleanly when the Cairo recorder isn't available;
-//! SKIPPED is the only acceptable failure-to-run mode per the M23
-//! milestone spec.
+//! When the Cairo recorder isn't available, the test goes through
+//! `common/origin_dap_gate.rs`: a loud "asserted NOTHING" skip on a developer
+//! box, and a failure under `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
+//! `CT_ORIGIN_DAP_REQUIRED=1`.
 //!
 //! The shared per-DAP helper lives in `tests/common/origin_dap.rs`.
 
@@ -23,21 +24,26 @@ mod test_harness;
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use db_backend::task::{OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
     fixture_source, load_fixture_and_query_or_skip,
 };
+use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
 
 /// Skip reason emitted when the Cairo recorder is missing. Returns the
 /// version label used for the trace-dir name on success.
 fn require_cairo_recorder() -> Option<String> {
     if test_harness::find_cairo_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Cairo recorder not found (set CODETRACER_CAIRO_RECORDER_PATH or build codetracer-cairo-recorder)"
+        return unavailable(
+            required_mode(),
+            "Cairo recorder prerequisite",
+            "Cairo recorder not found (set CODETRACER_CAIRO_RECORDER_PATH or build codetracer-cairo-recorder)",
         );
-        return None;
     }
     Some("cairo-2.0".to_string())
 }
@@ -57,10 +63,7 @@ fn cairo_config(scenario: &str, version: &str, line: u32, variable: &str) -> Ori
 fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
     match load_fixture_and_query_or_skip(config) {
         QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: cairo/{}: {}", scenario, reason);
-            None
-        }
+        QueryOutcome::Skipped(reason) => unavailable(required_mode(), &format!("cairo/{scenario}"), &reason),
     }
 }
 

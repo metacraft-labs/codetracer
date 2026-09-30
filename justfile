@@ -785,6 +785,28 @@ build-app-image:
 test-rust:
   #!/usr/bin/env bash
   set -e
+  # A test that skips for a missing prerequisite is counted as PASSED, and
+  # nextest does not print a passing test's output, so its banner never reaches
+  # the log. The test gates append each skip to this report instead, and it is
+  # printed when the recipe ends, pass or fail, one line per skipped test (and
+  # as a GitHub warning annotation in CI), so every skip is reported by the
+  # lane that took it.
+  skip_report="$(mktemp "${TMPDIR:-/tmp}/codetracer-test-skips.XXXXXX")"
+  export CODETRACER_TEST_SKIP_REPORT="$skip_report"
+  report_skips() {
+    if [ -s "$skip_report" ]; then
+      echo
+      echo "SKIPPED (NOT VERIFIED): $(sort -u "$skip_report" | wc -l | tr -d ' ') test(s) asserted nothing in this lane:"
+      sort -u "$skip_report" | while IFS= read -r line; do
+        echo "  $line"
+        if [ -n "${GITHUB_ACTIONS:-}" ]; then
+          echo "::warning title=Test skipped (not verified)::$line"
+        fi
+      done
+    fi
+    rm -f "$skip_report"
+  }
+  trap report_skips EXIT
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server
