@@ -2,6 +2,7 @@ name: Cross-Repo Integration Tests
 
 on:
   pull_request:
+    branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
       - 'scripts/resolve-sibling-rev.sh'

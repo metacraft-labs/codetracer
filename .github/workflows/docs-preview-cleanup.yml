@@ -21,6 +21,7 @@ name: "Docs preview cleanup"
 
 on:
   pull_request:
+    branches-ignore: [agents]
     types: [ closed ]
   # Manual recovery. If a cleanup run is ever lost -- cancelled, or failing
   # while gh-pages is unreachable -- the preview simply stays published, and

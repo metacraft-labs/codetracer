@@ -43,6 +43,7 @@ on:
       # NOT be treated that way.
       - cloud
   pull_request:
+    branches-ignore: [agents]
 
   # PERIODIC COVERAGE ON `dev`, WHICH PUSH RUNS NO LONGER PROVIDE.
   #

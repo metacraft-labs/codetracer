@@ -178,6 +178,7 @@ on:
   push:
     branches: [main, dev, stable]
   pull_request:
+    branches-ignore: [agents]
   workflow_dispatch:
 
 # Collapse superseded runs. This block did not exist until now, and its absence
