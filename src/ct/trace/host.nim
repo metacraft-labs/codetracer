@@ -89,6 +89,36 @@ proc emitReplayProblemForHostFailure(message: string) =
       "Replay storage objects could not be read from any available replica.")
     flushFile(stdout)
 
+const DefaultHostBind* = "127.0.0.1"
+  ## LOOPBACK, because `CLI/ct/host.md` says so and gives the reason: "a trace
+  ## contains the recorded program's memory and I/O". Serving that on a
+  ## routable interface has to be something the operator asked for.
+
+proc resolveHostBind*(flagValue, envValue: string): string =
+  ## The interface `ct host` tells the Electron main process to bind.
+  ##
+  ## `--bind` wins over `CODETRACER_HOST_BIND`, which wins over loopback —
+  ## the precedence `--idle-timeout` / `CODETRACER_HOST_IDLE_TIMEOUT` already
+  ## uses a few lines below, and the one that lets a shell profile widen the
+  ## default without taking the flag away from a single invocation.
+  ##
+  ## The flag's own default is the EMPTY string rather than `127.0.0.1`, which
+  ## is what makes this function possible at all: with `127.0.0.1` as the
+  ## declared default there is no value that means "the operator said nothing",
+  ## so the environment variable could never be consulted without also
+  ## overriding an explicit `--bind 127.0.0.1`.
+  ##
+  ## Whitespace-only is treated as absent. A malformed address is NOT rejected
+  ## here — the bind failure names the address and the errno, and duplicating
+  ## the platform's own address parsing would only disagree with it.
+  let flag = flagValue.strip()
+  if flag.len > 0:
+    return flag
+  let env = envValue.strip()
+  if env.len > 0:
+    return env
+  DefaultHostBind
+
 proc parseIdleTimeoutMs*(raw: string): IdleTimeoutResult =
   ## Parse a human-friendly duration string into milliseconds.
   ## Supports suffixes: ms, s, m, h. Empty => default. 0/never/off => disabled.
@@ -1185,6 +1215,7 @@ proc importLocalManifest(
 
 proc hostCommand*(
     port: int,
+    bindAddressFlag: string,
     backendSocketPort: Option[int],
     frontendSocketPort: Option[int],
     frontendSocketParameters: string,
@@ -1213,6 +1244,8 @@ proc hostCommand*(
   # M-REC-2: ``traceId`` is a UUIDv7 recording-id string; empty means
   # "no trace specified yet".  Was an int sentinel ``-1`` pre-M-REC-2.
   var traceId = ""
+  let bindAddress = resolveHostBind(
+    bindAddressFlag, getEnv("CODETRACER_HOST_BIND", ""))
   let envIdleTimeout = getEnv("CODETRACER_HOST_IDLE_TIMEOUT", "")
   let parsedIdleTimeout = parseIdleTimeoutMs(
     if idleTimeoutRaw.len > 0: idleTimeoutRaw else: envIdleTimeout)
@@ -1353,6 +1386,12 @@ proc hostCommand*(
       $traceId,
       "--port",
       $port,
+      # Threaded through so the DEFAULT is loopback rather than whatever Node
+      # does when the host argument is absent, which is every interface. See
+      # CLI/ct/host.md: "a trace contains the recorded program's memory and
+      # I/O", so exposing it is an explicit choice.
+      "--bind",
+      bindAddress,
       "--frontend-socket-port",
       $frontendSocketPort,
       "--frontend-socket-parameters",

@@ -209,7 +209,7 @@ proc parseArgs* =
           i += 2
           continue
         else:
-          errorPrint "expected --port <port>"
+          errorPrint "expected --bind <address>"
           break
       elif arg == cstring"--frontend-socket-port":
         if i + 1 < args.len:

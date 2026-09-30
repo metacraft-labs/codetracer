@@ -319,6 +319,7 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
     of StartupCommand.host:
       hostCommand(
         conf.hostPort,
+        conf.hostBind,
         conf.hostBackendSocketPort, conf.hostFrontendSocketPort,
         conf.hostFrontendSocketParameters, conf.hostTraceArg,
         conf.hostIdleTimeout,

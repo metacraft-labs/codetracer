@@ -471,6 +471,7 @@ type
       .}: Option[bool]
     of host:
       # codetracer host --port <port>
+      #        [--bind <addr>]
       #        [--backend-socket-port <port>]
       #        [--frontend-socket <port>]
       #        [--frontend-socket-parameters
@@ -480,6 +481,18 @@ type
         name: "port"
         desc: "Port to listen on"
       .} : int
+
+      # EMPTY MEANS "THE OPERATOR SAID NOTHING", which is the only way
+      # `CODETRACER_HOST_BIND` can be consulted without also overriding an
+      # explicit `--bind 127.0.0.1`. `resolveHostBind` in `trace/host.nim`
+      # turns absence into loopback and carries the reasoning.
+      hostBind* {.
+        name: "bind"
+        defaultValue: ""
+        desc: "Interface to bind " &
+          "(default: 127.0.0.1; " &
+          "CODETRACER_HOST_BIND)"
+      .} : string
 
       hostBackendSocketPort* {.
         name: "backend-socket-port"

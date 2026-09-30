@@ -753,7 +753,13 @@ test_lane_files() {
 		# (`index/ipc_subsystems/dap.nim`) with two sessions whose requests
 		# share a `seq`, and asserts each answer reaches the session that
 		# asked.
+		#
+		# `index_server_binds_loopback_test.nim` starts the REAL
+		# `server_config.setupServer` and then tries to connect to it from
+		# this host's own routable address: the default must refuse, and
+		# `--bind 0.0.0.0` through the real `parseArgs` must accept.
 		echo src/frontend/tests/dap_session_routing_test.nim
+		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		;;
 
 	frontend-native-units)
