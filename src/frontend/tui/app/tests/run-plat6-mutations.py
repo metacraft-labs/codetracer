@@ -802,8 +802,10 @@ MUTATIONS = [
     # had to add it.
     Mutation(
         "M33", RUNTIME,
-        "    if isMouse:",
-        "    if false:",
+        # PLAT-48 put a second `if isMouse:` above this one (the top bar takes
+        # the mouse first), so the needle names the layout binding's.
+        "    if isMouse:\n      rt.routeMouseReport(event, result)",
+        "    if false:\n      rt.routeMouseReport(event, result)",
         R_MOUSEDRAG,
         "`handleToken` stops offering a decoded mouse report to the binding, "
         "which is the state PLAT-6 landed in",
@@ -811,8 +813,8 @@ MUTATIONS = [
     ),
     Mutation(
         "M33B", RUNTIME,
-        "    if isMouse:",
-        "    if false:",
+        "    if isMouse:\n      rt.routeMouseReport(event, result)",
+        "    if false:\n      rt.routeMouseReport(event, result)",
         M_DRAG,
         "the same defect, seen from a REAL PTY: a press and a release written "
         "as SGR-1006 bytes no longer rearrange the terminal. THE SAME "
@@ -833,20 +835,22 @@ MUTATIONS = [
     ),
     Mutation(
         "M35", BIND,
-        # RE-POINTED BY PLAT-47: the drag ghost is now a LABEL over the frame,
-        # not a glyph, so the only glyph kind the mouse drag still reaches
-        # through `paintDecorations` is the dock strip's. Collapsing the table
-        # onto the ghost's old glyph repaints the strip, which the drag case
-        # ALSO reads cell by cell — so it can no longer be spared, and the
-        # arm is graded by the absolute probe dying with it rather than alone.
-        "    let glyph = glyphFor(d.kind)",
-        "    let glyph = DragGhostGlyph",
+        # RE-POINTED BY PLAT-47 (the drag ghost became a LABEL over the frame)
+        # AND AGAIN BY PLAT-48: a dock strip is no longer painted by
+        # `paintDecorations` at all — it is its labels on blanks
+        # (`views/shell.paintDockStrips`) — so collapsing the whole glyph
+        # table reached nothing the mouse drag draws and SURVIVED. What the
+        # absolute probe still reads is the strip's glyph as the decoration
+        # table states it (`glyphFor(ldDockStrip)`, a blank): a table that
+        # names the ghost's glyph for the strip disagrees with every strip
+        # cell on the real terminal.
+        "  of ldDockStrip: DockStripGlyph",
+        "  of ldDockStrip: DragGhostGlyph",
         M_MODEL,
-        "M31's defect, graded against the MOUSE suite: every decoration is "
-        "painted with one glyph. The absolute probe — each decoration's "
-        "rectangle from `decorationsFor`, required to carry THAT KIND's glyph "
-        "(or, for the ghost, its label) on the real terminal — dies; since "
-        "PLAT-47 the drag case, which counts the strip's glyphs, dies with it",
+        "the decoration table names the wrong glyph for a dock strip. The "
+        "absolute probe — each decoration's rectangle from `decorationsFor`, "
+        "required to carry THAT KIND's glyph (or, for the ghost, its label) "
+        "on the real terminal — dies at the strip",
         suite=MOUSE_SUITE,
     ),
     Mutation(
