@@ -277,21 +277,16 @@ proc browserWasmHost(delivered: seq[DeliveredWasmModule];
   ## Forward-declared because the bridge is built above the Worker transport
   ## it may need. Defined with `newBrowserWasmHost`, whose reasons it shares.
 
-proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
-                       persistenceAnswered: bool;
-                       deliveredWasmModules: seq[DeliveredWasmModule] = @[];
-                       wasmModuleUrls: seq[tuple[id: string, url: string]] = @[];
-                       wasmWorkerScriptUrl: string = ""
-                      ): BrowserBridge =
-  BrowserBridge(
-    volume: volume,
-    persistenceGranted: persistenceGranted,
-    persistenceAnswered: persistenceAnswered,
-    ownerId: $jsRandomHex(),
-      # Per page load, and random. A stable id — derived from the origin, say —
-      # would make a reloaded tab indistinguishable from a second one, and
-      # §4.3's whole protocol turns on telling those apart.
-    nowMs: proc(): int64 = jsNowMs().int64,
+proc newBrowserTabBridge*(): BrowserTabBridge =
+  ## The ten operations `platform/browser_facades.nim` builds the clipboard,
+  ## download and shell facades over, wired to the real browser.
+  ##
+  ## Split out of `newBrowserBridge` below when those builders moved down into
+  ## `browser_facades.nim`: the WEB bridge is this plus a project-store volume,
+  ## a `WasmHost` and a share origin, and the CONTAINER deployment is a tab
+  ## with none of those three. Keeping the two records apart is what lets the
+  ## container reach the same three builders without inventing a store.
+  BrowserTabBridge(
     writeClipboardText: proc(text: string
                             ): PlatformFuture[PlatformOutcome[Nothing]] =
       settleVoid(jsWriteClipboard(text.cstring), "copying to the clipboard"),
@@ -351,7 +346,24 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
         window.addEventListener('focus', function () { `deliver`(); });
         window.addEventListener('blur', function () { `deliver`(); });
       }
-      """.},
+      """.})
+
+proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
+                       persistenceAnswered: bool;
+                       deliveredWasmModules: seq[DeliveredWasmModule] = @[];
+                       wasmModuleUrls: seq[tuple[id: string, url: string]] = @[];
+                       wasmWorkerScriptUrl: string = ""
+                      ): BrowserBridge =
+  BrowserBridge(
+    volume: volume,
+    persistenceGranted: persistenceGranted,
+    persistenceAnswered: persistenceAnswered,
+    ownerId: $jsRandomHex(),
+      # Per page load, and random. A stable id — derived from the origin, say —
+      # would make a reloaded tab indistinguishable from a second one, and
+      # §4.3's whole protocol turns on telling those apart.
+    nowMs: proc(): int64 = jsNowMs().int64,
+    tab: newBrowserTabBridge(),
     shareLinkOrigin: $jsShareOrigin(),
     # NS3's seam, now DERIVED FROM THE DELIVERY rather than asserted empty.
     #

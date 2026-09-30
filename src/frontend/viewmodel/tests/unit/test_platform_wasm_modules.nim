@@ -104,13 +104,12 @@ proc fakeWasmHost(registry: WasmRegistry; log: HostLog;
     isRunning: proc(handle: ProcessHandle): auto =
       resolvedOk($handle in log.started and $handle notin log.terminated))
 
-proc fakeBridge(volume: StoreVolume; host: WasmHost): BrowserBridge =
-  BrowserBridge(
-    volume: volume,
-    persistenceGranted: true,
-    persistenceAnswered: true,
-    ownerId: "tab-under-test",
-    nowMs: proc(): int64 = t0,
+proc fakeTabBridge(): BrowserTabBridge =
+  ## This suite's subject is the wasm registry, not the tab: every operation
+  ## here is the blandest one that satisfies `{.requiresInit.}`. The record is
+  ## separate from `BrowserBridge` because the tab facades moved to
+  ## `platform/browser_facades.nim`, which the container deployment shares.
+  BrowserTabBridge(
     writeClipboardText: proc(text: string): auto = resolvedOk(),
     writeClipboardHtml: proc(html, plainText: string): auto = resolvedOk(),
     offerDownload: proc(suggestedName: string; content: seq[byte];
@@ -126,7 +125,16 @@ proc fakeBridge(volume: StoreVolume; host: WasmHost): BrowserBridge =
     windowState: proc(): auto =
       resolvedOk(WindowState(maximized: false, minimized: false,
                              fullscreen: false, focused: true)),
-    onWindowStateChanged: proc(handler: proc(state: WindowState)) = discard,
+    onWindowStateChanged: proc(handler: proc(state: WindowState)) = discard)
+
+proc fakeBridge(volume: StoreVolume; host: WasmHost): BrowserBridge =
+  BrowserBridge(
+    volume: volume,
+    persistenceGranted: true,
+    persistenceAnswered: true,
+    ownerId: "tab-under-test",
+    nowMs: proc(): int64 = t0,
+    tab: fakeTabBridge(),
     shareLinkOrigin: "",
     wasm: host)
 

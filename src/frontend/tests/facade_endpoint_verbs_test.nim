@@ -63,10 +63,11 @@ import ../viewmodel/platform/settings
 import ../viewmodel/platform/download
 import ../viewmodel/platform/shell
 import ../viewmodel/platform/platform
+import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 864
+const ExpectedAssertions = 934
 var counted = 0
 var failedChecks = 0
 
@@ -1102,6 +1103,160 @@ suite "the client and the server agree, verb by verb":
     # Every recorded outcome went over the transport; nothing was answered by
     # the client without a frame.
     ck transportCalls == sweep.len
+
+# ---------------------------------------------------------------------------
+# 9. §6.6 — the sixteen the TAB answers, against the profile this server serves
+# ---------------------------------------------------------------------------
+#
+# Suite 8 above builds the client with the bridge-less constructor, which is
+# what `ct host` shipped at `7739d096f`: every field over the wire, including
+# the clipboard and the window. The server is right to refuse those and right
+# to withdraw their capabilities — and the RESULT is a browser tab whose
+# platform has no clipboard. §6.6 is the client-side half of the fix, and this
+# is the one place both halves exist in the same process, so it is where the
+# union can be asserted against the profile the server really computes rather
+# than against a stand-in for it.
+
+var tabbedTransportCalls = 0
+var tabbedOps: seq[string] = @[]
+var tabbedUrls: seq[string] = @[]
+
+let tabbedTransport: RemoteTransport = proc(request: RemoteRequest
+                                           ): PlatformFuture[RemoteResponse] =
+  inc tabbedTransportCalls
+  inc nextCallId
+  let text = encodeCall(CallFrame(
+    id: nextCallId, verb: request.verb, args: request.args))
+  let reply = decodeReply(endpoint.handleFrame(text))
+  newCompletedFuture(
+    if reply.ok: remoteOk(reply.payload)
+    else: remoteErr(reply.errorKind, reply.errorMessage))
+
+# A tab that answers everything, so that a refusal below is the FACADE's and
+# not this fixture's.
+let tabbedBridge = BrowserTabBridge(
+  writeClipboardText: proc(text: string): auto =
+    tabbedOps.add "clipboard.writeText"
+    resolvedOk(),
+  writeClipboardHtml: proc(html, plainText: string): auto =
+    tabbedOps.add "clipboard.writeHtml"
+    resolvedOk(),
+  offerDownload: proc(suggestedName: string; content: seq[byte];
+                      mimeType: string): auto =
+    tabbedOps.add "download.offer"
+    resolvedOk(),
+  pickFiles: proc(options: OpenDialogOptions): auto =
+    tabbedOps.add "download.openFileDialog"
+    resolvedOk(@["imported.nr"]),
+  pickDirectory: proc(options: OpenDialogOptions): auto =
+    tabbedOps.add "download.pickDirectory"
+    resolvedOk("imported"),
+  suggestSaveName: proc(options: SaveDialogOptions): auto =
+    tabbedOps.add "download.saveFileDialog"
+    resolvedOk(options.suggestedName),
+  openExternalUrl: proc(url: string): auto =
+    tabbedOps.add "shell.openExternalUrl"
+    tabbedUrls.add url
+    resolvedOk(),
+  setFullscreen: proc(fullscreen: bool): auto =
+    tabbedOps.add "shell.setFullscreen"
+    resolvedOk(),
+  windowState: proc(): auto =
+    tabbedOps.add "shell.windowState"
+    resolvedOk(WindowState(maximized: false, minimized: false,
+                           fullscreen: false, focused: true)),
+  onWindowStateChanged: proc(handler: proc(state: WindowState)) = discard)
+
+let tabbed = newContainerPlatform(tabbedTransport, tabbedBridge,
+                                  endpoint.welcomeFrame())
+
+suite "§6.6 — the deployment is a tab AND a container":
+
+  test "the platform's profile is the union, not the served set":
+    ck tabbed.profile.capabilities ==
+      servedProfile().capabilities + browserTabCapabilities()
+    ck servedProfile().capabilities < tabbed.profile.capabilities
+    # The seven the server withdraws and the tab restores, named: a set
+    # comparison passes when both sides are wrong in the same way.
+    for capability in [capClipboardWrite, capDownloadFile, capOpenFileDialog,
+                       capSaveFileDialog, capDirectoryPicker,
+                       capOpenExternalUrl, capWindowFullscreen]:
+      ck capability notin servedProfile().capabilities
+      ck tabbed.can(capability)
+    # And the SAME endpoint, through the bridge-less constructor, still has
+    # none of them. This is the defect §6.6 was opened on, side by side with
+    # its fix, in one process.
+    ck not client.can(capClipboardWrite)
+    ck not client.can(capOpenExternalUrl)
+    # Neither side supplies these, so the union must not claim them either.
+    for capability in [capClipboardRead, capRevealInFileManager,
+                       capWindowControls, capMultiWindow, capSecretStore,
+                       capShareLink, capFilesystemWatch]:
+      ck not tabbed.can(capability)
+    # The server's half is untouched by the composition.
+    ck tabbed.can(capFilesystemRead)
+    ck tabbed.can(capVcsRemote)
+
+  test "the composed profile still explains every absence and no presence":
+    ck undeclaredDegradations(tabbed.profile).len == 0
+    ck staleDegradations(tabbed.profile).len == 0
+    ck degradedBehaviour(tabbed.profile, capClipboardWrite) == ""
+    ck degradedBehaviour(tabbed.profile, capClipboardRead).len > 20
+    for capability in tabbed.profile.missing:
+      ck degradedBehaviour(tabbed.profile, capability).len > 20
+      ck not degradedBehaviour(tabbed.profile, capability).contains(
+        "no degradation declared")
+
+  test "none of the sixteen reaches the dispatcher":
+    ## Asserted on the CALL COUNT rather than on the outcomes: a tab verb that
+    ## was sent and refused satisfies "the outcome was not ok" and is exactly
+    ## what this is about.
+    let before = tabbedTransportCalls
+    discard awaitSync(tabbed.clipboard.writeText("copied"))
+    discard awaitSync(tabbed.clipboard.readText())
+    discard awaitSync(tabbed.clipboard.writeHtml("<b>b</b>", "b"))
+    discard awaitSync(tabbed.download.offerFile("a.tar", @[byte 1], "application/x-tar"))
+    discard awaitSync(tabbed.download.offerText("a.txt", "t", "text/plain"))
+    discard awaitSync(tabbed.download.openFileDialog(OpenDialogOptions()))
+    discard awaitSync(tabbed.download.saveFileDialog(
+      SaveDialogOptions(suggestedName: "a.txt")))
+    discard awaitSync(tabbed.download.pickDirectory(OpenDialogOptions()))
+    discard awaitSync(tabbed.shell.openExternalUrl("https://example.test/"))
+    discard awaitSync(tabbed.shell.revealInFileManager("/w/a.nr"))
+    discard awaitSync(tabbed.shell.windowState())
+    discard awaitSync(tabbed.shell.minimizeWindow())
+    discard awaitSync(tabbed.shell.toggleMaximizeWindow())
+    discard awaitSync(tabbed.shell.closeWindow())
+    discard awaitSync(tabbed.shell.setFullscreen(true))
+    discard awaitSync(tabbed.shell.openSessionWindow("s1"))
+    ck tabbedTransportCalls == before
+    # And the tab WAS reached, so the count above is not zero for want of
+    # anything happening.
+    ck tabbedOps.len == 10
+
+  test "the wire-owned verbs still reach it":
+    let before = tabbedTransportCalls
+    let dir = workspace & "/tabbed"
+    ck awaitSync(tabbed.fs.createDir(dir)).ok
+    ck awaitSync(tabbed.fs.writeText(dir & "/a.txt", "tab\n")).ok
+    ck awaitSync(tabbed.fs.readText(dir & "/a.txt")).value == "tab\n"
+    ck tabbedTransportCalls == before + 3
+
+  test "the external-URL allow-list guards the container's bridge too":
+    ## The guard lives in `platform/browser_facades.buildBrowserShell`, which
+    ## is the same builder the web instantiation uses. A container deployment
+    ## wires a THIRD bridge, and the one before it —
+    ## `test_platform_web.nim`'s fake — accepted `javascript:` through a check
+    ## that existed only in `host/web_browser.nim`.
+    let before = tabbedUrls.len
+    for hostile in ["javascript:alert(1)", "data:text/html,<script>x()</script>",
+                    "file:///etc/passwd"]:
+      let outcome = awaitSync(tabbed.shell.openExternalUrl(hostile))
+      ck not outcome.ok
+      ck outcome.error.kind == pkInvalidArgument
+    ck tabbedUrls.len == before
+    ck awaitSync(tabbed.shell.openExternalUrl("https://ok.test/")).ok
+    ck tabbedUrls.len == before + 1
 
 # ---------------------------------------------------------------------------
 # Teardown and the tally

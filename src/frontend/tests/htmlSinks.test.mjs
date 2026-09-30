@@ -920,21 +920,28 @@ assertEqual(shippedMatching(/proc allowedExternalUrlScheme\*/),
 assertEqual(shippedMatchesAcross(/if not allowedExternalUrlScheme\(url\):/g),
   'src/frontend/viewmodel/host/desktop_electron.nim:if not allowedExternalUrlScheme(url): | '
   + 'src/frontend/viewmodel/host/web_browser.nim:if not allowedExternalUrlScheme(url): | '
-  + 'src/frontend/viewmodel/platform/web_platform.nim:if not allowedExternalUrlScheme(url):',
+  + 'src/frontend/viewmodel/platform/browser_facades.nim:if not allowedExternalUrlScheme(url):',
   'and all THREE constructions that can reach an opener call it');
-// Three and not two, and the third is the one that matters: `web_platform`'s
+// Three and not two, and the third is the one that matters: the tab facade's
 // bridge is PLUGGABLE, so a guard living only in `host/web_browser.nim` is a
 // guard one bridge implementation happens to have.  The fake bridge in
 // `test_platform_web.nim` proved it by accepting `javascript:` straight
 // through the real one.
+// The third site MOVED, from `platform/web_platform.nim` to
+// `platform/browser_facades.nim`, when the clipboard / download / shell
+// builders were lifted so the CONTAINER deployment could share them
+// (UI-Bundle-And-Endpoints.md §6.6).  That is the whole reason the guard had
+// to travel with the builder: a container wires a third bridge of its own,
+// and a check left behind in `web_platform` would have covered neither it nor
+// the facade that hands the URL on.
 // The population itself: every place the field is given a body.  Three of the
 // five hand the request somewhere else; the two that act on it are above.
 assertEqual(shippedMatching(/openExternalUrl\*?\s*[:=]\s*proc/),
   'src/frontend/viewmodel/host/container_platform.nim,'
   + 'src/frontend/viewmodel/host/desktop_electron.nim,'
   + 'src/frontend/viewmodel/host/web_browser.nim,'
-  + 'src/frontend/viewmodel/platform/shell.nim,'
-  + 'src/frontend/viewmodel/platform/web_platform.nim',
+  + 'src/frontend/viewmodel/platform/browser_facades.nim,'
+  + 'src/frontend/viewmodel/platform/shell.nim',
   'and the set of files that implement the field has not grown');
 assertEqual(shippedMatchesAcross(/window\.open\([^)]*\)/g),
   "src/frontend/viewmodel/host/web_browser.nim:window.open(u, '_blank', 'noopener,noreferrer')",
