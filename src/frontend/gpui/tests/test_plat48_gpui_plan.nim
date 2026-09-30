@@ -41,7 +41,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 173
+  ExpectedAssertions = 174
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -332,10 +332,16 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
 
   test "pin docks a pane to the footer; Unpin puts it back beside where it was":
     let pinned = windowPlan("pin:state")
-    var bottom: seq[string] = @[]
-    for s in pinned.nodesWith("data-ct-dock-slot"):
-      bottom.add s.attr("data-ct-dock-slot")
+    # In the FOOTER strip (the pin's edge), and in no other strip.
+    var bottom, elsewhere: seq[string] = @[]
+    for st in pinned.nodesWith("data-ct-dock-strip"):
+      for s in st.nodesWith("data-ct-dock-slot"):
+        if st.attr("data-ct-dock-strip") == $leBottom:
+          bottom.add s.attr("data-ct-dock-slot")
+        else:
+          elsewhere.add s.attr("data-ct-dock-slot")
     ck $paneState in bottom
+    ck elsewhere.len == 0
     for p in pinned.nodesWith("data-ct-pin"):
       ck p.attr("data-ct-pin") != $paneState
     let back = windowPlan("pin:state,label:state,unpin")
