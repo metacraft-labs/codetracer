@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""PLAT-47 (part A) — the mutation harness for the terminal and GPUI
+"""PLAT-47 (parts A and B) — the mutation harness for the terminal and GPUI
 front-ends at desktop parity: the shared default generated from the desktop's
 Debug layout, one editor theme, the FILES and calltrace panes, tab strips
 shaped by colour and weight, the closed focus outline, the Dark-only
-auto-detection and the centred jump.
+auto-detection and the centred jump (part A); the VCS pane, the divider drag,
+the drop indication, GPUI's editor colours, border, weight and call-trace
+paging, the Monaco tokenizers, and test state isolation (part B).
 
     python3 src/frontend/tui/tests/run-plat47-parity-mutations.py
     python3 ... --needle-scan
@@ -36,10 +38,22 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | a jump centres the execution line | V1 |
   | TESTS is captioned as the desktop's | N1 |
   | the execution band is Monaco's: the whole code column, not the gutter | X1, X2 |
-  | the call trace pages: the section around the rows shown is loaded | P1, P2, P3, P4 |
-  | Python is tokenised as the desktop's Monaco tokenizer, character by character | Y1, Y2, Y3 |
+  | the terminal's call trace pages: the section around the rows shown is loaded | P1, P2, P3, P4 |
+  | every language is tokenised by the desktop's Monaco tokenizer, character by character | Y1 (spans cut short), M1 (a state never popped), M2 (negated classes), M3 (a language mapped to another tokenizer), M4 (the generated definitions edited) |
+  | a window opening inside a string starts in the state the file leaves | M5 (the contexts dropped), M6 (the VM's contexts misaligned) |
+  | a test run never touches the user's state | S1 |
+  | the VCS pane: branch and changed files, the desktop's rows, in both front-ends | Q1 (untracked lines unread), Q2 (a staged state not preferred), Q3 (GPUI's rows lose their state), Q4 (the terminal's rows lose their state), Q5 (the terminal never reads the repository) |
+  | the drop indication: exactly the region the drop would take | O1 (the model's split side), O2 (the terminal's half), O3 (the terminal's overlay rectangle), O4 (isonim-tui's overlay rows), O5 (GPUI's half), O6 (GPUI's Esc), O7 (GPUI's edge bands) |
+  | GPUI's divider drag, live and committed | R1 (the pointer's fraction), R2 (no live preview), R3 (the divider not hit-tested) |
+  | GPUI's editor from the one editor theme (B1) | H1 (every class plain), H2 (the band under the gutter), H3 (the window's entry state ignored), H4 (the active line number) |
+  | GPUI's 1px border (B2) | K6, with K4/K5 |
+  | GPUI's call trace pages (B3) | P5 (never a second section), P6 (always the head), P7 (the title's count) |
   | the light editor colours are the desktop's MEASURED light ones | W1 |
   | the desktop's first run installs the Debug-mode default | E1 |
+  | the VCS pane re-reads its repository on the desktop's interval and redraws when it moved | U1 (the pane's value blind to the working tree), U2 (GPUI's re-read reads nothing) |
+  | a pane docked in GPUI stays on screen: its strip, its reveal, its dismissal | D1 (no strips), D2 (a click reveals nothing), D3 (a press outside keeps it) |
+  | GPUI's editor rows are whole lines: the window holds the rows its pane shows | D4 (the rows counted from the window's height again) |
+  | the desktop's editor opens every lexed file in its Monaco language | E2 (the recording language's name only), E3 (TOML read as `ini`) |
 
 E1 IS GRADED BY THE REAL ELECTRON APP: `scripts/plat45-capture-electron.sh`
 compiles this checkout's desktop JavaScript (the mutated `index/config.nim`
@@ -47,6 +61,14 @@ included) into a prefix and runs
 `src/tests/gui/tests/layout/plat45-desktop-remembers-own.spec.ts`, filtered to
 its first-run case. It needs Xvfb (started when no display is set) and the
 built frontend `just build-once` leaves.
+
+WHAT NO ARM GRADES, AND WHAT DOES INSTEAD: the GPUI window's own drawing in
+`gpui/main.nim` — the strips and the revealed pane placed where the geometry
+says, the VCS tick armed at `VCSRefreshIntervalMs` — needs a compositor, which
+a harness arm cannot start per mutation. Those are read off a real window by
+`just plat47-gpui-window` into the committed `plat47-gpui-window.json`, which
+`test_plat47_gpui_window.nim` asserts (the `vcs-refresh`, `dock-*` and `base`
+frames); the arms above grade every decision the drawing reads (D1–D4, U2).
 
 W1 is a TWO-FILE arm: the light theme's block and the generated tokens are
 edited together, to the value the pre-measurement version COMPOSED, so the
@@ -65,7 +87,14 @@ unfiltered and must name every killer as [OK].
 
 THE BINARY IS PART OF THE SUBJECT: an arm graded by a real-PTY suite rebuilds
 `build/bin/codetracer-tui` with the defect (`just build-tui`), and again from
-the restored tree afterwards.
+the restored tree afterwards. O4's subject is in the SIBLING `isonim-tui`
+(`$ISONIM_TUI_SRC`, else `../isonim-tui/src`) — the binary links it.
+
+S1 IS GRADED WITHOUT THE HARNESS'S OWN ISOLATION: its suite runs with
+`XDG_STATE_HOME` and `CODETRACER_TUI_LAYOUT_DIR` unset and `HOME` pointed at
+a throwaway directory, so the forced import is the only thing isolating it —
+and a mutated import that isolates nothing writes into the throwaway home,
+never the developer's.
 
 RESTORATION is from an in-memory snapshot, and every touched file's SHA-256
 is compared with the pre-run baseline after each arm (§32). The full run
@@ -114,6 +143,28 @@ CHROME = "src/frontend/gpui/chrome.nim"
 CAPS = "src/frontend/tui/app/theme/capabilities.nim"
 SOURCEVM = "src/frontend/viewmodel/viewmodels/source_vm.nim"
 CELLS = "src/frontend/tui/app/layout/cells.nim"
+# part B
+LEXICAL = "src/frontend/tui/app/syntax/lexical.nim"
+MONARCH = "src/frontend/tui/app/syntax/monarch.nim"
+JSREGEX = "src/frontend/tui/app/syntax/js_regex.nim"
+MONARCH_JSON = "src/frontend/tui/app/syntax/monarch_languages.json"
+ISOLATION = "src/frontend/test_support/state_isolation.nim"
+VCSPARSE = "src/frontend/viewmodel/platform/vcs.nim"
+VCSVM = "src/frontend/viewmodel/viewmodels/vcs_vm.nim"
+VCSPANE = "src/frontend/tui/app/views/vcs_pane.nim"
+VCSSOURCE = "src/frontend/tui/host/vcs_source.nim"
+INTERACTION = "src/frontend/headless_app/layout_interaction.nim"
+BINDING = "src/frontend/tui/app/layout/binding.nim"
+FRAMEOVERLAY = "src/frontend/tui/app/views/frame_overlay.nim"
+ISONIM_TUI_OVERLAY = str(Path(os.environ.get(
+    "ISONIM_TUI_SRC", str(ROOT.parent / "isonim-tui" / "src"))) /
+    "isonim_tui" / "overlay.nim")
+WINGEOM = "src/frontend/gpui/window_geometry.nim"
+WINGEST = "src/frontend/gpui/window_gestures.nim"
+LEAVES = "src/frontend/gpui/app/leaves.nim"
+GPUIHOST = "src/frontend/gpui/host/gpui_host.nim"
+GPUIMAIN = "src/frontend/gpui/main.nim"
+DIFFDOC = "src/frontend/viewmodel/viewmodels/diff_document.nim"
 
 # --- suites and gates ---------------------------------------------------------
 VMJS = "src/frontend/viewmodel/tests/unit/test_shared_default_layout.nim"
@@ -124,15 +175,33 @@ PTY45 = "src/frontend/tui/tests/real_terminal/test_real_plat45_layout.nim"
 GPUIP = "src/frontend/gpui/tests/test_plat47_gpui_parity.nim"
 RESOLUTION = "src/frontend/tui/app/tests/test_capability_resolution.nim"
 SRCWIN = "src/frontend/viewmodel/tests/unit/test_source_vm_window.nim"
+# part B
+LEXERS = "src/frontend/tui/tests/test_plat47_monaco_lexers.nim"
+ISOLATE = "src/frontend/tui/tests/real_terminal/test_state_isolation.nim"
+VCSUNIT = "src/frontend/viewmodel/tests/unit/test_vcs_working_tree.nim"
+VCSPTY = "src/frontend/tui/tests/real_terminal/test_plat47_vcs_pane.nim"
+INTERACT = "src/frontend/viewmodel/tests/unit/test_layout_interaction.nim"
+DROPPTY = "src/frontend/tui/tests/real_terminal/test_plat47_drop_overlay.nim"
+GESTURES = "src/frontend/gpui/tests/test_plat47_window_gestures.nim"
+GEDITOR = "src/frontend/gpui/tests/test_plat47_gpui_editor.nim"
+GCALLS = "src/frontend/gpui/tests/test_plat47_gpui_calltrace.nim"
+GVCSR = "src/frontend/gpui/tests/test_plat47_gpui_vcs_refresh.nim"
+MONARCH_GATE = "ci/test/monarch-languages-fresh.sh"
 LAYOUT_GATE = "ci/test/default-layout-fresh.sh"
 TOKENS_GATE = "ci/test/design-tokens-fresh.sh"
 DESKTOP_GATE = "scripts/plat45-capture-electron.sh"
 
 SUBJECTS = [DESK, FRONT, GENERATED, TOKENS, EMITTER, ROLES, EDTHEME, GUTTER,
             SESSION, NATIVE, SHELL, CTVIEW, PANEVIEWS, TABSTRIP, CHROME, CAPS,
-            SOURCEVM, CELLS, SRCPANE, RUNTIME, LEXER, WHITE, DESKCONFIG]
+            SOURCEVM, CELLS, SRCPANE, RUNTIME, LEXER, WHITE, DESKCONFIG,
+            LEXICAL, MONARCH, JSREGEX, MONARCH_JSON, ISOLATION, VCSPARSE,
+            VCSVM, VCSPANE, VCSSOURCE, INTERACTION, BINDING, FRAMEOVERLAY,
+            ISONIM_TUI_OVERLAY, WINGEOM, WINGEST, LEAVES, GPUIHOST, GPUIMAIN,
+            DIFFDOC]
 SUITES = [VMJS, THEME, CALLS, PTY, PTY45, GPUIP, RESOLUTION, SRCWIN,
-          LAYOUT_GATE, TOKENS_GATE, DESKTOP_GATE]
+          LAYOUT_GATE, TOKENS_GATE, DESKTOP_GATE,
+          LEXERS, ISOLATE, VCSUNIT, VCSPTY, INTERACT, DROPPTY, GESTURES,
+          GEDITOR, GCALLS, MONARCH_GATE, GVCSR]
 TOUCHED = SUBJECTS + SUITES
 
 # How each suite is run: (backend, lane whose `--path`s it needs).
@@ -150,12 +219,28 @@ SUITE_KIND = {
     # The real desktop, filtered to the first-run case (a regex without
     # spaces: `just` word-splits the arguments it forwards to Playwright).
     DESKTOP_GATE: ("electron", "first.run.opens.the.shared.default"),
+    LEXERS: ("c", "tui"),
+    ISOLATE: ("c", "tui-real-terminal"),
+    VCSUNIT: ("c", "vm-unit"),
+    VCSPTY: ("c", "tui-real-terminal"),
+    INTERACT: ("c", "vm-unit"),
+    DROPPTY: ("c", "tui-real-terminal"),
+    GESTURES: ("c", "gpui-shell"),
+    GEDITOR: ("c", "gpui-shell"),
+    GCALLS: ("c", "gpui-shell"),
+    GVCSR: ("c", "gpui-shell"),
+    MONARCH_GATE: ("gate", "is not what scripts/monarch-languages.mjs generates"),
 }
-BINARY_SUITES = {PTY, PTY45}   # graded against a REBUILT codetracer-tui
+BINARY_SUITES = {PTY, PTY45, ISOLATE, VCSPTY, DROPPTY}
+  # graded against a REBUILT codetracer-tui
+GPUI_BINARY_SUITES = {GPUIP}
+  # read the plan of a REBUILT codetracer-gpui (`just build-gpui`)
+UNISOLATED_SUITES = {ISOLATE}
+  # run WITHOUT the harness's state variables, HOME a throwaway (see S1)
 
 CONTROL_HASHES = HERE / "plat47-parity-mutation-control.sha256"
 SUITE_TIMEOUT = int(os.environ.get("CT_P47_SUITE_TIMEOUT", "2400"))
-SHIM = ROOT.parent / "isonim-gpui/rust/target/debug"
+SHIM = Path(os.environ.get("ISONIM_GPUI_SHIM_DIR", str(ROOT.parent / "isonim-gpui/rust/target/debug")))
 RESULT_LINE = re.compile(r"^\s*(?:\x1b\[[0-9;]*m)*\[(OK|FAILED)\]\s*"
                          r"(?:\x1b\[[0-9;]*m)*\s*(.*?)\s*$")
 
@@ -185,6 +270,50 @@ C_CHARS = "every character of calc has the desktop's colour, in both themes"
 C_MEASURED = ("the generated editor colours are the desktop's MEASURED ones, "
               "in both themes")
 
+# part B
+C_LEX_TYPES = "every character has the desktop's token type"
+C_LEX_LANGS = ("the capture covers one sample per language, each tokenised "
+               "in its Monaco language")
+C_DOCWINDOW = ("a calc window that starts inside the module docstring is "
+               "coloured as the desktop colours it")
+C_CONTEXTS = ("each held line keeps the context it was fetched with, through "
+              "scrolls both ways")
+C_ISOLATED = "this process was isolated before any suite code ran"
+C_VCS_READS = "the reader handles every kind of line git emits"
+C_VCS_PTY = "the VCS pane lists the desktop's rows for a real repository"
+C_GVCS = ("deliverable 4: the VCS pane over a real repository equals the "
+          "desktop's VCS panel")
+C_INDICATION = ("every hovered drop maps to the region it would occupy, with "
+                "no measurement")
+C_DROP_PTY = ("each drop kind tints exactly its region, glyphs kept; release "
+              "commits, Esc cancels")
+C_G_SPLIT = "a split: the half of the target pane on the drop's side"
+C_G_ESC = ("Esc cancels: nothing is indicated and the committed layout is the "
+           "start")
+C_G_HIT = ("the hit-test: a tab, the strip past the tabs, the four bands, the "
+           "centre, the margins")
+C_G_DIVIDER = ("a divider dragged 80 px moves its pane's edge 80 px, live and "
+               "committed")
+C_G_B1 = "B1: the editor's colours are the desktop's Monaco colours, class by class"
+C_G_DOC = "a window opening inside the docstring colours it as a string"
+C_G_PAGES = ("scrolled to the end the last call is listed; back at the top, "
+             "the first")
+C_G_TITLE = "B3: the call trace's title counts the whole trace"
+G_MONARCH = "gate:" + MONARCH_GATE
+C_VCS_REFRESH = ("a periodic re-read moves the pane's value exactly when the "
+                 "repository moved")
+C_G_VCS_REFRESH = ("a re-read picks up another program's changes and reports "
+                   "them once")
+C_G_DOCKED = "the docked pane leaves the tree and gets a label in the left strip"
+C_G_REVEAL = ("a click on the label reveals the pane over the tree; a second "
+              "click hides it")
+C_G_DISMISS = ("Esc, or a press outside the revealed pane, hides it; the layout "
+               "never moved")
+C_G_ROWS = ("the editor's fetch window is the rows its pane shows at the row "
+            "pitch")
+C_EDITOR_LANG = ("the desktop's editor opens every sample in the language the "
+                 "terminal lexes it as")
+
 CASE_SUITE = {
     C_DERIVE: VMJS, C_TOKENS: THEME, C_ROLES: THEME, C_COLOURS: PTY,
     C_SESSION: CALLS, C_LATER: CALLS, C_FALLBACK: CALLS, C_STRIP: PTY,
@@ -192,6 +321,17 @@ CASE_SUITE = {
     C_FOLLOW: SRCWIN, C_SIZES: PTY45,
     G_LAYOUT: LAYOUT_GATE, G_TOKENS: TOKENS_GATE, G_DESKTOP: DESKTOP_GATE,
     C_PAGES: CALLS, C_CHARS: THEME, C_MEASURED: THEME,
+    # part B
+    C_LEX_TYPES: LEXERS, C_LEX_LANGS: LEXERS, C_DOCWINDOW: THEME,
+    C_CONTEXTS: SRCWIN, C_ISOLATED: ISOLATE, C_VCS_READS: VCSUNIT,
+    C_VCS_PTY: VCSPTY, C_GVCS: GPUIP,
+    C_INDICATION: INTERACT, C_DROP_PTY: DROPPTY, C_G_SPLIT: GESTURES,
+    C_G_ESC: GESTURES, C_G_HIT: GESTURES, C_G_DIVIDER: GESTURES,
+    C_G_B1: GPUIP, C_G_DOC: GEDITOR, C_G_PAGES: GCALLS, C_G_TITLE: GPUIP,
+    G_MONARCH: MONARCH_GATE,
+    C_VCS_REFRESH: VCSUNIT, C_G_VCS_REFRESH: GVCSR, C_G_DOCKED: GESTURES,
+    C_G_REVEAL: GESTURES, C_G_DISMISS: GESTURES, C_G_ROWS: GESTURES,
+    C_EDITOR_LANG: LEXERS,
 }
 NAMED_CASES = list(CASE_SUITE)
 
@@ -346,10 +486,10 @@ ARMS = [
         C_RING,
         "no divider row under a pane: the ring cannot close at the bottom"),
     Arm("K4", CHROME,
-        "     chromeOf(if focused: crFocusOutline else: crWindowBackground)),",
-        "     chromeOf(if focused: crWindowBackground else: crWindowBackground)),",
+        "     chromeOf(if focused: crFocusOutline else: crWindowBackground))]",
+        "     chromeOf(if focused: crWindowBackground else: crWindowBackground))]",
         C_GCHROME,
-        "GPUI's focused region framed in the window background: no outline"),
+        "GPUI's focused region bordered in the window background: no outline"),
     Arm("K5", CHROME,
         '    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold")]',
         '    @[("color", chromeOf(crTabActiveForeground))]',
@@ -410,26 +550,182 @@ ARMS += [
         "    if idx >= 0 and geometry.projection.regions[idx].pane == paneEditor and\n",
         C_PAGES,
         "the wheel over the call trace's body scrolls nothing"),
-    # --- Python, tokenised as the desktop's Monaco tokenizer -------------------
+    # --- every language, tokenised as the desktop's Monaco tokenizer ----------
     Arm("Y1", LEXER,
-        "        emit(3, tcString)\n        push psDocDouble\n",
-        "        emit(3, tcString)\n",
+        "                       endCell: cellOffsetAtByte(line, min(stop, line.len)),\n",
+        "                       endCell: cellOffsetAtByte(line, t.start + 1),\n",
         C_CHARS,
-        "a docstring is a string only on its first line (the generic "
-        "scanner's defect)"),
-    Arm("Y2", LEXER,
-        "      elif c in {'[', ']'}:                              # @brackets: delimiter.bracket\n"
-        "        emit(1, tcBracket)\n",
-        "      elif c in {'[', ']'}:                              # @brackets: delimiter.bracket\n"
-        "        emit(1, tcPunctuation)\n",
-        C_CHARS,
-        "square brackets painted as the other delimiters, where the desktop's "
-        "dark theme lightens them"),
-    Arm("Y3", LEXER,
-        '    "in", "is", "lambda", "match", "nonlocal", "not", "or", "pass", "print",\n',
-        '    "in", "is", "lambda", "match", "nonlocal", "not", "or", "pass",\n',
-        C_CHARS,
-        "`print` no longer a Monaco keyword: calc's output lines read otherwise"),
+        "a token's span ends after its first character: the rest of every "
+        "token is drawn in the default colour"),
+    Arm("M1", MONARCH,
+        "          stack.setLen(stack.len - 1)\n        of \"@popall\":",
+        "          discard\n        of \"@popall\":",
+        C_LEX_TYPES,
+        "the tokenizer never pops a state: a string or a comment never ends"),
+    Arm("M2", JSREGEX,
+        "    hit xor n.negated\n",
+        "    hit\n",
+        C_LEX_TYPES,
+        "a negated character class matches what it excludes"),
+    Arm("M3", LEXICAL,
+        '  (".ts", lxTypeScript),',
+        '  (".ts", lxJavaScript),',
+        C_LEX_LANGS,
+        "TypeScript lexed by the JavaScript tokenizer, where the desktop uses "
+        "Monaco's typescript definition"),
+    Arm("M4", MONARCH_JSON,
+        '"pass","print","raise"',
+        '"pass","raise"',
+        G_MONARCH,
+        "the generated Monarch definitions edited by hand (Python's `print` "
+        "no longer a keyword)"),
+    Arm("M5", LEXICAL,
+        "    if i >= firstLine:\n      result.add context\n",
+        "    if i >= firstLine:\n      result.add initialContext(lexer)\n",
+        C_DOCWINDOW,
+        "every window line starts in the tokenizer's initial state: a window "
+        "opening inside a docstring colours it as code"),
+    Arm("M6", SOURCEVM,
+        "    vm.heldLineContexts.val = @[]\n    vm.heldFirstLine.val = 1\n",
+        "    vm.heldFirstLine.val = 1\n",
+        C_CONTEXTS,
+        "a discarded window keeps its line contexts: the next window's lines "
+        "are coloured from another window's states"),
+    # --- tests never touch the user's state -----------------------------------
+    Arm("S1", ISOLATION,
+        "  isolate()\n  addExitProc(cleanup)\n",
+        "  addExitProc(cleanup)\n",
+        C_ISOLATED,
+        "the forced import isolates nothing: a suite run outside the lane "
+        "runner writes into the user's own state directory"),
+    # --- the VCS pane ------------------------------------------------------------
+    Arm("Q1", VCSPARSE,
+        '    elif line.startsWith("? "):\n',
+        '    elif line.startsWith("?? "):\n',
+        C_VCS_READS,
+        "untracked files are never read out of git's status"),
+    Arm("Q2", VCSVM,
+        "  let staged = letter(change.indexStatus)\n"
+        "  if staged.len > 0: staged else: letter(change.workingTreeStatus)\n",
+        "  let staged = letter(change.indexStatus)\n"
+        "  let unstaged = letter(change.workingTreeStatus)\n"
+        "  if unstaged.len > 0: unstaged else: staged\n",
+        C_VCS_READS,
+        "an added file edited after staging shows as modified, not added"),
+    Arm("Q3", PANEVIEWS,
+        'label: f.status & " " & f.path)',
+        'label: f.path)',
+        C_GVCS,
+        "GPUI's VCS rows lose their state letters"),
+    Arm("Q4", VCSPANE,
+        "           StyledSpan(text: f.status, style: statusStyle(f.status)),",
+        "           StyledSpan(text: \" \", style: statusStyle(f.status)),",
+        C_VCS_PTY,
+        "the terminal's VCS rows lose their state letters"),
+    Arm("Q5", VCSSOURCE,
+        "  s.vm.refreshFromFacade(s.facade, s.directory)\n",
+        "  discard s.directory\n",
+        C_VCS_PTY,
+        "the terminal never reads the repository: the pane stays empty"),
+    # --- the drop indication ----------------------------------------------------
+    Arm("O1", INTERACTION,
+        "      of saRow: (if t.kind == dtSplitBefore: leLeft else: leRight)\n",
+        "      of saRow: (if t.kind == dtSplitBefore: leRight else: leLeft)\n",
+        C_INDICATION,
+        "the model names the wrong half: a split right indicates the left"),
+    Arm("O2", BINDING,
+        "    (tint: halfOf(geom.dropAreaOfPath(ind.path), ind.side), caret: CellArea())\n",
+        "    (tint: geom.dropAreaOfPath(ind.path), caret: CellArea())\n",
+        C_DROP_PTY,
+        "the terminal tints the whole pane for a split, not the half it takes"),
+    Arm("O3", FRAMEOVERLAY,
+        "  OverlaySpec(top: o.row, left: o.col, width: o.width, height: o.height,\n",
+        "  OverlaySpec(top: o.row, left: o.col, width: o.width + 1, height: o.height,\n",
+        C_DROP_PTY,
+        "the terminal's overlay rectangle one cell wider than the region"),
+    Arm("O4", ISONIM_TUI_OVERLAY,
+        "  let bottom = min(buf.rowsCount, spec.top + max(0, spec.height))\n",
+        "  let bottom = min(buf.rowsCount, spec.top + max(0, spec.height) div 2)\n",
+        C_DROP_PTY,
+        "isonim-tui's overlay re-colours only the upper half of its rectangle"),
+    Arm("O5", WINGEOM,
+        "    (tint: halfOf(g.dropAreaOf(ind.path), ind.side), caret: PxRect())\n",
+        "    (tint: g.dropAreaOf(ind.path), caret: PxRect())\n",
+        C_G_SPLIT,
+        "GPUI tints the whole pane for a split"),
+    Arm("O6", WINGEST,
+        "  g.interaction = cancel(g.interaction)\n  g = g.idleKeepingReveal()\n",
+        "  discard\n",
+        C_G_ESC,
+        "Esc leaves GPUI's drag in flight, its drop still indicated"),
+    Arm("O7", WINGEOM,
+        "    best = dl\n    zone = dzLeftEdge\n",
+        "    best = dl\n    zone = dzRightEdge\n",
+        C_G_HIT,
+        "GPUI's left edge band hit-tests as the right one"),
+    # --- GPUI's divider drag ----------------------------------------------------
+    Arm("R1", WINGEOM,
+        "  let content = axisPos - d.start - d.index * ChromeGapPx\n",
+        "  let content = axisPos - d.start - d.index * ChromeGapPx + ChromeGapPx\n",
+        C_G_DIVIDER,
+        "the pointer's fraction measured a gap off: the divider lands 8 px "
+        "from where it was dropped"),
+    Arm("R2", WINGEST,
+        "  if g.kind != gkResize:\n    return layout\n",
+        "  if true:\n    return layout\n",
+        C_G_DIVIDER,
+        "no live preview: the window shows the old split until the release"),
+    Arm("R3", WINGEST,
+        "  let d = geom.dividerAt(x, y)\n",
+        "  let d = -1\n",
+        C_G_DIVIDER,
+        "a press on a divider is not hit-tested as one: nothing resizes"),
+    # --- GPUI's editor (B1) -----------------------------------------------------
+    Arm("H1", LEAVES,
+        "  DesignTokenHex[tokenClassToken(cls)][dmDark]\n",
+        "  DesignTokenHex[tokenClassToken(tcPlain)][dmDark]\n",
+        C_G_B1,
+        "every GPUI code run painted the default colour"),
+    Arm("H2", LEAVES,
+        "    r.setStyle(column, \"background\", ExecutionRowBand)\n",
+        "    r.setStyle(el, \"background\", ExecutionRowBand)\n",
+        C_G_B1,
+        "GPUI's band under the whole row, gutter included (the old `.on` band)"),
+    Arm("H3", LEAVES,
+        "  var context = if surface.entryContext.len > 0: surface.entryContext\n"
+        "                else: initialContext(lexer)\n",
+        "  var context = initialContext(lexer)\n",
+        C_G_DOC,
+        "GPUI ignores the window's entry state: a window inside a docstring "
+        "is coloured as code"),
+    Arm("H4", LEAVES,
+        "             if row.pointer == eptExecution: EditorActiveLineNumberColour\n"
+        "             else: EditorLineNumberColour)\n",
+        "             EditorLineNumberColour)\n",
+        C_G_B1,
+        "GPUI's execution line number painted as a resting one"),
+    # --- GPUI's border (B2) -----------------------------------------------------
+    Arm("K6", CHROME,
+        '  @[("border-width", $FocusOutlinePx & "px"),\n',
+        '  @[("border-width", "0px"),\n',
+        C_GCHROME,
+        "GPUI's panes carry no border: the outline is not drawn at all"),
+    # --- GPUI's call trace (B3) --------------------------------------------------
+    Arm("P5", GPUIHOST,
+        "  if result.top >= first and last <= first + held:\n    return\n",
+        "  if true:\n    return\n",
+        C_G_PAGES,
+        "GPUI never reads a section past the first"),
+    Arm("P6", GPUIHOST,
+        "    session.requestAndLoadCalltrace(startIndex = int64(start),\n",
+        "    session.requestAndLoadCalltrace(startIndex = 0'i64,\n",
+        C_G_PAGES,
+        "GPUI's page request always reads the trace's head"),
+    Arm("P7", GPUIMAIN,
+        '    (if total > 0: " " & $total & " call(s)" else: "")\n',
+        '    ""\n',
+        C_G_TITLE,
+        "GPUI's call-trace title does not count the trace"),
     # --- the light theme, measured ----------------------------------------------
     Arm("W1", WHITE,
         '    "executionLine": "#c5ca88",\n',
@@ -440,6 +736,56 @@ ARMS += [
         also=((TOKENS,
                '    dtEditorThemeExecutionLine: ["#404040", "#c5ca88"],\n',
                '    dtEditorThemeExecutionLine: ["#404040", "#c5ca87"],\n'),)),
+    # --- the VCS pane refreshes --------------------------------------------------
+    Arm("U1", VCSVM,
+        '  for f in vm.workingTreeFiles.val:\n    result.add "\\x1e" & f.status & " " & f.path\n',
+        '  discard\n',
+        C_VCS_REFRESH,
+        "the pane's value is blind to the working tree: a file another "
+        "program writes never redraws the pane"),
+    Arm("U2", GPUIHOST,
+        "  vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)\n"
+        "  vm.workingStateKey() != before\n",
+        "  discard directory\n"
+        "  vm.workingStateKey() != before\n",
+        C_G_VCS_REFRESH,
+        "GPUI's tick re-reads nothing: the pane keeps the state it opened with"),
+    # --- a pane docked in GPUI stays on screen ------------------------------------
+    Arm("D1", WINGEOM,
+        "    has[edge] = layout.dockedAt(edge).len > 0\n",
+        "    has[edge] = false\n",
+        C_G_DOCKED,
+        "GPUI draws no strips: a pane docked by a drop disappears"),
+    Arm("D2", WINGEST,
+        "        let shown = beginReveal(layout, was.source)\n",
+        "        let shown = none(Interaction)\n",
+        C_G_REVEAL,
+        "a click on a docked pane's label reveals nothing"),
+    Arm("D3", WINGEST,
+        "    g.reveal = noInteraction()\n    dismissed = true\n",
+        "    dismissed = true\n",
+        C_G_DISMISS,
+        "a press outside the revealed pane leaves it over the tree"),
+    # --- GPUI's editor rows are whole lines ---------------------------------------
+    Arm("D4", WINGEOM,
+        "  max(1, (h - 2 * ChromePaddingPx - EditorLinesAbovePx) div GpuiEditorRowPx)\n",
+        "  max(1, g.viewport.h div 20)\n",
+        C_G_ROWS,
+        "the fetch window counted from the WINDOW's height at a nominal 20 px "
+        "again: more rows than the pane shows, each squeezed"),
+    # --- the desktop's editor languages -------------------------------------------
+    Arm("E2", DIFFDOC,
+        "  if extension.len > 0 and extension notin EditorPlainExtensions:\n",
+        "  if false:\n",
+        C_EDITOR_LANG,
+        "the desktop's editor takes the recording language's name only: "
+        "`.ts`, `.java`, `.sh`, `.json` and `.yaml` open uncoloured"),
+    Arm("E3", DIFFDOC,
+        "  if extension.len > 0 and extension notin EditorPlainExtensions:\n",
+        "  if extension.len > 0:\n",
+        C_EDITOR_LANG,
+        "the desktop's editor colours TOML with the `ini` approximation the "
+        "terminal and GPUI do not draw"),
     # --- the desktop's first run ---------------------------------------------------
     Arm("E1", DESKCONFIG,
         "    else:\n      modeDefaultLayout(bundled, mode)\n",
@@ -596,6 +942,27 @@ def run_one(path: str, case: str | None = None) -> RunResult:
                     ["node", out_js, *filt], cwd=ROOT, capture_output=True,
                     text=True, timeout=SUITE_TIMEOUT, encoding="utf-8",
                     errors="replace", env=suite_env())
+        elif path in UNISOLATED_SUITES:
+            # Compiled in the ordinary environment, RUN with the harness's own
+            # isolation removed and HOME a throwaway: the forced import is then
+            # the only thing isolating the suite (S1), and a regression writes
+            # into the throwaway home, never the developer's.
+            comp = subprocess.run(
+                ["nim", "c", *flags, "-o:" + binary, path],
+                cwd=ROOT, capture_output=True, text=True,
+                timeout=SUITE_TIMEOUT, encoding="utf-8", errors="replace",
+                env=suite_env())
+            if comp.returncode != 0:
+                proc = comp
+            else:
+                env = suite_env()
+                env.pop("XDG_STATE_HOME", None)
+                env.pop("CODETRACER_TUI_LAYOUT_DIR", None)
+                env["HOME"] = tempfile.mkdtemp(prefix="plat47-s1-home-")
+                proc = subprocess.run(
+                    [binary, *filt], cwd=ROOT, capture_output=True, text=True,
+                    timeout=SUITE_TIMEOUT, encoding="utf-8", errors="replace",
+                    env=env)
         else:
             proc = subprocess.run(
                 ["nim", "c", "-r", *flags, "-o:" + binary, path, *filt],
@@ -627,6 +994,25 @@ def build_tui() -> bool:
         for line in (p.stdout + p.stderr).splitlines()[-15:]:
             print("      " + line)
     return p.returncode == 0
+
+
+def build_gpui() -> bool:
+    p = subprocess.run(["just", "build-gpui"], cwd=ROOT, capture_output=True,
+                       text=True, timeout=SUITE_TIMEOUT)
+    if p.returncode != 0:
+        print("      ---- just build-gpui failed; last 15 lines ----")
+        for line in (p.stdout + p.stderr).splitlines()[-15:]:
+            print("      " + line)
+    return p.returncode == 0
+
+
+def build_for(suite: str) -> bool:
+    """Rebuild the binary a suite grades, if it grades one."""
+    if suite in BINARY_SUITES:
+        return build_tui()
+    if suite in GPUI_BINARY_SUITES:
+        return build_gpui()
+    return True
 
 
 _ACTIVE: list | None = None
@@ -786,6 +1172,10 @@ def main() -> int:
        not build_tui():
         print("CONTROL: the unmutated terminal binary does not build")
         return 1
+    if any(CASE_SUITE[a.killer] in GPUI_BINARY_SUITES for a in wanted) and \
+       not build_gpui():
+        print("CONTROL: the unmutated GPUI binary does not build")
+        return 1
     for path in SUITES:
         if not any(CASE_SUITE[a.killer] == path for a in wanted):
             continue
@@ -817,7 +1207,7 @@ def main() -> int:
         for path, find, replace in arm.edits():
             write_source(path, read_source(path).replace(find, replace))
         try:
-            if suite in BINARY_SUITES and not build_tui():
+            if not build_for(suite):
                 res = RunResult(rc=1, ran=False)
                 print("      the mutated binary did not build")
             else:
@@ -832,8 +1222,8 @@ def main() -> int:
                     print(f"{arm.id:<4} HARNESS-FAILURE      {p} did not "
                           "restore to its control bytes")
                     return 2
-            if suite in BINARY_SUITES and not build_tui():
-                print("the restored tree's terminal binary does not build")
+            if not build_for(suite):
+                print("the restored tree's binary does not build")
                 return 2
         if res.hung:
             verdict, note = "HUNG", f"no result in {SUITE_TIMEOUT}s"

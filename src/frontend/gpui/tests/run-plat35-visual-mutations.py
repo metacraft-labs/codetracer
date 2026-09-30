@@ -134,8 +134,8 @@ ARMS = [
     # THE PANE MUTATION — the milestone's own gate, half one
     # ------------------------------------------------------------------
     Arm("M1", LEAVES,
-        "  for row in surface.rows:\n    r.appendChild(parent, renderEditorRow(r, row, widest))",
-        "  for row in surface.rows:\n    discard row",
+        "  for i, row in surface.rows:\n    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest))",
+        "  for i, row in surface.rows:\n    discard row",
         SUITE,
         "stepped-editor / editor-row-count",
         CTL[LEAVES][0], CTL[LEAVES][1],

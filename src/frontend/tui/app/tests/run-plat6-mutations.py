@@ -610,10 +610,13 @@ MUTATIONS = [
     # --- drawing the transient state ---------------------------------------
     Mutation(
         "M15", BIND,
-        "    if not ghost.isEmptyArea:\n"
-        "      result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
-        "    if false:\n"
-        "      result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
+        # RE-POINTED BY PLAT-47: the ghost with no pointer (a keyboard drag,
+        # what C_DRAW's case makes) is now the `else` of the pointer-label
+        # branch, one level deeper.
+        "      if not ghost.isEmptyArea:\n"
+        "        result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
+        "      if false:\n"
+        "        result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
         C_DRAW,
         "the drag ghost is never drawn",
     ),
@@ -627,10 +630,15 @@ MUTATIONS = [
     # --- a cancelled gesture cannot have changed the layout ----------------
     Mutation(
         "M17", BIND,
+        # RE-POINTED BY PLAT-47: the cancel also forgets the drag's pointer.
         "  b.interaction = b.interaction.cancel()\n"
+        "  b.pointerRow = -1\n"
+        "  b.pointerCol = -1\n"
         "  action(lasCancelled, \"gesture cancelled\")",
         "  discard b.dropDrag()\n"
         "  b.interaction = b.interaction.cancel()\n"
+        "  b.pointerRow = -1\n"
+        "  b.pointerCol = -1\n"
         "  action(lasCancelled, \"gesture cancelled\")",
         C_CANCEL,
         "cancelling commits the drag first",
@@ -825,18 +833,21 @@ MUTATIONS = [
     ),
     Mutation(
         "M35", BIND,
+        # RE-POINTED BY PLAT-47: the drag ghost is now a LABEL over the frame,
+        # not a glyph, so the only glyph kind the mouse drag still reaches
+        # through `paintDecorations` is the dock strip's. Collapsing the table
+        # onto the ghost's old glyph repaints the strip, which the drag case
+        # ALSO reads cell by cell — so it can no longer be spared, and the
+        # arm is graded by the absolute probe dying with it rather than alone.
         "    let glyph = glyphFor(d.kind)",
-        "    let glyph = DockStripGlyph",
+        "    let glyph = DragGhostGlyph",
         M_MODEL,
         "M31's defect, graded against the MOUSE suite: every decoration is "
-        "painted with one glyph. Both tiers paint the same wrong screen, so "
-        "the cell-for-cell comparison is DECLARED SPARED and stays green; only "
-        "the absolute probe — each decoration's rectangle from "
-        "`decorationsFor`, required to carry THAT KIND's glyph on the real "
-        "terminal — dies. The drag reaches two kinds with two glyphs, which is "
-        "what makes that possible at all",
+        "painted with one glyph. The absolute probe — each decoration's "
+        "rectangle from `decorationsFor`, required to carry THAT KIND's glyph "
+        "(or, for the ghost, its label) on the real terminal — dies; since "
+        "PLAT-47 the drag case, which counts the strip's glyphs, dies with it",
         suite=MOUSE_SUITE,
-        spares=(M_DRAG,),
     ),
     Mutation(
         "M36", BIND,

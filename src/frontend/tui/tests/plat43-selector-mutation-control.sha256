@@ -4,7 +4,7 @@
 # scan (§39a).
 2164775e14f44724462cbe1296a58a2ad789c8de6e2d7c04e19abeefbc658b57  src/frontend/viewmodel/keymap/keymap_selection.nim
 9efc381d608fb63e0a9dc3c643152e4d26d3e0df1f5fc3a008bce88c2509071c  src/frontend/viewmodel/host/keymap_preference.nim
-c01a5b6adce76121690e7d175cc9f2fabe7c93ab60264a2b2ea147f1f9f4d6ef  src/frontend/tui/app/runtime.nim
+75308186d701bbe79f912570b79f46f96d3ef0a7f171cc69d470d3b51cedaa50  src/frontend/tui/app/runtime.nim
 760745a3d79947f12a9b8566d50358efe6310d80d5d456db37e3b6a62a5b64b6  src/frontend/tui/app/edit_binding.nim
 5cbca57776c1b717f11d8de0bfd7a71208afdeb17f58fa293d8bab1867cf6b33  src/frontend/viewmodel/editing_core.nim
 1b418941eb4c7eefca5f3d4533242fcbf777f49646a0aba2afa99fa8481b1448  src/frontend/tui/tests/test_plat43_keymap_selector.nim

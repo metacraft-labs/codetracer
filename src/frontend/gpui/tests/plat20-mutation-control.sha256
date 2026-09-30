@@ -18,7 +18,7 @@
 # along with the bytes.
 d813dc3d32c43ab969ef7cea9fa03cf02886472b9269eb24594cf19c3d1e4253  src/frontend/gpui/app/dock_projection.nim
 813951b3174d787cdd228c8b369f15a52fb51e090c8abb09111096ce2a198236  src/frontend/gpui/app/shell.nim
-7192de86b54786bc019d3daf79c47eea6397c6ae75fadfee68d2fcd91c2a8a43  src/frontend/gpui/app/leaves.nim
+25d6e9a3a1acf0b50ce20c06548a1ceb0ae1905387da785c8d5bfcafde8b501c  src/frontend/gpui/app/leaves.nim
 17936a2eb728f155e928a4c892a979829cfa9a7dec7dc6cbff3299d03076496e  src/frontend/headless_app/extent_distribution.nim
 b2228c55e583ffd48ebf6edd410123cb4d00bb3567cbe6020192b402a5a2f1bb  src/ct/ui_selection.nim
 28f08e816325d93094b2a8b90e3ded35894fea639ee31e9c42a0406e1fb5ca8d  src/ct/launch/ui_dispatch.nim

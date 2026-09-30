@@ -629,10 +629,10 @@ MUTATIONS = [
     ),
     Mutation(
         "B4", BIND,
-        "    if info.get.kind == lnRow:\n"
-        "      float(col - bounds.col + 1) / float(bounds.width)",
-        "    if info.get.kind != lnRow:\n"
-        "      float(col - bounds.col + 1) / float(bounds.width)",
+        "  some(if info.get.kind == lnRow:\n"
+        "         float(col - bounds.col + 1) / float(bounds.width)",
+        "  some(if info.get.kind != lnRow:\n"
+        "         float(col - bounds.col + 1) / float(bounds.width)",
         T_MOUSE_DIV,
         "the release is measured along the wrong axis",
     ),
