@@ -526,26 +526,42 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-shell-re
 	_ct_detect_summary "codetracer-shell-recorders"
 fi
 
-# --- noir (metacraft-labs fork, provides nargo) ---
-# Prepends to PATH so `ct` finds nargo via the same PATH search as end users.
-# Also exports NARGO_PATH: the column-aware ViewModel test
-# (test_column_noir_vm.nim) deliberately requires an explicit NARGO_PATH
-# opt-in (no PATH/sibling fallback) so a legacy non-column-aware nargo can't
-# silently surface column=None.  We point it at the built sibling — which on
-# the workspace branches carries the M-noir column-aware tracer — so the test
-# RUNS (instead of skipping) in CI and local runs.
-if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/noir" ]; then
-	if [ -x "$_CT_WORKSPACE_ROOT/noir/target/release/nargo" ]; then
-		export PATH="$_CT_WORKSPACE_ROOT/noir/target/release:$PATH"
-		export NARGO_PATH="$_CT_WORKSPACE_ROOT/noir/target/release/nargo"
-		_ct_detect_summary "noir (nargo release build)"
-	elif [ -x "$_CT_WORKSPACE_ROOT/noir/target/debug/nargo" ]; then
-		export PATH="$_CT_WORKSPACE_ROOT/noir/target/debug:$PATH"
-		export NARGO_PATH="$_CT_WORKSPACE_ROOT/noir/target/debug/nargo"
-		_ct_detect_summary "noir (nargo debug build)"
+# --- noir: which nargo the dev shell uses ---
+# The dev shell provides `nargo` from the flake's pinned, column-aware noir, and
+# that is the one every test and `ct` invocation should get. A `noir` sibling's
+# `target/{release,debug}/nargo` is whatever that checkout was on when someone
+# last built it; putting it first by default let a months-old build record
+# containers the current reader refuses, on one machine only
+# (ci/test/detect-siblings-nargo-test.sh pins this).
+#
+# So the sibling build is used only when asked for by name with
+# CODETRACER_NARGO_FROM_SIBLING=1, and an explicitly set NARGO_PATH is kept.
+# NARGO_PATH is exported either way because the column-aware ViewModel test
+# (test_column_noir_vm.nim) deliberately requires it rather than searching
+# PATH.
+if [ -n "${NARGO_PATH:-}" ]; then
+	_ct_detect_summary "nargo (NARGO_PATH=$NARGO_PATH, explicitly configured)"
+elif [ "${CODETRACER_NARGO_FROM_SIBLING:-}" = "1" ]; then
+	_ct_noir_sibling_nargo=""
+	for _ct_noir_profile in release debug; do
+		if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/noir/target/$_ct_noir_profile/nargo" ]; then
+			_ct_noir_sibling_nargo="$_CT_WORKSPACE_ROOT/noir/target/$_ct_noir_profile/nargo"
+			break
+		fi
+	done
+	if [ -n "$_ct_noir_sibling_nargo" ]; then
+		PATH="$(dirname "$_ct_noir_sibling_nargo"):$PATH"
+		export PATH
+		export NARGO_PATH="$_ct_noir_sibling_nargo"
+		_ct_detect_summary "nargo (noir sibling build $NARGO_PATH, CODETRACER_NARGO_FROM_SIBLING=1)"
 	else
-		_ct_detect_summary "noir (repo present, nargo not built)"
+		echo "  WARNING: CODETRACER_NARGO_FROM_SIBLING=1 but no built nargo under $_CT_WORKSPACE_ROOT/noir/target/{release,debug}." >&2
 	fi
+	unset _ct_noir_sibling_nargo _ct_noir_profile
+elif command -v nargo >/dev/null 2>&1; then
+	NARGO_PATH="$(command -v nargo)"
+	export NARGO_PATH
+	_ct_detect_summary "nargo (dev shell)"
 fi
 
 # --- codetracer-nim (patched Nim providing the `nim --trace` column-aware tracer) ---
