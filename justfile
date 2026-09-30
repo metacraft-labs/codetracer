@@ -4923,6 +4923,28 @@ plat47-gpui-window:
 plat47-gpui-window-record:
   python3 ci/test/plat47_gpui_window.py record
 
+# PLAT-48: the top bar and the auto-hide panels in a REAL GPUI window — the
+# menu, the desktop's debugger marks, the omnibar, the footer and TOP strips,
+# pin / unpin — driven by a virtual pointer and wtype on a headless sway and
+# framed with grim (ci/test/plat48_gpui_window.py). Needs isonim-gpui's dev
+# shell tools and a windowed binary (`CODETRACER_WINDOW_BIN_PINS_SHIM=1`).
+plat48-gpui-window:
+  bash ci/test/plat48-gpui-window.sh
+
+# Measure the captured frames into `src/tests/visual/plat48-gpui-window.json`,
+# which `src/frontend/gpui/tests/test_plat48_gpui_window.nim` asserts.
+plat48-gpui-window-record:
+  python3 ci/test/plat48_gpui_window.py record
+
+# The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
+# isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
+# checkout's windowed front-end against it, record `calc` / `call_pages` when
+# absent, then for each of plat45 / plat47 / plat48 (default: all) capture on a
+# headless sway, measure the frames into the committed record, and run the
+# suite that asserts it. The `gpui-window-captures` CI job runs this.
+gpui-window-captures *which:
+  bash ci/test/gpui-window-captures.sh {{which}}
+
 # PLAT-46: the desktop's computed colour for every role the TUI also paints,
 # written to src/tests/visual/answers/plat46-token-parity.electron.json for
 # `tests/real_terminal/test_plat46_desktop_parity.nim`. Same Xvfb arrangement
@@ -4957,6 +4979,13 @@ plat46-capture-electron *args:
 # JavaScript in a prefix of its own (scripts/plat45-desktop-prefix.sh).
 plat47-capture-electron *args:
   bash scripts/plat47-capture-electron.sh {{args}}
+
+# PLAT-48: the desktop's menu drawn from the shared Menu ViewModel (the
+# verification gate: a ViewModel-only highlight change moves the DOM's), its
+# shortcuts, Step Over from the menu, and the footer's labels — written to
+# `src/tests/visual/answers/plat48-menu.electron.json`.
+plat48-capture-electron *args:
+  bash scripts/plat48-capture-electron.sh {{args}}
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:

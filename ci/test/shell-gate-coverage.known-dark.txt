@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 47
+# RECORDED-DARK-CEILING: 43
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -580,19 +580,25 @@ ci/test/plat38-keystroke.sh
 # **THESE ARE BLOCKED, NOT UNWIRED.** Every one has its `just` recipe
 # (`plat40-capture-window`, `plat41-capture-window`, `plat42-frame-budget`,
 # `plat42-frames-record`, `plat42-surfaces-record`, `plat42-surfaces-window`,
-# `plat44-edit-window`, `plat44-sequences-window`, `plat44-sequences-record`,
-# `plat45-arrangement-window`); what is missing is a runner that can execute
-# them.
+# `plat44-edit-window`, `plat44-sequences-window`, `plat44-sequences-record`);
+# what was missing is a runner that can execute them.
 #
-# `ci/test/plat45-arrangement-window.sh` (43 -> 44) frames the GPUI window's
-# FIRST screen on `calc` with no remembered layout, for the "same panes, same
-# places, three media" row: its reading
-# (`src/tests/visual/plat45-gpui-arrangement.json`, `just plat45-window-record`)
-# is asserted by `test_plat45_three_media.nim`. Blocked on the same two
-# capabilities — a built windowed shim and a compositor — and on nothing else;
+# **THE TWO CAPABILITIES NOW EXIST IN CI** (PLAT-48's review, 2026-09-30): the
+# `gpui-window-captures` job (`just gpui-window-captures`,
+# `ci/test/gpui-window-captures.sh`) builds isonim-gpui's windowed shim and
+# virtual pointer in isonim-gpui's own dev shell, builds the windowed
+# front-end against it, and runs captures on a headless sway on the
+# `[self-hosted, linux, x64]` label isonim-gpui's own headless-sway job is
+# green on. It re-takes and asserts PLAT-45's arrangement window, PLAT-47's
+# and PLAT-48's window records, whose lines were deleted when it was wired
+# (PLAT-45's `plat45-arrangement-window.sh`, PLAT-47's two scripts, PLAT-48's
+# two, and the capture library they share; 49 -> 43). The PLAT-40/41/42/44
+# captures below are NOT yet steps of that job — each needs its own record
+# step, fixtures and asserting suite
+# added to `gpui-window-captures.sh` — and are the open remainder of
 # codetracer-specs `issues/2026-09-26-window-capture-gates-recorded-blocked-
-# although-ci-can-run-them.md` argues this whole group is wireable on the
-# self-hosted GPU hosts, and it goes with them when they are wired.
+# although-ci-can-run-them.md`. Each goes, and the ceiling drops, in the
+# commit that adds it to that job.
 #
 # THE GATES THAT READ THESE CAPTURES ARE *NOT* DARK, which is the design the
 # PLAT-37 entry describes: `ci/test/editor-model-case-floor.sh` PLAT-40
@@ -603,15 +609,14 @@ ci/test/plat38-keystroke.sh
 # `just editor-model-case-floors` runs them in the `viewmodel-tests` job. What
 # is dark is the RE-TAKING of the measurements, not the checking of them.
 #
-# `ci/lib/gpui-window-capture.sh` is the capture library the PLAT-40 and
-# PLAT-41 window scripts source. It is not a gate; it is here because every
-# script that reaches it is dark, and it becomes reachable the day they do.
+# `ci/lib/gpui-window-capture.sh`, the capture library the PLAT-40, PLAT-41
+# and PLAT-45 window scripts source, became reachable with PLAT-45's and left
+# this list with it.
 #
 # WHAT WOULD MAKE THEM GREEN: a CI job that runs `just build-gpui` against a
 # built `isonim-gpui` shim, and then — once PLAT-37's `just plat37-capture`
 # has been measured on an `eph-linux-x64` runner — one step per recipe above.
 # Each line is deleted, and the ceiling drops, in the commit that wires it.
-ci/lib/gpui-window-capture.sh
 ci/test/plat40-panes-window.sh
 ci/test/plat41-panes-window.sh
 ci/test/plat42-frame-budget.sh
@@ -621,23 +626,12 @@ ci/test/plat42-surfaces-window.sh
 ci/test/plat44-edit-window.sh
 ci/test/plat44_sequences_window_record.py
 ci/test/plat44-sequences-window.sh
-ci/test/plat45-arrangement-window.sh
-# PLAT-47 part B (44 -> 47): `ci/test/plat47-gpui-window.sh` and its driver
-# `ci/test/plat47_gpui_window.py` re-take the GPUI window measurements —
-# a divider drag, the four drop indications, Esc, the VCS tab, the wheel
-# over the call trace — with a virtual pointer DEVICE and `wtype` on a
-# headless sway (`just plat47-gpui-window`, `just plat47-gpui-window-record`).
-# Blocked on the same two capabilities as the group above (a built windowed
-# shim and a compositor) plus isonim-gpui's `build/virtual-pointer`; the
-# committed record (`src/tests/visual/plat47-gpui-window.json`) is asserted
-# by `test_plat47_gpui_window.nim` in the `gpui-shell` lane, which is NOT
-# dark. `scripts/plat47-vcs-fixture.sh` builds the git repository with a
-# modified, an added and an untracked file that the VCS tests read; it is
-# run by Nim suites (`test_plat47_vcs_pane.nim`, `test_plat47_gpui_parity
-# .nim`), the Electron capture and the window driver, none of which this scan
-# follows.
-ci/test/plat47-gpui-window.sh
-ci/test/plat47_gpui_window.py
+# PLAT-47 part B: `scripts/plat47-vcs-fixture.sh` builds the git repository
+# with a modified, an added and an untracked file that the VCS tests read; it
+# is run by Nim suites (`test_plat47_vcs_pane.nim`, `test_plat47_gpui_parity
+# .nim`), the Electron capture and the window driver
+# (`ci/test/plat47_gpui_window.py`, a step of `gpui-window-captures` since
+# PLAT-48's review), none of which this scan follows.
 scripts/plat47-vcs-fixture.sh
 
 # ---------------------------------------------------------------------------

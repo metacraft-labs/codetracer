@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: a build step, not a check on one.
+# A build step, not a check on one — and REACHED FROM CI since PLAT-48's
+# review: the `gpui-window-captures` job runs `just tui-prereqs` for PLAT-45's
+# three-media suite, which opens the terminal as well as the GPUI window. It
+# therefore no longer declares itself outside CI's reach (the coverage guard
+# rejects a reachable file that says it is not a gate).
 #
 # It produces the grammar archive the TUI links; whether that archive is
 # present, complete and fresh IS a question worth gating, and it is gated —
@@ -9,7 +13,8 @@
 #
 # The honest second half, since `ci/test/shell-gate-coverage.sh` exists to make
 # exactly this kind of claim checkable: the `tui` and `tui-real-terminal` lanes
-# are not in any workflow yet either. They are in the same position as the
+# are not in any workflow yet (one terminal suite is, through
+# `gpui-window-captures`). They are in the same position as the
 # thirteen discovery lanes the justfile documents at length — declared, green,
 # and waiting on a pipeline — and CTUI-0's verification gate is that
 # `just tui-prereqs && just build-tui && just test-tui` is green from a clean
