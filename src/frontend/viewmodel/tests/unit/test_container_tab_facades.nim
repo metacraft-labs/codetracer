@@ -49,8 +49,12 @@ import std/[json, unittest]
 import ../../platform/platform
 import ../../platform/browser_facades
 import ../../host/container_platform
+# For the one cross-check below, which is the whole reason it is worth the
+# import: the tab's capability table and the web deployment's hand-written set
+# now describe the SAME facades, and nothing else makes them say so together.
+import ../../platform/web_platform
 
-const ExpectedAssertions = 142
+const ExpectedAssertions = 151
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -524,6 +528,27 @@ suite "the external-URL allow-list travels with the facade":
     ck rec.openedUrls == @["http://a.test/x", "https://a.test/x",
                            "mailto:a@b.test", "HTTPS://A.test/x"]
     ck rec.verbs.len == 0
+
+suite "the tab's table agrees with the WEB instantiation, not only with itself":
+  test "every capability the tab table evidences, the web deployment also claims":
+    # TWO INDEPENDENT STATEMENTS THAT HAPPEN TO AGREE, until this.
+    #
+    # `webInstantiationCapabilities` is written by hand and `browserTabVerbs`
+    # is a table; both say the browser can write the clipboard, and nothing
+    # made them say it together. The facades are now literally shared — the
+    # container and the web deployment call the same `buildBrowser*` — so a
+    # capability the tab table evidences and the web profile does not claim
+    # means one of the two is wrong about the same code.
+    #
+    # Subset rather than equality: the web deployment legitimately claims more
+    # than the tab table covers, because `capShareLink` is a capability with no
+    # facade verb at all (§6.6) and `capFilesystemRead` and friends come from
+    # the store rather than from the tab.
+    let tab = browserTabCapabilities()
+    ck tab.len > 0
+    ck tab <= webInstantiationCapabilities
+    for c in tab:
+      ck c in webInstantiationCapabilities
 
 suite "the tally":
   test "assertion count":
