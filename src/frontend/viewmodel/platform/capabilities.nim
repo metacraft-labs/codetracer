@@ -33,6 +33,24 @@ type
     ## §3.1a. `pkContainer` is post-MVP and deliberately present anyway: a
     ## capability whose signature only makes sense in-process is a design error
     ## to catch now, not after `ct host` is refactored.
+    ##
+    ## `ct host` IS STILL UNREFACTORED, AND THE COST OF THAT IS NOW MEASURED
+    ## RATHER THAN ANTICIPATED — 2026-09-30, scheduled as WD1b in
+    ## codetracer-specs Planned-Work/CodeTracer-Web-Deployments.milestones.org.
+    ##
+    ## `pkContainer` is constructed in exactly one place in the whole product,
+    ## and it is a unit test. What a running `ct host` reports instead is
+    ## `pkWeb`: its renderer's `electronAvailable()` probe fails, because the
+    ## served page sets `window.electron = undefined`, so it falls into the
+    ## branch written for the browsersync dev server and StoryBook and gets
+    ## `newPlatform(webProfile)` — a profile that ADVERTISES capabilities every
+    ## facade then refuses.
+    ##
+    ## That is this enum's own failure mode, reached from the outside: `can()`
+    ## answers yes and the call refuses. `ui/git_cli.nim:93` passes its
+    ## `capFilesystemRead` guard and `:95` refuses. A reader reaching for
+    ## `pkContainer` should know it is a declaration waiting for an
+    ## implementation, not a supported deployment.
     pkDesktop
     pkWeb
     pkContainer
