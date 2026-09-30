@@ -340,6 +340,24 @@ fn ct_print_events(ct: &Path) -> Dump {
 // Reader + handler, built the production way.
 // ---------------------------------------------------------------------------
 
+/// Serializes the tests that extract bundled sources.
+///
+/// The extraction root is keyed by the container path alone (see
+/// `build_handler`), and two tests here open the SAME reloaded recording. Each
+/// wipes that root and then reads from it for the rest of its body, so run
+/// concurrently one could wipe the tree the other is reading ("could not clear
+/// the bundled-sources root … No such file or directory" was the visible
+/// half). Every test that calls `build_handler` holds this for its whole body.
+static BUNDLED_SOURCES_EXTRACTION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn exclusive_bundled_sources() -> std::sync::MutexGuard<'static, ()> {
+    // A test that panicked while holding the lock has already failed; the next
+    // one wipes and re-extracts anyway, so a poisoned lock carries no state.
+    BUNDLED_SOURCES_EXTRACTION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn open_reader(ct: &Path) -> Arc<dyn TraceReader> {
     Arc::new(
         CTFSTraceReader::open(ct)
@@ -447,6 +465,22 @@ fn stop_after(handler: &mut Handler, step: StepId) -> JsonValue {
     step_forward(handler)
 }
 
+/// The stop a freshly launched session reports: the production run-to-entry
+/// path, which positions at the recording's first step and emits that stop
+/// WITHOUT advancing past it.
+///
+/// This is how a forward-only session can stand on step 0 at all. `stop_after`
+/// cannot — it lands one step after the step it positions at — and step 0 is a
+/// real stop: `start` emits the recording's entry step there
+/// (`trace-events.md`, "The entry step is part of `start`").
+fn entry_stop(handler: &mut Handler) -> JsonValue {
+    let (tx, rx) = mpsc::channel::<DapMessage>();
+    handler
+        .run_to_entry(make_request("ct/run-to-entry"), None, tx)
+        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: run_to_entry failed on a materialized trace: {e}"));
+    move_location(&rx)
+}
+
 /// One production `stepIn`, returning the stop it lands on.
 ///
 /// `stepIn` and not `next`, and the difference is the whole reason the walk
@@ -488,7 +522,8 @@ fn container_ordinal_at(reader: &Arc<dyn TraceReader>, loc: &JsonValue) -> Optio
 /// number of stops against what the container declares.
 fn walk_all_stops(handler: &mut Handler, reader: &Arc<dyn TraceReader>) -> Vec<JsonValue> {
     let mut stops = Vec::new();
-    let mut loc = stop_after(handler, StepId(0));
+    // From the launch stop, so the walk includes the entry step at step 0.
+    let mut loc = entry_stop(handler);
     stops.push(loc.clone());
     let bound = reader.step_count() + 8;
     let mut last = ticks_of(&loc);
@@ -627,6 +662,7 @@ fn probe_lines_per_version() -> Vec<BTreeSet<i64>> {
 /// wins.
 #[test]
 fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
+    let _extraction = exclusive_bundled_sources();
     let mut ck = Checker::new("gdh7_no_step_is_attributed_to_the_wrong_version_through_dap");
     let ct = container(&reloaded_dir());
     let dump = ct_print_events(&ct);
@@ -768,10 +804,18 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     // this asserts their ABSENCE over every step, so the gate does not
     // depend on anyone reading a log line.
     let mut unresolvable: Vec<String> = Vec::new();
+    let mut steps_examined = 0usize;
     for idx in 0..reader.step_count() {
+        // An index below the reader's own step count that it cannot answer is
+        // not a step to skip: it is a position the debugger can be asked for
+        // and cannot resolve, so it is filed with the other failures to look.
         let Some(step) = reader.step(StepId(idx as i64)) else {
+            unresolvable.push(format!(
+                "step {idx}: the reader has no step at an index below its own step count"
+            ));
             continue;
         };
+        steps_examined += 1;
         match reader.path(step.path_id) {
             None => unresolvable.push(format!(
                 "step {idx}: path id {} is not in the path table",
@@ -788,6 +832,11 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
             }
         }
     }
+    ck.eq(
+        steps_examined,
+        reader.step_count(),
+        "the registry check examined EVERY step index below the reader's step count",
+    );
     ck.ck(
         unresolvable.is_empty(),
         format!(
@@ -817,10 +866,20 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     let mut nonzero_generations = 0usize;
     let mut seen_versions: BTreeSet<i64> = BTreeSet::new();
     let mut stop_texts: Vec<(i64, i64, String)> = Vec::new();
+    let mut stops_examined = 0usize;
     for loc in &stops {
+        // Every stop is one the debugger reported, so the reader must be able
+        // to say which version it belongs to. One it cannot answer is a wrong
+        // generation by definition — there is nothing it could be right about.
         let Some(want_ordinal) = container_ordinal_at(&reader, loc) else {
+            wrong_generation.push(format!(
+                "step {} line {}: the debugger reported this stop but the reader has no step there",
+                ticks_of(loc),
+                line_of(loc)
+            ));
             continue;
         };
+        stops_examined += 1;
         let reported = generation_of(loc);
         if reported != 0 {
             nonzero_generations += 1;
@@ -850,6 +909,12 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
             }
         }
     }
+
+    ck.eq(
+        stops_examined,
+        stops.len(),
+        "the version of EVERY stop the walk reported was checked against the container",
+    );
 
     // Per the entry: assert at least one stop reports a NON-ZERO
     // `source_generation` BEFORE asserting any of them are correct. A run in
@@ -906,7 +971,7 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
         ),
     );
 
-    ck.finish(17);
+    ck.finish(19);
 }
 
 /// The CONTROL for the gate above: a legacy single-version recording, where
@@ -917,6 +982,7 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
 /// would pass the reloaded half.
 #[test]
 fn gdh7_control_single_version_recording_reports_generation_zero() {
+    let _extraction = exclusive_bundled_sources();
     let mut ck = Checker::new("gdh7_no_step_is_attributed_to_the_wrong_version_through_dap [CONTROL]");
     let ct = container(&control_dir());
     let reader = open_reader(&ct);
@@ -945,8 +1011,10 @@ fn gdh7_control_single_version_recording_reports_generation_zero() {
     let mut nonzero = Vec::new();
     let mut wrong_text = Vec::new();
     let mut probe_stops = 0usize;
+    let mut unreadable = Vec::new();
     for loc in &stops {
         if container_ordinal_at(&reader, loc).is_none() {
+            unreadable.push(format!("step {} line {}", ticks_of(loc), line_of(loc)));
             continue;
         }
         let reported = generation_of(loc);
@@ -972,9 +1040,25 @@ fn gdh7_control_single_version_recording_reports_generation_zero() {
             }
         }
     }
+    // The walk must reach EVERY probe step the container holds, not merely
+    // one: the target is read from the container, so a walk that silently
+    // stopped short, or skipped probe lines, cannot pass on a lucky subset.
+    let container_probe_steps = probe_steps(&reader, &probe_lines[..1]);
     ck.ck(
-        probe_stops > 0,
-        format!("the control walk reached {probe_stops} probe stop(s) — the text half is not vacuous"),
+        !container_probe_steps.is_empty() && probe_stops == container_probe_steps.len(),
+        format!(
+            "the control walk reached every probe step the container holds ({probe_stops} of {}) \
+             — the text half is not vacuous",
+            container_probe_steps.len()
+        ),
+    );
+    ck.ck(
+        unreadable.is_empty(),
+        format!(
+            "every stop the debugger reported is a step the reader can resolve ({} are not: {:?})",
+            unreadable.len(),
+            unreadable.iter().take(4).collect::<Vec<_>>()
+        ),
     );
     ck.ck(
         nonzero.is_empty(),
@@ -993,7 +1077,7 @@ fn gdh7_control_single_version_recording_reports_generation_zero() {
         ),
     );
 
-    ck.finish(5);
+    ck.finish(6);
 }
 
 // ===========================================================================
@@ -1013,6 +1097,7 @@ fn gdh7_control_single_version_recording_reports_generation_zero() {
 /// `gdh7-falsify-string-keyed-cache` arm is exactly that.
 #[test]
 fn gdh7_reverse_across_the_boundary_shows_v1() {
+    let _extraction = exclusive_bundled_sources();
     let mut ck = Checker::new("gdh7_reverse_across_the_boundary_shows_v1");
     let ct = container(&reloaded_dir());
     let dump = ct_print_events(&ct);
@@ -1201,14 +1286,16 @@ fn gdh7_reverse_across_the_boundary_shows_v1() {
     //
     // The control is a SEPARATE handler that has only ever moved forward, so
     // its bundled-source state cannot have been influenced by a backward read.
-    // It walks from step 0 with the production `stepIn` runner until it stands
-    // on the same step id. Failing to reach it is a CHECK-FAIL: comparing
-    // against nothing is how a gate passes for free.
+    // It starts at the launch stop (the entry step, step 0) and walks forward
+    // with the production `stepIn` runner until it stands on the same step id,
+    // so it can reach every step the backward run can land on — including the
+    // entry step itself. Failing to reach it is a CHECK-FAIL: comparing against
+    // nothing is how a gate passes for free.
     let back_ticks = ticks_of(&back_loc);
     let control_text = {
         let creader = open_reader(&ct);
         let mut chandler = build_handler(&ct, creader);
-        let mut loc = stop_after(&mut chandler, StepId(0));
+        let mut loc = entry_stop(&mut chandler);
         let mut guard = 0usize;
         while ticks_of(&loc) < back_ticks && guard < bound {
             loc = step_forward(&mut chandler);
