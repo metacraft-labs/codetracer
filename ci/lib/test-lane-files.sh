@@ -857,7 +857,16 @@ test_lane_files() {
 		echo src/frontend/tests/dap_session_routing_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
+		#
+		# `index_serves_deployment_cache_classes_test.nim` asks the running
+		# server for two files and compares the `Cache-Control` it sends with
+		# `web_deployment.headerFor(cacheClassFor(url))` — the same pair that
+		# generates the Pages `_headers` file. Reading the function back would
+		# have passed against the broken code, because the function was right
+		# and nothing under `src/frontend/index/` called it. It writes two probe
+		# files under `codetracerExeDir` and removes them.
 		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
+		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
 		;;
 
 	frontend-native-units)

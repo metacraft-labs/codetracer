@@ -1,14 +1,21 @@
 import
-  std / [ async, jsffi, macros, jsconsole, strformat ],
+  std / [ async, jsffi, macros, jsconsole, strformat, strutils ],
   electron_vars, base_handlers, config, idle_timeout, facade_endpoint,
   ../lib/[ jslib, electron_lib, misc_lib ],
   ../[ types ],
   ../../common/[ paths, ct_logging ]
 
+# `cacheClassFor` / `headerFor` — the Pages deployment's own, so `ct host` and
+# the CDN cannot disagree about what a path may be cached for.
+from ../viewmodel/platform/web_deployment import cacheClassFor, headerFor
+
+proc nodeRelative(fromPath, toPath: cstring): cstring {.importjs:
+  "require('path').relative(require('path').resolve(#), #)".}
+
 when defined(server):
   type
     ExpressLib* = ref object
-      `static`*: proc(path: cstring): JsObject
+      `static`*: proc(path: cstring, options: JsObject): JsObject
 
     ExpressServer* = ref object
       get*: proc(path: cstring, handler: proc(req: Jsobject, response: JsObject))
@@ -99,13 +106,60 @@ when defined(server):
         frontendSocketParameters: data.startOptions.frontendSocket.parameters
       }))
 
+    # THE CACHE CLASSES ARE THE DEPLOYMENT'S OWN, NOT SIMILAR ONES — WD1c.
+    #
+    # `express.static` defaults to `public, max-age=0`, so `ct host` served the
+    # whole bundle uncacheable while the Pages deployment served the same bytes
+    # `immutable, max-age=31536000`. Opening a second trace re-downloaded the
+    # entire UI — which is exactly what
+    # `test_the_bundle_is_cached_across_traces` is about.
+    #
+    # `cacheClassFor` and `headerFor` are `platform/web_deployment.nim`'s, the
+    # same two functions that generate the Pages `_headers` file. Not a copy:
+    # a wrong header is then wrong in ONE place rather than in the deployment
+    # nobody is looking at. That module declares `webRuntimeAssets()` and the
+    # digest rule too, so a bundled asset that starts carrying a digest moves
+    # to `ccStaticAsset` on both deployments on the same day.
+    #
+    # The path handed to `cacheClassFor` is the URL the client asked for — the
+    # mount prefix plus what `express.static` resolved under it — because the
+    # class follows from the URL and nothing else. Passing the filesystem path
+    # would classify `/nix/store/...-codetracer/ui.js` and answer for a path no
+    # browser ever names.
+    proc cached(mount: string; root: cstring): JsObject =
+      # The URL is the mount prefix plus the path BELOW THE ROOT, not the
+      # basename: `/public/dist/frontend_bundle.js` is one of the four bundled
+      # assets and `/public/frontend_bundle.js` is not, so a basename would
+      # move it out of `ccMutableAsset` into the entry document's class and
+      # serve a stale renderer for sixty seconds instead of four hours —
+      # different bug, same cause.
+      let prefix = mount
+      let rootPath = root
+      express.`static`(root, js{
+        setHeaders: proc(response: JsObject, filePath: cstring, stat: JsObject) =
+          # `path.relative` rather than a prefix strip: the root is what the
+          # caller wrote (trailing slash or not, absolute or relative to the
+          # process cwd) and `filePath` is what `send` resolved, so the two are
+          # not string-comparable and a strip that missed left the whole
+          # absolute path glued onto the mount — which classifies as the entry
+          # document and is wrong in the direction nobody notices.
+          var below = $nodeRelative(rootPath, filePath)
+          while below.len > 0 and below[0] == '/':
+            below = below[1 .. ^1]
+          var url = prefix
+          if not url.endsWith("/"): url.add "/"
+          url.add below
+          response.setHeader(cstring"Cache-Control",
+                             headerFor(cacheClassFor(url)).cstring)
+      })
+
     debugPrint codetracerExeDir & cstring"/frontend/styles/"
-    server.use(cstring"/golden-layout", express.`static`(codetracerInstallDir & cstring"/libs/golden-layout"))
-    server.use(cstring"/public/", express.`static`(codetracerExeDir & cstring"/public/"))
-    server.use(cstring"/styles/", express.`static`(codetracerExeDir & cstring"/frontend/styles/"))
-    server.use(cstring"/frontend/styles/", express.`static`(codetracerExeDir & cstring"/frontend/styles/"))
-    server.use(cstring"/node_modules", express.`static`(codetracerInstallDir & cstring"/node_modules"))
-    server.use(cstring"/ui.js", express.`static`(userInterfacePath))
+    server.use(cstring"/golden-layout", cached("/golden-layout", codetracerInstallDir & cstring"/libs/golden-layout"))
+    server.use(cstring"/public/", cached("/public/", codetracerExeDir & cstring"/public/"))
+    server.use(cstring"/styles/", cached("/styles/", codetracerExeDir & cstring"/frontend/styles/"))
+    server.use(cstring"/frontend/styles/", cached("/frontend/styles/", codetracerExeDir & cstring"/frontend/styles/"))
+    server.use(cstring"/node_modules", cached("/node_modules", codetracerInstallDir & cstring"/node_modules"))
+    server.use(cstring"/ui.js", cached("/ui.js", userInterfacePath))
     # BIND THE ADDRESS, AND REPORT THE ONE ACTUALLY BOUND.
     #
     # `server.listen(port, cb)` with no host argument binds 0.0.0.0. This line
