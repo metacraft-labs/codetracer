@@ -829,11 +829,23 @@ test-rust:
   cargo build --release --bin session-manager
   popd
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Flow tests that need ct-native-replay/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
   # and are run separately in cross-repo CI jobs.
-  cargo nextest run --release --test '*' \
-    -E 'not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  #
+  # The rr origin tests (`rr::` in origin_rr_dap_test) fail when rr or
+  # ct-native-replay is missing; they do not skip. A lane with no rr backend
+  # declares CODETRACER_RR_BACKEND_PRESENT=0 (ci/test/non-gui.sh does), and
+  # then they are excluded here, by name, and the exclusion is printed, rather
+  # than run and counted as passed. They run in cross-repo-tests.yml's
+  # rr-backend-tests job.
+  filter='not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "0" ]; then
+    filter="$filter and not (binary(origin_rr_dap_test) and test(/^rr::/))"
+    echo "NOT RUN in this lane (CODETRACER_RR_BACKEND_PRESENT=0): the rr origin tests"
+    echo "  origin_rr_dap_test rr::*   -- they need rr + ct-native-replay; they run in"
+    echo "  cross-repo-tests.yml rr-backend-tests (scripts/run-cross-repo-tests.sh origin-rr)"
+  fi
+  cargo nextest run --release --test '*' -E "$filter"
   popd
   pushd src/backend-manager
   cargo nextest run --release
