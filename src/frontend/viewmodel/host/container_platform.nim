@@ -75,6 +75,9 @@ type
     payload*: JsonNode
     errorKind*: PlatformErrorKind
     errorMessage*: string
+    detail*: string
+      ## §6.2's `detail`: the originating diagnostic, kept separate so a
+      ## container call is no less debuggable than the same call in-process.
 
   RemoteTransport* = proc(request: RemoteRequest
                          ): PlatformFuture[RemoteResponse]
@@ -83,8 +86,10 @@ type
 proc remoteOk*(payload: JsonNode): RemoteResponse =
   RemoteResponse(ok: true, payload: payload)
 
-proc remoteErr*(kind: PlatformErrorKind; message: string): RemoteResponse =
-  RemoteResponse(ok: false, errorKind: kind, errorMessage: message)
+proc remoteErr*(kind: PlatformErrorKind; message: string;
+                detail = ""): RemoteResponse =
+  RemoteResponse(ok: false, errorKind: kind, errorMessage: message,
+                 detail: detail)
 
 # ---------------------------------------------------------------------------
 # The one adapter every operation goes through
@@ -128,12 +133,12 @@ proc callRemote[T](transport: RemoteTransport; verb: string; args: JsonNode;
       let r = getSyncValue[RemoteResponse](response)
       result =
         if r.ok: newCompletedFuture(decoded(verb, r.payload, decode))
-        else: newCompletedFuture(failed[T](r.errorKind, r.errorMessage))
+        else: newCompletedFuture(failed[T](r.errorKind, r.errorMessage, r.detail))
     else:
       result = newPromise(proc(resolve: proc(v: PlatformOutcome[T])) =
         discard response.then(proc(r: RemoteResponse) =
           if r.ok: resolve(decoded(verb, r.payload, decode))
-          else: resolve(failed[T](r.errorKind, r.errorMessage))))
+          else: resolve(failed[T](r.errorKind, r.errorMessage, r.detail))))
   else:
     let promise = newFuture[PlatformOutcome[T]]("remote." & verb)
     # `addCallback` wants `proc() {.closure, gcsafe.}`, and the closure captures
@@ -150,7 +155,7 @@ proc callRemote[T](transport: RemoteTransport; verb: string; args: JsonNode;
         else:
           let r = response.read()
           if r.ok: promise.complete(decoded(verb, r.payload, decode))
-          else: promise.complete(failed[T](r.errorKind, r.errorMessage)))
+          else: promise.complete(failed[T](r.errorKind, r.errorMessage, r.detail)))
     result = promise
 
 proc decodeNothing(payload: JsonNode): Nothing = nothing

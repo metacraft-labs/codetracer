@@ -66,7 +66,7 @@ import ../viewmodel/platform/platform
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 862
+const ExpectedAssertions = 864
 var counted = 0
 var failedChecks = 0
 
@@ -430,10 +430,15 @@ suite "node errno becomes PlatformErrorKind once, at the boundary":
     let missing = answer("fs.readText", %*{"path": scratch & "/no-such-file"})
     ck not missing.ok
     ck missing.errorKind == pkNotFound
-    # The originating diagnostic survives into the message: the `reply` frame
-    # has no third field for it, and a bug report with only "read failed" in
-    # it is not one.
-    ck missing.errorMessage.contains("ENOENT")
+    # THE DIAGNOSTIC IS IN `detail`, AND THE MESSAGE IS NEUTRAL. §6.2 gained
+    # the field on 2026-09-30 for exactly this; before it, the errno text was
+    # appended to the message because the frame had nowhere else to put it,
+    # which made a container failure read differently from the same failure
+    # in-process. A bug report with only "read failed" in it is not one, so
+    # the text is not dropped either — it moved.
+    ck missing.detail.contains("ENOENT")
+    ck not missing.errorMessage.contains("ENOENT")
+    ck missing.errorMessage.contains("no-such-file")
 
     let notADirectory = answer("fs.listDir", %*{"path": scratch & "/hello.txt"})
     ck not notADirectory.ok

@@ -236,6 +236,7 @@ type
     payload*: JsonNode
     errorKind*: PlatformErrorKind
     errorMessage*: string
+    detail*: string
 
 proc replyOk(payload: JsonNode): VerbReply =
   VerbReply(ok: true, payload: payload)
@@ -246,24 +247,29 @@ proc replyNothing(): VerbReply =
   ## for a nil node anyway, and saying so here keeps the two spellings one.
   VerbReply(ok: true, payload: newJNull())
 
-proc replyErr(kind: PlatformErrorKind; message: string): VerbReply =
-  VerbReply(ok: false, errorKind: kind, errorMessage: message)
+proc replyErr(kind: PlatformErrorKind; message: string;
+              detail = ""): VerbReply =
+  VerbReply(ok: false, errorKind: kind, errorMessage: message, detail: detail)
 
 proc replyFromNode(action, subject: string; a: NodeAttempt): VerbReply =
   ## Every failed node call becomes a reply here and nowhere else.
   ##
-  ## The originating diagnostic is folded INTO `errorMessage`, because §6.2's
-  ## `reply` frame carries `errorKind` and `errorMessage` and has no third
-  ## field — `PlatformError.detail` exists on this side of the facade and does
-  ## not exist on the wire. Losing the errno text entirely would leave a bug
-  ## report with nothing in it, so it is appended rather than dropped.
+  ## The message is NEUTRAL and the diagnostic goes in `detail`, which is the
+  ## split `PlatformError` has always had: a message a user could be shown, and
+  ## the originating text a log needs. §6.2's `reply` frame carries `detail`
+  ## since 2026-09-30 for exactly this — an earlier version of this proc
+  ## appended the errno text to the message because the frame had nowhere else
+  ## to put it, which made every container failure read differently from the
+  ## same failure in-process.
+  ##
+  ## The node `code` is kept in `detail` even when a message is present.
+  ## `ENOENT` and `ERR_FS_EISDIR` are what someone greps for, and node does not
+  ## always put the code in the message text.
   let kind = errorKindForNodeCode(a.code)
-  var message = action & " failed for " & subject
-  if a.message.len > 0:
-    message.add ": " & a.message
-  elif a.code.len > 0:
-    message.add ": " & a.code
-  replyErr(kind, message)
+  var detail = a.message
+  if a.code.len > 0:
+    detail = if detail.len > 0: a.code & ": " & detail else: a.code
+  replyErr(kind, action & " failed for " & subject, detail)
 
 # ---------------------------------------------------------------------------
 # Arguments. A missing or wrongly-typed field RAISES, and `dispatch` turns the
@@ -1157,7 +1163,7 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
                payload: if reply.payload.isNil: newJNull() else: reply.payload)
   else:
     ReplyFrame(id: call.id, ok: false, errorKind: reply.errorKind,
-               errorMessage: reply.errorMessage)
+               errorMessage: reply.errorMessage, detail: reply.detail)
 
 proc handleFrame*(ep: FacadeEndpoint; text: string): string =
   ## Frame text in, frame text out; "" when the text is not a frame this

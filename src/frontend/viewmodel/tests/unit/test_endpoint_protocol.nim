@@ -24,7 +24,7 @@ import ../../platform/capabilities
 import ../../platform/endpoint_protocol
 import ../../platform/outcome
 
-const ExpectedAssertions = 93
+const ExpectedAssertions = 99
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -172,6 +172,35 @@ suite "call and reply":
     ck decodeReply(encodeReply(ReplyFrame(
       id: 1, ok: false, errorKind: pkNotFound,
       errorMessage: "because"))).errorMessage == "because"
+
+  test "a refusal carries its DETAIL separately from its message":
+    # §6.2 and §6.4. `PlatformError` has always split a message a user could be
+    # shown from the originating text a log needs; folding them together on the
+    # wire would make a container failure strictly less debuggable than the
+    # same failure in-process.
+    let got = decodeReply(encodeReply(ReplyFrame(
+      id: 3, ok: false, errorKind: pkNotFound,
+      errorMessage: "reading failed for /a/b.nim",
+      detail: "ENOENT: no such file or directory, open '/a/b.nim'")))
+    ck got.errorMessage == "reading failed for /a/b.nim"
+    ck got.detail == "ENOENT: no such file or directory, open '/a/b.nim'"
+    ck not got.errorMessage.contains("ENOENT")
+
+  test "an absent detail is empty, not a malformed frame":
+    # A server with nothing more to say than its message is ordinary, and a
+    # peer built before the field existed is the other case. Neither is a
+    # protocol error.
+    let got = decodeReply($(%*{"kind": "reply", "id": 1, "ok": false,
+                               "errorKind": "pkAccessDenied",
+                               "errorMessage": "m"}))
+    ck got.detail == ""
+    ck got.errorKind == pkAccessDenied
+
+  test "a SUCCESSFUL reply carries no detail at all":
+    # The field belongs to the failure branch. Writing it on a success would
+    # invite a caller to read a diagnostic out of an outcome that has none.
+    let text = encodeReply(ReplyFrame(id: 1, ok: true, payload: %"x"))
+    ck not text.contains("detail")
 
   test "a refusal with NO kind decodes as pkFailed, never as pkNone":
     let got = decodeReply($(%*{"kind": "reply", "id": 1, "ok": false}))

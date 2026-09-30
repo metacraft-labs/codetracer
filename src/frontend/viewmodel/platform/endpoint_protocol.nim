@@ -85,6 +85,16 @@ type
     payload*: JsonNode
     errorKind*: PlatformErrorKind
     errorMessage*: string
+    detail*: string
+      ## The ORIGINATING diagnostic — an errno's text, git's stderr — and a
+      ## field of its own rather than something folded into `errorMessage`.
+      ##
+      ## `PlatformError` has carried `detail` since the facade was written, and
+      ## the whole point of the pair is that `message` is neutral enough to show
+      ## a user while `detail` is what a log needs. Merging them on the wire
+      ## would discard in transit a distinction the type keeps in memory, and a
+      ## container call would then be strictly less debuggable than the same
+      ## call made in-process — which is the one thing a deployment must not be.
 
   EventFrame* = object
     handle*: string
@@ -306,7 +316,8 @@ proc encodeReply*(f: ReplyFrame): string =
   else:
     $(%*{"kind": FrameReply, "id": f.id, "ok": false,
          "errorKind": errorKindName(f.errorKind),
-         "errorMessage": f.errorMessage})
+         "errorMessage": f.errorMessage,
+         "detail": f.detail})
 
 proc decodeReply*(text: string): ReplyFrame =
   let node = parseFrame(text, FrameReply)
@@ -332,6 +343,12 @@ proc decodeReply*(text: string): ReplyFrame =
     let message = node{"errorMessage"}
     result.errorMessage =
       if message.isNil or message.kind != JString: "" else: message.getStr
+    # Absent is EMPTY, not an error. A server that has nothing more to say than
+    # its message is the ordinary case, and a peer built before this field
+    # existed is the other one; neither is a malformed frame.
+    let detail = node{"detail"}
+    result.detail =
+      if detail.isNil or detail.kind != JString: "" else: detail.getStr
 
 proc encodeEvent*(f: EventFrame): string =
   $(%*{
