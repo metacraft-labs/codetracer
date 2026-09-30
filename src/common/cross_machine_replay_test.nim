@@ -41,7 +41,7 @@
 ##   - **Simulated** (not heavyweight-real, by design — the heavy tests
 ##     live in ``backend-manager/tests/real_recording_integration.rs``
 ##     and in the recorder repo): the recorder itself.  The helper
-##     hand-builds a real meta.dat v3 + CTFS container; the writer logic
+##     hand-builds a real current-version meta.dat + CTFS container; the writer logic
 ##     mirrors the sibling ``ctfs_sources_test.nim`` fixture writer and
 ##     the Rust ``meta_dat::write_minimal_ctfs`` test fixture.  The
 ##     orchestrator does NOT spawn ``ct-mcr``; that path is covered by

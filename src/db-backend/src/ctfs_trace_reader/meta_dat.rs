@@ -16,7 +16,8 @@
 //!
 //! ```text
 //! [4 bytes] magic "CTMD"  (0x43 0x54 0x4D 0x44)
-//! [2 bytes] version u16 little-endian (must be 3 — current)
+//! [2 bytes] version u16 little-endian (4, or 5 when `flags_ext` follows —
+//!           see [`SUPPORTED_VERSIONS`])
 //! [2 bytes] flags u16 little-endian
 //!           bit 0       — FLAG_HAS_MCR_FIELDS
 //!           bit 1       — FLAG_HAS_REPLAY_LAUNCH_FIELDS (M-RLP-1, §6A.5)
@@ -35,6 +36,8 @@
 //!           bit 14      — FLAG_HAS_LINE_COUNT_TABLE (paths.dat records carry line_count)
 //!           bit 15      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
 //!           (no bit is reserved; the flag word is fully allocated)
+//! [4 bytes] flags_ext u32 little-endian — version 5 only; absent at version 4
+//!           bit 0       — FLAG_EXT_HAS_SOURCE_RELOAD (GDH-M2)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -96,9 +99,12 @@
 //!   version moved because it is the only thing in a container that
 //!   distinguishes the two encodes, and reading a v3 container under the
 //!   current decode reports every step one line high without failing.
-//!   See [`SUPPORTED_VERSIONS`] for why the accepted set is a singleton.
+//!   See [`SUPPORTED_VERSIONS`] for why no version before it is accepted.
 //!   Spec: `codetracer-trace-format-spec/internal-files.md` §"Global Line
 //!   Index".
+//! - **v5** — GDH-M2 (2026-09-10): a `[4] flags_ext u32 LE` word follows the
+//!   u16 flags.  Written only when an extended flag is set, so a recording
+//!   without one stays v4.  See [`META_DAT_VERSION_EXTENDED_FLAGS`].
 
 use std::error::Error;
 use std::fmt;
@@ -127,12 +133,13 @@ pub const LAST_SHIFTED_GLOBAL_INDEX_VERSION: u16 = 3;
 
 /// All `meta.dat` versions this reader can decode.
 ///
-/// **A singleton, and it has to be.**  The obvious alternative — accept
-/// `&[3, 4]`, since v4 changed no field of the header — reintroduces the
-/// exact defect the bump exists to close.  v3 and v4 differ not in the
-/// bytes of `meta.dat` but in what the rest of the container's step
-/// addresses MEAN: a v3 writer packed a line-only `global_position_index`
-/// as `prefix_sum[file_id] + line`, and v4 packs
+/// **No version at or below [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`], and that
+/// has to be so.**  The obvious alternative — accept `&[3, 4]`, since v4
+/// changed no field of the header — reintroduces the exact defect the bump
+/// exists to close.  v3 and v4 differ not in the bytes of `meta.dat` but
+/// in what the rest of the container's step addresses MEAN: a v3 writer
+/// packed a line-only `global_position_index` as
+/// `prefix_sum[file_id] + line`, and v4 packs
 /// `prefix_sum[file_id] + (line - 1)`, the exact inverse of the decode
 /// [`super::line_position_space`] performs.  Both land INSIDE the trace's
 /// own address space, so accepting a v3 container does not fail anywhere:
