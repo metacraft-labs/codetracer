@@ -14,7 +14,7 @@
 #   Fedora, RHEL and derivatives     the Metacraft Labs RPM repository, rpm.metacraft-labs.com
 #   Arch and derivatives             the AUR package `codetracer`, through yay, paru or pamac
 #   Gentoo                           the metacraft-overlay ebuild `codetracer-bin`
-#   macOS (Apple silicon)            the release DMG, copied to /Applications
+#   macOS (Apple silicon)            the signed DMG from downloads.codetracer.com, copied to /Applications
 #   NixOS                            nothing is installed; the flake to use is printed
 #   anything else on Linux x86_64    the release AppImage, as ~/.local/bin/ct (no updates)
 #
@@ -39,9 +39,10 @@
 # against it themselves. The key is 22F8 0A4A 65B0 8E36 AEA8 9F57 E127 BF3A C4CE 1719;
 # changing the digest below is a key rotation.
 #
-# The AppImage and DMG downloads are checked against the release's SHA256SUMS,
-# and SHA256SUMS against its signature by the CodeTracer release key
-# 0389 4920 AC59 5EDF 9B79 5B0D A941 7A0B 6297 F790. Without gpg the signature
+# The AppImage is checked against the release's SHA256SUMS, and SHA256SUMS
+# against its signature by the CodeTracer release key
+# 0389 4920 AC59 5EDF 9B79 5B0D A941 7A0B 6297 F790; the DMG against its own
+# signature by the same key. Without gpg the signature
 # cannot be checked, and the script refuses unless
 # CODETRACER_INSTALL_ALLOW_UNVERIFIED=1 is set.
 #
@@ -59,7 +60,8 @@ RPM_URL="${CODETRACER_RPM_URL:-https://rpm.$REPO_DOMAIN}"
 KEYS_URL="${CODETRACER_KEYS_URL:-https://deb.$REPO_DOMAIN/keys}"
 RELEASES_URL="${CODETRACER_RELEASES_URL:-https://github.com/metacraft-labs/codetracer/releases}"
 RELEASES_API="${CODETRACER_RELEASES_API:-https://api.github.com/repos/metacraft-labs/codetracer/releases}"
-RELEASE_KEY_URL="${CODETRACER_RELEASE_KEY_URL:-https://downloads.codetracer.com/CodeTracer.pub.asc}"
+DOWNLOADS_URL="${CODETRACER_DOWNLOADS_URL:-https://downloads.codetracer.com}"
+RELEASE_KEY_URL="${CODETRACER_RELEASE_KEY_URL:-$DOWNLOADS_URL/CodeTracer.pub.asc}"
 
 KEYRING_FILE='metacraft-labs-archive-keyring.asc'
 KEYRING_DEST='/usr/share/keyrings/metacraft-labs-archive-keyring.asc'
@@ -388,8 +390,23 @@ resolve_version() {
   echo "$v"
 }
 
+# verify_release_signature <signature> <file>: succeeds only when <file> carries
+# a valid signature by the pinned CodeTracer release key.
+verify_release_signature() {
+  if [ ! -d "$TMP/gnupg" ]; then
+    mkdir -m 700 "$TMP/gnupg"
+    fetch "$RELEASE_KEY_URL" "$TMP/release-key.asc"
+    GNUPGHOME="$TMP/gnupg" gpg --batch --quiet --import "$TMP/release-key.asc" 2>/dev/null \
+      || die 'could not import the CodeTracer release key'
+  fi
+  signer="$(GNUPGHOME="$TMP/gnupg" gpg --batch --status-fd 1 --verify "$1" "$2" 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print $12 }')"
+  [ "$signer" = "$RELEASE_KEY_FPR" ]
+}
+
 # Download a release asset and verify it: its digest against SHA256SUMS, and
 # SHA256SUMS against the CodeTracer release key's signature.
+
 download_verified() { # download_verified <version> <asset>
   base="$RELEASES_URL/download/$1"
   fetch "$base/$2" "$TMP/$2"
@@ -408,20 +425,29 @@ download_verified() { # download_verified <version> <asset>
   Install gnupg and retry, or set CODETRACER_INSTALL_ALLOW_UNVERIFIED=1 if you accept the risk.'
   fi
   fetch "$base/SHA256SUMS.asc" "$TMP/SHA256SUMS.asc"
-  fetch "$RELEASE_KEY_URL" "$TMP/release-key.asc"
-  mkdir -m 700 "$TMP/gnupg"
-  GNUPGHOME="$TMP/gnupg" gpg --batch --quiet --import "$TMP/release-key.asc" 2>/dev/null \
-    || die 'could not import the CodeTracer release key'
-  signer="$(GNUPGHOME="$TMP/gnupg" gpg --batch --status-fd 1 --verify "$TMP/SHA256SUMS.asc" "$TMP/SHA256SUMS" 2>/dev/null \
-    | awk '$2 == "VALIDSIG" { print $12 }')"
-  [ "$signer" = "$RELEASE_KEY_FPR" ] || { rm -f "$TMP/$2"; die "SHA256SUMS is not signed by the CodeTracer release key $RELEASE_KEY_FPR. Refusing to install."; }
+  verify_release_signature "$TMP/SHA256SUMS.asc" "$TMP/SHA256SUMS" \
+    || { rm -f "$TMP/$2"; die "SHA256SUMS is not signed by the CodeTracer release key $RELEASE_KEY_FPR. Refusing to install."; }
   log 'SHA256SUMS signature verified'
 }
 
+# The macOS DMG is not yet a GitHub Release asset (see .github/workflows/release.yml),
+# so it comes from downloads.codetracer.com, where each DMG is published with a
+# detached signature by the CodeTracer release key. That signature is checked
+# against the pinned fingerprint before the DMG is opened.
 install_dmg() {
-  v="$(resolve_version)"
-  asset="CodeTracer-$v-arm64.dmg"
-  download_verified "$v" "$asset"
+  slot="${want_version:-latest}"
+  asset="CodeTracer-$slot-arm64.dmg"
+  fetch "$DOWNLOADS_URL/$asset" "$TMP/$asset"
+  if command -v gpg >/dev/null 2>&1; then
+    fetch "$DOWNLOADS_URL/$asset.asc" "$TMP/$asset.asc"
+    verify_release_signature "$TMP/$asset.asc" "$TMP/$asset" || { rm -f "$TMP/$asset"; die "$asset is not signed by the CodeTracer release key $RELEASE_KEY_FPR. Refusing to install it."; }
+    log "$asset signature verified"
+  elif [ "${CODETRACER_INSTALL_ALLOW_UNVERIFIED:-0}" = 1 ]; then
+    warn "gpg is not installed, so the signature on $asset was NOT checked. Proceeding because CODETRACER_INSTALL_ALLOW_UNVERIFIED=1."
+  else
+    die "gpg is not installed, so the signature on $asset cannot be checked.
+  Install it (brew install gnupg) and retry, or set CODETRACER_INSTALL_ALLOW_UNVERIFIED=1 if you accept the risk."
+  fi
   [ "$dry_run" -eq 0 ] || { log "DRY-RUN would copy CodeTracer.app from $asset to /Applications"; return 0; }
   mnt="$TMP/mnt"; mkdir -p "$mnt"
   hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$TMP/$asset" >/dev/null || die "could not mount $asset"

@@ -18,7 +18,7 @@ user $ curl -fsSL https://get.codetracer.com/sh | sh
 On Debian, Ubuntu, Fedora and RHEL the installer registers the Metacraft Labs package
 repository (`deb.metacraft-labs.com` / `rpm.metacraft-labs.com`) and installs the `codetracer`
 package, so later updates arrive with `apt upgrade` / `dnf upgrade`. On Arch it uses your AUR
-helper, on Gentoo the metacraft-overlay, and on macOS the release DMG.
+helper, on Gentoo the metacraft-overlay, and on macOS the signed DMG from downloads.codetracer.com.
 
 ### Manually on Linux
 Here is a list of our Linux packages:

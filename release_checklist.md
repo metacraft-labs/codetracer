@@ -23,8 +23,9 @@ and the [branching policy](https://github.com/metacraft-labs/metacraft-dev-guide
    (afterwards, `gh workflow run release.yml --ref dev` also works). Every leg
    must be green: the AppImage builds, the `.deb` and `.rpm` install the
    AppImage's tree intact and a working `ct` in clean `debian:12` / `fedora:40`
-   containers, the DMG builds and reports the version, and every asset is signed.
-   Only tag a commit whose dry run was green.
+   containers, and every asset is signed. Only tag a commit whose dry run was
+   green. (The macOS DMG is not part of the release yet; see the header of
+   `release.yml`.)
 4. **Tag the commit and push the tag:**
 
        git tag -a <version> -m "Release <version>" <sha>
@@ -32,7 +33,7 @@ and the [branching policy](https://github.com/metacraft-labs/metacraft-dev-guide
 
    The tag runs `release.yml` for real. It rebuilds and verifies everything,
    publishes the GitHub Release with all assets, `SHA256SUMS` and signatures,
-   uploads the AppImage and DMG to `downloads.codetracer.com` (versioned and
+   uploads the AppImage to `downloads.codetracer.com` (versioned and
    `latest`), and asks
    [metacraft-desktop-packages](https://github.com/metacraft-labs/metacraft-desktop-packages)
    to add the `.deb` and `.rpm` to `deb.metacraft-labs.com` and
