@@ -66,6 +66,10 @@ var data* = ServerData(
     record: false,
     edit: false,
     name: cstring"",
+    # LOOPBACK BY DEFAULT, because `CLI/ct/host.md` says so and gives the
+    # reason: "a trace contains the recorded program's memory and I/O".
+    # Exposing it on a routable interface is `--bind`, an explicit choice.
+    address: cstring"127.0.0.1",
     frontendSocket: SocketAddressInfo(),
     backendSocket: SocketAddressInfo(),
     idleTimeoutMs: 10 * 60 * 1_000,

@@ -200,6 +200,14 @@ proc parseArgs* =
           data.startOptions.port = args[i + 1].parseJsInt
           i += 2
           continue
+      elif arg == cstring"--bind":
+        # The interface both listeners bind. Defaulted to loopback in
+        # `config.nim`, so omitting it is the safe case rather than the
+        # unspecified one.
+        if i + 1 < args.len:
+          data.startOptions.address = args[i + 1]
+          i += 2
+          continue
         else:
           errorPrint "expected --port <port>"
           break

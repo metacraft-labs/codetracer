@@ -12,7 +12,13 @@ when defined(server):
 
     ExpressServer* = ref object
       get*: proc(path: cstring, handler: proc(req: Jsobject, response: JsObject))
-      listen*: proc(port: int, handler: proc: void)
+      # THE HOST ARGUMENT IS THE POINT OF THIS DECLARATION.
+      #
+      # Node's `server.listen(port, cb)` binds 0.0.0.0. This binding omitted
+      # the host parameter, so there was no way to say otherwise from Nim and
+      # `ct host` served every interface while its own spec required loopback.
+      # Declaring the three-argument form is what makes the rule expressible.
+      listen*: proc(port: int, host: cstring, handler: proc: void)
       use*: proc(prefix: cstring, value: JsObject)
 
 
@@ -95,7 +101,17 @@ when defined(server):
     server.use(cstring"/frontend/styles/", express.`static`(codetracerExeDir & cstring"/frontend/styles/"))
     server.use(cstring"/node_modules", express.`static`(codetracerInstallDir & cstring"/node_modules"))
     server.use(cstring"/ui.js", express.`static`(userInterfacePath))
-    server.listen(data.startOptions.port, proc = infoPrint fmt"listening on localhost:{data.startOptions.port}")
+    # BIND THE ADDRESS, AND REPORT THE ONE ACTUALLY BOUND.
+    #
+    # `server.listen(port, cb)` with no host argument binds 0.0.0.0. This line
+    # used to do that while printing "localhost", so the operator's only signal
+    # was wrong in the direction that matters — `CLI/ct/host.md` requires
+    # loopback by default because "a trace contains the recorded program's
+    # memory and I/O", and a reader watching the log had no way to tell the
+    # rule was not being kept.
+    let bindAddress = data.startOptions.address
+    server.listen(data.startOptions.port, bindAddress.cstring, proc =
+      infoPrint fmt"listening on {bindAddress}:{data.startOptions.port}")
 
     debugPrint "in server"
     debugPrint data.startOptions
@@ -181,5 +197,8 @@ when defined(server):
         discard jsAsFunction[proc: Future[void]](readyVar)()
         readyVar = undefined
 
-    infoPrint fmt"socket.io listening on localhost:{backendSocketPort}"
-    httpServer.listen(backendSocketPort)
+    # The socket carries the whole index IPC surface — filesystem reads,
+    # ripgrep, process spawns — so it binds the same address as the page
+    # server rather than defaulting wider than the thing it serves.
+    infoPrint fmt"socket.io listening on {data.startOptions.address}:{backendSocketPort}"
+    httpServer.listen(backendSocketPort, data.startOptions.address.cstring)
