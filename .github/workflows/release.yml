@@ -49,10 +49,15 @@ concurrency:
 permissions:
   contents: read
 
+# The Linux jobs run on `eph-linux-x64-release`, the release lane: a scale set
+# reached by name, so a release does not queue behind ordinary CI, and a tag
+# push can reach it (infra lib/infra-constants.nix `releaseLane`). It is the
+# lane reprobuild's release.yml uses. Its runners are the same incus image as
+# `[self-hosted, linux, x64]`, with Docker for the package install check.
 jobs:
   plan:
     name: Plan release
-    runs-on: [self-hosted, linux, x64]
+    runs-on: eph-linux-x64-release
     timeout-minutes: 10
     outputs:
       version: ${{ steps.plan.outputs.version }}
@@ -85,7 +90,7 @@ jobs:
   linux:
     name: Linux (x86_64) release build
     needs: plan
-    runs-on: [self-hosted, linux, x64]
+    runs-on: eph-linux-x64-release
     timeout-minutes: 120
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -296,7 +301,7 @@ jobs:
   publish:
     name: Publish release (all-or-nothing)
     needs: [plan, linux, macos]
-    runs-on: [self-hosted, linux, x64]
+    runs-on: eph-linux-x64-release
     timeout-minutes: 60
     permissions:
       contents: write
