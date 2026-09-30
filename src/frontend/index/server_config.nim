@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, macros, jsconsole, strformat ],
-  electron_vars, base_handlers, config, idle_timeout,
+  electron_vars, base_handlers, config, idle_timeout, facade_endpoint,
   ../lib/[ jslib, electron_lib, misc_lib ],
   ../[ types ],
   ../../common/[ paths, ct_logging ]
@@ -81,6 +81,11 @@ when defined(server):
 
     var httpServer = require("http").createServer()
     var server = express.call()
+
+    # Built ONCE per server rather than per connection: it holds the settings
+    # root and the temp root, and a per-connection endpoint would give two tabs
+    # of one session two different settings stores.
+    let facadeEndpoint = newFacadeEndpoint()
 
     server.toJs.set(cstring"view engine", cstring"ejs")
     server.get(cstring"/", proc(request: JsObject, response: JsObject) =
@@ -182,6 +187,27 @@ when defined(server):
       client.on(cstring"__activity__") do ():
         resetActivity()
       ipc.attachSocket(client)
+
+      # THE FACADE ENDPOINT, on the SAME socket — §6.1.
+      #
+      # `UI-Bundle-And-Endpoints.md` §6.1 chose this connection rather than a
+      # second listener, for a reason that is about capability and not about
+      # tidiness: three facade operations take a callback and hand back a handle
+      # (`fs.watch`, `process.start`, `shell.onWindowStateChanged`), and a
+      # request/response endpoint can only be polled. The socket is also the
+      # thing WD1a narrowed, so a second listener would be a second thing to
+      # bind and narrow.
+      #
+      # ONE MESSAGE NAME, and the frame decides the rest. `handleFrame` reads
+      # `kind` and answers `hello` with `welcome` and `call` with `reply`;
+      # anything it does not own comes back as "" and is dropped rather than
+      # raising, because this connection also carries the index IPC surface and
+      # taking it down over someone else's message would end the session.
+      client.on(FacadeChannel) do (frame: cstring):
+        resetActivity()
+        let answer = facadeEndpoint.handleFrame($frame)
+        if answer.len > 0:
+          client.emit(FacadeChannel, answer.cstring)
 
       client.on(cstring"disconnect") do ():
         debugPrint "socket disconnect"

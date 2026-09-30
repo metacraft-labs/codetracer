@@ -836,9 +836,19 @@ test_lane_files() {
 		# contract are exercised against each other with no socket. It needs
 		# `git` and `sh` on PATH and writes only under one `mkdtemp`
 		# directory, which it removes.
+		#
+		# `facade_endpoint_over_socket_test.nim` is the one that cannot be
+		# faked: it starts the real `setupServer` and reaches the dispatcher
+		# over a real socket.io connection, because the two suites above were
+		# green for weeks while NOTHING under `src/frontend/index/` imported
+		# `facade_endpoint` at all. It then holds the welcome's profile and
+		# the dispatcher's refusals to the biconditional §6.3 promises. Needs
+		# `git` and `sh` on PATH; writes only under one `mkdtemp` directory,
+		# which it points `XDG_CONFIG_HOME` at and then removes.
 		echo src/frontend/tests/dap_session_routing_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
+		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
 		;;
 
 	frontend-native-units)

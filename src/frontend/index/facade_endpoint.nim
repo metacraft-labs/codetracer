@@ -327,6 +327,18 @@ proc defaultSettingsRoot(): string =
       joinPath($(nos.homedir().to(cstring)), ".config")
   joinPath(base, "codetracer", "endpoint")
 
+const FacadeChannel* = cstring"CODETRACER::facade"
+  ## The one socket.io message name the endpoint contract uses, in BOTH
+  ## directions.
+  ##
+  ## One name rather than one per frame kind, because §6.2 already puts `kind`
+  ## in the frame and a second dispatch on the message name would be the same
+  ## decision made twice, in two places, able to disagree.
+  ##
+  ## Prefixed like the index IPC surface it shares the connection with (§6.1),
+  ## so an operator reading a socket trace sees which subsystem a frame belongs
+  ## to without decoding it.
+
 proc newFacadeEndpoint*(settingsRoot = ""; tempRoot = "";
                         deployment: JsonNode = nil): FacadeEndpoint =
   FacadeEndpoint(
