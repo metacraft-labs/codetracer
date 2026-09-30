@@ -2096,15 +2096,51 @@ impl CTFSTraceReader {
             db.step_map.push(HashMap::new());
         }
 
-        // Functions — the Nim reader only exposes function names (not
-        // path/line), so we create stub FunctionRecords for now.
+        // Functions. The Nim FFI exposes a function's NAME only, but a
+        // structured `funcs.dat` record (`global_line_index, name_len, name`,
+        // `internal-files.md`) also carries its declaration site. That site is
+        // decoded from the same container by the pure-Rust interning reader,
+        // which resolves it against this container's own position space. A
+        // plain-layout container (name bytes only, `meta.dat` bit 12 clear)
+        // stores no site, so its functions keep `(PathId(0), Line(0))`.
+        //
+        // A container that is still being written (the follow path) can carry
+        // `paths.dat` before the other tables exist; the writer emits those at
+        // close. With no `funcs.dat` there is no site to read, and the Nim
+        // reader has no function to report either, so such a container opens
+        // exactly as it did before sites were read.
+        let has_all_interning_tables = ["paths.dat", "funcs.dat", "types.dat", "varnames.dat"]
+            .iter()
+            .all(|name| ctfs.has_file(name));
+        let declared_sites = if has_all_interning_tables {
+            match interning_tables::InterningTables::open_from_ctfs(ctfs)
+                .map_err(|e| format!("interning tables: {e}"))?
+            {
+                Some(tables) if tables.layout == interning_tables::RecordLayout::Structured => Some(tables.functions),
+                _ => None,
+            }
+        } else {
+            None
+        };
         for i in 0..reader.function_count() {
             let name = reader.function(i).map_err(|e| format!("function {i}: {e}"))?;
-            db.functions.push(FunctionRecord {
-                name,
-                path_id: PathId(0),
-                line: Line(0),
-            });
+            let (path_id, line) = match declared_sites.as_ref().map(|sites| sites.get(i as usize)) {
+                Some(Some(site)) if site.name == name => (site.path_id, site.line),
+                Some(Some(site)) => {
+                    return Err(format!(
+                        "function {i}: the Nim reader names it {name:?} but funcs.dat decodes as {:?}",
+                        site.name
+                    )
+                    .into());
+                }
+                Some(None) => {
+                    return Err(
+                        format!("function {i}: the Nim reader reports it but funcs.dat has no such record").into(),
+                    );
+                }
+                None => (PathId(0), Line(0)),
+            };
+            db.functions.push(FunctionRecord { name, path_id, line });
         }
 
         // Types — only the type name is available via FFI.
