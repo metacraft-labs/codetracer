@@ -44,8 +44,8 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 /// `codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md`
 /// § 3 and the M-REC-1 / M-REC-1.5 milestones for the rationale.
 ///
-/// Concretely this means [`SUPPORTED_META_DAT_VERSIONS`] is a
-/// singleton; any older payload encountered in the wild is a
+/// Concretely this means [`SUPPORTED_META_DAT_VERSIONS`] holds no version
+/// before [`META_DAT_VERSION`]; any older payload encountered in the wild is a
 /// stale build artefact (e.g. an out-of-date
 /// `libcodetracer_trace_writer.a` static library) and must be
 /// rebuilt rather than worked around at the reader.
@@ -62,8 +62,8 @@ pub const META_DAT_VERSION: u16 = 4;
 /// The set of `meta.dat` versions this parser accepts on read.  Kept
 /// as a slice (rather than a single constant) so callers that surface
 /// "unsupported version" errors can enumerate the accepted set in
-/// diagnostics; the slice is intentionally a singleton, mirroring
-/// [`META_DAT_VERSION`].
+/// diagnostics.  It holds [`META_DAT_VERSION`] and
+/// [`META_DAT_VERSION_EXTENDED_FLAGS`], and nothing older.
 ///
 /// v3 and below are refused even though this parser reads no step
 /// addresses and so could decode their header perfectly well.  The
@@ -441,8 +441,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     };
 
     let mut pos = body_start;
-    // v3 (M-REC-1) prepends a canonical UUIDv7 `recording_id` directly
-    // after the flags word.  Pre-1.0, the parser only accepts v3, so
+    // `recording_id` (M-REC-1, v3+) is a canonical UUIDv7 directly after
+    // the flag words.  Every version the parser accepts carries it, so
     // this read is unconditional — there is no v2-shaped layout to
     // fall back to.
     let recording_id = read_string(input, &mut pos)?;

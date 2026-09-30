@@ -3655,7 +3655,7 @@ mod tests {
     /// fictional; the byte layout passes `is_canonical_uuid_v7`.
     const TEST_RECORDING_ID: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
 
-    /// Helper: build a syntactically valid v3 `meta.dat` payload with the
+    /// Helper: build a syntactically valid current-version `meta.dat` payload with the
     /// given program / args / workdir fields and no MCR/replay-launch
     /// blocks.  Tests previously hand-wrote `meta.json` here — M-REC-1.5
     /// dropped that fallback so the binary form is now the only option.
@@ -4864,7 +4864,7 @@ mod tests {
     // CTFS container.  M-REC-1.5 (pre-1.0) removed the legacy `meta.json`
     // fallback, so any trace that lacks `meta.dat` is rejected outright.
 
-    /// Helper: build a syntactically valid v3 [`meta_dat::MetaDat`] for
+    /// Helper: build a syntactically valid current-version [`meta_dat::MetaDat`] for
     /// tests with the canonical pinned UUIDv7 recording_id.
     fn test_meta_dat_v3(program: &str, args: Vec<String>, workdir: &str) -> meta_dat::MetaDat {
         meta_dat::MetaDat {
