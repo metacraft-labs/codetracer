@@ -48,8 +48,11 @@ inputs:
       forwarded to setup-dev-env.
 
       A composite action cannot read ``secrets.*`` or ``vars.*``, so this has
-      to arrive as an input: the caller passes
-      ``attic-token: ${{ secrets.ATTIC_TOKEN }}``. Without it nix is handed a
+      to arrive as an input: the caller passes the ``ATTIC_TOKEN`` secret as
+      ``attic-token``. (Do not write the expression itself here: GitHub
+      evaluates expressions inside an action's input descriptions too, and
+      ``secrets`` is not available there, so the action fails to load.)
+      Without it nix is handed a
       private substituter it has no credential for, answers its own
       ``nix-cache-info`` probe with 401, disables the cache and builds
       everything not on cache.nixos.org from source.
