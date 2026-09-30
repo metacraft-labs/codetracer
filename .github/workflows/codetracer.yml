@@ -5747,6 +5747,41 @@ jobs:
           fi
           echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
 
+      # ---------------------------------------------------------------------
+      # codetracer-wasm-instrumenter. Seven db-backend integration tests in
+      # this lane replay the `cross-process-three-trace` recording
+      # (cross_process_three_trace_dap_test, m25b_event_log_test,
+      # step_over_frameless_step_test). It is not committed: the test harness
+      # produces it from this tree with scripts/materialize-recording.sh, which
+      # instruments the demo's wasm with `ct-instrument` and refuses to record
+      # without it ("ct-instrument not found"). Its other prerequisite,
+      # `session-manager`, is built by `just test-rust` itself.
+      #
+      # Cloned with `clone-repo` for the same branch-tip-ceiling reason as the
+      # js recorder above, and built in the instrumenter's own dev shell. The
+      # script finds the binary at `<sibling>/target/release/ct-instrument`.
+      # Not gated to one platform: both legs run the same `just test`.
+      - name: Clone codetracer-wasm-instrumenter sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-wasm-instrumenter
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Build ct-instrument (codetracer-wasm-instrumenter sibling)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-wasm-instrumenter"
+          nix develop --no-write-lock-file --command cargo build --release -p ct-instrument-cli
+          if [ ! -x target/release/ct-instrument ]; then
+            echo "::error::cargo build reported success but target/release/ct-instrument is missing; scripts/materialize-recording.sh cannot produce the cross-process recording."
+            exit 1
+          fi
+          echo "ct-instrument: $(pwd)/target/release/ct-instrument"
+
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
         # invoke ``elixirc`` / ``erlc`` through

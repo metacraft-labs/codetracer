@@ -799,6 +799,13 @@ test-rust:
     else \
       exit "$?"; \
     fi
+  # The cross-process recordings some integration tests replay are produced at
+  # test time by scripts/materialize-recording.sh, which drives the web
+  # recording through `session-manager` and refuses to record without it. Build
+  # it before the integration tests rather than after them.
+  pushd ../backend-manager
+  cargo build --release --bin session-manager
+  popd
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
   # Flow tests that need ct-native-replay/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
