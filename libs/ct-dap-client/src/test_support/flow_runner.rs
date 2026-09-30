@@ -231,7 +231,42 @@ impl FlowData {
                 }
             }
         }
-        None
+        Self::extract_noir_field_value(value)
+    }
+
+    /// Decode a Noir `Field` element to an `i64`.
+    ///
+    /// The Noir recorder spells a `Field` as a string: `0x` followed by exactly
+    /// 64 lowercase big-endian hex digits, under a type whose `langType` is
+    /// `Field`. Only that exact spelling, under that type, is decoded, so a
+    /// string value that merely looks like hex in another language is still
+    /// text. A field element that does not fit an `i64` (for example the
+    /// residue a negative literal is stored as) yields `None`.
+    fn extract_noir_field_value(value: &Value) -> Option<i64> {
+        let lang_type = value
+            .get("typ")
+            .and_then(|t| t.get("langType"))
+            .and_then(|v| v.as_str())?;
+        if lang_type != "Field" {
+            return None;
+        }
+        let digits = value
+            .get("text")
+            .and_then(|v| v.as_str())?
+            .strip_prefix("0x")?;
+        if digits.len() != 64
+            || !digits
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return None;
+        }
+        let (high, low) = digits.split_at(48);
+        if high.bytes().any(|b| b != b'0') {
+            return None;
+        }
+        let n = u64::from_str_radix(low, 16).ok()?;
+        i64::try_from(n).ok()
     }
 }
 
@@ -980,6 +1015,73 @@ mod tests {
         assert!(
             result.is_err(),
             "verify_flow_results should reject when zero values are loaded"
+        );
+    }
+
+    /// A Noir `Field` as db-backend serves it: a `String` value whose text is
+    /// `0x` + 64 lowercase hex digits, under a type whose `langType` is `Field`.
+    fn noir_field_value(text: &str, lang_type: &str) -> Value {
+        json!({
+            "kind": 9,
+            "i": "",
+            "r": "",
+            "text": text,
+            "typ": {"kind": 16, "langType": lang_type, "cType": lang_type},
+        })
+    }
+
+    const FIELD_42: &str = "0x000000000000000000000000000000000000000000000000000000000000002a";
+
+    #[test]
+    fn a_noir_field_decodes_to_its_integer() {
+        assert_eq!(
+            FlowData::extract_int_value(&noir_field_value(FIELD_42, "Field")),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn a_hex_string_that_is_not_typed_field_is_not_an_integer() {
+        assert_eq!(
+            FlowData::extract_int_value(&noir_field_value(FIELD_42, "String")),
+            None,
+            "only the Noir Field spelling is decoded; an arbitrary string that happens to be hex is text"
+        );
+    }
+
+    #[test]
+    fn a_field_not_in_the_fixed_width_spelling_is_not_decoded() {
+        for text in [
+            "0x2a",
+            "42",
+            "0x000000000000000000000000000000000000000000000000000000000000002A",
+            "0x00000000000000000000000000000000000000000000000000000000000000zz",
+        ] {
+            assert_eq!(
+                FlowData::extract_int_value(&noir_field_value(text, "Field")),
+                None,
+                "{text:?} is not `0x` + 64 lowercase hex digits"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_wider_than_i64_is_not_decoded() {
+        // p - 13 on BN254: the field element Noir records for the literal -13.
+        let minus_13 = "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593effffff4";
+        assert_eq!(
+            FlowData::extract_int_value(&noir_field_value(minus_13, "Field")),
+            None
+        );
+        let just_over = "0x0000000000000000000000000000000000000000000000008000000000000000";
+        assert_eq!(
+            FlowData::extract_int_value(&noir_field_value(just_over, "Field")),
+            None
+        );
+        let i64_max = "0x0000000000000000000000000000000000000000000000007fffffffffffffff";
+        assert_eq!(
+            FlowData::extract_int_value(&noir_field_value(i64_max, "Field")),
+            Some(i64::MAX)
         );
     }
 }
