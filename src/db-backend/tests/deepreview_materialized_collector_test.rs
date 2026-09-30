@@ -17,15 +17,20 @@
 //! load-bearing is that the trace is real and that both on-disk layouts a
 //! materialized recording comes in are covered:
 //!
-//! * Noir, unconditionally — `nargo trace` writes a legacy `runtime_tracing`
-//!   `trace.json`, the layout `diff::load_and_postprocess_trace` refuses;
+//! * Noir, unconditionally — `nargo trace` writes a column-aware `*.ct` CTFS
+//!   container;
+//! * the legacy `runtime_tracing` `trace.json` layout, which
+//!   `diff::load_and_postprocess_trace` refuses and the collector must not
+//!   (`a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it`).
+//!   No current recorder writes it — `nargo trace` did until it became
+//!   CTFS-only — so that case transcodes the same real Noir recording into it:
+//!   the events are the recorder's, read back out of its container by the
+//!   trace-format reader, and only their on-disk layout changes;
 //! * Python, when the recorder is importable
-//!   (`a_python_recording_reviews_the_way_a_noir_one_does`) — the Rust-backed
-//!   `codetracer_python_recorder` writes a `*.ct` CTFS container, which is a
-//!   different arm of `materialized_source::open_materialized_trace`.  It is
-//!   also the milestone's own verification entry ("an end-to-end review over a
-//!   Python recording"), so the Python case is run rather than argued from
-//!   Noir's equivalence.
+//!   (`a_python_recording_reviews_the_way_a_noir_one_does`) — a line-only
+//!   `*.ct` from a different recorder.  It is also the milestone's own
+//!   verification entry ("an end-to-end review over a Python recording"), so
+//!   the Python case is run rather than argued from Noir's equivalence.
 //!
 //! The third layout — a legacy `trace.bin`, what the pre-CTFS recordings in
 //! `codetracer-example-recordings/` are — has no case here: those recordings
@@ -244,9 +249,16 @@ fn coverage_is_the_recordings_real_per_line_execution_counts() {
         assert!(!entry.partial);
     }
     // The covered set is exactly what the recorder emitted steps for.  Line 1
-    // (`fn main(x: Field) {`) has no step of its own and the collector does
-    // not invent one for it; line 6 (the loop's closing brace) does have one,
-    // four times, and the collector does not drop it for looking odd.
+    // (`fn main(x: Field) {`) is the entry point, and a recording's first step
+    // is the entry point's (`trace-events.md`, "Recorder Integration —
+    // Starting a Recording": "The first step's position is the entry point's,
+    // not the first event the recorder produced"), so it ran once.  Line 6 (the
+    // loop's closing brace) has a step four times, and the collector does not
+    // drop it for looking odd.
+    //
+    // `nargo trace` records columns, so most of these lines are several steps
+    // per execution — line 4 is three (`x`, `(i as Field) * x`, the `let`).
+    // The counts are executions, not steps: see the collector's module header.
     let covered: Vec<(u32, u32)> = file
         .coverage
         .iter()
@@ -254,7 +266,7 @@ fn coverage_is_the_recordings_real_per_line_execution_counts() {
         .collect();
     assert_eq!(
         covered,
-        vec![(2, 1), (3, 5), (4, 4), (5, 4), (6, 4), (7, 1), (8, 1), (9, 1)]
+        vec![(1, 1), (2, 1), (3, 5), (4, 4), (5, 4), (6, 4), (7, 1), (8, 1), (9, 1)]
     );
 
     assert!(file.flags.has_coverage);
@@ -272,8 +284,10 @@ fn flow_carries_the_functions_steps_values_and_loop_iterations() {
     let flow = &file.flow[0];
     assert_eq!(flow.function_key, "main");
     assert_eq!(flow.execution_index, 0);
-    // 21 steps: the whole call, not the window from the diff line onward.
-    assert_eq!(flow.steps.len(), 21, "steps: {:?}", flow.steps.len());
+    // 22 steps: the whole call, not the window from the diff line onward —
+    // including the entry step at `main`'s own line 1, which every recording
+    // has (`trace-events.md`, "The entry step is part of `start`").
+    assert_eq!(flow.steps.len(), 22, "steps: {:?}", flow.steps.len());
 
     // The loop body's steps are attributed to the loop and numbered by
     // iteration, which is what the overlay's iteration slider reads.
@@ -284,13 +298,21 @@ fn flow_carries_the_functions_steps_values_and_loop_iterations() {
     assert_eq!(iterations, vec![0, 1, 2, 3]);
     assert!(body.iter().all(|step| step.loop_id >= 0));
 
-    // Real values, rendered the way the debugger renders them.
+    // Real values, rendered the way the debugger renders them. `contribution`
+    // is a `Field`, which the Noir recorder records as its fixed-width
+    // lowercase hex spelling (`0x` + 64 digits) in a string value, and the
+    // debugger renders a string value quoted.
     let contribution: Vec<String> = body
         .iter()
         .filter_map(|step| step.values.iter().find(|value| value.name == "contribution"))
         .map(|value| value.value.clone())
         .collect();
-    assert_eq!(contribution, vec!["0", "5", "10", "15"], "i * x for x = 5");
+    let field = |n: u64| format!("\"0x{n:064x}\"");
+    assert_eq!(
+        contribution,
+        vec![field(0), field(5), field(10), field(15)],
+        "i * x for x = 5"
+    );
     assert!(body.iter().all(|step| step.values.iter().all(|value| !value.truncated)));
 
     // Steps carry the trace position, so a reviewer can jump from the overlay
@@ -378,27 +400,66 @@ fn the_dataset_names_the_recording_it_came_from() {
     // the collector made up.
     assert_eq!(data.session_title, "");
 
+    // The call tree is rooted at `<toplevel>`, with `main` below it
+    // (`trace-events.md`: "a recording of a program whose entry point is `main`
+    // has BOTH a `<toplevel>` frame at depth 0 and a `main` frame at depth 1,
+    // and a reader showing a call tree shows the former as the root").
     let call_trace = data.call_trace.expect("a recording has a call tree");
     assert_eq!(call_trace.nodes.len(), 1);
-    assert_eq!(call_trace.nodes[0].name, "main");
+    assert_eq!(call_trace.nodes[0].name, "<toplevel>");
     assert_eq!(call_trace.nodes[0].execution_count, 1);
+    assert_eq!(call_trace.nodes[0].children.len(), 1);
+    assert_eq!(call_trace.nodes[0].children[0].name, "main");
+    assert_eq!(call_trace.nodes[0].children[0].execution_count, 1);
 }
 
 #[test]
 fn a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it() {
-    // `nargo trace` writes the legacy runtime_tracing layout, which
-    // `diff::load_and_postprocess_trace` refuses outright ("legacy
-    // trace_metadata.json + trace.bin/trace.json sidecars are no longer
-    // accepted").  The collector must not inherit that refusal: it is the
-    // shape a Python recording has.
+    // The legacy runtime_tracing layout — a `trace.json` event stream beside a
+    // `trace_metadata.json` — is refused outright by
+    // `diff::load_and_postprocess_trace` ("legacy trace_metadata.json +
+    // trace.bin/trace.json sidecars are no longer accepted").  The collector
+    // must not inherit that refusal: the debugger still opens such recordings.
+    //
+    // No recorder writes this layout any more, so the fixture's real Noir
+    // recording is transcoded into it: its events are read back out of the
+    // container by the trace-format reader and written as the JSON event
+    // stream, with the recording's own workdir in the metadata sidecar.
+    use db_backend::trace_reader::TraceReader as _;
+
     let fixture = build_fixture("legacy");
-    let recording = fixture.recordings.join("run-1");
+    let ct = std::fs::read_dir(fixture.recordings.join("run-1"))
+        .expect("read run-1")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "ct"))
+        .expect("`nargo trace` writes a *.ct container");
+    let events = codetracer_trace_reader::ctfs_reader::read_trace_from_ctfs(&ct).expect("read the recording's events");
+    assert!(!events.is_empty(), "the recording has events to transcode");
+    let workdir = db_backend::ctfs_trace_reader::CTFSTraceReader::open(&ct)
+        .expect("open the recording")
+        .workdir()
+        .to_path_buf();
+
+    let legacy_recordings = fixture.root.join("legacy-recordings");
+    let recording = legacy_recordings.join("run-1");
+    std::fs::create_dir_all(&recording).expect("mkdir legacy run-1");
+    std::fs::write(
+        recording.join("trace.json"),
+        serde_json::to_string(&events).expect("events serialize"),
+    )
+    .expect("write trace.json");
+    std::fs::write(
+        recording.join("trace_metadata.json"),
+        serde_json::json!({ "workdir": workdir, "program": "main", "args": [] }).to_string(),
+    )
+    .expect("write trace_metadata.json");
+
     assert!(
-        recording.join("trace.json").is_file(),
-        "the fixture is the legacy layout"
-    );
-    assert!(
-        !recording.join("trace.ct").exists(),
+        !std::fs::read_dir(&recording)
+            .expect("read the legacy recording")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "ct")),
         "the fixture is not a CTFS container"
     );
     assert!(
@@ -406,12 +467,34 @@ fn a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it() {
         "the CTFS-only loader still refuses it, which is why this path exists"
     );
 
-    let found = discover_recordings(&fixture.recordings).expect("discovery");
+    let found = discover_recordings(&legacy_recordings).expect("discovery");
     assert_eq!(found, vec![recording]);
 
-    let data = collect_fixture(&fixture, "out");
+    let output = fixture.root.join("out");
+    let args = ReviewCollectArgs {
+        repo: Some(fixture.repo.clone()),
+        diff_spec: Some("HEAD~..HEAD".to_string()),
+        recordings: legacy_recordings,
+        output: output.clone(),
+        progress: false,
+        ..ReviewCollectArgs::default()
+    };
+    let report = db_backend::deepreview::cli::run(&args).expect("collection");
+    assert_eq!(report.recordings_collected, 1);
+    let data: DeepReviewData =
+        serde_json::from_str(&std::fs::read_to_string(output.join("review.json")).expect("review.json"))
+            .expect("review.json is the dataset shape");
     assert_eq!(data.recording_count, 1);
-    assert!(!data.files[0].coverage.is_empty());
+    // The same recording, so the same coverage as the container it came from.
+    let covered: Vec<(u32, u32)> = data.files[0]
+        .coverage
+        .iter()
+        .map(|entry| (entry.line, entry.execution_count))
+        .collect();
+    assert_eq!(
+        covered,
+        vec![(1, 1), (2, 1), (3, 5), (4, 4), (5, 4), (6, 4), (7, 1), (8, 1), (9, 1)]
+    );
 }
 
 #[test]
@@ -615,22 +698,31 @@ const PYTHON_OLD_SOURCE: &str = "def scale(i, x):\n    scaled = i * x\n    retur
 fn a_python_recording_reviews_the_way_a_noir_one_does() {
     // RV-4's third verification entry is "an end-to-end review over a Python
     // recording", and the rest of this suite substitutes Noir for it. Noir is
-    // not a full stand-in: `nargo trace` writes a legacy `trace.json`, whereas
-    // `codetracer_python_recorder` writes a `*.ct` CTFS container by default —
-    // a DIFFERENT arm of `materialized_source::open_materialized_trace`. This
-    // case runs the real recorder so the arm a Python review actually takes is
-    // exercised, rather than argued to be equivalent.
+    // not a full stand-in: `nargo trace` records columns, whereas
+    // `codetracer_python_recorder` writes a line-only `*.ct`, where every step
+    // is one execution of its line. This case runs the real recorder so the
+    // trace a Python review actually reads is exercised, rather than argued to
+    // be equivalent.
     //
-    // Skipped rather than failed when the recorder is not importable, following
-    // `python_flow_dap_test.rs`: the recorder is an optional sibling toolchain.
-    // The Noir cases above are the unconditional ones, so a skip here cannot
-    // leave the collector untested.
+    // The recorder is an optional sibling toolchain, so its absence goes
+    // through the harness's prerequisite gate: a loud "asserted NOTHING" skip
+    // on a developer box, and a failure wherever
+    // `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` makes it mandatory.
+    const TEST: &str = "a_python_recording_reviews_the_way_a_noir_one_does";
     let Some(recorder) = test_harness::find_python_recorder() else {
-        eprintln!("SKIPPED: `codetracer_python_recorder` is not importable from the active interpreter");
+        test_harness::skip_or_fail_missing_prerequisite(
+            TEST,
+            "`codetracer_python_recorder` is not importable from the active interpreter",
+            "run inside the codetracer dev shell with the codetracer-python-recorder sibling checked out",
+        );
         return;
     };
     let Some((python, _version)) = test_harness::find_suitable_python() else {
-        eprintln!("SKIPPED: no Python 3.10+ interpreter for the recorder");
+        test_harness::skip_or_fail_missing_prerequisite(
+            TEST,
+            "no Python 3.10+ interpreter for the recorder",
+            "put a Python 3.10+ interpreter on PATH",
+        );
         return;
     };
     assert!(
