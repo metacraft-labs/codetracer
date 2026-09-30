@@ -4630,6 +4630,14 @@ fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
         // classifier reuses the Python grammar for GDScript's
         // Python-derived syntax.
         "gd" => Some(ClassifierLang::GDScript),
+        // Smart-contract languages with their own classifier grammar
+        // (Value-Origin-Tracking spec §7.2, M23 rows). Stylus and Solana
+        // sources are `.rs` and Noir's are `.nr`, both covered above.
+        "cairo" => Some(ClassifierLang::Cairo),
+        "ak" => Some(ClassifierLang::Aiken),
+        "leo" => Some(ClassifierLang::Leo),
+        "circom" => Some(ClassifierLang::Circom),
+        "sw" => Some(ClassifierLang::Sway),
         _ => None,
     }
 }
@@ -5635,5 +5643,40 @@ mod jump_destination_tests {
                 .expect_err("a non-object `arguments` names no destination either");
             assert!(refusal.contains("Location object"), "got: {refusal} for {arguments}");
         }
+    }
+}
+
+#[cfg(test)]
+mod classifier_lang_tests {
+    //! The materialized origin engine picks the classifier grammar from the
+    //! source file's extension. A language the classifier supports but this
+    //! mapping does not name gets no grammar at all, and every line of it is
+    //! reported as unparseable: the chain stops at its first hop with an
+    //! `UnknownSource` terminator.
+
+    use super::classifier_lang_for_path;
+    use origin_classifier::Lang as ClassifierLang;
+
+    #[test]
+    fn smart_contract_sources_reach_their_classifier_grammar() {
+        for (path, lang) in [
+            ("/w/main.cairo", ClassifierLang::Cairo),
+            ("/w/main.ak", ClassifierLang::Aiken),
+            ("/w/main.leo", ClassifierLang::Leo),
+            ("/w/main.circom", ClassifierLang::Circom),
+            ("/w/main.sw", ClassifierLang::Sway),
+        ] {
+            assert_eq!(
+                classifier_lang_for_path(path),
+                Some(lang),
+                "{path} must be classified with the {lang:?} grammar"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_extension_has_no_grammar() {
+        assert_eq!(classifier_lang_for_path("/w/main.unknownext"), None);
+        assert_eq!(classifier_lang_for_path("/w/Makefile"), None);
     }
 }
