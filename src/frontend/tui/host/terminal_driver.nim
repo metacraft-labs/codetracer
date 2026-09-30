@@ -287,8 +287,13 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
 # exactly as they did.
 
 const
-  MotionTrackingOnBytes* = "\x1b[?1002h"
-  MotionTrackingOffBytes* = "\x1b[?1002l"
+  MotionTrackingOnBytes* = "\x1b[?1003h"
+  MotionTrackingOffBytes* = "\x1b[?1003l"
+    ## ANY-EVENT tracking (`?1003`) since PLAT-48; button-event tracking
+    ## (`?1002`) before it. A motion report with a button held drives a
+    ## drag (PLAT-47); one with no button lets the top bar's controls show
+    ## their tooltip and key on hover (`runtime.routeTopBarMouse`), and is
+    ## otherwise dropped without a repaint.
 
 proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
@@ -515,10 +520,11 @@ proc start*(d: TerminalDriver) =
     # `--no-mouse` — the negotiation, observed from the terminal's side.
     d.mouseCapture = enableMouseCapture(d.outFd)
     d.mouseOwned = true
-    # PLAT-47: BUTTON-EVENT TRACKING (`?1002`) too — a motion report while a
-    # button is held — so a drag's drop indication and ghost follow the
-    # pointer and a divider previews where it would land. Only while a
-    # button is down: no report for a pointer merely passing over.
+    # PLAT-47: MOTION TRACKING too, so a drag's drop indication and ghost
+    # follow the pointer and a divider previews where it would land. Since
+    # PLAT-48 ANY motion (`?1003`), so the pointer passing over the top bar's
+    # controls shows each one's tooltip and key; a report over anything else
+    # is dropped without a frame.
     writeAll(d.outFd, MotionTrackingOnBytes)
   # NOTHING IS SENT FOR THE KITTY KEYBOARD PROTOCOL OR FOR modifyOtherKeys,
   # on a terminal that advertises either. See
@@ -683,7 +689,21 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       d.framer.reset()
       return DriverEvent(kind: dekToken, token: $Esc)
     return DriverEvent(kind: dekIdle)
-  let (complete, token) = d.framer.feed(char(b))
+  var (complete, token) = d.framer.feed(char(b))
+  # PLAT-48: THE REST OF A SEQUENCE THAT IS ALREADY WAITING IS TAKEN NOW.
+  # A terminal writes an escape sequence in one write, so when its `ESC` is
+  # read the remaining bytes are already in the kernel's buffer. Reading them
+  # one per call let the caller's work between two calls — a repaint, an idle
+  # tick — run past `EscDelayMs` with `ESC` held, and `escDue` then split a
+  # mouse report queued behind a debugger step into a lone `Esc` and the keys
+  # `[ < 0 ; 5 1 ; 1 m` (a pointer release became `[` = "previous call",
+  # `1` = focus the call stack, `m` = memory dump). The delay now only ever
+  # measures bytes that had NOT arrived.
+  while not complete and d.framer.pending.len > 0:
+    let more = readByteWithTimeout(0, d.inFd)
+    if more < 0:
+      break
+    (complete, token) = d.framer.feed(char(more))
   if complete:
     return DriverEvent(kind: dekToken, token: token)
   if d.framer.holdsLoneEsc:

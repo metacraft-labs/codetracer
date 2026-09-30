@@ -136,8 +136,8 @@ proc terminalCapability*(): PaneCapability =
      panePointList, paneFileTree, paneBuildOutput,
      # PLAT-47 deliverable 4: the VCS pane (`views/vcs_pane.nim`).
      paneVcs},
-    [(paneDebugControls, "the terminal steps from the keyboard and names " &
-                         "the keys on its status line"),
+    [(paneDebugControls, "the terminal draws the debugger controls in its " &
+                         "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
      (paneSearch, "search results open in the command line, not a pane"),
      (paneScratchpad, "the terminal has no scratchpad view yet"),
@@ -146,7 +146,10 @@ proc terminalCapability*(): PaneCapability =
      (paneTerminalOutput, "the recorded program's terminal output has no " &
                           "terminal view yet"),
      (paneTestResults, "the terminal has no test-results view yet"),
-     (paneConstraints, "the terminal has no constraints view yet")])
+     (paneConstraints, "the terminal has no constraints view yet"),
+     (paneProblems, "the terminal has no problems view yet; a build's " &
+                    "errors are in the Build pane"),
+     (paneRequests, "the terminal has no requests view yet")])
 
 # ---------------------------------------------------------------------------
 # PLAT-45 deliverable 5 — the fold depth this terminal needs
@@ -357,6 +360,14 @@ proc profileLayout*(profile: LayoutProfile): LayoutNode =
   terminalDefaultAt(pmDebug, profile.width, profile.height,
                     depthFor(pmDebug, profile))
 
+proc profileLayoutValue*(profile: LayoutProfile): Layout =
+  ## PLAT-48: Debug mode's default at this size as a whole `Layout` — the
+  ## folded tree AND the shared default's docked panes (the desktop's footer
+  ## panels, `sharedDefaultDocked`), which the terminal draws as its bottom
+  ## dock strip. Every place that seeds or resets the terminal's arrangement
+  ## reads this, so a reset brings the footer back with the tree.
+  initLayout(profileLayout(profile), sharedDefaultLayout().docked)
+
 proc editProfileLayout*(profile: LayoutProfile): LayoutNode =
   ## Edit mode's default at this size: `sharedEditLayout()` folded by the same
   ## rule. Mode-Transitions.md §4a still holds — the edit default is a tree of
@@ -371,6 +382,16 @@ proc layoutForMode*(product: ProductMode; profile: LayoutProfile): LayoutNode =
   case product
   of pmDebug: profileLayout(profile)
   of pmEdit: editProfileLayout(profile)
+
+proc dockedForMode*(product: ProductMode): seq[DockedPane] =
+  ## PLAT-48: the panes a mode's DEFAULT docks beside `layoutForMode`'s tree —
+  ## Debug mode's footer panels (`sharedDefaultDocked`, as
+  ## `profileLayoutValue` carries them), nothing for Edit mode. So a runtime
+  ## with no layout binding and no session paints the footer strip the bound
+  ## one does.
+  case product
+  of pmDebug: sharedDefaultLayout().docked
+  of pmEdit: @[]
 
 proc resizeShares*(tree: LayoutNode; product: ProductMode;
                    profile: LayoutProfile) =

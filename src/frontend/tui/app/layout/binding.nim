@@ -90,6 +90,7 @@
 ## recommendation, implemented rather than recommended.
 
 import std/[json, options, strutils]
+from std/unicode import runeLen
 
 import headless_app/layout_interaction
 import headless_app/layout_model
@@ -239,6 +240,12 @@ type
       ## motion report — so the ghost label follows it. A MEASUREMENT, and so
       ## held here in the terminal's binding, never in the `Interaction`
       ## (PLAT-5's purity law). -1 when no drag is in flight.
+    pressWasRevealing*: bool
+    pressRevealedPane*: PaneKind
+      ## PLAT-48: the pane that was REVEALED when the button went down. A
+      ## press on a strip label starts a drag (which replaces the reveal), so
+      ## the release needs this to tell "a second click on the revealed
+      ## pane's label" (hide it) from a first click (reveal it).
 
 const
   DockStripThickness* = 1
@@ -257,7 +264,11 @@ const
     ## axis, clamped to at least one cell. A third rather than a half because
     ## the point of a peek is that the arrangement behind it is still readable.
 
-  DockStripGlyph* = "·"
+  DockStripGlyph* = " "
+    ## PLAT-48: a dock strip's FILLER is blank. The shell paints a strip as the
+    ## desktop's footer does — each docked pane's padded label, in strip
+    ## order, on the strip's surface (`shell.paintDockStrips`) — so every
+    ## cell no label covers is a blank, where it was a `·` until PLAT-48.
   DragGhostGlyph* = "░"
   DropTargetGlyph* = "▒"
   ResizeGuideGlyph* = "▓"
@@ -305,35 +316,41 @@ proc stripAreaFor(body: CellArea; edge: LayoutEdge; left, right: int):
     CellArea(col: body.col + left, row: body.row + body.height - DockStripThickness,
              width: body.width - left - right, height: DockStripThickness)
 
-proc slotAreas(strip: CellArea; edge: LayoutEdge; count: int): seq[CellArea] =
-  ## Divide a strip among `count` collapsed tabs.
+proc slotExtent*(edge: LayoutEdge; title: string): int =
+  ## How many cells one docked pane's LABEL takes along its strip (PLAT-48):
+  ## a top or bottom strip's label is a tab — the title padded one cell each
+  ## side, as the desktop's footer strip draws BUILD, PROBLEMS, …; a left or
+  ## right strip's reads DOWNWARDS, one character per row, with one row of
+  ## space after it.
+  if edge in {leTop, leBottom}: cellWidthOf(title) + 2
+  else: title.runeLen + 1
+
+proc slotAreas(strip: CellArea; edge: LayoutEdge;
+               titles: seq[string]): seq[CellArea] =
+  ## The strip's labels, one slot each, packed from the strip's start as the
+  ## desktop's strip packs its tabs. The rest of the strip is the strip, not
+  ## a slot: a press there reveals nothing. A label that does not fit whole
+  ## is clipped to the strip; one with no cell left gets an empty slot (it is
+  ## still docked, and `:reveal` still reaches it).
   ##
-  ## Through `project.distributeCells`, which is the SAME largest-remainder
-  ## distribution the split tree is snapped with — so a strip's slots sum to
-  ## the strip exactly and none of them is empty, by the properties that
-  ## routine already carries and its own suite already asserts.
+  ## Until PLAT-48 the strip was divided EQUALLY among its panes and every
+  ## title was written along its first row — so a left or right strip showed
+  ## one character of one title.
   result = @[]
-  if count <= 0 or strip.isEmptyArea:
+  if titles.len == 0 or strip.isEmptyArea:
     return
   let horizontal = edge in {leTop, leBottom}
-  let axis = if horizontal: strip.width else: strip.height
-  var shares: seq[float] = @[]
-  for _ in 0 ..< count:
-    shares.add 1.0
-  let sizes = distributeCells(axis, shares)
-  if sizes.len == 0:
-    # Fewer cells than tabs. Reported as no slots rather than as zero-width
-    # ones: an empty rectangle a user can click is worse than a tab that is
-    # honestly not drawn.
-    return
+  let stop = if horizontal: strip.col + strip.width
+             else: strip.row + strip.height
   var cursor = if horizontal: strip.col else: strip.row
-  for s in sizes:
+  for t in titles:
+    let s = max(0, min(slotExtent(edge, t), stop - cursor))
     if horizontal:
       result.add CellArea(col: cursor, row: strip.row, width: s,
-                          height: strip.height)
+                          height: (if s > 0: strip.height else: 0))
     else:
-      result.add CellArea(col: strip.col, row: cursor, width: strip.width,
-                          height: s)
+      result.add CellArea(col: strip.col, row: cursor,
+                          width: (if s > 0: strip.width else: 0), height: s)
     cursor += s
 
 proc revealAreaFor(inner: CellArea; edge: LayoutEdge): CellArea =
@@ -389,11 +406,13 @@ proc geometryOf*(layout: Layout; body: CellArea;
       continue
     let area = stripAreaFor(body, edge, left, rightW)
     var strip = DockStrip(edge: edge, area: area, slots: @[])
-    let areas = slotAreas(area, edge, docked.len)
+    var titles: seq[string] = @[]
+    for d in docked:
+      titles.add(if d.title.len > 0: d.title else: terminalPaneName(d.pane))
+    let areas = slotAreas(area, edge, titles)
     for i, d in docked:
       strip.slots.add DockStripSlot(
-        pane: d.pane, title: (if d.title.len > 0: d.title
-                              else: terminalPaneName(d.pane)),
+        pane: d.pane, title: titles[i],
         order: d.order,
         area: (if i < areas.len: areas[i] else: CellArea()))
     result.strips.add strip
@@ -975,6 +994,12 @@ proc paintDecorations*(g: var StyledGrid;
       # (`frameOverlaysOf`), not into it — a tint keeps the glyphs under it,
       # and the ghost is above the tint.
       continue
+    if d.kind in {ldDockStrip, ldRevealOverlay}:
+      # PLAT-48: a strip is its labels on the tab-strip surface
+      # (`views/shell.paintDockStrips`) — colour, no `·` fill — and a
+      # revealed dock is the docked PANE ITSELF painted over the body
+      # (`views/shell.paintRevealedPane`), not a `▒` fill with its name.
+      continue
     let glyph = glyphFor(d.kind)
     let right = d.area.col + d.area.width
     for row in d.area.row ..< d.area.row + d.area.height:
@@ -1014,7 +1039,7 @@ proc newLayoutBinding*(profile: LayoutProfile): LayoutBinding =
   ## A binding on the profile's own default arrangement — the tree
   ## `views/shell.newShellModel` would have built, now with an undo log and a
   ## docked list.
-  newLayoutBinding(initLayout(profileLayout(profile)), profile)
+  newLayoutBinding(profileLayoutValue(profile), profile)
 
 proc geometry*(b: LayoutBinding; body: CellArea;
                policy: ProjectionPolicy = DefaultProjectionPolicy):
@@ -1333,6 +1358,26 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       b.pressCol = event.col
       b.pointerRow = event.row
       b.pointerCol = event.col
+      b.pressWasRevealing = b.interaction.kind == ikRevealingDock
+      if b.pressWasRevealing:
+        b.pressRevealedPane = b.interaction.pane
+      if b.pressWasRevealing:
+        # PLAT-48: A REVEALED PANE IS AN OVERLAY. A press inside it belongs to
+        # it and moves nothing behind it; a press outside it — anywhere but
+        # its own strip label, whose release toggles it — hides it (the
+        # desktop's auto-hide overlay closes on an outside click), and is
+        # consumed by that.
+        if geom.reveal.contains(event.row, event.col):
+          return action(lasNoGesture, "inside the revealed " &
+                                      $b.interaction.pane)
+        let onStrip = geom.stripIndexAt(event.row, event.col)
+        if onStrip < 0 or geom.strips[onStrip].slotAt(event.row,
+                                                      event.col) < 0:
+          b.pressRow = -1
+          b.pressCol = -1
+          let hidden = b.interaction.pane
+          b.interaction = b.interaction.cancel()
+          return action(lasCancelled, "hid " & $hidden)
       let tab = b.tabAtCell(geom, event.row, event.col)
       if tab.isSome:
         return b.beginDrag(tab.get)
@@ -1379,6 +1424,9 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       # two entries onto one undo log for one gesture.
       discard b.cancelGesture()
       if b.layout.dockedIndex(source) >= 0:
+        if b.pressWasRevealing and b.pressRevealedPane == source:
+          # A SECOND click on the revealed pane's label hides it.
+          return action(lasCancelled, "hid " & $source)
         return b.beginRevealDock(source)
       return b.dispatch(cmdActivateTab(source))
     discard b.hoverAt(geom, event.row, event.col)
@@ -1415,11 +1463,18 @@ type
     lvUndoLayout = "undo-layout"
     lvRedoLayout = "redo-layout"
     lvResetLayout = "reset-layout"
+    lvPin = "pin"
+      ## PLAT-48. The desktop's PIN: the focused pane goes to an auto-hide
+      ## strip (`lcDock`; default edge: the footer, `bottom`).
+    lvUnpin = "unpin"
+      ## PLAT-48. The desktop's UNPIN: a docked pane goes back into the
+      ## layout (`lcRestoreDocked`) — the revealed one, or the one named.
 
 const
   LayoutVerbNames*: array[LayoutVerb, string] = [
     "move-tab", "move-pane", "merge-pane", "dock", "undock", "reveal",
-    "hide", "resize", "focus", "undo-layout", "redo-layout", "reset-layout"]
+    "hide", "resize", "focus", "undo-layout", "redo-layout", "reset-layout",
+    "pin", "unpin"]
     ## Spelled out rather than read from `$verb`, so the published names and
     ## the enum can be compared as two things in the suite instead of one
     ## thing compared with itself.
@@ -1539,7 +1594,7 @@ proc resetToProfile*(b: LayoutBinding): LayoutAction =
   ## It resets `userModified`, so the layout starts re-flowing on resize
   ## again, and it starts a NEW history: an undo across a reset would take the
   ## user to a layout the profile no longer produces.
-  b.history = newLayoutHistory(initLayout(profileLayout(b.profile)))
+  b.history = newLayoutHistory(profileLayoutValue(b.profile))
   b.interaction = noInteraction()
   b.userModified = false
   action(lasApplied, "layout reset to the shared default")
@@ -1624,6 +1679,31 @@ proc runLayoutCommand*(b: LayoutBinding; geom: LayoutGeometry;
   of lvUndoLayout: b.undoLayout()
   of lvRedoLayout: b.redoLayout()
   of lvResetLayout: b.resetToProfile()
+  of lvPin:
+    let edgeWord = if arg.len == 0: "bottom" else: arg
+    let (ok, edge) = parseEdgeWord(edgeWord)
+    if not ok:
+      return action(lasBadArgument, ":pin needs left|right|top|bottom")
+    if b.interaction.kind == ikRevealingDock:
+      return action(lasNoOp, $b.interaction.pane & " is already pinned")
+    b.dispatch(cmdDock(b.focus, edge))
+  of lvUnpin:
+    var pane = b.focus
+    if arg.len > 0:
+      let (ok, named) = parsePaneWord(arg)
+      if not ok:
+        return action(lasBadArgument,
+                      ":unpin needs the name of a docked pane, not '" & arg &
+                      "'")
+      pane = named
+    elif b.interaction.kind == ikRevealingDock:
+      pane = b.interaction.pane
+    if b.layout.dockedIndex(pane) < 0:
+      return action(lasRefused, $pane & " is not pinned to a strip")
+    b.interaction = noInteraction()
+    # Back beside the pane it was pinned from, while that pane is placed:
+    # the docked entry remembers it (`DockedPane.beside`).
+    b.dispatch(cmdRestoreDocked(pane))
 
 # ---------------------------------------------------------------------------
 # The responsive-profile decision, and persistence
@@ -1659,7 +1739,7 @@ proc resize*(b: LayoutBinding; width, height: int): bool =
     # rather than the old size's cell counts. Not a re-flow.
     resizeShares(b.layout.tree, pmDebug, selected)
     return false
-  b.history = newLayoutHistory(initLayout(profileLayout(selected)))
+  b.history = newLayoutHistory(profileLayoutValue(selected))
   b.interaction = noInteraction()
   true
 

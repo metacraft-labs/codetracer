@@ -33,9 +33,10 @@
 ## PLAT-6's own status note says so about cross-tier equality. So the row-for-row
 ## comparison below is paired with assertions made against the SPECIFICATION of
 ## the decoration rather than against the model's rendering of it: after the
-## gesture, the body's last row must be `binding.DockStripGlyph` in every cell
-## the pane's own title does not occupy, and the pane's `[Files]` tab label
-## must be gone from the screen entirely. A binding that had stopped docking
+## gesture, the body's last row must read the shared default's footer labels
+## and then the pane's own, each padded, on a blank strip
+## (`testing/strip_read.stripLabelProblems`, PLAT-48's strip), and the pane's
+## `[Files]` tab label must be gone from the screen entirely. A binding that had stopped docking
 ## — and a renderer that had stopped drawing strips — would fail those whatever
 ## the two tiers agreed about.
 ##
@@ -71,12 +72,13 @@ import headless_app/layout_model
 import ../../app/runtime
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
+import ../../testing/strip_read
 import ../apps/app_layout_gestures as gestureApp
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 46
+const ExpectedAssertions = 44  # PLAT-48: the strip read as labels on blanks (one check where three were)
 
 const
   Stem = "app_layout_gestures"
@@ -217,15 +219,19 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
 
       # ---- THE UNGESTURED SCREEN -------------------------------------------
       ckScreenMatches(sess, model.shellScreenOf().rows, "before the gesture")
-      # ABSOLUTE, not differential: there is no dock strip yet, and the pane
-      # that is about to be docked is on the screen under its own title.
+      # ABSOLUTE, not differential: the bottom strip carries the shared
+      # default's footer panels only (PLAT-48), and the pane that is about to
+      # be docked is on the screen under its own title.
       let before = sess.screenContents()
-      ck not before.contains(DockStripGlyph)
+      let footerBefore = stripLabelProblems(
+        sess.regionText(Rows - 2, 0, Cols, 1).split('\n')[0], footerTitles())
+      for p in footerBefore[0 .. min(3, footerBefore.high)]: checkpoint(p)
+      ck footerBefore.len == 0
       ck before.contains(DockedPaneTitleRow)
       # …and the shared default's Variables stack is there, which is what says this
       # is the arrangement the case was written against.
       ck before.contains(" Variables ")
-      ck model.bottomStripRow() < 0
+      ck model.bottomStripRow() == Rows - 2
 
       # ---- THE GESTURE, ONE BYTE AT A TIME ---------------------------------
       typeAt(sess, DockLine)
@@ -247,7 +253,7 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :dock bottom")
 
       # …AND ABSOLUTELY. This is the pair that survives both tiers being wrong
-      # together: the strip's cells are asserted against `DockStripGlyph` and
+      # together: the strip's cells are asserted against its labels and blanks and
       # the pane's title against the pane's own name, neither of which is read
       # off the model's rendering.
       let stripRow = model.bottomStripRow()
@@ -256,36 +262,28 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       ck stripRow == Rows - 2          ## the body's last row, above the status
       let stripText = sess.regionText(stripRow, 0, Cols, 1).split('\n')[0]
       checkpoint("strip row: '" & stripText & "'")
-      ck stripText.startsWith(DockedPaneTitle)
-      var glyphCells = 0
-      var wrongCells: seq[string] = @[]
-      for col in textCells(DockedPaneTitle) ..< Cols:
-        let rune = $sess.cellAt(stripRow, col).rune
-        if rune == DockStripGlyph:
-          inc glyphCells
-        else:
-          wrongCells.add "(" & $stripRow & "," & $col & ") is '" & rune & "'"
+      # EXACT (Verification-Harness-Traps §4b): every label in strip order —
+      # the footer's, then the docked pane's — and nothing but blanks besides.
+      let wrongCells = stripLabelProblems(stripText,
+                                          footerTitles() & @[DockedPaneTitle])
       if wrongCells.len > 0:
         checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
-      # EXACT, not "more than none" (Verification-Harness-Traps §4b): the strip
-      # spans the body's full width and the label takes its first cells, so the
-      # number of glyph cells is knowable.
-      ck glyphCells == Cols - textCells(DockedPaneTitle)
       ck wrongCells.len == 0
       # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that
       # was never removed would satisfy every assertion above.
       let after = sess.screenContents()
       ck not after.contains(DockedPaneTitleRow)
-      ck after.contains(DockStripGlyph)
+      ck after.count(" " & DockedPaneTitle & " ") == 1
 
       # ---- `:undo-layout` PUTS IT BACK, ON THE TERMINAL --------------------
       typeAt(sess, UndoLine)
       for token in tokensOf(UndoLine):
         discard model.handleToken(token, 0'i64)
       ck model.app.layoutBinding.layout.dockedIndex(DockedPaneKind) < 0
-      ck model.bottomStripRow() < 0
+      ck model.bottomStripRow() == Rows - 2
       let restored = sess.screenContents()
-      ck not restored.contains(DockStripGlyph)
+      ck stripLabelProblems(sess.regionText(Rows - 2, 0, Cols, 1).split('\n')[0],
+                            footerTitles()).len == 0
       ck restored.contains(DockedPaneTitleRow)
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :undo-layout")
 
@@ -319,7 +317,8 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       let status = paneRow(sess, Rows - 1)
       checkpoint("status row: '" & status & "'")
       ck status.toLowerAscii().contains("teleport")
-      ck not sess.screenContents().contains(DockStripGlyph)
+      ck stripLabelProblems(sess.regionText(Rows - 2, 0, Cols, 1).split('\n')[0],
+                            footerTitles()).len == 0
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :teleport")
 
       sess.send($TestAppQuitByte)

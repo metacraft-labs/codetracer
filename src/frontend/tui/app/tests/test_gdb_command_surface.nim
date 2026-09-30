@@ -156,7 +156,11 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 97
+  ExpectedAppModules = 98
+    ## RE-COUNTED ON 2026-09-30 (PLAT-48): 97 → 98. `views/top_bar.nim`, the
+    ## terminal's top bar: the shared menu, the debugger controls, the
+    ## omnibar field and the session tabs on row 0, and their drop-downs.
+    ##
     ## RE-COUNTED ON 2026-09-29 (PLAT-47 part B): 91 → 97. The desktop's Monaco
     ## tokenizers (`syntax/lexical.nim`, `syntax/monarch.nim`,
     ## `syntax/js_regex.nim`, `syntax/json_tokens.nim`), the VCS pane
@@ -241,7 +245,12 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 198
+  ExpectedStyleLiterals = 218
+    ## 2026-09-30 (PLAT-48): +20, all roles — seventeen in the new
+    ## `views/top_bar.nim` (the menu titles and button, the controls, the
+    ## omnibar field and its results, the session tabs, the menu's
+    ## drop-downs) and three in `views/shell.nim` (the auto-hide strips'
+    ## vertical labels and the revealed pane's focused top edge).
     ## 2026-09-29 (PLAT-47 part B): +21, all roles — the eight scopes the
     ## other Monaco tokenizers colour on their own (`source_pane.TokenStyles`),
     ## the VCS pane's styles (`views/vcs_pane.nim`, a new file) and the drop
@@ -300,7 +309,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 29
+  ExpectedStyledFiles = 30
+    ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.
     ## 2026-09-29 (PLAT-47 part B): +2, `views/vcs_pane.nim` and
     ## `views/frame_overlay.nim`.
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.

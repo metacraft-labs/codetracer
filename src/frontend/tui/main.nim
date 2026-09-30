@@ -54,7 +54,7 @@
 ## constructed without a `TerminalCapabilities`, and the paint is a method on
 ## the driver.
 
-import std/os
+import std/[os, strutils]
 
 import ./app/cli
 # `./app/edit_binding` IS DELIBERATELY NOT IMPORTED. It was, until the landing
@@ -80,7 +80,11 @@ import ./host/terminal_driver
 import ./host/terminal_probe
 import ./host/tui_session
 import ./host/vcs_source
+import ./host/control_icons
+import ./host/image_probe
+import ./app/theme/palette
 import ../viewmodel/host/keymap_preference
+import ../viewmodel/host/icons_preference
 
 const
   IdlePollMs = 200
@@ -166,6 +170,64 @@ proc wireEditServices(rt: TuiRuntime; root: string;
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
 
+proc wireTopBar(rt: TuiRuntime) =
+  ## PLAT-48: the top bar's host half, for both loops.
+  ##
+  ##   * the menu is enabled for what this front-end performs and shows the
+  ##     ACTIVE keymap's chords (`runtime.refreshMenuForKeymap`);
+  ##   * the `icons` setting the user chose last time is read back; a stored
+  ##     value that is not a mode is refused by name on the status line;
+  ##   * `:icons` writes it through `saveIconsPreference`;
+  ##   * when nothing was chosen and the environment says Nerd Fonts are in
+  ##     use, the status line SUGGESTS `nerd` — a font cannot be measured
+  ##     from a terminal, so it is never switched on for the user.
+  rt.refreshMenuForKeymap()
+  let stored = loadIconsPreference()
+  case stored.status
+  of iplLoaded:
+    rt.app.icons = stored.mode
+    rt.app.iconsChosen = true
+  of iplRefused:
+    rt.app.notification = stored.message
+  of iplAbsent:
+    rt.app.icons = defaultIconsMode(graphicsDrawn = false)
+    if nerdFontHint(getEnv("NERD_FONT", getEnv("NERDFONT", "")),
+                    getEnv("TERM_PROGRAM", ""), getEnv("KITTY_FONT", "")):
+      rt.app.notification = NerdSuggestion
+  rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
+
+var gIconState: ControlIconState
+  ## What the terminal already holds of the controls' pictures (one terminal
+  ## per process).
+
+type GraphicsProbeState = object
+  ## PLAT-48: the kitty graphics query sent after the first frame, so the
+  ## `icons` default can be `graphics` on a terminal that draws pictures —
+  ## measured, never assumed from `$TERM`. Sent AFTER frame 0 rather than in
+  ## the start-up round, so the cold-start gate pays nothing for it.
+  open: bool
+  deadlineMs: int64
+
+const GraphicsProbeWaitMs = 500'i64
+
+proc startGraphicsProbe(driver: TerminalDriver; rt: TuiRuntime):
+    GraphicsProbeState =
+  ## Ask, unless a multiplexer is in the path (tmux or screen would need a
+  ## passthrough this probe does not negotiate; `image_capability` refuses
+  ## tier 0 there too) or the user already chose a mode that is not
+  ## `graphics`.
+  let env = readImageEnv()
+  if env.tmux.len > 0 or env.sty.len > 0:
+    return
+  if rt.app.iconsChosen and rt.app.icons != imGraphics:
+    return
+  driver.expectReplies(true)
+  writeAll(driver.outFd, ProbeQuery & ProbeFence)
+  GraphicsProbeState(open: true, deadlineMs: nowMs() + GraphicsProbeWaitMs)
+
+proc isGraphicsProbeReply(token: string): bool =
+  token.startsWith("\x1b_Gi=" & $ProbeImageId & ";")
+
 proc startHighlights(rt: TuiRuntime; driver: TerminalDriver): HighlightWorker =
   ## PLAT-29. The Edit pane's parse moves onto a worker thread: the runtime
   ## hands it requests, the driver wakes on its pipe, and `drainHighlights`
@@ -227,9 +289,17 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## and what it costs a reader of the frame barrier.
   let screen = rt.shellScreenOf()
   var epilogue = ""
+  # PLAT-48: the debugger controls as the desktop's marks, placed over the
+  # cells the top bar reserved — only on a terminal measured to draw them.
+  let mode = rt.caps.mode
+  epilogue.add controlIconBytes(gIconState, screen.topBarLayout,
+                                rt.app.controlsEnabledOf(),
+                                RoleColourTable[mode][srChromeText].fgRgb,
+                                RoleColourTable[mode][srChromeMuted].fgRgb)
   let (prompting, row, col) = rt.promptCursor()
   if prompting:
-    epilogue = "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" & ShowCursorBytes
+    epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
+                 ShowCursorBytes
   driver.paint(screen.styledRows,
                prologue = cursorControlBytes(rt.modal.mode),
                epilogue = epilogue,
@@ -347,6 +417,7 @@ proc interactive(command: TuiCommand): int =
   let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
     let listing = listProjectFiles(projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
+  wireTopBar(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -479,9 +550,14 @@ proc interactive(command: TuiCommand): int =
   # opposite precedence and is also deliberate.
   if layoutRestore.status == lrsUnreadable:
     app.notification = layoutRestore.message
+  # The menu's chords and the omnibar's commands, now that the session's
+  # ViewModels exist.
+  rt.refreshMenuForKeymap()
   paint(driver, rt)
+  var graphicsProbe = startGraphicsProbe(driver, rt)
 
   var running = true
+  var frameOwed = false
   while running:
     # §6.2's `--replay-keys`: "replay input events from file and exit". The
     # journal REPLACES the keyboard rather than being merged with it, so a
@@ -502,7 +578,11 @@ proc interactive(command: TuiCommand): int =
       # is gone, and the only correct thing left is to give the tty back.
       running = false
     of dekIdle:
-      negotiation.closeReplyWindow(driver)
+      if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
+        # No answer: the terminal draws no pictures. The default stays.
+        graphicsProbe.open = false
+      if not graphicsProbe.open:
+        negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
       # exactly `editInteractive`'s rule and for §5's reason. A replay session
       # that switched to Edit mode and typed `:build` owns a process, and a
@@ -510,8 +590,10 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
-      if drainHighlights(rt, highlights, files) or built or vcsChanged:
+      if drainHighlights(rt, highlights, files) or built or vcsChanged or
+         frameOwed:
         paint(driver, rt)
+        frameOwed = false
     of dekResize:
       size = ev.size
       rt.resize(size.cols, size.rows)
@@ -523,6 +605,17 @@ proc interactive(command: TuiCommand): int =
       session.refresh(rt)
       paint(driver, rt)
     of dekToken:
+      # PLAT-48: THE ANSWER TO THE GRAPHICS QUERY. `OK` means the terminal
+      # draws pictures: the controls default to the desktop's marks, unless
+      # the user chose otherwise. Never a key, never journalled.
+      if isGraphicsProbeReply(ev.token):
+        graphicsProbe.open = false
+        if ev.token.contains(";OK"):
+          rt.app.graphicsDrawn = true
+          if not rt.app.iconsChosen:
+            rt.app.icons = imGraphics
+          paint(driver, rt)
+        continue
       # PLAT-46: A TERMINAL'S LATE ANSWER TO THE START-UP ROUND IS NOT A KEY.
       # It re-decides the capabilities and repaints; it is never journalled.
       let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
@@ -553,9 +646,20 @@ proc interactive(command: TuiCommand): int =
         # the frames dropped are the ones a terminal could not have shown
         # before they were replaced. `ssh_tuning.WriteCoalescer.maxHeld` is what
         # stops a held key from freezing the screen for as long as it is held.
-        if outcome.repaint and
-           not driver.holdFrame(journal.pendingReplay > 0):
-          paint(driver, rt)
+        #
+        # PLAT-48: A HELD FRAME IS OWED, NOT DROPPED. It was held because the
+        # next token was already waiting — but that token may change nothing
+        # on screen (the release half of a click on a debugger control, a
+        # pointer passing over the body), and a frame held for a token that
+        # repaints nothing was never drawn: the step the click made happened
+        # and the screen kept the old tick. `frameOwed` carries it to the
+        # next token and to the next idle tick.
+        if outcome.repaint or frameOwed:
+          if driver.holdFrame(journal.pendingReplay > 0):
+            frameOwed = true
+          else:
+            paint(driver, rt)
+            frameOwed = false
 
   # THE ARRANGEMENT IS SAVED AGAIN ON THE WAY OUT, AND ONLY IF IT IS THE
   # USER'S. PLAT-45 added the write-through on every committed change (a drag
@@ -669,6 +773,7 @@ proc editInteractive(command: TuiCommand): int =
   # walk happened on the ordinary screen; this hands back its answer.
   let edit = wireEditServices(rt, root, proc(): EditListResult =
     EditListResult(files: listing.files, truncated: listing.truncated))
+  wireTopBar(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)

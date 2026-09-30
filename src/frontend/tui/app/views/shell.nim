@@ -63,12 +63,15 @@ import ./source_pane
 import ./status_bar
 import ./styled_row
 import ./timeline_bar
+import ./top_bar
 import ./tracepoint_manager
 import ./vcs_pane
 import ./frame_overlay
 import ./variables
 
 export header, status_bar, profile, project, source_pane, styled_row
+# PLAT-48: the top bar is painted by this module from a `ShellModel` field.
+export top_bar
 # PLAT-6 moved `tabRow` and `PaneRuleGlyph` to `app/layout/tab_strip.nim`, so
 # the painter and the binding's hit-test read ONE answer about where tab `i`
 # sits. Re-exported here because this module declared both before, and every
@@ -91,6 +94,12 @@ type
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
     ## debugger exists.
     header*: HeaderModel
+    topBar*: TopBarModel
+      ## PLAT-48. Row 0: the program menu, the debugger controls, the
+      ## omnibar, the session tabs, then `header`'s trace and tick and the
+      ## badge (`views/top_bar`). Its menu and omnibar are the shared
+      ## ViewModels the runtime holds; a shell built with none (a Tier-1
+      ## suite's) draws the row with a closed menu button and omnibar icon.
     status*: StatusBarModel
     layout*: LayoutNode
       ## THE SAME TREE THE DESKTOP PERSISTS. Held rather than derived, because
@@ -273,6 +282,11 @@ type
     decorations*: seq[LayoutDecoration]
       ## What was painted over the panes: the strips, and whatever the gesture
       ## in flight asked for. Empty when there is no gesture and nothing docked.
+    topBarLayout*: TopBarLayout
+      ## PLAT-48. Where row 0's parts are, so a click is hit-tested against
+      ## the cells the paint used (`top_bar.topBarHitAt`).
+    menuDropdowns*: seq[MenuDropdown]
+      ## PLAT-48. The open menu's dropdowns, over everything else.
     frameOverlays*: seq[FrameOverlay]
       ## PLAT-47 deliverable 6: what the compositor draws OVER this frame's
       ## cells — a drag's drop tint and insertion caret (re-colouring, never
@@ -884,6 +898,69 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     g.paint(full.row + full.height - 1, full.col,
             repeatGlyph(PaneRuleGlyph, inner), PaneRuleStyle)
 
+proc paintDockStrips*(g: var StyledGrid; geometry: LayoutGeometry) =
+  ## PLAT-48 deliverable 6: every auto-hide strip, the terminal's spelling of
+  ## the desktop's footer. The strip is a run of cells on the tab-strip
+  ## surface; each docked pane's label is a tab on it — the revealed one in
+  ## the active tab's colour and weight, the others in the inactive tier. A
+  ## top or bottom strip's labels read across; a LEFT or RIGHT strip's read
+  ## DOWN, one character per row (a terminal cannot rotate text).
+  for strip in geometry.strips:
+    let a = strip.area
+    if a.isEmptyArea:
+      continue
+    for row in a.row ..< a.row + a.height:
+      g.paint(row, a.col, spaces(a.width), CellStyle(role: srTabBar))
+    g.fillSurface(a.row, a.col, a.width, a.height, srTabBar)
+    for slot in strip.slots:
+      let s = slot.area
+      if s.isEmptyArea:
+        continue
+      let shown = geometry.revealing and geometry.revealPane == slot.pane
+      let role = if shown: srTabActive else: srTabInactive
+      g.fillSurface(s.row, s.col, s.width, s.height, role)
+      if strip.edge in {leTop, leBottom}:
+        g.paint(s.row, s.col, fitCells(" " & slot.title & " ", s.width),
+                CellStyle(role: role, bold: shown))
+      else:
+        var r = s.row
+        for rune in runes(slot.title):
+          if r >= s.row + s.height:
+            break
+          g.paint(r, s.col, fitCells($rune, s.width),
+                  CellStyle(role: role, bold: shown))
+          inc r
+
+proc paintRevealedPane*(g: var StyledGrid; geometry: LayoutGeometry;
+                        model: ShellModel) =
+  ## PLAT-48 deliverable 6: A REVEALED DOCK IS THE DOCKED PANE ITSELF, painted
+  ## over the body against its edge — its title row and its content, by the
+  ## same painter that draws it when it is placed — never a fill glyph, and
+  ## never reflowing the arrangement behind it (the rectangle is an overlay,
+  ## not one of the projection's regions). Its edge toward the body takes
+  ## the focus ring's colour, so where the overlay ends is visible without a
+  ## drawn border.
+  let a = geometry.reveal
+  var title = ""
+  for strip in geometry.strips:
+    for slot in strip.slots:
+      if slot.pane == geometry.revealPane:
+        title = slot.title
+  let region = PaneRegion(pane: geometry.revealPane, title: title, area: a,
+                          tabs: @[], activeTab: -1)
+  # AN OVERLAY REPLACES WHAT IS UNDER IT: the cells are cleared first, so no
+  # glyph of the panes behind shows through the rows the painter leaves
+  # blank. The arrangement behind is not reflowed — it is simply covered.
+  for row in a.row ..< a.row + a.height:
+    g.paint(row, a.col, spaces(a.width), DefaultCellStyle)
+  paintPane(g, region, model, a)
+  g.restyle(a.row, a.col, a.width,
+            proc(s: CellStyle): CellStyle =
+              var r = s
+              if r.role in {srChromeTitle, srBorderPane}:
+                r.role = srBorderFocused
+              r)
+
 proc degradedBanner(status: ProjectionStatus; width: int): string =
   ## What a non-`prOk` projection puts on the first body row. It names the
   ## status, so a screenshot of a degraded run is self-describing.
@@ -953,18 +1030,15 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # and the status line its row below.
   g.fillSurface(0, 0, width, height, srSurfaceCanvas)
   g.fillSurface(0, 0, width, HeaderRows, srSurfaceCard)
-  g.paint(0, 0, headerText(model.header, width))
-  # The session tabs, shaped by role like every other tab strip (PLAT-47).
-  for tab in sessionTabSpans(model.header, width):
-    let w = min(tab.width, width - tab.col)
-    if w > 0:
-      let role = if tab.active: srTabActive else: srTabInactive
-      g.fillSurface(0, tab.col, w, 1, role)
-      g.restyle(0, tab.col, w,
-                proc(s: CellStyle): CellStyle =
-                  var r = s
-                  r.role = role
-                  r)
+  # PLAT-48: ROW 0 IS THE TOP BAR — the menu, the debugger controls, the
+  # omnibar and the session tabs, with the header's trace, tick and badge
+  # where the row leaves room (`views/top_bar`). The session tabs used to be
+  # the header's own strip; they are the top bar's now.
+  var bar = model.topBar
+  bar.header = model.header
+  let barLayout = topBarLayout(bar, width)
+  result.topBarLayout = barLayout
+  paintTopBar(g, bar, barLayout)
 
   for region in projection.regions:
     paintPane(g, region, model, geometry.inner)
@@ -1006,6 +1080,17 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # gesture is in flight, so this call paints nothing on a screen CTUI-3 would
   # have painted and the goldens do not move.
   paintDecorations(g, decorations)
+  # PLAT-48: the dock strips as labels on the tab-strip surface, and a
+  # revealed dock as the docked pane itself, over the body.
+  paintDockStrips(g, geometry)
+  if geometry.revealing and not geometry.reveal.isEmptyArea:
+    paintRevealedPane(g, geometry, model)
+
+  # PLAT-48: the menu's dropdowns and the omnibar's results are over
+  # EVERYTHING — the panes, the dialogs, the strips — as the desktop's are.
+  result.menuDropdowns = menuDropdowns(bar, barLayout, width, height)
+  paintMenuDropdowns(g, result.menuDropdowns)
+  paintOmnibarDropdown(g, bar, barLayout, width, height)
 
   var status = model.status
   if projection.status != prOk and status.notification.len == 0:

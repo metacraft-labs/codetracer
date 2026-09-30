@@ -55,7 +55,7 @@ import ../input/modal_state
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 285
+const ExpectedAssertions = 306
 
 var countedAssertions = 0
 
@@ -80,7 +80,7 @@ const
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 86
+  ExpectedBindingCount = 90
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -91,6 +91,11 @@ const
     ## §4.2 coverage case above is untouched by it, and
     ## `app/tests/test_product_mode_dimensions.nim` is what asserts that
     ## EXACTLY ONE action comes from that third document.
+    ##
+    ## 90 SINCE the session tabs (CodeTracer-TUI.md §3.3.1): FOUR bindings for
+    ## two actions — `g t` / `g T` and `Ctrl+Tab` / `Ctrl+Shift+Tab`.
+    ## `specSectionOf` answers `ssSpec331` for both, and the case below asserts
+    ## that exactly those two come from that section.
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -102,7 +107,7 @@ const
     ("z", "z"), ("n", "n"), ("N", "N"), ("p", "p"), ("s", "s"), ("b", "b"),
     ("f", "f"), ("r", "r"), ("c", "c"), ("o", "o"), ("O", "O"), ("j", "j"),
     ("k", "k"), ("l", "l"), ("h", "h"), ("m", "m"), ("x", "x"), ("q", "q"),
-    ("g", "g"), ("G", "G"), ("t", "t"), ("i", "i"),
+    ("g", "g"), ("G", "G"), ("t", "t"), ("T", "T"), ("i", "i"),
     ("[", "["), ("]", "]"), ("{", "{"), ("}", "}"), (".", "."),
     ("/", "/"), ("?", "?"), (":", ":"), (" ", "Space"),
     ("\r", "Enter"), ("\n", "Enter"), ("\x7f", "Backspace"),
@@ -121,6 +126,11 @@ const
     # ctlseqs document as every row above — the modifier parameter is
     # `1 + (Shift=1 | Alt=2 | Ctrl=4)`, so Ctrl is 5.
     ("\x1b[15;5~", "Ctrl+F5"),
+    # §3.3.1's session tabs. Ctrl+Tab has no legacy encoding (it is `\t`);
+    # xterm sends it with `modifyOtherKeys` as `CSI 27 ; m ; 9 ~` (ctlseqs,
+    # "modifyOtherKeys"), and the `CSI u` convention as `CSI 9 ; m u`.
+    ("\x1b[27;5;9~", "Ctrl+Tab"), ("\x1b[27;6;9~", "Ctrl+Shift+Tab"),
+    ("\x1b[9;5u", "Ctrl+Tab"), ("\x1b[9;6u", "Ctrl+Shift+Tab"),
   ]
 
 # ---------------------------------------------------------------------------
@@ -308,6 +318,22 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       ck km.bindingsOf(a).len > 0
       ck specAction(a) == ""
 
+    # AND §3.3.1's TWO — the session tabs — named the same way.
+    var fromSpec331: seq[string] = @[]
+    for a in KeyAction:
+      if a != kaNone and specSectionOf(a) == ssSpec331:
+        fromSpec331.add $a
+    fromSpec331.sort()
+    checkpoint("§3.3.1-sourced actions: " & fromSpec331.join(", "))
+    ck fromSpec331 == @["next-session-tab", "previous-session-tab"]
+    for a in [kaNextSessionTab, kaPrevSessionTab]:
+      var spellings: seq[string] = @[]
+      for bnd in km.bindingsOf(a):
+        spellings.add bnd.spelling
+      checkpoint("§3.3.1 action " & $a & " bound as " & spellings.join(", "))
+      ck spellings.len == 2
+      ck specAction(a) == ""
+
   test "each §4.2 row's keys are exactly the keys the keymap binds":
     var comparisons = 0
     var wrong: seq[string] = @[]
@@ -422,7 +448,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 63
+    ck decoded == 68
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0
@@ -438,18 +464,23 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     ck unreachable.len == 0
     checkpoint("chords checked: " & $chordsChecked)
     # Every binding contributes one chord, plus one extra for each of the SEVEN
-    # two-chord bindings §4.2 has: `Ctrl+w` h/j/k/l, `rf`, `rc` and `g` `g`.
+    # two-chord bindings §4.2 has: `Ctrl+w` h/j/k/l, `rf`, `rc` and `g` `g` —
+    # and the TWO §3.3.1 adds, `g t` and `g T`: nine.
     var twoChord = 0
     for bnd in km.bindings:
       if bnd.chords.len == 2:
         inc twoChord
-    ck twoChord == 7
+    ck twoChord == 9
     ck chordsChecked == ExpectedBindingCount + twoChord
 
     # …and the decoder REFUSES what is not a key, so "every chord decodes" is
     # not satisfied by a decoder that names everything.
+    # The two modified-key forms decode TAB only: another codepoint, or a
+    # modifier outside xterm's table, is still not a key.
     for junk in ["", "\x1b[<0;12;5M", "\x1b[", "\x1b[99~", "\x1b[1;9P",
-                 "\x1b[15;99~", "\x1bOZ", "\x1b[0;1;2X"]:
+                 "\x1b[15;99~", "\x1bOZ", "\x1b[0;1;2X",
+                 "\x1b[27;5;13~", "\x1b[13;5u", "\x1b[27;99;9~",
+                 "\x1b[9;99u", "\x1b[9u"]:
       checkpoint("must not decode: " & junk.escape())
       ck keyName(junk) == ""
 

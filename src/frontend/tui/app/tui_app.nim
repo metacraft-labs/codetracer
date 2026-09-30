@@ -52,6 +52,8 @@ import isonim_tui
 
 import ./edit_binding
 import ./views/shell
+# PLAT-48: the top bar's shared models come through `codetracer_embed`.
+import headless_app/session_tabs
 import ./views/vcs_pane
 import ./views/point_list
 
@@ -177,6 +179,24 @@ type
     traceName*: string
     tick*: int
     totalTicks*: int
+    menu*: MenuVM
+      ## PLAT-48. The program menu — the shared tree, the shared state.
+    omnibar*: OmnibarVM
+      ## PLAT-48. The omnibar.
+    icons*: IconsMode
+      ## PLAT-48. How the debugger controls are drawn (`:icons`).
+    iconsChosen*: bool
+      ## Whether the user chose `icons` (stored or typed); when not, the
+      ## default follows what the terminal was measured to draw.
+    graphicsDrawn*: bool
+      ## The terminal answered the kitty graphics query: it draws pictures.
+    hoveredControl*: int
+    tabScroll*: int
+    controls*: DebugControlsVM
+      ## The session's transport ViewModel, for which controls are available.
+    filesVM*: FilesystemVM
+    store*: ReplayDataStore
+      ## What the omnibar's index is gathered from (`omnibar_sources`).
       ## §3.1's header fields for a session a HOST opened.
       ##
       ## SEPARATE FROM `shell.activeSlot()`, and that is the point rather than
@@ -194,7 +214,23 @@ proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
   ## `newDebuggerSession` are.
   TuiApp(shell: newHeadlessApp(), title: title,
          highlighting: newHighlighterCache(),
-         modes: initModeRegister())
+         modes: initModeRegister(),
+         menu: newMenuVM(nativeFrontEndMenu("CodeTracer")),
+         omnibar: newOmnibarVM(), icons: imUnicode, hoveredControl: -1)
+
+proc controlsEnabledOf*(app: TuiApp): seq[bool] =
+  ## Per `TransportControls`: whether the session's ViewModel offers it now
+  ## (`debug_controls_vm.transportAvailable`, the desktop toolbar's rule).
+  if app.isNil or app.controls.isNil:
+    return
+  for c in TransportControls:
+    result.add app.controls.transportAvailable(c.id)
+
+proc refreshOmnibarIndex*(app: TuiApp) =
+  ## Rebuild what the omnibar can find from the session's ViewModels.
+  if app.isNil or app.omnibar.isNil:
+    return
+  app.omnibar.setIndex(omnibarIndexOf(app.filesVM, app.store, app.menu))
 
 proc openSession*(app: TuiApp; backend: BackendService;
                   title: string = ""): HeadlessSessionSlot =
@@ -273,6 +309,11 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   let registered = app.modes.activeLayout()
   result = ShellModel(
     header: header,
+    topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
+                        icons: app.icons, graphicsDrawn: app.graphicsDrawn,
+                        controlsEnabled: app.controlsEnabledOf(),
+                        hoveredControl: app.hoveredControl,
+                        tabs: app.shell.tabsOf(), tabScroll: app.tabScroll),
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
                                product = app.modes.product,
@@ -288,7 +329,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
              elif active.isNil: layoutForMode(app.modes.product, selected)
              else: active.layout.tree),
     docked: (if bound: boundLayout.docked
-             elif not registered.isNil or active.isNil: @[]
+             elif not registered.isNil: @[]
+             elif active.isNil: dockedForMode(app.modes.product)
              else: active.layout.docked),
     interaction: (if bound: app.layoutBinding.interaction
                   else: noInteraction()),
@@ -334,7 +376,7 @@ proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   let active = app.shell.activeSlot()
   let seed =
     if active.isNil or active.layout.tree.isNil:
-      initLayout(profileLayout(selected))
+      profileLayoutValue(selected)
     else: active.layout
   app.layoutBinding = newLayoutBinding(seed, selected)
   app.layoutBinding

@@ -36,7 +36,7 @@
 ## wrong and recorded it: with nothing pumping the event, a step is sent, the
 ## engine moves, and every pane keeps reporting the old position forever.
 
-import std/strutils
+import std/[os, strutils, tables]
 
 import codetracer_embed   # PLAT-43: `KeymapModel`, `selectKeymap`
 
@@ -238,6 +238,12 @@ type
       ## shipped binary; nil in a host that does not persist, where nothing
       ## happens. A hook rather than a call, because `app/` may not open a
       ## file.
+    saveIcons*: proc(mode: IconsMode): string {.closure.}
+      ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
+      ## success. Nil in a host that keeps no state.
+    topBarPressConsumed*: bool
+      ## PLAT-48: the top bar (or an open menu / omnibar) took the last
+      ## press, so its release is not a layout gesture.
     layoutDocumentQuarantined*: bool
       ## Whether this session started from a document it could NOT read.
       ##
@@ -503,6 +509,9 @@ proc movesTheDebugger*(action: KeyAction): bool =
      kaValueOrigin, kaReverseOrigin: true
   else: false
 
+proc refreshMenuForKeymap*(rt: TuiRuntime)
+  ## FORWARD-DECLARED for `:keys`; defined with the top bar below.
+
 proc runPromptLine(rt: TuiRuntime; line: string;
                    outcome: var RuntimeOutcome) =
   ## A committed prompt line, through CTUI-10's interpreter.
@@ -519,6 +528,63 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   if line.strip().len == 0:
     rt.note("")
     return
+
+  # PLAT-48's TWO TOP-BAR VERBS, `:icons` and `:keys`. A separate surface
+  # from §4.3 for the reason the layout verbs below give (its sixteen
+  # commands are a published table), and routed in every product mode.
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and words[0] in ["icons", "keys"]:
+      let arg = if words.len > 1: words[1] else: ""
+      if words[0] == "icons":
+        if arg.len == 0:
+          rt.note("icons " & $rt.app.icons & "; the accepted values are " &
+                  iconsModeNames())
+        else:
+          let (ok, mode) = parseIconsMode(arg)
+          if not ok:
+            rt.note("unknown icons value '" & arg &
+                    "'; the accepted values are " & iconsModeNames())
+          else:
+            rt.app.icons = mode
+            rt.app.iconsChosen = true
+            let saved =
+              if rt.saveIcons.isNil: "not remembered: this session keeps " &
+                                     "no state"
+              else: rt.saveIcons(mode)
+            var msg = "icons " & $mode
+            if mode == imGraphics and not rt.app.graphicsDrawn:
+              msg.add " — this terminal did not answer the graphics query, " &
+                      "so the controls are drawn as unicode"
+            if saved.len > 0:
+              msg.add " (" & saved & ")"
+            rt.note(msg)
+      else:
+        # `:keys <file>` layers a `.cttui-keys` file (CTUI-9's user keymap)
+        # over the built-in table; `:keys default` goes back to the table.
+        # The menu's shortcuts and the controls' tooltips follow at once —
+        # they are read from the active keymap, never written beside it.
+        if arg.len == 0 or arg == "default":
+          rt.keymap = defaultKeymap()
+          rt.note("keys: the built-in table")
+        else:
+          if not fileExists(expandTilde(arg)):
+            rt.note("keys: no such file: " & arg)
+            outcome.detail = rt.app.notification
+            return
+          try:
+            let load = loadKeymapFile(defaultKeymap(), expandTilde(arg))
+            rt.keymap = load.keymap
+            rt.note(if load.errors.len == 0: "keys " & arg
+                    else: describeError(load.errors[0]))
+          except CatchableError as e:
+            rt.note("keys: " & arg & ": " & e.msg)
+        rt.refreshMenuForKeymap()
+      outcome.detail = rt.app.notification
+      return
 
   # PLAT-6's TWELVE LAYOUT VERBS, ROUTED HERE AND ONLY WHEN A BINDING IS
   # ENABLED. This is the line that makes a layout gesture reachable from the
@@ -1141,6 +1207,22 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     outcome.quit = true
     outcome.detail = QuitDetail
     true
+  of kaNextSessionTab, kaPrevSessionTab:
+    # CodeTracer-TUI.md §3.3.1: `g t` / `g T` (and `Ctrl+Tab` /
+    # `Ctrl+Shift+Tab` where the terminal reports them) step the session
+    # tabs, wrapping. With one session there is no other tab, and the status
+    # line says so rather than the key doing nothing silently.
+    let delta = if action == kaNextSessionTab: 1 else: -1
+    if rt.app.shell.stepTab(delta):
+      let tabs = rt.app.shell.tabsOf()
+      let at = rt.app.shell.activeTabIndex()
+      rt.note("session " & $(at + 1) & " of " & $tabs.len & ": " &
+              tabs[at].title)
+    else:
+      rt.note("only one session is open; there is no other tab to switch to")
+    outcome.detail = rt.app.notification
+    outcome.repaint = true
+    true
   of kaToggleProductMode:
     # PLAT-16 / Mode-Transitions.md. `Ctrl+F5`.
     #
@@ -1200,6 +1282,429 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
   else:
     false
 
+# ---------------------------------------------------------------------------
+# PLAT-48 — the top bar: the menu, the debugger controls, the omnibar, the
+# session tabs, and the auto-hide strips' key
+# ---------------------------------------------------------------------------
+
+const
+  MenuKey* = "F12"
+    ## Opens the program menu. The desktop's `Ctrl+M` is `Enter` on a
+    ## terminal's wire and `Alt+<letter>` reaches this front-end as the bare
+    ## letter (`host/terminal_driver.feed`), so the menu takes the one free
+    ## function key; it is also a click on `≡` or a folder title.
+  RevealKey* = "Ctrl+o"
+    ## Reveals the next auto-hidden pane (and, after the last, hides again):
+    ## the auto-hide strips' keyboard route beside a click and `:reveal`.
+
+proc transportKeyAction*(id: string): KeyAction =
+  ## The terminal's action for a debugger control (`TransportControls` id).
+  case id
+  of "reverse-next": kaReverseStepOver
+  of "next": kaStepOver
+  of "reverse-step-in": kaReverseStepInto
+  of "step-in": kaStepInto
+  of "reverse-step-out": kaReverseStepOut
+  of "step-out": kaStepOut
+  of "reverse-continue": kaReverseContinue
+  of "continue": kaContinue
+  of "run-to-entry": kaJumpToStart
+  else: kaNone
+
+proc menuKeyAction*(action: string): KeyAction =
+  ## The terminal's key action for a menu item's `ClientAction`, or `kaNone`.
+  case action
+  of "forwardContinue": kaContinue
+  of "reverseContinue": kaReverseContinue
+  of "forwardNext": kaStepOver
+  of "reverseNext": kaReverseStepOver
+  of "forwardStep": kaStepInto
+  of "reverseStep": kaReverseStepInto
+  of "forwardStepOut": kaStepOut
+  of "reverseStepOut": kaReverseStepOut
+  of "aBreakpoint": kaToggleBreakpoint
+  of "aExit": kaQuit
+  else: kaNone
+
+proc menuPaneOf*(action: string): (bool, PaneKind) =
+  ## The pane a View-menu item shows.
+  case action
+  of "aFilesystem": (true, paneFileTree)
+  of "aFullCalltrace": (true, paneCalltrace)
+  of "aState": (true, paneState)
+  of "aEventLog": (true, paneEventLog)
+  of "aTimeline": (true, paneTimeline)
+  of "aTerminal": (true, paneTerminalOutput)
+  of "aScratchpad": (true, paneScratchpad)
+  of "aPointList": (true, panePointList)
+  of "aAgentActivity": (true, paneAgentActivity)
+  else: (false, paneEditor)
+
+proc menuPromptLine*(action: string): string =
+  ## The `:` line a menu item is, for the items that are one.
+  case action
+  of "aResetLayout": ":reset-layout"
+  of "aTheme3": ":theme dark"
+  of "aTheme1": ":theme light"
+  else: ""
+
+proc menuOmnibarQuery*(action: string): (bool, string) =
+  case action
+  of "findSymbol": (true, ":sym ")
+  of "findInFiles": (true, ":grep ")
+  else: (false, "")
+
+proc menuActionAvailable*(action: string): bool =
+  ## Whether the terminal performs a menu item. The rest are drawn DISABLED,
+  ## not dropped, so every front-end shows the same menu.
+  menuKeyAction(action) != kaNone or menuPaneOf(action)[0] or
+    menuPromptLine(action).len > 0 or menuOmnibarQuery(action)[0]
+
+proc chordOf*(rt: TuiRuntime; action: KeyAction): string =
+  ## The ACTIVE keymap's first NORMAL-mode binding for `action`, as §4.2
+  ## spells it — what the menu and a control's tooltip display.
+  if action == kaNone:
+    return ""
+  for bnd in rt.keymap.bindingsOf(action):
+    if bnd.mode == mmNormal:
+      return bnd.spelling
+  ""
+
+proc refreshMenuForKeymap*(rt: TuiRuntime) =
+  ## Enable the items the terminal performs and show the ACTIVE keymap's
+  ## chords beside them. Run at start-up and after every keymap switch.
+  var chords = initTable[string, string]()
+  for (_, it) in rt.app.menu.root.actionItems():
+    let chord = rt.chordOf(menuKeyAction(it.action))
+    if chord.len > 0:
+      chords[it.action] = chord
+  let (hasPalette, _) = menuOmnibarQuery("findSymbol")
+  if hasPalette:
+    let chord = rt.chordOf(kaCommandPalette)
+    if chord.len > 0:
+      chords["findSymbol"] = chord
+  rt.app.menu.setEnabled(menuActionAvailable)
+  rt.app.menu.setShortcuts(chords)
+  rt.app.refreshOmnibarIndex()
+
+proc performAction(rt: TuiRuntime; action: KeyAction;
+                   outcome: var RuntimeOutcome) =
+  ## One resolved action, end to end: its product-mode scope, its modal
+  ## transition, a local answer, or the dispatcher — the path a key takes
+  ## once `keymap.resolve` named its action, shared by the menu, the
+  ## debugger controls and the omnibar so a click and a key cannot differ.
+  outcome.action = action
+  if not appliesIn(action, rt.app.modes.product):
+    outcome.detail = inertReason(action, rt.app.modes.product)
+    rt.note(outcome.detail)
+    outcome.repaint = true
+    return
+  let (known, ev) = modalEventFor(action)
+  if known:
+    let transition = rt.modal.applyModalEvent(ev)
+    if not transition.accepted:
+      rt.note(describeTransition(transition))
+      outcome.repaint = true
+      return
+  if rt.applyLocalAction(action, outcome):
+    return
+  let dispatch = dispatchAction(rt.dispatcher, rt.context, action)
+  outcome.detail = dispatch.detail
+  rt.note(dispatch.detail)
+  outcome.repaint = true
+  if dispatch.status == drDone and movesTheDebugger(action):
+    outcome.awaitsMove = true
+  if dispatch.status == drDone and changesSessionState(action):
+    outcome.refreshesSession = true
+
+proc shellScreenOf*(rt: TuiRuntime): ShellScreen
+  ## FORWARD-DECLARED for the top bar's hit-testing, which reads the cells
+  ## the next frame is painted with; defined with the other screen readers.
+
+proc omnibarHit(rt: TuiRuntime; screen: ShellScreen;
+                event: MouseEvent): (bool, int) =
+  var bar = rt.app.shellModel(rt.width, rt.height).topBar
+  bar.header = rt.app.shellModel(rt.width, rt.height).header
+  omnibarHitAt(bar, screen.topBarLayout, rt.width, rt.height, event.row,
+               event.col)
+
+proc openOmnibar*(rt: TuiRuntime; query = "") =
+  if rt.app.menu.isOpen:
+    rt.app.menu.close()
+  rt.app.refreshOmnibarIndex()
+  rt.app.omnibar.open(query)
+  rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
+
+proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
+  ## A View-menu item: bring `pane` forward — reveal it when it is docked,
+  ## activate its tab and focus it when it is placed.
+  if not rt.layoutBindingEnabled():
+    rt.note($pane & ": the layout is not rearrangeable in this session")
+    return
+  let b = rt.app.layoutBinding
+  if b.layout.dockedIndex(pane) >= 0:
+    let acted = b.beginRevealDock(pane)
+    rt.note(acted.message)
+  elif b.layout.tree.contains(pane):
+    let acted = b.dispatch(cmdActivateTab(pane))
+    if acted.status == lasApplied:
+      rt.afterLayoutCommit()
+    rt.rebuildFocus()
+    discard rt.focus.focusPaneKind(pane)
+    b.focus = pane
+    rt.note("focus " & $pane)
+  else:
+    rt.note($pane & " is not in this arrangement")
+  outcome.repaint = true
+
+proc runMenuAction*(rt: TuiRuntime; action: string;
+                    outcome: var RuntimeOutcome) =
+  ## A chosen menu item (or omnibar command), in the terminal's terms.
+  let ka = menuKeyAction(action)
+  if ka != kaNone:
+    rt.performAction(ka, outcome)
+    return
+  let (isPane, pane) = menuPaneOf(action)
+  if isPane:
+    rt.showPane(pane, outcome)
+    return
+  let line = menuPromptLine(action)
+  if line.len > 0:
+    rt.runPromptLine(line, outcome)
+    if outcome.action != kaNone:
+      discard rt.applyLocalAction(outcome.action, outcome)
+    outcome.repaint = true
+    return
+  let (isOmni, query) = menuOmnibarQuery(action)
+  if isOmni:
+    rt.openOmnibar(query)
+    outcome.repaint = true
+    return
+  rt.note(action & " is not available in the terminal")
+  outcome.repaint = true
+
+proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `Enter` in the omnibar: act on the chosen entry. A tick and a symbol go
+  ## to that point in time (`:goto`), a command runs its menu item, a file is
+  ## selected in the Files pane (the debugger's source pane shows where the
+  ## recording is; in Edit mode it is opened).
+  let (ok, entry) = rt.app.omnibar.accept()
+  outcome.repaint = true
+  if not ok:
+    rt.note("nothing matches")
+    return
+  case entry.kind
+  of omTick, omSymbol:
+    if entry.target.len == 0:
+      rt.note(entry.label & " has no tick to go to")
+      return
+    rt.runPromptLine(":goto " & entry.target, outcome)
+  of omCommand:
+    rt.runMenuAction(entry.target, outcome)
+  of omFile:
+    if rt.app.modes.product == pmEdit:
+      rt.runPromptLine(":e " & entry.target, outcome)
+    else:
+      rt.app.fileTree.openPath = entry.target
+      rt.note("file " & entry.target)
+  else:
+    rt.note(entry.label)
+
+proc handleOmnibarKey(rt: TuiRuntime; token: string;
+                      outcome: var RuntimeOutcome) =
+  ## Every key while the omnibar is open belongs to it.
+  let name = keyName(token)
+  outcome.repaint = true
+  case name
+  of "Esc":
+    rt.app.omnibar.close()
+    rt.note("")
+  of "Enter":
+    rt.acceptOmnibar(outcome)
+  of "Up": rt.app.omnibar.moveSelection(-1)
+  of "Down": rt.app.omnibar.moveSelection(1)
+  of "Backspace": rt.app.omnibar.backspace()
+  else:
+    if isTextKey(name):
+      rt.app.omnibar.typeText(keyCharacter(name))
+    else:
+      outcome.repaint = false
+
+proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
+                   outcome: var RuntimeOutcome) =
+  ## Every key while the menu is open belongs to it. Which key is which
+  ## ViewModel operation is this medium's: on the menu BAR (the folder titles
+  ## drawn across the row, nothing entered) `Left`/`Right` move between
+  ## titles and `Down` opens one; in a dropdown `Up`/`Down` move, `Right`
+  ## enters a folder or — on an item — moves to the next title, `Left` backs
+  ## out or moves to the previous title.
+  let vm = rt.app.menu
+  let name = keyName(token)
+  let bar = shellScreenOf(rt).topBarLayout.menuExpanded
+  outcome.repaint = true
+  case name
+  of "Esc": vm.escape()
+  of MenuKey: vm.close()
+  of "Enter":
+    let act = vm.activate()
+    if act.ran:
+      rt.runMenuAction(act.action, outcome)
+  of "Up":
+    if bar and vm.path.len == 0: discard
+    else: vm.moveHighlight(-1)
+  of "Down":
+    if bar and vm.path.len == 0: discard vm.enterFolder()
+    else: vm.moveHighlight(1)
+  of "Right":
+    if bar and vm.path.len == 0: vm.moveHighlight(1)
+    elif not vm.enterFolder() and bar: vm.siblingMenu(1)
+  of "Left":
+    if bar and vm.path.len == 0: vm.moveHighlight(-1)
+    elif bar and vm.path.len == 1: vm.siblingMenu(-1)
+    else: discard vm.leaveFolder()
+  else:
+    if isTextKey(name):
+      vm.typeToSelect(keyCharacter(name), nowMs)
+    else:
+      outcome.repaint = false
+  if not vm.isOpen:
+    rt.note(if outcome.detail.len > 0: outcome.detail else: rt.app.notification)
+
+proc cycleReveal(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `Ctrl+o`: reveal the first docked pane, then the next; after the last,
+  ## hide. The strips' key.
+  outcome.repaint = true
+  if not rt.layoutBindingEnabled():
+    rt.note("no pane is docked")
+    return
+  let b = rt.app.layoutBinding
+  let docked = b.layout.docked
+  if docked.len == 0:
+    rt.note("no pane is docked")
+    return
+  var next = 0
+  if b.interaction.kind == ikRevealingDock:
+    for i, d in docked:
+      if d.pane == b.interaction.pane:
+        next = i + 1
+  if next >= docked.len:
+    discard b.cancelGesture()
+    rt.note("hid the auto-hide pane")
+    return
+  rt.note(b.beginRevealDock(docked[next].pane).message)
+
+proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
+                      outcome: var RuntimeOutcome): bool =
+  ## PLAT-48: a mouse report the top bar, an open menu or an open omnibar
+  ## takes. Answers whether it was taken (the layout binding never sees it).
+  ##
+  ##   * the pointer passing over the row (no button, `?1003`): the control
+  ##     under it shows its tooltip and key on the status line;
+  ##   * with the menu open, a press in a dropdown clicks the item (a folder
+  ##     opens, an item runs); a press outside the menu closes it;
+  ##   * with the omnibar open, a press on a result chooses it; outside, it
+  ##     closes;
+  ##   * a press on the row: `≡` / a folder title opens the menu, a control
+  ##     runs its action, the omnibar opens, a tab is activated.
+  let screen = shellScreenOf(rt)
+  let lay = screen.topBarLayout
+  let vm = rt.app.menu
+  if event.kind == mekRelease:
+    if rt.topBarPressConsumed:
+      rt.topBarPressConsumed = false
+      return true
+    return false
+  if event.kind == mekMotion:
+    if event.button == mbLeft:
+      return false   # a drag: the binding's
+    # Hover: the row's controls, and the open menu's items.
+    var hovered = -1
+    if event.row == 0:
+      let hit = lay.topBarHitAt(event.col)
+      if hit.kind == thControl:
+        hovered = hit.index
+    if vm.isOpen:
+      let (inside, path) = menuHitAt(screen.menuDropdowns, event.row,
+                                     event.col)
+      if inside and path.len > 0:
+        let before = vm.revision
+        vm.hoverPath(path)
+        if vm.revision != before:
+          outcome.repaint = true
+    if hovered != rt.app.hoveredControl:
+      rt.app.hoveredControl = hovered
+      if hovered >= 0:
+        let c = TransportControls[hovered]
+        rt.note(tooltipFor(c, rt.chordOf(transportKeyAction(c.id))))
+      outcome.repaint = true
+    return true
+  if event.kind != mekPress or event.button != mbLeft:
+    return vm.isOpen or rt.app.omnibar.isOpen or event.row == 0
+  # A left press.
+  if vm.isOpen:
+    let (inside, path) = menuHitAt(screen.menuDropdowns, event.row, event.col)
+    if inside:
+      rt.topBarPressConsumed = true
+      outcome.repaint = true
+      if path.len > 0:
+        let act = vm.clickPath(path)
+        if act.ran:
+          rt.runMenuAction(act.action, outcome)
+      return true
+    if event.row != 0:
+      vm.close()
+      rt.topBarPressConsumed = true
+      outcome.repaint = true
+      return true
+  if rt.app.omnibar.isOpen:
+    let (inside, index) = rt.omnibarHit(screen, event)
+    if inside:
+      rt.topBarPressConsumed = true
+      outcome.repaint = true
+      if index >= 0:
+        rt.app.omnibar.select(index)
+        rt.acceptOmnibar(outcome)
+      return true
+    if event.row != 0 or lay.topBarHitAt(event.col).kind != thOmnibar:
+      rt.app.omnibar.close()
+      if event.row != 0:
+        rt.topBarPressConsumed = true
+        outcome.repaint = true
+        return true
+  if event.row != 0:
+    return false
+  rt.topBarPressConsumed = true
+  outcome.repaint = true
+  let hit = lay.topBarHitAt(event.col)
+  case hit.kind
+  of thMenuButton:
+    if vm.isOpen: vm.close() else: vm.open(keyboard = false)
+  of thMenuTitle:
+    if vm.isOpen and vm.path.len > 0 and vm.path[0] == hit.index:
+      vm.close()
+    else:
+      vm.openFolder(hit.index, keyboard = false)
+  of thControl:
+    let c = TransportControls[hit.index]
+    let ka = transportKeyAction(c.id)
+    let enabled = hit.index < rt.app.controlsEnabledOf().len and
+                  rt.app.controlsEnabledOf()[hit.index]
+    if not enabled:
+      rt.note(c.label & " is not available here")
+    else:
+      rt.performAction(ka, outcome)
+  of thOmnibar:
+    if not rt.app.omnibar.isOpen:
+      rt.openOmnibar()
+  of thTab:
+    if rt.app.shell.activateTab(hit.index):
+      rt.note("session " & $hit.index)
+  of thTabMore:
+    rt.app.tabScroll = max(0, rt.app.tabScroll + hit.index)
+  of thNone:
+    discard
+  true
+
 proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ## ONE input token, end to end.
   ##
@@ -1234,6 +1739,17 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # predicate on a nil field and the token takes exactly the path it has always
   # taken: `keyName` answers "" for a mouse report and `keymap.resolve` reports
   # `krNone`, which is why a mouse has been inert in this front-end until now.
+  # PLAT-48: THE TOP BAR, AN OPEN MENU AND AN OPEN OMNIBAR TAKE THE MOUSE
+  # FIRST — a press on row 0 or in a dropdown is never a layout gesture —
+  # and the pointer merely passing over the screen (`?1003` motion, no
+  # button) is theirs or nobody's: it never repaints a frame for nothing.
+  block:
+    let (isMouse, event) = decodeMouse(token)
+    if isMouse:
+      if rt.routeTopBarMouse(event, result):
+        return
+      if event.kind == mekMotion and event.button != mbLeft:
+        return
   if rt.layoutBindingEnabled():
     let (isMouse, event) = decodeMouse(token)
     if isMouse:
@@ -1243,9 +1759,11 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     # ghost go, a held divider snaps back, and nothing is committed (`cancel`
     # takes no layout). Only when one is in flight: otherwise `Esc` is the
     # mode key it has always been.
-    if token == "\x1b" and
+    if token == "\x1b" and not rt.app.menu.isOpen and
+        not rt.app.omnibar.isOpen and
         rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
-                                                  ikResizingSplit}:
+                                                  ikResizingSplit,
+                                                  ikRevealingDock}:
       let cancelled = rt.app.layoutBinding.cancelGesture()
       rt.note(cancelled.message)
       result.detail = cancelled.message
@@ -1285,6 +1803,26 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         # no message at all.
         result.repaint = true
       return
+
+  # PLAT-48: AN OPEN OMNIBAR, THEN AN OPEN MENU, OWN EVERY KEY — the text
+  # field and the menu are modal, as the desktop's are.
+  if rt.app.omnibar.isOpen:
+    rt.handleOmnibarKey(token, result)
+    return
+  if rt.app.menu.isOpen:
+    rt.handleMenuKey(token, nowMs, result)
+    return
+  case keyName(token)
+  of MenuKey:
+    rt.app.menu.open(keyboard = true)
+    rt.note("menu: arrows to move, Enter to choose, Esc to close")
+    result.repaint = true
+    return
+  of RevealKey:
+    rt.cycleReveal(result)
+    return
+  else:
+    discard
 
   # PLAT-16, STEP 1a: THE EDITOR OWNS ITS OWN KEYS, and it owns them by FOCUS
   # rather than by a fifth input mode.
@@ -1359,26 +1897,15 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   of krAction:
     discard
 
-  result.action = resolution.action
-  let (known, ev) = modalEventFor(resolution.action)
-  if known:
-    let transition = rt.modal.applyModalEvent(ev)
-    if not transition.accepted:
-      rt.note(describeTransition(transition))
-      result.repaint = true
-      return
-
-  if rt.applyLocalAction(resolution.action, result):
+  # PLAT-48: §4.2's `Ctrl+p` / `F1` "Fuzzy Command Palette" IS THE OMNIBAR —
+  # the desktop's palette is its omnibar, and one model draws both.
+  if resolution.action == kaCommandPalette:
+    result.action = kaCommandPalette
+    rt.openOmnibar()
+    result.repaint = true
     return
 
-  let dispatch = dispatchAction(rt.dispatcher, rt.context, resolution.action)
-  result.detail = dispatch.detail
-  rt.note(dispatch.detail)
-  result.repaint = true
-  if dispatch.status == drDone and movesTheDebugger(resolution.action):
-    result.awaitsMove = true
-  if dispatch.status == drDone and changesSessionState(resolution.action):
-    result.refreshesSession = true
+  rt.performAction(resolution.action, result)
 
 # ---------------------------------------------------------------------------
 # The screen
