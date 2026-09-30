@@ -2988,18 +2988,21 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     enforceMinStackWidth(layout)
 
     # check if only one tab is left and prevent user from close/drag it
-    let mainContainer = data.ui.layout.groundItem.contentItems[0]
-    if mainContainer.contentItems.len == 1 and
-      mainContainer.contentItems[0].isStack and
-      mainContainer.contentItems[0].contentItems.len == 1 and
-      mainContainer.contentItems[0].contentItems[0].isComponent:
-      mainContainer.contentItems[0].contentItems[0]
-        .tab.element.style.pointerEvents = cstring"none"
-    else:
-      let tabElements = jqAll(".lm_tab")
-      for element in tabElements:
-        element.style.pointerEvents = cstring"auto"
-
+    # groundItem.contentItems can be empty during loadLayout/swapLayout
+    # (GL2 defers stateChanged via rAF, so it can fire after the old tree
+    # is destroyed but before the new one is built).
+    if data.ui.layout.groundItem.contentItems.len > 0:
+      let mainContainer = data.ui.layout.groundItem.contentItems[0]
+      if mainContainer.contentItems.len == 1 and
+        mainContainer.contentItems[0].isStack and
+        mainContainer.contentItems[0].contentItems.len == 1 and
+        mainContainer.contentItems[0].contentItems[0].isComponent:
+        mainContainer.contentItems[0].contentItems[0]
+          .tab.element.style.pointerEvents = cstring"none"
+      else:
+        let tabElements = jqAll(".lm_tab")
+        for element in tabElements:
+          element.style.pointerEvents = cstring"auto"
     if not data.ui.layout.isNil and data.ui.saveLayout:
       data.ui.resolvedConfig = data.ui.layout.saveLayout()
       data.saveConfig(data.ui.layoutConfig.fromResolved(data.ui.resolvedConfig))

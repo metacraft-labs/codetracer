@@ -32,7 +32,7 @@
 ## a real filesystem, the discovery path is the real `findCtFileInFolder`, and
 ## the process really is spawned and really does exit 0.
 
-import std/[os, osproc, unittest]
+import std/[os, osproc, strutils, unittest]
 import results
 import codetracer_ctfs/container
 import codetracer_ctfs/base40
@@ -87,6 +87,22 @@ proc writeContainer(path: string, members: openArray[(string, string)]) =
     doAssert wRes.isOk, "writeToFile " & name & " failed: " & wRes.error
   let saveRes = c.writeCtfsToFile(path)
   doAssert saveRes.isOk, "writeCtfsToFile failed: " & saveRes.error
+
+proc writeWideContainer(path: string, count: int, skip = -1) =
+  ## A real container declaring `count` root entries — more than block 0's 170
+  ## when `count` > 170, so its entry array continues into the blocks after
+  ## block 0 (`ctfs-container.md` §1) — holding members `w0.bin` ..
+  ## `w<count-1>.bin`, minus `skip`.  This is the shape of a recording that
+  ## takes periodic checkpoints (three members per checkpoint).
+  var c = createCtfs(BlockSize, uint32(count))
+  for i in 0 ..< count:
+    if i == skip: continue
+    let name = "w" & $i & ".bin"
+    let fRes = c.addFile(name)
+    doAssert fRes.isOk, "addFile " & name & " failed: " & fRes.error
+    var f = fRes.get()
+    doAssert c.writeToFile(f, [byte(i and 0xFF), byte(i shr 8)]).isOk
+  doAssert c.writeCtfsToFile(path).isOk
 
 proc writeStubExporter(dir: string, body: string): string =
   ## A stand-in for `ct-mcr`, installed through the module's own
@@ -285,3 +301,38 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
 
     check not enriched
     check memberNames(ctPath).len == before.len
+
+suite "MCR Enrichment — a root directory larger than block 0":
+  # `readCtfsRootDir` used to clamp the entry count to block 0, so a recording
+  # with more than 170 members was compared on its first 170 only: an export
+  # that dropped any later member was accepted and moved over the user's
+  # original.  These use `exportKeptEveryMember` directly — the decision's
+  # own comparison — over real overflowed containers.
+
+  setup:
+    let wideDir = getTempDir() / "test_mcr_enrich_wide_root"
+    removeDir(wideDir)
+    createDir(wideDir)
+
+  teardown:
+    removeDir(wideDir)
+
+  test "an export that drops a member whose entry is past block 0 is refused":
+    let original = wideDir / "orig.ct"
+    let lossy = wideDir / "lossy.ct"
+    writeWideContainer(original, 200)
+    writeWideContainer(lossy, 200, skip = 190)
+    # The control on the fixture: entry 190 really is past block 0.
+    check HeaderSize + ExtHeaderSize + 190 * FileEntrySize >= int(BlockSize)
+    let (ok, reason) = exportKeptEveryMember(original, lossy)
+    check not ok
+    check "w190.bin" in reason
+
+  test "a faithful export of a wide recording is accepted":
+    let original = wideDir / "orig2.ct"
+    let faithful = wideDir / "faithful.ct"
+    writeWideContainer(original, 200)
+    writeWideContainer(faithful, 200)
+    let (ok, reason) = exportKeptEveryMember(original, faithful)
+    check ok
+    check reason == ""

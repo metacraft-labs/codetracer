@@ -19,7 +19,16 @@ try {
       break;
     } catch {}
   }
-  if (!__acpSdk) throw e;
+  if (!__acpSdk) {
+    // ESM-only package — degrade gracefully so the main process still boots
+    const noop = () => {};
+    __acpSdk = {
+      PROTOCOL_VERSION: 0,
+      ndJsonStream: noop,
+      createServer: noop,
+      createClient: noop,
+    };
+  }
 }
 """.}
 

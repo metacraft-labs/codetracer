@@ -842,6 +842,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # the GPUI window's remembered layouts are other files and are not
           # touched.
           element "Reset Layout", aResetLayout
+          element "Shell", aShell
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -865,11 +866,10 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # (Notifications is live, above, beside the other View entries.)
           # element "Start Window", aStartWindow, false
           # element "Full Screen Toggle", aFullScreen, false
-          # folder "Choose App Theme":
-            # element "Mac Classic Theme", aTheme0
-            # element "Default White Theme", aTheme1
-            # element "Default Black Theme", aTheme2
-            # element "Default Dark Theme", aTheme3
+          --sub
+          folder "Theme":
+            element "Default Dark Theme", aTheme3
+            element "Default White Theme", aTheme1
           # folder "Choose Monaco Theme":
             # element "vs-light", aMonacoTheme0, false
             # element "etc",

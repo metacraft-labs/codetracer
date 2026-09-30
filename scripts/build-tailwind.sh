@@ -22,6 +22,30 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Resolve node from the cached codetracer dev-shell profile when it is not
+# already on PATH.  build-once.sh may be invoked outside a nix-develop /
+# direnv shell; the .direnv/flake-profile-*.rc file records the exact PATH
+# the dev shell uses, including the nodejs bin directory.
+if ! command -v node >/dev/null 2>&1; then
+	for _direnv_rc in "$CT_ROOT/.direnv"/flake-profile-*.rc; do
+		if [ ! -f "$_direnv_rc" ]; then
+			continue
+		fi
+		# Match the non-dev nodejs bin dir (e.g. nodejs-22.x/bin, not nodejs-22.x-dev/bin).
+		_node_dir="$(grep -o '/nix/store/[^:]*-nodejs-[0-9][^/]*/bin' "$_direnv_rc" |
+			grep -v -- '-dev/' | head -1)"
+		if [ -n "$_node_dir" ] && [ -x "$_node_dir/node" ]; then
+			export PATH="$_node_dir:$PATH"
+			break
+		fi
+	done
+	if ! command -v node >/dev/null 2>&1; then
+		echo "Error: node not found on PATH and could not be resolved from .direnv/flake-profile-*.rc." >&2
+		echo "Run inside the codetracer dev shell (direnv allow, or nix develop) and retry." >&2
+		exit 1
+	fi
+fi
+
 isonim_root=""
 if [ -n "${ISONIM_SRC:-}" ]; then
 	isonim_candidate="$(cd "$ISONIM_SRC/.." && pwd)"
