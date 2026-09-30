@@ -32,7 +32,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | the shared default docks the desktop's footer panels, in every front-end | SD1 (REQUESTS dropped), SD2 (the terminal's default without them), DM2 (the unbound terminal without them) |
   | the reveal is an overlay of the pane itself, where the strip is | RV1 (the bottom reveal at the top), RV2 (the pane not painted) |
   | a side strip's label reads down, one character per row | VL1 (every character on one row), VL2 (a one-row slot) |
-  | pin / unpin round-trip to where the pane was | PN1 (the anchor forgotten), DO1 (a redock to a populated edge collides) |
+  | pin / unpin round-trip to where the pane was | PN1 (the anchor forgotten), PN2 (a stack's first tab comes back last), DO1 (a redock to a populated edge collides) |
   | the terminal's menu: the keymap's chords, the bar's keys | TM1 (no chord shown), TM2 (Right walks left) |
   | the top bar acts on the recording | TO1 (a tick query goes to tick 0), TC1 (a control click does nothing), TF1 (the frame after a click never drawn), DR1 (a queued mouse report split into keys) |
   | GPUI: the top dock edge, the popovers, the desktop keymap | GT1 (top dock refused), GT2 (the top strip misplaced), GT3 (the top margin not a dock zone), GM1 (a nested popover over its parent), GK1 (no bindings read) |
@@ -190,6 +190,7 @@ T_LEFT = ("a left-docked pane's label reads top to bottom, one character per "
           "row")
 T_REVEAL = ("Ctrl+o reveals the docked pane ITSELF over the body, Esc restores "
             "every cell")
+T_PIN = "pin / unpin round-trip through the saved document"
 T_MARKS = ("each control is the desktop's mark, transmitted once and placed "
            "on its cells")
 P_TICK = ("Ctrl+p, a tick, Enter: the debugger is there; a :sym query lists "
@@ -225,7 +226,7 @@ CASE_SUITE = {
     C_MODES: VMU, C_RANKED: VMU, C_NERD: VMU, C_FOUR: VMU, C_DEFAULT: VMU,
     C_PRIORITY: VMU, C_FOOTER: VMU, C_TABS: VMU, C_SQUARE: VMU,
     T_NARROW: T1, T_GLYPHS: T1, T_F12: T1, T_REBIND: T1, T_COMMAND: T1,
-    T_STRIP: T1, T_LEFT: T1, T_REVEAL: T1, T_MARKS: T1,
+    T_STRIP: T1, T_LEFT: T1, T_REVEAL: T1, T_MARKS: T1, T_PIN: T1,
     P_TICK: PTY, P_CLICK: PTY,
     G_TOP: GTB, G_POPOVER: GTB, G_BINDINGS: GTB, G_TABKEYS: GTB,
     G_PINSHOWN: GTB, T_TABKEYS: T1,
@@ -405,13 +406,18 @@ ARMS = [
         "character"),
     # --- pin / unpin -------------------------------------------------------------------
     Arm("PN1", LAYOUTMODEL,
-        "        elif entry.beside.isSome and tree.contains(entry.beside.get):\n"
-        "          entry.beside\n",
-        "        elif false:\n"
-        "          entry.beside\n",
+        "                       entry.beside.isSome and tree.contains(entry.beside.get)\n",
+        "                       false\n",
         B_VERBS,
         "unpin forgets where the pane was pinned from and appends it to the "
         "root"),
+    Arm("PN2", LAYOUTMODEL,
+        "                          before = remembered and entry.besideBefore):\n",
+        "                          before = false):\n",
+        T_PIN,
+        "unpin puts a stack's FIRST tab back behind the tab that followed it "
+        "(Call Trace | Agent Activity came back as Agent Activity | Call "
+        "Trace)"),
     Arm("DO1", LAYOUTMODEL,
         "          else: maxOrderAt(next, cmd.autoHideEdge) + 1\n",
         "          else: d.order\n",
