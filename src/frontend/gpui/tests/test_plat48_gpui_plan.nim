@@ -350,13 +350,14 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for s in back.nodesWith("data-ct-dock-slot"):
       slots.add s.attr("data-ct-dock-slot")
     ck $paneState notin slots
-    # Back in a pane box (a stack whose active tab it may not be): its tab
-    # is drawn in the tree again, beside Scratchpad as in the shared default.
-    var together = false
+    # Back in its own stack, AT ITS OWN PLACE: the shared default's
+    # "State | Scratchpad", not "Scratchpad | State" (State is the first
+    # tab, so it goes back in front of the tab that followed it).
+    var tabs: seq[string] = @[]
     for t in back.nodesWith("data-ct-tabs"):
       let labels = t.attr("data-ct-tabs").split(',')
-      if "State" in labels and "Scratchpad" in labels: together = true
-    ck together
+      if "Scratchpad" in labels: tabs = labels
+    ck tabs == @["State", "Scratchpad"]
 
   test "every assertion ran":
     echo "CHECKS: " & $CHECKS

@@ -321,10 +321,11 @@ suite "Interaction — separate from Layout, structurally (§4.1)":
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders either.
     # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
-    # PLAT-48 added `DockedPane.beside` (the pane it was docked from) and
-    # `DockedPane.weight` (its share there), so the docked pane's is 7 —
-    # where it goes back to, never where it is drawn.
-    check checkedFields == 7 + 7 + 3
+    # PLAT-48 added `DockedPane.beside` (the pane it was docked from),
+    # `DockedPane.weight` (its share there) and `DockedPane.besideBefore`
+    # (which side of `beside`), so the docked pane's is 8 — where it goes
+    # back to, never where it is drawn.
+    check checkedFields == 7 + 8 + 3
 
   test "layout_model names none of the transient types, and cannot":
     # `layout_interaction` imports `layout_model`; the reverse import is a

@@ -375,6 +375,13 @@ type
       ## PLAT-48: the share the pane had in its container when it was docked,
       ## given back on restore (0 — the neutral share — when it had none).
       ## Persisted (`"weight"`) when positive.
+    besideBefore*: bool
+      ## PLAT-48: the pane goes back BEFORE `beside` rather than after it —
+      ## true when `beside` was its NEXT sibling, i.e. the pane was the first
+      ## of its container. Without it a pane pinned from the front of a stack
+      ## came back behind the pane that had followed it (Call Trace | Agent
+      ## Activity became Agent Activity | Call Trace). Persisted
+      ## (`"besideBefore": true`) only when set.
 
   Layout* = object
     ## The persisted unit: a tree, the panes docked beside it, and a version.
@@ -1262,6 +1269,26 @@ proc indexIn(parent: LayoutNode; child: LayoutNode): int =
       return i
   -1
 
+proc pinPlaceOf*(layout: Layout; pane: PaneKind):
+    tuple[beside: Option[PaneKind], before: bool] =
+  ## `pinAnchorOf`, and on which side of it the pane sat: `before` is true
+  ## when the anchor is the pane's NEXT sibling (the pane was first in its
+  ## container), so the restore goes in front of it, where the pane was.
+  let leaf = find(layout.tree, pane)
+  let parent = parentOf(layout.tree, leaf)
+  if leaf.isNil or parent.isNil:
+    return (none(PaneKind), false)
+  let at = indexIn(parent, leaf)
+  for i in countdown(at - 1, 0):
+    let c = parent.children[i]
+    if c.kind == lnPane and not c.isContributed:
+      return (some(c.pane), false)
+  for i in at + 1 ..< parent.children.len:
+    let c = parent.children[i]
+    if c.kind == lnPane and not c.isContributed:
+      return (some(c.pane), true)
+  (none(PaneKind), false)
+
 proc pinAnchorOf*(layout: Layout; pane: PaneKind): Option[PaneKind] =
   ## PLAT-48: the pane `pane` should come back BESIDE when it is unpinned —
   ## read BEFORE the pin (`cmdDock`) takes it out of the tree, and handed to
@@ -1269,22 +1296,10 @@ proc pinAnchorOf*(layout: Layout; pane: PaneKind): Option[PaneKind] =
   ## pane back in the container it left (its stack, or its split) rather
   ## than appending it to the root, which is `ahRestore`'s answer without an
   ## anchor. The previous sibling leaf when there is one (the restore lands
-  ## directly after it, which is where the pane was), else the next one;
-  ## `none` when the pane is alone in its container or not placed.
-  let leaf = find(layout.tree, pane)
-  let parent = parentOf(layout.tree, leaf)
-  if leaf.isNil or parent.isNil:
-    return none(PaneKind)
-  let at = indexIn(parent, leaf)
-  for i in countdown(at - 1, 0):
-    let c = parent.children[i]
-    if c.kind == lnPane and not c.isContributed:
-      return some(c.pane)
-  for i in at + 1 ..< parent.children.len:
-    let c = parent.children[i]
-    if c.kind == lnPane and not c.isContributed:
-      return some(c.pane)
-  none(PaneKind)
+  ## directly after it), else the next one (the restore lands in front of
+  ## it — `pinPlaceOf` says which); `none` when the pane is alone in its
+  ## container or not placed.
+  layout.pinPlaceOf(pane).beside
 
 proc copyOf(n: LayoutNode): LayoutNode =
   ## A shallow structural copy: the same fields, the same child refs. Used
@@ -1304,7 +1319,7 @@ proc wrapRootAround(root: LayoutNode; leaf: LayoutNode; leafFirst: bool) =
   root.becomes(LayoutNode(kind: lnRow, weight: root.weight, children: kids))
 
 proc insertBeside(root: LayoutNode; anchor: Option[PaneKind];
-                  leaf: LayoutNode): bool =
+                  leaf: LayoutNode; before = false): bool =
   ## `lcAddPane`'s placement rule, shared by `ahRestore`.
   ##
   ## With an anchor: the new leaf joins the anchor's own container, directly
@@ -1324,9 +1339,12 @@ proc insertBeside(root: LayoutNode; anchor: Option[PaneKind];
       wrapRootAround(root, leaf, leafFirst = false)
       return true
     let at = indexIn(parent, target)
-    parent.children.insert(leaf, at + 1)
+    # `before`: in FRONT of the anchor (the pane was its container's first,
+    # `DockedPane.besideBefore`); otherwise directly after it.
+    let into = if before: at else: at + 1
+    parent.children.insert(leaf, into)
     if parent.kind == lnStack:
-      parent.activeIndex = at + 1
+      parent.activeIndex = into
     return true
   if root.kind == lnPane:
     wrapRootAround(root, leaf, leafFirst = false)
@@ -1924,7 +1942,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       let title =
         if cmd.autoHideTitle.len > 0: cmd.autoHideTitle else: leaf.title
       # Where it came from, read before it leaves (PLAT-48).
-      let beside = Layout(tree: tree).pinAnchorOf(cmd.autoHidePane)
+      let (beside, besideBefore) = Layout(tree: tree).pinPlaceOf(cmd.autoHidePane)
       let weight = leaf.weight
       discard detachPane(tree, cmd.autoHidePane)
       if not normaliseInPlace(tree):
@@ -1932,6 +1950,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       next.docked.add(DockedPane(pane: cmd.autoHidePane, title: title,
                                  edge: cmd.autoHideEdge, order: order,
                                  revealed: false, beside: beside,
+                                 besideBefore: besideBefore,
                                  weight: weight))
       return appliedTo(next)
     of ahRestore:
@@ -1948,12 +1967,14 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       leaf.weight = entry.weight
       # No anchor named: back beside the pane it was docked from, while that
       # pane is placed (PLAT-48); otherwise `lcAddPane`'s root placement.
+      let remembered = cmd.autoHideRestoreBeside.isNone and
+                       entry.beside.isSome and tree.contains(entry.beside.get)
       let anchor =
         if cmd.autoHideRestoreBeside.isSome: cmd.autoHideRestoreBeside
-        elif entry.beside.isSome and tree.contains(entry.beside.get):
-          entry.beside
+        elif remembered: entry.beside
         else: none(PaneKind)
-      if not insertBeside(tree, anchor, leaf):
+      if not insertBeside(tree, anchor, leaf,
+                          before = remembered and entry.besideBefore):
         return refusedFor(lpPaneNotPlaced, cmd.autoHidePane)
       next.docked.delete(at)
       return appliedTo(next)
@@ -2296,6 +2317,8 @@ proc toJson*(d: DockedPane): JsonNode =
     result["beside"] = %($d.beside.get)
   if d.weight > 0.0:
     result["weight"] = %d.weight
+  if d.besideBefore:
+    result["besideBefore"] = %true
 
 proc saveLayout*(layout: Layout): JsonNode =
   ## A versioned document, which is what a shell persists. `docked` is always
@@ -2520,6 +2543,11 @@ proc restoreLayoutDocument*(j: JsonNode): Layout =
       if entry["beside"].kind != JString:
         raiseDecode(ldeWrongFieldType, "docked.beside is " & $entry["beside"].kind)
       d.beside = some(parsePaneKind(entry["beside"].getStr))
+    if entry.hasKey("besideBefore"):
+      if entry["besideBefore"].kind != JBool:
+        raiseDecode(ldeWrongFieldType,
+                    "docked.besideBefore is " & $entry["besideBefore"].kind)
+      d.besideBefore = entry["besideBefore"].getBool
     if entry.hasKey("weight"):
       if entry["weight"].kind notin {JFloat, JInt}:
         raiseDecode(ldeWrongFieldType, "docked.weight is " & $entry["weight"].kind)

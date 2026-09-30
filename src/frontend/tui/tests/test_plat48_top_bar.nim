@@ -28,11 +28,12 @@ import ../app/theme/capabilities
 import ../host/control_icons
 import ../../../common/terminal_graphics/[raster, path_raster]
 import headless_app/session_tabs
+import headless_app/layout_model
 import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 310
+const ExpectedAssertions = 311
 
 var countedAssertions = 0
 
@@ -360,6 +361,19 @@ suite "PLAT-48: the auto-hide strips":
     let rt3 = newRuntime(200, 50)
     discard rt3.app.layoutBinding.restoreDocument(back)
     ck rt3.app.layoutBinding.layout.tree.contains(pane)
+    # …and in its own place: the arrangement after pin + unpin is the one
+    # before the pin, pane for pane (the first tab of a stack goes back in
+    # FRONT of the tab that followed it, not behind it).
+    let before = newRuntime(200, 50)
+    discard before.typeLine("focus left")
+    proc order(n: LayoutNode; acc: var seq[PaneKind]) =
+      if n.kind == lnPane: acc.add n.pane
+      for c in n.children: order(c, acc)
+    var was, now: seq[PaneKind] = @[]
+    order(before.app.layoutBinding.layout.tree, was)
+    order(rt3.app.layoutBinding.layout.tree, now)
+    checkpoint($was & " / " & $now)
+    ck was == now
 
 suite "PLAT-48: session tabs":
 
