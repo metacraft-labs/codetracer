@@ -374,8 +374,8 @@ ARMS = [
         "LayoutNode — a window's docked pane vanishes from the session"),
     # --- the terminal -------------------------------------------------------
     Arm("U1", TUIAPP,
-        "      initLayout(profileLayout(selected))\n    else: active.layout\n",
-        "      initLayout(profileLayout(selected))\n"
+        "      profileLayoutValue(selected)\n    else: active.layout\n",
+        "      profileLayoutValue(selected)\n"
         "    else: initLayout(active.layout.tree)\n",
         C_SHELL_SYNC,
         "the terminal binding is seeded from the session's TREE, as it was "

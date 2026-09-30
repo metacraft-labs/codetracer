@@ -1796,6 +1796,17 @@ def install_signal_restore() -> None:
 
 
 def main() -> int:
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = {"--needle-scan", "--record-control-hashes"}
+    unknown = [a for a in sys.argv[1:] if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     if "--needle-scan" in sys.argv[1:]:
         return report_needle_scan()
 

@@ -1666,6 +1666,17 @@ def run_suite(suite: str = SUITE) -> RunResult:
 
 
 def main() -> int:
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = set()
+    unknown = [a for a in sys.argv[1:] if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     # An optional arm filter, so a re-run after fixing ONE arm costs one
     # compile rather than all of them. The control still runs: an arm graded
     # against a suite nobody checked is not graded.

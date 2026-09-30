@@ -154,12 +154,15 @@ ARMS = [
         "  of leTop: (false, dpCenter)",
         "  of leTop: (true, dpBottom)",
         SUITE_DOCK,
-        "a pane docked to the TOP edge is REFUSED, not relocated",
+        "a pane docked to the TOP edge is PROJECTED, drawn by the window itself",
         "func placementFor*(edge: LayoutEdge): (bool, DockPlacement) =",
         "func placementFor*(edge: LayoutEdge): (bool, DockPlacement) = ## ctl",
         "gpui-kit has no `top` placement. Silently rounding it to `bottom` is "
         "the 'I lost a pane' failure Layout-ViewModel §3A.2 is written "
-        "against, and it is the cheapest mistake to make here."),
+        "against, and it is the cheapest mistake to make here. (Since PLAT-48 "
+        "a top-docked layout is projected with NO dock in its place, the "
+        "window drawing the top strip itself; the arm still relocates it "
+        "into the bottom dock, and the case says there is none.)"),
 
     Arm("G2", DOCK,
         '  result["open"] = %false',

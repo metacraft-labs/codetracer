@@ -184,6 +184,12 @@ def scan_needles():
 
 
 def main():
+    # THIS HARNESS TAKES NO ARGUMENT, and refuses one rather than ignoring it:
+    # an ignored flag (`--needle-scan`, `--only=…`) used to start a full,
+    # file-mutating grading run.
+    if sys.argv[1:]:
+        print(f"unknown argument(s): {sys.argv[1:]}; this harness takes none")
+        return 2
     os.chdir(ROOT)
     print("=== PLAT-39 oracle mutation harness ===\n")
 

@@ -780,6 +780,13 @@ lint_step "DAP command sync: contract suite" \
 lint_step "DAP command sync: the allow-list names everything the engine dispatches" \
 	python3 ci/test/dap-command-sync.py
 
+# The mutation harnesses edit the product's sources in place. One that DROPS a
+# flag it does not know turns `--only=…` into a full, file-mutating grading run;
+# every harness must refuse the flag instead, before touching anything. Pure
+# Python start-up per harness, no build.
+lint_step "Mutation harnesses refuse an unknown flag before touching a file" \
+	bash ci/test/harness-argument-refusal.sh
+
 # Canary for the chronicles/distinct-type breakage that takes every editor in
 # the project down. Currently QUARANTINED against an upstream nimsuggest crash;
 # ci/test/nimsuggest-check.sh carries the diagnosis, tells a toolchain defect

@@ -1137,6 +1137,17 @@ def enumerate_touched() -> int:
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str]) -> int:
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = {"--collect-because", "--enumerate-touched", "--needle-scan", "--only", "--record-control-hashes"}
+    unknown = [a for a in argv if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     only = None
     for a in argv:
         if a.startswith("--only="):

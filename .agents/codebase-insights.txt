@@ -6508,8 +6508,10 @@ Two traps in the same area, both live:
     docked pane, a click (no motion) reveals it (`WindowGestures.reveal`,
     which OUTLIVES a gesture: every entry point carries it) over the tree at
     `revealRectOf` (a third, the terminal's rule); Esc, a second click or a
-    press outside dismisses. gpui-kit has no TOP dock: `projectDock` refuses a
-    top-docked document (PLAT-48's).
+    press outside dismisses. gpui-kit has no TOP dock: since PLAT-48
+    `projectDock` no longer refuses a top-docked layout — the window draws the
+    top strip and its reveal itself (the centre height gives up the extent),
+    and the document carries no `top_dock`.
   * GPUI editor rows: the fetch window holds `window_geometry.editorRowsOf`
     rows (the editor pane's body at `GpuiEditorRowPx` = 26 px, less the
     heading and the source statement), and each row is `flex-shrink: 0`. It
@@ -6522,3 +6524,79 @@ Two traps in the same area, both live:
     `toCLang` alone has no `.ts/.java/.sh/.json/.yaml` and opened them plain.
 - The desktop's light theme (config `theme: default_white`) keeps the DARK panels (#282828) and only switches Monaco to codetracerWhite; codetracerWhite.json's `codetracer` block holds the values MEASURED in that state (plat47-desktop-parity-light.electron.json). Launch a light desktop in Playwright with the fixture option `configTheme: "default_white"`.
 - Real-PTY suites launched without CODETRACER_TUI_LAYOUT_DIR read/write the user's ~/.local/state/codetracer/tui-layout.json; a remembered non-default arrangement then fails layout/colour read-backs. Export CODETRACER_TUI_LAYOUT_DIR (and XDG_STATE_HOME) to a scratch dir when running them by hand.
+- PLAT-48 (top bar + auto-hide panels on every front-end):
+  * ONE menu: `viewmodel/viewmodels/product_menu.productMenuTree` is the tree
+    (the desktop's old `webTechMenu` macro tree, now data); `menu_vm.MenuVM`
+    is its logical state (open path, highlight, typeahead, the ACTIVE keymap's
+    chords via `setShortcuts`). The desktop's `ui/menu.nim` keeps NO state of
+    its own: it syncs the tree/chords into `MenuComponent.vm` and draws from
+    `vm.isOnPath`; `window.__ctMenuVM` exposes it to Playwright. The terminal
+    (`tui/app/views/top_bar.nim`, row 0) and GPUI (`gpui/window_top_bar.nim`)
+    draw `nativeFrontEndMenu` (macOS entries hidden).
+  * Omnibar: `omnibar_vm.classifyOmnibarQuery` is the desktop's
+    `command_interpreter.parseQuery` rule (":grep", ":sym", "/ai", ":cmd",
+    plus "#<tick>"); the desktop maps tick to its file kind
+    (`desktopKindOf`). `omnibar_sources` builds the index.
+  * Controls: `transport_icons.TransportControls` (nerd = Codicons, unicode,
+    text; graphics = the desktop's SVG marks rasterised by
+    `common/terminal_graphics/path_raster`, sent by
+    `tui/host/control_icons` over kitty graphics after a probe). The `icons`
+    setting persists under the native state root
+    (`viewmodel/host/icons_preference`); default graphics if the probe
+    answered, else unicode — never nerd; `:icons <mode>` switches.
+  * The shared default now DOCKS the desktop's footer panels (BUILD,
+    PROBLEMS, FIND IN FILES, REQUESTS) at the bottom (`sharedDefaultDocked`,
+    layout schema v5). The terminal's default is
+    `profile.profileLayoutValue` / `dockedForMode`; the desktop's footer list
+    is derived from the same table (`ui/layout.nim`).
+  * TUI reveal: `Ctrl+o` cycles docked panes; the revealed pane is painted
+    as an overlay (area cleared first) at `binding.revealAreaFor`; `:pin
+    [edge]` / `:unpin [pane]` restore beside the pane it came from: every
+    `ahDock` of a placed pane records `DockedPane.beside` (+ `weight`),
+    persisted as `"beside"`/`"weight"`, and `ahRestore` without an anchor
+    uses it while that pane is placed.
+  * `layout_model` ahDock with order -1 moving a docked pane to ANOTHER edge
+    appends after that edge's last entry (it used to keep its old order and
+    collide with the footer's order 0).
+  * The TUI main loop keeps a held frame OWED (`frameOwed`) until painted:
+    a consumed mouse release used to leave the frame for a click never drawn.
+  * GPUI: `handleTopHover` ignores a re-reported pointer that did not move
+    (gpui re-reports after a redraw), or it takes back a keyboard highlight.
+  * Terminal key framing: two ESC bytes back to back arrive as ONE Esc token;
+    PTY tests that press Esc twice must pace them.
+  * Session tabs from the keyboard: the terminal binds `g t` / `g T` and
+    `Ctrl+Tab` / `Ctrl+Shift+Tab` (CodeTracer-TUI.md §3.3.1; keymap
+    `SpecSection` `ssSpec331`; `key_names.keyName` decodes Ctrl+Tab from
+    xterm modifyOtherKeys `CSI 27;5;9~` and `CSI 9;5u` — a terminal sends
+    plain `\t` otherwise). GPUI binds `Ctrl+Alt+PageDown/PageUp`
+    (`window_top_bar.sessionTabStepOf`): the window binds the DESKTOP's
+    chords and the desktop's Ctrl+Tab is Switch File.
+  * `codetracer-gpui --report-window-plan [--window-ops=…]` runs the WINDOW's
+    root builder (`paintWindowChrome`) over a detached root, dispatches the
+    ops through the window's own pointer/key handlers (`windowPointer`,
+    `windowKey`), and prints the root's render plan: the top bar, strips,
+    reveal overlay, popovers, pins, hover label — without a compositor.
+    `test_plat48_gpui_plan.nim` and the PLAT-48 GW arms read it. The plan's
+    `img src` SVG files are left for the reader to remove. Box sizes appear
+    in the plan as `w` / `h`, not `width` / `height`.
+  * GPUI paint order: gTopEls are appended to the root in list order after
+    the arrangement and its overlay, so a later element paints OVER an
+    earlier one. The pin buttons go before the popovers, and are skipped
+    under a revealed pane (`pinButtonShown`), or a ⇲ shows through both.
+  * `just gpui-window-captures [plat45 plat47 plat48]` (CI job
+    `gpui-window-captures`) re-takes the three GPUI window records from a
+    checkout: windowed shim + virtual pointer built in isonim-gpui's own dev
+    shell, then capture, record, and the asserting suite. PLAT-48's last case
+    opens a layout the TERMINAL saved (`codetracer-tui` in a pty, `1`,
+    `:dock top`), so the capture needs `build/bin/codetracer-tui` too.
+  * A v4 layout document restores unchanged (re-stamped v5): it keeps its
+    docked panes and does NOT gain the shared default's footer panels. v5's
+    docked entries MAY carry `beside` / `weight` (optional), which the
+    migration table's "shape unchanged" line predates.
+- Mutation harnesses REFUSE an unknown flag since PLAT-48's review
+  (`ci/test/harness-argument-refusal.sh`, a lint step): several used to drop
+  one (`wanted = [a for a in argv if not a.startswith("-")]`) and start a
+  FULL, file-mutating run — `--only=A,B` on those graded every arm, and
+  `run-plat16-mutations.py` did it with `--needle-scan`. Killing one mid-arm
+  (a `timeout`) can still leave a mutation in the tree: after an interrupted
+  run check `git diff` against the base for files you did not edit.
