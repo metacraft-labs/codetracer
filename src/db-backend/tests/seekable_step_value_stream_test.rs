@@ -21,7 +21,7 @@
 //!     still reads through the existing fully-materialized path, unchanged.
 //!
 //! The fixtures are written in-test — the seekable one with the M23a/M23b writer
-//! (`CtfsTraceWriter::with_step_stream(true).with_value_stream(true)`), the
+//! (`CtfsTraceWriter`, which always writes both streams), the
 //! legacy twin with `common::legacy_events_log` — so the tests are
 //! self-contained and do not depend on an external bundle.
 
@@ -156,8 +156,6 @@ fn write_trace(dir: &tempfile::TempDir, with_streams: bool) -> PathBuf {
     }
     let path_buf = dir.path().join("trace");
     let mut writer = CtfsTraceWriter::new("test_program", &[])
-        .with_step_stream(true)
-        .with_value_stream(true)
         .with_steps_chunk_size(2)
         .with_values_chunk_size(2);
     TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();

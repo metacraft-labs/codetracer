@@ -14,10 +14,12 @@
 //!     still reads through the existing fully-materialized path, unchanged.
 //!
 //! The fixtures are written in-test with the M17a writer
-//! (`CtfsTraceWriter::with_call_stream(true)` / a flag-off twin), so the tests
+//! (`CtfsTraceWriter` / a legacy twin without `calls.dat`), so the tests
 //! are self-contained and do not depend on an external bundle.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,10 +44,9 @@ use db_backend::trace_reader::TraceReader;
 ///
 /// A small `calls.dat` chunk size (2) means the 5 records span 3 chunks, so
 /// seeking to a single call must inflate only that one chunk.
-fn write_trace(dir: &tempfile::TempDir, with_call_stream: bool) -> PathBuf {
+fn write_trace(dir: &tempfile::TempDir) -> PathBuf {
     let path_buf = dir.path().join("trace");
-    let mut writer = CtfsTraceWriter::new("test_program", &[]).with_call_stream(with_call_stream);
-    writer = writer.with_calls_chunk_size(2);
+    let mut writer = CtfsTraceWriter::new("test_program", &[]).with_calls_chunk_size(2);
     TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();
 
     let src = Path::new("/test/prog.rs");
@@ -109,7 +110,7 @@ fn write_trace(dir: &tempfile::TempDir, with_call_stream: bool) -> PathBuf {
 #[test]
 fn fetch_call_by_key_decompresses_only_its_chunk() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
 
     let stream = SeekableCallStream::open(&ct)
         .expect("open seekable call stream")
@@ -173,7 +174,7 @@ fn fetch_call_by_key_decompresses_only_its_chunk() {
 #[test]
 fn seekable_call_stream_opens_from_block_source() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
     let bytes = std::fs::read(&ct).unwrap();
     std::fs::remove_file(&ct).unwrap();
 
@@ -196,7 +197,7 @@ fn seekable_call_stream_opens_from_block_source() {
 #[test]
 fn ctfs_reader_serves_call_tree_from_calls_dat() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
 
     let reader = CTFSTraceReader::open(&ct).expect("open CTFS reader over split bundle");
 
@@ -232,7 +233,7 @@ fn ctfs_reader_serves_call_tree_from_calls_dat() {
 #[test]
 fn concurrent_readers_over_same_ct() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
     let ct = Arc::new(ct);
 
     let mut handles = Vec::new();
@@ -275,7 +276,21 @@ fn concurrent_readers_over_same_ct() {
 #[test]
 fn flag_off_trace_exposes_no_seekable_stream() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, false);
+    // The trace-format writer always writes `calls.dat`: it has no switch to
+    // leave it out, because each event kind has exactly one stream to live in.
+    // A container without one is a legacy bundle, built by the shared helper.
+    let src = std::path::PathBuf::from("/test/prog.rs");
+    let ct = common::legacy_events_log::write_legacy_events_log_bundle(
+        dir.path(),
+        "trace",
+        &[
+            TraceLowLevelEvent::Path(src),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ],
+    );
 
     assert!(
         SeekableCallStream::open(&ct).expect("open ok").is_none(),
@@ -375,7 +390,7 @@ fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
 #[test]
 fn seekable_and_materialized_call_trees_agree() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
     let reader = CTFSTraceReader::open(&ct).expect("open split bundle");
 
     let n = reader.seekable_call_count().expect("seekable stream present");
