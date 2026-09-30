@@ -125,11 +125,41 @@ lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 # ONE DIRECTORY PER FILE, not per lane (see the loop below): a suite that docks
 # a pane leaves `tui-layout.json` behind, and the next FILE would otherwise open
 # that docked arrangement instead of the shared default.
+#
+# `XDG_STATE_HOME` too, and for the same reason: it is the fallback both hosts
+# read when the override is unset, and the per-user root other tools under
+# test (`ct_test`'s run store) write below. Every test program is ALSO isolated
+# on its own (`src/frontend/test_support/state_isolation.nim`, force-imported
+# by the `config.nims` beside each test tree), so a suite compiled by hand or
+# by a mutation harness is covered; this is the lane's belt to that brace.
 _ct_lane_state=""
 if [ -z "${CODETRACER_TUI_LAYOUT_DIR:-}" ]; then
 	_ct_lane_state="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-state.XXXXXX")"
 	trap 'rm -rf "${_ct_lane_state}"' EXIT
 fi
+
+# THE GUARD: the user's own state directory is READ before the lane and after
+# it — every file's path and checksum, never written — and the lane FAILS if
+# anything there changed: a file that APPEARED, whose bytes CHANGED, or that
+# DISAPPEARED. A deletion is damage too (a suite that "cleans up" the layout
+# file at the user's path destroys the arrangement the user left), so it is
+# not excused. Only files are compared — listings and directory times are not,
+# because they move without any file changing. The per-test side of the same
+# property is `tests/real_terminal/test_state_isolation.nim`, which runs the
+# shipped binary against a throwaway HOME and fails on any change there.
+# Someone else changing CodeTracer state on this machine while a lane runs
+# (using CodeTracer, or clearing stale state by hand) trips it as well; the
+# message names that possibility, and the fix is to rerun on a quiet host.
+_ct_user_state="${HOME:-/nonexistent}/.local/state/codetracer"
+_ct_user_state_snapshot() {
+	# One line per file: `<cksum> <size> <path>`, sorted by path. `cksum`
+	# rather than a GNU-only tool: this runner also runs on macOS.
+	if [ -d "${_ct_user_state}" ]; then
+		find "${_ct_user_state}" -type f -print0 2>/dev/null | sort -z |
+			xargs -0 -r cksum 2>/dev/null
+	fi
+}
+_ct_user_state_before="$(_ct_user_state_snapshot)"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
 # Expanded below as ${extra_flags[@]+"${extra_flags[@]}"}, not
@@ -199,6 +229,8 @@ while read -r f; do
 	if [ -n "${_ct_lane_state}" ]; then
 		mkdir -p "${_ct_lane_state}/${name}"
 		export CODETRACER_TUI_LAYOUT_DIR="${_ct_lane_state}/${name}"
+		mkdir -p "${_ct_lane_state}/${name}.xdg-state"
+		export XDG_STATE_HOME="${_ct_lane_state}/${name}.xdg-state"
 	fi
 	printf '  %s ... ' "${f}"
 
@@ -582,6 +614,36 @@ if [ "${compile_only}" -eq 0 ]; then
 	if ! kf_audit="$(test_lane_files "${lane}" |
 		xargs python3 "${repo_root}/ci/lib/known_failures.py" audit "${lane}" 2>&1)"; then
 		printf '%s\n' "${kf_audit}" >&2
+		exit 1
+	fi
+fi
+
+_ct_user_state_after="$(_ct_user_state_snapshot)"
+if [ "${_ct_user_state_after}" != "${_ct_user_state_before}" ]; then
+	# Lines only AFTER has: files created, or rewritten (new checksum).
+	_ct_written="$(comm -13 <(printf '%s\n' "${_ct_user_state_before}" | sort) \
+		<(printf '%s\n' "${_ct_user_state_after}" | sort) | sed '/^$/d')"
+	# Paths BEFORE had and AFTER does not: files removed.
+	_ct_removed="$(comm -23 \
+		<(printf '%s\n' "${_ct_user_state_before}" | awk 'NF {print $3}' | sort) \
+		<(printf '%s\n' "${_ct_user_state_after}" | awk 'NF {print $3}' | sort) |
+		sed '/^$/d')"
+	if [ -n "${_ct_removed}" ]; then
+		echo "ERROR: lane '${lane}': these files LEFT the user's own state" \
+			"directory ${_ct_user_state} during the run — a test (or a binary" \
+			"it spawned) deleted real per-user state. (If CodeTracer state was" \
+			"cleared on this machine during the run, that is the other possible" \
+			"cause.)" >&2
+		printf '    %s\n' ${_ct_removed} >&2
+	fi
+	if [ -n "${_ct_written}" ]; then
+		echo "ERROR: lane '${lane}' WROTE the user's own state directory" \
+			"${_ct_user_state} — a test (or a binary it spawned) created or" \
+			"rewrote real per-user state. (If CodeTracer was used on this" \
+			"machine during the run, that is the other possible cause.)" >&2
+		printf '    %s\n' "${_ct_written}" >&2
+	fi
+	if [ -n "${_ct_written}" ] || [ -n "${_ct_removed}" ]; then
 		exit 1
 	fi
 fi

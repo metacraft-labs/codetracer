@@ -198,6 +198,14 @@ server
 # import paths from RUNQUOTA_SRC when the relative sibling layout is unavailable
 # (git worktrees, CI). It must be tracked despite the blanket *.nims ignore.
 !src/ct_test/config.nims
+# The test trees' NimScript configs force-import the per-user state isolation
+# (`src/frontend/test_support/state_isolation.nim`) into every test program, so
+# no suite can read or write the developer's own `~/.local/state/codetracer`.
+# Without them tracked a fresh checkout's suites would run unisolated.
+!src/tests/config.nims
+!src/frontend/tui/tests/config.nims
+!src/frontend/gpui/tests/config.nims
+!src/frontend/viewmodel/tests/config.nims
 # NS1's host-free build gate ships its own NimScript config: it is half of the
 # poison (the `patchFile` bans and the stubs search path), and without it
 # `ci/test/hostfree-build.sh` cannot even find `stubs/no_host_access`. Tracked
@@ -722,3 +730,6 @@ src/common/**/test_*
 !src/tests/**/test_*.*
 !src/frontend/**/test_*.*
 !src/common/**/test_*.*
+# A test-helper DIRECTORY matches `test_*` too, and git cannot re-include a file
+# below an excluded directory, so the directory itself is re-included.
+!src/frontend/test_support/
