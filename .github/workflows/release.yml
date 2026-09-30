@@ -140,8 +140,23 @@ jobs:
             direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
               bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
+      # GitHub App installation tokens expire after one hour, and a cold build
+      # outlasts the one minted at the start of the job: the 26.10.1 dry run
+      # (36761623351) failed 100 minutes in, when nix, still holding the first
+      # token, fetched a flake input and got "401 Bad credentials". So the
+      # build gets a token minted immediately before it, passed to nix through
+      # NIX_CONFIG, which takes precedence over the configured one.
+      - name: Mint a fresh token for the build
+        id: build_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Build the AppImage
         env:
+          NIX_CONFIG: access-tokens = github.com=${{ steps.build_token.outputs.token }}
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           set -euo pipefail
@@ -235,8 +250,23 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       # The build, the gate and the packaging are dmg-build's in codetracer.yml.
+      # GitHub App installation tokens expire after one hour, and a cold build
+      # outlasts the one minted at the start of the job: the Linux leg of the 26.10.1
+      # dry run (36761623351) failed 100 minutes in, when nix, still holding the first
+      # token, fetched a flake input and got "401 Bad credentials". So the
+      # build gets a token minted immediately before it, passed to nix through
+      # NIX_CONFIG, which takes precedence over the configured one.
+      - name: Mint a fresh token for the build
+        id: build_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Build CodeTracer.app via reprobuild
         env:
+          NIX_CONFIG: access-tokens = github.com=${{ steps.build_token.outputs.token }}
           CODETRACER_REPROBUILD_TARGET: .#macos-app
         run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
 
