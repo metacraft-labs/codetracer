@@ -143,6 +143,7 @@ ct-cli-units
 ct-trace-units
 mcr-enrichment-units
 online-sharing-live
+identity-device-grant-live
 host-instantiations
 renderer-electron
 renderer-web
@@ -187,6 +188,7 @@ test_lane_description() {
 	ct-trace-units) echo "ct trace-layer unit suites" ;;
 	mcr-enrichment-units) echo "ct upload / MCR-enrichment unit suites" ;;
 	online-sharing-live) echo "live sharing round-trip (compile-checked only, never executed)" ;;
+	identity-device-grant-live) echo "live OIDC device-grant probe (compile-checked only; it needs a running issuer AND a browser)" ;;
 	host-instantiations) echo "JS-backend modules no other lane compiles: the facade's host instantiations and platform_host's Electron arm (compile-checked only)" ;;
 	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
 	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
@@ -338,11 +340,26 @@ test_lane_extra_flags() {
 		# connection; the define is a link-time requirement only.
 		echo "-d:ssl -d:useOpenssl3"
 		;;
+	identity-device-grant-live)
+		# Same define, a DIFFERENT reason, and the difference matters: this
+		# lane's file really does open a TLS connection — `identity/
+		# http_transport.nim` builds an `SslContext` around a CA bundle and
+		# talks to a live issuer. Without `-d:ssl` that context type does not
+		# exist and the probe does not compile.
+		echo "-d:ssl -d:useOpenssl3"
+		;;
 	ct-cli-units)
 		# src/ct/sourcemap.nim calls `GC_disable`, which only exists under the
 		# refc memory manager; with Nim 2.x's default ORC it is an undeclared
 		# identifier and `test_sourcemap.nim` does not compile at all.
-		echo "--mm:refc"
+		#
+		# `-d:ssl` arrived with `src/ct/identity/oidc_test.nim`, which this
+		# lane discovers by glob. That suite drives a FAKE transport and opens
+		# nothing — but it imports `oidc.nim`, which imports `http_transport
+		# .nim`, which needs std/net's `newContext`. Measured at 4b453a266
+		# before the define was added: `undeclared identifier: 'newContext'`,
+		# i.e. the whole lane red, from a suite that touches no network.
+		echo "--mm:refc -d:ssl -d:useOpenssl3"
 		;;
 	ct-test-incremental | ct-test-incremental-e2e)
 		# test_incremental_adapter_seam.nim imports `ct_incremental_adapter`,
@@ -567,6 +584,32 @@ test_lane_files() {
 		# a lane — the file rotted into a non-compiling state precisely
 		# because nothing ever looked at it.
 		echo src/ct/online_sharing/online_sharing_test.nim
+		;;
+
+	identity-device-grant-live)
+		# The same arrangement as the lane above, for the same reason and with
+		# a second one on top.
+		#
+		# `identity_live_device_grant_probe.nim` cannot run here: it needs a
+		# running Zitadel AND a second agent — a browser signing in and
+		# pressing Allow — neither of which CI provisions. Its harness,
+		# `ci/test/identity-live-device-grant.sh`, drives both and SKIPS loudly
+		# (exit 2) when they are absent, which is the right behaviour there and
+		# no coverage at all here.
+		#
+		# So it is compiled. That is the weakest check that catches what
+		# actually rots, and what rots is real: the probe is the only caller of
+		# `oidc.nim`'s `awaitDeviceGrant`/`fetchJwks` pair outside a fake
+		# transport, so a signature change in the identity layer breaks it and
+		# nothing else. `online-sharing-live` beside it is the recorded
+		# precedent — that file was found not compiling at all, having rotted
+		# against three signatures, precisely because nothing ever looked at it.
+		#
+		# It is NOT test-shaped (no `unittest`, no `suite`), so
+		# `ci/test/test-lane-coverage.sh` would never have demanded a lane for
+		# it. A file nothing collects and no guard misses is the quietest hole
+		# there is; naming it here is the whole fix.
+		echo ci/test/identity_live_device_grant_probe.nim
 		;;
 
 	host-instantiations)

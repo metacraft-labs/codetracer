@@ -4434,6 +4434,49 @@ test-identity:
   bash ci/test/identity-webcrypto.sh
   bash ci/test/identity-token-mutation.sh
 
+# WD3's verification, and the only thing in this repo that has ever watched a
+# RUNNING issuer accept a token the identity layer verified.
+#
+# Two real processes against one local Zitadel: the probe
+# (`ci/test/identity_live_device_grant_probe.nim` — the product's own modules,
+# native backend, real TLS) performs RFC 8628's device flow, and a real
+# headless Chromium (`ci/test/identity-device-approve.mjs`) signs in on the
+# issuer's own hosted login and presses Allow.  The password is typed into a
+# browser the CLI has no handle on; the two meet only at the issuer, which is
+# the property the device flow exists for.  Asserted at the end: the probe
+# exited 0, printed PASSED, and printed a non-empty SUBJECT — three separate
+# checks, because a probe that died before finishing is not a probe that passed.
+#
+# NOT part of `test-identity`, on purpose.  This needs a running stack that
+# nothing provisions, so it SKIPS with exit 2 and a named remedy when the stack,
+# the dev CA, the registered client, Chromium or Playwright is absent — and
+# `test-identity`'s `set -e` would turn every such honest skip into a red
+# aggregate.  Its negative controls are `CT_IDENTITY_CLIENT_ID=<unregistered>`
+# (red at the device-authorization step) and `CT_DEVICE_ACTION=deny|none` (red
+# at the poll step, and `none` is bounded by CT_DEVICE_GRANT_TIMEOUT rather than
+# left to hang).
+test-identity-live-device-grant:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-identity-live-device-grant.log) 2>&1
+  bash ci/test/identity-live-device-grant.sh
+
+# The live probe above, COMPILE-CHECKED ONLY — same arrangement, and same
+# argument, as `test-online-sharing-compile`.  It cannot run here: it needs an
+# issuer and a second agent at a browser.  But it is the only caller of
+# `oidc.nim`'s `awaitDeviceGrant` / `fetchJwks` pair outside a fake transport,
+# so a signature change in the identity layer breaks it and breaks nothing else
+# — which is precisely how `online_sharing_test.nim` came to be found rotted
+# against three signatures at once.  It is also not test-shaped, so
+# `test-lane-coverage.sh` would never have asked for a lane for it.
+test-identity-device-grant-compile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-identity-device-grant-compile.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh identity-device-grant-live --compile-only
+
 # NS7a's first verification: the development loop has no network surface, so
 # there is no request for a token to ride on. Runs the gate through its own
 # build path FIRST (no bundle variables set, so it compiles both arms exactly
