@@ -109,12 +109,12 @@ type
     dppEmptyLayout = "EmptyLayout"
       ## Nil, or a tree with no pane in it at all.
     dppNoPlacementForEdge = "NoPlacementForEdge"
-      ## A pane is docked to `leTop` and gpui-kit's `DockPlacement` has no
-      ## `top`. **Refused rather than dropped, relocated or rounded to
-      ## `bottom`.** A silently relocated pane is exactly the "I lost a pane"
-      ## failure Layout-ViewModel §3A.2 is written against, and a projection
-      ## that quietly moved one would be true of the document and false of the
-      ## user's layout.
+      ## An edge gpui-kit's `DockPlacement` has no name for. Since PLAT-48 no
+      ## edge is refused: the one it lacks, `top`, is drawn by the window
+      ## itself outside the document (see `projectDock`), so this kind is
+      ## reported only by `dockStateFor` if it is ever asked for `leTop`,
+      ## which `projectDock` no longer does. Kept because a persisted problem
+      ## report may name it.
     dppViewportTooSmall = "ViewportTooSmall"
       ## The viewport cannot give every sibling at least one pixel.
       ## `distributeExtent` returns an empty seq there, and inventing a
@@ -389,14 +389,22 @@ proc projectDock*(layout: Layout; viewport: DockViewport): DockProjection =
   var left = dockStateFor(layout, leLeft, viewport.dockExtent, problems)
   var right = dockStateFor(layout, leRight, viewport.dockExtent, problems)
   var bottom = dockStateFor(layout, leBottom, viewport.dockExtent, problems)
-  # `leTop` has no placement; `dockStateFor` records one problem per pane.
-  discard dockStateFor(layout, leTop, viewport.dockExtent, problems)
+  # PLAT-48: A TOP-DOCKED PANE IS NO LONGER A REFUSAL. gpui-kit's
+  # `DockPlacement` still has no `top`, so the document carries no top dock —
+  # the window draws the top strip and its reveal ITSELF, outside the
+  # document, from `layout.docked` (`window_geometry.stripsOf`), exactly as
+  # it draws the other three edges' strips. Until PLAT-48 a layout the
+  # terminal or the desktop saved with a top-docked pane could not be opened
+  # in the GPUI window at all. The centre gives the strip its extent, as it
+  # does for a bottom dock.
+  let topDocked = dockGroupsOf(layout, leTop).len > 0
 
   var centreWidth = viewport.width
   var centreHeight = viewport.height
   if not left.isNil: centreWidth -= viewport.dockExtent
   if not right.isNil: centreWidth -= viewport.dockExtent
   if not bottom.isNil: centreHeight -= viewport.dockExtent
+  if topDocked: centreHeight -= viewport.dockExtent
 
   let centre = panelStateOf(layout.tree, centreWidth, centreHeight, problems,
                             "")

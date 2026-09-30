@@ -332,11 +332,18 @@ def capture():
         steps["dock-committed"] = settle("dock-committed")
         shutil.copy(win.geometry, os.path.join(OUT, "a-dock.geometry.json"))
         g = win.geom()
-        slot = g["strips"][0]["slots"][0]["rect"] if g.get("strips") else None
+        # The LEFT strip (since PLAT-48 the shared default's footer is a
+        # bottom strip too).
+        left = next((st for st in g.get("strips", []) if st["edge"] == "left"), None)
+        slot = left["slots"][0]["rect"] if left else None
         if slot is not None:
             lx, ly = centre(slot)
             ptr.jump(lx, ly)
             ptr.send("down", "sleep 120", "up", "sleep 300")
+            # Off the label before the frames are kept: a pointer resting on
+            # a strip label draws its hover label (PLAT-48), which is not
+            # the reveal's to compare.
+            ptr.jump(4, FRAME_H // 2)
             steps["dock-revealed"] = settle("dock-revealed")
             shutil.copy(win.geometry, os.path.join(OUT, "a-revealed.geometry.json"))
             key("Escape")
@@ -704,8 +711,9 @@ def record():
     dock = {"strips": gd.get("strips", []),
             "treePanes": sorted(p for n in gd["nodes"] if n["kind"] == "tabs"
                                 for p in n["panes"])}
-    if gd.get("strips"):
-        st = gd["strips"][0]
+    left = next((st for st in gd.get("strips", []) if st["edge"] == "left"), None)
+    if left:
+        st = left
         sr = st["rect"]
         fc = frames["dock-committed"]
         # The strip is drawn: its label's ink on the strip's ground.

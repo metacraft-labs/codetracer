@@ -187,11 +187,17 @@ suite "PLAT-45: the GPUI window and the shared default":
     ck got.problem.len == 0
     ck sameArrangement(got, want)
     # EVERY PANE OF THE SHARED DEFAULT IS IN THE PLAN — data or report.
+    # PLAT-48: the shared default also DOCKS the desktop's footer panels at
+    # the bottom; they are in the plan too, in the bottom dock, not the
+    # centre.
+    var footer = initHashSet[string]()
+    for d in sharedDefaultDocked(): footer.incl $d.pane
     var drawn = initHashSet[string]()
     for (pane, path, st) in planLeaves(run.plan):
       drawn.incl pane
-      ck path.startsWith("center/")
-    ck drawn == sharedPaneNames()
+      if pane in footer: ck not path.startsWith("center/")
+      else: ck path.startsWith("center/")
+    ck drawn == sharedPaneNames() + footer
     # THE CAPABILITY'S REPORT LEAVES: each undrawable pane is a report that
     # names itself, never an absent slot.
     let cap = gpuiCapability()
@@ -236,8 +242,10 @@ suite "PLAT-45: the GPUI window and the shared default":
     ck sameArrangement(restored, ofTree(saved.tree))
     ck "stack[calltrace,agentActivity*]" in restored.groups
     # The terminal's planted docked Event Log did NOT reach this window: the
-    # event log is in the centre, and there is no bottom dock at all.
-    ck not second.dock.hasKey("bottom_dock")
+    # event log is in the centre, and the bottom dock holds only the shared
+    # default's footer panels (PLAT-48).
+    ck second.dock.hasKey("bottom_dock")
+    ck not ($second.dock["bottom_dock"]).contains("eventLog")
     var eventLogPath = ""
     for (pane, path, st) in planLeaves(second.plan):
       if pane == "eventLog": eventLogPath = path

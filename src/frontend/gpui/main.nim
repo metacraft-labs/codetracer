@@ -83,6 +83,9 @@ import ./replay_ops
 import ./layout_memory
 import ./window_geometry
 import ./window_gestures
+import ./window_top_bar
+import ../viewmodel/views/debug_control_marks
+import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../styles/generated/design_tokens
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
@@ -111,6 +114,26 @@ USAGE:
 OPTIONS:
   --report-plan     Build the window's render plan, print it, and exit 0
                     without entering an event loop. What GPUI would execute.
+  --report-window-plan
+                    PLAT-48. Run the WINDOW's own root builder — the top
+                    bar, the arrangement, the auto-hide strips, a revealed
+                    pane, the popovers, the pin / unpin buttons and the
+                    hover label, exactly as a window draws them — over a
+                    detached root, apply `--window-ops`, print that root's
+                    render plan and exit 0. No window, no compositor.
+  --window-ops=<spec>
+                    PLAT-48, with `--report-window-plan`. A comma-separated
+                    list of window events, dispatched through the window's
+                    OWN pointer and key handlers:
+                      key:<key>[:<mod>+<mod>]   press:<x>:<y>
+                      move:<x>:<y>              release:<x>:<y>
+                    and the same events aimed at a part of the window by
+                    name, read off the window's geometry:
+                      menu:<title>  control:<id> (the pointer rests on it)
+                      label:<pane> (its strip label)  pin:<pane>  unpin
+                      drag:<pane>:top (its tab to the top margin)
+                      hold:<pane>:<over> (its tab dragged over another
+                      pane's centre, not released)
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
   --quit-after-ms=<n>
@@ -239,6 +262,11 @@ type
       ## note is written against. `parseGpuiCommand` sets it; every path below
       ## reads it.
     reportPlan: bool
+    reportWindowPlan: bool
+      ## PLAT-48. `--report-window-plan`: the window's root builder over a
+      ## detached root, `windowOps` applied, the root's plan printed.
+    windowOps: seq[string]
+      ## PLAT-48. `--window-ops`: window events for `--report-window-plan`.
     width: int
     height: int
     quitAfterMs: uint32
@@ -305,6 +333,21 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       result.product = pmEdit
     elif arg == "--report-plan":
       result.reportPlan = true
+    elif arg == "--report-window-plan":
+      result.reportWindowPlan = true
+    elif arg.startsWith("--window-ops="):
+      let spec = arg["--window-ops=".len .. ^1]
+      if spec.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --window-ops needs at least one event")
+      for op in spec.split(','):
+        let head = op.split(':')[0]
+        if head notin ["key", "press", "move", "release", "menu", "control",
+                       "label", "pin", "unpin", "drag", "hold"]:
+          return GpuiCommand(kind: gckUsageError,
+            message: "codetracer-gpui: --window-ops: unknown event '" & op &
+                     "'")
+        result.windowOps.add op
     elif arg.startsWith("--width="):
       try: result.width = parseInt(arg["--width=".len .. ^1])
       except ValueError:
@@ -671,6 +714,13 @@ const
     ## it asks the ViewModel for are the rows that fit, so the last call
     ## scrolled to is on screen, not clipped below the pane.
 
+proc drawTopBar(r: GpuiRenderer)
+  ## PLAT-48: the top bar over the window (defined with its handlers below).
+proc handleTopPress(r: GpuiRenderer; x, y: int): bool
+proc handleTopHover(r: GpuiRenderer; x, y: int)
+proc handleTopKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
+proc topBarGeometry(): JsonNode
+
 proc traceGesture(line: string) =
   if gestureTrace and line.len > 0:
     stderr.writeLine("gesture " & line)
@@ -960,11 +1010,12 @@ proc writeGeometry() =
       %*{"pane": $gGestures.reveal.pane,
          "rect": rect(gGeom.revealRectOf(gGestures.reveal.edge))}
     else: newJNull()
+  let top = topBarGeometry()
   try:
     writeFile(geometryOut, $(%*{"area": rect(gGeom.area),
                                 "inner": rect(gGeom.inner), "nodes": nodes,
                                 "dividers": dividers, "strips": strips,
-                                "revealed": revealed}))
+                                "revealed": revealed, "topBar": top}))
   except IOError:
     discard
 
@@ -979,7 +1030,7 @@ proc drawArrangement(r: GpuiRenderer): bool =
   if projection.status == dpsRefused:
     return false
   gGeom = windowGeometryOf(layout, projection.state, pendingViewportWidth,
-                           pendingViewportHeight)
+                           pendingViewportHeight, GpuiTopBandPx)
   if gGeom.root < 0:
     return false
   # The leaves are MOVED into the new arrangement, never rebuilt.
@@ -994,6 +1045,7 @@ proc drawArrangement(r: GpuiRenderer): bool =
   r.appendChild(gContainer, gTop)
   if not gRoot.isNil:
     drawOverlay(r)
+    drawTopBar(r)
   writeGeometry()
   true
 
@@ -1053,38 +1105,60 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
                $page.total)
   redrawCalltrace(r)
 
+proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
+                   dy = 0.0) =
+  ## One pointer event of the window, wherever it came from: the root's
+  ## listener (`pointerHandler`) and `--window-ops` (the plan's scripted
+  ## pointer) both call this, so a scripted press is the press a user makes.
+  var r = r0
+  if gShell.isNil:
+    return
+  var step: GestureStep
+  case kind
+  of gekPointerDown:
+    # PLAT-48: the top bar, its popovers and the pin / unpin buttons first.
+    if handleTopPress(r, x, y):
+      return
+    step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
+  of gekPointerMove:
+    if not gGestures.active:
+      handleTopHover(r, x, y)
+      return
+    step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
+  of gekPointerUp:
+    if not gGestures.active: return
+    step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
+    if step.command.isSome:
+      applyGestureCommand(r, step.command.get)
+  of gekWheel:
+    if gGeom.activePaneAt(x, y) == $paneCalltrace:
+      # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
+      # (scroll down) moves the content up, a negative `dy`.
+      scrollCalltrace(r, int(round(-dy / float(CalltraceRowPx))))
+    return
+  else:
+    return
+  traceGesture(step.status)
+  if step.changed:
+    discard drawArrangement(r)
+
 proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
   ## The root's pointer listener: every pointer event of the window.
   result = proc(ev: GpuiEvent) =
-    var r = r0
     let p = pointerOf(ev)
-    if not p.valid or gShell.isNil:
+    if not p.valid:
       return
-    let x = int(p.x)
-    let y = int(p.y)
-    var step: GestureStep
-    case ev.kind
-    of gekPointerDown:
-      step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
-    of gekPointerMove:
-      if not gGestures.active: return
-      step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
-    of gekPointerUp:
-      if not gGestures.active: return
-      step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
-      if step.command.isSome:
-        applyGestureCommand(r, step.command.get)
-    of gekWheel:
-      if gGeom.activePaneAt(x, y) == $paneCalltrace:
-        # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
-        # (scroll down) moves the content up, a negative `dy`.
-        scrollCalltrace(r, int(round(-p.dy / float(CalltraceRowPx))))
-      return
-    else:
-      return
-    traceGesture(step.status)
-    if step.changed:
-      discard drawArrangement(r)
+    windowPointer(r0, ev.kind, int(p.x), int(p.y), p.dy)
+
+proc windowKey(key: string; mods: seq[string]) =
+  ## One key of a replay window, from its `keydown` listener or from
+  ## `--window-ops`: the top bar's keys (an open omnibar or menu owns them
+  ## all), then `Esc` cancels a layout gesture.
+  var r: GpuiRenderer
+  if handleTopKey(r, key, mods):
+    return
+  if key.toLowerAscii in ["escape", "esc"]:
+    discard cancelWindowGesture()
 
 proc gestureKeyHandler(el: GpuiElement): GpuiEventHandler =
   ## A replay window's `keydown` listener: `Esc` cancels a layout gesture.
@@ -1092,8 +1166,7 @@ proc gestureKeyHandler(el: GpuiElement): GpuiEventHandler =
   result = proc(ev: GpuiEvent) =
     discard ev
     if el.lastEventKind() != gekKeyDown: return
-    if el.lastEventKey().toLowerAscii in ["escape", "esc"]:
-      discard cancelWindowGesture()
+    windowKey(el.lastEventKey(), modifierNamesOf(el.lastEventModifiers()))
 
 proc armPointer(r: GpuiRenderer; root: GpuiElement) =
   if gShell.isNil:
@@ -1122,6 +1195,698 @@ proc cancelWindowGesture(): bool =
   traceGesture(step.status)
   discard drawArrangement(r)
   true
+
+
+# ---------------------------------------------------------------------------
+# PLAT-48 — the top bar: the program menu, the debugger controls (the
+# desktop's own marks), the omnibar, the session tabs; the auto-hide strips'
+# key, hover label and pin / unpin
+# ---------------------------------------------------------------------------
+
+const
+  PinButtonPx = 24
+  HoverLabelPx = 24
+
+var
+  gMenu: MenuVM = nil
+    ## THE SHARED MENU VIEWMODEL — the tree the desktop's menu is built from
+    ## (`product_menu`), the state every front-end's menu is drawn from.
+  gOmnibar: OmnibarVM = nil
+  gTopLayout: GTopLayout
+  gTopEls: seq[GpuiElement] = @[]
+    ## The band, its parts, the popovers and the hover label: absolutely
+    ## placed on the root, rebuilt by `drawTopBar`.
+  gHoverControl = -1
+  gHoverSlot = ""
+    ## The auto-hide label under the pointer (its pane id), for the hover
+    ## label.
+  gHoverAt = (-1, -1)
+    ## Where the last hover was handled. The window re-reports a pointer
+    ## that has not moved (after a redraw); a keyboard move of the menu's
+    ## highlight must not be taken back by it, so a hover counts only when
+    ## the pointer really moved — the desktop menu's rule too.
+  gIconDir = ""
+    ## Where the desktop's marks are written as SVG documents for `img`.
+  gSourceService: GpuiSourceService = nil
+  gBindings: Table[string, string]
+    ## The window's keymap: the desktop's default chords
+    ## (`window_top_bar.desktopBindings`), shown in the menu and bound here.
+
+proc gpuiMenuActionAvailable(action: string): bool =
+  ## What this window performs from the menu: the debugger's transport and
+  ## the panes it can bring forward, and the omnibar's two searches. The
+  ## rest are drawn disabled — the same menu, honestly marked.
+  action in ["forwardContinue", "reverseContinue", "forwardNext",
+             "reverseNext", "forwardStep", "reverseStep", "forwardStepOut",
+             "reverseStepOut", "findSymbol", "aFilesystem", "aFullCalltrace",
+             "aState", "aEventLog", "aTimeline", "aTerminal", "aScratchpad",
+             "aPointList", "aAgentActivity"]
+
+proc markSvgPath(controlIndex: int; enabled: bool): string =
+  ## The desktop's mark for a control, written once as an SVG document in
+  ## the ink its state is drawn in — `svgMarkup`'s `currentColor` resolved,
+  ## as the button's CSS `color` resolves it on the desktop.
+  if gIconDir.len == 0:
+    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(gIconDir)
+  let c = TransportControls[controlIndex]
+  let path = gIconDir / (c.id & (if enabled: "-on" else: "-off") & ".svg")
+  if not fileExists(path):
+    let ink = chromeOf(if enabled: crTabActiveForeground
+                       else: crTabInactiveForeground)
+    var svg = svgMarkup(markFor(c.id)).replace("currentColor", ink)
+    svg = svg.replace("<svg ", "<svg width=\"" & $(2 * ControlIconPx) &
+                      "\" height=\"" & $(2 * ControlIconPx) & "\" ")
+    writeFile(path, svg)
+  path
+
+proc controlsEnabled(): seq[bool] =
+  if gSession.isNil or gSession.session.debugControlsVM.isNil:
+    return newSeq[bool](TransportControls.len)
+  for c in TransportControls:
+    result.add gSession.session.debugControlsVM.transportAvailable(c.id)
+
+proc absBox(r: GpuiRenderer; rect: PxRect; bg = ""): GpuiElement =
+  result = r.createElement("div")
+  r.setStyle(result, "position", "absolute")
+  r.setStyle(result, "left", $rect.x & "px")
+  r.setStyle(result, "top", $rect.y & "px")
+  r.setStyle(result, "width", $max(1, rect.w) & "px")
+  r.setStyle(result, "height", $max(1, rect.h) & "px")
+  r.setStyle(result, "flex-direction", "row")
+  r.setStyle(result, "items", "center")
+  if bg.len > 0:
+    r.setStyle(result, "background-color", bg)
+
+proc pinButtonRect(n: GeomNode): PxRect =
+  ## The PIN button of a pane box: the right end of its tab strip (or of its
+  ## heading row, for a bare pane).
+  let top = if n.strip.isEmpty: n.body.y else: n.strip.y
+  PxRect(x: n.rect.x + n.rect.w - PinButtonPx - 2, y: top + 3,
+         w: PinButtonPx, h: TabStripPx - 6)
+
+proc overlayRects(): seq[PxRect] =
+  ## What `drawOverlay` draws OVER the tree right now: the revealed pane, a
+  ## drag's drop tint and caret, and its ghost label — the rectangles no
+  ## control of the tree may paint over.
+  if gGestures.revealing:
+    result.add gGeom.revealRectOf(gGestures.reveal.edge)
+  let ind = gGestures.indication()
+  if ind.kind != diNone:
+    let (tint, caret) = gGeom.dropIndicationRects(ind)
+    if not tint.isEmpty: result.add tint
+    if not caret.isEmpty: result.add caret
+  if gGestures.kind == gkDragTab and gGestures.moved:
+    result.add PxRect(x: gGestures.pointerX + 12, y: gGestures.pointerY + 12,
+                      w: tabWidthPx(labelOf($gGestures.source)),
+                      h: TabStripPx)
+
+proc unpinButtonRect(): PxRect =
+  let rr = gGeom.revealRectOf(gGestures.reveal.edge)
+  PxRect(x: rr.x + rr.w - 72, y: rr.y + 4, w: 64, h: TabStripPx - 8)
+
+proc drawTopBar(r: GpuiRenderer) =
+  ## The band and everything over it, from the shared ViewModels.
+  if gRoot.isNil or gMenu.isNil:
+    return
+  for e in gTopEls:
+    r.removeChild(gRoot, e)
+  gTopEls = @[]
+  let tabs = if gShell.isNil: @[] else: gShell.app.tabsOf()
+  gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth)
+  let band = absBox(r, gTopLayout.band, chromeOf(crPaneBackground))
+  r.setAttribute(band, "data-ct-top-bar", "band")
+  r.setStyle(band, "rounded", "4px")
+  gTopEls.add band
+  let enabled = controlsEnabled()
+  let openAt = if gMenu.isOpen and gMenu.path.len > 0: gMenu.path[0] else: -1
+  for sg in gTopLayout.segs:
+    case sg.part
+    of gtMenuButton:
+      let b = absBox(r, sg.rect)
+      r.setAttribute(b, "data-ct-menu-button", $gMenu.isOpen)
+      r.setStyle(b, "padding-left", $TabPadPx & "px")
+      for (k, v) in tabStyle(gMenu.isOpen): r.setStyle(b, k, v)
+      r.appendChild(b, r.createTextNode("≡"))
+      gTopEls.add b
+    of gtMenuTitle:
+      let active = openAt == sg.index or
+                   (gMenu.isOpen and gMenu.path.len == 0 and
+                    gMenu.highlight == sg.index)
+      let b = absBox(r, sg.rect)
+      r.setAttribute(b, "data-ct-menu-title", gMenu.root.children[sg.index].label)
+      r.setAttribute(b, "data-ct-tab-active", $active)
+      r.setStyle(b, "padding-left", $TabPadPx & "px")
+      for (k, v) in tabStyle(active): r.setStyle(b, k, v)
+      r.appendChild(b, r.createTextNode(gMenu.root.children[sg.index].label))
+      gTopEls.add b
+    of gtControl:
+      let on = sg.index < enabled.len and enabled[sg.index]
+      let b = absBox(r, sg.rect,
+                     if gHoverControl == sg.index: chromeOf(crWindowBackground)
+                     else: "")
+      r.setAttribute(b, "data-ct-control", TransportControls[sg.index].id)
+      r.setAttribute(b, "data-ct-enabled", $on)
+      r.setStyle(b, "justify", "center")
+      let icon = r.createElement("img")
+      r.setAttribute(icon, "src", markSvgPath(sg.index, on))
+      r.setStyle(icon, "width", $ControlIconPx & "px")
+      r.setStyle(icon, "height", $ControlIconPx & "px")
+      r.appendChild(b, icon)
+      gTopEls.add b
+    of gtOmnibar:
+      let b = absBox(r, sg.rect, chromeOf(crWindowBackground))
+      r.setAttribute(b, "data-ct-omnibar", $gOmnibar.isOpen)
+      r.setStyle(b, "padding-left", $TabPadPx & "px")
+      r.setStyle(b, "rounded", "4px")
+      r.setStyle(b, "white-space", "nowrap")
+      r.setStyle(b, "overflow", "hidden")
+      let text =
+        if gOmnibar.isOpen: "⌕ " & gOmnibar.query & "▏"
+        elif gTopLayout.omnibarField: "⌕ Search files, :commands, :sym, #tick"
+        else: "⌕"
+      r.setStyle(b, "color", chromeOf(if gOmnibar.isOpen: crTabActiveForeground
+                                      else: crTabInactiveForeground))
+      r.appendChild(b, r.createTextNode(text))
+      gTopEls.add b
+    of gtTab:
+      let t = tabs[sg.index]
+      let b = absBox(r, sg.rect)
+      r.setAttribute(b, "data-ct-session-tab", t.title)
+      r.setAttribute(b, "data-ct-tab-active", $t.active)
+      r.setStyle(b, "padding-left", $TabPadPx & "px")
+      for (k, v) in tabStyle(t.active): r.setStyle(b, k, v)
+      r.appendChild(b, r.createTextNode(t.title))
+      gTopEls.add b
+  # PIN BUTTONS on every pane box. Drawn BEFORE the popovers and the
+  # omnibar's results, which open over the panes' tab strips and must cover
+  # them, and not at all under an overlay of the tree — a revealed pane, a
+  # drag's drop indication (`pinButtonShown`, `overlayRects`).
+  let covers = overlayRects()
+  for n in gGeom.nodes:
+    if n.kind != gnTabs:
+      continue
+    let pr = pinButtonRect(n)
+    if not pinButtonShown(pr, covers):
+      continue
+    let pb = absBox(r, pr)
+    r.setAttribute(pb, "data-ct-pin", n.panes[n.active])
+    r.setStyle(pb, "justify", "center")
+    r.setStyle(pb, "color", chromeOf(crTabInactiveForeground))
+    r.appendChild(pb, r.createTextNode("⇲"))
+    gTopEls.add pb
+  # THE MENU'S POPOVERS: a native-looking menu — rows on the pane surface,
+  # the open path and the highlight lifted, the chord right-aligned.
+  for p in gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
+                            pendingViewportHeight):
+    let box = absBox(r, p.rect, chromeOf(crPaneBackground))
+    r.setAttribute(box, "data-ct-menu-popover", $p.folderPath)
+    r.setStyle(box, "rounded", "6px")
+    for (k, v) in paneOutlineStyle(true): r.setStyle(box, k, v)
+    gTopEls.add box
+    let levels = gMenu.openLevels()
+    var lv: MenuLevelView
+    for l in levels:
+      if l.folderPath == p.folderPath: lv = l
+    for row in p.rows:
+      if row.item < 0:
+        continue
+      let it = lv.items[row.item]
+      let rb = absBox(r, row.rect,
+                      if it.active: chromeOf(crWindowBackground) else: "")
+      r.setAttribute(rb, "data-ct-menu-item", it.label)
+      r.setAttribute(rb, "data-ct-menu-active", $it.active)
+      r.setStyle(rb, "padding-left", $TabPadPx & "px")
+      r.setStyle(rb, "color", chromeOf(
+        if not it.enabled: crTabInactiveForeground
+        elif it.active: crTabActiveForeground
+        else: crWindowForeground))
+      if it.active:
+        r.setStyle(rb, "font-weight", "bold")
+      var label = it.label
+      if it.shortcut.len > 0: label.add "   " & it.shortcut
+      if it.folder: label.add "  ›"
+      r.appendChild(rb, r.createTextNode(label))
+      gTopEls.add rb
+  # THE OMNIBAR'S RESULTS.
+  let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
+  if op.rows.len > 0:
+    let box = absBox(r, op.rect, chromeOf(crPaneBackground))
+    r.setAttribute(box, "data-ct-omnibar-results", $gOmnibar.results.len)
+    for (k, v) in paneOutlineStyle(true): r.setStyle(box, k, v)
+    gTopEls.add box
+    for row in op.rows:
+      let selected = row.item >= 0 and row.item == gOmnibar.selected
+      let rb = absBox(r, row.rect,
+                      if selected: chromeOf(crWindowBackground) else: "")
+      r.setStyle(rb, "padding-left", $TabPadPx & "px")
+      r.setStyle(rb, "white-space", "nowrap")
+      r.setStyle(rb, "overflow", "hidden")
+      let text =
+        if row.item < 0: "no match"
+        else:
+          let e = gOmnibar.results[row.item].entry
+          e.label & (if e.detail.len > 0: "   " & e.detail else: "")
+      if row.item >= 0:
+        r.setAttribute(rb, "data-ct-omnibar-result",
+                       gOmnibar.results[row.item].entry.label)
+      r.setStyle(rb, "color", chromeOf(if selected: crTabActiveForeground
+                                       else: crWindowForeground))
+      r.appendChild(rb, r.createTextNode(text))
+      gTopEls.add rb
+  # UNPIN on a revealed pane (the PIN buttons are drawn before the
+  # popovers, below).
+  if gGestures.revealing:
+    let ub = absBox(r, unpinButtonRect(), chromeOf(crWindowBackground))
+    r.setAttribute(ub, "data-ct-unpin", $gGestures.reveal.pane)
+    r.setStyle(ub, "justify", "center")
+    r.setStyle(ub, "rounded", "4px")
+    for (k, v) in tabStyle(true): r.setStyle(ub, k, v)
+    r.appendChild(ub, r.createTextNode("Unpin"))
+    gTopEls.add ub
+  # THE HOVER LABEL: a control's tooltip and key, or an auto-hide label's
+  # pane, beside the pointer's target.
+  var hoverText = ""
+  var hoverAt = PxRect()
+  if gHoverControl >= 0:
+    let sg = gTopLayout.segOf(gtControl, gHoverControl)
+    hoverText = controlTooltip(gHoverControl,
+                               gMenu.shortcutFor(
+                                 TransportControls[gHoverControl].clientAction))
+    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 2,
+                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+  elif gHoverSlot.len > 0:
+    for st in gGeom.strips:
+      for sl in st.slots:
+        if sl.pane == gHoverSlot:
+          hoverText = sl.label & " — click to show, drag to place"
+          let w = textPx(hoverText) + 2 * TabPadPx
+          hoverAt =
+            case st.edge
+            of leBottom: PxRect(x: sl.rect.x, y: sl.rect.y - HoverLabelPx - 2,
+                                w: w, h: HoverLabelPx)
+            of leTop: PxRect(x: sl.rect.x, y: sl.rect.y + sl.rect.h + 2,
+                             w: w, h: HoverLabelPx)
+            of leLeft: PxRect(x: sl.rect.x + sl.rect.w + 2, y: sl.rect.y,
+                              w: w, h: HoverLabelPx)
+            of leRight: PxRect(x: sl.rect.x - w - 2, y: sl.rect.y, w: w,
+                               h: HoverLabelPx)
+  if hoverText.len > 0:
+    let hb = absBox(r, hoverAt, chromeOf(crWindowBackground))
+    r.setAttribute(hb, "data-ct-hover-label", hoverText)
+    r.setStyle(hb, "padding-left", $TabPadPx & "px")
+    r.setStyle(hb, "white-space", "nowrap")
+    for (k, v) in paneOutlineStyle(true): r.setStyle(hb, k, v)
+    r.appendChild(hb, r.createTextNode(hoverText))
+    gTopEls.add hb
+  for e in gTopEls:
+    r.appendChild(gRoot, e)
+  writeGeometry()
+  traceGesture("topbar menu=" & $gMenu.isOpen & " path=" & $gMenu.path &
+               " highlight=" & $gMenu.highlight & " omnibar=" &
+               $gOmnibar.isOpen & " query=" & gOmnibar.query & " results=" &
+               $gOmnibar.results.len)
+
+proc topBarGeometry(): JsonNode =
+  ## PLAT-48: the top bar's parts and the open popovers, for aiming a pointer
+  ## at a control, a menu title or a menu item (the geometry file's
+  ## `topBar`). What a gesture DID is read from the window's pixels.
+  proc rect(p: PxRect): JsonNode = %*[p.x, p.y, p.w, p.h]
+  var top = newJObject()
+  if not gMenu.isNil:
+    var segs = newJArray()
+    for sg in gTopLayout.segs:
+      var label = ""
+      case sg.part
+      of gtMenuTitle: label = gMenu.root.children[sg.index].label
+      of gtControl: label = TransportControls[sg.index].id
+      else: discard
+      segs.add %*{"part": $sg.part, "index": sg.index, "label": label,
+                  "rect": rect(sg.rect)}
+    var pops = newJArray()
+    let levels = gMenu.openLevels()
+    for p in gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
+                              pendingViewportHeight):
+      var rows = newJArray()
+      for lv in levels:
+        if lv.folderPath == p.folderPath:
+          for row in p.rows:
+            if row.item >= 0:
+              rows.add %*{"label": lv.items[row.item].label,
+                          "shortcut": lv.items[row.item].shortcut,
+                          "active": lv.items[row.item].active,
+                          "rect": rect(row.rect)}
+      pops.add %*{"path": p.folderPath, "rect": rect(p.rect), "rows": rows}
+    var results = newJArray()
+    let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
+    for row in op.rows:
+      if row.item >= 0:
+        results.add %*{"label": gOmnibar.results[row.item].entry.label,
+                       "rect": rect(row.rect)}
+    top = %*{"band": rect(gTopLayout.band), "segs": segs, "popovers": pops,
+             "menuOpen": gMenu.isOpen, "menuPath": gMenu.path,
+             "highlight": gMenu.highlight, "omnibarOpen": gOmnibar.isOpen,
+             "query": gOmnibar.query, "results": results,
+             "tick": (if gSession.isNil: 0'u64
+                      else: gSession.getCurrentRRTicks())}
+  top
+
+proc refreshReplayWindow(r: GpuiRenderer) =
+  ## After the debugger moved: the source window, the stop's panes, every
+  ## live leaf drawn again from its ViewModel (the call trace with its whole
+  ## count), the editor from a fresh surface, and the top bar (the controls'
+  ## availability moved too).
+  if gSession.isNil:
+    return
+  if not gSourceService.isNil:
+    gSourceService.serveWindow()
+  discard gSession.loadStopPanes()
+  let editor = gPanes.getOrDefault($paneEditor)
+  if not editor.isNil and not gSourceService.isNil:
+    let surface = editorSurfaceFor(
+      source = gSourceService.vm,
+      editor = gSession.session.editorVM,
+      state = gSession.session.stateVM,
+      flow = gSession.session.flowVM,
+      availability = gSourceService.availability(),
+      budget = gpuiRowBudget(),
+      medium = GpuiMedium,
+      points = editorPointsOf(gSession.session.store.pointList.rows.val))
+    while childCount(editor) > 1:
+      r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
+    discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface)
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin != paneEditor:
+      let pane = gPanes.getOrDefault($leaf.builtin)
+      if not pane.isNil and not leaf.vm.isNil:
+        redrawLeafBody(r, pane, leaf,
+                       (if leaf.builtin == paneCalltrace: calltraceHeading()
+                        else: ""))
+  gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
+                                   gSession.session.store, gMenu))
+  drawTopBar(r)
+
+proc performControl(r: GpuiRenderer; id: string) =
+  ## A debugger control (or its menu item), through the transport
+  ## ViewModel the desktop's toolbar calls (`DebugControlsVM`), then the
+  ## engine's `stopped` + `ct/complete-move` consumed as the terminal's host
+  ## consumes them.
+  if gSession.isNil:
+    return
+  let vm = gSession.session.debugControlsVM
+  if vm.isNil or not vm.transportAvailable(id):
+    traceGesture("control " & id & " unavailable")
+    return
+  case id
+  of "run-to-entry":
+    gSession.gotoTick(0'u64)
+  else:
+    case id
+    of "next": vm.stepForward()
+    of "reverse-next": vm.stepBackward()
+    of "step-in": vm.stepIn()
+    of "step-out": vm.stepOut()
+    of "reverse-step-in": vm.reverseStepIn()
+    of "reverse-step-out": vm.reverseStepOut()
+    of "continue": vm.continueExecution()
+    of "reverse-continue": vm.reverseContinue()
+    else: discard
+    try:
+      gSession.consumeNextCompleteMove()
+    except CatchableError:
+      discard
+  traceGesture("control " & id & " tick=" & $gSession.getCurrentRRTicks())
+  refreshReplayWindow(r)
+
+proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
+  let layout = committedLayout()
+  if layout.dockedIndex(pane) >= 0:
+    let shown = beginReveal(layout, pane)
+    if shown.isSome:
+      gGestures.reveal = shown.get
+  elif layout.tree.contains(pane):
+    applyGestureCommand(r, cmdActivateTab(pane))
+  discard drawArrangement(r)
+
+proc openOmnibar(r: GpuiRenderer; query = "") =
+  if gMenu.isOpen: gMenu.close()
+  if not gSession.isNil:
+    gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
+                                     gSession.session.store, gMenu))
+  gOmnibar.open(query)
+  drawTopBar(r)
+
+proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
+  traceGesture("menu action " & action)
+  for c in TransportControls:
+    if c.clientAction.len > 0 and c.clientAction == action:
+      performControl(r, c.id)
+      return
+  case action
+  of "findSymbol": openOmnibar(r, ":sym ")
+  of "aFilesystem": showPaneFromMenu(r, paneFileTree)
+  of "aFullCalltrace": showPaneFromMenu(r, paneCalltrace)
+  of "aState": showPaneFromMenu(r, paneState)
+  of "aEventLog": showPaneFromMenu(r, paneEventLog)
+  of "aTimeline": showPaneFromMenu(r, paneTimeline)
+  of "aTerminal": showPaneFromMenu(r, paneTerminalOutput)
+  of "aScratchpad": showPaneFromMenu(r, paneScratchpad)
+  of "aPointList": showPaneFromMenu(r, panePointList)
+  of "aAgentActivity": showPaneFromMenu(r, paneAgentActivity)
+  else: traceGesture("menu action " & action & " is not available here")
+  drawTopBar(r)
+
+proc acceptOmnibar(r: GpuiRenderer) =
+  let (ok, entry) = gOmnibar.accept()
+  if not ok:
+    drawTopBar(r)
+    return
+  traceGesture("omnibar " & $entry.kind & " " & entry.label & " -> " &
+               entry.target)
+  case entry.kind
+  of omTick, omSymbol:
+    if entry.target.len > 0 and not gSession.isNil:
+      try:
+        gSession.gotoTick(parseBiggestUInt(entry.target))
+      except ValueError:
+        discard
+      refreshReplayWindow(r)
+      return
+  of omCommand:
+    runGpuiMenuAction(r, entry.target)
+    return
+  else:
+    discard
+  drawTopBar(r)
+
+proc revealNext(r: GpuiRenderer) =
+  ## `Ctrl+O`: reveal the first docked pane, then the next; after the last,
+  ## hide — the strips' key (the terminal's `Ctrl+o`).
+  let layout = committedLayout()
+  if layout.docked.len == 0:
+    return
+  var next = 0
+  if gGestures.revealing:
+    for i, d in layout.docked:
+      if d.pane == gGestures.reveal.pane:
+        next = i + 1
+  if next >= layout.docked.len:
+    gGestures.reveal = noInteraction()
+  else:
+    let shown = beginReveal(layout, layout.docked[next].pane)
+    gGestures.reveal = if shown.isSome: shown.get else: noInteraction()
+  traceGesture(if gGestures.revealing: "revealed " & $gGestures.reveal.pane
+               else: "reveal dismissed")
+  discard drawArrangement(r)
+
+proc handleTopKey(r: GpuiRenderer; key: string;
+                  mods: seq[string]): bool =
+  ## The window's keys for the top bar and the strips. Answers whether the
+  ## key was taken. An open omnibar, then an open menu, own every key.
+  if gMenu.isNil or gOmnibar.isNil:
+    return false
+  let k = key.toLowerAscii
+  let ctrl = "control" in mods
+  if gOmnibar.isOpen:
+    case k
+    of "escape", "esc": gOmnibar.close()
+    of "enter", "return":
+      acceptOmnibar(r)
+      return true
+    of "up": gOmnibar.moveSelection(-1)
+    of "down": gOmnibar.moveSelection(1)
+    of "backspace": gOmnibar.backspace()
+    of "space": gOmnibar.typeText(" ")
+    else:
+      if key.len == 1 and not ctrl:
+        gOmnibar.typeText(key)
+      else:
+        return true
+    drawTopBar(r)
+    return true
+  if gMenu.isOpen:
+    let bar = gTopLayout.menuExpanded
+    case k
+    of "escape", "esc": gMenu.escape()
+    of "m":
+      if ctrl: gMenu.close()
+      else: gMenu.typeToSelect(key, int64(epochTime() * 1000))
+    of "enter", "return":
+      let act = gMenu.activate()
+      if act.ran:
+        runGpuiMenuAction(r, act.action)
+        return true
+    of "up":
+      if not (bar and gMenu.path.len == 0): gMenu.moveHighlight(-1)
+    of "down":
+      if bar and gMenu.path.len == 0: discard gMenu.enterFolder()
+      else: gMenu.moveHighlight(1)
+    of "right":
+      if bar and gMenu.path.len == 0: gMenu.moveHighlight(1)
+      elif not gMenu.enterFolder() and bar: gMenu.siblingMenu(1)
+    of "left":
+      if bar and gMenu.path.len == 0: gMenu.moveHighlight(-1)
+      elif bar and gMenu.path.len == 1: gMenu.siblingMenu(-1)
+      else: discard gMenu.leaveFolder()
+    else:
+      if key.len == 1 and not ctrl:
+        gMenu.typeToSelect(key, int64(epochTime() * 1000))
+    drawTopBar(r)
+    return true
+  # The desktop's chords: `CTRL+M` opens the menu (`aMenu`), the transport
+  # and Find Symbol run their action.
+  let chord = chordOfKey(key, mods)
+  let bound = gBindings.actionForChord(chord)
+  if bound == "aMenu":
+    gMenu.open(keyboard = true)
+    drawTopBar(r)
+    return true
+  if bound.len > 0 and gpuiMenuActionAvailable(bound):
+    runGpuiMenuAction(r, bound)
+    return true
+  if ctrl and k == "p":
+    openOmnibar(r)
+    return true
+  if ctrl and k == "o":
+    revealNext(r)
+    return true
+  let step = sessionTabStepOf(key, mods)
+  if step != 0 and not gShell.isNil:
+    # The session tabs (`session_tabs.stepTab`, wrapping); one session has
+    # no other tab, and the key is then taken and does nothing.
+    if gShell.app.stepTab(step):
+      traceGesture("session tab " & $gShell.app.activeTabIndex())
+    drawTopBar(r)
+    return true
+  false
+
+proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
+  ## A left press the top bar, a popover, a pin / unpin button or an open
+  ## menu / omnibar takes. Answers whether it was taken.
+  if gMenu.isNil:
+    return false
+  let band = gTopLayout.band
+  if gMenu.isOpen:
+    let pops = gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
+                                pendingViewportHeight)
+    let (inside, path) = gpuiMenuHitAt(pops, gMenu, x, y)
+    if inside:
+      if path.len > 0:
+        let act = gMenu.clickPath(path)
+        if act.ran:
+          runGpuiMenuAction(r, act.action)
+          return true
+      drawTopBar(r)
+      return true
+    if not band.contains(x, y):
+      gMenu.close()
+      drawTopBar(r)
+      return true
+  if gOmnibar.isOpen:
+    let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
+    if op.rect.contains(x, y):
+      for row in op.rows:
+        if row.item >= 0 and row.rect.contains(x, y):
+          gOmnibar.select(row.item)
+          acceptOmnibar(r)
+          return true
+      return true
+    if not gTopLayout.segOf(gtOmnibar).rect.contains(x, y):
+      gOmnibar.close()
+      drawTopBar(r)
+      if not band.contains(x, y):
+        return true
+  if gGestures.revealing and unpinButtonRect().contains(x, y):
+    let pane = gGestures.reveal.pane
+    gGestures.reveal = noInteraction()
+    # Back where it was pinned from (`DockedPane.beside`).
+    applyGestureCommand(r, cmdRestoreDocked(pane))
+    discard drawArrangement(r)
+    drawTopBar(r)
+    return true
+  let covers = overlayRects()
+  for n in gGeom.nodes:
+    if n.kind == gnTabs and pinButtonRect(n).contains(x, y) and
+       pinButtonShown(pinButtonRect(n), covers):
+      for k in PaneKind:
+        if $k == n.panes[n.active]:
+          applyGestureCommand(r, cmdDock(k, leBottom))
+      discard drawArrangement(r)
+      drawTopBar(r)
+      return true
+  if not band.contains(x, y):
+    return false
+  let hit = gTopLayout.topBarHitAt(x, y)
+  if hit.index < 0 and hit.rect.w == 0:
+    return true
+  case hit.part
+  of gtMenuButton:
+    if gMenu.isOpen: gMenu.close() else: gMenu.open(keyboard = false)
+  of gtMenuTitle:
+    if gMenu.isOpen and gMenu.path.len > 0 and gMenu.path[0] == hit.index:
+      gMenu.close()
+    else:
+      gMenu.openFolder(hit.index, keyboard = false)
+  of gtControl:
+    performControl(r, TransportControls[hit.index].id)
+    return true
+  of gtOmnibar:
+    if not gOmnibar.isOpen:
+      openOmnibar(r)
+      return true
+  of gtTab:
+    discard gShell.app.activateTab(hit.index)
+  drawTopBar(r)
+  true
+
+proc handleTopHover(r: GpuiRenderer; x, y: int) =
+  ## The pointer moving with no button: a control's tooltip, an auto-hide
+  ## label's hover label, an open menu's hovered item.
+  if gMenu.isNil or (x, y) == gHoverAt:
+    return
+  gHoverAt = (x, y)
+  var control = -1
+  if gTopLayout.band.contains(x, y):
+    let hit = gTopLayout.topBarHitAt(x, y)
+    if hit.part == gtControl and hit.rect.w > 0:
+      control = hit.index
+  var slot = ""
+  let (si, sj) = gGeom.slotAt(x, y)
+  if si >= 0:
+    slot = gGeom.strips[si].slots[sj].pane
+  var changed = control != gHoverControl or slot != gHoverSlot
+  gHoverControl = control
+  gHoverSlot = slot
+  if gMenu.isOpen:
+    let pops = gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
+                                pendingViewportHeight)
+    let (inside, path) = gpuiMenuHitAt(pops, gMenu, x, y)
+    if inside and path.len > 0:
+      let before = gMenu.revision
+      gMenu.hoverPath(path)
+      changed = changed or gMenu.revision != before
+  if changed:
+    drawTopBar(r)
 
 var gVcsDirectory = ""
   ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
@@ -1185,13 +1950,24 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   r.setStyle(root, "font-family", WindowFontFamily)
   r.setStyle(root, "width", "100%")
   r.setStyle(root, "height", "100%")
-  r.setStyle(root, "flex-direction", "row")
+  # PLAT-48: A COLUMN — the top bar's band (reserved by a spacer; its parts
+  # are placed absolutely from `window_top_bar`, the geometry the pointer
+  # reads) above the arrangement.
+  r.setStyle(root, "flex-direction", "column")
   r.setStyle(root, "padding", $ChromePaddingPx & "px")
   r.setStyle(root, "gap", $ChromeGapPx & "px")
+  let topSpacer = r.createElement("div")
+  r.setAttribute(topSpacer, "data-ct-top-bar", "spacer")
+  r.setStyle(topSpacer, "width", "100%")
+  r.setStyle(topSpacer, "height", $TopBarPx & "px")
+  r.setStyle(topSpacer, "flex-shrink", "0")
+  r.appendChild(root, topSpacer)
 
   let container = pendingOutcome.root
   r.setStyle(container, "width", "100%")
-  r.setStyle(container, "height", "100%")
+  r.setStyle(container, "height",
+             $max(1, pendingViewportHeight - 2 * ChromePaddingPx -
+                     GpuiTopBandPx) & "px")
   r.setStyle(container, "flex-direction", "row")
   r.setStyle(container, "gap", $ChromeGapPx & "px")
 
@@ -1273,6 +2049,7 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   armPointer(r, root)
 
   r.appendChild(root, container)
+  drawTopBar(r)
 
 proc writeInputProbe(path: string; elapsedMs: int; deadlineMs: uint32): bool =
   ## PLAT-38. Write what the element store held, after the loop returned.
@@ -1354,6 +2131,136 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
     stderr.writeLine("codetracer-gpui: --frame-report: " & e.msg)
     false
 
+proc centreOf(r: PxRect): (int, int) = (r.x + r.w div 2, r.y + r.h div 2)
+
+proc removeMarkFiles() =
+  ## The debugger controls' SVG files (`markSvgPath`) live in a directory of
+  ## this process's own; it goes when the window does, so a run leaves
+  ## nothing behind in the temporary directory.
+  if gIconDir.len > 0:
+    try: removeDir(gIconDir)
+    except OSError: discard
+    gIconDir = ""
+
+proc runWindowOp(r: GpuiRenderer; op: string): string =
+  ## One `--window-ops` event, through the window's own handlers
+  ## (`windowPointer`, `windowKey`). A named target is aimed from the
+  ## geometry the window drew — the same aim a user's pointer takes. Answers
+  ## "" or why the event could not be aimed.
+  let parts = op.split(':')
+  proc at(i: int): int = parseInt(parts[i])
+  proc pressAt(x, y: int) =
+    windowPointer(r, gekPointerDown, x, y)
+    windowPointer(r, gekPointerUp, x, y)
+  try:
+    case parts[0]
+    of "key":
+      let mods = if parts.len > 2: parts[2].split('+') else: @[]
+      windowKey(parts[1], mods)
+    of "press": windowPointer(r, gekPointerDown, at(1), at(2))
+    of "move": windowPointer(r, gekPointerMove, at(1), at(2))
+    of "release": windowPointer(r, gekPointerUp, at(1), at(2))
+    of "menu":
+      for sg in gTopLayout.segs:
+        if sg.part == gtMenuTitle and
+           gMenu.root.children[sg.index].label == parts[1]:
+          let (x, y) = centreOf(sg.rect)
+          pressAt(x, y)
+          return ""
+      return "no menu title '" & parts[1] & "' in the band"
+    of "control":
+      for sg in gTopLayout.segs:
+        if sg.part == gtControl and TransportControls[sg.index].id == parts[1]:
+          let (x, y) = centreOf(sg.rect)
+          windowPointer(r, gekPointerMove, x, y)
+          return ""
+      return "no control '" & parts[1] & "' in the band"
+    of "label":
+      for st in gGeom.strips:
+        for sl in st.slots:
+          if sl.pane == parts[1]:
+            let (x, y) = centreOf(sl.rect)
+            pressAt(x, y)
+            return ""
+      return "no strip label for '" & parts[1] & "'"
+    of "pin":
+      for n in gGeom.nodes:
+        if n.kind == gnTabs and parts[1] in n.panes:
+          let (x, y) = centreOf(pinButtonRect(n))
+          pressAt(x, y)
+          return ""
+      return "no pane box holds '" & parts[1] & "'"
+    of "unpin":
+      if not gGestures.revealing:
+        return "nothing is revealed to unpin"
+      let (x, y) = centreOf(unpinButtonRect())
+      pressAt(x, y)
+    of "hold":
+      var src, dst = -1
+      for i, n in gGeom.nodes:
+        if n.kind == gnTabs and parts[1] in n.panes: src = i
+        if n.kind == gnTabs and parts[2] in n.panes: dst = i
+      if src < 0 or dst < 0:
+        return "no pane box holds '" & parts[1] & "' or '" & parts[2] & "'"
+      let n = gGeom.nodes[src]
+      let (sx, sy) =
+        if n.tabs.len > 0: centreOf(n.tabs[n.panes.find(parts[1])])
+        else: (n.body.x + 40, n.body.y + 12)
+      let (tx, ty) = centreOf(gGeom.nodes[dst].body)
+      windowPointer(r, gekPointerDown, sx, sy)
+      for k in 1 .. 6:
+        windowPointer(r, gekPointerMove, sx + (tx - sx) * k div 6,
+                      sy + (ty - sy) * k div 6)
+    of "drag":
+      for n in gGeom.nodes:
+        if n.kind == gnTabs and parts[1] in n.panes:
+          let (sx, sy) =
+            if n.tabs.len > 0: centreOf(n.tabs[n.panes.find(parts[1])])
+            else: (n.body.x + 40, n.body.y + 12)
+          let (tx, ty) = (gGeom.area.x + gGeom.area.w div 2, gGeom.area.y - 3)
+          windowPointer(r, gekPointerDown, sx, sy)
+          for k in 1 .. 6:
+            windowPointer(r, gekPointerMove, sx + (tx - sx) * k div 6,
+                          sy + (ty - sy) * k div 6)
+          windowPointer(r, gekPointerUp, tx, ty)
+          return ""
+      return "no pane box holds '" & parts[1] & "'"
+    else:
+      return "unknown event '" & op & "'"
+  except ValueError, IndexDefect:
+    return "malformed event '" & op & "'"
+  ""
+
+proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
+                      dock: JsonNode): int =
+  ## `--report-window-plan`: the window's root builder over a detached root,
+  ## then `--window-ops`, then the root's render plan on stdout. The SAME
+  ## `paintWindowChrome` `gpui_launch` calls, so what this prints is what a
+  ## window draws — its top bar, strips, overlays and buttons — not a model
+  ## of it.
+  pendingOutcome = outcome
+  pendingViewportWidth = cmd.width
+  pendingViewportHeight = cmd.height
+  pendingDock = dock
+  builderCalls = 0
+  probeEnabled = false
+  var r: GpuiRenderer
+  let root = r.createElement("div")
+  paintWindowChrome(root)
+  for op in cmd.windowOps:
+    let failure = runWindowOp(r, op)
+    if failure.len > 0:
+      stderr.writeLine("codetracer-gpui: --window-ops: " & failure)
+      return 1
+  if not r.verifyRenderPlan(root):
+    stderr.writeLine("codetracer-gpui: the window's render plan did not verify")
+    return 1
+  # The marks' SVG files STAY: the plan names them (`img src`) and they are
+  # what a reader of the plan checks the drawn marks against. The reader
+  # removes them (`test_plat48_gpui_plan.nim` does).
+  echo r.renderPlanJson(root)
+  0
+
 proc launchWindow(cmd: GpuiCommand; title: string;
                   outcome: LeafRenderOutcome; dock: JsonNode = nil): int =
   ## Open the window, run the event loop, and return when it stops.
@@ -1363,6 +2270,8 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   ## measured that a windowed client ran past a 12 s and a 90 s cap before
   ## `gpui_quit_after_ms` existed, because `gpui_launch` does not return while
   ## the window does.
+  if cmd.reportWindowPlan:
+    return reportWindowPlan(cmd, outcome, dock)
   pendingOutcome = outcome
   pendingViewportWidth = cmd.width
   pendingViewportHeight = cmd.height
@@ -1383,6 +2292,7 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
               paintWindowChrome)
   let elapsedMs = int((epochTime() - startedAt) * 1000)
+  removeMarkFiles()
   if cmd.frameReport.len > 0:
     if not writeFrameReport(cmd.frameReport, loadStart, loadAverage(),
                             elapsedMs, cmd.quitAfterMs):
@@ -1409,7 +2319,7 @@ proc editorRowsFor(layout: Layout; viewport: DockViewport;
   editorRowsOf(windowGeometryOf(layout,
                                 (if proj.status == dpsRefused: nil
                                  else: proj.state),
-                                cmd.width, cmd.height))
+                                cmd.width, cmd.height, GpuiTopBandPx))
 
 proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
   ## PLAT-22. **Edit mode's surface: the WORKING TREE, and no recording.**
@@ -1806,6 +2716,19 @@ proc runOpen(cmd: GpuiCommand): int =
   gWindow = windowId
   gRemember = not quarantined and cmd.layoutFile.len == 0
   gSession = session
+  gSourceService = sourceService
+  # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
+  # with what this window performs enabled, its chords none (the window has
+  # no keymap of its own for the debugger yet); the omnibar searches the
+  # session's files, the held call-trace section and the menu's commands —
+  # the index the terminal builds for the same recording.
+  gMenu = newMenuVM(nativeFrontEndMenu("CodeTracer"))
+  gMenu.setEnabled(gpuiMenuActionAvailable)
+  gBindings = desktopBindings()
+  gMenu.setShortcuts(gBindings)
+  gOmnibar = newOmnibarVM()
+  gOmnibar.setIndex(omnibarIndexOf(session.session.fileTreeVM,
+                                   session.session.store, gMenu))
   gLeafSet = leafSet
   gCalltraceLoads =
     if session.session.store.calltrace.lines.val.len > 0: 1 else: 0

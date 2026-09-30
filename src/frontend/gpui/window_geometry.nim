@@ -27,10 +27,9 @@
 ## cells to the same functions. The resolution order is the terminal's:
 ##
 ##   0. an auto-hide strip: the dock of its edge (`dzOutside<edge>`);
-##   1. outside the layout area: the nearest DOCK edge this front-end can
-##      place (gpui-kit's dock has no top placement, so the top margin names
-##      no target — `dock_projection` would refuse the document a top dock
-##      produced, and the window would have nothing to draw);
+##   1. outside the layout area: the nearest DOCK edge — all four since
+##      PLAT-48 (gpui-kit's dock has no top placement, so the window draws
+##      the top strip and its reveal itself, outside the dock document);
 ##   2. a stack's tab strip: the tab under the pointer (`dzTabStrip` on that
 ##      tab's path), or past the last label `dzCentre` ("append");
 ##   3. the four edge bands of the pane's body (a quarter of its extent each,
@@ -315,14 +314,16 @@ proc stripsOf(layout: Layout; area: PxRect):
     result.strips.add strip
 
 proc windowGeometryOf*(layout: Layout; dock: JsonNode;
-                       width, height: int): WindowGeometry =
+                       width, height: int; topBandPx = 0): WindowGeometry =
   ## Where every pane, strip, tab and divider of the window is, for the dock
   ## document `dock` (projected from `layout`) in a `width` x `height` window.
+  ## `topBandPx` (PLAT-48) is what the window's top bar and its gap take
+  ## above the arrangement; 0 for a window drawn without one.
   result = WindowGeometry(
     viewport: PxRect(x: 0, y: 0, w: width, h: height),
-    area: PxRect(x: ChromePaddingPx, y: ChromePaddingPx,
+    area: PxRect(x: ChromePaddingPx, y: ChromePaddingPx + topBandPx,
                  w: max(1, width - 2 * ChromePaddingPx),
-                 h: max(1, height - 2 * ChromePaddingPx)),
+                 h: max(1, height - 2 * ChromePaddingPx - topBandPx)),
     nodes: @[], root: -1, dividers: @[])
   let (strips, inner) = stripsOf(layout, result.area)
   result.strips = strips
@@ -493,19 +494,22 @@ proc pointerAt*(g: WindowGeometry; x, y: int): Option[LayoutPointer] =
     return some(LayoutPointer(path: "", zone: zone))
   let a = g.area
   if not a.contains(x, y):
-    # The nearest dock edge this front-end can place; the top margin has
-    # none (see the header).
+    # The nearest dock edge — all four since PLAT-48: the window draws a top
+    # strip itself (gpui-kit's dock has no top placement; see
+    # `dock_projection.projectDock`), so the top margin docks to the top as
+    # the terminal's row above the body and the desktop's top drop do.
     let dl = x - a.x
     let dr = a.x + a.w - 1 - x
     let db = a.y + a.h - 1 - y
     let dt = y - a.y
-    if dt < 0 and dt <= min(dl, min(dr, db)):
-      return none(LayoutPointer)
     var best = dl
     var zone = dzOutsideLeft
     if dr < best:
       best = dr
       zone = dzOutsideRight
+    if dt < best:
+      best = dt
+      zone = dzOutsideTop
     if db < best:
       zone = dzOutsideBottom
     return some(LayoutPointer(path: "", zone: zone))

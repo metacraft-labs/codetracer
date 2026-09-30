@@ -228,35 +228,35 @@ suite "PLAT-20: the dock projection writes gpui-kit's persisted schema":
     ck centreSlot.region == dpCenter
     expectCount(17)
 
-  test "a pane docked to the TOP edge is REFUSED, not relocated":
+  test "a pane docked to the TOP edge is PROJECTED, drawn by the window itself":
     resetCount()
     # gpui-kit's `DockPlacement` is center/left/bottom/right — there is no
-    # `top`, and that was read off `crates/base/src/dock/state.rs` at
-    # 959ccc5e rather than assumed. Rounding a top dock to `bottom` would move
-    # a user's pane silently, which is the "I lost a pane" failure
-    # Layout-ViewModel §3A.2 is written against.
+    # `top`, read off `crates/base/src/dock/state.rs` at 959ccc5e. Until
+    # PLAT-48 the projection REFUSED a top-docked layout (rounding it to
+    # `bottom` would move a user's pane silently), so a layout the terminal
+    # or the desktop saved with one could not be opened in the GPUI window at
+    # all. Now the document carries no top dock and NO other dock in its
+    # place — the window draws the top strip itself, from `layout.docked`
+    # (`window_geometry.stripsOf`) — and the centre gives the strip its
+    # extent, as it does for a bottom dock.
     var layout = initLayout(row([pane(paneEditor), pane(paneState)]))
     let outcome = layout.apply(cmdDock(paneState, leTop))
     ck outcome.kind == loApplied
-    # `topEdgeProjection`, not `projection`, and the name is load-bearing
-    # rather than descriptive: `unittest` prints an assertion's AST AS
-    # SUBSTITUTED AT THE CALL SITE, so a case that spells its subject
-    # `projection` produces the identical failure text as the invalid-layout
-    # case below — and `run-plat20-mutations.py` REFUSED the run over exactly
-    # that, which is Verification-Harness-Traps §17a's closing rule doing its
-    # job. Two arms sharing one `because` is a shared quotation, and a shared
-    # quotation is how an arm gets attributed to a case it did not break.
+    # `topEdgeProjection`, not `projection` — see §17a: two arms sharing one
+    # quotation cannot be told apart by `run-plat20-mutations.py`.
     let topEdgeProjection = projectDock(outcome.layout, Viewport)
-    ck topEdgeProjection.status == dpsRefused
-    # `problemsOf` rather than `.problems`: reading the field on a projected
-    # value raises `FieldDefect` and takes the case's remaining assertions
-    # with it (§1a). Found by running arm G1.
-    let topProblems = problemsOf(topEdgeProjection)
-    ck topProblems.len == 1
-    ck topProblems[0].kind == dppNoPlacementForEdge
-    ck "state" in topProblems[0].detail
-    ck "top" in topProblems[0].detail
-    expectCount(6)
+    ck topEdgeProjection.status == dpsProjected
+    let doc = topEdgeProjection.state
+    ck not doc.hasKey("top_dock")
+    ck not doc.hasKey("bottom_dock") and not doc.hasKey("left_dock") and
+       not doc.hasKey("right_dock")
+    # The docked pane is not in the centre either: docked means not placed.
+    ck not ($doc["center"]).contains("\"state\"")
+    ck problemsOf(topEdgeProjection).len == 0
+    # …and gpui-kit still has no top placement to round it into: the edge
+    # maps to NO dock, so a top pane can only ever be the window's own strip.
+    ck not placementFor(leTop)[0]
+    expectCount(7)
 
   test "an INVALID layout is refused rather than projected":
     resetCount()
@@ -497,8 +497,9 @@ suite "PLAT-20: conformance against gpui-kit's OWN committed documents":
     expectCount(5)
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
-# spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 95
+# spelling as a RUNTIME assertion count. PLAT-48: 95 -> 96, the top edge's
+# "no gpui-kit placement" contract (`placementFor(leTop)`).
+const ExpectedAssertions = 96
 
 suite "PLAT-20: the assertion count":
   test "every case in this file ran":

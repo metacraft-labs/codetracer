@@ -65,7 +65,7 @@ proc gpuiLayoutDocumentPath*(): string =
 proc sharedDefaultValue*(): Layout =
   ## The shared default at depth 0 — this front-end has no minimum-size
   ## contract in pixels, so it never folds (PLAT-45 deliverable 6).
-  initLayout(sharedDefaultLayout().tree)
+  initLayout(sharedDefaultLayout().tree, sharedDefaultLayout().docked)
 
 proc unreadable(path, kind, why: string): GpuiLayoutRestore =
   GpuiLayoutRestore(
