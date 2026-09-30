@@ -19,6 +19,7 @@ from ../viewmodel/viewmodels/generated_code_operation import
   TargetCommand, TargetAvailability, gaEnabled, gaDisabled, commandLabel
 from dom import createElement
 from mode_layouts import isEditingMode
+from ../viewmodel/viewmodels/diff_document import editorLanguageForPath
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
@@ -2379,7 +2380,8 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
         "#" & editorDom.id.cstring,
         MonacoEditorOptions(
           value: source,
-          language: lang.toCLang(),
+          language: cstring(editorLanguageForPath(
+            $self.data.services.debugger.location.path, lang.toCLang())),
           readOnly: true,
           theme: theme,
           automaticLayout: true,
@@ -3347,7 +3349,7 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
       selector,
       MonacoEditorOptions(
         value: tabInfo.source,
-        language: lang.toCLang(),
+        language: cstring(editorLanguageForPath($path, lang.toCLang())),
         readOnly: readOnly,
         theme: theme,
         automaticLayout: true,

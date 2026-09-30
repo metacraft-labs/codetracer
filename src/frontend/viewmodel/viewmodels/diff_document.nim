@@ -329,6 +329,10 @@ const
     ("rst", "restructuredtext"),
   ]
 
+const EditorPlainExtensions* = ["toml"]
+  ## Extensions ``editorLanguageForPath`` leaves to the fallback although
+  ## ``DiffLanguageByExtension`` approximates them (see there).
+
 proc diffFileExtension*(path: string): string {.noSideEffect.} =
   ## The lowercased extension of ``path``, without the dot, or "".
   ##
@@ -368,6 +372,32 @@ proc diffLanguageForPath*(path: string): string {.noSideEffect.} =
     if entry[0] == extension:
       return entry[1]
   DiffPlainLanguage
+
+proc editorLanguageForPath*(path: string; fallback: string): string
+    {.noSideEffect.} =
+  ## The Monaco language the desktop's EDITOR opens ``path`` in: the
+  ## extension's Monaco id from ``DiffLanguageByExtension`` — the one table of
+  ## ids the vendored Monaco registers — and ``fallback`` (the recording
+  ## language's name, ``common_lang.toCLang``) only for an extension that table
+  ## does not know.
+  ##
+  ## Until 2026-09-30 the editor asked ``toCLang`` alone, which answers per
+  ## RECORDING language and has no spelling for ``.ts``, ``.java``, ``.sh``,
+  ## ``.json`` or ``.yaml``, so the desktop opened those files uncoloured
+  ## while its own diff view (and the terminal's and GPUI's lexers, which run
+  ## Monaco's definitions) coloured them.
+  ##
+  ## ONE EXCEPTION: ``toml``. Monaco has no TOML tokenizer; the diff view
+  ## reads it as ``ini``, an approximation, but the editor draws it plain —
+  ## as it always has, and as the terminal's and GPUI's editors do
+  ## (``tui/app/syntax/lexical.LexerExtensions`` has no TOML on purpose) — so
+  ## the three editors colour a TOML file the same way.
+  let extension = diffFileExtension(path)
+  if extension.len > 0 and extension notin EditorPlainExtensions:
+    for entry in DiffLanguageByExtension:
+      if entry[0] == extension:
+        return entry[1]
+  fallback
 
 proc diffLanguageForFiles*(files: openArray[VCSDiffFileRow]): string
     {.noSideEffect.} =
