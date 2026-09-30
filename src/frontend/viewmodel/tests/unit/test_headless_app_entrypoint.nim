@@ -194,8 +194,13 @@ suite "Headless app — launch":
     # answers nil by design (`headless_app.paneViewModel`'s arm). They are the
     # front-ends' report leaves, not replay panes, and asserted nil here so a
     # ViewModel wired to them later is a visible change.
+    #
+    # PLAT-48 adds two more of the same kind: the desktop's PROBLEMS and
+    # REQUESTS footer panels, which the shared default now docks at the
+    # bottom (`layout_model.sharedDefaultDocked`).
     const DesktopOnlyPanes = {paneVcs, paneAgentActivity, paneTerminalOutput,
-                              paneTestResults, paneConstraints}
+                              paneTestResults, paneConstraints,
+                              paneProblems, paneRequests}
     var replayPanes = 0
     var editPanes = 0
     var desktopPanes = 0
@@ -217,7 +222,7 @@ suite "Headless app — launch":
         check not slot.paneViewModel(p).isNil
     checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
     check editPanes == 1
-    check desktopPanes == 5
+    check desktopPanes == 7
     check replayPanes > 0
     # The pane PLAT-41 moved, pinned by name so the move cannot be undone
     # quietly by re-adding it to the set above.

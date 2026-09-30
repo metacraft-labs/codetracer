@@ -413,6 +413,20 @@ export editing_core
 # are what stand between a plugin and a process, and an embedder has no
 # manifest and therefore no grants at all.
 
+# PLAT-48: THE TOP BAR'S LOGICAL STATE, for every front-end. The Menu
+# ViewModel (its tree is `product_menu`'s, the desktop's menu), the Omnibar
+# ViewModel and the index it searches (`omnibar_sources`, over the session's
+# own `FilesystemVM` and store), and the debugger controls' renderings
+# (`transport_icons`). The terminal and the GPUI window are SDK consumers and
+# reach them here; the desktop's renderer imports them directly. All five are
+# plain Nim over `std/*` and the ViewModels this facade already exports —
+# `filesystem_vm` is `session_vm`'s own import, exported so its type is
+# nameable — so the facade's graph gains no renderer, no I/O and no process.
+import viewmodels/[menu_vm, product_menu, omnibar_vm, omnibar_sources,
+                   transport_icons, filesystem_vm]
+export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
+       filesystem_vm
+
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"
     ## The one module name a consumer may import from this SDK. The import

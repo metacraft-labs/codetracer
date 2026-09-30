@@ -264,6 +264,25 @@ proc activate*(app: HeadlessApp; id: HeadlessSessionId): bool =
   app.activeId = id
   true
 
+proc moveSlot*(app: HeadlessApp; id: HeadlessSessionId; toIndex: int): bool =
+  ## PLAT-48: reorder the session tabs — move `id` to position `toIndex`
+  ## (clamped). False, changing nothing, when `id` is unknown or already
+  ## there. Which session is active does not change.
+  app.requireLive()
+  var at = -1
+  for i, s in app.slots:
+    if s.id == id:
+      at = i
+  if at < 0:
+    return false
+  let target = max(0, min(app.slots.high, toIndex))
+  if target == at:
+    return false
+  let moved = app.slots[at]
+  app.slots.delete(at)
+  app.slots.insert(moved, target)
+  true
+
 proc closeSession*(app: HeadlessApp; id: HeadlessSessionId;
                    disconnectBackend: bool = true): bool =
   ## Dispose and remove a session. False when `id` is unknown.
@@ -368,6 +387,12 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # a REPORT leaf naming the pane and the reason
     # (`layout_model.PaneCapability`), and this answers what is true: no
     # ViewModel here, `paneIsLive` false.
+    nil
+  of paneProblems, paneRequests:
+    # PLAT-48. The desktop's PROBLEMS and REQUESTS footer panels, which the
+    # shared default now docks. Their ViewModels are the desktop's (a build's
+    # diagnostics, a service's request log); the replay session owns neither,
+    # so nil, for the reason above.
     nil
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =
