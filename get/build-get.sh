@@ -31,7 +31,7 @@ sh_src="$repo_root/install-on-distributions.sh"
   printf '# CodeTracer installer — served from https://get.codetracer.com/sh\n'
   printf '# Source: metacraft-labs/codetracer install-on-distributions.sh @ %s (assembled %s)\n' "$rev" "$now"
   printf '# Inspect before running:  curl -fsSL https://get.codetracer.com/sh | less\n'
-  printf '# Artifacts come from the release store (GitHub Releases / downloads.codetracer.com).\n'
+  printf '# It registers the Metacraft Labs package repository (deb./rpm.metacraft-labs.com) where one applies.\n'
   printf '#\n'
   tail -n +2 "$sh_src"
 } > "$out/sh"
