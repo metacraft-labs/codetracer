@@ -83,6 +83,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# `grep -q` CLOSES ITS INPUT ON THE FIRST MATCH, so a producer piped into it
+# takes SIGPIPE and `set -o pipefail` reports the whole pipeline as failed — a
+# successful match read as a miss. `ci/test/grep-q-pipefail-gate.sh` exists for
+# that defect and caught three sites in the first version of this file.
+#
+# So every membership test goes through here: the candidate list is captured
+# first and matched with a HERESTRING, which is a redirect rather than a pipe and
+# has no producer to signal.
+contains_line() {
+	local haystack="$1" needle="$2"
+	grep -qxF -- "${needle}" <<<"${haystack}"
+}
+
 # shellcheck source=ci/lib/test-lane-files.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "${repo_root}/ci/lib/test-lane-files.sh"
@@ -165,7 +178,8 @@ mapfile -t with_control < <(
 			grep -qE "${SUITE_MARKER}" "${f}" && printf '%s\n' "${f}"
 		done | sort
 )
-if printf '%s\n' "${with_control[@]}" | grep -qxF "${planted}"; then
+control_subjects="$(printf '%s\n' "${with_control[@]}")"
+if contains_line "${control_subjects}" "${planted}"; then
 	ok "the planted suite is IN the subject set — the enumeration follows the import, not the directory"
 else
 	bad "the planted suite is not in the subject set; the enumeration is still location-based and this gate is vacuous"
@@ -173,7 +187,8 @@ fi
 
 control_seen=0
 for lane in ${REQUIRED_LANES}; do
-	if test_lane_files "${lane}" 2>/dev/null | grep -qxF "${planted}"; then
+	lane_list="$(test_lane_files "${lane}" 2>/dev/null)"
+	if contains_line "${lane_list}" "${planted}"; then
 		control_seen=$((control_seen + 1))
 	fi
 done
@@ -186,7 +201,7 @@ fi
 # The two together are the whole control: in the subject set AND in no lane
 # means step 2 would have failed. Asserted as one statement so a future edit
 # cannot satisfy half of it.
-if printf '%s\n' "${with_control[@]}" | grep -qxF "${planted}" &&
+if contains_line "${control_subjects}" "${planted}" &&
 	[ "${control_seen}" -eq 0 ]; then
 	ok "so step 2 WOULD have failed with the control present — this gate can fail"
 else
