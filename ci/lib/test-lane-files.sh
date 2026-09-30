@@ -827,8 +827,18 @@ test_lane_files() {
 		# `server_config.setupServer` and then tries to connect to it from
 		# this host's own routable address: the default must refuse, and
 		# `--bind 0.0.0.0` through the real `parseArgs` must accept.
+		#
+		# `facade_endpoint_verbs_test.nim` drives `index/facade_endpoint.nim`
+		# as a server: a §6.2 `call` frame in and a `reply` frame out, over a
+		# real temporary directory, real `git` repositories and real `sh`
+		# children, and then the same dispatcher paired with the REAL client
+		# (`host/container_platform.nim`) so that both ends of the endpoint
+		# contract are exercised against each other with no socket. It needs
+		# `git` and `sh` on PATH and writes only under one `mkdtemp`
+		# directory, which it removes.
 		echo src/frontend/tests/dap_session_routing_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
+		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		;;
 
 	frontend-native-units)
