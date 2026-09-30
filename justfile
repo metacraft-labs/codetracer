@@ -4417,13 +4417,17 @@ test-renderer-pane-parity:
 # off.
 #
 # The unit suites themselves run in `vm-unit` and `vm-unit-js` by the directory
-# glob; these three are the evidence around them. M17 needs BOTH backends — it
+# glob — and `identity-suites-are-in-a-lane.sh` is what makes that sentence
+# checkable rather than assumed. Two identity suites were once written in a
+# directory no lane globs and ran only by hand for a week; the gate finds suites
+# by the identity module they IMPORT, so one written anywhere is found. M17 needs BOTH backends — it
 # asserts green on C and red on JS — so do not set CT_IDENTITY_ARMS here.
 test-identity:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-identity.log) 2>&1
+  bash ci/test/identity-suites-are-in-a-lane.sh
   bash ci/test/identity-no-escape-hatch.sh
   bash ci/test/identity-desktop-no-credential.sh
   bash ci/test/identity-desktop-no-credential-test.sh
