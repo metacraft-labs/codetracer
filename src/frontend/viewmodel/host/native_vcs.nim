@@ -35,9 +35,15 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
     try:
       let child = startProcess("git", workingDir = repository, args = args,
                                options = {poUsePath})
-      let code = child.waitForExit()
+      # READ BEFORE WAITING. A child that writes more than a pipe holds (64 KiB
+      # on Linux) blocks until someone reads, so `waitForExit` first never
+      # returns: `git log --max-count=50` with commit bodies is well past that
+      # on an ordinary repository, and a front-end opened in one hung at
+      # start. stdout is drained to EOF first (git's stderr is a few lines),
+      # then stderr, then the exit code.
       let output = child.outputStream.readAll()
       let errText = child.errorStream.readAll()
+      let code = child.waitForExit()
       child.close()
       if code != 0:
         failed[string](pkFailed, "git " & args.join(" ") & " failed", errText)
@@ -141,8 +147,10 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
                                options = {poUsePath})
       child.inputStream.write(patch)
       child.inputStream.close()
-      let code = child.waitForExit()
+      # Drained before waiting, for the reason `git` above gives.
+      discard child.outputStream.readAll()
       let errText = child.errorStream.readAll()
+      let code = child.waitForExit()
       child.close()
       if code == 0: resolvedOk()
       else: resolvedErr[Nothing](pkConflict, "the patch did not apply", errText)

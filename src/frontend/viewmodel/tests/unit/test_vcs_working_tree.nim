@@ -19,7 +19,10 @@
 ##   4. a re-read — what every front-end does every `VCSRefreshIntervalMs` —
 ##      changes the pane's value (`workingStateKey`) exactly when the
 ##      repository moved: not on a repeat read, and yes when another program
-##      adds a file or commits.
+##      adds a file or commits;
+##   5. a repository whose history is larger than a pipe holds is read
+##      completely, not deadlocked on (the facade drains git's output before
+##      waiting for it).
 ##
 ## No mocks of git or the filesystem. IsoNim's `MockRenderer` is the one
 ## stand-in, and it is not a mock: it is the renderer IsoNim ships for running
@@ -145,6 +148,28 @@ suite "PLAT-47 deliverable 4: one working tree for every VCS pane":
       ck vm.commits.val.len == 2
       # One interval for every front-end's refresh: the desktop's 5 s.
       ck VCSRefreshIntervalMs == 5000
+      dispose()
+    removeDir(repo.parentDir)
+
+  test "a history larger than a pipe holds is read, not deadlocked on":
+    # Fifty commits with 2 KiB bodies: `git log --max-count=50` writes about
+    # 100 KiB, past the 64 KiB a Linux pipe buffers. A facade that waits for
+    # the child before reading hangs here forever (it hung the terminal and
+    # GPUI opened in the CodeTracer repository itself).
+    let repo = fixtureRepo()
+    let body = "x".repeat(2048)
+    for i in 0 ..< 50:
+      let (output, code) = execCmdEx("git -C " & quoteShell(repo) &
+        " -c user.name=x -c user.email=x@invalid -c commit.gpgsign=false" &
+        " commit -q --allow-empty -m " & quoteShell("big " & $i & "\n\n" & body))
+      if code != 0: checkpoint(output)
+      doAssert code == 0
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.refreshFromFacade(newDesktopNativePlatform().vcs, repo)
+      ck vm.isGitRepo.val
+      ck vm.commits.val.len == 50
+      ck vm.commits.val[0].message == "big 49"
       dispose()
     removeDir(repo.parentDir)
 
