@@ -691,7 +691,11 @@ impl fmt::Display for MetaDatError {
             ),
             MetaDatError::UnsupportedVersion(v) => {
                 let accepted: Vec<String> = SUPPORTED_VERSIONS.iter().map(u16::to_string).collect();
-                write!(f, "meta.dat: unsupported version {v} (accepted: {})", accepted.join(", "))
+                write!(
+                    f,
+                    "meta.dat: unsupported version {v} (accepted: {})",
+                    accepted.join(", ")
+                )
             }
             MetaDatError::UnknownFlags { flags, unknown_bits } => write!(
                 f,
@@ -1637,7 +1641,10 @@ mod tests {
             msg.contains(&format!("accepted: {}", expected.join(", "))),
             "the refusal must list every accepted version; got: {msg}"
         );
-        assert!(msg.contains("99"), "the refusal must name the version it saw; got: {msg}");
+        assert!(
+            msg.contains("99"),
+            "the refusal must name the version it saw; got: {msg}"
+        );
     }
 
     #[test]
