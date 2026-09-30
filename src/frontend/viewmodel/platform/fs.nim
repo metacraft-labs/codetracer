@@ -75,9 +75,10 @@ type
     ## Without it that check does not hold, and the failure is silent. Nim's
     ## named object construction leaves an unassigned field `nil`, so adding
     ## `openHandle*: proc(path: string): File` here compiles cleanly — every
-    ## instantiation, `host/remote_stub.nim` included, simply grows a nil field,
-    ## and the suite still reports green because it only asserts the facades are
-    ## not nil. The stub's completeness would then be maintained by discipline,
+    ## instantiation, `host/container_platform.nim` included, simply grows a
+    ## nil field, and the suite still reports green because it only asserts the
+    ## facades are not nil. That module's completeness would then be maintained
+    ## by discipline,
     ## which is the thing this milestone exists to stop relying on.
     ##
     ## `{.requiresInit.}` makes an unassigned field a compile error at every

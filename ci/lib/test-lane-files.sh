@@ -673,9 +673,10 @@ test_lane_files() {
 		# it costs seconds.
 		#
 		# Listed explicitly rather than discovered. A glob over `host/` would
-		# pull in `desktop_native.nim` and `remote_stub.nim`, which are C-backend
-		# modules `vm-unit` already compiles, and a lane that compiles a module
-		# on the wrong backend reports a green that means nothing.
+		# pull in `desktop_native.nim` and `container_platform.nim`, which are
+		# C-backend modules `vm-unit` already compiles, and a lane that
+		# compiles a module on the wrong backend reports a green that means
+		# nothing.
 		# `platform_host.nim` is here for its ELECTRON arm specifically. It is
 		# a three-way switch (`js`+`ctWeb`, `js`, native) and each arm needs a
 		# gate, or the switch acquires a hole the shape of whichever arm is

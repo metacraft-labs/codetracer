@@ -30,7 +30,7 @@ type
     ## `{.requiresInit.}` for the reason spelled out on `FileSystemFacade` in
     ## `fs.nim`: without it, an unassigned field is `nil` rather than a compile
     ## error, and an operation that only makes sense in-process could be added
-    ## without `host/remote_stub.nim` noticing.
+    ## without `host/container_platform.nim` noticing.
     profile*: PlatformProfile
 
     writeText*: proc(text: string): PlatformFuture[PlatformOutcome[Nothing]]

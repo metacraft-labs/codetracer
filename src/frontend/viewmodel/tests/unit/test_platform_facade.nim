@@ -23,12 +23,12 @@
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_platform_facade.nim
 
-import std/[strutils, unittest]
+import std/[json, strutils, unittest]
 
 import ../../platform/platform
 import ../../platform/paths
 import ../../viewmodels/topbar_actions
-import ../../host/remote_stub
+import ../../host/container_platform
 import ../../host/electron_profile
 
 proc awaitOutcome[T](future: PlatformFuture[PlatformOutcome[T]]
@@ -315,23 +315,38 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
 
   setup:
     var seenVerbs: seq[string] = @[]
-    var lastArgs: seq[string] = @[]
+    var lastArgs: JsonNode = newJObject()
 
     let transport: RemoteTransport = proc(request: RemoteRequest
                                          ): PlatformFuture[RemoteResponse] =
       seenVerbs.add request.verb
       lastArgs = request.args
+      # Answers written as the §6.2 payloads the server sends, so the
+      # assertions below are about the codec both ends share rather than about
+      # a shape invented in this file. `test_container_platform_verbs.nim`
+      # drives every verb through a real `encodeCall`/`decodeCall` pair; this
+      # fake stays small because its subject is the SIGNATURES.
       let answer =
         case request.verb
-        of "fs.readText": remoteOk("fn main() {}")
-        of "fs.stat": remoteOk("1\x1f42\x1f1700000000000\x1ffalse")
-        of "fs.listDir": remoteOk("main.nr\x1f1\x1esrc\x1f2")
-        of "process.run": remoteOk("0\x1ffalse\x1fcompiled\x1f")
+        of "fs.readText": remoteOk(%"fn main() {}")
+        of "fs.stat": remoteOk(%*{"kind": "fekFile", "size": 42,
+                                  "modifiedMs": 1700000000000,
+                                  "readOnly": false})
+        of "fs.listDir": remoteOk(%*[{"name": "main.nr", "kind": "fekFile"},
+                                     {"name": "src", "kind": "fekDirectory"}])
+        of "process.run": remoteOk(%*{"exit": {"exitCode": 0,
+                                               "signalled": false,
+                                               "signalName": ""},
+                                      "stdout": "compiled", "stderr": ""})
         of "process.which": remoteErr(pkNotFound, "no nargo in the container")
-        of "vcs.status": remoteOk("main\x1forigin/main\x1f0\x1f0\x1ffalse" &
-                                  "\x1dsrc/main.nr\x1f\x1f1\x1f0")
-        of "clipboard.readText": remoteOk("pasted")
-        else: remoteOk("")
+        of "vcs.status": remoteOk(%*{
+          "branch": "main", "upstream": "origin/main", "ahead": 0,
+          "behind": 0, "detached": false,
+          "changes": [{"path": "src/main.nr", "previousPath": "",
+                       "indexStatus": "vfsModified",
+                       "workingTreeStatus": "vfsUnmodified"}]})
+        of "clipboard.readText": remoteOk(%"pasted")
+        else: remoteOk(newJNull())
       # `newCompletedFuture`, not a bare promise. A real endpoint's answer
       # arrives on a later tick and this one does not, and nim-everywhere marks
       # the difference so a synchronous caller can still observe it. A plain
@@ -340,10 +355,13 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
       # not run on the JS backend while still reporting green.
       newCompletedFuture(answer)
 
-    let remote = newRemoteStubPlatform(transport)
+    # The profile is named HERE rather than defaulted in the constructor, which
+    # is §6.3 showing through into the suite: shipping code takes it from the
+    # `welcome` frame, and a test that wants `containerProfile` has to say so.
+    let remote = newContainerPlatform(transport, containerProfile)
 
-  test "the stub satisfies every facade module with no signature altered":
-    ## The compile is the assertion. `newRemoteStubPlatform` assigns every field
+  test "the container platform satisfies every facade with no signature altered":
+    ## The compile is the assertion. `newContainerPlatform` assigns every field
     ## of all seven facades; if any operation had a signature that only made
     ## sense in-process — returning a `File`, a `Process`, a pointer or an
     ## iterator — this suite would not build.
@@ -369,7 +387,10 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
     check outcome.ok
     check outcome.value == "fn main() {}"
     check seenVerbs == @["fs.readText"]
-    check lastArgs == @["src/main.nr"]
+    # The ARGUMENT IS NAMED, not positional. §6.2: the server reads
+    # `args["path"]`, so two transposed strings are caught by the name they
+    # arrived under rather than by an arity that would still match.
+    check lastArgs["path"].getStr == "src/main.nr"
 
   test "a structured result survives the round trip":
     let outcome = awaitOutcome(remote.fs.listDir("src"))
@@ -394,8 +415,8 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
     let run = outcome.value
     check run.exit.exitCode == 0
     check run.stdout == "compiled"
-    check lastArgs[0] == "nargo"
-    check lastArgs[2] == "/w"
+    check lastArgs["spec"]["command"].getStr == "nargo"
+    check lastArgs["spec"]["workingDir"].getStr == "/w"
 
   test "version control is expressed in what the panel needs, not in git argv":
     let outcome = awaitOutcome(remote.vcs.status("/w"))

@@ -930,8 +930,8 @@ assertEqual(shippedMatchesAcross(/if not allowedExternalUrlScheme\(url\):/g),
 // The population itself: every place the field is given a body.  Three of the
 // five hand the request somewhere else; the two that act on it are above.
 assertEqual(shippedMatching(/openExternalUrl\*?\s*[:=]\s*proc/),
-  'src/frontend/viewmodel/host/desktop_electron.nim,'
-  + 'src/frontend/viewmodel/host/remote_stub.nim,'
+  'src/frontend/viewmodel/host/container_platform.nim,'
+  + 'src/frontend/viewmodel/host/desktop_electron.nim,'
   + 'src/frontend/viewmodel/host/web_browser.nim,'
   + 'src/frontend/viewmodel/platform/shell.nim,'
   + 'src/frontend/viewmodel/platform/web_platform.nim',

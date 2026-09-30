@@ -186,7 +186,7 @@ suite "the web instantiation satisfies every facade — NS2, §3.1":
     ## The shape check `{.requiresInit.}` makes cheap: a facade field added to
     ## any of the seven fails this build at `newWebPlatform`, exactly as NS1's
     ## `test_a_remote_instantiation_needs_no_signature_change` requires of the
-    ## remote stub.
+    ## container platform.
     check not web.platform.isNil
     check not web.platform.fs.isNil
     check not web.platform.process.isNil

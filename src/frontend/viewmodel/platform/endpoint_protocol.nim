@@ -291,9 +291,9 @@ proc decodeCall*(text: string): CallFrame =
   result.id = requireInt(node, "id")
   result.verb = requireStr(node, "verb")
   if result.verb.len == 0 or not result.verb.contains('.'):
-    # §6.2: verbs are the dotted names `remote_stub.nim` already uses. A server
-    # that dispatched on an undotted string would be answering something this
-    # contract does not define.
+    # §6.2: verbs are the dotted names `container_platform.nim` already uses.
+    # A server that dispatched on an undotted string would be answering
+    # something this contract does not define.
     raise newException(ProtocolError,
       "'" & result.verb & "' is not a dotted facade verb")
   let args = node{"args"}

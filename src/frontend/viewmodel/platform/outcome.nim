@@ -248,9 +248,9 @@ proc thenOutcome*[A, B](future: PlatformFuture[PlatformOutcome[A]];
     let promise = newFuture[PlatformOutcome[B]]("thenOutcome")
     var capturedStep = step
     # `addCallback` wants `proc() {.closure, gcsafe.}` and the captured `step`
-    # carries no such annotation. The cast is the bridge `remote_stub.nim`
-    # already uses, and is safe for the same reason: nothing captured crosses a
-    # thread.
+    # carries no such annotation. The cast is the bridge
+    # `container_platform.nim` already uses, and is safe for the same reason:
+    # nothing captured crosses a thread.
     future.addCallback(proc() {.gcsafe.} =
       {.cast(gcsafe).}:
         if future.failed:
