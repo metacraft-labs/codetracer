@@ -37,11 +37,8 @@ use db_backend::ctfs_trace_reader::step_value_stream_source::{SeekableStepStream
 fn write_trace(dir: &tempfile::TempDir) -> PathBuf {
     let path_buf = dir.path().join("trace");
     let mut writer = CtfsTraceWriter::new("test_program", &[])
-        .with_call_stream(true)
         .with_calls_chunk_size(2)
-        .with_step_stream(true)
         .with_steps_chunk_size(2)
-        .with_value_stream(true)
         .with_values_chunk_size(2);
     TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();
 

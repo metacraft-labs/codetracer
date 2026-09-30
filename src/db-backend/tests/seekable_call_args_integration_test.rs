@@ -93,9 +93,7 @@ const EXPECTED_ARGS: [(&str, i64); 3] = [("alpha", 11), ("beta", 22), ("gamma", 
 /// `calls.dat` chunk size 2 puts records 0–1 in chunk 0 and 2–3 in chunk 1.
 fn write_trace(dir: &tempfile::TempDir) -> PathBuf {
     let path_buf = dir.path().join("trace");
-    let mut writer = CtfsTraceWriter::new("seekable_call_args_prog", &[])
-        .with_call_stream(true)
-        .with_calls_chunk_size(2);
+    let mut writer = CtfsTraceWriter::new("seekable_call_args_prog", &[]).with_calls_chunk_size(2);
     TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();
 
     let src = Path::new("/test/prog.rs");

@@ -5103,8 +5103,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path_buf = dir.path().join("bundle");
         let mut writer = CtfsTraceWriter::new("test_program", &[])
-            .with_step_stream(true)
-            .with_value_stream(true)
             .with_steps_chunk_size(2)
             .with_values_chunk_size(2);
         TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();
