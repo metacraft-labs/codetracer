@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 26.10.1 - 2026-10-01
+
+This is the first published release since 25.11.1 (26.08.1 was tagged but never
+published). The entries below are the ones collected under "Unreleased"; they do
+not describe every change since 25.11.1.
+
+### Installing and updating
+
+- **Linux packages come from the Metacraft Labs repositories.** CodeTracer's
+  `.deb` and `.rpm` are now published to `deb.metacraft-labs.com` and
+  `rpm.metacraft-labs.com`, which carry every Metacraft Labs product and are
+  signed with the organisation's package key. `deb.codetracer.com` and
+  `rpm.codetracer.com` redirect there. `curl -fsSL https://get.codetracer.com/sh | sh`
+  registers the repository with a pinned key and installs through apt or dnf,
+  replacing entries earlier installers wrote; after that, `apt upgrade` /
+  `dnf upgrade` keep CodeTracer current.
+- **The packages install the release AppImage's contents** under
+  `/usr/lib/codetracer`, with `ct` on the `PATH`. They no longer need FUSE.
+- **Each release lists its assets in a signed `SHA256SUMS`.**
+- **There is no new macOS build in this release.** The macOS DMG could not be
+  built for it; macOS installs keep getting the newest signed DMG from
+  `downloads.codetracer.com`.
+
 ### Breaking changes
 
 - **`ct list` now lists every artifact CodeTracer holds, not only recordings —
