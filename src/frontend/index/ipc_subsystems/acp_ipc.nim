@@ -783,7 +783,25 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
       "clientSessionId": clientSessionId,
       "id": messageId
     })
-    for filePath in allTouchedPaths:
+    # BY INDEX, WITH AN EXPLICIT COPY, and the loop variable is the reason.
+    #
+    # The body `await`s, so Nim rewrites it into a closure — and a `for x in
+    # seq` loop variable is `lent T` on Nim 2.2.8, which cannot be captured:
+    #
+    #   Error: 'filePath' is of type <lent cstring> which cannot be captured as
+    #   it would violate memory safety
+    #
+    # This is the only loop in this file whose body awaits, which is why it is
+    # the only one that needs this. The dev shell's nim-fork 2.3.1 accepts the
+    # borrowed form, so the failure appears ONLY in the packaged build
+    # (`nix build .#codetracer`, nim 2.2.8) — it is not something a local
+    # `nim js` would have shown.
+    #
+    # `-d:nimNoLentIterators` is what the compiler's own hint suggests and is
+    # the wrong instrument: it changes how every iterator in the program
+    # behaves, to fix one capture.
+    for touchedIndex in 0 ..< allTouchedPaths.len:
+      let filePath: cstring = allTouchedPaths[touchedIndex]
       try:
         # Use the content snapshotted before the first write this prompt as the
         # original, so the diff shows only what the agent changed — not the full
