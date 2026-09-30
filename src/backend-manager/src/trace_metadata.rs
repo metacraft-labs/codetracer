@@ -130,8 +130,9 @@ fn detect_language(program: &str) -> String {
 
 /// Reads metadata from a trace directory's CTFS `.ct` container.
 ///
-/// The directory must contain a `trace.ct` file with a v3 `meta.dat`
-/// internal stream (M-REC-1).
+/// The directory must contain a `trace.ct` file whose `meta.dat` internal
+/// stream is a version this parser accepts (M-REC-1; see
+/// `meta_dat::SUPPORTED_META_DAT_VERSIONS`).
 ///
 /// # Errors
 ///

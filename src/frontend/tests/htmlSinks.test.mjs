@@ -744,7 +744,7 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
   ['src/frontend/ui/auto_hide.nim', 3, 0],
-  ['src/frontend/ui/calltrace.nim', 2, 0],
+  ['src/frontend/ui/calltrace.nim', 1, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
   ['src/frontend/ui/event_log.nim', 1, 0],
@@ -753,12 +753,31 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/ui/hcr_live_edit_panel.nim', 0, 1],
   ['src/frontend/ui/layout.nim', 3, 0],
   ['src/frontend/ui/request_panel.nim', 1, 0],
-  ['src/frontend/ui/scratchpad.nim', 1, 0],
-  ['src/frontend/ui/state.nim', 1, 0],
-  ['src/frontend/ui/terminal_output.nim', 1, 0],
   ['src/frontend/ui/trace.nim', 6, 3],
   ['src/frontend/ui/welcome_screen.nim', 2, 0],
   ['src/frontend/viewmodel/views/context_menu_bridge.nim', 1, 0],
+  // TRIAGED 2026-09-30, and the fact that it needed triaging is the finding.
+  // Both writes reached the shipped renderer while this table did not list
+  // them, so neither had ever been looked at — which is the single thing the
+  // table exists to prevent.
+  //
+  //   * `setIconHtml(el, html)` has six call sites and every one passes a
+  //     compile-time `const` SVG literal: `AgentAddContextUploadIcon`,
+  //     `…FolderIcon`, `…EditorIcon`, `…TraceIcon`, `BranchSearchIcon`,
+  //     `BranchCreateIcon`. Nothing is interpolated and nothing is
+  //     caller-supplied — the same shape as `file_conflict_dialog.nim` and
+  //     `hcr_live_edit_panel.nim` below, which this table already accepts.
+  //   * the `setupInputHighlightJs` `importjs` writes `hl.innerHTML = b(…)`,
+  //     and `b` escapes `&`, `<` and `>` before emitting anything. The only
+  //     markup it produces is `<span class="agent-inline-code">`, and its
+  //     input is the user's own textarea.
+  //
+  // Three entries left this table in the same change — `ui/scratchpad.nim`,
+  // `ui/state.nim`, `ui/terminal_output.nim` and one of `ui/calltrace.nim`'s
+  // two — because those writes no longer exist. A table that is stale in both
+  // directions is worse than one that is merely behind: it fails for a reason
+  // that has nothing to do with the write someone just added.
+  ['src/frontend/viewmodel/views/isonim_agent_activity_view.nim', 0, 2],
   ['src/frontend/viewmodel/views/isonim_build_view.nim', 0, 1],
   ['src/frontend/viewmodel/views/isonim_request_panel_view.nim', 0, 1],
   ['src/frontend/viewmodel/views/isonim_terminal_output_view.nim', 0, 1],
@@ -769,8 +788,9 @@ const INNER_HTML_BY_FILE = [
  * The source text of every NON-CLEARING write, verbatim.
  *
  * The clears are counted but not transcribed: `x.innerHTML = cstring""` cannot
- * carry a payload, and `isClear` is what says so.  These thirteen are the
- * actual sinks, and each one is triaged by name in arm S or S2 above.
+ * carry a payload, and `isClear` is what says so.  These are the actual sinks,
+ * and each one is triaged by name in arm S or S2 above, or in the comment
+ * beside its row in the table.
  * (There were fourteen: `ui/auto_hide.nim`'s floating unpin button wrote a
  * literal `&#x2715;`.  Its icon is now drawn by CSS, so the write is gone.)
  */
@@ -785,6 +805,8 @@ const INNER_HTML_LIVE_WRITES = [
   'src/frontend/ui/trace.nim: self.kindSwitchButton.innerHTML =',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
+  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: el.innerHTML = cstring(html)",
+  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)\"\"\".}",
   'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
   'src/frontend/viewmodel/views/isonim_terminal_output_view.nim: contentNode.innerHTML = cstring(frag.htmlText)',
@@ -920,21 +942,28 @@ assertEqual(shippedMatching(/proc allowedExternalUrlScheme\*/),
 assertEqual(shippedMatchesAcross(/if not allowedExternalUrlScheme\(url\):/g),
   'src/frontend/viewmodel/host/desktop_electron.nim:if not allowedExternalUrlScheme(url): | '
   + 'src/frontend/viewmodel/host/web_browser.nim:if not allowedExternalUrlScheme(url): | '
-  + 'src/frontend/viewmodel/platform/web_platform.nim:if not allowedExternalUrlScheme(url):',
+  + 'src/frontend/viewmodel/platform/browser_facades.nim:if not allowedExternalUrlScheme(url):',
   'and all THREE constructions that can reach an opener call it');
-// Three and not two, and the third is the one that matters: `web_platform`'s
+// Three and not two, and the third is the one that matters: the tab facade's
 // bridge is PLUGGABLE, so a guard living only in `host/web_browser.nim` is a
 // guard one bridge implementation happens to have.  The fake bridge in
 // `test_platform_web.nim` proved it by accepting `javascript:` straight
 // through the real one.
+// The third site MOVED, from `platform/web_platform.nim` to
+// `platform/browser_facades.nim`, when the clipboard / download / shell
+// builders were lifted so the CONTAINER deployment could share them
+// (UI-Bundle-And-Endpoints.md §6.6).  That is the whole reason the guard had
+// to travel with the builder: a container wires a third bridge of its own,
+// and a check left behind in `web_platform` would have covered neither it nor
+// the facade that hands the URL on.
 // The population itself: every place the field is given a body.  Three of the
 // five hand the request somewhere else; the two that act on it are above.
 assertEqual(shippedMatching(/openExternalUrl\*?\s*[:=]\s*proc/),
   'src/frontend/viewmodel/host/container_platform.nim,'
   + 'src/frontend/viewmodel/host/desktop_electron.nim,'
   + 'src/frontend/viewmodel/host/web_browser.nim,'
-  + 'src/frontend/viewmodel/platform/shell.nim,'
-  + 'src/frontend/viewmodel/platform/web_platform.nim',
+  + 'src/frontend/viewmodel/platform/browser_facades.nim,'
+  + 'src/frontend/viewmodel/platform/shell.nim',
   'and the set of files that implement the field has not grown');
 assertEqual(shippedMatchesAcross(/window\.open\([^)]*\)/g),
   "src/frontend/viewmodel/host/web_browser.nim:window.open(u, '_blank', 'noopener,noreferrer')",

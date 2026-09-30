@@ -36,6 +36,21 @@
 ## this file and there is no `hello`/`welcome` exchange — `endpoint_protocol`
 ## owns the envelope, and whoever opens the channel performs the handshake.
 ##
+## ## Sixteen operations that are NOT one call — §6.6
+##
+## `newContainerPlatform(transport, profile)` below routes every field over the
+## wire, including the clipboard, the downloads and the window. That is the
+## right shape for a suite that wants to see a verb arrive and it is the WRONG
+## shape for a deployment: §6.6 measured that a container endpoint refuses all
+## sixteen and withdraws their capabilities, so a user sat in a browser with a
+## clipboard got a platform with none.
+##
+## `newContainerPlatform(transport, tab, welcome)` is the deployment's
+## constructor. It builds fs / process / vcs / settings over the transport and
+## takes clipboard / download / shell from `platform/browser_facades.nim` — the
+## same three builders `web_platform.newWebPlatform` uses, not a second copy —
+## and composes the profile as the union §6.3 is refined into.
+##
 ## ## What is NOT here: the event frames
 ##
 ## `fs.watch` and `process.start` take callbacks, and §6.2's `event` frame is
@@ -58,6 +73,7 @@ import ../platform/download
 import ../platform/shell
 import ../platform/platform
 import ../platform/endpoint_codec
+import ../platform/browser_facades
 
 type
   RemoteRequest* = object
@@ -451,3 +467,41 @@ proc newContainerPlatform*(transport: RemoteTransport;
   ## it" is legible at the call site — the alternative reads identically to
   ## having assumed one.
   newContainerPlatform(transport, welcome.profile)
+
+proc newContainerPlatform*(transport: RemoteTransport; tab: BrowserTabBridge;
+                           profile: PlatformProfile): Platform =
+  ## §6.6's constructor: **a verb the tab can answer, the tab answers.**
+  ##
+  ## The container deployment is a tab AND a container, and the sixteen
+  ## operations whose subject is the tab — all three `clipboard.*`, all five
+  ## `download.*`, all eight `shell.*` — are answered here rather than sent.
+  ## Measured at codetracer `7739d096f`: the client routed all sixteen over the
+  ## transport, the server correctly refused every one of them, and the
+  ## capability was *gone* rather than served by the side that owns it.
+  ##
+  ## **The three facades are overwritten wholesale rather than the wire
+  ## versions being skipped field by field.** Writing it as a branch inside the
+  ## big constructor would have put sixteen `if` statements where the question
+  ## is not per-field at all — a facade either has the tab as its subject or it
+  ## does not, and all three of these do, entirely. Replacing the whole facade
+  ## also means the day a `ShellFacade` grows a field, that field is built by
+  ## `buildBrowserShell` with everything else rather than silently inheriting
+  ## the wire form nobody re-examined.
+  ##
+  ## The profile is the UNION, and `withBrowserTab` is where the degradations
+  ## are reconciled with it; see its comment for why only the stale direction
+  ## can be violated here.
+  let composed = profile.withBrowserTab()
+  result = newContainerPlatform(transport, composed)
+  result.clipboard = buildBrowserClipboard(tab, composed)
+  result.download = buildBrowserDownload(tab, composed)
+  result.shell = buildBrowserShell(tab, composed)
+
+proc newContainerPlatform*(transport: RemoteTransport; tab: BrowserTabBridge;
+                           welcome: WelcomeFrame): Platform =
+  ## The shipping path: §6.3's "the server declares the profile" for the half
+  ## the server owns, §6.6's union for the half it does not. Spelled as an
+  ## overload for the reason the two-argument pair is — "the server declared
+  ## it" has to be legible at the call site, because the alternative reads
+  ## identically to having assumed one.
+  newContainerPlatform(transport, tab, welcome.profile)
