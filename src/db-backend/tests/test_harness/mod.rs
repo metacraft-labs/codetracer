@@ -1305,9 +1305,9 @@ pub struct FlowStep {
     pub line: i64,
     pub variables: Vec<String>,
     pub before_values: HashMap<String, serde_json::Value>,
-    /// Values of variables AFTER this step executes. Populated retroactively
-    /// by `flow_preloader.rs` from the next step's `before_values`. Useful for
-    /// asserting on the result of an assignment that happens at this step.
+    /// Values of the variables this line mentions AFTER it executes, read by
+    /// `flow_preloader.rs` at the next step. Useful for asserting on the result
+    /// of an assignment that happens at this step.
     pub after_values: HashMap<String, serde_json::Value>,
     /// Loop iteration index for this step (0-based; -1 / 0 when outside
     /// a loop, depending on the recorder).
@@ -1365,6 +1365,8 @@ impl FlowData {
             if let Some(av) = step_json.get("afterValues").and_then(|v| v.as_object()) {
                 for (var_name, value) in av {
                     after_values.insert(var_name.clone(), value.clone());
+                    // Within a step the post-line value is the most recent.
+                    values.insert(var_name.clone(), value.clone());
                 }
             }
 
