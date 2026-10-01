@@ -6600,3 +6600,20 @@ Two traps in the same area, both live:
   `run-plat16-mutations.py` did it with `--needle-scan`. Killing one mid-arm
   (a `timeout`) can still leave a mutation in the tree: after an interrupted
   run check `git diff` against the base for files you did not edit.
+- 2026-10-01: How to build and launch the TUI/GPUI for a user (dev env via
+  `repro exec . --`, sibling pins, a trace, tmux split, state isolation, the
+  windowed GPUI shim) is documented in AGENTS.md "Launching the TUI / GPUI for
+  the user" and README.md "Running the terminal (TUI) and native (GPUI)
+  front-ends". Non-obvious: `ct record` under `repro exec` ignores a PYTHONPATH
+  exported beforehand (use `repro exec . -- env PYTHONPATH=... ct record`);
+  `just rust-build` in isonim-gpui gives a window-less shim (codetracer-gpui
+  exits 0 at once), the windowed one (`--features gpui-backend`) needs
+  `LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH` even for `--report-plan`;
+  `just build-gpui`'s ISONIM_GPUI_SHIM_DIR only drives a warning -- the shim
+  path baked into the binary comes from the isonim-gpui sources it compiles
+  (ISONIM_GPUI_SRC/../rust/target/debug). If `repro exec` fails building the
+  dev shell with `could not read Username for 'https://github.com'` inside a
+  fetchgit, the binary cache lost that NAR and anonymous GitHub git is refused
+  from the build sandbox: fetch the rev with your credentials, strip .git, check
+  `nix hash path` equals the drv's outputHash, then
+  `nix-store --add-fixed --recursive sha256 <dir-named-like-the-drv>`.

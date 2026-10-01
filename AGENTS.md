@@ -62,6 +62,59 @@ just build-once
 This runs tup (incremental build) and webpack. Use this after modifying any `.nim` files in
 `src/ct/`, `src/frontend/`, or `src/common/`.
 
+## Launching the TUI / GPUI for the user
+
+The user-facing reference is README.md, "Running the terminal (TUI) and native
+(GPUI) front-ends". The agent recipe, from a clean shell at this checkout's root:
+
+1. **Environment.** Run build/record commands as `repro exec . -- <cmd>` (no
+   interactive shell, no direnv). The first run in a checkout takes minutes.
+2. **Siblings at the pin.** `../isonim-tui` and `../isonim-gpui` must contain the
+   revisions `flake.lock` pins (`jq -r '.nodes["isonim-tui"].locked.rev' flake.lock`),
+   or the TUI fails to compile with undeclared identifiers from isonim-tui. Do not
+   move the user's sibling checkouts; use the `../<repo>-pin` worktree loop from
+   README.md and `export ISONIM_TUI_SRC=$PWD/../isonim-tui-pin/src
+   ISONIM_GPUI_SRC=$PWD/../isonim-gpui-pin/src` before building.
+3. **Build:** `repro exec . -- just build-once` (only if `src/build-debug/bin/ct` or
+   `replay-server` is missing), then `repro exec . -- just build-tui`.
+4. **A trace.** Reuse `test-logs/tui-fixtures/calc-*/` if `just test-tui` has run
+   here, or record one: `repro exec . -- ct record -o /tmp/ct-calc
+   test-programs/calc/main.py`. Package-style Python needs
+   `repro exec . -- env PYTHONPATH=<pkg-parent> ct record ...` (a `PYTHONPATH`
+   exported before `repro exec` is replaced by the environment's).
+5. **Check it headless first:** `build/bin/codetracer-tui --headless <trace>`
+   prints one screen and exits; the built binaries run without the environment.
+6. **Open it in a tmux split for the user** (from inside their tmux session; it
+   creates a NEW pane and leaves the others alone, `-d` keeps focus where it is):
+
+   ```bash
+   tmux split-window -v -c "$PWD" "build/bin/codetracer-tui <trace> || read"
+   ```
+
+   Equivalent through the launcher: `src/build-debug/bin/ct replay --ui=tui <trace>`.
+   A dev build finds `src/build-debug/bin/replay-server` of its own checkout; set
+   `REPLAY_SERVER_BIN=<path>` when the engine lives elsewhere (for example a
+   `src/build-debug-repro/bin/` build, or another worktree's).
+7. **State.** When launching for the user, do NOT set `CODETRACER_TUI_LAYOUT_DIR`:
+   they expect their own remembered layout in `$XDG_STATE_HOME/codetracer/`
+   (`~/.local/state/codetracer/tui-layout.json`). When YOU drive the TUI for
+   testing, always set `CODETRACER_TUI_LAYOUT_DIR=<scratch dir>` so a test never
+   rewrites the user's layout or `icons` choice.
+8. **Stopping.** The user quits with `q`; closing the pane also ends it. Each
+   running TUI owns one `replay-server` child, which exits with it. The
+   orphan-sensitive pty suites (`test_real_no_orphans`, `test_real_pty_lifecycle`)
+   count every `replay-server` on the host, so they FAIL while the user's TUI pane
+   is open. Check `pgrep -a replay-server` before running them or before calling
+   such a failure a regression, and never kill a replay-server you did not start.
+
+GPUI: build the windowed shim in the same isonim-gpui checkout the build compiles
+against (`repro exec . -- bash -c 'cd rust && cargo build --features gpui-backend'`
+inside it), `repro exec . -- just build-gpui`, and launch with
+`repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH
+src/build-debug/bin/ct replay --ui=gpui <trace>'` from a graphical session. With
+no display, use `--report-plan` (same command) to check the build; `--headless`
+is TUI-only and `ct` refuses it with `--ui=gpui`.
+
 ## Building the db-backend
 
 ```
@@ -143,7 +196,7 @@ that only need a subset):
 ```bash
 # Rust components
 cd src/db-backend && cargo build && cargo test && cargo clippy
-cd src/tui && cargo build && cargo test
+cd src/tui && cargo build && cargo test   # the legacy Rust TUI crate, NOT the terminal front-end (`just build-tui`)
 cd src/backend-manager && cargo build
 
 # Full frontend (Nim + Tup)
