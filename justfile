@@ -3752,6 +3752,22 @@ test-web-bundle-assets:
   exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
   bash ci/test/web-bundle-assets.sh
 
+# THE FRONT DOOR'S LOGIC, LOCALLY — WD4.
+#
+# `local-development-parity.md` §4 splits this deliberately: local proves the
+# middleware LOGIC, only a real edge proves the CACHE, and shipping on a green
+# local run for the cache property is the specific mistake that section exists
+# to prevent. So this recipe proves the fork, the allow-list and the headers
+# under the real pinned wrangler; the cache-isolation gate is on the deploy.
+#
+# Needs the `.#ci` shell for wrangler. No stack, no network.
+test-web-front-door-local:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-front-door-local.log) 2>&1
+  bash ci/test/web-front-door-local.sh
+
 # THE `-d:ctWeb` PARTITION MAY SHRINK AND MUST NOT GROW.
 #
 # §7.5 of `UI-Bundle-And-Endpoints.md` wants one bundle across all three
