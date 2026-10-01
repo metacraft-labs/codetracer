@@ -116,7 +116,11 @@ jobs:
     # the dry run spent its whole two hours building ~7000 derivations
     # (sui, forc, miden, ...) before the AppImage build began (run 36808054227).
     runs-on: eph-linux-x64-release
-    timeout-minutes: 120
+    # Measured on the release lane (dry run 36817835550): provisioning the dev
+    # shell takes about 50 minutes on a fresh runner and the AppImage build
+    # another hour or more, so the 120 minutes this started with cancelled
+    # the job mid-build. Packaging and the container install checks follow.
+    timeout-minutes: 300
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
