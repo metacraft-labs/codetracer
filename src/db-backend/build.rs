@@ -1222,11 +1222,7 @@ fn nim_input_roots(emulator_dir: &Path) -> Vec<PathBuf> {
     }
     // `$PROJECT_ROOT/../codetracer-trace-format-nim/src` in both scripts.
     if let Some(workspace_root) = recorder_root.parent() {
-        roots.push(
-            workspace_root
-                .join("codetracer-trace-format-nim")
-                .join("src"),
-        );
+        roots.push(workspace_root.join("codetracer-trace-format-nim").join("src"));
     }
     roots
 }
@@ -1247,10 +1243,10 @@ fn newest_mtime_under(root: &Path) -> Option<std::time::SystemTime> {
                 stack.push(path);
                 continue;
             }
-            if let Ok(mtime) = meta.modified() {
-                if newest.map(|n| mtime > n).unwrap_or(true) {
-                    newest = Some(mtime);
-                }
+            if let Ok(mtime) = meta.modified()
+                && newest.map(|n| mtime > n).unwrap_or(true)
+            {
+                newest = Some(mtime);
             }
         }
     }
