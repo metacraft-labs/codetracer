@@ -19,6 +19,7 @@ Dataclasses
 Deque
 Dockerfiles
 EADDRINUSE
+ENOENT
 EVENTINDEX
 FastCGI
 Fixnum
@@ -264,6 +265,7 @@ teardowns
 testdata
 textareas
 tinygo
+traceKind
 tracepoint
 tracepoints
 travelling
@@ -274,6 +276,7 @@ unparseable
 unrecognised
 unrepresentable
 unsat
+userInfo
 usize
 vccexe
 venir

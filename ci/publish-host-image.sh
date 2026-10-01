@@ -260,6 +260,25 @@ mkdir -p "${rootfs}/run/dhcpcd" "${rootfs}/var/lib/dhcpcd" "${rootfs}/var/log"
 rm -f "${rootfs}/etc/dhcpcd.conf" "${rootfs}/sbin/init"
 : >"${rootfs}/etc/dhcpcd.conf"
 
+# A PASSWD AND GROUP WITH ROOT ONLY, for the reason
+# `isonim-platform/session/src/image.nim` gives: `id` inside the session has to
+# resolve, and nothing else is named — there is no second account to become.
+#
+# `dockerTools` ships neither, because an OCI runtime does not need them: a
+# container started by `Entrypoint` never asks who it is. `ct host` does, three
+# layers down — node's `os.userInfo()` calls `uv_os_get_passwd`, which fails
+# ENOENT with no entry for uid 0, and the server exits before it listens:
+#
+#   errno: -2, code: 'ENOENT', syscall: 'uv_os_get_passwd'
+#
+# Measured 2026-10-01 inside a container launched from this image, after the
+# library path and the init were already fixed. Third defect in the same chain,
+# same shape as the other two: everything upstream was green because nothing
+# upstream starts the server.
+printf 'root:x:0:0:root:/root:/bin/sh\n' >"${rootfs}/etc/passwd"
+printf 'root:x:0:\n' >"${rootfs}/etc/group"
+mkdir -p "${rootfs}/root"
+
 cat >"${rootfs}/sbin/init" <<'INIT'
 #!/bin/sh
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin

@@ -36,6 +36,7 @@ written" closes nothing.
 | `ct host` reports the port it actually bound | `index_reports_the_port_it_bound_test.nim` — CONNECTS to the port the URL line named |
 | The front door's fork, allow-list and headers | `ci/test/web-front-door-local.sh` — real pinned wrangler, real generated function, 16 checks |
 | The image reaches a daemon's store and resolves | `ci/publish-host-image.sh`, run against a real Incus 6.0.6 |
+| **`ct host` SERVING in a container, reached from OUTSIDE it** | `ci/test/host-image-serves-in-a-container.sh`, 10/10 against a real Incus 6.0.6 — the image launches, its init leases, `ct --version` runs, `/etc/passwd` resolves, the fixture trace imports through the image's own `ct import`, `ct host` auto-assigns and prints `CODETRACER_HOST_URL`, and the HOST gets `200` on `/` plus a `/deployment.json` answer over the bridge. The join WD1a, WD1c and WD2 were each half of |
 | The published image BOOTS, networks, and runs `ct` | The probe in §B2 — container boots, `/run/isonim-net.status` = `ok`, `ct --version` answers, `ct host --help` shows `auto-assign; CODETRACER_HOST_PORT` |
 | **The egress cap firing on a LIVE session** | isonim-platform `75bf80a` — `test_egress_cap_evicts_a_live_session`, 15/15 against a real Incus 6.0.6: a session emits traffic, the sweep reads the allocator's counter, the predicate fires, the session is evicted `egress_cap` and the container destroyed. Paired with a control under a 1 GB cap that must SURVIVE the same sweep |
 | The session sweeps run on a clock | isonim-platform `3743125` — `substrate.runSessionSweeps` from the api-server's async loop every `ISONIM_SESSION_SWEEP_SECONDS`. Seam S44 closed, and D-S14's cap with it |
@@ -53,12 +54,11 @@ whole claim is that an unlisted seam is an assumed-covered one.
 | **Edge cache isolation** — an authenticated render must never reach an anonymous visitor from a shared cache | There is no shared cache in a local loop, and `local-development-parity.md` §4 names this the property hardest to reproduce locally and **forbids** shipping on a green local run for it. A local crossing would be the mistake, not the fix | The `An authenticated render never enters the shared cache` step of `deploy-web-codetracer.yml`, on every deploy, against `ide.codetracer.com` |
 | **The renderer on the pinned `isonim-tui`** | This workspace's sibling checkout is 31 commits behind and lacks `clusterDisplayWidth(cluster, ambiguous)`, so a local compile needs `ISONIM_TUI_SRC`. That is workspace drift, already filed, not a product gap | CI's `renderer-electron` lane, which compiles `ui_js.nim` on the revision the flake pins |
 
-## B1. Genuinely open
+## B1. Genuinely open — one row, and it is not this campaign's to close
 
 | Seam | Where it stands | What compensates |
 | --- | --- | --- |
-| **`ct host` SERVING inside a substrate-allocated session** — the server reachable on the container's own address | Probed 2026-10-01 against a real Incus 6.0.6 and **four of five steps now cross**: the published image boots as a container, its init leases an address and writes `/run/isonim-net.status` = `ok`, `/bin/ct` runs, and `ct host` starts and reaches its trace-loading stage with `--port` showing `auto-assign; CODETRACER_HOST_PORT`. The fifth is unproven — `ct host` needs a trace, and no fixture in this tree is in a form it takes: the `.ct` bundles are MCR and want `ct-mcr`, and `ct import` requires a zip containing a `.ct` | Nothing for the last step, and it is a FIXTURE gap rather than an integration one. The hosting image deliberately carries no recorder (that is what makes it the hosting closure), so a trace must arrive from outside — which is what the substrate does when it mounts a project. Closing it needs a trace artifact this tree does not have |
-| **Session TLS** — an allocated session reached over HTTPS | **Not this campaign's deliverable, and not a test gap.** `Hosted-Session-Allocation.md` says so: TLS termination under the wildcard "is not implemented; it needs DNS and an issuer". It is D-S5's remaining half and belongs to the substrate's plan; no WD milestone names TLS | The substrate's own plan. This campaign cannot close the row, because the feature is not its to write. It is listed so a reader is not surprised by it later |
+| **Session TLS** — an allocated session reached over HTTPS | **Tracked in the owning plan, not dangling here.** `Shared-Services-Production.milestones.org` SS-M5 carries it: the allocation half is done (isonim-platform `b0b0ae8`, hostname derived from the session id, eight tests) and "what remains is the wildcard certificate and TLS termination". Its own executive summary lists the blocker among the things "nobody here can supply" — a wildcard certificate and DNS. Its verification is already written: _a session is allocated, reachable over TLS on its own hostname, and reclaimed_ | SS-M5, with the blocker named there. This row exists so a reader of THIS register is not surprised by it, and closing it is that campaign's to do once the certificate exists |
 
 ## B2. What the probe cost, and why it is in this file
 
@@ -79,7 +79,16 @@ are the register's own argument:
   ambiguity the status file exists to remove, reintroduced by a test that
   depended on a binary the image does not carry.
 
-Neither is visible without starting the thing. That is what a seam is.
+- **The image shipped no `/etc/passwd`.** `dockerTools` does not write one,
+  because an OCI runtime never asks who it is. node's `os.userInfo()` does,
+  three layers down: `ct host` exited on `uv_os_get_passwd` ENOENT **before it
+  listened**, after the two fixes above were already in. The substrate's own
+  image writes a root-only passwd and group for exactly this reason, and the
+  converter now does too.
+
+None of the three is visible without starting the thing. That is what a seam is
+— and the register found all three in one afternoon by naming one row "nothing
+crosses this".
 
 ## C. Deliberately not a seam
 
