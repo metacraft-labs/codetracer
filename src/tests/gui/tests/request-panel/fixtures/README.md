@@ -252,8 +252,11 @@ successive slices of one thread.
 **The cohort spans are not `contiguous_on_one_thread`.** The recorder replays
 its session sidecar into a single exec stream, so an overlapping request's
 events are interleaved into its neighbours' ranges. The eight sequential
-requests are contiguous. Both bits are measured from the recorded ranges, not
-declared.
+requests do not overlap one another, but the client that issues them is another
+BEAM process, and in six of them its call and reply were recorded inside the
+request's range; only `GET /api/users` and `GET /healthz` are contiguous in the
+current recording. Both bits are measured from the recorded ranges, not
+declared, so a re-recording can move the contiguous count.
 
 **There are no per-line step events.** The recorder applies step instrumentation
 to `.erl` sources; an Elixir app recorded through `mix run` reaches the

@@ -218,10 +218,14 @@ const
         "the Plug has no error hook: /boom is answered 500 by " &
         "Plug.ErrorHandler, which the middleware only ever sees as a status",
       requiredExtraKeys: BeamKeys, forbiddenKeys: @[DiscoveryModeKey],
-      contiguousRows: 5, concurrentRows: 4,
+      contiguousRows: 2, concurrentRows: 4,
+        # 5 -> 2 with the re-recording in b2ad0af6b: only `GET /api/users`
+        # and `GET /healthz` came out contiguous; in the other six sequential
+        # rows the client driver's `$gen_call` send and reply (a different
+        # BEAM process) were recorded inside the request's own range.
       structuralNote:
         "MEASURED by the replay pass over the recorded ranges: the " &
-        "four-request rendezvous cohort genuinely overlaps, and three further " &
+        "four-request rendezvous cohort genuinely overlaps, and six further " &
         "rows have another BEAM process's events interleaved into their ranges",
       slowRowFloorMs: 400,
       durationNote:
