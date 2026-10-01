@@ -763,6 +763,21 @@ type
           "shows requests arriving live; stop it with Ctrl-C."
       .}: bool
 
+      # `--portable` (codetracer-specs CLI/ct/record.md, "Portable traces"):
+      # a dispatcher-owned option, forwarded to the backend the dispatcher
+      # selects; a backend that cannot honour it refuses it by name (see
+      # src/ct/trace/portable_route.nim).
+      recordPortable* {.
+        name: "portable",
+        defaultValue: false,
+        desc: "Make the trace replayable on another machine, or later " &
+          "after its files change: the MCR backend bundles every file " &
+          "the program mapped, their debug symbols and the platform " &
+          "description into the trace. A backend that cannot do this " &
+          "yet refuses the flag. Also honors CODETRACER_PORTABLE=on|off; " &
+          "--upload implies it for MCR recordings."
+      .}: bool
+
       recordProgram* {.
         argument
         desc: "Program to record"

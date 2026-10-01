@@ -89,6 +89,7 @@ ct record [options] <program> [-- <program-args>]
 | `-a, --address <ADDR>`        | Contract address (Stylus)                                    |
 | `--socket <PATH>`             | Unix socket path for event reporting                         |
 | `--use-interpose`             | Record graphics API calls for visual replay (MCR backend only) |
+| `--portable`                  | Make the trace replayable on another machine, or later after its files change (MCR backend; see below) |
 
 **Language detection:** When `--lang` is not provided, `ct` detects the language from the file extension or project structure:
 
@@ -103,6 +104,8 @@ ct record [options] <program> [-- <program-args>]
 | `Cargo.toml`                    | Rust (native, via rr/TTD) |
 
 > **Note:** Blockchain-specific languages (Circom, Cairo, Aiken, Cadence, Move, Sway, Miden, PolkaVM, Leo, Tolk) use their own recorder binaries. See the [Getting Started](../getting_started/overview.md) guides for each language.
+
+> **Portable traces:** A native recording refers to the files the program used (its libraries, and any file it mapped) by content hash, so it replays only where those files still exist unchanged. `ct record --portable` makes the trace carry them instead, together with their debug symbols and a description of the recording machine, so it replays on another machine or after the files change. The MCR backend implements it; a backend that does not yet refuses `--portable` rather than producing a trace that would fail elsewhere. `--upload` implies it for MCR recordings, and `CODETRACER_PORTABLE=on|off` sets it from the environment.
 
 > **Note:** Visual recordings for native graphics programs are MCR `.ct` traces produced with `ct record --use-interpose`. CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See [Visual recordings](../usage_guide/visual_recordings.md).
 
@@ -279,6 +282,7 @@ for the full surface.
 | `CODETRACER_CALLTRACE_MODE`     | Call trace mode: `FullRecord`, `RawRecordNoValues`, `NoInstrumentation` |
 | `CODETRACER_SHELL_ID`           | Shell session ID (for CodeTracer Shell)                                 |
 | `CODETRACER_CT_MCR_CMD`         | Override the internal MCR binary that `ct trace extract-gfx` invokes     |
+| `CODETRACER_PORTABLE`           | `on`/`off`: default for `ct record --portable` (the flag wins)          |
 | `CODETRACER_CT_GFX_PLAYER_CMD`  | Override the internal player binary that `ct gfx-replay` launches        |
 | `CODETRACER_CT_GFX_PLAYER_BACKEND` | Default backend for `ct gfx-replay` (equivalent to `--backend`), for example `software` |
 

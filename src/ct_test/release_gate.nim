@@ -911,6 +911,10 @@ const
     "src/tests/cli/target_recognition_test.nim",
     "src/tests/cli/record_backend_selection_test.nim",
     "src/tests/cli/record_recognition_e2e_test.nim",
+    # `ct record --portable` (codetracer-specs CLI/ct/record.md, "Portable
+    # traces"): the dispatcher forwards it to MCR as CT_PORTABLE=on and every
+    # backend that cannot honour it refuses it by name.
+    "src/tests/cli/record_portable_test.nim",
   ]
 
   CliReviewGateTests* = [
