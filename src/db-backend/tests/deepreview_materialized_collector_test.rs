@@ -22,10 +22,11 @@
 //! * the legacy `runtime_tracing` `trace.json` layout, which
 //!   `diff::load_and_postprocess_trace` refuses and the collector must not
 //!   (`a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it`).
-//!   No current recorder writes it — `nargo trace` did until it became
+//!   No recorder writes it by default — `nargo trace` did until it became
 //!   CTFS-only — so that case transcodes the same real Noir recording into it:
 //!   the events are the recorder's, read back out of its container by the
-//!   trace-format reader, and only their on-disk layout changes;
+//!   trace-format reader.  The layout cannot carry columns, so the transcoded
+//!   recording is a line-only one;
 //! * Python, when the recorder is importable
 //!   (`a_python_recording_reviews_the_way_a_noir_one_does`) — a line-only
 //!   `*.ct` from a different recorder.  It is also the milestone's own
@@ -423,10 +424,15 @@ fn a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it() {
     // trace.bin/trace.json sidecars are no longer accepted").  The collector
     // must not inherit that refusal: the debugger still opens such recordings.
     //
-    // No recorder writes this layout any more, so the fixture's real Noir
+    // No recorder writes this layout by default, so the fixture's real Noir
     // recording is transcoded into it: its events are read back out of the
     // container by the trace-format reader and written as the JSON event
     // stream, with the recording's own workdir in the metadata sidecar.
+    //
+    // The event stream's `Step` is `(path, line)` with no column
+    // (`StepRecord`; columns exist only in the CTFS step encoding), so the
+    // transcoded recording is line-only even though `nargo trace` recorded
+    // several column steps per line.
     use db_backend::trace_reader::TraceReader as _;
 
     let fixture = build_fixture("legacy");
@@ -487,15 +493,34 @@ fn a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it() {
         serde_json::from_str(&std::fs::read_to_string(output.join("review.json")).expect("review.json"))
             .expect("review.json is the dataset shape");
     assert_eq!(data.recording_count, 1);
-    // The same recording, so the same coverage as the container it came from.
+    // A line-only recording's step is one execution of its line, so every
+    // step the transcoded stream holds counts, except the entry step on line 1
+    // (the first `Step`), which marks where the recording began.  That is the
+    // debugger's reading of the same file: it has no columns to group by.
+    let mut steps_per_line = std::collections::BTreeMap::<u32, u32>::new();
+    for step in events
+        .iter()
+        .filter_map(|event| match event {
+            codetracer_trace_types::TraceLowLevelEvent::Step(step) => Some(step),
+            _ => None,
+        })
+        .skip(1)
+    {
+        *steps_per_line.entry(step.line.0 as u32).or_default() += 1;
+    }
     let covered: Vec<(u32, u32)> = data.files[0]
         .coverage
         .iter()
         .map(|entry| (entry.line, entry.execution_count))
         .collect();
+    assert_eq!(covered, steps_per_line.into_iter().collect::<Vec<_>>());
+    // Only the loop lines, where `nargo trace` stopped at several columns per
+    // execution, differ from the container's own counts
+    // (`coverage_is_the_recordings_real_per_line_execution_counts`): line 4 is
+    // three steps per iteration and line 5 two.
     assert_eq!(
         covered,
-        vec![(1, 1), (2, 1), (3, 5), (4, 4), (5, 4), (6, 4), (7, 1), (8, 1), (9, 1)]
+        vec![(1, 1), (2, 1), (3, 9), (4, 12), (5, 8), (6, 4), (7, 1), (8, 1), (9, 1)]
     );
 }
 
