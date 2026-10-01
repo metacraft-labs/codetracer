@@ -1,7 +1,14 @@
 # Expected Origin Chain — sway / simple_trivial_chain
 
 **Query target:** local `c` at the trailing `c` expression in `compute`
-(`main.sw` line 19).
+(the test finds the line by its text).
+
+**What a recording supports today (forc 0.70.3):** none of this chain. The
+build's `debug_symbols.obj` carries no `DW_TAG_variable` at all, and its line
+table has no entry for any statement of `compute`'s body (only `fn compute`
+and `main`'s call), even with `#[inline(never)]`. The query therefore reports
+`c` as an unknown variable with no hops, and the test asserts exactly that. The
+chain below is the target for when forc emits variable debug information.
 
 **Expected chain shape:**
 

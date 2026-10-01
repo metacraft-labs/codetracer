@@ -71,6 +71,7 @@ Uninit
 WDIO
 WINDBG
 WSGI
+Zmir
 Zstd
 abigen
 alloy
@@ -137,6 +138,7 @@ fdebug
 finalizers
 flake
 flist
+forc
 fsbase
 fstatat
 gpui
@@ -188,6 +190,7 @@ nixos
 nixpkgs
 nocapture
 noirc
+objdump
 objs
 openat
 opfs

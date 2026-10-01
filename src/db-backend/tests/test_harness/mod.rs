@@ -3981,10 +3981,21 @@ fn record_solana_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     .map_err(|e| format!("failed to write SBF crate source: {}", e))?;
 
     let target_dir = crate_dir.join("target");
+    // `-Zmir-opt-level=0`: even at `opt-level = 0`, rustc's MIR optimisations
+    // merge locals that are copies of one another into one stack slot (`b` and
+    // `c` in `let b = a; let c = b;` share a DWARF location), and a recording
+    // then cannot tell their values or their writes apart. The fixtures are
+    // debugging subjects, so they are built the way a debug build is meant to
+    // look: one slot per local, written on its own line.
+    let rustflags = match env::var("RUSTFLAGS") {
+        Ok(existing) if !existing.trim().is_empty() => format!("{existing} -Zmir-opt-level=0"),
+        _ => "-Zmir-opt-level=0".to_string(),
+    };
     let build = Command::new(&cargo_build_sbf)
         .arg("--manifest-path")
         .arg(crate_dir.join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", &target_dir)
+        .env("RUSTFLAGS", rustflags)
         .output()
         .map_err(|e| format!("failed to run cargo-build-sbf: {}", e))?;
     if !build.status.success() {
