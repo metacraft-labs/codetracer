@@ -37,6 +37,12 @@
 //!   per-language fixture tests.
 //! - `SKIPPED: M17 <test>: <tool> not on PATH ...` — covers per-language
 //!   compiler probes.
+//!
+//! Tests #3, #4 and #5 are `#[ignore]`d as pending: their end-to-end bodies
+//! are not written, so on a runner with every prerequisite they can only
+//! fail (`unimplemented_end_to_end`). Ignored, the runner reports them as not
+//! run instead of the binary's four real tests being kept out of every lane
+//! that lacks `ct-mcr`.
 
 mod test_harness;
 
@@ -286,6 +292,8 @@ fn test_origin_mcr_hybrid_falls_back_to_breakpoints_before_window() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/c/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --run-ignored to see it fail"]
 fn test_origin_mcr_undo_c_simple_trivial_chain() {
     if !require_gcc("c_simple_trivial_chain") {
         return;
@@ -305,6 +313,8 @@ fn test_origin_mcr_undo_c_simple_trivial_chain() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/rust/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --run-ignored to see it fail"]
 fn test_origin_mcr_undo_rust_simple_trivial_chain() {
     if !require_rustc("rust_simple_trivial_chain") {
         return;
@@ -323,6 +333,8 @@ fn test_origin_mcr_undo_rust_simple_trivial_chain() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/nim/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --run-ignored to see it fail"]
 fn test_origin_mcr_undo_nim_simple_trivial_chain() {
     if !require_nim("nim_simple_trivial_chain") {
         return;
