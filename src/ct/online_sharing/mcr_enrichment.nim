@@ -42,7 +42,10 @@ const
   CtfsExtHeaderSize = 8
   CtfsFileEntrySize = 24
   CtfsVersion = 5'u8
-    ## The one container version read here (`ctfs-container.md` §1).
+    ## The container version writers write (`ctfs-container.md` §1).
+  CtfsVersionV6 = 6'u8
+    ## Version 5's body behind a 24-byte header (§1a); read here for the full
+    ## profile with no whole-file scheme only (§1c).
   CtfsDirect = 1'u64 shl 63
     ## Bit 63 of `MapBlock`: the rest is the member's only data block (§2).
   # \0, 0-9, a-z, ., /, -   (Section 3)
@@ -114,9 +117,10 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
   if totalLen < uint64(FixedHeader):
     return (false, CtfsRootDir(), path & " is only " & $totalLen & " bytes")
 
-  var header = newSeq[byte](FixedHeader)
+  let headerLen = int(min(totalLen, 24'u64))
+  var header = newSeq[byte](headerLen)
   try:
-    if f.readBuffer(addr header[0], FixedHeader) != FixedHeader:
+    if f.readBuffer(addr header[0], headerLen) != headerLen:
       return (false, CtfsRootDir(), "short read of " & path & "'s header")
   except IOError, OSError:
     return (false, CtfsRootDir(), "cannot read " & path & "'s header")
@@ -125,10 +129,26 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
     if header[i] != CtfsMagic[i]:
       return (false, CtfsRootDir(), path & " does not carry the CTFS magic")
 
-  if header[5] != CtfsVersion:
+  if header[5] != CtfsVersion and header[5] != CtfsVersionV6:
     return (false, CtfsRootDir(), path & " is CTFS container version " &
-            $header[5] & ", and this reader reads version " & $CtfsVersion &
-            " only")
+            $header[5] & ", and this reader reads versions " & $CtfsVersion &
+            " and " & $CtfsVersionV6)
+  var entryStart = FixedHeader
+  if header[5] == CtfsVersionV6:
+    if headerLen < 24:
+      return (false, CtfsRootDir(), path & " is too short for a version 6 header")
+    if header[16] != 0:
+      return (false, CtfsRootDir(), path & " is a version 6 container with " &
+              "profile " & $header[16] & "; this reader reads profile 0 only")
+    if header[17] != 0:
+      return (false, CtfsRootDir(), path & " is a version 6 container with " &
+              "whole-file compression " & $header[17] &
+              "; this reader reads compression 0 only")
+    for i in 18 ..< 24:
+      if header[i] != 0:
+        return (false, CtfsRootDir(), path & " is a version 6 container " &
+                "with reserved byte " & $i & " = " & $header[i])
+    entryStart = 24
 
   let blockSize = uint64(readU32LE(header, 8))
   if blockSize == 0:
@@ -145,13 +165,13 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
   var maxRootEntries = int(readU32LE(header, 12))
   if maxRootEntries == 0:
     # `0` fills the rest of block 0 with entries (§1, "Auto-fill").
-    maxRootEntries = int((blockSize - uint64(FixedHeader) -
+    maxRootEntries = int((blockSize - uint64(entryStart) -
       7'u64 * uint64(header[7]) * 6'u64) div uint64(CtfsFileEntrySize))
   let rootBlocks = max(1'u64,
-    (uint64(FixedHeader) + 7'u64 * uint64(header[7]) * 6'u64 +
+    (uint64(entryStart) + 7'u64 * uint64(header[7]) * 6'u64 +
      uint64(maxRootEntries) * uint64(CtfsFileEntrySize) + blockSize - 1) div
     blockSize)
-  let onDiskRoom = int((totalLen - uint64(FixedHeader)) div
+  let onDiskRoom = int((totalLen - uint64(entryStart)) div
                        uint64(CtfsFileEntrySize))
   if maxRootEntries > onDiskRoom:
     maxRootEntries = onDiskRoom
@@ -161,6 +181,7 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
   var entries = newSeq[byte](maxRootEntries * CtfsFileEntrySize)
   if entries.len > 0:
     try:
+      f.setFilePos(int64(entryStart))
       if f.readBuffer(addr entries[0], entries.len) != entries.len:
         return (false, CtfsRootDir(),
                 "short read of " & path & "'s root directory")

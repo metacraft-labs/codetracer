@@ -714,8 +714,14 @@ fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
     ]))
 }
 
-/// The one container version this reader reads (`ctfs-container.md` §1).
+/// The container version written here (`ctfs-container.md` §1): a
+/// full-profile container with no whole-file scheme.
 const CTFS_VERSION: u8 = 5;
+
+/// Version 6: version 5's body behind a 24-byte header with `Profile` and
+/// whole-file `Compression` (§1a). Read here for the full profile with no
+/// whole-file scheme; every other value of those fields is refused (§1c).
+const CTFS_VERSION_V6: u8 = 6;
 
 /// Bit 63 of `FileEntry.MapBlock`: the rest of the word is the member's only
 /// data block (`ctfs-container.md` §2).
@@ -727,8 +733,9 @@ struct CtfsEntry {
     map_block: u64,
 }
 
-/// Validate a container header and return `(block_size, root entry count)`.
-fn ctfs_header(data: &[u8]) -> Result<(u64, usize), String> {
+/// Validate a container header and return `(block_size, entry_start, root
+/// entry count)`.
+fn ctfs_header(data: &[u8]) -> Result<(u64, usize, usize), String> {
     if data.len() < 16 {
         return Err(format!("CTFS file too short ({} bytes)", data.len()));
     }
@@ -736,32 +743,62 @@ fn ctfs_header(data: &[u8]) -> Result<(u64, usize), String> {
         return Err("not a valid CTFS file (bad magic)".to_string());
     }
     let version = data[5];
-    if version != CTFS_VERSION {
+    if version != CTFS_VERSION && version != CTFS_VERSION_V6 {
         return Err(format!(
-            "CTFS container version {version} is not readable: this reader reads version \
-             {CTFS_VERSION} only. Re-record the trace"
+            "CTFS container version {version} is not readable: this reader reads versions \
+             {CTFS_VERSION} and {CTFS_VERSION_V6}. Re-record the trace"
         ));
     }
     let block_size = read_u32_le(data, 8).ok_or("CTFS header truncated at block_size")?;
     if !matches!(block_size, 1024 | 2048 | 4096) {
         return Err(format!("invalid CTFS block size {block_size}"));
     }
+    let entry_start = if version == CTFS_VERSION_V6 {
+        if data.len() < 24 {
+            return Err(format!(
+                "a version 6 CTFS header is 24 bytes, but only {} are present",
+                data.len()
+            ));
+        }
+        if data[16] != 0 {
+            return Err(format!(
+                "CTFS version 6 container with profile {}: this reader reads profile 0 (full) only",
+                data[16]
+            ));
+        }
+        if data[17] != 0 {
+            return Err(format!(
+                "CTFS version 6 container with whole-file compression {}: this reader reads \
+                 compression 0 (none) only",
+                data[17]
+            ));
+        }
+        if let Some(i) = (18..24).find(|&i| data[i] != 0) {
+            return Err(format!(
+                "CTFS version 6 container with reserved byte {i} = {}; reserved bytes must be zero",
+                data[i]
+            ));
+        }
+        24
+    } else {
+        16
+    };
     let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")? as usize;
     // `0` fills the rest of block 0 with entries (§1, "Auto-fill").
     let count = if max_entries == 0 {
-        (block_size as usize - 16) / 24
+        (block_size as usize - entry_start) / 24
     } else {
         max_entries
     };
-    Ok((u64::from(block_size), count))
+    Ok((u64::from(block_size), entry_start, count))
 }
 
 /// The root directory entry named `file_name`, if the container has one.
 fn ctfs_entry(data: &[u8], file_name: &str) -> Result<Option<CtfsEntry>, String> {
-    let (_, count) = ctfs_header(data)?;
+    let (_, entry_start, count) = ctfs_header(data)?;
     let encoded_name = base40_encode(file_name);
     for i in 0..count {
-        let entry_off = 16 + i * 24;
+        let entry_off = entry_start + i * 24;
         let Some(entry_name) = read_u64_le(data, entry_off + 16) else {
             break;
         };
@@ -795,7 +832,7 @@ pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u6
 /// Read the internal file `file_name` out of a version 5 CTFS container:
 /// `Ok(None)` when the container has no such member.
 pub fn read_ctfs_internal_file(data: &[u8], file_name: &str) -> Result<Option<Vec<u8>>, String> {
-    let (block_size, _) = ctfs_header(data)?;
+    let (block_size, _, _) = ctfs_header(data)?;
     let Some(entry) = ctfs_entry(data, file_name)? else {
         return Ok(None);
     };
@@ -1321,7 +1358,7 @@ mod tests {
 
     #[test]
     fn a_container_of_another_version_is_refused_by_name() {
-        for v in [3u8, 4, 6] {
+        for v in [3u8, 4, 7] {
             let mut raw = raw_v5(2, &[(0, "meta.dat", 2, BIT63 | 1)]);
             raw[5] = v;
             let err = read_meta_dat_from_ctfs(&raw)
@@ -1427,5 +1464,36 @@ mod tests {
         assert_eq!(read_ctfs_internal_file(&raw, "big").unwrap(), Some(big));
         assert_eq!(read_ctfs_internal_file(&raw, "absent").unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A version 6 full container with no whole-file scheme is read, its
+    /// entries at 24; every v6 value this reader does not implement is
+    /// refused by name (`ctfs-container.md` §1a-§1c).
+    #[test]
+    fn version_6_full_containers_are_read_and_other_fields_refused() {
+        let v6 = |profile: u8, compression: u8, reserved: u8| {
+            let mut raw = vec![0u8; 2 * 1024];
+            raw[0..5].copy_from_slice(&CTFS_MAGIC);
+            raw[5] = 6;
+            raw[8..12].copy_from_slice(&1024u32.to_le_bytes());
+            raw[12..16].copy_from_slice(&8u32.to_le_bytes());
+            raw[16] = profile;
+            raw[17] = compression;
+            raw[23] = reserved;
+            raw[24..32].copy_from_slice(&3u64.to_le_bytes());
+            raw[32..40].copy_from_slice(&(BIT63 | 1).to_le_bytes());
+            raw[40..48].copy_from_slice(&base40_encode("meta.dat").to_le_bytes());
+            raw[1024..1027].copy_from_slice(b"abc");
+            raw
+        };
+        assert_eq!(read_meta_dat_from_ctfs(&v6(0, 0, 0)).unwrap(), b"abc");
+        for (p, c, r, what) in [
+            (1, 0, 0, "profile 1"),
+            (0, 1, 0, "compression 1"),
+            (0, 0, 2, "reserved"),
+        ] {
+            let err = read_meta_dat_from_ctfs(&v6(p, c, r)).unwrap_err();
+            assert!(err.contains(what), "{what}: {err}");
+        }
     }
 }

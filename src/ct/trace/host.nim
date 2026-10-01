@@ -732,13 +732,13 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   # (emitted as `trace.bin` by e.g. the Python recorder) shares the
   # same 5-byte `C0 DE 72 AC E2` prefix but uses version byte 0x00,
   # whereas a CTFS container declares its version at offset 5, and the
-  # db-backend reads version 5 only (`ctfs-container.md` §1).
+  # db-backend reads versions 5 and 6 (`ctfs-container.md` §1, §1a).
   # Copying a capnp-binary `trace.bin` to `trace.ct` makes the
   # db-backend's `is_codetracer_ctfs_file` reject it (unsupported CTFS
   # version) and wrongly fall through to the rr replay-worker path.
   # Require a genuine CTFS version byte before the rename.
   const ctfsMagic = "\xC0\xDE\x72\xAC\xE2"
-  const ctfsVersion = 5'u8
+  const ctfsVersions = {5'u8, 6'u8}
   if not fileExists(outputFolder / "trace.ct"):
     for payloadName in ["trace.bin", "trace.json"]:
       let payloadPath = outputFolder / payloadName
@@ -749,7 +749,7 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
           if content.len > ctfsMagic.len and
               content[0 ..< ctfsMagic.len] == ctfsMagic:
             let version = uint8(content[ctfsMagic.len])
-            isCtfsContainer = version == ctfsVersion
+            isCtfsContainer = version in ctfsVersions
         except CatchableError:
           isCtfsContainer = false
         if isCtfsContainer:

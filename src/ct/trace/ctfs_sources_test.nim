@@ -354,7 +354,7 @@ suite "CTFS container version 5":
     defer: removeDir(root)
 
     let ct = writeContainerWithMetaDat(root, "c.ct", 6)
-    for version in [3, 4, 6]:
+    for version in [3, 4, 7]:
       var data = readFile(ct)
       data[5] = char(version)
       let patched = root / ("c" & $version & ".ct")
@@ -409,3 +409,31 @@ suite "CTFS container version 5":
     # An empty member is present and empty.
     patchEntry(ct, 0, 0, 0)
     check refusal(ct).contains("missing or empty")
+
+  test "a version 6 full container is read, and its other fields refused":
+    let root = getTempDir() / "ctfs-container-v6-" & $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    # Version 6 is version 5's body behind a 24-byte header: rebuild a v5
+    # container with the entry array moved 8 bytes along.
+    let v5 = writeContainerWithMetaDat(root, "v5.ct", 6)
+    proc toV6(profile, compression, reserved: int): string =
+      let data = readFile(v5)
+      result = data[0 ..< 16] & char(profile) & char(compression) &
+        "\0\0\0\0\0" & char(reserved) &
+        data[16 ..< TestBlockSize - 8] & data[TestBlockSize .. ^1]
+    let full = root / "full.ct"
+    writeFile(full, toV6(0, 0, 0))
+    var data = readFile(full)
+    data[5] = char(6)
+    writeFile(full, data)
+    check readCtfsMetaDat(full).paths == SrcPaths
+    for (p, c, r, what) in [(1, 0, 0, "profile 1"), (0, 1, 0, "compression 1"),
+                            (0, 0, 4, "reserved")]:
+      var bad = toV6(p, c, r)
+      bad[5] = char(6)
+      let path = root / "bad.ct"
+      writeFile(path, bad)
+      check refusal(path).contains(what)

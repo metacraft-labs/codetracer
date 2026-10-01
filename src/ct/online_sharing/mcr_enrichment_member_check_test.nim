@@ -425,3 +425,25 @@ suite "MCR Enrichment — container version 5":
       check not ok
       check why in reason
       check "t00000000001" in reason
+
+  test "a version 6 full export is read, its entries at 24":
+    # Version 6 is version 5's body behind a 24-byte header (§1a).
+    let exported = v5Dir / "v6.ct"
+    rawContainer(exported, 4, [
+      ("meta.dat", 10'u64, CtfsDirect or 1),
+      ("platform.bin", 20'u64, CtfsDirect or 2),
+      ("t00000000001", 30'u64, CtfsDirect or 3),
+      ("eventlog.idx", 0'u64, 0'u64)])
+    var data = readFile(exported)
+    data = data[0 ..< 16] & "\0\0\0\0\0\0\0\0" & data[16 ..< int(BlockSize) - 8] &
+      data[int(BlockSize) .. ^1]
+    data[5] = char(6)
+    writeFile(exported, data)
+    let (ok, reason) = exportKeptEveryMember(original, exported)
+    check reason == ""
+    check ok
+    data[16] = char(1)
+    writeFile(exported, data)
+    let (ok2, reason2) = exportKeptEveryMember(original, exported)
+    check not ok2
+    check "profile 1" in reason2

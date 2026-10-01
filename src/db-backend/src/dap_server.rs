@@ -3824,7 +3824,7 @@ mod tests {
         bytes[5] = 4;
         std::fs::write(&ct_path, &bytes).unwrap();
         let err = refuse_unreadable_ctfs_version(&ct_path).unwrap_err();
-        assert!(err.contains("version 4") && err.contains("version 5"), "{err}");
+        assert!(err.contains("version 4") && err.contains("versions 5 and 6"), "{err}");
 
         // The legacy runtime_tracing binary shares the magic with version 0.
         bytes[5] = 0;

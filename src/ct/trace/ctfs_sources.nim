@@ -43,11 +43,17 @@ const
     ## ``src/backend-manager/src/meta_dat.rs``, both ``&[6]``.
 
   SupportedCtfsVersion* = 5
-    ## The one CTFS container version this reader accepts
-    ## (``ctfs-container.md`` §1).  Version 5 stores a member of at most one
-    ## block without a mapping block (its ``MapBlock`` tagged with bit 63)
-    ## and an empty member as ``MapBlock = 0``; earlier versions gave every
-    ## member a mapping block, and only this byte tells the layouts apart.
+    ## The CTFS container version writers write (``ctfs-container.md`` §1).
+    ## Version 5 stores a member of at most one block without a mapping
+    ## block (its ``MapBlock`` tagged with bit 63) and an empty member as
+    ## ``MapBlock = 0``; earlier versions gave every member a mapping block,
+    ## and only this byte tells the layouts apart.
+
+  CtfsVersionV6* = 6
+    ## Version 5's body behind a 24-byte header that adds ``Profile`` and
+    ## whole-file ``Compression`` (§1a).  Read here for the full profile with
+    ## no whole-file scheme; every other value of those fields, and a
+    ## non-zero reserved byte, is refused by name (§1c).
 
 type
   CtfsMetaDat* = object
@@ -122,19 +128,41 @@ proc openCtfs(path: string): CtfsReader =
   # different number from the ``meta.dat`` schema version that
   # ``parseCtfsMetaDat`` gates on, and the two move independently.
   let version = result.data[5].ord
-  if version != SupportedCtfsVersion:
+  if version != SupportedCtfsVersion and version != CtfsVersionV6:
     raise newException(ValueError,
       "CTFS container version " & $version & " is not readable: this " &
-      "reader reads version " & $SupportedCtfsVersion & " only. Re-record " &
-      "the trace")
+      "reader reads versions " & $SupportedCtfsVersion & " and " &
+      $CtfsVersionV6 & ". Re-record the trace")
   result.blockSize = readU32Le(result.data, 8)
   if result.blockSize notin [uint32 1024, 2048, 4096]:
     raise newException(ValueError, "invalid CTFS block size")
+  var entryStart = 16
+  if version == CtfsVersionV6:
+    if result.data.len < 24:
+      raise newException(ValueError,
+        "a version 6 CTFS header is 24 bytes, but only " &
+        $result.data.len & " are present")
+    let profile = result.data[16].ord
+    if profile != 0:
+      raise newException(ValueError,
+        "CTFS version 6 container with profile " & $profile &
+        ": this reader reads profile 0 (full) only")
+    let compression = result.data[17].ord
+    if compression != 0:
+      raise newException(ValueError,
+        "CTFS version 6 container with whole-file compression " &
+        $compression & ": this reader reads compression 0 (none) only")
+    for i in 18 ..< 24:
+      if result.data[i].ord != 0:
+        raise newException(ValueError,
+          "CTFS version 6 container with reserved byte " & $i & " = " &
+          $result.data[i].ord & "; reserved bytes must be zero")
+    entryStart = 24
   var maxEntries = int(readU32Le(result.data, 12))
   if maxEntries == 0:
     # ``0`` fills the rest of block 0 with entries (§1, "Auto-fill").
-    maxEntries = (int(result.blockSize) - 16) div 24
-  var offset = 16
+    maxEntries = (int(result.blockSize) - entryStart) div 24
+  var offset = entryStart
   for _ in 0 ..< maxEntries:
     if offset + 24 > result.data.len:
       break

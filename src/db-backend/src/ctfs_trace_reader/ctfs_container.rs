@@ -39,39 +39,132 @@ use std::path::Path;
 /// Magic bytes identifying a CTFS file: "C0DE trACE2" in hex-speak.
 pub(crate) const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
 
-/// The one container version this reader reads (`ctfs-container.md` §1).
+/// The container version this crate's writers write (`ctfs-container.md`
+/// §1, "What a writer writes"): version 5, for a full-profile container with
+/// no whole-file scheme.
 ///
 /// Version 5 stores a member of at most one block without a mapping block
 /// (its `MapBlock` carries [`CTFS_DIRECT`]) and an empty member as
 /// `MapBlock = 0`. Earlier versions gave every member a mapping block, and
-/// their bytes cannot be told apart from version 5's by anything but this
-/// byte, so every other version is refused by name (§2, "Older versions are
+/// their bytes cannot be told apart from version 5's by anything but the
+/// version byte, so they are refused by name (§2, "Older versions are
 /// refused"); such containers are re-recorded.
 pub(crate) const CTFS_VERSION: u8 = 5;
+
+/// Version 6: version 5's body behind a 24-byte header that adds `Profile`
+/// and whole-file `Compression` (§1a). This reader reads the full profile
+/// with no whole-file scheme, and refuses, naming the value, a compact
+/// profile, any whole-file scheme and a non-zero reserved byte (§1c).
+pub(crate) const CTFS_VERSION_V6: u8 = 6;
+
+/// Size of the version 6 header.
+pub(crate) const V6_HEADER_SIZE: usize = 24;
 
 /// Bit 63 of `FileEntry.MapBlock`: set, the rest of the word is the member's
 /// only data block (`ctfs-container.md` §2, "`MapBlock` has three forms").
 pub(crate) const CTFS_DIRECT: u64 = 1 << 63;
 
-/// Refuse every container version but [`CTFS_VERSION`], before any member is
-/// resolved.
+/// Refuse every container version but the ones this reader implements (5
+/// and 6), before any member is resolved.
 pub(crate) fn check_container_version(version: u8) -> Result<(), CtfsError> {
-    if version == CTFS_VERSION {
+    if version == CTFS_VERSION || version == CTFS_VERSION_V6 {
         Ok(())
     } else {
         Err(CtfsError::UnsupportedVersion(version))
     }
 }
 
-/// The number of root directory entries a header declares: `max_root_entries`,
-/// or, when it is `0`, as many as fill the rest of block 0
-/// (`ctfs-container.md` §1, "Auto-fill"). The entry array starts at byte 16.
-pub(crate) fn root_entry_count(block_size: usize, max_root_entries: usize) -> usize {
-    if max_root_entries == 0 {
-        block_size.saturating_sub(HEADER_SIZE + EXTENDED_HEADER_SIZE) / FILE_ENTRY_SIZE
-    } else {
-        max_root_entries
+/// What a container's header says about where its root directory is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ContainerHeader {
+    /// Block size in bytes (1024, 2048 or 4096).
+    pub(crate) block_size: usize,
+    /// Byte offset of the `FileEntry` array: the header's own size.
+    pub(crate) entry_start: usize,
+    /// Root directory entries (`MaxRootEntries`, or the auto-fill count).
+    pub(crate) max_root_entries: usize,
+}
+
+/// Parse and validate a container header from its first bytes (at least 16;
+/// 24 for version 6). Every value this reader does not implement is refused,
+/// naming it (`ctfs-container.md` §1c).
+pub(crate) fn parse_container_header(header: &[u8]) -> Result<ContainerHeader, CtfsError> {
+    if header.len() < HEADER_SIZE + EXTENDED_HEADER_SIZE {
+        return Err(CtfsError::Corrupt(format!(
+            "file too small ({} bytes, need at least {})",
+            header.len(),
+            HEADER_SIZE + EXTENDED_HEADER_SIZE
+        )));
     }
+    if header[..5] != CTFS_MAGIC {
+        return Err(CtfsError::InvalidMagic);
+    }
+    let version = header[5];
+    check_container_version(version)?;
+    let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
+    if !matches!(block_size, 1024 | 2048 | 4096) {
+        return Err(CtfsError::Corrupt(format!("invalid block size: {block_size}")));
+    }
+    let entry_start = if version == CTFS_VERSION_V6 {
+        if header.len() < V6_HEADER_SIZE {
+            return Err(CtfsError::Corrupt(format!(
+                "a version 6 header is {V6_HEADER_SIZE} bytes, but only {} are present",
+                header.len()
+            )));
+        }
+        match header[16] {
+            0 => {}
+            1 => {
+                return Err(CtfsError::Corrupt(
+                    "version 6 container with profile 1 (compact): this reader reads profile 0 (full) only".to_string(),
+                ));
+            }
+            other => {
+                return Err(CtfsError::Corrupt(format!(
+                    "version 6 container with profile {other}, which is not a defined profile"
+                )));
+            }
+        }
+        if header[17] != 0 {
+            return Err(CtfsError::Corrupt(format!(
+                "version 6 container with whole-file compression {}: this reader reads compression 0 \
+                 (none) only",
+                header[17]
+            )));
+        }
+        if let Some(i) = (18..V6_HEADER_SIZE).find(|&i| header[i] != 0) {
+            return Err(CtfsError::Corrupt(format!(
+                "version 6 container with reserved byte {i} = {}; reserved bytes must be zero",
+                header[i]
+            )));
+        }
+        V6_HEADER_SIZE
+    } else {
+        HEADER_SIZE + EXTENDED_HEADER_SIZE
+    };
+    let raw_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
+    // `0` fills the rest of block 0 with entries (§1, "Auto-fill").
+    let max_root_entries = if raw_entries == 0 {
+        block_size.saturating_sub(entry_start) / FILE_ENTRY_SIZE
+    } else {
+        raw_entries
+    };
+    Ok(ContainerHeader {
+        block_size,
+        entry_start,
+        max_root_entries,
+    })
+}
+
+/// Read and parse the header through a [`BlockSource`].
+fn read_container_header(source: &dyn BlockSource) -> Result<ContainerHeader, CtfsError> {
+    let total = source.current_size();
+    let want = V6_HEADER_SIZE.min(usize::try_from(total).unwrap_or(V6_HEADER_SIZE));
+    let mut header = vec![0u8; want];
+    if want > 0 {
+        read_exact_at(source, 0, &mut header, "header")?;
+    }
+    parse_container_header(&header)
 }
 
 /// Size of the fixed header (magic + version + reserved).
@@ -165,8 +258,8 @@ impl fmt::Display for CtfsError {
             CtfsError::InvalidMagic => write!(f, "not a valid CTFS file (bad magic bytes)"),
             CtfsError::UnsupportedVersion(v) => write!(
                 f,
-                "CTFS container version {v} is not readable: this reader reads version {CTFS_VERSION} \
-                 only. Re-record the trace, or regenerate the fixture with its producer"
+                "CTFS container version {v} is not readable: this reader reads versions {CTFS_VERSION} \
+                 and {CTFS_VERSION_V6}. Re-record the trace, or regenerate the fixture with its producer"
             ),
             CtfsError::FileNotFound(name) => write!(f, "internal file not found in CTFS container: {name}"),
             CtfsError::Io(e) => write!(f, "CTFS I/O error: {e}"),
@@ -367,9 +460,10 @@ fn read_exact_at(source: &dyn BlockSource, offset: u64, buf: &mut [u8], context:
 fn parse_root_directory(
     source: &dyn BlockSource,
     total: u64,
+    entry_start: usize,
     max_root_entries: usize,
 ) -> Result<HashMap<String, FileEntry>, CtfsError> {
-    let entry_start = (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64;
+    let entry_start = entry_start as u64;
     // How many whole entries are actually backed by the observable container.
     let available = total.saturating_sub(entry_start) / FILE_ENTRY_SIZE as u64;
     let entry_count = usize::try_from(available).unwrap_or(usize::MAX).min(max_root_entries);
@@ -557,6 +651,8 @@ pub struct FollowFileSource {
     /// Block size, parsed from the extended header at open. Needed to locate the
     /// Block 0 `FileEntry` array on each `refresh`.
     block_size: usize,
+    /// Byte offset of the `FileEntry` array (the header's size).
+    entry_start: usize,
     /// Number of root directory entries (extended header `max_root_entries`).
     max_root_entries: usize,
     /// The latest `FileEntry.Size` per internal file name, re-read from Block 0
@@ -587,27 +683,22 @@ impl FollowFileSource {
     pub fn open(path: &Path) -> Result<Self, CtfsError> {
         let file = File::open(path)?;
         let size = file.metadata()?.len();
-        // Parse the extended header to locate the FileEntry array. We read it
-        // here (not lazily) so a malformed container fails fast at open.
-        let mut header = [0u8; HEADER_SIZE + EXTENDED_HEADER_SIZE];
+        // Parse the header to locate the FileEntry array. We read it here
+        // (not lazily) so a malformed container fails fast at open.
+        let want = V6_HEADER_SIZE.min(usize::try_from(size).unwrap_or(V6_HEADER_SIZE));
+        let mut header = vec![0u8; want];
         Self::pread_into(&file, 0, &mut header)?;
-        if header[..5] != CTFS_MAGIC {
-            return Err(CtfsError::InvalidMagic);
-        }
-        check_container_version(header[5])?;
-        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        if !matches!(block_size, 1024 | 2048 | 4096) {
-            return Err(CtfsError::Corrupt(format!("invalid block size: {block_size}")));
-        }
-        let max_root_entries = root_entry_count(
+        let ContainerHeader {
             block_size,
-            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize,
-        );
+            entry_start,
+            max_root_entries,
+        } = parse_container_header(&header)?;
 
         let mut source = FollowFileSource {
             file,
             size,
             block_size,
+            entry_start,
             max_root_entries,
             file_sizes: HashMap::new(),
             finalized: false,
@@ -631,7 +722,7 @@ impl FollowFileSource {
     /// `open` and `refresh`. Mirrors `ConcurrentCtfsReader::refresh`: one
     /// positional read per root entry, no whole-container scan.
     fn reobserve_block_zero(&mut self) -> Result<(), CtfsError> {
-        let entry_start = (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64;
+        let entry_start = self.entry_start as u64;
         for i in 0..self.max_root_entries {
             let offset = entry_start + (i * FILE_ENTRY_SIZE) as u64;
             // Stop once an entry would run past the bytes currently on disk —
@@ -754,6 +845,8 @@ pub struct CtfsReader {
     block_size: usize,
     /// Number of entries per mapping block (`block_size / 8`).
     entries_per_block: usize,
+    /// Byte offset of the `FileEntry` array (the header's size).
+    entry_start: usize,
     /// Maximum number of file entries in Block 0's root directory.
     max_root_entries: usize,
     /// Parsed file directory, keyed by decoded name.
@@ -786,44 +879,20 @@ impl CtfsReader {
     /// follow, HTTP range) opens through one code path.
     pub fn from_source(source: Box<dyn BlockSource>) -> Result<Self, CtfsError> {
         let total = source.current_size();
-        if total < (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64 {
-            return Err(CtfsError::Corrupt(format!(
-                "file too small ({total} bytes, need at least {})",
-                HEADER_SIZE + EXTENDED_HEADER_SIZE
-            )));
-        }
-
-        // Read the fixed + extended header (16 bytes) in one positional read.
-        let mut header = [0u8; HEADER_SIZE + EXTENDED_HEADER_SIZE];
-        read_exact_at(source.as_ref(), 0, &mut header, "header")?;
-
-        // Validate magic bytes
-        if header[..5] != CTFS_MAGIC {
-            return Err(CtfsError::InvalidMagic);
-        }
-
-        check_container_version(header[5])?;
-
-        // Parse extended header
-        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-
-        // Validate block size
-        if !matches!(block_size, 1024 | 2048 | 4096) {
-            return Err(CtfsError::Corrupt(format!("invalid block size: {block_size}")));
-        }
-        let max_root_entries = root_entry_count(
+        let ContainerHeader {
             block_size,
-            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize,
-        );
-
+            entry_start,
+            max_root_entries,
+        } = read_container_header(source.as_ref())?;
         let entries_per_block = block_size / 8;
 
-        let files = parse_root_directory(source.as_ref(), total, max_root_entries)?;
+        let files = parse_root_directory(source.as_ref(), total, entry_start, max_root_entries)?;
 
         Ok(CtfsReader {
             source,
             block_size,
             entries_per_block,
+            entry_start,
             max_root_entries,
             files,
         })
@@ -858,7 +927,7 @@ impl CtfsReader {
     pub fn refresh(&mut self) -> Result<(), CtfsError> {
         self.source.refresh()?;
         let total = self.source.current_size();
-        self.files = parse_root_directory(self.source.as_ref(), total, self.max_root_entries)?;
+        self.files = parse_root_directory(self.source.as_ref(), total, self.entry_start, self.max_root_entries)?;
         Ok(())
     }
 
@@ -2159,7 +2228,7 @@ mod tests {
         let path = dir.path().join("old.ct");
         write_minimal_ctfs(&path, &[("meta.dat", b"x")]).unwrap();
         let mut raw = std::fs::read(&path).unwrap();
-        for version in [2u8, 3, 4, 6] {
+        for version in [2u8, 3, 4, 7] {
             raw[5] = version;
             std::fs::write(&path, &raw).unwrap();
             let err = CtfsReader::from_bytes(raw.clone()).unwrap_err();
@@ -2346,5 +2415,79 @@ mod tests {
         raw[4096..4099].copy_from_slice(b"abc");
         let mut r = CtfsReader::from_bytes(raw).unwrap();
         assert_eq!(r.read_file("x.dat").unwrap(), b"abc");
+    }
+
+    // ── Container version 6 (ctfs-container.md §1a-§1c) ──────────────────
+
+    /// A version 6 container: version 5's body behind a 24-byte header, so the
+    /// entry array starts at 24.
+    fn raw_v6(
+        blocks: usize,
+        profile: u8,
+        compression: u8,
+        reserved: u8,
+        entries: &[(usize, &str, u64, u64)],
+    ) -> Vec<u8> {
+        let mut buf = vec![0u8; blocks * 4096];
+        buf[0..5].copy_from_slice(&CTFS_MAGIC);
+        buf[5] = 6;
+        buf[8..12].copy_from_slice(&4096u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&31u32.to_le_bytes());
+        buf[16] = profile;
+        buf[17] = compression;
+        buf[23] = reserved;
+        for &(slot, name, size, map_block) in entries {
+            let off = 24 + slot * 24;
+            buf[off..off + 8].copy_from_slice(&size.to_le_bytes());
+            buf[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
+            buf[off + 16..off + 24].copy_from_slice(&base40_encode(name).unwrap().to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn a_version_6_full_container_without_compression_is_read() {
+        let mut raw = raw_v6(2, 0, 0, 0, &[(0, "x.dat", 5, BIT63 | 1)]);
+        raw[4096..4101].copy_from_slice(b"hello");
+        let mut r = CtfsReader::from_bytes(raw.clone()).unwrap();
+        assert_eq!(r.read_file("x.dat").unwrap(), b"hello");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v6.ct");
+        std::fs::write(&path, &raw).unwrap();
+        let follow = FollowFileSource::open(&path).unwrap();
+        assert_eq!(
+            follow.file_size("x.dat"),
+            Some(5),
+            "the follow source reads entries at 24"
+        );
+    }
+
+    #[test]
+    fn a_version_6_field_this_reader_does_not_implement_is_refused_by_value() {
+        for (profile, compression, reserved, what) in [
+            (1u8, 0u8, 0u8, "profile 1"),
+            (7, 0, 0, "profile 7"),
+            (0, 1, 0, "compression 1"),
+            (0, 9, 0, "compression 9"),
+            (0, 0, 3, "reserved"),
+        ] {
+            let raw = raw_v6(2, profile, compression, reserved, &[]);
+            let err = CtfsReader::from_bytes(raw.clone()).unwrap_err().to_string();
+            assert!(err.contains(what), "{what}: the refusal does not name the value: {err}");
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("v6.ct");
+            std::fs::write(&path, &raw).unwrap();
+            assert!(
+                FollowFileSource::open(&path).is_err(),
+                "{what}: the follow source opened it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_version_6_header_too_short_for_its_fields_is_refused() {
+        let raw = raw_v6(1, 0, 0, 0, &[]);
+        assert!(CtfsReader::from_bytes(raw[..20].to_vec()).is_err());
     }
 }

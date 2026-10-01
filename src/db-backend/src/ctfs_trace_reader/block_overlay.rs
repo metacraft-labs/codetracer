@@ -42,10 +42,7 @@ use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
-use super::ctfs_container::{
-    BlockSource, CTFS_DIRECT, CtfsError, EXTENDED_HEADER_SIZE, FILE_ENTRY_SIZE, HEADER_SIZE, base40_decode,
-    base40_encode,
-};
+use super::ctfs_container::{BlockSource, CTFS_DIRECT, CtfsError, FILE_ENTRY_SIZE, base40_decode, base40_encode};
 
 /// Byte offset of the `Size` field within a 24-byte `FileEntry`
 /// (CTFS-Binary-Format.md §2: `Size` is the first field).
@@ -166,6 +163,8 @@ pub struct CtfsBlockOverlay {
     blocks: BTreeMap<u64, Vec<u8>>,
     /// Block size in bytes (1024 / 2048 / 4096), parsed from the header.
     block_size: usize,
+    /// Byte offset of the `FileEntry` array (the header's size).
+    entry_start: usize,
     /// Number of root directory entries (extended-header `max_root_entries`).
     max_root_entries: usize,
     /// The shadow `NextFreeBlock` counter: the next block number a fresh
@@ -184,33 +183,22 @@ impl CtfsBlockOverlay {
     /// layered over an existing container image, never over empty bytes).
     pub fn new(backing: Box<dyn BlockSource>, mode: OverlayMode) -> Result<Self, CtfsError> {
         let total = backing.current_size();
-        if total < (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64 {
-            return Err(CtfsError::Corrupt(format!(
-                "overlay: backing too small ({total} bytes, need at least {})",
-                HEADER_SIZE + EXTENDED_HEADER_SIZE
-            )));
-        }
-
-        // Parse the fixed + extended header to learn block_size / max_root_entries.
-        let mut header = [0u8; HEADER_SIZE + EXTENDED_HEADER_SIZE];
+        // Parse the header to learn block_size / entry_start / max_root_entries.
         // `read_block` would over-read on a sub-block-sized header, so read the
-        // 16-byte header directly via read_at.
-        let read = backing.read_at(0, &mut header)?;
-        if read != header.len() {
-            return Err(CtfsError::Corrupt("overlay: short header read".to_string()));
+        // header directly via read_at.
+        let want = super::ctfs_container::V6_HEADER_SIZE.min(usize::try_from(total).unwrap_or(usize::MAX));
+        let mut header = vec![0u8; want];
+        if want > 0 {
+            let read = backing.read_at(0, &mut header)?;
+            if read != header.len() {
+                return Err(CtfsError::Corrupt("overlay: short header read".to_string()));
+            }
         }
-        if header[..5] != super::ctfs_container::CTFS_MAGIC {
-            return Err(CtfsError::InvalidMagic);
-        }
-        super::ctfs_container::check_container_version(header[5])?;
-        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        if !matches!(block_size, 1024 | 2048 | 4096) {
-            return Err(CtfsError::Corrupt(format!("overlay: invalid block size: {block_size}")));
-        }
-        let max_root_entries = super::ctfs_container::root_entry_count(
+        let super::ctfs_container::ContainerHeader {
             block_size,
-            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize,
-        );
+            entry_start,
+            max_root_entries,
+        } = super::ctfs_container::parse_container_header(&header)?;
 
         // The backing image is laid out as a whole number of blocks; the next
         // free block is the count of WHOLE blocks currently present.
@@ -239,6 +227,7 @@ impl CtfsBlockOverlay {
             backing,
             blocks: BTreeMap::new(),
             block_size,
+            entry_start,
             max_root_entries,
             next_free_block,
             mode,
@@ -345,8 +334,8 @@ impl CtfsBlockOverlay {
     // ── Shadow Block 0 accessors ──────────────────────────────────────────
 
     /// The byte offset of file-entry slot `index` within Block 0.
-    fn file_entry_offset(index: usize) -> usize {
-        HEADER_SIZE + EXTENDED_HEADER_SIZE + index * FILE_ENTRY_SIZE
+    fn file_entry_offset(&self, index: usize) -> usize {
+        self.entry_start + index * FILE_ENTRY_SIZE
     }
 
     /// Find the file-entry slot index for the named internal file in Block 0, or
@@ -356,7 +345,7 @@ impl CtfsBlockOverlay {
         let target = base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
         let block0 = self.read_block(0)?;
         for index in 0..self.max_root_entries {
-            let off = Self::file_entry_offset(index);
+            let off = self.file_entry_offset(index);
             if off + FILE_ENTRY_SIZE > block0.len() {
                 break;
             }
@@ -379,7 +368,7 @@ impl CtfsBlockOverlay {
             return Ok(None);
         };
         let block0 = self.read_block(0)?;
-        let off = Self::file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
+        let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
         let size = u64::from_le_bytes(
             block0[off..off + 8]
                 .try_into()
@@ -395,7 +384,7 @@ impl CtfsBlockOverlay {
         let index = self
             .find_file_entry(name)?
             .ok_or_else(|| CtfsError::FileNotFound(name.to_string()))?;
-        let off = Self::file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
+        let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
         self.mutate_block(0, |block0| {
             block0[off..off + 8].copy_from_slice(&new_size.to_le_bytes());
         })
@@ -412,7 +401,7 @@ impl CtfsBlockOverlay {
     /// the region so allocator state mutates in the overlay, not on disk.
     pub fn read_free_list_roots(&self, len: usize) -> Result<Vec<u8>, CtfsError> {
         let block0 = self.read_block(0)?;
-        let start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
+        let start = self.entry_start;
         let end = start + len;
         if end > block0.len() {
             return Err(CtfsError::Corrupt(format!(
@@ -428,7 +417,7 @@ impl CtfsBlockOverlay {
     /// `roots` replaces the `roots.len()`-byte region starting immediately after
     /// the container header. Mirrors [`read_free_list_roots`](CtfsBlockOverlay::read_free_list_roots).
     pub fn write_free_list_roots(&mut self, roots: &[u8]) -> Result<(), CtfsError> {
-        let start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
+        let start = self.entry_start;
         let block_size = self.block_size;
         if start + roots.len() > block_size {
             return Err(CtfsError::Corrupt(format!(
@@ -523,7 +512,7 @@ impl CtfsBlockOverlay {
         let block0 = self.read_block(0)?;
         let mut target: Option<usize> = None;
         for index in 0..self.max_root_entries {
-            let off = Self::file_entry_offset(index);
+            let off = self.file_entry_offset(index);
             if off + FILE_ENTRY_SIZE > block0.len() {
                 break;
             }
@@ -543,7 +532,7 @@ impl CtfsBlockOverlay {
         }
         let index =
             target.ok_or_else(|| CtfsError::Corrupt(format!("overlay: root directory full, cannot add '{name}'")))?;
-        let off = Self::file_entry_offset(index);
+        let off = self.file_entry_offset(index);
         self.mutate_block(0, |block0| {
             block0[off..off + 8].copy_from_slice(&size.to_le_bytes());
             block0[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
@@ -613,7 +602,7 @@ impl CtfsBlockOverlay {
         let block0 = self.read_block(0)?;
         let mut names = Vec::new();
         for index in 0..self.max_root_entries {
-            let off = Self::file_entry_offset(index);
+            let off = self.file_entry_offset(index);
             if off + FILE_ENTRY_SIZE > block0.len() {
                 break;
             }

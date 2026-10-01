@@ -20,8 +20,8 @@ export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "e
  * reuses one the backend will reject.
  */
 const expectedMetaDatVersion = 6;
-/** The one CTFS container version the backend reads (`ctfs-container.md` §1). */
-const expectedCtfsVersion = 5;
+/** The CTFS container versions the backend reads (`ctfs-container.md` §1, §1a). */
+const readableCtfsVersions = [5, 6];
 /** Bit 63 of `MapBlock`: the rest is the member's only data block (§2). */
 const ctfsDirect = 1n << 63n;
 const ctfsMagic = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
@@ -103,10 +103,30 @@ function openCtfs(ctPath: string): CtfsReader {
     throw new Error("invalid CTFS magic");
   }
   const ctfsVersion = data[5];
-  if (ctfsVersion !== expectedCtfsVersion) {
+  if (!readableCtfsVersions.includes(ctfsVersion)) {
     throw new Error(
-      `CTFS container version ${ctfsVersion} is not readable: this reader reads version ${expectedCtfsVersion} only`,
+      `CTFS container version ${ctfsVersion} is not readable: this reader reads versions ${readableCtfsVersions.join(" and ")}`,
     );
+  }
+  // Version 6 is version 5's body behind a 24-byte header; only the full
+  // profile with no whole-file scheme is read here (§1c).
+  let entryStart = 16;
+  if (ctfsVersion === 6) {
+    if (data.length < 24) {
+      throw new Error("version 6 CTFS header too short");
+    }
+    if (data[16] !== 0) {
+      throw new Error(`version 6 CTFS container with profile ${data[16]}`);
+    }
+    if (data[17] !== 0) {
+      throw new Error(`version 6 CTFS container with whole-file compression ${data[17]}`);
+    }
+    for (let i = 18; i < 24; i++) {
+      if (data[i] !== 0) {
+        throw new Error(`version 6 CTFS container with reserved byte ${i} = ${data[i]}`);
+      }
+    }
+    entryStart = 24;
   }
 
   const blockSize = data.readUInt32LE(8);
@@ -117,10 +137,10 @@ function openCtfs(ctPath: string): CtfsReader {
   let maxEntries = data.readUInt32LE(12);
   if (maxEntries === 0) {
     // `0` fills the rest of block 0 with entries (§1, "Auto-fill").
-    maxEntries = Math.floor((blockSize - 16) / 24);
+    maxEntries = Math.floor((blockSize - entryStart) / 24);
   }
   const entries: CtfsEntry[] = [];
-  for (let offset = 16, i = 0; i < maxEntries; i++, offset += 24) {
+  for (let offset = entryStart, i = 0; i < maxEntries; i++, offset += 24) {
     if (offset + 24 > data.length) {
       throw new Error("truncated CTFS entry table");
     }
