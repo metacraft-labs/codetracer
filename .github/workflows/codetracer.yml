@@ -1680,18 +1680,17 @@ jobs:
         run: cargo build --release
 
       - name: Run headless DAP tests (MCR backend)
+        # Graceful skipping is OFF (the script sets it). The DAP tests needing
+        # tools this lane does not provide are excluded by name through
+        # ci/test/headless-not-provided.windows.txt, which names where each runs.
         shell: bash
         env:
           CODETRACER_CT_MCR_CMD: ${{ github.workspace }}/../codetracer-native-recorder/ct_cli/ct_mcr.exe
-          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
           CODETRACER_USE_GCC: "1"
           CODETRACER_GDB_CMD: gdb
           CODETRACER_GCC_CMD: gcc
           CODETRACER_GPP_CMD: g++
-        working-directory: src/db-backend
-        run: |
-          cargo nextest run --release --test '*' \
-            -E 'test(~dap) and not test(~bash_flow) and not test(~zsh_flow) and not test(~javascript_flow)'
+        run: bash ci/test/windows-headless-tests.sh
 
   lint-bash:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
