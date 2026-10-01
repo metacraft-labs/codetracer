@@ -18,6 +18,17 @@
 //! milestone records this verification as `pending` until it is observed green
 //! in a recorder-capable CI lane.
 //!
+//! ## Why it is ignored
+//!
+//! A `ct-mcr` recording is a Memory-Recreator trace: the container holds the
+//! thread event streams the replay needs, and no `steps.dat` / `steps.idx`.
+//! Execution steps exist only as a replay derives them, and writing those back
+//! into the container as a materialized step stream (tracked by `coverage.tc`,
+//! `codetracer-specs/Recording-Backends/Multi-Core-Recorder/Multi-Core-Recorder.md`)
+//! is not implemented by any replay worker. A fresh recording therefore has no
+//! step stream to follow, and this test can only fail until one does: it is
+//! ignored as pending, not skipped, so the runner reports it as not run.
+//!
 //! ## Scope vs. the synthetic follow tests
 //!
 //! `follow_stream_flow_test.rs` proves the follow reader observes growth on a
@@ -40,6 +51,9 @@ mod test_harness;
 use test_harness::{Language, TestRecording};
 
 #[test]
+#[ignore = "pending: ct-mcr writes a Memory-Recreator recording (thread events, no steps.dat/steps.idx); \
+            steps exist only as replay derives them, and persisting materialized steps into the .ct \
+            (coverage.tc, Multi-Core-Recorder.md) is not implemented, so there is nothing to follow"]
 fn e2e_mcr_streaming_flow_via_unified_reader() {
     // ── pre-flight: the MCR recorder sibling must be available ──
     let ct_native_replay = match test_harness::find_ct_native_replay() {
