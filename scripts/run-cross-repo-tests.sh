@@ -12,6 +12,7 @@
 #   go-flow     Run Go flow integration tests
 #   lean-flow   Run Lean build/record/replay tests
 #   origin-rr   Run the rr value-origin tests (origin_rr_dap_test rr::)
+#   origin-rr-smoke  Run the rr origin API smoke (origin_rr_smoke)
 #
 # Selectors (rr-backend tests, need db-backend):
 #   c-flow      Run C flow tests (in rr-backend repo)
@@ -115,13 +116,13 @@ expand_selectors() {
 	for sel in "${SELECTORS[@]}"; do
 		case "$sel" in
 		all)
-			expanded+=(nim-flow rust-flow go-flow lean-flow origin-rr c-flow cpp-flow d-flow pascal-flow)
+			expanded+=(nim-flow rust-flow go-flow lean-flow origin-rr origin-rr-smoke c-flow cpp-flow d-flow pascal-flow)
 			;;
-		nim-flow | rust-flow | go-flow | lean-flow | origin-rr | c-flow | cpp-flow | d-flow | pascal-flow)
+		nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | c-flow | cpp-flow | d-flow | pascal-flow)
 			expanded+=("$sel")
 			;;
 		*)
-			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, origin-rr, c-flow, cpp-flow, d-flow, pascal-flow, all)"
+			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, origin-rr, origin-rr-smoke, c-flow, cpp-flow, d-flow, pascal-flow, all)"
 			;;
 		esac
 	done
@@ -511,7 +512,7 @@ mkdir -p "$LOG_DIR"
 # Returns "db-backend" or "rr-backend" depending on where the test lives
 selector_test_location() {
 	case "$1" in
-	nim-flow | rust-flow | go-flow | lean-flow | origin-rr) echo "db-backend" ;;
+	nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke) echo "db-backend" ;;
 	c-flow | cpp-flow | d-flow | pascal-flow) echo "rr-backend" ;;
 	*) die "Unknown selector: $1" ;;
 	esac
@@ -525,6 +526,7 @@ selector_to_test_name() {
 	go-flow) echo "test_go_flow" ;;
 	lean-flow) echo "test_lean" ;;
 	origin-rr) echo "rr::test_origin_rr" ;;
+	origin-rr-smoke) echo "test_origin_rr_smoke" ;;
 	*) die "Unknown db-backend selector: $1" ;;
 	esac
 }
@@ -582,12 +584,12 @@ run_test() {
 			env "${env_vars[@]}" cargo test "$test_name" -- --nocapture
 		) >"$log_file" 2>&1 || exit_code=$?
 
-		# A name filter that matches nothing exits 0. For origin-rr that would
-		# report the rr origin suite green without running it, so require that
-		# its tests actually ran.
-		if [[ $selector == "origin-rr" && $exit_code -eq 0 ]] &&
+		# A name filter that matches nothing exits 0. For the origin suites that
+		# would report them green without running them, so require that their
+		# tests actually ran.
+		if [[ $selector == origin-rr* && $exit_code -eq 0 ]] &&
 			! grep -q "^test $test_name.* ok$" "$log_file"; then
-			log "origin-rr: no rr::test_origin_rr test ran; refusing to report it as passed"
+			log "$selector: no $test_name test ran; refusing to report it as passed"
 			exit_code=1
 		fi
 	else

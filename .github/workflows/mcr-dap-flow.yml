@@ -134,11 +134,16 @@ jobs:
           #   entry point as a SIBLING of codetracer-trace-format and
           #   hard-errors when it is absent, so it must be provisioned
           #   wherever codetracer-trace-format is.
+          # codetracer-visual-replay: ensure-ct-mcr's `ct_cli` imports
+          #   `gfx_stream/ctfs_visual` from it, and the build stops with
+          #   "cannot open file: gfx_stream/ctfs_visual" without it. Bare:
+          #   clone-siblings resolves it from this commit's repro.lock.
           siblings: |
             codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || 'dev' }}
             codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'dev' }}
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
+            codetracer-visual-replay
 
       - name: Run MCR DAP flow tests
         # The single canonical target. scripts/detect-siblings.sh (sourced

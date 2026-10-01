@@ -230,7 +230,7 @@ echo "siblings: entries pin a reproducible revision"
 # The ceiling had been exceeded (67 > 59) on `dev` for some time without ever
 # being reported, because this suite ran inside `ci-verdict` behind steps that
 # aborted first, and no `Codetracer CI` run on `dev` reached it.
-readonly BRANCH_TIP_CEILING=56
+readonly BRANCH_TIP_CEILING=53
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -916,7 +916,7 @@ echo "db-backend cargo legs provision codetracer-native-recorder"
 # detector regresses -- a step is reworded, the scanner stops matching -- this
 # anchor turns "nothing forbidden was found" into a FAILURE instead of a
 # vacuous pass. Two vacuous greens have already been paid for in this file.
-readonly DB_BACKEND_ANCHOR='cross-repo-tests.yml:shell-recorder-tests'
+readonly DB_BACKEND_ANCHOR='cross-repo-tests.yml:recorder-tests'
 
 # A job satisfies this contract by naming the composite instead of the repo --
 # which is the shape this contract WANTS, and also a way to launder the defect
@@ -1008,11 +1008,12 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		# step that `cd`s in, an out-of-tree invocation naming the manifest, and
 		# the cross-repo driver, whose `run_db_backend_test` does
 		# `cd "$REPO_ROOT/src/db-backend"; cargo test` (scripts/
-		# run-cross-repo-tests.sh:446).
+		# run-cross-repo-tests.sh:446), and `just test-recorder-siblings`, whose
+		# recipe does the same.
 		case "$stripped_line" in
 		'cd src/db-backend' | 'cd src/db-backend '* | "cd 'src/db-backend'"* | \
 			*'--manifest-path src/db-backend'* | *'--manifest-path=src/db-backend'* | \
-			*'run-cross-repo-tests.sh'*)
+			*'run-cross-repo-tests.sh'* | *'just test-recorder-siblings'*)
 			db_backend_sites+=("$wf_name:$job")
 			if [ "$seen_recorder" -eq 0 ]; then
 				db_backend_missing+=("$wf_name:$line_no: job '$job' builds src/db-backend with no codetracer-native-recorder sibling before it")

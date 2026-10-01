@@ -858,9 +858,9 @@ test-rust:
     exit 1
   fi
   export CODETRACER_RECORD_WEB_BIN="$session_manager"
-  # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
-  # and are run separately in cross-repo CI jobs.
+  # Integration tests (tests/*.rs): DAP protocol, flow tests, etc. A test
+  # whose recorder or tool a lane does not provide is excluded through that
+  # lane's not-provided list (below), which names where it runs instead.
   #
   # The rr origin tests (`rr::` in origin_rr_dap_test) fail when rr or
   # ct-native-replay is missing; they do not skip. A lane with no rr backend
@@ -868,7 +868,7 @@ test-rust:
   # then they are excluded here, by name, and the exclusion is printed, rather
   # than run and counted as passed. They run in cross-repo-tests.yml's
   # rr-backend-tests job.
-  filter='not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  filter='all()'
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "0" ]; then
     filter="$filter and not (binary(origin_rr_dap_test) and test(/^rr::/))"
     echo "NOT RUN in this lane (CODETRACER_RR_BACKEND_PRESENT=0): the rr origin tests"
@@ -880,13 +880,7 @@ test-rust:
   # each is excluded by name and listed here as NOT RUN with where it runs.
   if [ -n "${CODETRACER_TEST_LANE_NOT_PROVIDED:-}" ]; then
     not_provided="$(cd ../.. && realpath "$CODETRACER_TEST_LANE_NOT_PROVIDED")"
-    echo "NOT RUN in this lane ($CODETRACER_TEST_LANE_NOT_PROVIDED): tests whose tools it does not provide"
-    while IFS='|' read -r fset prereq lane; do
-      fset="$(echo "$fset" | xargs)"
-      case "$fset" in ''|\#*) continue ;; esac
-      filter="$filter and not $fset"
-      echo "  $fset   -- needs $(echo "$prereq" | xargs); runs in: $(echo "$lane" | xargs)"
-    done < "$not_provided"
+    filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided"))"
   fi
   cargo nextest run --release --test '*' -E "$filter"
   popd
@@ -2049,6 +2043,44 @@ test-ruby-flow:
 test-origin-dap:
   #!/usr/bin/env bash
   exec ./scripts/test-origin-dap.sh
+
+# The recorder siblings `test-recorder-siblings` records with. Each must be
+# checked out next to this repository (../<repo>).
+recorder_siblings := "codetracer-cairo-recorder codetracer-circom-recorder codetracer-leo-recorder codetracer-cardano-recorder codetracer-solana-recorder codetracer-fuel-recorder codetracer-php-recorder"
+
+# Build the recorder siblings, each in its own dev shell with its own `just`
+# targets (ci/test/build-recorder-siblings.sh), and check each artefact exists.
+build-recorder-siblings:
+  bash ci/test/build-recorder-siblings.sh {{recorder_siblings}}
+
+# The db-backend tests that record through a sibling recorder this repo's dev
+# shell does not ship: the Bash and Zsh flow tests, the PHP flow test, the
+# value-origin tests for Aiken, Cairo, Circom, Leo, Solana and Sway, and the
+# Cairo GLI decode regression. Run `just build-recorder-siblings` first (and
+# `cargo build` in ../codetracer-shell-recorders for the shell recorders).
+#
+# Graceful skipping is OFF: every prerequisite is provisioned here, so a missing
+# one fails. This is the `recorder-tests` job of cross-repo-tests.yml, and the
+# lane ci/test/*-not-provided.*.txt names for these tests.
+test-recorder-siblings:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  ws="$(cd .. && pwd)"
+  export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
+  export CODETRACER_BASH_RECORDER_PATH="$ws/codetracer-shell-recorders/bash-recorder/launcher.sh"
+  export CODETRACER_ZSH_RECORDER_PATH="$ws/codetracer-shell-recorders/zsh-recorder/launcher.zsh"
+  # The PHP extension is built against the PHP of the recorder's own shell and
+  # loads only into that PHP, so that is the `php` the test runs.
+  php="$(direnv exec "$ws/codetracer-php-recorder" bash -c 'command -v php')"
+  export PATH="$(dirname "$php"):$PATH"
+  cd src/db-backend
+  cargo test --no-fail-fast \
+    --test bash_flow_integration --test zsh_flow_integration \
+    --test php_flow_dap_test \
+    --test origin_aiken_dap_test --test origin_cairo_dap_test --test origin_circom_dap_test \
+    --test origin_leo_dap_test --test origin_solana_dap_test --test origin_sway_dap_test \
+    --test cairo_fixture_gli_decode \
+    -- --nocapture
 
 # The WebAssembly boundary-recording checks: record each demo from this
 # tree and replay it.
@@ -6118,7 +6150,10 @@ ensure-ct-native-replay:
 
 # Run the DAP-flow integration tests (Ada / C / C++ / D / Fortran / Go /
 # Pascal / Nim / Rust) under
-# ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``.
+# ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``, and
+# ``mcr_streaming_unified_reader_test.rs``, which reads a real ct-mcr
+# recording through the unified follow reader and needs the same two
+# binaries.
 #
 # The ``ensure-*`` prerequisites build the sibling binaries; this recipe
 # then makes them discoverable to the Rust tests:
@@ -6171,4 +6206,4 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     fi
     export PATH="${extra_path}${PATH}"
 
-    cd src/db-backend && cargo test --test '*_mcr_streaming_flow_test'
+    cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test
