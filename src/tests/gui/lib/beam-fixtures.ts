@@ -10,19 +10,20 @@ export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "e
  * The `meta.dat` schema version a cached fixture must carry to be reused.
  *
  * Must track `SUPPORTED_VERSIONS` in
- * `src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is `&[4]`:
+ * `src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is `&[6]`:
  * a cached container the backend would refuse is not a reusable
- * fixture. It cannot be widened to also accept 3 for the same reason
- * the backend's set cannot — v3 packs a step's line-only
- * `global_position_index` as `prefix_sums[file_id] + line` where v4
- * packs `prefix_sums[file_id] + (line - 1)`, so a v3 fixture would
- * drive the UI one line high rather than fail.
+ * fixture. Version 6 dropped the path list that versions 3 to 5 wrote after
+ * `recorder_id`, so no earlier version reads as it.
  *
  * Getting this stale is quiet in both directions: too low and every run
  * judges a current fixture stale and re-records it, too high and a run
  * reuses one the backend will reject.
  */
-const expectedMetaDatVersion = 4;
+const expectedMetaDatVersion = 6;
+/** The one CTFS container version the backend reads (`ctfs-container.md` §1). */
+const expectedCtfsVersion = 5;
+/** Bit 63 of `MapBlock`: the rest is the member's only data block (§2). */
+const ctfsDirect = 1n << 63n;
 const ctfsMagic = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
 const base40Alphabet = "\0" + "0123456789abcdefghijklmnopqrstuvwxyz./-";
 
@@ -102,8 +103,10 @@ function openCtfs(ctPath: string): CtfsReader {
     throw new Error("invalid CTFS magic");
   }
   const ctfsVersion = data[5];
-  if (![2, 3, 4].includes(ctfsVersion)) {
-    throw new Error(`unsupported CTFS version ${ctfsVersion}`);
+  if (ctfsVersion !== expectedCtfsVersion) {
+    throw new Error(
+      `CTFS container version ${ctfsVersion} is not readable: this reader reads version ${expectedCtfsVersion} only`,
+    );
   }
 
   const blockSize = data.readUInt32LE(8);
@@ -111,7 +114,11 @@ function openCtfs(ctPath: string): CtfsReader {
     throw new Error(`invalid CTFS block size ${blockSize}`);
   }
 
-  const maxEntries = data.readUInt32LE(12);
+  let maxEntries = data.readUInt32LE(12);
+  if (maxEntries === 0) {
+    // `0` fills the rest of block 0 with entries (§1, "Auto-fill").
+    maxEntries = Math.floor((blockSize - 16) / 24);
+  }
   const entries: CtfsEntry[] = [];
   for (let offset = 16, i = 0; i < maxEntries; i++, offset += 24) {
     if (offset + 24 > data.length) {
@@ -132,8 +139,19 @@ function openCtfs(ctPath: string): CtfsReader {
   return { data, blockSize, entries };
 }
 
+/** The byte offset of a block, refusing a null pointer (block 0 is the header). */
+function blockOffset(reader: CtfsReader, blockNum: bigint, what: string): number {
+  if (blockNum === 0n) {
+    throw new Error(`${what} is a null CTFS block pointer`);
+  }
+  if (blockNum >= BigInt(Math.floor(reader.data.length / reader.blockSize))) {
+    throw new Error(`${what} is block ${blockNum}, outside the container`);
+  }
+  return Number(blockNum) * reader.blockSize;
+}
+
 function readBlockPtr(reader: CtfsReader, blockNum: bigint, index: number): bigint {
-  const offset = Number(blockNum) * reader.blockSize + index * 8;
+  const offset = blockOffset(reader, blockNum, "a CTFS mapping block") + index * 8;
   if (offset + 8 > reader.data.length) {
     throw new Error("CTFS block pointer outside file");
   }
@@ -206,13 +224,23 @@ function readCtfsFile(reader: CtfsReader, name: string): Buffer {
   if (entry.size === 0n) {
     return Buffer.alloc(0);
   }
+  if (entry.mapBlock === 0n) {
+    throw new Error(`${name}: its MapBlock is a null CTFS block pointer`);
+  }
+  if ((entry.mapBlock & ctfsDirect) !== 0n) {
+    if (entry.size > BigInt(reader.blockSize)) {
+      throw new Error(`${name}: ${entry.size} bytes in a single direct block, more than one block holds`);
+    }
+    const offset = blockOffset(reader, entry.mapBlock & ~ctfsDirect, `${name}'s data block`);
+    return reader.data.subarray(offset, offset + Number(entry.size));
+  }
 
   const chunks: Buffer[] = [];
   const numBlocks = Number((entry.size + BigInt(reader.blockSize) - 1n) / BigInt(reader.blockSize));
   let remaining = Number(entry.size);
   for (let blockIndex = 0; blockIndex < numBlocks; blockIndex++) {
     const dataBlock = resolveBlock(reader, entry, BigInt(blockIndex));
-    const offset = Number(dataBlock) * reader.blockSize;
+    const offset = blockOffset(reader, dataBlock, `${name}'s data block ${blockIndex}`);
     const bytesToRead = Math.min(reader.blockSize, remaining);
     if (offset + bytesToRead > reader.data.length) {
       throw new Error("CTFS data block outside file");
@@ -223,7 +251,7 @@ function readCtfsFile(reader: CtfsReader, name: string): Buffer {
   return Buffer.concat(chunks, Number(entry.size));
 }
 
-function hasCompatibleMetaDat(traceDir: string): boolean {
+export function hasCompatibleMetaDat(traceDir: string): boolean {
   if (!fs.existsSync(traceDir)) {
     return false;
   }
@@ -263,7 +291,7 @@ function fixtureForceValue(): string {
  * directories. Generated BEAM fixtures are deterministic and cheap compared
  * with debugging a stale bundle, so the GUI specs regenerate by default.
  * A local run may opt into reuse with FORCE=0, but only when the existing
- * CTFS bundles already contain compatible v3 meta.dat metadata.
+ * CTFS bundles already carry a version 5 container and version 6 meta.dat.
  */
 export function prepareBeamFixtures(): PreparedBeamFixtures {
   const recorderRepo = resolveRecorderRepo();
