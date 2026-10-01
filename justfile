@@ -3752,6 +3752,19 @@ test-web-bundle-assets:
   exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
   bash ci/test/web-bundle-assets.sh
 
+# THE `-d:ctWeb` PARTITION MAY SHRINK AND MUST NOT GROW.
+#
+# §7.5 of `UI-Bundle-And-Endpoints.md` wants one bundle across all three
+# deployments and says the item is most likely to be deferred; it was deferred
+# on 2026-10-01 with the measurement attached. This is the deferral's boundary:
+# a fifteenth compile-time fork has to be added to an inventory somebody reads,
+# rather than appearing because a define was the quickest way past a problem.
+# Costs milliseconds.
+test-ctweb-partition-inventory:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  bash ci/test/ctweb-partition-inventory.sh
+
 # THE PAGE PAINTS — the assertion whose absence let a blank product reach
 # production with every check green.
 #
