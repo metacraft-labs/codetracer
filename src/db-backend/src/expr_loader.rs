@@ -472,6 +472,11 @@ pub struct FileInfo {
     position_branches: HashMap<Position, Branch>,
     // active_loops: Vec<Position>,
     comment_lines: Vec<Position>,
+    /// Names the file declares as something other than a variable, which an
+    /// identifier use cannot be told apart from syntactically: C/C++ macros
+    /// and enum constants, Pascal routines (lowercased; Pascal identifiers
+    /// are case-insensitive).
+    non_variable_names: std::collections::HashSet<String>,
 }
 
 impl FileInfo {
@@ -487,8 +492,38 @@ impl FileInfo {
             position_branches: HashMap::default(),
             // active_loops: vec![],
             comment_lines: vec![],
+            non_variable_names: std::collections::HashSet::new(),
         }
     }
+}
+
+/// The names a file declares as something other than a variable, for
+/// [`FileInfo::non_variable_names`].
+#[cfg(feature = "syntax-highlight")]
+fn collect_non_variable_names(lang: Lang, tree: &Tree, source: &[u8]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let declaring_kinds: &[&str] = match lang {
+        // `#define MAX_SIZE 10`, `#define ADD(a, b) ...`, `enum { RED }`
+        Lang::C | Lang::Cpp => &["preproc_def", "preproc_function_def", "enumerator"],
+        // `function calculate_sum(...)`, `procedure p;`
+        Lang::Pascal => &["declProc"],
+        _ => return names,
+    };
+    for node in traverse_tree(tree, Order::Pre) {
+        if !declaring_kinds.contains(&node.kind()) {
+            continue;
+        }
+        if let Some(name) = node.child_by_field_name("name")
+            && let Ok(text) = name.utf8_text(source)
+        {
+            names.insert(if lang == Lang::Pascal {
+                text.to_lowercase()
+            } else {
+                text.to_string()
+            });
+        }
+    }
+    names
 }
 
 #[cfg(feature = "syntax-highlight")]
@@ -1726,6 +1761,18 @@ impl ExprLoader {
                     return false;
                 }
 
+                // Filter out the name half of a namespace-qualified name.
+                // AST: qualified_identifier { scope: namespace_identifier "std",
+                //                             name: identifier "cout" }
+                // A name reached through a namespace (`std::cout`, `ns::x`)
+                // has static storage; it is never a local of the frame.
+                if parent_kind == "qualified_identifier"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
+                }
+
                 // Filter out enumerator constant names in enum declarations.
                 // AST: enumerator > identifier (name field) — e.g. `enum { RED, GREEN }`
                 // Enum constants are compile-time values, not runtime variables.
@@ -2132,6 +2179,32 @@ impl ExprLoader {
                 true
             }
 
+            Lang::Pascal => {
+                // tree-sitter-pascal uses `identifier` for every name, so a
+                // variable is told from the rest by where it stands:
+                //   - `exprCall { entity: identifier "writeln", args }`: the
+                //     routine being called.
+                //   - `declProc { name: identifier }`: a routine's own name.
+                //   - `typeref > identifier`: a type (`integer`).
+                //   - `moduleName > identifier`: the program/unit name.
+                // A routine's name also appears as a plain identifier where it
+                // is assigned its result (`calculate_sum := r`) or called
+                // without arguments; those are filtered by name, through the
+                // routines the file declares (`non_variable_names`).
+                if node.kind() != "identifier" {
+                    return false;
+                }
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+                match parent.kind() {
+                    "exprCall" => field_name_in_parent(node).as_deref() != Some("entity"),
+                    "declProc" => field_name_in_parent(node).as_deref() != Some("name"),
+                    "typeref" | "moduleName" => false,
+                    _ => true,
+                }
+            }
+
             _ => NODE_NAMES[&lang].values.contains(&node.kind().to_string()),
         }
     }
@@ -2153,13 +2226,15 @@ impl ExprLoader {
         // extract variable names
         if self.is_variable_node(lang, node) {
             let value = self.extract_expr(node, path, row);
-            self.processed_files
-                .get_mut(path)
-                .unwrap()
-                .variables
-                .entry(start)
-                .or_default()
-                .push(value);
+            let lookup = if lang == Lang::Pascal {
+                value.to_lowercase()
+            } else {
+                value.clone()
+            };
+            let file = self.processed_files.get_mut(path).unwrap();
+            if !file.non_variable_names.contains(&lookup) {
+                file.variables.entry(start).or_default().push(value);
+            }
         // extract function names and positions
         } else if NODE_NAMES[&lang].functions.contains(&node.kind().to_string()) {
             if let Some(name) = self.get_method_name(node, path, row) {
@@ -2393,6 +2468,11 @@ impl ExprLoader {
     #[cfg(feature = "syntax-highlight")]
     fn process_file(&mut self, tree: &Tree, path: &PathBuf) -> Result<(), Box<dyn Error>> {
         let lang = self.get_current_language(path);
+        let non_variable_names = {
+            let source = self.processed_files[path].source_code.as_bytes();
+            collect_non_variable_names(lang, tree, source)
+        };
+        self.processed_files.get_mut(path).unwrap().non_variable_names = non_variable_names;
         let postorder: Vec<Node<'_>> = traverse_tree(tree, Order::Post).collect::<Vec<_>>();
         for node in postorder {
             debug!("node {:?}", node.to_sexp());
@@ -3697,5 +3777,84 @@ var y = 20;
         );
 
         fs::remove_file(&file_path).unwrap();
+    }
+}
+
+/// The flow test programs, read in place: the expressions a flow shows for a
+/// whole function are exactly what these fixtures' flow tests check, so the
+/// extraction is tested on the same sources.
+#[cfg(all(test, feature = "syntax-highlight"))]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
+mod flow_fixture_extraction_tests {
+    use super::*;
+
+    fn variables_by_line(fixture: &str) -> HashMap<usize, Vec<String>> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-programs")
+            .join(fixture);
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        loader.processed_files[&path]
+            .variables
+            .iter()
+            .map(|(position, names)| (position.0 as usize, names.clone()))
+            .collect()
+    }
+
+    fn all_names(by_line: &HashMap<usize, Vec<String>>) -> Vec<String> {
+        by_line.values().flatten().cloned().collect()
+    }
+
+    #[test]
+    fn a_c_macro_or_enum_constant_used_as_a_value_is_not_a_variable() {
+        let by_line = variables_by_line("c/c_flow_test.c");
+        let names = all_names(&by_line);
+        for constant in ["MAX_SIZE", "GREEN", "RED", "BLUE"] {
+            assert!(
+                !names.contains(&constant.to_string()),
+                "{constant} is a compile-time constant, not a variable; extracted: {by_line:?}"
+            );
+        }
+        // `int final_result = doubled + MAX_SIZE;`
+        let line = by_line.get(&27).cloned().unwrap_or_default();
+        assert!(line.contains(&"final_result".to_string()), "line 27: {line:?}");
+        assert!(line.contains(&"doubled".to_string()), "line 27: {line:?}");
+    }
+
+    #[test]
+    fn a_cpp_namespace_qualified_name_is_not_a_local_variable() {
+        let by_line = variables_by_line("cpp/cpp_flow_test.cpp");
+        let names = all_names(&by_line);
+        for qualified in ["std", "cout", "endl"] {
+            assert!(
+                !names.contains(&qualified.to_string()),
+                "{qualified} is reached through a namespace, not a frame local; extracted: {by_line:?}"
+            );
+        }
+        // `std::cout << "Sum: " << sum << std::endl;`
+        assert_eq!(by_line.get(&16).cloned().unwrap_or_default(), vec!["sum".to_string()]);
+    }
+
+    #[test]
+    fn a_pascal_routine_call_or_result_assignment_is_not_a_variable() {
+        let by_line = variables_by_line("pascal/pascal_flow_test.pas");
+        let names = all_names(&by_line);
+        for routine in ["writeln", "calculate_sum"] {
+            assert!(
+                !names.contains(&routine.to_string()),
+                "{routine} names a routine, not a variable; extracted: {by_line:?}"
+            );
+        }
+        // `writeln('Sum: ', sum_val);`
+        assert_eq!(
+            by_line.get(&21).cloned().unwrap_or_default(),
+            vec!["sum_val".to_string()]
+        );
+        // `calculate_sum := final_result;`
+        assert_eq!(
+            by_line.get(&24).cloned().unwrap_or_default(),
+            vec!["final_result".to_string()]
+        );
     }
 }
