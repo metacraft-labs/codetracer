@@ -227,18 +227,15 @@ suite "RS-M4 demo recipe":
 
     let bytes = containerBytes(containerPath)
 
-    # --- (a) the container declares a span stream (meta.dat bit 13) ------
+    # --- (a) the container carries a span stream -------------------------
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    # This is the assertion the whole demo hangs on: the db-backend's span
-    # reader returns "no spans" for a container whose bit 13 is clear
-    # (``span_stream.rs::open_from_ctfs``), so a producer that forgot to
-    # register spans would yield an empty panel and no error anywhere.
-    check meta.get().hasSpanStream
-    # The writer sets the bit because spans were registered, not by request —
-    # so the files must actually be there too.
+    # The span stream is found by presence: spans.dat is created lazily, after
+    # meta.dat is written, so bit 13 is never set from meta.dat version 6 on
+    # (internal-files.md "Stream-presence flags are a hint, not a gate").
+    check not meta.get().hasSpanStream
     check hasSpanStreamFiles(bytes)
     check meta.get().recordingId == DemoRecordingId
 

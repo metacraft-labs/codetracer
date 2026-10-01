@@ -212,6 +212,19 @@ proc containerBytes(path: string): seq[byte] =
   for i in 0 ..< raw.len:
     result[i] = byte(raw[i])
 
+
+proc recordedPaths(container: string): seq[string] =
+  ## The container's source paths: its ``paths.dat`` records, in id order.
+  ## ``meta.dat`` carries no path list (internal-files.md §"``meta.dat``
+  ## carries no path list").
+  var opened = openNewTrace(container)
+  doAssert opened.isOk, "openNewTrace: " & opened.error
+  var reader = opened.get()
+  for id in 0'u64 ..< reader.pathCount():
+    let p = reader.path(id)
+    doAssert p.isOk, "path " & $id & ": " & p.error
+    result.add p.get()
+
 proc hasMeta(span: SpanRecord; key: string): bool =
   for (k, _) in span.metadata:
     if k == key:
@@ -302,11 +315,11 @@ proc checkStream(d: Diagnostics; lang: LanguageRow; bytes: seq[byte];
     return
   let meta = metaRes.get()
 
-  # A container whose bit 13 is clear makes the db-backend's span reader
-  # answer "no spans", so a recorder that forgot to register would show an
-  # empty panel and no error anywhere.
-  d.want("meta.dat", meta.hasSpanStream,
-    "FlagHasSpanStream (bit 13) is not set")
+  # The span stream is found by presence: spans.dat is created lazily, after
+  # meta.dat is written, so a version 6 writer never sets bit 13 (internal-
+  # files.md "Stream-presence flags are a hint, not a gate").
+  d.want("meta.dat", not meta.hasSpanStream,
+    "FlagHasSpanStream (bit 13) is set by a writer that cannot know it at open")
   d.want("meta.dat", hasSpanStreamFiles(bytes),
     "spans.dat / spans.idx are missing from the container")
 
@@ -798,7 +811,7 @@ suite "RS-M12 cross-language request-span conformance":
         if metaRaw.isOk:
           let metaRes = readMetaDat(metaRaw.get())
           if metaRes.isOk:
-            pathCount = metaRes.get().paths.len
+            pathCount = recordedPaths(containerPath).len
 
         for i, span in settled:
           let prev =
