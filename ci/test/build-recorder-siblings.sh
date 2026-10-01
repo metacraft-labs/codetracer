@@ -42,6 +42,12 @@ artefact_of() {
 	codetracer-cardano-recorder) echo target/debug/codetracer-cardano-recorder ;;
 	codetracer-solana-recorder) echo target/debug/codetracer-solana-recorder ;;
 	codetracer-fuel-recorder) echo target/debug/codetracer-fuel-recorder ;;
+	codetracer-evm-recorder) echo target/debug/codetracer-evm-recorder ;;
+	codetracer-flow-recorder) echo target/debug/codetracer-flow-recorder ;;
+	codetracer-miden-recorder) echo target/debug/codetracer-miden-recorder ;;
+	codetracer-move-recorder) echo target/debug/codetracer-move-recorder ;;
+	codetracer-polkavm-recorder) echo target/debug/codetracer-polkavm-recorder ;;
+	codetracer-ton-recorder) echo target/debug/codetracer-ton-recorder ;;
 	codetracer-php-recorder) echo ext/modules/codetracer.so ;;
 	*) return 1 ;;
 	esac

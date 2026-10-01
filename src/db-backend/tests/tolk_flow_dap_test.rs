@@ -47,12 +47,16 @@ fn run_tolk_dap_test(
     expected_values: HashMap<String, i64>,
     excluded: Vec<&str>,
 ) {
-    assert!(
-        find_tolk_recorder().is_some(),
-        "Tolk/TON recorder not found. \
+    if find_tolk_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "tolk_flow_dap_test",
+            "Tolk/TON recorder not found. \
          Set CODETRACER_TOLK_RECORDER_PATH or build codetracer-ton-recorder \
-         (run `cargo build` inside the codetracer-ton-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-ton-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = get_tolk_source_path();
@@ -96,7 +100,6 @@ fn run_tolk_dap_test(
 ///   doubled      = 84  (sum_val * 2)
 ///   final_result = 94  (doubled + a)
 #[test]
-#[ignore = "requires ton-recorder; run via: just test-tolk-flow"]
 fn tolk_flow_dap_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("a".to_string(), 10);

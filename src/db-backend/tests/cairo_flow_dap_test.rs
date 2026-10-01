@@ -47,12 +47,16 @@ fn run_cairo_dap_test(
     expected_values: HashMap<String, i64>,
     excluded: Vec<&str>,
 ) {
-    assert!(
-        find_cairo_recorder().is_some(),
-        "Cairo recorder not found. \
+    if find_cairo_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "cairo_flow_dap_test",
+            "Cairo recorder not found. \
          Set CODETRACER_CAIRO_RECORDER_PATH or build codetracer-cairo-recorder \
-         (run `cargo build` inside the codetracer-cairo-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-cairo-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = get_cairo_source_path();
@@ -92,9 +96,15 @@ fn run_cairo_dap_test(
 /// debugger advances to lines 3 and 4 respectively.
 /// This is the headless equivalent of the GUI "next" button test.
 #[test]
-#[ignore = "requires cairo-recorder; run via: just test-cairo-flow"]
 fn cairo_flow_dap_stepping() {
-    assert!(find_cairo_recorder().is_some(), "Cairo recorder not found.");
+    if find_cairo_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "cairo_flow_dap_test",
+            "Cairo recorder not found.",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = get_cairo_source_path();
@@ -129,7 +139,6 @@ fn cairo_flow_dap_stepping() {
 ///   doubled      = 84  (sum_val * 2)
 ///   final_result = 94  (doubled + a)
 #[test]
-#[ignore = "requires cairo-recorder; run via: just test-cairo-flow"]
 fn cairo_flow_dap_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("a".to_string(), 10);

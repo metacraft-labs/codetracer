@@ -21,12 +21,15 @@ fn find_db_backend() -> PathBuf {
 /// the flow-recorder's `go-helper/` directory, runs it against the Cadence
 /// source, then converts the NDJSON output to CodeTracer trace format.
 #[test]
-#[ignore = "requires flow-recorder + go helper; run via: just test-cadence-flow"]
 fn cadence_flow_dap_variables() {
-    assert!(
-        find_cadence_recorder().is_some(),
-        "Cadence/Flow recorder not found — build codetracer-flow-recorder"
-    );
+    if find_cadence_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "cadence_flow_dap_test",
+            "Cadence/Flow recorder not found — build codetracer-flow-recorder",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let source = find_cadence_flow_test()
         .expect("Cadence test program not found — check codetracer-flow-recorder/test-programs/cadence/flow_test.cdc");

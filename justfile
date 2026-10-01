@@ -2046,7 +2046,7 @@ test-origin-dap:
 
 # The recorder siblings `test-recorder-siblings` records with. Each must be
 # checked out next to this repository (../<repo>).
-recorder_siblings := "codetracer-cairo-recorder codetracer-circom-recorder codetracer-leo-recorder codetracer-cardano-recorder codetracer-solana-recorder codetracer-fuel-recorder codetracer-php-recorder"
+recorder_siblings := "codetracer-cairo-recorder codetracer-circom-recorder codetracer-leo-recorder codetracer-cardano-recorder codetracer-solana-recorder codetracer-fuel-recorder codetracer-php-recorder codetracer-evm-recorder codetracer-flow-recorder codetracer-miden-recorder codetracer-move-recorder codetracer-polkavm-recorder codetracer-ton-recorder"
 
 # Build the recorder siblings, each in its own dev shell with its own `just`
 # targets (ci/test/build-recorder-siblings.sh), and check each artefact exists.
@@ -2055,8 +2055,10 @@ build-recorder-siblings:
 
 # The db-backend tests that record through a sibling recorder this repo's dev
 # shell does not ship: the Bash and Zsh flow tests, the PHP flow test, the
-# value-origin tests for Aiken, Cairo, Circom, Leo, Solana and Sway, and the
-# Cairo GLI decode regression. Run `just build-recorder-siblings` first (and
+# value-origin tests for Aiken, Cairo, Circom, Leo, Solana and Sway, the Cairo
+# GLI decode regression, and the flow / calltrace tests for Aiken, Cadence,
+# Cairo, Circom, EVM / Solidity, Leo, MASM, Move, PolkaVM, Solana, Sway and
+# Tolk. Run `just build-recorder-siblings` first (and
 # `cargo build` in ../codetracer-shell-recorders for the shell recorders).
 #
 # Graceful skipping is OFF: every prerequisite is provisioned here, so a missing
@@ -2080,6 +2082,11 @@ test-recorder-siblings:
     --test origin_aiken_dap_test --test origin_cairo_dap_test --test origin_circom_dap_test \
     --test origin_leo_dap_test --test origin_solana_dap_test --test origin_sway_dap_test \
     --test cairo_fixture_gli_decode \
+    --test aiken_flow_dap_test --test cadence_flow_dap_test --test cairo_flow_dap_test \
+    --test circom_flow_dap_test --test evm_load_calltrace_test --test leo_flow_dap_test \
+    --test leo_search_calltrace_test --test masm_flow_dap_test --test move_flow_dap_test \
+    --test polkavm_flow_dap_test --test solana_flow_dap_test --test solidity_flow_dap_test \
+    --test solidity_flow_integration --test sway_flow_dap_test --test tolk_flow_dap_test \
     -- --nocapture
 
 # The WebAssembly boundary-recording checks: record each demo from this

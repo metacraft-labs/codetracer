@@ -255,13 +255,15 @@ jobs:
           if-no-files-found: ignore
 
   # The db-backend tests that record through a SIBLING recorder that
-  # codetracer's dev shell does not ship: Bash and Zsh, PHP, and the
-  # value-origin tests for Aiken, Cairo, Circom, Leo, Solana and Sway (plus the
-  # Cairo GLI decode regression). `test-non-gui` excludes them by name
+  # codetracer's dev shell does not ship: Bash and Zsh, PHP, the value-origin
+  # tests for Aiken, Cairo, Circom, Leo, Solana and Sway (plus the Cairo GLI
+  # decode regression), and the flow / calltrace tests of the blockchain
+  # recorders (Aiken, Cadence, Cairo, Circom, EVM / Solidity, Leo, MASM, Move,
+  # PolkaVM, Solana, Sway, Tolk). `test-non-gui` excludes them by name
   # (ci/test/non-gui-not-provided.linux.txt names this job as where they run).
   #
-  # WHY HERE AND NOT IN `test-non-gui`. The recorders are seven separate Rust /
-  # C builds. `test-non-gui` runs on every Codetracer CI trigger, docs and
+  # WHY HERE AND NOT IN `test-non-gui`. The recorders are thirteen separate
+  # Rust / C builds. `test-non-gui` runs on every Codetracer CI trigger, docs and
   # frontend changes included; this workflow is path-filtered to the db-backend
   # sources and the scripts that build and run these tests.
   # Building them here costs runner time only when it can find something, and
@@ -269,10 +271,10 @@ jobs:
   # recorders instead of adding a job (and a Linux x64 queue slot) of its own.
   recorder-tests:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # The seven recorder builds dominate; most of their dependency trees are
-    # large (cairo-lang, fuel-vm, solana sbpf, aiken). Bounded so a hung build
-    # frees the runner.
-    timeout-minutes: 150
+    # The thirteen recorder builds dominate; most of their dependency trees are
+    # large (cairo-lang, fuel-vm, solana sbpf, aiken, sui, miden, revm). Bounded
+    # so a hung build frees the runner.
+    timeout-minutes: 210
 
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -435,6 +437,60 @@ jobs:
           repo: metacraft-labs/codetracer-php-recorder
           ref: dev
           path: ${{ github.workspace }}/../codetracer-php-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-evm-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-evm-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-evm-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-flow-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-flow-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-flow-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-miden-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-miden-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-miden-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-move-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-move-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-move-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-polkavm-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-polkavm-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-polkavm-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-ton-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-ton-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-ton-recorder
           submodules: "false"
           gh-token: ${{ steps.ci_token.outputs.token }}
 

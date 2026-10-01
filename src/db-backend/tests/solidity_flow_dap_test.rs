@@ -113,15 +113,18 @@ fn is_anvil_available() -> bool {
 /// Prerequisites: `codetracer-evm-recorder`, `solc`, and `anvil`.
 /// These are provided by the Nix dev shell (`nix develop`).
 #[test]
-#[ignore = "requires evm-recorder dev shell (solc, anvil); run via: just test-solidity-flow"]
 fn solidity_flow_dap_variables() {
     // --- Prerequisite checks ---
-    assert!(
-        find_evm_recorder().is_some(),
-        "EVM recorder not found. \
+    if find_evm_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "solidity_flow_dap_test",
+            "EVM recorder not found. \
          Set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder \
-         (run `cargo build` inside the codetracer-evm-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-evm-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     assert!(
         is_solc_available(),

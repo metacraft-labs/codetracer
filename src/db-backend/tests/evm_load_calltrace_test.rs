@@ -32,12 +32,15 @@ fn find_db_backend() -> PathBuf {
 }
 
 #[test]
-#[ignore = "requires evm-recorder + solc + anvil; run via: just test-evm-load-calltrace"]
 fn evm_load_calltrace_returns_compute_call() {
-    assert!(
-        find_evm_recorder().is_some(),
-        "EVM recorder not found.  Set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder.",
-    );
+    if find_evm_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "evm_load_calltrace_test",
+            "EVM recorder not found.  Set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder.",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
 
