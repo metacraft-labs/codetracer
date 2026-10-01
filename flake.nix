@@ -71,8 +71,11 @@
       flake = false;
     };
 
+    # The wasm recorder (`wazero`), including the Stylus replay host
+    # (`wazero run -stylus`). Its package links the CTFS trace writer, so the
+    # binary in the dev shells records.
     wazero = {
-      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=wasm-tracing";
+      url = "github:metacraft-labs/codetracer-wasm-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
