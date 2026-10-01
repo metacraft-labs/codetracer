@@ -576,8 +576,9 @@ lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling bu
 
 # A lane that runs with graceful skipping off excludes, by name, the tests it
 # does not provide the tools for. A misspelled or stale entry excludes nothing
-# and says nothing, so every entry must name a test binary that exists.
-lint_step "contract suite: lane not-provided lists name real test binaries" \
+# and says nothing, so every entry must name a test binary that exists, and
+# the job that does run it: no test may be excluded everywhere (`NO LANE`).
+lint_step "contract suite: lane not-provided lists name real tests and the lane that runs each" \
 	bash ci/test/lane-not-provided-test.sh
 
 # The other half of the same defect: an honest detector reporting "not built" is

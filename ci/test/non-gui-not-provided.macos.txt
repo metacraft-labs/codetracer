@@ -1,0 +1,60 @@
+# db-backend integration tests the macOS `test-non-gui` lane does NOT provide
+# the tools for.
+#
+# The macOS leg runs `just test-rust` with CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false,
+# exactly like the Linux leg (see non-gui-not-provided.linux.txt for the
+# mechanism), so a test whose prerequisite is missing there FAILS.
+#
+# What the leg provides, enumerated from the `test-non-gui` job, the aarch64-darwin
+# dev shell (`nix develop .` = nix/shells/main.nix over ci-base.nix) and its
+# runner label (`aarch64-darwin`, the m3 nix-darwin hosts):
+#
+#   - siblings, cloned and built in the job: codetracer-trace-format (+ -nim and
+#     `ct-print`), codetracer-native-recorder (the MCR emulator the db-backend
+#     build links; `ct-mcr` itself is NOT built), codetracer-python-recorder
+#     (the dev shell's recorder venv), codetracer-ruby-recorder (native
+#     extension), codetracer-beam-recorder, codetracer-js-recorder,
+#     codetracer-wasm-instrumenter (`ct-instrument`);
+#   - from the dev shell: cargo + the wasm32-wasip1 / wasm32-unknown-unknown
+#     targets, wazero, nargo, circom, cargo-stylus, node / npx, black, ruby,
+#     python, go, gcc / clang, nim.
+#
+# Not on this leg, and the tests that need them:
+#
+#   - `ct-mcr` / `ct-native-replay`: the MCR flow tests (run on Linux in
+#     mcr-dap-flow);
+#   - rr: Linux-only. The rr flow tests (go/lean/nim/rust_flow_integration) and
+#     origin_rr_smoke are compiled only on Linux/Windows, so they are not in
+#     this list; the `rr::` origin tests are excluded by `just test-rust`
+#     (CODETRACER_RR_BACKEND_PRESENT=0);
+#   - the blockchain and PHP recorders, and forc / cargo-build-sbf, which the
+#     dev shell ships only on Linux (nix/shells/main.nix): the recorder-tests
+#     lane;
+#   - the shell recorders (Bash, Zsh): the recorder-tests lane.
+#
+# Format and checks: as in non-gui-not-provided.linux.txt
+# (ci/test/lane-not-provided-test.sh).
+
+binary(ada_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(c_mcr_streaming_flow_test)       | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(cpp_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(d_mcr_streaming_flow_test)       | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(fortran_mcr_streaming_flow_test) | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(go_mcr_streaming_flow_test)      | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(nim_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(pascal_mcr_streaming_flow_test)  | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(rust_mcr_streaming_flow_test)    | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+binary(mcr_streaming_unified_reader_test) | ct-mcr, ct-native-replay | mcr-dap-flow (Linux)
+
+binary(origin_aiken_dap_test)           | codetracer-cardano-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_cairo_dap_test)           | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_circom_dap_test)          | codetracer-circom-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_leo_dap_test)             | codetracer-leo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_solana_dap_test)          | codetracer-solana-recorder, cargo-build-sbf | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_sway_dap_test)            | codetracer-fuel-recorder, forc | recorder-tests (cross-repo-tests.yml, Linux)
+binary(cairo_fixture_gli_decode)        | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+
+binary(php_flow_dap_test)               | php, codetracer-php-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+
+binary(bash_flow_integration)           | codetracer-shell-recorders | recorder-tests (cross-repo-tests.yml, Linux)
+binary(zsh_flow_integration)            | codetracer-shell-recorders, zsh | recorder-tests (cross-repo-tests.yml, Linux)

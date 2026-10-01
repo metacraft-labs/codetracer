@@ -1280,8 +1280,10 @@ jobs:
     # `garm-*` VM, so `Get-DefaultInstallRoot`'s "persists across jobs" cache
     # never hits) and env.ps1 provisions ~22 toolchains from scratch, the largest
     # being a ~767 MB WinDbg msixbundle. This must not turn a slow-but-working
-    # bootstrap red, so it sits well above that and well under 360.
-    timeout-minutes: 75
+    # bootstrap red, so it sits well above that and well under 360: 75 minutes
+    # for the bootstrap, plus 25 for the cold ct-native-replay cargo build the
+    # TTD tests need.
+    timeout-minutes: 100
     steps:
       # See the eph-win-x64 note at the top of this file. This job checks out
       # with `submodules: recursive`, which actions/checkout can only honour
@@ -1343,10 +1345,14 @@ jobs:
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # codetracer-native-backend builds ct-native-replay for the Windows
+          # recorder (TTD) tests below. Bare: clone-siblings resolves it from
+          # this commit's repro.lock.
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
             codetracer-native-recorder=dev
+            codetracer-native-backend
 
       - name: Upload env.ps1 component decomposition
         # env.ps1 writes a per-component breakdown of the bootstrap -- wall
@@ -1445,6 +1451,26 @@ jobs:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: dev-exec cargo build
 
+      # ct-native-replay, for the Windows recorder tests: TTD (which env.ps1
+      # installs on this lane) records and ct-native-replay replays.
+      - name: Build ct-native-replay (codetracer-native-backend sibling)
+        shell: bash
+        env:
+          # The backend's lockfile names a private git dependency; the git CLI
+          # transport presents the credential setup-dev-env installed.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: |
+          set -euo pipefail
+          backend="${{ github.workspace }}/../codetracer-native-backend"
+          cd "$backend"
+          # The tests look for it under the sibling's own target/, not under a
+          # runner-wide CARGO_TARGET_DIR.
+          CARGO_TARGET_DIR="$backend/target" dev-exec just build
+          if [ ! -f "$backend/target/debug/ct-native-replay.exe" ]; then
+            echo "::error::just build succeeded but target/debug/ct-native-replay.exe is missing; the TTD tests cannot replay."
+            exit 1
+          fi
+
       - name: Test db-backend
         working-directory: src/db-backend
         shell: bash
@@ -1462,27 +1488,14 @@ jobs:
           # (we've observed 322ms cleanly).  Let CI assert against a
           # roomier threshold without weakening the dev-machine SLA.
           CT_BENCH_STARTUP_MS_THRESHOLD: "1000"
-          # This lane has none of the recorders or runtimes, so skips stay
-          # graceful here; each one is collected and reported by the next step
-          # rather than counted as a pass.
           CODETRACER_TEST_SKIP_REPORT: ${{ runner.temp }}/db-backend-test-skips.txt
-        # The *_flow_*  tests under tests/ are end-to-end integration
-        # tests that drive sibling-language recorders through the DAP
-        # wire protocol; they need both the recorder binaries AND a
-        # matching language runtime (elixir/erlang/ruby/etc.) on the
-        # runner image.  windows-latest has none of those installed --
-        # the Cross-Repo Integration Tests workflow exercises the same
-        # code paths on a Linux self-hosted runner with the recorders
-        # + runtimes available.  Mirror the skip pattern used by the
-        # db-backend Nix derivation in nix/packages/default.nix.
-        run: |
-          dev-exec cargo test -- \
-            --skip ruby_flow_integration \
-            --skip bash_flow_integration \
-            --skip zsh_flow_integration \
-            --skip javascript_flow_integration \
-            --skip e2e_codetracer_elixir \
-            --skip e2e_codetracer_erlang
+        # Graceful skipping is OFF (the script sets it). The integration tests
+        # needing recorders or runtimes this lane does not provide -- the
+        # interpreted-language, WebAssembly and blockchain recorders, which are
+        # not supported on Windows, and MCR -- are excluded by name through
+        # ci/test/rust-components-not-provided.windows.txt, which names the
+        # lane that runs each; the Windows recorder (TTD) tests run here.
+        run: dev-exec bash ../../ci/test/windows-rust-components-tests.sh
 
 
       - name: Report db-backend tests that skipped (not verified)
@@ -5670,38 +5683,17 @@ jobs:
       # /nix/store exactly like the nixos leg. ``just test`` (test-rust +
       # test-nimsuggest) builds what it needs via cargo, so no explicit
       # pre-build of the ct tree is required here.
-      - name: Clone codetracer-trace-format (macOS)
-        # The BEAM recorder built below transitively path-depends on
-        # codetracer-trace-format / codetracer_trace_writer_nim; its build.rs
-        # resolves that crate from the workspace sibling
-        # ``$GITHUB_WORKSPACE/../codetracer-trace-format``. Clone it (and its
-        # matched FFI half, codetracer-trace-format-nim) with the same
-        # ``clone-repo`` + ``ref: dev`` pattern the nixos leg's setup-dev-env
-        # uses.
-        if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          # `dev` is where this repo's work lands; its default branch is
-          # `stable`, and the last published workspace lock recorded
-          # upstream="dev" for it.
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-trace-format
-          gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Clone codetracer-trace-format-nim (macOS)
-        # Matched FFI half of codetracer-trace-format: the recorder's build.rs
-        # hard-errors ("Nim FFI entry point not found ...
-        # codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim")
-        # without this sibling. Same pairing the nixos leg's setup-dev-env
-        # ``siblings:`` list encodes.
-        if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-trace-format-nim
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.ci_token.outputs.token }}
+      # ── db-backend siblings and the BEAM (Erlang / Elixir) recorder ──
+      # `just test-rust` builds src/db-backend, whose build.rs compiles the
+      # Nim MCR emulator out of the codetracer-native-recorder sibling and
+      # panics without it, and whose Cargo.toml path-depends on
+      # codetracer-trace-format (+ its matched Nim half). Those, and the BEAM
+      # recorder that ``erlang_flow_dap_test.rs`` / ``elixir_flow_dap_test.rs``
+      # find through ``test_harness::find_beam_recorder()`` (built per leg
+      # below), are members of this repo's develop set, so the
+      # "Provision dependency siblings from repro.lock" step above clones
+      # them, on both legs, at the revisions repro.lock pins.
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -5802,58 +5794,13 @@ jobs:
           fi
           echo "ruby recorder native extension: $found"
 
-      # ── BEAM (Erlang / Elixir) recorder ──────────────────────────────
-      # ``src/db-backend/tests/erlang_flow_dap_test.rs`` and
-      # ``elixir_flow_dap_test.rs`` resolve the recorder binary via
-      # ``test_harness::find_beam_recorder()``: env var override →
-      # ``$PATH`` → sibling ``../codetracer-beam-recorder/target/{debug,
-      # release}/codetracer-beam-recorder``.  The tests ``assert!`` and
-      # panic when none of those hit, so they need the recorder repo
-      # cloned AND its binary compiled before ``./ci/test/non-gui.sh``
-      # runs.  Same sibling-pin pattern as codetracer-native-recorder
-      # (resolve-mcr-ref + clone-repo + nix-develop build).
-      #
-      # setup-dev-env clones the BEAM recorder + codetracer-trace-format
-      # (the recorder's CTFS path-dep) adjacent to this checkout at the
-      # pinned `dev` refs, replacing the former
-      # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps.
-      # Nix is already installed by the earlier "Install Nix" step on the
-      # nixos leg; setup-dev-env's nix install is idempotent.
-      - name: Setup dev env (BEAM siblings, nixos)
-        if: matrix.platform == 'nixos'
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
-        with:
-          env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          attic-token: ${{ secrets.ATTIC_TOKEN }}
-          attic-cache: ${{ vars.ATTIC_CACHE }}
-          # MATCHED FFI PAIR. The "Build codetracer-beam-recorder (nixos)" step
-          # below already documents that this recorder "transitively
-          # path-depends on codetracer-trace-format/codetracer_trace_writer_nim"
-          # -- that crate's build.rs also needs the Nim half checked out as a
-          # SIBLING of codetracer-trace-format, and hard-errors without it:
-          #
-          #   Nim FFI entry point not found at
-          #   .../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim
-          #
-          # Observed via the identical path-dep from codetracer-shell-recorders
-          # (run 31719867246, job 94513828226). Pinned by the
-          # "codetracer-trace-format implies codetracer-trace-format-nim"
-          # assertion in ci/test/sibling-provisioning-test.sh.
-          siblings: |
-            codetracer-beam-recorder=dev
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
-
       # ---------------------------------------------------------------------
       # codetracer-js-recorder. This lane runs `./ci/test/non-gui.sh` ->
       # `just test` -> `just test-rust` -> `cargo nextest run --release
-      # --test '*'`, whose `-E` filter excludes only
-      # `javascript_flow_integration`. FIVE JavaScript tests therefore execute
-      # here, and every one of them needs this sibling:
+      # --test '*'`, so every JavaScript test executes here, and every one of
+      # them needs this sibling, among them:
       #
+      #   javascript_flow_integration::test_javascript_flow_integration
       #   javascript_flow_dap_test::javascript_flow_dap_variables_and_values
       #   javascript_flow_dap_test::test_js_locals_all_statements
       #   javascript_hcr_ctfs_integration::test_javascript_hcr_ctfs_integration
@@ -5977,10 +5924,11 @@ jobs:
         # panics with ``failed to run elixirc in recorder dev shell:
         # No such file or directory (os error 2)``.  Allow the .envrc
         # before the test runs -- same idempotent pattern as the
-        # codetracer-native-recorder direnv-allow step above.
-        if: matrix.platform == 'nixos'
+        # codetracer-native-recorder direnv-allow step above. Both legs run
+        # these tests, so both allow it; `nix develop .` is the host's own
+        # default shell on either.
         run: |
-          nix develop .#devShells.x86_64-linux.default -c \
+          nix develop . -c \
             direnv allow "${{ github.workspace }}/../codetracer-beam-recorder"
 
       - name: Build codetracer-beam-recorder (nixos)
@@ -6025,15 +5973,6 @@ jobs:
             cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
             cargo build
           '
-
-      - name: Clone codetracer-beam-recorder (macOS)
-        if: matrix.platform == 'macos'
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-beam-recorder
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-beam-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build codetracer-beam-recorder (macOS)
         # cargo now comes from codetracer's nix dev shell (``nix develop .``)
@@ -6088,6 +6027,9 @@ jobs:
         run: ./ci/test/non-gui.sh
         env:
           CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
+          # The MCR emulator's Nim build resolves stew / results from
+          # codetracer's vendored copies, as every other db-backend lane does.
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
 
   test-ui-tests:
     strategy:

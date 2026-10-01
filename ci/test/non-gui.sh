@@ -40,14 +40,16 @@ macos)
 	source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
 	# Override rr-backend detection — rr is not available on macOS.
 	#
-	# Graceful skipping stays ON here: the macOS leg's toolset has not been
-	# enumerated the way the Linux leg's has (non-gui-not-provided.linux.txt),
-	# so a strict run would fail on tools nobody decided it should have. Every
-	# skip is still printed by `just test-rust` and annotated in CI.
+	# Graceful skipping is OFF, as on Linux. The tests needing tools this leg
+	# does not provide are named in ci/test/non-gui-not-provided.macos.txt, with
+	# the leg's toolset and the lane that runs each.
 	# ``nix develop .`` selects the host-default aarch64-darwin dev shell
 	# (mirroring the nixos branch, which pins the x86_64-linux shell).
 	exec nix develop . --command \
-		env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 just test
+		env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 \
+		CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false \
+		CODETRACER_TEST_LANE_NOT_PROVIDED=ci/test/non-gui-not-provided.macos.txt \
+		just test
 	;;
 *)
 	echo "ERROR: unknown CODETRACER_CI_PLATFORM: $PLATFORM" >&2
