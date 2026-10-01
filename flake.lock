@@ -2860,9 +2860,11 @@
     "nim-everywhere": {
       "flake": false,
       "locked": {
+        "lastModified": 1790724155,
+        "narHash": "sha256-TzPylZdQQWjUGV0K2oo42967jgY7esD/3ggGSdhgTns=",
         "owner": "metacraft-labs",
         "repo": "nim-everywhere",
-        "rev": "e2ef24ff8612ffa88c99952866c7eca541ac9339",
+        "rev": "7143eb9c748d2ea17c2e5643cacb601e9c76cb05",
         "type": "github"
       },
       "original": {
