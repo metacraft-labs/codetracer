@@ -39,20 +39,18 @@
 # Re-recording from scratch (only needed when the contract or recorder
 # changes)
 # --------------------------------------------------------------------
-# To capture a *fresh* trace rather than repack the committed one, run
-# the recording-tier integration test with the full Arbitrum toolchain:
-#
-#   - A running Arbitrum devnode at http://localhost:8547 (nitro-testnode)
-#   - cargo-stylus, cast (Foundry), and wazero on PATH
-#   - rustup target add wasm32-unknown-unknown
+# A fresh trace is a replay of the committed host-interaction capture
+# `test-programs/stylus_fund_tracker/evm_trace.json`, which needs no node:
 #
 #   cd src/db-backend && \
 #     STYLUS_FIXTURE_OUTPUT_DIR=tests/fixtures/stylus-fund-trace \
 #     cargo test --test stylus_flow_integration -- \
-#       --include-ignored --nocapture test_stylus_trace_analysis
+#       --nocapture test_stylus_trace_analysis
 #
 # then re-export trace.events.json from the recorded `.ct` and re-run
-# this script.
+# this script. To re-capture the transaction itself, run the live
+# `capture_stylus_fund_transaction_from_devnode` test (see the header of
+# `tests/stylus_flow_integration.rs`; it needs a Nitro dev node).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"

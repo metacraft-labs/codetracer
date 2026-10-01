@@ -1,52 +1,59 @@
-//! Integration tests for Stylus (Arbitrum WASM) flow/omniscience support
+//! Integration tests for Stylus (Arbitrum WASM) recording.
 //!
-//! Stylus tests require a running Arbitrum devnode (nitro-testnode) to:
-//! 1. Deploy the Stylus contract
-//! 2. Send transactions to trigger contract execution
-//! 3. Obtain EVM traces for the transaction
-//! 4. Record WASM execution via wazero with `-stylus` flag
+//! A Stylus recording is a replay. The transaction is traced on the Nitro
+//! node with `debug_traceTransaction` and the `stylusTracer`
+//! (`cargo stylus trace`), which lists every hostio the contract made with
+//! its arguments and results; `wazero run -stylus` then re-executes the
+//! contract's debug wasm with a `vm_hooks` host module that answers each
+//! hostio from that capture, and the replay is the materialized trace.
 //!
-//! These tests are `#[ignore]` by default — run with `--include-ignored`
-//! and a devnode at `http://localhost:8547`.
+//! The capture of a `fund(2)` transaction against
+//! `test-programs/stylus_fund_tracker` is committed as that project's
+//! `evm_trace.json`, so the default tests need no node:
 //!
-//! ## Test tiers
+//! - `test_stylus_flow_integration`: replays the capture and checks that a
+//!   `.ct` container was produced.
+//! - `test_stylus_trace_analysis`: replays the capture and checks the
+//!   trace's contents: the hostio events (`read_args`, storage reads and
+//!   writes, `write_result`), the `fund(uint256)` calldata and its argument,
+//!   and the metadata naming the contract's wasm.
+//! - `test_stylus_dap_trace`: loads the committed CTFS fixture in the DAP
+//!   server.
 //!
-//! - `test_stylus_flow_integration` (Tier 1): Records a Stylus trace and verifies
-//!   that trace files were produced. Quick smoke test for the recording pipeline.
+//! `capture_stylus_fund_transaction_from_devnode` is the live path, and is
+//! `#[ignore]`d: it deploys the contract to a Nitro dev node, sends
+//! `fund(2)`, re-captures `evm_trace.json`, and runs the same analysis on
+//! the fresh capture. Run it after changing the contract or its SDK:
 //!
-//! - `test_stylus_trace_analysis` (Tier 1+2): Records a trace AND verifies the
-//!   trace contents — checks that EVM event entries are present with expected
-//!   host function calls (read_args, storage ops) and correct calldata.
-//!   Catches regressions in both the Arbitrum toolchain and the wazero recorder.
+//! ```text
+//! cargo test --test stylus_flow_integration -- --ignored --nocapture \
+//!     capture_stylus_fund_transaction_from_devnode
+//! ```
 //!
-//! - `test_stylus_dap_trace` (Tier 2, offline): Loads the committed fixture
-//!   and verifies the DAP server can initialize, launch, and respond to
-//!   standard debug requests. No devnode needed.
+//! It needs a dev node at `http://localhost:8547` (OffchainLabs
+//! `nitro-devnode`'s `run-dev-node.sh`), `cargo-stylus` and `cast`.
 //!
-//! Prerequisites:
-//! - Arbitrum devnode running on localhost:8547
-//! - `cargo-stylus` on PATH
-//! - `cast` (Foundry) on PATH
-//! - `wazero` on PATH or set via CODETRACER_WASM_VM_PATH
-//! - `wasm32-unknown-unknown` Rust target installed
+//! The replay needs `wazero` (on PATH in the dev shells, or
+//! `CODETRACER_WASM_VM_PATH`) and a Rust toolchain with the
+//! `wasm32-unknown-unknown` target.
+//!
+//! No mocks: the host interface is answered from a real node's capture of a
+//! real transaction.
 
 mod test_harness;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use test_harness::{DapStdioTestClient, find_wazero, record_stylus_wasm_trace};
+use test_harness::{
+    DapStdioTestClient, STYLUS_EVM_TRACE_FILE, find_wazero, record_stylus_project_trace,
+    skip_or_fail_missing_prerequisite,
+};
 
 use codetracer_trace_types::{EventLogKind, RecordEvent, TraceLowLevelEvent};
 
 const DEVNODE_RPC: &str = "http://localhost:8547";
-// Standard test private key for Arbitrum devnodes
+// The pre-funded account of the Nitro dev node.
 const TEST_PRIVATE_KEY: &str = "0xb6b15c8cb491557369f3c7d2c287b053eb229daa9c22138887752191c9520659";
-
-/// Line in `stylus_fund_tracker/src/lib.rs` where we'd set a breakpoint for DAP testing.
-/// This is inside the `fund()` method: `let mut new_fund = self.funds.grow();`
-/// Currently unused — Stylus traces lack DWARF step data. Kept for future DAP integration.
-#[allow(dead_code)]
-const FUND_BREAKPOINT_LINE: u32 = 59;
 
 /// Returns the path to the Stylus fund tracker test project.
 fn get_stylus_project_path() -> PathBuf {
@@ -54,118 +61,107 @@ fn get_stylus_project_path() -> PathBuf {
     manifest_dir.join("../../test-programs/stylus_fund_tracker")
 }
 
-/// Check if the devnode is reachable.
-fn is_devnode_available() -> bool {
-    Command::new("curl")
-        .args(["-sf", "-o", "/dev/null", "--max-time", "2", DEVNODE_RPC])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Check if cargo-stylus is available.
-fn is_cargo_stylus_available() -> bool {
-    Command::new("cargo")
-        .args(["stylus", "--version"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-/// Check if `cast` (Foundry) is available.
-fn is_cast_available() -> bool {
-    Command::new("cast")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-/// Verify all prerequisites for Stylus testing are available.
-/// Returns false (and prints skip reason) if any prerequisite is missing.
-fn check_prerequisites() -> bool {
-    if !is_devnode_available() {
-        eprintln!("SKIPPED: Arbitrum devnode not reachable at {}", DEVNODE_RPC);
-        return false;
-    }
-    if !is_cargo_stylus_available() {
-        eprintln!("SKIPPED: cargo-stylus not found on PATH");
-        return false;
-    }
-    if !is_cast_available() {
-        eprintln!("SKIPPED: cast (Foundry) not found on PATH");
-        return false;
-    }
+/// The replay's prerequisites; reports a missing one through the loud-skip
+/// gate and returns false.
+fn replay_prerequisites_present(test_name: &str) -> bool {
     if find_wazero().is_none() {
-        eprintln!("SKIPPED: wazero not found");
+        skip_or_fail_missing_prerequisite(
+            test_name,
+            "the wazero recorder is not available",
+            "enter the dev shell, or set CODETRACER_WASM_VM_PATH",
+        );
+        return false;
+    }
+    if !test_harness::is_command_available("cargo") {
+        skip_or_fail_missing_prerequisite(test_name, "cargo is not on PATH", "enter the dev shell");
         return false;
     }
     true
 }
 
-/// Build the Stylus contract WASM binary.
-fn build_stylus_wasm(project_dir: &Path) -> Result<PathBuf, String> {
-    // Build in debug mode to preserve DWARF symbols for source-level stepping.
-    // The `ct arb deploy` command (deploy.nim) also uses debug builds for the same reason.
-    let output = Command::new("cargo")
-        .args(["build", "--target", "wasm32-unknown-unknown"])
-        .current_dir(project_dir)
-        .output()
-        .map_err(|e| format!("failed to build Stylus contract: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "Stylus WASM build failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ));
+/// Replay the committed `fund(2)` capture into a fresh trace directory.
+///
+/// Returns `(trace_dir, temp_dir)`; the caller removes `temp_dir`.
+fn record_committed_capture(project_path: &Path, label: &str) -> Result<(PathBuf, PathBuf), String> {
+    let temp_dir = std::env::temp_dir().join(format!("stylus_flow_{}_{}", label, std::process::id()));
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
-
-    let wasm_path = project_dir.join("target/wasm32-unknown-unknown/debug/stylus_fund_tracking_demo.wasm");
-    if !wasm_path.exists() {
-        return Err(format!("WASM binary not found at {}", wasm_path.display()));
-    }
-    Ok(wasm_path)
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
+    let trace_dir = temp_dir.join("trace");
+    record_stylus_project_trace(project_path, &trace_dir)?;
+    Ok((trace_dir, temp_dir))
 }
 
-/// Deploy the Stylus contract and return the contract address.
-fn deploy_stylus_contract(project_dir: &Path) -> Result<String, String> {
-    let output = Command::new("cargo")
-        .args([
-            "stylus",
-            "deploy",
-            &format!("--endpoint={}", DEVNODE_RPC),
-            &format!("--private-key={}", TEST_PRIVATE_KEY),
-            "--no-verify",
-        ])
-        .current_dir(project_dir)
-        .output()
-        .map_err(|e| format!("failed to deploy Stylus contract: {}", e))?;
+fn strip_ansi(text: &str) -> String {
+    let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    ansi_re.replace_all(text, "").into_owned()
+}
 
+fn run_checked(cmd: &mut Command, what: &str) -> Result<String, String> {
+    let output = cmd.output().map_err(|e| format!("failed to run {}: {}", what, e))?;
     if !output.status.success() {
         return Err(format!(
-            "Stylus deploy failed:\nstdout: {}\nstderr: {}",
+            "{} failed:\nstdout: {}\nstderr: {}",
+            what,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ));
     }
+    Ok(strip_ansi(&String::from_utf8_lossy(&output.stdout)))
+}
 
-    // Parse the contract address from the deploy output.
-    // cargo-stylus output contains ANSI escape codes, so we strip them first.
-    let stdout_raw = String::from_utf8_lossy(&output.stdout);
-    // Strip ANSI escape sequences: \x1b[...m
-    let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
-    let stdout = ansi_re.replace_all(&stdout_raw, "");
+/// Deploy the contract to the dev node from a scratch copy of the project.
+///
+/// cargo-stylus insists on a `rust-toolchain.toml` naming an exact version;
+/// the copy names the toolchain actually in use, so a machine without rustup
+/// deploys with the compiler it has, and the build output stays out of the
+/// tree.
+fn deploy_stylus_contract(project_dir: &Path, work_dir: &Path) -> Result<String, String> {
+    let copy = work_dir.join("contract");
+    let status = Command::new("cp")
+        .arg("-r")
+        .arg(project_dir)
+        .arg(&copy)
+        .status()
+        .map_err(|e| format!("failed to copy the contract project: {}", e))?;
+    if !status.success() {
+        return Err("failed to copy the contract project".to_string());
+    }
+    std::fs::remove_dir_all(copy.join("target")).ok();
+    let rustc_version = run_checked(Command::new("rustc").arg("--version"), "rustc --version")?;
+    let version = rustc_version
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| format!("unexpected rustc --version output: {}", rustc_version))?;
+    std::fs::write(
+        copy.join("rust-toolchain.toml"),
+        format!(
+            "[toolchain]\nchannel = \"{}\"\ntargets = [\"wasm32-unknown-unknown\"]\n",
+            version
+        ),
+    )
+    .map_err(|e| format!("failed to write rust-toolchain.toml: {}", e))?;
+
+    let stdout = run_checked(
+        Command::new("cargo")
+            .args([
+                "stylus",
+                "deploy",
+                &format!("--endpoint={}", DEVNODE_RPC),
+                &format!("--private-key={}", TEST_PRIVATE_KEY),
+                "--no-verify",
+            ])
+            .current_dir(&copy),
+        "cargo stylus deploy",
+    )?;
     for line in stdout.lines() {
-        if line.contains("deployed code at address") || line.contains("contract address") {
-            // Extract hex address (0x followed by 40 hex chars)
-            if let Some(addr) = line.split_whitespace().find(|w| w.starts_with("0x") && w.len() >= 42) {
-                // Trim to exactly 42 chars (0x + 40 hex digits)
-                return Ok(addr[..42].to_string());
-            }
+        if line.contains("deployed code at address")
+            && let Some(addr) = line.split_whitespace().find(|w| w.starts_with("0x") && w.len() >= 42)
+        {
+            return Ok(addr[..42].to_string());
         }
     }
-
     Err(format!(
         "could not parse contract address from deploy output:\n{}",
         stdout
@@ -174,9 +170,10 @@ fn deploy_stylus_contract(project_dir: &Path) -> Result<String, String> {
 
 /// Send a `fund(2)` transaction using Foundry's `cast send`.
 fn send_fund_transaction(contract_address: &str) -> Result<String, String> {
-    let output = Command::new("cast")
-        .args([
+    let stdout = run_checked(
+        Command::new("cast").args([
             "send",
+            "--json",
             "--rpc-url",
             DEVNODE_RPC,
             "--private-key",
@@ -184,106 +181,43 @@ fn send_fund_transaction(contract_address: &str) -> Result<String, String> {
             contract_address,
             "fund(uint256)",
             "2",
-        ])
-        .output()
-        .map_err(|e| format!("failed to send transaction: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "cast send failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    // Parse tx hash from output (strip ANSI codes first)
-    let stdout_raw = String::from_utf8_lossy(&output.stdout);
-    let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
-    let stdout = ansi_re.replace_all(&stdout_raw, "");
-    for line in stdout.lines() {
-        let line = line.trim();
-        if line.starts_with("transactionHash")
-            && let Some(hash) = line.split_whitespace().last()
-        {
-            return Ok(hash.to_string());
-        }
-    }
-
-    // Try the first line as raw tx hash
-    if let Some(first_line) = stdout.lines().next() {
-        let trimmed = first_line.trim();
-        if trimmed.starts_with("0x") && trimmed.len() == 66 {
-            return Ok(trimmed.to_string());
-        }
-    }
-
-    Err(format!("could not parse tx hash from cast output:\n{}", stdout))
+        ]),
+        "cast send",
+    )?;
+    let receipt: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("cast send printed no JSON receipt ({}): {}", e, stdout))?;
+    receipt
+        .get("transactionHash")
+        .and_then(|h| h.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("cast send receipt has no transactionHash: {}", stdout))
 }
 
-/// Get the EVM trace for a transaction using `cargo stylus trace`.
-fn get_stylus_trace(project_dir: &Path, tx_hash: &str) -> Result<String, String> {
-    let output = Command::new("cargo")
-        .args([
+/// The `stylusTracer` capture of `tx_hash`, as `cargo stylus trace` prints it.
+fn capture_transaction(tx_hash: &str) -> Result<String, String> {
+    run_checked(
+        Command::new("cargo").args([
             "stylus",
             "trace",
             &format!("--endpoint={}", DEVNODE_RPC),
+            "--use-native-tracer",
             "--tx",
             tx_hash,
-        ])
-        .current_dir(project_dir)
-        .output()
-        .map_err(|e| format!("failed to get Stylus trace: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "cargo stylus trace failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        ]),
+        "cargo stylus trace",
+    )
 }
 
-/// Perform the full Stylus recording pipeline: build, deploy, send tx, get EVM trace, record.
-///
-/// Returns the WASM path and trace directory on success.
-fn record_stylus_trace(project_path: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
-    println!("Building Stylus contract WASM...");
-    let wasm_path = build_stylus_wasm(project_path)?;
-    println!("WASM binary: {}", wasm_path.display());
-
-    println!("Deploying Stylus contract to devnode...");
-    let contract_address = deploy_stylus_contract(project_path)?;
-    println!("Contract deployed at: {}", contract_address);
-
-    println!("Sending fund(2) transaction...");
-    let tx_hash = send_fund_transaction(&contract_address)?;
-    println!("Transaction hash: {}", tx_hash);
-
-    println!("Getting EVM trace...");
-    let evm_trace_content = get_stylus_trace(project_path, &tx_hash)?;
-    println!("Got EVM trace ({} bytes)", evm_trace_content.len());
-
-    // Create temp directory for the trace
-    let temp_dir = std::env::temp_dir().join(format!("stylus_flow_test_{}", std::process::id()));
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
-
-    // Save EVM trace to a file (wazero -stylus expects a file path)
-    let evm_trace_path = temp_dir.join("evm_trace.json");
-    std::fs::write(&evm_trace_path, &evm_trace_content)
-        .map_err(|e| format!("failed to write evm_trace.json: {}", e))?;
-
-    let trace_dir = temp_dir.join("trace");
-
-    println!("Recording Stylus WASM trace...");
-    record_stylus_wasm_trace(&wasm_path, &trace_dir, &evm_trace_path)?;
-    println!("Stylus recording created at: {}", trace_dir.display());
-
-    Ok((wasm_path, trace_dir, temp_dir))
+/// One hostio per line, so a re-capture diffs readably.
+fn format_capture(raw: &str) -> Result<String, String> {
+    let events: Vec<serde_json::Value> =
+        serde_json::from_str(raw.trim()).map_err(|e| format!("capture is not a JSON array ({}): {}", e, raw))?;
+    let lines: Vec<String> = events
+        .iter()
+        .map(|e| serde_json::to_string(e).map(|l| format!("  {}", l)))
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(format!("[\n{}\n]\n", lines.join(",\n")))
 }
 
 /// Load the recording's metadata from the `.ct` CTFS container in `trace_dir`.
@@ -347,33 +281,24 @@ fn export_fixture_if_requested(trace_dir: &Path) {
     }
 }
 
-/// Tier 1: Record a Stylus trace and verify that trace files were produced.
-///
-/// This is a quick smoke test for the recording pipeline: build WASM, deploy,
-/// send a transaction, get the EVM trace, and record with wazero.
+/// Replay the committed capture and verify a CTFS container was produced.
 #[test]
-#[ignore]
 fn test_stylus_flow_integration() {
     let project_path = get_stylus_project_path();
     assert!(
-        project_path.join("Cargo.toml").exists(),
-        "Stylus test project not found at {}",
-        project_path.display()
+        project_path.join(STYLUS_EVM_TRACE_FILE).is_file(),
+        "committed Stylus capture missing at {}",
+        project_path.join(STYLUS_EVM_TRACE_FILE).display()
     );
-
-    if !check_prerequisites() {
+    if !replay_prerequisites_present("test_stylus_flow_integration") {
         return;
     }
 
-    let (_wasm_path, trace_dir, temp_dir) = match record_stylus_trace(&project_path) {
-        Ok(result) => result,
-        Err(e) => panic!("Stylus recording failed: {}", e),
-    };
+    let (trace_dir, temp_dir) = record_committed_capture(&project_path, "smoke")
+        .unwrap_or_else(|e| panic!("Stylus replay of the committed capture failed: {}", e));
 
-    // Verify a CTFS container was produced.  Per
-    // `Trace-Files/CTFS-Migration-Guide.md` §3e, `.ct` is the only
-    // supported materialized-trace format; legacy sidecars
-    // (`trace.json` / `trace_metadata.json`) are no longer accepted.
+    // Per `Trace-Files/CTFS-Migration-Guide.md` §3e, `.ct` is the only
+    // supported materialized-trace format.
     let has_ct = std::fs::read_dir(&trace_dir)
         .map(|entries| {
             entries
@@ -383,59 +308,94 @@ fn test_stylus_flow_integration() {
         .unwrap_or(false);
     assert!(has_ct, "no *.ct CTFS container produced at {}", trace_dir.display());
 
-    println!("Stylus flow integration test passed!");
-    println!("  Trace files verified at: {}", trace_dir.display());
-
-    // Clean up
     std::fs::remove_dir_all(&temp_dir).ok();
 }
 
-/// Tier 1+2: Record a Stylus trace AND verify its contents.
+/// Replay the committed capture and verify the trace's contents.
 ///
-/// After recording, this test parses the trace files and verifies that:
-/// - `trace.json` contains EVM event entries (EventLogKind::EvmEvent)
-/// - Expected EVM host function calls are present (read_args, storage operations)
-/// - The `read_args` event contains the `fund(uint256)` selector (0xca1d209d)
-/// - The trace metadata (from `trace_metadata.json` or the `.ct`
-///   container's `meta.dat`) is valid and references the WASM binary
-///
-/// Note: Stylus traces currently contain only Event entries (EVM host function
-/// calls), not Step/Call/Function entries. Source-level DAP debugging is not yet
-/// supported for Stylus — when DWARF-based stepping becomes available, this test
-/// should be extended with DAP breakpoint/flow analysis (see `FUND_BREAKPOINT_LINE`).
+/// Stylus traces carry EVM host-function Event entries next to the
+/// DWARF-derived steps; see [`verify_fund_trace`] for what is checked.
 ///
 /// If `STYLUS_FIXTURE_OUTPUT_DIR` is set, the trace is also exported to that
-/// directory for use by VS Code extension UI tests (Tier 3).
+/// directory for use by the VS Code extension's UI tests.
 #[test]
-#[ignore]
 fn test_stylus_trace_analysis() {
     let project_path = get_stylus_project_path();
-    assert!(
-        project_path.join("Cargo.toml").exists(),
-        "Stylus test project not found at {}",
-        project_path.display()
-    );
-
-    if !check_prerequisites() {
+    if !replay_prerequisites_present("test_stylus_trace_analysis") {
         return;
     }
 
-    // --- Tier 1: Recording ---
-    let (_wasm_path, trace_dir, temp_dir) = match record_stylus_trace(&project_path) {
-        Ok(result) => result,
-        Err(e) => panic!("Stylus recording failed: {}", e),
-    };
-
-    // Export fixture for Tier 3 if requested
+    let (trace_dir, temp_dir) = record_committed_capture(&project_path, "analysis")
+        .unwrap_or_else(|e| panic!("Stylus replay of the committed capture failed: {}", e));
     export_fixture_if_requested(&trace_dir);
+    verify_fund_trace(&trace_dir);
 
-    // --- Tier 2: Trace content verification ---
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+/// Live path: re-capture the `fund(2)` transaction from a Nitro dev node,
+/// write it over the committed `evm_trace.json`, and verify a replay of the
+/// fresh capture.
+#[test]
+#[ignore = "needs a Nitro dev node; regenerates the committed capture"]
+fn capture_stylus_fund_transaction_from_devnode() {
+    let project_path = get_stylus_project_path();
+    let devnode_up = Command::new("cast")
+        .args(["chain-id", "--rpc-url", DEVNODE_RPC])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    // Asked for explicitly, so a missing prerequisite is a failure.
+    assert!(
+        devnode_up,
+        "no Nitro dev node answers at {} (or `cast` is missing)",
+        DEVNODE_RPC
+    );
+    assert!(
+        Command::new("cargo")
+            .args(["stylus", "--version"])
+            .output()
+            .is_ok_and(|o| o.status.success()),
+        "cargo-stylus is not available"
+    );
+
+    let work_dir = std::env::temp_dir().join(format!("stylus_capture_{}", std::process::id()));
+    std::fs::remove_dir_all(&work_dir).ok();
+    std::fs::create_dir_all(&work_dir).expect("create the capture work dir");
+
+    let address = deploy_stylus_contract(&project_path, &work_dir).unwrap_or_else(|e| panic!("{}", e));
+    println!("Contract deployed at: {}", address);
+    let tx_hash = send_fund_transaction(&address).unwrap_or_else(|e| panic!("{}", e));
+    println!("fund(2) transaction: {}", tx_hash);
+    let raw = capture_transaction(&tx_hash).unwrap_or_else(|e| panic!("{}", e));
+    let capture = format_capture(&raw).unwrap_or_else(|e| panic!("{}", e));
+    let capture_path = project_path.join(STYLUS_EVM_TRACE_FILE);
+    std::fs::write(&capture_path, capture)
+        .unwrap_or_else(|e| panic!("failed to write {}: {}", capture_path.display(), e));
+    println!("Wrote {}", capture_path.display());
+
+    let (trace_dir, temp_dir) = record_committed_capture(&project_path, "live")
+        .unwrap_or_else(|e| panic!("Stylus replay of the fresh capture failed: {}", e));
+    verify_fund_trace(&trace_dir);
+
+    std::fs::remove_dir_all(&temp_dir).ok();
+    std::fs::remove_dir_all(&work_dir).ok();
+}
+
+/// Verify a replay of a `fund(2)` transaction against the fund tracker:
+/// - the events are EVM host-function events, including `read_args`,
+///   `storage_load_bytes32` and `write_result`;
+/// - `read_args` carries the `fund(uint256)` selector (0xca1d209d) and the
+///   argument 2;
+/// - storage writes are present;
+/// - the trace metadata names the contract's wasm.
+fn verify_fund_trace(trace_dir: &Path) {
     println!("\n=== Verifying trace contents ===");
 
     // Locate the .ct CTFS container produced by wazero -stylus and pull
     // recorded events out via the CTFS reader. Materialized traces are
     // CTFS-only; the legacy `trace.json` sidecar is no longer accepted.
-    let ct_path = std::fs::read_dir(&trace_dir)
+    let ct_path = std::fs::read_dir(trace_dir)
         .unwrap_or_else(|e| panic!("read_dir {}: {}", trace_dir.display(), e))
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -479,12 +439,15 @@ fn test_stylus_trace_analysis() {
     println!("Found {} Event entries in trace", evm_events.len());
     assert!(!evm_events.is_empty(), "Trace should contain EVM Event entries");
 
-    // Verify all events are EvmEvent kind
+    // Every event is a host-function event. The recorder registers them as
+    // `EvmEvent`, but the multi-stream CTFS IO-event stream has no EVM kind:
+    // the Nim writer stores `EvmEvent` (and `TraceLogEvent`) as `ioStderr`,
+    // which the reader returns as `WriteOther`. Either kind is accepted until
+    // the format carries the distinction; any other kind is a defect.
     for event in &evm_events {
-        assert_eq!(
-            event.kind,
-            EventLogKind::EvmEvent,
-            "Stylus trace events should all be EvmEvent, got {:?} for hook '{}'",
+        assert!(
+            matches!(event.kind, EventLogKind::EvmEvent | EventLogKind::WriteOther),
+            "Stylus trace events are host-function events, got {:?} for hook '{}'",
             event.kind,
             event.metadata
         );
@@ -528,18 +491,15 @@ fn test_stylus_trace_analysis() {
         .find("ca1d209d")
         .expect("selector must be present (already asserted)");
     let arg_start = selector_pos + 8; // skip 4-byte selector
-    if calldata.len() >= arg_start + 64 {
-        let arg_hex = &calldata[arg_start..arg_start + 64];
-        let trimmed = arg_hex.trim_start_matches('0');
-        assert_eq!(trimmed, "2", "fund() argument should be 2, got 0x{}", arg_hex);
-        println!("Verified: fund() argument is 2");
-    } else {
-        eprintln!(
-            "WARNING: calldata shorter than expected after selector ({} chars available, need 64), \
-             skipping argument check",
-            calldata.len().saturating_sub(arg_start)
-        );
-    }
+    assert!(
+        calldata.len() >= arg_start + 64,
+        "read_args calldata ends before the uint256 argument: {}",
+        calldata
+    );
+    let arg_hex = &calldata[arg_start..arg_start + 64];
+    let trimmed = arg_hex.trim_start_matches('0');
+    assert_eq!(trimmed, "2", "fund() argument should be 2, got 0x{}", arg_hex);
+    println!("Verified: fund() argument is 2");
 
     // Verify storage write operations are present (fund() writes to storage).
     // The Stylus SDK uses storage_cache_bytes32 + storage_flush_cache instead
@@ -557,7 +517,7 @@ fn test_stylus_trace_analysis() {
     // Parse and verify trace metadata.  Per the CTFS migration guide
     // (Trace-Files/CTFS-Migration-Guide.md §3e) the canonical home for
     // metadata is `meta.dat` inside the `.ct` container.
-    let metadata = load_stylus_trace_metadata(&trace_dir)
+    let metadata = load_stylus_trace_metadata(trace_dir)
         .unwrap_or_else(|e| panic!("Failed to load trace metadata from {}: {}", trace_dir.display(), e));
 
     assert!(
@@ -567,16 +527,13 @@ fn test_stylus_trace_analysis() {
     );
     println!("Verified: trace_metadata references '{}'", metadata.program);
 
-    println!("\nStylus trace analysis test passed!");
+    println!("\nStylus trace analysis passed!");
     println!(
         "  {} total entries, {} EVM events",
         trace_events.len(),
         evm_events.len()
     );
     println!("  EVM hooks: {:?}", hook_names);
-
-    // Clean up
-    std::fs::remove_dir_all(&temp_dir).ok();
 }
 
 /// Tier 2 (DAP): Verify the DAP server can load a pre-recorded Stylus trace
