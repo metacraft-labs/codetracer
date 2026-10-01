@@ -542,6 +542,23 @@ impl TestRecording {
         }
         fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
 
+        // The recording owns `temp_dir` and removes it on drop; until it
+        // exists, a failure has to remove it here.
+        let recording = Self::build_and_record_mcr(source_path, language, version_label, ct_native_replay, &temp_dir);
+        if recording.is_err() {
+            let _ = fs::remove_dir_all(&temp_dir);
+        }
+        recording
+    }
+
+    fn build_and_record_mcr(
+        source_path: &Path,
+        language: Language,
+        version_label: &str,
+        ct_native_replay: &Path,
+        temp_dir: &Path,
+    ) -> Result<Self, String> {
+        let temp_dir = temp_dir.to_path_buf();
         let binary_name = source_path
             .file_stem()
             .and_then(|s| s.to_str())
