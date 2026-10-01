@@ -58,15 +58,26 @@ concurrency:
 permissions:
   contents: read
 
-# The Linux jobs run on `eph-linux-x64-release`, the release lane: a scale set
-# reached by name, so a release does not queue behind ordinary CI, and a tag
-# push can reach it (infra lib/infra-constants.nix `releaseLane`). It is the
-# lane reprobuild's release.yml uses. Its runners are the same incus image as
-# `[self-hosted, linux, x64]`, with Docker for the package install check.
+# Where the Linux jobs run is the org's shared runner selector's decision
+# (devops-modules reusable-choose-runner.yml, the one metacraft-desktop-packages'
+# publisher uses): CI_RUNNER_MODE, and for this public repository free
+# GitHub-hosted `ubuntu-24.04` by default. Its self-hosted fallback is
+# `eph-linux-x64-release`, the release lane (infra lib/infra-constants.nix
+# `releaseLane`), which a tag push can reach by name. Both have Docker for the
+# package install check.
 jobs:
+  choose:
+    # Owner: zah. Same selector, pin and rationale as metacraft-desktop-packages'
+    # publish-release.yaml.
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@cd73eba732b9190499ec78e1e65b0dd784507440
+    with:
+      preferred: ubuntu-24.04
+      fallback: '["eph-linux-x64-release"]'
+
   plan:
     name: Plan release
-    runs-on: eph-linux-x64-release
+    needs: choose
+    runs-on: ${{ fromJSON(needs.choose.outputs.runs_on) }}
     timeout-minutes: 10
     outputs:
       version: ${{ steps.plan.outputs.version }}
@@ -98,8 +109,8 @@ jobs:
 
   linux:
     name: Linux (x86_64) release build
-    needs: plan
-    runs-on: eph-linux-x64-release
+    needs: [choose, plan]
+    runs-on: ${{ fromJSON(needs.choose.outputs.runs_on) }}
     timeout-minutes: 120
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -111,6 +122,19 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      # A GitHub-hosted runner has about 14 GB free; the dev shell closure and
+      # the AppImage build need more. Remove preinstalled toolchains this job
+      # never uses. A self-hosted runner skips this.
+      - name: Free disk space on a GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost /usr/local/julia* \
+            /opt/microsoft /opt/google /usr/lib/jvm
+          sudo docker image prune --all --force > /dev/null || true
+          df -h /
 
       # The persisted credential is used by the sibling provisioning below.
       - name: Checkout
@@ -222,8 +246,8 @@ jobs:
 
   publish:
     name: Publish release (all-or-nothing)
-    needs: [plan, linux]
-    runs-on: eph-linux-x64-release
+    needs: [choose, plan, linux]
+    runs-on: ${{ fromJSON(needs.choose.outputs.runs_on) }}
     timeout-minutes: 60
     permissions:
       contents: write
