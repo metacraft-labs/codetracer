@@ -2182,10 +2182,16 @@ fn wazero_command(wazero: &Path) -> Command {
 ///
 /// Runs `cargo build --target wasm32-wasip1` in debug mode (preserving DWARF).
 /// Returns the path to the produced `.wasm` binary.
+///
+/// The build's target directory is pinned to the project's own `target/`.
+/// Otherwise an inherited `CARGO_TARGET_DIR` (the CI runners set one) puts the
+/// binary somewhere else, and the lookup below fails with "WASM binary not
+/// found" after a successful build.
 pub fn build_wasm_test_program(project_dir: &Path) -> Result<PathBuf, String> {
     let output = Command::new("cargo")
         .args(["build", "--target", "wasm32-wasip1"])
         .current_dir(project_dir)
+        .env("CARGO_TARGET_DIR", project_dir.join("target"))
         .output()
         .map_err(|e| format!("failed to run cargo build for WASM: {}", e))?;
 

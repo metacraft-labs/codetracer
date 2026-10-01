@@ -42,8 +42,4 @@ binary(origin_stylus_dap_test)          | codetracer-evm-recorder | NO LANE
 binary(origin_sway_dap_test)            | codetracer-fuel-recorder | NO LANE
 binary(cairo_fixture_gli_decode)        | codetracer-vscode-extension Cairo fixture | NO LANE
 
-binary(wasm_flow_dap_test)              | wazero (codetracer-wasm-recorder) | NO LANE
-binary(wasm_flow_integration)           | wazero (codetracer-wasm-recorder) | NO LANE
-binary(wasm_step_advance_test)          | wazero (codetracer-wasm-recorder) | NO LANE
-
 binary(php_flow_dap_test)               | php, codetracer-php-recorder | NO LANE
