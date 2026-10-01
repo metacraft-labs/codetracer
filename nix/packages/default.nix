@@ -296,8 +296,8 @@
             # noir's own git dependencies and have nothing to do with
             # CodeTracer.
             outputHashes = {
-              "codetracer_trace_types-0.19.0" = "sha256-wyP96ovIqARw1uFlc0m8i4tJR8121pI0nxqclGnVERU=";
-              "codetracer_trace_writer_nim-0.1.0" = "sha256-wyP96ovIqARw1uFlc0m8i4tJR8121pI0nxqclGnVERU=";
+              "codetracer_trace_types-0.19.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
+              "codetracer_trace_writer_nim-0.1.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
               "clap-markdown-0.1.3" = "sha256-2vG7x+7T7FrymDvbsR35l4pVzgixxq9paXYNeKenrkQ=";
               "sancov-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
               "sancov-sys-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";

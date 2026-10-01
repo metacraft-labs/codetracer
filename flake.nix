@@ -67,7 +67,7 @@
     # THIS INPUT WAS A FLAKE.  Dropping ``flake = true`` is what let the pin
     # move to a branch that produces a trace this product can open.
     noir = {
-      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=ca080a58b05106e37a7b5178a11a8f4503951a2b";
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=875ee4855112922d4526c5f3e97448386dfc76f6";
       flake = false;
     };
 
@@ -118,7 +118,11 @@
       # `error: attribute 'python' missing`.  Every lane other than the Nix
       # lane took the recorder from a local checkout or a workspace override
       # and so never saw the disagreement.
-      url = "github:metacraft-labs/codetracer-python-recorder/dev";
+      #
+      # `/agents` while the 2026-10 trace format is integrated there: the
+      # recorder that writes it (filter provenance before the first record) is
+      # on `agents` and reaches `dev` with the next promotion, like `wazero`.
+      url = "github:metacraft-labs/codetracer-python-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
@@ -249,8 +253,15 @@
     # declarations below, and so is `codetracer-native-recorder`. Only this one
     # input disagreed, so only the lane that consumes flake inputs rather than
     # sibling checkouts -- the Nix lane -- could see the disagreement.
+    #
+    # `/agents` while the 2026-10 trace format is integrated there: the
+    # writer that produces it, and the readers in this repository that refuse
+    # anything older, land on `agents` together and reach `dev` with the next
+    # promotion. The recorders this flake builds (the Python recorder above,
+    # and those that follow `codetracer-trace-format-nim`) take the writer
+    # from these two inputs.
     codetracer-trace-format = {
-      url = "github:metacraft-labs/codetracer-trace-format/dev";
+      url = "github:metacraft-labs/codetracer-trace-format/agents";
       flake = false;
     };
 
@@ -269,7 +280,8 @@
       flake = false;
     };
     codetracer-trace-format-nim = {
-      url = "github:metacraft-labs/codetracer-trace-format-nim/dev";
+      # `/agents` with `codetracer-trace-format` above, for the same reason.
+      url = "github:metacraft-labs/codetracer-trace-format-nim/agents";
       flake = false;
     };
 

@@ -2,7 +2,7 @@
 #
 # WHY A PIN FILE AND NOT `flake.nix`'s `noir` INPUT
 #
-# `flake.nix` already pins a `noir` (ref `codetracer`, rev ca080a58) and that
+# `flake.nix` already pins a `noir` (ref `codetracer`, rev 875ee485) and that
 # pin is NOT this one. It supplies the NATIVE `nargo` the recorder builds
 # against; these are `wasm32-unknown-unknown` builds of two different crates,
 # consumed by a browser and by nothing else. Sharing one pin between them would
