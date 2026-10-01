@@ -31,6 +31,7 @@ type
     env*: seq[(string, string)]
       ## environment to set for the recording process chain
     refusal*: seq[string]    ## non-empty: print and exit 1, record nothing
+    warning*: seq[string]    ## non-empty: print to stderr and record anyway
 
 const
   PortableEnvVar* = "CODETRACER_PORTABLE"
@@ -64,12 +65,21 @@ proc portableRoute*(viaDispatchTable: bool, recorderLabel: string,
     result.wanted = true
     explicitOff = false
 
-  # `--upload` ships the trace to another machine, where a non-portable trace
-  # can only be refused: it implies `--portable` (CLI/ct/record.md).  Applied
-  # where a backend implements `--portable` -- the MCR backend; for the others
-  # the implication would refuse every upload they make today, which is the
-  # owner's call to make, not this dispatcher's.
+  # `--upload` ships the trace to another machine: it implies `--portable`
+  # (CLI/ct/record.md, "Portable traces"; owner, 2026-10-01, "warn now,
+  # implement per backend").  Strict where the backend implements it -- the
+  # MCR backend.  Elsewhere the upload goes ahead with a named warning, and
+  # each backend becomes strict when its mechanism lands.
   let mcr = not viaDispatchTable and nativeBackend == "mcr"
+  if upload and not mcr and not result.wanted:
+    let what =
+      if viaDispatchTable: recorderLabel & " recordings"
+      else: "the '" & nativeBackend & "' backend"
+    result.warning.add("warning: --upload sends this trace to another " &
+      "machine, but --portable is not implemented for " & what & " yet: " &
+      "the trace does not carry the files it used, so it replays only where " &
+      "those files still exist unchanged.")
+    return
   if upload and mcr and not result.wanted:
     if explicitOff:
       result.refusal.add("error: " & PortableEnvVar & "=" & envValue.strip() &

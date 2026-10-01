@@ -17,7 +17,8 @@
 ##
 ## `--upload` ships the trace elsewhere, so it implies `--portable` where a
 ## backend implements it; `CODETRACER_PORTABLE=off` together with it is a
-## refusal naming both.
+## refusal naming both.  Where a backend does not implement it yet, the upload
+## goes ahead with a named warning (owner, 2026-10-01).
 ##
 ## The other half -- that ct-mcr honours `CT_PORTABLE=on` by bundling every
 ## mapped file -- is asserted by codetracer-native-recorder's
@@ -98,9 +99,23 @@ suite "ct record --portable":
     check "not implemented for Python recordings" in r.refusal[0]
     check r.env.len == 0
 
-  test "--upload alone is left alone where --portable is not implemented":
-    # Implying --portable there would refuse every upload those backends make
-    # today; that is recorded as the owner's decision to make.
-    check route(backend = "rr", upload = true).refusal.len == 0
-    check route(dispatch = true, upload = true).refusal.len == 0
-    check not route(backend = "rr", upload = true).wanted
+  test "--upload where --portable is not implemented: uploads, with a named warning":
+    # Owner, 2026-10-01: "warn now, implement per backend".  Not refused, not
+    # silent: the warning names the backend and says what it means.
+    for backend in ["rr", "ttd"]:
+      let r = route(backend = backend, upload = true)
+      check r.refusal.len == 0
+      check not r.wanted
+      check r.env.len == 0
+      check r.warning.len == 1
+      check ("'" & backend & "' backend") in r.warning[0]
+      check "replays only where" in r.warning[0]
+    let d = route(dispatch = true, label = "Ruby", upload = true)
+    check d.refusal.len == 0 and d.warning.len == 1
+    check "Ruby recordings" in d.warning[0]
+    # MCR implements it: strict, and no warning.
+    check route(upload = true).warning.len == 0
+    # Without an upload nothing is warned about.
+    check route(backend = "rr").warning.len == 0
+    # Asked for explicitly, --portable stays strict everywhere.
+    check route(backend = "rr", flag = true, upload = true).refusal.len >= 1

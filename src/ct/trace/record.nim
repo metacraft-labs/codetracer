@@ -454,6 +454,8 @@ proc record*(lang: string,
     for line in portableDecision.refusal:
       echo line
     quit(1)
+  for line in portableDecision.warning:
+    stderr.writeLine(line)
   for (k, v) in portableDecision.env:
     putEnv(k, v)
   if portableDecision.implied.len > 0:
