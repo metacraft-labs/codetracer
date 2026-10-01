@@ -439,15 +439,14 @@ fn verify_fund_trace(trace_dir: &Path) {
     println!("Found {} Event entries in trace", evm_events.len());
     assert!(!evm_events.is_empty(), "Trace should contain EVM Event entries");
 
-    // Every event is a host-function event. The recorder registers them as
-    // `EvmEvent`, but the multi-stream CTFS IO-event stream has no EVM kind:
-    // the Nim writer stores `EvmEvent` (and `TraceLogEvent`) as `ioStderr`,
-    // which the reader returns as `WriteOther`. Either kind is accepted until
-    // the format carries the distinction; any other kind is a defect.
+    // Every event is a host-function event, which the recorder registers as
+    // `EvmEvent`, and an `events.dat` record keeps the recorder's exact kind
+    // (`trace-events.md` §"EventLogKind (u8 enum)").
     for event in &evm_events {
-        assert!(
-            matches!(event.kind, EventLogKind::EvmEvent | EventLogKind::WriteOther),
-            "Stylus trace events are host-function events, got {:?} for hook '{}'",
+        assert_eq!(
+            event.kind,
+            EventLogKind::EvmEvent,
+            "Stylus trace events should all be EvmEvent, got {:?} for hook '{}'",
             event.kind,
             event.metadata
         );

@@ -60,11 +60,7 @@ fn parse_ctfs_block_size(header: &[u8], context: &str) -> Result<usize, CtfsErro
     if header[..5] != CTFS_MAGIC {
         return Err(CtfsError::InvalidMagic);
     }
-    let version = header[5];
-    // Mirror the container reader's accepted version range (v2..=v4).
-    if !(2..=4).contains(&version) {
-        return Err(CtfsError::UnsupportedVersion(version));
-    }
+    super::ctfs_container::check_container_version(header[5])?;
     let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
     if !matches!(block_size, 1024 | 2048 | 4096) {
         return Err(CtfsError::Corrupt(format!(

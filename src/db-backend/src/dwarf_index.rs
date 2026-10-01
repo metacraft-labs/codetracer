@@ -3,7 +3,7 @@
 //! ## Purpose
 //!
 //! The F5 browser-replay path currently synthesises a single stack frame
-//! whose `source.path` is taken straight from `meta.paths[0]` and whose
+//! whose `source.path` is taken straight from `paths.dat`'s first record and whose
 //! `line` is hard-coded to 1 (see `emulator_session.rs`). To get
 //! production-grade replay we need to be able to ask, given an emulator
 //! program counter, three things:

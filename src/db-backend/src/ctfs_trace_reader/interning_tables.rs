@@ -316,6 +316,39 @@ impl InterningTables {
         }))
     }
 
+    /// The trace's source paths: the records of `paths.dat`, in id order.
+    ///
+    /// `paths.dat` is the only list of source paths a container carries
+    /// (`internal-files.md` §"`meta.dat` carries no path list"); a container
+    /// without it names none, which is an empty list rather than an error.
+    /// Unlike [`open_from_ctfs`](Self::open_from_ctfs) this reads the path
+    /// table alone, so it serves a container that interns paths and nothing
+    /// else -- a recording that writes no steps, such as an MCR recording.
+    pub fn read_source_paths(ctfs: &mut CtfsReader) -> Result<Vec<String>, String> {
+        if !ctfs.has_file("paths.dat") {
+            return Ok(Vec::new());
+        }
+        let meta = ctfs.read_file("meta.dat").unwrap_or_default();
+        let path_flags = super::meta_dat::parse_meta_dat(&meta)
+            .map(|parsed| parsed.flags)
+            .unwrap_or(0);
+        let column_aware_paths = path_flags & super::meta_dat::FLAG_HAS_COLUMN_AWARE_STEPS != 0;
+        let line_count_paths = path_flags & super::meta_dat::FLAG_HAS_LINE_COUNT_TABLE != 0;
+        let table = Self::load_table(ctfs, "paths")?;
+        let mut paths = Vec::with_capacity(table.count());
+        for id in 0..table.count() {
+            let raw = table.record(id)?;
+            paths.push(if column_aware_paths {
+                decode_column_aware_path(id, raw)?.0
+            } else if line_count_paths {
+                decode_line_count_path(id, raw)?.0
+            } else {
+                String::from_utf8_lossy(raw).into_owned()
+            });
+        }
+        Ok(paths)
+    }
+
     /// Load one table. The four tables are written together, so once any of
     /// them is known to exist, a missing sibling is a corrupt container rather
     /// than an absent feature — hence an error rather than `Ok(None)`.

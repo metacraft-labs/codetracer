@@ -514,11 +514,13 @@ pub struct SpanStreamReader {
     chunk_decompressions: u64,
 }
 
-/// Whether a parsed `meta.dat` payload declares the span stream (bit 13).
+/// Whether a parsed `meta.dat` payload sets the span-stream hint (bit 13).
 ///
-/// Callers gate on this rather than on the presence of `spans.dat`: the flag is
-/// the container's own declaration, and a container that sets it but omits the
-/// files is corrupt, not span-free.
+/// A hint only: no reader gates on it. `spans.dat` is created lazily, after
+/// `meta.dat` has been written, so from `meta.dat` version 6 on writers never
+/// set the bit, and [`SpanStreamReader::open_from_ctfs`] finds the stream by
+/// presence (`internal-files.md` §"Stream-presence flags are a hint, not a
+/// gate").
 pub fn meta_dat_has_span_stream(meta: &[u8]) -> bool {
     // Deliberately routed through the FULL parser rather than peeking at the
     // 8-byte header.  `parse_meta_dat` rejects any container carrying a flag
@@ -1444,6 +1446,7 @@ mod tests {
         buf.extend_from_slice(&super::super::meta_dat::META_DAT_MAGIC);
         buf.extend_from_slice(&super::super::meta_dat::META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&flags.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags_ext
         let put_str = |s: &str, out: &mut Vec<u8>| {
             out.push(s.len() as u8);
             out.extend_from_slice(s.as_bytes());
@@ -1453,7 +1456,6 @@ mod tests {
         buf.push(0); // args_count
         put_str("/w", &mut buf);
         put_str("php", &mut buf);
-        buf.push(0); // paths_count
         buf
     }
 

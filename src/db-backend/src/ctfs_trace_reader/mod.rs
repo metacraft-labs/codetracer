@@ -779,7 +779,7 @@ fn is_new_format(ctfs: &CtfsReader) -> bool {
 ///
 /// Built from the FORMAT CRATE's own constants so it cannot drift from the
 /// parser that reads it.
-fn structural_presence_meta() -> [u8; 8] {
+fn structural_presence_meta() -> [u8; 12] {
     use codetracer_trace_writer::meta_dat::{
         FLAG_HAS_CALL_STREAM, FLAG_HAS_INTERNING_TABLES, FLAG_HAS_IO_EVENT_STREAM, FLAG_HAS_STEP_STREAM,
         FLAG_HAS_VALUE_STREAM, META_DAT_MAGIC, META_DAT_VERSION,
@@ -795,7 +795,9 @@ fn structural_presence_meta() -> [u8; 8] {
         | FLAG_HAS_IO_EVENT_STREAM
         | FLAG_HAS_INTERNING_TABLES;
 
-    let mut buf = [0u8; 8];
+    // Twelve bytes: the header of a current `meta.dat` ends with the u32
+    // `flags_ext` word, left zero here.
+    let mut buf = [0u8; 12];
     buf[0..4].copy_from_slice(&META_DAT_MAGIC);
     buf[4..6].copy_from_slice(&META_DAT_VERSION.to_le_bytes());
     buf[6..8].copy_from_slice(&flags.to_le_bytes());
@@ -1216,7 +1218,7 @@ impl CTFSTraceReader {
                 Some(ns)
             }
             Err(e) => {
-                info!("CTFS: step-map.ns malformed ({e}); falling back to whole-table breakpoint build");
+                warn!("CTFS: {e}; falling back to the whole-table breakpoint build");
                 None
             }
         }
@@ -1377,11 +1379,8 @@ impl CTFSTraceReader {
 
         // ── Vocabulary ─────────────────────────────────────────────────
         //
-        // `paths` appear in BOTH `meta.dat` and `paths.dat`. Prefer the
-        // interning table: it is the table the step / function records index
-        // into, so using it keeps every `PathId` consistent by construction.
-        // `meta.dat`'s copy is the fallback for a container that predates the
-        // binary tables.
+        // Source paths come from `paths.dat` alone: it is the table the step /
+        // function records index into, and `meta.dat` carries no copy of it.
         let tables = interning_tables::InterningTables::open_from_ctfs(ctfs)
             .map_err(|e| format!("interning tables unreadable: {e}"))?;
 
@@ -1468,16 +1467,10 @@ impl CTFSTraceReader {
                 }
             }
             None => {
-                info!(
-                    "CTFS pure-Rust reader: no binary interning tables — falling back to meta.dat's {} paths",
-                    meta.paths.len()
-                );
-                for path in &meta.paths {
-                    db.paths.push(path.clone());
-                    let path_id = PathId(db.paths.len() - 1);
-                    db.register_path_version(path.clone(), path_id);
-                    db.step_map.push(HashMap::new());
-                }
+                // `paths.dat` is the only list of source paths
+                // (`internal-files.md` §"`meta.dat` carries no path list"), so
+                // a container without it names none.
+                info!("CTFS pure-Rust reader: no binary interning tables — the trace names no source paths");
             }
         }
 
@@ -2052,7 +2045,6 @@ impl CTFSTraceReader {
     #[cfg(feature = "nim-reader")]
     fn open_new_format_nim(ctfs: &mut CtfsReader, ct_file_path: &Path, follow: bool) -> Result<Self, Box<dyn Error>> {
         use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
-        use num_traits::FromPrimitive;
         use std::path::PathBuf;
 
         let ct_path = ct_file_path.to_string_lossy().to_string();
@@ -2711,26 +2703,17 @@ impl CTFSTraceReader {
 
         // ── Events ─────────────────────────────────────────────────────
         //
-        // event_fields returns (kind: u8, step_id: u64, data: Vec<u8>).
-        // Nim IOEventKind: 0=stdout, 1=stderr, 2=file_op, 3=error.
-        // Map to EventLogKind using num_traits::FromPrimitive for the
-        // standard values, with a fallback mapping for the Nim-specific
-        // kind codes.
+        // event_fields returns (kind: u8, step_id: u64, data: Vec<u8>), where
+        // `kind` is the recorder's exact `EventLogKind` ordinal
+        // (`trace-events.md` §"EventLogKind (u8 enum)").
         for idx in 0..event_count {
             match reader.event_fields(idx) {
                 Ok((kind_byte, step_id_raw, data)) => {
-                    // Map Nim IOEventKind values to EventLogKind.
-                    // Nim: 0=ioStdout → Write, 1=ioStderr → WriteOther,
-                    //      2=ioFileOp → WriteFile, 3=ioError → Error.
-                    let kind = match kind_byte {
-                        0 => EventLogKind::Write,
-                        1 => EventLogKind::WriteOther,
-                        2 => EventLogKind::WriteFile,
-                        3 => EventLogKind::Error,
-                        other => {
-                            // Try the Rust enum's own discriminant values
-                            // for forward compatibility.
-                            EventLogKind::from_u8(other).unwrap_or(EventLogKind::Write)
+                    let kind = match event_stream_source::event_log_kind_from_ordinal(kind_byte) {
+                        Ok(kind) => kind,
+                        Err(e) => {
+                            log::error!("event {idx} refused: {e}");
+                            break;
                         }
                     };
 
@@ -3699,7 +3682,7 @@ mod tests {
             args: args.iter().map(|s| (*s).to_owned()).collect(),
             workdir: workdir.to_owned(),
             recorder_id: "test".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -4906,7 +4889,7 @@ mod tests {
             args,
             workdir: workdir.to_owned(),
             recorder_id: "test".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -5276,7 +5259,7 @@ mod tests {
             args: vec![],
             workdir: "/tmp".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: Some(test_mcr_fields()),
             replay_launch: None,
             layout_snapshot: None,

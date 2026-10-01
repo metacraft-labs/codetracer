@@ -16,8 +16,7 @@
 //!
 //! ```text
 //! [4 bytes] magic "CTMD"  (0x43 0x54 0x4D 0x44)
-//! [2 bytes] version u16 little-endian (4, or 5 when `flags_ext` follows —
-//!           see [`SUPPORTED_VERSIONS`])
+//! [2 bytes] version u16 little-endian (6; see [`SUPPORTED_VERSIONS`])
 //! [2 bytes] flags u16 little-endian
 //!           bit 0       — FLAG_HAS_MCR_FIELDS
 //!           bit 1       — FLAG_HAS_REPLAY_LAUNCH_FIELDS (M-RLP-1, §6A.5)
@@ -36,7 +35,7 @@
 //!           bit 14      — FLAG_HAS_LINE_COUNT_TABLE (paths.dat records carry line_count)
 //!           bit 15      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
 //!           (no bit is reserved; the flag word is fully allocated)
-//! [4 bytes] flags_ext u32 little-endian — version 5 only; absent at version 4
+//! [4 bytes] flags_ext u32 little-endian — always present
 //!           bit 0       — FLAG_EXT_HAS_SOURCE_RELOAD (GDH-M2)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
@@ -44,8 +43,8 @@
 //!   ⤷ args_count × varint-prefixed UTF-8 string : args[i]
 //! varint-prefixed UTF-8 string : workdir
 //! varint-prefixed UTF-8 string : recorder_id
-//! varint                       : paths_count
-//!   ⤷ paths_count × varint-prefixed UTF-8 string : paths[i]
+//!
+//! (No path list: a trace's source paths are the records of `paths.dat`.)
 //!
 //! if (flags & FLAG_HAS_MCR_FIELDS) != 0:
 //!     varint                       : tick_source        (enum ord)
@@ -103,8 +102,12 @@
 //!   Spec: `codetracer-trace-format-spec/internal-files.md` §"Global Line
 //!   Index".
 //! - **v5** — GDH-M2 (2026-09-10): a `[4] flags_ext u32 LE` word follows the
-//!   u16 flags.  Written only when an extended flag is set, so a recording
-//!   without one stays v4.  See [`META_DAT_VERSION_EXTENDED_FLAGS`].
+//!   u16 flags, written only when an extended flag is set.
+//! - **v6** — 2026-10: the path list after `recorder_id` is gone, and
+//!   `flags_ext` is always present, so there is one header length.  Every
+//!   other version is refused: the bytes after `recorder_id` mean something
+//!   else in v5 and below.  Spec: `codetracer-trace-format-spec/
+//!   internal-files.md` §"Metadata (meta.dat)".
 
 use std::error::Error;
 use std::fmt;
@@ -114,12 +117,9 @@ use std::fmt;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// The `meta.dat` format version emitted by this serializer and the
-/// current Nim writer.
-///
-/// M-REC-1.5 retired v1 and v2 (pre-1.0, no backcompat).  The reader
-/// rejects any version not listed in [`SUPPORTED_VERSIONS`].
-pub const META_DAT_VERSION: u16 = 4;
+/// The `meta.dat` format version emitted by this serializer, and the only
+/// one the reader accepts (see [`SUPPORTED_VERSIONS`]).
+pub const META_DAT_VERSION: u16 = 6;
 
 /// The highest schema version whose writer packed a line-only
 /// `global_position_index` as `prefix_sum[file_id] + line`.
@@ -131,60 +131,24 @@ pub const META_DAT_VERSION: u16 = 4;
 /// instead of refusing it.
 pub const LAST_SHIFTED_GLOBAL_INDEX_VERSION: u16 = 3;
 
-/// All `meta.dat` versions this reader can decode.
+/// All `meta.dat` versions this reader can decode: version 6 alone.
 ///
-/// **No version at or below [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`], and that
-/// has to be so.**  The obvious alternative — accept `&[3, 4]`, since v4
-/// changed no field of the header — reintroduces the exact defect the bump
-/// exists to close.  v3 and v4 differ not in the bytes of `meta.dat` but
-/// in what the rest of the container's step addresses MEAN: a v3 writer
-/// packed a line-only `global_position_index` as
-/// `prefix_sum[file_id] + line`, and v4 packs
-/// `prefix_sum[file_id] + (line - 1)`, the exact inverse of the decode
-/// [`super::line_position_space`] performs.  Both land INSIDE the trace's
-/// own address space, so accepting a v3 container does not fail anywhere:
-/// every step resolves to a real file and a real line, each one exactly
-/// one line above where it was recorded, and the debugger shows that line
-/// while a breakpoint set on it never matches.  Nothing else in the
-/// container distinguishes the two — `recorder_id` names the producer,
-/// not its address packing, and the same recorders span the change — so
-/// the schema version is the only field that can carry the distinction,
-/// and answering a v3 container at all is answering it wrongly.
+/// Version 6 removed the path list that versions 3 to 5 wrote after
+/// `recorder_id`, and made `flags_ext` unconditional. A version 5 header read
+/// under version 6's rules would decode its path count as the next
+/// flag-gated block, and a version 6 header read under version 5's would
+/// decode the ext word as the recording id's length, so neither is read as
+/// the other: pre-1.0 there is no compatibility path, and older containers
+/// are re-recorded.
 ///
-/// A back-compat shim is not merely unimplemented here, it is not
-/// constructible: subtracting one from every address would correct a
-/// trace whose writer used the old packing, and the version is precisely
-/// what would have said that it did.  Pre-1.0, v3 containers are
-/// re-recorded rather than read.
-///
-/// v1 and v2 were retired earlier, by M-REC-1.5, on the same pre-1.0
-/// no-backcompat policy; [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`] covers
-/// them too, since every version at or below it predates the correction.
-///
-/// **GDH-M2 (2026-09-10) widened it to `&[4, 5]`, and that is not a
-/// relaxation of the paragraph above.**  v5 is not a different meaning for
-/// the same bytes; it is a header with one EXTRA word in it —
-/// `[4] flags_ext u32 LE`, inserted after the u16 flags — and the version
-/// field is what says the word is there.  That is the same discipline this
-/// comment insists on, applied to a header shape instead of to an address
-/// packing: nothing about the bytes distinguishes the two, so the version
-/// carries the distinction.  A v4 container is still read exactly as
-/// before, and a v5 one is read as a v4 one plus a word this reader knows
-/// how to validate.
-pub const SUPPORTED_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
-
-/// GDH-M2 — the schema version a container carries when at least one
-/// EXTENDED flag is set.  See [`SUPPORTED_VERSIONS`] and
-/// [`FLAG_EXT_HAS_SOURCE_RELOAD`].
-///
-/// A writer emits it ONLY when an extended flag is actually set, so a
-/// recording with no reload in it stays at [`META_DAT_VERSION`] and is
-/// byte-identical to one produced before the word existed.  Must match the
-/// Nim writer's `meta_dat.nim` `MetaDatVersionExtendedFlags`.
-pub const META_DAT_VERSION_EXTENDED_FLAGS: u16 = 5;
+/// Versions at or below [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`] are refused
+/// with their own reason as well: their writers packed a line-only step
+/// position as `prefix_sum[file_id] + line`, one line above the current
+/// decode, and nothing but the version tells the two apart.
+pub const SUPPORTED_VERSIONS: &[u16] = &[META_DAT_VERSION];
 
 /// Flag bit 0 — when set, the MCR (Multi-process Concurrent Recording)
-/// fields are appended after the paths block.
+/// fields follow `recorder_id`.
 pub const FLAG_HAS_MCR_FIELDS: u16 = 1 << 0;
 
 /// Flag bit 1 — replay-launch fields (M-RLP-1, spec §6A.5) follow the MCR
@@ -423,10 +387,6 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
 /// step-event tag `0x08` (`TagSourceReload`), the source-version transition
 /// marker that marks a GDScript hot reload.
 ///
-/// Present only at schema version [`META_DAT_VERSION_EXTENDED_FLAGS`]; a v4
-/// header has no `flags_ext` word at all, which is what keeps a recording
-/// with no reload byte-identical to one produced before GDH-M2.
-///
 /// Clear means the container carries no reload markers and a reader must
 /// REFUSE tag 0x08 rather than skip it: the record's length is not
 /// recoverable without decoding it, so a skip re-reads the payload varints
@@ -477,8 +437,9 @@ pub struct MetaDat {
     pub workdir: String,
     /// Recorder identifier (e.g. "ruby", "python", "evm").
     pub recorder_id: String,
-    /// Source file paths referenced by the trace.
-    pub paths: Vec<String>,
+    /// The extended flag word (`flags_ext`). Every bit in it is one this
+    /// reader knows; an unknown bit is refused at parse.
+    pub ext_flags: u32,
     /// MCR metadata. `Some` iff `flags & FLAG_HAS_MCR_FIELDS != 0`.
     pub mcr: Option<McrFields>,
     /// Replay-launch fields (M-RLP-1). `Some` iff
@@ -577,7 +538,7 @@ pub struct McrFields {
 /// Errors that can occur while parsing a `meta.dat` payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MetaDatError {
-    /// Input is shorter than the fixed 8-byte header.
+    /// Input is shorter than the fixed 12-byte header.
     TooShort {
         /// Number of bytes actually supplied to the parser.
         got: usize,
@@ -594,14 +555,10 @@ pub enum MetaDatError {
         /// The subset of bits this reader does not recognise.
         unknown_bits: u16,
     },
-    /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`, schema version
-    /// 5) were set that this reader does not know. Same contract as
+    /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`) were set that
+    /// this reader does not know. Same contract as
     /// [`MetaDatError::UnknownFlags`]: the writer is newer than this reader
     /// and the container declares a stream shape it cannot decode.
-    /// A version 5 header whose `flags_ext` word is zero: a schema version
-    /// spent on nothing, which is what an unconditional version bump produces
-    /// (`internal-files.md` §"Extended flags").
-    EmptyExtendedFlags,
     UnknownExtendedFlags {
         /// The full `flags_ext` word as parsed from the header.
         ext_flags: u32,
@@ -655,7 +612,7 @@ impl fmt::Display for MetaDatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MetaDatError::TooShort { got } => {
-                write!(f, "meta.dat too short: need at least 8 bytes, got {got}")
+                write!(f, "meta.dat too short: need at least 12 bytes, got {got}")
             }
             MetaDatError::BadMagic => write!(f, "meta.dat: bad magic bytes (expected 'CTMD')"),
             MetaDatError::ConflictingPathLayouts { flags } => write!(
@@ -689,23 +646,17 @@ impl fmt::Display for MetaDatError {
                  the trace with a current recorder. Spec: \
                  codetracer-trace-format-spec/internal-files.md \"Global Line Index\"",
             ),
-            MetaDatError::UnsupportedVersion(v) => {
-                let accepted: Vec<String> = SUPPORTED_VERSIONS.iter().map(u16::to_string).collect();
-                write!(
-                    f,
-                    "meta.dat: unsupported version {v} (accepted: {})",
-                    accepted.join(", ")
-                )
-            }
+            MetaDatError::UnsupportedVersion(v) => write!(
+                f,
+                "meta.dat: version {v} is not readable: this reader reads version {META_DAT_VERSION} only. \
+                 Version 5 and below carry a path list after recorder_id that version \
+                 {META_DAT_VERSION} does not, so the two cannot be read as each other. Re-record the \
+                 trace with a current recorder"
+            ),
             MetaDatError::UnknownFlags { flags, unknown_bits } => write!(
                 f,
                 "meta.dat: unknown flag bits set (flags=0x{flags:04x}, unknown=0x{unknown_bits:04x}); \
                  the writer is newer than this reader",
-            ),
-            MetaDatError::EmptyExtendedFlags => write!(
-                f,
-                "meta.dat: schema version {META_DAT_VERSION_EXTENDED_FLAGS} with an all-zero flags_ext word; a \
-                 container with no extended flag is written at version {META_DAT_VERSION}"
             ),
             MetaDatError::UnknownExtendedFlags {
                 ext_flags,
@@ -885,7 +836,7 @@ pub fn is_canonical_uuid_v7(s: &str) -> bool {
 /// double-writes or tooling that appends data without bumping the
 /// version field.
 pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
-    if input.len() < 8 {
+    if input.len() < 6 {
         return Err(MetaDatError::TooShort { got: input.len() });
     }
 
@@ -893,9 +844,14 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         return Err(MetaDatError::BadMagic);
     }
 
+    // The version is checked before the header length, so that a header from
+    // another version is refused for its version and not for being short.
     let version = u16::from_le_bytes([input[4], input[5]]);
     if !SUPPORTED_VERSIONS.contains(&version) {
         return Err(MetaDatError::UnsupportedVersion(version));
+    }
+    if input.len() < 12 {
+        return Err(MetaDatError::TooShort { got: input.len() });
     }
 
     let flags = u16::from_le_bytes([input[6], input[7]]);
@@ -903,35 +859,15 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     if unknown_bits != 0 {
         return Err(MetaDatError::UnknownFlags { flags, unknown_bits });
     }
-    // GDH-M2: the extended flag word, present at schema version 5 only.
-    // `body_start` moves with it — reading the body from a fixed 8 would
-    // decode the ext word as the recording id's length prefix.
-    // The word is VALIDATED and its width consumed, but it is deliberately
-    // NOT surfaced as a field on `MetaDat`. The rollout obligation GDH-M2
-    // carries is that no reader in the workspace REFUSES a v5 container and
-    // that an unknown extended bit is still rejected; giving consumers the
-    // bits is GDH-M7's job, when the db-backend learns to read the markers
-    // themselves. Adding a public field here today would only propagate a
-    // constant `0` through every `MetaDat` literal in the repo.
-    let (_ext_flags, body_start) = if version == META_DAT_VERSION_EXTENDED_FLAGS {
-        if input.len() < 12 {
-            return Err(MetaDatError::TooShort { got: input.len() });
-        }
-        let ext = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
-        let unknown_ext = ext & !KNOWN_EXT_FLAGS_MASK;
-        if unknown_ext != 0 {
-            return Err(MetaDatError::UnknownExtendedFlags {
-                ext_flags: ext,
-                unknown_bits: unknown_ext,
-            });
-        }
-        if ext == 0 {
-            return Err(MetaDatError::EmptyExtendedFlags);
-        }
-        (ext, 12usize)
-    } else {
-        (0u32, 8usize)
-    };
+    let ext_flags = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
+    let unknown_ext = ext_flags & !KNOWN_EXT_FLAGS_MASK;
+    if unknown_ext != 0 {
+        return Err(MetaDatError::UnknownExtendedFlags {
+            ext_flags,
+            unknown_bits: unknown_ext,
+        });
+    }
+    let body_start = 12usize;
     // Two known bits that cannot both be honoured: each selects a `paths.dat`
     // record layout, and a record is in one layout or the other. Refused here,
     // in front of every consumer, because the wrong choice is not a parse
@@ -961,13 +897,6 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 
     let workdir = read_string(input, &mut pos)?;
     let recorder_id = read_string(input, &mut pos)?;
-
-    let paths_count_u64 = decode_varint(input, &mut pos)?;
-    let paths_count = usize::try_from(paths_count_u64).map_err(|_| MetaDatError::StringTooLong(paths_count_u64))?;
-    let mut paths = Vec::with_capacity(paths_count);
-    for _ in 0..paths_count {
-        paths.push(read_string(input, &mut pos)?);
-    }
 
     let mcr = if flags & FLAG_HAS_MCR_FIELDS != 0 {
         let tick_source = decode_varint(input, &mut pos)?;
@@ -1098,7 +1027,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         args,
         workdir,
         recorder_id,
-        paths,
+        ext_flags,
         mcr,
         replay_launch,
         layout_snapshot,
@@ -1109,15 +1038,15 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 
 /// Serialize a [`MetaDat`] into the binary `meta.dat` wire format.
 ///
-/// Always emits the canonical encoding: the `flags` field of `meta` is
-/// **not** written verbatim — instead the `FLAG_HAS_MCR_FIELDS` bit is
-/// derived from `meta.mcr.is_some()` and any reserved bits in
-/// `meta.flags` are ignored. This guarantees that
+/// Always emits the canonical encoding: the section-presence bits of
+/// `flags` are **not** written verbatim — `FLAG_HAS_MCR_FIELDS` is derived
+/// from `meta.mcr.is_some()`, and likewise for the other blocks — while the
+/// capability and stream-presence bits of `meta.flags` are written as given. This guarantees that
 /// `parse_meta_dat(serialize_meta_dat(&x))` returns a value equal to
 /// `x` (after `x.flags` is normalised) and that we never produce output
 /// our own parser would reject.
 pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
-    // Pre-allocate a reasonable starting capacity. The header is 8 bytes;
+    // Pre-allocate a reasonable starting capacity. The header is 12 bytes;
     // the rest of the payload grows with the metadata size.
     let mut out = Vec::with_capacity(64);
 
@@ -1125,8 +1054,14 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     out.extend_from_slice(&META_DAT_MAGIC);
     out.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
 
-    // Canonicalise flags — only emit bits we know how to read back.
-    let mut flags: u16 = 0;
+    // Section-presence bits (0..3) are derived from the blocks present, so the
+    // header always says what follows `recorder_id`; every other known bit
+    // (capability, stream-presence) is written as given.
+    const SECTION_BITS: u16 = FLAG_HAS_MCR_FIELDS
+        | FLAG_HAS_REPLAY_LAUNCH_FIELDS
+        | FLAG_HAS_LAYOUT_SNAPSHOT
+        | FLAG_HAS_TRACE_FILTER_PROVENANCE;
+    let mut flags: u16 = meta.flags & KNOWN_FLAGS_MASK & !SECTION_BITS;
     if meta.mcr.is_some() {
         flags |= FLAG_HAS_MCR_FIELDS;
     }
@@ -1141,11 +1076,12 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         flags |= FLAG_HAS_TRACE_FILTER_PROVENANCE;
     }
     out.extend_from_slice(&flags.to_le_bytes());
+    out.extend_from_slice(&(meta.ext_flags & KNOWN_EXT_FLAGS_MASK).to_le_bytes());
 
     // M-REC-1: recording_id prepends the program field in v3+.
     write_string(&meta.recording_id, &mut out);
 
-    // Program / args / workdir / recorder_id / paths.
+    // Program / args / workdir / recorder_id.
     write_string(&meta.program, &mut out);
     encode_varint(meta.args.len() as u64, &mut out);
     for arg in &meta.args {
@@ -1153,10 +1089,6 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     }
     write_string(&meta.workdir, &mut out);
     write_string(&meta.recorder_id, &mut out);
-    encode_varint(meta.paths.len() as u64, &mut out);
-    for path in &meta.paths {
-        write_string(path, &mut out);
-    }
 
     // Optional MCR block.
     if let Some(mcr) = &meta.mcr {
@@ -1209,16 +1141,10 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// A REAL schema-version-5 `meta.dat`, produced by the canonical Nim
-    /// writer (`codetracer-trace-format-nim`) recording one file that is
-    /// reloaded once, and copied out of the container byte for byte.
-    ///
-    /// Captured rather than hand-built on purpose: the v5 branches in this
-    /// file exist so that a container from THAT writer parses HERE, and a
-    /// fixture this crate assembles itself could only show its own encoder
-    /// and its own decoder agreeing — which they would even if both placed
-    /// the `flags_ext` word wrongly. These are the other implementation's
-    /// bytes, so a disagreement about the layout fails instead of hiding.
+    /// A REAL schema-version-5 `meta.dat`, produced by the Nim writer
+    /// (`codetracer-trace-format-nim`) recording one file that is reloaded
+    /// once, and copied out of the container byte for byte. Version 6 refuses
+    /// it: its path list sits where version 6 puts the flag-gated blocks.
     ///
     ///   [0..4)  "CTMD"       [4..6)  version = 5
     ///   [6..8)  flags = 0x4f00    [8..12) flags_ext = 1 (source reload)
@@ -1231,69 +1157,6 @@ mod tests {
         0x72, 0x65, 0x76, 0x2F, 0x70, 0x72, 0x6F, 0x62, 0x65, 0x2E, 0x67, 0x64, 0x12, 0x72, 0x65, 0x73, 0x3A, 0x2F,
         0x2F, 0x72, 0x65, 0x76, 0x2F, 0x70, 0x72, 0x6F, 0x62, 0x65, 0x2E, 0x67, 0x64,
     ];
-
-    #[test]
-    fn a_v5_header_from_the_nim_writer_parses_here() {
-        // Anti-vacuity: prove the fixture is v5 before asserting anything
-        // that is only interesting at v5. A v4 fixture would take the old
-        // path and pass every assertion below while testing nothing.
-        assert_eq!(
-            u16::from_le_bytes([NIM_WRITTEN_V5_META_DAT[4], NIM_WRITTEN_V5_META_DAT[5]]),
-            META_DAT_VERSION_EXTENDED_FLAGS,
-            "fixture is not a v5 header"
-        );
-
-        let m = parse_meta_dat(NIM_WRITTEN_V5_META_DAT).expect("a v5 header must parse");
-        assert_eq!(m.version, META_DAT_VERSION_EXTENDED_FLAGS);
-        assert_eq!(m.program, "rev_produce");
-        assert_eq!(m.recording_id, "01890000-0000-7000-8000-0000000091d9");
-        // TWO path entries for ONE path string: that is the reload. Reaching
-        // it coherently is what proves the body started at offset 12 — a
-        // four-byte error would desynchronise every string after it.
-        assert_eq!(m.paths, vec!["res://rev/probe.gd", "res://rev/probe.gd"]);
-        // The u16 flags are still at offset 6: the widening inserted the new
-        // word AFTER them, which is what lets every offset-6 reader in the
-        // workspace stay untouched.
-        assert_eq!(m.flags, u16::from_le_bytes([0x00, 0x4f]));
-    }
-
-    #[test]
-    fn a_v5_header_with_an_unknown_ext_bit_is_refused() {
-        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
-        buf[9] = 0x01; // ext bit 8 — no constant here claims it
-        match parse_meta_dat(&buf) {
-            Err(MetaDatError::UnknownExtendedFlags { .. }) => {}
-            other => panic!("expected UnknownExtendedFlags, got {other:?}"),
-        }
-    }
-
-    /// A version 5 header whose `flags_ext` is zero is refused
-    /// (`codetracer-trace-format-spec/internal-files.md` §"Extended flags"):
-    /// it is what an unconditional version bump produces.
-    #[test]
-    fn a_v5_header_with_a_zero_ext_word_is_refused() {
-        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
-        buf[8] = 0;
-        match parse_meta_dat(&buf) {
-            Err(MetaDatError::EmptyExtendedFlags) => {}
-            other => panic!("a v5 header with flags_ext == 0 must be refused; got {other:?}"),
-        }
-        assert!(
-            MetaDatError::EmptyExtendedFlags.to_string().contains("flags_ext"),
-            "the refusal names the word"
-        );
-    }
-
-    #[test]
-    fn a_v5_header_truncated_before_its_ext_word_is_refused() {
-        // Eleven bytes: past the u16 flags, one short of the ext word. It
-        // must refuse rather than read three bytes and an implied zero.
-        let buf = NIM_WRITTEN_V5_META_DAT[..11].to_vec();
-        assert!(
-            parse_meta_dat(&buf).is_err(),
-            "a v5 header too short to hold its flags_ext word must be refused"
-        );
-    }
 
     /// Canonical lowercase hyphenated UUIDv7 used throughout the test suite
     /// so every v3 fixture carries a syntactically valid `recording_id`.
@@ -1311,7 +1174,7 @@ mod tests {
             args: vec![],
             workdir: String::new(),
             recorder_id: String::new(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -1320,9 +1183,9 @@ mod tests {
         }
     }
 
-    /// Build a [`MetaDat`] with populated args + paths, but no MCR block.
+    /// Build a [`MetaDat`] with populated args, but no MCR block.
     /// Round-trip fixture (b).
-    fn fixture_with_args_and_paths() -> MetaDat {
+    fn fixture_with_args() -> MetaDat {
         MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
@@ -1331,10 +1194,7 @@ mod tests {
             args: vec!["script.rb".to_owned(), "--flag".to_owned(), "".to_owned()],
             workdir: "/home/user/proj".to_owned(),
             recorder_id: "ruby".to_owned(),
-            paths: vec![
-                "/home/user/proj/script.rb".to_owned(),
-                "/home/user/proj/lib/util.rb".to_owned(),
-            ],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -1354,7 +1214,7 @@ mod tests {
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "evm".to_owned(),
-            paths: vec!["src/main.sol".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 2,
                 total_threads: 4,
@@ -1419,10 +1279,10 @@ mod tests {
     }
 
     #[test]
-    fn meta_dat_roundtrip_args_and_paths() {
-        let original = fixture_with_args_and_paths();
+    fn meta_dat_roundtrip_args() {
+        let original = fixture_with_args();
         let bytes = serialize_meta_dat(&original);
-        let parsed = parse_meta_dat(&bytes).expect("parse args+paths");
+        let parsed = parse_meta_dat(&bytes).expect("parse args");
         assert_eq!(parsed, original);
     }
 
@@ -1448,7 +1308,7 @@ mod tests {
     ///     args: ["a"],
     ///     workdir: "/w",
     ///     recorder_id: "r",
-    ///     paths: ["x"],
+    ///     ext_flags: 0,
     ///     mcr: None,
     /// }
     /// ```
@@ -1464,6 +1324,7 @@ mod tests {
         buf.extend_from_slice(&META_DAT_MAGIC); // "CTMD"
         buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes()); // version
         buf.extend_from_slice(&0u16.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u32.to_le_bytes()); // flags_ext
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
         encode_varint(2, &mut buf); // program "hi"
@@ -1475,9 +1336,6 @@ mod tests {
         buf.extend_from_slice(b"/w");
         encode_varint(1, &mut buf); // recorder_id "r"
         buf.extend_from_slice(b"r");
-        encode_varint(1, &mut buf); // paths_count
-        encode_varint(1, &mut buf); // paths[0] "x"
-        buf.push(b'x');
         buf
     }
 
@@ -1493,7 +1351,7 @@ mod tests {
             args: vec!["a".to_owned()],
             workdir: "/w".to_owned(),
             recorder_id: "r".to_owned(),
-            paths: vec!["x".to_owned()],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -1547,7 +1405,7 @@ mod tests {
             args: vec![],
             workdir: "/w".to_owned(),
             recorder_id: "r".to_owned(),
-            paths: vec!["/a.py".to_owned(), "/b.py".to_owned()],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -1593,6 +1451,7 @@ mod tests {
         buf.extend_from_slice(&META_DAT_MAGIC);
         buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
         encode_varint(bad.len() as u64, &mut buf);
         buf.extend_from_slice(bad.as_bytes());
         match parse_meta_dat(&buf) {
@@ -1605,11 +1464,11 @@ mod tests {
 
     #[test]
     fn rejects_truncated_input() {
-        for len in 0..8 {
-            let buf = vec![0u8; len];
-            match parse_meta_dat(&buf) {
+        let header = writer_compat_fixture_bytes();
+        for len in 0..12 {
+            match parse_meta_dat(&header[..len]) {
                 Err(MetaDatError::TooShort { got }) => assert_eq!(got, len),
-                other => panic!("expected TooShort, got {other:?}"),
+                other => panic!("expected TooShort for {len} bytes, got {other:?}"),
             }
         }
     }
@@ -1629,21 +1488,14 @@ mod tests {
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(99)));
     }
 
-    /// The refusal names every version this reader accepts, from
-    /// [`SUPPORTED_VERSIONS`], so a v5 recording is never told that only 4
-    /// would have been accepted.
+    /// The refusal names the version it saw and the one this reader reads.
     #[test]
-    fn unsupported_version_message_names_the_accepted_set() {
+    fn unsupported_version_message_names_the_version_read() {
+        assert_eq!(SUPPORTED_VERSIONS, &[META_DAT_VERSION]);
         let msg = MetaDatError::UnsupportedVersion(99).to_string();
-        let expected: Vec<String> = SUPPORTED_VERSIONS.iter().map(u16::to_string).collect();
-        assert!(expected.len() > 1, "the accepted set is not a singleton");
         assert!(
-            msg.contains(&format!("accepted: {}", expected.join(", "))),
-            "the refusal must list every accepted version; got: {msg}"
-        );
-        assert!(
-            msg.contains("99"),
-            "the refusal must name the version it saw; got: {msg}"
+            msg.contains("version 99") && msg.contains(&format!("version {META_DAT_VERSION}")),
+            "the refusal must name the version it saw and the one it reads; got: {msg}"
         );
     }
 
@@ -1874,7 +1726,7 @@ mod tests {
     #[test]
     fn parses_replay_launch_fields() {
         // FLAG_HAS_REPLAY_LAUNCH_FIELDS (bit 1) with `aslr_disabled = true`
-        // appended as a single byte after the paths block.
+        // appended as a single byte after `recorder_id`.
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0b0000_0010;
         buf[7] = 0;
@@ -1934,7 +1786,7 @@ mod tests {
             args: vec![],
             workdir: "w".to_owned(),
             recorder_id: "r".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: Some(ReplayLaunchFields { aslr_disabled: false }),
             layout_snapshot: Some(LayoutSnapshotFields {
@@ -1960,6 +1812,7 @@ mod tests {
         buf.extend_from_slice(&META_DAT_MAGIC);
         buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
         encode_varint(5, &mut buf); // program varint(5)
@@ -1983,6 +1836,7 @@ mod tests {
         buf.extend_from_slice(&META_DAT_MAGIC);
         buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
         let program_start = buf.len() + 1; // past the varint(2) byte
@@ -2059,5 +1913,114 @@ mod tests {
             let s = format!("{case}");
             assert!(!s.is_empty(), "Display produced empty string for {case:?}");
         }
+    }
+
+    // ── Version 6 (internal-files.md §"Metadata (meta.dat)") ─────────────
+
+    /// A version 6 header built from the specification, byte by byte:
+    /// `flags_ext` always present, and nothing after `recorder_id` but the
+    /// flag-gated blocks.
+    fn v6_bytes(flags: u16, ext: u32) -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(b"CTMD");
+        buf.extend_from_slice(&6u16.to_le_bytes());
+        buf.extend_from_slice(&flags.to_le_bytes());
+        buf.extend_from_slice(&ext.to_le_bytes());
+        buf.push(TEST_UUID_V7.len() as u8);
+        buf.extend_from_slice(TEST_UUID_V7.as_bytes());
+        buf.extend_from_slice(&[2, b'h', b'i']); // program
+        buf.extend_from_slice(&[1, 1, b'a']); // args = ["a"]
+        buf.extend_from_slice(&[2, b'/', b'w']); // workdir
+        buf.extend_from_slice(&[1, b'r']); // recorder_id
+        buf
+    }
+
+    #[test]
+    fn a_version_6_header_parses_with_its_ext_word_and_no_path_list() {
+        let m = parse_meta_dat(&v6_bytes(0, 0)).expect("a version 6 header with flags_ext 0 must parse");
+        assert_eq!(m.version, 6);
+        assert_eq!(m.recording_id, TEST_UUID_V7);
+        assert_eq!(m.program, "hi");
+        assert_eq!(m.args, vec!["a".to_owned()]);
+        assert_eq!(m.workdir, "/w");
+        assert_eq!(m.recorder_id, "r");
+
+        let reload = parse_meta_dat(&v6_bytes(0, 1)).expect("flags_ext bit 0 is known");
+        assert_eq!(reload.program, "hi", "the body starts after the ext word");
+    }
+
+    /// The bytes after `recorder_id` are the next flag-gated block or nothing;
+    /// a version 5 path list there is not read as one.
+    #[test]
+    fn a_path_list_after_recorder_id_is_not_read() {
+        let mut buf = v6_bytes(0, 0);
+        buf.extend_from_slice(&[1, 1, b'x']);
+        assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::TrailingBytes { extra: 3 }));
+    }
+
+    /// Every version but 6 is refused, naming the version it found and the
+    /// one this reader reads -- including a real version 5 header from the Nim
+    /// writer, whose path list would otherwise be read as an MCR block.
+    #[test]
+    fn every_version_but_6_is_refused_by_name() {
+        for v in [1u16, 2, 3, 4, 5, 7, 99] {
+            let mut buf = v6_bytes(0, 0);
+            buf[4..6].copy_from_slice(&v.to_le_bytes());
+            let err = parse_meta_dat(&buf).expect_err("another version must be refused");
+            assert_eq!(err, MetaDatError::UnsupportedVersion(v));
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&format!("version {v}")) && msg.contains('6'),
+                "the refusal names neither the version found nor the one read: {msg}"
+            );
+        }
+        assert_eq!(
+            parse_meta_dat(NIM_WRITTEN_V5_META_DAT),
+            Err(MetaDatError::UnsupportedVersion(5))
+        );
+    }
+
+    #[test]
+    fn a_version_6_header_shorter_than_12_bytes_is_refused() {
+        let buf = v6_bytes(0, 0);
+        for len in 8..12 {
+            assert!(parse_meta_dat(&buf[..len]).is_err(), "a {len}-byte header was accepted");
+        }
+    }
+
+    #[test]
+    fn an_unknown_ext_bit_is_refused_by_name() {
+        let err = parse_meta_dat(&v6_bytes(0, 1 << 8)).expect_err("an unknown ext bit must be refused");
+        assert_eq!(
+            err,
+            MetaDatError::UnknownExtendedFlags {
+                ext_flags: 1 << 8,
+                unknown_bits: 1 << 8
+            }
+        );
+    }
+
+    /// The serializer writes exactly the specified bytes: version 6, the ext
+    /// word, and no path list.
+    #[test]
+    fn the_serializer_writes_version_6() {
+        let mut m = fixture_minimal();
+        m.program = "hi".to_owned();
+        m.args = vec!["a".to_owned()];
+        m.workdir = "/w".to_owned();
+        m.recorder_id = "r".to_owned();
+        assert_eq!(serialize_meta_dat(&m), v6_bytes(0, 0));
+    }
+
+    /// Capability and stream-presence bits are written as given, and the
+    /// extended flag word too: a test writer that declares a split stream or a
+    /// source-reload capability gets a header that says so.
+    #[test]
+    fn the_serializer_keeps_capability_stream_and_extended_bits() {
+        let mut m = fixture_minimal();
+        m.flags = FLAG_HAS_STEP_STREAM | FLAG_HAS_CALL_STREAM | FLAG_HAS_COLUMN_AWARE_STEPS;
+        m.ext_flags = FLAG_EXT_HAS_SOURCE_RELOAD;
+        let parsed = parse_meta_dat(&serialize_meta_dat(&m)).expect("parse");
+        assert_eq!(parsed, m);
     }
 }

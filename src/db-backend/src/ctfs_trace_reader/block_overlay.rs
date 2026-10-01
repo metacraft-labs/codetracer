@@ -43,7 +43,8 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use super::ctfs_container::{
-    BlockSource, CtfsError, EXTENDED_HEADER_SIZE, FILE_ENTRY_SIZE, HEADER_SIZE, base40_decode, base40_encode,
+    BlockSource, CTFS_DIRECT, CtfsError, EXTENDED_HEADER_SIZE, FILE_ENTRY_SIZE, HEADER_SIZE, base40_decode,
+    base40_encode,
 };
 
 /// Byte offset of the `Size` field within a 24-byte `FileEntry`
@@ -201,15 +202,15 @@ impl CtfsBlockOverlay {
         if header[..5] != super::ctfs_container::CTFS_MAGIC {
             return Err(CtfsError::InvalidMagic);
         }
-        let version = header[5];
-        if !(super::ctfs_container::CTFS_VERSION_MIN..=super::ctfs_container::CTFS_VERSION_MAX).contains(&version) {
-            return Err(CtfsError::UnsupportedVersion(version));
-        }
+        super::ctfs_container::check_container_version(header[5])?;
         let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        let max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
         if !matches!(block_size, 1024 | 2048 | 4096) {
             return Err(CtfsError::Corrupt(format!("overlay: invalid block size: {block_size}")));
         }
+        let max_root_entries = super::ctfs_container::root_entry_count(
+            block_size,
+            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize,
+        );
 
         // The backing image is laid out as a whole number of blocks; the next
         // free block is the count of WHOLE blocks currently present.
@@ -447,14 +448,15 @@ impl CtfsBlockOverlay {
     /// container through the overlay (M5: persist `coverage.tc` /
     /// `memwrites.tc` / `linehits.tc` namespace images into the `.ct`).
     ///
-    /// Allocates fresh data blocks (born in the overlay) for `data`, a single
-    /// root mapping block pointing at them, and a directory `FileEntry` in shadow
-    /// Block 0 — all copy-on-write, so the backing file is untouched until a
-    /// `Persist` [`flush`](CtfsBlockOverlay::flush). The layout matches the
-    /// production single-level mapping (`FileEntry = (Size, MapBlock, Name)`; the
-    /// map block holds direct data-block pointers), so a plain
-    /// [`super::ctfs_container::CtfsReader`] reads the file back after a flush
-    /// (the warm-restart proof).
+    /// Allocates fresh blocks (born in the overlay) and a directory `FileEntry`
+    /// in shadow Block 0 — all copy-on-write, so the backing file is untouched
+    /// until a `Persist` [`flush`](CtfsBlockOverlay::flush). The member is laid
+    /// out as `ctfs-container.md` §2 requires of a version 5 container: empty
+    /// owns no block (`MapBlock = 0`), at most one block is that data block
+    /// tagged with [`CTFS_DIRECT`] and no mapping block, and anything larger is
+    /// a single-level mapping whose mapping block is claimed before its data
+    /// blocks. A plain [`super::ctfs_container::CtfsReader`] reads the file
+    /// back after a flush (the warm-restart proof).
     ///
     /// Constraints (sufficient for the M5 namespace images, which are at most a
     /// few pages): `data` must fit within a single-level mapping — i.e. at most
@@ -479,6 +481,14 @@ impl CtfsBlockOverlay {
         // Empty file: a directory entry with size 0 and no blocks.
         if data.is_empty() {
             return self.set_or_create_file_entry(name, 0, 0);
+        }
+
+        if data.len() <= self.block_size {
+            let data_block = self.alloc_block();
+            let mut block = vec![0u8; self.block_size];
+            block[..data.len()].copy_from_slice(data);
+            self.write_block(data_block, block)?;
+            return self.set_or_create_file_entry(name, data.len() as u64, CTFS_DIRECT | data_block);
         }
 
         // Allocate the root mapping block first, then the data blocks.
@@ -637,7 +647,7 @@ mod tests {
     fn data_block0_offset(path: &Path, name: &str) -> (u64, u64) {
         let reader = CtfsReader::open(path).unwrap();
         let entry = reader.file_entry(name).unwrap();
-        let data_block = reader.resolve_block_for_test(entry.1, 0).unwrap();
+        let data_block = reader.data_block_for_test(name, 0).unwrap();
         (data_block * BLOCK_SIZE as u64, entry.0)
     }
 
@@ -995,5 +1005,55 @@ mod tests {
             vec!["steps.dat".to_string()],
             "the unreferenced partial tail surfaced as an internal file"
         );
+    }
+
+    /// `write_internal_file` lays a member out as a version 5 writer must
+    /// (`ctfs-container.md` §2): empty owns no block, one block is a tagged
+    /// direct block with no mapping block, and a larger member is mapped with
+    /// its mapping block claimed before its data blocks. After a `Persist`
+    /// flush a plain reader reads each one back.
+    #[test]
+    fn test_overlay_writes_version_5_member_layouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("layouts.ct");
+        write_minimal_ctfs(&path, &[("meta.dat", b"m")]).unwrap();
+        let before = std::fs::metadata(&path).unwrap().len() / BLOCK_SIZE as u64;
+
+        let small: Vec<u8> = (0..300u32).map(|i| (i % 251) as u8).collect();
+        let big: Vec<u8> = (0..(2 * BLOCK_SIZE + 5) as u32).map(|i| (i % 247) as u8).collect();
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+        overlay.write_internal_file("empty.tc", &[]).unwrap();
+        overlay.write_internal_file("small.tc", &small).unwrap();
+        overlay.write_internal_file("big.tc", &big).unwrap();
+        // One block for `small.tc`, a mapping block and three data blocks for
+        // `big.tc`, none for `empty.tc`.
+        assert_eq!(overlay.next_free_block(), before + 5);
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        overlay.flush(&mut sink).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(
+            reader.file_entry("empty.tc"),
+            Some((0, 0)),
+            "an empty member owns no block"
+        );
+        let (size, map_block) = reader.file_entry("small.tc").unwrap();
+        assert_eq!(size, small.len() as u64);
+        assert_eq!(
+            map_block,
+            (1 << 63) | before,
+            "a one-block member is its tagged data block"
+        );
+        let (size, map_block) = reader.file_entry("big.tc").unwrap();
+        assert_eq!(size, big.len() as u64);
+        assert_eq!(
+            map_block,
+            before + 1,
+            "the mapping block is claimed before the data blocks"
+        );
+        assert_eq!(reader.read_file("empty.tc").unwrap(), Vec::<u8>::new());
+        assert_eq!(reader.read_file("small.tc").unwrap(), small);
+        assert_eq!(reader.read_file("big.tc").unwrap(), big);
     }
 }

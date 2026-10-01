@@ -409,6 +409,15 @@ fn setup(
         find_ctfs_container_in_dir(trace_folder)
     };
 
+    // A CTFS container of another version is refused here, by name, rather
+    // than falling through to the replay-worker path as if it were not a
+    // container at all (`ctfs-container.md` §2, "Older versions are refused").
+    for candidate in [trace_folder, trace_path.as_path()] {
+        if candidate.is_file() {
+            refuse_unreadable_ctfs_version(candidate)?;
+        }
+    }
+
     if let Some(ctfs_path) = ctfs_candidate {
         info!("detected CTFS container: {}", ctfs_path.display());
         match CTFSTraceReader::open(&ctfs_path) {
@@ -1870,6 +1879,26 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
         return true;
     }
     is_legacy_materialized_trace(folder, trace_file)
+}
+
+/// Refuse, naming both versions, a file that is a CTFS container of a
+/// version this backend does not read. Version bytes 0 and 1 are not
+/// containers: the legacy `runtime_tracing` binary shares the magic with
+/// version 0.
+fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), String> {
+    use std::io::Read;
+    let mut header = [0u8; 6];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Ok(());
+    };
+    if file.read_exact(&mut header).is_err() || header[..5] != [0xC0, 0xDE, 0x72, 0xAC, 0xE2] {
+        return Ok(());
+    }
+    match header[5] {
+        0 | 1 => Ok(()),
+        version => crate::ctfs_trace_reader::ctfs_container::check_container_version(version)
+            .map_err(|e| format!("{}: {e}", path.display())),
+    }
 }
 
 /// Classify a CTFS container as a DB (materialized) trace this backend can
@@ -3712,7 +3741,7 @@ mod tests {
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec!["src/main.c".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 1,
                 total_threads: 1,
@@ -3745,7 +3774,7 @@ mod tests {
             args: vec!["script.rb".to_owned()],
             workdir: "/srv/proj".to_owned(),
             recorder_id: "ruby".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -3780,6 +3809,27 @@ mod tests {
             is_mcr_ctfs_container(&mut ctfs),
             "expected meta.dat with FlagHasMcrFields to be classified as MCR",
         );
+    }
+
+    /// A container of another version is refused by name, not routed on as if
+    /// it were no container (`ctfs-container.md` §2).
+    #[test]
+    fn a_container_of_another_version_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("old.ct");
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &non_mcr_meta_dat_bytes())]).unwrap();
+        assert!(refuse_unreadable_ctfs_version(&ct_path).is_ok());
+
+        let mut bytes = std::fs::read(&ct_path).unwrap();
+        bytes[5] = 4;
+        std::fs::write(&ct_path, &bytes).unwrap();
+        let err = refuse_unreadable_ctfs_version(&ct_path).unwrap_err();
+        assert!(err.contains("version 4") && err.contains("version 5"), "{err}");
+
+        // The legacy runtime_tracing binary shares the magic with version 0.
+        bytes[5] = 0;
+        std::fs::write(&ct_path, &bytes).unwrap();
+        assert!(refuse_unreadable_ctfs_version(&ct_path).is_ok());
     }
 
     /// MCR native recordings may carry stream names that overlap with

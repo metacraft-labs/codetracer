@@ -1,6 +1,7 @@
 //! Minimal CTFS binary container reader (and test-only writer).
 //!
-//! Implements just enough of the CTFS v2/v3/v4 binary format spec to:
+//! Implements just enough of the CTFS container format (version 5,
+//! `codetracer-trace-format-spec/ctfs-container.md`) to:
 //! 1. Parse the container header and file directory
 //! 2. Read named internal files by navigating the block mapping hierarchy
 //!
@@ -20,8 +21,10 @@
 //!   Data blocks and mapping blocks
 //! ```
 //!
-//! File names are base40-encoded into a single `u64`. Block allocation uses
-//! a hierarchical mapping structure (up to 5 levels of indirect blocks).
+//! File names are base40-encoded into a single `u64`. A file entry's
+//! `MapBlock` is `0` for an empty member, the member's only data block with
+//! bit 63 set for a member of at most one block, and otherwise the root of a
+//! hierarchical mapping structure (up to 5 levels of indirect blocks).
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -36,22 +39,40 @@ use std::path::Path;
 /// Magic bytes identifying a CTFS file: "C0DE trACE2" in hex-speak.
 pub(crate) const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
 
-/// The minimum CTFS format version we support.
-pub(crate) const CTFS_VERSION_MIN: u8 = 2;
+/// The one container version this reader reads (`ctfs-container.md` §1).
+///
+/// Version 5 stores a member of at most one block without a mapping block
+/// (its `MapBlock` carries [`CTFS_DIRECT`]) and an empty member as
+/// `MapBlock = 0`. Earlier versions gave every member a mapping block, and
+/// their bytes cannot be told apart from version 5's by anything but this
+/// byte, so every other version is refused by name (§2, "Older versions are
+/// refused"); such containers are re-recorded.
+pub(crate) const CTFS_VERSION: u8 = 5;
 
-/// The maximum CTFS format version we support.
-///
-/// Version history:
-///   v2 — extended header with BlockSize and MaxRootEntries; reserved bytes 6-7.
-///   v3 — 16-byte header with encryption field at byte 6; binary metadata;
-///         default BlockSize 4096; small file optimization; namespaces.
-///   v4 — max_shards field at byte 7 (Nim writer default).
-///
-/// The on-disk layout of the extended header and file entries is unchanged
-/// across all three versions, so a single reader handles them all. The only
-/// difference is the meaning of header bytes 6 (encryption, ignored) and 7
-/// (max_shards, informational only).
-pub(crate) const CTFS_VERSION_MAX: u8 = 4;
+/// Bit 63 of `FileEntry.MapBlock`: set, the rest of the word is the member's
+/// only data block (`ctfs-container.md` §2, "`MapBlock` has three forms").
+pub(crate) const CTFS_DIRECT: u64 = 1 << 63;
+
+/// Refuse every container version but [`CTFS_VERSION`], before any member is
+/// resolved.
+pub(crate) fn check_container_version(version: u8) -> Result<(), CtfsError> {
+    if version == CTFS_VERSION {
+        Ok(())
+    } else {
+        Err(CtfsError::UnsupportedVersion(version))
+    }
+}
+
+/// The number of root directory entries a header declares: `max_root_entries`,
+/// or, when it is `0`, as many as fill the rest of block 0
+/// (`ctfs-container.md` §1, "Auto-fill"). The entry array starts at byte 16.
+pub(crate) fn root_entry_count(block_size: usize, max_root_entries: usize) -> usize {
+    if max_root_entries == 0 {
+        block_size.saturating_sub(HEADER_SIZE + EXTENDED_HEADER_SIZE) / FILE_ENTRY_SIZE
+    } else {
+        max_root_entries
+    }
+}
 
 /// Size of the fixed header (magic + version + reserved).
 pub(crate) const HEADER_SIZE: usize = 8;
@@ -144,7 +165,8 @@ impl fmt::Display for CtfsError {
             CtfsError::InvalidMagic => write!(f, "not a valid CTFS file (bad magic bytes)"),
             CtfsError::UnsupportedVersion(v) => write!(
                 f,
-                "unsupported CTFS version {v} (expected {CTFS_VERSION_MIN}..={CTFS_VERSION_MAX})"
+                "CTFS container version {v} is not readable: this reader reads version {CTFS_VERSION} \
+                 only. Re-record the trace, or regenerate the fixture with its producer"
             ),
             CtfsError::FileNotFound(name) => write!(f, "internal file not found in CTFS container: {name}"),
             CtfsError::Io(e) => write!(f, "CTFS I/O error: {e}"),
@@ -177,8 +199,33 @@ struct FileEntry {
     name: String,
     /// Size of the file in bytes.
     size: u64,
-    /// Block number of the root mapping block (0 if file is empty).
+    /// The raw `MapBlock` word: `0`, a tagged direct block, or a level-1
+    /// mapping block (see [`MemberLayout`]).
     map_block: u64,
+}
+
+/// The form a version 5 `FileEntry.MapBlock` takes (`ctfs-container.md` §2).
+/// Decided from `MapBlock` alone, never from `Size`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberLayout {
+    /// `MapBlock = 0`: the member owns no block.
+    Empty,
+    /// Tagged: the member's only data block.
+    Direct(u64),
+    /// Untagged and non-zero: the member's level-1 mapping block.
+    Mapped(u64),
+}
+
+impl FileEntry {
+    fn layout(&self) -> MemberLayout {
+        if self.map_block == 0 {
+            MemberLayout::Empty
+        } else if self.map_block & CTFS_DIRECT != 0 {
+            MemberLayout::Direct(self.map_block & !CTFS_DIRECT)
+        } else {
+            MemberLayout::Mapped(self.map_block)
+        }
+    }
 }
 
 // ── Block source abstraction ──────────────────────────────────────────────
@@ -547,15 +594,15 @@ impl FollowFileSource {
         if header[..5] != CTFS_MAGIC {
             return Err(CtfsError::InvalidMagic);
         }
-        let version = header[5];
-        if !(CTFS_VERSION_MIN..=CTFS_VERSION_MAX).contains(&version) {
-            return Err(CtfsError::UnsupportedVersion(version));
-        }
+        check_container_version(header[5])?;
         let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        let max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
         if !matches!(block_size, 1024 | 2048 | 4096) {
             return Err(CtfsError::Corrupt(format!("invalid block size: {block_size}")));
         }
+        let max_root_entries = root_entry_count(
+            block_size,
+            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize,
+        );
 
         let mut source = FollowFileSource {
             file,
@@ -678,9 +725,20 @@ impl BlockSource for FollowFileSource {
     }
 }
 
+/// The refusal for a null block pointer on the read path
+/// (`ctfs-container.md` §4, "Null block pointers on the read path"): it names
+/// the member and the pointer, and does not blame a truncation, which a null
+/// pointer is not.
+fn null_pointer(name: &str, pointer: &str, size: u64) -> CtfsError {
+    CtfsError::Corrupt(format!(
+        "file '{name}' (size {size}): its {pointer} is a null block pointer (block 0 is the \
+         container header); the container is damaged"
+    ))
+}
+
 // ── Reader ──────────────────────────────────────────────────────────────
 
-/// Reader for a CTFS v2/v3/v4 binary container.
+/// Reader for a CTFS version 5 binary container.
 ///
 /// Parses the header and file directory on construction, then provides
 /// `read_file(name)` to extract internal files by name.
@@ -744,21 +802,19 @@ impl CtfsReader {
             return Err(CtfsError::InvalidMagic);
         }
 
-        // Check version — we accept v2, v3, and v4 since the extended header
-        // and file entry layout is identical across these versions.
-        let version = header[5];
-        if !(CTFS_VERSION_MIN..=CTFS_VERSION_MAX).contains(&version) {
-            return Err(CtfsError::UnsupportedVersion(version));
-        }
+        check_container_version(header[5])?;
 
         // Parse extended header
         let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        let max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
 
         // Validate block size
         if !matches!(block_size, 1024 | 2048 | 4096) {
             return Err(CtfsError::Corrupt(format!("invalid block size: {block_size}")));
         }
+        let max_root_entries = root_entry_count(
+            block_size,
+            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize,
+        );
 
         let entries_per_block = block_size / 8;
 
@@ -819,13 +875,6 @@ impl CtfsReader {
 
         if entry.size == 0 {
             return Ok(Vec::new());
-        }
-
-        if entry.map_block == 0 {
-            return Err(CtfsError::Corrupt(format!(
-                "file '{name}' has non-zero size ({}) but map_block is 0",
-                entry.size
-            )));
         }
 
         self.read_file_range(name, 0, entry.size)
@@ -945,14 +994,28 @@ impl CtfsReader {
         if len == 0 {
             return Ok(Vec::new());
         }
-        if entry.map_block == 0 {
-            return Err(CtfsError::Corrupt(format!(
-                "file '{name}' has non-zero size ({}) but map_block is 0",
-                entry.size
-            )));
+        let block_size = self.block_size as u64;
+        // `ctfs-container.md` §2, "Readers": the layout comes from `MapBlock`,
+        // and each form has the checks its pointer needs before any block of
+        // it is read.
+        let layout = entry.layout();
+        match layout {
+            MemberLayout::Empty => {
+                return Err(null_pointer(name, "MapBlock", entry.size));
+            }
+            MemberLayout::Direct(0) => {
+                return Err(null_pointer(name, "direct data block", entry.size));
+            }
+            MemberLayout::Direct(_) if entry.size > block_size => {
+                return Err(CtfsError::Corrupt(format!(
+                    "file '{name}': MapBlock names a single direct data block, but the declared \
+                     size {} is more than one block ({block_size} bytes) can hold",
+                    entry.size
+                )));
+            }
+            MemberLayout::Direct(_) | MemberLayout::Mapped(_) => {}
         }
 
-        let block_size = self.block_size as u64;
         let first_block = offset / block_size;
         let last_block = (end - 1) / block_size;
 
@@ -960,11 +1023,13 @@ impl CtfsReader {
         for block_index in first_block..=last_block {
             let logical = usize::try_from(block_index)
                 .map_err(|_| CtfsError::Corrupt(format!("file '{name}': block index does not fit in usize")))?;
-            let data_block_num = self.resolve_block(entry.map_block, logical, whole_blocks_only, name)?;
+            let data_block_num = match layout {
+                MemberLayout::Direct(block) => block,
+                MemberLayout::Mapped(root) => self.resolve_block(root, logical, whole_blocks_only, name)?,
+                MemberLayout::Empty => unreachable!("an empty layout with a size was refused above"),
+            };
             if data_block_num == 0 {
-                return Err(CtfsError::Corrupt(format!(
-                    "file '{name}': unallocated block at index {logical}"
-                )));
+                return Err(null_pointer(name, &format!("data block {logical}"), entry.size));
             }
             // §5d's bound, applied to the DATA block — the path that is easy to
             // miss, because the last block's slice is clamped to the requested
@@ -987,7 +1052,15 @@ impl CtfsReader {
             let want_to = (end.min(block_start + block_size)) - block_start;
             let to_read = (want_to - want_from) as usize;
 
-            let src_offset = data_block_num * block_size + want_from;
+            let src_offset = data_block_num
+                .checked_mul(block_size)
+                .and_then(|o| o.checked_add(want_from))
+                .ok_or_else(|| {
+                    CtfsError::Corrupt(format!(
+                        "file '{name}': data block {logical} is container block {data_block_num}, \
+                         past any offset the container can address"
+                    ))
+                })?;
             // The prefix boundary, decided in the ONE place it can be decided:
             // how many of these bytes the container actually carries. Clamping
             // to the available count rather than dropping the whole block keeps
@@ -1107,9 +1180,10 @@ impl CtfsReader {
         for _ in 1..level {
             let indirect_ptr = self.read_mapping_entry(current_block, self.entries_per_block - 1)?;
             if indirect_ptr == 0 {
-                return Err(CtfsError::Corrupt(
-                    "null indirect pointer in mapping hierarchy".to_string(),
-                ));
+                return Err(CtfsError::Corrupt(format!(
+                    "file '{name}': a chain pointer in its mapping is a null block pointer \
+                     (block 0 is the container header); the container is damaged"
+                )));
             }
             // §5d path 2a of 3: a mapping block reached through the chain.
             if whole_blocks_only {
@@ -1176,7 +1250,10 @@ impl CtfsReader {
 
         let next_block = self.read_mapping_entry(map_block, sub_index)?;
         if next_block == 0 {
-            return Err(CtfsError::Corrupt("null pointer in mapping sub-block".to_string()));
+            return Err(CtfsError::Corrupt(format!(
+                "file '{name}': a child pointer in its mapping is a null block pointer \
+                 (block 0 is the container header); the container is damaged"
+            )));
         }
         // §5d path 2b of 3: a mapping block reached by descending the hierarchy.
         if whole_blocks_only {
@@ -1188,7 +1265,15 @@ impl CtfsReader {
 
     /// Read a single u64 entry from a mapping block.
     fn read_mapping_entry(&self, block_num: u64, entry_index: usize) -> Result<u64, CtfsError> {
-        let offset = block_num * self.block_size as u64 + (entry_index * 8) as u64;
+        let offset = block_num
+            .checked_mul(self.block_size as u64)
+            .and_then(|o| o.checked_add((entry_index * 8) as u64))
+            .ok_or_else(|| {
+                CtfsError::Corrupt(format!(
+                    "mapping entry at block {block_num}, index {entry_index} is past any offset the \
+                     container can address"
+                ))
+            })?;
         let mut buf = [0u8; 8];
         read_exact_at(
             self.source.as_ref(),
@@ -1227,16 +1312,26 @@ impl CtfsReader {
         self.files.get(name).map(|e| (e.size, e.map_block))
     }
 
-    /// Test-support accessor: resolve a logical block index to its physical
-    /// block number (wraps the private `resolve_block`).  Used by the M2 overlay
-    /// tests to find a file's data block offset in the raw image.
+    /// Test-support accessor: the container block holding logical block
+    /// `logical_index` of the named member, whichever form its `MapBlock`
+    /// takes.  Used by the M2 overlay tests to find a file's data block offset
+    /// in the raw image.
     #[cfg(test)]
-    pub(crate) fn resolve_block_for_test(&self, root_map_block: u64, logical_index: usize) -> Result<u64, CtfsError> {
-        // Bounded like the strict read path: these helpers exist to locate a
-        // block in a well-formed container, and a test that resolved a block
-        // outside the container's whole blocks would be asserting on bytes the
-        // container does not own.
-        self.resolve_block(root_map_block, logical_index, true, "<test>")
+    pub(crate) fn data_block_for_test(&self, name: &str, logical_index: usize) -> Result<u64, CtfsError> {
+        let entry = self
+            .files
+            .get(name)
+            .ok_or_else(|| CtfsError::FileNotFound(name.to_string()))?;
+        match entry.layout() {
+            MemberLayout::Empty => Err(CtfsError::Corrupt(format!("file '{name}' owns no block"))),
+            MemberLayout::Direct(block) if logical_index == 0 => Ok(block),
+            MemberLayout::Direct(_) => Err(CtfsError::Corrupt(format!("file '{name}' is one block"))),
+            // Bounded like the strict read path: these helpers exist to locate a
+            // block in a well-formed container, and a test that resolved a block
+            // outside the container's whole blocks would be asserting on bytes
+            // the container does not own.
+            MemberLayout::Mapped(root) => self.resolve_block(root, logical_index, true, name),
+        }
     }
 }
 
@@ -1244,11 +1339,18 @@ impl CtfsReader {
 
 /// Write a CTFS container for testing purposes.
 ///
-/// Creates a container with block_size=4096, max_root_entries=31 and lays
-/// out each file using the same bottom-up multi-level chain mapping that
-/// the production Rust and Nim writers use:
+/// Creates a version 5 container with block_size=4096, max_root_entries=31
+/// and lays out each file the way `ctfs-container.md` §2 requires of a
+/// closed container:
 ///
-/// - Each file owns a root mapping block.  Entries `[0..usable)` of the
+/// - An empty file owns no block: its entry is `(Size, MapBlock) = (0, 0)`.
+/// - A file of at most one block owns that one data block and no mapping
+///   block: `MapBlock` is the data block with [`CTFS_DIRECT`] set.
+/// - A larger file uses the bottom-up multi-level chain mapping, its
+///   level-1 mapping block claimed before its data blocks (§5, "Appending
+///   Data", case 3):
+///
+/// - Each mapped file owns a root mapping block.  Entries `[0..usable)` of the
 ///   root are direct pointers to data blocks; entry `usable`
 ///   (= `entries_per_block - 1`) is the chain pointer to a level-2
 ///   mapping block when the file exceeds `usable` data blocks.
@@ -1375,7 +1477,7 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> Result<(), Bo
 
     // Header (8 bytes) + extended header (8 bytes) + file entries.
     buf[0..5].copy_from_slice(&CTFS_MAGIC);
-    buf[5] = CTFS_VERSION_MAX;
+    buf[5] = CTFS_VERSION;
     // bytes 6-7: encryption=0, max_shards=0 (already zero)
     buf[8..12].copy_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
     buf[12..16].copy_from_slice(&MAX_ROOT_ENTRIES.to_le_bytes());
@@ -1392,10 +1494,19 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> Result<(), Bo
             buf[entry_off + 16..entry_off + 24].copy_from_slice(&name_encoded.to_le_bytes());
             continue;
         }
-        let map_block = alloc_block(&mut buf, &mut next_block);
         buf[entry_off..entry_off + 8].copy_from_slice(&size.to_le_bytes());
-        buf[entry_off + 8..entry_off + 16].copy_from_slice(&map_block.to_le_bytes());
         buf[entry_off + 16..entry_off + 24].copy_from_slice(&name_encoded.to_le_bytes());
+
+        if data.len() <= BLOCK_SIZE {
+            let data_block = alloc_block(&mut buf, &mut next_block);
+            let off = (data_block as usize) * BLOCK_SIZE;
+            buf[off..off + data.len()].copy_from_slice(data);
+            buf[entry_off + 8..entry_off + 16].copy_from_slice(&(CTFS_DIRECT | data_block).to_le_bytes());
+            continue;
+        }
+
+        let map_block = alloc_block(&mut buf, &mut next_block);
+        buf[entry_off + 8..entry_off + 16].copy_from_slice(&map_block.to_le_bytes());
 
         // Stream data blocks, inserting each into the multi-level mapping
         // hierarchy and writing the file contents into the block.
@@ -1539,8 +1650,8 @@ mod tests {
             let entry = in_mem.files.get(name).unwrap().clone();
             let num_blocks = (entry.size as usize).div_ceil(BLOCK_SIZE);
             for block_index in 0..num_blocks {
-                let phys = in_mem.resolve_block(entry.map_block, block_index, true, name).unwrap();
-                let phys_local = local.resolve_block(entry.map_block, block_index, true, name).unwrap();
+                let phys = in_mem.data_block_for_test(name, block_index).unwrap();
+                let phys_local = local.data_block_for_test(name, block_index).unwrap();
                 assert_eq!(phys, phys_local, "block {block_index} of '{name}' resolved differently");
 
                 let offset = phys * BLOCK_SIZE as u64;
@@ -1616,7 +1727,7 @@ mod tests {
         let path = dir.path().join("growing.ct");
 
         // Base container: one file "steps.dat" with 100 bytes (one data block,
-        // direct mapping). `write_minimal_ctfs` lays down a valid CTFS v4 image.
+        // tagged direct). `write_minimal_ctfs` lays down a valid CTFS v5 image.
         let initial: Vec<u8> = (0..100u32).map(|i| (i % 256) as u8).collect();
         write_minimal_ctfs(&path, &[("steps.dat", initial.as_slice())]).unwrap();
 
@@ -1627,18 +1738,16 @@ mod tests {
         let size_before = follow.current_size();
 
         // ── Simulate a chunk flush that grows "steps.dat" by 50 bytes IN PLACE.
-        //    The base writer placed "steps.dat"'s single data block right after
-        //    the root map block; rather than re-derive its physical offset, we
-        //    locate it by reading the FileEntry's map_block and its first direct
-        //    pointer through a throwaway reader, then append into that block (the
-        //    block is 4096 bytes, so 150 bytes still fit in block 0 of the file).
+        //    Rather than re-derive the physical offset of "steps.dat"'s single
+        //    data block, we locate it through a throwaway reader, then append
+        //    into that block (the block is 4096 bytes, so 150 bytes still fit in
+        //    block 0 of the file).
         let appended: Vec<u8> = (0..50u32).map(|i| (200 + i % 50) as u8).collect();
         let (data_block_offset, entry_offset, block_size) = {
             let reader = CtfsReader::open(&path).unwrap();
             let block_size = reader.block_size as u64;
-            let entry = reader.files.get("steps.dat").unwrap().clone();
             // Physical offset of the file's first (only) data block.
-            let data_block = reader.resolve_block(entry.map_block, 0, true, "steps.dat").unwrap();
+            let data_block = reader.data_block_for_test("steps.dat", 0).unwrap();
             // Byte offset of "steps.dat"'s FileEntry.Size field in Block 0.
             // Files are laid out in insertion order from the entry array start;
             // "steps.dat" is the sole entry ⇒ index 0.
@@ -1956,8 +2065,10 @@ mod tests {
 
         // `a.dat` is an exact multiple of the block size and is written first,
         // so `b.dat`'s mapping root is allocated above every block `a.dat` uses.
+        // `b.dat` is larger than one block, so it has a mapping root at all; a
+        // member of one block is stored direct, without one.
         let a: Vec<u8> = (0..(3 * BS) as u32).map(|i| (i % 251) as u8).collect();
-        let b: Vec<u8> = (0..100u32).map(|i| ((i + 3) % 251) as u8).collect();
+        let b: Vec<u8> = (0..(BS + 100) as u32).map(|i| ((i + 3) % 251) as u8).collect();
         write_minimal_ctfs(&path, &[("a.dat", &a), ("b.dat", &b)]).unwrap();
 
         let full = std::fs::read(&path).unwrap();
@@ -2004,5 +2115,236 @@ mod tests {
             msg.contains("b.dat"),
             "the refusal does not name the lost stream: {msg}"
         );
+    }
+
+    // ── Container version 5 (ctfs-container.md §1, §2, §4) ───────────────
+
+    const BIT63: u64 = 1 << 63;
+
+    /// A raw version 5 container of `blocks` 4096-byte blocks with the given
+    /// `(slot, name, size, map_block)` directory entries; every other byte is
+    /// zero, so a test writes the blocks it needs into the returned image.
+    fn raw_v5(blocks: usize, max_root_entries: u32, entries: &[(usize, &str, u64, u64)]) -> Vec<u8> {
+        let mut buf = vec![0u8; blocks * 4096];
+        buf[0..5].copy_from_slice(&CTFS_MAGIC);
+        buf[5] = 5;
+        buf[8..12].copy_from_slice(&4096u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&max_root_entries.to_le_bytes());
+        for &(slot, name, size, map_block) in entries {
+            let off = 16 + slot * 24;
+            buf[off..off + 8].copy_from_slice(&size.to_le_bytes());
+            buf[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
+            buf[off + 16..off + 24].copy_from_slice(&base40_encode(name).unwrap().to_le_bytes());
+        }
+        buf
+    }
+
+    fn put_u64(buf: &mut [u8], block: usize, slot: usize, value: u64) {
+        let off = block * 4096 + slot * 8;
+        buf[off..off + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn entry_fields(raw: &[u8], slot: usize) -> (u64, u64) {
+        let off = 16 + slot * 24;
+        let size = u64::from_le_bytes(raw[off..off + 8].try_into().unwrap());
+        let map_block = u64::from_le_bytes(raw[off + 8..off + 16].try_into().unwrap());
+        (size, map_block)
+    }
+
+    /// A container whose version byte is not 5 is refused by every open path,
+    /// and the refusal names the version it found and the one it reads.
+    #[test]
+    fn a_container_of_another_version_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.ct");
+        write_minimal_ctfs(&path, &[("meta.dat", b"x")]).unwrap();
+        let mut raw = std::fs::read(&path).unwrap();
+        for version in [2u8, 3, 4, 6] {
+            raw[5] = version;
+            std::fs::write(&path, &raw).unwrap();
+            let err = CtfsReader::from_bytes(raw.clone()).unwrap_err();
+            assert!(
+                matches!(err, CtfsError::UnsupportedVersion(v) if v == version),
+                "version {version} was not refused as an unsupported version: {err}"
+            );
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&format!("version {version}")) && msg.contains('5'),
+                "the refusal does not name both versions: {msg}"
+            );
+            let follow = FollowFileSource::open(&path);
+            assert!(
+                matches!(follow, Err(CtfsError::UnsupportedVersion(v)) if v == version),
+                "the follow source opened a version {version} container"
+            );
+        }
+    }
+
+    /// The test writer lays members out as a version 5 writer must: an empty
+    /// member owns no block, a member of at most one block is a tagged direct
+    /// block with no mapping block, and a larger one is mapped.
+    #[test]
+    fn the_test_writer_writes_version_5_layouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("layouts.ct");
+        let small: Vec<u8> = (0..100u32).map(|i| i as u8).collect();
+        let full: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let big: Vec<u8> = (0..4097u32).map(|i| (i % 249) as u8).collect();
+        write_minimal_ctfs(
+            &path,
+            &[("small", &small), ("empty", &[]), ("full", &full), ("big", &big)],
+        )
+        .unwrap();
+        let raw = std::fs::read(&path).unwrap();
+        assert_eq!(raw[5], 5, "the test writer must write container version 5");
+
+        let (size, map) = entry_fields(&raw, 0);
+        assert_eq!(size, 100);
+        assert_ne!(map & BIT63, 0, "a one-block member must carry the direct tag");
+        let b = (map & !BIT63) as usize;
+        assert_eq!(&raw[b * 4096..b * 4096 + 100], small.as_slice());
+
+        assert_eq!(entry_fields(&raw, 1), (0, 0), "an empty member owns no block");
+
+        let (size, map) = entry_fields(&raw, 2);
+        assert_eq!(size, 4096);
+        assert_ne!(map & BIT63, 0, "a member of exactly one block is direct");
+
+        let (size, map) = entry_fields(&raw, 3);
+        assert_eq!(size, 4097);
+        assert_eq!(map & BIT63, 0, "a member past one block is mapped");
+
+        // Block 0, small, full, and big's mapping block plus two data blocks.
+        assert_eq!(
+            raw.len(),
+            6 * 4096,
+            "a small or empty member must not own a mapping block"
+        );
+
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert_eq!(r.read_file("small").unwrap(), small);
+        assert_eq!(r.read_file("empty").unwrap(), Vec::<u8>::new());
+        assert_eq!(r.read_file("full").unwrap(), full);
+        assert_eq!(r.read_file("big").unwrap(), big);
+    }
+
+    /// A tagged `MapBlock` names the member's only data block, and is read
+    /// without reading a mapping block.
+    #[test]
+    fn a_direct_member_is_read_from_its_tagged_block() {
+        let mut raw = raw_v5(2, 31, &[(0, "x.dat", 5, BIT63 | 1)]);
+        raw[4096..4101].copy_from_slice(b"hello");
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert_eq!(r.read_file("x.dat").unwrap(), b"hello");
+        assert_eq!(r.read_file_range("x.dat", 1, 3).unwrap(), b"ell");
+        assert_eq!(r.read_file_range_available("x.dat", 2, 3).unwrap(), b"llo");
+    }
+
+    /// An untagged `MapBlock` is a mapping whatever `Size` says: a live reader
+    /// can observe a member between the two stores of its direct-to-mapped
+    /// transition, with the old size and the new mapping.
+    #[test]
+    fn a_mapped_member_of_one_block_is_read_through_its_mapping() {
+        let mut raw = raw_v5(3, 31, &[(0, "x.dat", 5, 1)]);
+        put_u64(&mut raw, 1, 0, 2);
+        raw[2 * 4096..2 * 4096 + 5].copy_from_slice(b"hello");
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert_eq!(r.read_file("x.dat").unwrap(), b"hello");
+    }
+
+    /// One block cannot hold more than `BlockSize` bytes, so a tagged member
+    /// claiming more is refused rather than read past its block.
+    #[test]
+    fn a_direct_member_larger_than_one_block_is_refused() {
+        let raw = raw_v5(4, 31, &[(0, "x.dat", 5000, BIT63 | 1)]);
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        let msg = r.read_file("x.dat").unwrap_err().to_string();
+        assert!(
+            msg.contains("x.dat") && msg.contains("5000") && msg.contains("one block"),
+            "the refusal does not name the member and why: {msg}"
+        );
+    }
+
+    fn assert_null_refusal(raw: Vec<u8>, what: &str) {
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert!(
+            r.has_file("x.dat"),
+            "{what}: a member with a null pointer is still present"
+        );
+        let err = r.read_file("x.dat").unwrap_err();
+        assert!(
+            matches!(err, CtfsError::Corrupt(_)),
+            "{what}: a null pointer must be refused as damage, not reported as {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("x.dat") && msg.contains("null"),
+            "{what}: the refusal does not name the member and the null pointer: {msg}"
+        );
+        assert!(
+            !msg.contains("truncat"),
+            "{what}: a null pointer is not a truncation, and the refusal must not say it is: {msg}"
+        );
+    }
+
+    /// `ctfs-container.md` §4 "Null block pointers on the read path", for each
+    /// place a null can sit in a version 5 container.
+    #[test]
+    fn a_null_block_pointer_is_refused_by_name_and_not_as_a_truncation() {
+        assert_null_refusal(raw_v5(2, 31, &[(0, "x.dat", 10, 0)]), "MapBlock 0 with a size");
+        assert_null_refusal(raw_v5(2, 31, &[(0, "x.dat", 10, BIT63)]), "a tagged block 0");
+        assert_null_refusal(raw_v5(2, 31, &[(0, "x.dat", 10, 1)]), "a null data pointer");
+        let mut raw = raw_v5(3, 31, &[(0, "x.dat", 600 * 4096, 1)]);
+        put_u64(&mut raw, 1, 511, 0);
+        for slot in 0..511 {
+            put_u64(&mut raw, 1, slot, 2);
+        }
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        let msg = r.read_file_range("x.dat", 511 * 4096, 10).unwrap_err().to_string();
+        assert!(
+            msg.contains("x.dat") && msg.contains("null") && !msg.contains("truncat"),
+            "a null chain pointer: {msg}"
+        );
+    }
+
+    /// An empty member, written as `(0, 0)`, reads as empty and is present.
+    #[test]
+    fn an_empty_member_is_present_and_empty() {
+        let raw = raw_v5(1, 31, &[(0, "x.dat", 0, 0)]);
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert!(r.has_file("x.dat"));
+        assert_eq!(r.read_file("x.dat").unwrap(), Vec::<u8>::new());
+    }
+
+    /// A block number out of the container is refused before it is multiplied
+    /// by the block size, on the strict and the tolerant path alike.
+    #[test]
+    fn a_block_number_past_any_offset_is_refused_without_overflowing() {
+        let huge = 1u64 << 60;
+        for map_block in [huge, BIT63 | huge] {
+            let raw = raw_v5(2, 31, &[(0, "x.dat", 10, map_block)]);
+            let mut r = CtfsReader::from_bytes(raw).unwrap();
+            assert!(r.read_file("x.dat").is_err(), "MapBlock {map_block:#x} was read");
+            assert!(
+                r.read_file_range_available("x.dat", 0, 10).is_err(),
+                "MapBlock {map_block:#x} was read by the tolerant path"
+            );
+        }
+        let mut raw = raw_v5(2, 31, &[(0, "x.dat", 10, 1)]);
+        put_u64(&mut raw, 1, 0, huge);
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert!(r.read_file("x.dat").is_err());
+        assert!(r.read_file_range_available("x.dat", 0, 10).is_err());
+    }
+
+    /// `MaxRootEntries = 0` fills block 0 with entries (`ctfs-container.md`
+    /// §1, "Auto-fill").
+    #[test]
+    fn an_auto_filled_root_directory_is_read_to_the_end_of_block_0() {
+        let last = (4096 - 16) / 24 - 1;
+        let mut raw = raw_v5(2, 0, &[(last, "x.dat", 3, BIT63 | 1)]);
+        raw[4096..4099].copy_from_slice(b"abc");
+        let mut r = CtfsReader::from_bytes(raw).unwrap();
+        assert_eq!(r.read_file("x.dat").unwrap(), b"abc");
     }
 }
