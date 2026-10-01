@@ -921,6 +921,9 @@ const
     # which is how `--use-interpose` was found landing in the program's argv.
     "src/tests/cli/recorder_env_test.nim",
     "src/tests/cli/recorder_env_e2e_test.nim",
+    # `ct record prog -- a b`: the program may stand before `--` (CLI/ct/record.md,
+    # "Program arguments"); the resolver and both forms through the real ct.
+    "src/tests/cli/record_child_argv_test.nim",
   ]
 
   CliReviewGateTests* = [

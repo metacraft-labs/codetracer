@@ -805,7 +805,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "0bbdfd4134aaac96421ff688a04673a5e603f5ea",
+        "rev": "9c4bcfff106f7c083974903ba5153be50be91a39",
         "type": "github"
       },
       "original": {
