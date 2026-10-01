@@ -6617,3 +6617,22 @@ Two traps in the same area, both live:
   from the build sandbox: fetch the rev with your credentials, strip .git, check
   `nix hash path` equals the drv's outputHash, then
   `nix-store --add-fixed --recursive sha256 <dir-named-like-the-drv>`.
+- An Electron window has NO reload path: the index process sends the renderer
+  its startup message (`CODETRACER::init` / `no-trace` / `welcome-screen`)
+  exactly once, and only `ct host` (server builds) replays the bootstrap cache
+  on reconnect. A Playwright `ctPage.reload()` in Electron leaves an empty
+  window (no `.lm_goldenlayout`, ever). Layout specs must damage a layout file
+  in a fixture-less `beforeEach`, before the app launches -- the loader reads
+  the files once, at startup (see layout_resilience.spec.ts).
+- `test_editor_change_algebra.nim`'s `ExpectedAssertions` grows by 3 for every
+  production `.nim` added anywhere under `src/frontend/viewmodel/` (outside
+  `tests/`), via its derived `ProductionModules` sweep. Adding a ViewModel
+  module means re-pinning it (and the plat25 harness control hash), naming the
+  commit that added the module.
+- The captured dev shell exports `CODETRACER_BUILD_DIR` for the checkout it was
+  entered in. GUI specs that fall back to it run THAT checkout's build from a
+  worktree; set it (and PATH) to the worktree's `src/build-debug`, or use a
+  prepared prefix (`CODETRACER_TEST_PREFIX`, `scripts/plat45-desktop-prefix.sh`).
+- codetracer imports `nim_everywhere/rs256` (identity), which exists from
+  nim-everywhere 955d13f on; the flake/repro.lock pin and the workspace's
+  `../nim-everywhere` checkout must be at or past it.
