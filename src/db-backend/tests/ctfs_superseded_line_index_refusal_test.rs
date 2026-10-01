@@ -125,10 +125,6 @@ fn container(addresses: &[u64], version: u16) -> Container {
             .iter()
             .map(|a| StepStreamRecord::Step { global_line_index: *a })
             .collect(),
-        // Every step absolute, so each address is on the wire as written rather
-        // than as a delta from its predecessor. The fixture is about which
-        // integers the steps carry.
-        forced_absolute: vec![true; addresses.len()],
     };
     let encoded = encode_step_stream(&stream, 4, 3).expect("encode steps.dat");
 

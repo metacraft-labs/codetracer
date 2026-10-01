@@ -2044,6 +2044,17 @@ impl CTFSTraceReader {
     /// population (steps, calls, events, step_map) comes next.
     #[cfg(feature = "nim-reader")]
     fn open_new_format_nim(ctfs: &mut CtfsReader, ct_file_path: &Path, follow: bool) -> Result<Self, Box<dyn Error>> {
+        // A `meta.dat` of another schema version is refused here, with this
+        // crate's diagnostic, so both entry points (this one and the
+        // pure-Rust `from_bytes`) say the same thing about it -- including,
+        // for a version before the global line index correction, what
+        // reading it anyway would do.
+        if let Ok(meta_bytes) = ctfs.read_file("meta.dat")
+            && !meta_bytes.is_empty()
+            && let Err(e @ meta_dat::MetaDatError::UnsupportedVersion(_)) = meta_dat::parse_meta_dat(&meta_bytes)
+        {
+            return Err(format!("meta.dat is not readable: {e}").into());
+        }
         use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
         use std::path::PathBuf;
 
@@ -5182,16 +5193,16 @@ mod tests {
     /// STRUCTURAL PRESENCE WINS: a container whose `steps.dat` is present but
     /// whose `has_step_stream` (bit 9) hint is CLEAR must still read its steps.
     ///
-    /// The db-backend `serialize_meta_dat` emits only bits 0..3, so re-stamping
-    /// the real bundle's meta leaves `steps.dat` structurally present with the
-    /// step bit cleared — exactly the still-recording shape the spec forbids a
-    /// reader from gating on.
+    /// Re-stamping the real bundle's meta with the step bit cleared leaves
+    /// `steps.dat` structurally present under a clear hint — exactly the shape
+    /// the spec forbids a reader from gating on.
     #[test]
     fn step_stream_read_by_structural_presence_when_step_bit_clear() {
         let (meta, others) = real_split_bundle_files();
 
         let mut md = meta_dat::parse_meta_dat(&meta).unwrap();
         md.mcr = None;
+        md.flags &= !meta_dat::FLAG_HAS_STEP_STREAM;
         let cleared = meta_dat::serialize_meta_dat(&md);
         assert_eq!(
             meta_dat::parse_meta_dat(&cleared).unwrap().flags & meta_dat::FLAG_HAS_STEP_STREAM,
