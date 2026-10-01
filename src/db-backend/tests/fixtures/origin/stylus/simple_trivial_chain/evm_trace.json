@@ -1,0 +1,10 @@
+[
+  {"args":"0x00000004","endInk":25400000,"name":"user_entrypoint","outs":"0x","startInk":25400000},
+  {"args":"0x","endInk":25377796,"name":"msg_reentrant","outs":"0x00000000","startInk":25386196},
+  {"args":"0x0000","endInk":25350726,"name":"pay_for_memory_grow","outs":"0x","startInk":25359126},
+  {"args":"0x","endInk":25267829,"name":"read_args","outs":"0x1a43c338","startInk":25281269},
+  {"args":"0x","endInk":25212203,"name":"msg_value","outs":"0x0000000000000000000000000000000000000000000000000000000000000000","startInk":25225643},
+  {"args":"0x00","endInk":24984603,"name":"storage_flush_cache","outs":"0x","startInk":25052676},
+  {"args":"0x000000000000000000000000000000000000000000000000000000000000000a","endInk":24928044,"name":"write_result","outs":"0x","startInk":24969206},
+  {"args":"0x","endInk":25400000,"name":"user_returned","outs":"0x00000000","startInk":25400000}
+]

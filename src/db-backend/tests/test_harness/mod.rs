@@ -2134,7 +2134,12 @@ pub fn find_wazero() -> Option<PathBuf> {
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev_locations = ["../../src/build-debug/bin/wazero", "../../result/bin/wazero"];
+    let dev_locations = [
+        "../../src/build-debug/bin/wazero",
+        "../../result/bin/wazero",
+        // Sibling recorder repo (workspace layout), built with `just build`.
+        "../../../codetracer-wasm-recorder/wazero",
+    ];
     for loc in dev_locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
@@ -2143,6 +2148,32 @@ pub fn find_wazero() -> Option<PathBuf> {
     }
 
     None
+}
+
+/// A `Command` for the wazero binary at `wazero`.
+///
+/// A wazero built in the sibling `codetracer-wasm-recorder` checkout links the
+/// CTFS writer from the sibling `codetracer-trace-format-nim` checkout, which
+/// may be the shared `libcodetracer_trace_writer.so`; that directory is put on
+/// the loader path so such a binary runs outside the recorder's dev shell.
+fn wazero_command(wazero: &Path) -> Command {
+    let mut cmd = Command::new(wazero);
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ffi_dir = manifest_dir.join("../../../codetracer-trace-format-nim");
+    if cfg!(target_os = "linux") && ffi_dir.join("libcodetracer_trace_writer.so").is_file() {
+        let ffi_dir = safe_canonicalize(&ffi_dir);
+        let joined = match env::var_os("LD_LIBRARY_PATH") {
+            Some(existing) if !existing.is_empty() => {
+                let mut v = ffi_dir.into_os_string();
+                v.push(":");
+                v.push(existing);
+                v
+            }
+            _ => ffi_dir.into_os_string(),
+        };
+        cmd.env("LD_LIBRARY_PATH", joined);
+    }
+    cmd
 }
 
 /// Build a WASM test program from a Cargo project directory.
@@ -2195,7 +2226,7 @@ fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let output = Command::new(&wazero)
+    let output = wazero_command(&wazero)
         .args([
             "run",
             "--out-dir",
@@ -2231,7 +2262,7 @@ pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_pa
     let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let output = Command::new(&wazero)
+    let output = wazero_command(&wazero)
         .args([
             "run",
             "-stylus",
@@ -2252,6 +2283,80 @@ pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_pa
     }
 
     Ok(())
+}
+
+/// Name of the recorded Stylus host-interaction capture inside a Stylus
+/// contract fixture project.
+pub const STYLUS_EVM_TRACE_FILE: &str = "evm_trace.json";
+
+/// Build the debug wasm of a Stylus contract project.
+///
+/// The debug profile keeps the DWARF that maps instructions back to source
+/// lines and locates locals; the replay needs it to produce steps and
+/// values. The build goes to a per-project target directory under the
+/// test-target scratch area, so the fixture tree stays clean and repeated
+/// runs reuse the compiled dependencies.
+pub fn build_stylus_debug_wasm(project_dir: &Path) -> Result<PathBuf, String> {
+    let cargo_toml = project_dir.join("Cargo.toml");
+    let cargo_content =
+        fs::read_to_string(&cargo_toml).map_err(|e| format!("failed to read {}: {}", cargo_toml.display(), e))?;
+    let pkg_name = cargo_content
+        .lines()
+        .find(|l| l.trim_start().starts_with("name"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .ok_or_else(|| format!("failed to parse package name from {}", cargo_toml.display()))?;
+    let dir_name = project_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| pkg_name.clone());
+    let target_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("stylus-contracts")
+        .join(dir_name);
+
+    let output = Command::new("cargo")
+        .args(["build", "--lib", "--target", "wasm32-unknown-unknown"])
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .current_dir(project_dir)
+        .output()
+        .map_err(|e| format!("failed to run cargo build for the Stylus contract: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Stylus contract build failed in {}:\nstdout: {}\nstderr: {}",
+            project_dir.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let wasm_path = target_dir
+        .join("wasm32-unknown-unknown/debug")
+        .join(format!("{}.wasm", pkg_name.replace('-', "_")));
+    if !wasm_path.is_file() {
+        return Err(format!("Stylus contract wasm not found at {}", wasm_path.display()));
+    }
+    Ok(wasm_path)
+}
+
+/// Record a Stylus contract project through the Stylus replay pipeline.
+///
+/// `project_dir` is a Stylus contract crate carrying the host-interaction
+/// capture of one transaction against it ([`STYLUS_EVM_TRACE_FILE`], the
+/// `debug_traceTransaction` / `stylusTracer` response that
+/// `cargo stylus trace` prints). The contract's debug wasm is built and
+/// re-executed by `wazero run -stylus`, whose `vm_hooks` host module answers
+/// every hostio from that capture; the replay is the materialized trace.
+pub fn record_stylus_project_trace(project_dir: &Path, trace_dir: &Path) -> Result<(), String> {
+    let evm_trace = project_dir.join(STYLUS_EVM_TRACE_FILE);
+    if !evm_trace.is_file() {
+        return Err(format!(
+            "Stylus host-interaction capture {} is missing; regenerate it with the \
+             fixture's regenerate.sh (needs a Nitro dev node, cargo-stylus and cast)",
+            evm_trace.display()
+        ));
+    }
+    let wasm = build_stylus_debug_wasm(project_dir)?;
+    record_stylus_wasm_trace(&wasm, trace_dir, &evm_trace)
 }
 
 /// Record a Python trace by running the Rust-backed CTFS Python recorder.
@@ -4742,6 +4847,8 @@ impl TestRecording {
                 record_wasm_trace(&wasm_binary, &trace_dir)?;
             }
             Language::Solidity => record_solidity_trace(source_path, &trace_dir)?,
+            // source_path is the Stylus contract project directory.
+            Language::Stylus => record_stylus_project_trace(source_path, &trace_dir)?,
             Language::Masm => record_masm_trace(source_path, &trace_dir)?,
             Language::Sway => record_fuel_trace(source_path, &trace_dir)?,
             Language::Move => record_move_trace(source_path, &trace_dir)?,
