@@ -140,6 +140,7 @@ import codetracer_ctfs/container
 import codetracer_trace_writer/meta_dat
 import codetracer_trace_writer/span_stream
 import codetracer_trace_writer/new_trace_reader
+import codetracer_trace_writer/step_encoding
 import codetracer_trace_writer/global_line_index
 from codetracer_trace_writer/multi_stream_writer import DefaultLinesPerFile
 
@@ -572,8 +573,9 @@ proc checkFixtureAggregates(d: Diagnostics; lang: LanguageRow;
     let bucket = statusBucket(numericMeta(span, "http.status_code"))
     if bucket notin buckets: buckets.add(bucket)
 
-  d.wantEq("session", "contiguous_on_one_thread rows (" &
-    lang.structuralNote & ")", contiguous, lang.contiguousRows)
+  if not lang.contiguityRacesInTheProgram:
+    d.wantEq("session", "contiguous_on_one_thread rows (" &
+      lang.structuralNote & ")", contiguous, lang.contiguousRows)
   d.wantEq("session", "concurrent_with_siblings rows (" &
     lang.structuralNote & ")", concurrent, lang.concurrentRows)
   d.wantEq("session", "rows carrying error.message (" &
@@ -589,6 +591,42 @@ proc checkFixtureAggregates(d: Diagnostics; lang: LanguageRow;
   d.want("session", buckets.len >= 2,
     "every row falls in the same status bucket (" & buckets.join(", ") &
     "), so this fixture no longer exercises the panel's colouring")
+
+proc checkContiguityAgainstThreadSwitches(d: Diagnostics; lang: LanguageRow;
+                                          containerPath: string;
+                                          settled: seq[SpanRecord]) =
+  ## A row's ``contiguous_on_one_thread`` bit says its step range is one
+  ## uninterrupted run of its own thread: no ``ThreadSwitch`` inside
+  ## ``[start_step, end_step]`` hands the timeline to another thread.  The
+  ## recording carries the switches, so each row's bit is checked against
+  ## them rather than counted (nested-trace-correlation.md, structural bit 0).
+  if lang.fidelity == sfNoStepStream:
+    return
+  var traceRes = openNewTrace(containerPath)
+  if traceRes.isErr:
+    d.note("contiguity", "openNewTrace failed: " & traceRes.error)
+    return
+  var trace = traceRes.get()
+  for i, span in settled:
+    if span.isOpen or span.isExternal:
+      continue
+    let ctx = "row " & $i & " (" & span.label & ")"
+    var interleaved = false
+    var readable = true
+    for n in span.startStep .. span.endStep:
+      let ev = trace.step(n)
+      if ev.isErr:
+        d.note(ctx, "step " & $n & " does not decode: " & ev.error)
+        readable = false
+        break
+      if ev.get().kind == sekThreadSwitch and ev.get().threadId != span.threadId:
+        interleaved = true
+    if readable:
+      d.want(ctx, span.contiguousOnOneThread == not interleaved,
+        "contiguous_on_one_thread is " & $span.contiguousOnOneThread &
+        " but the recording " &
+        (if interleaved: "switches to another thread" else: "has no switch to another thread") &
+        " inside steps " & $span.startStep & ".." & $span.endStep)
 
 proc checkBindingsResolvable(d: Diagnostics; lang: LanguageRow;
                              containerPath: string; pathCount: int;
@@ -819,6 +857,7 @@ suite "RS-M12 cross-language request-span conformance":
           checkSpan(d, lang, i, span, prev)
         checkFixtureAggregates(d, lang, settled)
         checkBindingsResolvable(d, lang, containerPath, pathCount, settled)
+        checkContiguityAgainstThreadSwitches(d, lang, containerPath, settled)
         checkViewModel(d, lang, settled)
         checkedLanguages += 1
 
