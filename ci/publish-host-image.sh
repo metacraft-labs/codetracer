@@ -176,6 +176,112 @@ find "${rootfs}" -name '.wh.*' -print0 | while IFS= read -r -d '' marker; do
 	rm -rf -- "${victim}" "${marker}"
 done
 
+echo "==> writing the Incus init"
+# AN OCI IMAGE AND AN INCUS CONTAINER START DIFFERENTLY, and the difference is
+# the whole of this step.
+#
+# An OCI runtime reads `config.Entrypoint` — `/bin/ct host --bind 0.0.0.0` — and
+# hands the container a configured network. An Incus container ignores that
+# config entirely: it boots `/sbin/init`, and its NIC comes up with NO address,
+# because a managed bridge hands addresses out over DHCP to a client INSIDE the
+# container. Converted without an init, this image produces a container the
+# substrate can RESOLVE and cannot RUN; converted with an init but no DHCP
+# client, it produces one that boots with an interface that is up and unusable
+# — which from outside is indistinguishable from one that was never attached,
+# and is what made isonim-platform's seam S81 take four months to find.
+#
+# So this is the same init `isonim-platform/session/src/image.nim` writes, for
+# the same reasons, and the comments there are the long form of every line
+# here. The three that are easy to get wrong:
+#
+#   * `/run/isonim-net.status` is written `pending` FIRST, before anything that
+#     can block, so a reader arriving during boot sees "not yet" rather than
+#     nothing. Three states, not two.
+#   * dhcpcd runs WITHOUT `--nobackground`: the lease has to be renewed, and a
+#     client that exited would leave a long session losing its network mid-edit
+#     with nothing running to notice.
+#   * the verdict is the OBSERVED DEFAULT ROUTE, never the client's exit
+#     status — a client can exit 0 having configured nothing, and non-zero
+#     having configured IPv4 and only failed at IPv6.
+#
+# The route test is `[ -n "$(...)" ]` and NOT `| grep -q .`, which is what the
+# substrate's own init uses. `grep` is not in this image — it is GNU grep, a
+# separate package from coreutils — so the piped form failed silently and the
+# status file read `no-lease` while `dhcpcd.log` said `leased 10.159.161.115`
+# and `ip route` showed the default route. Measured 2026-10-01. That is exactly
+# the "NIC, no lease" ambiguity the status file exists to remove, reintroduced
+# by a test that depended on a binary the image does not carry; the pure-shell
+# form removes the dependency rather than adding the package.
+#
+# `ct host` is NOT started here. The session's work arrives through
+# `incus exec`, which is what the substrate drives; an init that also launched
+# the server would race the allocator for the port and give a tenant a process
+# it never asked for.
+# MATERIALISE A DIRECTORY BEFORE WRITING INTO IT. `dockerTools` points several
+# top-level names at the store — `/etc` here is a SYMLINK — so `mkdir -p`
+# happily "succeeds" and the write that follows lands on a read-only
+# filesystem. The first run of this step failed exactly there:
+#   .../unified/rootfs/etc/dhcpcd.conf: Read-only file system
+# `chmod -R u+w` does not help: it changes the permissions of the link's target
+# in the store, not of the link.
+materialise() {
+	local d="$1"
+	if [ -L "${d}" ]; then
+		local target
+		target="$(readlink -f "${d}")"
+		rm -f "${d}"
+		mkdir -p "${d}"
+		if [ -d "${target}" ]; then
+			cp -aL "${target}/." "${d}/" 2>/dev/null || true
+			chmod -R u+w "${d}" 2>/dev/null || true
+		fi
+	else
+		mkdir -p "${d}"
+	fi
+}
+
+materialise "${rootfs}/etc"
+materialise "${rootfs}/sbin"
+materialise "${rootfs}/var"
+mkdir -p "${rootfs}/run/dhcpcd" "${rootfs}/var/lib/dhcpcd" "${rootfs}/var/log"
+# dhcpcd carries on SILENTLY without these and never obtains a lease; from the
+# host the container looks attached and healthy.
+[ -e "${rootfs}/var/run" ] || ln -s ../run "${rootfs}/var/run"
+
+# `rm -f` BEFORE each write, and this is the second half of the same trap.
+# `materialise` handles a DIRECTORY that is a link into the store; these two
+# are FILES that are. `pkgs.dhcpcd` ships `/etc/dhcpcd.conf`, so dockerTools
+# linked it, and `: >` on a symlink truncates the LINK'S TARGET — which is in
+# /nix/store, a read-only filesystem. Measured twice, with the same message
+# and two different causes:
+#   .../unified/rootfs/etc/dhcpcd.conf: Read-only file system
+# The first was the directory, the second the file; `>` follows a symlink and
+# never replaces it, so neither a `mkdir` nor a `chmod` could have helped.
+rm -f "${rootfs}/etc/dhcpcd.conf" "${rootfs}/sbin/init"
+: >"${rootfs}/etc/dhcpcd.conf"
+
+cat >"${rootfs}/sbin/init" <<'INIT'
+#!/bin/sh
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin
+echo pending > /run/isonim-net.status
+ip link set lo up 2>/dev/null
+ip link set eth0 up 2>/dev/null
+dhcpcd --timeout 15 eth0 >/var/log/dhcpcd.log 2>&1 || true
+i=0
+while [ $i -lt 20 ]; do
+  [ -n "$(ip -4 route show default 2>/dev/null)" ] && break
+  sleep 1
+  i=$((i+1))
+done
+if [ -n "$(ip -4 route show default 2>/dev/null)" ]; then
+  echo ok > /run/isonim-net.status
+else
+  echo no-lease > /run/isonim-net.status
+fi
+while true; do sleep 3600; done
+INIT
+chmod 0755 "${rootfs}/sbin/init"
+
 echo "==> writing metadata.yaml"
 # The same four keys `isonim-platform/session/src/image.nim` writes, and the
 # same constant epoch: the tarball is content-addressed, so a build timestamp

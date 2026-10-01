@@ -2047,8 +2047,37 @@
             cp -a ${codetracer}/. $out/
             chmod -R u+w $out
             rm -f $out/bin/ct
+            # THE LIBRARY PATH IS NOT OPTIONAL, and dropping it is how this
+            # package shipped a `ct` that could not start.
+            #
+            # `.ct-wrapped` `dlopen`s openssl and friends BY SONAME — the
+            # desktop `ct` wrapper carries exactly this list for that reason
+            # (`postFixup`, a few hundred lines up). Re-making the wrapper from
+            # scratch to repoint `CODETRACER_PREFIX` silently dropped it, and
+            # the symptom is only visible when the binary actually RUNS:
+            #
+            #   could not load: libcrypto.so(.3|.1.1|...)
+            #
+            # Measured inside a container launched from the published image,
+            # 2026-10-01. Everything upstream of that was green — the package
+            # built, the image built, the publication imported and the substrate
+            # RESOLVED it — because nothing in that chain starts `ct`.
+            #
+            # The comment is HERE and not among the flags: these are
+            # backslash-continued lines, so a `#` between them is an argument
+            # to `makeWrapper` rather than a comment.
             makeWrapper $out/bin/.ct-wrapped $out/bin/ct \
               --prefix PATH : $out/bin:${hostingDeps}/bin \
+              --prefix LD_LIBRARY_PATH : ${
+                pkgs.lib.makeLibraryPath [
+                  pkgs.openssl
+                  pkgs.sqlite
+                  pkgs.pcre
+                  pkgs.glib
+                  pkgs.libzip
+                  stdenv.cc.cc.lib
+                ]
+              } \
               --set CODETRACER_PREFIX ${hostingDeps}
           '';
           meta.mainProgram = "ct";
@@ -2070,6 +2099,19 @@
             pkgs.bashInteractive
             pkgs.coreutils
             pkgs.cacert
+            # THE TWO THE INCUS FORM NEEDS, and they are here rather than in
+            # the converter because a closure is the image's to declare.
+            #
+            # An OCI runtime starts `Entrypoint` and hands the container a
+            # configured network. An Incus container boots `/sbin/init` and
+            # gets an interface with NO address — a managed bridge hands those
+            # out over DHCP to a client INSIDE the container (D-S12, and
+            # `isonim-platform/session/src/image.nim` carries the same pair for
+            # the same reason). `ci/publish-host-image.sh` writes the init; it
+            # cannot conjure the binaries, so they travel with the image and
+            # both forms stay startable in their own runtime.
+            pkgs.iproute2
+            pkgs.dhcpcd
           ];
           config = {
             # `--bind 0.0.0.0` is the EXPLICIT choice WD1a's loopback default

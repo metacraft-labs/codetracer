@@ -53,6 +53,7 @@ Rossetta
 SAPI
 SHASUMS
 SIGQUIT
+SONAME
 STYLUSTMP
 Sinatra
 Solana
@@ -113,8 +114,10 @@ defun
 deserialise
 deserialised
 devshell
+dhcpcd
 direnv
 dllinject
+dlopen
 docbook
 docstrings
 doctests
@@ -143,10 +146,12 @@ healthz
 hoststate
 hotfixes
 impls
+incus
 inputarea
 instrumenter
 interning
 intraline
+iproute
 isonim
 jsre
 jstree
@@ -216,6 +221,7 @@ regen
 regs
 replayer
 replayer's
+repoint
 repr
 respawn
 rethrowing

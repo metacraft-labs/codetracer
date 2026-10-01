@@ -42,11 +42,32 @@ written" closes nothing.
 | Seam | Why it is open | What compensates |
 | --- | --- | --- |
 | **Edge cache isolation.** That an authenticated render can never be served from a shared cache to an anonymous visitor | There is no shared cache in the local loop. §4 names this as the property hardest to reproduce locally and forbids shipping on a green local run for it | The `An authenticated render never enters the shared cache` step of `deploy-web-codetracer.yml`, against `ide.codetracer.com`, on every deploy |
-| **`ct host` inside a substrate-allocated session.** The container reached through the substrate's own hostname and lease, rather than as a local process | The substrate is an allocator driven in-process by isonim-platform's api-server; no local stack stands up `ct host` behind it | Nothing yet. The pieces exist on both sides — the image publishes and resolves, `allocateFor` carries an image reference — and no test crosses the join |
+| **`ct host` SERVING inside a substrate-allocated session.** The server reachable on the container's own address | Probed 2026-10-01 against a real Incus 6.0.6, and four of the five steps now cross: the published image BOOTS as a container, its init leases an address and writes `/run/isonim-net.status` = `ok`, `/bin/ct` RUNS, and `ct host` starts and reaches its trace-loading stage with `--port` showing `auto-assign; CODETRACER_HOST_PORT`. The fifth is unproven: `ct host` requires a trace, and no fixture in this tree is in a form it accepts without an import step that wants a zip | Nothing for the last step. It is a FIXTURE gap rather than an integration one, and saying so is the point of this row — the probe is what turned "no test crosses the join" into one named step |
 | **Session TLS.** An allocated session reached over HTTPS | `Hosted-Session-Allocation.md`: _"TLS termination under the wildcard is the other half and is not implemented; it needs DNS and an issuer"_ | Nothing. It is unimplemented, not untested |
 | **The egress cap firing on a live session.** A session crossing its D-S14 cap and being evicted | `test_session_egress_policy.nim` proves the RULE and the ACL argv; `sessionctl sweep-egress` proves the verb runs. Nothing drives a session past a real cap | Nothing. The in-namespace half is `test_session_substrate.sh`'s territory and does not cover the cap |
 | **The sweeps on a timer.** Both `sweep-idle` and `sweep-egress` exist as verbs and nothing calls them periodically | Pre-existing; recorded as isonim-platform seam S44, which the egress cap now joins | Nothing. A session abandoned by its browser, or one past its cap, is reclaimed only when someone runs the verb |
 | **The renderer against the pinned `isonim-tui`.** `ui_js.nim` compiled on the revision the flake pins | The sibling checkout in this workspace is 31 commits behind and lacks `clusterDisplayWidth(cluster, ambiguous)`, so local compiles need `ISONIM_TUI_SRC` pointed at mainline | CI's `renderer-electron` lane, which uses the pin |
+
+## B2. What the probe cost, and why it is in this file
+
+The probe above was run because this register said "nothing crosses the join".
+It found **two defects that every green check upstream had missed**, and both
+are the register's own argument:
+
+- **`codetracer-host`'s wrapper dropped `LD_LIBRARY_PATH`.** The desktop `ct`
+  carries it because `.ct-wrapped` `dlopen`s openssl by SONAME; re-making the
+  wrapper to repoint `CODETRACER_PREFIX` silently lost it. The package built,
+  the image built, the publication imported and the substrate RESOLVED it —
+  and the binary could not start, under any runtime. Nothing in that chain
+  starts `ct`.
+- **The converted image's init reported `no-lease` while the network worked.**
+  Its route test was `| grep -q .`, carried over from the substrate's own init,
+  and `grep` is not in this image. `dhcpcd.log` said `leased 10.159.161.115`
+  and `ip route` showed the default route. That is exactly the "NIC, no lease"
+  ambiguity the status file exists to remove, reintroduced by a test that
+  depended on a binary the image does not carry.
+
+Neither is visible without starting the thing. That is what a seam is.
 
 ## C. Deliberately not a seam
 
