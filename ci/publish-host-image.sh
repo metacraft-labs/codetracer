@@ -52,6 +52,10 @@ while [ $# -gt 0 ]; do
 		alias_name="${2:-}"
 		shift 2
 		;;
+	--help | -h)
+		sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+		exit 0
+		;;
 	--sessionctl)
 		sessionctl_bin="${2:-}"
 		shift 2
@@ -84,8 +88,28 @@ if [ -z "${alias_name}" ]; then
 	# traced back to bytes is a name nothing can check.
 	rev="$(git rev-parse HEAD)"
 	if [ -n "$(git status --porcelain)" ]; then rev="${rev}-dirty"; fi
-	alias_name="codetracer-host:${rev}"
+	# `-` AND NOT `:`. `incus` parses `name:rest` as `remote:name`, so an alias
+	# containing a colon imports fine and is then unusable as an argument:
+	# measured 2026-10-01, `incus image delete codetracer-host:wd2verify`
+	# answered `Error: The remote "codetracer-host" doesn't exist`. The alias was
+	# still RESOLVABLE, because `resolveImage` matches alias names out of
+	# `image list --format json` rather than through argument parsing — so the
+	# publication looked entirely healthy and only an operator trying to delete
+	# or copy it would have found out.
+	alias_name="codetracer-host-${rev}"
 fi
+
+case "${alias_name}" in
+*:*)
+	# Refused rather than accepted-and-broken: see the default above. An alias
+	# with a colon is importable, resolvable, and cannot be named as an argument
+	# to any other `incus` verb.
+	echo "publish-host-image: an alias may not contain ':' —" \
+		"incus parses 'name:rest' as 'remote:name', so '${alias_name}'" \
+		"would import and then be unusable as an argument" >&2
+	exit 2
+	;;
+esac
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/ct-host-image-XXXXXX")"
 cleanup() {
