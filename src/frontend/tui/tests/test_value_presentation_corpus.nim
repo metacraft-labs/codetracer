@@ -245,6 +245,21 @@ proc brief(s: string): string =
   ## diagnostic that will be skipped.
   if s.len <= 120: s else: s[0 ..< 117] & "..."
 
+proc fieldElementText(text: string): string =
+  ## The number a `String`-carried field element denotes, spelled `0x` plus
+  ## its hex digits in lower case with the leading zeros dropped (`0x0` for
+  ## zero); "" when `text` is not a bare `0x<hex digits>` literal. Written
+  ## out here, not taken from the presenter, because it is the ORACLE for the
+  ## presenter's `pvkString` arm.
+  if text.len < 3 or not text.startsWith("0x"):
+    return ""
+  for c in text[2 .. ^1]:
+    if c notin HexDigits:
+      return ""
+  let digits = text[2 .. ^1].strip(leading = true, trailing = false,
+                                    chars = {'0'})
+  "0x" & (if digits.len == 0: "0" else: digits.toLowerAscii())
+
 proc announceSkip(res: FixtureResolution): string =
   result = missingPrereqMessage(res.spec, res.detail)
   echo "  ", result
@@ -412,11 +427,21 @@ suite "PLAT-2: one presentation, on real recordings":
           # legitimately alter the payload. Both mutations that survived this
           # suite die here: `""` is not `a.text`, and a changed sequence
           # delimiter reddens the corresponding oracle rows below.
+          #
+          # A `String` that is a bare `0x…` hex literal is a field element
+          # (Noir's `Field`, Aztec's address), which the presenter shows as the
+          # number it is — unquoted, leading zeros stripped — since
+          # `abd8b41aa` (`presenter.nim`, `builtin.scalar`, `pvkString` arm).
+          # The expectation is still derived from the adapter's payload, by
+          # `fieldElementText` below rather than by the presenter's own
+          # `normalisedHexLiteral`, so this arm keeps its independence.
           if a.text.len > 0:
             let scalarExpectation =
               case a.kind
               of pvkInt, pvkFloat, pvkBool: a.text
-              of pvkString, pvkCString: "\"" & a.text & "\""
+              of pvkString, pvkCString:
+                let field = fieldElementText(a.text)
+                if field.len > 0: field else: "\"" & a.text & "\""
               of pvkChar: "'" & a.text & "'"
               else: ""
             if scalarExpectation.len > 0:
