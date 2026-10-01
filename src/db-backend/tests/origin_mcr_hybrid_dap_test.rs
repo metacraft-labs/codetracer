@@ -17,10 +17,11 @@
 //!
 //! # SKIP discipline
 //!
-//! The tests use narrow probes — `is_ct_mcr_available()` and per-language
-//! compiler-on-PATH checks. The dev shell here has neither `ct-mcr` nor
-//! the language toolchains wired in, so every per-language test SKIPs
-//! cleanly with a precise sentinel.
+//! The tests use narrow probes — `ct-mcr` and per-language compilers on
+//! PATH. A missing one goes through `common/origin_dap_gate.rs`: a loud
+//! `SKIPPED: ... asserted NOTHING` on a developer box, and a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
+//! `CT_ORIGIN_DAP_REQUIRED=1`.
 //!
 //! Tests #1, #2, #6, #7 run end-to-end against the synthetic
 //! undo-map FFI — they drive the M17 algorithm directly through the
@@ -32,16 +33,21 @@
 //!
 //! Sentinels emitted on SKIP:
 //!
-//! - `SKIPPED: ct-mcr binary not on PATH` — covers the per-language
-//!   fixture tests.
-//! - `SKIPPED: <lang> compiler not on PATH` — covers per-language
+//! - `SKIPPED: M17 <test>: ct-mcr binary not on PATH ...` — covers the
+//!   per-language fixture tests.
+//! - `SKIPPED: M17 <test>: <tool> not on PATH ...` — covers per-language
 //!   compiler probes.
 
 mod test_harness;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Instant;
+
+use origin_dap_gate::{required_mode, unavailable};
 
 use db_backend::emulator_ffi;
 use db_backend::emulator_origin::{MCR_DEFAULT_MAX_HOPS, run_mcr_origin_chain};
@@ -57,7 +63,8 @@ use db_backend::task::{
 static FFI_LOCK: Mutex<()> = Mutex::new(());
 
 /// Narrow probe: is `ct-mcr` on PATH? Returns true if so, otherwise
-/// emits a SKIPPED sentinel and returns false.
+/// goes through the origin-DAP prerequisite gate (a loud skip, or a failure
+/// when skipping is disabled) and returns false.
 fn require_ct_mcr(test_label: &str) -> bool {
     if Command::new("ct-mcr")
         .arg("--version")
@@ -67,12 +74,12 @@ fn require_ct_mcr(test_label: &str) -> bool {
     {
         true
     } else {
-        eprintln!(
-            "SKIPPED: ct-mcr binary not on PATH (M17 {} requires the MCR recorder for an \
-             end-to-end fixture trace)",
-            test_label
-        );
-        false
+        unavailable::<()>(
+            required_mode(),
+            &format!("M17 {test_label}"),
+            "ct-mcr binary not on PATH (the MCR recorder is needed for an end-to-end fixture trace)",
+        )
+        .is_some()
     }
 }
 
@@ -86,8 +93,12 @@ fn require_gcc(test_label: &str) -> bool {
     {
         true
     } else {
-        eprintln!("SKIPPED: gcc not on PATH (M17 {} needs a C compiler)", test_label);
-        false
+        unavailable::<()>(
+            required_mode(),
+            &format!("M17 {test_label}"),
+            "gcc not on PATH (needs a C compiler)",
+        )
+        .is_some()
     }
 }
 
@@ -101,11 +112,12 @@ fn require_rustc(test_label: &str) -> bool {
     {
         true
     } else {
-        eprintln!(
-            "SKIPPED: rustc not on PATH (M17 {} needs the Rust compiler)",
-            test_label
-        );
-        false
+        unavailable::<()>(
+            required_mode(),
+            &format!("M17 {test_label}"),
+            "rustc not on PATH (needs the Rust compiler)",
+        )
+        .is_some()
     }
 }
 
@@ -119,8 +131,12 @@ fn require_nim(test_label: &str) -> bool {
     {
         true
     } else {
-        eprintln!("SKIPPED: nim not on PATH (M17 {} needs the Nim compiler)", test_label);
-        false
+        unavailable::<()>(
+            required_mode(),
+            &format!("M17 {test_label}"),
+            "nim not on PATH (needs the Nim compiler)",
+        )
+        .is_some()
     }
 }
 

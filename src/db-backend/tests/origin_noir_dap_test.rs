@@ -5,27 +5,36 @@
 //! the Noir `nargo`-based DB pipeline already exercised by
 //! `noir_flow_dap_test.rs`.
 //!
-//! The test SKIPs cleanly when the Noir recorder / nargo aren't
-//! available.
+//! When `nargo` isn't available, the test goes through
+//! `common/origin_dap_gate.rs`: a loud "asserted NOTHING" skip on a developer
+//! box, and a failure under `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
+//! `CT_ORIGIN_DAP_REQUIRED=1`.
 
 mod test_harness;
 
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use db_backend::task::{OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
     fixture_dir, load_fixture_and_query_or_skip,
 };
+use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
 
 fn require_noir_recorder() -> Option<String> {
     // The Noir pipeline is gated on `nargo` being on PATH (the
     // M3-style flow tests use the same gate).
     if !test_harness::is_command_available("nargo") {
-        eprintln!("SKIPPED: nargo is not available on PATH");
-        return None;
+        return unavailable(
+            required_mode(),
+            "Noir recorder prerequisite",
+            "nargo is not available on PATH",
+        );
     }
     Some("noir-0.30".to_string())
 }
@@ -54,10 +63,7 @@ fn noir_config(scenario: &str, version: &str, line: u32, variable: &str) -> Orig
 fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
     match load_fixture_and_query_or_skip(config) {
         QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: noir/{}: {}", scenario, reason);
-            None
-        }
+        QueryOutcome::Skipped(reason) => unavailable(required_mode(), &format!("noir/{scenario}"), &reason),
     }
 }
 

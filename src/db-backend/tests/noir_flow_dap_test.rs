@@ -45,7 +45,7 @@ fn nargo_version_label() -> String {
 /// Record a Noir trace and return the recording + breakpoint source path.
 ///
 /// This is the common setup shared by every Noir DAP test.
-fn setup_noir_trace() -> Option<(TestRecording, PathBuf)> {
+fn setup_noir_trace() -> (TestRecording, PathBuf) {
     let project_path = noir_project_path();
     assert!(
         project_path.join("Nargo.toml").exists(),
@@ -63,7 +63,7 @@ fn setup_noir_trace() -> Option<(TestRecording, PathBuf)> {
     // For Noir, the actual source file is src/main.nr within the project dir.
     let breakpoint_source = project_path.join("src/main.nr");
 
-    Some((recording, breakpoint_source))
+    (recording, breakpoint_source)
 }
 
 // ---------------------------------------------------------------------------
@@ -72,10 +72,7 @@ fn setup_noir_trace() -> Option<(TestRecording, PathBuf)> {
 
 #[test]
 fn noir_flow_dap_variables_and_values() {
-    let (recording, breakpoint_source) = match setup_noir_trace() {
-        Some(v) => v,
-        None => return,
-    };
+    let (recording, breakpoint_source) = setup_noir_trace();
 
     let db_backend = find_db_backend();
 
@@ -121,10 +118,7 @@ fn noir_flow_dap_variables_and_values() {
 ///   -> doubled should be 84
 #[test]
 fn noir_flow_dap_multi_breakpoint() {
-    let (recording, breakpoint_source) = match setup_noir_trace() {
-        Some(v) => v,
-        None => return,
-    };
+    let (recording, breakpoint_source) = setup_noir_trace();
 
     let db_backend = find_db_backend();
     let source = breakpoint_source.to_str().unwrap().to_string();
@@ -170,10 +164,7 @@ fn noir_flow_dap_multi_breakpoint() {
 ///   line 24 (breakpoint) -> next -> line 25 -> next -> line 26
 #[test]
 fn noir_flow_dap_stepping() {
-    let (recording, breakpoint_source) = match setup_noir_trace() {
-        Some(v) => v,
-        None => return,
-    };
+    let (recording, breakpoint_source) = setup_noir_trace();
 
     let db_backend = find_db_backend();
     let source = breakpoint_source.to_str().unwrap().to_string();
@@ -206,10 +197,7 @@ fn noir_flow_dap_stepping() {
 ///   add_offset -> calculate_sum -> main
 #[test]
 fn noir_flow_dap_call_stack() {
-    let (recording, breakpoint_source) = match setup_noir_trace() {
-        Some(v) => v,
-        None => return,
-    };
+    let (recording, breakpoint_source) = setup_noir_trace();
 
     let db_backend = find_db_backend();
     let source = breakpoint_source.to_str().unwrap().to_string();

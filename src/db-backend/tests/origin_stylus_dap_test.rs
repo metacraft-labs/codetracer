@@ -6,9 +6,10 @@
 //! under test is `codetracer-evm-recorder`, which records EVM
 //! execution of a compiled Stylus contract.
 //!
-//! The test SKIPs cleanly when the EVM recorder isn't available.
-//! SKIPPED is the only acceptable failure-to-run mode per the M23
-//! milestone spec.
+//! When the EVM recorder isn't available, the test goes through
+//! `common/origin_dap_gate.rs`: a loud "asserted NOTHING" skip on a developer
+//! box, and a failure under `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
+//! `CT_ORIGIN_DAP_REQUIRED=1`.
 //!
 //! The shared per-DAP helper lives in `tests/common/origin_dap.rs`.
 
@@ -17,11 +18,15 @@ mod test_harness;
 #[path = "common/origin_dap.rs"]
 mod origin_dap;
 
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use db_backend::task::{OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
     fixture_source, load_fixture_and_query_or_skip,
 };
+use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
 
 /// Skip reason emitted when the EVM recorder is missing. Stylus
@@ -29,10 +34,11 @@ use test_harness::Language;
 /// Stylus contracts compile to EVM bytecode under the hood.
 fn require_stylus_recorder() -> Option<String> {
     if test_harness::find_evm_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: EVM recorder not found (set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder)"
+        return unavailable(
+            required_mode(),
+            "Stylus recorder prerequisite",
+            "EVM recorder not found (set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder)",
         );
-        return None;
     }
     Some("stylus-1.0".to_string())
 }
@@ -54,10 +60,7 @@ fn stylus_config(scenario: &str, version: &str, line: u32, variable: &str) -> Or
 fn run_or_skip(scenario: &str, config: &OriginQueryConfig) -> Option<Box<origin_dap::OriginQueryResult>> {
     match load_fixture_and_query_or_skip(config) {
         QueryOutcome::Ok(r) => Some(r),
-        QueryOutcome::Skipped(reason) => {
-            eprintln!("SKIPPED: stylus/{}: {}", scenario, reason);
-            None
-        }
+        QueryOutcome::Skipped(reason) => unavailable(required_mode(), &format!("stylus/{scenario}"), &reason),
     }
 }
 

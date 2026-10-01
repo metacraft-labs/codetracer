@@ -27,42 +27,42 @@
 //! production bundle and checks this module's output name-for-name against the
 //! Nim FFI reader — the production decoder — on native.
 //!
-//! Note that the upstream Rust reader is NOT the comparison target, because it
-//! reads a different record layout from the one production traces carry; see
-//! "Record layouts" below. That difference is exactly what the parity test
-//! found.
+//! Since trace-format `051a298` the upstream Rust reader decodes the same
+//! record shapes as this one and refuses the same records with the same
+//! message; `tests/interning_tables_record_shape_test.rs` holds the two to that
+//! on identical bytes.
 //!
-//! # Record layouts — there are TWO, and real traces use the simpler one
+//! # Record shapes — the spec's, and nothing else
 //!
 //! Each table is a Variable-Size Record Table (`<name>.dat` + `<name>.off`)
 //! from `codetracer-trace-format-spec/internal-files.md`: `.off` holds
 //! `record_count + 1` little-endian `u64` byte offsets into `.dat` (the
 //! trailing entry is the total data length), so record `i` is
-//! `dat[off[i]..off[i + 1]]` — O(1) random access, no scan. That much is
-//! shared. The RECORD payload is not:
+//! `dat[off[i]..off[i + 1]]` — O(1) random access, no scan. Each table has ONE
+//! record shape ("Interning Tables"):
 //!
 //! ```text
-//!  [`RecordLayout::Plain`] — what the production Nim writer emits
-//!    paths.dat / funcs.dat / types.dat / varnames.dat = raw name bytes
-//!    paths.dat, when the trace is column-aware ("Layout A") =
-//!        path_len: varint, path: bytes, line_count: varint,
-//!        line_lengths: varint x line_count (zigzag deltas)
-//!
-//!  [`RecordLayout::Structured`] — M23d, what the secondary Rust writer emits
 //!    paths.dat / varnames.dat = raw bytes
 //!    funcs.dat   = global_line_index: varint, name_len: varint, name: bytes
 //!    types.dat   = kind: u8, lang_type_len: varint, lang_type: bytes,
 //!                  specific_info: CBOR of TypeSpecificInfo
+//!
+//!  when the trace is column-aware ("Layout A"):
+//!    paths.dat = path_len: varint, path: bytes, line_count: varint,
+//!                line_lengths: varint x line_count (zigzag deltas)
 //! ```
 //!
 //! Varints are unsigned LEB128, matching `meta.dat`.
 //!
-//! `meta.dat` bit 12 (`has_interning_tables`) selects between them. Note that
-//! it is NOT a presence check: the production Nim writer emits all four tables
-//! and leaves the bit clear, because the bit means "these are M23d structured
-//! records" and its records are plain. Presence is decided by asking the
-//! container for `paths.dat`; see
-//! [`InterningTables::open_from_ctfs`] for the full story.
+//! `meta.dat` bit 12 (`has_interning_tables`) says only that the tables are
+//! present; it does not select a record shape. The Nim writer wrote BARE NAMES
+//! into `funcs.dat`/`types.dat` until b891a0f (2026-09-15), with the bit clear.
+//! Such a container does not conform to the spec at any schema version, and a
+//! record in it is refused with the library readers' message, which names the
+//! remedy (re-record). Decoding it as a name instead would also misread a
+//! spec-shaped record in a bit-12-clear container, returning its varint prefix
+//! as part of the name. Presence of the tables is still decided by asking the
+//! container for `paths.dat`; see [`InterningTables::open_from_ctfs`].
 
 use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
 use num_traits::FromPrimitive;
@@ -165,11 +165,8 @@ impl VarSizeTable {
 pub struct InterningTables {
     /// Source file paths, indexed by `PathId`.
     pub paths: Vec<String>,
-    /// Function records, indexed by `FunctionId`. On the [`RecordLayout::Plain`]
-    /// layout only the name is on disk, so `path_id`/`line` are `0` — exactly
-    /// what the Nim FFI path produces. On [`RecordLayout::Structured`] the
-    /// record carries a packed `global_line_index` and the real definition site
-    /// is recovered.
+    /// Function records, indexed by `FunctionId`. Each record carries a
+    /// `global_line_index`, and the declaration site is recovered from it.
     pub functions: Vec<FunctionRecord>,
     /// Type records, indexed by `TypeId`.
     pub types: Vec<TypeRecord>,
@@ -202,38 +199,6 @@ pub struct InterningTables {
     /// more lines than that and undetectable when it is, because the resulting
     /// address is inside the next file's range.
     pub line_counts: Vec<u64>,
-    /// Which on-disk record layout these tables were decoded from.
-    pub layout: RecordLayout,
-}
-
-/// Which record layout a container's interning tables use.
-///
-/// There are TWO, and the difference is not cosmetic — it decides whether a
-/// record is a bare string or a structured blob. Getting it wrong does not
-/// produce wrong names; it produces a decode error or garbage, which is how
-/// this distinction was found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecordLayout {
-    /// **What every live recorder actually writes.** The Nim
-    /// `MultiStreamTraceWriter` interns through `interning_table.nim`'s
-    /// `ensureId`, which appends the RAW NAME BYTES and nothing else, for all
-    /// four tables. There is no `global_line_index` on a function record and no
-    /// kind byte on a type record, which is precisely why the Nim FFI reader
-    /// exposes only names and why `open_new_format_nim` stubs
-    /// `FunctionRecord::path_id`/`line` to zero and every `TypeRecord::kind` to
-    /// `Raw`. This reader reproduces that faithfully rather than inventing
-    /// data the container does not hold.
-    ///
-    /// `paths.dat` is the one exception: when the trace is column-aware its
-    /// records switch to the self-describing "Layout A" form
-    /// (`path_len` varint, path bytes, then a per-line length table).
-    Plain,
-    /// The M23d structured layout, which the SECONDARY Rust `CtfsTraceWriter`
-    /// emits and which `meta.dat` bit 12 (`FLAG_HAS_INTERNING_TABLES`)
-    /// advertises: a function record carries a packed `global_line_index`
-    /// before its name, and a type record carries a `TypeKind` ordinal and a
-    /// CBOR `TypeSpecificInfo` tail.
-    Structured,
 }
 
 impl InterningTables {
@@ -247,36 +212,17 @@ impl InterningTables {
     /// is what makes this browser-reachable: in the browser that reader is
     /// backed by in-memory VFS bytes.
     ///
-    /// # Detection is by PRESENCE; the flag selects the LAYOUT
+    /// # Detection is by PRESENCE; the flag only words a refusal
     ///
-    /// The spec gates these tables on `meta.dat` bit 12
-    /// (`FLAG_HAS_INTERNING_TABLES`), and
-    /// `codetracer_trace_reader::interning_tables_reader` keys off it alone.
-    /// **The production Nim writer does not stamp that bit** —
-    /// `MultiStreamTraceWriter` calls `initTraceInterningTables` (which creates
-    /// and fills all four tables) but its `writeMetaDat` call passes
-    /// `hasCallStream` / `hasStepStream` / `hasValueStream` /
-    /// `hasIoEventStream` / `hasSpanStream` and simply omits
-    /// `hasInterningTables`, which defaults to `false`.
-    ///
-    /// That is not merely a missing bit. The bit means "these tables are in the
-    /// M23d STRUCTURED layout", and the Nim writer's tables are NOT: its
-    /// `ensureId` appends raw name bytes with no `global_line_index` prefix and
-    /// no kind byte. So the flag is honest about the layout even though it
-    /// looks like a bug about presence, and a reader that took the flag as a
-    /// presence check would find nothing on any real trace — a blank Variables
-    /// pane over data that is sitting on disk.
-    ///
-    /// So: PRESENCE decides whether to read at all (ask the container for
-    /// `paths.dat`), and the FLAG decides how to decode
-    /// ([`RecordLayout`]).
+    /// Whether to read at all is decided by asking the container for
+    /// `paths.dat`, not by `meta.dat` bit 12, which is a presence hint. Every
+    /// `funcs.dat`/`types.dat` record is decoded in the spec's shape. The bit
+    /// only decides how a record that does not decode is described: with it
+    /// clear the record is most likely a pre-b891a0f bare name, and the refusal
+    /// says so and names the remedy (see [`bare_record_diagnosis`]).
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<InterningTables>, String> {
         let meta = ctfs.read_file("meta.dat").unwrap_or_default();
-        let layout = if meta_dat_has_interning_tables(&meta) {
-            RecordLayout::Structured
-        } else {
-            RecordLayout::Plain
-        };
+        let interning_tables_declared = meta_dat_has_interning_tables(&meta);
         // `paths.dat` is written first and unconditionally by both writers, so
         // its presence is the container's own answer to "do I carry interning
         // tables".
@@ -345,32 +291,19 @@ impl InterningTables {
         let mut functions = Vec::with_capacity(funcs_table.count());
         for id in 0..funcs_table.count() {
             let raw = funcs_table.record(id)?;
-            functions.push(match layout {
-                RecordLayout::Structured => decode_func_record(id, raw, &line_space)?,
-                RecordLayout::Plain => FunctionRecord {
-                    name: String::from_utf8_lossy(raw).into_owned(),
-                    // Not on disk in this layout. The Nim FFI reader stubs the
-                    // same two fields to zero, so this is parity rather than
-                    // loss — see `RecordLayout::Plain`.
-                    path_id: PathId(0),
-                    line: Line(0),
-                },
-            });
+            functions.push(
+                decode_func_record(raw, &line_space)
+                    .map_err(|e| bare_record_diagnosis(interning_tables_declared, "funcs.dat", id, e))?,
+            );
         }
 
         let mut types = Vec::with_capacity(types_table.count());
         for id in 0..types_table.count() {
             let raw = types_table.record(id)?;
-            types.push(match layout {
-                RecordLayout::Structured => decode_type_record(id, raw)?,
-                RecordLayout::Plain => TypeRecord {
-                    // The type NAME is all this layout stores, so `Raw` is the
-                    // only honest kind — again matching `open_new_format_nim`.
-                    kind: TypeKind::Raw,
-                    lang_type: String::from_utf8_lossy(raw).into_owned(),
-                    specific_info: TypeSpecificInfo::None,
-                },
-            });
+            types.push(
+                decode_type_record(raw)
+                    .map_err(|e| bare_record_diagnosis(interning_tables_declared, "types.dat", id, e))?,
+            );
         }
 
         Ok(Some(InterningTables {
@@ -380,7 +313,6 @@ impl InterningTables {
             variable_names,
             line_lengths,
             line_counts,
-            layout,
         }))
     }
 
@@ -457,29 +389,76 @@ fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>),
     Ok((path, lengths))
 }
 
-/// Decode one M23d-layout `funcs.dat` record into a [`FunctionRecord`].
+/// Decode one `funcs.dat` record — `global_line_index: varint, name_len:
+/// varint, name` — into a [`FunctionRecord`]. The messages are the library
+/// readers' (`decodeFuncRecord` in the Nim reader), so a caller sees one message
+/// whichever reader it used.
 ///
 /// The record's `global_line_index` addresses the declaration site in the
 /// container's own position space, the same space the step stream addresses in,
-/// so `space` recovers the `(path_id, line)` the function was defined at.
-///
-/// An address the space cannot place leaves the site at `(0, 0)` — the same
-/// stub the `Plain` layout carries, which every consumer already handles —
-/// rather than a `(path_id, line)` produced by arithmetic alone.
-fn decode_func_record(id: usize, raw: &[u8], space: &LinePositionSpace) -> Result<FunctionRecord, String> {
+/// so `space` recovers the `(path_id, line)` the function was defined at. An
+/// address the space cannot place leaves the site at `(0, 0)`, which every
+/// consumer already handles, rather than a `(path_id, line)` produced by
+/// arithmetic alone.
+fn decode_func_record(raw: &[u8], space: &LinePositionSpace) -> Result<FunctionRecord, String> {
     let mut pos = 0usize;
-    let global_line_index = decode_varint(raw, &mut pos)?;
-    let name_len = decode_varint(raw, &mut pos)? as usize;
-    if pos + name_len > raw.len() {
-        return Err(format!("funcs.dat: record {id} name extends past record"));
+    let global_line_index = decode_varint_nim(raw, &mut pos)?;
+    let name_len = decode_varint_nim(raw, &mut pos)?;
+    let left = (raw.len() - pos) as u64;
+    if left < name_len {
+        return Err(format!(
+            "funcs.dat record is truncated: declares a {name_len}-byte name with only {left} bytes left"
+        ));
     }
-    let name = String::from_utf8_lossy(&raw[pos..pos + name_len]).into_owned();
+    let name = String::from_utf8_lossy(&raw[pos..pos + name_len as usize]).into_owned();
     let (path_id, line) = space.resolve(global_line_index).unwrap_or((0, 0));
     Ok(FunctionRecord {
         name,
         path_id: PathId(path_id),
         line: Line(line),
     })
+}
+
+/// Unsigned LEB128 with the library readers' messages, for the records whose
+/// refusals must read the same in every reader.
+fn decode_varint_nim(data: &[u8], pos: &mut usize) -> Result<u64, String> {
+    let mut result: u64 = 0;
+    let mut shift: u32 = 0;
+    for _ in 0..10 {
+        if *pos >= data.len() {
+            return Err("varint: unexpected end of input".to_string());
+        }
+        let byte = data[*pos];
+        *pos += 1;
+        result |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(result);
+        }
+        shift += 7;
+    }
+    Err("varint: too many bytes (>10)".to_string())
+}
+
+/// The refusal for a `funcs.dat`/`types.dat` record that does not decode as the
+/// spec's structured record — word for word the library readers' (Nim
+/// `bareRecordDiagnosis`, Rust `InterningTablesReader::bare_record_diagnosis`).
+///
+/// With `meta.dat` bit 12 set the decode error is plain corruption and is
+/// returned as is. With it clear, the record is most likely a bare name, the
+/// shape the Nim writer wrote before b891a0f, at schema versions 4 and 5 — so
+/// no version check refuses the container, and the decoder's own message would
+/// describe neither the record nor the remedy.
+fn bare_record_diagnosis(interning_tables_declared: bool, table: &str, id: usize, decode_error: String) -> String {
+    if interning_tables_declared {
+        return decode_error;
+    }
+    format!(
+        "{table} record {id} is not the spec's structured record (internal-files.md \"Interning Tables\"); \
+         in a container with meta.dat bit 12 clear it is a bare name, the shape the Nim writer wrote before \
+         b891a0f (2026-09-15). Such a container does not conform to the spec at any schema version and is \
+         not read; re-record it with a current recorder. (Decoding it as a structured record reported: \
+         {decode_error})"
+    )
 }
 
 /// Split a line-count-table `paths.dat` record into its path and its line
@@ -516,25 +495,30 @@ fn decode_line_count_path(id: usize, raw: &[u8]) -> Result<(String, u64), String
     Ok((path, count))
 }
 
-/// Decode one `types.dat` record into a [`TypeRecord`].
+/// Decode one `types.dat` record — `kind: u8, lang_type_len: varint,
+/// lang_type, specific_info` (CBOR) — into a [`TypeRecord`], with the library
+/// readers' messages.
 ///
 /// An unrecognised `kind` ordinal degrades to [`TypeKind::Raw`] rather than
 /// failing the open: a forward-compatible writer adding a kind this build does
 /// not know about must not make the whole trace unopenable.
-fn decode_type_record(id: usize, raw: &[u8]) -> Result<TypeRecord, String> {
+fn decode_type_record(raw: &[u8]) -> Result<TypeRecord, String> {
     if raw.is_empty() {
-        return Err(format!("types.dat: record {id} is empty (missing kind byte)"));
+        return Err("types.dat record is empty: it must carry at least the kind byte".to_string());
     }
     let kind_byte = raw[0];
     let mut pos = 1usize;
-    let lang_type_len = decode_varint(raw, &mut pos)? as usize;
-    if pos + lang_type_len > raw.len() {
-        return Err(format!("types.dat: record {id} lang_type extends past record"));
+    let lang_len = decode_varint_nim(raw, &mut pos)?;
+    let left = (raw.len() - pos) as u64;
+    if left < lang_len {
+        return Err(format!(
+            "types.dat record is truncated: declares a {lang_len}-byte lang_type with only {left} bytes left"
+        ));
     }
-    let lang_type = String::from_utf8_lossy(&raw[pos..pos + lang_type_len]).into_owned();
-    pos += lang_type_len;
+    let lang_type = String::from_utf8_lossy(&raw[pos..pos + lang_len as usize]).into_owned();
+    pos += lang_len as usize;
     let specific_info: TypeSpecificInfo = cbor4ii::serde::from_slice(&raw[pos..])
-        .map_err(|e| format!("types.dat: record {id} specific_info CBOR decode failed: {e}"))?;
+        .map_err(|e| format!("types.dat record specific_info CBOR decode failed: {e}"))?;
     Ok(TypeRecord {
         kind: TypeKind::from_u8(kind_byte).unwrap_or(TypeKind::Raw),
         lang_type,
@@ -617,7 +601,7 @@ mod tests {
         encode_varint(&mut raw, 3);
         raw.extend_from_slice(b"run");
 
-        let record = decode_func_record(0, &raw, &space).unwrap();
+        let record = decode_func_record(&raw, &space).unwrap();
         assert_eq!(record.name, "run");
         assert_eq!(record.path_id, PathId(7));
         assert_eq!(record.line, Line(42));
@@ -635,21 +619,25 @@ mod tests {
         raw.extend_from_slice(b"run");
 
         let narrow = LinePositionSpace::uniform(2);
-        let record = decode_func_record(0, &raw, &narrow).unwrap();
+        let record = decode_func_record(&raw, &narrow).unwrap();
         assert_eq!(record.name, "run", "the name is still readable");
         assert_eq!(record.path_id, PathId(0));
         assert_eq!(record.line, Line(0));
     }
 
-    /// A truncated function name is an error naming the record, not a panic.
+    /// A truncated function name is an error in the library readers' words,
+    /// not a panic and not a short name.
     #[test]
     fn truncated_func_name_is_reported() {
         let mut raw = Vec::new();
         encode_varint(&mut raw, 0);
         encode_varint(&mut raw, 10);
         raw.extend_from_slice(b"ab");
-        let err = decode_func_record(3, &raw, &LinePositionSpace::uniform(1)).unwrap_err();
-        assert!(err.contains("record 3"), "{err}");
+        let err = decode_func_record(&raw, &LinePositionSpace::uniform(1)).unwrap_err();
+        assert_eq!(
+            err,
+            "funcs.dat record is truncated: declares a 10-byte name with only 2 bytes left"
+        );
     }
 
     /// An unknown `TypeKind` ordinal degrades to `Raw` so a forward-compatible
@@ -661,7 +649,7 @@ mod tests {
         raw.extend_from_slice(b"u64");
         raw.extend_from_slice(&cbor4ii::serde::to_vec(Vec::new(), &TypeSpecificInfo::None).unwrap());
 
-        let record = decode_type_record(0, &raw).unwrap();
+        let record = decode_type_record(&raw).unwrap();
         assert_eq!(record.kind, TypeKind::Raw);
         assert_eq!(record.lang_type, "u64");
     }

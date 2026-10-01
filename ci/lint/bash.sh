@@ -566,6 +566,14 @@ lint_step "contract suite: macOS reprobuild drivers stop the repro daemon" \
 lint_step "contract suite: recorder probes track the built artefact" \
 	bash ci/test/detect-siblings-recorder-artifacts-test.sh
 
+# The same detector decides which `nargo` the dev shell runs. A noir sibling's
+# build, from whatever that checkout was on when last built, must not shadow
+# the flake's pinned nargo unless asked for by name: when it did, one machine's
+# stale build made the Noir db-backend tests record containers the reader
+# refuses. Pure bash fixtures, no noir needed.
+lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling build" \
+	bash ci/test/detect-siblings-nargo-test.sh
+
 # The other half of the same defect: an honest detector reporting "not built" is
 # still a red job if no job builds it. Registered here because the check reads
 # the workflow statically -- it needs neither a runner nor a recorder -- and

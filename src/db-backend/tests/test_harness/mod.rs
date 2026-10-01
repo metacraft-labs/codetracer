@@ -2493,6 +2493,31 @@ pub fn skip_or_fail_missing_prerequisite(test_name: &str, what: &str, remedy: &s
          to make a missing prerequisite fail instead.\n",
         test_name, what, remedy
     );
+    record_skip(test_name, what);
+}
+
+/// Append one line to the lane's skip report, when the lane asked for one.
+///
+/// A skipped test is tallied by cargo and nextest as a PASS, and nextest does
+/// not print a passing test's stderr, so a loud banner alone is invisible in a
+/// CI log. `just test-rust` points `CODETRACER_TEST_SKIP_REPORT` at a file and
+/// prints every line of it after the run, so each skip is reported by the lane
+/// that took it. `test_harness::record_skip` and
+/// `common::origin_dap_gate::record_skip_to` are the two writers; keep them alike.
+pub fn record_skip(context: &str, reason: &str) {
+    let Some(report) = std::env::var_os("CODETRACER_TEST_SKIP_REPORT") else {
+        return;
+    };
+    // A lane that asked for the report and cannot get it would be back to
+    // counting this skip as a pass, so failing to write it fails the test.
+    let line = format!("{context}: {}\n", reason.replace('\n', " "));
+    use std::io::Write as _;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&report)
+        .and_then(|mut file| file.write_all(line.as_bytes()))
+        .unwrap_or_else(|e| panic!("cannot append to the skip report {}: {e}", report.to_string_lossy()));
 }
 
 /// Find the JavaScript recorder CLI entry point via CARGO_MANIFEST_DIR.
@@ -3775,16 +3800,26 @@ fn record_move_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
     Ok(())
 }
 
-/// Record a Solana/SBF trace using the `--regs` pipeline.
+/// Record a Solana/SBF trace of the program in `source_path`.
 ///
-/// Generates a synthetic register trace (.regs file) that simulates the
-/// canonical flow test computation (a=10, b=32, sum=42, doubled=84, final=94)
-/// and feeds it to the recorder along with the recorder's own binary as
-/// an ELF (for DWARF source mapping demonstration).
+/// The recorder executes a compiled SBF ELF (`record <program.so>`), so the
+/// source is compiled first with `cargo-build-sbf`, which the codetracer dev
+/// shell provides. A Solana test program here is plain Rust with a no-argument
+/// entry function — `process_instruction` (Solana's conventional handler
+/// name) or, failing that, `main` — and no SDK dependency. It is compiled
+/// inside a scratch cdylib crate that `include!`s the file verbatim, so the
+/// DWARF line table names the source file itself and its own line numbers, and
+/// whose exported `entrypoint` symbol calls that function. The profile keeps
+/// the debug info and the locals the recorder reads: `opt-level = 0`,
+/// `debug = true`, `strip = "none"`.
 ///
-/// This approach works without `cargo-build-sbf` or the full Solana SDK.
-/// For full end-to-end testing with real SBF programs, use Mollusk or
-/// LiteSVM as the execution harness (requires the Solana toolchain).
+/// The recorder is handed the UNSTRIPPED ELF under
+/// `target/sbpf-solana-solana/release/`; `target/deploy/` holds the stripped
+/// copy `cargo-build-sbf` prepares for deployment, which has no DWARF.
+///
+/// A missing `cargo-build-sbf` is reported with the harness's
+/// "is not available on PATH" sentinel, so origin tests route it through their
+/// prerequisite gate instead of recording anything else in its place.
 fn record_solana_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let recorder = find_solana_recorder().ok_or_else(|| {
         "Solana recorder not found. \
@@ -3792,54 +3827,83 @@ fn record_solana_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
              (run `cargo build` inside the codetracer-solana-recorder repo)."
             .to_string()
     })?;
+    let cargo_build_sbf = find_on_path("cargo-build-sbf").ok_or_else(|| {
+        "cargo-build-sbf is not available on PATH; it compiles the Solana test program to the SBF \
+         ELF the recorder executes. Run inside the codetracer dev shell, which provides it."
+            .to_string()
+    })?;
+
+    let source = fs::read_to_string(source_path)
+        .map_err(|e| format!("failed to read Solana program {}: {}", source_path.display(), e))?;
+    let entry = ["process_instruction", "main"]
+        .into_iter()
+        .find(|name| source.contains(&format!("fn {name}()")))
+        .ok_or_else(|| {
+            format!(
+                "{} defines neither `fn process_instruction()` nor `fn main()`; the harness needs a \
+                 no-argument entry function to call from the SBF entrypoint",
+                source_path.display()
+            )
+        })?;
+    let absolute_source = safe_canonicalize(source_path);
 
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+    let crate_dir = trace_dir.parent().unwrap_or(trace_dir).join("sbf_program");
+    let crate_src = crate_dir.join("src");
+    fs::create_dir_all(&crate_src).map_err(|e| format!("failed to create SBF crate dir: {}", e))?;
+    let crate_name = "ct_solana_test_program";
+    fs::write(
+        crate_dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [lib]\ncrate-type = [\"cdylib\"]\npath = \"src/lib.rs\"\n\n[dependencies]\n\n\
+             [profile.release]\nopt-level = 0\ndebug = true\nstrip = \"none\"\nlto = \"off\"\n\
+             overflow-checks = true\n\n[workspace]\n"
+        ),
+    )
+    .map_err(|e| format!("failed to write SBF crate manifest: {}", e))?;
+    fs::write(
+        crate_src.join("lib.rs"),
+        format!(
+            "#![allow(dead_code, unused)]\ninclude!({:?});\n\n\
+             #[no_mangle]\npub extern \"C\" fn entrypoint(_input: *mut u8) -> u64 {{\n    \
+             core::hint::black_box({entry}());\n    0\n}}\n",
+            absolute_source.to_string_lossy()
+        ),
+    )
+    .map_err(|e| format!("failed to write SBF crate source: {}", e))?;
 
-    // Generate a synthetic .regs file with the canonical arithmetic.
-    // Each row = 12 × u64 (96 bytes): r0-r10 (registers) + r11 (PC).
-    // We simulate 9 instructions that compute a=10, b=32, sum=42, doubled=84, final=94.
-    let mut regs_data = Vec::new();
-    let steps: Vec<[u64; 12]> = vec![
-        // PC=0: mov r1, 10
-        [0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        // PC=1: mov r2, 32
-        [0, 10, 32, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        // PC=2: mov r3, r1 (sum = a)
-        [0, 10, 32, 10, 0, 0, 0, 0, 0, 0, 0, 2],
-        // PC=3: add r3, r2 (sum = a + b = 42)
-        [0, 10, 32, 42, 0, 0, 0, 0, 0, 0, 0, 3],
-        // PC=4: mov r4, r3 (doubled = sum)
-        [0, 10, 32, 42, 42, 0, 0, 0, 0, 0, 0, 4],
-        // PC=5: mul r4, 2 (doubled = sum * 2 = 84)
-        [0, 10, 32, 42, 84, 0, 0, 0, 0, 0, 0, 5],
-        // PC=6: mov r0, r4 (final = doubled)
-        [84, 10, 32, 42, 84, 0, 0, 0, 0, 0, 0, 6],
-        // PC=7: add r0, r1 (final = doubled + a = 94)
-        [94, 10, 32, 42, 84, 0, 0, 0, 0, 0, 0, 7],
-        // PC=8: exit
-        [94, 10, 32, 42, 84, 0, 0, 0, 0, 0, 0, 8],
-    ];
-    for step in &steps {
-        for &val in step {
-            regs_data.extend_from_slice(&val.to_le_bytes());
-        }
+    let target_dir = crate_dir.join("target");
+    let build = Command::new(&cargo_build_sbf)
+        .arg("--manifest-path")
+        .arg(crate_dir.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .output()
+        .map_err(|e| format!("failed to run cargo-build-sbf: {}", e))?;
+    if !build.status.success() {
+        return Err(format!(
+            "cargo-build-sbf failed for {}:\nstdout: {}\nstderr: {}",
+            source_path.display(),
+            String::from_utf8_lossy(&build.stdout),
+            String::from_utf8_lossy(&build.stderr)
+        ));
     }
-
-    let regs_path = trace_dir.join("synthetic.regs");
-    fs::write(&regs_path, &regs_data).map_err(|e| format!("failed to write synthetic .regs file: {}", e))?;
-
-    // Use the recorder's own binary as the ELF (it has DWARF debug info).
-    // Source mapping will map to the recorder's own source, which is fine
-    // for verifying the pipeline works end-to-end.
-    let elf_path = &recorder;
+    let elf = target_dir
+        .join("sbpf-solana-solana")
+        .join("release")
+        .join(format!("{crate_name}.so"));
+    if !elf.is_file() {
+        return Err(format!(
+            "cargo-build-sbf succeeded but produced no unstripped ELF at {}",
+            elf.display()
+        ));
+    }
 
     let output = run_recorder_command(
         &recorder,
         &[
             "record",
-            elf_path.to_str().unwrap(),
-            "--regs",
-            regs_path.to_str().unwrap(),
+            elf.to_str().unwrap(),
             "--out-dir",
             trace_dir.to_str().unwrap(),
         ],
@@ -4615,12 +4679,14 @@ impl TestRecording {
     /// For interpreted languages, the "binary_path" is the source path itself.
     ///
     /// The temp-dir name is a function of `(language, trace_format,
-    /// version_label, process_id, source_path_hash)` so concurrent
-    /// tests within the same crate get distinct trace bundles. The
-    /// M3 origin-DAP test suites in particular invoke this helper
-    /// multiple times per process (once per fixture); reusing a
-    /// single `temp_dir` made concurrent tests stomp on each other's
-    /// trace artefacts and racing the `/tmp/codetracer/last` symlink.
+    /// version_label, process_id, source_path_hash, call_sequence)` so
+    /// every call gets its own trace bundle. The M3 origin-DAP test
+    /// suites invoke this helper once per fixture, and suites such as
+    /// `noir_flow_dap_test` record the SAME source from several tests
+    /// that run concurrently in one process; a shared `temp_dir` let one
+    /// test's cleanup delete the bundle another was replaying, and raced
+    /// the `/tmp/codetracer/last` symlink. The per-process call sequence
+    /// is what separates two calls with identical arguments.
     pub fn create_db_trace_with_format(
         source_path: &Path,
         language: Language,
@@ -4639,13 +4705,16 @@ impl TestRecording {
             source_path.hash(&mut h);
             format!("{:016x}", h.finish())
         };
+        static CALL_SEQUENCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let call_sequence = CALL_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp_dir = std::env::temp_dir().join(format!(
-            "flow_test_{}_{}_{}_{}_{}",
+            "flow_test_{}_{}_{}_{}_{}_{}",
             language.extension(),
             trace_format,
             version_label.replace('.', "_"),
             std::process::id(),
-            source_hash
+            source_hash,
+            call_sequence
         ));
 
         // Clean up any existing temp directory. In sandboxed builds (nix),

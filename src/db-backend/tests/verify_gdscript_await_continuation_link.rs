@@ -74,7 +74,7 @@ fn open_reader() -> Arc<dyn TraceReader> {
     assert!(
         ct.is_file(),
         "GDScript coroutine fixture trace missing at {} — record it with the patched engine \
-         (scripts/record-and-verify-gf10.sh in the codetracer-engine-godot fork); \
+         (scripts/regenerate-codetracer-fixtures.sh in the codetracer-engine-godot fork); \
          this test must NOT silently skip",
         ct.display()
     );

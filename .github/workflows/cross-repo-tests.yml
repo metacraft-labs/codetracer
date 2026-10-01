@@ -196,8 +196,18 @@ jobs:
           # which the token is for. The scoped extraHeader avoids all of that.
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
+          # The runner exports its own CARGO_TARGET_DIR (/build/cargo/<runner>),
+          # so a bare `cargo build` put the binary there and never at the
+          # target/debug/ct-native-replay the test step hands over. The script
+          # then found nothing, rebuilt outside this repo's LLDB shell, and died
+          # with "unable to locate shared library of liblldb" (run 35707046571).
+          # Build where the next step looks, and check it is there.
           nix develop "$CLONE_DIR" --command \
-            bash -c "cd '$CLONE_DIR' && cargo build"
+            bash -c "cd '$CLONE_DIR' && CARGO_TARGET_DIR='$CLONE_DIR/target' cargo build"
+          if [ ! -x "$CLONE_DIR/target/debug/ct-native-replay" ]; then
+            echo "::error::cargo build succeeded but $CLONE_DIR/target/debug/ct-native-replay is missing"
+            exit 1
+          fi
 
       - name: Resolve rr-backend environment paths
         id: rr-libs
