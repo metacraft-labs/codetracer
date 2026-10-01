@@ -189,6 +189,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The build alone outlasts a token (dry run 36832102898).
+          keep-refreshing: "true"
 
       - name: Build the AppImage
         env:
