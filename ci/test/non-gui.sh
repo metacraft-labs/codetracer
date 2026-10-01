@@ -17,8 +17,17 @@ case "$PLATFORM" in
 nixos)
 	# The nix dev shell hook builds and sets up the environment.
 	# Override rr-backend detection so cross-repo tests don't run here.
+	#
+	# Graceful skipping is OFF: a test whose prerequisite is missing fails
+	# instead of passing having asserted nothing. The tests needing tools this
+	# lane does not install are named in ci/test/non-gui-not-provided.linux.txt;
+	# `just test-rust` excludes them by name and prints each as NOT RUN with the
+	# lane that runs it.
 	exec nix develop .#devShells.x86_64-linux.default --command \
-		env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 just test
+		env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 \
+		CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false \
+		CODETRACER_TEST_LANE_NOT_PROVIDED=ci/test/non-gui-not-provided.linux.txt \
+		just test
 	;;
 macos)
 	REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -30,6 +39,11 @@ macos)
 	# shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT
 	source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
 	# Override rr-backend detection — rr is not available on macOS.
+	#
+	# Graceful skipping stays ON here: the macOS leg's toolset has not been
+	# enumerated the way the Linux leg's has (non-gui-not-provided.linux.txt),
+	# so a strict run would fail on tools nobody decided it should have. Every
+	# skip is still printed by `just test-rust` and annotated in CI.
 	# ``nix develop .`` selects the host-default aarch64-darwin dev shell
 	# (mirroring the nixos branch, which pins the x86_64-linux shell).
 	exec nix develop . --command \

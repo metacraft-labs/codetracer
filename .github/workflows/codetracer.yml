@@ -1462,6 +1462,10 @@ jobs:
           # (we've observed 322ms cleanly).  Let CI assert against a
           # roomier threshold without weakening the dev-machine SLA.
           CT_BENCH_STARTUP_MS_THRESHOLD: "1000"
+          # This lane has none of the recorders or runtimes, so skips stay
+          # graceful here; each one is collected and reported by the next step
+          # rather than counted as a pass.
+          CODETRACER_TEST_SKIP_REPORT: ${{ runner.temp }}/db-backend-test-skips.txt
         # The *_flow_*  tests under tests/ are end-to-end integration
         # tests that drive sibling-language recorders through the DAP
         # wire protocol; they need both the recorder binaries AND a
@@ -1480,6 +1484,22 @@ jobs:
             --skip e2e_codetracer_elixir \
             --skip e2e_codetracer_erlang
 
+
+      - name: Report db-backend tests that skipped (not verified)
+        if: always()
+        shell: bash
+        env:
+          CODETRACER_TEST_SKIP_REPORT: ${{ runner.temp }}/db-backend-test-skips.txt
+        run: |
+          if [ -s "$CODETRACER_TEST_SKIP_REPORT" ]; then
+            echo "SKIPPED (NOT VERIFIED): $(sort -u "$CODETRACER_TEST_SKIP_REPORT" | wc -l | tr -d ' ') test(s) asserted nothing in this lane:"
+            sort -u "$CODETRACER_TEST_SKIP_REPORT" | while IFS= read -r line; do
+              echo "  $line"
+              echo "::warning title=Test skipped (not verified)::$line"
+            done
+          else
+            echo "No db-backend test skipped."
+          fi
       - name: Build backend-manager
         working-directory: src/backend-manager
         shell: bash
@@ -6048,6 +6068,22 @@ jobs:
       # WASM flow tests skip automatically if wazero or wasm32-wasip1 target
       # are not available. Stylus flow tests are #[ignore] and need a devnode.
       # Cross-repo tests (rr) run in the separate test-ui-tests-rr job.
+      - name: Build ct-print (codetracer-trace-format-nim sibling)
+        # The GDScript version-attribution tests (gdh7_consumers_tell_the_truth)
+        # read recordings through `ct-print` as an independent decoder and fail
+        # without it: it is a build artefact of the trace-format-nim sibling,
+        # which this job clones but never built. Built with that repo's own
+        # recipe, inside codetracer's dev shell (which carries nim and nimble).
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-trace-format-nim"
+          nix develop "${{ github.workspace }}" --command nimble buildCtPrint
+          if [ ! -x ct-print ]; then
+            echo "::error::nimble buildCtPrint reported success but ct-print is missing; the gdh7 tests cannot run."
+            exit 1
+          fi
+
       - name: Run tests
         run: ./ci/test/non-gui.sh
         env:

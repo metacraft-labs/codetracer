@@ -846,9 +846,18 @@ test-rust:
   # test time by scripts/materialize-recording.sh, which drives the web
   # recording through `session-manager` and refuses to record without it. Build
   # it before the integration tests rather than after them.
+  # The build lands wherever CARGO_TARGET_DIR points (the CI runners set it),
+  # not necessarily under src/backend-manager/target where the script looks,
+  # so the path cargo reports is handed to the script explicitly.
   pushd ../backend-manager
-  cargo build --release --bin session-manager
+  session_manager="$(cargo build --release --bin session-manager --message-format=json-render-diagnostics \
+    | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' | tail -n 1)"
   popd
+  if [ ! -x "$session_manager" ]; then
+    echo "error: cargo build of session-manager reported no executable" >&2
+    exit 1
+  fi
+  export CODETRACER_RECORD_WEB_BIN="$session_manager"
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
   # and are run separately in cross-repo CI jobs.
@@ -865,6 +874,19 @@ test-rust:
     echo "NOT RUN in this lane (CODETRACER_RR_BACKEND_PRESENT=0): the rr origin tests"
     echo "  origin_rr_dap_test rr::*   -- they need rr + ct-native-replay; they run in"
     echo "  cross-repo-tests.yml rr-backend-tests (scripts/run-cross-repo-tests.sh origin-rr)"
+  fi
+  # A lane that runs with graceful skipping off names, in one file, the tests
+  # whose tools it does not provide (ci/test/non-gui-not-provided.linux.txt);
+  # each is excluded by name and listed here as NOT RUN with where it runs.
+  if [ -n "${CODETRACER_TEST_LANE_NOT_PROVIDED:-}" ]; then
+    not_provided="$(cd ../.. && realpath "$CODETRACER_TEST_LANE_NOT_PROVIDED")"
+    echo "NOT RUN in this lane ($CODETRACER_TEST_LANE_NOT_PROVIDED): tests whose tools it does not provide"
+    while IFS='|' read -r fset prereq lane; do
+      fset="$(echo "$fset" | xargs)"
+      case "$fset" in ''|\#*) continue ;; esac
+      filter="$filter and not $fset"
+      echo "  $fset   -- needs $(echo "$prereq" | xargs); runs in: $(echo "$lane" | xargs)"
+    done < "$not_provided"
   fi
   cargo nextest run --release --test '*' -E "$filter"
   popd

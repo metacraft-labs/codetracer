@@ -574,6 +574,12 @@ lint_step "contract suite: recorder probes track the built artefact" \
 lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling build" \
 	bash ci/test/detect-siblings-nargo-test.sh
 
+# A lane that runs with graceful skipping off excludes, by name, the tests it
+# does not provide the tools for. A misspelled or stale entry excludes nothing
+# and says nothing, so every entry must name a test binary that exists.
+lint_step "contract suite: lane not-provided lists name real test binaries" \
+	bash ci/test/lane-not-provided-test.sh
+
 # The other half of the same defect: an honest detector reporting "not built" is
 # still a red job if no job builds it. Registered here because the check reads
 # the workflow statically -- it needs neither a runner nor a recorder -- and

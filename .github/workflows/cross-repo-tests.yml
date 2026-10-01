@@ -225,6 +225,10 @@ jobs:
           echo "Resolved rr-backend PATH (first 200 chars): ${RR_PATH:0:200}..."
 
       - name: Run cross-repo integration tests
+        # Graceful skipping OFF: this lane provisions the tools its tests need,
+        # so a missing one is a failure here, not a skip that passes.
+        env:
+          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |
           CT_NATIVE_REPLAY="$(pwd)/../codetracer-native-backend/target/debug/ct-native-replay"
           echo "Using ct-native-replay: $CT_NATIVE_REPLAY"
@@ -349,6 +353,8 @@ jobs:
               bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
 
       - name: Run shell-recorder integration tests
+        # Graceful skipping OFF: this lane provisions the tools its tests need,
+        # so a missing one is a failure here, not a skip that passes.
         # CT_EMULATOR_EXTRA_NIM_PATHS: the emulator's `syscall_replay.nim`
         # imports `stew/endians2`, but `ct_emulator.nimble` does not declare
         # `stew` as a dependency, so a fresh Nim build cannot resolve the
@@ -356,6 +362,7 @@ jobs:
         # `libs/nim-stew` and `libs/nim-result`; injecting them here is what the
         # other db-backend jobs in `codetracer.yml` do.
         env:
+          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           CLONE_DIR="$(pwd)/../codetracer-shell-recorders"

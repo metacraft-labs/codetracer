@@ -147,8 +147,13 @@ jobs:
         # ensure-ct-mcr / ensure-ct-native-replay prerequisites then build
         # ct-mcr / ct-native-replay on demand via the siblings' own `just`
         # targets (direnv exec, per cross-repo-builds.md) before the tests
-        # run. Languages whose compiler is absent honest-SKIP inside the
-        # Rust tests.
+        # run.
+        #
+        # Graceful skipping OFF: codetracer's dev shell carries every compiler
+        # these tests use (gnatmake, ldc2, gfortran, go, fpc, gcc/clang, nim,
+        # rustc), so a missing one is a failure here, not a skip that passes.
+        env:
+          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |
           set -euo pipefail
           mkdir -p test-logs

@@ -1,0 +1,49 @@
+# db-backend integration tests the Linux `test-non-gui` lane does NOT provide
+# the tools for.
+#
+# That lane runs `just test-rust` with CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false,
+# so a test whose prerequisite is missing FAILS there instead of passing having
+# asserted nothing. The tests below need tools the lane does not install; they
+# are excluded by name, and `just test-rust` prints every line of this file as
+# NOT RUN, with where the test does run (or that it runs nowhere yet).
+#
+# A new test that needs a tool this lane lacks fails the lane until it is added
+# here or the lane provisions the tool. That is intended: the decision is made
+# once, in review, instead of the test quietly skipping forever.
+#
+# Format: <nextest filterset> | <prerequisite the lane lacks> | <lane that runs it>
+# ci/test/lane-not-provided-test.sh checks that every filterset names a test
+# binary that exists.
+
+binary(ada_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(c_mcr_streaming_flow_test)       | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(cpp_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(d_mcr_streaming_flow_test)       | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(fortran_mcr_streaming_flow_test) | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(go_mcr_streaming_flow_test)      | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(nim_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(pascal_mcr_streaming_flow_test)  | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(rust_mcr_streaming_flow_test)    | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(mcr_streaming_unified_reader_test) | ct-mcr, ct-native-replay | NO LANE
+binary(origin_mcr_hybrid_dap_test)      | ct-mcr | NO LANE
+
+binary(go_flow_integration)             | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
+binary(lean_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
+binary(nim_flow_integration)            | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
+binary(rust_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
+binary(origin_rr_smoke)                 | rr, ct-native-replay | NO LANE
+
+binary(origin_aiken_dap_test)           | codetracer-aiken recorder | NO LANE
+binary(origin_cairo_dap_test)           | codetracer-cairo-recorder | NO LANE
+binary(origin_circom_dap_test)          | codetracer-circom-recorder | NO LANE
+binary(origin_leo_dap_test)             | codetracer-leo-recorder | NO LANE
+binary(origin_solana_dap_test)          | codetracer-solana-recorder | NO LANE
+binary(origin_stylus_dap_test)          | codetracer-evm-recorder | NO LANE
+binary(origin_sway_dap_test)            | codetracer-fuel-recorder | NO LANE
+binary(cairo_fixture_gli_decode)        | codetracer-vscode-extension Cairo fixture | NO LANE
+
+binary(wasm_flow_dap_test)              | wazero (codetracer-wasm-recorder) | NO LANE
+binary(wasm_flow_integration)           | wazero (codetracer-wasm-recorder) | NO LANE
+binary(wasm_step_advance_test)          | wazero (codetracer-wasm-recorder) | NO LANE
+
+binary(php_flow_dap_test)               | php, codetracer-php-recorder | NO LANE
