@@ -2053,24 +2053,39 @@ pub fn find_elixir_recorder() -> Option<PathBuf> {
 /// `CODETRACER_RUBY_RECORDER_PATH` still works for out-of-tree experiments.
 ///
 /// Returns `None` if a CTFS-capable recorder is not found.
-/// Find the PHP recorder C extension.
+/// Find the PHP recorder C extension (`codetracer.so`).
 ///
 /// Search order:
-/// 1. `CODETRACER_PHP_RECORDER_PATH` env var (explicit override)
-/// 2. Sibling repo: `../../../codetracer-php-recorder/ext/modules/codetracer.so`
+/// 1. `CODETRACER_PHP_RECORDER_EXTENSION`: the extension itself, the variable
+///    `ct record` reads and `scripts/detect-siblings.sh` exports.
+/// 2. `CODETRACER_PHP_RECORDER_PATH`: the extension, or the recorder REPO,
+///    which is what `scripts/detect-siblings.sh` exports under this name; a
+///    directory is searched for `ext/modules/codetracer.so`.
+/// 3. Sibling repo: `../../../codetracer-php-recorder/ext/modules/codetracer.so`
 ///
-/// Returns `None` if the recorder is not found.
+/// Only an existing file is returned: `php -d extension=<dir>` does not fail,
+/// it just records nothing.
 pub fn find_php_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_PHP_RECORDER_EXTENSION") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
     if let Ok(path) = env::var("CODETRACER_PHP_RECORDER_PATH") {
         let p = PathBuf::from(&path);
-        if p.exists() {
+        if p.is_file() {
             return Some(p);
+        }
+        let in_repo = p.join("ext/modules/codetracer.so");
+        if in_repo.is_file() {
+            return Some(safe_canonicalize(&in_repo));
         }
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir.join("../../../codetracer-php-recorder/ext/modules/codetracer.so");
-    if path.exists() {
+    if path.is_file() {
         return Some(safe_canonicalize(&path));
     }
 
