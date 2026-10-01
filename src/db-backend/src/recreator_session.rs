@@ -671,32 +671,45 @@ impl ReplayWorker {
     }
 
     // for now: don't return a typed value here, only Ok(raw value) or an error
-    #[allow(clippy::expect_used)] // stream must be initialized before dispatch_replay_query is called
     #[cfg(any(unix, windows))]
     pub fn dispatch_replay_query(&mut self, query: ReplayQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
+        let Some(stream) = self.stream.as_mut() else {
+            return Err(format!("the replay worker is not connected; cannot send: {raw_json}").into());
+        };
+
         debug!("send to worker {raw_json}\n");
-        self.stream
-            .as_mut()
-            .expect("valid sending stream")
-            .write_all(&format!("{raw_json}\n").into_bytes())?;
         // `clippy::unused_io_amount` catched we need write_all, not write
+        if let Err(e) = stream.write_all(&format!("{raw_json}\n").into_bytes()) {
+            self.abandon_connection();
+            return Err(format!("dispatch_replay_query IO error sending {raw_json}: {e}").into());
+        }
 
         let mut res = "".to_string();
         debug!("wait to read");
 
-        let mut reader = BufReader::new(self.stream.as_mut().expect("valid receiving stream"));
-        reader.read_line(&mut res).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
-                format!(
-                    "dispatch_replay_query timed out ({:?}) waiting for worker response to: {raw_json}",
-                    replay_query_timeout()
-                )
-            } else {
-                format!("dispatch_replay_query IO error: {e}")
-            }
-        })?;
+        let read_result = BufReader::new(stream).read_line(&mut res);
+        if let Err(e) = read_result {
+            // The protocol pairs answers with queries by order alone. An
+            // answer that did not arrive is still owed: the worker writes it
+            // whenever it finishes, and the next query would read it as its
+            // own. Nothing sent on this connection can be trusted any more,
+            // so it is closed and the worker stopped; the next query starts a
+            // fresh one.
+            self.abandon_connection();
+            return Err(
+                if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
+                    format!(
+                        "dispatch_replay_query timed out ({:?}) waiting for worker response to: {raw_json}",
+                        replay_query_timeout()
+                    )
+                } else {
+                    format!("dispatch_replay_query IO error: {e}")
+                }
+                .into(),
+            );
+        }
 
         res = String::from(res.trim()); // trim newlines/whitespace!
 
@@ -740,8 +753,10 @@ impl ReplayWorker {
     }
 }
 
-impl Drop for ReplayWorker {
-    fn drop(&mut self) {
+impl ReplayWorker {
+    /// Close the connection to the worker and stop it. Used when the
+    /// connection can no longer be trusted to pair answers with queries.
+    fn abandon_connection(&mut self) {
         self.stream = None;
         if let Some(child) = self.process.as_mut() {
             let _ = child.kill();
@@ -749,6 +764,12 @@ impl Drop for ReplayWorker {
         }
         self.process = None;
         self.active = false;
+    }
+}
+
+impl Drop for ReplayWorker {
+    fn drop(&mut self) {
+        self.abandon_connection();
     }
 }
 
