@@ -58,13 +58,14 @@ concurrency:
 permissions:
   contents: read
 
-# Where the Linux jobs run is the org's shared runner selector's decision
-# (devops-modules reusable-choose-runner.yml, the one metacraft-desktop-packages'
-# publisher uses): CI_RUNNER_MODE, and for this public repository free
-# GitHub-hosted `ubuntu-24.04` by default. Its self-hosted fallback is
-# `eph-linux-x64-release`, the release lane (infra lib/infra-constants.nix
-# `releaseLane`), which a tag push can reach by name. Both have Docker for the
-# package install check.
+# The AppImage build runs on `eph-linux-x64-release`, the release lane (infra
+# lib/infra-constants.nix `releaseLane`), which a tag push can reach by name and
+# whose runners have the dev shell's dependencies cached and Docker for the
+# package install check. The two short jobs, plan and publish, run where the
+# org's shared runner selector puts them (devops-modules
+# reusable-choose-runner.yml, as metacraft-desktop-packages' publisher does):
+# free GitHub-hosted for this public repository unless CI_RUNNER_MODE says
+# otherwise, so they do not hold the lane's single slot.
 jobs:
   choose:
     # Owner: zah. Same selector, pin and rationale as metacraft-desktop-packages'
@@ -109,8 +110,12 @@ jobs:
 
   linux:
     name: Linux (x86_64) release build
-    needs: [choose, plan]
-    runs-on: ${{ fromJSON(needs.choose.outputs.runs_on) }}
+    needs: plan
+    # Always the release lane, not the selector's choice. On a GitHub-hosted
+    # runner the default dev shell is not in any binary cache it can reach, so
+    # the dry run spent its whole two hours building ~7000 derivations
+    # (sui, forc, miden, ...) before the AppImage build began (run 36808054227).
+    runs-on: eph-linux-x64-release
     timeout-minutes: 120
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -122,19 +127,6 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
-
-      # A GitHub-hosted runner has about 14 GB free; the dev shell closure and
-      # the AppImage build need more. Remove preinstalled toolchains this job
-      # never uses. A self-hosted runner skips this.
-      - name: Free disk space on a GitHub-hosted runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache /usr/share/swift /usr/local/share/boost /usr/local/julia* \
-            /opt/microsoft /opt/google /usr/lib/jvm
-          sudo docker image prune --all --force > /dev/null || true
-          df -h /
 
       # The persisted credential is used by the sibling provisioning below.
       - name: Checkout
