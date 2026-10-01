@@ -22,6 +22,7 @@
 ## by `src/tests/cli/record_portable_test.nim` without a recording.
 
 import std/strutils
+import recorder_env
 
 type
   PortableRoute* = object
@@ -100,4 +101,4 @@ proc portableRoute*(viaDispatchTable: bool, recorderLabel: string,
     result.refusal.add("help: record with --backend=mcr, which implements " &
       "--portable, or record without it.")
     return
-  result.env.add((McrPortableEnvVar, "on"))
+  result.env.add(recorderForwarding(["--portable"]).env)

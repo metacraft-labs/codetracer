@@ -915,6 +915,12 @@ const
     # traces"): the dispatcher forwards it to MCR as CT_PORTABLE=on and every
     # backend that cannot honour it refuses it by name.
     "src/tests/cli/record_portable_test.nim",
+    # Recorder options reach ct-mcr only as environment twins
+    # (CLI/ct/record.md, "Recorder options"): the table, and the real
+    # ct -> db-backend-record -> ct-native-replay chain with a stub recorder,
+    # which is how `--use-interpose` was found landing in the program's argv.
+    "src/tests/cli/recorder_env_test.nim",
+    "src/tests/cli/recorder_env_e2e_test.nim",
   ]
 
   CliReviewGateTests* = [

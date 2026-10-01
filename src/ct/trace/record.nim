@@ -1,7 +1,7 @@
 import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, options],
   multitrace,
   native_backend_selection,
-  record_assessment, recorder_dispatch, portable_route,
+  record_assessment, recorder_dispatch, portable_route, recorder_env,
   ../../common/[ lang, paths, types, trace_index, config, ct_logging ],
   ../utilities/[language_detection ],
   ../cli/build,
@@ -613,21 +613,15 @@ proc record*(lang: string,
       if nativeBackend == "mcr":
         nativeArgs = nativeArgs.concat(@["--backend", "mcr"])
         if useInterpose:
-          # Forwarded as a trailing recorder-side flag; db-backend-record
-          # already passes unknown ``--`` args through to the native
-          # recorder when ``--backend=mcr`` is in effect.
-          #
-          # THE RECORDER'S SPELLING IS ``--interpose``, NOT CODETRACER'S
-          # ``--use-interpose``. They are two different CLIs: `--use-interpose`
-          # is ct's own public flag (docs/book/src/reference/ct_cli.md), while
-          # the flag that reaches ct_cli must be the one its parser knows
-          # (`codetracer-native-recorder/ct_cli/src/ct_cli/arg_parser.nim:695`).
-          # ct_cli RETIRED `--use-interpose` and its parser's `else` branch
-          # returns `err("unknown option: ...")`, so sending the ct spelling
-          # here does not degrade — it fails the recording outright. This is
-          # the exact skew `src/common/target_assessment.nim:26` cites as the
-          # precedent for versioning the launcher protocol.
-          nativeArgs.add("--interpose")
+          # Forwarded through the environment (`recorder_env.nim`): appended
+          # here as `--interpose` it travelled behind `--` to the recorded
+          # program, and the recorder never saw it.
+          let fwd = recorderForwarding(["--use-interpose"])
+          if fwd.refusal.len > 0:
+            for line in fwd.refusal: echo line
+            quit(1)
+          for (k, v) in fwd.env:
+            putEnv(k, v)
       return recordInternal(
         dbBackendRecordExe,
         nativeArgs,
