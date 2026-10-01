@@ -1603,6 +1603,98 @@ jobs:
           [ "$fail" -eq 0 ] || { echo "the deployed artifact is not what was built" >&2; exit 1; }
           echo "the deployed bytes are the bytes that were built."
 
+      - name: An authenticated render never enters the shared cache
+        # WD4'S CACHE-ISOLATION GATE, and it is HERE because here is the only
+        # place it can be real.
+        #
+        # `local-development-parity.md` §4 names shipping on a green local run
+        # for this property as the specific mistake it exists to prevent: local
+        # proves the middleware's LOGIC, and only a real edge proves the cache —
+        # cache keys, tiered caching, and what Cloudflare actually honours are
+        # not things a `wrangler pages dev` answers for. Website-IA calls the
+        # gate absolute, so it runs on every deploy rather than on request.
+        #
+        # Four observations, and each fails differently:
+        #
+        #   1. An anonymous `/` is answered by the static branch. If the front
+        #      door proxied it, every visitor would be reaching the platform and
+        #      the anonymous path this milestone must not touch would be gone.
+        #   2. A request carrying a session cookie is answered by the ORIGIN
+        #      branch. This is the fork working; without it the gate below is
+        #      vacuous, because an un-forked response is trivially cacheable and
+        #      trivially carries no user data.
+        #   3. That response says `private, no-store` and `Vary: Cookie`. The
+        #      first keeps it out of any cache; the second keeps a cache that
+        #      ignores the first from collapsing the two states of one URL.
+        #   4. The anonymous response AFTER the authenticated one is still the
+        #      static branch. This is the actual isolation claim — if the
+        #      authenticated render had entered a shared cache, this is the
+        #      request that would be served it.
+        #
+        # `X-CodeTracer-Front-Door` is what distinguishes the branches. It is an
+        # observation the function sets and never reads, which is why asserting
+        # on it is not circular: markup both states might one day share would be.
+        if: steps.deploy.outputs.url != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="https://ide.codetracer.com"
+          fail=0
+
+          anon_headers="$(curl -sS -D - -o /dev/null "$host/" || true)"
+          anon_branch="$(printf '%s' "$anon_headers" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="x-codetracer-front-door"{print $2}')"
+          if [ -n "$anon_branch" ] && [ "$anon_branch" != "static" ]; then
+            echo "::error::an anonymous / was answered by the '$anon_branch' branch" >&2
+            fail=1
+          fi
+
+          # A cookie VALUE is enough: the front door forks on the cookie's
+          # presence by name, and whether the session is valid is the platform's
+          # question. A real token is not needed and must not be used here.
+          auth_headers="$(curl -sS -D - -o /dev/null \
+            -H 'Cookie: session_id=wd4-cache-isolation-probe' "$host/" || true)"
+          auth_branch="$(printf '%s' "$auth_headers" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="x-codetracer-front-door"{print $2}')"
+          auth_cc="$(printf '%s' "$auth_headers" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="cache-control"{print tolower($2)}')"
+          auth_vary="$(printf '%s' "$auth_headers" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="vary"{print tolower($2)}')"
+
+          if [ -z "$auth_branch" ]; then
+            echo "::error::a request with a session cookie reached no front door;" \
+                 "the function is not in the request path, so every assertion" \
+                 "below would be vacuous" >&2
+            fail=1
+          elif [ "$auth_branch" = "static" ]; then
+            echo "::error::a request with a session cookie was answered by the" \
+                 "STATIC branch — the fork is absent and this is the shimmed case" >&2
+            fail=1
+          else
+            case "$auth_cc" in
+              *no-store*) : ;;
+              *) echo "::error::the authenticated render's Cache-Control is '$auth_cc'," \
+                      "which does not say no-store" >&2; fail=1 ;;
+            esac
+            case "$auth_vary" in
+              *cookie*) : ;;
+              *) echo "::error::the authenticated render does not Vary on Cookie," \
+                      "so a cache can collapse the two states of /" >&2; fail=1 ;;
+            esac
+          fi
+
+          after_headers="$(curl -sS -D - -o /dev/null "$host/" || true)"
+          after_branch="$(printf '%s' "$after_headers" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="x-codetracer-front-door"{print $2}')"
+          if [ -n "$after_branch" ] && [ "$after_branch" != "static" ]; then
+            echo "::error::an anonymous / AFTER an authenticated one was answered by" \
+                 "'$after_branch' — the authenticated render entered a shared cache" >&2
+            fail=1
+          fi
+
+          [ "$fail" -eq 0 ] || exit 1
+          echo "the authenticated render stays out of the shared cache."
+
       - name: Every served host can NAME the revision it is running
         # THE CHEAPEST POSSIBLE CHECK, and the one whose absence cost the most.
         #
