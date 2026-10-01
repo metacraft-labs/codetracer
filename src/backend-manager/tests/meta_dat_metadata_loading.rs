@@ -68,7 +68,7 @@ fn make_recording(test_name: &str, mcr_total_events: Option<u64>) -> PathBuf {
         args: vec!["--input".to_owned(), "data.txt".to_owned()],
         workdir: "/home/user/project".to_owned(),
         recorder_id: "test".to_owned(),
-        paths: vec!["src/main.rs".to_owned(), "src/lib.rs".to_owned()],
+        ext_flags: 0,
         mcr,
         replay_launch: None,
         layout_snapshot: None,
@@ -76,8 +76,19 @@ fn make_recording(test_name: &str, mcr_total_events: Option<u64>) -> PathBuf {
         has_filter_provenance: false,
     };
     let dat_bytes = meta_dat::serialize_meta_dat(&meta);
-    meta_dat::write_minimal_ctfs(&dir.join("trace.ct"), &[("meta.dat", &dat_bytes)])
-        .expect("write minimal ctfs");
+    // The source paths are the container's `paths.dat` records; `meta.dat`
+    // carries no copy of them.
+    let paths_dat = b"src/main.rssrc/lib.rs".to_vec();
+    let paths_off = [0u64, 11, 21].map(u64::to_le_bytes).concat();
+    meta_dat::write_minimal_ctfs(
+        &dir.join("trace.ct"),
+        &[
+            ("meta.dat", &dat_bytes),
+            ("paths.dat", &paths_dat),
+            ("paths.off", &paths_off),
+        ],
+    )
+    .expect("write minimal ctfs");
     dir
 }
 

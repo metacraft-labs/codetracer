@@ -19,7 +19,7 @@
 //! | `recording_id`        | `meta.dat` v3+ `recording_id` (UUIDv7)   |
 //! | `program`             | `meta.dat` `program`                     |
 //! | `workdir`             | `meta.dat` `workdir`                     |
-//! | `source_files`        | `meta.dat` `paths`                       |
+//! | `source_files`        | `paths.dat` records, in id order          |
 //! | `language`            | derived from `program` extension         |
 //! | `total_events`        | `meta.dat` MCR `total_events` if present |
 //!
@@ -59,8 +59,8 @@ pub struct TraceMetadata {
     /// legacy `trace.json` event count.
     pub total_events: u64,
 
-    /// Source file paths referenced by the trace, as recorded in
-    /// `meta.dat`'s `paths` block.
+    /// Source file paths referenced by the trace: the records of the
+    /// container's `paths.dat`, its only list of source paths.
     pub source_files: Vec<String>,
 
     /// Program path or identifier as recorded.
@@ -158,6 +158,16 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
         }
     })?;
 
+    // `paths.dat` is the trace's only list of source paths; `meta.dat`
+    // carries none (internal-files.md §"`meta.dat` carries no path list").
+    let source_files =
+        meta_dat::read_source_paths_from_ctfs(&bytes, parsed.flags).map_err(|message| {
+            TraceMetadataError::Ctfs {
+                file: ct_path.clone(),
+                message,
+            }
+        })?;
+
     // Language detection: try the program path first.  When it does
     // not carry a recognised extension (e.g. compiled RR binaries like
     // `rust_flow_test`, or the Ruby native gem which stores the
@@ -165,7 +175,7 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
     // recorded source paths so we still surface a useful answer.
     let mut language = detect_language(&parsed.program);
     if language == "unknown" {
-        for path in &parsed.paths {
+        for path in &source_files {
             let candidate = detect_language(path);
             if candidate != "unknown" {
                 language = candidate;
@@ -206,12 +216,12 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
     // tests have a real script reference.  The recorder-supplied
     // value is still preserved in `meta.dat`; only the
     // user-facing `program` is rewritten.
-    let program = if !parsed.paths.is_empty()
+    let program = if !source_files.is_empty()
         && !parsed.program.contains('/')
         && !parsed.program.contains('\\')
         && Path::new(&parsed.program).extension().is_none()
     {
-        parsed.paths[0].clone()
+        source_files[0].clone()
     } else {
         parsed.program
     };
@@ -220,7 +230,7 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
         recording_id: parsed.recording_id,
         language,
         total_events,
-        source_files: parsed.paths,
+        source_files,
         program,
         workdir: parsed.workdir,
     })
@@ -347,7 +357,19 @@ mod tests {
     /// Canonical pinned test UUIDv7 used to build meta.dat fixtures.
     const TEST_RECORDING_ID: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
 
-    /// Build a `trace_dir/trace.ct` containing the given metadata for tests.
+    /// `paths.dat` + `paths.off` interning `paths` in id order.
+    fn paths_table(paths: &[&str]) -> (Vec<u8>, Vec<u8>) {
+        let mut dat = Vec::new();
+        let mut off = 0u64.to_le_bytes().to_vec();
+        for p in paths {
+            dat.extend_from_slice(p.as_bytes());
+            off.extend_from_slice(&(dat.len() as u64).to_le_bytes());
+        }
+        (dat, off)
+    }
+
+    /// Build a `trace_dir/trace.ct` containing the given metadata, and
+    /// `paths` as its `paths.dat`, for tests.
     fn make_trace_dir(
         test_name: &str,
         program: &str,
@@ -369,7 +391,7 @@ mod tests {
             args: args.iter().map(|s| (*s).to_owned()).collect(),
             workdir: workdir.to_owned(),
             recorder_id: "test".to_owned(),
-            paths: paths.iter().map(|s| (*s).to_owned()).collect(),
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -377,8 +399,17 @@ mod tests {
             has_filter_provenance: false,
         };
         let dat = meta_dat::serialize_meta_dat(&meta);
+        let (paths_dat, paths_off) = paths_table(paths);
         let ct_path = dir.join("trace.ct");
-        meta_dat::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).expect("write minimal ctfs");
+        meta_dat::write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", &dat),
+                ("paths.dat", &paths_dat),
+                ("paths.off", &paths_off),
+            ],
+        )
+        .expect("write minimal ctfs");
 
         dir
     }
@@ -482,6 +513,18 @@ mod tests {
             other => panic!("expected MissingCtFile, got {other:?}"),
         }
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A program name with no extension falls back to the first `paths.dat`
+    /// record, for both the language and the program surfaced.
+    #[test]
+    fn test_extensionless_program_falls_back_to_paths_dat() {
+        let dir = make_trace_dir("fallback", "ruby", "/w", &[], &["/w/app.rb", "/w/lib.rb"]);
+        let meta = read_trace_metadata(&dir).expect("read metadata");
+        assert_eq!(meta.language, "ruby");
+        assert_eq!(meta.program, "/w/app.rb");
+        assert_eq!(meta.source_files, vec!["/w/app.rb", "/w/lib.rb"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
