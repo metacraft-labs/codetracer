@@ -18,8 +18,9 @@
 //! proof that the Nim CoW writer's on-disk page format is byte-compatible with
 //! the Rust reader.
 //!
-//! If the fixture is absent (a checkout without it / before the generator has
-//! been run) the test skips cleanly rather than failing.
+//! The fixtures are committed under `tests/fixtures/cow_namespace/`, so a
+//! missing one is a broken checkout and fails the test (regenerate with
+//! `gen_cow_btree_crossread_fixture.nim`, `--bulk` for the bulk image).
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -57,14 +58,12 @@ fn rust_reader_round_trips_nim_cow_image() {
     let image_path = dir.join("cow_btree_typea.cowbt");
     let manifest_path = dir.join("cow_btree_typea.manifest");
 
-    if !image_path.exists() || !manifest_path.exists() {
-        eprintln!(
-            "SKIPPED: CoW namespace fixture not present at {} (run \
-             gen_cow_btree_crossread_fixture.nim to generate it)",
-            image_path.display()
-        );
-        return;
-    }
+    assert!(
+        image_path.exists() && manifest_path.exists(),
+        "the committed CoW namespace fixture is missing at {} (regenerate it with \
+         gen_cow_btree_crossread_fixture.nim)",
+        image_path.display()
+    );
 
     let image = std::fs::read(&image_path).expect("read fixture image");
     let manifest = std::fs::read_to_string(&manifest_path).expect("read manifest");
@@ -117,21 +116,20 @@ fn rust_reader_round_trips_nim_cow_image() {
 /// depend on the per-key build's page-allocation pattern: only the bytes' page
 /// PACKING changed, not the format the reader parses.
 ///
-/// Skips cleanly when the fixture is absent (run the `--bulk` generator).
+/// The bulk fixture is committed; a missing one fails (regenerate it with the
+/// `--bulk` generator).
 #[test]
 fn reads_nim_bulk_built_cow_image() {
     let dir = fixture_dir();
     let image_path = dir.join("cow_btree_bulk_typea.cowbt");
     let manifest_path = dir.join("cow_btree_bulk_typea.manifest");
 
-    if !image_path.exists() || !manifest_path.exists() {
-        eprintln!(
-            "SKIPPED: bulk CoW namespace fixture not present at {} (run \
-             gen_cow_btree_crossread_fixture.nim --bulk to generate it)",
-            image_path.display()
-        );
-        return;
-    }
+    assert!(
+        image_path.exists() && manifest_path.exists(),
+        "the committed bulk CoW namespace fixture is missing at {} (regenerate it with \
+         gen_cow_btree_crossread_fixture.nim --bulk)",
+        image_path.display()
+    );
 
     let image = std::fs::read(&image_path).expect("read bulk fixture image");
     let manifest = std::fs::read_to_string(&manifest_path).expect("read bulk manifest");

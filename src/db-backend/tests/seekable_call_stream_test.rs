@@ -305,20 +305,27 @@ fn flag_off_trace_exposes_no_seekable_stream() {
 /// fully-materialized `Db` exactly as before.
 ///
 /// The fixture is the flag-OFF twin of `ruby_split.ct` used by the M17a engine
-/// tests. It is skipped (not failed) if the reprobuild checkout is absent, so
-/// the db-backend suite stays self-contained on a bare checkout while genuinely
-/// exercising a real legacy bundle when the workspace has it.
+/// tests.
+///
+/// PENDING, and ignored so the runner reports it as not run. The fixture lived
+/// in the reprobuild sibling and was deleted there with `repro_ct_incremental`
+/// in 4036237a (2026-06-24); since then this test returned early and passed in
+/// every run. It cannot simply be restored: that `ruby.ct` is meta.dat schema
+/// 3, which predates the global line index correction and is refused by the
+/// current reader, and its split twin has no `calls.idx`. The flag-off case is
+/// covered by `flag_off_trace_exposes_no_seekable_stream` above with an
+/// in-test container; this one needs a current real recording.
 #[test]
+#[ignore = "pending: its reprobuild fixture (ruby.ct) was deleted in 4036237a (2026-06-24) and predates the readable format; needs a current real bundle"]
 fn real_legacy_ct_reads_unchanged_with_no_seekable_stream() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../reprobuild/libs/repro_ct_incremental/tests/fixtures/m12_ctfs/ruby.ct");
-    if !fixture.exists() {
-        eprintln!(
-            "skipping real_legacy_ct_reads_unchanged: fixture absent at {}",
-            fixture.display()
-        );
-        return;
-    }
+    assert!(
+        fixture.exists(),
+        "the real bundle {} is missing: reprobuild deleted it with repro_ct_incremental in 4036237a \
+         (2026-06-24), and nothing produces it now",
+        fixture.display()
+    );
 
     let reader = CTFSTraceReader::open(&fixture).expect("open real legacy ruby.ct");
     assert!(
@@ -344,19 +351,20 @@ fn real_legacy_ct_reads_unchanged_with_no_seekable_stream() {
 /// this test asserts — no longer skips — that the real recorded bundle is served
 /// through the seekable path with bounded decompression. (Pre-M20 the Nim writer
 /// shipped a `calls.dat`+`calls.off` VariableRecordTable with no `calls.idx`, so
-/// this test had to skip; that gap is closed.) The only remaining tolerated skip
-/// is a genuinely-absent fixture (e.g. a sparse checkout).
+/// this test had to skip; that gap is closed.) The only remaining gate is an
+/// absent fixture: see the PENDING note on the test above, which applies to
+/// this one's `ruby_split.ct` too (no `calls.idx` in the deleted copy).
 #[test]
+#[ignore = "pending: its reprobuild fixture (ruby_split.ct) was deleted in 4036237a (2026-06-24) and predates the readable format; needs a current real bundle"]
 fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../reprobuild/libs/repro_ct_incremental/tests/fixtures/m12_ctfs/ruby_split.ct");
-    if !fixture.exists() {
-        eprintln!(
-            "skipping real_split_ct_serves_calls_seekably: fixture absent at {}",
-            fixture.display()
-        );
-        return;
-    }
+    assert!(
+        fixture.exists(),
+        "the real bundle {} is missing: reprobuild deleted it with repro_ct_incremental in 4036237a \
+         (2026-06-24), and nothing produces it now",
+        fixture.display()
+    );
 
     // M20: a Nim-written split bundle MUST now be seekable — open must succeed
     // and expose a stream (the fixture carries has_call_stream + calls.idx).

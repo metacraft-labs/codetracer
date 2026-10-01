@@ -58,6 +58,9 @@ const
     "--test",
     "origin_chain_dump_helper",
     "--",
+    # The dump helpers are #[ignore]d so a plain `cargo test` does not count
+    # them as passed; this is the caller that runs them.
+    "--ignored",
     "--test-threads=1",
     "--nocapture",
   ]

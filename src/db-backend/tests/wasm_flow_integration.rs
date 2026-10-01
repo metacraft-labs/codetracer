@@ -67,7 +67,11 @@ fn test_wasm_flow_integration() {
 
     // Check wazero availability
     if find_wazero().is_none() {
-        eprintln!("SKIPPED: wazero not found (set CODETRACER_WASM_VM_PATH or add wazero to PATH)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_wasm_flow_integration",
+            "wazero was not found",
+            "set CODETRACER_WASM_VM_PATH or add wazero to PATH; run inside the codetracer dev shell, which provides it, or install it",
+        );
         return;
     }
 
@@ -78,7 +82,11 @@ fn test_wasm_flow_integration() {
     if let Ok(output) = target_check {
         let targets = String::from_utf8_lossy(&output.stdout);
         if !targets.contains("wasm32-wasip1") {
-            eprintln!("SKIPPED: wasm32-wasip1 target not installed (run: rustup target add wasm32-wasip1)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "test_wasm_flow_integration",
+                "the wasm32-wasip1 Rust target is not installed",
+                "run `rustup target add wasm32-wasip1`",
+            );
             return;
         }
     }

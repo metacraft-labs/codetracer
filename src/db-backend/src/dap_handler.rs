@@ -8005,16 +8005,18 @@ mod tests {
         Ok(())
     }
 
+    // A manual tool, not a test: it checks a trace the caller names, and with
+    // no trace named it has nothing to check. It used to return early and
+    // count as passed in every run; it is ignored instead, and run on purpose
+    // with `just test-valid-trace <trace-dir>`.
     #[test]
-    fn test_valid_trace() {
-        // can be called from just test-valid-trace <my-trace-dir>
-        // calling inside db-backend
-        // env CODETRACER_VALID_TEST_TRACE_DIR=<trace-dir> cargo test test_valid_trace
-        let raw_path = env::var("CODETRACER_VALID_TEST_TRACE_DIR").unwrap_or("".to_string());
-        if raw_path.is_empty() {
-            // assume called as part of normal tests or by mistake: just don't do anything and return
-            return;
-        }
+    #[ignore = "manual: run with `just test-valid-trace <trace-dir>` (sets CODETRACER_VALID_TEST_TRACE_DIR)"]
+    fn manual_valid_trace() {
+        let raw_path = env::var("CODETRACER_VALID_TEST_TRACE_DIR").unwrap_or_default();
+        assert!(
+            !raw_path.is_empty(),
+            "CODETRACER_VALID_TEST_TRACE_DIR is not set: run `just test-valid-trace <trace-dir>`"
+        );
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/user/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);

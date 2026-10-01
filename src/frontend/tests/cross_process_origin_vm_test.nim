@@ -58,7 +58,7 @@ proc runDumpHelper(outDir: string): tuple[ok: bool, output: string] =
   let process = startProcess(
     "cargo",
     workingDir = dbBackend,
-    args = ["test", "--test", DumpHelperTest, "--", "--nocapture"],
+    args = ["test", "--test", DumpHelperTest, "--", "--ignored", "--nocapture"],
     env = env,
     options = {poUsePath, poStdErrToStdOut},
   )

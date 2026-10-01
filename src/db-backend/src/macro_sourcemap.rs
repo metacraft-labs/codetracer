@@ -706,12 +706,18 @@ mod tests {
         assert!(parse_macro_sourcemap(pre_m1_fixture()).is_none());
     }
 
+    // A manual check against a file nothing in the tree produces: without it
+    // the test had nothing to read and passed in every run. It is ignored and
+    // fails if run without the file.
     #[test]
-    fn test_load_real_schema2_file() {
+    #[ignore = "manual: needs /tmp/macro_sourcemap_m2_test_bin.json from a schema-2 macro-sourcemap build"]
+    fn manual_load_real_schema2_file() {
         let real_path = std::path::Path::new("/tmp/macro_sourcemap_m2_test_bin.json");
-        if !real_path.exists() {
-            return;
-        }
+        assert!(
+            real_path.exists(),
+            "{} is missing; produce a schema-2 macro sourcemap there first",
+            real_path.display()
+        );
         let map = MacroSourceMap::load(real_path).expect("schema-2 file should parse");
         assert_eq!(map.schema, MACRO_SOURCEMAP_SUPPORTED_SCHEMA);
         assert!(!map.expansions.is_empty());

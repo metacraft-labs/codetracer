@@ -48,8 +48,10 @@ fn create_zsh_flow_config() -> FlowTestConfig {
 #[test]
 fn test_zsh_flow_integration() {
     if test_harness::find_zsh_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Zsh recorder not found (set CODETRACER_ZSH_RECORDER_PATH or check out codetracer-shell-recorders)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_zsh_flow_integration",
+            "the Zsh recorder is not found",
+            "check out the codetracer-shell-recorders sibling, or set CODETRACER_ZSH_RECORDER_PATH",
         );
         return;
     }
@@ -61,7 +63,11 @@ fn test_zsh_flow_integration() {
         .map(|o| o.status.success())
         .unwrap_or(false)
     {
-        eprintln!("SKIPPED: zsh not available");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_zsh_flow_integration",
+            "`zsh` is not on PATH",
+            "install zsh or run inside the codetracer dev shell",
+        );
         return;
     }
 

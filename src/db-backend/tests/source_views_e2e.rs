@@ -32,6 +32,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod test_harness;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -211,10 +213,11 @@ fn invoke_stack_trace(handler: &mut Handler) -> StackTraceResponseBody {
 #[test]
 fn replay_server_loads_srcviews_from_trace() {
     if !translation_enabled() {
-        // Kill switch active: the loader silently no-ops.  We still
-        // verify the recorded path flows through unchanged so we have
-        // SOME assertion in this configuration, then exit.
-        eprintln!("CT_SOURCEMAP_TRANSLATION is off; skipping srcviews acceptance assertion.");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "replay_server_loads_srcviews_from_trace",
+            "CT_SOURCEMAP_TRANSLATION turns sourcemap translation off in this environment, so the srcviews acceptance assertion cannot be checked",
+            "unset CT_SOURCEMAP_TRANSLATION",
+        );
         return;
     }
 
@@ -292,7 +295,11 @@ fn replay_server_loads_srcviews_from_trace() {
 #[test]
 fn replay_server_prefers_srcviews_over_sibling_map() {
     if !translation_enabled() {
-        eprintln!("CT_SOURCEMAP_TRANSLATION is off; skipping precedence assertion.");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "replay_server_prefers_srcviews_over_sibling_map",
+            "CT_SOURCEMAP_TRANSLATION turns sourcemap translation off in this environment, so the precedence assertion cannot be checked",
+            "unset CT_SOURCEMAP_TRANSLATION",
+        );
         return;
     }
 
@@ -354,7 +361,11 @@ fn replay_server_prefers_srcviews_over_sibling_map() {
 #[test]
 fn replay_server_legacy_trace_no_srcviews() {
     if !translation_enabled() {
-        eprintln!("CT_SOURCEMAP_TRANSLATION is off; skipping legacy-fallback assertion.");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "replay_server_legacy_trace_no_srcviews",
+            "CT_SOURCEMAP_TRANSLATION turns sourcemap translation off in this environment, so the legacy-fallback assertion cannot be checked",
+            "unset CT_SOURCEMAP_TRANSLATION",
+        );
         return;
     }
 

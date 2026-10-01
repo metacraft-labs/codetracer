@@ -24,11 +24,14 @@
 //! 4. Re-open the same trace with `CT_AUTOFORMAT=0` and assert the DAP
 //!    frame's `source.path` is the recorded minified file unchanged.
 //!
-//! When `black` is not on `PATH` the test prints a `SKIP autoformat_test:`
-//! line and returns — same skip-loud pattern the JS test uses for
-//! `prettier` / `npx`.
+//! When `black` is not on `PATH`, or it does not finish within its budget,
+//! the test goes through `test_harness::skip_or_fail_missing_prerequisite`:
+//! a failure under `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`,
+//! otherwise a loud skip recorded in the lane's skip report.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+mod test_harness;
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -218,7 +221,11 @@ fn p6_6_python_fixture_passes_minified_heuristic() {
 #[test]
 fn p6_6_dap_source_returns_formatted_python() {
     if !black_available() {
-        eprintln!("SKIP autoformat_test: black not on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p6_6_dap_source_returns_formatted_python",
+            "`black` is not on PATH",
+            "run inside the codetracer dev shell, which provides it",
+        );
         return;
     }
     // Acquire the env lock to serialize against the kill-switch test
@@ -260,8 +267,13 @@ fn p6_6_dap_source_returns_formatted_python() {
     // failing on a host-perf flake.  This mirrors the JS test's
     // identical guard against `prettier` timeouts.
     if source_path == &recorded_min_path {
-        eprintln!("SKIP autoformat_test: black likely timed out under load; saw recorded path on output");
         restore_env("CT_AUTOFORMAT", orig_kill);
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p6_6_dap_source_returns_formatted_python",
+            "`black` did not finish within its budget (the recorded minified path came back), \
+             most likely because the host is under load",
+            "rerun on an idle host; a lane with graceful skipping off reports this as a failure",
+        );
         return;
     }
     let formatted_pathbuf = std::path::PathBuf::from(source_path);
@@ -320,7 +332,11 @@ fn p6_6_dap_source_returns_formatted_python() {
 #[test]
 fn p6_6_kill_switch_returns_minified_python_unchanged() {
     if !black_available() {
-        eprintln!("SKIP autoformat_test: black not on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p6_6_kill_switch_returns_minified_python_unchanged",
+            "`black` is not on PATH",
+            "run inside the codetracer dev shell, which provides it",
+        );
         return;
     }
     // Serialize against the happy-path test above — both mutate the

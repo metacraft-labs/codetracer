@@ -58,7 +58,11 @@ fn create_noir_flow_config() -> FlowTestConfig {
 #[test]
 fn test_noir_flow_integration() {
     if !test_harness::is_command_available("nargo") {
-        eprintln!("SKIPPED: nargo not found on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_noir_flow_integration",
+            "`nargo` is not on PATH",
+            "run inside the codetracer dev shell, which provides the pinned noir",
+        );
         return;
     }
 

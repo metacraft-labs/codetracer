@@ -45,6 +45,8 @@
 //! Run with:
 //!     cargo test --test noir_space_ship_calltrace_jump_flow -- --nocapture
 
+mod test_harness;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -60,10 +62,8 @@ use db_backend::trace_reader::TraceReader;
 /// Load the in-memory `Db` from the unique `*.ct` CTFS container in
 /// `target_dir`.
 ///
-/// Returns `None` if `target_dir` does not contain a `.ct` file so the
-/// caller can skip cleanly when the recorder hasn't yet migrated to
-/// CTFS — the diagnostic test must not fail the suite when its input
-/// can't be produced.  Per `Trace-Files/CTFS-Migration-Guide.md` §3e the
+/// Returns `None` if `target_dir` does not contain a `.ct` file; the
+/// caller treats that as a recorder failure.  Per `Trace-Files/CTFS-Migration-Guide.md` §3e the
 /// `.ct` bundle is the only supported materialized-trace format; legacy
 /// sidecars (`trace_metadata.json` / `trace.json` / `trace.bin`) are no
 /// longer accepted.
@@ -88,7 +88,7 @@ fn find_nargo() -> bool {
 /// Mirrors the helper in `noir_loop_diagnostic.rs` but uses the
 /// `noir_space_ship` test program (which has the iterate_asteroids
 /// loop the GUI tests exercise).
-fn record_noir_space_ship_trace() -> Option<PathBuf> {
+fn record_noir_space_ship_trace() -> PathBuf {
     let target_dir = PathBuf::from(format!(
         "{}/test-traces/nss_calltrace_jump_{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -103,16 +103,14 @@ fn record_noir_space_ship_trace() -> Option<PathBuf> {
         .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
         .current_dir(&canonical)
         .output()
-        .ok()?;
-    if !result.status.success() {
-        eprintln!(
-            "nargo trace failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr)
-        );
-        return None;
-    }
-    Some(target_dir)
+        .expect("`nargo trace` could not be started");
+    assert!(
+        result.status.success(),
+        "nargo trace failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    target_dir
 }
 
 /// Find the first step inside `iterate_asteroids` (the function body).
@@ -149,26 +147,28 @@ fn find_iterate_asteroids_first_step(db: &Db, reader: &Arc<dyn TraceReader>) -> 
 #[test]
 fn flow_request_for_iterate_asteroids_returns_shield_nr_loops() {
     if !find_nargo() {
-        eprintln!("SKIPPED: nargo not on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "flow_request_for_iterate_asteroids_returns_shield_nr_loops",
+            "`nargo` is not on PATH",
+            "run inside the codetracer dev shell, which provides the pinned noir",
+        );
         return;
     }
-    let Some(target_dir) = record_noir_space_ship_trace() else {
-        eprintln!("SKIPPED: nargo trace unavailable");
-        return;
-    };
+    // `nargo` is present (checked above), so a recording that fails is a
+    // failure, not a missing prerequisite.
+    let target_dir = record_noir_space_ship_trace();
 
     // CTFS-only: pull the materialised `Db` directly from the `.ct`
     // container.  The reader runs `TraceProcessor::postprocess` for us, so
     // we no longer need to drive event decode + postprocess by hand.
-    let Some(db) = load_db_from_ctfs(&target_dir) else {
-        eprintln!(
-            "SKIPPED: nargo did not produce a *.ct CTFS container in {} — \
-             the Noir recorder still emits the legacy layout, which is no \
-             longer supported by this diagnostic.",
+    // `nargo trace` writes a CTFS container; a run that produced none is a
+    // recorder failure, not a reason to skip.
+    let db = load_db_from_ctfs(&target_dir).unwrap_or_else(|| {
+        panic!(
+            "nargo did not produce a *.ct CTFS container in {}",
             target_dir.display()
-        );
-        return;
-    };
+        )
+    });
 
     let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
     let (target_step_id, shield_path) =

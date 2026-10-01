@@ -46,13 +46,22 @@ fn find_db_backend() -> PathBuf {
 #[test]
 fn duplicate_launch_does_not_emit_second_stopped() {
     if test_harness::find_python_recorder().is_none() {
-        eprintln!("SKIPPED: Python recorder not found");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "duplicate_launch_does_not_emit_second_stopped",
+            "the Python recorder is not installed",
+            "run inside the codetracer dev shell with the codetracer-python-recorder sibling checked \
+             out, or set CODETRACER_PYTHON_RECORDER_PATH",
+        );
         return;
     }
     let (_python_cmd, version_label) = match test_harness::find_suitable_python() {
         Some(pair) => pair,
         None => {
-            eprintln!("SKIPPED: Python 3.10+ not found (needed for the recorder)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "duplicate_launch_does_not_emit_second_stopped",
+                "no Python 3.10+ interpreter for the recorder",
+                "put a Python 3.10+ interpreter on PATH (the codetracer dev shell provides one)",
+            );
             return;
         }
     };

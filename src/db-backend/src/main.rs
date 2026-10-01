@@ -132,6 +132,9 @@ mod request_spans;
 // the sourcemap_cache integration reaches for the module via
 // `crate::autoformat`.
 mod autoformat;
+// The missing-prerequisite gate for this crate's own unit tests.
+#[cfg(test)]
+mod test_prerequisite;
 // Column-Aware-Tracing-And-Deminification §P5 — user-provided variable
 // rename list.  Mirrors the lib.rs declaration; the bin needs its own
 // copy because `sourcemap_cache` reaches for the module via the

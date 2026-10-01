@@ -831,7 +831,12 @@ test-rust:
   # ("no tests to run") which we don't want to surface as a failure
   # of the whole ``just test`` invocation.  Tolerate that specific
   # exit code while still failing on any real test failure.
-  cargo nextest run --release --bin replay-server --run-ignored ignored-only || \
+  #
+  # Tests named `manual_*` are hooks a developer runs on purpose against an
+  # input nothing in the suite produces (e.g. `just test-valid-trace <dir>`);
+  # they are ignored so they never count as passed, and fail if run without
+  # their input, so they are left out of this sweep by name.
+  cargo nextest run --release --bin replay-server --run-ignored ignored-only -E 'not test(/::manual_/)' || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in replay-server; treating as no-op)"; \
     else \
@@ -1380,7 +1385,7 @@ log-args pid_or_current_or_last task-id:
 
 test-valid-trace trace_dir:
   cd src/db-backend && \
-    env CODETRACER_VALID_TEST_TRACE_DIR={{trace_dir}} cargo nextest run test_valid_trace
+    env CODETRACER_VALID_TEST_TRACE_DIR={{trace_dir}} cargo nextest run --run-ignored ignored-only manual_valid_trace
 # no need to cd back: i assume and manual use shows
 # just probably runs this in a subshell(or at least it doesn't seem to affect
 # our callsite)

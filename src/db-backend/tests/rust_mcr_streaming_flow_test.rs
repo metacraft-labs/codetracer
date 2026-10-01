@@ -28,13 +28,21 @@ fn rust_mcr_streaming_flow_variables_and_values() {
     let ct_native_replay = match test_harness::find_ct_native_replay() {
         Some(p) => p,
         None => {
-            eprintln!("SKIPPED: ct-native-replay not found");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "rust_mcr_streaming_flow_variables_and_values",
+                "ct-native-replay was not found",
+                "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
+            );
             return;
         }
     };
 
     if !test_harness::is_mcr_available() {
-        eprintln!("SKIPPED: MCR backend not available (ct-mcr not found)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "rust_mcr_streaming_flow_variables_and_values",
+            "the MCR recorder CLI (ct-mcr / ct_cli / CODETRACER_CT_MCR_CMD) was not found",
+            "build the MCR CLI with `just build-ct-mcr` in codetracer-native-recorder, then put ct-mcr/ct_cli on PATH or set CODETRACER_CT_MCR_CMD",
+        );
         return;
     }
 

@@ -23,7 +23,11 @@ fn wasm_flow_dap_variables_and_values() {
 
     // Check wazero availability
     if find_wazero().is_none() {
-        eprintln!("SKIPPED: wazero not found (set CODETRACER_WASM_VM_PATH or add wazero to PATH)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "wasm_flow_dap_variables_and_values",
+            "wazero was not found",
+            "set CODETRACER_WASM_VM_PATH or add wazero to PATH; run inside the codetracer dev shell, which provides it, or install it",
+        );
         return;
     }
 
@@ -34,7 +38,11 @@ fn wasm_flow_dap_variables_and_values() {
     if let Ok(output) = target_check {
         let targets = String::from_utf8_lossy(&output.stdout);
         if !targets.contains("wasm32-wasip1") {
-            eprintln!("SKIPPED: wasm32-wasip1 target not installed (run: rustup target add wasm32-wasip1)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "wasm_flow_dap_variables_and_values",
+                "the wasm32-wasip1 Rust target is not installed",
+                "run `rustup target add wasm32-wasip1`",
+            );
             return;
         }
     }

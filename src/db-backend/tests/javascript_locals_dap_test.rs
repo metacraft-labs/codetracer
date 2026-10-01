@@ -102,9 +102,10 @@ const RETURN_LINE: u32 = 21;
 fn require_js_recorder() -> Option<String> {
     if find_js_recorder().is_none() {
         if std::env::var("CT_PROVIDERS_ALLOW_MISSING").is_ok() {
-            eprintln!(
-                "SKIPPED (CT_PROVIDERS_ALLOW_MISSING=1): JavaScript recorder not found; \
-                 set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder"
+            test_harness::skip_or_fail_missing_prerequisite(
+                "javascript_locals_dap_test",
+                "the JavaScript recorder is not built (skipping allowed by CT_PROVIDERS_ALLOW_MISSING=1)",
+                "check out codetracer-js-recorder and run `just build` there, or set CODETRACER_JS_RECORDER_PATH",
             );
             return None;
         }

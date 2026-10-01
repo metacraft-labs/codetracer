@@ -3,9 +3,20 @@
 //! This test verifies that tree-sitter correctly extracts variables
 //! and filters out function calls when loading flow data for Rust programs.
 //!
-//! The test is skipped if `ct-native-replay` or `rr` is not available.
+//! It needs `ct-native-replay` and rr (or TTD on Windows); see the platform
+//! gate below.
 //!
 //! Rust uses rr-based traces on Unix and TTD-based traces on Windows.
+//!
+//! ## Platform gate
+//!
+//! The replay backend these tests record with is rr on Linux or TTD on
+//! Windows; macOS has neither, so on macOS the target is not compiled (the
+//! `cfg` below). Everywhere else a missing tool goes through
+//! `test_harness::skip_or_fail_missing_prerequisite`: a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`, otherwise a reported skip.
+
+#![cfg(any(target_os = "linux", target_os = "windows"))]
 
 mod test_harness;
 
@@ -49,17 +60,29 @@ fn create_rust_flow_config() -> FlowTestConfig {
 fn test_rust_flow_integration() {
     // Check prerequisites
     if find_ct_native_replay().is_none() {
-        eprintln!("SKIPPED: ct-native-replay not found in PATH or development locations");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_rust_flow_integration",
+            "ct-native-replay was not found",
+            "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
+        );
         return;
     }
 
     if !is_replay_backend_available() {
-        eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_rust_flow_integration",
+            "no replay backend: rr (Linux) or TTD (Windows, installed and elevated)",
+            "install rr on Linux (on AMD Zen it needs the SpecLockMap workaround) or run elevated with Microsoft.TimeTravelDebugging on Windows",
+        );
         return;
     }
 
     if !is_command_available("rustc") {
-        eprintln!("SKIPPED: rustc is not available on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_rust_flow_integration",
+            "rustc is not on PATH",
+            "run inside the codetracer dev shell, which provides it, or install it",
+        );
         return;
     }
 

@@ -43,7 +43,10 @@ fn find_db_backend() -> PathBuf {
 /// fresh wasm DB trace must advance the reported `location.line`.
 #[test]
 fn wasm_db_trace_next_advances_line() {
-    run_wasm_next_test(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/wasm"));
+    run_wasm_next_test(
+        "wasm_db_trace_next_advances_line",
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/wasm"),
+    );
 }
 
 /// Reproduces TODO 5.2(i) using the GUI-test wasm_example fixture
@@ -55,15 +58,15 @@ fn wasm_example_db_trace_next_advances_line() {
         .nth(2)
         .expect("expected codetracer workspace root above db-backend")
         .to_path_buf();
-    let project_path = workspace_root.join("test-programs/wasm_example");
-    if !project_path.join("Cargo.toml").exists() {
-        eprintln!("SKIPPED: wasm_example fixture not found at {}", project_path.display());
-        return;
-    }
-    run_wasm_next_test(&project_path);
+    // The fixture is committed (`test-programs/wasm_example`), so its absence
+    // is a broken checkout, not a missing tool; `run_wasm_next_test` asserts it.
+    run_wasm_next_test(
+        "wasm_example_db_trace_next_advances_line",
+        &workspace_root.join("test-programs/wasm_example"),
+    );
 }
 
-fn run_wasm_next_test(project_path: &Path) {
+fn run_wasm_next_test(test_name: &str, project_path: &Path) {
     let db_backend = find_db_backend();
 
     assert!(
@@ -73,7 +76,11 @@ fn run_wasm_next_test(project_path: &Path) {
     );
 
     if find_wazero().is_none() {
-        eprintln!("SKIPPED: wazero not found (set CODETRACER_WASM_VM_PATH or add wazero to PATH)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            test_name,
+            "wazero was not found",
+            "set CODETRACER_WASM_VM_PATH or add wazero to PATH; run inside the codetracer dev shell, which provides it, or install it",
+        );
         return;
     }
     let target_check = std::process::Command::new("rustup")
@@ -82,7 +89,11 @@ fn run_wasm_next_test(project_path: &Path) {
     if let Ok(output) = target_check {
         let targets = String::from_utf8_lossy(&output.stdout);
         if !targets.contains("wasm32-wasip1") {
-            eprintln!("SKIPPED: wasm32-wasip1 target not installed (run: rustup target add wasm32-wasip1)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                test_name,
+                "the wasm32-wasip1 Rust target is not installed",
+                "run `rustup target add wasm32-wasip1`",
+            );
             return;
         }
     }

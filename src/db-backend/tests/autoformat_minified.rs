@@ -20,12 +20,15 @@
 //! 4. Re-open the same trace with `CT_AUTOFORMAT=0` and assert the DAP
 //!    frame's `source.path` is the recorded minified file unchanged.
 //!
-//! When neither `prettier` nor `npx` is on the host's `PATH` the test
-//! prints a `SKIP autoformat_test:` line and returns — the reviewer
-//! requires a real run on a host with prettier; the skip path
-//! deliberately fires loud rather than silently passing.
+//! When neither `prettier` nor `npx` is on the host's `PATH`, or the
+//! formatter does not finish within its budget, the test goes through
+//! `test_harness::skip_or_fail_missing_prerequisite`: a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`, otherwise a loud skip
+//! recorded in the lane's skip report.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+mod test_harness;
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -210,7 +213,11 @@ fn p4_fixture_passes_minified_heuristic() {
 #[test]
 fn p4_dap_source_returns_formatted_javascript() {
     if !formatter_available() {
-        eprintln!("SKIP autoformat_test: prettier / npx not on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p4_dap_source_returns_formatted_javascript",
+            "neither `prettier` nor `npx` is on PATH",
+            "run inside the codetracer dev shell, which provides both",
+        );
         return;
     }
     // Acquire the env lock to serialize against the kill-switch test
@@ -251,8 +258,13 @@ fn p4_dap_source_returns_formatted_javascript() {
     // surfaces the recorded path again.  Detect that case and
     // skip-loud rather than failing on a host-perf flake.
     if source_path == &recorded_min_path {
-        eprintln!("SKIP autoformat_test: formatter likely timed out under load; saw recorded path on output");
         restore_env("CT_AUTOFORMAT", orig_kill);
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p4_dap_source_returns_formatted_javascript",
+            "the formatter did not finish within its budget (the recorded minified path came back), \
+             most likely because the host is under load",
+            "rerun on an idle host; a lane with graceful skipping off reports this as a failure",
+        );
         return;
     }
     let formatted_pathbuf = std::path::PathBuf::from(source_path);
@@ -304,7 +316,11 @@ fn p4_dap_source_returns_formatted_javascript() {
 #[test]
 fn p4_kill_switch_returns_minified_source_unchanged() {
     if !formatter_available() {
-        eprintln!("SKIP autoformat_test: prettier / npx not on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p4_kill_switch_returns_minified_source_unchanged",
+            "neither `prettier` nor `npx` is on PATH",
+            "run inside the codetracer dev shell, which provides both",
+        );
         return;
     }
     // Serialize against the happy-path test above — both mutate the

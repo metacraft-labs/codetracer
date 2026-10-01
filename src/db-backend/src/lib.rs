@@ -194,6 +194,9 @@ pub mod remote_request_spans;
 // `sourcemap_cache` integration calls into it lazily on
 // per-path translation requests when no sourcemap is loaded.
 pub mod autoformat;
+// The missing-prerequisite gate for this crate's own unit tests.
+#[cfg(test)]
+mod test_prerequisite;
 // Column-Aware-Tracing-And-Deminification §P5 — user-provided variable
 // rename list.  Loaded at trace open from `<recording-dir>/renames.toml`
 // (or via `--rename-list <path>` on the CLI) and composed with the §P3

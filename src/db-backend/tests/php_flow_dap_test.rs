@@ -12,12 +12,21 @@ fn find_db_backend() -> PathBuf {
 #[test]
 fn test_php_debugger_line_jump() {
     if !test_harness::is_command_available("php") {
-        eprintln!("SKIPPED: php is not available on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_php_debugger_line_jump",
+            "`php` is not on PATH",
+            "install PHP 8.x (the codetracer dev shell does not provide it) or run inside the \
+             codetracer-php-recorder sibling's dev shell",
+        );
         return;
     }
 
     if find_php_recorder().is_none() {
-        eprintln!("SKIPPED: PHP recorder not found");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_php_debugger_line_jump",
+            "the PHP recorder is not found",
+            "check out and build the codetracer-php-recorder sibling, or set CODETRACER_PHP_RECORDER_PATH",
+        );
         return;
     }
 

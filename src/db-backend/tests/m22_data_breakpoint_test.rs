@@ -519,9 +519,8 @@ fn test_origin_browser_replay_omniscient_when_available() {
 /// E2E test: the IsoNim browser-replay UI loads a non-omniscient
 /// emulator trace and renders an origin chain end-to-end. The UI lives
 /// in the IsoNim project (sibling repo); in the dev shell here the
-/// Playwright fixture and the browser harness are not provisioned, so
-/// we SKIP narrowly with the precise sentinel the spec's verification
-/// table calls for.
+/// Playwright fixture and the browser harness are not provisioned, and the
+/// end-to-end body was never written, so it is ignored as pending.
 ///
 /// When the IsoNim browser-replay fixture is available, this test:
 ///
@@ -532,21 +531,15 @@ fn test_origin_browser_replay_omniscient_when_available() {
 ///   3. Asserts the rendered chain contains at least one hop badge
 ///      tagged with the M22 Tier 3 provenance string.
 #[test]
+#[ignore = "pending: the IsoNim browser-replay E2E this stands in for was never written"]
 fn e2e_browser_replay_origin_chain_renders_in_iso_nim() {
-    let isonim_root = std::env::var("ISONIM_BROWSER_REPLAY_FIXTURE").ok();
-    if isonim_root.is_none() {
-        eprintln!(
-            "SKIPPED: ISONIM_BROWSER_REPLAY_FIXTURE env var not set (M22 E2E test \
-             requires the IsoNim browser-replay UI harness; the dev shell here ships \
-             neither Playwright nor the IsoNim sibling repo's browser fixture)"
-        );
-        return;
-    }
-    eprintln!(
-        "END-TO-END (ISONIM_BROWSER_REPLAY_FIXTURE set to {:?}): \
-         e2e_browser_replay_origin_chain_renders_in_iso_nim would launch the IsoNim \
-         UI, load the xos_hello.ct fixture, dispatch ct/originChain, and assert the \
-         chain renders with a Tier-3 provenance badge.",
-        isonim_root.unwrap()
+    // Both branches of this stub used to pass: without
+    // ISONIM_BROWSER_REPLAY_FIXTURE it printed SKIPPED, and with it it printed
+    // what it "would" do. Neither asserted anything, so it is ignored as a
+    // pending feature, and running it explicitly fails rather than passing.
+    panic!(
+        "e2e_browser_replay_origin_chain_renders_in_iso_nim has no body: the IsoNim browser-replay \
+         UI harness it describes (load xos_hello.ct, dispatch ct/originChain, assert a Tier-3 \
+         provenance badge) was never written"
     );
 }

@@ -84,15 +84,14 @@ fn collapse_bytes_match_nim_server_prep_writer() {
     let line_path = dir.join("linehits.tc");
     let man_path = dir.join("server_prep.manifest");
 
-    if !mem_path.exists() || !man_path.exists() {
-        eprintln!(
-            "SKIPPED: collapse_bytes_match_nim_server_prep_writer — Nim fixture absent at {}. \
-             Generate it with: direnv exec codetracer-native-recorder nim c -r --path:ct_emulator/src \
-             ct_emulator/tests/gen_server_prep_crossread_fixture.nim",
-            dir.display()
-        );
-        return;
-    }
+    // The fixture is committed, so a missing one is a broken checkout.
+    assert!(
+        mem_path.exists() && man_path.exists(),
+        "the committed Nim fixture is missing at {}. Regenerate it with: direnv exec \
+         codetracer-native-recorder nim c -r --path:ct_emulator/src \
+         ct_emulator/tests/gen_server_prep_crossread_fixture.nim",
+        dir.display()
+    );
 
     let manifest = std::fs::read_to_string(&man_path).expect("read manifest");
     let (per_address, per_line) = parse_manifest(&manifest);

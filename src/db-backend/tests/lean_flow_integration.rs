@@ -10,9 +10,20 @@
 //! 2. ct-native-replay can record its execution with RR
 //! 3. db-backend can connect to the replay and initialize a DAP session
 //!
-//! The test is skipped if `ct-native-replay`, `rr`, or `lake` is not available.
+//! It needs `ct-native-replay`, `rr` (or TTD on Windows) and `lake`; see the
+//! platform gate below for what happens when one is missing.
 //!
 //! Lean uses rr-based traces on Unix and TTD-based traces on Windows.
+//!
+//! ## Platform gate
+//!
+//! The replay backend these tests record with is rr on Linux or TTD on
+//! Windows; macOS has neither, so on macOS the target is not compiled (the
+//! `cfg` below). Everywhere else a missing tool goes through
+//! `test_harness::skip_or_fail_missing_prerequisite`: a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`, otherwise a reported skip.
+
+#![cfg(any(target_os = "linux", target_os = "windows"))]
 
 mod test_harness;
 
@@ -38,18 +49,30 @@ fn test_lean_build_and_record() {
     let ct_native_replay = match find_ct_native_replay() {
         Some(p) => p,
         None => {
-            eprintln!("SKIPPED: ct-native-replay not found");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "test_lean_build_and_record",
+                "ct-native-replay was not found",
+                "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
+            );
             return;
         }
     };
 
     if !is_replay_backend_available() {
-        eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_lean_build_and_record",
+            "no replay backend: rr (Linux) or TTD (Windows, installed and elevated)",
+            "install rr on Linux (on AMD Zen it needs the SpecLockMap workaround) or run elevated with Microsoft.TimeTravelDebugging on Windows",
+        );
         return;
     }
 
     if !is_lake_available() {
-        eprintln!("SKIPPED: lake (Lean build tool) is not available");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_lean_build_and_record",
+            "lake (the Lean 4 build tool) is not on PATH",
+            "install Lean 4 with elan, which provides lake",
+        );
         return;
     }
 
@@ -98,18 +121,30 @@ fn test_lean_dap_replay_connects() {
     let ct_native_replay = match find_ct_native_replay() {
         Some(p) => p,
         None => {
-            eprintln!("SKIPPED: ct-native-replay not found");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "test_lean_dap_replay_connects",
+                "ct-native-replay was not found",
+                "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
+            );
             return;
         }
     };
 
     if !is_replay_backend_available() {
-        eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_lean_dap_replay_connects",
+            "no replay backend: rr (Linux) or TTD (Windows, installed and elevated)",
+            "install rr on Linux (on AMD Zen it needs the SpecLockMap workaround) or run elevated with Microsoft.TimeTravelDebugging on Windows",
+        );
         return;
     }
 
     if !is_lake_available() {
-        eprintln!("SKIPPED: lake (Lean build tool) is not available");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_lean_dap_replay_connects",
+            "lake (the Lean 4 build tool) is not on PATH",
+            "install Lean 4 with elan, which provides lake",
+        );
         return;
     }
 

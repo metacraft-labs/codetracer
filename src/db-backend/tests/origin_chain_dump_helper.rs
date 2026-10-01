@@ -13,10 +13,17 @@
 //! 4. Writes the raw response body JSON to
 //!    `<ORIGIN_DUMP_OUT_DIR>/<scenario>.json`.
 //!
-//! When the recorder isn't available, it writes
-//! `<ORIGIN_DUMP_OUT_DIR>/<scenario>.skipped` with the skip reason so
-//! the Nim test can render the SKIPPED outcome (matching the harness
-//! discipline documented in `origin_python_dap_test.rs`).
+//! When the recorder isn't available, the skip goes through
+//! `test_harness::skip_or_fail_missing_prerequisite` (a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`) and writes
+//! `<ORIGIN_DUMP_OUT_DIR>/<scenario>.skipped` with the reason, so the Nim
+//! test can render the SKIPPED outcome.
+//!
+//! These are helpers, not tests: without `ORIGIN_DUMP_OUT_DIR` there is
+//! nothing to dump and nothing to assert, so under a plain `cargo test` they
+//! used to pass having done nothing. They are `#[ignore]`d, and the two Nim
+//! tests that drive them pass `--ignored`. Run with `--ignored` but without
+//! the variable, they fail rather than pass.
 //!
 //! No mocks. The chain that lands in the dump file is the same chain
 //! the Nim `parseOriginChain` would receive from the real db-backend
@@ -34,11 +41,12 @@ use std::path::PathBuf;
 use origin_dap::{OriginQueryConfig, QueryOutcome, fixture_source, load_fixture_and_query_or_skip};
 use test_harness::Language;
 
-/// Output directory injected by the Nim test runner. Returning `None`
-/// means "no dump requested" so the test silently no-ops when run by a
-/// human via plain `cargo test`.
-fn dump_out_dir() -> Option<PathBuf> {
-    std::env::var_os("ORIGIN_DUMP_OUT_DIR").map(PathBuf::from)
+/// Output directory injected by the Nim test runner. The helpers are only
+/// run on purpose (they are ignored), so its absence is a misuse and fails.
+fn dump_out_dir() -> PathBuf {
+    std::env::var_os("ORIGIN_DUMP_OUT_DIR")
+        .map(PathBuf::from)
+        .expect("ORIGIN_DUMP_OUT_DIR is not set: these helpers are run by value_origin_test.nim and cross_process_origin_vm_test.nim, which set it")
 }
 
 /// Build the standard Python origin-query config.
@@ -73,19 +81,19 @@ fn require_python_recorder() -> Result<String, String> {
 /// marker. Returns `Ok(())` even on environment skip — the Nim test
 /// inspects the file contents to decide whether to assert or skip.
 fn dump_scenario(scenario: &str, line: u32, variable: &str) -> Result<(), String> {
-    let Some(out_dir) = dump_out_dir() else {
-        // No dump requested — running under plain `cargo test`. Skip
-        // silently so this file behaves like a normal test crate.
-        return Ok(());
-    };
+    let out_dir = dump_out_dir();
     fs::create_dir_all(&out_dir).map_err(|e| format!("create out dir: {}", e))?;
 
     let version = match require_python_recorder() {
         Ok(v) => v,
         Err(reason) => {
+            test_harness::skip_or_fail_missing_prerequisite(
+                &format!("origin_chain_dump_helper python/{scenario}"),
+                &reason,
+                "run inside the codetracer dev shell with the codetracer-python-recorder sibling checked out",
+            );
             let path = out_dir.join(format!("{}.skipped", scenario));
             fs::write(&path, &reason).map_err(|e| format!("write skipped marker: {}", e))?;
-            eprintln!("SKIPPED: python/{}: {}", scenario, reason);
             return Ok(());
         }
     };
@@ -101,9 +109,13 @@ fn dump_scenario(scenario: &str, line: u32, variable: &str) -> Result<(), String
             Ok(())
         }
         QueryOutcome::Skipped(reason) => {
+            test_harness::skip_or_fail_missing_prerequisite(
+                &format!("origin_chain_dump_helper python/{scenario}"),
+                &reason,
+                "run inside the codetracer dev shell with the codetracer-python-recorder sibling checked out",
+            );
             let path = out_dir.join(format!("{}.skipped", scenario));
             fs::write(&path, &reason).map_err(|e| format!("write skipped marker: {}", e))?;
-            eprintln!("SKIPPED: python/{}: {}", scenario, reason);
             Ok(())
         }
     }
@@ -119,9 +131,7 @@ fn dump_scenario(scenario: &str, line: u32, variable: &str) -> Result<(), String
 /// recordings — the state those view models exist to represent, and
 /// which no single-trace fixture can produce.
 fn dump_cross_process_scenario() -> Result<(), String> {
-    let Some(out_dir) = dump_out_dir() else {
-        return Ok(());
-    };
+    let out_dir = dump_out_dir();
     fs::create_dir_all(&out_dir).map_err(|e| format!("create out dir: {}", e))?;
 
     let scenario = "cross_process_three_trace";
@@ -171,6 +181,7 @@ fn dump_cross_process_scenario() -> Result<(), String> {
 
 /// Dump the three-recording cross-process chain for the ViewModel test.
 #[test]
+#[ignore = "helper: run with --ignored and ORIGIN_DUMP_OUT_DIR by value_origin_test.nim / cross_process_origin_vm_test.nim"]
 fn dump_cross_process_three_trace() {
     dump_cross_process_scenario().expect("dump cross_process_three_trace");
 }
@@ -178,6 +189,7 @@ fn dump_cross_process_three_trace() {
 /// Dump the chain JSON for `python/simple_trivial_chain` (query: `c`
 /// at line 12).
 #[test]
+#[ignore = "helper: run with --ignored and ORIGIN_DUMP_OUT_DIR by value_origin_test.nim / cross_process_origin_vm_test.nim"]
 fn dump_python_simple_trivial_chain() {
     dump_scenario("simple_trivial_chain", 12, "c").expect("dump simple_trivial_chain");
 }
@@ -185,6 +197,7 @@ fn dump_python_simple_trivial_chain() {
 /// Dump the chain JSON for `python/computational_origin` (query:
 /// `result` at line 10).
 #[test]
+#[ignore = "helper: run with --ignored and ORIGIN_DUMP_OUT_DIR by value_origin_test.nim / cross_process_origin_vm_test.nim"]
 fn dump_python_computational_origin() {
     dump_scenario("computational_origin", 10, "result").expect("dump computational_origin");
 }
@@ -192,6 +205,7 @@ fn dump_python_computational_origin() {
 /// Dump the chain JSON for `python/parameter_pass` (query: `local`
 /// inside `receive(p)` at line 9).
 #[test]
+#[ignore = "helper: run with --ignored and ORIGIN_DUMP_OUT_DIR by value_origin_test.nim / cross_process_origin_vm_test.nim"]
 fn dump_python_parameter_pass() {
     dump_scenario("parameter_pass", 9, "local").expect("dump parameter_pass");
 }

@@ -29,6 +29,8 @@
 
 #![cfg(feature = "nim-reader")]
 
+mod test_harness;
+
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use std::path::PathBuf;
 
@@ -41,12 +43,15 @@ fn cairo_fixture_path() -> PathBuf {
 fn cairo_flow_test_lines_stay_within_source_range() {
     let path = cairo_fixture_path();
     if !path.exists() {
-        // The fixture is checked into a sibling repo that may not be
-        // present in every developer's checkout.  Skip cleanly rather
-        // than failing — CI always has the sibling layout.
-        eprintln!(
-            "skipping cairo_flow_test_lines_stay_within_source_range: fixture missing at {}",
-            path.display()
+        // The fixture is built in the codetracer-vscode-extension sibling by its
+        // scripts/prepare-cairo-fixture.sh; it is gitignored there.
+        test_harness::skip_or_fail_missing_prerequisite(
+            "cairo_flow_test_lines_stay_within_source_range",
+            &format!(
+                "the codetracer-vscode-extension fixture is missing at {}",
+                path.display()
+            ),
+            "check out the codetracer-vscode-extension sibling and run its scripts/prepare-cairo-fixture.sh (the fixture is built, not committed)",
         );
         return;
     }
