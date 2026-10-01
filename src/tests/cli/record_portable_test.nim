@@ -84,14 +84,23 @@ suite "ct record --portable":
     check "CODETRACER_PORTABLE=off contradicts --upload" in r.refusal[0]
     check r.env.len == 0
 
-  test "rr and ttd refuse --portable by name":
-    for backend in ["rr", "ttd"]:
-      let r = route(backend = backend, flag = true)
-      check r.refusal.len >= 1
-      check ("'" & backend & "' backend") in r.refusal[0]
-      check "not implemented" in r.refusal[0]
-      check r.env.len == 0
-    check "rr pack" in route(backend = "rr", flag = true).refusal[0]
+  test "ttd refuses --portable by name":
+    let r = route(backend = "ttd", flag = true)
+    check r.refusal.len >= 1
+    check "'ttd' backend" in r.refusal[0]
+    check "not implemented" in r.refusal[0]
+    check r.env.len == 0
+
+  test "rr: --portable is accepted, and an upload is strict":
+    # Every rr recording is packed by ct-native-replay (`rr pack`), so
+    # --portable needs nothing forwarded and is never refused.
+    let r = route(backend = "rr", flag = true)
+    check r.wanted and r.refusal.len == 0 and r.env.len == 0
+    let u = route(backend = "rr", upload = true)
+    check u.wanted and u.implied == "--upload" and u.warning.len == 0
+    let off = route(backend = "rr", upload = true, env = "off")
+    check off.refusal.len == 1
+    check "contradicts --upload" in off.refusal[0]
 
   test "a source-level recorder refuses --portable by name":
     let r = route(dispatch = true, label = "Python", flag = true)
@@ -102,13 +111,13 @@ suite "ct record --portable":
   test "--upload where --portable is not implemented: uploads, with a named warning":
     # Owner, 2026-10-01: "warn now, implement per backend".  Not refused, not
     # silent: the warning names the backend and says what it means.
-    for backend in ["rr", "ttd"]:
-      let r = route(backend = backend, upload = true)
+    block:
+      let r = route(backend = "ttd", upload = true)
       check r.refusal.len == 0
       check not r.wanted
       check r.env.len == 0
       check r.warning.len == 1
-      check ("'" & backend & "' backend") in r.warning[0]
+      check "'ttd' backend" in r.warning[0]
       check "replays only where" in r.warning[0]
     let d = route(dispatch = true, label = "Ruby", upload = true)
     check d.refusal.len == 0 and d.warning.len == 1
@@ -116,6 +125,6 @@ suite "ct record --portable":
     # MCR implements it: strict, and no warning.
     check route(upload = true).warning.len == 0
     # Without an upload nothing is warned about.
-    check route(backend = "rr").warning.len == 0
-    # Asked for explicitly, --portable stays strict everywhere.
-    check route(backend = "rr", flag = true, upload = true).refusal.len >= 1
+    check route(backend = "ttd").warning.len == 0
+    # Asked for explicitly, --portable stays strict where it is not implemented.
+    check route(backend = "ttd", flag = true, upload = true).refusal.len >= 1

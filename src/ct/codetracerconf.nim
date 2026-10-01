@@ -773,9 +773,10 @@ type
         desc: "Make the trace replayable on another machine, or later " &
           "after its files change: the MCR backend bundles every file " &
           "the program mapped, their debug symbols and the platform " &
-          "description into the trace. A backend that cannot do this " &
+          "description into the trace, and the rr backend packs the " &
+          "files the trace mapped into it. A backend that cannot do this " &
           "yet refuses the flag. Also honors CODETRACER_PORTABLE=on|off; " &
-          "--upload implies it for MCR recordings."
+          "--upload implies it, and warns where it is not implemented."
       .}: bool
 
       recordProgram* {.

@@ -915,6 +915,9 @@ const
     # traces"): the dispatcher forwards it to MCR as CT_PORTABLE=on and every
     # backend that cannot honour it refuses it by name.
     "src/tests/cli/record_portable_test.nim",
+    # The rr row of "Portable traces": a packed rr trace replays after its
+    # program changes and after it is moved.
+    "src/tests/cli/record_portable_rr_e2e_test.nim",
     # Recorder options reach ct-mcr only as environment twins
     # (CLI/ct/record.md, "Recorder options"): the table, and the real
     # ct -> db-backend-record -> ct-native-replay chain with a stub recorder,

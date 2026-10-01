@@ -71,7 +71,15 @@ proc portableRoute*(viaDispatchTable: bool, recorderLabel: string,
   # MCR backend.  Elsewhere the upload goes ahead with a named warning, and
   # each backend becomes strict when its mechanism lands.
   let mcr = not viaDispatchTable and nativeBackend == "mcr"
-  if upload and not mcr and not result.wanted:
+  # rr: `ct-native-replay record` runs `rr pack` on every rr recording
+  # (codetracer-native-backend src/record.rs, `record_program`), which copies
+  # every file the trace mapped into the trace directory, and a failed pack
+  # fails the recording.  So an rr trace is always portable, and `--portable`
+  # needs nothing forwarded.  Measured 2026-10-01: a packed trace replays
+  # unchanged after its binary is rebuilt, and after the directory is moved.
+  let rr = not viaDispatchTable and nativeBackend == "rr"
+  let implemented = mcr or rr
+  if upload and not implemented and not result.wanted:
     let what =
       if viaDispatchTable: recorderLabel & " recordings"
       else: "the '" & nativeBackend & "' backend"
@@ -80,7 +88,7 @@ proc portableRoute*(viaDispatchTable: bool, recorderLabel: string,
       "the trace does not carry the files it used, so it replays only where " &
       "those files still exist unchanged.")
     return
-  if upload and mcr and not result.wanted:
+  if upload and implemented and not result.wanted:
     if explicitOff:
       result.refusal.add("error: " & PortableEnvVar & "=" & envValue.strip() &
         " contradicts --upload, which ships the trace to another machine " &
@@ -102,12 +110,12 @@ proc portableRoute*(viaDispatchTable: bool, recorderLabel: string,
     result.refusal.add("help: record without --portable; see \"Portable " &
       "traces\" in the `ct record` reference.")
     return
+  if rr:
+    return    # every rr recording is packed; nothing to forward
   if not mcr:
     result.refusal.add("error: --portable is not implemented for the '" &
-      nativeBackend & "' backend yet" &
-      (if nativeBackend == "rr": ": the trace is not packed with the files " &
-         "it mapped (the `rr pack` mechanism)" else: "") &
-      ", so it could not be replayed on another machine.")
+      nativeBackend & "' backend yet, so it could not be replayed on " &
+      "another machine.")
     result.refusal.add("help: record with --backend=mcr, which implements " &
       "--portable, or record without it.")
     return
