@@ -38,7 +38,8 @@ set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# The inventory as measured at codetracer 29b37c032. Shrinking is free; growing
+# The inventory as measured at codetracer 29b37c032, less the one site
+# converted on 2026-10-01. Shrinking is free; growing
 # means editing this table, deliberately.
 #
 #   frontend/ui_js.nim                        5  the renderer entry: the
@@ -48,8 +49,15 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 #                                                bootstrap that matches it
 #   frontend/ui/layout.nim                    2  the `panel_transfer` import and
 #                                                its one call site
-#   frontend/ui/shortcuts.nim                 1  ctrl+b re-record, which needs
-#                                                capProcessArbitraryPrograms
+#   frontend/ui/shortcuts.nim                 0  CONVERTED 2026-10-01: the ctrl+b
+#                                                re-record binding asks
+#                                                `can(capProcessArbitraryPrograms)`
+#                                                instead. The only one of the
+#                                                four under `ui/` that converts
+#                                                for free; the other three need
+#                                                `panel_transfer`'s {.error.}
+#                                                lifted, which is the trade
+#                                                §7.5's deferral is about.
 #   frontend/ui/panel_transfer.nim            1  {.error.}: capMultiWindow is
 #                                                absent on the web, so a facade
 #                                                arm could only ever refuse
@@ -63,7 +71,6 @@ frontend/subwindow.nim 1
 frontend/ui/agentic_worktree_test_hooks.nim 1
 frontend/ui/layout.nim 2
 frontend/ui/panel_transfer.nim 1
-frontend/ui/shortcuts.nim 1
 frontend/ui_js.nim 5"
 
 actual="$(

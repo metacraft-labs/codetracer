@@ -874,7 +874,15 @@ test_lane_files() {
 		# shape — two deliveries of one value can drift, and a shape check
 		# passes while they do.
 		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
+		#
+		# `index_reports_the_port_it_bound_test.nim` starts the real server on
+		# `--port 0` and then CONNECTS to the port the `CODETRACER_HOST_URL=`
+		# line named. The number cannot be compared against the input, because
+		# with auto-assign there is no input — so the connection is the check,
+		# and it is the only one an implementation that echoed the argument back
+		# could not satisfy.
 		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
+		echo src/frontend/tests/index_reports_the_port_it_bound_test.nim
 		;;
 
 	frontend-native-units)

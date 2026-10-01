@@ -88,7 +88,19 @@ if [ -z "${alias_name}" ]; then
 fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/ct-host-image-XXXXXX")"
-cleanup() { [ "${keep_work}" -eq 1 ] || rm -rf "${work}"; }
+cleanup() {
+	[ "${keep_work}" -eq 1 ] && return 0
+	# `chmod` FIRST, and the trap must not fail. The extracted layers are nix
+	# store paths, whose directories are mode 555 — `rm -rf` cannot remove a
+	# child of a directory it cannot write, so a bare cleanup leaves the tree
+	# behind AND returns non-zero, which under `set -e` in an EXIT trap turns a
+	# successful publication into a failed script. Measured: the first run of
+	# this script reported `PUB-EXIT=1` after importing nothing, with sixty
+	# lines of `Permission denied` from tzdata's zoneinfo.
+	chmod -R u+w "${work}" 2>/dev/null || true
+	rm -rf "${work}" 2>/dev/null || true
+	return 0
+}
 trap cleanup EXIT
 
 echo "==> building packages.codetracer-host-image"
@@ -122,6 +134,14 @@ while IFS= read -r layer; do
 	layer_count=$((layer_count + 1))
 done <<<"${layers}"
 echo "    ${layer_count} layer(s)"
+
+# WRITABLE BEFORE ANYTHING TRIES TO MODIFY IT. Every path in these layers is a
+# nix store path, extracted with its own 444/555 modes, so the whiteout sweep
+# below and the cleanup above both need this. It does not affect the image: the
+# modes that ship are the ones `tar` records, and `tar` is run after this with
+# `--owner=0 --group=0`, which is what makes the archive deterministic in the
+# first place.
+chmod -R u+w "${rootfs}"
 
 # `.wh.` whiteouts: a layer deletes a file by adding a marker rather than by
 # removing it, and tar knows nothing about that convention. Left in place they

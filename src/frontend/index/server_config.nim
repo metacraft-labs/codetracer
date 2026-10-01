@@ -7,6 +7,12 @@ import
 
 # `cacheClassFor` / `headerFor` — the Pages deployment's own, so `ct host` and
 # the CDN cannot disagree about what a path may be cached for.
+proc flushStdoutSync() {.importjs:
+  "(process.stdout.write('') , undefined)".}
+  ## `process.stdout.write('')` forces the pending buffer out on a pipe. There
+  ## is no synchronous `flush` in node; an empty write is the documented way to
+  ## make the queue drain.
+
 from ../viewmodel/platform/web_deployment import cacheClassFor, headerFor
 import ../viewmodel/platform/deployment_descriptor
 
@@ -26,7 +32,12 @@ when defined(server):
       # the host parameter, so there was no way to say otherwise from Nim and
       # `ct host` served every interface while its own spec required loopback.
       # Declaring the three-argument form is what makes the rule expressible.
-      listen*: proc(port: int, host: cstring, handler: proc: void)
+      # RETURNS THE LISTENER, and that return is load-bearing rather than
+      # incidental: with `--port 0` the kernel chooses the port, so the only
+      # place the real one can be read is `listener.address().port`. Declared
+      # `void` this was unreachable from Nim, which is the same shape as the
+      # host argument this type was widened for.
+      listen*: proc(port: int, host: cstring, handler: proc: void): JsObject
       use*: proc(prefix: cstring, value: JsObject)
 
 
@@ -211,8 +222,35 @@ when defined(server):
     # memory and I/O", and a reader watching the log had no way to tell the
     # rule was not being kept.
     let bindAddress = data.startOptions.address
-    server.listen(data.startOptions.port, bindAddress.cstring, proc =
-      infoPrint fmt"listening on {bindAddress}:{data.startOptions.port}")
+    var httpListener: JsObject
+    httpListener = server.listen(data.startOptions.port, bindAddress.cstring, proc =
+      # THE PORT IS READ BACK FROM THE SOCKET, not echoed from the argument.
+      #
+      # `--port 0` means "let the kernel choose" (`ct host`'s auto-assign, which
+      # is what a substrate-allocated session uses), and then the argument is
+      # `0` while the server is on some real port. Printing the argument would
+      # tell a supervisor to connect to port 0.
+      #
+      # `CLI/ct/host.md` §High-Level Rules requires the URL on stdout "in a form
+      # a supervising process can parse before the first client connects", so
+      # the machine-readable line is emitted here — inside the listen callback,
+      # which is the first moment the port is known and still before any client
+      # can have connected.
+      var boundPort = data.startOptions.port
+      if not httpListener.isNil:
+        let address = httpListener.address()
+        if not address.isNil and not address[cstring"port"].isUndefined:
+          boundPort = address[cstring"port"].to(int)
+      data.startOptions.port = boundPort
+      infoPrint fmt"listening on {bindAddress}:{boundPort}"
+      # One line, one prefix, the whole URL. A supervisor greps for the prefix
+      # and takes the rest; `infoPrint` above is for a person and carries a
+      # timestamp and a source location that a parser would have to strip.
+      echo fmt"CODETRACER_HOST_URL=http://{bindAddress}:{boundPort}"
+      # An explicit flush: node buffers stdout when it is a pipe, which is
+      # exactly the case a supervisor reads it through, and "before the first
+      # client connects" is a promise about when the bytes ARRIVE.
+      flushStdoutSync())
 
     debugPrint "in server"
     debugPrint data.startOptions

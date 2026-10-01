@@ -3,6 +3,10 @@ import
   std/strutils,
   isonim/core/signals,
   ui_imports, trace,
+  # `ctPlatform` / `can` — the chord below asks what this platform can do rather
+  # than which build this is. See the binding for why that is not the same
+  # question.
+  ../platform_host,
   # `debug` FOR `handleHistoryJump`, and the import is the fix.
   #
   # Until now this module called that name without importing anything that
@@ -552,7 +556,22 @@ proc configureShortcuts* =
   # web arm can install its handler whenever it likes: `configureShortcuts`
   # runs again from `onNoTrace` and `onWelcomeScreen`, and a rebinding race
   # over the chord would otherwise decide whether Build worked.
-  when not defined(ctWeb):
+  # A CAPABILITY QUERY, NOT A BUILD CHECK — §7.5's direction, applied to the one
+  # site where it costs nothing.
+  #
+  # `when not defined(ctWeb)` asked what BUILD this is; the question the binding
+  # actually has is whether this platform can run an arbitrary program, because
+  # re-recording shells out to a recorder. Those are the same answer today and
+  # they are not the same question: the container deployment is a browser tab
+  # whose platform CAN spawn (`containerCapabilities` has
+  # `capProcessArbitraryPrograms`), and a build check would have withheld the
+  # chord there for no reason.
+  #
+  # This also removes one of the fourteen branches
+  # `ci/test/ctweb-partition-inventory.sh` tracks. It is the only one that
+  # converts for free: the other three under `ui/` need `panel_transfer`'s
+  # `{.error.}` lifted, which is the trade §7.5's deferral is about.
+  if ctPlatform().can(capProcessArbitraryPrograms):
     Mousetrap.`bind`("ctrl+b") do ():
       data.reRecordCurrent(projectOnly=true)
 
