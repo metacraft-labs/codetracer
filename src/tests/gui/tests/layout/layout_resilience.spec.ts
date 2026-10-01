@@ -265,9 +265,37 @@ test.describe("Normal operation with valid layout", () => {
 // Recovery tests that corrupt/modify the layout file and verify the app recovers.
 // ---------------------------------------------------------------------------
 
+// THE THREE CASES BELOW WRITE THE BAD FILE BEFORE THE APP STARTS.
+//
+// They used to write it after launch and then call `ctPage.reload()`. That
+// never exercised the loader: the index process reads the layout file once,
+// at startup, and an Electron window has no reload path at all — the index
+// process sends the renderer its startup message (`CODETRACER::no-trace` in
+// edit mode) once, so a reloaded page waited for it forever and
+// `.lm_goldenlayout` never appeared. The cases timed out on every run, and
+// had they passed they would have proved only that a reload re-renders the
+// layout read before the file was damaged.
+//
+// So each case damages `default_edit_layout.json` in `beforeEach` (which
+// requests no fixture, so it runs before `ctPage` launches the app), and
+// asserts what recovery means: the window comes up usable, the damaged file
+// was replaced by a layout GoldenLayout can load, and the damaged bytes were
+// kept beside it as `.broken` (`index/config.resetLayoutToDefault`).
+
+/** The startup loader replaced a damaged layout and kept the damaged bytes. */
+function expectRecoveredOnDisk(layoutPath: string, damaged: string): void {
+  const persisted = JSON.parse(fs.readFileSync(layoutPath, "utf8"));
+  expect(persisted).toHaveProperty("root");
+  expect(persisted.root).toHaveProperty("type");
+  expect(fs.readFileSync(layoutPath + ".broken", "utf8")).toBe(damaged);
+}
+
+function cleanUpRecovery(layoutPath: string): void {
+  restoreLayoutFile(layoutPath);
+  fs.rmSync(layoutPath + ".broken", { force: true });
+}
+
 test.describe("Recovery from corrupted JSON", () => {
-  // Recovery tests can be flaky when running sequentially due to
-  // Playwright fixture lifecycle interactions.
   test.describe.configure({ retries: 2 });
   // This whole file manages `default_edit_layout.json` itself — backing it
   // up, corrupting it, restoring it — so the launch fixture must not reset it
@@ -275,24 +303,28 @@ test.describe("Recovery from corrupted JSON", () => {
   // that file too; see `layout-reset.resetEditLayout`.)
   test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
+  let damaged = "";
+  test.beforeEach(() => {
+    backupLayoutFile(defaultEditLayoutPath);
+    corruptLayoutFile(defaultEditLayoutPath);
+    damaged = fs.readFileSync(defaultEditLayoutPath, "utf8");
+  });
+
+  test.afterEach(() => {
+    cleanUpRecovery(defaultEditLayoutPath);
+  });
+
   test("app recovers from corrupted layout JSON", async ({ ctPage }) => {
-    const layoutPath = defaultEditLayoutPath;
-    backupLayoutFile(layoutPath);
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-    try {
-      corruptLayoutFile(layoutPath);
+    const layout = ctPage.locator(".lm_goldenlayout");
+    await expect(layout).toBeVisible();
 
-      await ctPage.reload();
-      await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+    const layoutContent = ctPage.locator(".lm_content").first();
+    await expect(layoutContent).toBeVisible();
+    expect(await ctPage.locator(".lm_tab").count()).toBeGreaterThan(0);
 
-      const layout = ctPage.locator(".lm_goldenlayout");
-      await expect(layout).toBeVisible();
-
-      const layoutContent = ctPage.locator(".lm_content").first();
-      await expect(layoutContent).toBeVisible();
-    } finally {
-      restoreLayoutFile(layoutPath);
-    }
+    expectRecoveredOnDisk(defaultEditLayoutPath, damaged);
   });
 });
 
@@ -304,21 +336,25 @@ test.describe("Recovery from invalid structure", () => {
   // that file too; see `layout-reset.resetEditLayout`.)
   test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
+  let damaged = "";
+  test.beforeEach(() => {
+    backupLayoutFile(defaultEditLayoutPath);
+    createInvalidStructureLayoutFile(defaultEditLayoutPath);
+    damaged = fs.readFileSync(defaultEditLayoutPath, "utf8");
+  });
+
+  test.afterEach(() => {
+    cleanUpRecovery(defaultEditLayoutPath);
+  });
+
   test("app recovers from layout with missing root", async ({ ctPage }) => {
-    const layoutPath = defaultEditLayoutPath;
-    backupLayoutFile(layoutPath);
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-    try {
-      createInvalidStructureLayoutFile(layoutPath);
+    const layout = ctPage.locator(".lm_goldenlayout");
+    await expect(layout).toBeVisible();
+    expect(await ctPage.locator(".lm_tab").count()).toBeGreaterThan(0);
 
-      await ctPage.reload();
-      await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
-
-      const layout = ctPage.locator(".lm_goldenlayout");
-      await expect(layout).toBeVisible();
-    } finally {
-      restoreLayoutFile(layoutPath);
-    }
+    expectRecoveredOnDisk(defaultEditLayoutPath, damaged);
   });
 });
 
@@ -330,21 +366,25 @@ test.describe("Recovery from missing type", () => {
   // that file too; see `layout-reset.resetEditLayout`.)
   test.use({ launchMode: "edit", editFolderPath: testFolder, preserveEditLayout: true });
 
+  let damaged = "";
+  test.beforeEach(() => {
+    backupLayoutFile(defaultEditLayoutPath);
+    createMissingTypeLayoutFile(defaultEditLayoutPath);
+    damaged = fs.readFileSync(defaultEditLayoutPath, "utf8");
+  });
+
+  test.afterEach(() => {
+    cleanUpRecovery(defaultEditLayoutPath);
+  });
+
   test("app recovers from layout root missing type property", async ({ ctPage }) => {
-    const layoutPath = defaultEditLayoutPath;
-    backupLayoutFile(layoutPath);
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-    try {
-      createMissingTypeLayoutFile(layoutPath);
+    const layout = ctPage.locator(".lm_goldenlayout");
+    await expect(layout).toBeVisible();
+    expect(await ctPage.locator(".lm_tab").count()).toBeGreaterThan(0);
 
-      await ctPage.reload();
-      await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
-
-      const layout = ctPage.locator(".lm_goldenlayout");
-      await expect(layout).toBeVisible();
-    } finally {
-      restoreLayoutFile(layoutPath);
-    }
+    expectRecoveredOnDisk(defaultEditLayoutPath, damaged);
   });
 });
 
@@ -358,11 +398,10 @@ test.describe("Recovery from missing type", () => {
 // ---------------------------------------------------------------------------
 
 // NOTE ON SETUP: these two cases write the broken layout in `beforeEach`,
-// NOT after `ctPage.reload()` like the three above.
+// like the three above, and for the same reason.
 //
-// `reload()` only reloads the renderer; the index process read the layout
-// file once at startup and never re-reads it, so a file written after launch
-// is never seen by the loader under test.  A `beforeEach` that requests no
+// The index process reads the layout file once, at startup, so a file
+// written after launch is never seen by the loader under test.  A `beforeEach` that requests no
 // fixture runs before Playwright instantiates `ctPage`, so the app boots with
 // the broken file already on disk — which is what makes these assertions
 // mean something.

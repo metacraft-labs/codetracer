@@ -23,9 +23,10 @@
  *      saved file holds the Debug-mode default's stacks again — and the two
  *      native files are byte-identical.
  *
- * The prefix (`PLAT45_DESKTOP_PREFIX`) must carry THIS checkout's desktop
- * JavaScript — the reset action is new — and its generated default; the
- * recipe that builds one is `scripts/plat45-desktop-prefix.sh`.
+ * The prefix (`PLAT45_DESKTOP_PREFIX`, else `CODETRACER_TEST_PREFIX`) must
+ * carry THIS checkout's desktop JavaScript — the reset action is new — and its
+ * generated default; the recipe that builds one is
+ * `scripts/plat45-desktop-prefix.sh`.
  *
  * No mocks: a real recording, the real `ct`, a real `replay-server`, the real
  * Electron app, real files.
@@ -53,13 +54,23 @@ const ConstraintsContent = 49;
 // which is every CI job, since none of them runs the terminal lanes first.
 const calcProgram = "calc/main.py";
 
+// The prepared prefix this spec launches, or "" for the build itself:
+// `PLAT45_DESKTOP_PREFIX`, else the `CODETRACER_TEST_PREFIX` every other spec
+// honours (`lib/fixtures.ts`). The fallback matters: this spec sets its own
+// `codetracerPrefixOverride`, which REPLACES the fixture's default, so with
+// only the suite-wide variable set it used to launch the build in
+// `CODETRACER_BUILD_DIR` — another checkout's, in a dev shell entered there —
+// and judge that checkout's desktop against this one's expectations.
+const preparedPrefix =
+  process.env.PLAT45_DESKTOP_PREFIX || process.env.CODETRACER_TEST_PREFIX || "";
+
 function prefix(): string {
   // With no prepared prefix the spec runs against the BUILD itself — in CI's
   // GUI job the build is this checkout, carrying its own desktop JavaScript and
   // generated default. A worktree whose `src/build-debug` is another
-  // checkout's needs `scripts/plat45-desktop-prefix.sh` and this variable.
-  const value = process.env.PLAT45_DESKTOP_PREFIX ?? "";
-  if (value.length > 0) return value;
+  // checkout's needs `scripts/plat45-desktop-prefix.sh` and one of the two
+  // variables above.
+  if (preparedPrefix.length > 0) return preparedPrefix;
   const build = process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
     ? process.env.CODETRACER_BUILD_DIR
     : path.join(repoRoot, "src", "build-debug");
@@ -172,7 +183,7 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       sourcePath: calcProgram,
       launchMode: "trace",
       noUserLayout: true,
-      codetracerPrefixOverride: process.env.PLAT45_DESKTOP_PREFIX ?? "",
+      codetracerPrefixOverride: preparedPrefix,
     });
     test.setTimeout(300_000);
 
@@ -226,7 +237,7 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       sourcePath: calcProgram,
       launchMode: "trace",
       preserveUserLayout: true,
-      codetracerPrefixOverride: process.env.PLAT45_DESKTOP_PREFIX ?? "",
+      codetracerPrefixOverride: preparedPrefix,
     });
     test.setTimeout(300_000);
 
