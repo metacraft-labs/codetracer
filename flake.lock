@@ -2612,7 +2612,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "983a11326aff114f613e0d479f9d8b628a25a1f5",
+        "rev": "e75019940be4722fcaf11f1b239de37adae54f41",
         "type": "github"
       },
       "original": {
@@ -3061,7 +3061,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "a42306dc05b0d17e646df885319b27ab1764d56c",
+        "rev": "71f2aae9c68132c5200b78af24f10e7c9575659f",
         "type": "github"
       },
       "original": {
