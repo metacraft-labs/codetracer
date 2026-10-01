@@ -249,12 +249,12 @@ fn coverage_is_the_recordings_real_per_line_execution_counts() {
         assert!(!entry.partial);
     }
     // The covered set is exactly what the recorder emitted steps for.  Line 1
-    // (`fn main(x: Field) {`) is the entry point, and a recording's first step
-    // is the entry point's (`trace-events.md`, "Recorder Integration —
-    // Starting a Recording": "The first step's position is the entry point's,
-    // not the first event the recorder produced"), so it ran once.  Line 6 (the
-    // loop's closing brace) has a step four times, and the collector does not
-    // drop it for looking odd.
+    // (`fn main(x: Field) {`) ran once: `main` has a step there.  The
+    // recording's entry step sits on the same line (`trace-events.md`, "The
+    // first step's position is the entry point's"), but it marks where the
+    // recording began rather than an execution, so it does not count again.
+    // Line 6 (the loop's closing brace) has a step four times, and the
+    // collector does not drop it for looking odd.
     //
     // `nargo trace` records columns, so most of these lines are several steps
     // per execution — line 4 is three (`x`, `(i as Field) * x`, the `let`).
@@ -284,9 +284,10 @@ fn flow_carries_the_functions_steps_values_and_loop_iterations() {
     let flow = &file.flow[0];
     assert_eq!(flow.function_key, "main");
     assert_eq!(flow.execution_index, 0);
-    // 22 steps: the whole call, not the window from the diff line onward —
-    // including the entry step at `main`'s own line 1, which every recording
-    // has (`trace-events.md`, "The entry step is part of `start`").
+    // 22 steps: the whole call, not the window from the diff line onward,
+    // starting at `main`'s own step on its line 1. The recording's entry step
+    // is also on line 1 but belongs to `<toplevel>`, not to `main`
+    // (`trace-events.md`, "The entry step is part of `start`").
     assert_eq!(flow.steps.len(), 22, "steps: {:?}", flow.steps.len());
 
     // The loop body's steps are attributed to the loop and numbered by
@@ -316,9 +317,10 @@ fn flow_carries_the_functions_steps_values_and_loop_iterations() {
     assert!(body.iter().all(|step| step.values.iter().all(|value| !value.truncated)));
 
     // Steps carry the trace position, so a reviewer can jump from the overlay
-    // into the recording.  On a materialized trace that is the step id.
+    // into the recording.  On a materialized trace that is the step id: `main`
+    // starts at step 1, right after the entry step `start` records at step 0.
     let positions: Vec<i64> = flow.steps.iter().map(|step| step.rr_ticks).collect();
-    assert_eq!(positions.first(), Some(&0));
+    assert_eq!(positions.first(), Some(&1));
     assert!(
         positions.windows(2).all(|pair| pair[0] < pair[1]),
         "monotonic: {positions:?}"

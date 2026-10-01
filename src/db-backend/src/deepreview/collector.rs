@@ -108,6 +108,24 @@ use super::unified_diff::ParsedDiff;
 /// fixed"). See the module header for why it is not a file symbol.
 const TOP_LEVEL_FUNCTION_NAME: &str = "<toplevel>";
 
+/// Whether `step_id` is the recording's entry step: the step `start` emits at
+/// the entry point, in the `<toplevel>` frame, before the program has run any
+/// statement (`trace-events.md`, "The entry step is part of `start`, not the
+/// recorder's first `register_step`").
+///
+/// It marks where the recording began, so it is neither an execution of the
+/// line it sits on nor a step of any function under review. Counting it made
+/// the entry point's line look executed once more than it ran, and when that
+/// line fell inside a diff hunk it anchored a `<toplevel>` flow duplicating the
+/// entry function's own.
+fn is_entry_step(reader: &dyn TraceReader, step_id: StepId, call_key: CallKey) -> bool {
+    step_id.0 == 0
+        && reader
+            .call(call_key)
+            .and_then(|call| reader.function(call.function_id))
+            .is_some_and(|function| function.name == TOP_LEVEL_FUNCTION_NAME)
+}
+
 /// Everything a collection needs that is not in the recordings themselves.
 #[derive(Debug, Clone)]
 pub struct CollectOptions {
@@ -777,6 +795,9 @@ fn collect_one(
     for index in 0..reader.step_count() {
         let step_id = StepId(index as i64);
         let Some(step) = reader.step(step_id) else { continue };
+        if is_entry_step(reader.as_ref(), step_id, step.call_key) {
+            continue;
+        }
         let path_id = step.path_id.0;
         let previous_in_frame = frame_line.insert(step.call_key.0, (path_id, step.line.0));
         let continues_execution = step.column.is_some() && previous_in_frame == Some((path_id, step.line.0));
