@@ -156,9 +156,9 @@ VCSSOURCE = "src/frontend/tui/host/vcs_source.nim"
 INTERACTION = "src/frontend/headless_app/layout_interaction.nim"
 BINDING = "src/frontend/tui/app/layout/binding.nim"
 FRAMEOVERLAY = "src/frontend/tui/app/views/frame_overlay.nim"
-ISONIM_TUI_OVERLAY = str(Path(os.environ.get(
-    "ISONIM_TUI_SRC", str(ROOT.parent / "isonim-tui" / "src"))) /
-    "isonim_tui" / "overlay.nim")
+ISONIM_TUI_SRC_DIR = Path(os.environ.get(
+    "ISONIM_TUI_SRC", str(ROOT.parent / "isonim-tui" / "src")))
+ISONIM_TUI_OVERLAY = str(ISONIM_TUI_SRC_DIR / "isonim_tui" / "overlay.nim")
 WINGEOM = "src/frontend/gpui/window_geometry.nim"
 WINGEST = "src/frontend/gpui/window_gestures.nim"
 LEAVES = "src/frontend/gpui/app/leaves.nim"
@@ -1107,8 +1107,26 @@ def needle_scan() -> int:
     return 0 if problems == 0 else 1
 
 
+def control_key(path: str) -> str:
+    """The name a touched file is recorded under in the control file.
+
+    In-tree subjects are named by their repository-relative path. The sibling
+    `isonim-tui` subject lives wherever `$ISONIM_TUI_SRC` points (a pin
+    worktree, a plain `../isonim-tui` checkout, CI's clone), so it is named
+    relative to that source root, `isonim-tui/src/...`: an absolute path
+    would make the committed control unreadable on every other checkout,
+    while the digest still pins the exact bytes graded."""
+    p = Path(path)
+    if p.is_absolute():
+        try:
+            return "isonim-tui/src/" + p.relative_to(ISONIM_TUI_SRC_DIR).as_posix()
+        except ValueError:
+            return path
+    return path
+
+
 def record_control_hashes() -> int:
-    lines = [f"{digest(p)}  {p}" for p in TOUCHED]
+    lines = [f"{digest(p)}  {control_key(p)}" for p in TOUCHED]
     CONTROL_HASHES.write_text("\n".join(lines) + "\n")
     print(f"recorded {len(lines)} digests in {CONTROL_HASHES}")
     return 0
@@ -1126,10 +1144,11 @@ def check_control_hashes() -> bool:
             recorded[p.strip()] = h
     ok = True
     for p in TOUCHED:
-        if p not in recorded:
-            print(f"CONTROL DIGEST ABSENT: {p}")
+        key = control_key(p)
+        if key not in recorded:
+            print(f"CONTROL DIGEST ABSENT: {key} ({p})")
             ok = False
-        elif recorded[p] != digest(p):
+        elif recorded[key] != digest(p):
             print(f"CONTROL DIGEST MOVED: {p} — re-run --needle-scan BEFORE "
                   "--record-control-hashes (§32)")
             ok = False
