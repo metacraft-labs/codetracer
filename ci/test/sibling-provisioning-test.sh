@@ -420,15 +420,19 @@ fi
 #     lock WAS pinning, and made the other five branch tips.
 #
 # `repro.lock` is committed in this repo, next to the source it describes. It
-# names the dependency set and a 40-hex revision for each, and
-# `.github/actions/provision-repro-lock-siblings` clones exactly that with
-# `repro develop --all`. No manifest repo, no publication lag, no branch tip.
+# names the dependency set (the develop set) and a 40-hex revision for each,
+# and `.github/actions/provision-repro-lock-siblings` clones its build-input
+# members -- the ones the lock also lists as solved packages -- with
+# `repro develop --all --only=<them>`. No manifest repo, no publication lag, no
+# branch tip.
 #
 # What is asserted here is that the arrangement stays that way: the action
 # still runs the lock-driven command (anti-vacuity -- everything below is
-# meaningless if it was renamed or rewritten), it hand-writes no sibling list
-# of its own, the lock still declares the dependency set, and every member of
-# that set carries an immutable revision.
+# meaningless if it was renamed or rewritten) and takes its `--only=` set from
+# the lock through `ci/repro-lock-build-input-siblings.sh`, it hand-writes no
+# sibling list of its own, the lock still declares the dependency set and its
+# build-input subset, and every member of that set carries an immutable
+# revision.
 # ---------------------------------------------------------------------------
 echo
 echo "the from-source dependency siblings resolve from this repo's repro.lock"
@@ -438,7 +442,19 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # The dependency set `repro.lock`'s `codetracer` node declares, in the order it
 # declares them. Pinned here so that a repo silently added to or dropped from
 # the lock is a failure rather than a quiet change of what CI provisions.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere'
+#
+# It is the whole develop set: the from-source build inputs AND the siblings
+# the test lanes are run against (recorders, native backend, trace format),
+# which `clone-siblings` resolves by bare name from this lock. Several of the
+# latter are private, and none is something a Nim build compiles, so the
+# provisioning action clones only the build-input subset below.
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,codetracer-beam-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-trace-format,codetracer-trace-format-nim,codetracer-visual-replay,codetracer-vscode-extension'
+# The build-input subset of that set (members that are also solved packages,
+# i.e. what `repro.nim` `uses` from source), as
+# `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is
+# what `provision-repro-lock-siblings` clones.
+readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp'
+readonly BUILD_INPUT_SELECTOR="$REPO_ROOT/ci/repro-lock-build-input-siblings.sh"
 
 # Anti-vacuity first: the action must exist and must still invoke the command
 # whose behaviour every assertion below describes.
@@ -458,12 +474,20 @@ else
 	# leaving the placement root to be inferred.
 	grep -q -- '--into=' "$LOCK_ACTION" ||
 		lock_action_defects+=("it does not pass --into=, so the sibling placement root is implicit")
+	# --only=<build inputs>: the develop set also names private test-lane
+	# siblings, which this credential-less step must not try to clone. The
+	# subset comes from the lock, through the selector script, not from a list
+	# written into the action.
+	grep -q -- '--only=' "$LOCK_ACTION" ||
+		lock_action_defects+=("it does not pass --only=, so it clones the whole develop set, private test-lane siblings included")
+	grep -q 'ci/repro-lock-build-input-siblings.sh' "$LOCK_ACTION" ||
+		lock_action_defects+=("it does not take its --only= set from ci/repro-lock-build-input-siblings.sh")
 fi
 
 if [ "${#lock_action_defects[@]}" -eq 0 ]; then
-	ok "provision-repro-lock-siblings still runs 'repro develop --all --reset --into='"
+	ok "provision-repro-lock-siblings still runs 'repro develop --all --only=<build inputs> --reset --into='"
 else
-	fail "provision-repro-lock-siblings still runs 'repro develop --all --reset --into='" \
+	fail "provision-repro-lock-siblings still runs 'repro develop --all --only=<build inputs> --reset --into='" \
 		"the assertions below describe what that command does; without it they" \
 		"describe nothing" \
 		"${lock_action_defects[@]}"
@@ -511,10 +535,26 @@ if [ "$actual_deps" = "$LOCK_DECLARED_DEPS" ]; then
 	ok "repro.lock declares the dependency set CI provisions ($actual_deps)"
 else
 	fail "repro.lock declares the dependency set CI provisions" \
-		"this is what 'repro develop --all' clones, so a change here is a change" \
-		"to what every job in this repo builds against" \
+		"this is the develop set: the build-input subset is what" \
+		"provision-repro-lock-siblings clones, and every member is what" \
+		"clone-siblings resolves a bare sibling name against" \
 		"expected: $LOCK_DECLARED_DEPS" \
 		"actual:   $actual_deps"
+fi
+
+# ... of which the build inputs are the part a Nim build clones.
+if [ -x "$BUILD_INPUT_SELECTOR" ]; then
+	actual_build_inputs="$("$BUILD_INPUT_SELECTOR" "$REPRO_LOCK" 2>&1)" || true
+else
+	actual_build_inputs="<$BUILD_INPUT_SELECTOR is missing or not executable>"
+fi
+if [ "$actual_build_inputs" = "$LOCK_BUILD_INPUT_SIBLINGS" ]; then
+	ok "the lock's build-input siblings are the set provision-repro-lock-siblings clones ($actual_build_inputs)"
+else
+	fail "the lock's build-input siblings are the set provision-repro-lock-siblings clones" \
+		"this is what every job using the action checks out next to codetracer" \
+		"expected: $LOCK_BUILD_INPUT_SIBLINGS" \
+		"actual:   $actual_build_inputs"
 fi
 
 # ... and each of them at an IMMUTABLE revision. A branch name here would be
@@ -1681,7 +1721,10 @@ echo
 # every member is pinned to a 40-hex SHA).
 # 27 -> 29: assertion 2c ("non-gui legs provision codetracer-js-recorder")
 # contributes the scanner-anchor check and the contract itself.
-readonly EXPECTED_ASSERTIONS=29
+# 29 -> 30: assertion 1b adds the build-input subset of the develop set (the
+# lock's develop set grew to name the test-lane siblings, and the action
+# clones only the members the build compiles from source).
+readonly EXPECTED_ASSERTIONS=30
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

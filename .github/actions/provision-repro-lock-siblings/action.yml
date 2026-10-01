@@ -45,14 +45,25 @@ description: |
       and the same commit builds against different sources on every run.
 
   ``repro.lock`` is committed HERE, next to the source it describes, and it
-  answers the question the build actually asks. Its ``depends`` field says
+  answers the question the build actually asks. Its ``depends`` field is the
+  develop set -- every sibling this commit is built AND tested against -- and
+  it carries a 40-hex revision for each, resolved offline from a file in this
+  commit: no manifest repo, no publication lag, no branch tip, and no
+  fifth-hand guess about which extra checkouts a developer had lying around.
 
-      depends = "isonim,isonim-tui,nim-acp,nim-agent-harbor,nim-agents,nim-everywhere"
+  WHICH OF THEM THIS ACTION CLONES. The develop set also names the siblings
+  the test lanes run against (recorders, the native backend, the trace
+  format), which ``clone-siblings`` resolves by bare name from the same lock.
+  Several are private, and no Nim build compiles them. This action clones
+  only the BUILD INPUTS: the members of the develop set that are also solved
+  packages in the lock, i.e. what ``repro.nim`` ``uses`` from source --
 
-  and it carries a 40-hex revision for each. That is six repos at exact
-  SHAs, resolved offline from a file in this commit -- no manifest repo, no
-  publication lag, no branch tip, and no fifth-hand guess about which four
-  extra checkouts a developer had lying around.
+      isonim, isonim-tui, nim-everywhere, nim-agent-harbor, nim-agents, nim-acp
+
+  ``ci/repro-lock-build-input-siblings.sh`` derives that list from the lock
+  and the step passes it as ``--only=``, so the lock stays the only answer
+  (declare a from-source dependency in ``repro.nim``, relock, and it is
+  cloned here with no list to edit).
 
   ``repro develop --all`` is the documented consumer path for exactly this
   (see the header of ``metacraft-labs/reprobuild``'s
@@ -117,11 +128,12 @@ description: |
 runs:
   using: composite
   steps:
-    # No ``gh-token`` input, and that is deliberate: every repo `repro.lock`
-    # names is public (`visibility = "public"`, and each clones anonymously),
-    # so this step needs no credential and is given none. Reprobuild's own CI
-    # runs the identical command with `GIT_CONFIG_GLOBAL=/dev/null`. A future
-    # private dependency is the moment to add a token, and it will be visible
+    # No ``gh-token`` input, and that is deliberate: every build-input sibling
+    # is public and clones anonymously, so this step needs no credential and
+    # is given none. Reprobuild's own CI runs the same command with
+    # `GIT_CONFIG_GLOBAL=/dev/null`. The develop set's private members are
+    # test-lane siblings, which `--only=` leaves to `clone-siblings`. A future
+    # private BUILD input is the moment to add a token, and it will be visible
     # as a failing clone rather than as a silent widening of what this step can
     # read.
     - name: Clone the lock-pinned dependency siblings
@@ -131,8 +143,10 @@ runs:
         root="${GITHUB_WORKSPACE}"
         siblings_root="$(cd "${root}/.." && pwd)"
         cd "${root}"
+        build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
+        echo "Provisioning the lock's build-input siblings: ${build_inputs}"
         nix develop .#ci --command \
-          repro develop --all --reset --into="${siblings_root}"
+          repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
 
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES
