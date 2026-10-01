@@ -82,6 +82,13 @@ fn write_production_bundle(dir: &Path) -> PathBuf {
     writer.finish_writing_trace_paths().unwrap();
 
     let path = Path::new(SRC);
+
+    // `start` comes first: it interns `<toplevel>` as function 0 and opens its
+    // call at depth 0 (trace-events.md, "Recorder Integration — Starting a
+    // Recording"). Everything the fixture registers afterwards therefore sits
+    // one level below it: `main` at depth 1, each `worker` at depth 2.
+    writer.start(path, Line(1));
+
     let fid = writer.ensure_function_id("main", path, Line(1));
     writer.register_function("main", path, Line(1));
 
@@ -97,7 +104,6 @@ fn write_production_bundle(dir: &Path) -> PathBuf {
     let worker_id = writer.ensure_function_id("worker", path, Line(200));
     writer.register_function("worker", path, Line(200));
 
-    writer.start(path, Line(1));
     writer.register_step(path, Line(1));
     let int_type = writer.ensure_type_id(TypeKind::Int, "int");
     TraceWriter::register_call(&mut writer, fid, vec![]);
@@ -167,6 +173,22 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
     (dir, ct)
 }
 
+/// The function name and call depth of the frame `step_id` executes in.
+///
+/// The cases below each depend on WHERE a step sits in the call tree, so they
+/// assert it by name as well as by depth: a depth alone cannot tell `main`
+/// from `<toplevel>` if the writer's call bookkeeping ever shifts again.
+fn frame_of(reader: &CTFSTraceReader, step_id: StepId) -> (String, usize) {
+    let step = reader.step(step_id).expect("the step exists");
+    let call = reader
+        .call(step.call_key)
+        .expect("every step is inside a recorded call");
+    let function = reader
+        .function(call.function_id)
+        .expect("the call's function is interned");
+    (function.name.clone(), call.depth)
+}
+
 /// The core M0 assertion, and the milestone's
 /// `test_navigation_does_not_materialize_step_table`.
 ///
@@ -178,6 +200,16 @@ fn step_over_costs_the_chunk_it_walks_not_the_trace() {
     let reader = Arc::new(browser_reader(&ct));
     let probe = reader.clone();
     let mut session = MaterializedReplaySession::new(reader);
+
+    // Start inside `main`. Steps 0 and 1 belong to `<toplevel>`, whose only
+    // child is `main`, so a step-over from there legitimately steps over the
+    // whole program — that measures the fixture, not the walk.
+    session.step_id_jump(StepId(2));
+    assert_eq!(
+        frame_of(&probe, StepId(2)),
+        ("main".to_string(), 1),
+        "step 2 must be `main`'s first step, directly below `<toplevel>`, for this case to mean anything"
+    );
 
     for _ in 0..25 {
         session.step(Action::Next, true).expect("step-over forward");
@@ -225,14 +257,11 @@ fn step_out_of_a_frame_is_bounded_by_that_frame() {
     // here rather than assumed: if the writer's call bookkeeping ever changes,
     // this fails by name instead of silently measuring a frameless step.
     session.step_id_jump(StepId(10));
-    let step = probe.step(StepId(10)).expect("step 10 exists");
-    let depth = probe
-        .call(step.call_key)
-        .map(|c| c.depth)
-        .expect("step 10 must be inside a recorded call");
     assert_eq!(
-        depth, 1,
-        "step 10 must sit inside a `worker` frame for this case to mean anything"
+        frame_of(&probe, StepId(10)),
+        ("worker".to_string(), 2),
+        "step 10 must sit inside a `worker` frame (below `main`, below `<toplevel>`) for this case \
+         to mean anything"
     );
 
     session.step(Action::StepOut, true).expect("step-out forward");
@@ -265,13 +294,13 @@ fn step_out_of_the_outermost_frame_walks_to_the_boundary_without_building_the_ta
     let probe = reader.clone();
     let mut session = MaterializedReplaySession::new(reader);
 
-    // Step 2 is `main`'s own first step: depth 0, nothing to step out to.
-    session.step_id_jump(StepId(2));
-    let step = probe.step(StepId(2)).expect("step 2 exists");
+    // Step 1 is `<toplevel>`'s own step before it calls `main`: depth 0, the
+    // root of the call tree, nothing to step out to.
+    session.step_id_jump(StepId(1));
     assert_eq!(
-        probe.call(step.call_key).map(|c| c.depth),
-        Some(0),
-        "step 2 must be at the outermost depth for this case to mean anything"
+        frame_of(&probe, StepId(1)),
+        ("<toplevel>".to_string(), 0),
+        "step 1 must be at the outermost depth for this case to mean anything"
     );
 
     session.step(Action::StepOut, true).expect("step-out forward");

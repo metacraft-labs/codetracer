@@ -5,7 +5,7 @@
     "Regenerate: `just plat45-arrangement-window` then",
     "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
   ],
-  "takenAt": "2026-09-30T00:25:11Z",
+  "takenAt": "2026-09-30T19:22:49Z",
   "host": "gpu-server-001",
   "frames": {
     "shared": {
@@ -17,10 +17,10 @@
       "regions": [
         {
           "x": 0,
-          "y": 13,
+          "y": 55,
           "w": 387,
-          "h": 1054,
-          "strip": "Files VCS Tests",
+          "h": 980,
+          "strip": "Files VCS Tests N",
           "tabs": [
             "Files",
             "VCS",
@@ -37,10 +37,10 @@
         },
         {
           "x": 396,
-          "y": 13,
+          "y": 55,
           "w": 470,
-          "h": 1054,
-          "strip": "Editor",
+          "h": 980,
+          "strip": "Editor B",
           "tabs": [
             "Editor"
           ],
@@ -55,10 +55,10 @@
         },
         {
           "x": 875,
-          "y": 13,
+          "y": 55,
           "w": 511,
-          "h": 522,
-          "strip": "State Scratchpad",
+          "h": 485,
+          "strip": "State Scratchpad N",
           "tabs": [
             "State",
             "Scratchpad"
@@ -74,10 +74,10 @@
         },
         {
           "x": 1396,
-          "y": 13,
+          "y": 55,
           "w": 524,
-          "h": 522,
-          "strip": "Call Trace Agent Activity",
+          "h": 485,
+          "strip": "Call Trace Agent Activity N",
           "tabs": [
             "Call Trace",
             "Agent Activity"
@@ -93,10 +93,10 @@
         },
         {
           "x": 875,
-          "y": 545,
+          "y": 550,
           "w": 1045,
-          "h": 522,
-          "strip": "Event Log Timeline Terminal Output",
+          "h": 485,
+          "strip": "Event Log Timeline Terminal Output N",
           "tabs": [
             "Event Log",
             "Timeline",

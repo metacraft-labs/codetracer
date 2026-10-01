@@ -8,10 +8,36 @@
 //!
 //! | Ingredient | Where it comes from |
 //! |---|---|
-//! | line coverage | `Db::steps` — every recorded step's `(path, line)` |
+//! | line coverage | `Db::steps` — every recorded step's `(path, line)`, counted per line execution (see below) |
 //! | per-invocation flow, with values and loops | `flow_preloader::FlowPreloader::load`, `FlowMode::Call` |
 //! | the call tree | `Db::calls` / `Db::functions` |
 //! | the diff | the patch the caller supplied, read by [`super::unified_diff`] |
+//!
+//! # A line's execution count is not its step count
+//!
+//! `LineCoverageData::execution_count` is the number of times the line ran
+//! (`File-Format-Spec.md`: "Times executed"). In a line-only trace every step
+//! is one execution of its line, so the two coincide. A column-aware recorder
+//! emits one step per sub-expression it stops at — `let c = (i as Field) * x;`
+//! is three steps each time it runs — so there a line's steps are one
+//! execution while the frame stays on that line. A column-bearing step
+//! therefore starts a new execution of its line only when the previous step of
+//! the SAME frame was on a different line (or there was none). Keying on the
+//! frame rather than on the previous step overall keeps a line that calls a
+//! function one execution across the callee's steps. It is the same line-level
+//! granularity the flow uses (it advances with a step to a different line), so
+//! the coverage and the flow of one recording agree on how often a line ran.
+//!
+//! # `<toplevel>` is in the call tree, not in a file's symbols
+//!
+//! The trace-format spec makes `<toplevel>` the root of every recording's call
+//! tree, and has the writer place its function record at the entry point's
+//! `(path, line)` (`trace-events.md`, "Recorder Integration — Starting a
+//! Recording"). It is not a function declared in that file, so it is not a
+//! symbol a reviewer can navigate to (`Data-Collection-Algorithm.md`: symbols
+//! are "for navigation") and it has no per-function coverage of its own. It is
+//! left out of `symbols` and `functions` and kept in the call tree, where the
+//! spec says a reader shows it as the root.
 //!
 //! # Why `FlowMode::Call` and not `FlowMode::Diff`
 //!
@@ -76,6 +102,11 @@ use super::json::{
     FunctionFlowData, LineCoverageData, LoopData, SymbolData, TraceContextData, VariableValueData,
 };
 use super::unified_diff::ParsedDiff;
+
+/// The name the trace-format spec gives the call tree's root
+/// (`trace-events.md`, "`<toplevel>` is the call tree's root and its id is
+/// fixed"). See the module header for why it is not a file symbol.
+const TOP_LEVEL_FUNCTION_NAME: &str = "<toplevel>";
 
 /// Everything a collection needs that is not in the recordings themselves.
 #[derive(Debug, Clone)]
@@ -605,6 +636,9 @@ pub fn collect(options: &CollectOptions) -> Result<(DeepReviewData, CollectRepor
         let mut symbols = vec![];
         let mut functions = vec![];
         for (name, function) in &acc.functions {
+            if name == TOP_LEVEL_FUNCTION_NAME {
+                continue;
+            }
             symbols.push(SymbolData {
                 name: name.clone(),
                 // A materialized trace records that a function ran, not its
@@ -728,6 +762,11 @@ fn collect_one(
     let mut path_match: HashMap<usize, Option<usize>> = HashMap::new();
     let mut path_absolute: HashMap<usize, PathBuf> = HashMap::new();
 
+    // Per frame, the `(path, line)` its most recent step landed on. See the
+    // module header: a column-bearing step on the line its frame is already on
+    // continues that execution of the line rather than starting a new one.
+    let mut frame_line: HashMap<i64, (usize, i64)> = HashMap::new();
+
     let touched_lines: Vec<BTreeSet<u32>> = options
         .diff
         .files
@@ -739,6 +778,8 @@ fn collect_one(
         let step_id = StepId(index as i64);
         let Some(step) = reader.step(step_id) else { continue };
         let path_id = step.path_id.0;
+        let previous_in_frame = frame_line.insert(step.call_key.0, (path_id, step.line.0));
+        let continues_execution = step.column.is_some() && previous_in_frame == Some((path_id, step.line.0));
         let matched = *path_match.entry(path_id).or_insert_with(|| {
             let raw = reader.path(step.path_id).unwrap_or("");
             let absolute = absolute_trace_path(raw, &workdir);
@@ -754,7 +795,10 @@ fn collect_one(
         let line = line as u32;
         touched_files.insert(file_index);
         lines_this_recording[file_index].insert(line);
-        *accumulators[file_index].coverage.entry(line).or_insert(0) += 1;
+        let count = accumulators[file_index].coverage.entry(line).or_insert(0);
+        if !continues_execution {
+            *count += 1;
+        }
         if touched_lines[file_index].contains(&line) {
             anchors.insert(step.call_key.0, (step_id, file_index));
         }

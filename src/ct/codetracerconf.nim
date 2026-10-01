@@ -477,9 +477,23 @@ type
       #        [--frontend-socket-parameters
       #         <parameters>]
       #        <trace-id>/<trace-folder>
+      # `-1` MEANS "THE OPERATOR SAID NOTHING", for the same reason
+      # `hostBind`'s default is the empty string: without a value that means
+      # absence, `CODETRACER_HOST_PORT` could never be consulted without also
+      # overriding an explicit `--port`. `resolveHostPort` in
+      # `trace/host.nim` turns absence into auto-assign and carries the
+      # reasoning.
+      #
+      # It was MANDATORY until 2026-10-01 (no `defaultValue`, so confutils
+      # required it), while `CLI/ct/host.md` §Options had always said
+      # `auto-assign` — WD2's hosted path is exactly the case where the port is
+      # the substrate's to allocate rather than the operator's to choose.
       hostPort* {.
         name: "port"
-        desc: "Port to listen on"
+        defaultValue: -1
+        desc: "Port to listen on " &
+          "(default: auto-assign; " &
+          "CODETRACER_HOST_PORT)"
       .} : int
 
       # EMPTY MEANS "THE OPERATOR SAID NOTHING", which is the only way

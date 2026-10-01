@@ -43,6 +43,7 @@ on:
       # NOT be treated that way.
       - cloud
   pull_request:
+    branches-ignore: [agents]
 
   # PERIODIC COVERAGE ON `dev`, WHICH PUSH RUNS NO LONGER PROVIDE.
   #
@@ -3770,6 +3771,18 @@ jobs:
         # step above gives; the recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat47-capture-electron
 
+      - name: The desktop's menu is drawn from the shared Menu ViewModel
+        if: ${{ !cancelled() }}
+        # The desktop column of the one menu drawn three ways: a highlight
+        # given to the Menu ViewModel ALONE must move the desktop's DOM
+        # highlight (a renderer keeping its own copy fails here), the Debug
+        # folder's shortcuts are the keymap's chords, choosing Step Over moves
+        # the debugger, and the footer's labels are the shared default's
+        # docked panes — read from the REAL Electron app on `calc` with this
+        # checkout's desktop JavaScript. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat48-capture-electron
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -3777,6 +3790,121 @@ jobs:
           name: viewmodel-test-logs
           path: test-logs/
           retention-days: 30
+
+  gpui-window-captures:
+    runs-on: [self-hosted, linux, x64]  # the label isonim-gpui's "GUI tests (headless sway)" job runs green on
+    # NEW, NO SAMPLE YET. The work is two cargo builds of isonim-gpui's shim
+    # (windowed and featureless; incremental on a runner that kept its work
+    # tree), `just build-once`, three windowed front-end builds' worth of Nim,
+    # and three captures of 2-5 minutes each on this host class. 90m is a
+    # generous first bound, to be tightened from the first green runs.
+    timeout-minutes: 90
+    name: GPUI window captures (headless sway)
+    # WHY THIS JOB EXISTS. The GPUI window suites assert records measured off
+    # a real window (`src/tests/visual/plat4{5,7,8}-…json`); until this job
+    # nothing re-took them, so a record stopped describing the window the
+    # first time the window changed (PLAT-45's and PLAT-47's predated the
+    # top bar). Here each capture runs on a headless sway, its frames are
+    # measured into the record, and the suite asserts THAT — this commit's
+    # window, not the file last committed. The two capabilities the
+    # known-dark list recorded as missing — a windowed shim and a
+    # compositor — are isonim-gpui's own CI job's, on this runner label
+    # (codetracer-specs issues/2026-09-26-window-capture-gates-recorded-
+    # blocked-although-ci-can-run-them.md).
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Read the isonim-gpui pin
+        # The ONE pin this repo keeps for isonim-gpui is flake.lock's; the
+        # clone below takes it from there rather than from a second copy of
+        # the SHA in this file.
+        id: gpui_pin
+        run: |
+          rev="$(python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["isonim-gpui"]["locked"]["rev"])')"
+          echo "rev=${rev}" >> "${GITHUB_OUTPUT}"
+
+      # Every authenticated clone near the top: the installation token expires
+      # an hour after it is minted (see `viewmodel-tests`).
+      - name: Clone isonim-gpui sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/isonim-gpui
+          ref: ${{ steps.gpui_pin.outputs.rev }}
+          path: ${{ github.workspace }}/../isonim-gpui
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone GuiAssert sibling
+        # PLAT-45's window record reads the frames through GuiAssert's pixel
+        # readers (`--path:../GuiAssert/src`), the declared cross-repo edge
+        # the `gpui-shell` and `screen-oracle` lanes carry.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/GuiAssert
+          ref: dev
+          path: ${{ github.workspace }}/../GuiAssert
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # `just build-once` compiles `ct`, which imports `runquota_process`
+        # (see `cross-process-linux`).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+
+      - name: Build ct and replay-server
+        # `ct record` records the `calc` and `call_pages` fixtures the
+        # captures open; `replay-server` replays them.
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: Re-take and assert the GPUI window captures
+        # isonim-gpui's windowed shim and virtual pointer are built in ITS
+        # dev shell (the one that declares the X/Wayland libraries and the
+        # compositor tools); the recipe enters it itself.
+        run: nix develop .#devShells.x86_64-linux.default --command just gpui-window-captures
+
+      - name: Upload the frames
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpui-window-captures
+          path: |
+            build/plat45/
+            build/plat47-gpui/
+            build/plat48-gpui/
+            src/tests/visual/plat45-gpui-arrangement.json
+            src/tests/visual/plat47-gpui-window.json
+            src/tests/visual/plat48-gpui-window.json
+          retention-days: 7
 
   push-gpg-public-key:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -5778,6 +5906,41 @@ jobs:
             exit 1
           fi
           echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
+
+      # ---------------------------------------------------------------------
+      # codetracer-wasm-instrumenter. Seven db-backend integration tests in
+      # this lane replay the `cross-process-three-trace` recording
+      # (cross_process_three_trace_dap_test, m25b_event_log_test,
+      # step_over_frameless_step_test). It is not committed: the test harness
+      # produces it from this tree with scripts/materialize-recording.sh, which
+      # instruments the demo's wasm with `ct-instrument` and refuses to record
+      # without it ("ct-instrument not found"). Its other prerequisite,
+      # `session-manager`, is built by `just test-rust` itself.
+      #
+      # Cloned with `clone-repo` for the same branch-tip-ceiling reason as the
+      # js recorder above, and built in the instrumenter's own dev shell. The
+      # script finds the binary at `<sibling>/target/release/ct-instrument`.
+      # Not gated to one platform: both legs run the same `just test`.
+      - name: Clone codetracer-wasm-instrumenter sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-wasm-instrumenter
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Build ct-instrument (codetracer-wasm-instrumenter sibling)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-wasm-instrumenter"
+          nix develop --no-write-lock-file --command cargo build --release -p ct-instrument-cli
+          if [ ! -x target/release/ct-instrument ]; then
+            echo "::error::cargo build reported success but target/release/ct-instrument is missing; scripts/materialize-recording.sh cannot produce the cross-process recording."
+            exit 1
+          fi
+          echo "ct-instrument: $(pwd)/target/release/ct-instrument"
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``

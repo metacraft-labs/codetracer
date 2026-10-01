@@ -85,6 +85,15 @@ pub const META_DAT_VERSION: u16 = 4;
 /// sets an extended flag.
 pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
 
+/// [`SUPPORTED_META_DAT_VERSIONS`] as a comma-separated list, for refusals.
+fn accepted_versions() -> String {
+    SUPPORTED_META_DAT_VERSIONS
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// GDH-M2 — the schema version a container carries when at least one
 /// EXTENDED flag is set.  Must match the Nim writer's `meta_dat.nim`
 /// `MetaDatVersionExtendedFlags`.
@@ -247,6 +256,10 @@ pub enum MetaDatError {
     /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`, schema version
     /// 5) were set that this reader does not know.  Same contract as
     /// `UnknownFlags`: the writer is newer than this reader.
+    /// A version 5 header whose `flags_ext` word is zero: a schema version
+    /// spent on nothing, which is what an unconditional version bump produces
+    /// (`internal-files.md` §"Extended flags").
+    EmptyExtendedFlags,
     UnknownExtendedFlags {
         ext_flags: u32,
         unknown_bits: u32,
@@ -278,7 +291,8 @@ impl fmt::Display for MetaDatError {
             MetaDatError::UnsupportedVersion(v) => {
                 write!(
                     f,
-                    "meta.dat: unsupported version {v}, expected {META_DAT_VERSION}"
+                    "meta.dat: unsupported version {v} (accepted: {})",
+                    accepted_versions()
                 )
             }
             MetaDatError::UnknownFlags {
@@ -287,6 +301,11 @@ impl fmt::Display for MetaDatError {
             } => write!(
                 f,
                 "meta.dat: unknown flag bits set (flags=0x{flags:04x}, unknown=0x{unknown_bits:04x})",
+            ),
+            MetaDatError::EmptyExtendedFlags => write!(
+                f,
+                "meta.dat: schema version {META_DAT_VERSION_EXTENDED_FLAGS} with an all-zero flags_ext word; a \
+                 container with no extended flag is written at version {META_DAT_VERSION}"
             ),
             MetaDatError::UnknownExtendedFlags { ext_flags, unknown_bits } => write!(
                 f,
@@ -434,6 +453,9 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
                 ext_flags: ext,
                 unknown_bits: unknown_ext,
             });
+        }
+        if ext == 0 {
+            return Err(MetaDatError::EmptyExtendedFlags);
         }
         12usize
     } else {
@@ -1011,6 +1033,23 @@ mod tests {
         }
     }
 
+    /// A version 5 header whose `flags_ext` is zero is refused
+    /// (`codetracer-trace-format-spec/internal-files.md` §"Extended flags"):
+    /// it is what an unconditional version bump produces.
+    #[test]
+    fn a_v5_header_with_a_zero_ext_word_is_refused() {
+        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
+        buf[8] = 0;
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::EmptyExtendedFlags) => {}
+            other => panic!("a v5 header with flags_ext == 0 must be refused; got {other:?}"),
+        }
+        assert!(
+            MetaDatError::EmptyExtendedFlags.to_string().contains("flags_ext"),
+            "the refusal names the word"
+        );
+    }
+
     #[test]
     fn a_v5_header_truncated_before_its_ext_word_is_refused() {
         // Eleven bytes: past the u16 flags, one short of the ext word.
@@ -1104,6 +1143,21 @@ mod tests {
             parse_meta_dat(&buf),
             Err(MetaDatError::UnsupportedVersion(99))
         );
+    }
+
+    /// The refusal names every version this parser accepts, from
+    /// [`SUPPORTED_META_DAT_VERSIONS`], so a v5 recording is never told
+    /// that only 4 would have been accepted.
+    #[test]
+    fn unsupported_version_message_names_the_accepted_set() {
+        let msg = MetaDatError::UnsupportedVersion(99).to_string();
+        let expected: Vec<String> = SUPPORTED_META_DAT_VERSIONS.iter().map(u16::to_string).collect();
+        assert!(expected.len() > 1, "the accepted set is not a singleton");
+        assert!(
+            msg.contains(&format!("accepted: {}", expected.join(", "))),
+            "the refusal must list every accepted version; got: {msg}"
+        );
+        assert!(msg.contains("99"), "the refusal must name the version it saw; got: {msg}");
     }
 
     #[test]

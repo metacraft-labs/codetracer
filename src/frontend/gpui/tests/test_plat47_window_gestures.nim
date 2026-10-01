@@ -124,8 +124,11 @@ suite "PLAT-47: the window's geometry is total and exact":
     ck g0.pointerAt(3, H div 2).get.zone == dzOutsideLeft
     ck g0.pointerAt(W - 3, H div 2).get.zone == dzOutsideRight
     ck g0.pointerAt(W div 2, H - 3).get.zone == dzOutsideBottom
-    # gpui-kit's dock has no top placement: the top margin names nothing.
-    ck g0.pointerAt(W div 2, 3).isNone
+    # PLAT-48: the window draws a TOP strip itself (gpui-kit's dock has no
+    # top placement), so the margin above the layout names the top dock, as
+    # the terminal's row above the body and the desktop's top drop do.
+    let above = g0.pointerAt(W div 2, 3)
+    ck above.isSome and above.get.zone == dzOutsideTop
 
 suite "the editor pane shows whole rows":
 

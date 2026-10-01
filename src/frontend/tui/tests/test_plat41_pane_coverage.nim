@@ -86,15 +86,19 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # desktop's own panes, which the shared default places everywhere and
     # which no native front-end had a view for — and PLAT-47 moved `paneVcs`
     # into the vocabulary: it draws the desktop's own `VCSVM`.
-    ck card(allPanes()) == 18
+    #
+    # PLAT-48 added the desktop's two footer panels the enum could not name
+    # (PROBLEMS, REQUESTS) — docked by the shared default, reported here.
+    ck card(allPanes()) == 20
     ck card(PaneVocabularyPanes) == 11
     ck card(PaneNativePanes) == 2
-    ck card(PaneAcceptedExceptions) == 5
+    ck card(PaneAcceptedExceptions) == 7
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
     ck PaneAcceptedExceptions == {paneBuildOutput, paneAgentActivity,
                                   paneTerminalOutput, paneTestResults,
-                                  paneConstraints}
+                                  paneConstraints, paneProblems,
+                                  paneRequests}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +
        card(PaneAcceptedExceptions) == card(allPanes())
 

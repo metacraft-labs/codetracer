@@ -34,9 +34,9 @@
  "focusRing": {
   "bbox": [
    396,
-   12,
+   54,
    470,
-   1056
+   982
   ],
   "sides": {
    "top": {
@@ -50,13 +50,13 @@
     "inside": 0
    },
    "left": {
-    "ring": 1048,
-    "of": 1048,
+    "ring": 974,
+    "of": 974,
     "inside": 0
    },
    "right": {
-    "ring": 1048,
-    "of": 1048,
+    "ring": 974,
+    "of": 974,
     "inside": 0
    }
   }
@@ -64,19 +64,19 @@
  "editor": {
   "body": [
    397,
-   13,
+   55,
    468,
-   1054
+   980
   ],
   "pixelsByDesktopColour": {
-   "keyword": 105,
-   "string": 4055,
+   "keyword": 80,
+   "string": 3972,
    "comment": 127,
-   "identifier": 258,
+   "identifier": 222,
    "delimiter": 2,
-   "lineNumber": 1197,
-   "activeLineNumber": 68,
-   "ground": 430775,
+   "lineNumber": 1106,
+   "activeLineNumber": 66,
+   "ground": 398177,
    "oldBand4f4f4f": 0,
    "chromePaneFill": 0
   },
@@ -93,12 +93,12 @@
    "executionLine": "#404040",
    "selection": "#353535"
   },
-  "text": "Editor\n\nthe recording's source\n\np\u00bb 1 #!/usr/binfenv python3\n\"\"\"calc \u2014 the small, fast, deterministic program b\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS\n"
+  "text": "Editor -\nthe recording's source\np\u00bb 1 #!/usr/binfenv python3\n\"\"\"calc \u2014 the small, fast, deterministic program b\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS\n"
  },
  "band": {
   "rows": [
-   77,
-   102
+   119,
+   144
   ],
   "startX": 462,
   "endX": 852,
@@ -112,7 +112,7 @@
   "fileTree": {
    "rect": [
     19,
-    13,
+    55,
     70,
     30
    ],
@@ -130,7 +130,7 @@
   "vcs": {
    "rect": [
     89,
-    13,
+    55,
     50,
     30
    ],
@@ -153,7 +153,7 @@
   "pressBodyRingLeft": 476,
   "pressBodyChanged": 0,
   "savedLayout": {
-   "version": 4,
+   "version": 5,
    "layout": {
     "kind": "row",
     "children": [
@@ -242,9 +242,35 @@
    },
    "docked": [
     {
+     "pane": "buildOutput",
+     "edge": "bottom",
+     "order": 0,
+     "title": "BUILD"
+    },
+    {
+     "pane": "problems",
+     "edge": "bottom",
+     "order": 1,
+     "title": "PROBLEMS"
+    },
+    {
+     "pane": "search",
+     "edge": "bottom",
+     "order": 2,
+     "title": "FIND IN FILES"
+    },
+    {
+     "pane": "requests",
+     "edge": "bottom",
+     "order": 3,
+     "title": "REQUESTS"
+    },
+    {
      "pane": "state",
      "edge": "left",
-     "order": 0
+     "order": 0,
+     "beside": "editor",
+     "weight": 20.74468085106383
     }
    ]
   }
@@ -252,22 +278,22 @@
  "drop": {
   "editorBody": [
    477,
-   13,
+   55,
    387,
-   1054
+   980
   ],
   "pointers": {
    "drop-split": [
     860,
-    540
+    545
    ],
    "drop-whole": [
     670,
-    540
+    545
    ],
    "drop-slot": [
     1601,
-    28
+    70
    ],
    "drop-dock": [
     4,
@@ -277,11 +303,11 @@
   "drop-split": {
    "tintBBox": [
     670,
-    13,
+    55,
     194,
-    1054
+    980
    ],
-   "changedPixels": 204476,
+   "changedPixels": 190120,
    "ghostChangedPixels": 888,
    "ghostCentre": [
     27,
@@ -292,11 +318,11 @@
   "drop-whole": {
    "tintBBox": [
     477,
-    13,
+    55,
     387,
-    1054
+    980
    ],
-   "changedPixels": 402778,
+   "changedPixels": 374140,
    "ghostChangedPixels": 5120,
    "ghostCentre": [
     27,
@@ -307,7 +333,7 @@
   "drop-slot": {
    "tintBBox": [
     1395,
-    13,
+    55,
     512,
     30
    ],
@@ -322,11 +348,11 @@
   "drop-dock": {
    "tintBBox": [
     12,
-    12,
+    54,
     48,
-    1056
+    1014
    ],
-   "changedPixels": 49280,
+   "changedPixels": 47264,
    "ghostChangedPixels": 669,
    "ghostCentre": [
     27,
@@ -338,9 +364,9 @@
   "releasedChangedPixels": 0,
   "commitRing": [
    476,
-   12,
+   54,
    190,
-   1056
+   982
   ],
   "commitArrangement": [
    {
@@ -351,9 +377,9 @@
     ],
     "rect": [
      12,
-     12,
+     54,
      456,
-     1056
+     982
     ]
    },
    {
@@ -362,9 +388,9 @@
     ],
     "rect": [
      476,
-     12,
+     54,
      190,
-     1056
+     982
     ]
    },
    {
@@ -373,9 +399,9 @@
     ],
     "rect": [
      674,
-     12,
+     54,
      191,
-     1056
+     982
     ]
    },
    {
@@ -384,9 +410,9 @@
     ],
     "rect": [
      873,
-     12,
+     54,
      513,
-     524
+     487
     ]
    },
    {
@@ -396,9 +422,9 @@
     ],
     "rect": [
      1394,
-     12,
+     54,
      514,
-     524
+     487
     ]
    },
    {
@@ -409,9 +435,9 @@
     ],
     "rect": [
      873,
-     544,
+     549,
      1035,
-     524
+     487
     ]
    }
   ]
@@ -426,15 +452,15 @@
   "changedPixels": 4544,
   "changedBBox": [
    25,
-   114,
+   156,
    239,
    168
   ],
   "paneBody": [
    13,
-   43,
+   85,
    454,
-   1024
+   950
   ]
  },
  "dock": {
@@ -443,9 +469,9 @@
     "edge": "left",
     "rect": [
      12,
-     12,
+     54,
      24,
-     1056
+     1014
     ],
     "slots": [
      {
@@ -453,9 +479,60 @@
       "label": "State",
       "rect": [
        12,
-       18,
+       60,
        24,
        100
+      ]
+     }
+    ]
+   },
+   {
+    "edge": "bottom",
+    "rect": [
+     44,
+     1044,
+     1864,
+     24
+    ],
+    "slots": [
+     {
+      "pane": "buildOutput",
+      "label": "BUILD",
+      "rect": [
+       50,
+       1044,
+       70,
+       24
+      ]
+     },
+     {
+      "pane": "problems",
+      "label": "PROBLEMS",
+      "rect": [
+       120,
+       1044,
+       100,
+       24
+      ]
+     },
+     {
+      "pane": "search",
+      "label": "FIND IN FILES",
+      "rect": [
+       220,
+       1044,
+       150,
+       24
+      ]
+     },
+     {
+      "pane": "requests",
+      "label": "REQUESTS",
+      "rect": [
+       370,
+       1044,
+       100,
+       24
       ]
      }
     ]
@@ -477,7 +554,7 @@
   "stripInk": 161,
   "slotText": "=\nt\na\nt\ne\n",
   "savedLayout": {
-   "version": 4,
+   "version": 5,
    "layout": {
     "kind": "row",
     "children": [
@@ -566,9 +643,35 @@
    },
    "docked": [
     {
+     "pane": "buildOutput",
+     "edge": "bottom",
+     "order": 0,
+     "title": "BUILD"
+    },
+    {
+     "pane": "problems",
+     "edge": "bottom",
+     "order": 1,
+     "title": "PROBLEMS"
+    },
+    {
+     "pane": "search",
+     "edge": "bottom",
+     "order": 2,
+     "title": "FIND IN FILES"
+    },
+    {
+     "pane": "requests",
+     "edge": "bottom",
+     "order": 3,
+     "title": "REQUESTS"
+    },
+    {
      "pane": "state",
      "edge": "left",
-     "order": 0
+     "order": 0,
+     "beside": "editor",
+     "weight": 20.74468085106383
     }
    ]
   },
@@ -576,25 +679,25 @@
    "pane": "state",
    "rect": [
     44,
-    12,
+    54,
     621,
-    1056
+    982
    ]
   },
   "revealChangedBBox": [
    18,
-   12,
+   54,
    647,
-   1056
+   982
   ],
-  "revealChangedPixels": 194452,
-  "revealText": "State\nState\nLocals\nGlobals\n",
+  "revealChangedPixels": 181587,
+  "revealText": "State Unpin\nState\n\nLocals\n\nGlobals\n",
   "dismissChangedPixels": 0
  },
  "calltrace": {
-  "baseText": "Call Trace 603 call(s)\n<toplevel> #0\n<_ main_ > #1\nmain #2\nstep #3\nleaf #4\nstep #5\nleaf #6\nstep #7\nleaf #8\nstep #9\nleaf #10\nstep #11\nleaf #12\nstep #13\nleaf #14\nstep #15\nleaf #16\n",
-  "endText": "Call Trace 603 call(s)\nleaf #586\nstep #587\nleaf #588\nstep #589\nleaf #590\nstep #591\nleaf #592\nstep #593\nleaf #594\nstep #595\nleaf #596\nstep #597\nleaf #598\nstep #599\nleaf #600\nstep #601\nleaf #602\n",
+  "baseText": "Call Trace 603 call(s)\n<toplevel> #0\n<_ main_ > #1\nmain #2\nstep #3\nleaf #4\nstep #5\nleaf #6\nstep #7\nleaf #8\nstep #9\nleaf #10\nstep #11\nleaf #12\nstep #13\nleaf #14\nstep #15\n",
+  "endText": "Call Trace 603 call(s)\nleaf #588\nstep #589\nleaf #590\nstep #591\nleaf #592\nstep #593\nleaf #594\nstep #595\nleaf #596\nstep #597\nleaf #598\nstep #599\nleaf #600\nstep #601\nleaf #602\n",
   "sectionLoads": 9,
-  "lastTop": "gesture calltrace top=586 rows=17 total=603"
+  "lastTop": "gesture calltrace top=588 rows=15 total=603"
  }
 }

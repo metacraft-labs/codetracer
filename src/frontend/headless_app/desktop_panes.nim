@@ -116,7 +116,16 @@ const
                                  label: "testResultsComponent-0"),
     paneConstraints: DesktopPane(placement: dpLayout,
                                  content: Content.Constraints,
-                                 label: "constraintsComponent-0")]
+                                 label: "constraintsComponent-0"),
+    # PLAT-48: the two footer panels the enum could not name. The label is
+    # the one `ui/layout.nim` mounts the standalone auto-hide panel into —
+    # PROBLEMS is `Content.BuildErrors` but mounts into `errorsComponent-0`.
+    paneProblems: DesktopPane(placement: dpLayout,
+                              content: Content.BuildErrors,
+                              label: "errorsComponent-0"),
+    paneRequests: DesktopPane(placement: dpLayout,
+                              content: Content.RequestPanel,
+                              label: "requestPanelComponent-0")]
     ## **THE TABLE.** Indexed by `PaneKind`, so a `PaneKind` added without a
     ## row does not compile. One-to-one on the rows that have a `Content`
     ## (`dpNone` is the one row without), asserted by the suite.

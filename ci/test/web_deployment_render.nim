@@ -77,6 +77,15 @@ when isMainModule:
   let revision = paramStr(2)
   let outDir = paramStr(3)
   let languageOriginsArg = if paramCount() >= 4: paramStr(4) else: ""
+  # WD4's front door, and its directory is a SEPARATE argument on purpose: it
+  # must not be `outDir`. wrangler resolves Functions from `./functions`
+  # relative to its CWD, and this product's workflow `cd`s to `$RUNNER_TEMP`
+  # and passes the staged publish directory as an argument — so the function
+  # belongs beside that directory and NOT inside it. Writing it into `outDir`
+  # would upload it as a static asset AND leave wrangler with no Functions,
+  # which is the shimmed case: every signed-in request answered by the static
+  # page, 200, no error anywhere.
+  let functionsRoot = if paramCount() >= 5: paramStr(5) else: ""
 
   # THE BUILD IDENTITY, from the environment rather than from a positional
   # argument. Six more `paramStr`s would make every call site a row of
@@ -205,6 +214,13 @@ when isMainModule:
   # added to the product reaches the CDN without anybody editing a second file.
   writeFile outDir / "_headers", renderCacheConfig(contract)
   writeFile outDir / "_redirects", renderRewriteConfig(contract)
+
+  if functionsRoot.len > 0:
+    let functionsDir = functionsRoot / "functions"
+    createDir functionsDir
+    writeFile functionsDir / "_middleware.js", renderFrontDoorFunction(contract)
+    echo "front door: " & (functionsDir / "_middleware.js") & " (" &
+      $frontDoorDynamicPrefixes(contract).len & " dynamic prefixes)"
 
   # THE ONE-LINE BUILD IDENTITY, written from the SAME `identity` the entry
   # document's descriptor carries, so the page and the file cannot disagree

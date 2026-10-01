@@ -762,6 +762,12 @@ proc dispatchAction*(d: Dispatcher; ctx: CommandContext; action: KeyAction;
     # action that never touches the engine says so here.
     paneLocal(action)
 
+  of kaNextSessionTab, kaPrevSessionTab:
+    # CodeTracer-TUI.md §3.3.1's session tabs: which of this front-end's
+    # sessions is active (`headless_app/session_tabs.stepTab`). Nothing is
+    # sent to an engine; `app/runtime.applyLocalAction` answers it.
+    paneLocal(action)
+
   of kaViewMemoryDump:
     unsupported(action, NoMemorySurfaceNote)
 

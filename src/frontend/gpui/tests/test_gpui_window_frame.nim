@@ -95,7 +95,9 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 605
+const ExpectedAssertions = 615
+  ## 605 -> 615 (PLAT-48): one more non-test file under `src/frontend/gpui/`
+  ## — `window_top_bar.nim` — ten assertions.
   ## 585 -> 605 (PLAT-47 part B): two more non-test files under
   ## `src/frontend/gpui/` — `window_geometry.nim` and `window_gestures.nim` —
   ## ten assertions each.

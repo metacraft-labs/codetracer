@@ -6,6 +6,7 @@ import
   ui / auto_hide
 
 import viewmodel / viewmodels / editor_gutter_lanes
+from viewmodel / viewmodels / menu_vm import newMenuVM
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -819,20 +820,16 @@ proc makeMenuComponent*(data: Data): MenuComponent =
   result = MenuComponent(
     id: data.generateId(Content.Menu),
     elements: MenuData(),
-    active: false,
-    activePath: @[],
+    vm: newMenuVM(),
     activePathWidths: JsAssoc[int,int]{},
     activePathOffsets: JsAssoc[int,int]{},
     prepared: @[],
-    searchResults: @[],
     nameMap: JsAssoc[cstring, ClientAction]{},
-    searchQuery: cstring"",
     debug: data.debugComponent,
     service: data.services.editor,
     iconWidth: 24,
     mainMenuWidth: 18,
-    folderArrowCharWidth: 2,
-    keyNavigation: false)
+    folderArrowCharWidth: 2)
   data.ui.menu = result
   when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
     data.registerComponent(result, Content.Menu)

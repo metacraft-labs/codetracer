@@ -557,8 +557,10 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     # to the first, which leaves the sum where it was). It was 19 when the loop covered 4 panes and the
     # only escape was the source pane; PLAT-41 moved every term, and PLAT-45
     # added the five desktop panes the shared default places (each an accepted
-    # exception that reports rather than renders blank).
-    expectCount(58)
+    # exception that reports rather than renders blank). PLAT-48 adds the
+    # desktop's PROBLEMS and REQUESTS footer panels, accepted exceptions too
+    # (+6).
+    expectCount(64)
 
   liveTest "the entries each pane uses are the ones the module declares":
     publishTracepoints()
@@ -990,7 +992,8 @@ suite "PLAT-21: the session is closed":
 # second native escape, and replaced one flow assertion with a loop over the two
 # accepted exceptions. No other case changed. PLAT-45 adds 15 more (293 -> 308):
 # the five desktop panes it added are accepted exceptions, three assertions each.
-const ExpectedAssertions = 308
+# PLAT-48 adds 6 (308 -> 314): PROBLEMS and REQUESTS, the same three each.
+const ExpectedAssertions = 314
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

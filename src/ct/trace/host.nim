@@ -119,6 +119,69 @@ proc resolveHostBind*(flagValue, envValue: string): string =
     return env
   DefaultHostBind
 
+type HostPortResolution* = object
+  ## What `resolveHostPort` decided, and whether the caller must read the port
+  ## back from the listening socket.
+  port*: int
+    ## `0` means "let the kernel choose", which is what `listen(0)` does.
+  autoAssigned*: bool
+    ## True when nobody named a port. The URL is then NOT derivable before the
+    ## listen, which is the whole reason this field exists: §High-Level Rules
+    ## requires the URL on stdout "in a form a supervising process can parse
+    ## before the first client connects", and a supervisor cannot parse a port
+    ## nobody printed.
+  error*: string
+    ## Non-empty when the environment named something that is not a port. An
+    ## unparseable `CODETRACER_HOST_PORT` is REFUSED rather than ignored: a
+    ## typo that silently fell back to auto-assign would put the server on a
+    ## port the operator did not choose and did not know about.
+
+const AutoAssignPort* = 0
+  ## What goes to `listen()` when nobody named a port. `0` is the kernel's own
+  ## spelling for "any free port", so there is no scan and no race between
+  ## choosing and binding.
+
+proc resolveHostPort*(flagValue: int; envValue: string): HostPortResolution =
+  ## The port `ct host` tells the Electron main process to listen on.
+  ##
+  ## `--port` wins over `CODETRACER_HOST_PORT`, which wins over auto-assign —
+  ## the precedence `--bind` / `CODETRACER_HOST_BIND` and `--idle-timeout` /
+  ## `CODETRACER_HOST_IDLE_TIMEOUT` already use, and the one that lets a shell
+  ## profile or a container's environment supply a port without taking the flag
+  ## away from a single invocation.
+  ##
+  ## The flag's own default is `-1` rather than a port number, which is what
+  ## makes this function possible: with a real default there is no value that
+  ## means "the operator said nothing".
+  ##
+  ## **A negative flag value is an error and auto-assign is not.** `--port -1`
+  ## is what absence looks like, so it cannot also be a refusal; any OTHER
+  ## negative number is a caller mistake and is rejected by `hostCommand`,
+  ## which is where that check already lived.
+  if flagValue >= 0:
+    # `--port 0` is auto-assign SAID OUT LOUD, not a chosen port. Port 0 is not
+    # connectable, so a caller told to wait for a URL naming it would wait for
+    # something no client can reach — and `listen(0)` is exactly what
+    # auto-assign does, so the two are the same request spelled two ways.
+    return HostPortResolution(port: flagValue, autoAssigned: flagValue == 0)
+  let env = envValue.strip()
+  if env.len > 0:
+    var parsed = 0
+    try:
+      parsed = parseInt(env)
+    except ValueError:
+      return HostPortResolution(error:
+        "CODETRACER_HOST_PORT is set to '" & env & "', which is not a port")
+    if parsed < 0 or parsed > 65535:
+      return HostPortResolution(error:
+        "CODETRACER_HOST_PORT is set to '" & env &
+        "', which is outside 0-65535")
+    # A deliberate `CODETRACER_HOST_PORT=0` is auto-assign, said explicitly.
+    # Treating it as a chosen port would make the caller wait for a URL naming
+    # port 0, which no client can connect to.
+    return HostPortResolution(port: parsed, autoAssigned: parsed == 0)
+  HostPortResolution(port: AutoAssignPort, autoAssigned: true)
+
 proc parseIdleTimeoutMs*(raw: string): IdleTimeoutResult =
   ## Parse a human-friendly duration string into milliseconds.
   ## Supports suffixes: ms, s, m, h. Empty => default. 0/never/off => disabled.
@@ -1261,8 +1324,15 @@ proc hostCommand*(
     echo "ct host: error: ", e.msg
     quit(1)
 
-  if port < 0:
+  # `-1` is what `--port`'s default looks like and means "the operator said
+  # nothing"; anything else negative is a caller mistake. The resolution below
+  # turns absence into auto-assign.
+  if port < -1:
     echo fmt"ct host: error: no valid port specified: {port}"
+    quit(1)
+  let resolvedPort = resolveHostPort(port, getEnv("CODETRACER_HOST_PORT", ""))
+  if resolvedPort.error.len > 0:
+    echo "ct host: error: ", resolvedPort.error
     quit(1)
 
   if isSetBackendSocketPort and not isSetFrontendSocketPort or
@@ -1385,7 +1455,7 @@ proc hostCommand*(
       codetracerExeDir / "server_index.js",
       $traceId,
       "--port",
-      $port,
+      $resolvedPort.port,
       # Threaded through so the DEFAULT is loopback rather than whatever Node
       # does when the host argument is absent, which is every interface. See
       # CLI/ct/host.md: "a trace contains the recorded program's memory and

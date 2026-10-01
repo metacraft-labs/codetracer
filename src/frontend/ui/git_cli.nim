@@ -20,9 +20,80 @@ import ui_imports
 from ../platform_host import
   ctPlatform, ctAwaitSync, can, canAll, capFilesystemRead, capProcessSpawn,
   capProcessArbitraryPrograms, capVcsWrite, ProcessSpec, Platform,
-  PlatformOutcome, process, fs, vcs, succeededExit, `$`
+  PlatformOutcome, PlatformFutureT, ProcessRunResult, Nothing, process, fs, vcs,
+  succeededExit, onComplete, pkTimeout, `$`
+
+import std/tables
 
 const gitTimeoutMs = 5000
+
+# ---------------------------------------------------------------------------
+# THE ONE-TICK-LATE CACHE, and why a renderer needs one at all.
+#
+# Every proc in this file is synchronous: `gitExec` returns a `cstring` into a
+# render path, and `ui/vcs.nim` alone calls it from about twenty places. That
+# was fine while the only instantiation that could run git was Electron's,
+# whose process facade is synchronous underneath — `ctAwaitSync` drains once
+# and the answer is there.
+#
+# The container instantiation's answer arrives on a socket. `ctAwaitSync`
+# therefore returns `pkTimeout` naming itself, which is exactly what it is for
+# (`platform/outcome.nim`: "the day one of these call sites runs against the
+# container instantiation, it reports 'this call site still needs
+# converting'"). Left at that, WD1b would deliver an honest capability profile
+# and a VCS panel that is still blank — the capability would be advertised and
+# the panel would show nothing, which is the same user-visible outcome as
+# before with a better excuse.
+#
+# So the bridge is here, ONCE, instead of at twenty call sites: a call that
+# cannot be answered synchronously answers with what was learned last time and
+# re-asks. When the reply arrives the memo is updated and the redraw hook
+# fires, so the panel that rendered empty renders again with the answer.
+#
+# Three properties this shape has to have, and each is a defect if missing:
+#
+#   * **The desktop is untouched.** `ctAwaitSync` settles there, the memo is
+#     never read and never written, and the path is the one it was before.
+#     This is not an optimisation: a memo in front of a synchronous git would
+#     make the panel show stale data after a commit.
+#   * **Re-render must not re-ask.** A redraw calls `gitExec` again, so an
+#     in-flight key is recorded and a second call for it issues nothing. A
+#     renderer that spawned one process per frame would never converge, and
+#     the hook makes the redraw happen, so this is a live loop rather than a
+#     theoretical one.
+#   * **The hook fires only on CHANGE.** Re-asking after the answer is in the
+#     memo would produce the same bytes, redraw, re-ask, redraw for ever. The
+#     redraw happens when the value is new.
+# ---------------------------------------------------------------------------
+
+var gitMemo: Table[string, tuple[output: string, ok: bool]]
+var gitInFlight: Table[string, bool]
+var gitRedraw: proc() = nil
+
+proc setGitRefreshHook*(hook: proc()) =
+  ## What to call when a git answer arrives after the render that asked for it.
+  ##
+  ## Registered by the renderer entry point. Nil is a valid state and is the
+  ## one every headless suite is in: the memo still fills, nothing redraws, and
+  ## the next call reads the answer.
+  gitRedraw = hook
+
+proc memoKey(verb: string; args: seq[cstring]; cwd: cstring): string =
+  # `\x1f` because it cannot occur in a path or a git argument, so two
+  # different calls cannot collide by concatenation — the mistake a space or a
+  # comma would make the moment a branch name contains one.
+  result = verb & "\x1f" & (if cwd.isNil: "" else: $cwd)
+  for a in args:
+    result.add "\x1f"
+    result.add $a
+
+proc remember(key: string; value: tuple[output: string, ok: bool]) =
+  let changed = not gitMemo.hasKey(key) or gitMemo[key] != value
+  gitMemo[key] = value
+  gitInFlight.del(key)
+  if changed and gitRedraw != nil:
+    gitRedraw()
+
 
 proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
   ## One git invocation, through the platform facade.
@@ -63,14 +134,39 @@ proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
   var argv: seq[string] = @[]
   for arg in args:
     argv.add $arg
-  let outcome = ctAwaitSync(ctPlatform().process.run(ProcessSpec(
+  let key = memoKey("run", args, cwd)
+  if gitInFlight.hasKey(key):
+    # A call for this exact question is already out. Issuing a second one here
+    # is the live loop the header names: the redraw hook brings every caller
+    # back, and a render that spawned a git process per frame would never
+    # settle. On the desktop this map is never populated, so this branch is
+    # unreachable there.
+    return (if gitMemo.hasKey(key): gitMemo[key] else: ("", false))
+  let future = ctPlatform().process.run(ProcessSpec(
     command: "git",
     args: argv,
     workingDir: (if cwd.isNil: "" else: $cwd),
-    timeoutMs: gitTimeoutMs)))
-  if not outcome.ok:
+    timeoutMs: gitTimeoutMs))
+  let outcome = ctAwaitSync(future)
+  if outcome.ok:
+    return (outcome.value.stdout, outcome.value.exit.succeededExit)
+  if outcome.error.kind != pkTimeout:
+    # A real failure — no git, a bad revision, a non-repository. Answering ""
+    # is this module's contract and always has been; caching it would pin the
+    # failure past the condition that caused it.
     return ("", false)
-  (outcome.value.stdout, outcome.value.exit.succeededExit)
+
+  # The instantiation is remote. Subscribe, answer from the memo, and let the
+  # redraw hook bring the caller back.
+  gitInFlight[key] = true
+  future.onComplete(
+    proc(settled: PlatformOutcome[ProcessRunResult]) =
+      if settled.ok:
+        remember(key, (settled.value.stdout, settled.value.exit.succeededExit))
+      else:
+        remember(key, ("", false)),
+    proc(message: string) = remember(key, ("", false)))
+  if gitMemo.hasKey(key): gitMemo[key] else: ("", false)
 
 proc gitExec*(args: seq[cstring], cwd: cstring): cstring =
   ## Run a git command in the given working directory.
@@ -92,8 +188,23 @@ proc fsReadTextFile*(path: cstring): cstring =
   ## later wants to.
   if not ctPlatform().can(capFilesystemRead):
     return cstring""
-  let outcome = ctAwaitSync(ctPlatform().fs.readText($path))
-  if outcome.ok: outcome.value.cstring else: cstring""
+  let key = memoKey("readText", @[path], nil)
+  if gitInFlight.hasKey(key):
+    return (if gitMemo.hasKey(key): gitMemo[key].output.cstring else: cstring"")
+  let future = ctPlatform().fs.readText($path)
+  let outcome = ctAwaitSync(future)
+  if outcome.ok:
+    return outcome.value.cstring
+  if outcome.error.kind != pkTimeout:
+    return cstring""
+  # Remote, exactly as `runGit` above: see the note beside `gitMemo`.
+  gitInFlight[key] = true
+  future.onComplete(
+    proc(settled: PlatformOutcome[string]) =
+      let text = if settled.ok: settled.value else: ""
+      remember(key, (text, settled.ok)),
+    proc(message: string) = remember(key, ("", false)))
+  if gitMemo.hasKey(key): gitMemo[key].output.cstring else: cstring""
 
 proc stripTrailingNewline(text: string): string =
   ## Drop the one line terminator a file ends with.
@@ -150,10 +261,29 @@ proc applyPatchToIndex*(patch, cwd: cstring) =
   if not ctPlatform().can(capVcsWrite):
     cerror "Failed to stage hunks: version control is not available here"
     return
-  let outcome = ctAwaitSync(ctPlatform().vcs.applyPatch(
-    (if cwd.isNil: "" else: $cwd), $patch, reverse = false))
-  if not outcome.ok:
+  let future = ctPlatform().vcs.applyPatch(
+    (if cwd.isNil: "" else: $cwd), $patch, reverse = false)
+  let outcome = ctAwaitSync(future)
+  if outcome.ok:
+    return
+  if outcome.error.kind != pkTimeout:
     cerror "Failed to stage hunks: " & $outcome.error
+    return
+  # NOT memoised, and the difference from the two readers above is the point:
+  # this is a user's ACTION rather than a value a render wants. There is
+  # nothing to answer with now and nothing to cache — what the user needs is to
+  # be told if it failed, whenever that is known. So the subscription reports
+  # and nothing else happens here.
+  future.onComplete(
+    proc(settled: PlatformOutcome[Nothing]) =
+      if not settled.ok:
+        cerror "Failed to stage hunks: " & $settled.error
+      elif gitRedraw != nil:
+        # The index changed under the panel, and nothing else will notice.
+        gitMemo.clear()
+        gitRedraw(),
+    proc(message: string) =
+      cerror "Failed to stage hunks: " & message)
 
 proc isGitRepository*(cwd: cstring): bool =
   ## Check whether `cwd` is inside a git working tree.

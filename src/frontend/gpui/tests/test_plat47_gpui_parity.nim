@@ -60,6 +60,12 @@ proc requirePrereq(ok: bool; what: string) =
   if not ok:
     raise newException(IOError, "prerequisite missing: " & what)
 
+const PlanHeight = 1080
+  ## PLAT-48: 900 until the window gained its top bar (a band above the
+  ## tree) and the footer's strip: at 900 the editor's rows, centred on the
+  ## entry line, no longer reach past `calc`'s module docstring, and B1 saw
+  ## only the comment and string classes. At 1080 they reach code again.
+
 proc runPlan(cwd = ""): (int, JsonNode, JsonNode, string) =
   let state = createTempDir("plat47-gpui-state-", "")
   var env = newStringTable()
@@ -70,7 +76,7 @@ proc runPlan(cwd = ""): (int, JsonNode, JsonNode, string) =
   env[StateDirEnvVar] = state
   let errFile = genTempPath("plat47-gpui-", ".err")
   let dockFile = genTempPath("plat47-gpui-", ".dock.json")
-  let args = @["--report-plan", "--width=1440", "--height=900",
+  let args = @["--report-plan", "--width=1440", "--height=" & $PlanHeight,
                "--dock-out=" & dockFile, calc]
   let p = startProcess("/bin/sh",
     args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
@@ -161,7 +167,7 @@ suite "PLAT-47: the GPUI window at desktop parity":
     if rc != 0: checkpoint(err)
     ck rc == 0
     var regions: seq[RegionRect] = @[]
-    dockRegions(dock["center"], 0, 0, 1440, 900, regions)
+    dockRegions(dock["center"], 0, 0, 1440, PlanHeight, regions)
     let got = ofRegions(regions, tolerance = 0.5)
     checkpoint("gpui: " & got.canonical)
     ck got.problem.len == 0

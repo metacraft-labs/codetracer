@@ -116,6 +116,8 @@ proc terminalPaneName*(kind: PaneKind): string =
   of paneTerminalOutput: "Terminal Output"
   of paneTestResults: "Tests"
   of paneConstraints: "Constraints"
+  of paneProblems: "Problems"
+  of paneRequests: "Requests"
 
 proc minPaneWidth*(kind: PaneKind): int =
   ## The narrowest column a pane can be given: its content's minimum, and

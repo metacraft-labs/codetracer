@@ -586,7 +586,13 @@ suite "PLAT-40 4 — DIFF-9: the surfaces that draw each pane, compared as domai
         if needle in code: return true
     ck live("src/frontend/utils.nim", "of Content.PointList:")
     ck live("src/frontend/utils.nim", "makePointListComponent(")
-    ck live("src/frontend/ui_js.nim", "element \"Breakpoints & Tracepoints\", aPointList")
+    # PLAT-48 moved the menu's tree into the shared Menu ViewModel's module
+    # (`product_menu.productMenuTree`), which the desktop's `webTechMenu`
+    # translates into its `MenuNode`s: the entry is there, and the desktop
+    # builds its menu from it.
+    ck live("src/frontend/viewmodel/viewmodels/product_menu.nim",
+            "item(\"Breakpoints & Tracepoints\", \"aPointList\")")
+    ck live("src/frontend/ui_js.nim", "menuNodeOf(productMenuTree(")
 
 suite "PLAT-40 — assertion tally":
   test "CHECKS":

@@ -1,28 +1,23 @@
-//! M23e-4 — the SECONDARY Rust `CtfsTraceWriter` now DEFAULT-emits the full spec
-//! multi-stream split layout (calls/steps/values/events.dat + interning), while
-//! still writing `events.log` (additive). These tests verify the db-backend
-//! serves a DEFAULT (no-opt-in) Rust-writer bundle correctly end-to-end and
-//! documents the Rust↔Nim split-reader interop boundary.
+//! The Rust `CtfsTraceWriter`, with no opt-ins, writes the spec's multi-stream
+//! split layout (calls/steps/values/events.dat + the interning tables) and
+//! nothing else. These tests verify the db-backend serves such a bundle
+//! correctly end-to-end.
 //!
-//! ## Interop finding (M23e-4)
+//! ## What the bundle contains, and which reader path serves it
 //!
-//! A Rust-writer bundle always carries `events.log` (the Rust writer writes it
-//! unconditionally). So `CTFSTraceReader::open` routes it through the LEGACY
-//! `open_old_format` → `TraceProcessor::postprocess` path — NOT the Nim FFI
-//! `open_new_format_nim` path — because `is_new_format` now requires
-//! `steps.dat` present AND `events.log` ABSENT.
+//! The trace-format spec lists the files of a materialized `.ct`
+//! (`internal-files.md`, "A materialized trace `.ct` from runtime recorders")
+//! and defines no combined `events.log` stream: `trace-events.md`'s
+//! old-tag disposition table records the old `Event` variant as *moved to
+//! `events.dat`*. The Rust writer therefore writes no `events.log`.
 //!
-//! This boundary is deliberate: the Rust writer's `steps.idx`/`values.idx`/
-//! `events.idx` use a bare `[chunk_size][offsets…]` index with a header-less
-//! chunk layout and content-size-omitting zstd frames, which the Nim exec/value/
-//! event FFI readers (expecting a `total_events` header+trailer, a per-chunk u32
-//! count, and pledged-content-size frames) CANNOT read — routing a Rust split
-//! bundle through the Nim reader yields zero steps/calls. Only `calls.dat` (M20)
-//! and the binary interning tables (M23d) were cross-matched. The production
-//! split-stream format is `events.log`-free and Nim-written, so it stays on the
-//! Nim FFI path; the secondary Rust-writer combined bundle reads correctly via
-//! its `events.log`. The Rust-side SEEKABLE readers (same crate that wrote the
-//! streams) still attach for on-demand calls/steps/values.
+//! With no `events.log` present, `CTFSTraceReader::open` recognises the bundle
+//! as the split format (`is_new_format`: `steps.dat` present, `events.log`
+//! absent) and serves it through the Nim FFI reader — the same path as a
+//! Nim-written production bundle. That this works is itself asserted: the
+//! execution streams the two writers produce are byte-compatible, so a Rust
+//! split bundle yields its steps, calls and values through that reader. The
+//! Rust-side SEEKABLE readers still attach for on-demand calls/steps/values.
 
 #![cfg(feature = "nim-reader")]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -104,17 +99,14 @@ fn step_index_for_line(reader: &CTFSTraceReader, line: i64) -> Option<StepId> {
         .find(|&sid| reader.step(sid).map(|s| s.line == Line(line)).unwrap_or(false))
 }
 
-/// The default bundle carries `events.log` AND all the split streams.
+/// The default bundle carries every split stream the spec lists, and no
+/// `events.log` — a stream the spec does not define (see the header).
 #[test]
-fn default_bundle_carries_events_log_and_split_streams() {
+fn default_bundle_carries_the_split_streams_and_no_events_log() {
     let dir = tempfile::tempdir().unwrap();
     let ct = write_default_bundle(dir.path());
 
     let mut ctfs = CtfsReader::open(&ct).expect("open container");
-    assert!(
-        ctfs.read_file("events.log").is_ok(),
-        "default bundle keeps events.log (additive)"
-    );
     for f in [
         "calls.dat",
         "steps.dat",
@@ -125,12 +117,15 @@ fn default_bundle_carries_events_log_and_split_streams() {
     ] {
         assert!(ctfs.read_file(f).is_ok(), "default bundle must carry split file `{f}`");
     }
+    assert!(
+        ctfs.read_file("events.log").is_err(),
+        "the default bundle must not carry `events.log`: the spec defines no such stream"
+    );
 }
 
 /// The db-backend serves the DEFAULT Rust-writer bundle correctly end-to-end:
 /// steps, calls, and per-step variable values all surface through the
-/// `TraceReader` trait. (Routed via the legacy `events.log` path because the
-/// bundle carries `events.log` — see the interop note at the top.)
+/// `TraceReader` trait, through the split-format reader path (see the header).
 #[test]
 fn default_bundle_is_served_correctly_end_to_end() {
     let dir = tempfile::tempdir().unwrap();

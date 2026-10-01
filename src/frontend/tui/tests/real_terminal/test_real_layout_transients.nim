@@ -318,6 +318,14 @@ proc probeDecorationsOnTheTerminal(sess: var TuiTestSession;
         if rune != want:
           wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
             ") reads '" & rune & "' rather than the label's '" & want & "'"
+      of ldRevealOverlay:
+        # THE PANE ITSELF (PLAT-48), not a fill: the cell the model's screen
+        # has there — the revealed pane's own content — and never the old
+        # `RevealOverlayGlyph` fill.
+        let want = screen[probeRow][probeCol]
+        if rune != want or rune == RevealOverlayGlyph:
+          wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
+            ") reads '" & rune & "' rather than the pane's '" & want & "'"
       else:
         if rune != glyphFor(d.kind):
           wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &

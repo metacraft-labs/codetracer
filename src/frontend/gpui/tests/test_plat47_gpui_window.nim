@@ -22,7 +22,9 @@
 ##
 ## No mocks: a real window, a real compositor, a real pointer, real OCR.
 
-import std/[json, os, sequtils, strutils, unittest]
+import std/[algorithm, json, os, sequtils, strutils, unittest]
+
+import gpui/window_top_bar   # `GpuiTopBandPx`: the band above the layout (PLAT-48)
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -32,7 +34,7 @@ template ck(cond: untyped) =
 const
   Record = "src/tests/visual/plat47-gpui-window.json"
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
-  ExpectedAssertions = 106
+  ExpectedAssertions = 104
   GhostBoxPx = 160 * 32
   EditorRowPx = 26
     ## One editor row's pitch in the window (`window_geometry.GpuiEditorRowPx`).
@@ -162,7 +164,9 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     let dock = arr(d["drop-dock"]["tintBBox"])
     checkpoint("dock " & $dock)
     ck dock[0] == PanePaddingPx and dock[2] < 100
-    ck dock[3] >= rec["frame"][1].getInt - 2 * PanePaddingPx
+    # The layout's whole height: the window less its padding and, since
+    # PLAT-48, the top bar's band above the layout.
+    ck dock[3] >= rec["frame"][1].getInt - 2 * PanePaddingPx - GpuiTopBandPx
     # The ghost label was drawn beside the pointer in every one.
     for k in ["drop-split", "drop-whole", "drop-slot", "drop-dock"]:
       ck d[k]["ghostChangedPixels"].getInt > 100
@@ -224,13 +228,22 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     let d = rec["dock"]
     checkpoint($d["strips"])
     # Docked: out of the tree, one label in the left strip, and the saved
-    # document says so.
+    # document says so. (Since PLAT-48 the shared default's footer panels
+    # are a bottom strip beside it, and the saved document docks them too.)
     ck "state" notin d["treePanes"].getElems.mapIt(it.getStr)
-    ck d["strips"].len == 1
-    ck d["strips"][0]["edge"].getStr == "left"
-    ck d["strips"][0]["slots"][0]["pane"].getStr == "state"
-    ck d["savedLayout"]["docked"][0]["pane"].getStr == "state"
-    ck d["savedLayout"]["docked"][0]["edge"].getStr == "left"
+    var edges: seq[string] = @[]
+    var leftSlots: seq[string] = @[]
+    for st in d["strips"]:
+      edges.add st["edge"].getStr
+      if st["edge"].getStr == "left":
+        for sl in st["slots"]: leftSlots.add sl["pane"].getStr
+    edges.sort()
+    ck edges == @["bottom", "left"]
+    ck leftSlots == @["state"]
+    var savedEdge = ""
+    for e in d["savedLayout"]["docked"]:
+      if e["pane"].getStr == "state": savedEdge = e["edge"].getStr
+    ck savedEdge == "left"
     # The strip is drawn, with its label's ink on it, reading down.
     ck d["stripInk"].getInt > 50
     ck d["slotText"].getStr.splitWhitespace().join("").contains("tate")

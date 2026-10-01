@@ -486,6 +486,14 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # showed: five `…` lines under a `TRACEPOINTS loading` title.
   rt.app.eventLog.ensureWindow(0, EventLogPageSize)
 
+  # PLAT-48: the top bar reads the transport ViewModel for which controls
+  # are available, and the omnibar searches the session's files and the
+  # call trace section the store now holds.
+  rt.app.controls = s.controls
+  rt.app.filesVM = s.session.session.fileTreeVM
+  rt.app.store = s.session.session.store
+  rt.app.refreshOmnibarIndex()
+
   rt.dispatcher = Dispatcher(
     controls: s.controls,
     timeline: s.timeline,

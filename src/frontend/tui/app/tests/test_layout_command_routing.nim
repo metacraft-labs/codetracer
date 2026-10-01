@@ -90,7 +90,10 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 421
+const ExpectedAssertions = 474
+# PLAT-48: 421 → 474 — the footer strip checks (one decoration, a strip, per
+# geometry: +40), the footer row before and after `:dock bottom`, and the
+# top strip counted apart from the bottom one.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -255,9 +258,14 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
               ":\n  unbound '" & a[i] & "'\n  bound   '" & b[i] & "'"
             break
       ck a == b
-      # And the DECORATIONS are empty, which is what says the equality above is
-      # not two screens that both happen to be wrong.
-      ck bound.shellScreenOf().decorations.len == 0
+      # And the DECORATIONS are no gesture's, which is what says the equality
+      # above is not two screens that both happen to be wrong: the one there
+      # is is the bottom dock strip the shared default's footer panels sit on
+      # (PLAT-48), which the unbound screen paints too.
+      let decos = bound.shellScreenOf().decorations
+      ck decos.len == 1
+      for d in decos:
+        ck d.kind == ldDockStrip
     if mismatches.len > 0:
       for m in mismatches[0 ..< min(4, mismatches.len)]:
         checkpoint(m)
@@ -283,7 +291,12 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck focused == paneCalltrace
     ck rt.app.layoutBinding.layout.tree.contains(focused)
     ck rt.app.layoutBinding.layout.dockedIndex(focused) < 0
-    ck rt.dockStripRowOf() < 0
+    # PLAT-48: the bottom strip is there before any gesture — the shared
+    # default docks the desktop's footer panels on it — and it does not yet
+    # carry the call trace.
+    let footerRow = rt.dockStripRowOf()
+    ck footerRow >= 0
+    ck not rt.shellScreenOf().rows[footerRow].contains("Call Trace")
 
     let outcome = rt.typeLine("dock bottom")
     checkpoint(":dock bottom -> " & rt.app.notification)
@@ -294,8 +307,8 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.app.layoutBinding.layout.dockedIndex(focused) >= 0
     ck not rt.app.layoutBinding.layout.tree.contains(focused)
     ck rt.app.layoutBinding.userModified
-    # THE SCREEN. A bottom strip exists, it is one row, and it is painted with
-    # the dock-strip glyph carrying the pane's own title.
+    # THE SCREEN. The bottom strip is one row, and it carries the pane's own
+    # title.
     let stripRow = rt.dockStripRowOf()
     ck stripRow >= 0
     let screen = rt.shellScreenOf()
@@ -308,15 +321,18 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck stripDecorations == 1
     let painted = screen.rows[stripRow]
     checkpoint("dock strip row: '" & painted & "'")
-    ck painted.contains(DockStripGlyph)
+    # PLAT-48: the strip is painted as labels (the shell's
+    # `paintDockStrips`), the footer's first and the docked pane's after.
+    ck painted.contains("BUILD")
     ck painted.contains("Call Trace")
+    ck painted.find("BUILD") < painted.find("Call Trace")
     # …and the pane's own tab is gone from the body, which is the half a
     # strip-only assertion would miss. (In the shared default the call trace
     # is the first tab of its stack, so its padded label ` Call Trace ` starts
     # the strip — PLAT-47: padded, not bracketed.)
     var titlesLeft = 0
-    for row in screen.rows:
-      if row.contains(" Call Trace "):
+    for i, row in screen.rows:
+      if i != stripRow and row.contains(" Call Trace "):
         inc titlesLeft
     ck titlesLeft == 0
 
@@ -325,9 +341,11 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     checkpoint(":undo-layout -> " & rt.app.notification)
     ck rt.app.layoutBinding.layout.dockedIndex(focused) < 0
     ck rt.app.layoutBinding.layout.tree.contains(focused)
-    ck rt.dockStripRowOf() < 0
+    ck rt.dockStripRowOf() == footerRow
+    ck not rt.shellScreenOf().rows[footerRow].contains("Call Trace")
     var titlesBack = 0
-    for row in rt.shellScreenOf().rows:
+    for i, row in rt.shellScreenOf().rows:
+      if i == footerRow: continue
       if row.contains(" Call Trace "):
         inc titlesBack
     ck titlesBack == 1
@@ -529,13 +547,20 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     let (docked, edge) = rt.dockedEdgeOf(paneCalltrace)
     ck docked
     ck edge == leTop
-    # THE SCREEN. A top strip exists, one row deep, carrying the pane's title.
+    # THE SCREEN. A top strip exists, one row deep, carrying the pane's title
+    # — beside the bottom one the shared default's footer panels sit on
+    # (PLAT-48), so two strips in all.
     var strips = 0
+    var topStrips = 0
+    let topRow = rt.layoutGeometry().body.row
     for d in rt.shellScreenOf().decorations:
       if d.kind == ldDockStrip:
         inc strips
         ck d.area.height == DockStripThickness
-    ck strips == 1
+        if d.area.row == topRow:
+          inc topStrips
+    ck strips == 2
+    ck topStrips == 1
 
     # …AND `:undo-layout`, through the prompt, puts it back — which says the
     # gesture went onto the SAME undo log a typed verb uses rather than beside

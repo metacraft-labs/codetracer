@@ -941,6 +941,245 @@ proc renderRewriteConfig*(contract: DeploymentContract): string =
     result.add rule.prefix & "/*  " & entryDocumentAddress & "  200\n"
     result.add rule.prefix & "  " & entryDocumentAddress & "  200\n"
 
+proc frontDoorDynamicPrefixes*(contract: DeploymentContract): seq[string] =
+  ## Which paths the front door hands to a SESSION rather than to the static
+  ## bundle, derived from the contract's own rewrite rules.
+  ##
+  ## **Derived, never re-spelled — WD4.** `web_entry.classifyPath` is where
+  ## "which prefixes exist" is decided; `rewritePrefixes` reads it and
+  ## `deploymentContract` carries the answer. A hand-written list in the edge
+  ## function is a second implementation of that question, and the failure mode
+  ## is the one `web_entry.nim` warns about: a form reaches the SPA in code and
+  ## 404s at the CDN. Here it would be worse, because the CDN would answer with
+  ## the STATIC page — 200, no error anywhere — and the session the visitor is
+  ## entitled to would simply not happen.
+  ##
+  ## `/` is deliberately absent: it is the one path that FORKS on
+  ## signed-in-ness rather than being classified. §3.1a of
+  ## `Hosted-Session-Allocation.md` settles that the edge forks on
+  ## signed-in-ness and nothing else, so this list is not a per-project lookup
+  ## and must not become one.
+  for rule in contract.rewrites:
+    if rule.servesEntryDocument: result.add rule.prefix
+
+proc renderFrontDoorFunction*(contract: DeploymentContract;
+                              cookieName = "session_id"): string =
+  ## The Cloudflare Pages Function that decides, per request, whether
+  ## `ide.codetracer.com` serves the static WASM bundle or a
+  ## substrate-allocated session — SS-M5's *"a signed-in user gets a
+  ## substrate-allocated session, and an anonymous visitor still gets the
+  ## static bundle"*.
+  ##
+  ## ## Mirrored from `isonim-web-site/functions/_middleware.js`, not shared
+  ##
+  ## Different Pages project, different tree; a shared file would need a
+  ## publishing step neither repo has. What is mirrored INCLUDING the parts that
+  ## were paid for there:
+  ##
+  ## * the cookie is parsed BY NAME (`other_session_id=x` otherwise flips the
+  ##   branch for a visitor who never signed in);
+  ## * seven cache headers are DELETED rather than overridden, because
+  ##   `Cache-Control` is not the only header that can admit a response to a
+  ##   cache;
+  ## * `Set-Cookie` is rebuilt from `getSetCookie()` rather than copied,
+  ##   because `new Headers(other)` folds repeated names and a folded
+  ##   `Set-Cookie` is one a browser cannot split — a sign-in through the front
+  ##   door would end with no session;
+  ## * `Vary: Cookie`, because the two states of one URL differ on exactly that
+  ##   header;
+  ## * a POSITIVE dynamic allow-list, so a route added to the platform and
+  ##   forgotten here fails as a static 404 rather than leaking;
+  ## * fail CLOSED on an unconfigured origin — `context.next()` there would
+  ##   serve the landing page to a signed-in visitor AND would be a cacheable
+  ##   response produced after reading a session cookie.
+  ##
+  ## ## Why this is GENERATED rather than committed as a `.js` file
+  ##
+  ## The allow-list. It is `frontDoorDynamicPrefixes` above, emitted from the
+  ## contract, so a prefix added to `web_entry.classifyPath` reaches the edge
+  ## without anybody editing a second file — the same argument `_headers` and
+  ## `_redirects` are generated on.
+  # Built with two placeholders and `replace`, rather than by interrupting the
+  # literal below. A `"""` literal that has to be closed and reopened around an
+  # interpolation is one `"` away from swallowing the rest of the file, and the
+  # symptom is a JS syntax error in generated output nobody reads.
+  var prefixes = ""
+  for prefix in frontDoorDynamicPrefixes(contract):
+    prefixes.add "  " & escapeJson(prefix) & ",\n"
+
+  result = """/* ide.codetracer.com — the front door. GENERATED from
+ * viewmodel/platform/web_deployment.nim. Do not edit.
+ *
+ * WHERE THIS FILE HAS TO LIVE, and it is NOT where isonim's lives. wrangler
+ * resolves Functions from `./functions` RELATIVE TO THE CURRENT WORKING
+ * DIRECTORY. isonim's workflow runs wrangler from its repo root, so its file
+ * sits beside `dist/`. THIS product's deploy workflow does `cd "$RUNNER_TEMP"`
+ * and passes the staged directory as an argument, so this file belongs at
+ * `$RUNNER_TEMP/functions/` — in the repo, or inside the staged bundle, is the
+ * shimmed case: wrangler logs `No Functions. Shimming...` and every signed-in
+ * request is answered by the static page, 200, with no error anywhere.
+ *
+ * A Pages Function and not a Worker route because this account's Cloudflare
+ * tokens lack Workers/WAF scope. That is a constraint, not a preference.
+ */
+
+const SESSION_COOKIE = @@COOKIE@@;
+
+/* THE DYNAMIC ALLOW-LIST — generated from the deployment contract, which reads
+ * `web_entry.classifyPath`. Everything not named here is static,
+ * unconditionally: an unknown path can only be answered by the static artifact,
+ * which carries no user data, so a route added to the product and forgotten
+ * here fails VISIBLY instead of leaking. `/` is deliberately absent — it is the
+ * one path that forks.
+ */
+const DYNAMIC_PREFIXES = [
+@@PREFIXES@@];
+
+function isDynamicPath(pathname) {
+  for (const prefix of DYNAMIC_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(prefix + "/")) return true;
+  }
+  return false;
+}
+
+/* Read ONE cookie BY NAME. A substring test over the whole Cookie header also
+ * matches a cookie whose name merely ENDS with the one being looked for, which
+ * would put the front door into its authenticated branch for a visitor who has
+ * never signed in. Parse the header the way a browser wrote it: `; `
+ * separated, name before the first `=`. */
+function readCookie(header, name) {
+  if (!header) return "";
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    if (trimmed.slice(0, eq) === name) return trimmed.slice(eq + 1);
+  }
+  return "";
+}
+
+function markPrivate(response, branch) {
+  const headers = new Headers(response.headers);
+  /* Set-Cookie is REBUILT, not copied: `new Headers(other)` folds repeated
+   * names, a cookie value may contain a comma (`Expires=Wed, 09 Jun 2021`), and
+   * a folded Set-Cookie is one a browser cannot split back apart. */
+  const cookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : [];
+  if (cookies.length > 0) {
+    headers.delete("Set-Cookie");
+    for (const c of cookies) headers.append("Set-Cookie", c);
+  }
+  /* DELETED rather than overridden: `Cache-Control` is not the only header that
+   * can admit a response to a cache. */
+  headers.delete("Cache-Control");
+  headers.delete("Expires");
+  headers.delete("Pragma");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
+  headers.delete("Age");
+  headers.delete("CDN-Cache-Control");
+  headers.delete("Cloudflare-CDN-Cache-Control");
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("Vary", "Cookie");
+  headers.set("X-CodeTracer-Front-Door", branch);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function refuse(status, message) {
+  return markPrivate(
+    new Response(message + "\n", {
+      status,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    }),
+    "origin-unavailable",
+  );
+}
+
+/* THE SUBSTRATE'S REFUSALS, SURFACED RATHER THAN RE-DERIVED. The platform
+ * answers an allocation it will not make with one of these; the front door
+ * passes the status and the reason through instead of turning them all into a
+ * 502, because "you are out of budget" and "that image does not exist" are
+ * different things for the person reading the page. */
+const KNOWN_REFUSALS = [
+  "concurrency",
+  "budget",
+  "flavour_not_allowed",
+  "snapshot_expired",
+  "not_entitled",
+  "unknown_image",
+];
+
+async function proxyToPlatform(request, env, branch) {
+  const origin = (env && env.PLATFORM_ORIGIN) || "";
+  if (!origin) {
+    /* FAIL CLOSED. `context.next()` here would serve the static page to a
+     * signed-in visitor and would be a cacheable response produced after
+     * reading a session cookie. */
+    return refuse(
+      503,
+      "This deployment has no platform origin configured (PLATFORM_ORIGIN).",
+    );
+  }
+
+  const url = new URL(request.url);
+  const target = origin.replace(/\/+$/, "") + url.pathname + url.search;
+
+  const headers = new Headers(request.headers);
+  headers.set("X-Forwarded-Host", url.host);
+  headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+  headers.delete("Accept-Encoding");
+
+  const init = { method: request.method, headers, redirect: "manual" };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = request.body;
+  }
+
+  try {
+    const upstream = await fetch(target, init);
+    const refusal = upstream.headers.get("X-Session-Refusal") || "";
+    if (refusal && KNOWN_REFUSALS.indexOf(refusal) >= 0) {
+      return markPrivate(upstream, "refused:" + refusal);
+    }
+    return markPrivate(upstream, branch);
+  } catch (err) {
+    return refuse(502, "The platform origin did not answer: " + String(err));
+  }
+}
+
+export async function onRequest(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const cookieName = (env && env.SESSION_COOKIE_NAME) || SESSION_COOKIE;
+  const session = readCookie(request.headers.get("Cookie"), cookieName);
+
+  /* The dynamic surfaces are the platform's whether or not a cookie is
+   * present: an API call with no session has to reach the platform so the
+   * platform can refuse it, and the sign-in endpoints have to work for someone
+   * who by definition has no session yet. This file routes; it does not
+   * authorize. */
+  if (isDynamicPath(url.pathname)) {
+    return proxyToPlatform(request, env, "origin");
+  }
+
+  /* THE FORK, and it is signed-in-ness and nothing else —
+   * Hosted-Session-Allocation.md §3.1a. Nothing above this line looked at the
+   * User-Agent and nothing below it does: a crawler is a visitor with no
+   * cookie, so there is no branch to cloak on. */
+  if (url.pathname === "/" && session) {
+    return proxyToPlatform(request, env, "origin");
+  }
+
+  return context.next();
+}
+"""
+  result = result.replace("@@COOKIE@@", escapeJson(cookieName))
+  result = result.replace("@@PREFIXES@@", prefixes)
+
 proc rewriteTargets*(contract: DeploymentContract): seq[string] =
   ## Every target `renderRewriteConfig` emits, as a value.
   ##

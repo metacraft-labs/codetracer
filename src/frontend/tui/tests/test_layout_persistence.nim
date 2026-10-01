@@ -81,7 +81,7 @@ import ../host/layout_store
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 167
+const ExpectedAssertions = 168
 
 const UnreadableFileArmAssertions = 15
   ## What the `UnreadableFile` case contributes to the count above.
@@ -174,6 +174,11 @@ proc filesUnder(root: string): seq[string] =
   for path in walkDirRec(root):
     result.add path.relativePath(root)
   result.sort()
+
+const FooterStrips = 1
+  ## PLAT-48: the shared default docks the desktop's footer panels
+  ## (`layout_model.sharedDefaultDocked`), so a session on the profile's own
+  ## arrangement draws ONE strip — the footer — where it drew none before.
 
 proc stripsOnScreen(rt: TuiRuntime): int =
   for d in rt.shellScreenOf().decorations:
@@ -331,9 +336,10 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       # docked pane in it, and WITHOUT `revealed` (Layout-ViewModel §3.2).
       let doc = parseJson(readFile(layoutDocumentPath()))
       ck doc["version"].getInt == LayoutSchemaVersion
-      ck doc["docked"].len == 1
-      ck doc["docked"][0]["pane"].getStr == $docked
-      ck doc["docked"][0]["edge"].getStr == $leBottom
+      # The footer's panes, and the docked one after them on the same edge.
+      ck doc["docked"].len == sharedDefaultDocked().len + 1
+      ck doc["docked"][^1]["pane"].getStr == $docked
+      ck doc["docked"][^1]["edge"].getStr == $leBottom
       ck not doc.mentionsKey("revealed")
       # …and the positive twin for that scan, through the same predicate: a key
       # the document DOES carry is found, so `not mentionsKey` is a measurement
@@ -344,7 +350,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       # ---- THE SECOND SESSION -------------------------------------------
       let second = newBoundRuntime(120, 40)
       ck second.app.layoutBinding.layout.tree.contains(docked)
-      ck second.stripsOnScreen() == 0
+      ck second.stripsOnScreen() == FooterStrips
       ck second.onScreen(paneCalltrace) == 1
       let report = restoreLayoutForSession(second)
       checkpoint("restore -> " & $report.status & " | " & report.message)
@@ -354,9 +360,16 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       # THE MODEL: the pane is docked, exactly as the first session left it.
       ck second.app.layoutBinding.layout.dockedIndex(docked) >= 0
       ck not second.app.layoutBinding.layout.tree.contains(docked)
-      ck second.app.layoutBinding.layout.dockedAt(leBottom).len == 1
-      # THE SCREEN: the strip is there and the pane's own title row is gone.
+      ck second.app.layoutBinding.layout.dockedAt(leBottom).len ==
+         sharedDefaultDocked().len + 1
+      # THE SCREEN: the strip is there — the footer's, the docked pane now
+      # one of its labels — and the pane's own title row is gone.
       ck second.stripsOnScreen() == 1
+      var labelled = false
+      for strip in second.shellScreenOf().geometry.strips:
+        for slot in strip.slots:
+          if slot.pane == docked: labelled = true
+      ck labelled
       ck second.onScreen(paneCalltrace) == 0
       # `revealed` IS NOT PERSISTED: no overlay is open and no gesture is in
       # flight, whatever the previous session was doing when it exited.
@@ -397,7 +410,8 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       # the user's.
       ck second.app.layoutBinding.profile == selectProfile(200, 60)
       ck $second.app.layoutBinding.saveDocument() == mine
-      ck second.app.layoutBinding.layout.dockedAt(leBottom).len == 1
+      ck second.app.layoutBinding.layout.dockedAt(leBottom).len ==
+         sharedDefaultDocked().len + 1
 
       # THE NEGATIVE TWIN, through the same code path: a session that restored
       # NOTHING re-flows, so the assertion above is about the freeze rather than
@@ -454,7 +468,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         ck report.message.contains(layoutDocumentPath())
         # THE SESSION IS USABLE, on the profile's own arrangement.
         ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
-        ck rt.stripsOnScreen() == 0
+        ck rt.stripsOnScreen() == FooterStrips
         ck rt.onScreen(paneCalltrace) == 1
         # AND THE DOCUMENT IS QUARANTINED. Overwriting a document written by a
         # NEWER build would destroy a user's arrangement because they opened an
@@ -498,7 +512,14 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         edges.add entry["edge"].getStr
       edges.sort()
       checkpoint("after a second session's gesture the edges are " & $edges)
-      ck edges == @[$leRight, $leTop]
+      # The footer's four bottom docks (PLAT-48's shared default) are in
+      # both documents, beside the two sessions' gestures.
+      var want: seq[string] = @[]
+      for d in sharedDefaultDocked(): want.add $d.edge
+      want.add $leRight
+      want.add $leTop
+      want.sort()
+      ck edges == want
     finally:
       box.dispose()
 
@@ -567,7 +588,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
           ck report.message.contains(doc)
           # THE SESSION IS USABLE, on the profile's own arrangement.
           ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
-          ck rt.stripsOnScreen() == 0
+          ck rt.stripsOnScreen() == FooterStrips
           ck rt.onScreen(paneCalltrace) == 1
           # THE FLAG NOTHING ELSE ON THIS PATH SETS, and the plan that follows
           # from it. Asserted as two facts because `markLayoutDocumentUnreadable`
@@ -646,7 +667,7 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       let fresh = newBoundRuntime(120, 40)
       ck restoreLayoutForSession(fresh).status == lrsNoDocument
       ck fresh.app.layoutBinding.layout.tree.contains(paneCalltrace)
-      ck fresh.stripsOnScreen() == 0
+      ck fresh.stripsOnScreen() == FooterStrips
     finally:
       box.dispose()
 
@@ -687,8 +708,10 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
         # The screen is the one a session with no binding has always painted:
         # the shared default, where the call stack is a region of its own —
         # except at 80x24, where the source pane's minimum folds it into a tab
-        # of the Variables stack (PLAT-45's fold), and it paints no region.
-        ck rt.stripsOnScreen() == 0
+        # of the Variables stack (PLAT-45's fold), and it paints no region;
+        # and (PLAT-48) the shared default's footer strip, which an unbound
+        # session paints as the bound one does.
+        ck rt.stripsOnScreen() == FooterStrips
         ck rt.onScreen(paneCalltrace) == (if size[0] >= 120: 1 else: 0)
       ck sessionsChecked == 3
       # NOT ONE BYTE MOVED, and nothing was created beside it.

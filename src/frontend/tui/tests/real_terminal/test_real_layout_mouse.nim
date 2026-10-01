@@ -92,13 +92,14 @@ import headless_app/layout_model
 import ../../app/runtime
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
+import ../../testing/strip_read
 import ../apps/app_layout_gestures as gestureApp
 import ../apps/app_layout_mouse as mouseApp
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 54
+const ExpectedAssertions = 52  # PLAT-48: the strip read as labels on blanks (one check where three were)
 
 const
   Stem = "app_layout_mouse"
@@ -318,7 +319,9 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       # ---- THE UNGESTURED SCREEN -------------------------------------------
       ckScreenMatches(sess, model.shellScreenOf().visibleRows, "before the gesture")
       let before = sess.screenContents()
-      ck not before.contains(DockStripGlyph)
+      # No TOP strip yet: the body starts right under the top bar (PLAT-48's
+      # bottom strip, the footer's, is there from the start).
+      ck model.layoutGeometry().body.row == 1
       ck before.contains(DraggedPaneTitleRow)
       ck before.contains(" Variables ")     ## the shared default's Variables stack
       ck model.app.layoutBinding.interaction.kind == ikNone
@@ -349,11 +352,10 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ckScreenMatches(sess, model.shellScreenOf().visibleRows, "after the drop")
       probeDecorationsOnTheTerminal(sess, model, "after the drop")
 
-      # …AND ABSOLUTELY. The strip's cells are asserted against
-      # `DockStripGlyph` and the pane's title against the pane's own name,
-      # neither of which is read off the model's rendering. This pair is
-      # M35-IMMUNE by construction — the collapsed glyph table would still
-      # produce `·` here — which is exactly why the probe case beside it exists.
+      # …AND ABSOLUTELY. The strip's cells are asserted against the pane's own
+      # name, padded, on a blank strip (PLAT-48's strip), neither of which is
+      # read off the model's rendering. This pair is M35-IMMUNE by
+      # construction, which is exactly why the probe case beside it exists.
       var stripRow = -1
       for s in model.layoutGeometry().strips:
         if s.edge == leTop:
@@ -362,21 +364,11 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck stripRow == 1                    ## the body's first row, below the header
       let stripText = sess.regionText(stripRow, 0, Cols, 1).split('\n')[0]
       checkpoint("strip row: '" & stripText & "'")
-      ck stripText.startsWith(DraggedPaneTitle)
-      var glyphCells = 0
-      var wrongCells: seq[string] = @[]
-      for col in textCells(DraggedPaneTitle) ..< Cols:
-        let rune = $sess.cellAt(stripRow, col).rune
-        if rune == DockStripGlyph:
-          inc glyphCells
-        else:
-          wrongCells.add "(" & $stripRow & "," & $col & ") is '" & rune & "'"
+      # EXACT (Verification-Harness-Traps §4b): the label, and nothing but
+      # blanks besides.
+      let wrongCells = stripLabelProblems(stripText, [DraggedPaneTitle])
       if wrongCells.len > 0:
         checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
-      # EXACT, not "more than none" (Verification-Harness-Traps §4b): the strip
-      # spans the body's full width and the label takes its first cells, so the
-      # number of glyph cells is knowable.
-      ck glyphCells == Cols - textCells(DraggedPaneTitle)
       ck wrongCells.len == 0
       # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that was
       # never removed would satisfy every assertion above.
@@ -410,7 +402,9 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
     checkpoint("frames probed: " & $framesProbed & ", terminal probes: " &
                $probesMade & ", kinds reached: " & $kindsProbed)
     ck framesProbed == 2
-    ck probesMade == 2
+    # Two per frame since PLAT-48: the drag's own decoration and the bottom
+    # strip the shared default's footer panels sit on.
+    ck probesMade == 4
     # TWO KINDS WITH TWO DIFFERENT GLYPHS, which is the property that makes the
     # probe able to see a collapsed glyph table at all. One kind, or two kinds
     # sharing a glyph, and this case would be as blind as the differential one.

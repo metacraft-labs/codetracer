@@ -166,10 +166,11 @@ suite "PLAT-20: the shell is renderer-free":
         if "gpui" in line.toLowerAscii or "isonim" in line.toLowerAscii or
            "tui" in line.toLowerAscii:
           inc importers
-    ck scanned == 8   # headless_app, layout_model, layout_interaction,
-                      # window_set, extent_distribution — and PLAT-45's
+    ck scanned == 9   # headless_app, layout_model, layout_interaction,
+                      # window_set, extent_distribution — PLAT-45's
                       # desktop_panes, arrangement_relation and
-                      # generate_default_layout
+                      # generate_default_layout — and PLAT-48's
+                      # session_tabs
     ck importers == 0
     # The positive twin over the same reader (§4a): the scanner really is
     # reading import lines, so `importers == 0` is not an empty scan.
@@ -264,10 +265,13 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
 
   test "a REFUSED projection draws the refusal, not an empty window":
     resetCount()
-    var sh = newGpuiShell()
+    # A viewport that cannot give every sibling a pixel (`dppViewportTooSmall`)
+    # — since PLAT-48 a top-docked pane is projected, so it no longer serves
+    # as this case's refusal.
+    var sh = newGpuiShell(DockViewport(width: 1, height: 1, dockExtent: 0))
     let id = WindowId(0)
-    var layout = defaultReplayLayoutValue()
-    let docked = layout.apply(cmdDock(paneState, leTop))
+    let layout = defaultReplayLayoutValue()
+    let docked = (kind: loApplied, layout: layout)
     ck docked.kind == loApplied
     ck sh.openWindow(id, docked.layout).kind == wsApplied
     let leafSet = sh.leavesFor(id)
@@ -280,7 +284,7 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
     let texts = planLeafTexts(leafPlanJson(r, drawn))
     ck texts.len == 1
     ck "layout refused" in texts[0]
-    ck "NoPlacementForEdge" in texts[0]
+    ck "ViewportTooSmall" in texts[0]
     expectCount(9)
 
   test "a contributed pane from an unloaded extension keeps its slot":

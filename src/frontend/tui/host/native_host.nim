@@ -305,23 +305,58 @@ proc listedEntry(dir, relative: string): FilesystemEntryNode =
     result.children.add FilesystemEntryNode(text: f,
                                             path: "/" & relative & "/" & f)
 
+proc storedSourcePaths(store: string): seq[string] =
+  ## Every file of the trace's `files/` store, as a path relative to it, in a
+  ## stable order — the desktop's own fallback when a trace folder carries no
+  ## `paths.json` (`index/files.loadFilenames`: the `files/` payload, read
+  ## relative to its root).
+  if not dirExists(store):
+    return
+  for path in walkDirRec(store, relative = true):
+    result.add path.replace('\\', '/')
+  result.sort()
+
+proc outermostRoots(roots: seq[string]): seq[string] =
+  ## The roots no OTHER root contains. `listedEntry` lists a folder
+  ## recursively, so a root inside another one (a package's `pkg/` beside
+  ## its parent's modules) would be drawn twice — once as its own root and
+  ## once inside its parent's. Order kept.
+  for r in roots:
+    var inside = false
+    for o in roots:
+      if o != r and r.startsWith(o & "/"):
+        inside = true
+        break
+    if not inside and r notin result:
+      result.add r
+
 proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   ## **The replay session's file tree**: the recording's own source folders,
   ## derived from its `paths.json` by the rule the desktop's Files pane uses
   ## (`trace_source_paths.sourceFolderRootsOf`), each listed from the trace's
   ## `files/` store. An empty tree when the recording lists no sources or
   ## carries no store — the pane then reports rather than guessing at a disk.
+  ##
+  ## A trace folder need not HAVE a `paths.json`: that sidecar is written
+  ## when a container is materialised or imported, and a folder straight out
+  ## of `ct record` holds the container and its `files/` store only. Then the
+  ## store itself is the list of recorded sources — the desktop's
+  ## `loadFilenames` fallback — so a recording whose sources span several
+  ## folders (a runner in one place, the package it imports in another)
+  ## lists every one of them instead of an empty tree.
   result = FilesystemEntryNode(text: "source folders", isFolder: true,
                                isExpanded: true)
-  let pathsFile = traceFolder / "paths.json"
-  if not fileExists(pathsFile): return
-  var recorded: seq[string] = @[]
-  try:
-    for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
-  except CatchableError:
-    return
   let store = traceFolder / "files"
-  for root in sourceFolderRootsOf(recorded):
+  let pathsFile = traceFolder / "paths.json"
+  var recorded: seq[string] = @[]
+  if fileExists(pathsFile):
+    try:
+      for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
+    except CatchableError:
+      recorded = @[]
+  if recorded.len == 0:
+    recorded = storedSourcePaths(store)
+  for root in outermostRoots(sourceFolderRootsOf(recorded)):
     let dir = store / root
     if dirExists(dir):
       result.children.add listedEntry(dir, root)

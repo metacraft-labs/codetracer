@@ -1272,6 +1272,95 @@
 
         };
 
+        # ------------------------------------------------------------------
+        # WD2: THE HOSTING CLOSURE, and why it is a PAIR rather than a subset.
+        #
+        # `ct host` needs two directories and they are not the same one.
+        # Measured against the built package rather than read off this
+        # expression, because the expression does not show it:
+        #
+        #   * `ct` is compiled with `-d:ctEntrypoint`, so `paths.nim` gives it
+        #     `codetracerExeDir = getAppDir().parentDir` — the CODETRACER
+        #     PACKAGE. `hostCommand` spawns `codetracerExeDir / "server_index.js"`,
+        #     and that file exists at the package root.
+        #   * the index process it spawns is `js` WITHOUT `ctEntrypoint`, so the
+        #     same name resolves from `CODETRACER_PREFIX` — the symlinkJoin
+        #     below. There `server_index.js` is under `src/`, and `public/`,
+        #     `views/`, `ui.js` and `node_modules` are what it serves.
+        #
+        # An image carrying only the prefix has every asset and no entry point
+        # to launch; one carrying only the package launches and serves nothing.
+        # Two directories behind one name, decided by a compile-time define.
+        #
+        # WHAT THIS DROPS relative to `runtimeDeps`, and why each is safe:
+        # `pkgs.electron` (the host serves a browser, it does not open a
+        # window), `pkgs.ruby` / `ruby-recorder-native` / `noir` / `wazero` /
+        # `pkgs.universal-ctags` / `cargo-stylus` (recorders and language
+        # tooling — hosting REPLAYS a trace someone else recorded), and
+        # `ctRemote`. What it keeps is the replay path (`db-backend`,
+        # `backend-manager`), the served bundle (`indexJavascript`,
+        # `uiJavascript`, `codetracer-electron`, `node-modules-derivation`,
+        # `resources-derivation`) and `staticDeps` for `node` itself, which
+        # `nodeExe()` resolves through `findTool` and which no other path
+        # supplies.
+        hostingDeps = pkgs.symlinkJoin {
+          name = "hosting-deps";
+
+          paths = [
+            resources-derivation
+            db-backend
+            backend-manager
+            node-modules-derivation
+            indexJavascript
+            uiJavascript
+
+            # `codetracer-electron` is DELIBERATELY ABSENT from this list and
+            # its files are copied below instead. Linking the derivation makes
+            # this join reference it, and it references `stdenv-linux`,
+            # `gcc-wrapper` and `gcc` — **1 GiB of C toolchain**, measured in
+            # the built image, in an artifact the substrate holds once per
+            # project. Its `installPhase` does `cp -Lr src/* $out/src/` over the
+            # whole source tree, which is where the reference comes from.
+            #
+            # Hosting needs four things out of it and none of them is a build
+            # input, so copying is both smaller and more honest about what is
+            # actually served.
+
+            # `node` AND NOTHING ELSE FROM THE TOOLCHAIN. `nodeExe()` is
+            # `findTool("node")`, so the interpreter has to be on `PATH` and
+            # nothing else supplies it — but `staticDeps.paths` was the wrong
+            # way to get it. Measured: pulling that set in left `bin/` at
+            # **380 MB** (gcc, rustup, nim, npm, webpack) and the whole closure
+            # at 751 MB against `runtimeDeps`' 853 MB — a 12% saving on a
+            # derivation whose entire purpose is to be the small one.
+            #
+            # `which` because `findTool` resolves through it.
+            pkgs.nodejs_20
+            pkgs.which
+          ];
+
+          # The same shape `runtimeDeps` builds, minus the Electron entry
+          # points. `index.js` and `subwindow.js` are the desktop window's;
+          # `server_index.js` is the one `ct host` spawns.
+          postBuild = ''
+            mkdir -p $out/src
+
+            cp -L ${indexJavascript}/bin/server_index.js $out/src/
+            ln -sf ${node-modules-derivation.out}/bin/node_modules $out/node_modules
+            cp -L ${uiJavascript}/bin/ui.js $out/
+
+            # COPIED, so this join does not reference `codetracer-electron`.
+            # See the note beside `paths`.
+            cp -L ${codetracer-electron}/src/helpers.js $out/src/helpers.js
+            cp -L ${codetracer-electron}/src/helpers.js $out/helpers.js
+            mkdir -p $out/frontend/styles $out/public $out/views
+            cp -Lr ${codetracer-electron}/styles/. $out/frontend/styles/
+            cp -Lr ${codetracer-electron}/public/. $out/public/
+            cp -Lr ${codetracer-electron}/views/. $out/views/ 2>/dev/null || true
+            chmod -R u+w $out/public $out/views $out/frontend
+          '';
+        };
+
         runtimeDeps = pkgs.symlinkJoin {
           name = "runtime-deps";
 
@@ -1916,6 +2005,91 @@
             appimageChannelPkgs = inputs.appimage-channel.legacyPackages.${system};
           in
           appimageChannelPkgs.callPackage ./codetracer-appimage { };
+
+        # ------------------------------------------------------------------
+        # WD2: `ct host` re-pointed at the hosting closure.
+        #
+        # Not a second build of the product — the SAME `codetracer` package,
+        # with one environment variable changed. `postFixup` there sets
+        # `CODETRACER_PREFIX` with `--set`, which overrides whatever the
+        # container's environment says, so an image cannot redirect the prefix
+        # by declaring `Env`. It has to be rewrapped, and rewrapping is all
+        # this does.
+        codetracer-host = pkgs.stdenv.mkDerivation {
+          name = "codetracer-host";
+          dontUnpack = true;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          # COPIED, NOT SYMLINKED, and the closure is the whole reason.
+          #
+          # Symlinking `${codetracer}` makes this derivation REFERENCE it, and
+          # `codetracer` references `runtimeDeps` — so the fat prefix this
+          # milestone exists to drop comes back through the side door.
+          # Measured: with symlinks, `codetracer-host`'s closure was **4.0 GiB**
+          # while `hostingDeps`' own was 1.9 GiB, and the image carried
+          # `binutils-wrapper` and `audit-tmpdir.sh`.
+          #
+          # `du` on the symlinkJoin said 529 MB and that number was worthless:
+          # it measures what the links POINT AT, not the transitive closure.
+          # `nix path-info -S` is the metric.
+          #
+          # Exactly ONE file carries the reference — `bin/ct`, the wrapper
+          # script `postFixup` wrote, whose `--set CODETRACER_PREFIX` names
+          # `runtimeDeps` literally. The `.ct-wrapped` ELF does not, and
+          # neither do `server_index.js`, `index.js` or `ui.js`; that was
+          # measured with `grep -a` over the built package rather than assumed.
+          # So copying everything and replacing that one file is enough.
+          installPhase = ''
+            mkdir -p $out/bin
+            # Everything the ENTRYPOINT context resolves by
+            # `getAppDir().parentDir` has to sit beside `bin/`: `hostCommand`
+            # spawns `$out/server_index.js`, and `ct` reads `$out/config`,
+            # `$out/views` and the rest by the same rule.
+            cp -a ${codetracer}/. $out/
+            chmod -R u+w $out
+            rm -f $out/bin/ct
+            makeWrapper $out/bin/.ct-wrapped $out/bin/ct \
+              --prefix PATH : $out/bin:${hostingDeps}/bin \
+              --set CODETRACER_PREFIX ${hostingDeps}
+          '';
+          meta.mainProgram = "ct";
+          meta.description =
+            "codetracer with CODETRACER_PREFIX pointed at the hosting "
+            + "closure — the replay path and the served bundle, without "
+            + "Electron, Ruby, noir, wazero or ctags";
+        };
+
+        codetracer-host-image = pkgs.dockerTools.buildLayeredImage {
+          name = "codetracer-host";
+          tag = "latest";
+          # `contents` rather than a hand-built rootfs: the layered builder
+          # already computes the closure, and the closure is the point —
+          # §5 of the substrate spec makes the runtime contract an image
+          # reference, and what is IN it is this product's business.
+          contents = [
+            codetracer-host
+            pkgs.bashInteractive
+            pkgs.coreutils
+            pkgs.cacert
+          ];
+          config = {
+            # `--bind 0.0.0.0` is the EXPLICIT choice WD1a's loopback default
+            # exists to force, and inside a container it is the right one: the
+            # container is its own network namespace, so binding its own
+            # loopback would make the server unreachable by the substrate that
+            # allocated it. D-S12 is what gives it an interface at all.
+            Entrypoint = [
+              "/bin/ct"
+              "host"
+              "--bind"
+              "0.0.0.0"
+            ];
+            Env = [
+              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+              "PATH=/bin"
+            ];
+            WorkingDir = "/workspace";
+          };
+        };
 
         default = codetracer;
       };

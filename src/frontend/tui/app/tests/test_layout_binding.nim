@@ -67,7 +67,9 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2685
+const ExpectedAssertions = 2685 + 17
+  ## PLAT-48: +17 — the `:pin` / `:unpin` block and the two new verbs in the
+  ## every-verb sweep.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -107,8 +109,9 @@ proc standard(): Layout = initLayout(oldProfileLayout(opStandard))
 proc ultraWide(): Layout = initLayout(oldProfileLayout(opUltraWide))
 
 proc sharedAt(profile: LayoutProfile): Layout =
-  ## The product's default at a size: the shared arrangement, folded.
-  initLayout(profileLayout(profile))
+  ## The product's default at a size: the shared arrangement, folded, with
+  ## the shared default's footer panels docked (PLAT-48).
+  profileLayoutValue(profile)
 
 proc allEdgesDocked(): Layout =
   ## Ultra-wide with one pane auto-hidden on each of the four edges, which
@@ -1269,6 +1272,32 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ck $b.saveDocument() == $saveLayout(sharedAt(b.profile))
       ck not b.userModified
       verbsRun.incl lvResetLayout
+
+    # :pin / :unpin (PLAT-48) — PLAT-4 commands: `:pin` docks the focused
+    # pane (bottom by default), `:unpin` puts it back BESIDE the pane it left
+    # (`DockedPane.beside`), and refuses a pane on no strip.
+    block:
+      let b = bindingOn(standard(), lpStandard, focus = paneState)
+      let geom = b.geometry(bodyFor(120, 40))
+      let stackBefore = shapeOf(b.layout)
+      let pinned = b.runLayoutCommand(geom, ":pin")
+      ck pinned.status == lasApplied
+      ck b.layout.dockedIndex(paneState) >= 0
+      ck b.layout.dockedAt(leBottom)[^1].pane == paneState
+      verbsRun.incl lvPin
+      let unpinned = b.runLayoutCommand(geom, ":unpin state")
+      ck unpinned.status == lasApplied
+      ck b.layout.dockedIndex(paneState) < 0
+      # Back where it was, beside the pane it sat next to — the same
+      # container in the same place, not a new column at the root: the
+      # arrangement's shape is the one before the pin.
+      checkpoint("before " & stackBefore & " / after " & shapeOf(b.layout))
+      ck shapeOf(b.layout) == stackBefore
+      let again = b.runLayoutCommand(geom, ":unpin state")
+      ck again.status == lasRefused
+      ckMessageIsNeverSilent(again, ":unpin state when it is placed")
+      ck b.runLayoutCommand(geom, ":pin sideways").status == lasBadArgument
+      verbsRun.incl lvUnpin
 
     checkpoint("verbs exercised: " & $verbsRun)
     for v in LayoutVerb:

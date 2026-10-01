@@ -541,16 +541,14 @@ fn browser_event_count_does_not_decode_events() {
     );
 }
 
-/// M0/1 — the browser reader resolves the same function VOCABULARY the native
-/// reader does.
+/// M0/1 — the browser reader resolves the same function table the native
+/// reader does: names AND declaration sites.
 ///
-/// It also pins a limitation rather than papering over it. The production Nim
-/// writer interns a function as its NAME ONLY (`interning_table.nim`'s
-/// `ensureId` appends raw name bytes), so neither reader can report where a
-/// function was defined: both give `PathId(0)` / `Line(0)`. The stub is in the
-/// FORMAT, not in either reader, and asserting it here means the day a writer
-/// starts recording definition sites this test fails and says so, instead of
-/// the limitation quietly persisting because nothing looked at it.
+/// A `funcs.dat` record is `global_line_index: varint, name_len: varint, name`
+/// (`codetracer-trace-format-spec/internal-files.md`), so both readers recover
+/// where each function was declared. The fixture declares `main` at line 1 of
+/// its only source file, so a reader that stubbed the site to line 0 fails the
+/// final assertion by name.
 #[test]
 fn browser_and_native_readers_agree_on_the_function_table() {
     let f = fixture();
@@ -579,11 +577,10 @@ fn browser_and_native_readers_agree_on_the_function_table() {
         .expect("the fixture's function");
     assert_eq!(main.name, "main");
     assert_eq!(
-        main.line,
-        Line(0),
-        "the production writer does not record a function's definition line in funcs.dat, so both \
-         readers report 0. If this now fails, a writer started recording it — propagate that \
-         through `interning_tables::RecordLayout` rather than deleting the assertion."
+        (main.path_id, main.line),
+        (codetracer_trace_types::PathId(0), Line(1)),
+        "`main` is declared at line 1 of the fixture's only source file, and funcs.dat records \
+         that site"
     );
 }
 

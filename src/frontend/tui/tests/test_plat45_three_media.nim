@@ -334,6 +334,9 @@ suite "PLAT-45: same panes, same places, three media":
     # Every pane of the shared default is a leaf of the plan (data or report).
     var shared = initHashSet[string]()
     for p in allPanes(sharedDefaultLayout().tree): shared.incl $p
+    # PLAT-48: and the footer's docked panes, which the window draws as its
+    # bottom strip and reveals from it.
+    for d in sharedDefaultLayout().docked: shared.incl $d.pane
     ck planPanes(plan) == shared
 
   test "the desktop shows the shared default, read from the DOM of the real app":

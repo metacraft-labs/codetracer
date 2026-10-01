@@ -359,7 +359,7 @@ test-windows-installer:
     nim r --hints:off --warnings:off --verbosity:0 \
       tests/e2e/t_vm_harness_hyperv_windows_installer_smoke.nim
 
-test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
+test-reprobuild-hcr-mcr-dap:
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -369,6 +369,14 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
     echo "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64 (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
     exit 2
   fi
+
+  # The sibling builds run HERE, after the platform check, not as just
+  # dependencies of this recipe. just runs a recipe's dependencies before its
+  # body, so as dependencies they ran on every host -- including the Linux
+  # CI job that only asserts the UNSUPPORTED exit above -- and a failing
+  # sibling build there replaced the loud exit 2 with an unrelated error.
+  just ensure-ct-mcr
+  just ensure-ct-native-replay
 
   if ! command -v repro >/dev/null 2>&1; then
     echo "SKIP: repro not on PATH (run inside the CodeTracer Nix dev shell)." >&2
@@ -499,7 +507,7 @@ test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
     --test reprobuild_hcr_mcr_dap_test -- --nocapture
 
-test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
+test-reprobuild-hcr-in-codetracer:
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -508,6 +516,14 @@ test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
     echo "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR (got $(uname -s) $(uname -m)); covered by macOS arm64 CI on aarch64-darwin." >&2
     exit 2
   fi
+
+  # The sibling builds run HERE, after the platform check, not as just
+  # dependencies of this recipe. just runs a recipe's dependencies before its
+  # body, so as dependencies they ran on every host -- including the Linux
+  # CI job that only asserts the UNSUPPORTED exit above -- and a failing
+  # sibling build there replaced the loud exit 2 with an unrelated error.
+  just ensure-ct-mcr
+  just ensure-ct-native-replay
 
   if ! command -v repro >/dev/null 2>&1; then
     echo "SKIP: repro not on PATH (run inside the CodeTracer Nix dev shell)." >&2
@@ -785,6 +801,28 @@ build-app-image:
 test-rust:
   #!/usr/bin/env bash
   set -e
+  # A test that skips for a missing prerequisite is counted as PASSED, and
+  # nextest does not print a passing test's output, so its banner never reaches
+  # the log. The test gates append each skip to this report instead, and it is
+  # printed when the recipe ends, pass or fail, one line per skipped test (and
+  # as a GitHub warning annotation in CI), so every skip is reported by the
+  # lane that took it.
+  skip_report="$(mktemp "${TMPDIR:-/tmp}/codetracer-test-skips.XXXXXX")"
+  export CODETRACER_TEST_SKIP_REPORT="$skip_report"
+  report_skips() {
+    if [ -s "$skip_report" ]; then
+      echo
+      echo "SKIPPED (NOT VERIFIED): $(sort -u "$skip_report" | wc -l | tr -d ' ') test(s) asserted nothing in this lane:"
+      sort -u "$skip_report" | while IFS= read -r line; do
+        echo "  $line"
+        if [ -n "${GITHUB_ACTIONS:-}" ]; then
+          echo "::warning title=Test skipped (not verified)::$line"
+        fi
+      done
+    fi
+    rm -f "$skip_report"
+  }
+  trap report_skips EXIT
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server
@@ -799,12 +837,31 @@ test-rust:
     else \
       exit "$?"; \
     fi
+  # The cross-process recordings some integration tests replay are produced at
+  # test time by scripts/materialize-recording.sh, which drives the web
+  # recording through `session-manager` and refuses to record without it. Build
+  # it before the integration tests rather than after them.
+  pushd ../backend-manager
+  cargo build --release --bin session-manager
+  popd
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Flow tests that need ct-native-replay/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
   # and are run separately in cross-repo CI jobs.
-  cargo nextest run --release --test '*' \
-    -E 'not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  #
+  # The rr origin tests (`rr::` in origin_rr_dap_test) fail when rr or
+  # ct-native-replay is missing; they do not skip. A lane with no rr backend
+  # declares CODETRACER_RR_BACKEND_PRESENT=0 (ci/test/non-gui.sh does), and
+  # then they are excluded here, by name, and the exclusion is printed, rather
+  # than run and counted as passed. They run in cross-repo-tests.yml's
+  # rr-backend-tests job.
+  filter='not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "0" ]; then
+    filter="$filter and not (binary(origin_rr_dap_test) and test(/^rr::/))"
+    echo "NOT RUN in this lane (CODETRACER_RR_BACKEND_PRESENT=0): the rr origin tests"
+    echo "  origin_rr_dap_test rr::*   -- they need rr + ct-native-replay; they run in"
+    echo "  cross-repo-tests.yml rr-backend-tests (scripts/run-cross-repo-tests.sh origin-rr)"
+  fi
+  cargo nextest run --release --test '*' -E "$filter"
   popd
   pushd src/backend-manager
   cargo nextest run --release
@@ -3695,6 +3752,19 @@ test-web-bundle-assets:
   exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
   bash ci/test/web-bundle-assets.sh
 
+# THE `-d:ctWeb` PARTITION MAY SHRINK AND MUST NOT GROW.
+#
+# §7.5 of `UI-Bundle-And-Endpoints.md` wants one bundle across all three
+# deployments and says the item is most likely to be deferred; it was deferred
+# on 2026-10-01 with the measurement attached. This is the deferral's boundary:
+# a fifteenth compile-time fork has to be added to an inventory somebody reads,
+# rather than appearing because a define was the quickest way past a problem.
+# Costs milliseconds.
+test-ctweb-partition-inventory:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  bash ci/test/ctweb-partition-inventory.sh
+
 # THE PAGE PAINTS — the assertion whose absence let a blank product reach
 # production with every check green.
 #
@@ -4882,6 +4952,28 @@ plat47-gpui-window:
 plat47-gpui-window-record:
   python3 ci/test/plat47_gpui_window.py record
 
+# PLAT-48: the top bar and the auto-hide panels in a REAL GPUI window — the
+# menu, the desktop's debugger marks, the omnibar, the footer and TOP strips,
+# pin / unpin — driven by a virtual pointer and wtype on a headless sway and
+# framed with grim (ci/test/plat48_gpui_window.py). Needs isonim-gpui's dev
+# shell tools and a windowed binary (`CODETRACER_WINDOW_BIN_PINS_SHIM=1`).
+plat48-gpui-window:
+  bash ci/test/plat48-gpui-window.sh
+
+# Measure the captured frames into `src/tests/visual/plat48-gpui-window.json`,
+# which `src/frontend/gpui/tests/test_plat48_gpui_window.nim` asserts.
+plat48-gpui-window-record:
+  python3 ci/test/plat48_gpui_window.py record
+
+# The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
+# isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
+# checkout's windowed front-end against it, record `calc` / `call_pages` when
+# absent, then for each of plat45 / plat47 / plat48 (default: all) capture on a
+# headless sway, measure the frames into the committed record, and run the
+# suite that asserts it. The `gpui-window-captures` CI job runs this.
+gpui-window-captures *which:
+  bash ci/test/gpui-window-captures.sh {{which}}
+
 # PLAT-46: the desktop's computed colour for every role the TUI also paints,
 # written to src/tests/visual/answers/plat46-token-parity.electron.json for
 # `tests/real_terminal/test_plat46_desktop_parity.nim`. Same Xvfb arrangement
@@ -4916,6 +5008,13 @@ plat46-capture-electron *args:
 # JavaScript in a prefix of its own (scripts/plat45-desktop-prefix.sh).
 plat47-capture-electron *args:
   bash scripts/plat47-capture-electron.sh {{args}}
+
+# PLAT-48: the desktop's menu drawn from the shared Menu ViewModel (the
+# verification gate: a ViewModel-only highlight change moves the DOM's), its
+# shortcuts, Step Over from the menu, and the footer's labels — written to
+# `src/tests/visual/answers/plat48-menu.electron.json`.
+plat48-capture-electron *args:
+  bash scripts/plat48-capture-electron.sh {{args}}
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
@@ -5820,15 +5919,11 @@ ensure-ct-mcr:
         exit 0
     fi
     sibling="$CT_CODETRACER_NATIVE_RECORDER_SIBLING"
-    if command -v repro >/dev/null 2>&1; then
-        # ``repro build`` operates on the project at the current working
-        # directory (the CLI has no ``--cwd`` flag); cd into the sibling
-        # first so the recorder's ``ct-mcr`` target resolves there.
-        # ``--tool-provisioning=nix`` is required: reprobuild refuses an
-        # implicit PATH fallback for ``uses`` declarations and the Nix-based
-        # sibling resolves its toolchain through its flake.
-        ( cd "$sibling" && repro build --tool-provisioning=nix ct-mcr )
-    elif [ "${OS:-}" = "Windows_NT" ]; then
+    # The recorder's own ``just build-ct-mcr`` is the build, on every
+    # platform. There is no reprobuild target called ``ct-mcr``: ``repro
+    # build ct-mcr`` fails with ``unknown_target``, so it cannot be the
+    # first choice whenever ``repro`` happens to be on PATH.
+    if [ "${OS:-}" = "Windows_NT" ]; then
         # Windows DIY: no Nix dev shell, invoke the sibling's
         # Windows-specific build target directly. env.ps1 has already
         # populated nim + MSVC into the current shell, so the sibling's

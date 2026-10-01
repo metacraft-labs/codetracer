@@ -885,6 +885,41 @@ suite "Layout algebra — auto-hide (§3)":
         check b.layout.placement(paneEventLog) == plPlaced
         checkValid b.layout
 
+  test "pin then unpin puts every pane of a stack back at its own index":
+    # PLAT-48. With no anchor named, a restore goes back beside the pane the
+    # docked one sat next to (`DockedPane.beside`) — AFTER its previous
+    # sibling, or IN FRONT of its next one when it was the first
+    # (`besideBefore`). Only the second rule was missing: Call Trace, the
+    # first tab of the shared default's Call Trace | Agent Activity stack,
+    # came back BEHIND Agent Activity. Every position of a three-tab stack,
+    # and the restored tab is the one shown.
+    let tree = row(@[
+      pane(paneEditor, "Editor"),
+      stack(@[pane(paneState, "State"), pane(paneScratchpad, "Scratchpad"),
+              pane(paneEventLog, "Event Log")])])
+    let base = initLayout(tree)
+    for p in [paneState, paneScratchpad, paneEventLog]:
+      checkpoint($p)
+      let pinned = apply(base, cmdDock(p, leBottom))
+      checkApplied pinned
+      if pinned.kind != loApplied: continue
+      let back = apply(pinned.layout, cmdRestoreDocked(p))
+      checkApplied back
+      if back.kind != loApplied: continue
+      proc tabsOf(t: LayoutNode): seq[PaneKind] =
+        for c in t.children[1].children: result.add c.pane
+      let order = @[paneState, paneScratchpad, paneEventLog]
+      check tabsOf(back.layout.tree) == order
+      let st = back.layout.tree.children[1]
+      check st.children[st.activeIndex].pane == p
+      checkValid back.layout
+      # …and across a save/restore of the pinned document.
+      let reloaded = restoreLayoutDocument(parseJson($saveLayout(pinned.layout)))
+      let back2 = apply(reloaded, cmdRestoreDocked(p))
+      checkApplied back2
+      if back2.kind == loApplied:
+        check tabsOf(back2.layout.tree) == order
+
   test "restoring a pane that is not docked is refused by kind":
     for name in AllShapes:
       checkpoint(name)
@@ -1102,7 +1137,11 @@ suite "Layout algebra — floating panels are not expressible (§3A.2)":
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders too.
     # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
-    check checkedFields == 7 + 5 + 3
+    # PLAT-48 added `DockedPane.beside` (the pane it was docked from),
+    # `DockedPane.weight` (its share there) and `DockedPane.besideBefore`
+    # (which side of `beside`), so the docked pane's is 8 — where it goes
+    # back to, never where it is drawn.
+    check checkedFields == 7 + 8 + 3
 
   test "every visible pane occupies a distinct region of the split tree":
     # The model's half of the projection's total-and-disjoint invariant: each

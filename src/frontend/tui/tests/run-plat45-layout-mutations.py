@@ -123,7 +123,7 @@ RESULT_LINE = re.compile(r"^\s*(?:\x1b\[[0-9;]*m)*\[(OK|FAILED)\]\s*"
 # ---------------------------------------------------------------------------
 
 C_TABLE = "the table is one-to-one onto Content ordinals, and inverts"
-C_V3 = "every committed v3 document restores unchanged, migrated to v4"
+C_V3 = "every committed v3 document restores unchanged, migrated to the current version"
 C_REPORTS = "report leaves are exactly the placed panes a front-end cannot draw"
 C_LAWS = "the four laws at every depth of the debug default"
 C_STEPS = "every authored step of the debug order folds exactly one region"

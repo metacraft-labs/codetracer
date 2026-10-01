@@ -189,13 +189,16 @@ suite "PLAT-45 deliverable 1 — the vocabulary covers the desktop's default":
       if p.isSome: image.incl p.get
     ck image == EditModeHiddenPanes
 
-suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4":
+suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5)":
 
-  test "the version is 4 and the chain still starts at 1":
-    ck LayoutSchemaVersion == 4
+  # PLAT-48 bumped the schema to 5 (the desktop's PROBLEMS and REQUESTS
+  # footer panels are new `PaneKind`s, docked by the shared default); v3 and
+  # v4 documents migrate forward unchanged in their trees.
+  test "the version is 5 and the chain still starts at 1":
+    ck LayoutSchemaVersion == 5
     ck FirstLayoutSchemaVersion == 1
 
-  test "every committed v3 document restores unchanged, migrated to v4":
+  test "every committed v3 document restores unchanged, migrated to the current version":
     for text in V3Corpus:
       let doc = parseJson(text)
       ck doc["version"].getInt == 3
@@ -206,10 +209,10 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4":
       ck equalTrees(restored.tree, fromJson(doc["layout"]))
       ck validate(restored, {}).len == 0
 
-  test "a v4 document naming the new panes round-trips":
+  test "a current document naming the new panes round-trips":
     let layout = initLayout(sharedDefaultLayout().tree)
     let doc = saveLayout(layout)
-    ck doc["version"].getInt == 4
+    ck doc["version"].getInt == 5
     let back = restoreLayoutDocument(parseJson($doc))
     ck equalTrees(back.tree, layout.tree)
     ck panesOf(back.tree) == panesOf(layout.tree)
@@ -218,12 +221,37 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4":
     var doc = saveLayout(initLayout(defaultReplayLayout()))
     doc["version"] = %3
     let back = restoreLayoutDocument(doc)
-    ck back.version == 4
+    ck back.version == 5
     ck equalTrees(back.tree, defaultReplayLayout())
+
+  test "a v4 document as the previous build wrote it restores exactly, docked panes included":
+    # PLAT-45/47's shape: a tree and a docked pane, no `beside` / `weight`,
+    # version 4. It restores to the same tree and the same docked list —
+    # it gains no footer panel (a saved arrangement is the user's).
+    let layout = initLayout(sharedDefaultLayout().tree)
+    let docked = layout.apply(cmdDock(paneFileTree, leLeft))
+    ck docked.kind == loApplied
+    var doc = saveLayout(docked.layout)
+    doc["version"] = %4
+    for d in doc["docked"]:
+      for field in ["beside", "weight"]:
+        if d.hasKey(field): d.delete(field)
+    let back = restoreLayoutDocument(doc)
+    ck back.version == 5
+    ck equalTrees(back.tree, docked.layout.tree)
+    ck back.docked.len == 1
+    ck back.docked[0].pane == paneFileTree and back.docked[0].edge == leLeft
+    ck back.docked[0].beside.isNone
+    ck validate(back, {}).len == 0
+    # …and unpinning it with no anchor still places it (at the root, the
+    # pre-PLAT-48 answer, since the document names nowhere to go back to).
+    let restored = back.apply(cmdRestoreDocked(paneFileTree))
+    ck restored.kind == loApplied
+    ck restored.layout.tree.contains(paneFileTree)
 
   test "a document from a newer build is refused as a whole":
     var doc = saveLayout(initLayout(sharedDefaultLayout().tree))
-    doc["version"] = %5
+    doc["version"] = %(LayoutSchemaVersion + 1)
     var kind = ldeNotAnObject
     try:
       discard restoreLayoutDocument(doc)

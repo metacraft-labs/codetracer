@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.base.schema.json",
+  "name": "CodeTracer host",
+
+  // THE ALTERNATIVE PRODUCER, and it is an alternative rather than the
+  // mechanism. `interactive-session-substrate.md` §5: "We are not committing to
+  // the dev container standard. `devcontainer.json` is a way to build a Docker
+  // image; it is a build-time input, not a runtime." The substrate resolves an
+  // image REFERENCE in its own store and does not care which of the two
+  // producers made it.
+  //
+  // The nix producer is `packages.codetracer-host-image` plus
+  // `ci/publish-host-image.sh`. This is for a customer or a CI system that has
+  // Docker and no nix, and it exists so that "bring your own image" is a real
+  // option rather than a sentence.
+  //
+  // WHAT HAS TO MATCH, and what does not. The substrate only needs the
+  // container to run `ct host` on a port it can address, so the OBLIGATIONS are
+  // the entrypoint, the bind address and the working directory — the three
+  // things `codetracer-host-image`'s `config` sets. Everything else (which
+  // base, which shell, which extra tools) is this file's own business, and
+  // saying so is the point of §5.
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  // `--bind 0.0.0.0` is not a default being repeated; it is the EXPLICIT choice
+  // WD1a's loopback default exists to force. Inside a container the namespace
+  // is the container's own, so binding loopback would make the server
+  // unreachable by the substrate that allocated it — and it is reachable at all
+  // only because of D-S12.
+  //
+  // No `--port`: `ct host` takes it from `CODETRACER_HOST_PORT` or auto-assigns
+  // and reports the URL on stdout, which is what the substrate parses. That
+  // behaviour is tracked in
+  // `codetracer-specs/issues/2026-09-30-ct-host-port-env-and-auto-assign-are-unimplemented.md`;
+  // until it lands, a deployment using this file passes `--port` itself through
+  // `CODETRACER_HOST_ARGS`.
+  "overrideCommand": false,
+  "runArgs": ["--init"],
+  "workspaceFolder": "/workspace",
+
+  "containerEnv": {
+    "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+    "CODETRACER_HOST_BIND": "0.0.0.0"
+  },
+
+  // Deliberately NO `postCreateCommand` that starts the server. A devcontainer
+  // is usually opened by an editor that wants a shell, and a
+  // `devcontainer.json` that also launched `ct host` would give a customer two
+  // processes racing for the same port the first time they opened it in VS
+  // Code. The image's `CMD` starts the server; the editor's attach does not.
+  "remoteUser": "root"
+}

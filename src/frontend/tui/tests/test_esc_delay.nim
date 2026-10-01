@@ -16,11 +16,13 @@
 ##   * `ESC ESC` still yields exactly one `Esc` immediately — the framing every
 ##     earlier pty suite relies on is unchanged;
 ##   * an `ESC` followed by an ordinary key AFTER the delay is two tokens —
-##     the key-press sequence of a Vim user leaving insert mode.
+##     the key-press sequence of a Vim user leaving insert mode;
+##   * a sequence already waiting behind its `ESC` is one token even when the
+##     reader comes back after the delay (PLAT-48).
 ##
 ## NO MOCKS: a real pipe, the shipped driver, the shipped framer.
 
-import std/[monotimes, os, posix, times, unittest]
+import std/[monotimes, os, posix, strutils, times, unittest]
 
 import ../host/terminal_driver
 import ../app/theme/capabilities
@@ -103,6 +105,29 @@ suite "the lone ESC delay, over a real pipe":
     w.put("\x1bj")
     let (tok, _) = d.nextToken(1000)
     ck tok == "j"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "a sequence already waiting behind its ESC is one token, however late the reader":
+    # PLAT-48. The input loop does work between two `nextEvent` calls — a
+    # repaint, a debugger step's round trip — and read ONE byte per call. A
+    # mouse release queued behind a click on a debugger control had its `ESC`
+    # read, then the loop repainted for longer than `EscDelayMs`, and the
+    # held `ESC` was declared the Esc key with `[<0;51;1m` still waiting: the
+    # release arrived as the keys `[`, `<`, `0`, `;`, `5`, `1`, `;`, `1`, `m`.
+    # The reader here is late by construction: it takes the `ESC`, then
+    # sleeps past the delay before asking again.
+    let (d, w) = pipeDriver()
+    w.put("\x1b[<0;51;1m")
+    let first = d.nextEvent(20)
+    os.sleep(int(EscDelayMs) * 3)
+    var tok = ""
+    if first.kind == dekToken:
+      tok = first.token
+    else:
+      tok = d.nextToken(1000)[0]
+    checkpoint("got " & tok.escape)
+    ck tok == "\x1b[<0;51;1m"
     let (none, _) = d.nextToken(150)
     ck none == ""
 

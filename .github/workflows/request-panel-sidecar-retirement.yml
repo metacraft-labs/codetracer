@@ -27,6 +27,7 @@ name: Request Panel — sidecar retirement (all recorders)
 
 on:
   pull_request:
+    branches-ignore: [agents]
     paths:
       - 'src/tests/gui/tests/request-panel/**'
       - 'src/frontend/viewmodel/**'

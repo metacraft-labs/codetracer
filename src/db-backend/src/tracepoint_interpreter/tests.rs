@@ -26,9 +26,17 @@ fn log_array() -> Result<(), Box<dyn Error>> {
     let src = "log(arr)";
 
     let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
+    let noir_expected = vec![var(
+        "arr",
+        seq_val(vec![
+            noir_field(FIELD_42),
+            noir_field(FIELD_MINUS_13),
+            noir_field(FIELD_5),
+        ]),
+    )];
 
     check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected)?;
-    run_noir_variant(src, 3, "array", &expected)?;
+    run_noir_variant(src, 3, "array", &noir_expected)?;
 
     Ok(())
 }
@@ -44,9 +52,14 @@ log(arr[2])";
         var("arr[1]", int_val(-13)),
         var("arr[2]", int_val(5)),
     ];
+    let noir_expected = vec![
+        var("arr[0]", noir_field(FIELD_42)),
+        var("arr[1]", noir_field(FIELD_MINUS_13)),
+        var("arr[2]", noir_field(FIELD_5)),
+    ];
 
     check_tracepoint_evaluate(src, 3, "array", Lang::RubyDb, &expected)?;
-    run_noir_variant(src, 3, "array", &expected)?;
+    run_noir_variant(src, 3, "array", &noir_expected)?;
 
     Ok(())
 }
@@ -76,6 +89,26 @@ fn int_val(value: i64) -> Value {
         i: value.to_string(),
         ..Default::default()
     }
+}
+
+// `test-programs/array/noir` declares `let arr = [42, -13, 5];` with no type
+// annotation, so each element is a `Field`. The Noir recorder spells a `Field`
+// as `ValueRecord::String` holding `0x` + 64 lowercase big-endian hex digits
+// (under the `(TypeKind::Int, "Field")` type record), so that one field element
+// has one spelling across every recorder that writes it. A negative literal is
+// its residue modulo the BN254 scalar-field prime
+// p = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001,
+// i.e. -13 is p - 13.
+const FIELD_42: &str = "0x000000000000000000000000000000000000000000000000000000000000002a";
+const FIELD_MINUS_13: &str = "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593effffff4";
+const FIELD_5: &str = "0x0000000000000000000000000000000000000000000000000000000000000005";
+
+fn noir_field(hex: &str) -> Value {
+    assert!(
+        hex.len() == 66 && hex.starts_with("0x"),
+        "a Noir Field is `0x` + 64 hex digits, got {hex:?}"
+    );
+    str_val(hex)
 }
 
 fn str_val(value: &str) -> Value {

@@ -17,6 +17,7 @@ name: MCR DAP Flow
 
 on:
   pull_request:
+    branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
       - 'libs/ct-dap-client/**'

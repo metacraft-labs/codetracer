@@ -6,7 +6,7 @@
 3a78fc1d60a28e60c21569d4c8f9184d5ea7b0bb7c122ab06536f07dfdfde43a  src/frontend/tui/app/theme/palette.nim
 5e82d0b58e65edc5c05d73eb25d7a070076ad92da84cce6af99cd76ba80286d0  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-9be3ac9bea25f0aeea707ada3231abb375ced7974d8b56ba4465a64ce1496045  src/frontend/tui/app/views/shell.nim
+e8644f6fffc257d6fd997be195bfe86bce360e5291d84b6b607209547568b665  src/frontend/tui/app/views/shell.nim
 704b1ad3389bd76e8f03d2409b160ba06d11657e278811a828556406db7b9527  src/frontend/tui/app/views/gutter.nim
 42e192dc0d0a251ef801b27b7250d9cd43dcf0a1ead61ebd876a1c1a8061e1e4  src/frontend/tui/app/views/source_pane.nim
 81c4fc54101ab04e1f1083fbc63e22d9da9105d12cbc36564abf3e5c810285b7  src/frontend/tui/host/terminal_probe.nim

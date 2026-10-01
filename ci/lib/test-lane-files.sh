@@ -715,7 +715,16 @@ test_lane_files() {
 		# therefore checked at package time rather than on push. That gap is
 		# real and is recorded in the milestone file rather than papered over
 		# with a lane that would lie.
+		# `browser_tab.nim` is here for the same reason `web_browser.nim` is:
+		# it is `importjs` and `{.emit.}` throughout, so `vm-unit` cannot see
+		# it, and the two modules that DO import it — `web_browser.nim` here
+		# and `ui_js.nim` in `renderer-electron` — are each one edit away from
+		# not doing so. It carries the ten operations that belong to the TAB
+		# rather than to the container (§6.6), shared by the web deployment
+		# and the container deployment, which is exactly the shape of module
+		# that loses its last compiler without anyone noticing.
 		echo src/frontend/platform_host.nim
+		echo src/frontend/viewmodel/host/browser_tab.nim
 		echo src/frontend/viewmodel/host/desktop_electron.nim
 		echo src/frontend/viewmodel/host/opfs_volume.nim
 		echo src/frontend/viewmodel/host/web_browser.nim
@@ -836,9 +845,44 @@ test_lane_files() {
 		# contract are exercised against each other with no socket. It needs
 		# `git` and `sh` on PATH and writes only under one `mkdtemp`
 		# directory, which it removes.
+		#
+		# `facade_endpoint_over_socket_test.nim` is the one that cannot be
+		# faked: it starts the real `setupServer` and reaches the dispatcher
+		# over a real socket.io connection, because the two suites above were
+		# green for weeks while NOTHING under `src/frontend/index/` imported
+		# `facade_endpoint` at all. It then holds the welcome's profile and
+		# the dispatcher's refusals to the biconditional §6.3 promises. Needs
+		# `git` and `sh` on PATH; writes only under one `mkdtemp` directory,
+		# which it points `XDG_CONFIG_HOME` at and then removes.
 		echo src/frontend/tests/dap_session_routing_test.nim
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
+		#
+		# `index_serves_deployment_cache_classes_test.nim` asks the running
+		# server for two files and compares the `Cache-Control` it sends with
+		# `web_deployment.headerFor(cacheClassFor(url))` — the same pair that
+		# generates the Pages `_headers` file. Reading the function back would
+		# have passed against the broken code, because the function was right
+		# and nothing under `src/frontend/index/` called it. It writes two probe
+		# files under `codetracerExeDir` and removes them.
+		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
+		#
+		# `index_serves_one_deployment_descriptor_test.nim` is §7's "it arrives
+		# differently per deployment and is the SAME document": it fetches
+		# `/deployment.json` over HTTP, reads `welcome.deployment` over a real
+		# socket, and compares the two to EACH OTHER rather than each to a
+		# shape — two deliveries of one value can drift, and a shape check
+		# passes while they do.
+		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
+		#
+		# `index_reports_the_port_it_bound_test.nim` starts the real server on
+		# `--port 0` and then CONNECTS to the port the `CODETRACER_HOST_URL=`
+		# line named. The number cannot be compared against the input, because
+		# with auto-assign there is no input — so the connection is the check,
+		# and it is the only one an implementation that echoed the argument back
+		# could not satisfy.
+		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
+		echo src/frontend/tests/index_reports_the_port_it_bound_test.nim
 		;;
 
 	frontend-native-units)

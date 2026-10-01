@@ -52,6 +52,25 @@ const
   FrameReply* = "reply"
   FrameEvent* = "event"
 
+const FacadeChannel* = "CODETRACER::facade"
+  ## The one transport message name the endpoint contract uses, in BOTH
+  ## directions.
+  ##
+  ## One name rather than one per frame kind, because §6.2 already puts `kind`
+  ## in the frame and a second dispatch on the message name would be the same
+  ## decision made twice, in two places, able to disagree.
+  ##
+  ## Prefixed like the index IPC surface it shares the connection with (§6.1),
+  ## so an operator reading a socket trace sees which subsystem a frame belongs
+  ## to without decoding it.
+  ##
+  ## It lives HERE, with the codec, rather than in either end. The server side
+  ## is `index/facade_endpoint.nim`, an Electron main-process module the
+  ## renderer must not import; the client side is `host/container_boot.nim`,
+  ## which the main process must not import. A name the two ends spell
+  ## separately is a name they can spell differently, and the failure is
+  ## silent — frames go out and nothing answers.
+
 type
   ProtocolError* = object of CatchableError
     ## Raised by the decoders. A frame that cannot be read is not a value a

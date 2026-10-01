@@ -182,12 +182,38 @@ proc keyName*(token: string): string =
       except ValueError:
         return ""
     return ""
+  of 'u':
+    # The `CSI u` convention (fixterms, kitty's keyboard protocol in its
+    # legacy-compatible form): `CSI <codepoint> ; <modifier> u`. Decoded for
+    # TAB only — `Ctrl+Tab` / `Ctrl+Shift+Tab`, which CodeTracer-TUI.md
+    # §3.3.1 binds and which a terminal can send in no other form. Anything
+    # else stays "not a key" rather than a guess.
+    let parts = params.split(';')
+    if parts.len == 2 and parts[0] == "9":
+      try:
+        let m = parseInt(parts[1])
+        if ModifierNames.hasKey(m):
+          return ModifierNames[m] & "+Tab"
+      except ValueError:
+        return ""
+    return ""
   of '~':
     let parts = params.split(';')
     var code = 0
     try:
       code = parseInt(parts[0])
     except ValueError:
+      return ""
+    # xterm's `modifyOtherKeys`: `CSI 27 ; <modifier> ; <codepoint> ~`.
+    # Decoded for TAB only, for the reason the `CSI u` arm above gives.
+    if code == 27:
+      if parts.len == 3 and parts[2] == "9":
+        try:
+          let m = parseInt(parts[1])
+          if ModifierNames.hasKey(m):
+            return ModifierNames[m] & "+Tab"
+        except ValueError:
+          return ""
       return ""
     var base = ""
     if FunctionKeyCodes.hasKey(code):

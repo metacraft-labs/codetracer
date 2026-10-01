@@ -20,11 +20,14 @@
 //!  4. Backward compat: a legacy (flag-off) `.ct` exposes NO seekable stream and
 //!     still reads through the existing fully-materialized path, unchanged.
 //!
-//! The fixtures are written in-test with the M23a/M23b writer
-//! (`CtfsTraceWriter::with_step_stream(true).with_value_stream(true)` / a flag-off
-//! twin), so the tests are self-contained and do not depend on an external bundle.
+//! The fixtures are written in-test — the seekable one with the M23a/M23b writer
+//! (`CtfsTraceWriter`, which always writes both streams), the
+//! legacy twin with `common::legacy_events_log` — so the tests are
+//! self-contained and do not depend on an external bundle.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -139,13 +142,20 @@ fn fixture_events() -> Vec<TraceLowLevelEvent> {
 /// Write the fixture trace to a `.ct`. With `with_streams` on, the writer emits
 /// the seekable `steps.dat`/`values.dat` (chunk size 2 ⇒ the {TOTAL_STEPS}-record
 /// streams span multiple chunks, so a single lookup must inflate only one
-/// chunk). With it off, the legacy flag-off twin is written (no streams), used
-/// for the backward-compatibility test.
+/// chunk). With it off, the legacy twin is written — the same events in the
+/// combined `events.log` layout with no split streams — used for the
+/// backward-compatibility test.
+///
+/// The legacy twin comes from `common::legacy_events_log` rather than from the
+/// writer with its streams switched off: since codetracer-trace-format `ac413d7`
+/// the writer emits no `events.log`, so switching its streams off now produces a
+/// container with no execution data at all, not a legacy recording.
 fn write_trace(dir: &tempfile::TempDir, with_streams: bool) -> PathBuf {
+    if !with_streams {
+        return common::legacy_events_log::write_legacy_events_log_bundle(dir.path(), "trace", &fixture_events());
+    }
     let path_buf = dir.path().join("trace");
     let mut writer = CtfsTraceWriter::new("test_program", &[])
-        .with_step_stream(with_streams)
-        .with_value_stream(with_streams)
         .with_steps_chunk_size(2)
         .with_values_chunk_size(2);
     TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();

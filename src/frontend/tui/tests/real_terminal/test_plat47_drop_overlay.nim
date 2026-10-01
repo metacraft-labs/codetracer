@@ -126,6 +126,12 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     let resolved = resolveFixture("calc")
     ck resolved.outcome == foRecorded
     let state = getEnv("CODETRACER_TUI_LAYOUT_DIR") / "drop-overlay"
+    # A FRESH state: the case's geometry is the shared default's, and a
+    # document an earlier run left here (a gesture's `:undo-layout` still
+    # counts as the user's arrangement and is written through) — or one a
+    # mutation harness's rebuilt binary left — would be restored instead.
+    # Found when PLAT-48's footer strip was absent from such a document.
+    removeDir(state)
     createDir(state)
     var sess = newTuiTest(tuiBinary(), @[resolved.tracePath])
       .width(Cols).height(Rows)
@@ -154,10 +160,11 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
         if d < callTraceCol: c = d + 1
       c
     # The Source pane is a column of its own, the whole body tall: rows 1 ..
-    # StatusRow - 1.
+    # StatusRow - 2 — the row above the status line is the bottom strip, the
+    # shared default's footer panels (PLAT-48).
     let source = Rect(row: 1, col: sourceLeft,
                       width: sourceRight - sourceLeft + 1,
-                      height: StatusRow - 1)
+                      height: StatusRow - 2)
 
     # A CLICK ON THE VARIABLES TAB FIRST, so the baseline carries the same
     # focus the drag will: the press that starts the drag focuses that stack.
