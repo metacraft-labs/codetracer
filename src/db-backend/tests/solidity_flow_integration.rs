@@ -49,9 +49,12 @@ fn create_solidity_flow_config() -> FlowTestConfig {
             "sum_val".to_string(),
             "doubled".to_string(),
             "final_result".to_string(),
+            // A state variable the function assigns is a variable too.
+            "storedResult".to_string(),
         ],
-        // `storedResult` and `emit` should not appear as local variables
-        excluded_identifiers: vec!["storedResult".to_string(), "Computed".to_string()],
+        // The emitted event, the contract and the function are names, not
+        // variables.
+        excluded_identifiers: vec!["Computed".to_string(), "FlowTest".to_string(), "run".to_string()],
         expected_values,
     }
 }

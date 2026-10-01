@@ -1032,6 +1032,65 @@ impl ExprLoader {
     #[cfg(feature = "syntax-highlight")]
     fn is_variable_node(&self, lang: Lang, node: &Node) -> bool {
         match lang {
+            Lang::Solidity => {
+                // tree-sitter-solidity reports every name as an `identifier`;
+                // these are the ones that name something other than a value:
+                //   - the name of a contract, function, event, modifier,
+                //     struct or enum declaration (`name` field);
+                //   - everything inside an event declaration and inside a
+                //     function's `returns (...)` clause (the signature line
+                //     declares no value the step can hold);
+                //   - the event in `emit X(...)` and the callee of a call;
+                //   - a member name after `.` and a type name.
+                // A local, a parameter and a state variable stay variables.
+                if node.kind() != "identifier" {
+                    return false;
+                }
+                let Some(mut parent) = node.parent() else {
+                    return true;
+                };
+                let mut field = field_name_in_parent(node);
+                // The grammar wraps an operand in an `expression` node; what
+                // the name is used as is decided one level up.
+                if parent.kind() == "expression"
+                    && let Some(grandparent) = parent.parent()
+                {
+                    field = field_name_in_parent(&parent);
+                    parent = grandparent;
+                }
+                match parent.kind() {
+                    "contract_declaration"
+                    | "interface_declaration"
+                    | "library_declaration"
+                    | "function_definition"
+                    | "modifier_definition"
+                    | "event_definition"
+                    | "error_declaration"
+                    | "struct_declaration"
+                    | "enum_declaration"
+                        if field.as_deref() == Some("name") =>
+                    {
+                        return false;
+                    }
+                    "emit_statement" | "revert_statement" => return false,
+                    "call_expression" if field.as_deref() == Some("function") => return false,
+                    "member_expression" if field.as_deref() == Some("property") => return false,
+                    "type_name" | "user_defined_type" | "modifier_invocation" | "inheritance_specifier" => {
+                        return false;
+                    }
+                    _ => {}
+                }
+                let mut ancestor = node.parent();
+                while let Some(a) = ancestor {
+                    match a.kind() {
+                        "event_definition" | "return_type_definition" | "error_declaration" => return false,
+                        "function_body" | "contract_body" => break,
+                        _ => {}
+                    }
+                    ancestor = a.parent();
+                }
+                true
+            }
             Lang::Rust => {
                 // NOTE: this is by no mean complete
                 if node.kind() != "identifier" {
@@ -3705,6 +3764,53 @@ console.log("Result:", result);
         );
 
         fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Solidity: an emitted event, a contract's name, a function's name and
+    /// what its signature line declares as its return type are not variables;
+    /// a local, a parameter and a state variable are.
+    #[test]
+    fn a_solidity_event_contract_or_function_name_is_not_a_variable() {
+        use std::fs;
+
+        let code = r#"pragma solidity ^0.8.0;
+
+contract FlowTest {
+    uint256 public storedResult;
+    event Computed(uint256 indexed result);
+
+    function run(uint256 seed) public returns (uint256 out) {
+        uint256 a = seed + 10;
+        storedResult = a;
+        emit Computed(a);
+        return helper(a);
+    }
+
+    function helper(uint256 x) internal pure returns (uint256) {
+        return x;
+    }
+}
+"#;
+        let file_path = std::env::temp_dir().join(format!("sol_vars_{}.sol", std::process::id()));
+        fs::write(&file_path, code).unwrap();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+        fs::remove_file(&file_path).unwrap();
+
+        for not_a_variable in ["FlowTest", "Computed", "result", "run", "helper", "out"] {
+            assert!(
+                !all_vars.contains(&not_a_variable.to_string()),
+                "{not_a_variable} is not a variable; got {all_vars:?}"
+            );
+        }
+        for variable in ["storedResult", "a", "seed", "x"] {
+            assert!(
+                all_vars.contains(&variable.to_string()),
+                "{variable} is a variable; got {all_vars:?}"
+            );
+        }
     }
 
     /// Test that JavaScript function declaration names are filtered out

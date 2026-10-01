@@ -170,9 +170,15 @@ fn solidity_flow_dap_variables() {
         source_file: source_path.to_str().unwrap().to_string(),
         // Line 39: `uint256 final_result = doubled + 10;`
         breakpoint_line: 39,
-        expected_variables: vec!["final_result"].into_iter().map(String::from).collect(),
-        // `storedResult` and `Computed` should not appear as local variables
-        excluded_identifiers: vec!["storedResult".to_string(), "Computed".to_string()],
+        // `storedResult` is a state variable the function assigns, so it is a
+        // variable too.
+        expected_variables: vec!["final_result", "storedResult"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        // The emitted event, the contract and the function are names, not
+        // variables.
+        excluded_identifiers: vec!["Computed".to_string(), "FlowTest".to_string(), "run".to_string()],
         expected_values,
     };
 

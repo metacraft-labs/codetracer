@@ -32,7 +32,7 @@ fn find_db_backend() -> PathBuf {
 }
 
 #[test]
-fn evm_load_calltrace_returns_compute_call() {
+fn evm_load_calltrace_returns_the_transactions_call_tree() {
     if find_evm_recorder().is_none() {
         test_harness::skip_or_fail_missing_prerequisite(
             "evm_load_calltrace_test",
@@ -82,11 +82,64 @@ fn evm_load_calltrace_returns_compute_call() {
             );
             assert!(resp.success, "DAP responded with success=false: {resp:?}");
             assert_eq!(resp.command, "ct/load-calltrace-section");
+            // FlowTest.sol's transaction enters through the contract's
+            // dispatcher, which the recorder reports as the top-level frame,
+            // and makes exactly one internal call: `add(10, 20)`, declared on
+            // lines 20-22 and entered at step 17. `compute` is the external
+            // entry point, inlined into that top-level frame; it is not a
+            // call of its own.
             let body_str = resp.body.to_string();
-            assert!(
-                body_str.contains("compute"),
-                "expected the loaded calltrace to reference ``compute``; \
-                 got body: {body_str}",
+            let calls: Vec<(i64, String, i64, Vec<(String, String)>)> = resp.body["callLines"]
+                .as_array()
+                .expect("callLines is an array")
+                .iter()
+                .filter(|line| line["content"]["kind"] == 0)
+                .map(|line| {
+                    let call = &line["content"]["call"];
+                    let loc = &call["location"];
+                    let args = call["args"]
+                        .as_array()
+                        .map(|args| {
+                            args.iter()
+                                .map(|a| {
+                                    (
+                                        a["name"].as_str().unwrap_or_default().to_string(),
+                                        a["value"]["r"].as_str().unwrap_or_default().to_string(),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    (
+                        line["depth"].as_i64().unwrap_or(-1),
+                        call["rawName"].as_str().unwrap_or_default().to_string(),
+                        loc["rrTicks"].as_i64().unwrap_or(-1),
+                        args,
+                    )
+                })
+                .collect();
+            let expected = vec![
+                (0, "<toplevel>".to_string(), 0, vec![]),
+                (
+                    1,
+                    "add".to_string(),
+                    17,
+                    vec![
+                        ("x".to_string(), "0xa".to_string()),
+                        ("y".to_string(), "0x14".to_string()),
+                    ],
+                ),
+            ];
+            assert_eq!(
+                calls, expected,
+                "the calltrace is not <toplevel> -> add(10, 20); got body: {body_str}"
+            );
+            assert_eq!(resp.body["totalCallsCount"], 2, "got body: {body_str}");
+            let add = &resp.body["callLines"][1]["content"]["call"]["location"];
+            assert_eq!(
+                (add["functionFirst"].as_i64(), add["functionLast"].as_i64()),
+                (Some(20), Some(22)),
+                "add is declared on lines 20-22; got body: {body_str}"
             );
         }
         Err(e) => {
