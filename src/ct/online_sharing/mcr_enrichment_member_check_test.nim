@@ -336,3 +336,92 @@ suite "MCR Enrichment — a root directory larger than block 0":
     let (ok, reason) = exportKeptEveryMember(original, faithful)
     check ok
     check reason == ""
+
+# ---------------------------------------------------------------------------
+# Container version 5 (`ctfs-container.md` §1, §2)
+# ---------------------------------------------------------------------------
+
+const CtfsDirect = 1'u64 shl 63
+
+proc putU64(data: var seq[byte], offset: int, value: uint64) =
+  for i in 0 ..< 8:
+    data[offset + i] = byte((value shr (8 * i)) and 0xFF)
+
+proc rawContainer(path: string, blocks: int,
+                  entries: openArray[(string, uint64, uint64)],
+                  version = 5'u8) =
+  ## A container of `blocks` blocks whose root directory holds `entries` as
+  ## `(name, Size, MapBlock)`, written byte by byte from the specification.
+  var data = newSeq[byte](blocks * int(BlockSize))
+  for i, b in [0xC0'u8, 0xDE, 0x72, 0xAC, 0xE2]:
+    data[i] = b
+  data[5] = version
+  for i in 0 ..< 4:
+    data[8 + i] = byte((BlockSize shr (8 * i)) and 0xFF)
+  data[12] = 31
+  for i, (name, size, mapBlock) in entries:
+    let off = HeaderSize + ExtHeaderSize + i * FileEntrySize
+    data.putU64(off, size)
+    data.putU64(off + 8, mapBlock)
+    data.putU64(off + 16, base40Encode(name))
+  var s = newString(data.len)
+  for i, b in data:
+    s[i] = char(b)
+  writeFile(path, s)
+
+suite "MCR Enrichment — container version 5":
+
+  setup:
+    let v5Dir = getTempDir() / "test_mcr_enrich_v5"
+    removeDir(v5Dir)
+    createDir(v5Dir)
+    let original = v5Dir / "orig.ct"
+    # Three one-block members and an empty one: version 5 gives them no
+    # mapping block, so the container is block 0 plus three data blocks.
+    rawContainer(original, 4, [
+      ("meta.dat", 10'u64, CtfsDirect or 1),
+      ("platform.bin", 20'u64, CtfsDirect or 2),
+      ("t00000000001", 30'u64, CtfsDirect or 3),
+      ("eventlog.idx", 0'u64, 0'u64)])
+
+  teardown:
+    removeDir(v5Dir)
+
+  test "an export of one-block members, none with a mapping block, is accepted":
+    let exported = v5Dir / "export.ct"
+    rawContainer(exported, 7, [
+      ("meta.dat", 10'u64, CtfsDirect or 1),
+      ("platform.bin", 20'u64, CtfsDirect or 2),
+      ("t00000000001", 30'u64, CtfsDirect or 3),
+      ("eventlog.idx", 0'u64, 0'u64),
+      ("b/0001", 5000'u64, 4'u64)])  # mapped: block 4 maps data blocks 5, 6
+    let (ok, reason) = exportKeptEveryMember(original, exported)
+    check reason == ""
+    check ok
+
+  test "an export of another container version is refused by name":
+    let exported = v5Dir / "v4.ct"
+    rawContainer(exported, 4, [
+      ("meta.dat", 10'u64, CtfsDirect or 1),
+      ("platform.bin", 20'u64, CtfsDirect or 2),
+      ("t00000000001", 30'u64, CtfsDirect or 3),
+      ("eventlog.idx", 0'u64, 0'u64)], version = 4)
+    let (ok, reason) = exportKeptEveryMember(original, exported)
+    check not ok
+    check "version 4" in reason
+    check "5" in reason
+
+  test "a direct member whose block is null or too small is refused":
+    for (size, mapBlock, why) in [(10'u64, CtfsDirect, "null"),
+                                  (5000'u64, CtfsDirect or 3, "one block"),
+                                  (10'u64, CtfsDirect or 9, "past")]:
+      let exported = v5Dir / "bad.ct"
+      rawContainer(exported, 4, [
+        ("meta.dat", 10'u64, CtfsDirect or 1),
+        ("platform.bin", 20'u64, CtfsDirect or 2),
+        ("t00000000001", size, mapBlock),
+        ("eventlog.idx", 0'u64, 0'u64)])
+      let (ok, reason) = exportKeptEveryMember(original, exported)
+      check not ok
+      check why in reason
+      check "t00000000001" in reason

@@ -41,6 +41,10 @@ const
   CtfsHeaderSize = 8
   CtfsExtHeaderSize = 8
   CtfsFileEntrySize = 24
+  CtfsVersion = 5'u8
+    ## The one container version read here (`ctfs-container.md` §1).
+  CtfsDirect = 1'u64 shl 63
+    ## Bit 63 of `MapBlock`: the rest is the member's only data block (§2).
   # \0, 0-9, a-z, ., /, -   (Section 3)
   Base40Alphabet = "\0" & "0123456789abcdefghijklmnopqrstuvwxyz./-"
 
@@ -121,6 +125,11 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
     if header[i] != CtfsMagic[i]:
       return (false, CtfsRootDir(), path & " does not carry the CTFS magic")
 
+  if header[5] != CtfsVersion:
+    return (false, CtfsRootDir(), path & " is CTFS container version " &
+            $header[5] & ", and this reader reads version " & $CtfsVersion &
+            " only")
+
   let blockSize = uint64(readU32LE(header, 8))
   if blockSize == 0:
     return (false, CtfsRootDir(), path & " declares a zero block size")
@@ -134,6 +143,10 @@ proc readCtfsRootDir(path: string): tuple[ok: bool, dir: CtfsRootDir,
   # SHORT without saying so: every member past entry 170 invisible to the
   # comparison below.  The count is still bounded by the bytes the file holds.
   var maxRootEntries = int(readU32LE(header, 12))
+  if maxRootEntries == 0:
+    # `0` fills the rest of block 0 with entries (§1, "Auto-fill").
+    maxRootEntries = int((blockSize - uint64(FixedHeader) -
+      7'u64 * uint64(header[7]) * 6'u64) div uint64(CtfsFileEntrySize))
   let rootBlocks = max(1'u64,
     (uint64(FixedHeader) + 7'u64 * uint64(header[7]) * 6'u64 +
      uint64(maxRootEntries) * uint64(CtfsFileEntrySize) + blockSize - 1) div
@@ -184,10 +197,13 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
   ## to hold what it claims — which needs no walk and no data read:
   ##
   ##   * a container is a whole number of blocks (§5d);
-  ##   * an entry with `Size > 0` has a non-null mapping root inside the file;
+  ##   * an entry with `Size > 0` has a non-null block inside the file: its
+  ##     only data block when `MapBlock` carries the direct tag (§2), and then
+  ##     `Size` fits that one block; otherwise its mapping root;
   ##   * and the file has its root blocks (one, or `root_blocks` when the entry
-  ##     array overflows block 0), plus one mapping block and
-  ##     `ceil(Size / BlockSize)` data blocks for every non-empty member.
+  ##     array overflows block 0), plus, for every non-empty member, one block
+  ##     if it is direct, or one mapping block and `ceil(Size / BlockSize)`
+  ##     data blocks if it is mapped.
   ##
   ## The last is a strict lower bound — a multi-level mapping needs *more*
   ## blocks, never fewer — so it can only ever reject a container that is
@@ -201,10 +217,26 @@ proc exportCouldHoldItsOwnDirectory(path: string, dir: CtfsRootDir):
   for m in dir.members:
     if m.size == 0:
       continue
-    if m.mapBlock == 0:
+    if m.mapBlock == 0 or m.mapBlock == CtfsDirect:
       return (false, "'" & m.name & "' declares " & $m.size &
-                     " bytes but has no mapping root, so none of its " &
-                     "content is reachable")
+                     " bytes but its MapBlock is a null block pointer, so " &
+                     "none of its content is reachable")
+    if (m.mapBlock and CtfsDirect) != 0:
+      let b = m.mapBlock and not CtfsDirect
+      if m.size > dir.blockSize:
+        return (false, "'" & m.name & "' declares " & $m.size &
+                       " bytes in a single direct block, more than one " &
+                       "block holds")
+      if b < dir.rootBlocks:
+        return (false, "'" & m.name & "' has its data block at block " &
+                       $b & ", inside the " & $dir.rootBlocks &
+                       "-block root directory")
+      if b >= dir.fileBlocks:
+        return (false, "'" & m.name & "' has its data block at block " &
+                       $b & ", past the " & $dir.fileBlocks &
+                       " blocks the file contains")
+      needed += 1
+      continue
     if m.mapBlock < dir.rootBlocks:
       return (false, "'" & m.name & "' has its mapping root at block " &
                      $m.mapBlock & ", inside the " & $dir.rootBlocks &

@@ -14,65 +14,40 @@ const
     ## against a stale literal would answer such a container instead of
     ## refusing it.
 
-  MetaDatVersionExtendedFlags* = 5'u16
-    ## GDH-M2 (2026-09-10) — the schema version a container carries when at
-    ## least one EXTENDED flag is set: a v4 header with a
-    ## ``[4] flags_ext u32 LE`` word inserted after the u16 flags.
-    ##
-    ## Accepted ALONGSIDE ``SupportedMetaDatVersion`` rather than replacing
-    ## it, and that is not a relaxation of the paragraph below.  v5 is not a
-    ## different meaning for the same bytes; it is a header with one extra
-    ## word in it, and the version field is what says the word is there —
-    ## the same discipline, applied to a header shape instead of to an
-    ## address packing.  A writer emits v5 only when an extended flag is
-    ## actually set, so a recording with no reload stays at v4 and is
-    ## byte-identical to one produced before the word existed.
-
   FlagExtHasSourceReload* = 1'u32
     ## Extended flag bit 0 (global bit 16) — the execution stream may
     ## contain step-event tag ``0x08`` (``TagSourceReload``).
 
   KnownExtFlags* = FlagExtHasSourceReload
-    ## Every ``flags_ext`` bit this reader understands.  A v5 header
-    ## carrying a bit outside it is refused, the same strict-rejection
-    ## contract the u16's known-bits mask enforces elsewhere.
+    ## Every ``flags_ext`` bit this reader understands.  A header carrying
+    ## a bit outside it is refused, the same strict-rejection contract the
+    ## u16's known-bits mask enforces elsewhere.
 
-  SupportedMetaDatVersion* = 4'u16
-    ## The one ``meta.dat`` schema version this reader accepts.
+  SupportedMetaDatVersion* = 6'u16
+    ## The one ``meta.dat`` schema version this reader accepts
+    ## (``codetracer-trace-format-spec/internal-files.md`` §"Metadata
+    ## (meta.dat)").
     ##
-    ## **One version, and it has to be one.** The tempting alternative —
-    ## accept ``{3, 4}``, since v4 changed no field of the header this
-    ## module decodes — reintroduces the exact defect the bump exists to
-    ## close. v3 and v4 differ not in the bytes of ``meta.dat`` but in
-    ## what the rest of the container's step addresses MEAN: a v3 writer
-    ## packed a line-only ``global_position_index`` as
-    ## ``prefix_sums[file_id] + line``, and v4 packs
-    ## ``prefix_sums[file_id] + (line - 1)``, the exact inverse of the
-    ## ``line = q + 1`` decode. Both land INSIDE the trace's own address
-    ## space, so accepting a v3 container fails nowhere: every step
-    ## resolves to a real file and a real line, each one exactly one line
-    ## above where it was recorded.
-    ##
-    ## The ``paths`` list this module returns is the file table those
-    ## addresses are indexed against, and it is what the importer writes
-    ## into the trace folder's ``paths.json``. Answering a v3 container
-    ## here therefore hands the frontend the file table for an address
-    ## space the backend is about to read one line high — or, since the
-    ## backend refuses v3 outright, a half-imported trace. Nothing else in
-    ## the container distinguishes the two encodes: ``recorder_id`` names
-    ## the producer, not its address packing, and the same recorders span
-    ## the change.
+    ## Version 6 carries ``flags_ext`` unconditionally and no path list
+    ## after ``recorder_id``: a trace's source paths are the records of
+    ## ``paths.dat``.  Versions 3 to 5 wrote a path list where version 6 has
+    ## the flag-gated blocks, so neither can be read as the other, and every
+    ## other version is refused by name.  Versions at or below
+    ## ``LastShiftedGlobalIndexVersion`` are refused with their own reason
+    ## too: their step addresses use a packing the current decode reads one
+    ## line high, and nothing but the version tells the two apart.
     ##
     ## Mirrors ``SUPPORTED_VERSIONS`` in
     ## ``src/db-backend/src/ctfs_trace_reader/meta_dat.rs`` and
     ## ``SUPPORTED_META_DAT_VERSIONS`` in
-    ## ``src/backend-manager/src/meta_dat.rs``, both ``&[4]``.
-    ##
-    ## A back-compat shim is not merely unimplemented, it is not
-    ## constructible: subtracting one from every address would correct a
-    ## trace whose writer used the old packing, and the version is
-    ## precisely what would have said that it did. Pre-1.0, v3 containers
-    ## are re-recorded rather than read.
+    ## ``src/backend-manager/src/meta_dat.rs``, both ``&[6]``.
+
+  SupportedCtfsVersion* = 5
+    ## The one CTFS container version this reader accepts
+    ## (``ctfs-container.md`` §1).  Version 5 stores a member of at most one
+    ## block without a mapping block (its ``MapBlock`` tagged with bit 63)
+    ## and an empty member as ``MapBlock = 0``; earlier versions gave every
+    ## member a mapping block, and only this byte tells the layouts apart.
 
 type
   CtfsMetaDat* = object
@@ -86,9 +61,15 @@ type
     workdir*: string
     args*: seq[string]
     paths*: seq[string]
+      ## The trace's source paths.  ``readCtfsMetaDat`` takes them from the
+      ## container's ``paths.dat`` -- its only list of source paths;
+      ## ``meta.dat`` carries none.
 
 const
   CtfsMagic = [byte 0xC0, 0xDE, 0x72, 0xAC, 0xE2]
+  CtfsDirect = 1'u64 shl 63
+    ## Bit 63 of ``FileEntry.MapBlock``: the rest of the word is the
+    ## member's only data block (``ctfs-container.md`` §2).
   Base40Alphabet = "\0" & "0123456789abcdefghijklmnopqrstuvwxyz./-"
 
 type
@@ -140,23 +121,23 @@ proc openCtfs(path: string): CtfsReader =
   # The CTFS *container* version, at offset 5 of the ``.ct`` file. It is a
   # different number from the ``meta.dat`` schema version that
   # ``parseCtfsMetaDat`` gates on, and the two move independently.
-  #
-  # A set is right here where a singleton is right there. This byte
-  # describes the block-and-mapping layout that locates internal files;
-  # every version in the set addresses blocks identically, so reading a v2
-  # container yields the same bytes a v4 one would. It says nothing about
-  # what those bytes MEAN — in particular nothing about how a step's
-  # ``global_position_index`` is packed — so it cannot stand in for the
-  # ``meta.dat`` gate, and widening it does not widen that one.
   let version = result.data[5].ord
-  if version notin {2, 3, 4}:
-    raise newException(ValueError, "unsupported CTFS version")
+  if version != SupportedCtfsVersion:
+    raise newException(ValueError,
+      "CTFS container version " & $version & " is not readable: this " &
+      "reader reads version " & $SupportedCtfsVersion & " only. Re-record " &
+      "the trace")
   result.blockSize = readU32Le(result.data, 8)
   if result.blockSize notin [uint32 1024, 2048, 4096]:
     raise newException(ValueError, "invalid CTFS block size")
-  let maxEntries = int(readU32Le(result.data, 12))
+  var maxEntries = int(readU32Le(result.data, 12))
+  if maxEntries == 0:
+    # ``0`` fills the rest of block 0 with entries (§1, "Auto-fill").
+    maxEntries = (int(result.blockSize) - 16) div 24
   var offset = 16
   for _ in 0 ..< maxEntries:
+    if offset + 24 > result.data.len:
+      break
     let size = readU64Le(result.data, offset)
     let mapBlock = readU64Le(result.data, offset + 8)
     let encodedName = readU64Le(result.data, offset + 16)
@@ -173,8 +154,24 @@ proc findEntry(reader: CtfsReader, name: string): CtfsEntry =
       return entry
   raise newException(ValueError, "CTFS file not found: " & name)
 
-proc readBlockPtr(reader: CtfsReader, blockNum: uint64, index: int): uint64 =
-  let offset = int(blockNum * uint64(reader.blockSize)) + index * 8
+proc blockOffset(reader: CtfsReader, blockNum: uint64, name, what: string): int =
+  ## The byte offset of ``blockNum``, refusing a null pointer by name (block
+  ## 0 is the container header, ``ctfs-container.md`` §4) and a block past
+  ## the container before it is multiplied by the block size.
+  if blockNum == 0:
+    raise newException(ValueError,
+      name & ": its " & what & " is a null block pointer (block 0 is the " &
+      "container header); the container is damaged")
+  let blocks = uint64(reader.data.len) div uint64(reader.blockSize)
+  if blockNum >= blocks:
+    raise newException(ValueError,
+      name & ": its " & what & " is block " & $blockNum &
+      ", outside the container's " & $blocks & " blocks")
+  int(blockNum * uint64(reader.blockSize))
+
+proc readBlockPtr(reader: CtfsReader, blockNum: uint64, index: int,
+    name: string): uint64 =
+  let offset = reader.blockOffset(blockNum, name, "mapping block") + index * 8
   readU64Le(reader.data, offset)
 
 proc levelCapacity(usable: uint64, level: uint32): uint64 =
@@ -183,20 +180,15 @@ proc levelCapacity(usable: uint64, level: uint32): uint64 =
     result = result * usable
 
 proc navigateToDataBlock(reader: CtfsReader, mappingBlock: uint64, level: uint32,
-    indexWithinLevel, usable: uint64): uint64 =
+    indexWithinLevel, usable: uint64, name: string): uint64 =
   if level == 1:
-    result = readBlockPtr(reader, mappingBlock, int(indexWithinLevel))
-    if result == 0:
-      raise newException(ValueError, "null CTFS data block pointer")
-    return
+    return readBlockPtr(reader, mappingBlock, int(indexWithinLevel), name)
 
   let subCapacity = levelCapacity(usable, level - 1)
   let entryIndex = indexWithinLevel div subCapacity
   let subIndex = indexWithinLevel mod subCapacity
-  let childBlock = readBlockPtr(reader, mappingBlock, int(entryIndex))
-  if childBlock == 0:
-    raise newException(ValueError, "null CTFS mapping block pointer")
-  navigateToDataBlock(reader, childBlock, level - 1, subIndex, usable)
+  let childBlock = readBlockPtr(reader, mappingBlock, int(entryIndex), name)
+  navigateToDataBlock(reader, childBlock, level - 1, subIndex, usable, name)
 
 proc resolveBlock(reader: CtfsReader, entry: CtfsEntry, blockIndex: uint64): uint64 =
   let usable = uint64(reader.blockSize div 8) - 1
@@ -212,23 +204,41 @@ proc resolveBlock(reader: CtfsReader, entry: CtfsEntry, blockIndex: uint64): uin
     inc level
     if level > 5:
       raise newException(ValueError, "CTFS block index exceeds mapping depth")
-    currentLevelBlock = readBlockPtr(reader, currentLevelBlock, int(usable))
-    if currentLevelBlock == 0:
-      raise newException(ValueError, "null CTFS chain pointer")
+    currentLevelBlock = readBlockPtr(reader, currentLevelBlock, int(usable),
+      entry.name)
 
-  navigateToDataBlock(reader, currentLevelBlock, level, index, usable)
+  navigateToDataBlock(reader, currentLevelBlock, level, index, usable, entry.name)
 
 proc readCtfsFile(reader: CtfsReader, name: string): string =
+  ## A member's bytes, its layout decided by ``MapBlock`` alone
+  ## (``ctfs-container.md`` §2): ``0`` is empty, a tagged word is the only
+  ## data block, anything else is a level-1 mapping block.
   let entry = reader.findEntry(name)
   if entry.size == 0:
     return ""
+  if entry.mapBlock == 0:
+    raise newException(ValueError,
+      name & " (size " & $entry.size & "): its MapBlock is a null block " &
+      "pointer; the container is damaged")
+  if (entry.mapBlock and CtfsDirect) != 0:
+    if entry.size > uint64(reader.blockSize):
+      raise newException(ValueError,
+        name & ": MapBlock names a single direct data block, but the " &
+        "declared size " & $entry.size & " is more than one block (" &
+        $reader.blockSize & " bytes) can hold")
+    let offset = reader.blockOffset(entry.mapBlock and not CtfsDirect, name,
+      "direct data block")
+    let n = int(entry.size)
+    if offset + n > reader.data.len:
+      raise newException(ValueError, name & ": data block outside file")
+    return reader.data[offset ..< offset + n]
 
   let blockSize = int(reader.blockSize)
   let numBlocks = int((entry.size + uint64(blockSize) - 1) div uint64(blockSize))
   var remaining = int(entry.size)
   for blockIndex in 0 ..< numBlocks:
     let dataBlock = reader.resolveBlock(entry, uint64(blockIndex))
-    let offset = int(dataBlock * uint64(blockSize))
+    let offset = reader.blockOffset(dataBlock, name, "data block " & $blockIndex)
     let bytesToRead = min(blockSize, remaining)
     if offset + bytesToRead > reader.data.len:
       raise newException(ValueError, "CTFS data block outside file")
@@ -364,7 +374,7 @@ proc metaDatFlagWord(reader: CtfsReader): uint16 =
   uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
 
 proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
-  ## Decode the CTFS v4 interning-table path list (``paths.dat`` +
+  ## Decode the interning-table path list (``paths.dat`` +
   ## ``paths.off``) written by the current trace writer
   ## (``codetracer-trace-format-nim``'s ``InterningTable`` /
   ## ``VariableRecordTable``).
@@ -382,8 +392,8 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
   ##       * ``path_len + path_bytes + line_count + line_lengths`` when
   ##         bit 4 (``FLAG_HAS_COLUMN_AWARE_STEPS``) is set.
   ##
-  ## Returns an empty seq when the container predates the v4 format
-  ## (no ``paths.dat``); the caller falls back to ``paths.json``.
+  ## Returns an empty seq when the container carries no ``paths.dat``: it
+  ## then names no source path.
   result = @[]
   var datBytes, offBytes: string
   try:
@@ -441,8 +451,6 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
       else:
         result.add datBytes[startOff ..< endOff]
 
-proc parseCtfsMetaDat(data: string): CtfsMetaDat   # forward decl — used by materializeCtfsSources' meta.paths fallback below
-
 proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   ## Extract source metadata from a CTFS .ct file into the runtime
   ## trace-folder layout consumed by the current frontend: a sibling
@@ -476,50 +484,33 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     except CatchableError as e:
       echo "ct host: warning: failed to decode CTFS paths.dat: ", e.msg
 
-  # M-REC-1.5/M4a: mirror ``meta.dat``'s ``paths`` field into the sidecar so
-  # the importer derives a usable jstree root from the recorded source paths
-  # instead of leaving an empty list. This used to be conditional on the
-  # container-internal ``paths.json`` having been empty; that file is retired,
-  # so ``meta.dat`` is now simply where recorded ``--source`` paths come from.
-  #
-  # Any sibling sidecar already present in ``outputFolder`` (e.g.
-  # ``trace_paths.json`` written by the local manifest importer to
-  # surface request-details JSON files alongside the recorded source)
-  # is merged in — without the merge ``normalizeImportedTracePaths``
-  # would silently drop the sidecar because it prefers ``paths.json``
-  # whenever it exists.
+  # A ``trace_paths.json`` sidecar already in ``outputFolder`` (written by
+  # the local manifest importer to surface request-details JSON files
+  # alongside the recorded source) is merged in after the recorded paths;
+  # without the merge ``normalizeImportedTracePaths`` would drop it, because
+  # it prefers ``paths.json`` whenever that exists.  ``meta.dat`` contributes
+  # nothing: it carries no path list (``internal-files.md`` §"``meta.dat``
+  # carries no path list").
   block:
-    try:
-      let metaPaths = parseCtfsMetaDat(reader.readCtfsFile("meta.dat")).paths
-      var merged: seq[string] = @[]
-      var seen = initHashSet[string]()
-      # Sidecar entries first so the manifest importer's intent
-      # (e.g. inventory-response.json) wins ordering for any later
-      # `paths.json[0]` consumer that picks the first entry.
-      for sidecarName in ["paths.json", "trace_paths.json"]:
-        let sidecarPath = outputFolder / sidecarName
-        if fileExists(sidecarPath):
-          try:
-            let sidecarJson = parseJson(readFile(sidecarPath))
-            if sidecarJson.kind == JArray:
-              for node in sidecarJson:
-                if node.kind == JString:
-                  let p = node.getStr()
-                  if p.len > 0 and p notin seen:
-                    merged.add p
-                    seen.incl p
-          except CatchableError:
-            discard
-      for path in metaPaths:
-        if path.len > 0 and path notin seen:
-          merged.add path
-          seen.incl path
-      if merged.len > 0:
-        paths = merged
-        writeFile(outputFolder / "paths.json", $(%paths))
-        result = true
-    except CatchableError as e:
-      echo "ct host: warning: failed to decode meta.dat paths fallback: ", e.msg
+    let sidecarPath = outputFolder / "trace_paths.json"
+    if fileExists(sidecarPath):
+      try:
+        var merged = paths
+        var seen = toHashSet(paths)
+        let sidecarJson = parseJson(readFile(sidecarPath))
+        if sidecarJson.kind == JArray:
+          for node in sidecarJson:
+            if node.kind == JString:
+              let p = node.getStr()
+              if p.len > 0 and p notin seen:
+                merged.add p
+                seen.incl p
+        if merged.len > 0:
+          paths = merged
+          writeFile(outputFolder / "paths.json", $(%paths))
+          result = true
+      except CatchableError as e:
+        echo "ct host: warning: failed to merge trace_paths.json: ", e.msg
 
   try:
     let filemapPaths = extractFilemapSources(reader, outputFolder)
@@ -555,7 +546,9 @@ proc readVarStringFromMetaDat(data: string, pos: var int): string =
 proc parseCtfsMetaDat(data: string): CtfsMetaDat =
   ## Parse the ``meta.dat`` payload at ``SupportedMetaDatVersion``.  Only
   ## the fields the importer consumes are decoded; the remainder of the
-  ## block is left untouched.
+  ## block is left untouched.  ``paths`` is left empty: ``meta.dat``
+  ## carries no path list, and ``readCtfsMetaDat`` fills it from
+  ## ``paths.dat``.
   ##
   ## Wire format reference:
   ## ``codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim``
@@ -568,64 +561,37 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
   const FlagHasLayoutSnapshot: uint16 = 4
   const FlagHasTraceFilterProvenance: uint16 = 8
 
-  if data.len < 8:
+  if data.len < 6:
     raise newException(ValueError, "meta.dat too short")
   for i in 0 ..< 4:
     if byte(data[i].ord) != Magic[i]:
       raise newException(ValueError, "meta.dat: bad magic")
   let version = uint16(data[4].ord) or (uint16(data[5].ord) shl 8)
-  if version != SupportedMetaDatVersion and
-     version != MetaDatVersionExtendedFlags:
+  if version != SupportedMetaDatVersion:
     let detail =
       if version <= LastShiftedGlobalIndexVersion:
         " — its step addresses use the superseded global_position_index " &
         "packing (prefix_sums[file_id] + line), which the current decode " &
-        "reads one line high; re-record the trace"
+        "reads one line high"
       else:
-        " — this reader predates that version"
+        ""
     raise newException(ValueError,
-      "meta.dat: unsupported version " & $version &
-      " (expected " & $SupportedMetaDatVersion & " or " &
-      $MetaDatVersionExtendedFlags & ")" & detail)
+      "meta.dat: version " & $version & " is not readable: this reader " &
+      "reads version " & $SupportedMetaDatVersion & " only" & detail &
+      ". Re-record the trace")
+  if data.len < 12:
+    raise newException(ValueError,
+      "meta.dat: a version " & $SupportedMetaDatVersion & " header is 12 " &
+      "bytes, but this one is " & $data.len)
   let flags = uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
-
-  # GDH-M2: schema version 5 inserts a ``[4] flags_ext u32 LE`` word after
-  # the u16 flags.  The word is validated and its width consumed; nothing in
-  # this module reads its bits, but the BODY OFFSET moves with it, and a
-  # parser that read the body from a fixed 8 would decode the ext word as
-  # the recording id's length prefix — which surfaces as "invalid
-  # recording_id" rather than as anything about the version.
-  var bodyStart = 8
-  if version == MetaDatVersionExtendedFlags:
-    if data.len < 12:
-      raise newException(ValueError,
-        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
-        " declares a flags_ext word but the header is only " & $data.len &
-        " bytes")
-    let flagsExt = uint32(data[8].ord) or (uint32(data[9].ord) shl 8) or
-      (uint32(data[10].ord) shl 16) or (uint32(data[11].ord) shl 24)
-    let unknownExt = flagsExt and (not KnownExtFlags)
-    if unknownExt != 0:
-      raise newException(ValueError,
-        "meta.dat: unknown extended flag bits set: 0x" &
-        toHex(BiggestInt(unknownExt), 8))
-    if flagsExt == 0:
-      # The canonical reader (``meta_dat.nim``) refuses this shape BY NAME
-      # and this one must agree, or the two disagree about what a valid v5
-      # container is — and "which reader opened it" becomes part of the
-      # format. A v5 header with an all-zero extended word is a container
-      # that spent a schema version on nothing, which is precisely what a
-      # writer that bumped the version unconditionally produces; accepting
-      # it would make "no reload" and "reload machinery present but
-      # silent" indistinguishable at the byte level.
-      raise newException(ValueError,
-        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
-        " with an all-zero flags_ext word. Version " &
-        $MetaDatVersionExtendedFlags & " exists to carry extended flags; " &
-        "a container with none must be written at version " &
-        $SupportedMetaDatVersion & " so that it stays byte-identical to " &
-        "one produced before the word existed")
-    bodyStart = 12
+  let flagsExt = uint32(data[8].ord) or (uint32(data[9].ord) shl 8) or
+    (uint32(data[10].ord) shl 16) or (uint32(data[11].ord) shl 24)
+  let unknownExt = flagsExt and (not KnownExtFlags)
+  if unknownExt != 0:
+    raise newException(ValueError,
+      "meta.dat: unknown extended flag bits set: 0x" &
+      toHex(BiggestInt(unknownExt), 8))
+  let bodyStart = 12
 
   var pos = bodyStart
   let recordingId = readVarStringFromMetaDat(data, pos)
@@ -640,10 +606,6 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     args.add readVarStringFromMetaDat(data, pos)
   let workdir = readVarStringFromMetaDat(data, pos)
   discard readVarStringFromMetaDat(data, pos)  # recorder_id (unused here)
-  let pathsCount = int(decodeVarintFromString(data, pos))
-  var paths = newSeqOfCap[string](pathsCount)
-  for _ in 0 ..< pathsCount:
-    paths.add readVarStringFromMetaDat(data, pos)
 
   # The MCR/replay-launch/layout-snapshot/trace-filter blocks are skipped:
   # callers in ct/host don't need them.  We still keep this proc resilient
@@ -659,7 +621,6 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     program: program,
     workdir: workdir,
     args: args,
-    paths: paths,
   )
 
 proc readCtfsMetaDat*(ctFilePath: string): CtfsMetaDat =
@@ -671,4 +632,5 @@ proc readCtfsMetaDat*(ctFilePath: string): CtfsMetaDat =
   if data.len == 0:
     raise newException(ValueError,
       "meta.dat missing or empty in " & ctFilePath)
-  parseCtfsMetaDat(data)
+  result = parseCtfsMetaDat(data)
+  result.paths = extractInterningTablePaths(reader)
