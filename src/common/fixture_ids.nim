@@ -38,7 +38,7 @@ const goFlowTestRecordingId* = "019e3a35-2531-7600-8aaa-43ff10020001"
   ## ``recording_id`` for ``go/flow_test/`` — RR-recorded Go trace.
 
 const javascriptFlowTestRecordingId* = "019e3a35-2532-7100-8aaa-43ff10030001"
-  ## ``recording_id`` for ``javascript/flow_test/``.
+  ## ``recording_id`` for ``javascript/flow_test/`` — JavaScript recorder ``.ct``.
   ##
   ## Lives in the ``codetracer/examples/recordings/`` submodule rather
   ## than the sibling ``codetracer-example-recordings/`` repo (different
@@ -51,7 +51,7 @@ const pythonFlowTestRecordingId* = "019e3a35-2534-7000-8aaa-43ff10050001"
   ## ``recording_id`` for ``python/flow_test/`` — Python materialized trace.
 
 const rubyFlowTestRecordingId* = "019e3a35-2535-7b00-8aaa-43ff10060001"
-  ## ``recording_id`` for ``ruby/flow_test/`` — pure-Ruby materialized trace.
+  ## ``recording_id`` for ``ruby/flow_test/`` — native Ruby recorder ``.ct``.
 
 const rustFlowTestRecordingId* = "019e3a35-2536-7900-8aaa-43ff10070001"
   ## ``recording_id`` for ``rust/flow_test/`` — RR-recorded Rust trace.

@@ -2,8 +2,8 @@
  * Observability M29 acceptance: local materialized manifest hostability.
  *
  * Exercises the user-facing `ct host --manifest=<manifest.json>` path with
- * real hostable materialized trace folders (`trace.bin`/`trace.json` plus
- * metadata).
+ * real hostable materialized trace folders (`trace.bin` or a `trace.ct` container,
+ * plus metadata).
  * The test intentionally launches `ct host` directly because the acceptance
  * target is manifest routing, import, and browser replay from that manifest.
  */
@@ -72,7 +72,7 @@ type MaterializedFlowFixture = {
   label: string;
   objectName: string;
   traceDir: string;
-  traceFileName: "trace.bin" | "trace.json";
+  traceFileName: "trace.bin" | "trace.ct";
   sourcePath: string;
   sourceFileName: string;
   requiredSourceSnippets: string[];
@@ -107,7 +107,7 @@ const rubyFlowFixture: MaterializedFlowFixture = {
   label: "Ruby",
   objectName: "ruby-flow",
   traceDir: rubyFlowTraceFixture,
-  traceFileName: "trace.json",
+  traceFileName: "trace.ct",
   sourcePath: rubyFlowSourcePayload,
   sourceFileName: "ruby_flow_test.rb",
   requiredSourceSnippets: ["def calculate_sum", "def sum_with_while"],
@@ -128,7 +128,7 @@ const javascriptFlowFixture: MaterializedFlowFixture = {
   label: "JavaScript",
   objectName: "javascript-flow",
   traceDir: javascriptFlowTraceFixture,
-  traceFileName: "trace.json",
+  traceFileName: "trace.ct",
   sourcePath: javascriptFlowSourceFixture,
   sourceFileName: "javascript_flow_test.js",
   requiredSourceSnippets: ["function calculate_sum", "var sum_val"],
