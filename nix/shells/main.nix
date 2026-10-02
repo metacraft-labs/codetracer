@@ -184,6 +184,17 @@ mkShell {
       ${preCommit.installationScript}
     fi
 
+    # The installer above ends by writing the RELATIVE `core.hooksPath=.git/hooks`
+    # into the config every worktree shares; in a linked worktree that path names
+    # nothing, so git silently runs no hooks there. `anchor` repairs that value
+    # and runs on every entry, from any checkout, so a value an earlier entry
+    # left behind is healed too. `check` then reports, loudly, any relative
+    # value `anchor` could not attribute; it does not stop the shell opening.
+    if [ -n "$ROOT_PATH" ]; then
+      bash "$ROOT_PATH/ci/dev/git-hooks-path.sh" anchor || true
+      bash "$ROOT_PATH/ci/dev/git-hooks-path.sh" check || true
+    fi
+
     # The config symlink is per-worktree and mutates nothing shared, so it is
     # created unconditionally -- including on the skip path above, where the
     # installer never runs. Without it the shared hooks fire in a worktree that

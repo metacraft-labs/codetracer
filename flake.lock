@@ -608,7 +608,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "3adc3f0d626c731ee6fc9d64f31f10ba924ed8c5",
+        "rev": "c480cdb8df02d3d594a187dbf6e8ebc7737498e8",
         "type": "github"
       },
       "original": {
@@ -622,7 +622,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "5e3f85118ce3368b7ed7ffe3c0e7a9b8182eb3b3",
+        "rev": "9185e1ed6c15d9e6cf2d620e452105b145e09e3b",
         "type": "github"
       },
       "original": {
@@ -642,7 +642,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-python-recorder",
-        "rev": "030a8e8f541d9a6478e529d690d0bbf2144e10d6",
+        "rev": "8b950b2e7d39155c0184d174adc525d14b5e83a1",
         "type": "github"
       },
       "original": {
@@ -667,11 +667,9 @@
         "pre-commit-hooks": "pre-commit-hooks_3"
       },
       "locked": {
-        "lastModified": 1790846253,
-        "narHash": "sha256-Q7/bYmMdJi9QHkxa3I78JfKhJZypnE/jnX8gERqgzmU=",
         "owner": "metacraft-labs",
         "repo": "codetracer-ruby-recorder",
-        "rev": "bd4f94fba36b0fbfdc368cc0cb803a321b469b93",
+        "rev": "7f171a21df1c5cc7abc189a03fa73cab99e503c7",
         "type": "github"
       },
       "original": {
