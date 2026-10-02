@@ -150,4 +150,11 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # `db_backend_record.nim` stopped reading in the 2026-05 convention pass, so
 # Noir recording through `ct record` did not work under the pin this line
 # replaces. This is a repair, not a version bump.
-LOCK_NOIR=ca080a58b05106e37a7b5178a11a8f4503951a2b
+#
+# Moved to c008e890 (`codetracer`, the 2026-10 trace format merged with the
+# ACIR listing and `nargo test` in wasm), so the native `nargo` and the wasm
+# modules in `ci/deploy/noir-wasm.pin` build from one revision. Re-measured on
+# x86_64-linux on 2026-10-02: rustc 1.96.0 (ac68faa20) and cargo 1.96.0 are
+# unchanged, and nargo reports 1.0.0-beta.26. The Nim lines above were not
+# re-measured by this move.
+LOCK_NOIR=c008e89028a360a7854ac9e0e017b647bf8fd0a8

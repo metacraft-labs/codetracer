@@ -300,12 +300,13 @@
             # https://github.com/metacraft-labs/codetracer-trace-format at the
             # revision noir's Cargo.lock names (1eae589), a public URL. It was
             # computed as `nix hash path` of `git archive <rev>`, a method
-            # checked against the previous revision's recorded hash. On the
-            # machine that moved it, every sandboxed `fetchgit` from github.com
-            # failed ("could not read Username") — a public repository such as
-            # status-im/nim-stew included — so the source was added to the store
-            # with `nix-store --add-fixed --recursive sha256` instead. That is a
-            # property of that machine's sandbox, not of the repository.
+            # checked against the previous revision's recorded hash. The URL is
+            # public. A sandboxed `fetchgit` from github.com can still fail with
+            # "could not read Username" when GitHub turns away an anonymous
+            # fetch from a stripped build environment; that happens for any
+            # public repository and says nothing about this one. Where it does,
+            # add the source with `nix-store --add-fixed --recursive sha256`
+            # and the hash above.
             outputHashes = {
               "codetracer_trace_types-0.19.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
               "codetracer_trace_writer_nim-0.1.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
