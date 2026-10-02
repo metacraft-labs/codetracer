@@ -652,12 +652,12 @@ impl CTFSTraceReader {
     /// production recorders, `nargo trace` among them, write `.ct`.  A
     /// bare `Vec<TraceLowLevelEvent>` stream — the same payload CTFS
     /// stores (CBOR-encoded) in `events.log` — still reaches the
-    /// db-backend from producers that hand events over without a
-    /// container: the `session-manager record-web` browser recordings
-    /// (`trace.json`), the in-browser replay engine's VFS handoff
-    /// (`trace.json`), and pre-CTFS `trace.bin` recordings.  Those run
-    /// the very same postprocessing pipeline `open()` uses so the
-    /// resulting reader is indistinguishable from a CTFS-loaded one.
+    /// db-backend from pre-CTFS `trace.bin` recordings, and from tests that
+    /// build an event list directly.  Those run the very same
+    /// postprocessing pipeline `open()` uses so the resulting reader is
+    /// indistinguishable from a CTFS-loaded one.  A `trace.json` event
+    /// stream is test-oracle output and is never handed here
+    /// (`materialized_source::TEST_ORACLE_OUTPUT_ERROR`).
     pub fn from_events(events: Vec<TraceLowLevelEvent>, workdir: &Path) -> Result<Self, Box<dyn Error>> {
         let mut db = Db::new(&workdir.to_path_buf());
         let mut processor = TraceProcessor::new(&mut db);

@@ -650,7 +650,7 @@ pub struct ExprLoader {
 /// case — not because the source is absent, but because there is nowhere for
 /// it to be. A Noir trace produced in the tab *carries* its own source text
 /// (`MemoryTrace::source_views[].content`), and the host writes it into the
-/// VFS at the recorded path alongside `trace.json`.
+/// VFS at the recorded path alongside `trace.ct`.
 ///
 /// Everything the engine does with source text funnels through
 /// [`ExprLoader::file_source_code`] into `processed_files`:

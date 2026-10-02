@@ -634,33 +634,6 @@ fn setup(
     }
 }
 
-/// Repair a legacy `runtime_tracing` `trace.json` in place.
-///
-/// `pub` because `materialized_source` opens the same streams for the
-/// DeepReview collector and must apply the same repair; two copies of it would
-/// diverge and give a review a different trace from the one the debugger
-/// shows.
-pub fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                normalize_legacy_trace_json_values(item);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            if let Some(serde_json::Value::String(text)) = map.get("i")
-                && let Ok(parsed) = text.parse::<i64>()
-            {
-                map.insert("i".to_string(), serde_json::Value::Number(parsed.into()));
-            }
-            for child in map.values_mut() {
-                normalize_legacy_trace_json_values(child);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// File name of a multi-recording session manifest. Mirrored on the Nim
 /// side by `ct/src/ct/trace/trace_container.nim::SESSION_MANIFEST_FILE`.
 /// Spec: `codetracer-specs/Trace-Files/Session-Manifest.md` §5.
@@ -1565,63 +1538,20 @@ pub fn setup_from_vfs(
         }
     }
 
-    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
-    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS `.ct`
-    // container.  It is what the in-browser Noir tracer hands this engine
-    // (`replay_engine_vfs.nim` writes it into the VFS).  The native
-    // `try_open_trace` path handles this format too; the browser path must,
-    // otherwise client-side WASM replay of an in-browser Noir trace fails after `configurationDone` (the handler
-    // is never constructed, so `threads`/`stackTrace` return nothing).
-    let json_candidates = [join_vfs(trace_folder, "trace.json"), trace_folder.to_string()];
-    for candidate in &json_candidates {
-        if !crate::vfs::vfs_exists(candidate) || !candidate.ends_with("trace.json") {
-            continue;
+    // A `trace.json` is test-oracle output from the pure Python and Ruby
+    // recorders, never a recording; refuse it by name rather than with the
+    // generic "nothing found" below.
+    for candidate in [
+        join_vfs(trace_folder, trace_file),
+        join_vfs(trace_folder, crate::materialized_source::TEST_ORACLE_TRACE_FILE),
+    ] {
+        let is_oracle = candidate.rsplit('/').next() == Some(crate::materialized_source::TEST_ORACLE_TRACE_FILE);
+        if is_oracle && crate::vfs::vfs_exists(&candidate) {
+            return Err(crate::materialized_source::test_oracle_refusal(&candidate).into());
         }
-        let json_bytes = match crate::vfs::vfs_read(candidate) {
-            Some(b) => b,
-            None => continue,
-        };
-        info!("setup_from_vfs: detected legacy materialized trace.json at VFS path {candidate:?}");
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {candidate:?}: {e}"))?;
-        normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {candidate:?}: {e}"))?;
-        // Workdir: prefer `trace_metadata.json` alongside `trace.json` in
-        // the VFS, else fall back to the trace folder.
-        let meta_vfs = join_vfs(trace_folder, "trace_metadata.json");
-        let workdir = crate::vfs::vfs_read(&meta_vfs)
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from(trace_folder));
-        let ctfs_reader = CTFSTraceReader::from_events(events, &workdir)?;
-        info!(
-            "setup_from_vfs: legacy materialized trace loaded: {} steps, {} calls, {} events",
-            ctfs_reader.step_count(),
-            ctfs_reader.call_count(),
-            ctfs_reader.event_count(),
-        );
-        let reader: Arc<dyn TraceReader> = Arc::new(ctfs_reader);
-        let mut handler = Handler::construct_with_reader(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            reader,
-            false,
-        );
-        handler.raw_diff_index = raw_diff_index;
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
     }
 
-    Err("setup_from_vfs: no CTFS (.ct) container or legacy trace.json \
-         found in VFS"
-        .into())
+    Err("setup_from_vfs: no CTFS (.ct) container found in VFS".into())
 }
 
 fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<PathBuf> {
@@ -2702,12 +2632,11 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
 ///
 /// The native auto-detect uses `Path::is_file()`, which always returns
 /// false under wasm32, so the browser path re-detects against the in-memory
-/// [`crate::vfs`] instead.  Materialized traces are CTFS-only, with the
-/// legacy `runtime_tracing` `trace.json` layout still accepted.
+/// [`crate::vfs`] instead.  Materialized traces are CTFS-only.
 ///
 /// Returns an error when the folder holds a multi-recording session
 /// manifest: `setup_from_vfs` has no session branch, and the probe below
-/// would happily latch onto a `trace.ct`/`trace.json` sitting beside the
+/// would happily latch onto a `trace.ct` sitting beside the
 /// manifest and open a fraction of the program with no error at all — the
 /// exact silent failure the native launch path was fixed for.
 #[cfg(feature = "browser-transport")]
@@ -2728,10 +2657,10 @@ fn browser_detect_trace_file_in_vfs(ctx: &mut Ctx) -> Result<(), Box<dyn Error>>
         .into());
     }
 
-    // `trace.ct` is the canonical CTFS container; `trace.json` is the
-    // event-stream handoff the in-browser Noir tracer writes into the VFS.
-    // Probe both so client-side WASM replay works for either.
-    let candidates = ["trace.ct", "trace.json"];
+    // `trace.ct` is the canonical CTFS container.  A `trace.json` is probed
+    // too, last, only so that `setup_from_vfs` refuses it by name as
+    // test-oracle output instead of reporting that nothing was found.
+    let candidates = ["trace.ct", crate::materialized_source::TEST_ORACLE_TRACE_FILE];
     for name in &candidates {
         let vfs_path = if folder.is_empty() {
             (*name).to_string()
@@ -4042,12 +3971,23 @@ mod tests {
             CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
         };
 
-        /// The smallest legacy `runtime_tracing` trace `setup_from_vfs`
-        /// will open: one path, one function, one call, three steps.
-        /// Serialised as `trace.json`, the layout the in-browser replay
-        /// engine is handed through its VFS.
-        fn minimal_trace_json() -> Vec<u8> {
-            let events: Vec<TraceLowLevelEvent> = vec![
+        /// A `.ct` container holding `events`, built in memory by the same
+        /// pure-Rust writer the web recorders use.
+        fn container_bytes(events: Vec<TraceLowLevelEvent>) -> Vec<u8> {
+            use codetracer_trace_writer::{ctfs_writer::CtfsTraceWriter, trace_writer::TraceWriter};
+            let mut writer = CtfsTraceWriter::new_in_memory("main", &[]);
+            TraceWriter::begin_writing_trace_events(&mut writer, Path::new("trace")).unwrap();
+            for event in events {
+                TraceWriter::add_event(&mut writer, event);
+            }
+            TraceWriter::finish_writing_trace_events(&mut writer).unwrap();
+            writer.take_container_bytes().expect("in-memory writer")
+        }
+
+        /// The smallest trace `setup_from_vfs` will open: one path, one
+        /// function, one call, three steps.
+        fn minimal_trace_events() -> Vec<TraceLowLevelEvent> {
+            vec![
                 TraceLowLevelEvent::Path(PathBuf::from("/browser/handshake/main.nr")),
                 TraceLowLevelEvent::Function(FunctionRecord {
                     path_id: PathId(0),
@@ -4070,15 +4010,57 @@ mod tests {
                     path_id: PathId(0),
                     line: Line(3),
                 }),
-            ];
-            serde_json::to_vec(&events).unwrap()
+            ]
         }
 
-        /// Seed the process-wide VFS with `<folder>/trace.json`.  Each
-        /// test uses its own folder name so the shared static store never
-        /// makes two tests interfere.
+        /// Seed the process-wide VFS with `<folder>/trace.ct`, the
+        /// container the in-browser replay engine is handed.  Each test
+        /// uses its own folder name so the shared static store never makes
+        /// two tests interfere.
         fn seed_vfs(folder: &str) {
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
+        }
+
+        /// A `trace.json` in the VFS is test-oracle output.  Well-formed on
+        /// purpose, so the refusal is a refusal of the format.
+        fn setup_from_vfs_error(folder: &str, trace_file: &str) -> String {
+            let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+            match setup_from_vfs(folder, trace_file, None, None, sender, false, "oracle-test") {
+                Ok(_) => panic!("{folder}/{trace_file} was opened as a recording"),
+                Err(e) => e.to_string(),
+            }
+        }
+
+        #[test]
+        fn a_trace_json_in_the_vfs_is_refused_as_test_oracle_output() {
+            let folder = "browser-oracle-named";
+            crate::vfs::vfs_write(
+                &format!("{folder}/trace.json"),
+                serde_json::to_vec(&minimal_trace_events()).unwrap(),
+            );
+            let message = setup_from_vfs_error(folder, "trace.json");
+            assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+            assert!(
+                message.contains(folder),
+                "the refusal must name the path; got: {message}"
+            );
+        }
+
+        #[test]
+        fn a_folder_holding_only_a_trace_json_is_refused_as_test_oracle_output() {
+            let folder = "browser-oracle-detected";
+            crate::vfs::vfs_write(
+                &format!("{folder}/trace.json"),
+                serde_json::to_vec(&minimal_trace_events()).unwrap(),
+            );
+            let mut ctx = Ctx {
+                launch_trace_folder: PathBuf::from(folder),
+                ..Ctx::default()
+            };
+            browser_detect_trace_file_in_vfs(&mut ctx).unwrap();
+            let file = ctx.launch_trace_file.to_string_lossy().to_string();
+            let message = setup_from_vfs_error(folder, &file);
+            assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
         }
 
         fn request(seq: i64, command: &str, arguments: serde_json::Value) -> DapMessage {
@@ -4401,7 +4383,7 @@ mod tests {
         fn a_session_manifest_in_the_vfs_is_refused() {
             let folder = "browser-handshake-session";
             crate::vfs::vfs_write(&format!("{folder}/{SESSION_MANIFEST_FILE}"), b"version = 1\n".to_vec());
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
 
             let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
@@ -4432,9 +4414,8 @@ mod tests {
         // is NOT reachable from the browser, and these tests do not pretend
         // otherwise:
         //
-        //   * the browser opens a legacy `trace.json` as
-        //     `TraceKind::Materialized` — the shape the in-browser Noir
-        //     tracer hands the web product to replay (`setup_from_vfs`);
+        //   * the browser opens the in-browser Noir tracer's `trace.ct` as
+        //     `TraceKind::Materialized` (`setup_from_vfs`);
         //   * `Handler::source_line_jump` answers a Materialized trace with
         //     a direct index jump, and enters the
         //     `disable_breakpoints ... enable_breakpoints` bracket only in
@@ -4453,13 +4434,12 @@ mod tests {
         // threshold becomes load-bearing right here, and these tests are
         // what will say whether it still behaves.
 
-        /// The source path used by [`trace_json_with_lines`].
+        /// The source path used by [`trace_with_lines`].
         const RUN_TO_LINE_PATH: &str = "/browser/runtoline/main.nr";
 
-        /// A legacy `trace.json` with one step per line, `1..=line_count`,
-        /// in the shape the in-browser Noir tracer hands over and the browser path opens as
-        /// `TraceKind::Materialized`.
-        fn trace_json_with_lines(line_count: i64) -> Vec<u8> {
+        /// A `.ct` container with one step per line, `1..=line_count`, which
+        /// the browser path opens as `TraceKind::Materialized`.
+        fn trace_with_lines(line_count: i64) -> Vec<u8> {
             let mut events: Vec<TraceLowLevelEvent> = vec![
                 TraceLowLevelEvent::Path(PathBuf::from(RUN_TO_LINE_PATH)),
                 TraceLowLevelEvent::Function(FunctionRecord {
@@ -4478,13 +4458,13 @@ mod tests {
                     line: Line(line),
                 }));
             }
-            serde_json::to_vec(&events).unwrap()
+            container_bytes(events)
         }
 
         /// Like [`drive`], but the caller chooses the trace bytes instead
         /// of always getting the 3-step handshake fixture.
         fn drive_against(folder: &str, trace: Vec<u8>, commands: &[(&str, serde_json::Value)]) -> Vec<DapMessage> {
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), trace);
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), trace);
             let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
             let mut handler: Option<Handler> = None;
@@ -4552,7 +4532,7 @@ mod tests {
             commands.push(("continue", json!({ "threadId": 1 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             let verified = received
                 .iter()
@@ -4598,7 +4578,7 @@ mod tests {
             commands.push(("ct/source-line-jump", json!({ "path": RUN_TO_LINE_PATH, "line": 5 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             let lines = stack_trace_lines(&received);
             assert_eq!(
@@ -4629,7 +4609,7 @@ mod tests {
             commands.push(("continue", json!({ "threadId": 1 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             assert_eq!(
                 stack_trace_lines(&received),

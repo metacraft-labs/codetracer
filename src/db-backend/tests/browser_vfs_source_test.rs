@@ -4,9 +4,8 @@
 //!
 //! A trace produced inside a browser tab carries its own source text — the
 //! Noir wasm tracer records `MemoryTrace::source_views[].content` for every
-//! path it interns — but `trace.json` is a bare `Vec<TraceLowLevelEvent>` and
-//! has nowhere to put it. The host therefore writes each view into the
-//! engine's VFS at the recorded path, beside `trace.json`.
+//! path it interns. The host writes each view into the engine's VFS at the
+//! recorded path, beside the `trace.ct` container.
 //!
 //! Before this test's subject existed that write reached nothing. The VFS was
 //! consulted at seven call sites, all of them in `dap_server`'s trace-container
