@@ -87,7 +87,6 @@ _ct_try_workspace_root() {
 		[ -d "$candidate/codetracer-solana-recorder" ] ||
 		[ -d "$candidate/codetracer-ton-recorder" ] ||
 		[ -d "$candidate/codetracer-native-recorder" ] ||
-		[ -d "$candidate/codetracer-wasmi-recorder" ] ||
 		[ -d "$candidate/noir" ]; then
 		_CT_WORKSPACE_ROOT="$candidate"
 		return 0
@@ -733,7 +732,7 @@ fi
 # column-aware tracer) makes those tests RUN instead of skipping, in CI and
 # locally, while `ct` itself still resolves the recorder via the PATH entry
 # above (same as end users).
-for _ct_bc_name in cairo cardano circom evm flow fuel leo miden move polkavm solana ton native wasmi; do
+for _ct_bc_name in cairo cardano circom evm flow fuel leo miden move polkavm solana ton native; do
 	_ct_bc_repo="codetracer-${_ct_bc_name}-recorder"
 	_ct_bc_bin="target/release/codetracer-${_ct_bc_name}-recorder"
 	if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/$_ct_bc_repo/$_ct_bc_bin" ]; then

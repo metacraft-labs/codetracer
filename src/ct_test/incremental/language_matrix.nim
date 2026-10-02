@@ -184,9 +184,9 @@ let languageTable: Table[string, LanguageStrategy] = block:
     MatrixDoc & " — Lua: Planned, Lua recorder (interpreted; canonical " &
     "Function/Call records). Platform Support Overview row 'Lua'.")
   add sourceStrategy("WASM",
-    MatrixDoc & " — WASM: recorded by the Wasm/wasmi recorders (managed-runtime; " &
+    MatrixDoc & " — WASM: recorded by the Wasm recorder (managed-runtime; " &
     "canonical Function/Call records, NOT native machine code). Classified with " &
-    "the interpreted/managed group (the Wasm recorders, listed in the CodeTracer " &
+    "the interpreted/managed group (the Wasm recorder, listed in the CodeTracer " &
     "Language-Support recorder set).")
 
   # --- NATIVE / MCR group (DWARF-based system languages) -----------------------

@@ -1054,7 +1054,7 @@ const
       unsupportedDiagnostic: ""),
   ]
 
-const ProviderGateEntries*: array[39, ProviderGateEntry] = [
+const ProviderGateEntries*: array[38, ProviderGateEntry] = [
   ProviderGateEntry(providerId: "ada-fallback",
     fixturePath: "src/ct_test/fixtures/m12_ada_project",
     researchDoc: "src/ct_test/framework_research/ada-aunit-fallback.md",
@@ -1266,11 +1266,6 @@ const ProviderGateEntries*: array[39, ProviderGateEntry] = [
     providerTest: SmartHarnessProviderTest,
     sourceFiles: SmartHarnessSourceFiles, heavy: true),
   ProviderGateEntry(providerId: "smart-wasm",
-    fixturePath: "src/ct_test/fixtures/m13_smart_contract_project",
-    researchDoc: SmartHarnessResearchDoc,
-    providerTest: SmartHarnessProviderTest,
-    sourceFiles: SmartHarnessSourceFiles, heavy: true),
-  ProviderGateEntry(providerId: "smart-wasmi",
     fixturePath: "src/ct_test/fixtures/m13_smart_contract_project",
     researchDoc: SmartHarnessResearchDoc,
     providerTest: SmartHarnessProviderTest,
