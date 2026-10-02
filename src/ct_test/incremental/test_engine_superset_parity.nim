@@ -29,6 +29,7 @@
 import std/[unittest, os, strutils, times, osproc, json]
 
 import engine
+import m0_three_funcs_trace
 import native_trace   # NativeCalltraceFile, readExecutedFunctionsNative
 import native_hash    # shallowHashNative (the native parity guard)
 
@@ -41,13 +42,15 @@ const
 
 const
   threeFuncsFixture = fixturesDir / "m0_three_funcs"
-  threeFuncsTrace = threeFuncsFixture / "trace"
   # The trace records the source path as
   # `/fixtures/m0_three_funcs/src/three_funcs.rb`; the engine strips the leading
   # slash and resolves it under `sourceRoot`, so the temp source must live at
   # `<sourceRoot>/fixtures/m0_three_funcs/src/three_funcs.rb`.
   relSourcePath = "fixtures/m0_three_funcs/src/three_funcs.rb"
   sourceTestId = "fixture::three_funcs"
+
+# The m0_three_funcs recording: a `.ct` built by `m0_three_funcs_trace`.
+let threeFuncsTrace = threeFuncsTraceDir()
 
 var sourceCounter = 0
 

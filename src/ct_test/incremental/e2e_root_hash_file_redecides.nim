@@ -27,6 +27,7 @@
 import std/[unittest, os, strutils, times]
 
 import engine        # IncrementalDecisionKind, isRerun
+import m0_three_funcs_trace
 import root_hash      # buildArtifact, writeArtifact, readArtifact, redecideFromArtifact
 # M4a: importing ctfs_codec installs the CTFS-namespace format as the default
 # codec behind M2's boundary, so this e2e now round-trips the artifact through
@@ -37,9 +38,11 @@ import ctfs_codec
 const
   fixturesDir = currentSourcePath().parentDir / "fixtures"
   threeFuncsFixture = fixturesDir / "m0_three_funcs"
-  threeFuncsTrace = threeFuncsFixture / "trace"
   relSourcePath = "fixtures/m0_three_funcs/src/three_funcs.rb"
   testId = "fixture::three_funcs"
+
+# The m0_three_funcs recording: a `.ct` built by `m0_three_funcs_trace`.
+let threeFuncsTrace = threeFuncsTraceDir()
 
 var counter = 0
 

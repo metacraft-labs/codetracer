@@ -2,7 +2,7 @@
 ## Trace-Based-Incremental-Testing prototype campaign.
 ##
 ## Given a test's executed functions (discovered from a CodeTracer trace by
-## `trace_reader`) and the *current* source tree, this module decides whether
+## the backend the trace requires — see `backends`) and the *current* source tree, this module decides whether
 ## the test can be skipped ("skipped (unchanged)") or must be re-run. The
 ## algorithm follows `codetracer-specs/Planned-Features/`
 ## `Nim-Parallel-Test-Framework.md`:
@@ -300,9 +300,9 @@ proc shallowHashOfDepNative(dep: ExecutedFunction; sourceRoot: string): string
 #
 # The engine routes dependency discovery and shallow hashing through the
 # `backends` seams, selected by the detected `TraceBackend`. The
-# source/interpreted strategy is wired here from the Phase-1 implementations
-# (`trace_reader.readExecutedFunctions` + `shallowHashOfDepSource`), giving the
-# byte-for-byte identical behaviour Phase 1 had. Native (`tbNativeDwarf`) and
+# source/interpreted strategy reads the interpreted recorder's `.ct`
+# (`ctfs_trace.readExecutedFunctionsCtfs`) and hashes source text
+# (`shallowHashOfDepSource`). Native (`tbNativeDwarf`) and
 # the reserved `tbNimInstrumented` are intentionally LEFT with nil seam procs
 # until M7-M9: `strategiesImplemented` reports them unimplemented and the
 # engine fails safe to a re-run (never a skip).
@@ -310,7 +310,7 @@ proc shallowHashOfDepNative(dep: ExecutedFunction; sourceRoot: string): string
 let
   sourceInterpretedStrategies = BackendStrategies(
     backend: tbSourceInterpreted,
-    discovery: newDependencyDiscovery(readExecutedFunctions),
+    discovery: newDependencyDiscovery(readExecutedFunctionsCtfs),
     hasher: newShallowHasher(shallowHashOfDepSource))
 
   nativeDwarfStrategies = BackendStrategies(
@@ -599,8 +599,7 @@ proc record*(cache: var IncrementalCache; testId, traceDir, sourceRoot: string;
   ##
   ## The trace's backend is detected (`detectBackend`) and dependency discovery +
   ## shallow hashing go through that backend's seams. The source/interpreted
-  ## backend uses `readExecutedFunctions` + the source-text hasher exactly as
-  ## Phase 1 did (byte-for-byte identical results). A backend whose strategies
+  ## backend reads the interpreted recorder's `.ct` and hashes source text. A backend whose strategies
   ## are not yet wired (native / Nim-instrumented, until M7-M9), or an
   ## ambiguous/unknown trace shape, returns an `Err` — the caller MUST re-run,
   ## never record a skip-eligible entry from an unsupported backend.
@@ -661,25 +660,6 @@ proc markNonDeterministic*(cache: var IncrementalCache; testId: string;
   cache.entries[testId].deterministic = deterministic
   ok()
 
-proc sourceTraceDirReadable(traceDir: string): Result[void, string] =
-  ## A conservative readability probe for a SOURCE/interpreted test's trace
-  ## directory (M5 fail-safe). The directory must exist AND its two required JSON
-  ## files (`trace.json`, `trace_paths.json`) must be present and readable. We do
-  ## NOT fully parse them here — `record` does that — but a missing dir or file,
-  ## or a file we cannot open, is reported so `decide` re-runs rather than risk a
-  ## skip against a trace it cannot even see.
-  if not dirExists(traceDir):
-    return err("missing trace dir: " & traceDir)
-  for required in [TraceEventsFile, TracePathsFile]:
-    let p = traceDir / required
-    if not fileExists(p):
-      return err("missing trace file: " & p)
-    try:
-      discard readFile(p)
-    except CatchableError as e:
-      return err("unreadable trace file " & p & ": " & e.msg)
-  ok()
-
 proc nativeTraceDirReadable(traceDir: string): Result[void, string] =
   ## The native-backend readability probe (M8/M15 fail-safe). A native trace dir
   ## must exist and carry a readable native trace artifact of a recognised
@@ -691,32 +671,30 @@ proc nativeTraceDirReadable(traceDir: string): Result[void, string] =
   nativeTraceDirReadableAny(traceDir)
 
 proc ctfsTraceDirReadable(traceDir: string): Result[void, string] =
-  ## The CTFS-backend readability probe (M12 fail-safe). A CTFS trace dir must
-  ## exist and contain a resolvable `.ct` bundle, and `ct-print` must be
-  ## resolvable — otherwise we cannot read the executed-function set and MUST
-  ## re-run rather than risk a skip against a bundle we cannot see. (Whether the
-  ## bundle's CONTENTS parse is checked later, by the discovery seam, which also
-  ## Errs ⇒ re-run.)
+  ## The CTFS-backend readability probe (M12 fail-safe), used by both
+  ## interpreted backends. A CTFS trace dir must exist and contain a resolvable
+  ## `.ct` bundle — otherwise we MUST re-run rather than risk a skip against a
+  ## bundle we cannot see. `decide` re-hashes the CACHED deps and never reads
+  ## the bundle's contents, so `ct-print` is not needed here; whether the
+  ## contents parse is checked by the discovery seam when recording, which also
+  ## Errs ⇒ re-run.
   if not dirExists(traceDir) and
       not (fileExists(traceDir) and traceDir.toLowerAscii().endsWith(".ct")):
     return err("missing CTFS trace dir/bundle: " & traceDir)
   let bundleRes = resolveCtBundle(traceDir)
   if bundleRes.isErr:
     return err(bundleRes.error)
-  let ctPrintRes = resolveCtPrint()
-  if ctPrintRes.isErr:
-    return err(ctPrintRes.error)
   ok()
 
 proc traceDirReadable(traceDir: string; backend: TraceBackend):
     Result[void, string] =
   ## Backend-dispatched readability probe. Each backend has its own required
-  ## trace files (source: `trace.json`+`trace_paths.json`; native:
-  ## `native_calltrace.json`; CTFS: a resolvable `.ct` bundle + `ct-print`), so
-  ## the probe must run AFTER backend detection.
+  ## trace files (native: `native_calltrace.json` or the instrumentation
+  ## capture; source and CTFS: a resolvable `.ct` bundle), so the probe must
+  ## run AFTER backend detection.
   case backend
   of tbSourceInterpreted:
-    sourceTraceDirReadable(traceDir)
+    ctfsTraceDirReadable(traceDir)
   of tbNativeDwarf:
     nativeTraceDirReadable(traceDir)
   of tbSourceCtfs:
@@ -801,8 +779,8 @@ proc decide*(testId, traceDir, sourceRoot: string;
     return rerunNonDeterministic()
   # Guard 2 (M6/M8 backend routing): detect the trace's backend and select its
   # strategies FIRST, because the readability probe (guard 3) is backend-specific
-  # — a source trace requires `trace.json`/`trace_paths.json`, a native trace
-  # requires `native_calltrace.json`. An ambiguous/unknown shape, or a backend
+  # — a source trace requires a `.ct` bundle, a native trace requires its
+  # native capture. A `trace.json` (test-oracle output), an unknown shape, or a backend
   # whose strategies are not yet wired (Nim-instrumented until M9), fails safe to
   # a re-run with a clear reason — NEVER a skip.
   let backendRes = detectBackend(traceDir)
@@ -814,9 +792,7 @@ proc decide*(testId, traceDir, sourceRoot: string;
   # Guard 3: the trace dir referenced for this test must carry the backend's
   # required, readable trace files. If they are gone or unreadable, fail safe to
   # a re-run with a diagnostic — we re-run rather than trust a stale decision
-  # against a trace we cannot see. (Source backend keeps the Phase-1 fail-safe
-  # reasons ``missing trace dir`` / ``missing trace file`` byte-for-byte.) This
-  # guard intentionally fires only for a cached test: a never-recorded test
+  # against a trace we cannot see. This guard intentionally fires only for a cached test: a never-recorded test
   # already runs fresh.
   let traceRes = traceDirReadable(traceDir, backendRes.value)
   if traceRes.isErr:

@@ -15,8 +15,8 @@
 ## CodeTracer has exactly TWO incremental-testing mechanisms, differing on BOTH
 ## axes (dependency discovery AND shallow hashing):
 ##
-##   * SOURCE / interpreted (`tbSourceInterpreted`): the trace carries canonical
-##     `Function`/`Call` records; a function's identity is its SOURCE TEXT. The
+##   * SOURCE / interpreted (`tbSourceInterpreted`): the recorder's `.ct` carries
+##     `function`/`call` records; a function's identity is its SOURCE TEXT. The
 ##     Language-Support-Matrix's *interpreted* languages take this path:
 ##     Python, Ruby, JavaScript, TypeScript, Lua, and WASM.
 ##   * NATIVE / MCR (`tbNativeDwarf`): the trace is an RR/MCR + DWARF capture with
@@ -64,8 +64,8 @@ type
     ## Which of the two incremental-testing MECHANISMS a language uses. This is
     ## the coarse classification the table guarantees is total over the matrix.
     lmSourceInterpreted
-      ## Source / interpreted path: canonical `Function`/`Call` dependency
-      ## discovery + source-text shallow hash (`tbSourceInterpreted`).
+      ## Source / interpreted path: `function`/`call` dependency discovery
+      ## from the `.ct` + source-text shallow hash (`tbSourceInterpreted`).
     lmNativeDwarf
       ## Native / MCR path: native-calltrace dependency discovery +
       ## instruction-byte shallow hash (`tbNativeDwarf`).
@@ -77,8 +77,8 @@ type
     ## The dependency-discovery mechanism a language's strategy implies
     ## (descriptive label; the running impl is the seam in `backendStrategies`).
     ddCanonicalFunctionCall
-      ## Executed set = the `Function` records referenced by `Call` records in a
-      ## canonical `trace.json` (source path; `trace_reader.readExecutedFunctions`).
+      ## Executed set = the `function` records referenced by `call` records in
+      ## the recorder's `.ct` (source path; `ctfs_trace.readExecutedFunctionsCtfs`).
     ddNativeCalltrace
       ## Executed set = the function names in a native trace's calltrace
       ## (`native_trace.readExecutedFunctionsNative`).

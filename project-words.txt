@@ -141,6 +141,7 @@ flist
 forc
 fsbase
 fstatat
+funcs
 gpui
 hashtable
 headful

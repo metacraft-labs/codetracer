@@ -2,8 +2,8 @@
 ## Trace-Based-Incremental-Testing prototype campaign (Phase 2).
 ##
 ## CodeTracer's *native / Multi-Core-Recorder (MCR)* path does NOT emit the
-## canonical `Function`/`Call` records the source/interpreted path uses (those
-## are read by `trace_reader.readExecutedFunctions`). Instead the executed
+## `function`/`call` records the source/interpreted path reads from its `.ct`
+## (`ctfs_trace.readExecutedFunctionsCtfs`). Instead the executed
 ## functions come from the native trace's **calltrace**: the MCR/RR emulator
 ## records flat `CallRecord`s (`tickEnter`, `tickExit`, `callerPc`, `calleePc`)
 ## while emulating the program, then resolves each `calleePc` to a function name
@@ -23,8 +23,7 @@
 ## # The native-trace fixture shape (a documented prototype stand-in)
 ##
 ## A live MCR/RR run is NOT available in this dev shell (it needs the emulator +
-## a recorded process), so — exactly as Phase 1 hand-crafts canonical JSON
-## traces in the real `codetracer-trace-format` shape — M8 hand-crafts the
+## a recorded process), so M8 hand-crafts the
 ## native calltrace in a JSON shape modeled on the real `CallNode`/`CallRecord`
 ## structures above. The reader consumes a single file:
 ##

@@ -24,15 +24,18 @@
 import std/[unittest, os, strutils, times, algorithm]
 
 import engine        # IncrementalDecisionKind, isRerun, CachedDep, ExecutedFunction
+import m0_three_funcs_trace
 import root_hash      # RootHashArtifact, buildArtifact, writeArtifact, readArtifact, redecide..., defaultCodec
 import ctfs_codec     # installs the CTFS codec as default; ctfsNamespaceCodec
 
 const
   fixturesDir = currentSourcePath().parentDir / "fixtures"
   threeFuncsFixture = fixturesDir / "m0_three_funcs"
-  threeFuncsTrace = threeFuncsFixture / "trace"
   relSourcePath = "fixtures/m0_three_funcs/src/three_funcs.rb"
   testId = "fixture::three_funcs"
+
+# The m0_three_funcs recording: a `.ct` built by `m0_three_funcs_trace`.
+let threeFuncsTrace = threeFuncsTraceDir()
 
 var counter = 0
 
