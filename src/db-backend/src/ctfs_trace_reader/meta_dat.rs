@@ -36,7 +36,10 @@
 //!           bit 14      — FLAG_HAS_LINE_COUNT_TABLE (paths.dat records carry line_count)
 //!           bit 15      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
 //!           (no bit is reserved; the flag word is fully allocated)
-//! [4 bytes] flags_ext u32 little-endian — version 5 only; absent at version 4
+//! [4 bytes] flags_ext u32 little-endian — version 5 and 6; absent at version 4.
+//!           At v5 it is written ONLY when a bit is set, so a zero word there is
+//!           refused; at v6 it is unconditional and MAY be zero, which is the
+//!           common case and must NOT be refused.
 //!           bit 0       — FLAG_EXT_HAS_SOURCE_RELOAD (GDH-M2)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
@@ -44,8 +47,10 @@
 //!   ⤷ args_count × varint-prefixed UTF-8 string : args[i]
 //! varint-prefixed UTF-8 string : workdir
 //! varint-prefixed UTF-8 string : recorder_id
-//! varint                       : paths_count
+//! varint                       : paths_count          (v4 and v5 ONLY)
 //!   ⤷ paths_count × varint-prefixed UTF-8 string : paths[i]
+//!           At v6 this block is ABSENT, not empty — there is no count varint to
+//!           consume, because `paths.dat` is the only list of source paths.
 //!
 //! if (flags & FLAG_HAS_MCR_FIELDS) != 0:
 //!     varint                       : tick_source        (enum ord)
@@ -171,7 +176,38 @@ pub const LAST_SHIFTED_GLOBAL_INDEX_VERSION: u16 = 3;
 /// carries the distinction.  A v4 container is still read exactly as
 /// before, and a v5 one is read as a v4 one plus a word this reader knows
 /// how to validate.
-pub const SUPPORTED_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
+/// **The 2026-10 revision widened it to `&[4, 5, 6]`, and that is the same
+/// discipline again, applied to a body shape.**  v6 is v5's header and v5's
+/// field order with ONE field removed: the `paths_count` + `paths[]` block
+/// after `recorder_id` is gone, because `paths.dat` is the only list of source
+/// paths, and `flags_ext` is unconditionally present rather than present only
+/// when an extended flag is set.  Nothing in the bytes distinguishes the two —
+/// a v6 body's first post-`recorder_id` varint is the MCR block's `tick_source`
+/// (or the end of the payload), and read as a path count it is a plausible
+/// small number — so the version field is what carries the distinction, and
+/// [`PATH_LIST_LAST_VERSION`] is where the parser branches on it.
+///
+/// Admitting 6 is what makes a CURRENTLY RECORDED trace readable here at all:
+/// the canonical Nim writer has written schema 6 since the 2026-10 revision,
+/// and every container at CTFS container version 5 in this workspace carries
+/// one (24 of 24, measured).  Refusing it was correct while the body was
+/// unimplemented and became a product break the moment the writer moved.
+pub const SUPPORTED_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS, META_DAT_VERSION_NO_PATH_LIST];
+
+/// The last schema version whose body carries the `paths_count` + `paths[]`
+/// block after `recorder_id`.
+///
+/// Named rather than written as a literal `5` at the branch, for the reason
+/// [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`] is named: a later version that moved
+/// another field would raise it, and a parser comparing against a stale
+/// literal would read the wrong field layout while reporting success.
+pub const PATH_LIST_LAST_VERSION: u16 = META_DAT_VERSION_EXTENDED_FLAGS;
+
+/// The 2026-10 revision's schema version: no in-`meta.dat` path list, and
+/// `flags_ext` always present.
+///
+/// Must match the canonical Nim writer's `meta_dat.nim` `MetaDatVersion`.
+pub const META_DAT_VERSION_NO_PATH_LIST: u16 = 6;
 
 /// GDH-M2 — the schema version a container carries when at least one
 /// EXTENDED flag is set.  See [`SUPPORTED_VERSIONS`] and
@@ -903,7 +939,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     if unknown_bits != 0 {
         return Err(MetaDatError::UnknownFlags { flags, unknown_bits });
     }
-    // GDH-M2: the extended flag word, present at schema version 5 only.
+    // GDH-M2: the extended flag word, present from schema version 5 on.
     // `body_start` moves with it — reading the body from a fixed 8 would
     // decode the ext word as the recording id's length prefix.
     // The word is VALIDATED and its width consumed, but it is deliberately
@@ -913,7 +949,15 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     // bits is GDH-M7's job, when the db-backend learns to read the markers
     // themselves. Adding a public field here today would only propagate a
     // constant `0` through every `MetaDat` literal in the repo.
-    let (_ext_flags, body_start) = if version == META_DAT_VERSION_EXTENDED_FLAGS {
+    //
+    // At v6 the word is present UNCONDITIONALLY and may legitimately be zero:
+    // v6 has one header length, so a recording with no extended capability
+    // carries `flags_ext = 0` rather than a shorter header. `EmptyExtendedFlags`
+    // is therefore a v5-only refusal — at v5 the word exists only because a bit
+    // is set, so a zero there is a writer that emitted a version it did not
+    // need, and refusing it is what keeps "the version says the word is there"
+    // from decaying into "the word is always there".
+    let (_ext_flags, body_start) = if version >= META_DAT_VERSION_EXTENDED_FLAGS {
         if input.len() < 12 {
             return Err(MetaDatError::TooShort { got: input.len() });
         }
@@ -925,7 +969,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
                 unknown_bits: unknown_ext,
             });
         }
-        if ext == 0 {
+        if ext == 0 && version == META_DAT_VERSION_EXTENDED_FLAGS {
             return Err(MetaDatError::EmptyExtendedFlags);
         }
         (ext, 12usize)
@@ -962,12 +1006,25 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     let workdir = read_string(input, &mut pos)?;
     let recorder_id = read_string(input, &mut pos)?;
 
-    let paths_count_u64 = decode_varint(input, &mut pos)?;
-    let paths_count = usize::try_from(paths_count_u64).map_err(|_| MetaDatError::StringTooLong(paths_count_u64))?;
-    let mut paths = Vec::with_capacity(paths_count);
-    for _ in 0..paths_count {
-        paths.push(read_string(input, &mut pos)?);
-    }
+    // The path list, through [`PATH_LIST_LAST_VERSION`] only. From v6 the
+    // container's source paths live in `paths.dat` alone, and this block is not
+    // present — not empty, ABSENT, so there is no count varint to consume. The
+    // branch is on the version rather than on a length, because a v6 body's
+    // next varint is whatever the flags say follows (the MCR block's
+    // `tick_source`, or nothing at all) and a small plausible number read as a
+    // path count would consume the MCR block as path strings and then fail
+    // somewhere with no relation to the cause.
+    let paths = if version <= PATH_LIST_LAST_VERSION {
+        let paths_count_u64 = decode_varint(input, &mut pos)?;
+        let paths_count = usize::try_from(paths_count_u64).map_err(|_| MetaDatError::StringTooLong(paths_count_u64))?;
+        let mut paths = Vec::with_capacity(paths_count);
+        for _ in 0..paths_count {
+            paths.push(read_string(input, &mut pos)?);
+        }
+        paths
+    } else {
+        Vec::new()
+    };
 
     let mcr = if flags & FLAG_HAS_MCR_FIELDS != 0 {
         let tick_source = decode_varint(input, &mut pos)?;

@@ -46,12 +46,67 @@ pub(crate) const CTFS_VERSION_MIN: u8 = 2;
 ///   v3 — 16-byte header with encryption field at byte 6; binary metadata;
 ///         default BlockSize 4096; small file optimization; namespaces.
 ///   v4 — max_shards field at byte 7 (Nim writer default).
+///   v5 — a member of at most one block carries the direct-block tag in bit 63
+///         of its `MapBlock` and owns no mapping block ([`CTFS_DIRECT_TAG`]).
 ///
-/// The on-disk layout of the extended header and file entries is unchanged
-/// across all three versions, so a single reader handles them all. The only
-/// difference is the meaning of header bytes 6 (encryption, ignored) and 7
-/// (max_shards, informational only).
-pub(crate) const CTFS_VERSION_MAX: u8 = 4;
+/// The header layout is identical across all four: 16 bytes, with the only
+/// differences being the meaning of bytes 6 (encryption, ignored) and 7
+/// (max_shards, informational only). The BODY differs once, at v5, and only in
+/// the third of the three `MapBlock` forms — which is why v5 could not simply
+/// be folded into the accepted set. [`direct_data_block`] is the implementation
+/// that earns it; see its comment for why accepting the version without it
+/// would have been the defect `ctfs-container.md` §1c is written against.
+pub(crate) const CTFS_VERSION_MAX: u8 = 5;
+
+/// `ctfs-container.md` §2, "Members of at most one block": bit 63 of a
+/// `FileEntry.MapBlock` tags it as naming the member's ONLY data block rather
+/// than its mapping block.
+///
+/// Bit 63 is available because no real block number reaches it — block `2^63`
+/// would begin `2^63 * BlockSize` bytes into the container, past anything a
+/// 64-bit offset addresses.
+pub(crate) const CTFS_DIRECT_TAG: u64 = 1 << 63;
+
+/// The data block a `MapBlock` names directly, or `None` when it is a mapping
+/// block (or the `0` that means "empty member").
+///
+/// **This function is why [`CTFS_VERSION_MAX`] could move to 5 at all.** §1c's
+/// rule is to refuse a version whose BODY is not implemented, and before this
+/// existed a v5 container's `MapBlock` of `0x8000_0000_0000_0005` would have
+/// been walked as mapping block `9223372036854775813` — so refusing 5 was
+/// correct, not a stale floor. Accepting the version is the second half of the
+/// change, never the first.
+/// The version [`write_minimal_ctfs`] stamps, which is NOT
+/// [`CTFS_VERSION_MAX`].
+///
+/// **These were the same constant and that was a latent defect, which moving
+/// `CTFS_VERSION_MAX` to 5 made live.** A reader's highest ACCEPTED version and
+/// a writer's EMITTED version are different claims, and tying the writer to the
+/// reader means every widening of the reader silently re-stamps every container
+/// the test suite produces. Measured: it took two arms red
+/// (`seekable_call_stream_test::flag_off_trace_exposes_no_seekable_stream` and
+/// its step/value twin), because those arms open the written container through
+/// the SIBLING `codetracer-trace-format` reader, whose accepted set is still
+/// `{2,3,4}`.
+///
+/// It stays at 4 because 4 is what this writer's BYTES are. It gives every
+/// member a level-1 mapping block, including members of a few bytes; version 5
+/// is the version at which such a member carries the direct-block tag instead
+/// (§2, "Members of at most one block"). Stamping 5 over a mapping block per
+/// member would be two spellings of one state — the defect
+/// `ctfs-container.md`'s `max_shards` note was written for — and it would also
+/// keep alive, by stamp, exactly the writer behaviour version 5 exists to
+/// retire. Moving this to 5 means teaching this writer the direct form AND the
+/// sibling reader following; until both, 4 is the honest number.
+pub(crate) const CTFS_VERSION_TEST_WRITER: u8 = 4;
+
+pub(crate) fn direct_data_block(map_block: u64) -> Option<u64> {
+    if map_block & CTFS_DIRECT_TAG == 0 {
+        None
+    } else {
+        Some(map_block & !CTFS_DIRECT_TAG)
+    }
+}
 
 /// Size of the fixed header (magic + version + reserved).
 pub(crate) const HEADER_SIZE: usize = 8;
@@ -1187,8 +1242,8 @@ impl CtfsReader {
                 "CTFS container is version {CTFS_PROFILED_VERSION}, profile 0 (full); this reader \
                  implements the version-6 COMPACT body only. A version-6 full container's \
                  FileEntry array begins at {HEADER_V6_SIZE}, not at {}, so reading it with the \
-                 version 2..={CTFS_VERSION_MAX} directory parser would resolve every entry out \
-                 of the reserved area",
+                 version {CTFS_VERSION_MIN}..={CTFS_VERSION_MAX} directory parser would resolve \
+                 every entry out of the reserved area",
                 HEADER_SIZE + EXTENDED_HEADER_SIZE
             )));
         }
@@ -1451,6 +1506,64 @@ impl CtfsReader {
                 &mut out,
                 &format!("compact member '{name}'"),
             )?;
+            return Ok(out);
+        }
+
+        // `ctfs-container.md` §2's SECOND `MapBlock` form (version 5 on): the
+        // member owns no mapping block and its bytes are the one data block the
+        // tag names. Served here rather than through `resolve_block` because
+        // there is nothing to resolve — but with the same three refusals the
+        // Nim reader's `readMemberBytes` applies, because this path reaches
+        // container bytes directly and §5d's bound has to hold on EVERY path
+        // from a block number to bytes, not merely on the mapped one.
+        if let Some(direct_block) = direct_data_block(entry.map_block) {
+            let block_size = self.block_size as u64;
+            // Block 0 is the container's own header and `FileEntry` array. An
+            // unrefused 0 here would serve the directory back as the member's
+            // content and report success.
+            if direct_block == 0 {
+                return Err(CtfsError::Corrupt(format!(
+                    "file '{name}' names data block 0 directly; block 0 is the container's \
+                     root directory and no member may name it"
+                )));
+            }
+            // A direct member is one block by definition, so a declared size
+            // past one block is an entry that contradicts its own tag —
+            // refused, rather than silently truncated to a block.
+            if entry.size > block_size {
+                return Err(CtfsError::Corrupt(format!(
+                    "file '{name}' is stored in one direct block but declares {} bytes, \
+                     more than one {block_size}-byte block holds",
+                    entry.size
+                )));
+            }
+            // §5d, FLOORED: bytes past the last whole block are the fragment a
+            // crash inside an append's tail write leaves. The strict reader
+            // refuses a block there; the tolerant one stops and reports the
+            // prefix, which is what the clamp below does.
+            let whole_blocks = self.source.current_size() / block_size;
+            if whole_blocks_only && direct_block >= whole_blocks {
+                return Err(CtfsError::Corrupt(format!(
+                    "file '{name}': direct data block {direct_block} is outside the \
+                     {whole_blocks} whole {block_size}-byte blocks the container carries; \
+                     it is truncated or its tail write was interrupted"
+                )));
+            }
+            let src_offset = direct_block
+                .checked_mul(block_size)
+                .and_then(|base| base.checked_add(offset))
+                .ok_or_else(|| CtfsError::Corrupt(format!("file '{name}': direct block offset overflow")))?;
+            let available = self.source.current_size().saturating_sub(src_offset);
+            let readable = len.min(available) as usize;
+            let mut out = vec![0u8; readable];
+            if readable > 0 {
+                read_exact_at(
+                    self.source.as_ref(),
+                    src_offset,
+                    &mut out,
+                    &format!("file '{name}': direct block {direct_block}"),
+                )?;
+            }
             return Ok(out);
         }
 
@@ -1893,7 +2006,7 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> Result<(), Bo
 
     // Header (8 bytes) + extended header (8 bytes) + file entries.
     buf[0..5].copy_from_slice(&CTFS_MAGIC);
-    buf[5] = CTFS_VERSION_MAX;
+    buf[5] = CTFS_VERSION_TEST_WRITER;
     // bytes 6-7: encryption=0, max_shards=0 (already zero)
     buf[8..12].copy_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
     buf[12..16].copy_from_slice(&MAX_ROOT_ENTRIES.to_le_bytes());

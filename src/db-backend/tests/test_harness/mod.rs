@@ -1811,13 +1811,68 @@ pub fn find_suitable_python() -> Option<(String, String)> {
     }
 }
 
+/// What a `--version` probe of `cmd` actually found.
+///
+/// # Why this is three states and not a bool
+///
+/// The predicate below used to be
+/// `Command::new(cmd).arg("--version").output().map(|o| o.status.success()).unwrap_or(false)`,
+/// which collapses "not on PATH" and "on PATH and broken" into one `false`.
+/// Every caller then feeds that `false` to
+/// [`skip_or_fail_missing_prerequisite`], whose default is graceful, and a
+/// skip is tallied by cargo and nextest as a PASS. So a tool that is installed
+/// and whose `--version` is broken reads here as a bare host and takes the
+/// skip — the one case where the remedy ("install it") is wrong and the right
+/// one ("it is installed and it is broken") is never printed.
+///
+/// `Command::output()` already carries the discriminator: `Err(NotFound)` is
+/// absent, `Ok(status)` with a non-zero status is present and failing. It was
+/// being discarded, not missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandProbe {
+    /// `cmd` is not on PATH (or is not executable). A legitimate skip.
+    Absent,
+    /// `cmd` is on PATH and `--version` succeeded.
+    Usable,
+    /// `cmd` is on PATH and `--version` FAILED, with its own diagnosis.
+    /// Never a skip — see [`is_command_available`].
+    Broken(String),
+}
+
+/// Probe `cmd` for all three outcomes. Prefer this over
+/// [`is_command_available`] in new code: a caller holding a
+/// [`CommandProbe::Broken`] can print the tool's own complaint, which is the
+/// difference between a useful failure and "not available".
+pub fn probe_command(cmd: &str) -> CommandProbe {
+    match Command::new(cmd).arg("--version").output() {
+        Ok(o) if o.status.success() => CommandProbe::Usable,
+        Ok(o) => CommandProbe::Broken(format!(
+            "`{cmd} --version` exited {} — stderr: {}",
+            o.status,
+            String::from_utf8_lossy(&o.stderr).trim()
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CommandProbe::Absent,
+        Err(e) => CommandProbe::Broken(format!("`{cmd} --version` could not be run: {e}")),
+    }
+}
+
 /// Check if a command is available on PATH.
+///
+/// **A command that is PRESENT and broken panics here rather than returning
+/// `false`.** Returning `false` would route it into the graceful-skip path,
+/// and a skip is a pass; a broken tool on the host is a defect in the host or
+/// the tool, and the run has to say so. Absent stays `false`, which is the
+/// state the skip exists for.
 pub fn is_command_available(cmd: &str) -> bool {
-    Command::new(cmd)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    match probe_command(cmd) {
+        CommandProbe::Usable => true,
+        CommandProbe::Absent => false,
+        CommandProbe::Broken(why) => panic!(
+            "PREREQUISITE PRESENT BUT BROKEN: {why}. This is NOT a missing prerequisite and must \
+             not be skipped: `{cmd}` is on PATH, so installing it is not the remedy. Fix the \
+             tool or remove it from PATH — removing it makes this an honest skip."
+        ),
+    }
 }
 
 /// Probe the recorder's Repro environment before invoking BEAM tooling.
