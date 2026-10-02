@@ -912,7 +912,7 @@ fn test_eager_mode_indicator_renders_current_trace_mode() {
 // See `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
 //
 // They still self-skip when the `ct` binary at `src/build-debug/bin/ct`
-// (per CLAUDE.md "Running Playwright e2e tests") is absent, because
+// (per AGENTS.md "Running Playwright e2e tests") is absent, because
 // without it the e2e lane cannot run at all.
 // ---------------------------------------------------------------------------
 
