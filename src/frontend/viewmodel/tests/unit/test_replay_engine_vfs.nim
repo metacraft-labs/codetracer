@@ -50,7 +50,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 101
+const ExpectedAssertions = 110
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -196,6 +196,18 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     counted payload.fileNamed(RelativePath) == MainSource
     counted payload.fileNamed("trace/" & RelativePath) == MainSource
 
+  test "a container with no workdir gets the key the engine probes":
+    # The in-browser tracer's `.ct` records an empty workdir. Measured in a
+    # browser: the engine then reports `./hello_noir/src/main.nr` in every
+    # `ct/complete-move`, and with only the bare key written every position
+    # came back `missingPath` and the editor painted nothing.
+    let payload = replayVfsPayload(memoryTrace(paths = @[RelativePath],
+                                               workdir = ""))
+    counted payload.defects.len == 0
+    counted payload.hasFile(RelativePath)
+    counted payload.hasFile("./" & RelativePath)
+    counted payload.fileNamed("./" & RelativePath) == MainSource
+
   test "an absolute recorded path still writes exactly one key":
     # `PathBuf::join` discards the base for an absolute path, so all three
     # probes collapse onto one string and a second entry would be dead weight
@@ -205,7 +217,13 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     counted vfsKeysFor(RelativePath, "trace") ==
       @[RelativePath, "trace/" & RelativePath]
     counted vfsKeysFor("", "trace").len == 0
-    counted vfsKeysFor(RelativePath, "") == @[RelativePath]
+    # An EMPTY workdir is not "no join": both CTFS readers open such a
+    # container with `.` as the workdir, so `StepLinesLoader` probes
+    # `./hello_noir/src/main.nr`. The in-browser tracer's container records no
+    # workdir, so this is the key every browser trace needs.
+    counted vfsKeysFor(RelativePath, "") ==
+      @[RelativePath, "./" & RelativePath]
+    counted vfsKeysFor(MainPath, "") == @[MainPath]
 
   test "a location is retargeted to the spelling the renderer opens tabs by":
     # The compiler records `hello_noir/src/main.nr`; the renderer keys tabs by
@@ -254,6 +272,15 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     counted stripTraceFolder("/abs/main.nr", "trace") == "/abs/main.nr"
     counted stripTraceFolder("tracey/main.nr", "trace") == "tracey/main.nr"
     counted stripTraceFolder("trace/x.nr", "") == "trace/x.nr"
+    # The `.` an empty workdir is joined as comes off the same way.
+    counted stripTraceFolder("./hello_noir/src/main.nr", "trace") ==
+      "hello_noir/src/main.nr"
+    counted stripTraceFolder("./hello_noir/src/main.nr", "") ==
+      "hello_noir/src/main.nr"
+    var dotJoined = %*{"body": {"location": {"path": "./" & RelativePath}}}
+    counted retargetLocationPaths(dotJoined, "hello_noir", "/hello_noir") == 1
+    counted dotJoined["body"]["location"]["path"].getStr ==
+      "/hello_noir/src/main.nr"
     var joined = %*{"body": {"location": {"path": "trace/" & RelativePath}}}
     counted retargetLocationPaths(joined, "hello_noir", "/hello_noir") == 1
     counted joined["body"]["location"]["path"].getStr ==

@@ -171,6 +171,11 @@ proc decodeContent(node: JsonNode): string =
     if value < 0 or value > 255: return ""
     result.add chr(value)
 
+proc engineWorkdir*(workdir: string): string =
+  ## The workdir the engine joins relative recorded paths onto: the recorded
+  ## one, or `.` when the container records none.
+  if workdir.len == 0: "." else: workdir
+
 proc vfsKeysFor*(recordedPath, workdir: string): seq[string] =
   ## Every spelling of `recordedPath` the engine might probe, deduplicated.
   ##
@@ -195,11 +200,16 @@ proc vfsKeysFor*(recordedPath, workdir: string): seq[string] =
   ## Writing both spellings costs one extra map entry per source file and
   ## makes the probe order stop mattering. The list is deduplicated so the
   ## absolute case still writes exactly one.
+  ##
+  ## An EMPTY workdir is still joined, as `.`: both CTFS readers open a
+  ## container that records no workdir with `.` as its workdir, so
+  ## `StepLinesLoader` probes `./hello_noir/src/main.nr`. The in-browser
+  ## tracer's container records none, so this is the key every browser trace
+  ## is read by.
   if recordedPath.len == 0: return @[]
   result = @[recordedPath]
-  if workdir.len > 0:
-    let joined = pathJoin(workdir, recordedPath)
-    if joined != recordedPath: result.add joined
+  let joined = pathJoin(engineWorkdir(workdir), recordedPath)
+  if joined != recordedPath: result.add joined
 
 proc replayVfsPayload*(rawTraceResult: string;
                        traceFolder = "trace"): ReplayVfsPayload =
@@ -326,6 +336,10 @@ proc stripTraceFolder*(reportedPath, traceFolder: string): string =
   ## does not start with it — so the location passed through unchanged, the
   ## editor opened a tab named after the engine's trace folder, and the
   ## bundled template host answered `-1` for a file it does not have.
+  ##
+  ## A container that records no workdir is joined onto `.` instead
+  ## (`engineWorkdir`), so a leading `./` comes off the same way.
+  if reportedPath.startsWith("./"): return reportedPath[2 .. ^1]
   if traceFolder.len == 0: return reportedPath
   let prefix = traceFolder & "/"
   if reportedPath.startsWith(prefix):
