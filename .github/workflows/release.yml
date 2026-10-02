@@ -1,0 +1,433 @@
+name: Release
+
+# Builds, verifies and publishes a CodeTracer release. See release_checklist.md
+# and metacraft-specs infrastructure/package-distribution.md §9.1 and §12.
+#
+#   * push of a version tag (`26.09.1`) -> the real release: build every
+#     platform, verify, sign, publish the GitHub Release all-or-nothing, then
+#     ask metacraft-labs/metacraft-desktop-packages to add the .deb/.rpm to
+#     deb.metacraft-labs.com / rpm.metacraft-labs.com.
+#   * workflow_dispatch, a push to `release-dry-run/**`, or a pull request that
+#     touches the release machinery -> a DRY RUN: the same builds and the same
+#     verification, and nothing is published. A release is tagged only on a
+#     commit whose dry run was green (§12 step 3). workflow_dispatch needs this
+#     file on the default branch, so until it is there, a dry run of a `dev`
+#     commit is `git push origin <sha>:refs/heads/release-dry-run/<version>`.
+#
+# The release carries (VERSION from src/ct/version.nim):
+#
+#   linux  CodeTracer-VERSION-amd64.AppImage   the Linux payload
+#          codetracer_VERSION-1_amd64.deb      carriers for the AppImage's tree
+#          codetracer-VERSION-1.x86_64.rpm     (scripts/release/ct-build-packages.sh)
+#          resources.tar.xz                    desktop entry + icons, for AUR/Gentoo
+#   all    <each asset>.asc, SHA256SUMS, SHA256SUMS.asc
+#
+# macOS and Windows are deliberately absent. The release is all-or-nothing,
+# so a leg belongs here only once it has been proven green; a leg that has
+# never produced its artifact blocks every release instead of adding one.
+#
+#   * macOS: the DMG is built through reprobuild (`repro build .#macos-app`,
+#     as dmg-build does in codetracer.yml), and that path does not build on
+#     the aarch64-darwin runners today: reprobuild's project-provider compile
+#     fails with `Security/SecRandom.h: No such file or directory` (dry run
+#     36777381894). reprobuild-macos-smoke fails the same way on PRs cut from
+#     current `dev` (job 109902009060). Add a macOS leg back, producing CodeTracer-VERSION-arm64.dmg,
+#     after dmg-build is green. Until then get.codetracer.com/sh installs the
+#     newest signed DMG from downloads.codetracer.com.
+#   * Windows: no Windows build of CodeTracer has been published yet.
+
+on:
+  push:
+    tags:
+      - "[0-9][0-9].[0-9][0-9].[0-9]*"
+    branches:
+      - "release-dry-run/**"
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "scripts/release/**"
+      - "appimage-scripts/**"
+  workflow_dispatch:
+
+# One release per ref at a time, never cancelled once started: a cancelled
+# publish can leave a draft with half its assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# The AppImage build runs on `eph-linux-x64-release`, the release lane (infra
+# lib/infra-constants.nix `releaseLane`), which a tag push can reach by name and
+# whose runners have the dev shell's dependencies cached and Docker for the
+# package install check. The two short jobs, plan and publish, run where the
+# org's shared runner selector puts them (devops-modules
+# reusable-choose-runner.yml, as metacraft-desktop-packages' publisher does):
+# free GitHub-hosted for this public repository unless CI_RUNNER_MODE says
+# otherwise, so they do not hold the lane's single slot.
+jobs:
+  choose:
+    # Owner: zah. Same selector, pin and rationale as metacraft-desktop-packages'
+    # publish-release.yaml.
+    uses: metacraft-labs/devops-modules/.github/workflows/reusable-choose-runner.yml@cd73eba732b9190499ec78e1e65b0dd784507440
+    with:
+      preferred: ubuntu-24.04
+      fallback: '["eph-linux-x64-release"]'
+
+  plan:
+    name: Plan release
+    needs: choose
+    runs-on: ${{ fromJSON(needs.choose.outputs.runs_on) }}
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Derive the version and whether this run publishes
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          field() { sed -n "s/^ *CodeTracer$1\* = \([0-9][0-9]*\).*/\1/p" src/ct/version.nim; }
+          version="$(field Year).$(printf '%02d' "$(field Month)").$(field Build)"
+          [[ "$version" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]] || { echo "::error::could not read a version from src/ct/version.nim (got '$version')"; exit 1; }
+          publish=false
+          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_TYPE}" = tag ]; then
+            # The tag names the release; version.nim is what the binaries
+            # report. They must agree, or `ct --version` lies.
+            [ "${GITHUB_REF_NAME}" = "$version" ] || { echo "::error::tag ${GITHUB_REF_NAME} does not match src/ct/version.nim ($version)"; exit 1; }
+            publish=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "::notice::CodeTracer $version (publish=$publish)"
+
+  linux:
+    name: Linux (x86_64) release build
+    needs: plan
+    # Always the release lane, not the selector's choice. On a GitHub-hosted
+    # runner the default dev shell is not in any binary cache it can reach, so
+    # the dry run spent its whole two hours building ~7000 derivations
+    # (sui, forc, miden, ...) before the AppImage build began (run 36808054227).
+    runs-on: eph-linux-x64-release
+    # Measured on the release lane (dry run 36817835550): provisioning the dev
+    # shell takes about 50 minutes on a fresh runner and the AppImage build
+    # another hour or more, so the 120 minutes this started with cancelled
+    # the job mid-build. Packaging and the container install checks follow.
+    timeout-minutes: 300
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      # The persisted credential is used by the sibling provisioning below.
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      # The build steps below are appimage-build's in codetracer.yml; see the
+      # notes there for why each one exists.
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+
+      # The job's first token expires after an hour, and a cold runner spends
+      # most of that provisioning (see .github/actions/refresh-github-token).
+      # Every later step that reaches GitHub gets a fresh one first.
+      - name: Refresh the GitHub token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Allow direnv in cloned codetracer-native-recorder
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Refresh the GitHub token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Resolve ct_emulator nimble dependencies
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
+
+      - name: Refresh the GitHub token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The build alone outlasts a token (dry run 36832102898).
+          keep-refreshing: "true"
+
+      - name: Build the AppImage
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: |
+          set -euo pipefail
+          nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh
+          mv CodeTracer.AppImage "CodeTracer-${VERSION}-amd64.AppImage"
+          tar -cJf resources.tar.xz resources/
+
+      # The .deb and .rpm are built HERE, from the AppImage just produced, so a
+      # dry run exercises them exactly as a release does. Every step runs from
+      # the checkout, where the flake and the scripts are.
+      - name: Build the native packages from the AppImage
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}"
+          nix shell nixpkgs#dpkg nixpkgs#rpm nixpkgs#squashfsTools nixpkgs#zstd nixpkgs#xz -c \
+            sh scripts/release/ct-build-packages.sh --version "${VERSION}" \
+              --appimage "CodeTracer-${VERSION}-amd64.AppImage" --out . < /dev/null
+          for f in "codetracer_${VERSION}-1_amd64.deb" "codetracer-${VERSION}-1.x86_64.rpm"; do
+            [ -f "$f" ] || { echo "::error::ct-build-packages.sh did not produce $f"; exit 1; }
+          done
+
+      # The packages must install EXACTLY the AppImage's tree, and the program
+      # they install must run. Both are checked against what a package user
+      # gets: the extracted package contents, then a clean debian:12 / fedora:40
+      # container that installs the package with apt / dnf and runs `ct`.
+      - name: Verify the native packages install the AppImage intact
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}"
+          nix shell nixpkgs#dpkg nixpkgs#rpm nixpkgs#cpio nixpkgs#squashfsTools nixpkgs#findutils nixpkgs#coreutils -c \
+            sh scripts/release/ct-verify-packages.sh --version "${VERSION}" \
+              --appimage "CodeTracer-${VERSION}-amd64.AppImage" \
+              --deb "codetracer_${VERSION}-1_amd64.deb" \
+              --rpm "codetracer-${VERSION}-1.x86_64.rpm" < /dev/null
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: |
+            CodeTracer-${{ env.VERSION }}-amd64.AppImage
+            codetracer_${{ env.VERSION }}-1_amd64.deb
+            codetracer-${{ env.VERSION }}-1.x86_64.rpm
+            resources.tar.xz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release (all-or-nothing)
+    needs: [choose, plan, linux]
+    runs-on: ${{ fromJSON(needs.choose.outputs.runs_on) }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ github.token }}
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Assert the complete, expected asset set is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            "CodeTracer-${VERSION}-amd64.AppImage"
+            "codetracer_${VERSION}-1_amd64.deb"
+            "codetracer-${VERSION}-1.x86_64.rpm"
+            "resources.tar.xz"
+          )
+          printf '%s\n' "${expected[@]}" | LC_ALL=C sort > expected.txt
+          (cd dist && ls -1) | LC_ALL=C sort > present.txt
+          if ! diff -u expected.txt present.txt; then
+            echo "::error::the release must carry exactly the expected assets"
+            exit 1
+          fi
+          for f in "${expected[@]}"; do
+            [ -s "dist/$f" ] || { echo "::error::dist/$f is empty"; exit 1; }
+          done
+
+      - name: Import the release signing key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
+
+      # Each asset gets a detached signature, SHA256SUMS lists every asset, and
+      # SHA256SUMS is itself signed (package-distribution.md §7.1). The key is
+      # the CodeTracer release key, 0389 4920 AC59 5EDF 9B79 5B0D A941 7A0B 6297 F790,
+      # which get.codetracer.com/sh pins for its AppImage fallback.
+      - name: Sign the assets and build SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          assets=(*)
+          for f in "${assets[@]}"; do
+            gpg --batch --yes --armor --detach-sign "$f"
+          done
+          sha256sum "${assets[@]}" > SHA256SUMS
+          gpg --batch --yes --armor --detach-sign SHA256SUMS
+          fpr="$(gpg --batch --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2=="VALIDSIG"{print $12}')"
+          [ "$fpr" = 03894920AC595EDF9B795B0DA9417A0B6297F790 ] \
+            || { echo "::error::SHA256SUMS was signed by '$fpr', not the CodeTracer release key"; exit 1; }
+          for f in "${assets[@]}"; do gpg --batch --verify "$f.asc" "$f" 2>/dev/null; done
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Dry run summary
+        if: needs.plan.outputs.publish != 'true'
+        run: |
+          {
+            echo "### Dry run of CodeTracer ${VERSION}: every asset built, verified and signed"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+            echo
+            echo "Nothing was published. Tag this commit \`${VERSION}\` to release it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write the release notes
+        if: needs.plan.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk -v v="$VERSION" '
+            /^## / { if (p) exit; if (index($0, "## " v) == 1) { p = 1; next } }
+            p
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::CHANGELOG.md has no '## ${VERSION}' section"; exit 1; }
+          cat >> notes.md <<NOTES
+
+          ## Install
+
+          Linux and macOS:
+
+              curl -fsSL https://get.codetracer.com/sh | sh
+
+          On Debian, Ubuntu, Fedora and RHEL this registers the Metacraft Labs package
+          repository (\`deb.metacraft-labs.com\` / \`rpm.metacraft-labs.com\`), so later
+          updates arrive through \`apt upgrade\` / \`dnf upgrade\`. The packages and the
+          AppImage are also attached below. \`SHA256SUMS\` lists every
+          asset and is signed, like each asset, with the CodeTracer release key
+          [\`0389 4920 AC59 5EDF 9B79 5B0D A941 7A0B 6297 F790\`](https://downloads.codetracer.com/CodeTracer.pub.asc).
+          NOTES
+
+      - name: Publish the GitHub Release
+        if: needs.plan.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh() { nix shell nixpkgs#gh -c gh "$@"; }
+          # A PUBLISHED release for this tag is never replaced. A leftover
+          # draft (from a failed earlier attempt) is, so a re-run starts clean.
+          if state="$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null)"; then
+            [ "$state" = true ] || { echo "::error::release $TAG is already published"; exit 1; }
+            gh release delete "$TAG" --yes
+          fi
+          gh release create "$TAG" --draft --verify-tag --title "CodeTracer $TAG" \
+            --notes-file notes.md dist/*
+          # Verify the draft carries exactly what was built, byte for byte in
+          # size, before anyone can see it.
+          gh release view "$TAG" --json assets -q '.assets[] | "\(.name) \(.size)"' | LC_ALL=C sort > uploaded.txt
+          (cd dist && for f in *; do echo "$f $(stat -c %s "$f")"; done) | LC_ALL=C sort > built.txt
+          diff -u built.txt uploaded.txt || { echo "::error::the draft's assets differ from the built set"; exit 1; }
+          gh release edit "$TAG" --draft=false --latest
+          echo "::notice::Published CodeTracer $TAG with $(wc -l < built.txt) assets"
+
+      # downloads.codetracer.com serves the AppImage under stable names. The AUR
+      # and Gentoo recipes, and older installers, fetch it from there.
+      - name: Publish the AppImage to downloads.codetracer.com
+        if: needs.plan.outputs.publish == 'true'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+          ENDPOINT: ${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }}
+          BUCKET: ${{ vars.R2_CODETRACER_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          put() { nix shell nixpkgs#awscli2 -c aws --endpoint-url="$ENDPOINT" s3 cp "dist/$1" "s3://$BUCKET/$2" --checksum-algorithm CRC32 --only-show-errors; }
+          for slot in "$VERSION" latest; do
+            put "CodeTracer-${VERSION}-amd64.AppImage"     "CodeTracer-${slot}-amd64.AppImage"
+            put "CodeTracer-${VERSION}-amd64.AppImage.asc" "CodeTracer-${slot}-amd64.AppImage.asc"
+          done
+
+      # Runs AFTER the release is public: the publisher downloads the .deb and
+      # .rpm from this Release and verifies them against its SHA256SUMS. It
+      # owns the organisation's repository key and bucket credentials; this
+      # workflow holds neither and only asks. See package-distribution.md §9.1.
+      - name: Mint a token for the organisation's package publisher
+        if: needs.plan.outputs.publish == 'true'
+        id: packages_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+          repositories: metacraft-desktop-packages
+          # repository_dispatch requires contents: write on the target.
+          permission-contents: write
+
+      - name: Publish the packages into the organisation's repositories
+        if: needs.plan.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.packages_token.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          nix shell nixpkgs#gh -c gh api --method POST repos/metacraft-labs/metacraft-desktop-packages/dispatches \
+            -f event_type=publish-release \
+            -f "client_payload[repository]=${GITHUB_REPOSITORY}" \
+            -f "client_payload[tag]=${TAG}"
+          echo "::notice::Asked metacraft-labs/metacraft-desktop-packages to add ${TAG}'s packages to deb.metacraft-labs.com and rpm.metacraft-labs.com. Follow it at https://github.com/metacraft-labs/metacraft-desktop-packages/actions/workflows/publish-release.yaml"
