@@ -239,10 +239,50 @@ fn structured_records_decode_alike_whatever_bit_12_says() {
     }
 }
 
+/// Committed recordings that predate the current container version and whose
+/// documented producer cannot run on a Linux x86_64 host, with the reason.
+/// Each must still fail, and only with the container-version refusal; one that
+/// opens fails the test so its entry is removed rather than left to hide a
+/// later regression.
+const NOT_YET_RE_RECORDED: &[(&str, &str)] = &[
+    (
+        "examples/recordings/mcr/android-arm64/trace.ct",
+        "re-recorded only on a USB-connected Android device (mcr/android-arm64/regenerate.sh)",
+    ),
+    (
+        "examples/recordings/mcr/android-arm64/trace-portable.ct",
+        "exported from android-arm64/trace.ct, which must be re-recorded first",
+    ),
+    (
+        "examples/recordings/mcr/ios-arm64/trace.ct",
+        "re-recorded only on macOS with Xcode and an iOS simulator (mcr/ios-arm64/regenerate.sh)",
+    ),
+    (
+        "examples/recordings/mcr/ios-arm64/trace-portable.ct",
+        "exported from ios-arm64/trace.ct, which must be re-recorded first",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/trace.ct",
+        "re-recorded only on an Apple Silicon Mac (mcr/macos-arm64/regenerate.sh)",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/trace-portable.ct",
+        "exported from macos-arm64/trace.ct, which must be re-recorded first",
+    ),
+    (
+        "examples/recordings/mcr/windows-x86_64/trace.ct",
+        "re-recorded only on Windows in a VS Developer shell (mcr/windows-x86_64/regenerate.ps1)",
+    ),
+    (
+        "examples/recordings/mcr/windows-x86_64/trace-portable.ct",
+        "exported from windows-x86_64/trace.ct, which must be re-recorded first",
+    ),
+];
+
 /// Every committed recording still opens: the bare-name fixtures were
 /// re-recorded, so refusing that shape must not refuse anything in the tree.
 /// Submodules are included, so the example recordings are covered when checked
-/// out.
+/// out. The recordings in [`NOT_YET_RE_RECORDED`] are the only exceptions.
 #[test]
 fn every_committed_recording_opens() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -265,7 +305,30 @@ fn every_committed_recording_opens() {
     );
 
     let mut with_tables = 0;
+    let mut not_yet_re_recorded = 0;
     for ct in &files {
+        let relative = ct
+            .strip_prefix(&repo)
+            .unwrap_or(ct)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if let Some((_, reason)) = NOT_YET_RE_RECORDED.iter().find(|(path, _)| *path == relative) {
+            match CtfsReader::open(ct) {
+                Ok(_) => panic!(
+                    "{relative} now opens; remove it from NOT_YET_RE_RECORDED (it was listed because it is {reason})"
+                ),
+                Err(e) => {
+                    let message = e.to_string();
+                    assert!(
+                        message.contains("is not readable: this reader reads versions 5 and 6"),
+                        "{relative} is listed as not yet re-recorded ({reason}), so it may fail only on its \
+                         container version, but it failed with: {message}"
+                    );
+                }
+            }
+            not_yet_re_recorded += 1;
+            continue;
+        }
         let mut ctfs = CtfsReader::open(ct).unwrap_or_else(|e| panic!("{}: container: {e}", ct.display()));
         if let Some(tables) =
             InterningTables::open_from_ctfs(&mut ctfs).unwrap_or_else(|e| panic!("{}: {e}", ct.display()))
@@ -283,8 +346,17 @@ fn every_committed_recording_opens() {
         "none of the {} committed recordings carries interning tables, so this checked nothing",
         files.len()
     );
+    let examples_checked_out = files.iter().any(|f| f.starts_with(repo.join("examples/recordings")));
+    if examples_checked_out {
+        assert_eq!(
+            not_yet_re_recorded,
+            NOT_YET_RE_RECORDED.len(),
+            "every recording listed in NOT_YET_RE_RECORDED must exist; a missing one was moved or removed"
+        );
+    }
     println!(
-        "{with_tables} of {} committed recordings carry interning tables; all open",
+        "{with_tables} of {} committed recordings carry interning tables; all open except the {not_yet_re_recorded} \
+         listed as not yet re-recorded",
         files.len()
     );
 }
