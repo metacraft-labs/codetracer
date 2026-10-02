@@ -27,6 +27,14 @@ portable-pre-commit-doctor:
 test-build-alignment:
   bash scripts/test-build-alignment.sh
 
+# Assert that entering the dev shell from ANOTHER git repository writes nothing
+# there (no node_modules link, no hook config, no git hooks), and that entered
+# from inside this repository it still prepares this repository's top level.
+# Runs `nix develop`, so it is slow and not part of the in-shell suites. See the
+# header of ci/test/dev-shell-writes-nothing-elsewhere-test.sh.
+test-dev-shell-writes-nothing-elsewhere:
+  bash ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `inputs.runquota-src.follows = "runquota"`
 # means reprobuild is COMPILED against whatever that input resolves to, so
