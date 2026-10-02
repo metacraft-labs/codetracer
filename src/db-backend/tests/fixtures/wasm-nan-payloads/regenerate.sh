@@ -73,8 +73,8 @@ CT_INSTRUMENT_BIN="${CT_INSTRUMENT_BIN:-}"
 if [ -z "$CT_INSTRUMENT_BIN" ]; then
 	CT_INSTRUMENT_BIN="$(newest_executable \
 		"$WASM_INSTRUMENTER/target/release/ct-instrument" \
-		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" \
-		|| CT_INSTRUMENT_BIN=""
+		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" ||
+		CT_INSTRUMENT_BIN=""
 fi
 if [ -z "$CT_INSTRUMENT_BIN" ] && command -v ct-instrument >/dev/null 2>&1; then
 	CT_INSTRUMENT_BIN="$(command -v ct-instrument)"
@@ -88,8 +88,8 @@ if [ -z "$RECORD_WEB_BIN" ]; then
 	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" \
-		|| RECORD_WEB_BIN=""
+		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" ||
+		RECORD_WEB_BIN=""
 fi
 if [ -z "$RECORD_WEB_BIN" ]; then
 	missing+=("- session-manager not built (cargo build in $CODETRACER_ROOT/src/backend-manager)")
@@ -255,12 +255,12 @@ kill -INT "$RECORD_WEB_PID" >/dev/null 2>&1 || true
 wait "$RECORD_WEB_PID" 2>/dev/null || true
 forget_pid "$RECORD_WEB_PID"
 
-if [ ! -d "$RECORD_WEB_OUT/nan-payloads.ct" ]; then
+if [ ! -f "$RECORD_WEB_OUT/nan-payloads.ct" ]; then
 	echo "[regenerate] record-web did not produce nan-payloads.ct" >&2
 	ls -la "$RECORD_WEB_OUT" >&2 || true
 	exit 1
 fi
-cp -R "$RECORD_WEB_OUT/nan-payloads.ct" "$OUT_DIR/nan-payloads.ct"
+cp "$RECORD_WEB_OUT/nan-payloads.ct" "$OUT_DIR/nan-payloads.ct"
 
 echo
 echo "[regenerate] wrote $OUT_DIR/nan-payloads.ct"

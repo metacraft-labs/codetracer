@@ -1,13 +1,13 @@
 //! M26 — browser-recorder receiver **host process**.
 //!
 //! Companion of [`crate::browser_stream_receiver`]: that module owns the
-//! JSON event vocabulary, the line parser, and the [`CtfsWriter`] trait
+//! wire event vocabulary, the line parser, and the [`CtfsWriter`] trait
 //! used by the unit tests; this module owns the **runnable** half — a
 //! tokio + `tokio-tungstenite` WebSocket server that listens on
 //! `ws://<host>:<port>/ct-stream`, accepts one connection per browser tab,
-//! dispatches each received text frame's newline-delimited JSON events to
-//! a per-connection [`StreamReceiver`], and persists the resulting trace
-//! to disk under a user-chosen output directory.
+//! dispatches each received text frame's events to a per-connection
+//! [`StreamReceiver`], and persists the resulting recording under a
+//! user-chosen output directory.
 //!
 //! # Wire format
 //!
@@ -17,104 +17,40 @@
 //! newline-delimited JSON, one event per line.  The first event is always
 //! `SessionStart {program, args}`; the last (on `pagehide` /
 //! `__ct.stop()`) is `SessionEnd {}`.  See `Value-Origin-Tracking.md`
-//! §14.4 for the full event vocabulary.
+//! §14.4 for the full event vocabulary.  That is a transport between the
+//! page and this host; it is never persisted.
 //!
 //! # On-disk format
 //!
-//! V1 lands the legacy three-file JSON trace shape — the lightest
-//! container the downstream `codetracer_trace_reader` / db-backend tooling
-//! understands without pulling in the Nim-backed CTFS writer (which would
-//! force every backend-manager build to compile the trace-format-nim
-//! static library, see `codetracer-trace-format-nim`):
+//! `codetracer-specs/Recording-Backends/Browser-Recording-Container.md` §2:
+//! one CTFS container per connection, `<out_dir>/<program>.ct`, written by
+//! the pure-Rust `CtfsTraceWriter` ([`CtfsRecordingWriter`]).  It opens in
+//! the debugger like any other JavaScript recording.  Inside it, as the
+//! internal file `boundary.log`, is the boundary log
+//! ([`crate::boundary_log`], CTBL v1) — the same record sequence in the
+//! framed binary encoding `codetracer-wasm-recorder` replays a module
+//! against.
 //!
-//!   * `<out_dir>/<program>.ct/trace.json`          — `Vec<TraceLowLevelEvent>` per spec
-//!   * `<out_dir>/<program>.ct/trace_metadata.json` — `{program, args, workdir, ...}`
-//!   * `<out_dir>/<program>.ct/trace_paths.json`    — `[path, ...]`
-//!
-//! Upgrading to the CBOR+Zstd CTFS container is a follow-on that swaps
-//! this writer impl for a `NimTraceWriter`-backed one without touching the
-//! WebSocket transport surface above.  The `CtfsWriter` trait keeps that
-//! seam intact.
-//!
-//! # Why `trace.json` is written incrementally (M38c)
-//!
-//! `codetracer-specs/Recording-Backends/WASM-Replay-Snapshots-And-Slices.md`
-//! §2 requires snapshots to be derived **during** recording: "the browser
-//! streams boundary events; a replaying recorder consumes that stream as it
-//! arrives and re-executes in lockstep, emitting snapshots as it goes. When
-//! the page stops, the snapshots are already there."
-//!
-//! The original writer accumulated every record in a `Vec` and wrote
-//! `trace.json` with one `fs::write` at session end, so the file did not
-//! exist until the page unloaded — it could be neither followed nor teed,
-//! and §2's timeline could not hold in production no matter what the
-//! consumer did.  [`JsonFileCtfsWriter`] now appends each record the
-//! moment it is translated: the array is opened with `[` on the first
-//! record and closed with `]` at session end.
-//!
-//! Two properties of that rendering are load-bearing and pinned by tests:
-//!
-//! 1. **It is byte-for-byte what the single-shot writer produced.**
-//!    `serde_json`'s compact sequence serialiser emits
-//!    `[` *elem* `,` *elem* … `]` with no whitespace, so appending
-//!    `"[" + first` and then `"," + next` reproduces
-//!    `serde_json::to_string(&Vec<TraceLowLevelEvent>)` exactly, and `[]`
-//!    for an empty recording.  This is not cosmetic: the `Function`,
-//!    `VariableName` and `Path` tables in this format are **positional**,
-//!    consumers resolve them by index, and `codetracer-wasm-recorder`
-//!    pins the exact rendering (`TestBuilderReproducesTheCommittedBrowserRecording`)
-//!    as does the committed cross-process demo fixture.
-//!    `verify_incremental_writer_is_byte_identical_to_the_batch_writer`
-//!    renders the same record sequence both ways and compares the bytes.
-//! 2. **A recording cut off mid-session is classifiable, not corrupt.**
-//!    Each record is assembled into one buffer (separator + JSON) and
-//!    handed to a single `write_all`, so a producer that dies leaves whole
-//!    records and an unclosed array — which
-//!    `codetracer-wasm-recorder/internal/boundarylog/stream.go` classifies
-//!    as the benign `TruncatedUnterminated` ("every crossing it did carry
-//!    was complete") rather than `TruncatedMidRecord`.
-//!
-//! `trace_metadata.json` is also written when the stream opens, not only
-//! at session end, because the streaming consumer calls
-//! `boundarylog.LoadRecordingMetadata` on the `.ct` *before* reading a
-//! single record; without it the recording it produces has no program
-//! name.  Session end rewrites it, so the final bytes are unchanged.
+//! The container is written under `<out_dir>/.record-web-partial/` while
+//! the session runs and renamed into place when it ends, so a reader of
+//! `<out_dir>` never meets a half-written recording.
 //!
 //! # Feeding the streaming consumer (opt-in)
 //!
-//! Nothing above changes what lands on disk, so it is unconditional.  The
-//! two ways to hand the same bytes to a §2 consumer *are* opt-in, because
-//! they spawn a process and add a file to the `.ct`:
+//! `WASM-Replay-Snapshots-And-Slices.md` §2 derives snapshots *during*
+//! recording: "the browser streams boundary events; a replaying recorder
+//! consumes that stream as it arrives and re-executes in lockstep".
+//! [`StreamConsumerConfig::command`] is spawned once per recording and fed
+//! the boundary log on stdin, frame by frame, as records are translated —
+//! the shape `wazero run --boundary-stream - <module>` wants.  EOF is
+//! unambiguous (the daemon closes stdin after the `End` frame) and
+//! backpressure is real (the consumer reads only between exported calls).
+//! Its absence or failure costs seek performance only — a broken tee is
+//! logged and the recording continues.
 //!
-//! * [`StreamConsumerConfig::command`] — a command spawned
-//!   once per recording, receiving the exact `trace.json` byte stream on
-//!   stdin.  This is the shape
-//!   `wazero-snapshots run --boundary-log <program>.ct --boundary-stream -`
-//!   wants: EOF is unambiguous (the daemon closes stdin) and backpressure
-//!   is real (the consumer reads only between exported calls).  Its
-//!   absence or failure costs seek performance only — a broken tee is
-//!   logged and the recording continues.
-//! * [`StreamConsumerConfig::done_marker`] — the marker file
-//!   `wazero-snapshots run --boundary-stream <file> --stream-done <marker>`
-//!   waits for, created inside the `.ct` after the final flush.  A file
-//!   has no end of stream, so without the marker the consumer refuses to
-//!   follow one.
-//!
-//! # Why the legacy JSON shape (not CTFS) for M26 V1
-//!
-//! 1. **Zero new build deps.**  The backend-manager crate currently has a
-//!    pure-Rust dependency graph; pulling in `codetracer_trace_writer_nim`
-//!    would force every consumer (including the headless CI containers)
-//!    to grow a Nim toolchain + libzstd + a build.rs invocation that
-//!    compiles a static library.  M26's stop-condition rules that out as
-//!    "new infrastructure".
-//! 2. **The reader path already handles it.**  The db-backend loads both
-//!    the legacy JSON and the modern CTFS containers via the same trace
-//!    reader entry point (`codetracer_trace_reader::open`); the format is
-//!    auto-detected from the artefact shape.
-//! 3. **A follow-on upgrade is mechanical.**  Swap [`JsonFileCtfsWriter`]
-//!    below for a `NimTraceWriter` instance — the WebSocket transport,
-//!    the receiver, and the CLI are untouched.
+//! Each frame is assembled into one buffer and handed to a single
+//! `write_all`, so a producer that dies leaves whole frames and no `End`:
+//! a stream the consumer classifies as unterminated rather than torn.
 
 use std::fs;
 use std::io;
@@ -132,6 +68,11 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
 
+use codetracer_trace_types::{EventLogKind, TypeKind, ValueRecord};
+use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+use codetracer_trace_writer::trace_writer::TraceWriter;
+
+use crate::boundary_log;
 use crate::browser_stream_receiver::{
     BrowserEvent, CtfsWriter, EncodedValue, GlobalSet, ImportedGlobalState, ImportedMemoryState,
     MemoryWrite, StreamReceiver, default_output_path,
@@ -147,39 +88,56 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:9230";
 pub const DEFAULT_ENDPOINT_PATH: &str = "/ct-stream";
 
 /// Placeholder substituted in every [`StreamConsumerConfig::command`]
-/// argument with the absolute path of the `.ct` directory the recording is
-/// being written to.
+/// argument with the path the recording's `.ct` will be written to.
 ///
-/// The consumer needs it — `wazero-snapshots run --boundary-log <program>.ct`
-/// reads the recording's metadata from that directory — but the daemon only
-/// knows the path once the page has announced its program name, so it cannot
-/// be baked into the command line by the operator.
-pub const TRACE_DIR_PLACEHOLDER: &str = "{trace_dir}";
+/// The daemon only knows that path once the page has announced its program
+/// name, so it cannot be baked into the command line by the operator.  The
+/// container itself does not exist until the session ends; a consumer uses
+/// the path to name what it derives (`--slice-dir {trace}.slices`).
+pub const TRACE_PLACEHOLDER: &str = "{trace}";
 
-/// How the daemon hands the recording's byte stream to a
+/// The placeholder this host used to substitute, when a recording was a
+/// directory.  Refused by [`StreamConsumerConfig::validate`]: substituting
+/// a file path into an argument written for a directory would hand the
+/// consumer paths like `<program>.ct/slices`, inside a file.
+pub const RETIRED_TRACE_DIR_PLACEHOLDER: &str = "{trace_dir}";
+
+/// How the daemon hands the recording's boundary log to a
 /// `WASM-Replay-Snapshots-And-Slices.md` §2 consumer.
 ///
-/// Both members are **off by default**: `record-web` without them behaves
-/// exactly as it always has, spawning nothing and writing nothing extra
-/// into the `.ct`.
+/// Off by default: `record-web` without it spawns nothing.
 #[derive(Debug, Clone, Default)]
 pub struct StreamConsumerConfig {
-    /// Command and arguments spawned once per recording, fed the exact
-    /// `trace.json` byte stream on stdin.  Empty means "spawn nothing".
+    /// Command and arguments spawned once per recording, fed the boundary
+    /// log (CTBL v1) on stdin.  Empty means "spawn nothing".
     ///
-    /// Every argument has [`TRACE_DIR_PLACEHOLDER`] replaced with the
+    /// Every argument has [`TRACE_PLACEHOLDER`] replaced with the
     /// recording's `.ct` path.  A typical value:
     ///
     /// ```text
-    /// wazero-snapshots run --boundary-log {trace_dir} --boundary-stream - \
-    ///     --slice-dir {trace_dir}/slices --slice-every 10 original.wasm
+    /// wazero-snapshots run --boundary-stream - \
+    ///     --slice-dir {trace}.slices --slice-every 10 original.wasm
     /// ```
     pub command: Vec<String>,
-    /// Name of a marker file created inside the `.ct` once `trace.json` is
-    /// complete, for the file-following consumer shape
-    /// (`--boundary-stream <file> --stream-done <marker>`).  `None` means
-    /// no marker is written.
-    pub done_marker: Option<String>,
+}
+
+impl StreamConsumerConfig {
+    /// Refuse a command that still uses the retired `{trace_dir}`
+    /// placeholder, naming the replacement.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(arg) = self
+            .command
+            .iter()
+            .find(|arg| arg.contains(RETIRED_TRACE_DIR_PLACEHOLDER))
+        {
+            return Err(format!(
+                "--snapshot-consumer argument `{arg}` uses {RETIRED_TRACE_DIR_PLACEHOLDER}, \
+                 which named the recording directory. A recording is now a single .ct \
+                 file; use {TRACE_PLACEHOLDER} for its path"
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Configuration for the [`BrowserStreamHost`].
@@ -190,7 +148,7 @@ pub struct BrowserStreamHostConfig {
     /// Directory under which per-program `.ct` trace directories land.
     /// Created on demand if it does not exist.
     pub out_dir: PathBuf,
-    /// Working directory recorded in `trace_metadata.json`.  Defaults to
+    /// Working directory recorded in the recording's metadata.  Defaults to
     /// the host process's CWD at start time.
     pub workdir: PathBuf,
     /// Optional §2 streaming-consumer wiring.  Defaults to
@@ -524,7 +482,7 @@ async fn handle_connection(
     // shared with the receiver through the `CtfsWriter` trait so the
     // unit-test suite (in `browser_stream_receiver::tests`) can reuse the
     // same plumbing with `InMemoryCtfsWriter`.
-    let writer_handle = Arc::new(Mutex::new(JsonFileCtfsWriter::with_stream_consumer(
+    let writer_handle = Arc::new(Mutex::new(CtfsRecordingWriter::with_stream_consumer(
         config.out_dir.clone(),
         config.workdir.clone(),
         config.stream_consumer.clone(),
@@ -593,7 +551,7 @@ async fn handle_connection(
 }
 
 // `shared_writer` in `browser_stream_receiver` consumes a `W: CtfsWriter + 'static`
-// by value, but here we have to keep an `Arc<Mutex<JsonFileCtfsWriter>>` around so
+// by value, but here we have to keep an `Arc<Mutex<CtfsRecordingWriter>>` around so
 // the connection handler can inspect `last_output_path` after the receiver runs.
 // This helper wraps an existing `Arc<Mutex<W>>` as `Arc<Mutex<dyn CtfsWriter>>`
 // without losing the typed handle.
@@ -605,93 +563,89 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// On-disk JSON CTFS writer
+// The CTFS recording writer
 // ---------------------------------------------------------------------------
 
-/// A [`CtfsWriter`] that emits the legacy three-file JSON trace shape.
+/// A [`CtfsWriter`] that records a browser session into one CTFS `.ct`.
 ///
-/// The format is the same one `NonStreamingTraceWriter` writes in
-/// `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs`
-/// (`fn flush_events_to_disk`): a directory containing `trace.json` (a
-/// `Vec<TraceLowLevelEvent>`), `trace_metadata.json`
-/// (`{program, args, workdir}`), and `trace_paths.json` (`Vec<String>`).
-/// The db-backend / `codetracer_trace_reader` reader path auto-detects
-/// this format from the directory shape.
-pub struct JsonFileCtfsWriter {
+/// Every translated record goes two places at once:
+///
+/// * into a [`CtfsTraceWriter`] writing `<out_dir>/.record-web-partial/<program>.ct`,
+///   which is renamed to `<out_dir>/<program>.ct` when the session ends; and
+/// * into the CTBL v1 boundary log ([`crate::boundary_log`]), which is teed
+///   live to the `--snapshot-consumer` process and stored in the finished
+///   container as its `boundary.log` internal file.
+///
+/// The record sequence is the same in both, which is what lets the replaying
+/// recorder and the debugger agree about which crossing is which.
+pub struct CtfsRecordingWriter {
     out_dir: PathBuf,
     workdir: PathBuf,
     program: String,
     args: Vec<String>,
-    /// The open `trace.json`, plus the optional tee into the spawned §2
-    /// consumer.  `None` before the first record and after `session_end`
-    /// has closed the array — see [`Self::open_stream`].
-    stream: Option<RecordStream>,
-    /// The `.ct` directory chosen when the stream opened.  Once fixed it
-    /// is never recomputed, so metadata and the events file cannot land in
-    /// different directories if the program name arrives late.
-    trace_dir: Option<PathBuf>,
+    /// The recording being written.  `None` before the first record and
+    /// after `session_end` has finalised it — see [`Self::open_stream`].
+    open: Option<OpenRecording>,
+    /// The `.ct` path chosen when the recording opened.  Once fixed it is
+    /// never recomputed, so a program name that arrives late cannot move a
+    /// recording that has already started.
+    output_path: Option<PathBuf>,
     /// §2 consumer wiring; see [`StreamConsumerConfig`].
     stream_consumer: StreamConsumerConfig,
-    /// Test-only mirror of every emitted record.
-    ///
-    /// The whole point of the incremental writer is *not* to hold the
-    /// recording in memory, so this is `None` in production.  A test
-    /// enables it to render the same record sequence the way the original
-    /// single-shot writer did — `serde_json::to_string` of one `Vec` — and
-    /// compare those bytes against the file the incremental path produced.
-    /// Comparing against serde's own sequence serialiser (rather than
-    /// against a second hand-rolled join) is what makes that check worth
-    /// anything.
-    batch_mirror: Option<Vec<TraceLowLevelEvent>>,
-    /// Path interning table: maps the path's first-seen index to the
-    /// canonical `path_id`.  Mirrors `NonStreamingTraceWriter`'s
-    /// `ensure_path_id` so paths land in `trace_paths.json` in
-    /// registration order.
+    /// Path interning table, in registration order: a path's position is
+    /// the `path_id` every `Step` and `Function` refers to.
     path_index: indexmap_compat::OrderedSet<PathBuf>,
-    /// Function interning table: keyed by `(fn_id_from_runtime,
-    /// path_id_at_first_sight)`.  The browser runtime mints its own
-    /// `fnId` namespace which we map 1:1 onto the canonical
-    /// `function_id` for the on-disk format.  Subsequent `Call` events
-    /// referencing the same `fnId` resolve to the registered function.
+    /// Function interning table, keyed by the runtime's own `fnId`, which
+    /// this maps 1:1 onto the recording's dense `function_id`.
     fn_table: indexmap_compat::OrderedMap<u32, FunctionRecordOnDisk>,
-    /// Whether `session_end` has run.  Set to true after the JSON files
-    /// land on disk so a second call is a no-op.
-    pub session_ended: bool,
-    /// The path the writer chose for the events file — captured for
-    /// logging and for the smoke test.
-    pub last_output_path: Option<PathBuf>,
-    /// Variable-name interning table.  The on-disk format identifies a
-    /// variable by its index in `VariableName` registration order, so a
-    /// writer that emits the name but always writes id 0 attributes
-    /// every value in the recording to whichever name happened to be
-    /// registered first — the trace looks populated but every lookup
-    /// returns the wrong variable.
+    /// Variable-name interning table.  A recording identifies a variable by
+    /// its position in `VariableName` registration order, so a writer that
+    /// named a variable but always wrote id 0 would attribute every value to
+    /// whichever name happened to be registered first.
     var_index: indexmap_compat::OrderedSet<String>,
-    /// Instrumentation manifest forwarded by the page runtime, decoded
-    /// into the site / function lookup tables below.  `None` until a
-    /// `Manifest` event arrives (or forever, for a runtime that does not
-    /// bundle one) — in that case the writer falls back to the
-    /// `<browser>` placeholder path and site-id-as-line encoding.
+    /// Instrumentation manifest forwarded by the page runtime.  `None` until
+    /// a `Manifest` event arrives (or forever, for a runtime that does not
+    /// bundle one) — in that case the writer falls back to the `<browser>`
+    /// placeholder path and site-id-as-line encoding.
     manifest: Option<InstrumentationManifest>,
-    /// Accumulated spec §3.3 / §3.4 host state, rendered to
-    /// `boundary_state.json`.  Empty (and no file written) for every
-    /// recording whose module defines its own memory and globals.
-    host_state: HostStateSidecar,
+    /// Whether a spec §3.3 `HostInitialState` has been recorded.  The page
+    /// sends it once, before the first exported call; a second one would
+    /// mean two sessions were spliced together.
+    host_initial_seen: bool,
+    /// Whether `session_end` has run.  Set once the `.ct` is in place, so a
+    /// second call is a no-op.
+    pub session_ended: bool,
+    /// The `.ct` the session was finalised into, for logging and tests.
+    pub last_output_path: Option<PathBuf>,
 }
 
-/// Name of the spec §3.3 / §3.4 sidecar inside the `.ct` directory.
-///
-/// Must match `HostStateFileName` in
-/// `codetracer-wasm-recorder/internal/boundarylog/hoststate.go`.
-const HOST_STATE_FILE_NAME: &str = "boundary_state.json";
+/// The parts of a recording that only exist between its first record and
+/// its finalisation.
+struct OpenRecording {
+    writer: CtfsTraceWriter,
+    /// Where the container is written while the session runs.  Renamed onto
+    /// the final path at session end, so a reader of `<out_dir>` never sees
+    /// a half-written `.ct`.
+    partial_path: PathBuf,
+    /// The whole boundary log so far, magic and version included.  Small: a
+    /// browser recording's boundary log is the page's host interactions,
+    /// not its memory.
+    boundary: Vec<u8>,
+    tee: Option<ConsumerTee>,
+    /// Records written, for the consumer's exit log line.
+    records: u64,
+    /// Type ids registered on first use, by kind.
+    types: std::collections::HashMap<&'static str, codetracer_trace_types::TypeId>,
+}
 
-/// Schema version of the sidecar.
-///
-/// The consumer treats an unrecognised version as a **hard error** rather
-/// than reading what it recognises, because the whole point of §3.3 is
-/// that a missing input produces a divergence later, at a point unrelated
-/// to the cause.  Bumping this therefore means bumping it there too.
-const HOST_STATE_VERSION: u32 = 1;
+/// Name of the directory, inside `--out-dir`, recordings are written into
+/// while their session runs.  Hidden, so a scan of `<out_dir>/*.ct` cannot
+/// mistake an unfinished recording for a finished one.
+pub const PARTIAL_DIR_NAME: &str = ".record-web-partial";
+
+/// What the browser recording names as its producer, in the boundary log's
+/// header frame.
+const RECORDER_NAME: &str = "codetracer-js-recorder-browser";
 
 /// `boundary_id` of the in-stream spec §3.3 / §3.4 records (M44b).
 ///
@@ -703,18 +657,25 @@ const HOST_STATE_VERSION: u32 = 1;
 /// `codetracer-wasm-recorder/internal/boundarylog/hoststate.go`.
 const HOST_STATE_BOUNDARY_ID: &str = "wasm-host-state";
 
+/// Schema version of the host-state records.
+///
+/// The consumer treats an unrecognised version as a **hard error** rather
+/// than reading what it recognises, because the whole point of §3.3 is
+/// that a missing input produces a divergence later, at a point unrelated
+/// to the cause.  Bumping this therefore means bumping it there too.
+const HOST_STATE_VERSION: u32 = 1;
+
 /// The two in-stream record kinds.  Must match `hostStateRecordInitial` /
 /// `hostStateRecordMutation` in the consumer.
 const HOST_STATE_RECORD_INITIAL: &str = "initial";
 const HOST_STATE_RECORD_MUTATION: &str = "mutation";
 
-/// Render one in-stream host-state record's `metadata` document.
+/// Render one host-state record's `metadata` document.
 ///
-/// The payload rides in `metadata` as a nested JSON string, which is the
-/// shape the realm and correlation markers on this path already use: it is
-/// the only field of `RecordEvent` a producer can put structure into
-/// without inventing a record type every existing reader would have to
-/// learn.
+/// The payload rides in an `Event`'s `metadata`, the same carrier the realm
+/// and correlation markers on this path use, so the record lives in the
+/// recording itself (the source of truth) and in the boundary log, which
+/// mirrors it, without a record type every reader would have to learn.
 ///
 /// `field` is the key the payload lands under (`initial` or `mutation`),
 /// so the consumer can decode straight into its own schema types rather
@@ -734,44 +695,21 @@ fn host_state_marker_metadata<T: Serialize>(
         .map_err(|e| io::Error::other(format!("host state marker serialisation: {e}")))
 }
 
-/// `boundary_state.json` as it is written.
+/// Spec §3.3 initial state, as the consumer's `InitialState` decodes it.
 ///
-/// Mirrors `HostState` in the consumer, field for field.  `tables` is
-/// always empty: the producer never records imported-table state, and the
-/// consumer *rejects* a recording that carries any (spec §8 lists
-/// host-mutated imported tables among the constructs refused rather than
-/// silently degraded).  It is emitted rather than omitted so the file
+/// `tables` is always empty: the producer never records imported-table
+/// state, and the consumer *rejects* a recording that carries any (spec §8
+/// lists host-mutated imported tables among the constructs refused rather
+/// than silently degraded).  It is emitted rather than omitted so the record
 /// states the fact instead of leaving it to a missing key.
-#[derive(Debug, Serialize)]
-struct HostStateSidecar {
-    version: u32,
-    initial: InitialStateSidecar,
-    mutations: Vec<HostMutationRecord>,
-    /// Not serialised: whether a `HostInitialState` event has been seen,
-    /// which is what distinguishes "the host supplied nothing" from "the
-    /// host supplied an empty set of regions".
-    #[serde(skip)]
-    initial_seen: bool,
-}
-
-impl Default for HostStateSidecar {
-    fn default() -> Self {
-        Self {
-            version: HOST_STATE_VERSION,
-            initial: InitialStateSidecar::default(),
-            mutations: Vec::new(),
-            initial_seen: false,
-        }
-    }
-}
-
 #[derive(Debug, Default, Serialize)]
-struct InitialStateSidecar {
+struct InitialStateRecord {
     memories: Vec<ImportedMemoryState>,
     globals: Vec<ImportedGlobalState>,
     tables: Vec<serde_json::Value>,
 }
 
+/// Spec §3.4 mutation, as the consumer's `HostMutation` decodes it.
 #[derive(Debug, Serialize)]
 struct HostMutationRecord {
     #[serde(rename = "afterCrossing")]
@@ -835,14 +773,14 @@ struct ManifestSite {
     target: Option<String>,
 }
 
-impl JsonFileCtfsWriter {
+impl CtfsRecordingWriter {
     pub fn new(out_dir: PathBuf, workdir: PathBuf) -> Self {
         Self::with_stream_consumer(out_dir, workdir, StreamConsumerConfig::default())
     }
 
     /// Same as [`Self::new`] but with the §2 streaming-consumer wiring
     /// attached.  Kept separate so the default constructor stays the
-    /// "spawn nothing, write nothing extra" one.
+    /// "spawn nothing" one.
     pub fn with_stream_consumer(
         out_dir: PathBuf,
         workdir: PathBuf,
@@ -853,104 +791,95 @@ impl JsonFileCtfsWriter {
             workdir,
             program: String::new(),
             args: Vec::new(),
-            stream: None,
-            trace_dir: None,
+            open: None,
+            output_path: None,
             stream_consumer,
-            batch_mirror: None,
             path_index: indexmap_compat::OrderedSet::new(),
             fn_table: indexmap_compat::OrderedMap::new(),
-            session_ended: false,
-            last_output_path: None,
             var_index: indexmap_compat::OrderedSet::new(),
             manifest: None,
-            host_state: HostStateSidecar::default(),
+            host_initial_seen: false,
+            session_ended: false,
+            last_output_path: None,
         }
     }
 
-    /// Retain every emitted record so a test can re-render the recording
-    /// the way the original single-shot writer did.  See
-    /// [`Self::batch_mirror`].
-    #[cfg(test)]
-    fn enable_batch_mirror(&mut self) {
-        self.batch_mirror = Some(Vec::new());
-    }
-
-    /// The `.ct` directory this recording is being written to, chosen from
-    /// the program name the page announced.
+    /// The `.ct` this recording lands in, chosen from the program name the
+    /// page announced.
     ///
-    /// `default_output_path` sanitises the program name so an untrusted
-    /// page title cannot traverse the output layout.
-    fn resolve_trace_dir(&self) -> PathBuf {
-        if let Some(dir) = &self.trace_dir {
-            return dir.clone();
+    /// `default_output_path` sanitises the program name so an untrusted page
+    /// title cannot traverse the output layout.
+    fn resolve_output_path(&self) -> PathBuf {
+        if let Some(path) = &self.output_path {
+            return path.clone();
         }
         let program_name = if self.program.is_empty() {
             "browser".to_string()
         } else {
             self.program.clone()
         };
-        // The .ct artefact in M26 V1 is a *directory* (legacy JSON shape),
-        // so `.ct` here is the directory name.
         default_output_path(&self.out_dir, &program_name)
     }
 
-    /// Render `trace_metadata.json`.  Written both when the stream opens
-    /// (so a concurrently-spawned consumer's
-    /// `boundarylog.LoadRecordingMetadata` finds a program name) and again
-    /// at session end, which is what fixes the final bytes.
-    fn write_metadata(&self, trace_dir: &std::path::Path) -> io::Result<()> {
-        let metadata = TraceMetadata {
+    /// Start the container and the boundary log, and spawn the §2 consumer,
+    /// if any.  Idempotent.
+    ///
+    /// Deferred to the first record rather than done in `session_start`
+    /// because the output path is derived from the program name, and only a
+    /// session that produced at least one record — or ended — needs a
+    /// recording at all.
+    fn open_stream(&mut self) -> io::Result<()> {
+        if self.open.is_some() {
+            return Ok(());
+        }
+        let output_path = self.resolve_output_path();
+        let file_name = output_path
+            .file_name()
+            .ok_or_else(|| io::Error::other("the recording path has no file name"))?;
+        let partial_dir = self.out_dir.join(PARTIAL_DIR_NAME);
+        fs::create_dir_all(&partial_dir)?;
+        let partial_path = partial_dir.join(file_name);
+        // A previous run's leftover at this path is a recording that never
+        // finished; writing over it is right, appending to it would not be.
+        if partial_path.exists() {
+            fs::remove_file(&partial_path)?;
+        }
+
+        let mut writer = CtfsTraceWriter::new(&self.program, &self.args);
+        TraceWriter::set_workdir(&mut writer, &self.workdir);
+        TraceWriter::begin_writing_trace_events(&mut writer, &partial_path).map_err(|e| {
+            io::Error::other(format!("could not start {}: {e}", partial_path.display()))
+        })?;
+
+        // `None` takes type id 0, which is `NONE_TYPE_ID` by the trace
+        // format's convention; every other type is registered on first use.
+        let mut types = std::collections::HashMap::new();
+        types.insert("None", TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None"));
+
+        let mut boundary = Vec::with_capacity(4096);
+        boundary.extend_from_slice(&boundary_log::stream_prefix());
+        boundary.extend_from_slice(&boundary_log::encode_frame(&boundary_log::Record::Header {
             program: self.program.clone(),
             args: self.args.clone(),
             workdir: self.workdir.to_string_lossy().into_owned(),
-            recorder: TraceMetadataRecorder {
-                name: "codetracer-js-recorder-browser".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-        };
-        let metadata_json = serde_json::to_string(&metadata)
-            .map_err(|e| io::Error::other(format!("metadata serialisation: {e}")))?;
-        fs::write(trace_dir.join("trace_metadata.json"), metadata_json)
-    }
+            recorder_name: RECORDER_NAME.to_string(),
+            recorder_version: env!("CARGO_PKG_VERSION").to_string(),
+        }));
 
-    /// Render `trace_paths.json` — the registration-order list of source
-    /// paths, whose *position* is the `path_id` every `Step` refers to.
-    fn write_paths(&self, trace_dir: &std::path::Path) -> io::Result<()> {
-        let paths: Vec<String> = self
-            .path_index
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect();
-        let paths_json = serde_json::to_string(&paths)
-            .map_err(|e| io::Error::other(format!("paths serialisation: {e}")))?;
-        fs::write(trace_dir.join("trace_paths.json"), paths_json)
-    }
-
-    /// Create the `.ct` directory, open `trace.json` for appending and
-    /// spawn the §2 consumer, if any.  Idempotent.
-    ///
-    /// Deferred to the first record rather than done in `session_start`
-    /// because the output path is derived from the program name, and only
-    /// a session that produced at least one record — or ended — needs a
-    /// directory at all.
-    fn open_stream(&mut self) -> io::Result<()> {
-        if self.stream.is_some() {
-            return Ok(());
+        let mut tee = self.spawn_consumer(&output_path);
+        if let Some(tee) = tee.as_mut() {
+            tee.write(&boundary);
         }
-        let trace_dir = self.resolve_trace_dir();
-        fs::create_dir_all(&trace_dir)?;
-        // Truncating is right: a `JsonFileCtfsWriter` is created per
-        // connection and owns its recording, so anything already at this
-        // path is a previous run's, and appending to it would splice two
-        // recordings into one malformed array.
-        let file = fs::File::create(trace_dir.join("trace.json"))?;
-        // Before the consumer starts: it reads the recording's metadata
-        // from the `.ct` at startup, not from the stream.
-        self.write_metadata(&trace_dir)?;
-        self.write_paths(&trace_dir)?;
-        let tee = self.spawn_consumer(&trace_dir);
-        self.trace_dir = Some(trace_dir);
-        self.stream = Some(RecordStream::new(file, tee));
+
+        self.output_path = Some(output_path);
+        self.open = Some(OpenRecording {
+            writer,
+            partial_path,
+            boundary,
+            tee,
+            records: 0,
+            types,
+        });
         Ok(())
     }
 
@@ -960,11 +889,11 @@ impl JsonFileCtfsWriter {
     /// makes seeking faster, so its absence must never cost the user their
     /// recording (spec §11 / `MCR-Memory-Page-CAS.md` §10 take the same
     /// line about snapshot versions).
-    fn spawn_consumer(&self, trace_dir: &std::path::Path) -> Option<ConsumerTee> {
+    fn spawn_consumer(&self, output_path: &std::path::Path) -> Option<ConsumerTee> {
         let command = &self.stream_consumer.command;
         let (program, args) = command.split_first()?;
         let substitute = |arg: &String| -> String {
-            arg.replace(TRACE_DIR_PLACEHOLDER, &trace_dir.to_string_lossy())
+            arg.replace(TRACE_PLACEHOLDER, &output_path.to_string_lossy())
         };
         let program = substitute(program);
         let args: Vec<String> = args.iter().map(substitute).collect();
@@ -982,11 +911,12 @@ impl JsonFileCtfsWriter {
                          the recording continues without it"
                     );
                 }
-                log::info!("browser-stream writer: streaming the recording into `{label}`");
+                log::info!("browser-stream writer: streaming the boundary log into `{label}`");
                 Some(ConsumerTee {
                     child,
                     stdin,
                     label,
+                    records: 0,
                 })
             }
             Err(err) => {
@@ -999,38 +929,43 @@ impl JsonFileCtfsWriter {
         }
     }
 
-    /// Append one record to `trace.json` (and the tee), opening the array
-    /// on the first call.
-    fn emit(&mut self, event: TraceLowLevelEvent) -> io::Result<()> {
+    /// Append one record to the recording and the boundary log (and the
+    /// tee), opening the recording on the first call.
+    fn emit(&mut self, record: boundary_log::Record) -> io::Result<()> {
         if self.session_ended {
-            // The array has been closed; a record appended after it would
-            // make the document unparseable for every consumer. The
-            // single-shot writer dropped these too (its `flush` was
-            // one-shot), so this is the same loss made audible.
+            // The recording is finalised; a record arriving after it has
+            // nowhere to go.  The single-shot writers dropped these too, so
+            // this is the same loss made audible.
             log::warn!(
                 "browser-stream writer: dropping a record that arrived after session end: \
-                 {event:?}"
+                 {record:?}"
             );
             return Ok(());
         }
-        let json = serde_json::to_string(&event)
-            .map_err(|e| io::Error::other(format!("event serialisation: {e}")))?;
-        if let Some(mirror) = self.batch_mirror.as_mut() {
-            mirror.push(event);
-        }
         self.open_stream()?;
-        self.stream
+        let open = self
+            .open
             .as_mut()
-            .expect("open_stream leaves the stream open")
-            .write_record(json.as_bytes())
+            .expect("open_stream leaves the recording open");
+        let frame = boundary_log::encode_frame(&record);
+        // The recording first, the tee second: the recording is the source
+        // of truth (spec §2), snapshots are derived data, so the `.ct` must
+        // never be short of a record the consumer already has.
+        open.apply(&record);
+        open.boundary.extend_from_slice(&frame);
+        open.records += 1;
+        if let Some(tee) = open.tee.as_mut() {
+            tee.write(&frame);
+            tee.records += 1;
+        }
+        Ok(())
     }
 
-    /// Resolve a variable name to its on-disk id, registering it on
-    /// first sight.
+    /// Resolve a variable name to its id, registering it on first sight.
     fn intern_variable(&mut self, name: &str) -> io::Result<u32> {
         let (idx, inserted) = self.var_index.insert_full(name.to_string());
         if inserted {
-            self.emit(TraceLowLevelEvent::VariableName(name.to_string()))?;
+            self.emit(boundary_log::Record::VariableName(name.to_string()))?;
         }
         Ok(idx as u32)
     }
@@ -1101,99 +1036,82 @@ impl JsonFileCtfsWriter {
         Ok(Some((name, self.intern_path(&path)?, line)))
     }
 
-    /// Resolve a runtime-side path string to a canonical `path_id`,
-    /// interning the path if it has not been seen yet.  Mirrors
-    /// `NonStreamingTraceWriter::ensure_path_id`.
+    /// Resolve a runtime-side path string to its `path_id`, interning the
+    /// path if it has not been seen yet.
     fn intern_path(&mut self, path: &str) -> io::Result<u32> {
         let path_buf = PathBuf::from(path);
         let (idx, inserted) = self.path_index.insert_full(path_buf.clone());
         if inserted {
-            self.emit(TraceLowLevelEvent::Path(
+            self.emit(boundary_log::Record::Path(
                 path_buf.to_string_lossy().into_owned(),
             ))?;
         }
         Ok(idx as u32)
     }
 
-    /// Translate a [`BrowserEvent`] into one or more on-disk
-    /// `TraceLowLevelEvent`s.  Some browser events expand to multiple
-    /// disk events (e.g. a `Call` may emit a synthetic `Function` record
-    /// the first time its `fnId` is seen).
+    /// Translate a [`BrowserEvent`] into one or more records.  Some browser
+    /// events expand to several (e.g. a `Call` may emit a synthetic
+    /// `Function` record the first time its `fnId` is seen).
     fn translate(&mut self, event: &BrowserEvent) -> io::Result<()> {
+        use boundary_log::Record;
         match event {
             BrowserEvent::Path { path_id: _, path } => {
                 // The runtime's path_id is opaque; we re-intern through
-                // our own table so the on-disk indices stay dense and
-                // start at 0.  The runtime's path_id is dropped (it has
-                // no consumer on the disk side).
+                // our own table so the recorded indices stay dense and
+                // start at 0.
                 self.intern_path(path)?;
             }
             BrowserEvent::Step { site_id } => {
-                // Browser site IDs are flat; the forwarded manifest
-                // carries the `(path, line)` tuple per site.  When the
-                // runtime bundled a manifest we resolve to the real
-                // source location — that is what lets the origin
-                // classifier read the source line behind each hop.
-                // Without one we fall back to the historical placeholder
-                // (`<browser>` path, site id smuggled as the line) so
-                // manifest-less runtimes still record.
+                // Browser site IDs are flat; the forwarded manifest carries
+                // the `(path, line)` tuple per site.  Without one we fall
+                // back to the `<browser>` placeholder path, site id smuggled
+                // as the line, so manifest-less runtimes still record.
                 let (path_id, line) = self.step_position(*site_id)?;
-                self.emit(TraceLowLevelEvent::Step(StepRecord { path_id, line }))?;
+                self.emit(Record::Step { path_id, line })?;
             }
             BrowserEvent::Assignment { site_id, value } => {
                 // Same position resolution as Step — an assignment site is
                 // a step site with write metadata attached.
                 let (path_id, line) = self.step_position(*site_id)?;
-                self.emit(TraceLowLevelEvent::Step(StepRecord { path_id, line }))?;
+                self.emit(Record::Step { path_id, line })?;
                 // Bind the value to its name so the recording carries
-                // variables, not just positions. A trace that records
-                // where execution went but not what it produced cannot
-                // answer any question about a value — including where it
-                // came from.
+                // variables, not just positions.
                 if let (Some(target), Some(value)) = (self.site_target(*site_id), value.as_ref()) {
                     let variable_id = self.intern_variable(&target)?;
-                    self.emit(TraceLowLevelEvent::Value(FullValueRecordOnDisk {
+                    self.emit(Record::Value {
                         variable_id,
                         value: translate_value(value),
-                    }))?;
+                    })?;
                 }
             }
             BrowserEvent::Call { fn_id, args } => {
                 let function_id = self.ensure_function_id(*fn_id)?;
-                let translated_args: Vec<FullValueRecordOnDisk> = args
+                let args = args
                     .iter()
                     .enumerate()
-                    .map(|(i, v)| FullValueRecordOnDisk {
-                        variable_id: i as u32,
-                        value: translate_value(v),
-                    })
+                    .map(|(i, v)| (i as u32, translate_value(v)))
                     .collect();
-                self.emit(TraceLowLevelEvent::Call(CallRecord {
-                    function_id,
-                    args: translated_args,
-                }))?;
+                self.emit(Record::Call { function_id, args })?;
             }
             BrowserEvent::Return {
                 fn_id: _,
                 return_value,
             } => {
-                self.emit(TraceLowLevelEvent::Return(ReturnRecord {
-                    return_value: translate_value(return_value),
-                }))?;
+                self.emit(Record::Return(translate_value(return_value)))?;
             }
             BrowserEvent::Value { name, value } => {
                 let variable_id = self.intern_variable(name)?;
-                self.emit(TraceLowLevelEvent::Value(FullValueRecordOnDisk {
+                self.emit(Record::Value {
                     variable_id,
                     value: translate_value(value),
-                }))?;
+                })?;
             }
             BrowserEvent::Write { channel, content } => {
-                self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                self.emit(Record::Event {
                     kind: write_channel_to_kind(channel),
                     metadata: channel.clone(),
                     content: content.clone(),
-                }))?;
+                })?;
             }
             BrowserEvent::CorrelationMarker {
                 direction,
@@ -1204,24 +1122,20 @@ impl JsonFileCtfsWriter {
             } => {
                 // Correlation markers land as Event records whose
                 // `metadata` slot carries a **complete** M25
-                // `MarkerPayload` JSON document.  This shape is
-                // load-bearing, not cosmetic: the db-backend's
-                // `SessionHandler::pair_index` calls
-                // `MarkerPayload::decode(&event.metadata)` and silently
-                // drops any firing that does not deserialise into the
-                // full struct.  An abbreviated `{direction, boundary}`
-                // object decodes to `None`, which means the marker never
-                // enters the pair index and no cross-process chain can
-                // ever cross this boundary.  Field names and the
+                // `MarkerPayload` document.  This shape is load-bearing,
+                // not cosmetic: the db-backend's `SessionHandler::pair_index`
+                // calls `MarkerPayload::decode(&event.metadata)` and
+                // silently drops any firing that does not deserialise into
+                // the full struct.  Field names and the
                 // `key_value`-is-a-string convention therefore mirror
                 // `codetracer/src/db-backend/src/correlation_markers.rs`
                 // exactly.
                 //
-                // `key_value` is stringified because the pair index
-                // matches sends to receives by string equality on
-                // `(boundary_id, key_value)`; JSON numbers and strings
-                // that render identically must therefore collapse to the
-                // same key.
+                // `key_value` is stringified because the pair index matches
+                // sends to receives by string equality on
+                // `(boundary_id, key_value)`; numbers and strings that
+                // render identically must therefore collapse to the same
+                // key.
                 let key_value = match key {
                     serde_json::Value::String(s) => s.clone(),
                     other => other.to_string(),
@@ -1249,81 +1163,52 @@ impl JsonFileCtfsWriter {
                     "payload": payload,
                 })
                 .to_string();
-                self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                self.emit(Record::Event {
                     kind: EVENT_KIND_TRACE_LOG_EVENT,
                     metadata,
                     content,
-                }))?;
+                })?;
             }
             // --- spec §3.3 / §3.4: host-supplied state ------------------
             //
             // These describe the module's *starting state* and what the
-            // host did to it during a host call.  They are written twice,
-            // and the two carriers are for two different consumers:
+            // host did to it during a host call.  Each is one `Event`
+            // record, appended the moment it arrives, so a streaming
+            // consumer has it in hand before the crossing it is anchored
+            // to — §3.3 is only known at the first exported call, after the
+            // consumer was spawned, and its position relative to that call
+            // is unambiguous only in the stream.
             //
-            //   * the `boundary_state.json` sidecar, which a **batch**
-            //     replay of a finished recording reads at startup.  This
-            //     is what M44 built and it is unchanged.
-            //   * one `Event` record apiece, appended to `trace.json` at
-            //     the moment the record arrives, which is the only thing
-            //     a **streaming** consumer can use (M44b).
-            //
-            // The second was originally left out on the reasoning that it
-            // "would put a record into `trace.json` that the boundary-log
-            // assembler would then have to learn to skip".  That is true
-            // and it is the wrong trade: `--boundary-stream` reads
-            // `LoadRecordingMetadata` once, at startup, and the sidecar
-            // cannot exist then — §3.3 is only known at the first exported
-            // call, which happens after the daemon opened the stream and
-            // spawned its consumer.  The consequence was that the whole
-            // streaming pipeline refused every module whose linear memory
-            // is imported: every Stylus contract, every `wasm-bindgen`
-            // glue layer.
-            //
-            // A re-read protocol would not have fixed it either, and not
-            // merely because it is late: `write_host_state` calls
-            // `open_stream`, and `open_stream` is what *spawns* the
-            // consumer, so the consumer's first read races the sidecar's
-            // first write.  Carrying the record in the stream has no such
-            // window, and puts §3.3 in the one place where its position
-            // relative to the first call is unambiguous.
-            //
-            // Nothing downstream had to learn anything: `Event` is an open
-            // extension point on this path (`parseRealmMarker` in
-            // `internal/boundarylog/recording.go` returns "not mine" for a
-            // `boundary_id` it does not know, and the JS recorder already
-            // puts HTTP and other domain markers into its recordings), so
-            // an older `wazero`, `ct-print` and the db-backend all skip
-            // these records.
+            // `Event` is an open extension point on this path
+            // (`parseRealmMarker` in `internal/boundarylog/recording.go`
+            // returns "not mine" for a `boundary_id` it does not know), so
+            // `ct print` and the db-backend skip these records.
             BrowserEvent::HostInitialState { memories, globals } => {
-                if self.host_state.initial_seen {
+                if self.host_initial_seen {
                     // The producer emits this once, immediately before the
                     // first exported call.  A second one would mean two
                     // recordings were spliced together; keeping the first
                     // is the only reading that stays true to the calls
-                    // already written.  Nothing is emitted into the stream
-                    // either, so the stream and the sidecar keep saying
-                    // the same thing — the consumer cross-checks them.
+                    // already written.
                     log::warn!(
                         "browser-stream writer: ignoring a second HostInitialState event; \
                          spec §3.3 state is the state before the FIRST exported call"
                     );
                 } else {
-                    self.host_state.initial_seen = true;
-                    self.host_state.initial.memories = memories.clone();
-                    self.host_state.initial.globals = globals.clone();
-                    let metadata = host_state_marker_metadata(
-                        HOST_STATE_RECORD_INITIAL,
-                        "initial",
-                        &self.host_state.initial,
-                    )?;
-                    self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                    self.host_initial_seen = true;
+                    let initial = InitialStateRecord {
+                        memories: memories.clone(),
+                        globals: globals.clone(),
+                        tables: Vec::new(),
+                    };
+                    let metadata =
+                        host_state_marker_metadata(HOST_STATE_RECORD_INITIAL, "initial", &initial)?;
+                    self.emit(Record::Event {
                         kind: EVENT_KIND_TRACE_LOG_EVENT,
                         metadata,
                         content: String::new(),
-                    }))?;
+                    })?;
                 }
-                self.write_host_state()?;
             }
             BrowserEvent::HostMutation {
                 after_crossing,
@@ -1337,17 +1222,15 @@ impl JsonFileCtfsWriter {
                 };
                 let metadata =
                     host_state_marker_metadata(HOST_STATE_RECORD_MUTATION, "mutation", &record)?;
-                // Emitted BEFORE the sidecar is rewritten, and before the
-                // import's own `LEAVE` realm marker reaches the stream, so
-                // a streaming consumer has the write in hand at the moment
-                // it services the crossing the write is anchored to.
-                self.emit(TraceLowLevelEvent::Event(RecordEvent {
+                // Emitted before the import's own `LEAVE` realm marker
+                // reaches the stream, so a streaming consumer has the write
+                // in hand at the moment it services the crossing the write
+                // is anchored to.
+                self.emit(Record::Event {
                     kind: EVENT_KIND_TRACE_LOG_EVENT,
                     metadata,
                     content: String::new(),
-                }))?;
-                self.host_state.mutations.push(record);
-                self.write_host_state()?;
+                })?;
             }
             // Lifecycle events are handled in the trait impls below.
             BrowserEvent::SessionStart { .. }
@@ -1357,51 +1240,18 @@ impl JsonFileCtfsWriter {
         Ok(())
     }
 
-    /// Render `boundary_state.json`, the spec §3.3 / §3.4 sidecar.
-    ///
-    /// Written every time it changes rather than once at session end, for
-    /// the same reason `trace.json` is appended to rather than buffered
-    /// (M38c): a `.ct` that is being consumed while it is still being
-    /// produced must not have to wait for the page to close.  It is
-    /// rewritten whole each time because it is small — a boundary
-    /// recording's host state is the calldata a page supplied, not the
-    /// memory image — and because a partially-written array is not a
-    /// document any consumer could read.
-    ///
-    /// Nothing is written when the page supplied no host state at all,
-    /// which is the common case: the consumer treats a missing file as
-    /// "this module defines its own memory and globals", and an empty
-    /// sidecar would say the same thing more confusingly.
-    fn write_host_state(&mut self) -> io::Result<()> {
-        if !self.host_state.initial_seen && self.host_state.mutations.is_empty() {
-            return Ok(());
-        }
-        self.open_stream()?;
-        let trace_dir = self
-            .trace_dir
-            .clone()
-            .expect("open_stream fixes the trace dir");
-        let json = serde_json::to_string(&self.host_state)
-            .map_err(|e| io::Error::other(format!("host state serialisation: {e}")))?;
-        fs::write(trace_dir.join(HOST_STATE_FILE_NAME), json)
-    }
-
-    /// Resolve the runtime's `fn_id` to a canonical on-disk function id.
-    /// The browser runtime currently does not ship a separate `Function`
-    /// event before the first `Call`, so we synthesise one on first
-    /// sight with placeholder name / path / line — the manifest carries
-    /// the real values in V1+ and the synthesised record is overwritten
-    /// at trace open time.
+    /// Resolve the runtime's `fn_id` to the recording's function id.  The
+    /// browser runtime does not ship a separate `Function` event before the
+    /// first `Call`, so one is synthesised on first sight — from the
+    /// manifest's real `(name, path, line)` when there is one, from a
+    /// placeholder otherwise.
     fn ensure_function_id(&mut self, fn_id: u32) -> io::Result<u32> {
-        // Prefer the manifest's real `(name, path, line)`; fall back to
-        // a synthesised record when no manifest was forwarded.
         let (name, path_id, line) = match self.resolve_function(fn_id)? {
             Some(resolved) => resolved,
             None => (format!("fn_{fn_id}"), self.ensure_default_path()?, 0),
         };
         let next_id = self.fn_table.len() as u32;
         let mut newly_inserted = false;
-        let record_name = name.clone();
         let assigned = self
             .fn_table
             .entry(fn_id)
@@ -1409,43 +1259,35 @@ impl JsonFileCtfsWriter {
                 newly_inserted = true;
                 FunctionRecordOnDisk {
                     function_id: next_id,
-                    name: record_name,
-                    path_id,
-                    line,
                 }
             })
             .function_id;
         if newly_inserted {
-            // Insertion order matters — we must emit the Function event
-            // before the Call event that triggered the lookup.  The
-            // caller `translate` emits the Call afterwards.
-            self.emit(TraceLowLevelEvent::Function(FunctionRecord {
+            // The `Function` record must precede the `Call` that triggered
+            // the lookup; `translate` emits the `Call` afterwards.
+            self.emit(boundary_log::Record::Function {
                 name,
                 path_id,
                 line,
-            }))?;
+            })?;
         }
         Ok(assigned)
     }
 
-    /// Lazily register the placeholder path used for Step / Assignment
-    /// events until the manifest forwarding lands.  Returns the canonical
-    /// path_id.
+    /// The placeholder path for Step / Assignment events of a runtime that
+    /// forwarded no manifest.  `<browser>` is the marker the db-backend
+    /// recognises as "browser recording, manifest not forwarded".
     fn ensure_default_path(&mut self) -> io::Result<u32> {
-        // `<browser>` is the marker the db-backend recognises as
-        // "browser recording, manifest not yet forwarded" — same string
-        // convention as the existing `<unknown>` sentinel for the JS
-        // recorder.  Lives in path index 0 by construction.
         self.intern_path("<browser>")
     }
 
-    /// Finalise the recording: close `trace.json`'s array, rewrite the
-    /// metadata and paths files, let the consumer see end of stream.
+    /// Finalise the recording: end the boundary log, close the container,
+    /// store the boundary log inside it, move it into place, and let the
+    /// consumer see the end of the stream.
     ///
     /// Idempotent; subsequent calls are no-ops once `session_ended` is
     /// true.  A session that ended without ever emitting a record still
-    /// lands a complete three-file trace, whose `trace.json` is `[]` —
-    /// exactly what the single-shot writer produced for that case.
+    /// lands a complete, empty recording.
     fn flush(&mut self) -> io::Result<PathBuf> {
         if self.session_ended {
             return Ok(self
@@ -1453,65 +1295,213 @@ impl JsonFileCtfsWriter {
                 .clone()
                 .unwrap_or_else(|| self.out_dir.clone()));
         }
-        // Opens the `.ct` if no record ever arrived, so the "session ended
-        // without streaming anything" path still produces a valid trace.
         self.open_stream()?;
-        let trace_dir = self
-            .trace_dir
+        let output_path = self
+            .output_path
             .clone()
-            .expect("open_stream fixes the trace dir");
+            .expect("open_stream fixes the output path");
+        let mut open = self
+            .open
+            .take()
+            .expect("open_stream leaves the recording open");
 
-        self.stream
-            .as_mut()
-            .expect("open_stream leaves the stream open")
-            .close()?;
+        let end = boundary_log::encode_frame(&boundary_log::Record::End);
+        open.boundary.extend_from_slice(&end);
+        if let Some(tee) = open.tee.as_mut() {
+            tee.write(&end);
+        }
 
-        self.write_metadata(&trace_dir)?;
-        self.write_paths(&trace_dir)?;
-        // Idempotent: the sidecar is already current, since it is
-        // rewritten on every host-state event.  Repeating it here means
-        // the "recording is final" guarantee covers it too, without the
-        // caller having to know it was written earlier.
-        self.write_host_state()?;
+        TraceWriter::finish_writing_trace_events(&mut open.writer)
+            .map_err(|e| io::Error::other(format!("could not finish the recording: {e}")))?;
+        store_boundary_log(&open.partial_path, &open.boundary)?;
+        fs::rename(&open.partial_path, &output_path)?;
 
         self.session_ended = true;
-        self.last_output_path = Some(trace_dir.clone());
+        self.last_output_path = Some(output_path.clone());
 
-        // Dropping the stream closes the tee's stdin, which is what gives
-        // `--boundary-stream -` its unambiguous end of stream, and reaps
-        // the child so a long-running daemon does not accumulate zombies.
-        // It happens before the marker so that by the time a
-        // file-following consumer starts, the piped one is already done.
-        self.stream = None;
+        // Dropping the tee closes the consumer's stdin, which is what gives
+        // `--boundary-stream -` its unambiguous end of stream, and reaps the
+        // child so a long-running daemon does not accumulate zombies.  It
+        // happens after the rename, so the `.ct`'s mtime is the moment the
+        // recording stopped being produced, not the moment the consumer
+        // finished catching up.
+        drop(open);
+        Ok(output_path)
+    }
+}
 
-        // The marker is created last: its whole meaning is "`trace.json`
-        // is final", so everything a consumer might then read must already
-        // be on disk.
-        //
-        // Because of the reap above, the marker's mtime is *after the
-        // piped consumer exited*, not when the recording stopped being
-        // produced. It is therefore useless as a reference point for "was
-        // this derived during the recording?" — measuring against it makes
-        // the answer trivially yes. `trace.json`'s own mtime is that
-        // instant, since the `]` written by `close()` is its last write.
-        // `stream-snapshots-demo.sh` uses that, and says why.
-        if let Some(marker) = self.stream_consumer.done_marker.clone() {
-            let marker_path = trace_dir.join(&marker);
-            if let Err(err) = fs::write(&marker_path, b"") {
-                // A missing marker only means a file-following consumer
-                // waits; it must not fail the recording.
-                log::warn!(
-                    "browser-stream writer: could not create the stream-done marker {}: {err}",
-                    marker_path.display(),
+/// Add the boundary log to a finished container as its `boundary.log`
+/// internal file.
+///
+/// The trace writer has already closed the container, so the file is
+/// appended through the CTFS append path — the same one snapshots are
+/// attached through (`WASM-Replay-Snapshots-And-Slices.md` §6).
+fn store_boundary_log(container: &std::path::Path, boundary: &[u8]) -> io::Result<()> {
+    let ctfs_err = |what: &str, e: codetracer_ctfs::CtfsError| {
+        io::Error::other(format!("{what} {}: {e:?}", container.display()))
+    };
+    let mut writer = codetracer_ctfs::CtfsWriter::open_append(container)
+        .map_err(|e| ctfs_err("could not reopen", e))?;
+    let handle = writer
+        .add_file(boundary_log::INTERNAL_FILE_NAME)
+        .map_err(|e| ctfs_err("could not add the boundary log to", e))?;
+    writer
+        .write(handle, boundary)
+        .map_err(|e| ctfs_err("could not write the boundary log into", e))?;
+    writer.close().map_err(|e| ctfs_err("could not close", e))?;
+    Ok(())
+}
+
+impl OpenRecording {
+    /// The type id of `kind`, registering the type on first use.
+    fn type_id(&mut self, kind: TypeKind, name: &'static str) -> codetracer_trace_types::TypeId {
+        if let Some(id) = self.types.get(name) {
+            return *id;
+        }
+        let id = TraceWriter::ensure_type_id(&mut self.writer, kind, name);
+        self.types.insert(name, id);
+        id
+    }
+
+    /// The recording's value for a boundary-log value.
+    ///
+    /// Integers and floats that do not fit `i64` / `f64` — a JS `BigInt`,
+    /// a NaN-payload spelling — are recorded as `Raw` with the producer's
+    /// exact text rather than truncated.
+    fn value(&mut self, value: &boundary_log::Value) -> ValueRecord {
+        use boundary_log::Value;
+        match value {
+            Value::Int(text) => match text.parse::<i64>() {
+                Ok(i) => ValueRecord::Int {
+                    i,
+                    type_id: self.type_id(TypeKind::Int, "Int"),
+                },
+                Err(_) => ValueRecord::Raw {
+                    r: text.clone(),
+                    type_id: self.type_id(TypeKind::Raw, "Raw"),
+                },
+            },
+            Value::Float(text) => match text.parse::<f64>() {
+                Ok(f) => ValueRecord::Float {
+                    f,
+                    type_id: self.type_id(TypeKind::Float, "Float"),
+                },
+                Err(_) => ValueRecord::Raw {
+                    r: text.clone(),
+                    type_id: self.type_id(TypeKind::Raw, "Raw"),
+                },
+            },
+            Value::Bool(b) => ValueRecord::Bool {
+                b: *b,
+                type_id: self.type_id(TypeKind::Bool, "Bool"),
+            },
+            Value::String(text) => ValueRecord::String {
+                text: text.clone(),
+                type_id: self.type_id(TypeKind::String, "String"),
+            },
+            Value::Raw(text) => ValueRecord::Raw {
+                r: text.clone(),
+                type_id: self.type_id(TypeKind::Raw, "Raw"),
+            },
+            Value::None => ValueRecord::None {
+                type_id: self.type_id(TypeKind::None, "None"),
+            },
+        }
+    }
+
+    /// Write one boundary-log record into the CTFS recording.
+    fn apply(&mut self, record: &boundary_log::Record) {
+        use boundary_log::Record;
+        use codetracer_trace_types::{
+            CallRecord, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, RecordEvent,
+            ReturnRecord, StepRecord, TraceLowLevelEvent, VariableId,
+        };
+        match record {
+            Record::Header { .. } | Record::End => {}
+            Record::Path(path) => {
+                TraceWriter::ensure_path_id(&mut self.writer, std::path::Path::new(path));
+            }
+            Record::Function {
+                name,
+                path_id,
+                line,
+            } => TraceWriter::add_event(
+                &mut self.writer,
+                TraceLowLevelEvent::Function(FunctionRecord {
+                    path_id: PathId(*path_id as usize),
+                    line: Line(*line),
+                    name: name.clone(),
+                }),
+            ),
+            Record::Step { path_id, line } => TraceWriter::add_event(
+                &mut self.writer,
+                TraceLowLevelEvent::Step(StepRecord {
+                    path_id: PathId(*path_id as usize),
+                    line: Line(*line),
+                }),
+            ),
+            Record::Call { function_id, args } => {
+                let args = args
+                    .iter()
+                    .map(|(variable_id, value)| FullValueRecord {
+                        variable_id: VariableId(*variable_id as usize),
+                        value: self.value(value),
+                    })
+                    .collect();
+                TraceWriter::add_event(
+                    &mut self.writer,
+                    TraceLowLevelEvent::Call(CallRecord {
+                        function_id: FunctionId(*function_id as usize),
+                        args,
+                    }),
                 );
             }
+            Record::Return(value) => {
+                let return_value = self.value(value);
+                TraceWriter::add_event(
+                    &mut self.writer,
+                    TraceLowLevelEvent::Return(ReturnRecord { return_value }),
+                );
+            }
+            Record::Value { variable_id, value } => {
+                let value = self.value(value);
+                TraceWriter::add_event(
+                    &mut self.writer,
+                    TraceLowLevelEvent::Value(FullValueRecord {
+                        variable_id: VariableId(*variable_id as usize),
+                        value,
+                    }),
+                );
+            }
+            Record::VariableName(name) => {
+                TraceWriter::ensure_variable_id(&mut self.writer, name);
+            }
+            Record::Event {
+                kind,
+                metadata,
+                content,
+            } => TraceWriter::add_event(
+                &mut self.writer,
+                TraceLowLevelEvent::Event(RecordEvent {
+                    kind: event_log_kind(*kind),
+                    metadata: metadata.clone(),
+                    content: content.clone(),
+                }),
+            ),
         }
-        Ok(trace_dir)
+    }
+}
+
+/// The recording's event kind for a boundary-log `Event` kind.
+fn event_log_kind(kind: i32) -> EventLogKind {
+    match kind {
+        EVENT_KIND_TRACE_LOG_EVENT => EventLogKind::TraceLogEvent,
+        _ => EventLogKind::Write,
     }
 }
 
 // ---------------------------------------------------------------------------
-// The incremental record stream
+// The live consumer
 // ---------------------------------------------------------------------------
 
 /// The spawned §2 consumer and the pipe into it.
@@ -1521,86 +1511,30 @@ struct ConsumerTee {
     stdin: Option<std::process::ChildStdin>,
     /// The resolved command line, for log messages.
     label: String,
-}
-
-/// `trace.json` as it is being written, plus the optional tee.
-///
-/// The array framing lives here and nowhere else: `[` before the first
-/// record, `,` before every later one, `]` at the end (or `[]` for a
-/// recording with no records).  That is precisely `serde_json`'s compact
-/// rendering of a `Vec`, which is what makes the incremental output
-/// byte-identical to the single-shot writer's.
-struct RecordStream {
-    file: fs::File,
-    tee: Option<ConsumerTee>,
-    /// Whether the opening `[` has been written.
-    opened: bool,
+    /// Frames handed to the consumer, for the exit log line.
     records: u64,
 }
 
-impl RecordStream {
-    fn new(file: fs::File, tee: Option<ConsumerTee>) -> Self {
-        Self {
-            file,
-            tee,
-            opened: false,
-            records: 0,
-        }
-    }
-
-    /// Append one already-serialised record.
+impl ConsumerTee {
+    /// Hand `bytes` to the consumer.
     ///
-    /// The separator and the record body go out in a **single**
-    /// `write_all`.  That is what keeps a crashed producer's file
-    /// classifiable: `boundarylog.StreamReader` distinguishes
-    /// `TruncatedMidRecord` (unusable trailing bytes) from the benign
-    /// `TruncatedUnterminated` (whole records, no closing `]`), and only
-    /// one write per record can land in the latter.
-    fn write_record(&mut self, json: &[u8]) -> io::Result<()> {
-        let mut buf = Vec::with_capacity(json.len() + 1);
-        buf.push(if self.opened { b',' } else { b'[' });
-        buf.extend_from_slice(json);
-        self.opened = true;
-        self.records += 1;
-        self.write_bytes(&buf)
-    }
-
-    /// Close the array.  `[]` when no record was ever written, which is
-    /// what `serde_json::to_string(&Vec::<T>::new())` renders.
-    fn close(&mut self) -> io::Result<()> {
-        let tail: &[u8] = if self.opened { b"]" } else { b"[]" };
-        self.opened = true;
-        self.write_bytes(tail)
-    }
-
-    /// Write to the recording, then to the tee.
-    ///
-    /// The order matters: the recording is the source of truth (spec §2),
-    /// snapshots are derived data, so the `.ct` must never be short of a
-    /// record the consumer already has.  A tee failure is logged once and
-    /// the tee dropped — it costs seek performance, never the recording.
-    fn write_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.file.write_all(bytes)?;
-        let Some(tee) = self.tee.as_mut() else {
-            return Ok(());
+    /// A blocking write is deliberate: it is how the consumer's
+    /// backpressure reaches the browser (the WebSocket's TCP window), which
+    /// keeps the replayer from accumulating an unbounded backlog of
+    /// unreplayed crossings.  A failure is logged once and the tee dropped —
+    /// it costs seek performance, never the recording.
+    fn write(&mut self, bytes: &[u8]) {
+        let Some(stdin) = self.stdin.as_mut() else {
+            return;
         };
-        let Some(stdin) = tee.stdin.as_mut() else {
-            return Ok(());
-        };
-        // A blocking write is deliberate: it is how the consumer's
-        // backpressure reaches the browser (the WebSocket's TCP window),
-        // which is what keeps the replayer from accumulating an unbounded
-        // backlog of unreplayed crossings. See
-        // `codetracer-wasm-recorder/internal/boundarylog/stream.go`.
         if let Err(err) = stdin.write_all(bytes) {
             log::warn!(
                 "browser-stream writer: the snapshot consumer `{}` stopped reading ({err}); \
                  continuing without it. The recording is unaffected.",
-                tee.label,
+                self.label,
             );
-            tee.stdin = None;
+            self.stdin = None;
         }
-        Ok(())
     }
 }
 
@@ -1616,24 +1550,20 @@ const CONSUMER_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(
 /// Polling interval while waiting out [`CONSUMER_EXIT_GRACE`].
 const CONSUMER_POLL: std::time::Duration = std::time::Duration::from_millis(20);
 
-impl Drop for RecordStream {
+impl Drop for ConsumerTee {
     fn drop(&mut self) {
         let records = self.records;
-        let Some(tee) = self.tee.as_mut() else {
-            return;
-        };
-        // Close the pipe first: the consumer reads until EOF, so it will
-        // not exit before stdin closes and waiting on it first would
-        // deadlock.
-        tee.stdin = None;
+        // Close the pipe first: the consumer reads until EOF, so it will not
+        // exit before stdin closes and waiting on it first would deadlock.
+        self.stdin = None;
         let deadline = std::time::Instant::now() + CONSUMER_EXIT_GRACE;
         loop {
-            match tee.child.try_wait() {
+            match self.child.try_wait() {
                 Ok(Some(status)) if status.success() => {
                     log::info!(
                         "browser-stream writer: snapshot consumer `{}` finished after {records} \
                          record(s)",
-                        tee.label,
+                        self.label,
                     );
                     return;
                 }
@@ -1641,7 +1571,7 @@ impl Drop for RecordStream {
                     log::warn!(
                         "browser-stream writer: snapshot consumer `{}` exited with {status}; \
                          the recording is complete but seeking it will be linear",
-                        tee.label,
+                        self.label,
                     );
                     return;
                 }
@@ -1653,18 +1583,18 @@ impl Drop for RecordStream {
                         "browser-stream writer: snapshot consumer `{}` did not exit within {:?} \
                          of end of stream; killing it. The recording is complete; its snapshots \
                          may be partial and can be re-derived.",
-                        tee.label,
+                        self.label,
                         CONSUMER_EXIT_GRACE,
                     );
-                    let _ = tee.child.kill();
-                    let _ = tee.child.wait();
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
                     return;
                 }
                 Err(err) => {
                     log::warn!(
                         "browser-stream writer: could not wait for the snapshot consumer `{}`: \
                          {err}",
-                        tee.label,
+                        self.label,
                     );
                     return;
                 }
@@ -1673,19 +1603,20 @@ impl Drop for RecordStream {
     }
 }
 
-impl CtfsWriter for JsonFileCtfsWriter {
+impl CtfsWriter for CtfsRecordingWriter {
     fn session_start(&mut self, program: &str, args: &[String]) -> io::Result<()> {
-        if self.trace_dir.is_some() && self.program != program {
+        if self.output_path.is_some() && self.program != program {
             // `SessionStart` is spec'd as the very first line, so the
             // output path is normally fixed before any record arrives. If
             // a runtime announces itself late the recording stays where it
-            // already is rather than splitting across two directories —
-            // say so instead of silently choosing.
+            // already is rather than splitting in two — say so instead of
+            // silently choosing.
             log::warn!(
                 "browser-stream writer: SessionStart named program `{program}` after the \
                  recording had already opened as `{}`; keeping the existing output path",
                 self.program,
             );
+            return Ok(());
         }
         self.program = program.to_string();
         self.args = args.to_vec();
@@ -1693,11 +1624,10 @@ impl CtfsWriter for JsonFileCtfsWriter {
     }
 
     fn manifest(&mut self, manifest: &serde_json::Value) -> io::Result<()> {
-        // Decode the instrumenter manifest so subsequent `Step` /
-        // `Call` events resolve to real source locations.  A manifest
-        // that fails to decode is logged and ignored rather than
-        // failing the recording — a partially-understood manifest must
-        // not cost the user their trace.
+        // Decode the instrumenter manifest so subsequent `Step` / `Call`
+        // events resolve to real source locations.  A manifest that fails to
+        // decode is logged and ignored rather than failing the recording — a
+        // partially-understood manifest must not cost the user their trace.
         match serde_json::from_value::<InstrumentationManifest>(manifest.clone()) {
             Ok(decoded) => {
                 log::info!(
@@ -1727,87 +1657,11 @@ impl CtfsWriter for JsonFileCtfsWriter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// On-disk serialisation types
-// ---------------------------------------------------------------------------
-//
-// These shapes match `codetracer_trace_types::TraceLowLevelEvent` and its
-// nested records.  We re-declare them here so backend-manager does NOT
-// have to take a hard build-time dependency on the trace-format workspace
-// (which would force a sibling repo into every build).  The downstream
-// reader path uses serde's externally-tagged enum representation, so the
-// names below must match the upstream variant names exactly.
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "PascalCase")]
-enum TraceLowLevelEvent {
-    Path(String),
-    Function(FunctionRecord),
-    Step(StepRecord),
-    Call(CallRecord),
-    Return(ReturnRecord),
-    Value(FullValueRecordOnDisk),
-    VariableName(String),
-    Event(RecordEvent),
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct StepRecord {
-    path_id: u32,
-    line: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct FunctionRecord {
-    name: String,
-    path_id: u32,
-    line: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct CallRecord {
-    function_id: u32,
-    args: Vec<FullValueRecordOnDisk>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ReturnRecord {
-    return_value: ValueRecordOnDisk,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct FullValueRecordOnDisk {
-    variable_id: u32,
-    value: ValueRecordOnDisk,
-}
-
-/// On-disk projection of the browser-side `EncodedValue`.  Mirrors the
-/// `ValueRecord` external-tagging used by
-/// `codetracer_trace_types::ValueRecord` so the reader-side
-/// `kind`-dispatched decode lands on the right variant.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "PascalCase")]
-enum ValueRecordOnDisk {
-    Int { i: String, type_id: u32 },
-    Float { f: String, type_id: u32 },
-    Bool { b: bool, type_id: u32 },
-    String { text: String, type_id: u32 },
-    Raw { r: String, type_id: u32 },
-    None { type_id: u32 },
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct RecordEvent {
-    kind: i32,
-    metadata: String,
-    content: String,
-}
-
-/// `EventLogKind::TraceLogEvent` discriminator — mirrors
-/// `FfiEventLogKind::FFI_EVENT_TRACE_LOG_EVENT = 12` in
+/// `EventLogKind::TraceLogEvent` discriminator, as the boundary log carries
+/// it — mirrors `FfiEventLogKind::FFI_EVENT_TRACE_LOG_EVENT = 12` in
 /// `codetracer_trace_writer.h`.
 const EVENT_KIND_TRACE_LOG_EVENT: i32 = 12;
-/// Stdout / stderr discriminators.
+/// Stdout / stderr discriminator.
 const EVENT_KIND_WRITE: i32 = 0;
 
 fn write_channel_to_kind(channel: &str) -> i32 {
@@ -1817,32 +1671,18 @@ fn write_channel_to_kind(channel: &str) -> i32 {
     EVENT_KIND_WRITE
 }
 
-/// Convert a browser-side encoded value into the on-disk `ValueRecord`
-/// shape.  V1 keeps it lossless for primitives and falls back to `Raw`
-/// for compound payloads (the JSON value is stringified verbatim).
-fn translate_value(encoded: &EncodedValue) -> ValueRecordOnDisk {
+/// Convert a browser-side encoded value into its boundary-log value.
+/// Lossless for primitives; compound payloads fall back to `Raw` with the
+/// JSON value stringified verbatim.
+fn translate_value(encoded: &EncodedValue) -> boundary_log::Value {
+    use boundary_log::Value;
     match encoded.type_kind.as_str() {
-        "Int" => ValueRecordOnDisk::Int {
-            i: value_to_compact_string(&encoded.value),
-            type_id: 0,
-        },
-        "Float" => ValueRecordOnDisk::Float {
-            f: value_to_compact_string(&encoded.value),
-            type_id: 0,
-        },
-        "Bool" => ValueRecordOnDisk::Bool {
-            b: encoded.value.as_bool().unwrap_or(false),
-            type_id: 0,
-        },
-        "String" => ValueRecordOnDisk::String {
-            text: encoded.value.as_str().unwrap_or("").to_string(),
-            type_id: 0,
-        },
-        "None" => ValueRecordOnDisk::None { type_id: 0 },
-        _ => ValueRecordOnDisk::Raw {
-            r: value_to_compact_string(&encoded.value),
-            type_id: 0,
-        },
+        "Int" => Value::Int(value_to_compact_string(&encoded.value)),
+        "Float" => Value::Float(value_to_compact_string(&encoded.value)),
+        "Bool" => Value::Bool(encoded.value.as_bool().unwrap_or(false)),
+        "String" => Value::String(encoded.value.as_str().unwrap_or("").to_string()),
+        "None" => Value::None,
+        _ => Value::Raw(value_to_compact_string(&encoded.value)),
     }
 }
 
@@ -1851,20 +1691,6 @@ fn value_to_compact_string(value: &serde_json::Value) -> String {
         return s.to_string();
     }
     value.to_string()
-}
-
-#[derive(Debug, Serialize)]
-struct TraceMetadata {
-    program: String,
-    args: Vec<String>,
-    workdir: String,
-    recorder: TraceMetadataRecorder,
-}
-
-#[derive(Debug, Serialize)]
-struct TraceMetadataRecorder {
-    name: String,
-    version: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -1903,10 +1729,6 @@ mod indexmap_compat {
             self.order.push(value.clone());
             self.index.insert(value, idx);
             (idx, true)
-        }
-
-        pub fn iter(&self) -> std::slice::Iter<'_, T> {
-            self.order.iter()
         }
     }
 
@@ -1959,17 +1781,10 @@ mod indexmap_compat {
     }
 }
 
-// `FunctionRecordOnDisk` shadows the FFI shape — same fields as
-// `codetracer_trace_types::FunctionRecord` but local to this module.
+// The recording's function id for one runtime `fnId`.
 #[derive(Debug, Clone)]
 struct FunctionRecordOnDisk {
     function_id: u32,
-    #[allow(dead_code)]
-    name: String,
-    #[allow(dead_code)]
-    path_id: u32,
-    #[allow(dead_code)]
-    line: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -2193,76 +2008,185 @@ mod repo_root_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::boundary_log::{Record, Value};
     use crate::browser_stream_receiver::{BrowserEvent, EncodedValue};
+    use std::path::Path;
     use std::time::Duration;
     use tempfile::TempDir;
 
-    #[test]
-    fn json_writer_lands_three_file_legacy_layout() {
-        let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        writer
-            .session_start("smoke-app", &["--demo".to_string()])
-            .unwrap();
-        writer.event(&BrowserEvent::Step { site_id: 1 }).unwrap();
-        writer
-            .event(&BrowserEvent::Value {
-                name: "x".to_string(),
-                value: EncodedValue {
-                    value: serde_json::json!(42),
-                    type_kind: "Int".to_string(),
+    /// A boundary log decoded for assertions: its records, and whether it
+    /// ended with `End` (complete) or simply stopped (unterminated).
+    ///
+    /// CodeTracer has no CTBL reader — the only product decoder is
+    /// `codetracer-wasm-recorder/internal/boundarylog`. This one exists so
+    /// the tests here can state what the writer emitted in terms of
+    /// records rather than bytes; the byte layout itself is pinned by
+    /// `boundary_log::tests`.
+    pub(super) struct DecodedLog {
+        pub records: Vec<Record>,
+        pub complete: bool,
+        /// Bytes after the last whole frame. Non-zero means the stream was
+        /// torn mid-frame.
+        pub torn_bytes: usize,
+    }
+
+    pub(super) fn decode_log(bytes: &[u8]) -> DecodedLog {
+        assert!(bytes.len() >= 5, "shorter than the CTBL prefix: {bytes:?}");
+        assert_eq!(&bytes[..4], b"CTBL", "missing magic");
+        assert_eq!(bytes[4], 1, "unexpected version");
+        let mut pos = 5;
+        let mut records = Vec::new();
+        let mut complete = false;
+        while pos + 4 <= bytes.len() {
+            let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            if pos + 4 + len > bytes.len() {
+                break;
+            }
+            let mut r = Cursor {
+                b: &bytes[pos + 4..pos + 4 + len],
+                i: 0,
+            };
+            let record = r.record();
+            assert_eq!(r.i, len, "a frame must be consumed exactly");
+            pos += 4 + len;
+            if record == Record::End {
+                complete = true;
+                assert_eq!(pos, bytes.len(), "nothing may follow End");
+            }
+            records.push(record);
+        }
+        DecodedLog {
+            records,
+            complete,
+            torn_bytes: bytes.len() - pos,
+        }
+    }
+
+    struct Cursor<'a> {
+        b: &'a [u8],
+        i: usize,
+    }
+
+    impl Cursor<'_> {
+        fn u8(&mut self) -> u8 {
+            self.i += 1;
+            self.b[self.i - 1]
+        }
+        fn u32(&mut self) -> u32 {
+            self.i += 4;
+            u32::from_le_bytes(self.b[self.i - 4..self.i].try_into().unwrap())
+        }
+        fn i32(&mut self) -> i32 {
+            self.i += 4;
+            i32::from_le_bytes(self.b[self.i - 4..self.i].try_into().unwrap())
+        }
+        fn i64(&mut self) -> i64 {
+            self.i += 8;
+            i64::from_le_bytes(self.b[self.i - 8..self.i].try_into().unwrap())
+        }
+        fn str(&mut self) -> String {
+            let n = self.u32() as usize;
+            self.i += n;
+            String::from_utf8(self.b[self.i - n..self.i].to_vec()).unwrap()
+        }
+        fn value(&mut self) -> Value {
+            match self.u8() {
+                1 => Value::Int(self.str()),
+                2 => Value::Float(self.str()),
+                3 => Value::Bool(self.u8() != 0),
+                4 => Value::String(self.str()),
+                5 => Value::Raw(self.str()),
+                6 => Value::None,
+                other => panic!("unknown vtag {other}"),
+            }
+        }
+        fn record(&mut self) -> Record {
+            match self.u8() {
+                1 => {
+                    let program = self.str();
+                    let argc = self.u32();
+                    let args = (0..argc).map(|_| self.str()).collect();
+                    Record::Header {
+                        program,
+                        args,
+                        workdir: self.str(),
+                        recorder_name: self.str(),
+                        recorder_version: self.str(),
+                    }
+                }
+                2 => Record::Path(self.str()),
+                3 => Record::Function {
+                    name: self.str(),
+                    path_id: self.u32(),
+                    line: self.i64(),
                 },
-            })
-            .unwrap();
-        writer.event(&BrowserEvent::Step { site_id: 2 }).unwrap();
-        let trace_dir = writer.session_end().unwrap();
-        assert!(trace_dir.is_dir(), "trace dir should exist: {trace_dir:?}");
-        let trace_json = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
-        let metadata_json = std::fs::read_to_string(trace_dir.join("trace_metadata.json")).unwrap();
-        let paths_json = std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap();
-        let events: serde_json::Value = serde_json::from_str(&trace_json).unwrap();
-        let arr = events.as_array().expect("trace.json must be an array");
-        // Path/Step/VariableName/Value/Step — five entries minimum.
-        assert!(arr.len() >= 5, "events: {arr:?}");
-        let metadata: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
-        assert_eq!(metadata["program"], "smoke-app");
-        assert_eq!(metadata["args"][0], "--demo");
-        let paths: serde_json::Value = serde_json::from_str(&paths_json).unwrap();
-        assert_eq!(paths[0], "<browser>");
+                4 => Record::Step {
+                    path_id: self.u32(),
+                    line: self.i64(),
+                },
+                5 => {
+                    let function_id = self.u32();
+                    let argc = self.u32();
+                    let args = (0..argc).map(|_| (self.u32(), self.value())).collect();
+                    Record::Call { function_id, args }
+                }
+                6 => Record::Return(self.value()),
+                7 => Record::Value {
+                    variable_id: self.u32(),
+                    value: self.value(),
+                },
+                8 => Record::VariableName(self.str()),
+                9 => Record::Event {
+                    kind: self.i32(),
+                    metadata: self.str(),
+                    content: self.str(),
+                },
+                10 => Record::End,
+                other => panic!("unknown tag {other}"),
+            }
+        }
     }
 
-    #[test]
-    fn json_writer_is_idempotent_on_double_session_end() {
-        let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        writer.session_start("x", &[]).unwrap();
-        let first = writer.session_end().unwrap();
-        let second = writer.session_end().unwrap();
-        assert_eq!(first, second);
-        // A session that ended without ever streaming a record must still
-        // leave a valid three-file trace, and its events file must be the
-        // empty array — what `serde_json::to_string(&Vec::new())` renders,
-        // so the reader path is unchanged. The second `session_end` must
-        // not append a second `]`.
-        let trace_json = std::fs::read_to_string(first.join("trace.json")).unwrap();
-        assert_eq!(trace_json, "[]");
-        assert!(first.join("trace_metadata.json").is_file());
-        assert!(first.join("trace_paths.json").is_file());
+    /// The `boundary.log` stored inside a finished `.ct`.
+    pub(super) fn stored_boundary_log(ct: &Path) -> Vec<u8> {
+        let mut reader = codetracer_ctfs::CtfsReader::open(ct)
+            .unwrap_or_else(|e| panic!("open {} as CTFS: {e:?}", ct.display()));
+        reader
+            .read_file(boundary_log::INTERNAL_FILE_NAME)
+            .unwrap_or_else(|e| panic!("{} has no boundary.log: {e:?}", ct.display()))
     }
 
-    /// The record sequence the byte-identity and truncation tests run on.
+    /// The recording's events, read back with the trace-format reader the
+    /// way any CTFS consumer reads them.
+    fn recorded_events(ct: &Path) -> Vec<codetracer_trace_types::TraceLowLevelEvent> {
+        codetracer_trace_reader::ctfs_reader::read_trace_from_ctfs(ct)
+            .unwrap_or_else(|e| panic!("read {} as a CTFS recording: {e}", ct.display()))
+    }
+
+    fn writer_in(tmp: &TempDir) -> CtfsRecordingWriter {
+        CtfsRecordingWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf())
+    }
+
+    /// Everything in `dir` except the (hidden) partial-recordings directory.
+    fn visible_entries(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != PARTIAL_DIR_NAME)
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The record sequence most tests below run on.
     ///
     /// It is deliberately the widest one available: a forwarded manifest
     /// (so `Step` / `Assignment` / `Call` resolve to real
     /// `Path` + `Function` records rather than the `<browser>` fallback),
     /// every `BrowserEvent` variant that produces a record, and every
-    /// `ValueRecordOnDisk` arm — `Int`, `Float`, `Bool`, `String`, `None`
-    /// and the `Raw` fallback. Between them these cover all eight
-    /// `TraceLowLevelEvent` variants the writer can emit, which is what
-    /// makes "byte-identical" a statement about the format rather than
-    /// about one record type.
+    /// value arm — `Int`, `Float`, `Bool`, `String`, `None` and the `Raw`
+    /// fallback.
     fn wide_event_sequence() -> Vec<BrowserEvent> {
         let manifest = serde_json::json!({
             "paths": ["src/app.js", "src/util.js"],
@@ -2370,10 +2294,11 @@ mod tests {
         ]
     }
 
-    /// Drive `events` through a writer, returning it plus the `.ct` path.
-    /// `SessionStart` / `Manifest` / `SessionEnd` are dispatched to the
-    /// lifecycle methods exactly as `StreamReceiver` does.
-    fn drive(writer: &mut JsonFileCtfsWriter, events: &[BrowserEvent]) -> Option<PathBuf> {
+    /// Drive `events` through a writer, returning the `.ct` path if the
+    /// sequence ended the session.  `SessionStart` / `Manifest` /
+    /// `SessionEnd` are dispatched to the lifecycle methods exactly as
+    /// `StreamReceiver` does.
+    fn drive(writer: &mut CtfsRecordingWriter, events: &[BrowserEvent]) -> Option<PathBuf> {
         let mut out = None;
         for event in events {
             match event {
@@ -2392,504 +2317,386 @@ mod tests {
         out
     }
 
-    /// M38c's primary correctness test.
-    ///
-    /// The `Function`, `VariableName` and `Path` tables in this format are
-    /// **positional** — consumers resolve them by index — so the
-    /// incremental writer is pinned to the single-shot writer's exact
-    /// rendering, not merely to an equivalent JSON document.
-    /// `codetracer-wasm-recorder`'s
-    /// `TestBuilderReproducesTheCommittedBrowserRecording`, the committed
-    /// cross-process demo fixture and the db-backend's CTFS reader all
-    /// depend on it.
-    ///
-    /// The reference side is `serde_json`'s own `Vec` serialiser — the
-    /// literal expression the removed `flush` used
-    /// (`serde_json::to_string(&self.events)`) — fed the very records the
-    /// incremental path emitted. Comparing against a second hand-rolled
-    /// join would prove nothing.
+    /// A browser session lands as ONE file, `<program>.ct`, and nothing
+    /// else: no `trace.json`, no `trace_metadata.json`, no
+    /// `trace_paths.json`, no `boundary_state.json`.
     #[test]
-    fn verify_incremental_writer_is_byte_identical_to_the_batch_writer() {
+    fn a_session_lands_as_one_ct_file_and_nothing_else() {
         let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        writer.enable_batch_mirror();
-        let events = wide_event_sequence();
-        let trace_dir = drive(&mut writer, &events).expect("the sequence ends the session");
+        let mut writer = writer_in(&tmp);
+        let ct = drive(&mut writer, &wide_event_sequence()).expect("the sequence ends the session");
 
-        let incremental = std::fs::read(trace_dir.join("trace.json")).unwrap();
-        let batch = serde_json::to_string(
-            writer
-                .batch_mirror
-                .as_ref()
-                .expect("the mirror was enabled"),
-        )
-        .unwrap();
-
-        assert_eq!(
-            String::from_utf8_lossy(&incremental),
-            batch,
-            "the incrementally appended trace.json must be byte-for-byte what \
-             serde_json renders for the same Vec<TraceLowLevelEvent>",
+        assert_eq!(ct, tmp.path().join("frontend.ct"));
+        assert!(ct.is_file(), "a recording is a single CTFS file: {}", ct.display());
+        assert_eq!(visible_entries(tmp.path()), vec!["frontend.ct".to_string()]);
+        let partial = tmp.path().join(PARTIAL_DIR_NAME);
+        assert!(
+            !partial.exists() || std::fs::read_dir(&partial).unwrap().next().is_none(),
+            "a finished recording leaves nothing behind in {}",
+            partial.display(),
         );
-
-        // Guard against the comparison passing vacuously: the sequence has
-        // to have exercised every record variant.
-        let records: Vec<serde_json::Value> = serde_json::from_slice(&incremental).unwrap();
-        let kinds: std::collections::BTreeSet<String> = records
-            .iter()
-            .filter_map(|r| r.as_object())
-            .flat_map(|o| o.keys().cloned())
-            .collect();
-        for expected in [
-            "Path",
-            "Function",
-            "Step",
-            "Call",
-            "Return",
-            "Value",
-            "VariableName",
-            "Event",
-        ] {
-            assert!(
-                kinds.contains(expected),
-                "the byte-identity input must exercise a {expected} record; got {kinds:?}",
-            );
-        }
     }
 
-    /// The same comparison for the two degenerate lengths, where a
-    /// hand-rolled array framing is easiest to get wrong: an empty
-    /// recording must render `[]` and a one-record one must carry no
-    /// separator.
+    /// The `.ct` is a recording any CTFS reader opens, carrying the
+    /// translated records with their real values and types.
     #[test]
-    fn verify_incremental_framing_matches_serde_for_zero_and_one_records() {
-        for take in [0usize, 1] {
-            let tmp = TempDir::new().expect("create tempdir");
-            let mut writer =
-                JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-            writer.enable_batch_mirror();
-            writer.session_start("tiny", &[]).unwrap();
-            // One `Step` with no manifest emits a `Path` then a `Step`; to
-            // land exactly one record, emit the `Path` alone.
-            if take == 1 {
-                writer
-                    .event(&BrowserEvent::Path {
-                        path_id: 0,
-                        path: "only.js".to_string(),
-                    })
-                    .unwrap();
-            }
-            let trace_dir = writer.session_end().unwrap();
-            let incremental = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
-            let mirror = writer.batch_mirror.as_ref().unwrap();
-            assert_eq!(mirror.len(), take, "expected {take} record(s)");
-            assert_eq!(incremental, serde_json::to_string(mirror).unwrap());
-        }
-    }
-
-    /// The committed browser recording, reframed record by record, must
-    /// come back byte-for-byte.
-    ///
-    /// The two tests above compare the incremental writer against
-    /// `serde_json`'s renderer on records the writer itself produced. That
-    /// is the right oracle for the framing, but both sides of it are
-    /// generated by the code under test, so neither is evidence about the
-    /// bytes any *committed* consumer actually reads.
-    ///
-    /// This one takes the real `frontend-wasm.ct/trace.json` from the
-    /// cross-process demo — written by the single-shot writer during a
-    /// browser run this test triggers, and pinned by
-    /// `codetracer-wasm-recorder`'s
-    /// `TestBuilderReproducesTheCommittedBrowserRecording` — splits it into
-    /// its top-level records *as literal byte ranges of that file* (no
-    /// re-serialisation anywhere), and pushes each through
-    /// [`RecordStream`]. The result must equal that file exactly.
-    /// Real records, real escapes, and an oracle the change cannot reach:
-    /// the file is produced by the *single-shot* writer and re-framed by
-    /// the *incremental* one, so neither side is the other's echo.
-    ///
-    /// The recording is produced rather than committed. A committed one
-    /// would have been made by the very writer under test, so it would
-    /// go on matching after that writer changed — the round trip would
-    /// still close, over bytes nothing in the product emits any more.
-    #[test]
-    fn verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte() {
-        let recordings = super::tests_support::materialized_three_trace_recordings();
-        for fixture in ["frontend-wasm.ct", "frontend.ct"] {
-            let committed = recordings.join(fixture).join("trace.json");
-            let original = std::fs::read(&committed)
-                .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
-
-            let records = split_top_level_records(&original);
-            assert!(
-                records.len() >= 15,
-                "{fixture} should be a substantial recording; got {} records",
-                records.len(),
-            );
-
-            let tmp = TempDir::new().expect("create tempdir");
-            let out = tmp.path().join("reframed.json");
-            {
-                let mut stream = RecordStream::new(fs::File::create(&out).unwrap(), None);
-                for record in &records {
-                    stream.write_record(record).unwrap();
-                }
-                stream.close().unwrap();
-            }
-            let reframed = std::fs::read(&out).unwrap();
-            assert_eq!(
-                String::from_utf8_lossy(&reframed),
-                String::from_utf8_lossy(&original),
-                "reframing {fixture}'s records one at a time must reproduce the \
-                 recorded bytes exactly",
-            );
-        }
-    }
-
-    /// Split a compact JSON array into the byte ranges of its top-level
-    /// elements, tracking string state so a `{`, `}` or `,` inside a string
-    /// literal is not mistaken for structure.
-    ///
-    /// Deliberately dumb and self-contained: its whole job is to hand
-    /// [`RecordStream`] the *original file's* bytes rather than anything
-    /// this crate re-rendered.
-    pub(super) fn split_top_level_records(bytes: &[u8]) -> Vec<&[u8]> {
-        assert_eq!(bytes.first(), Some(&b'['), "not a JSON array");
-        assert_eq!(bytes.last(), Some(&b']'), "unterminated JSON array");
-        let mut records = Vec::new();
-        let mut depth = 0usize;
-        let mut start = None;
-        let mut in_string = false;
-        let mut escaped = false;
-        for (i, &b) in bytes.iter().enumerate().skip(1) {
-            if in_string {
-                match b {
-                    _ if escaped => escaped = false,
-                    b'\\' => escaped = true,
-                    b'"' => in_string = false,
-                    _ => {}
-                }
-                continue;
-            }
-            match b {
-                b'"' => in_string = true,
-                b'{' | b'[' => {
-                    if depth == 0 {
-                        start = Some(i);
-                    }
-                    depth += 1;
-                }
-                b'}' | b']' => {
-                    if depth == 0 {
-                        // The array's own closing bracket.
-                        break;
-                    }
-                    depth -= 1;
-                    if depth == 0 {
-                        records.push(&bytes[start.take().unwrap()..=i]);
-                    }
-                }
-                _ => {}
-            }
-        }
-        assert_eq!(depth, 0, "unbalanced JSON");
-        records
-    }
-
-    /// Byte identity across the *whole* writer for payloads whose JSON
-    /// rendering is not the identity: quotes, backslashes, control
-    /// characters, non-BMP text, and an unpaired surrogate.
-    ///
-    /// A record body that grows an escape is exactly where a hand-rolled
-    /// framing could disagree with `serde_json` — the separator is written
-    /// before a body whose length the writer never inspects — and it is
-    /// also where a byte-count-based framing (which this deliberately is
-    /// not) would go wrong.
-    #[test]
-    fn verify_byte_identity_survives_values_that_json_must_escape() {
+    fn the_recording_reads_back_through_the_trace_format_reader() {
+        use codetracer_trace_types::TraceLowLevelEvent as E;
         let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        writer.enable_batch_mirror();
-        writer.session_start("escapes\"and\\slashes", &[]).unwrap();
+        let mut writer = writer_in(&tmp);
+        let ct = drive(&mut writer, &wide_event_sequence()).unwrap();
+        let events = recorded_events(&ct);
 
-        let hostile = [
-            "a\"quoted\"name",
-            "back\\slash",
-            "line\nbreak\ttab\r\u{0}nul",
-            "hé—日本語🎉",
-            // A lone high surrogate: legal in a Rust string only as its
-            // replacement, which is what a browser would deliver too, so
-            // this pins the escape of U+FFFD rather than of \ud800.
-            "lone\u{fffd}surrogate",
-            "\u{7f}\u{1b}[0m",
-        ];
-        for (i, text) in hostile.iter().enumerate() {
-            // Through a name (VariableName + Value), a String payload, a
-            // Raw payload, a path, and an Event's metadata + content, so
-            // every place a string reaches disk is covered.
-            writer
-                .event(&BrowserEvent::Path {
-                    path_id: i as u32,
-                    path: format!("src/{text}.js"),
-                })
-                .unwrap();
+        let count = |pred: &dyn Fn(&E) -> bool| events.iter().filter(|e| pred(e)).count();
+        assert_eq!(count(&|e| matches!(e, E::Step(_))), 5, "{events:#?}");
+        assert_eq!(count(&|e| matches!(e, E::Call(_))), 3, "{events:#?}");
+        let returned: Vec<&ValueRecord> = events
+            .iter()
+            .filter_map(|e| match e {
+                E::Return(r) => Some(&r.return_value),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(returned.first(), Some(ValueRecord::String { text, .. }) if text == "12.34"),
+            "the first recorded return carries its value: {returned:#?}",
+        );
+        assert_eq!(count(&|e| matches!(e, E::Value(_))), 5, "{events:#?}");
+
+        let functions: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                E::Function(f) => Some(f.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(functions, vec!["renderBalance", "formatCents"]);
+
+        let paths: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                E::Path(p) => Some(p.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(paths, vec!["src/vendor.js", "src/app.js", "src/util.js"]);
+
+        let ints: Vec<i64> = events
+            .iter()
+            .filter_map(|e| match e {
+                E::Value(v) => match v.value {
+                    ValueRecord::Int { i, .. } => Some(i),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ints, vec![1234, 7, 3], "integers are recorded as integers");
+
+        assert!(
+            events.iter().any(|e| matches!(e, E::Event(ev)
+                if ev.content == "balance: 12.34\n" && matches!(ev.kind, EventLogKind::Write))),
+            "the page's output is recorded: {events:#?}",
+        );
+    }
+
+    /// `boundary.log` inside the container is the record sequence, in
+    /// order, with the tables positional — the replaying recorder
+    /// resolves `path_id`, `function_id` and `variable_id` by index, so a
+    /// renumbering would silently attribute every value to the wrong name.
+    #[test]
+    fn the_boundary_log_carries_the_record_sequence_in_order() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let mut writer = writer_in(&tmp);
+        let ct = drive(&mut writer, &wide_event_sequence()).unwrap();
+        let log = decode_log(&stored_boundary_log(&ct));
+        assert!(log.complete, "a finished recording's log ends with End");
+        assert_eq!(log.torn_bytes, 0);
+
+        let mut records = log.records.into_iter();
+        assert_eq!(
+            records.next().unwrap(),
+            Record::Header {
+                program: "frontend".into(),
+                args: vec!["--demo".into()],
+                workdir: tmp.path().to_string_lossy().into_owned(),
+                recorder_name: "codetracer-js-recorder-browser".into(),
+                recorder_version: env!("CARGO_PKG_VERSION").into(),
+            }
+        );
+        let records: Vec<Record> = records.collect();
+        let (markers, rest): (Vec<Record>, Vec<Record>) = records
+            .into_iter()
+            .partition(|r| matches!(r, Record::Event { kind: 12, .. }));
+        assert_eq!(markers.len(), 2, "one Event per correlation marker");
+        for marker in &markers {
+            let Record::Event { metadata, .. } = marker else {
+                unreachable!()
+            };
+            let doc: serde_json::Value = serde_json::from_str(metadata).unwrap();
+            assert_eq!(doc["boundary_id"], "http:/api/balance");
+        }
+        let int = |s: &str| Value::Int(s.into());
+        assert_eq!(
+            rest,
+            vec![
+                Record::Path("src/vendor.js".into()),
+                Record::Path("src/app.js".into()),
+                Record::Step { path_id: 1, line: 20 },
+                Record::Function {
+                    name: "renderBalance".into(),
+                    path_id: 1,
+                    line: 12,
+                },
+                Record::Call {
+                    function_id: 0,
+                    args: vec![(0, int("42"))],
+                },
+                Record::Step { path_id: 1, line: 13 },
+                Record::VariableName("total".into()),
+                Record::Value {
+                    variable_id: 0,
+                    value: int("1234"),
+                },
+                Record::Path("src/util.js".into()),
+                Record::Function {
+                    name: "formatCents".into(),
+                    path_id: 2,
+                    line: 3,
+                },
+                Record::Call {
+                    function_id: 1,
+                    args: vec![(0, Value::Float("1.5".into())), (1, Value::Bool(true))],
+                },
+                Record::Step { path_id: 2, line: 4 },
+                Record::VariableName("cents".into()),
+                Record::Value {
+                    variable_id: 1,
+                    value: int("7"),
+                },
+                Record::Return(Value::String("12.34".into())),
+                Record::Step { path_id: 1, line: 20 },
+                Record::VariableName("rows".into()),
+                Record::Value {
+                    variable_id: 2,
+                    value: Value::Raw(r#"{"a":[1,2],"b":"x\"y"}"#.into()),
+                },
+                Record::VariableName("missing".into()),
+                Record::Value {
+                    variable_id: 3,
+                    value: Value::None,
+                },
+                Record::Value {
+                    variable_id: 2,
+                    value: int("3"),
+                },
+                Record::Event {
+                    kind: 0,
+                    metadata: "stdout".into(),
+                    content: "balance: 12.34\n".into(),
+                },
+                Record::Call {
+                    function_id: 0,
+                    args: vec![],
+                },
+                Record::Return(Value::None),
+                Record::Step { path_id: 2, line: 7 },
+                Record::End,
+            ]
+        );
+    }
+
+    /// A value that does not fit its CTFS type keeps the producer's exact
+    /// text: as `Raw` in the recording, as the original kind in the
+    /// boundary log.  A JS `BigInt` past `i64` and a NaN-payload spelling
+    /// are the two shapes that occur.
+    #[test]
+    fn values_that_do_not_fit_their_type_are_recorded_exactly() {
+        use codetracer_trace_types::TraceLowLevelEvent as E;
+        let tmp = TempDir::new().expect("create tempdir");
+        let mut writer = writer_in(&tmp);
+        writer.session_start("wide", &[]).unwrap();
+        // A value is attached to the step it was observed at.
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let big = "123456789012345678901234567890";
+        let nan = "NaN:0x7ff4000000000001";
+        for (name, text, kind) in [("big", big, "Int"), ("nan", nan, "Float")] {
             writer
                 .event(&BrowserEvent::Value {
-                    name: (*text).to_string(),
+                    name: name.into(),
                     value: EncodedValue {
                         value: serde_json::json!(text),
-                        type_kind: "String".to_string(),
+                        type_kind: kind.into(),
                     },
                 })
                 .unwrap();
-            writer
-                .event(&BrowserEvent::Value {
-                    name: (*text).to_string(),
-                    value: EncodedValue {
-                        value: serde_json::json!({ *text: [text, 1] }),
-                        type_kind: "Object".to_string(),
-                    },
-                })
-                .unwrap();
-            writer
-                .event(&BrowserEvent::Write {
-                    channel: (*text).to_string(),
-                    content: (*text).to_string(),
-                })
-                .unwrap();
         }
-        let trace_dir = writer.session_end().unwrap();
+        let ct = writer.session_end().unwrap();
 
-        let incremental = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
-        let batch = serde_json::to_string(writer.batch_mirror.as_ref().unwrap()).unwrap();
-        assert_eq!(incremental, batch);
-        // The escapes really did reach the file, so the comparison is not
-        // vacuous.
-        assert!(incremental.contains("\\\""), "{incremental}");
-        assert!(incremental.contains("\\\\"), "{incremental}");
-        assert!(incremental.contains("\\n"), "{incremental}");
-        assert!(incremental.contains("\\t"), "{incremental}");
-        assert!(incremental.contains("\\u0000"), "{incremental}");
-        assert!(incremental.contains("\\u001b"), "{incremental}");
-        assert!(incremental.contains('\u{1F389}'), "{incremental}");
-        // And the second sighting of each name minted no second
-        // `VariableName`, so the positional table stayed put.
-        let records: Vec<serde_json::Value> = serde_json::from_str(&incremental).unwrap();
-        let names = records
-            .iter()
-            .filter(|r| r.get("VariableName").is_some())
-            .count();
-        assert_eq!(names, hostile.len(), "one VariableName per distinct name");
-    }
-
-    /// A session whose paths, variables and functions are all re-seen many
-    /// times must intern each exactly once, in first-seen order, and still
-    /// render byte-identically.
-    ///
-    /// The interning tables are what the format's positional lookups
-    /// resolve against, so a duplicate — or a reordering — silently
-    /// renumbers every later reference. The batch comparison alone cannot
-    /// catch that (both sides see the same records), so the counts are
-    /// asserted directly.
-    #[test]
-    fn verify_repeated_interning_emits_one_record_each_in_first_seen_order() {
-        let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        writer.enable_batch_mirror();
-        writer
-            .manifest(&serde_json::json!({
-                "paths": ["a.js", "b.js"],
-                "functions": [
-                    {"name": "f", "pathIndex": 0, "line": 1},
-                    {"name": "g", "pathIndex": 1, "line": 2},
-                ],
-                "sites": [
-                    {"pathIndex": 0, "line": 3, "target": "x"},
-                    {"pathIndex": 1, "line": 4, "target": "y"},
-                ],
-            }))
-            .unwrap();
-        writer.session_start("repeats", &[]).unwrap();
-        for _ in 0..25 {
-            for site in 0..2u32 {
-                writer
-                    .event(&BrowserEvent::Assignment {
-                        site_id: site,
-                        value: Some(EncodedValue {
-                            value: serde_json::json!(site),
-                            type_kind: "Int".to_string(),
-                        }),
-                    })
-                    .unwrap();
-            }
-            for fn_id in 0..2u32 {
-                writer
-                    .event(&BrowserEvent::Call {
-                        fn_id,
-                        args: vec![],
-                    })
-                    .unwrap();
-            }
-        }
-        let trace_dir = writer.session_end().unwrap();
-
-        let incremental = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
-        assert_eq!(
-            incremental,
-            serde_json::to_string(writer.batch_mirror.as_ref().unwrap()).unwrap(),
-        );
-
-        let records: Vec<serde_json::Value> = serde_json::from_str(&incremental).unwrap();
-        let of_kind = |kind: &str| -> Vec<serde_json::Value> {
-            records
-                .iter()
-                .filter_map(|r| r.get(kind).cloned())
-                .collect()
-        };
-        assert_eq!(
-            of_kind("Path"),
-            vec![serde_json::json!("a.js"), serde_json::json!("b.js")],
-            "each path interned once, in first-seen order",
-        );
-        assert_eq!(
-            of_kind("VariableName"),
-            vec![serde_json::json!("x"), serde_json::json!("y")],
-        );
-        assert_eq!(of_kind("Function").len(), 2, "one Function record each");
-        // And the paths file agrees with the Path records' positions,
-        // because a Step's `path_id` indexes it.
-        let paths: Vec<String> = serde_json::from_str(
-            &std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(paths, vec!["a.js".to_string(), "b.js".to_string()]);
-    }
-
-    /// `trace_metadata.json` and `trace_paths.json` are written twice — once
-    /// when the stream opens, so a concurrently-spawned consumer finds a
-    /// program name, and again at session end. Their *final* bytes must be
-    /// what a single write at session end would have produced, or the early
-    /// write is a regression rather than an addition.
-    #[test]
-    fn verify_the_metadata_and_paths_files_end_where_the_single_write_left_them() {
-        let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        let workdir = tmp.path().to_path_buf();
-        writer
-            .session_start("meta", &["--a".to_string(), "b c".to_string()])
-            .unwrap();
-        let trace_dir = drive(
-            &mut writer,
-            &wide_event_sequence()
-                .into_iter()
-                .filter(|e| !matches!(e, BrowserEvent::SessionStart { .. }))
-                .collect::<Vec<_>>(),
-        )
-        .expect("session ends");
-
-        // Reference side: rendered exactly as the removed `flush` did.
-        #[derive(Serialize)]
-        struct Reference {
-            program: String,
-            args: Vec<String>,
-            workdir: String,
-            recorder: TraceMetadataRecorder,
-        }
-        let expected_metadata = serde_json::to_string(&Reference {
-            program: "meta".to_string(),
-            args: vec!["--a".to_string(), "b c".to_string()],
-            workdir: workdir.to_string_lossy().into_owned(),
-            recorder: TraceMetadataRecorder {
-                name: "codetracer-js-recorder-browser".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-        })
-        .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(trace_dir.join("trace_metadata.json")).unwrap(),
-            expected_metadata,
-        );
-
-        // The paths file must list every interned path, in order, and
-        // nothing else — the early write must not have left a short list.
-        let recorded: Vec<serde_json::Value> =
-            serde_json::from_str(&std::fs::read_to_string(trace_dir.join("trace.json")).unwrap())
-                .unwrap();
-        let path_records: Vec<String> = recorded
-            .iter()
-            .filter_map(|r| r.get("Path")?.as_str().map(str::to_string))
+        let raws: Vec<String> = recorded_events(&ct)
+            .into_iter()
+            .filter_map(|e| match e {
+                E::Value(v) => match v.value {
+                    ValueRecord::Raw { r, .. } => Some(r),
+                    _ => None,
+                },
+                _ => None,
+            })
             .collect();
-        let paths_file: Vec<String> = serde_json::from_str(
-            &std::fs::read_to_string(trace_dir.join("trace_paths.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(paths_file, path_records);
+        assert_eq!(raws, vec![big.to_string(), nan.to_string()]);
+
+        let logged: Vec<Value> = decode_log(&stored_boundary_log(&ct))
+            .records
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::Value { value, .. } => Some(value),
+                _ => None,
+            })
+            .collect();
         assert_eq!(
-            paths_file,
-            serde_json::from_str::<Vec<String>>(&serde_json::to_string(&path_records).unwrap())
-                .unwrap(),
+            logged,
+            vec![Value::Int(big.into()), Value::Float(nan.into())]
         );
     }
 
-    /// `trace.json` must be readable *while* the session is still open —
-    /// that is the whole point of M38c, and it is what
-    /// `boundarylog.FollowFile` and the `--boundary-stream -` tee both
-    /// need. Before the change the file did not exist until the page
-    /// unloaded.
     #[test]
-    fn verify_records_are_on_disk_before_session_end() {
+    fn a_second_session_end_is_a_no_op() {
         let tmp = TempDir::new().expect("create tempdir");
-        let mut writer =
-            JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        writer.session_start("live", &[]).unwrap();
-        let trace_json = tmp.path().join("live.ct").join("trace.json");
+        let mut writer = writer_in(&tmp);
+        writer.session_start("twice", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let first = writer.session_end().unwrap();
+        let bytes = std::fs::read(&first).unwrap();
+        let second = writer.session_end().unwrap();
+        assert_eq!(first, second);
+        assert_eq!(std::fs::read(&second).unwrap(), bytes);
+        // A record after the end has nowhere to go and changes nothing.
+        writer.event(&BrowserEvent::Step { site_id: 1 }).unwrap();
+        assert_eq!(std::fs::read(&second).unwrap(), bytes);
+    }
+
+    /// A session that ends without a single record still lands a complete
+    /// recording, rather than nothing a user could open.
+    #[test]
+    fn an_empty_session_still_lands_a_recording() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let mut writer = writer_in(&tmp);
+        writer.session_start("empty", &[]).unwrap();
+        let ct = writer.session_end().unwrap();
+        recorded_events(&ct);
+        let log = decode_log(&stored_boundary_log(&ct));
+        assert!(log.complete);
+        assert!(matches!(log.records[0], Record::Header { .. }));
+        assert_eq!(log.records.len(), 2, "Header and End only");
+    }
+
+    /// Until the session ends there is no `<program>.ct` in the output
+    /// directory — a reader can never open a half-written recording.
+    #[test]
+    fn the_recording_appears_only_when_the_session_ends() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let mut writer = writer_in(&tmp);
+        writer.session_start("pending", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
         assert!(
-            !trace_json.exists(),
-            "no record has arrived yet, so nothing should be on disk",
+            visible_entries(tmp.path()).is_empty(),
+            "mid-session the output directory shows nothing: {:?}",
+            visible_entries(tmp.path()),
         );
-
-        let mut seen = Vec::new();
-        for site_id in 0..5u32 {
-            writer.event(&BrowserEvent::Step { site_id }).unwrap();
-            let bytes = std::fs::read_to_string(&trace_json)
-                .expect("trace.json must exist and be readable mid-session");
-            // The array is still open, so the prefix cannot be parsed as
-            // one; closing it must yield exactly the records so far.
-            let records: Vec<serde_json::Value> =
-                serde_json::from_str(&format!("{bytes}]")).expect("a complete record prefix");
-            seen.push(records.len());
-        }
-        // The `<browser>` Path record precedes the first Step, so the
-        // counts are 2,3,4,5,6 — strictly growing with every event, which
-        // is what "the consumer can act on record k before record k+1 is
-        // produced" requires.
-        assert_eq!(seen, vec![2, 3, 4, 5, 6], "records must land one by one");
-        assert!(!writer.session_ended);
+        assert!(tmp.path().join(PARTIAL_DIR_NAME).join("pending.ct").is_file());
+        writer.session_end().unwrap();
+        assert_eq!(visible_entries(tmp.path()), vec!["pending.ct".to_string()]);
     }
 
-    /// A recording cut off mid-session must be *classifiable* by
-    /// `codetracer-wasm-recorder/internal/boundarylog/stream.go`'s
-    /// three-way truncation logic, not corrupt.
+    /// A consumer that writes stdin to `sink`, and records the argument it
+    /// was given in `arg` — so a test can check the `{trace}` substitution
+    /// too.
+    fn cat_consumer(sink: &Path, arg: &Path) -> StreamConsumerConfig {
+        StreamConsumerConfig {
+            command: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                format!(
+                    "printf '%s' \"$0\" > '{}' && exec cat > '{}'",
+                    arg.display(),
+                    sink.display()
+                ),
+                TRACE_PLACEHOLDER.to_string(),
+            ],
+        }
+    }
+
+    fn wait_for_nonempty(path: &Path) -> Vec<u8> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            let bytes = std::fs::read(path).unwrap_or_default();
+            if bytes.len() > 5 {
+                return bytes;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::fs::read(path).unwrap_or_default()
+    }
+
+    /// The tee: a real spawned child receives the boundary log *during* the
+    /// session, and at the end has exactly the bytes the container stores.
     ///
-    /// The benign classification, `TruncatedUnterminated`, requires the
-    /// file to hold whole records and no closing `]` — i.e. zero pending
-    /// bytes of a partial object, which is what `RecordStream`'s
-    /// one-`write_all`-per-record buys. `TruncatedMidRecord` is the
-    /// outcome this test exists to rule out.
+    /// The stand-in consumer is `sh -c 'cat > <file>'` rather than
+    /// `wazero`: what the daemon owes the §2 consumer is the byte stream on
+    /// stdin, live, and that is exactly what this measures.  The consumer's
+    /// own half is pinned in `codetracer-wasm-recorder`.
     #[test]
-    fn verify_a_killed_session_leaves_a_stream_the_consumer_can_classify() {
+    fn the_tee_feeds_a_real_child_process_during_the_session() {
         let tmp = TempDir::new().expect("create tempdir");
-        let trace_json = tmp.path().join("frontend.ct").join("trace.json");
+        let out = tmp.path().join("out");
+        let sink = tmp.path().join("teed.ctbl");
+        let arg = tmp.path().join("arg");
+        let mut writer = CtfsRecordingWriter::with_stream_consumer(
+            out.clone(),
+            tmp.path().to_path_buf(),
+            cat_consumer(&sink, &arg),
+        );
+        writer.session_start("teed", &[]).unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+
+        // Mid-session: the child already holds the header and the step.
+        let teed = wait_for_nonempty(&sink);
+        let live = decode_log(&teed);
+        assert!(!live.complete, "the session is still open");
+        assert_eq!(live.records.len(), 3, "Header, Path, Step: {:?}", live.records);
+        assert!(!writer.session_ended);
+
+        let ct = writer.session_end().unwrap();
+        // `session_end` closes the pipe and reaps the child, so the sink is
+        // complete by the time it returns.
+        assert_eq!(
+            std::fs::read(&sink).unwrap(),
+            stored_boundary_log(&ct),
+            "the consumer sees exactly the boundary log the recording stores",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&arg).unwrap(),
+            ct.to_string_lossy(),
+            "{{trace}} is the path the recording lands at",
+        );
+    }
+
+    /// A page killed mid-session leaves the consumer a stream of whole
+    /// frames with no `End` — unterminated, not torn — and leaves no
+    /// recording in the output directory.
+    #[test]
+    fn a_killed_session_leaves_a_stream_the_consumer_can_classify() {
+        let tmp = TempDir::new().expect("create tempdir");
+        let out = tmp.path().join("out");
+        let sink = tmp.path().join("teed.ctbl");
+        let arg = tmp.path().join("arg");
         {
-            let mut writer =
-                JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-            // Stop short of `SessionEnd`: the page was killed, not unloaded.
-            let events = wide_event_sequence();
-            let truncated: Vec<BrowserEvent> = events
+            let mut writer = CtfsRecordingWriter::with_stream_consumer(
+                out.clone(),
+                tmp.path().to_path_buf(),
+                cat_consumer(&sink, &arg),
+            );
+            let truncated: Vec<BrowserEvent> = wide_event_sequence()
                 .into_iter()
                 .filter(|e| !matches!(e, BrowserEvent::SessionEnd {}))
                 .collect();
@@ -2897,133 +2704,27 @@ mod tests {
             assert!(!writer.session_ended, "the session never ended cleanly");
             // Dropping the writer without `session_end` is the crash.
         }
-
-        let bytes = std::fs::read_to_string(&trace_json).expect("a partial recording on disk");
-        assert!(
-            bytes.starts_with('['),
-            "the array must have been opened: {bytes}",
-        );
-        assert!(
-            !bytes.ends_with(']'),
-            "an interrupted recording must NOT look complete: {bytes}",
-        );
-        // `stream.go`'s scanner tracks brace depth: it reports pending
-        // bytes unless the last thing in the file is a finished object.
-        assert!(
-            bytes.ends_with('}'),
-            "the last bytes must be a whole record, or the consumer classifies \
-             this TruncatedMidRecord instead of the benign TruncatedUnterminated: {bytes}",
-        );
-        let records: Vec<serde_json::Value> = serde_json::from_str(&format!("{bytes}]"))
-            .expect("every record present must be complete");
-        assert!(records.len() > 10, "expected a substantial prefix");
-    }
-
-    /// The `--stream-done` marker: created at session end, and only when
-    /// asked for. It must not appear in a default recording, because it
-    /// would then land in every committed `.ct` fixture.
-    #[test]
-    fn verify_the_stream_done_marker_is_opt_in_and_lands_last() {
-        let tmp = TempDir::new().expect("create tempdir");
-        let mut plain = JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf());
-        plain.session_start("plain", &[]).unwrap();
-        let plain_dir = plain.session_end().unwrap();
-        assert!(!plain_dir.join(".complete").exists(), "marker is opt-in");
-
-        let marked_tmp = TempDir::new().expect("create tempdir");
-        let mut marked = JsonFileCtfsWriter::with_stream_consumer(
-            marked_tmp.path().to_path_buf(),
-            marked_tmp.path().to_path_buf(),
-            StreamConsumerConfig {
-                command: Vec::new(),
-                done_marker: Some(".complete".to_string()),
-            },
-        );
-        marked.session_start("marked", &[]).unwrap();
-        marked.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        let marked_dir = marked_tmp.path().join("marked.ct");
-        assert!(
-            !marked_dir.join(".complete").exists(),
-            "the marker means `trace.json` is final; it must not exist mid-session",
-        );
-        assert_eq!(marked.session_end().unwrap(), marked_dir);
-        assert!(marked_dir.join(".complete").is_file());
-        // The marker's promise: by the time it exists, the array is closed.
-        let bytes = std::fs::read_to_string(marked_dir.join("trace.json")).unwrap();
-        assert!(bytes.ends_with(']'), "{bytes}");
-    }
-
-    /// The tee: a real spawned child process receives the exact
-    /// `trace.json` bytes, and receives them *during* the session rather
-    /// than in a dump at the end.
-    ///
-    /// The stand-in consumer is `sh -c 'cat > <file>'` rather than
-    /// `wazero-snapshots`: what the daemon owes the §2 consumer is the
-    /// byte stream on stdin, live, and that is exactly what this measures.
-    /// The consumer's own half — turning those bytes into snapshots and
-    /// slices while the stream is still arriving — is pinned in
-    /// `codetracer-wasm-recorder` by
-    /// `TestSnapshotsAreEmittedWhileTheStreamIsStillArriving`.
-    #[test]
-    fn verify_the_tee_feeds_a_real_child_process_during_the_session() {
-        let tmp = TempDir::new().expect("create tempdir");
-        let sink = tmp.path().join("teed.json");
-        let mut writer = JsonFileCtfsWriter::with_stream_consumer(
-            tmp.path().to_path_buf(),
-            tmp.path().to_path_buf(),
-            StreamConsumerConfig {
-                command: vec![
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    // `{trace_dir}` substitution is exercised too: the
-                    // consumer is told which recording it is reading.
-                    format!(
-                        "test -d '{}' && exec cat > '{}'",
-                        TRACE_DIR_PLACEHOLDER,
-                        sink.display()
-                    ),
-                ],
-                done_marker: None,
-            },
-        );
-        writer.session_start("teed", &[]).unwrap();
-        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-
-        // Mid-session: the child must already hold the bytes. `cat` is
-        // block-buffered on a pipe, so wait for it to flush rather than
-        // assuming a size.
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let mut teed = String::new();
-        while std::time::Instant::now() < deadline {
-            teed = std::fs::read_to_string(&sink).unwrap_or_default();
-            if !teed.is_empty() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(
-            teed.starts_with('['),
-            "the tee must reach a real child process while the session is live; got {teed:?}",
-        );
-        assert!(!writer.session_ended, "the session is still open");
-
-        let trace_dir = writer.session_end().unwrap();
-        // `session_end` closes the pipe and reaps the child, so the sink is
-        // complete by the time it returns — no polling needed here.
-        let teed = std::fs::read_to_string(&sink).unwrap();
-        let recorded = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
-        assert_eq!(
-            teed, recorded,
-            "the consumer must see exactly the recording's bytes",
-        );
+        let log = decode_log(&std::fs::read(&sink).unwrap());
+        assert!(!log.complete, "an interrupted stream must NOT look complete");
+        assert_eq!(log.torn_bytes, 0, "every frame the consumer got is whole");
+        assert!(log.records.len() > 10, "expected a substantial prefix");
+        assert!(visible_entries(&out).is_empty(), "no recording for a killed session");
     }
 
     /// A consumer that cannot be spawned, or that dies early, costs seek
-    /// performance and nothing else — the recording must be complete and
-    /// correct either way (spec §2: the recording is the source of truth,
+    /// performance and nothing else — the recording is complete and
+    /// identical either way (spec §2: the recording is the source of truth,
     /// snapshots are derived data).
     #[test]
-    fn verify_a_broken_consumer_does_not_cost_the_recording() {
+    fn a_broken_consumer_does_not_cost_the_recording() {
+        // One workdir for every run, so the header frames agree.
+        let workdir = PathBuf::from("/workdir");
+        let reference = {
+            let tmp = TempDir::new().expect("create tempdir");
+            let mut writer = CtfsRecordingWriter::new(tmp.path().to_path_buf(), workdir.clone());
+            let ct = drive(&mut writer, &wide_event_sequence()).unwrap();
+            stored_boundary_log(&ct)
+        };
         for command in [
             vec!["definitely-not-a-real-binary-38c".to_string()],
             // Exits immediately, so every write after the first hits a
@@ -3031,29 +2732,74 @@ mod tests {
             vec!["sh".to_string(), "-c".to_string(), "exit 0".to_string()],
         ] {
             let tmp = TempDir::new().expect("create tempdir");
-            let mut writer = JsonFileCtfsWriter::with_stream_consumer(
+            let mut writer = CtfsRecordingWriter::with_stream_consumer(
                 tmp.path().to_path_buf(),
-                tmp.path().to_path_buf(),
-                StreamConsumerConfig {
-                    command,
-                    done_marker: None,
-                },
+                workdir.clone(),
+                StreamConsumerConfig { command },
             );
-            writer.enable_batch_mirror();
-            let trace_dir = drive(&mut writer, &wide_event_sequence()).expect("session ends");
-            let recorded = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
+            let ct = drive(&mut writer, &wide_event_sequence()).expect("session ends");
+            recorded_events(&ct);
+            assert_eq!(stored_boundary_log(&ct), reference);
+        }
+    }
+
+    /// `{trace_dir}` named the recording DIRECTORY.  Substituting a file
+    /// path into an argument written for a directory would hand the
+    /// consumer `<program>.ct/slices`, a path inside a file — so it is
+    /// refused up front, naming the replacement.
+    #[test]
+    fn the_retired_trace_dir_placeholder_is_refused() {
+        let config = StreamConsumerConfig {
+            command: vec![
+                "wazero".to_string(),
+                "--slice-dir".to_string(),
+                "{trace_dir}/slices".to_string(),
+            ],
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.contains("{trace_dir}") && err.contains("{trace}"), "{err}");
+        assert!(StreamConsumerConfig::default().validate().is_ok());
+    }
+
+    /// Recordings produced by the real browser pipeline from this tree:
+    /// both browser-side recordings of the three-trace demo are single
+    /// `.ct` files whose boundary log is complete and whose events read
+    /// back.
+    ///
+    /// The recordings are produced rather than committed: a committed one
+    /// was made by an earlier version of the writer under test, and would
+    /// go on passing after the writer changed.
+    #[test]
+    fn a_real_browser_recording_is_a_ct_with_a_complete_boundary_log() {
+        let recordings = super::tests_support::materialized_three_trace_recordings();
+        for fixture in ["frontend-wasm.ct", "frontend.ct"] {
+            let ct = recordings.join(fixture);
+            assert!(ct.is_file(), "{} must be a CTFS file", ct.display());
+            let log = decode_log(&stored_boundary_log(&ct));
+            assert!(log.complete, "{fixture}: the page ended its session cleanly");
+            assert!(
+                log.records.len() >= 15,
+                "{fixture} should be a substantial recording; got {} records",
+                log.records.len(),
+            );
+            let steps_logged = log
+                .records
+                .iter()
+                .filter(|r| matches!(r, Record::Step { .. }))
+                .count();
+            let steps_recorded = recorded_events(&ct)
+                .iter()
+                .filter(|e| matches!(e, codetracer_trace_types::TraceLowLevelEvent::Step(_)))
+                .count();
             assert_eq!(
-                recorded,
-                serde_json::to_string(writer.batch_mirror.as_ref().unwrap()).unwrap(),
-                "a broken consumer must not perturb the recording",
+                steps_logged, steps_recorded,
+                "{fixture}: the boundary log and the recording carry the same steps",
             );
         }
     }
 
     /// End-to-end smoke: spin up the host, connect a real WebSocket
-    /// client, ship a 5-event session, observe the `.ct` directory on
-    /// disk.  This is the M26 acceptance criterion the milestone called
-    /// out (5 dummy events → valid `.ct` file lands).
+    /// client, ship a 5-event session, observe the `.ct` file on disk.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn smoke_end_to_end_records_five_events_to_ct_file() {
         use futures_util::SinkExt;
@@ -3074,7 +2820,6 @@ mod tests {
         let (mut ws, _resp) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect");
-        // Ship the session in one batch — newline-delimited JSON.
         let batch = [
             r#"{"kind":"SessionStart","program":"smoke","args":[]}"#,
             r#"{"kind":"Step","siteId":0}"#,
@@ -3088,41 +2833,33 @@ mod tests {
         ws.send(Message::Text(batch)).await.expect("send");
         ws.close(None).await.ok();
         // Allow the spawned connection handler to flush.
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         running.stop().await.expect("stop");
 
-        let trace_dir = tmp.path().join("smoke.ct");
+        let ct = tmp.path().join("smoke.ct");
         assert!(
-            trace_dir.is_dir(),
-            "expected trace directory at {trace_dir:?}; entries: {:?}",
-            std::fs::read_dir(tmp.path())
-                .unwrap()
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .collect::<Vec<_>>(),
+            ct.is_file(),
+            "expected a recording at {ct:?}; entries: {:?}",
+            visible_entries(tmp.path()),
         );
-        let trace_json = std::fs::read_to_string(trace_dir.join("trace.json")).unwrap();
-        let arr: Vec<serde_json::Value> = serde_json::from_str(&trace_json).unwrap();
-        assert!(
-            arr.iter().any(|e| e.get("Step").is_some()),
-            "expected at least one Step event in trace.json: {arr:?}",
-        );
-        assert!(
-            arr.iter().any(|e| e.get("Value").is_some()),
-            "expected at least one Value event in trace.json: {arr:?}",
-        );
-        let metadata_json = std::fs::read_to_string(trace_dir.join("trace_metadata.json")).unwrap();
-        let metadata: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
-        assert_eq!(metadata["program"], "smoke");
+        use codetracer_trace_types::TraceLowLevelEvent as E;
+        let events = recorded_events(&ct);
+        assert_eq!(events.iter().filter(|e| matches!(e, E::Step(_))).count(), 3);
+        assert_eq!(events.iter().filter(|e| matches!(e, E::Value(_))).count(), 2);
+        let log = decode_log(&stored_boundary_log(&ct));
+        assert!(matches!(&log.records[0], Record::Header { program, .. } if program == "smoke"));
     }
 }
 
 // ---------------------------------------------------------------------------
-// Host-supplied state sidecar (spec §§3.3, 3.4)
+// Host-supplied state (spec §§3.3, 3.4)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod host_state_tests {
+    use super::tests::{decode_log, stored_boundary_log};
     use super::*;
+    use crate::boundary_log::Record;
     use crate::browser_stream_receiver::{
         BrowserEvent, GlobalSet, ImportedGlobalState, ImportedMemoryState, MemoryRegion,
         MemoryWrite, parse_event_line,
@@ -3146,8 +2883,23 @@ mod host_state_tests {
         r#""globalSets":[{"module":"env","name":"fee_bps","type":"i32","value":"250"}]}"#
     );
 
-    fn writer_in(tmp: &TempDir) -> JsonFileCtfsWriter {
-        JsonFileCtfsWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf())
+    fn writer_in(tmp: &TempDir) -> CtfsRecordingWriter {
+        CtfsRecordingWriter::new(tmp.path().to_path_buf(), tmp.path().to_path_buf())
+    }
+
+    /// The host-state documents a finished recording's boundary log
+    /// carries, in order.
+    fn host_state_documents(ct: &std::path::Path) -> Vec<serde_json::Value> {
+        decode_log(&stored_boundary_log(ct))
+            .records
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::Event { metadata, .. } if metadata.contains(HOST_STATE_BOUNDARY_ID) => {
+                    Some(serde_json::from_str(&metadata).unwrap())
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -3210,8 +2962,12 @@ mod host_state_tests {
         }
     }
 
+    /// Host state rides in the record stream, one `Event` per message, in
+    /// the consumer's schema (`hoststate.go`'s `InitialState` /
+    /// `HostMutation`, field for field).  It is the only carrier: there is
+    /// no sidecar file to fall out of step with it.
     #[test]
-    fn host_state_events_land_in_the_sidecar_in_the_consumers_schema() {
+    fn host_state_rides_in_the_stream_in_the_consumers_schema() {
         let tmp = TempDir::new().unwrap();
         let mut writer = writer_in(&tmp);
         writer.session_start("frontend-wasm", &[]).unwrap();
@@ -3222,56 +2978,52 @@ mod host_state_tests {
         writer
             .event(&parse_event_line(MUTATION_LINE).unwrap())
             .unwrap();
-        let dir = writer.session_end().unwrap();
+        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
+        let ct = writer.session_end().unwrap();
 
-        let raw = std::fs::read_to_string(dir.join("boundary_state.json"))
-            .expect("boundary_state.json must be written");
-        let doc: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let docs = host_state_documents(&ct);
+        assert_eq!(docs.len(), 2, "one Event per host-state message");
 
-        // Field-for-field against `hoststate.go`'s `HostState`.
-        assert_eq!(doc["version"], 1);
-        assert_eq!(doc["initial"]["tables"], serde_json::json!([]));
-        let mem = &doc["initial"]["memories"][0];
+        let initial = &docs[0];
+        assert_eq!(initial["boundary_id"], HOST_STATE_BOUNDARY_ID);
+        assert_eq!(initial["version"], HOST_STATE_VERSION);
+        assert_eq!(initial["record"], HOST_STATE_RECORD_INITIAL);
+        let mem = &initial["initial"]["memories"][0];
         assert_eq!(mem["module"], "env");
         assert_eq!(mem["name"], "memory");
         assert_eq!(mem["minPages"], 17);
         assert_eq!(mem["maxPages"], serde_json::Value::Null);
         assert_eq!(mem["data"][0]["offset"], 1_048_576);
         assert_eq!(mem["data"][0]["bytesB64"], "BwAAAGQ=");
-        let g = &doc["initial"]["globals"][0];
+        let g = &initial["initial"]["globals"][0];
         assert_eq!(g["type"], "i32");
         assert_eq!(g["mutable"], true);
         assert_eq!(g["value"], "25");
-        let mu = &doc["mutations"][0];
-        assert_eq!(mu["afterCrossing"], 1);
-        assert_eq!(mu["memoryWrites"][0]["offset"], 1_048_584);
-        assert_eq!(mu["memoryWrites"][0]["bytesB64"], "+g==");
-        assert_eq!(mu["globalSets"][0]["value"], "250");
+        assert_eq!(initial["initial"]["tables"], serde_json::json!([]));
+
+        let mutation = &docs[1];
+        assert_eq!(mutation["record"], HOST_STATE_RECORD_MUTATION);
+        assert_eq!(mutation["mutation"]["afterCrossing"], 1);
+        assert_eq!(mutation["mutation"]["memoryWrites"][0]["offset"], 1_048_584);
+        assert_eq!(mutation["mutation"]["memoryWrites"][0]["bytesB64"], "+g==");
+        assert_eq!(mutation["mutation"]["globalSets"][0]["value"], "250");
+
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != PARTIAL_DIR_NAME)
+            .collect();
+        assert_eq!(entries, vec!["frontend-wasm.ct".to_string()], "no sidecar");
     }
 
+    /// Host-state records join none of the positional tables: removing
+    /// them leaves exactly the record sequence of the same session without
+    /// host state.  `Function` / `VariableName` / `Path` are resolved by
+    /// index downstream, so a record that renumbered them would silently
+    /// break every lookup.
     #[test]
-    fn host_state_events_ride_in_the_trace_stream_and_disturb_nothing_else() {
-        // M44b. This test replaces `host_state_events_add_nothing_to_the_
-        // trace_stream`, which asserted the opposite — that a host-state
-        // event changed `trace.json` by not one byte.
-        //
-        // That was the right call under M44's assumptions and the wrong
-        // one overall. The sidecar it left as the only carrier is a file,
-        // and a file is exactly what a streaming consumer cannot use:
-        // `--boundary-stream` reads its metadata once, at startup, and
-        // §3.3 state is only known at the module's first exported call —
-        // after the daemon opened the stream and spawned the consumer. The
-        // whole streaming pipeline therefore refused every module whose
-        // linear memory is imported.
-        //
-        // The concern behind the old test was real and is preserved here
-        // in the form that actually states it: the reason a new record was
-        // risky is that `Function` / `VariableName` / `Path` are POSITIONAL
-        // tables, so anything that renumbers them silently breaks every
-        // lookup downstream. An `Event` record joins none of those tables,
-        // and the second assertion below proves it rather than assuming
-        // it — remove the host-state records from the new document and the
-        // remaining bytes are the old document, exactly.
+    fn host_state_records_disturb_nothing_else() {
         let tmp = TempDir::new().unwrap();
         let mut writer = writer_in(&tmp);
         writer.session_start("frontend-wasm", &[]).unwrap();
@@ -3283,138 +3035,50 @@ mod host_state_tests {
             .event(&parse_event_line(MUTATION_LINE).unwrap())
             .unwrap();
         writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        let dir = writer.session_end().unwrap();
-        let with_state = std::fs::read_to_string(dir.join("trace.json")).unwrap();
+        let with_state = decode_log(&stored_boundary_log(&writer.session_end().unwrap()));
 
-        // (1) The records are there, in order, in the consumer's schema.
-        let records: Vec<serde_json::Value> = serde_json::from_str(&with_state).unwrap();
-        let host_state: Vec<&serde_json::Value> = records
-            .iter()
-            .filter(|r| {
-                r.get("Event")
-                    .and_then(|e| e.get("metadata"))
-                    .and_then(|m| m.as_str())
-                    .is_some_and(|m| m.contains(HOST_STATE_BOUNDARY_ID))
-            })
-            .collect();
-        assert_eq!(
-            host_state.len(),
-            2,
-            "one Event per host-state message, no more and no fewer"
-        );
-
-        let initial: serde_json::Value =
-            serde_json::from_str(host_state[0]["Event"]["metadata"].as_str().unwrap()).unwrap();
-        assert_eq!(initial["boundary_id"], HOST_STATE_BOUNDARY_ID);
-        assert_eq!(initial["version"], HOST_STATE_VERSION);
-        assert_eq!(initial["record"], HOST_STATE_RECORD_INITIAL);
-        // The payload is the sidecar's `initial` document, field for field
-        // — the consumer decodes both into the same `InitialState`.
-        assert_eq!(initial["initial"]["memories"][0]["name"], "memory");
-        assert_eq!(initial["initial"]["memories"][0]["minPages"], 17);
-        assert_eq!(
-            initial["initial"]["memories"][0]["data"][0]["bytesB64"],
-            "BwAAAGQ="
-        );
-        assert_eq!(initial["initial"]["globals"][0]["value"], "25");
-        assert_eq!(initial["initial"]["tables"], serde_json::json!([]));
-
-        let mutation: serde_json::Value =
-            serde_json::from_str(host_state[1]["Event"]["metadata"].as_str().unwrap()).unwrap();
-        assert_eq!(mutation["record"], HOST_STATE_RECORD_MUTATION);
-        assert_eq!(mutation["mutation"]["afterCrossing"], 1);
-        assert_eq!(mutation["mutation"]["memoryWrites"][0]["bytesB64"], "+g==");
-        assert_eq!(mutation["mutation"]["globalSets"][0]["value"], "250");
-
-        // (2) Nothing else moved. The same session without the host-state
-        // events must be exactly what remains after the host-state records
-        // are removed — same records, same order, same bytes.
         let tmp2 = TempDir::new().unwrap();
         let mut plain = writer_in(&tmp2);
         plain.session_start("frontend-wasm", &[]).unwrap();
         plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
         plain.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        let dir2 = plain.session_end().unwrap();
-        let without_state = std::fs::read_to_string(dir2.join("trace.json")).unwrap();
+        let without_state = decode_log(&stored_boundary_log(&plain.session_end().unwrap()));
 
-        // Compared as the ORIGINAL bytes, not as re-serialised values:
-        // `serde_json::Value` is a sorted map, so a round trip through it
-        // would normalise key order and hide exactly the kind of change
-        // this assertion exists to catch.
-        let raw_records = super::tests::split_top_level_records(with_state.as_bytes());
-        let kept: Vec<&[u8]> = raw_records
+        let kept: Vec<Record> = with_state
+            .records
             .into_iter()
-            .filter(|r| {
-                !std::str::from_utf8(r)
-                    .unwrap()
-                    .contains(HOST_STATE_BOUNDARY_ID)
+            .filter(|r| !matches!(r, Record::Event { metadata, .. } if metadata.contains(HOST_STATE_BOUNDARY_ID)))
+            .map(|r| match r {
+                // The two sessions ran in different directories.
+                Record::Header { .. } => Record::End,
+                other => other,
             })
             .collect();
-        let rejoined = format!(
-            "[{}]",
-            kept.iter()
-                .map(|r| std::str::from_utf8(r).unwrap())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        assert_eq!(
-            rejoined, without_state,
-            "removing the host-state records must leave the document a \
-             recording without host state produces, byte for byte"
-        );
-
-        // (3) And the sidecar still says the same thing, because it is a
-        // rendering of these records rather than a second source of truth.
-        // The consumer refuses a recording whose two carriers disagree.
-        let sidecar: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(sidecar["initial"], initial["initial"]);
-        assert_eq!(sidecar["mutations"][0], mutation["mutation"]);
+        let plain: Vec<Record> = without_state
+            .records
+            .into_iter()
+            .map(|r| match r {
+                Record::Header { .. } => Record::End,
+                other => other,
+            })
+            .collect();
+        assert_eq!(kept, plain);
     }
 
     #[test]
-    fn a_recording_with_no_host_state_writes_no_sidecar() {
-        // The consumer reads a missing file as "this module defines its
-        // own memory and globals", which is the truth for almost every
-        // module; an empty sidecar would say the same thing less clearly.
+    fn a_recording_with_no_host_state_carries_no_host_state_records() {
         let tmp = TempDir::new().unwrap();
         let mut writer = writer_in(&tmp);
         writer.session_start("frontend-wasm", &[]).unwrap();
         writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        let dir = writer.session_end().unwrap();
-        assert!(!dir.join("boundary_state.json").exists());
-    }
-
-    #[test]
-    fn the_sidecar_is_readable_while_the_recording_is_still_running() {
-        // M38c made `trace.json` incremental so a consumer can replay a
-        // recording as it arrives.  A sidecar that only appeared at
-        // session end would be useless to that consumer, since §3.3 state
-        // has to be applied *before* the first exported call.
-        let tmp = TempDir::new().unwrap();
-        let mut writer = writer_in(&tmp);
-        writer.session_start("frontend-wasm", &[]).unwrap();
-        writer.event(&BrowserEvent::Step { site_id: 0 }).unwrap();
-        writer
-            .event(&parse_event_line(INITIAL_LINE).unwrap())
-            .unwrap();
-
-        let dir = tmp.path().join("frontend-wasm.ct");
-        let raw = std::fs::read_to_string(dir.join("boundary_state.json"))
-            .expect("the sidecar must exist before session_end");
-        let doc: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(doc["initial"]["memories"][0]["minPages"], 17);
-        assert_eq!(doc["mutations"], serde_json::json!([]));
-
-        writer.session_end().unwrap();
+        let ct = writer.session_end().unwrap();
+        assert!(host_state_documents(&ct).is_empty());
     }
 
     #[test]
     fn mutations_keep_the_order_the_page_reported_them_in() {
         // `MutationsFor(seq)` selects by anchor, but two mutations
-        // anchored to the same crossing are applied in file order, so the
+        // anchored to the same crossing are applied in stream order, so the
         // later write must win exactly as it did in the browser.
         let tmp = TempDir::new().unwrap();
         let mut writer = writer_in(&tmp);
@@ -3433,16 +3097,10 @@ mod host_state_tests {
                 })
                 .unwrap();
         }
-        let dir = writer.session_end().unwrap();
-        let doc: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
-        )
-        .unwrap();
-        let anchors: Vec<u64> = doc["mutations"]
-            .as_array()
-            .unwrap()
+        let ct = writer.session_end().unwrap();
+        let anchors: Vec<u64> = host_state_documents(&ct)
             .iter()
-            .map(|m| m["afterCrossing"].as_u64().unwrap())
+            .map(|m| m["mutation"]["afterCrossing"].as_u64().unwrap())
             .collect();
         assert_eq!(anchors, vec![3, 1, 3]);
     }
@@ -3471,12 +3129,10 @@ mod host_state_tests {
                 globals: vec![],
             })
             .unwrap();
-        let dir = writer.session_end().unwrap();
-        let doc: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("boundary_state.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(doc["initial"]["memories"][0]["minPages"], 17);
+        let ct = writer.session_end().unwrap();
+        let docs = host_state_documents(&ct);
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0]["initial"]["memories"][0]["minPages"], 17);
     }
 }
 
