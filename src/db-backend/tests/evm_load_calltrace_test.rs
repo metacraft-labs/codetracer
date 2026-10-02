@@ -27,6 +27,10 @@ use serde_json::json;
 mod test_harness;
 use test_harness::{Language, TestRecording, find_evm_recorder};
 
+/// One call row of the calltrace: depth, function name, the step it was
+/// entered at, and its arguments as (name, rendered value) pairs.
+type CallRow = (i64, String, i64, Vec<(String, String)>);
+
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
 }
@@ -89,7 +93,7 @@ fn evm_load_calltrace_returns_the_transactions_call_tree() {
             // entry point, inlined into that top-level frame; it is not a
             // call of its own.
             let body_str = resp.body.to_string();
-            let calls: Vec<(i64, String, i64, Vec<(String, String)>)> = resp.body["callLines"]
+            let calls: Vec<CallRow> = resp.body["callLines"]
                 .as_array()
                 .expect("callLines is an array")
                 .iter()
