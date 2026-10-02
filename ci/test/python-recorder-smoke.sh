@@ -90,28 +90,21 @@ export TRACE_DIR
 
 "${CT_BIN}" record -o="${TRACE_DIR}" "${TRACE_PROGRAM}"
 
-if [[ ! -f "${TRACE_DIR}/trace.json" ]]; then
-	echo "error: trace.json not produced at ${TRACE_DIR}"
+# The production recorder writes a single `.ct` container. A `trace.json`
+# here would be test-oracle output, which CodeTracer refuses to open.
+if [[ -f "${TRACE_DIR}/trace.json" ]]; then
+	echo "error: ct record wrote a trace.json (test-oracle output, not a recording) at ${TRACE_DIR}"
 	exit 1
 fi
 
-if [[ ! -f "${TRACE_DIR}/trace_metadata.json" ]]; then
-	echo "error: trace_metadata.json not produced at ${TRACE_DIR}"
+shopt -s nullglob
+CT_FILES=("${TRACE_DIR}"/*.ct)
+shopt -u nullglob
+if [[ ${#CT_FILES[@]} -ne 1 ]]; then
+	echo "error: expected exactly one .ct container in ${TRACE_DIR}, found ${#CT_FILES[@]}"
+	ls -la "${TRACE_DIR}"
 	exit 1
 fi
-
-python - <<'PY'
-import json
-import os
-from pathlib import Path
-
-trace_dir = Path(os.environ["TRACE_DIR"])
-metadata = json.loads((trace_dir / "trace_metadata.json").read_text(encoding="utf-8"))
-
-recorder = metadata.get("recorder", {})
-assert recorder.get("name") == "codetracer_python_recorder", recorder
-assert recorder.get("target_script"), "missing target_script in recorder metadata"
-PY
 
 echo '###############################################################################'
 echo "Verifying failure mode when recorder module is missing"

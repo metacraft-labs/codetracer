@@ -95,7 +95,7 @@ proc findReplayServer(): string =
 
 proc tracePath(): string =
   let p = repoRoot() / "src" / "db-backend" / "trace"
-  if not fileExists(p / "trace_metadata.json"):
+  if not fileExists(p / "trace.ct"):
     raise newException(IOError, "missing trace fixture at " & p)
   p
 
