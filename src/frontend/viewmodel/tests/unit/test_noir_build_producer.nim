@@ -43,7 +43,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 160
+const ExpectedAssertions = 159
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -105,9 +105,9 @@ const CleanWithWarning = """{"ok":true,"plan":{},"artifact":{"bytecode":"H4sI"},
 
 const GitDependencyRefused = """{"ok":false,"stage":"resolve","kind":"git-dependency-refused","message":"hello_noir/Nargo.toml:7:8: the dependency `util` is a GIT dependency. A virtual filesystem cannot fetch it.","manifest":"hello_noir/Nargo.toml","line":7,"column":8}"""
 
-const TraceDocument = """{"events":[{"Path":"p"},{"Call":{}},{"Step":{}},{"Step":{}},{"Step":{}},{"Call":{}}],"paths":["hello_noir/src/main.nr","hello_noir/src/utils.nr"]}"""
+const TraceDocument = """{"container":"wN5yrOIAAQ==","paths":["hello_noir/src/main.nr","hello_noir/src/utils.nr"],"source_views":[],"workdir":"","steps":3,"calls":2}"""
 
-const TrivialTrace = """{"events":[{"Path":"p"}],"paths":["hello_noir/src/main.nr"]}"""
+const TrivialTrace = """{"container":"wN5yrOIAAQ==","paths":["hello_noir/src/main.nr"],"source_views":[],"workdir":"","steps":0,"calls":0}"""
 
 suite "the pane is driven, not forked":
 
@@ -342,11 +342,10 @@ suite "the trace phase reports what a trace IS":
     let verdict = runPhase(producer, nbpTrace, TraceDocument, 0)
     counted verdict == npvSucceeded
     counted producer.vm.status.val == bsSucceeded
-    counted producer.lastSummary.events == 6
     counted producer.lastSummary.steps == 3
     counted producer.lastSummary.calls == 2
-    counted linesMentioning(producer.vm, "traced 6 events") == 1
-    counted linesMentioning(producer.vm, "3 steps") == 1
+    counted linesMentioning(producer.vm, "traced 3 steps") == 1
+    counted linesMentioning(producer.vm, "2 calls") == 1
     # The source files are rows a user can click, in the RENDERER's spelling.
     var traceRows = 0
     for line in producer.vm.output.val:
@@ -357,7 +356,7 @@ suite "the trace phase reports what a trace IS":
     # THE WHOLE TRACE IS NOT IN THE PANE. It is 3.7 KB for the bundled
     # template and unbounded in general; painting it verbatim would put a
     # trace in a log pane.
-    counted linesMentioning(producer.vm, "\"events\"") == 0
+    counted linesMentioning(producer.vm, "\"container\"") == 0
 
   test "ONE-EVENT-ZERO-STEPS is a fault, not a success":
     # Both wasm modules answer `ok` over a trace with nothing in it —
