@@ -648,14 +648,15 @@ impl CTFSTraceReader {
 
     /// Build a reader directly from a decoded `TraceLowLevelEvent` stream.
     ///
-    /// CTFS is the canonical materialized-trace container, but some
-    /// external recorders still emit the legacy `runtime_tracing`
-    /// materialized layout — a `trace.json` file holding the same
-    /// `Vec<TraceLowLevelEvent>` payload that CTFS stores (CBOR-encoded)
-    /// in `events.log`.  The Noir recorder (`nargo trace`) is the
-    /// current example.  Rather than failing such traces (which would
-    /// then wrongly fall through to the rr/MCR replay-worker path), we
-    /// run the very same postprocessing pipeline `open()` uses so the
+    /// CTFS is the canonical materialized-trace container, and the
+    /// production recorders, `nargo trace` among them, write `.ct`.  A
+    /// bare `Vec<TraceLowLevelEvent>` stream — the same payload CTFS
+    /// stores (CBOR-encoded) in `events.log` — still reaches the
+    /// db-backend from producers that hand events over without a
+    /// container: the `session-manager record-web` browser recordings
+    /// (`trace.json`), the in-browser replay engine's VFS handoff
+    /// (`trace.json`), and pre-CTFS `trace.bin` recordings.  Those run
+    /// the very same postprocessing pipeline `open()` uses so the
     /// resulting reader is indistinguishable from a CTFS-loaded one.
     pub fn from_events(events: Vec<TraceLowLevelEvent>, workdir: &Path) -> Result<Self, Box<dyn Error>> {
         let mut db = Db::new(&workdir.to_path_buf());

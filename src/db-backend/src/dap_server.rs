@@ -482,11 +482,10 @@ fn setup(
 
     // Legacy `runtime_tracing` materialized layout: a `trace.json` file
     // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS
-    // `.ct` container.  External recorders that have not yet adopted the
-    // CTFS writer still emit this — the Noir recorder (`nargo trace`)
-    // being the live example.  Treat it exactly like a materialized
-    // trace by decoding the events and running the same postprocessing
-    // pipeline `CTFSTraceReader::open()` uses, rather than wrongly
+    // `.ct` container.  The `session-manager record-web` browser
+    // recordings are the remaining producer.  Treat it exactly like a
+    // materialized trace by decoding the events and running the same
+    // postprocessing pipeline `CTFSTraceReader::open()` uses, rather than wrongly
     // falling through to the rr/MCR replay-worker path below.
     let legacy_json_path = {
         let direct = trace_folder.join("trace.json");
@@ -1632,11 +1631,10 @@ pub fn setup_from_vfs(
 
     // Legacy `runtime_tracing` materialized layout: a `trace.json` file
     // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS `.ct`
-    // container.  External recorders that have not adopted the CTFS
-    // writer still emit this — the Noir recorder (`nargo trace`) is the
-    // live example.  The native `try_open_trace` path already handles
-    // this format; the browser path must too, otherwise client-side WASM
-    // replay of a Noir trace fails after `configurationDone` (the handler
+    // container.  It is what the in-browser Noir tracer hands this engine
+    // (`replay_engine_vfs.nim` writes it into the VFS).  The native
+    // `try_open_trace` path handles this format too; the browser path must,
+    // otherwise client-side WASM replay of an in-browser Noir trace fails after `configurationDone` (the handler
     // is never constructed, so `threads`/`stackTrace` return nothing).
     let json_candidates = [join_vfs(trace_folder, "trace.json"), trace_folder.to_string()];
     for candidate in &json_candidates {
@@ -2788,9 +2786,8 @@ fn browser_detect_trace_file_in_vfs(ctx: &mut Ctx) -> Result<(), Box<dyn Error>>
     }
 
     // `trace.ct` is the canonical CTFS container; `trace.json` is the
-    // legacy `runtime_tracing` materialized layout still emitted by some
-    // recorders (e.g. `nargo trace`).  Probe both so client-side WASM
-    // replay works for either.
+    // event-stream handoff the in-browser Noir tracer writes into the VFS.
+    // Probe both so client-side WASM replay works for either.
     let candidates = ["trace.ct", "trace.json"];
     for name in &candidates {
         let vfs_path = if folder.is_empty() {
@@ -4034,8 +4031,8 @@ mod tests {
 
         /// The smallest legacy `runtime_tracing` trace `setup_from_vfs`
         /// will open: one path, one function, one call, three steps.
-        /// Serialised as `trace.json`, the layout `nargo trace` still
-        /// emits and the browser path explicitly supports.
+        /// Serialised as `trace.json`, the layout the in-browser replay
+        /// engine is handed through its VFS.
         fn minimal_trace_json() -> Vec<u8> {
             let events: Vec<TraceLowLevelEvent> = vec![
                 TraceLowLevelEvent::Path(PathBuf::from("/browser/handshake/main.nr")),
@@ -4423,8 +4420,8 @@ mod tests {
         // otherwise:
         //
         //   * the browser opens a legacy `trace.json` as
-        //     `TraceKind::Materialized` — the `nargo trace` shape the web
-        //     product replays (`setup_from_vfs`);
+        //     `TraceKind::Materialized` — the shape the in-browser Noir
+        //     tracer hands the web product to replay (`setup_from_vfs`);
         //   * `Handler::source_line_jump` answers a Materialized trace with
         //     a direct index jump, and enters the
         //     `disable_breakpoints ... enable_breakpoints` bracket only in
@@ -4447,7 +4444,7 @@ mod tests {
         const RUN_TO_LINE_PATH: &str = "/browser/runtoline/main.nr";
 
         /// A legacy `trace.json` with one step per line, `1..=line_count`,
-        /// in the shape `nargo trace` emits and the browser path opens as
+        /// in the shape the in-browser Noir tracer hands over and the browser path opens as
         /// `TraceKind::Materialized`.
         fn trace_json_with_lines(line_count: i64) -> Vec<u8> {
             let mut events: Vec<TraceLowLevelEvent> = vec![

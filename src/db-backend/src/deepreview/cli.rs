@@ -188,8 +188,8 @@ pub fn run(args: &ReviewCollectArgs) -> Result<CollectReport, Box<dyn Error>> {
     let recordings = discover_recordings(&args.recordings)?;
     if recordings.is_empty() {
         return Err(format!(
-            "no materialized recordings in '{}': a recording is a directory holding a *.ct container, \
-             a trace.json or a trace.bin",
+            "no materialized recordings in '{}': a recording is a directory holding a *.ct container \
+             or a trace.bin",
             args.recordings.display()
         )
         .into());
