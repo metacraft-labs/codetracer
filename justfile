@@ -35,6 +35,13 @@ test-build-alignment:
 test-dev-shell-writes-nothing-elsewhere:
   bash ci/test/dev-shell-writes-nothing-elsewhere-test.sh
 
+# Assert that build-once.sh sources the cached dev-shell profile (and so runs
+# its shellHook) inside this repository, not in the directory it is invoked
+# from. Runs the real script against a stub profile; no toolchain, a second.
+# See the header of scripts/test-build-once-profile-cwd.sh.
+test-build-once-profile-cwd:
+  bash scripts/test-build-once-profile-cwd.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `inputs.runquota-src.follows = "runquota"`
 # means reprobuild is COMPILED against whatever that input resolves to, so
