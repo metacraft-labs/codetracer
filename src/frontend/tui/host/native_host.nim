@@ -50,6 +50,7 @@ import headless_session
 import store/types as store_types   # `FilesystemEntryNode`
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 import ../../../common/trace_source_paths   # the shared source-folder rule
+import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
 export headless_session
 
 type
@@ -178,6 +179,10 @@ proc traceFolderProblem*(path: string): string =
   for kind, entry in walkDir(path):
     if kind == pcFile and entry.endsWith(".ct"):
       return ""
+  # A `trace.json` event stream is test-oracle output, not a recording; say
+  # so in the words every other CodeTracer entry point uses.
+  if fileExists(path / TestOracleTraceFileName):
+    return testOracleRefusal(path / TestOracleTraceFileName)
   "it holds no `trace.bin`, no `rr/` and no `.ct` container, so it is not a " &
   "CodeTracer recording"
 
