@@ -45,6 +45,10 @@
 import std/[strutils, math]
 
 import ../styles/generated/design_tokens
+# `FamilyClass` — the face class a text role's DECLARED metric names. The
+# window applies the face the answer already publishes rather than declaring
+# it a second time; see `fontFamilyForMetric`.
+import ../../common/view_vocabulary
 
 type
   ChromeRole* = enum
@@ -111,15 +115,79 @@ const
     ##
     ## HISTORY: introduced 2026-09-22 at 4.5. It has never been lowered.
 
-  WindowFontFamily* = "DejaVu Sans"
+  WindowFontFamily* = when defined(macosx): "Helvetica Neue" else: "DejaVu Sans"
     ## The window's text face, named rather than left to GPUI's default
     ## (`.SystemUIFont`). Measured 2026-09-29 on the window lane: with the
     ## default alias the text rendered in the fallback sans's Book face and a
     ## `font-weight: bold` tab drew exactly as heavy as a regular one — the
     ## alias resolved no bold face — so the active tab was bold in the plan
     ## and not on screen. Naming the family lets the text system find its
-    ## Bold. DejaVu Sans is what that fallback already was, so no metric
-    ## moves; where it is not installed GPUI falls back as before.
+    ## Bold. DejaVu Sans is what that fallback already was on that host, so
+    ## no metric moved there.
+    ##
+    ## **IT IS PER PLATFORM SINCE 2026-10-02, AND THE SINGLE VALUE WAS A
+    ## SILENT NO-OP ON macOS.** The family is resolved by the platform's own
+    ## text system — `MacTextSystem` on macOS, `CosmicTextSystem` on Linux —
+    ## and only the second consults fontconfig. The dev shell exports
+    ## `FONTCONFIG_FILE=…/fonts.conf`, which is where DejaVu comes from and
+    ## which Core Text never reads; `ls /System/Library/Fonts` on
+    ## aarch64-darwin / macOS 15 answers `Courier.ttc`, `Menlo.ttc`,
+    ## `SFNSMono.ttf` and no DejaVu at all. So a name no font has, and a
+    ## fallback to whatever the text system picks — which is how a
+    ## `font-family` that is set, drawn and asserted still produced the
+    ## proportional default the 2026-10-02 reviews reported.
+    ##
+    ## `Helvetica Neue` and `Menlo` are chosen because they have shipped in
+    ## `/System/Library/Fonts` since OS X 10.6 and are addressable by exactly
+    ## these names; `.SystemUIFont` and `SF Mono` are not reliably resolvable
+    ## by name, which is the defect this constant exists against.
+
+  MonoFontFamily* = when defined(macosx): "Menlo" else: "DejaVu Sans Mono"
+    ## **The face the editor, the gutter and the inline values are set in.**
+    ##
+    ## PLAT-35, 2026-10-02, and it is a correction of a sentence this tree
+    ## carried rather than a new choice. `app/leaves.nim`'s `GutterGap` said
+    ## *"the face drawn is the window's proportional default (the shim does
+    ## not draw `font-family`, so `gpuiMetricFor`'s mono is declared rather
+    ## than applied — `PLAT35-VG1`)"*. The second clause is FALSE and was
+    ## measured false: `gpui_app.rs`'s `apply_styles_to_div` reads
+    ## `"font-family" | "font_family"` into `styles.font_family` and calls
+    ## `el.font_family(...)` on it. Nothing was applying the declared face
+    ## because nothing was setting the key.
+    ##
+    ## The first macOS capture of this front-end's own scene is what made the
+    ## consequence visible rather than arguable. Three of the six review
+    ## readings on 2026-10-02 reported it, and one of them named the
+    ## mechanism exactly: *"code is set in a proportional sans, not monospace
+    ## (`total = add(total, i)` glyph widths vary); columns do not line up"*,
+    ## and *"the `▶` on line 6 displaces the `6` rightward, so numbers 2/6/10
+    ## each sit at a different x"*. The gutter's lanes are fixed-WIDTH in
+    ## characters (`gutterText` is `<padding><pointer><mark><number><gap>`,
+    ## every lane one glyph), which aligns the numbers in a monospaced face
+    ## and in no other.
+    ##
+    ## Each value is `WindowFontFamily`'s own monospace sibling on its
+    ## platform, so the two faces come from one family and a host that has
+    ## one has the other — and the per-platform split is not cosmetic: the
+    ## first attempt at this fix set one name for both platforms and
+    ## **re-captured six byte-identical frames**, which is the measurement
+    ## that found it. See `WindowFontFamily`.
+    ## The brief's third design goal is the requirement being met:
+    ## *"monospace for code, gutter and inline values; proportional for pane
+    ## titles and variable names"* — which is also `gpuiMetricFor`'s table,
+    ## already written and until now unapplied.
+    ##
+    ## **THE FALSE SENTENCE IS STILL IN `app/leaves.nim` AND THAT IS A STATED
+    ## RESIDUE RATHER THAN AN OVERSIGHT.** `run-plat20-mutations.py`,
+    ## `run-plat21-mutations.py`, `run-plat22-mutations.py` and
+    ## `run-plat35-visual-mutations.py` each digest that file byte-for-byte
+    ## into a `*-control.sha256`, so editing the comment — a comment — moves
+    ## four control digests and each harness then has to be RE-GRADED before
+    ## its digest may be re-recorded (PLAT-47 B1's own precedent). Recording
+    ## a digest without re-grading is `Verification-Harness-Traps` §39. So
+    ## the correction lives here, quoting what it refutes, and PLAT-35's
+    ## status names `GutterGap`'s parenthesis as the line to fix in the pass
+    ## that next re-grades those four.
 
   ChromeGapPx* = 8
   ChromePaddingPx* = 12
@@ -157,6 +225,39 @@ func contrastRatio*(a, b: string): float =
 
 func chromeOf*(role: ChromeRole): string =
   WindowChrome[role]
+
+func fontFamilyFor*(family: FamilyClass): string =
+  ## The window's face for a declared family class. An exhaustive `case`, so
+  ## a third class does not compile until it has a face.
+  case family
+  of fcMono: MonoFontFamily
+  of fcProportional: WindowFontFamily
+
+func fontFamilyForMetric*(metric: string): string =
+  ## The face a DECLARED text metric names, or "" when it names none.
+  ##
+  ## **THE APPLIED FACE IS DERIVED FROM THE ANSWERED ONE, which is the whole
+  ## point of parsing a string here instead of taking a `TextRole`.**
+  ## `metric` is what `leaves.gpuiMetricFor` stamped on the element and what
+  ## the tier-3 `text-metrics-per-role` question compares against the
+  ## Electron front-end's `getComputedStyle` reading. Deriving the face from
+  ## it makes *the face the gate compares* and *the face the renderer draws*
+  ## one fact, so they cannot drift apart; a second `case` over `TextRole`
+  ## here would be two spellings of one declaration
+  ## (`Verification-Harness-Traps` §30), and the failure mode of that drift
+  ## is a front-end that ANSWERS `mono` and DRAWS proportional — exactly the
+  ## state measured on 2026-10-02.
+  ##
+  ## "" rather than a default face for an unparseable metric: an element with
+  ## no declared metric keeps the window's inherited face, and an element
+  ## whose metric this build cannot read must not be silently restyled.
+  if metric.len == 0:
+    return ""
+  let face = metric.split('/')[0]
+  for family in FamilyClass:
+    if $family == face:
+      return fontFamilyFor(family)
+  ""
 
 func paneWidthPx*(viewportWidth, paneCount: int): int =
   ## How wide one pane is when `paneCount` of them tile the window's width.

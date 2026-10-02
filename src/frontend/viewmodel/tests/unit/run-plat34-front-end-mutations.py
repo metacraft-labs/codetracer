@@ -9,6 +9,59 @@ wiring they are about, and the suites themselves.
     python3 ... --only=M1,U2
 
 =============================================================================
+OWED: A RE-GRADE AND A RE-RECORD, 2026-10-02 (PLAT-35), RE-MEASURED AT
+`6fa0bdd89`. THE PRE-EXISTING BLOCKER LIFTED AND A DIFFERENT ONE REPLACED IT.
+=============================================================================
+  HARNESS   run-plat34-front-end-mutations.py
+  ENTRY OWED BY PLAT-35
+            src/frontend/gpui/main.nim   (the `--pixels-out` capture path).
+            Measured against the working tree digest line by digest line: it
+            is now the ONLY row that moved.
+  THE ROW THAT WAS STALE AT `d34c6e087` IS NO LONGER STALE
+            `ci/lib/test-lane-files.sh` matched NEITHER HEAD NOR the working
+            tree at the old base, and PLAT-35's first pass recorded that as
+            the reason this harness could not be graded by anyone. Upstream
+            fixed it: `f4afb504b` ("re-record harness controls over the
+            regraded tree") re-recorded this control, and at `6fa0bdd89` that
+            row matches. **So the claim this note used to carry — "what blocks
+            it is the stale row above, not the machine" — is now false in both
+            halves**, and the correction is the point of re-measuring rather
+            than reprinting.
+  WHAT BLOCKS IT NOW IS THE MACHINE, and the flag is named exactly:
+            `test_editor_front_end_observed.nim` (OBS — four of this
+            harness's arms) does not COMPILE on aarch64-darwin with the flags
+            this harness reads out of `ci/lib/test-lane-files.sh`:
+
+                .../syntax/treesitter_ffi.nim.c:9:10: fatal error:
+                  'tree_sitter/api.h' file not found
+
+            `test_lane_extra_flags tui` records the tree-sitter runtime's
+            LINK flags (`-L`, `-rpath`, from `build/grammars/
+            tui-link-flags.txt`) and no INCLUDE path. On a Linux dev shell
+            nix puts the headers on the default search path; on macOS the
+            runtime is resolved through Homebrew's pkg-config, whose headers
+            are under `.../tree-sitter/<v>/include` and are on no search path
+            at all. MEASURED, both directions: the same command plus
+            `--passC:-I/opt/homebrew/Cellar/tree-sitter/0.27.0/include`
+            compiles and links the suite. That is the whole cause.
+  HOST THAT CAN GRADE IT
+            any Linux host in the dev shell, where that header is found; or
+            this host once the `tui` lane records an include path beside its
+            link flags. The missing flag is NOT added here: `ci/lib/
+            test-lane-files.sh` is itself one of this harness's TOUCHED rows,
+            so changing it is a change that has to be graded by this harness,
+            which is the thing that cannot run.
+  COMMAND   python3 src/frontend/viewmodel/tests/unit/\
+              run-plat34-front-end-mutations.py          # all arms must kill
+            python3 ... --record-control-hashes          # only then
+
+**DO NOT CLEAR THE PLAT-35 ROW WITH `--record-control-hashes`**: it rewrites
+every row. With the OBS suite not compiling, four arms would come back
+DID-NOT-COMPILE rather than KILLED, so the record would certify bytes that
+four of this harness's claims were never asserted against.
+Verification-Harness-Traps §39a, by its own `plat17` example.
+
+=============================================================================
 WHY THIS HARNESS MATTERS MORE THAN USUAL, AND IT IS §30a
 =============================================================================
 

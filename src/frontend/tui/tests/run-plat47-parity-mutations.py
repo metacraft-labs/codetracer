@@ -18,6 +18,58 @@ recording), after `just plat47-capture-electron` (the real-PTY suite compares
 with the desktop's committed capture). The GPUI suite loads
 `libgpui_nim_shim`; the harness puts the shim on `LD_LIBRARY_PATH` itself.
 
+=============================================================================
+OWED: A RE-GRADE AND A RE-RECORD, 2026-10-02 (PLAT-35), RE-MEASURED AT
+`6fa0bdd89`. **BOTH PRE-EXISTING STALE ROWS WERE FIXED UPSTREAM; THIS
+HARNESS NOW REFUSES ON PLAT-35'S TWO ROWS AND NOTHING ELSE.**
+=============================================================================
+This harness digests `src/frontend/gpui/chrome.nim` and
+`src/frontend/gpui/main.nim`, both of which PLAT-35 edited. The digest is
+deliberately NOT re-recorded here.
+
+  HARNESS   run-plat47-parity-mutations.py
+  ENTRIES OWED BY PLAT-35 — and, at this base, the ONLY two rows the
+  comparator reports (measured: `--only=` prints exactly
+  `CONTROL DIGEST MOVED` for these two and `0 problems` for every needle):
+            src/frontend/gpui/chrome.nim   (the per-platform mono face)
+            src/frontend/gpui/main.nim     (the `--pixels-out` capture path)
+  THE TWO ROWS THAT WERE STALE AT `d34c6e087` ARE NOT STALE HERE, and the
+  earlier note's claim that this harness *"ALREADY refused on this host, on
+  those two rows alone, before PLAT-35 touched anything"* no longer describes
+  the tree. Upstream fixed both in `f4afb504b`:
+            src/frontend/index/config.nim
+              — matched neither HEAD nor the working tree at the old base; it
+                matches at `6fa0bdd89`.
+            the overlay row
+              — was recorded as `/home/zahary/m/codetracer-gui/
+                isonim-tui-plat47b/src/isonim_tui/overlay.nim`, an ABSOLUTE
+                path on another host, so the gate reported `CONTROL DIGEST
+                ABSENT` for the local spelling. It is now recorded as the
+                relative `isonim-tui/src/isonim_tui/overlay.nim` and resolves.
+            **SO PLAT-35 NO LONGER ADDS ROWS TO AN ALREADY-REFUSING
+            COMPARATOR; IT IS THE WHOLE REASON THIS ONE REFUSES.** That makes
+            the re-grade PLAT-35's to owe rather than somebody else's to
+            unblock, and it is owed, not waived.
+  HOST THAT CAN GRADE IT
+            a Linux host with `$ISONIM_TUI_SRC` resolving and `just build-tui`
+            compiling. Still NOT aarch64-darwin: this harness's control step
+            is `build_tui()` for every arm whose killer is a binary suite, and
+            `just build-tui` does not compile here — see
+            run-plat45-layout-mutations.py's note for the two errors measured
+            at this base (`terminal_driver.nim(263, 21)` against Darwin's
+            `Suseconds = int32`, behind a stale sibling checkout that stops the
+            build even earlier).
+  COMMAND   REPLAY_SERVER_BIN=<path> ISONIM_TUI_SRC=<path> python3 \
+              src/frontend/tui/tests/run-plat47-parity-mutations.py
+            # every arm must kill, and only then:
+            python3 ... --record-control-hashes
+
+**DO NOT CLEAR THE TWO PLAT-35 ROWS WITH `--record-control-hashes`.** That
+flag rewrites EVERY row, and on this host not one arm can be graded first, so
+it would convert *"these two rows moved"* into *"these bytes are reviewed"*
+without a single verdict behind it — Verification-Harness-Traps §39a's named
+prohibition, arrived at from the same direction as its `plat17` example.
+
 ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
 
   | claim | arms |

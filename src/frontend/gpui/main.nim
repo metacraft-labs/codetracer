@@ -101,7 +101,15 @@ import ./app/edit_arm
 import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
 import ../viewmodel/host/keymap_preference
 import ./host/gpui_host
+import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
 import ../viewmodel/viewmodels/vcs_vm   # `VCSVM`, `VCSRefreshIntervalMs`: the VCS pane's tick
+
+const DefaultPixelsView* = "window"
+  ## What `--pixels-out` records as the view when `--pixels-view` is not
+  ## given. Not one of `scenarios.json`'s six names on purpose: a capture
+  ## nobody labelled must not be filed under a scenario's view, because the
+  ## expected-elements block for that view would then be graded against a
+  ## frame that was never driven to it.
 
 const GpuiHelpText = """
 codetracer-gpui — CodeTracer's GPUI front-end (PLAT-20: the shell)
@@ -216,6 +224,36 @@ OPTIONS:
                     `CODETRACER_GPUI_PROBE_SENTINEL` names a key whose
                     arrival closes the loop, so a capture can tell "the
                     typist finished" from "the deadline fired".
+  --pixels-out=<path>
+                    PLAT-35. Render THIS WINDOW'S OWN SCENE off screen and
+                    write it to <path> as a PNG, instead of opening a
+                    window. The census of the frame — its byte count, its
+                    non-zero byte count and how many distinct byte values
+                    it holds — goes to <path>.json beside it, and a frame
+                    indistinguishable from a blank screen is a FAILURE
+                    rather than a file.
+                    This is the capture step of
+                    `codetracer-specs/spec/Methodologies/visual-design-iteration.md`
+                    on a host where the window's pixels cannot be read: it
+                    goes through `gpui_render_to_pixels`
+                    (`--features gpui-headless`), which needs no
+                    compositor and no screen-recording grant. An
+                    off-screen buffer is a FRAME AND NOT A WINDOW, so the
+                    record says `satisfiesG1: false` — PLAT-23's G1 asks
+                    that a window has been observed, and this path opens
+                    none.
+                    `--pixels-view` and `--pixels-scenario` name what the
+                    frame is of; they are recorded, never used to choose
+                    what is drawn.
+  --pixels-view=<name>
+                    The view name written into the capture record (default
+                    `window`). The named-view vocabulary is
+                    `src/tests/visual/scenarios.json`'s.
+  --pixels-scenario=<id>
+                    The scenario id written into the capture record. The
+                    operations themselves come from `--replay-ops`, so this
+                    is a LABEL and a mislabelled capture is a mislabelled
+                    capture rather than a differently-driven one.
   --plan-out=<path> Write the render plan the window was built from to
                     <path>, in addition to opening the window. One tree,
                     two readings: a second run would be a second tree.
@@ -304,6 +342,24 @@ type
       ## PLAT-42. Open with the flow overlay hidden — the user's
       ## `EditorVM.showFlowOverlay` toggle, from the command line; the window
       ## lane's negative twin for the drawn overlay.
+    pixelsOut: string
+      ## PLAT-35. Where to write this window's own scene as a PNG, rendered
+      ## off screen through `gpui_render_to_pixels` INSTEAD of opening a
+      ## window. Empty means "open the window", which is every ordinary
+      ## run.
+      ##
+      ## It replaces the window rather than following it, and that is
+      ## forced rather than chosen: `gpui_launch` does not return while the
+      ## window exists, so a run that did both would have to open, wait out
+      ## a deadline and then render a tree the window had already been
+      ## torn down around.
+    pixelsView: string
+      ## The view name recorded in the capture's census. A LABEL: nothing
+      ## in this binary branches on it, so a capture cannot silently draw
+      ## something other than what it is called.
+    pixelsScenario: string
+      ## The scenario id recorded in the capture's census, on the same
+      ## terms. The operations are `--replay-ops`'.
     inputProbe: string
       ## PLAT-38. A path to write the KEY-DELIVERY record to, after the event
       ## loop returns. Empty means "do not probe", which is every ordinary
@@ -318,7 +374,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
   ## process — `app/cli.parseTuiCommand`'s own split, one binary over.
   result = GpuiCommand(kind: gckOpen, product: pmDebug,
                        width: DefaultGpuiViewport.width,
-                       height: DefaultGpuiViewport.height)
+                       height: DefaultGpuiViewport.height,
+                       pixelsView: DefaultPixelsView)
   var positional: seq[string] = @[]
   for arg in argv:
     if arg == "--help" or arg == "-h":
@@ -411,6 +468,21 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --edit-keys needs at least one key")
       result.editKeys = spec.split(',')
+    elif arg.startsWith("--pixels-out="):
+      result.pixelsOut = arg["--pixels-out=".len .. ^1]
+      if result.pixelsOut.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --pixels-out needs a path")
+    elif arg.startsWith("--pixels-view="):
+      result.pixelsView = arg["--pixels-view=".len .. ^1]
+      if result.pixelsView.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --pixels-view needs a name")
+    elif arg.startsWith("--pixels-scenario="):
+      result.pixelsScenario = arg["--pixels-scenario=".len .. ^1]
+      if result.pixelsScenario.len == 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --pixels-scenario needs an id")
     elif arg.startsWith("--input-probe="):
       result.inputProbe = arg["--input-probe=".len .. ^1]
       if result.inputProbe.len == 0:
@@ -636,6 +708,12 @@ proc findEditorPane(root: GpuiElement): GpuiElement =
     if not found.isNil: return found
   nil
 
+proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.}
+  ## PLAT-35: the declared text metric, applied (defined with the chrome
+  ## below). Forward-declared because every path that REBUILDS a pane's body
+  ## has to re-stamp it — a redraw produces new elements, and an element the
+  ## walk never reached keeps the window's inherited proportional face.
+
 proc redrawEditor() =
   ## PLAT-44. Redraw the editor pane from the arm's CURRENT document.
   ##
@@ -655,6 +733,7 @@ proc redrawEditor() =
   discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
                        openArm.surfaceOf(editViewportRows))
   noteEditorTab(r, editorTabLabel(openArm.path, openArm.isDirty))
+  applyTextFaces(r, editPane)
 
 proc cancelWindowGesture(): bool
   ## PLAT-47: `Esc` during a layout gesture (defined with the gestures below).
@@ -767,6 +846,48 @@ proc traceGesture(line: string) =
 proc committedLayout(): Layout =
   let idx = gShell.windows.indexOf(gWindow)
   gShell.windows.windows[idx].layout
+
+proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.} =
+  ## PLAT-35 — **THE DECLARED TEXT METRIC, APPLIED.**
+  ##
+  ## Walk the subtree and give every element that carries a text metric the
+  ## face that metric names: monospace for the editor's code, its gutter and
+  ## its inline values, proportional for pane titles and variable names —
+  ## `leaves.gpuiMetricFor`'s own table, which was written for the tier-3
+  ## comparison and never reached a renderer.
+  ##
+  ## **IT READS THE ATTRIBUTE BACK OUT OF THE TREE rather than taking a role
+  ## list**, for `paintWindowChrome`'s own reason one paragraph up: the
+  ## renderer is handed what the tree holds, so the tree is what the face is
+  ## computed from. A version that walked `TextRole` and asked each leaf
+  ## where its spans were would be describing the tree instead of reading it
+  ## (§4a), and would silently miss a span a later pane added.
+  ##
+  ## **AND IT IS HERE RATHER THAN IN `leaves.nim`**, which is where the face
+  ## would more obviously go. `run-plat20-mutations.py`,
+  ## `run-plat21-mutations.py`, `run-plat22-mutations.py` and
+  ## `run-plat35-visual-mutations.py` all digest `app/leaves.nim` into their
+  ## control comparators (§39a), so an edit there stales four harnesses'
+  ## controls at once — which is the stated reason the chrome, the input
+  ## probe's listener and the editor's key listener are all attached from
+  ## this module and not from that one. The face is chrome.
+  ##
+  ## **ANSWERS HOW MANY ELEMENTS IT STYLED**, which is the only part of its
+  ## effect anything outside this process can observe: the shim's ABI has
+  ## `gpui_get_attribute` and no style read-back, so a suite cannot ask an
+  ## element what face it ended up with. A count it can ask for, and a count
+  ## of ZERO over a tree full of declared metrics is the state this walk
+  ## exists against — which is why `test_plat35_text_faces.nim` asserts the
+  ## number against an independent count of the elements carrying a metric
+  ## rather than merely asserting the walk returned.
+  if node.isNil:
+    return 0
+  let family = fontFamilyForMetric(getAttribute(node, TextMetricAttribute))
+  if family.len > 0:
+    r.setStyle(node, "font-family", family)
+    result = 1
+  for i in 0 ..< childCount(node):
+    result += applyTextFaces(r, nthChild(node, i))
 
 proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int) =
   ## One leaf's own box: its size, its fill, its clip.
@@ -1164,6 +1285,7 @@ proc redrawCalltrace(r: GpuiRenderer) =
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == paneCalltrace:
       redrawWindowLeaf(r, pane, leaf)
+      applyTextFaces(r, pane)
       break
 
 proc scrollCalltrace(r: GpuiRenderer; rows: int) =
@@ -1994,7 +2116,9 @@ proc vcsTick() {.cdecl.} =
        not leaf.vm.isNil:
       if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
         var r: GpuiRenderer
-        redrawWindowLeaf(r, gPanes.getOrDefault($paneVcs), leaf)
+        let pane = gPanes.getOrDefault($paneVcs)
+        redrawWindowLeaf(r, pane, leaf)
+        applyTextFaces(r, pane)
         traceGesture("vcs refreshed")
       break
 
@@ -2130,6 +2254,13 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
 
   r.appendChild(root, container)
   drawTopBar(r)
+  # PLAT-35. LAST, over the WHOLE window, because `drawArrangement` has by
+  # now moved the leaves out of `container` and into the arrangement's own
+  # boxes: a walk taken before it would have missed every pane it moved.
+  # After `drawTopBar` (PLAT-48) for the same reason, one line later: the top
+  # bar's own elements do not exist until it has run, and an element the walk
+  # never reached keeps the window's inherited proportional face.
+  applyTextFaces(r, root)
 
 proc writeInputProbe(path: string; elapsedMs: int; deadlineMs: uint32): bool =
   ## PLAT-38. Write what the element store held, after the loop returned.
@@ -2355,6 +2486,66 @@ proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
   echo r.renderPlanJson(root)
   0
 
+proc capturePixels(cmd: GpuiCommand): int =
+  ## PLAT-35 — THE WINDOW'S OWN SCENE, RENDERED OFF SCREEN.
+  ##
+  ## Called from `launchWindow` in place of `gpui_launch`, with the same
+  ## `pending*` state already set, so the tree this renders is the tree
+  ## that window would have painted and not a second derivation of it. The
+  ## root builder is called from HERE, by hand, exactly once — the shim
+  ## calls it for the window path, and nothing calls it off the window
+  ## path, so the caller has to.
+  ##
+  ## **`builderCalls` IS ASSERTED THE SAME WAY THE WINDOW PATH ASSERTS
+  ## IT.** A capture over a root the builder never populated renders an
+  ## empty div, and an empty div at 1920x1080 is a correctly-sized buffer
+  ## of one colour — which is indistinguishable from a renderer that could
+  ## not draw, unless something says the tree was built.
+  builderCalls = 0
+  let root = gpui_create_element("div".cstring)
+  if root.isNil:
+    stderr.writeLine("codetracer-gpui: --pixels-out: the shim returned no " &
+                     "root element")
+    return 1
+  paintWindowChrome(root)
+  if builderCalls != 1:
+    stderr.writeLine("codetracer-gpui: --pixels-out: the root builder ran " &
+                     $builderCalls & " times, expected exactly 1")
+    return 1
+  let shot = renderRootToPixels(root, cmd.width, cmd.height)
+  # The marks' SVG files GO, as they do when the window closes
+  # (`launchWindow`), and UNLIKE `--report-window-plan`, which leaves them
+  # because the plan it prints names them and a reader checks them. This path
+  # prints no plan: the renderer has already rasterised them into `shot`, so
+  # after this line nothing can read them and leaving them would leak a
+  # temporary directory per capture. Added 2026-10-02 when PLAT-48's top bar
+  # arrived ahead of this change — the capture path had no mark files to
+  # remove before `drawTopBar` existed.
+  removeMarkFiles()
+  let failed = writeCapture(cmd.pixelsOut, shot, cmd.pixelsView,
+                            cmd.pixelsScenario)
+  if failed.len > 0:
+    stderr.writeLine("codetracer-gpui: --pixels-out: " & failed)
+    stderr.writeLine("codetracer-gpui: --pixels-out: the census is at " &
+                     recordPathFor(cmd.pixelsOut))
+    return 1
+  # A BLANK FRAME IS A FAILURE AND NOT A FILE. The image and the census are
+  # both on disk by now — a reader has to be able to see what was captured
+  # in order to diagnose it — and the exit code refuses it, because a lane
+  # that asserted only "the file exists" would pass on a buffer of zeroes.
+  if shot.captureIsBlank:
+    stderr.writeLine("codetracer-gpui: --pixels-out: the frame is " &
+                     "indistinguishable from a blank screen (" &
+                     $shot.nonZeroBytes & " of " & $shot.bytes &
+                     " bytes non-zero, " & $shot.distinctByteValues &
+                     " distinct byte values)")
+    return 1
+  echo "codetracer-gpui: captured ", cmd.width, "x", cmd.height, " to ",
+       cmd.pixelsOut, " (", shot.nonZeroBytes, " of ", shot.bytes,
+       " bytes non-zero, ", shot.distinctByteValues,
+       " distinct byte values)"
+  0
+
 proc launchWindow(cmd: GpuiCommand; title: string;
                   outcome: LeafRenderOutcome; dock: JsonNode = nil): int =
   ## Open the window, run the event loop, and return when it stops.
@@ -2375,6 +2566,10 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   probeArrivals = @[]
   probeTarget = nil
   probeSentinel = getEnv("CODETRACER_GPUI_PROBE_SENTINEL", "")
+  # PLAT-35: the off-screen capture takes the place of the window, with the
+  # tree already built above.
+  if cmd.pixelsOut.len > 0:
+    return capturePixels(cmd)
   if cmd.quitAfterMs > 0'u32:
     gpui_quit_after_ms(cmd.quitAfterMs)
   if gVcsDirectory.len > 0:

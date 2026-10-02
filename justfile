@@ -5124,6 +5124,58 @@ plat49-capture-electron *args:
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
 
+# PLAT-35 — THE GPUI PIXEL CAPTURE, WITH NO COMPOSITOR.
+#
+# The methodology's capture step for the GPUI front-end: one PNG per named
+# view, at that view's declared viewport, rendered by the front-end's own
+# process through `gpui_render_to_pixels` (`--features gpui-headless`). It
+# needs no `sway`, no `grim` and no screen-recording grant, which is why it
+# runs where the nine window lanes cannot — see
+# `codetracer-specs/issues/2026-09-29-gpui-window-capture-lanes-are-wayland-only.md`.
+#
+# **An off-screen frame is NOT a window, and this recipe never claims it is.**
+# PLAT-23's G1 asks that a window has been observed; `satisfiesG1: false` is in
+# every census this lane writes. `plat37-capture` keeps G1.
+#
+# Needs the headless shim, built by the sibling that owns it:
+#
+#     cd ../isonim-gpui && nix develop --command just plat37-shims
+#
+# Target one view for a review iteration with `--only <view>`.
+plat35-capture-gpui *args:
+  bash ci/test/plat35-gpui-capture.sh {{args}}
+
+# The PNG encoder the capture writes through, round-tripped against a decoder
+# that is not it. NOT-A-VISUAL-GATE: it asserts the container and the filter,
+# which is what a reviewer looking at a wrong picture cannot tell apart from a
+# design problem.
+plat35-png-encoder:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --nimcache:build/nimcache/plat35-png \
+    -o:build/plat35/png_test src/common/png_test.nim
+
+# THE TIER-4 LEDGER'S OWN INTEGRITY. `src/tests/visual/tier4-gpui-readings.json`
+# was read by NOTHING in the tree until 2026-10-02, while `tier4-review.json`
+# beside it is graded in both directions — so the GPUI arm had a ledger and no
+# gate over it. This re-derives the `gate` counts from the ledger's own
+# `findings`, checks `gate.met` against them both ways, and checks the reading
+# population against `scenarios.json`.
+#
+# NOT A SCORE GATE: it quarantines no reading. See the suite's header for why
+# gating these scores would be a gate holding ten of twelve exceptions.
+#
+# Reads two JSON files and links no shim, so it needs no capture and no
+# compositor; the `gpui-shell` lane compiles it with the rest of that
+# directory.
+plat35-ledger-integrity:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off \
+    --nimcache:build/nimcache/plat35-ledger \
+    -o:build/plat35/ledger_integrity \
+    src/frontend/gpui/tests/test_plat35_ledger_integrity.nim
+
 # The gate. Runs the GPUI arm live (real recording, real replay-server, real
 # shadow tree) and compares it against the recorded Electron arm.
 test-plat35-visual-alignment:
