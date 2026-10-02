@@ -10,7 +10,7 @@
 ##   1. `configure` — the worker dynamic-imports the wasm-bindgen glue from the
 ##      URL the entry document declared and instantiates the wasm. Answers
 ##      `wasm-loaded`, or `worker-error` with a reason.
-##   2. one `vfs-write` per file — `trace.json`, `trace_metadata.json`, and the
+##   2. one `vfs-write` per file — the `trace.ct` container and the
 ##      recording's own source text under each recorded path. Each answers
 ##      `vfs-ack`.
 ##   3. `start` — hands `self.onmessage` to the wasm-side DAP dispatcher, which

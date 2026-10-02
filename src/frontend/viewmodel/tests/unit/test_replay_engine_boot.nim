@@ -13,7 +13,7 @@
 ## way of getting it wrong produces a session that looks like it worked:
 ##
 ##   * `start` before the writes land — the engine opens a trace folder whose
-##     `trace.json` is not there yet, or is there without its source, and the
+##     `trace.ct` is not there yet, or is there without its source, and the
 ##     session reports success over a timeline with nothing in it.
 ##   * an ack for a path nobody wrote — on a flat exact-match VFS that is the
 ##     host and the engine disagreeing about a key, and the session resolves
@@ -25,7 +25,7 @@
 ## because "it reached `rbpReady`" is exactly the claim a broken sequence also
 ## makes.
 
-import std/[json, strutils, unittest]
+import std/[base64, json, strutils, unittest]
 
 import ../../backend/replay_engine_boot
 import ../../platform/replay_engine_vfs
@@ -36,7 +36,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 70
+const ExpectedAssertions = 65
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -53,19 +53,16 @@ proc byteArray(text: string): JsonNode =
   for ch in text: result.add newJInt(ord(ch))
 
 proc memoryTrace(steps = 3; withSourceView = true): string =
-  var events = newJArray()
-  events.add %*{"Path": MainPath}
-  events.add %*{"Call": {"function_id": 0, "args": []}}
-  for i in 0 ..< steps:
-    events.add %*{"Step": {"path_id": 0, "line": i + 1}}
+  ## A `TraceResult` as `noir_tracer_wasm` answers it; the container is a
+  ## stand-in carrying the CTFS magic, which is all this layer looks at.
   var views = newJArray()
   if withSourceView:
     views.add %*{
       "path_id": 0, "view_kind": 0, "view_name": MainPath,
       "content": byteArray(MainSource), "sourcemap": newJArray()}
-  $(%*{"events": events, "paths": [MainPath], "line_lengths": newJArray(),
-       "source_views": views, "capabilities": %*{},
-       "workdir": "/virtual/a_1_mul"})
+  $(%*{"container": encode("\xC0\xDE\x72\xAC\xE2 container"),
+       "paths": [MainPath], "source_views": views, "capabilities": %*{},
+       "workdir": "/virtual/a_1_mul", "steps": steps, "calls": 1})
 
 proc urls(): seq[tuple[id: string, url: string]] =
   @[(id: glueAssetId, url: "/assets/db_backend.js"),
@@ -100,18 +97,17 @@ suite "the replay engine's bootstrap handshake":
     # 1. configure -> wasm-loaded, which releases the writes.
     let writes = boot.deliver(%*{"type": "wasm-loaded"})
     counted boot.phase == rbpWriting
-    # trace.json, trace_metadata.json, and one source file. Asserted as a
-    # NUMBER: a boot that wrote the trace and forgot the source would reach
-    # `rbpReady` just as happily and resolve every position to `missingPath`.
-    counted writes.len == 3
-    counted boot.outstanding == 3
+    # trace.ct and one source file. Asserted as a NUMBER: a boot that wrote
+    # the trace and forgot the source would reach `rbpReady` just as happily
+    # and resolve every position to `missingPath`.
+    counted writes.len == 2
+    counted boot.outstanding == 2
     var paths: seq[string]
     for write in writes:
       counted write["type"].getStr == "vfs-write"
       counted write["data"].kind == JArray
       paths.add write["path"].getStr
-    counted "trace/trace.json" in paths
-    counted "trace/trace_metadata.json" in paths
+    counted "trace/trace.ct" in paths
     counted MainPath in paths
 
     # The source bytes survive the trip as bytes.
@@ -123,15 +119,13 @@ suite "the replay engine's bootstrap handshake":
     # 2. the acks, one at a time. `start` must not appear until the last.
     counted boot.deliver(ackFor(paths[0])).len == 0
     counted boot.phase == rbpWriting
-    counted boot.deliver(ackFor(paths[1])).len == 0
-    counted boot.phase == rbpWriting
     counted boot.outstanding == 1
-    let starts = boot.deliver(ackFor(paths[2]))
+    let starts = boot.deliver(ackFor(paths[1]))
     counted starts.len == 1
     counted starts[0]["type"].getStr == "start"
     counted boot.phase == rbpStarting
     counted boot.outstanding == 0
-    counted boot.acked.len == 3
+    counted boot.acked.len == 2
 
     # 3. the worker's bare "ready", as `WorkerBackend.deliver` wraps it.
     counted boot.deliver(%*{"type": "worker-status", "status": "ready"}).len == 0
@@ -147,7 +141,7 @@ suite "the replay engine's bootstrap handshake":
     # A status line in the middle of the writes must not start the engine.
     counted boot.deliver(%*{"type": "worker-status", "status": "ready"}).len == 0
     counted boot.phase == rbpWriting
-    counted boot.outstanding == 3
+    counted boot.outstanding == 2
 
   test "an ack for a path nobody wrote fails the boot by name":
     # On a flat exact-match key store this is the host and the engine
@@ -160,13 +154,13 @@ suite "the replay engine's bootstrap handshake":
     counted boot.phase == rbpFailed
     counted "never written" in boot.failure
     # And it stays failed: a later, correct ack must not resurrect it.
-    counted boot.deliver(ackFor("trace/trace.json")).len == 0
+    counted boot.deliver(ackFor("trace/trace.ct")).len == 0
     counted boot.phase == rbpFailed
 
   test "a refused write fails the boot rather than starting anyway":
     var (boot, _) = beginReplayBoot(replayVfsPayload(memoryTrace()), urls())
     discard boot.deliver(%*{"type": "wasm-loaded"})
-    counted boot.deliver(ackFor("trace/trace.json", ok = false)).len == 0
+    counted boot.deliver(ackFor("trace/trace.ct", ok = false)).len == 0
     counted boot.phase == rbpFailed
     counted "refused" in boot.failure
 

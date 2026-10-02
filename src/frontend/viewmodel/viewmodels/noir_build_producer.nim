@@ -820,15 +820,14 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       # it, and reporting that as a successful Run is the chain-of-agreements
       # failure this campaign keeps meeting.
       producer.note(
-        "traced " & $summary.events & " event(s) and " & $summary.steps &
-        " step(s). A trace with no steps cannot be stepped through, which " &
-        "is what a build without debug information produces.")
+        "traced " & $summary.steps & " step(s). A trace with no steps " &
+        "cannot be stepped through, which is what a build without debug " &
+        "information produces.")
       producer.lastVerdict = npvFaulted
     else:
       producer.note(
-        "traced " & $summary.events & " events, " & $summary.steps &
-        " steps, " & $summary.calls & " calls across " & $summary.paths.len &
-        " source file(s)")
+        "traced " & $summary.steps & " steps, " & $summary.calls &
+        " calls across " & $summary.paths.len & " source file(s)")
       for path in summary.paths:
         producer.emit("  " & producer.rendererPath(path), isStdout = true,
                       severity = blsInfo, path = producer.rendererPath(path),
@@ -836,7 +835,7 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       producer.lastVerdict = npvSucceeded
       # THE TRACE IS HANDED ON WHILE IT STILL EXISTS.
       #
-      # `producer.stdoutText` is the whole `MemoryTrace` document and this is
+      # `producer.stdoutText` is the whole `TraceResult` document and this is
       # the only moment it is both complete and still there: `beginPhase`
       # clears it, so a session asked for after the next Build would be opened
       # over an empty string. It is also the moment the trace has just been

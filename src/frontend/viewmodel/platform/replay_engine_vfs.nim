@@ -2,19 +2,20 @@
 ##
 ## ## The problem this solves
 ##
-## `noir-tracer` answers a `MemoryTrace` document — `{events, paths,
-## line_lengths, source_views, capabilities, workdir}`. The engine's browser
-## entry point (`dap_server.rs::setup_from_vfs`) reads a *different* shape: a
-## bare `Vec<TraceLowLevelEvent>` at `<folder>/trace.json`, plus an optional
-## `<folder>/trace_metadata.json` from which it reads exactly one key,
-## `workdir`. So somebody has to take the document apart, and that somebody is
-## this module.
+## `noir-tracer` answers a `TraceResult` document — `{container, paths,
+## source_views, workdir, capabilities, steps, calls}`, where `container` is
+## the recording as a `.ct` CTFS container, base64
+## (`codetracer-specs/Recording-Backends/Browser-Recording-Container.md` §5).
+## The engine's browser entry point (`dap_server.rs::setup_from_vfs`) opens a
+## CTFS container at `<folder>/trace.ct` and reads source text from the VFS.
+## So somebody has to take the document apart, and that somebody is this
+## module.
 ##
 ## ## Why the SOURCE files are here too, and why that was in doubt
 ##
-## `trace.json` is an event array. It has nowhere to put source text, and the
-## engine's legacy branch decodes it as an array — `source_views` would be
-## discarded even if it were spliced in. But a trace made in a browser tab is
+## The container the browser builds has no source-view stream: the pure-Rust
+## writer that builds it in a tab cannot carry source text. But a trace made in
+## a browser tab is
 ## the only copy of its own source that anything will ever have: there is no
 ## working tree behind it, and on `wasm32-unknown-unknown` `fs::read_to_string`
 ## is `Unsupported` and `Path::exists()` is hardwired `false`, so *every*
@@ -53,7 +54,7 @@
 ## it without a browser. The host that actually posts these to a worker lives
 ## in `host/web_browser.nim`.
 
-import std/[json, strutils]
+import std/[base64, json, strutils]
 
 type
   VfsFile* = object
@@ -66,7 +67,7 @@ type
       ## the conversion is one place, in the host.
 
   ReplayVfsPayload* = object
-    ## What a `MemoryTrace` becomes.
+    ## What a `TraceResult` becomes.
     traceFolder*: string
     files*: seq[VfsFile]
     steps*: int
@@ -83,16 +84,13 @@ type
       ## terms a user could act on.
 
 const
-  traceFileName* = "trace.json"
-    ## `setup_from_vfs` probes `join_vfs(folder, "trace.json")` and
-    ## `browser_detect_trace_file_in_vfs` probes `["trace.ct", "trace.json"]`
-    ## under the folder. Both spellings must be this one.
-  traceMetadataFileName* = "trace_metadata.json"
-    ## The engine reads ONE key out of it, `workdir`, and falls back to the
-    ## trace folder when it cannot. Writing it anyway is what makes the
-    ## fallback never fire, so a relative recorded path would resolve against
-    ## the recording's own workdir rather than against the literal string
-    ## `"trace"`.
+  traceFileName* = "trace.ct"
+    ## `setup_from_vfs` opens `join_vfs(folder, trace_file)`, and
+    ## `browser_detect_trace_file_in_vfs` probes `trace.ct` under the folder.
+    ## Both spellings must be this one.
+  ctfsMagic* = "\xC0\xDE\x72\xAC\xE2"
+    ## The first five bytes of every CTFS container; the engine's VFS loader
+    ## recognises a container by them and nothing else.
 
 proc isRecordedAbsolute*(path: string): bool =
   ## Whether a RECORDED path is absolute, decided without `std/os`.
@@ -203,9 +201,9 @@ proc vfsKeysFor*(recordedPath, workdir: string): seq[string] =
     let joined = pathJoin(workdir, recordedPath)
     if joined != recordedPath: result.add joined
 
-proc replayVfsPayload*(rawMemoryTrace: string;
+proc replayVfsPayload*(rawTraceResult: string;
                        traceFolder = "trace"): ReplayVfsPayload =
-  ## Take a `MemoryTrace` document apart into the files the engine reads.
+  ## Take a `TraceResult` document apart into the files the engine reads.
   ##
   ## Never raises: a malformed document comes back as a payload with defects
   ## and no files, because the caller's job is to show the user a reason, not
@@ -214,13 +212,13 @@ proc replayVfsPayload*(rawMemoryTrace: string;
   result.files = @[]
   result.defects = @[]
 
-  if rawMemoryTrace.len == 0:
+  if rawTraceResult.len == 0:
     result.defects.add "the tracer produced no output at all"
     return
 
   var document: JsonNode
   try:
-    document = parseJson(rawMemoryTrace)
+    document = parseJson(rawTraceResult)
   except:
     # A BARE except, and for the reason `parseDeploymentDescriptor` gives for
     # its own: under `nim js` the failure that reaches here is not always a
@@ -228,30 +226,40 @@ proc replayVfsPayload*(rawMemoryTrace: string;
     # unhandled rejection instead of becoming the defect a user can read.
     document = nil
   if document.isNil or document.kind != JObject:
-    result.defects.add "the tracer's output is not a MemoryTrace document"
+    result.defects.add "the tracer's output is not a TraceResult document"
     return
 
-  let events =
-    if document.hasKey("events") and document["events"].kind == JArray:
-      document["events"]
-    else:
-      newJArray()
-  for event in events:
-    if event.kind != JObject: continue
-    if event.hasKey("Step"): inc result.steps
-    elif event.hasKey("Call"): inc result.calls
+  # The container. A document without one is a tracer older than the `.ct`
+  # result — its event list would have to become a `trace.json`, which the
+  # engine no longer opens — so it is named rather than half-read.
+  var container = ""
+  if document.hasKey("container") and document["container"].kind == JString:
+    try:
+      container = decode(document["container"].getStr)
+    except:
+      container = ""
+  else:
+    result.defects.add(
+      "the tracer answered no `.ct` container; it predates the in-browser " &
+      "`.ct` recording, and its event list is not a recording CodeTracer opens")
+    return
+  if not container.startsWith(ctfsMagic):
+    result.defects.add "the tracer's container is not a CTFS `.ct` container"
+
+  proc count(key: string): int =
+    if document.hasKey(key) and document[key].kind == JInt: document[key].getInt
+    else: 0
+  result.steps = count("steps")
+  result.calls = count("calls")
 
   # The false pass this path has, named and refused here rather than at the
   # end of a replay session that reported `ok` over an empty timeline. An
   # artifact compiled without debug instrumentation traces to one event and no
   # steps, and both wasm modules answer `ok` over it.
-  if events.len == 0:
-    result.defects.add "the trace carries no events"
-  elif result.steps == 0:
+  if result.defects.len == 0 and result.steps == 0:
     result.defects.add(
-      "the trace carries " & $events.len & " events and no steps, so there " &
-      "is nothing to step through — the program was compiled without debug " &
-      "instrumentation")
+      "the trace carries no steps, so there is nothing to step through — " &
+      "the program was compiled without debug instrumentation")
 
   var paths: seq[string] = @[]
   if document.hasKey("paths") and document["paths"].kind == JArray:
@@ -260,35 +268,18 @@ proc replayVfsPayload*(rawMemoryTrace: string;
   if paths.len == 0:
     result.defects.add "the trace registered no source paths"
 
-  # THE WORKDIR IS WRITTEN, ALWAYS, AND THE KEYS ARE DERIVED FROM THE SAME
-  # VALUE. `setup_from_vfs` falls back to the trace folder when
-  # `trace_metadata.json` names no workdir, so a payload that omitted it would
-  # leave the engine joining against `"trace"` while this module joined
-  # against something else — the two spellings would miss each other and every
-  # position would resolve to source the engine cannot read. Deriving both
-  # sides from one variable makes that disagreement unrepresentable.
+  # THE KEYS ARE DERIVED FROM THE WORKDIR THE CONTAINER RECORDS. The engine
+  # joins a relative recorded path onto that workdir, so a key derived from
+  # any other value would be one no probe asks for.
   let workdir =
-    if document.hasKey("workdir") and document["workdir"].kind == JString and
-       document["workdir"].getStr.len > 0:
+    if document.hasKey("workdir") and document["workdir"].kind == JString:
       document["workdir"].getStr
-    elif paths.len > 0 and isRecordedAbsolute(paths[0]):
-      # An absolute recording knows where it ran; `PathBuf::join` discards the
-      # base for these anyway, so this only affects what the metadata says.
-      recordedParentDir(paths[0])
-    else:
-      # A relative recording — every trace a browser tab can produce, because
-      # the Noir compiler is handed a virtual package tree and records the key
-      # it was given. The engine's own fallback is the trace folder, so naming
-      # it here says out loud what would otherwise be assumed.
-      traceFolder
+    else: ""
 
   if result.defects.len > 0: return
 
   result.files.add VfsFile(
-    path: vfsJoin(traceFolder, traceFileName), content: $events)
-  result.files.add VfsFile(
-    path: vfsJoin(traceFolder, traceMetadataFileName),
-    content: $(%*{"workdir": workdir}))
+    path: vfsJoin(traceFolder, traceFileName), content: container)
 
   # The source text, filed under the recorded path each view belongs to.
   # `SourceView` carries no path of its own — it carries a `path_id` into the
@@ -315,9 +306,7 @@ proc replayVfsPayload*(rawMemoryTrace: string;
   # A defective payload carries NO files. The alternative is a caller that
   # reads `defects`, decides to warn rather than refuse, and launches anyway
   # over a list that is right there — which is how a session opens onto a
-  # trace nobody vouched for. The two defects that can only be discovered
-  # after the files are built (no source view) are the reason this is a sweep
-  # at the end rather than an early return at each check.
+  # trace nobody vouched for.
   if result.defects.len > 0:
     result.files = @[]
 

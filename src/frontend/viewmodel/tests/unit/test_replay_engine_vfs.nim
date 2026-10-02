@@ -1,4 +1,4 @@
-## Headless tests for the `MemoryTrace` → engine-VFS transform.
+## Headless tests for the in-browser tracer's result → engine-VFS transform.
 ##
 ## LANE: `vm-unit` AND `vm-unit-js`, both by the directory glob. The subject is
 ## pure — no browser, no worker, no `when defined(js)` — so the backend the
@@ -16,7 +16,7 @@
 ##   1. A trace that LOADS AND REPORTS SUCCESS WHILE CARRYING ZERO STEPS. An
 ##      artifact compiled without debug instrumentation traces to one event and
 ##      no steps; both wasm modules answer `ok` over it, the engine accepts the
-##      `trace.json`, and the session opens onto an empty timeline. So the
+##      container, and the session opens onto an empty timeline. So the
 ##      counts are asserted as counts, and a step-less document is a defect
 ##      before anything is posted to a worker.
 ##   2. A session that RESOLVES POSITIONS THAT ARE ALL `missingPath`. In a
@@ -26,12 +26,15 @@
 ##      under is asserted against `paths[path_id]` rather than against the
 ##      view's own name.
 ##
-## The fixture is a real `MemoryTrace` shape, byte-array `content` included,
-## because `SourceView.content` is a `Vec<u8>` under plain serde and decoding
-## it as a string yields empty source for every file while looking like it
-## worked.
+## The fixture is the real `TraceResult` shape `noir_tracer_wasm` answers
+## (`codetracer-specs/Recording-Backends/Browser-Recording-Container.md` §5),
+## byte-array `content` included, because `SourceView.content` is a `Vec<u8>`
+## under plain serde and decoding it as a string yields empty source for every
+## file while looking like it worked. The container bytes are opaque to this
+## module beyond their CTFS magic, so the fixture carries a magic-prefixed
+## stand-in rather than a recording.
 
-import std/[json, strutils, unittest]
+import std/[base64, json, strutils, unittest]
 
 import ../../platform/replay_engine_vfs
 
@@ -47,7 +50,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 99
+const ExpectedAssertions = 101
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -64,14 +67,14 @@ proc byteArray(text: string): JsonNode =
   result = newJArray()
   for ch in text: result.add newJInt(ord(ch))
 
+const CtfsMagic = "\xC0\xDE\x72\xAC\xE2"
+  ## The first five bytes of every CTFS container; the engine's VFS loader
+  ## keys on them.
+
+proc containerBytes(): string = CtfsMagic & "\x00\x01 a container body"
+
 proc memoryTrace(steps = 2; withSourceView = true; paths = @[MainPath];
-                 workdir = ""): string =
-  var events = newJArray()
-  events.add %*{"Path": paths[0]}
-  events.add %*{"Function": {"path_id": 0, "line": 1, "name": "<toplevel>"}}
-  events.add %*{"Call": {"function_id": 0, "args": []}}
-  for i in 0 ..< steps:
-    events.add %*{"Step": {"path_id": 0, "line": i + 1}}
+                 workdir = ""; container = containerBytes()): string =
   var pathArray = newJArray()
   for path in paths: pathArray.add newJString(path)
   var views = newJArray()
@@ -79,11 +82,10 @@ proc memoryTrace(steps = 2; withSourceView = true; paths = @[MainPath];
     views.add %*{
       "path_id": 0, "view_kind": 0, "view_name": paths[0],
       "content": byteArray(MainSource), "sourcemap": newJArray()}
-  var document = %*{
-    "events": events, "paths": pathArray, "line_lengths": newJArray(),
-    "source_views": views, "capabilities": %*{}}
-  if workdir.len > 0: document["workdir"] = newJString(workdir)
-  $document
+  $(%*{
+    "container": encode(container), "paths": pathArray,
+    "source_views": views, "workdir": workdir, "capabilities": %*{},
+    "steps": steps, "calls": 1})
 
 proc fileNamed(payload: ReplayVfsPayload; path: string): string =
   for file in payload.files:
@@ -97,29 +99,31 @@ proc hasFile(payload: ReplayVfsPayload; path: string): bool =
 
 suite "a browser-produced MemoryTrace becomes the files the engine reads":
 
-  test "the trace lands at the two paths setup_from_vfs probes":
+  test "the trace lands as the one container setup_from_vfs opens":
     let payload = replayVfsPayload(memoryTrace())
     counted payload.defects.len == 0
     counted payload.traceFolder == "trace"
-    counted payload.hasFile("trace/trace.json")
-    counted payload.hasFile("trace/trace_metadata.json")
-    # `trace.json` is the EVENT ARRAY, not the whole document: the engine
-    # decodes it as `Vec<TraceLowLevelEvent>` and a `{events: [...]}` object
-    # fails to deserialize with an error naming serde rather than the shape.
-    let events = parseJson(payload.fileNamed("trace/trace.json"))
-    counted events.kind == JArray
-    counted events.len == 5
-    # And the metadata carries the one key the engine reads out of it.
-    let meta = parseJson(payload.fileNamed("trace/trace_metadata.json"))
-    counted meta.kind == JObject
-    counted meta.hasKey("workdir")
-    counted meta["workdir"].getStr == "/virtual/a_1_mul/src"
+    counted payload.hasFile("trace/trace.ct")
+    # The container is passed through byte for byte: it is the recording.
+    counted payload.fileNamed("trace/trace.ct") == containerBytes()
+    # And nothing of the retired JSON layout is written.
+    counted not payload.hasFile("trace/trace.json")
+    counted not payload.hasFile("trace/trace_metadata.json")
 
-  test "an explicit workdir is preferred over the one derived from a path":
-    let payload = replayVfsPayload(memoryTrace(workdir = "/virtual/a_1_mul"))
-    counted payload.defects.len == 0
-    let meta = parseJson(payload.fileNamed("trace/trace_metadata.json"))
-    counted meta["workdir"].getStr == "/virtual/a_1_mul"
+  test "a result whose container is not a CTFS container is refused":
+    for bad in ["", "not a container", "\xC0\xDE"]:
+      let payload = replayVfsPayload(memoryTrace(container = bad))
+      counted payload.defects.len > 0
+      counted payload.files.len == 0
+
+  test "the retired event-list document is refused by name":
+    # What a tracer older than the `.ct` result answered. Reading it would
+    # mean handing the engine a `trace.json`, which it no longer opens.
+    let legacy = $(%*{"events": [], "paths": [MainPath], "source_views": []})
+    let payload = replayVfsPayload(legacy)
+    counted payload.defects.len == 1
+    counted "no `.ct` container" in payload.defects[0]
+    counted payload.files.len == 0
 
   test "the counts are counted, so a step-less trace cannot report success":
     # Arm 1 of the acceptance: the false pass is a trace that loads and reports
@@ -182,7 +186,8 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     # Every trace a tab can produce is the refused case, so this module would
     # have rejected all of them and shown the user a defect naming the
     # engine's probe order.
-    let payload = replayVfsPayload(memoryTrace(paths = @[RelativePath]))
+    let payload = replayVfsPayload(memoryTrace(paths = @[RelativePath],
+                                               workdir = "trace"))
     counted payload.defects.len == 0
     counted payload.sourceViews == 1
     # Both keys carry the same bytes, so whichever probe asks, it hits.
@@ -190,10 +195,6 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     counted payload.hasFile("trace/" & RelativePath)
     counted payload.fileNamed(RelativePath) == MainSource
     counted payload.fileNamed("trace/" & RelativePath) == MainSource
-    # And the metadata names the workdir those keys were derived from, rather
-    # than leaving the engine to fall back to a value this module did not use.
-    let meta = parseJson(payload.fileNamed("trace/trace_metadata.json"))
-    counted meta["workdir"].getStr == "trace"
 
   test "an absolute recorded path still writes exactly one key":
     # `PathBuf::join` discards the base for an absolute path, so all three
@@ -293,16 +294,15 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
   test "vfsJoin is the engine's join, not the host's":
     # `os./` emits a backslash on a Windows build of this lane and the VFS key
     # is compared byte-for-byte against a `/`-joined probe.
-    counted vfsJoin("trace", "trace.json") == "trace/trace.json"
-    counted vfsJoin("trace/", "trace.json") == "trace/trace.json"
-    counted vfsJoin("", "trace.json") == "trace.json"
+    counted vfsJoin("trace", "trace.ct") == "trace/trace.ct"
+    counted vfsJoin("trace/", "trace.ct") == "trace/trace.ct"
+    counted vfsJoin("", "trace.ct") == "trace.ct"
 
   test "a caller may name the folder the engine launches against":
     let payload = replayVfsPayload(memoryTrace(), traceFolder = "session-4")
     counted payload.defects.len == 0
-    counted payload.hasFile("session-4/trace.json")
-    counted payload.hasFile("session-4/trace_metadata.json")
-    counted not payload.hasFile("trace/trace.json")
+    counted payload.hasFile("session-4/trace.ct")
+    counted not payload.hasFile("trace/trace.ct")
     # The source view is NOT under the folder — its key is the recorded path.
     counted payload.hasFile(MainPath)
     counted payload.sourceFileCount == 1
