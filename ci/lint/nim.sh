@@ -782,9 +782,10 @@ lint_step "DAP command sync: the allow-list names everything the engine dispatch
 
 # The mutation harnesses edit the product's sources in place. One that DROPS a
 # flag it does not know turns `--only=…` into a full, file-mutating grading run;
-# every harness must refuse the flag instead, before touching anything. Pure
-# Python start-up per harness, no build.
-lint_step "Mutation harnesses refuse an unknown flag before touching a file" \
+# every harness must refuse the flag instead, before touching anything — and an
+# arm id it does not declare, or an empty `--only=`, likewise
+# (`ci/lib/harness_guard.py`). Pure Python start-up per harness, no build.
+lint_step "Mutation harnesses refuse an unknown flag or arm id before touching a file" \
 	bash ci/test/harness-argument-refusal.sh
 
 # Canary for the chronicles/distinct-type breakage that takes every editor in

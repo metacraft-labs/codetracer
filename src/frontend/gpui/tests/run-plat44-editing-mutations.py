@@ -202,7 +202,16 @@ def grade(suites):
     return verdict, first
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main():
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--needle-scan", action="store_true")

@@ -852,7 +852,16 @@ def check_control_hashes() -> bool:
     return ok
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     only = None
     for arg in sys.argv[1:]:
         if arg == "--needle-scan":
