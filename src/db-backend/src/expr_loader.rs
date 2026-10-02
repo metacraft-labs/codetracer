@@ -507,22 +507,54 @@ fn collect_non_variable_names(lang: Lang, tree: &Tree, source: &[u8]) -> std::co
         Lang::C | Lang::Cpp => &["preproc_def", "preproc_function_def", "enumerator"],
         // `function calculate_sum(...)`, `procedure p;`
         Lang::Pascal => &["declProc"],
+        // Contract state (`uint256 storedResult;`, `uint256 constant MAX = 1;`)
+        // and every declared name that is not a value of the frame: events,
+        // errors, structs, enums, user-defined value types, contracts,
+        // interfaces, libraries, functions and modifiers.
+        Lang::Solidity => &[
+            "state_variable_declaration",
+            "constant_variable_declaration",
+            "event_definition",
+            "error_declaration",
+            "struct_declaration",
+            "enum_declaration",
+            "user_defined_type_definition",
+            "contract_declaration",
+            "interface_declaration",
+            "library_declaration",
+            "function_definition",
+            "modifier_definition",
+        ],
         _ => return names,
     };
+    // A local or parameter may share its name with contract state (it then
+    // shadows it); such a name stays a variable.
+    let local_declaring_kinds: &[&str] = match lang {
+        Lang::Solidity => &["variable_declaration", "parameter"],
+        _ => &[],
+    };
+    let mut local_names = std::collections::HashSet::new();
     for node in traverse_tree(tree, Order::Pre) {
-        if !declaring_kinds.contains(&node.kind()) {
+        let is_local = local_declaring_kinds.contains(&node.kind());
+        if !is_local && !declaring_kinds.contains(&node.kind()) {
             continue;
         }
         if let Some(name) = node.child_by_field_name("name")
             && let Ok(text) = name.utf8_text(source)
         {
-            names.insert(if lang == Lang::Pascal {
+            let text = if lang == Lang::Pascal {
                 text.to_lowercase()
             } else {
                 text.to_string()
-            });
+            };
+            if is_local {
+                local_names.insert(text);
+            } else {
+                names.insert(text);
+            }
         }
     }
+    names.retain(|name| !local_names.contains(name));
     names
 }
 
@@ -2179,6 +2211,44 @@ impl ExprLoader {
                 true
             }
 
+            Lang::Solidity => {
+                // tree-sitter-solidity uses `identifier` for every name; the
+                // positions that never hold a value of the frame are:
+                //   - `member_expression { property: identifier }`: a member
+                //     (`p.x`, `msg.sender`), reached through its object.
+                //   - `user_defined_type > identifier`: a type (`Point memory p`).
+                //   - the names of event and error parameters and struct members.
+                //   - the callee of a call (`require(...)`, `Point(...)`),
+                //     the event of an `emit` and the error of a `revert`,
+                //     each wrapped in an `expression` node.
+                // Declared names used as values (`storedResult = x`) are
+                // filtered by name, through `non_variable_names`.
+                if node.kind() != "identifier" {
+                    return false;
+                }
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+                match parent.kind() {
+                    "member_expression" => field_name_in_parent(node).as_deref() != Some("property"),
+                    "user_defined_type" => false,
+                    // The named parts of an event, error or struct
+                    // (`event Computed(uint256 result)`, `struct P { uint256 x; }`)
+                    // are not values of any frame.
+                    "event_parameter" | "error_parameter" | "struct_member" => false,
+                    "expression" => {
+                        let callee_field = match parent.parent().map(|grandparent| grandparent.kind()) {
+                            Some("call_expression") => "function",
+                            Some("emit_statement") => "name",
+                            Some("revert_statement") => "error",
+                            _ => return true,
+                        };
+                        field_name_in_parent(&parent).as_deref() != Some(callee_field)
+                    }
+                    _ => true,
+                }
+            }
+
             Lang::Pascal => {
                 // tree-sitter-pascal uses `identifier` for every name, so a
                 // variable is told from the rest by where it stands:
@@ -2628,10 +2698,20 @@ impl ExprLoader {
         updated_location
     }
 
+    /// The expressions a flow shows for `line`, or `None` when the flow
+    /// should show the recorded frame's locals instead.
+    ///
+    /// For Solidity an analysed file's list is authoritative even when it is
+    /// empty: an EVM recording's frame also carries the contract's storage
+    /// (state variables), which are not locals of the function.
     pub fn get_expr_list(&self, line: Position, location: &Location) -> Option<Vec<String>> {
-        self.processed_files
-            .get(&PathBuf::from(&location.path))
-            .and_then(|file| file.variables.get(&line).cloned())
+        let path = PathBuf::from(&location.path);
+        let file = self.processed_files.get(&path)?;
+        match file.variables.get(&line) {
+            Some(names) => Some(names.clone()),
+            None if self.get_current_language(&path) == Lang::Solidity => Some(vec![]),
+            None => None,
+        }
     }
     // pub fn load_loops(&mut self, )
 
@@ -3834,6 +3914,101 @@ mod flow_fixture_extraction_tests {
         }
         // `std::cout << "Sum: " << sum << std::endl;`
         assert_eq!(by_line.get(&16).cloned().unwrap_or_default(), vec!["sum".to_string()]);
+    }
+
+    #[test]
+    fn a_solidity_state_variable_event_or_type_name_is_not_a_local_variable() {
+        let by_line = variables_by_line("solidity/solidity_flow_test.sol");
+        let names = all_names(&by_line);
+        for non_local in ["storedA", "storedResult", "Computed", "FlowTest"] {
+            assert!(
+                !names.contains(&non_local.to_string()),
+                "{non_local} is contract state or a declared name, not a local of the frame; extracted: {by_line:?}"
+            );
+        }
+        // `event Computed(uint256 indexed result);`
+        assert_eq!(by_line.get(&20).cloned().unwrap_or_default(), Vec::<String>::new());
+        // `uint256 final_result = doubled + 10;`
+        let line = by_line.get(&39).cloned().unwrap_or_default();
+        assert!(line.contains(&"final_result".to_string()), "line 39: {line:?}");
+        assert!(line.contains(&"doubled".to_string()), "line 39: {line:?}");
+        // `storedResult = final_result;`
+        assert_eq!(
+            by_line.get(&41).cloned().unwrap_or_default(),
+            vec!["final_result".to_string()]
+        );
+        // `emit Computed(final_result);`
+        assert_eq!(
+            by_line.get(&42).cloned().unwrap_or_default(),
+            vec!["final_result".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_solidity_line_without_locals_shows_none_rather_than_the_recorded_frame() {
+        // An EVM recording's frame also holds the contract's storage
+        // (`storedResult`); a line the analysis found no locals on must not
+        // fall back to that frame.
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-programs")
+            .join("solidity/solidity_flow_test.sol");
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        let location = Location {
+            path: path.to_string_lossy().to_string(),
+            ..Location::default()
+        };
+        // `function run() public returns (uint256) {`
+        assert_eq!(loader.get_expr_list(Position(34), &location), Some(vec![]));
+        assert_eq!(
+            loader.get_expr_list(Position(39), &location),
+            Some(vec!["final_result".to_string(), "doubled".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_solidity_local_named_like_a_state_variable_is_still_a_variable() {
+        let path = std::env::temp_dir().join(format!("ct_sol_shadow_{}.sol", std::process::id()));
+        fs::write(
+            &path,
+            "pragma solidity ^0.8.0;\n\
+             contract C {\n\
+             \x20   uint256 total;\n\
+             \x20   error TooBig(uint256 limit);\n\
+             \x20   struct Point { uint256 x; }\n\
+             \x20   function f(uint256 total) public pure returns (uint256) {\n\
+             \x20       Point memory p = Point(total);\n\
+             \x20       if (p.x > 5) { revert TooBig(p.x); }\n\
+             \x20       return total;\n\
+             \x20   }\n\
+             }\n",
+        )
+        .unwrap();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        let by_line: HashMap<usize, Vec<String>> = loader.processed_files[&path]
+            .variables
+            .iter()
+            .map(|(position, names)| (position.0 as usize, names.clone()))
+            .collect();
+        fs::remove_file(&path).unwrap();
+        let names = all_names(&by_line);
+        for non_local in ["TooBig", "Point"] {
+            assert!(
+                !names.contains(&non_local.to_string()),
+                "{non_local} is a declared error/type name, not a variable; extracted: {by_line:?}"
+            );
+        }
+        // `error TooBig(uint256 limit);`, `struct Point { uint256 x; }`
+        assert_eq!(by_line.get(&4).cloned().unwrap_or_default(), Vec::<String>::new());
+        assert_eq!(by_line.get(&5).cloned().unwrap_or_default(), Vec::<String>::new());
+        // `if (p.x > 5) { revert TooBig(p.x); }`: `x` is reached through `p`.
+        assert_eq!(
+            by_line.get(&8).cloned().unwrap_or_default(),
+            vec!["p".to_string(), "p".to_string()]
+        );
+        // `return total;`: the parameter shadows the state variable.
+        assert_eq!(by_line.get(&9).cloned().unwrap_or_default(), vec!["total".to_string()]);
     }
 
     #[test]
