@@ -206,9 +206,13 @@ suite "PLAT-47: the GPUI window at desktop parity":
     ck ("font-weight", "bold") in active
     ck ("font-weight", "bold") notin inactive
     ck active[0][1] != inactive[0][1]
+    # PLAT-49 (the user's direction over PLAT-47's measurement): the selected
+    # tab has a background of its own, distinct from the strip's own ground.
+    ck ("background-color", chromeOf(crTabActiveBackground)) in active
+    ck chromeOf(crTabActiveBackground) != chromeOf(crTabStripBackground)
     for (k, v) in active & inactive:
       # No glyph anywhere: a tab is styled, never framed.
-      ck k in ["color", "font-weight"]
+      ck k in ["color", "font-weight", "background-color"]
     # B2: a 1px BORDER of the desktop's outline colour around the focused
     # pane, the same width — invisible — around every other.
     ck ("border-color", desk{"focus"}{"outline"}.getStr) in

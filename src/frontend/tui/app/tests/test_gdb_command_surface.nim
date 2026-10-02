@@ -245,7 +245,12 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 218
+  ExpectedStyleLiterals = 214
+    ## 2026-10-01 (PLAT-49): -4 net — the in-pane title styles went with the
+    ## titles (the shell's title row, the build and VCS panes' headings and
+    ## rules, `vcs_pane.VcsRuleStyle`), and the variables row's category tag, the omnibar field's
+    ## surface, the control tooltip and the editor strip's source statement
+    ## came in.
     ## 2026-09-30 (PLAT-48): +20, all roles — seventeen in the new
     ## `views/top_bar.nim` (the menu titles and button, the controls, the
     ## omnibar field and its results, the session tabs, the menu's

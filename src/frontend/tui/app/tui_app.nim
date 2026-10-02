@@ -191,6 +191,12 @@ type
     graphicsDrawn*: bool
       ## The terminal answered the kitty graphics query: it draws pictures.
     hoveredControl*: int
+    hoveredTooltip*: string
+      ## PLAT-49: the hovered control's tooltip, from
+      ## `debug_controls_vm.transportTooltip`.
+    caretDrawn*: bool
+      ## PLAT-49: the terminal is not known to honour caret shapes
+      ## (DECSCUSR), so the omnibar's caret is drawn into its cell.
     tabScroll*: int
     controls*: DebugControlsVM
       ## The session's transport ViewModel, for which controls are available.
@@ -313,7 +319,9 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),
                         hoveredControl: app.hoveredControl,
-                        tabs: app.shell.tabsOf(), tabScroll: app.tabScroll),
+                        hoverTooltip: app.hoveredTooltip,
+                        tabs: app.shell.tabsOf(), tabScroll: app.tabScroll,
+                        caretDrawn: app.caretDrawn),
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
                                product = app.modes.product,

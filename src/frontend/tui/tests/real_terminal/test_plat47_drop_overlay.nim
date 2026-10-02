@@ -172,13 +172,29 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     discard sess.waitStatus("activateTab(state)")
     let base = sess.snap()
 
+    var dragStartStatus = ""
+
     proc startDrag() =
+      # PLAT-49: a press only marks the tab; the drag begins once the pointer
+      # has moved past the threshold (`binding.DragThresholdCols`), so the
+      # press is followed by a motion report three columns along the strip.
+      # The drag is then over the Variables stack's own strip, so the status
+      # line names that drop (`would intoStack(state, …)`) rather than
+      # `dragging`.
       sess.mouse(0, 1, varCol + 1, 'M')
-      discard sess.waitStatus("dragging")
+      sess.mouse(32, 1, varCol + 4, 'M')
+      dragStartStatus = sess.waitStatus("would intoStack(state")
 
     proc hover(row, col: int): Snapshot =
       sess.mouse(32, row, col, 'M')
-      discard sess.waitStatus("would ")
+      # The status line already names the drop under the drag's start
+      # (`dragStartStatus`): wait for it to name the NEW target.
+      let deadline = getMonoTime() + initDuration(milliseconds = 20000)
+      while getMonoTime() < deadline:
+        discard sess.drainOutput(40)
+        let st = sess.regionText(StatusRow, 0, Cols, 1)
+        if st.contains("would ") and st != dragStartStatus:
+          break
       sess.snap()
 
     proc ghostAt(s: Snapshot; row, col: int): bool =

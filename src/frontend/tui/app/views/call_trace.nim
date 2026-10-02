@@ -64,8 +64,8 @@ type
 
 const
   CallTraceTitle* = "CALL TRACE"
-  StackFallbackTitle* = "CALL STACK (no call trace in this recording)"
-    ## The fallback's title, painted over the call stack's own title row.
+  StackFallbackTitle* = "Call stack: this recording has no call trace"
+    ## The fallback's note, painted over the call stack's own heading row.
   CallTraceLoadingText* = "  …"
     ## A row of the trace whose section has not arrived: drawn, not left
     ## blank, because a blank row reads as the end of the trace.
@@ -182,16 +182,12 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
     inc result
 
 proc paintFallbackCaption*(g: var StyledGrid; area: CellArea) =
-  ## The call-stack fallback's title row: says the pane is showing the STACK
-  ## because the recording provides no call trace.
+  ## The call-stack fallback's note, on the pane's first content row (in
+  ## place of the stack's own heading): the pane is showing the STACK because
+  ## the recording provides no call trace. A sentence, not a title bar
+  ## (PLAT-49): no rule, the muted caption tier.
   if area.width <= 0 or area.height <= 0:
     return
-  var line = StackFallbackTitle
-  if cellWidthOf(line) + 1 <= area.width:
-    line.add " "
-    line.add repeatGlyph(CallTraceRuleGlyph, area.width - cellWidthOf(line))
-  g.paint(area.row, area.col, truncateToCells(line, area.width),
-          CallTraceRuleStyle)
-  g.paint(area.row, area.col,
-          truncateToCells(StackFallbackTitle, area.width),
-          CallTraceTitleStyle)
+  g.paint(area.row, area.col, spaces(area.width), CallTraceCountStyle)
+  g.paint(area.row, area.col, truncateToCells(StackFallbackTitle, area.width),
+          CallTraceCountStyle)

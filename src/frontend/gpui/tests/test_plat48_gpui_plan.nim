@@ -41,7 +41,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 174
+  ExpectedAssertions = 177
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -154,7 +154,7 @@ proc markPaths(id: string): seq[string] =
 
 suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
 
-  test "the band: the shared menu's titles, the desktop's nine marks, the omnibar":
+  test "the band: the shared menu's root button, the desktop's nine marks, the omnibar":
     let plan = windowPlan("")
     let band = plan.nodesWith("data-ct-top-bar")
     var bandBox: JsonNode
@@ -163,15 +163,11 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck not bandBox.isNil
     let br = bandBox.rectOf
     ck br.x == ChromePaddingPx and br.y == ChromePaddingPx and br.h == TopBarPx
-    # The titles are the shared tree's visible folders, in its order.
-    let tree = nativeFrontEndMenu("calc")
-    var want: seq[string] = @[]
-    for i in tree.visibleChildren(): want.add tree.children[i].label
-    var got: seq[string] = @[]
-    for t in plan.nodesWith("data-ct-menu-title"):
-      got.add t.attr("data-ct-menu-title")
-      ck t.textOf == t.attr("data-ct-menu-title")
-    ck got == want
+    # PLAT-49: ONE root button, as the desktop's menu has; its folders are a
+    # popover inside it (`test_plat49_gpui_plan`), never titles in the band.
+    ck plan.nodesWith("data-ct-menu-button").len == 1
+    ck plan.nodesWith("data-ct-menu-button")[0].textOf == "≡"
+    ck plan.nodesWith("data-ct-menu-title").len == 0
     # Nine controls, in the desktop toolbar's order, each drawing the
     # DESKTOP'S mark for itself — its own paths — in the ink its state takes.
     let ctl = plan.nodesWith("data-ct-control")
@@ -195,7 +191,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       ck r.y == br.y and r.h > 0 and r.x >= br.x
     let omni = plan.nodesWith("data-ct-omnibar")
     ck omni.len == 1
-    ck omni[0].textOf.startsWith("⌕ Search files")
+    ck omni[0].textOf == "⌕ " & OmnibarPlaceholder
 
   test "the footer strip is the shared default's docked panes, in order":
     let plan = windowPlan("")
@@ -213,8 +209,9 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
   test "an open menu's popover is drawn over every pane's pin button":
     let plan = windowPlan("menu:Debug")
     let pops = plan.nodesWith("data-ct-menu-popover")
-    ck pops.len == 1
-    let pop = pops[0]
+    # The first level and, beside it, the Debug folder (PLAT-49's cascade).
+    ck pops.len == 2
+    let pop = pops[^1]
     let pr = pop.rectOf
     # The Debug folder's items, the chords the desktop binds beside them.
     let items = plan.nodesWith("data-ct-menu-item")
@@ -223,17 +220,23 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for it in items:
       if it.attr("data-ct-menu-item") == "Step Over": stepOver = it.textOf
     ck stepOver.contains("F10")
-    # Paint order: a pin button that the popover overlaps is painted BEFORE
-    # it (under it), never over its rows.
-    var overlapped = 0
-    for pin in plan.nodesWith("data-ct-pin"):
-      if pin.rectOf.overlaps(pr):
-        inc overlapped
-        checkpoint("pin " & pin.attr("data-ct-pin") & " under the popover")
-        ck plan.topIndex(pin) < plan.topIndex(pop)
-    ck overlapped >= 1
+    ck pr.w > 0
     for it in items:
-      ck plan.topIndex(it) > plan.topIndex(pop)
+      ck plan.topIndex(it) > plan.topIndex(pops[0])
+    # Paint order: a pin button that a popover overlaps is painted BEFORE it
+    # (under it), never over its rows. Since PLAT-49 a folder's submenu opens
+    # level with the folder's row, so Debug's (the sixth row) clears the
+    # strips' pins; Edit's opens beside the second row, over the Files pane's
+    # strip and its pin.
+    let edit = windowPlan("menu:Edit")
+    var overlapped = 0
+    for p in edit.nodesWith("data-ct-menu-popover"):
+      for pin in edit.nodesWith("data-ct-pin"):
+        if pin.rectOf.overlaps(p.rectOf):
+          inc overlapped
+          checkpoint("pin " & pin.attr("data-ct-pin") & " under a popover")
+          ck edit.topIndex(pin) < edit.topIndex(p)
+    ck overlapped >= 1
 
   test "a key walks the open menu: the highlight is drawn where the ViewModel has it":
     let plan = windowPlan("menu:Debug,key:down")
@@ -241,7 +244,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for it in plan.nodesWith("data-ct-menu-item"):
       if it.attr("data-ct-menu-active") == "true":
         active.add it.attr("data-ct-menu-item")
-    ck active == @["Step Over"]
+    ck active == @["Debug", "Step Over"]
 
   test "the pointer on a control: its tooltip and the desktop's chord, below it":
     let plan = windowPlan("control:next")

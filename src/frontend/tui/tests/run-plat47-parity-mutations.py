@@ -38,7 +38,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | a jump centres the execution line | V1 |
   | TESTS is captioned as the desktop's | N1 |
   | the execution band is Monaco's: the whole code column, not the gutter | X1, X2 |
-  | the terminal's call trace pages: the section around the rows shown is loaded | P1, P2, P3, P4 |
+  | the terminal's call trace pages: the section around the rows shown is loaded | P1, P2, P4 |
   | every language is tokenised by the desktop's Monaco tokenizer, character by character | Y1 (spans cut short), M1 (a state never popped), M2 (negated classes), M3 (a language mapped to another tokenizer), M4 (the generated definitions edited) |
   | a window opening inside a string starts in the state the file leaves | M5 (the contexts dropped), M6 (the VM's contexts misaligned) |
   | a test run never touches the user's state | S1 |
@@ -458,13 +458,13 @@ ARMS = [
         C_STRIP,
         "a rule drawn through the strip again"),
     Arm("B4", ROLES,
-        "    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryLabel,",
+        "    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,",
         "    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,",
         C_STRIP,
         "the active tab painted in the inactive tabs' foreground"),
     Arm("B3", ROLES,
-        "                      mono = {raBold, raReverse}, baseSurface = true),",
-        "                      mono = {raBold}, baseSurface = true),",
+        "                      mono = {raBold, raReverse}),\n    srTabInactive:",
+        "                      mono = {raBold}),\n    srTabInactive:",
         C_MONO,
         "in monochrome the active tab loses its reverse video"),
     # --- focus -----------------------------------------------------------------
@@ -491,8 +491,8 @@ ARMS = [
         C_GCHROME,
         "GPUI's focused region bordered in the window background: no outline"),
     Arm("K5", CHROME,
-        '    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold")]',
-        '    @[("color", chromeOf(crTabActiveForeground))]',
+        '    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold"),\n',
+        '    @[("color", chromeOf(crTabActiveForeground)),\n',
         C_GCHROME,
         "GPUI's active tab loses its weight"),
     # --- the user's two decisions ----------------------------------------------
@@ -538,11 +538,15 @@ ARMS += [
         "      startIndex = 0'i64, height = body + 2 * CallTraceBuffer,\n",
         C_PAGES,
         "a page request always reads the trace's head, not the rows scrolled to"),
-    Arm("P3", CTVIEW,
-        '  let count = " " & $m.total & " call(s)"\n',
-        '  let count = " " & $m.rows.len & " call(s)"\n',
-        C_PAGES,
-        "the title counts the loaded section instead of the whole trace"),
+    # P3 (the title counts the whole trace, not the loaded section) retired
+    # by PLAT-49: a pane has no title row in the terminal any more — the tab
+    # strip names it, as the desktop's GoldenLayout header does — so the
+    # count is drawn nowhere a user can read it. Nor does the desktop draw
+    # one: its call trace uses `totalCallsCount` only to size the scroll
+    # extent (`isonim_calltrace_view`, `.local-calltrace` at count x row
+    # height), never as text, so there is no place on the desktop for the
+    # terminal's count to match. The whole-trace count still drives the
+    # paging P1, P2 and P4 grade.
     Arm("P4", RUNTIME,
         "    let idx = geometry.regionIndexAt(event.row, event.col)\n"
         "    if idx >= 0 and geometry.projection.regions[idx].pane == paneCalltrace and\n",

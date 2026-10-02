@@ -82,7 +82,7 @@ const
                      clientAction: "forwardContinue",
                      nerd: "\u{EACF}", unicode: "⏵", text: "Continue"),
     TransportControl(id: "run-to-entry", label: "Run to entry",
-                     clientAction: "",
+                     clientAction: "aRunToEntry",
                      nerd: "\u{EAD2}", unicode: "⏮", text: "Entry")]
     ## In the desktop toolbar's order (`TransportActions`).
 
@@ -166,7 +166,5 @@ func textPrioritySubset*(budget: int; gap = 1): seq[int] =
     if i in chosen:
       result.add i
 
-func tooltipFor*(c: TransportControl; chord: string): string =
-  ## The tooltip / status line text: the label, and the key when one is
-  ## bound — `debug_controls_vm.toolbarTooltip`'s shape.
-  if chord.len == 0: c.label else: c.label & " (" & chord & ")"
+# PLAT-49: a control's tooltip is `debug_controls_vm.transportTooltip` — the
+# ViewModel's, one shape for every front-end — not a second spelling here.

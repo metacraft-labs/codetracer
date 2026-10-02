@@ -64,19 +64,29 @@ const
     ## strips are cut at their labels (PLAT-45).
   TallRows = 40
   CaptureRecipe = "just plat46-capture-electron"
-  SharedRoles = ["tab-active-bg", "tab-active-fg", "tab-inactive-fg",
-                 "surface-canvas", "surface-panel", "chrome-text",
-                 "syntax-keyword", "syntax-identifier", "surface-editor",
-                 "tab-inactive-bg"]
-    ## Every role the capture measures, and every one agrees (PLAT-47).
-  KnownDivergences: array[0, (string, string)] = []
-    ## EMPTY SINCE PLAT-47, and the count below is asserted, so a divergence
-    ## that reappears reddens this suite until it is filed here with its
-    ## reason. The three PLAT-46 counted — the editor's syntax, the editor's
-    ## surface and the inactive tab's surface — closed when the terminal's
-    ## editor was generated from the desktop's own Monaco theme documents
-    ## (`app/theme/editor_theme.nim`) and its tab strip moved onto the surface
-    ## the desktop's strip measures.
+  SharedRoles = ["tab-inactive-fg", "surface-panel", "chrome-text",
+                 "syntax-keyword", "syntax-identifier", "surface-editor"]
+    ## Every role the capture measures that the two front-ends paint alike.
+  KnownDivergences = [
+    ("tab-active-bg",
+     "PLAT-49 finding 4, the user's direction (2026-10-01): the selected " &
+     "tab has a ground of its own (ui/surface/primary/tertiary), overriding " &
+     "PLAT-47's measurement of the desktop's single #282828"),
+    ("tab-active-fg",
+     "PLAT-49 finding 4: the selected tab's text is in the headings tier, " &
+     "so it differs from the others by foreground as well as ground"),
+    ("tab-inactive-bg",
+     "PLAT-49 finding 4: the strip has a ground of its own " &
+     "(ui/surface/base/raised), distinct from the pane body"),
+    ("surface-canvas",
+     "PLAT-49 finding 13: a divider is drawn on its neighbours' own ground " &
+     "(the panel surface) with the subtle border foreground, where the " &
+     "desktop's splitter shows the layout's darker ground")]
+    ## Counted, so a divergence that appears reddens this suite until it is
+    ## filed here with its reason, and one that closes reddens it too. PLAT-47
+    ## had emptied it; PLAT-49 files the four the user asked for: the tab
+    ## strip's own ground and the selected tab's own ground and foreground
+    ## (finding 4), and dividers on the panes' ground (finding 13).
 
 proc hexOfColor(c: Color): string =
   if c.kind == ckRgb: hexOf((c.r.int, c.g.int, c.b.int)) else: ""
@@ -124,10 +134,10 @@ proc terminalColumn(sess: var TuiTestSession): Table[string, string] =
     let divider = colOf(sess, tabs, "Variables") - 2
     if divider >= 0:
       result["surface-canvas"] = hexOfColor(sess.cellAt(tabs, divider).bg)
-  let varRow = rowOf(sess, "VARIABLES")
+  let varRow = rowOf(sess, " Variables ")
   if varRow >= 0:
     result["surface-panel"] = hexOfColor(sess.cellAt(varRow + 2,
-      lastColBeforeRule(sess, varRow + 2, colOf(sess, varRow, "VARIABLES"))).bg)
+      lastColBeforeRule(sess, varRow + 2, colOf(sess, varRow, " Variables "))).bg)
   let srcRow = rowOf(sess, "   3 ")
   if srcRow >= 0:
     result["surface-editor"] = hexOfColor(

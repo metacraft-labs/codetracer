@@ -72,11 +72,11 @@
    "keyword": 80,
    "string": 3972,
    "comment": 127,
-   "identifier": 222,
+   "identifier": 401,
    "delimiter": 2,
-   "lineNumber": 1106,
+   "lineNumber": 1108,
    "activeLineNumber": 66,
-   "ground": 398177,
+   "ground": 384523,
    "oldBand4f4f4f": 0,
    "chromePaneFill": 0
   },
@@ -93,12 +93,12 @@
    "executionLine": "#404040",
    "selection": "#353535"
   },
-  "text": "Editor -\nthe recording's source\np\u00bb 1 #!/usr/binfenv python3\n\"\"\"calc \u2014 the small, fast, deterministic program b\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS\n"
+  "text": "main.py b\nthe recording's source\np\u00bb 1 #!/usr/binfenv python3\n\"\"\"calc \u2014 the small, fast, deterministic program b\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS\n"
  },
  "band": {
   "rows": [
-   119,
-   144
+   123,
+   148
   ],
   "startX": 462,
   "endX": 852,
@@ -117,14 +117,14 @@
     30
    ],
    "base": {
-    "mass": 233.9,
-    "ink": "#c8c8c8",
-    "ground": "#1b222c"
+    "mass": 240.7,
+    "ink": "#f3f3f3",
+    "ground": "#333333"
    },
    "vcs": {
-    "mass": 124.1,
+    "mass": 124.2,
     "ink": "#727272",
-    "ground": "#1b222c"
+    "ground": "#262626"
    }
   },
   "vcs": {
@@ -137,12 +137,12 @@
    "base": {
     "mass": 112.3,
     "ink": "#727272",
-    "ground": "#1b222c"
+    "ground": "#262626"
    },
    "vcs": {
-    "mass": 198.6,
-    "ink": "#c8c8c8",
-    "ground": "#1b222c"
+    "mass": 204.7,
+    "ink": "#f3f3f3",
+    "ground": "#333333"
    }
   }
  },
@@ -285,11 +285,11 @@
   "pointers": {
    "drop-split": [
     860,
-    545
+    560
    ],
    "drop-whole": [
     670,
-    545
+    560
    ],
    "drop-slot": [
     1601,
@@ -308,11 +308,11 @@
     980
    ],
    "changedPixels": 190120,
-   "ghostChangedPixels": 888,
+   "ghostChangedPixels": 1795,
    "ghostCentre": [
-    27,
-    34,
-    44
+    51,
+    51,
+    51
    ]
   },
   "drop-whole": {
@@ -325,9 +325,9 @@
    "changedPixels": 374140,
    "ghostChangedPixels": 5120,
    "ghostCentre": [
-    27,
-    34,
-    44
+    51,
+    51,
+    51
    ]
   },
   "drop-slot": {
@@ -338,11 +338,11 @@
     30
    ],
    "changedPixels": 14880,
-   "ghostChangedPixels": 851,
+   "ghostChangedPixels": 2370,
    "ghostCentre": [
-    27,
-    34,
-    44
+    51,
+    51,
+    51
    ]
   },
   "drop-dock": {
@@ -353,11 +353,11 @@
     1014
    ],
    "changedPixels": 47264,
-   "ghostChangedPixels": 669,
+   "ghostChangedPixels": 2188,
    "ghostCentre": [
-    27,
-    34,
-    44
+    51,
+    51,
+    51
    ]
   },
   "cancelChangedPixels": 0,
@@ -443,16 +443,16 @@
   ]
  },
  "vcs": {
-  "text": "VCS\n\nplat47-vcs\n\nWorking Tree (3)\n\nA added.txt\n\nM notes.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
+  "text": "plat47-vcs\n\nWorking Tree (3)\n\nA added.txt\n\nM notes.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
   "active": "vcs"
  },
  "vcsRefresh": {
-  "text": "VCS\n\nplat47-vcs\n\nWorking Tree (4)\n\nA added.txt\n\nM notes.txt\n\n? late.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
+  "text": "plat47-vcs\n\nWorking Tree (4)\n\nA added.txt\n\nM notes.txt\n\n? late.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
   "refreshes": 1,
   "changedPixels": 4544,
   "changedBBox": [
    25,
-   156,
+   130,
    239,
    168
   ],
@@ -685,19 +685,19 @@
    ]
   },
   "revealChangedBBox": [
-   18,
+   12,
    54,
-   647,
+   653,
    982
   ],
-  "revealChangedPixels": 181587,
-  "revealText": "State Unpin\nState\n\nLocals\n\nGlobals\n",
+  "revealChangedPixels": 183975,
+  "revealText": "State Unpin\nLocals\n\nGlobals\n\nWatches\n",
   "dismissChangedPixels": 0
  },
  "calltrace": {
-  "baseText": "Call Trace 603 call(s)\n<toplevel> #0\n<_ main_ > #1\nmain #2\nstep #3\nleaf #4\nstep #5\nleaf #6\nstep #7\nleaf #8\nstep #9\nleaf #10\nstep #11\nleaf #12\nstep #13\nleaf #14\nstep #15\n",
-  "endText": "Call Trace 603 call(s)\nleaf #588\nstep #589\nleaf #590\nstep #591\nleaf #592\nstep #593\nleaf #594\nstep #595\nleaf #596\nstep #597\nleaf #598\nstep #599\nleaf #600\nstep #601\nleaf #602\n",
+  "baseText": "<toplevel> #0\n<_ main_ > #1\nmain #2\nstep #3\nleaf #4\nstep #5\nleaf #6\nstep #7\nleaf #8\nstep #9\nleaf #10\nstep #11\nleaf #12\nstep #13\nleaf #14\nstep #15\nleaf #16\n",
+  "endText": "step #587\nleaf #588\nstep #589\nleaf #590\nstep #591\nleaf #592\nstep #593\nleaf #594\nstep #595\nleaf #596\nstep #597\nleaf #598\nstep #599\nleaf #600\nstep #601\nleaf #602\n",
   "sectionLoads": 9,
-  "lastTop": "gesture calltrace top=588 rows=15 total=603"
+  "lastTop": "gesture calltrace top=587 rows=16 total=603"
  }
 }

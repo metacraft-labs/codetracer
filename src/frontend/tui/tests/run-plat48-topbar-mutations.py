@@ -33,11 +33,11 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | the reveal is an overlay of the pane itself, where the strip is | RV1 (the bottom reveal at the top), RV2 (the pane not painted) |
   | a side strip's label reads down, one character per row | VL1 (every character on one row), VL2 (a one-row slot) |
   | pin / unpin round-trip to where the pane was | PN1 (the anchor forgotten), PN2 (a stack's first tab comes back last), DO1 (a redock to a populated edge collides) |
-  | the terminal's menu: the keymap's chords, the bar's keys | TM1 (no chord shown), TM2 (Right walks left) |
+  | the terminal's menu: the keymap's chords, the bar's keys | TM1 (no chord shown), TM2 (Down walks up) |
   | the top bar acts on the recording | TO1 (a tick query goes to tick 0), TC1 (a control click does nothing), TF1 (the frame after a click never drawn), DR1 (a queued mouse report split into keys) |
   | GPUI: the top dock edge, the popovers, the desktop keymap | GT1 (top dock refused), GT2 (the top strip misplaced), GT3 (the top margin not a dock zone), GM1 (a nested popover over its parent), GK1 (no bindings read) |
   | session tabs from the keyboard: `g t` / `g T` / `Ctrl+Tab` (terminal), `Ctrl+Alt+PageDown` / `PageUp` (GPUI) | TK1 (`g t` steps back), TK2 (`CSI u` Ctrl+Tab not a key), GS1 (the window's key does nothing) |
-  | GPUI's DRAWING, read from the window's own render plan (`--report-window-plan`) | GW1 (every control the first mark), GW2 (enabled drawn in the disabled ink), GW3 (titles without names), GW4 (the popover under the pin buttons), GW5 (a hover label without its chord), GW6 (the reveal an empty box), GW7 (no Unpin), GW8 (the revealed label not marked), GW9 (pins through a top reveal), GP1 (the rule that hides them), GW10 (pin docks to the wrong edge) |
+  | GPUI's DRAWING, read from the window's own render plan (`--report-window-plan`) | GW1 (every control the first mark), GW2 (enabled drawn in the disabled ink), GW3 (the root button without its mark), GW4 (the popover under the pin buttons), GW5 (a hover label without its chord), GW6 (the reveal an empty box), GW7 (no Unpin), GW8 (the revealed label not marked), GW9 (pins through a top reveal), GP1 (the rule that hides them), GW10 (pin docks to the wrong edge) |
 
 GPUI'S DRAWING IS GRADED FROM THE WINDOW'S OWN RENDER PLAN. `gpui/main.nim`'s
 drawing — the band, the desktop's SVG marks through `img`, the popovers and
@@ -181,8 +181,8 @@ C_SQUARE = "a filled square covers exactly its area"
 T_NARROW = ("at 80 columns: the menu collapses to ≡, the omnibar to ⌕, "
             "controls by priority")
 T_GLYPHS = "each icons mode draws its own glyph set"
-T_F12 = ("F12 opens it; keys walk the bar and into a folder; the chords are "
-         "the keymap's")
+T_F12 = ("F12 opens it; keys walk the first level and into a folder; the "
+         "chords are the keymap's")
 T_REBIND = "switching the keymap changes the chord the menu shows"
 T_COMMAND = "a command query lists the menu's commands and runs one"
 T_STRIP = "the shared default's footer panels are the bottom strip's labels"
@@ -198,8 +198,7 @@ P_TICK = ("Ctrl+p, a tick, Enter: the debugger is there; a :sym query lists "
 P_CLICK = "a click on each control performs it on the recording"
 G_TOP = ("a top-docked layout projects, lays out a top strip, and the top "
          "margin docks")
-G_POPOVER = ("an open folder drops below its title; a nested one opens to its "
-             "right")
+G_POPOVER = "the first level drops below the button; a folder opens to its right"
 G_BINDINGS = "the desktop's default bindings, spelled as its menu spells them"
 B_VERBS = "every keyboard gesture has a spelling, and none of them is silent"
 R_UNBOUND = "enabling it changes NOTHING on screen, compared as rendered rows"
@@ -211,8 +210,8 @@ T_TABKEYS = ("g t / g T and Ctrl+Tab / Ctrl+Shift+Tab step the tabs, "
 G_TABKEYS = ("the session tabs' keys: Ctrl+Alt+PageDown / PageUp, no desktop "
              "chord reused")
 G_PINSHOWN = "a pin button under a revealed pane is not drawn, and not pressable"
-W_BAND = ("the band: the shared menu's titles, the desktop's nine marks, the "
-          "omnibar")
+W_BAND = ("the band: the shared menu's root button, the desktop's nine marks, "
+          "the omnibar")
 W_POPOVER = "an open menu's popover is drawn over every pane's pin button"
 W_HOVER = "the pointer on a control: its tooltip and the desktop's chord, below it"
 W_REVEAL = "Ctrl+O reveals the first docked pane ITSELF over the tree, with Unpin"
@@ -431,10 +430,10 @@ ARMS = [
         T_REBIND,
         "the terminal's menu shows no chord for any item"),
     Arm("TM2", RUNTIME,
-        "    if bar and vm.path.len == 0: vm.moveHighlight(1)\n",
-        "    if bar and vm.path.len == 0: vm.moveHighlight(-1)\n",
+        '  of "Down": vm.moveHighlight(1)\n',
+        '  of "Down": vm.moveHighlight(-1)\n',
         T_F12,
-        "Right walks the menu bar leftwards"),
+        "Down walks the menu's first level upwards"),
     # --- acting on the recording -------------------------------------------------------
     Arm("TO1", RUNTIME,
         "    rt.runPromptLine(\":goto \" & entry.target, outcome)\n",
@@ -525,10 +524,10 @@ ARMS = [
         W_BAND,
         "an enabled control is drawn in the disabled ink"),
     Arm("GW3", GPUIMAIN,
-        "      r.appendChild(b, r.createTextNode(gMenu.root.children[sg.index].label))\n",
-        "      r.appendChild(b, r.createTextNode(\"\"))\n",
+        '      r.appendChild(b, r.createTextNode("≡"))\n',
+        '      r.appendChild(b, r.createTextNode(""))\n',
         W_BAND,
-        "the band's menu titles are drawn without their names"),
+        "the band's root menu button is drawn without its mark"),
     Arm("GW4", GPUIMAIN,
         "    r.setAttribute(box, \"data-ct-menu-popover\", $p.folderPath)\n"
         "    r.setStyle(box, \"rounded\", \"6px\")\n"

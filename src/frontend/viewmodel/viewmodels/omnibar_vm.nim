@@ -27,6 +27,15 @@
 ## the same query gives the same list in both, in the same order — which is
 ## what the real-stack tests assert.
 ##
+## ## The text it shows when empty, and its caret (PLAT-49)
+##
+## `OmnibarPlaceholder` is the one placeholder every front-end draws in the
+## empty field — the desktop's palette input, the terminal's top-bar field and
+## GPUI's — so the three cannot word it differently. The query is edited at a
+## CARET (`cursor`, a byte offset), in INSERT or OVERWRITE mode (`overwrite`,
+## toggled by the Insert key): the terminal shows the caret as a thin bar in
+## insert mode and a block in overwrite mode, the way an editor does.
+##
 ## Plain Nim, C and JavaScript backends, no signals (a host installs
 ## `onChange` to repaint).
 
@@ -69,6 +78,12 @@ type
     results*: seq[OmnibarResult]
     selected*: int
       ## Index into `results`, or -1 when there are none.
+    cursor*: int
+      ## PLAT-49: the caret, as a byte offset into `query` (always on a
+      ## character boundary). Typing inserts (or overwrites) there.
+    overwrite*: bool
+      ## PLAT-49: typing replaces the character under the caret instead of
+      ## inserting before it. Toggled by `toggleOverwrite` (the Insert key).
     limit*: int
     revision*: int
     onChange*: proc() {.closure.}
@@ -78,6 +93,10 @@ const
     ## The desktop palette's own limit (`COMMAND_FUZZY_OPTIONS.limit`).
   CommandPrefix* = ":"
   TickPrefix* = "#"
+  OmnibarPlaceholder* = "Navigate to file or run a :command"
+    ## PLAT-49: what every front-end's empty omnibar field shows — the
+    ## desktop's palette wording, now read from here by the desktop, the
+    ## terminal and GPUI alike.
 
 func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
                                                   needle: string] =
@@ -224,14 +243,19 @@ proc setIndex*(vm: OmnibarVM; index: seq[OmnibarEntry]) =
 
 proc open*(vm: OmnibarVM; query = "") =
   ## Show the omnibar; `query` pre-fills a mode (`":sym "` for Find Symbol).
+  ## The caret goes to the end, in insert mode.
   vm.isOpen = true
   vm.query = query
+  vm.cursor = query.len
+  vm.overwrite = false
   vm.rerank()
   vm.changed()
 
 proc close*(vm: OmnibarVM) =
   vm.isOpen = false
   vm.query = ""
+  vm.cursor = 0
+  vm.overwrite = false
   vm.needle = ""
   vm.mode = omFile
   vm.results = @[]
@@ -239,21 +263,85 @@ proc close*(vm: OmnibarVM) =
   vm.changed()
 
 proc setQuery*(vm: OmnibarVM; query: string) =
+  ## Replace the query; the caret goes to its end.
   vm.query = query
+  vm.cursor = query.len
   vm.rerank()
   vm.changed()
 
+func nextBoundary(s: string; i: int): int =
+  ## The byte offset of the character after the one starting at `i`.
+  result = min(s.len, i + 1)
+  while result < s.len and (ord(s[result]) and 0xC0) == 0x80:
+    inc result
+
+func prevBoundary(s: string; i: int): int =
+  ## The byte offset of the character before `i`.
+  result = max(0, i - 1)
+  while result > 0 and (ord(s[result]) and 0xC0) == 0x80:
+    dec result
+
 proc typeText*(vm: OmnibarVM; text: string) =
-  vm.setQuery(vm.query & text)
+  ## Insert `text` at the caret — or, in overwrite mode, put it in place of
+  ## the character under the caret (at the end there is none, so it appends).
+  let at = max(0, min(vm.cursor, vm.query.len))
+  let stop = if vm.overwrite and at < vm.query.len: nextBoundary(vm.query, at)
+             else: at
+  vm.query = vm.query[0 ..< at] & text & vm.query[stop .. ^1]
+  vm.cursor = at + text.len
+  vm.rerank()
+  vm.changed()
 
 proc backspace*(vm: OmnibarVM) =
-  if vm.query.len == 0:
+  ## Delete the character before the caret.
+  let at = max(0, min(vm.cursor, vm.query.len))
+  if at == 0:
     return
-  # Drop one UTF-8 character.
-  var cut = vm.query.len - 1
-  while cut > 0 and (ord(vm.query[cut]) and 0xC0) == 0x80:
-    dec cut
-  vm.setQuery(vm.query[0 ..< cut])
+  let cut = prevBoundary(vm.query, at)
+  vm.query = vm.query[0 ..< cut] & vm.query[at .. ^1]
+  vm.cursor = cut
+  vm.rerank()
+  vm.changed()
+
+proc deleteForward*(vm: OmnibarVM) =
+  ## `Delete`: remove the character under the caret.
+  let at = max(0, min(vm.cursor, vm.query.len))
+  if at >= vm.query.len:
+    return
+  vm.query = vm.query[0 ..< at] & vm.query[nextBoundary(vm.query, at) .. ^1]
+  vm.rerank()
+  vm.changed()
+
+proc moveCursor*(vm: OmnibarVM; delta: int) =
+  ## `Left` / `Right`: one character at a time, clamped to the query.
+  var at = max(0, min(vm.cursor, vm.query.len))
+  for _ in 0 ..< abs(delta):
+    at = if delta > 0: nextBoundary(vm.query, at) else: prevBoundary(vm.query, at)
+  if at != vm.cursor:
+    vm.cursor = at
+    vm.changed()
+
+proc cursorHome*(vm: OmnibarVM) =
+  if vm.cursor != 0:
+    vm.cursor = 0
+    vm.changed()
+
+proc cursorEnd*(vm: OmnibarVM) =
+  if vm.cursor != vm.query.len:
+    vm.cursor = vm.query.len
+    vm.changed()
+
+proc toggleOverwrite*(vm: OmnibarVM) =
+  ## `Insert`: switch between inserting and overwriting.
+  vm.overwrite = not vm.overwrite
+  vm.changed()
+
+func cursorChars*(vm: OmnibarVM): int =
+  ## The caret as a CHARACTER index (what a renderer counts cells by).
+  var i = 0
+  while i < min(vm.cursor, vm.query.len):
+    i = nextBoundary(vm.query, i)
+    inc result
 
 proc moveSelection*(vm: OmnibarVM; delta: int) =
   ## `Down` / `Up`: the next / previous result, clamped.

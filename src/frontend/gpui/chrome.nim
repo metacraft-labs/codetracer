@@ -56,9 +56,22 @@ type
     crPaneBackground = "pane.background"
     crPaneTitleForeground = "pane.title.foreground"
     crTabActiveForeground = "tab.active.foreground"
-      ## PLAT-47. The active tab of a strip: the desktop's label tier.
+      ## PLAT-47, PLAT-49. The active tab of a strip: a foreground of its own
+      ## (ui/text/primary/headings).
     crTabInactiveForeground = "tab.inactive.foreground"
       ## PLAT-47. Every other tab: the desktop's disabled title tier.
+    crTabStripBackground = "tab.strip.background"
+      ## PLAT-49. The tab strip's own ground, distinct from the pane body —
+      ## the user's direction, 2026-10-01. The window's card tier
+      ## (ui/surface/base/card): the terminal's strip token (base/raised,
+      ## #161616) is all but the WINDOW's own ground between the panes
+      ## (#12161c), so in the window a strip on it would read as a gap.
+    crTabActiveBackground = "tab.active.background"
+      ## PLAT-49. The active tab's own background (ui/surface/primary/
+      ## tertiary), so the selected tab is unmistakable.
+    crInputBackground = "input.background"
+      ## PLAT-49. The omnibar's field: an input box on its own surface
+      ## (ui/surface/input/default).
     crFocusOutline = "focus.outline"
       ## PLAT-47. The focused pane's 1px outline: the desktop's selected-panel
       ## stroke (`SELECTED_PANEL_BORDER_COLOR`, ui/border/primary).
@@ -72,8 +85,14 @@ const
     # PLAT-47: the tab strip and the focus outline are the DESKTOP'S, read
     # from the design system the desktop's stylesheets are generated from
     # (Dark), not chosen here — see `components/golden_layout.styl`.
-    DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark],
+    DesignTokenHex[dtColorsUiTextPrimaryHeadings][dmDark],
     DesignTokenHex[dtColorsUiTextPrimaryDisabled][dmDark],
+    # PLAT-49: the strip's own ground (see `crTabStripBackground`) and the
+    # active tab's own background — the token the terminal's `srTabActive`
+    # paints.
+    DesignTokenHex[dtColorsUiSurfaceBaseCard][dmDark],
+    DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark],
+    DesignTokenHex[dtColorsUiSurfaceInputDefault][dmDark],
     DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
   ]
     ## Indexed by `ChromeRole`, so a role with no colour does not compile.
@@ -154,15 +173,22 @@ func paneWidthPx*(viewportWidth, paneCount: int): int =
   max(1, usable div paneCount)
 
 func tabStyle*(active: bool): seq[(string, string)] =
-  ## PLAT-47 deliverable 8, GPUI's half: how one tab of a strip is styled.
-  ## Shaped by colour and weight alone, as the desktop's GoldenLayout strip is
-  ## — the active tab in the label tier and bold, every other in the disabled
-  ## tier; no brackets and no rule (a tab is its label, nothing else). The
-  ## window's chrome applies exactly this list (`main.paintWindowChrome`).
+  ## PLAT-47 deliverable 8, revisited by PLAT-49's finding 4 (the user,
+  ## 2026-10-01, over PLAT-47's "follow the desktop's single #282828"): how
+  ## one tab of a strip is styled. Shaped by colour and weight alone — no
+  ## brackets, no rule — but the SELECTED tab has a background AND a
+  ## foreground of its own, bold; every other tab sits on the strip's own
+  ## ground (`stripStyle`) in the disabled tier. The window's chrome applies
+  ## exactly this list (`main.paintWindowChrome`).
   if active:
-    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold")]
+    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold"),
+      ("background-color", chromeOf(crTabActiveBackground))]
   else:
     @[("color", chromeOf(crTabInactiveForeground))]
+
+func stripStyle*(): seq[(string, string)] =
+  ## PLAT-49: a tab strip's own ground, distinct from the pane body under it.
+  @[("background-color", chromeOf(crTabStripBackground))]
 
 func paneOutlineStyle*(focused: bool): seq[(string, string)] =
   ## PLAT-47 deliverable 9, GPUI's half: every pane box's 1px BORDER — the

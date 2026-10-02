@@ -2,7 +2,7 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-5562dc8d0c4972e46bf7692464724b9c7a0fedcb623760b4f87e140320b1e45f  src/frontend/view_vocabulary/pane_views.nim
+a8199eb980e757178fc2eaff87742252bb7af926a26cbd64763430605ea319a0  src/frontend/view_vocabulary/pane_views.nim
 4fc9ec8d3dc76203235a298f70ec37f3a2d9ddfe88569cad22a26f68f8c41ada  src/frontend/viewmodel/viewmodels/flow_vm.nim
 c4f17bac9fcc48bffc8ff55b6221d76479ea069c79d316ff339c1db0bc8f4ed3  src/frontend/viewmodel/store/replay_data_store.nim
 1f5e80e994d9706a9611949debe00ef76d9e2f9116b0a25fba420e170e1c9e83  src/frontend/tui/host/native_host.nim

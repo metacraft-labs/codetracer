@@ -267,7 +267,10 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
       break
   tree.cursor = cursor
   let tabs = viewTabs("state.tabs", stateTabOptions(), selected = ord(tab))
-  result.root = viewCollapsible("state", "State", @[tabs, tree],
+  # NO TITLE OF ITS OWN (PLAT-49, the user, 2026-10-01: no title row inside a
+  # pane). The pane's tab strip says "State", as the desktop's GoldenLayout
+  # header does; a label here drew a second "State" as the pane's first row.
+  result.root = viewCollapsible("state", "", @[tabs, tree],
                                 expanded = true)
   result.entries = entriesOf(result.root)
 

@@ -134,7 +134,8 @@ suite "the editor pane shows whole rows":
 
   test "the editor's fetch window is the rows its pane shows at the row pitch":
     # Every row a full line high (`GpuiEditorRowPx`): as many as fit below
-    # the heading and the source statement, and not one more — a window
+    # the source statement (no heading since PLAT-49: the pane's tab strip,
+    # outside its body, names it), and not one more — a window
     # holding more was squeezed into the pane, clipping every descender.
     let body = g0.nodeOf("editor").body
     let rows = editorRowsOf(g0)
@@ -192,7 +193,10 @@ suite "PLAT-47 deliverable 6: dragging a tab — the drop indication":
   let state = g0.nodeOf("state")
   let (sx, sy) = centre(state.tabs[0])      # the Variables tab
   let editor = g0.nodeOf("editor")
-  let eb = editor.body
+  # A BARE pane's drop area is its one-tab strip and its body together
+  # (PLAT-49: every pane box has a strip; a bare pane's is not a join zone).
+  let eb = PxRect(x: editor.body.x, y: editor.strip.y, w: editor.body.w,
+                  h: editor.strip.h + editor.body.h)
 
   test "a split: the half of the target pane on the drop's side":
     var gest = idle()

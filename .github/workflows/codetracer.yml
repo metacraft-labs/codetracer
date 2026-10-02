@@ -3815,6 +3815,17 @@ jobs:
         # give; the recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat48-capture-electron
 
+      - name: The desktop's chrome is the reference for the other front-ends
+        if: ${{ !cancelled() }}
+        # The desktop column of the chrome the terminal and GPUI front-ends
+        # draw: one root menu button whose first level drops below it and
+        # whose submenus open to its right, each transport control's tooltip
+        # (the ViewModel's label and chord) and the omnibar's placeholder —
+        # read from the REAL Electron app on `calc` with this checkout's
+        # desktop JavaScript. Here for the reasons the steps above give; the
+        # recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat49-capture-electron
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

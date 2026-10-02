@@ -90,7 +90,7 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 474
+const ExpectedAssertions = 475
 # PLAT-48: 421 → 474 — the footer strip checks (one decoration, a strip, per
 # geometry: +40), the footer row before and after `:dock bottom`, and the
 # top strip counted apart from the bottom one.
@@ -520,12 +520,16 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.focusedPaneOf() == paneCalltrace
     ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
 
-    # PRESS on a bare pane's own title row picks it up.
+    # PRESS on a bare pane's one-tab strip MARKS it (PLAT-49); MOTION past
+    # the drag threshold (`?1002`, button held: SGR button 32) picks it up.
     let pressed = rt.handleToken(
       sgrReport(0, source.row, source.col, true), 0'i64)
     checkpoint("press -> " & pressed.detail)
     ck pressed.repaint
     ck not pressed.quit
+    ck rt.app.layoutBinding.interaction.kind == ikNone
+    discard rt.handleToken(
+      sgrReport(32, source.row + 1, source.col + 3, true), 0'i64)
     ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
     ck rt.app.layoutBinding.interaction.source == paneCalltrace
     # …and the drag GHOST is on the frame the next paint would produce, which
@@ -632,9 +636,11 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck offeredBefore == 1
     ck ringBefore >= 2
 
-    # PRESS on the pane's own title row, RELEASE on the header row: the drop
-    # docks it, which is what takes it off the screen.
+    # PRESS on the pane's strip, MOVE past the threshold, RELEASE on the
+    # header row: the drop docks it, which is what takes it off the screen.
     discard rt.handleToken(sgrReport(0, source.row, source.col, true), 0'i64)
+    discard rt.handleToken(
+      sgrReport(32, source.row + 1, source.col + 3, true), 0'i64)
     ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
     let dropped = rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
     checkpoint("release on the header row -> " & dropped.detail)
@@ -737,6 +743,8 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.prompt.buffer == "dock bo"
     let source = rt.layoutGeometry().regionOfPane(paneCalltrace)
     discard rt.handleToken(sgrReport(0, source.row, source.col, true), 0'i64)
+    discard rt.handleToken(
+      sgrReport(32, source.row + 1, source.col + 3, true), 0'i64)
     ck rt.prompt.open
     ck rt.prompt.buffer == "dock bo"
     ck rt.app.layoutBinding.interaction.kind == ikDraggingTab

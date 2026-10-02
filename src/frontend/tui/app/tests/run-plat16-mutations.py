@@ -310,13 +310,9 @@ MUTATIONS = [
         DIMS,
         "the state space is the PRODUCT of the two, not their sum",
         "The product indicator disappears: one dimension is on screen."),
-    Mutation(
-        "M15", STATUS,
-        "  if mode == umNormal and product == pmEdit:",
-        "  if false:",
-        DIMS,
-        "the product mode changes the hint strip without changing the input mode",
-        "The hint strip stops being a function of the product mode."),
+    # M15 (the hint strip a function of the product mode) retired by PLAT-49:
+    # the user removed the status line's key hints altogether (2026-10-01), so
+    # there is no strip left for the product mode to change.
 
     # ---- the editing surface ----------------------------------------------
     Mutation(
@@ -628,7 +624,7 @@ DECLARED_SURVIVORS = [
         "  let mode = $m.mode & \" \" & productIndicator(m.product)",
         "  let mode = ($m.mode) & \" \" & productIndicator(m.product)",
         DIMS, "",
-        "Redundant parentheses around `$m.mode`. Pairs M14/M15: the dimension "
+        "Redundant parentheses around `$m.mode`. Pairs M14: the dimension "
         "cases redden because an INDICATOR went, not because this line moved."),
     Mutation(
         "S7", RUNTIME,
@@ -704,7 +700,7 @@ CONTROL_PAIRS = {
     "M1": "S1", "M2": "S1", "M3": "S1", "M4": "S1", "M5": "S1", "M6": "S1",
     "M7": "S3", "M8": "S3", "M9": "S3", "M18": "S3", "M25": "S3",
     "M10": "S2", "M11": "S2", "M12": "S2", "M13": "S2",
-    "M14": "S6", "M15": "S6",
+    "M14": "S6",
     "M16": "S4", "M17": "S4",
     "M19": "S5", "M20": "S5", "M21": "S5", "M22": "S5",
     "M23": "S7", "M24": "S7",
@@ -721,7 +717,6 @@ SUITE_CASES = {
     DIMS: [
         "the two enums have their own cardinalities, and neither names the other",
         "the state space is the PRODUCT of the two, not their sum",
-        "the product mode changes the hint strip without changing the input mode",
         "every action's scope is declared, and the three arms are exactly these",
         "one physical key, two product modes, two answers — and a control",
         "Ctrl+F5 is one command, reachable from both product modes",
@@ -831,10 +826,9 @@ BECAUSE = {
     'M12': 'r.kind == krAction',
     'M13': 'fromModeTransitions == @["toggle-product-mode"]',
     'M14': 'bar.find("[EDIT]") > bar.find("SEARCH")',
-    'M15': 'debugHints != editHints',
     'M16': 'not text.contains(ExecutionPointerGlyph)',
     'M17': 'not buf.isDirty',
-    'M18': 'not inDebug.contains(EditPaneTitle)',
+    'M18': 'not inDebug.contains("proc alpha() =")',
     'M19': 'cancelled.verdict == bvCancelled',
     'M20': 'statusOf(bvCancelled) == bsIdle',
     'M21': 's.truncated',
@@ -842,7 +836,7 @@ BECAUSE = {
     'M23': 'asked.len == 1',
     'M24': 'asked.len == 1',
     'M25': 'firstEdit.contains(paneBuildOutput)',
-    'M26': "Unhandled exception: the binary exited before 'EDIT ' appeared; screen was:",
+    'M26': "Unhandled exception: the binary exited before '[EDIT]' appeared; screen was:",
     'M27': "Unhandled exception: 'Zproc alpha() =' never appeared within 20000 ms; screen:",
     'M32': 'walks == 1',
     'M28': 'switched.detail.contains("predates")',

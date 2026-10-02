@@ -19,7 +19,7 @@ import ../window_top_bar
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 105
+const ExpectedAssertions = 87
 
 var countedAssertions = 0
 
@@ -31,9 +31,10 @@ proc menu(): MenuVM = newMenuVM(nativeFrontEndMenu("calc"))
 
 suite "PLAT-48 GPUI: the top bar's geometry":
 
-  test "a 1920-pixel window holds the titles, every control, the omnibar field":
+  test "a 1920-pixel window holds the menu button, every control, the omnibar field":
+    # PLAT-49: the menu is ONE root button at every width, as the desktop's.
     let lay = gpuiTopBarLayout(menu(), newOmnibarVM(), @[], 1920)
-    ck lay.menuExpanded and lay.omnibarField
+    ck lay.segOf(gtMenuButton).rect.w == MenuButtonPx and lay.omnibarField
     var controls = 0
     for s in lay.segs:
       if s.part == gtControl: inc controls
@@ -45,7 +46,6 @@ suite "PLAT-48 GPUI: the top bar's geometry":
 
   test "a narrow window keeps the menu button and the controls by priority":
     let lay = gpuiTopBarLayout(menu(), newOmnibarVM(), @[], 320)
-    ck not lay.menuExpanded
     ck lay.segOf(gtMenuButton).rect.w == MenuButtonPx
     var ids: seq[string] = @[]
     for s in lay.segs:
@@ -106,22 +106,25 @@ suite "PLAT-48 GPUI: the top bar's geometry":
 
 suite "PLAT-48 GPUI: the menu's popovers":
 
-  test "an open folder drops below its title; a nested one opens to its right":
+  test "the first level drops below the button; a folder opens to its right":
+    # PLAT-49: the desktop's cascade — the first level is a popover under the
+    # root button, and every entered folder opens beside its parent.
     let vm = menu()
     let lay = gpuiTopBarLayout(vm, newOmnibarVM(), @[], 1920)
     vm.openFolder(3)                 # View
     var pops = gpuiMenuPopovers(vm, lay, 1920, 1080)
-    ck pops.len == 1
-    ck pops[0].rect.x == lay.segOf(gtMenuTitle, 3).rect.x
+    ck pops.len == 2
+    ck pops[0].rect.x == lay.segOf(gtMenuButton).rect.x
     ck pops[0].rect.y == lay.band.y + lay.band.h
+    ck pops[1].rect.x == pops[0].rect.x + pops[0].rect.w
     # Walk to the Theme folder and enter it.
     vm.moveHighlight(-1)
     ck vm.enterFolder()
     pops = gpuiMenuPopovers(vm, lay, 1920, 1080)
-    ck pops.len == 2
-    ck pops[1].rect.x == pops[0].rect.x + pops[0].rect.w
+    ck pops.len == 3
+    ck pops[2].rect.x == pops[1].rect.x + pops[1].rect.w
     # A click inside names the item.
-    let row = pops[1].rows[0]
+    let row = pops[2].rows[0]
     let (inside, path) = gpuiMenuHitAt(pops, vm, row.rect.x + 4, row.rect.y + 4)
     ck inside and path == vm.path & @[0]
 

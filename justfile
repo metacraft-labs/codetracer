@@ -5113,6 +5113,13 @@ plat47-capture-electron *args:
 plat48-capture-electron *args:
   bash scripts/plat48-capture-electron.sh {{args}}
 
+# The desktop's chrome as the terminal's and GPUI's are measured against it:
+# the one root menu button and its cascade, each transport control's tooltip
+# and the omnibar's placeholder — written to
+# `src/tests/visual/answers/plat49-chrome.electron.json`.
+plat49-capture-electron *args:
+  bash scripts/plat49-capture-electron.sh {{args}}
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh

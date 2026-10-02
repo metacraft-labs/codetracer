@@ -44,7 +44,10 @@ HERE = Path(__file__).resolve().parent
 CONTROL = HERE / "plat40-producer-mutation-control.sha256"
 BECAUSE = HERE / "plat40-producer-mutation-because.json"
 NIMCACHE = Path(os.environ.get("TMPDIR", "/tmp")) / "plat40-mutations"
-SHIM = REPO.parent / "isonim-gpui/rust/target/debug"
+# The windowed shim the GPUI suites load: `$ISONIM_GPUI_SHIM_DIR` when set (a
+# worktree whose isonim-gpui is a `-pin` checkout), else the sibling's.
+SHIM = Path(os.environ.get("ISONIM_GPUI_SHIM_DIR",
+                           str(REPO.parent / "isonim-gpui/rust/target/debug")))
 TIMEOUT = 3600
 
 SESSION = "src/frontend/viewmodel/headless_session.nim"

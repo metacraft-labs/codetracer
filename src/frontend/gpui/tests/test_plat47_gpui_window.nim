@@ -34,7 +34,7 @@ template ck(cond: untyped) =
 const
   Record = "src/tests/visual/plat47-gpui-window.json"
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
-  ExpectedAssertions = 104
+  ExpectedAssertions = 102
   GhostBoxPx = 160 * 32
   EditorRowPx = 26
     ## One editor row's pitch in the window (`window_geometry.GpuiEditorRowPx`).
@@ -264,8 +264,8 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
   test "B3: the wheel scrolls the call trace to its end, paging it in sections":
     let c = rec["calltrace"]
     checkpoint(c["endText"].getStr)
-    ck "603 call(s)" in c["baseText"].getStr
-    ck "603 call(s)" in c["endText"].getStr
+    # (The pane's heading counted the whole trace — `603 call(s)` — until
+    # PLAT-49 removed in-pane headings; the tab strip names the pane.)
     ck "leaf #602" in c["endText"].getStr
     ck "leaf #602" notin c["baseText"].getStr
     ck c["sectionLoads"].getInt > 1

@@ -141,6 +141,14 @@ type
 # Tooltip text
 # ---------------------------------------------------------------------------
 
+func tooltipText*(label, chord: string): string =
+  ## THE one shape of a debugger control's tooltip (PLAT-49 finding 5): its
+  ## label, and the key bound to it in parentheses — or the bare label when
+  ## nothing is bound (never an empty pair of parentheses). The desktop's
+  ## toolbar tooltip, GPUI's hover popover and the terminal's hover label all
+  ## render this string; only WHERE they draw it is theirs.
+  if chord.len == 0: label else: label & " (" & chord & ")"
+
 proc toolbarTooltip*(vm: DebugControlsVM; actionId, label: string): string =
   ## The text of one toolbar button's tooltip: its label, plus the chord that
   ## is bound to it RIGHT NOW, in parentheses.
@@ -165,8 +173,7 @@ proc toolbarTooltip*(vm: DebugControlsVM; actionId, label: string): string =
   let chord =
     if vm.shortcutFor.isNil: ""
     else: vm.shortcutFor(actionId)
-  if chord.len == 0: label
-  else: label & " (" & chord & ")"
+  tooltipText(label, chord)
 
 # ---------------------------------------------------------------------------
 # The transport strip
@@ -186,6 +193,25 @@ const TransportActions* = [
   ## its labels** (`views/isonim_debug_controls_view`), named once so every
   ## front-end offers the same set (PLAT-41's DIFF-10). The ids are the ones
   ## `invokeToolbarStep` dispatches on.
+
+func transportLabel*(actionId: string): string =
+  ## A transport action's label (`TransportActions`), or the id itself.
+  for (id, label) in TransportActions:
+    if id == actionId:
+      return label
+  actionId
+
+func transportTooltip*(actionId, chord: string): string =
+  ## A transport action's tooltip — `tooltipText` over its label — for the
+  ## front-ends that hold the chord themselves (the terminal's keymap, GPUI's
+  ## desktop bindings) rather than in this ViewModel's `shortcutFor`.
+  tooltipText(transportLabel(actionId), chord)
+
+proc toolbarTooltip*(vm: DebugControlsVM; actionId: string): string =
+  ## A TRANSPORT control's tooltip with its label from `TransportActions` —
+  ## what the desktop's toolbar renders (PLAT-49: the label as well as the
+  ## chord comes from this ViewModel, not from the view).
+  vm.toolbarTooltip(actionId, transportLabel(actionId))
 
 proc transportAvailable*(vm: DebugControlsVM; actionId: string): bool =
   ## Whether a transport action is legal at this stop — the desktop toolbar's

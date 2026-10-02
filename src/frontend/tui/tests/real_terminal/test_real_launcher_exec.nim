@@ -121,10 +121,11 @@ const
     ## `S_ERR_NO_HANDLER` + the command, from
     ## `codetracer-launcher/src/install.nim`'s emit block. Not importable: that
     ## string lives in C inside an `--os:standalone` module.
-  PaneTitles: array[4, string] = ["CALL TRACE", "SOURCE", "VARIABLES",
+  PaneTitles: array[4, string] = [" Call Trace ", " main.py ", " Variables ",
                                   "Timeline"]
-    ## §3.1's screen, as the shared default draws it: the panes' own titles,
-    ## and the timeline as a tab label of the events stack (PLAT-45). Asserted as a
+    ## §3.1's screen, as the shared default draws it: the panes' tab labels
+    ## (PLAT-49: no pane carries a title row; a lone editor's tab names its
+    ## file), and the timeline as a tab label of the events stack (PLAT-45). Asserted as a
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 

@@ -67,9 +67,10 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2685 + 17
+const ExpectedAssertions = 2685 + 17 + 2
   ## PLAT-48: +17 — the `:pin` / `:unpin` block and the two new verbs in the
-  ## every-verb sweep.
+  ## every-verb sweep. PLAT-49: +2 — a press MARKS the pane (`pendingPick`)
+  ## and picks nothing up until the pointer moves past the threshold.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -134,6 +135,11 @@ proc press(row, col: int): mouse.MouseEvent =
 
 proc release(row, col: int): mouse.MouseEvent =
   mouse.MouseEvent(kind: mekRelease, button: mbLeft, row: row, col: col)
+
+proc motion(row, col: int): mouse.MouseEvent =
+  ## PLAT-49: the pointer moved with the button held — what begins a drag
+  ## once it is past the threshold from the press.
+  mouse.MouseEvent(kind: mekMotion, button: mbLeft, row: row, col: col)
 
 proc wheel(down: bool; row, col: int): mouse.MouseEvent =
   mouse.MouseEvent(kind: mekPress,
@@ -651,6 +657,11 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       var geom = b.geometry(bodyFor(80, 24))
       let source = geom.regionOfPane(paneCalltrace)
       discard b.onMouse(geom, press(source.row, source.col))
+      # PLAT-49: a press only MARKS the pane; moving past the threshold
+      # picks it up.
+      ck b.pendingPick == some(paneCalltrace)
+      ck b.interaction.kind == ikNone
+      discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
       ck b.interaction.source == paneCalltrace
       let (tabRow, tabCol) = tabCell(geom, paneState, 1)
@@ -677,6 +688,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       let source = geom.regionOfPane(paneCalltrace)
       let target = geom.regionOfPane(paneState)
       discard b.onMouse(geom, press(source.row, source.col))
+      discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
       let cell = case pair[0]
         of leLeft: (target.row + target.height div 2, target.col)
@@ -963,7 +975,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     let source = geom.regionOfPane(paneCalltrace)
     let target = geom.regionOfPane(paneState)
     discard b.onMouse(geom, press(source.row, source.col))
-    discard b.hoverAt(geom, target.row + target.height div 2, target.col)
+    discard b.onMouse(geom, motion(target.row + target.height div 2,
+                                   target.col))
     ck b.interaction.kind == ikDraggingTab
     ck b.interaction.hover.isSome
 

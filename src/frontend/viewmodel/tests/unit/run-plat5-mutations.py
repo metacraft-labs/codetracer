@@ -620,10 +620,10 @@ MUTATIONS = [
     ),
     Mutation(
         "B3", BIND,
-        "      if sameCell:\n"
-        "        # A click on the divider cell is what it was before the divider was\n",
+        "      if not past:\n"
+        "        # A click on the divider (within the threshold) is what it was\n",
         "      if false:\n"
-        "        # A click on the divider cell is what it was before the divider was\n",
+        "        # A click on the divider (within the threshold) is what it was\n",
         T_MOUSE_DIV,
         "a click on a divider cell is treated as a drop",
     ),

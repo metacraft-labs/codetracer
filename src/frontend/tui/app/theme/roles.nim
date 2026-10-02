@@ -72,6 +72,8 @@ type
     dgMode = "mode"
     dgFrame = "frame"
     dgHeat = "heat"
+    dgCategory = "variable-category"
+      ## PLAT-49: which group (local, argument, …) a variables row belongs to.
 
   SemanticRole* = enum
     ## Every distinction this front-end's screen carries. `srNone` is the zero
@@ -108,6 +110,8 @@ type
     srSurfaceEditor = "surface-editor"
     srSurfaceStatusLine = "surface-status-line"
     srSurfaceInput = "surface-input"
+    srSurfaceField = "surface-field"
+      ## PLAT-49: a one-row input box in the top bar (the omnibar's field).
     srSurfaceSelection = "surface-selection"
     srSurfaceCurrentLine = "surface-current-line"
     srSurfaceDropIndicator = "surface-drop-indicator"
@@ -143,6 +147,14 @@ type
     srValueUnchanged = "value-unchanged"
     srValueModified = "value-modified"
     srValueModifiedTag = "value-modified-tag"
+
+    # ---- dgCategory: PLAT-49's per-row variable category tags -------------
+    srCategoryLocal = "category-local"
+    srCategoryArgument = "category-argument"
+    srCategoryGlobal = "category-global"
+    srCategoryReturnValue = "category-return-value"
+    srCategoryRegister = "category-register"
+    srCategoryWatch = "category-watch"
 
     # ---- dgValueKind: PLAT-2's value presentation --------------------------
     srValueNumber = "value-number"
@@ -305,22 +317,25 @@ const
     srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderPrimary,
                             mono = {raBold}),
 
-    # The desktop's GoldenLayout strip, MEASURED (PLAT-47): the strip and
-    # every tab sit on the pane's own ui/surface/base/panel — the header is
-    # transparent over the panel, so an inactive tab and the strip's empty
-    # run read #282828 exactly as the active tab does — and the tabs are told
-    # apart by their text: the active tab in the label tier, the others in
-    # the disabled tier (`components/golden_layout.styl`, `.lm_tab` /
-    # `.lm_active` / `.lm_title`). The terminal adds BOLD to the active tab,
-    # its weight cue; where colour is unavailable the active tab is reverse
-    # video + bold (CTUI-11), never brackets.
+    # THE TAB STRIP, BY THE USER'S DIRECTION (PLAT-49 finding 4, 2026-10-01),
+    # which overrides PLAT-47's measured "follow the desktop's single
+    # #282828": the strip sits on its OWN ground, distinct from the pane body
+    # (ui/surface/base/raised — darker than the panel in Dark, lighter in
+    # Light), inactive tabs on that ground in the disabled text tier, and the
+    # selected tab on a background of its own (ui/surface/primary/tertiary)
+    # with a foreground of its own (ui/text/primary/headings) and bold — so
+    # it is unmistakable. The active tab is NOT a base surface: under
+    # `--palette=terminal` it keeps an ANSI background index while the strip
+    # takes the terminal's own. Where a rung collapses two of these (16
+    # colours, the terminal palette's neutrals) the collapse guard paints the
+    # monochrome attributes, and monochrome is reverse + bold (CTUI-11).
     srTabBar: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
-                   dtColorsUiSurfaceBasePanel, baseSurface = true),
-    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryLabel,
-                      dtColorsUiSurfaceBasePanel, attrs = {raBold},
-                      mono = {raBold, raReverse}, baseSurface = true),
+                   dtColorsUiSurfaceBaseRaised, baseSurface = true),
+    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,
+                      dtColorsUiSurfacePrimaryTertiary, attrs = {raBold},
+                      mono = {raBold, raReverse}),
     srTabInactive: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
-                        dtColorsUiSurfaceBasePanel, baseSurface = true),
+                        dtColorsUiSurfaceBaseRaised, baseSurface = true),
 
     srSurfaceCanvas: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                           dtColorsUiSurfaceBaseCanvas, baseSurface = true),
@@ -339,6 +354,15 @@ const
     srSurfaceInput: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                          dtColorsUiSurfaceInputDefault, mono = {raUnderline},
                          baseSurface = true),
+    # PLAT-49 finding 6: THE OMNIBAR IS AN INPUT BOX with a ground of its
+    # own. The design system's input token (#242424 in Dark) is all but the
+    # top bar's card (#262626) — a field on it would not read as a box — so
+    # the field is the base surface that differs from the card in both
+    # modes: ui/surface/base/raised, recessed in Dark, lifted in Light. Not a
+    # base surface, so `--palette=terminal` keeps an index for it; monochrome
+    # underlines it, as the prompt's input surface is.
+    srSurfaceField: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
+                         dtColorsUiSurfaceBaseRaised, mono = {raUnderline}),
     srSurfaceSelection: bgOnly(dgSurface, dtEditorThemeSelection,
                                mono = {raReverse}),
     srSurfaceCurrentLine: bgOnly(dgSurface, dtEditorThemeExecutionLine,
@@ -395,6 +419,27 @@ const
     srValueModifiedTag: fgbg(dgValue, dtColorsUiTextOnActionPrimary,
                              dtColorsUiSurfaceAlertSuccess, attrs = {raBold},
                              mono = {raBold, raReverse}),
+
+    # PLAT-49 finding 12: the variables pane's ONE-LETTER CATEGORY TAG
+    # (`state_vm.categoryTag`), each category its own colour — six of the
+    # design system's syntax hues, every one at or above 4.5:1 on the pane's
+    # surface in both modes. On the monochrome rung the LETTER already tells
+    # them apart; the attributes keep the group distinct by style as well.
+    srCategoryLocal: fgOnly(dgCategory, dtColorsEditorSyntaxType,
+                            attrs = {raBold}, mono = {raBold}),
+    srCategoryArgument: fgOnly(dgCategory, dtColorsEditorSyntaxParameter,
+                               attrs = {raBold}, mono = {raItalic}),
+    srCategoryGlobal: fgOnly(dgCategory, dtColorsEditorSyntaxNumber,
+                             attrs = {raBold}, mono = {raUnderline}),
+    srCategoryReturnValue: fgOnly(dgCategory, dtColorsEditorSyntaxFunction,
+                                  attrs = {raBold},
+                                  mono = {raBold, raItalic}),
+    srCategoryRegister: fgOnly(dgCategory, dtColorsEditorSyntaxKeyword,
+                               attrs = {raBold},
+                               mono = {raBold, raUnderline}),
+    srCategoryWatch: fgOnly(dgCategory, dtColorsEditorSyntaxString,
+                            attrs = {raBold},
+                            mono = {raItalic, raUnderline}),
 
     srValueNumber: fgOnly(dgValueKind, dtColorsEditorSyntaxNumber,
                           mono = {raUnderline}),

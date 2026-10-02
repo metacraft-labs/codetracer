@@ -65,7 +65,7 @@ import ../views/shell
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 137
+const ExpectedAssertions = 138
 
 var countedAssertions = 0
 
@@ -249,7 +249,9 @@ suite "PLAT-16 §2: which source a mode shows":
     let rt = editingRuntime()
     let inEdit = editorRows(rt).join("\n")
     checkpoint("edit pane:\n" & inEdit)
-    ck inEdit.contains(EditPaneTitle)
+    # PLAT-49: no title row — the strip names the pane — so what says WHICH
+    # source this is, is the pane's source statement.
+    ck not inEdit.contains(EditPaneTitle & " ")
     ck inEdit.contains(sourceStatementFor(pmEdit))
 
     # THE SAME SESSION, TOGGLED. The edit buffer is still there and the pane is
@@ -259,8 +261,12 @@ suite "PLAT-16 §2: which source a mode shows":
     ck not rt.app.editSession.activeBuffer().isNil
     let inDebug = editorRows(rt).join("\n")
     checkpoint("debug pane:\n" & inDebug)
-    ck not inDebug.contains(EditPaneTitle)
     ck not inDebug.contains(sourceStatementFor(pmEdit))
+    # …and not the buffer's TEXT either: with no title row, the statement is
+    # the strip's (chosen by the mode), so the leak a data branch would cause
+    # shows in the pane's body — the working tree's lines in Debug mode.
+    ck inEdit.contains("proc alpha() =")
+    ck not inDebug.contains("proc alpha() =")
 
 suite "PLAT-16 §2.1: the stale trace, asserted on what the user is TOLD":
 

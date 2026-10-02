@@ -33,7 +33,7 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 311
+const ExpectedAssertions = 314
 
 var countedAssertions = 0
 
@@ -75,17 +75,20 @@ proc typeLine(rt: TuiRuntime; line: string): RuntimeOutcome =
 
 suite "PLAT-48: the top bar row":
 
-  test "at 200 columns: the menu's titles, every control, the omnibar field, the header":
+  test "at 200 columns: the menu's root button, every control, the omnibar field, the header":
+    # PLAT-49: the menu is ONE root button, as the desktop's is; its folders
+    # are a dropdown inside it, never titles across the row.
     let rt = newRuntime(200, 50)
     let r = rt.row0()
+    ck r.startsWith(" ≡ ")
     for title in ["File", "Edit", "View", "Build", "Reset", "Debug", "Help"]:
-      ck r.contains(" " & title & " ")
+      ck not r.contains(" " & title & " ")
     for c in TransportControls:
       ck r.contains(c.unicode)
-    ck r.contains("⌕ Search")
+    ck r.contains("⌕ " & OmnibarPlaceholder[0 ..< 12])
     ck r.contains("tick: ")
     ck r.strip.endsWith("[PAUSED]")
-    # Colour, not glyphs: no bracket around a title and no rule through it.
+    # Colour, not glyphs: no bracket and no rule through the row.
     ck not r.contains("[File]") and not r.contains("─")
 
   test "at 80 columns: the menu collapses to ≡, the omnibar to ⌕, controls by priority":
@@ -95,7 +98,7 @@ suite "PLAT-48: the top bar row":
     rt.app.tick = 1420
     rt.app.totalTicks = 8950
     let lay = rt.shellScreenOf().topBarLayout
-    ck not lay.menuExpanded and not lay.omnibarField
+    ck not lay.omnibarField
     ck rt.row0().startsWith(" ≡ ")
     var ids: seq[string] = @[]
     for i in lay.shownControls: ids.add TransportControls[i].id
@@ -150,19 +153,20 @@ suite "PLAT-48: the top bar row":
 
 suite "PLAT-48: the menu":
 
-  test "F12 opens it; keys walk the bar and into a folder; the chords are the keymap's":
+  test "F12 opens it; keys walk the first level and into a folder; the chords are the keymap's":
     let rt = newRuntime(200, 50)
     discard rt.handleToken(F12, 0)
     ck rt.app.menu.isOpen
-    # The bar: Right moves across the titles, Down enters one.
+    # PLAT-49, the desktop's cascade: Down walks the first level, Right opens
+    # a folder's submenu beside it.
     for _ in 0 ..< 5:
-      discard rt.handleToken(Right, 0)
+      discard rt.handleToken(Down, 0)
     ck rt.app.menu.highlightedItem().label == "Debug"
-    discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Right, 0)
     ck rt.app.menu.path == @[6]
     let screen = rt.shellScreenOf()
-    ck screen.menuDropdowns.len == 1
-    let dd = screen.menuDropdowns[0]
+    ck screen.menuDropdowns.len == 2
+    let dd = screen.menuDropdowns[1]
     let rows = rt.visible()
     var stepOver = ""
     for dr in dd.rows:
@@ -189,8 +193,8 @@ suite "PLAT-48: the menu":
     let rt = newRuntime(200, 50)
     discard rt.handleToken(F12, 0)
     for _ in 0 ..< 5:
-      discard rt.handleToken(Right, 0)
-    discard rt.handleToken(Down, 0)
+      discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Right, 0)     # into Debug: Continue
     discard rt.handleToken(Down, 0)      # Step Over
     let outcome = rt.handleToken(Enter, 0)
     ck not rt.app.menu.isOpen
@@ -198,20 +202,31 @@ suite "PLAT-48: the menu":
     ck outcome.action == kaStepOver
     # File > Open Trace... is not something the terminal does: disabled.
     discard rt.handleToken(F12, 0)
-    discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Right, 0)
     ck rt.app.menu.path == @[1]
     ck not rt.app.menu.highlightedItem().enabled
     discard rt.handleToken(Enter, 0)
     ck rt.app.menu.isOpen
 
-  test "a click on a title opens it, on an item runs it, outside closes":
+  test "a click on the button opens it, on a folder its submenu, on an item runs it, outside closes":
     let rt = newRuntime(200, 50)
     let lay = rt.shellScreenOf().topBarLayout
-    let view = lay.segmentOf(tpMenuTitle, 3)     # View
-    discard rt.handleToken("\x1b[<0;" & $(view.col + 2) & ";1M", 0)
-    discard rt.handleToken("\x1b[<0;" & $(view.col + 2) & ";1m", 0)
+    let button = lay.segmentOf(tpMenuButton)
+    discard rt.handleToken("\x1b[<0;" & $(button.col + 2) & ";1M", 0)
+    discard rt.handleToken("\x1b[<0;" & $(button.col + 2) & ";1m", 0)
+    ck rt.app.menu.isOpen and rt.app.menu.path.len == 0
+    let first = rt.shellScreenOf().menuDropdowns[0]
+    var viewRow = -1
+    for dr in first.rows:
+      if dr.item >= 0 and first.level.items[dr.item].label == "View":
+        viewRow = dr.row
+    ck viewRow > 0
+    discard rt.handleToken("\x1b[<0;" & $(first.area.col + 3) & ";" &
+                           $(viewRow + 1) & "M", 0)
+    discard rt.handleToken("\x1b[<0;" & $(first.area.col + 3) & ";" &
+                           $(viewRow + 1) & "m", 0)
     ck rt.app.menu.isOpen and rt.app.menu.path == @[3]
-    let dd = rt.shellScreenOf().menuDropdowns[0]
+    let dd = rt.shellScreenOf().menuDropdowns[1]
     var resetRow = -1
     for dr in dd.rows:
       if dr.item >= 0 and dd.level.items[dr.item].label == "Reset Layout":

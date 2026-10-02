@@ -99,7 +99,7 @@ import ../apps/app_layout_mouse as mouseApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 52  # PLAT-48: the strip read as labels on blanks (one check where three were)
+const ExpectedAssertions = 54  # PLAT-49: +2, the drag now begins on motion (the press is a click)
 
 const
   Stem = "app_layout_mouse"
@@ -115,7 +115,9 @@ const
     ## label. A stacked pane's ghost is only its tab's cells, which its label
     ## covers entirely, so the probe would have nothing to read.
   DraggedPaneTitle = "Source"
-  DraggedPaneTitleRow = "SOURCE"
+  DraggedPaneTitleRow = " Source "
+    ## Its one tab on its strip row (PLAT-49: a pane has no title row; a bare
+    ## pane's strip names it).
   FocusedAtStart = paneFileTree
     ## Where `newPaneFocus` starts: the shared default's first region. Asserted
     ## so a change of the default that moved it is seen here; the drag itself
@@ -330,16 +332,20 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       checkpoint("the dragged pane is at " & $source)
       ck not source.isEmptyArea
 
-      # ---- THE PRESS: the pane is picked up --------------------------------
+      # ---- THE PRESS MARKS IT, THE MOTION PICKS IT UP (PLAT-49) -----------
       ckBothSaw(sess, model, sgrReport(0, source.row, source.col, true), 1,
-                "press on the pane's title row")
+                "press on the pane's strip row")
+      ck model.app.layoutBinding.interaction.kind == ikNone
+      ckBothSaw(sess, model, sgrReport(32, source.row + 1, source.col + 3,
+                                       true), 2,
+                "motion past the drag threshold")
       ck model.app.layoutBinding.interaction.kind == ikDraggingTab
       ck model.app.layoutBinding.interaction.source == DraggedPane
       ckScreenMatches(sess, model.shellScreenOf().visibleRows, "while dragging")
       probeDecorationsOnTheTerminal(sess, model, "while dragging")
 
       # ---- THE RELEASE, ON A CELL OUTSIDE THE TREE AREA --------------------
-      ckBothSaw(sess, model, sgrReport(0, DropRow, DropCol, false), 2,
+      ckBothSaw(sess, model, sgrReport(0, DropRow, DropCol, false), 3,
                 "release on the header row")
       # THE MODEL. Only the layout can be asked whether the pane left the tree.
       ck model.app.layoutBinding.layout.dockedIndex(DraggedPane) >= 0
@@ -371,8 +377,13 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
         checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
       ck wrongCells.len == 0
       # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that was
-      # never removed would satisfy every assertion above.
-      ck not sess.screenContents().contains(DraggedPaneTitleRow)
+      # never removed would satisfy every assertion above. (Below the strip:
+      # the strip's own label is the same name.)
+      var stillInBody = false
+      for r in stripRow + 1 ..< Rows - 1:
+        if sess.regionText(r, 0, Cols, 1).contains(DraggedPaneTitleRow):
+          stillInBody = true
+      ck not stillInBody
 
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))

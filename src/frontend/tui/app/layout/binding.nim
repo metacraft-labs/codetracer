@@ -240,6 +240,11 @@ type
       ## motion report — so the ghost label follows it. A MEASUREMENT, and so
       ## held here in the terminal's binding, never in the `Interaction`
       ## (PLAT-5's purity law). -1 when no drag is in flight.
+    pendingPick*: Option[PaneKind]
+      ## PLAT-49: the pane a press on its tab (a lone pane's strip, a dock
+      ## label) WOULD pick up. A press alone picks nothing up: the drag
+      ## begins only when the pointer has moved `DragThresholdCells` from the
+      ## press (`dragThresholdPassed`); a release before that is a click.
     pressWasRevealing*: bool
     pressRevealedPane*: PaneKind
       ## PLAT-48: the pane that was REVEALED when the button went down. A
@@ -258,6 +263,14 @@ const
     ## The widest an edge drop-zone gets. Three cells is enough to aim at with
     ## a mouse and small enough that `dzCentre` stays reachable on a 14-column
     ## pane — `profile.minPaneWidth`'s narrowest.
+
+  DragThresholdCols* = 2
+  DragThresholdRows* = 1
+    ## PLAT-49 (the user, 2026-10-01): how far the pointer must move from a
+    ## press on a tab or a divider before a DRAG begins — two columns or one
+    ## row (a cell is about twice as tall as it is wide, so the two are about
+    ## the same distance). Less than that and the press is a click: a plain
+    ## click never picks anything up and never reports a drag.
 
   RevealShareDenominator* = 3
     ## A revealed dock overlay takes a third of the inner area's extent on its
@@ -1261,6 +1274,12 @@ proc dropDivider(b: LayoutBinding; geom: LayoutGeometry;
     return action(lasNoOp, "the divider did not move")
   b.dispatch(cmd.get)
 
+proc dragThresholdPassed*(b: LayoutBinding; row, col: int): bool =
+  ## Whether `(row, col)` is far enough from the press for a drag.
+  b.pressRow >= 0 and
+    (abs(col - b.pressCol) >= DragThresholdCols or
+     abs(row - b.pressRow) >= DragThresholdRows)
+
 proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
               event: MouseEvent): LayoutAction =
   ## One decoded SGR-1006 report, as a layout gesture.
@@ -1274,13 +1293,19 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
   ## pointer, GoldenLayout's feedback) and while a divider is held previews
   ## the divider; the release still decides, exactly as before.
   ##
-  ##   * press on a tab             -> pick that tab up (a drag begins)
-  ##   * press on a bare pane's own
-  ##     title row                  -> pick that PANE up. A pane that is not in
-  ##                                   a stack has no tab, and without this
+  ##   * PLAT-49: A PRESS PICKS NOTHING UP. A press on a tab, on a bare
+  ##     pane's one-tab strip or on a dock slot only MARKS that pane
+  ##     (`pendingPick`); the drag begins when the pointer has moved
+  ##     `DragThresholdCols` / `DragThresholdRows` from the press — on a
+  ##     motion report, or (a terminal that sends none) on a release that
+  ##     far away. A release before that is a click.
+  ##   * press on a tab             -> mark that tab
+  ##   * press on a bare pane's
+  ##     strip row                  -> mark that PANE. A pane that is not in
+  ##                                   a stack has one tab, and without this
   ##                                   rule the commonest shape on screen would
   ##                                   be undraggable
-  ##   * press on a dock slot       -> pick that docked pane up
+  ##   * press on a dock slot       -> mark that docked pane
   ##   * press on a region's last
   ##     column / row where the
   ##     neighbour across it is its
@@ -1288,9 +1313,10 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
   ##                                   drag); release elsewhere moves it there,
   ##                                   release on the same cell is a click
   ##   * press elsewhere in a pane  -> focus it; no gesture
-  ##   * release on the press cell  -> a click: activate the tab, or reveal the
-  ##                                   docked pane
-  ##   * release elsewhere          -> hover there, then drop
+  ##   * release within the
+  ##     threshold                  -> a click: activate the tab, or reveal the
+  ##                                   docked pane; on a divider, nothing
+  ##   * release past it            -> hover there, then drop
   ##   * wheel on a tab strip       -> activate the next / previous tab
   ##
   ## **WHICH DOCK EDGES A MOUSE CAN REACH, recorded rather than implied.** A
@@ -1342,6 +1368,16 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       # PLAT-47: THE POINTER MOVED WITH THE BUTTON DOWN (`?1002` motion). A
       # drag's drop indication and ghost follow it, and a divider's guide
       # previews where it would land; nothing else listens to motion.
+      # PLAT-49: a marked tab becomes a drag only once the pointer is past
+      # the threshold; a held divider previews only from then on.
+      if b.pendingPick.isSome:
+        if not b.dragThresholdPassed(event.row, event.col):
+          return action(lasNoGesture, "within the drag threshold")
+        let pane = b.pendingPick.get
+        b.pendingPick = none(PaneKind)
+        let started = b.beginDrag(pane)
+        if b.interaction.kind != ikDraggingTab:
+          return started
       case b.interaction.kind
       of ikDraggingTab:
         b.pointerRow = event.row
@@ -1349,6 +1385,8 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
         return b.hoverAt(geom, event.row, event.col)
       of ikResizingSplit:
         if b.interaction.divider.isSome:
+          if not b.dragThresholdPassed(event.row, event.col):
+            return action(lasNoGesture, "within the drag threshold")
           return b.previewDivider(geom, event.row, event.col)
         return action(lasNoGesture, "motion during a share resize")
       else:
@@ -1358,6 +1396,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       b.pressCol = event.col
       b.pointerRow = event.row
       b.pointerCol = event.col
+      b.pendingPick = none(PaneKind)
       b.pressWasRevealing = b.interaction.kind == ikRevealingDock
       if b.pressWasRevealing:
         b.pressRevealedPane = b.interaction.pane
@@ -1380,12 +1419,16 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
           return action(lasCancelled, "hid " & $hidden)
       let tab = b.tabAtCell(geom, event.row, event.col)
       if tab.isSome:
-        return b.beginDrag(tab.get)
+        b.pendingPick = tab
+        return action(lasNoGesture, "pressed the " & $tab.get & " tab")
       let strip = geom.stripIndexAt(event.row, event.col)
       if strip >= 0:
         let slot = geom.strips[strip].slotAt(event.row, event.col)
         if slot >= 0:
-          return b.beginDrag(geom.strips[strip].slots[slot].pane)
+          b.pendingPick = some(geom.strips[strip].slots[slot].pane)
+          return action(lasNoGesture, "pressed the " &
+                                      $geom.strips[strip].slots[slot].pane &
+                                      " label")
         return action(lasNoGesture, "an empty part of a dock strip")
       let idx = geom.regionIndexAt(event.row, event.col)
       if idx < 0:
@@ -1393,8 +1436,9 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       let region = geom.projection.regions[idx]
       b.focus = region.pane
       if region.activeTab < 0 and event.row == region.area.row:
-        # A pane with no tab strip is picked up by its own title row.
-        return b.beginDrag(region.pane)
+        # A pane not in a stack is marked by its one-tab strip row.
+        b.pendingPick = some(region.pane)
+        return action(lasNoGesture, "pressed the " & $region.pane & " tab")
       let divider = b.dividerAt(geom, event.row, event.col)
       if divider.isSome:
         let started = beginResizeDivider(b.layout, divider.get[0],
@@ -1405,20 +1449,38 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
                                     $b.focus)
       return action(lasNoGesture, "focus " & $b.focus)
     # Release.
-    let sameCell = event.row == b.pressRow and event.col == b.pressCol
+    let past = b.dragThresholdPassed(event.row, event.col)
+    let pending = b.pendingPick
+    b.pendingPick = none(PaneKind)
     b.pressRow = -1
     b.pressCol = -1
     if b.interaction.kind == ikResizingSplit and b.interaction.divider.isSome:
-      if sameCell:
-        # A click on the divider cell is what it was before the divider was
-        # draggable: a focus, and nothing committed.
+      if not past:
+        # A click on the divider (within the threshold) is what it was
+        # before the divider was draggable: a focus, and nothing committed.
         b.interaction = b.interaction.cancel()
         return action(lasNoGesture, "focus " & $b.focus)
       return b.dropDivider(geom, event.row, event.col)
+    if pending.isSome:
+      # A MARKED TAB, RELEASED. Within the threshold it is a click; past it
+      # (a terminal that sent no motion reports) it is the whole drag at once.
+      if past:
+        discard b.beginDrag(pending.get)
+      else:
+        let source = pending.get
+        if b.layout.dockedIndex(source) >= 0:
+          if b.pressWasRevealing and b.pressRevealedPane == source:
+            # A SECOND click on the revealed pane's label hides it.
+            discard b.cancelGesture()
+            return action(lasCancelled, "hid " & $source)
+          return b.beginRevealDock(source)
+        return b.dispatch(cmdActivateTab(source))
     if b.interaction.kind != ikDraggingTab:
-      return action(lasNoGesture, "release with no drag in flight")
+      # A plain click, or the release of a press that marked nothing: not a
+      # drag, and nothing to say about one.
+      return action(lasNoGesture, "click")
     let source = b.interaction.source
-    if sameCell:
+    if not past:
       # A CLICK. Cancel the drag first, so the click's own command is the only
       # thing that reaches `dispatch` — a drag that also committed would push
       # two entries onto one undo log for one gesture.

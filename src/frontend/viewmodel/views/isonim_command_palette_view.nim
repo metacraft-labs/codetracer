@@ -53,6 +53,7 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/command_palette_vm
+from ../viewmodels/omnibar_vm import OmnibarPlaceholder
 
 const CommandPaletteContainerClass* = "component-container command-container"
   ## Verbatim string the legacy ``componentContainerClass(
@@ -230,7 +231,9 @@ proc renderCommandPalettePanel*(r: MockRenderer;
           input(ref = inputField, `type` = "text",
                 id = CommandPaletteInputId,
                 name = "command-query",
-                placeholder = "Navigate to file or run a :command",
+                # PLAT-49: the one omnibar placeholder, the Omnibar
+                # ViewModel's — the terminal and GPUI draw the same words.
+                placeholder = OmnibarPlaceholder,
                 class = CommandPaletteInputFieldClass &
                   " mousetrap ct-input-com-pal ct-input-search-image",
                 autocomplete = "off",
@@ -358,7 +361,9 @@ when defined(js):
             input(ref = inputField, `type` = "text",
                   id = CommandPaletteInputId,
                   name = "command-query",
-                  placeholder = "Navigate to file or run a :command",
+                  # PLAT-49: the Omnibar ViewModel's placeholder, as the
+                  # MockRenderer variant above draws it.
+                  placeholder = OmnibarPlaceholder,
                   class = CommandPaletteInputFieldClass &
                     " mousetrap ct-input-com-pal ct-input-search-image",
                   autocomplete = "off",

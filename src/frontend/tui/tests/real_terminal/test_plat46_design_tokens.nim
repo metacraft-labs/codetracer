@@ -66,7 +66,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 148
+const ExpectedAssertions = 150
 
 var countedAssertions = 0
 
@@ -279,13 +279,14 @@ proc readWide(sess: var TuiTestSession): Fidelity =
     result.currentLineBg = hexOfColor(sess.cellAt(execRow, c).bg)
   result.statusBg = hexOfColor(sess.cellAt(rows - 1, cols - 1).bg)
   result.modeFg = hexOfColor(sess.cellAt(rows - 1, 0).fg)
-  # A pane body: the VARIABLES pane's last column before its separator, two
-  # rows under its title. Found by the separator rather than by the screen's
-  # edge: since PLAT-45 the Variables pane is not the rightmost region.
-  let varRow = rowOf(sess, cols, rows, "VARIABLES")
+  # A pane body: the Variables pane's last column before its separator, three
+  # rows under its tab strip (PLAT-49: the strip is the pane's first row).
+  # Found by the separator rather than by the screen's edge: since PLAT-45
+  # the Variables pane is not the rightmost region.
+  let varRow = rowOf(sess, cols, rows, " Variables ")
   if varRow >= 0:
     let c = lastColBeforeRule(sess, varRow + 3,
-                              colOf(sess, varRow, cols, "VARIABLES"), cols)
+                              colOf(sess, varRow, cols, " Variables "), cols)
     result.panelBg = hexOfColor(sess.cellAt(varRow + 3, c).bg)
   # The editor body: the last cell of a short source line (line 3 is empty)
   # before the Source pane's separator — found by the separator, because the
@@ -442,13 +443,16 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       settleOnDebugger(tabs, Stacked.cols, Stacked.rows)
       let t = readTabs(tabs)
       checkpoint(modeName & " tabs: " & $t)
-      # PLAT-47: the desktop's strip, measured — every tab and the strip on
-      # the pane's own surface; the active tab told apart by its text colour
-      # and (the terminal's weight cue) bold.
-      ck t.activeBg == hexT(dtColorsUiSurfaceBasePanel, mode)
-      ck t.inactiveBg == hexT(dtColorsUiSurfaceBasePanel, mode)
-      ck t.barBg == hexT(dtColorsUiSurfaceBasePanel, mode)
-      ck t.activeFg == hexT(dtColorsUiTextPrimaryLabel, mode)
+      # PLAT-49, the user's direction over PLAT-47's measured single ground:
+      # the strip on its own ground (ui/surface/base/raised), the selected
+      # tab on a background (ui/surface/primary/tertiary) and in a foreground
+      # (ui/text/primary/headings) of its own, bold; inactive tabs on the
+      # strip in the disabled tier.
+      ck t.activeBg == hexT(dtColorsUiSurfacePrimaryTertiary, mode)
+      ck t.inactiveBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
+      ck t.barBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
+      ck t.barBg != hexT(dtColorsUiSurfaceBasePanel, mode)
+      ck t.activeFg == hexT(dtColorsUiTextPrimaryHeadings, mode)
       ck t.inactiveFg == hexT(dtColorsUiTextPrimaryDisabled, mode)
       ck t.activeBold and not t.inactiveBold
       ck oklabDistance(parseHexColour(t.activeFg),

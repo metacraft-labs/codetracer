@@ -48,9 +48,10 @@
 ## ## WHAT A "PROFILE" IS NOW
 ##
 ## `LayoutProfile` is the terminal SIZE the default is derived for — a value
-## that answers "which depth" per product mode — plus `hintDensity`, the one
-## thing the old breakpoint table still decides: how much of the key-hint strip
-## fits on the status line. The breakpoints no longer choose an arrangement.
+## that answers "which depth" per product mode. The old breakpoint table no
+## longer decides anything: it chose an arrangement until PLAT-45 and the
+## status line's key-hint strip until PLAT-49 removed that strip (no other
+## front-end has one).
 ##
 ## ## THIS MODULE NOW IMPORTS THE PROJECTION
 ##
@@ -78,24 +79,6 @@ type
     width*: int
     height*: int
 
-  HintDensity* = enum
-    ## How much of §3.3.6's key-hint strip the status line has room for. The
-    ## ONE decision the old breakpoint table still makes: it no longer picks an
-    ## arrangement (the fold does), only which hint strip is drawn.
-    hdCompact = "compact"
-    hdStandard = "standard"
-    hdUltraWide = "ultra-wide"
-
-const
-  StandardMinWidth* = 120
-    ## The widest terminal whose status line gets the function-key hint strip
-    ## (§3.1's 80x24 drawing); from here the letter strip (its 120x40 drawing)
-    ## fits.
-  UltraWideMinWidth* = 180
-  TallProfileMinHeight* = 35
-    ## Below this height the compact hint strip is kept at every width, as the
-    ## old §3.2 height clause did.
-
 const
   lpCompact* = LayoutProfile(width: 80, height: 24)
     ## THE THREE SIZES THE OLD §3.2 NAMED, kept as named sizes. Before PLAT-45
@@ -113,14 +96,6 @@ proc selectProfile*(width, height: int): LayoutProfile =
 
 proc `$`*(p: LayoutProfile): string =
   $p.width & "x" & $p.height
-
-proc hintDensity*(p: LayoutProfile): HintDensity =
-  ## The old breakpoint rule, kept for the hint strip only. Height decides
-  ## first, as it did (see git history for the §3.2 overlap it resolved).
-  if p.height < TallProfileMinHeight: hdCompact
-  elif p.width >= UltraWideMinWidth: hdUltraWide
-  elif p.width >= StandardMinWidth: hdStandard
-  else: hdCompact
 
 # ---------------------------------------------------------------------------
 # PLAT-45 deliverable 2 — what the terminal can draw

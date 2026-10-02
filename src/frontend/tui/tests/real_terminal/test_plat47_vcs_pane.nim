@@ -106,6 +106,11 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane":
       .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
       .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
       .envSet("COLORTERM", "truecolor")
+      # Its OWN state directory: clicking the VCS tab is a layout change the
+      # binary remembers on quit, and a document left in the lane's shared
+      # directory would be restored by every later suite of the lane.
+      .envSet("CODETRACER_TUI_LAYOUT_DIR",
+              getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-pane")
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     # The FILES stack's strip is the body's first row; click its VCS tab.
@@ -123,7 +128,7 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane":
     for row in 2 ..< Rows:
       let text = strutils.strip(sess.regionText(row, 0, width, 1),
                                 leading = false)
-      if text.startsWith("VCS ") and text.contains(desk["branch"].getStr):
+      if text.startsWith("on ") and text.contains(desk["branch"].getStr):
         branchSeen = true
       if text.startsWith("WORKING TREE"):
         sectionLine = text
@@ -164,6 +169,8 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane":
       .width(Cols).height(Rows).workDir(dir)
       .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
       .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
+      .envSet("CODETRACER_TUI_LAYOUT_DIR",
+              getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-pane-outside")
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     let strip = sess.regionText(1, 0, Cols, 1)

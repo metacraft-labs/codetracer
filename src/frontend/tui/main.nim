@@ -56,6 +56,9 @@
 
 import std/[os, strutils]
 
+from isonim_tui import caretSupportFor, caretBytes, TextCaret, CaretSupport,
+  caretShapes, caretDrawn, ckBar, ckBlock
+
 import ./app/cli
 # `./app/edit_binding` IS DELIBERATELY NOT IMPORTED. It was, until the landing
 # pass moved "open the first file and fill the tree" out of `editInteractive`
@@ -279,6 +282,10 @@ proc advanceBuild(rt: TuiRuntime; state: EditHostState;
   if result and report:
     rt.app.notification = describeVerdict(state.running.session)
 
+var gCaretSupport = caretShapes
+  ## PLAT-49: whether the running terminal shapes its cursor (`interactive`
+  ## decides it once, from `TERM` / `TERM_PROGRAM` / `TMUX`).
+
 proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## One frame of `rt` onto `driver`.
   ##
@@ -300,6 +307,17 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   if prompting:
     epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
                  ShowCursorBytes
+  # PLAT-49: AN OPEN OMNIBAR OWNS THE CARET. The terminal's cursor goes where
+  # its text goes — a thin bar while inserting, a block while overwriting
+  # (DECSCUSR) — after the modal prologue, so it wins over the mode's shape;
+  # where the terminal is not known to shape its cursor, the top bar has
+  # already drawn the caret into its cell and the cursor stays hidden.
+  let caret = screen.topBar.omnibarCaret(screen.topBarLayout)
+  if caret.shown and not prompting:
+    epilogue.add caretBytes(
+      TextCaret(row: caret.row, col: caret.col, visible: true,
+                shape: (if caret.overwrite: ckBlock else: ckBar)),
+      gCaretSupport)
   driver.paint(screen.styledRows,
                prologue = cursorControlBytes(rt.modal.mode),
                epilogue = epilogue,
@@ -380,6 +398,12 @@ proc interactive(command: TuiCommand): int =
 
   var size = driver.size()
   let app = newTuiApp()
+  # PLAT-49: whether this terminal shapes its cursor (DECSCUSR) — decided
+  # from its own identity; where it is not known to, the omnibar's caret is
+  # drawn into its cell instead (`isonim_tui.caretSupportFor`).
+  gCaretSupport = caretSupportFor(getEnv("TERM"), getEnv("TERM_PROGRAM"),
+                                  inTmux = getEnv("TMUX").len > 0)
+  app.caretDrawn = gCaretSupport == caretDrawn
   # The negotiation's note FIRST: the status line clips a long notification
   # from the right, and a trace folder's path is long.
   app.notification = capabilityNote(negotiation.caps) & " | opening " &

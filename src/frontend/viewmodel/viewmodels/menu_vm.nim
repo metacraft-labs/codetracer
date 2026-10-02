@@ -375,22 +375,6 @@ proc escape*(vm: MenuVM) =
   if not vm.leaveFolder():
     vm.close()
 
-proc siblingMenu*(vm: MenuVM; delta: int) =
-  ## A menu bar's `Left` / `Right` inside a dropdown: the neighbouring
-  ## top-level folder, opened.
-  if not vm.isOpen or vm.path.len == 0:
-    vm.moveHighlight(delta)
-    return
-  let items = vm.root.children
-  if items.len == 0:
-    return
-  var i = vm.path[0]
-  for _ in 0 ..< items.len:
-    i = (i + (if delta > 0: 1 else: -1) + items.len) mod items.len
-    if items[i].selectable:
-      break
-  vm.openFolder(i)
-
 proc activate*(vm: MenuVM): MenuActivation =
   ## `Enter`: run the highlighted action (the menu closes), or enter the
   ## highlighted folder. A disabled item does nothing.

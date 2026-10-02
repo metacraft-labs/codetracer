@@ -92,7 +92,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 227
+const ExpectedAssertions = 228
 
 var countedAssertions = 0
 
@@ -144,7 +144,7 @@ const
   ChecksLatency = 3
   ChecksBytes = 2
   ChecksBreakpointGutter = 9
-  ChecksShellIntegration = 7
+  ChecksShellIntegration = 8
   ChecksSummary = 4
   ChecksSkippedFixture = 2
 
@@ -602,7 +602,9 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
       ck shellText.len == 24
       var paneRowsMatched = 0
       var paneMismatches: seq[string] = @[]
-      for i in 0 ..< editorArea.height:
+      # Row 0 is the pane's TAB STRIP (PLAT-49: it replaces the pane's own
+      # heading row); every row under it is the standalone pane's.
+      for i in 1 ..< editorArea.height:
         let screenRow = shellText[editorArea.row + i]
         var slice = ""
         var at = 0
@@ -618,13 +620,15 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
             standalone[i] & "'\n  shell: '" & slice & "'"
       if paneMismatches.len > 0:
         checkpoint(paneMismatches[0 .. min(2, paneMismatches.high)].join("\n"))
-      ck paneRowsMatched == editorArea.height
+      ck paneRowsMatched == editorArea.height - 1
       # …and the OTHER panes are still there, so the source pane took its own
       # rectangle and nobody else's: at 80x24 the side column's first strip
       # is the Variables stack (the call stack is a tab of it — PLAT-45's
       # fold).
       ck shellText[1].contains(" Variables ")
-      ck shellText[editorArea.row].contains(SourcePaneTitle)
+      ck not shellText[editorArea.row].contains(SourcePaneTitle)
+      ck shellText[editorArea.row].contains(
+        " " & extractFilename(shellModel.source.path) & " ")
 
       # ---- FINE-GRAINED SUBSCRIPTION, measured ----------------------------
       # CTUI-5: "changing the execution line re-evaluates the gutter and

@@ -6,22 +6,18 @@
 ## app/views/status_bar.nim — CTUI-3. The command line and status bar of
 ## CodeTracer-TUI.md §3.3.6.
 ##
-## Three fields, in the order the specification lists them: the mode
-## indicator, a CONTEXT-SENSITIVE key hint strip, and the notification area.
+## Two fields: the mode indicator (input mode, then product mode) and the
+## notification area — plus the open prompt's text while one is open.
 ##
-## ## The hints are context-sensitive, and that is asserted rather than claimed
+## ## No key-hint strip (PLAT-49)
 ##
-## §3.3.6 asks for a "dynamic hint strip showing context-sensitive key
-## combinations", and §3.1 shows two DIFFERENT strips — the Compact drawing has
-## the function-key set (`F5:Cont F10:Next ...`) and the Standard drawing has
-## the letter set (`'n':step-over 'p':rev-step ...`). So `keyHints` is a
-## function of BOTH the mode and the profile, and
-## `app/tests/test_layout_profiles.nim` asserts the two differ — a "dynamic"
-## strip that returned one constant would satisfy every other assertion in this
-## milestone.
-##
-## The keys themselves are CTUI-9's subject; this milestone renders the strip
-## and does not bind anything.
+## §3.3.6 once asked for a "dynamic hint strip showing context-sensitive key
+## combinations" (`'n':step-over 'p':rev-step …`), and this row drew one for
+## every mode and profile. The user removed it on 2026-10-01: no other
+## front-end has one, and the keys are reachable from the menu (which shows
+## each item's chord, from the active keymap) and from the debugger controls'
+## tooltips (label and key). `app/tests/test_layout_profiles.nim` asserts the
+## status line carries no hint text in any mode.
 
 import ../layout/profile
 
@@ -85,9 +81,8 @@ type
       ## drawn — an empty notification area that always reserves its columns
       ## would make a lost message and a quiet one look the same.
     prompt*: string
-      ## What the user has typed after `:` or `/`. Shown INSTEAD of the hint
-      ## strip in `umCommand` / `umSearch`, because the prompt is what the user
-      ## is looking at and the hints are what they no longer need.
+      ## What the user has typed after `:` or `/`, shown after the mode
+      ## indicators in `umCommand` / `umSearch`.
 
 proc initStatusBarModel*(mode = umNormal;
                          profile = selectProfile(80, 24);
@@ -121,51 +116,6 @@ proc productStyle*(product: ProductMode): CellStyle =
   of pmDebug: CellStyle(role: srModeDebug)
   of pmEdit: CellStyle(role: srModeEdit)
 
-proc keyHints*(mode: UiMode; profile: LayoutProfile;
-               product = pmDebug): string =
-  ## The §3.3.6 hint strip for this mode, this profile and this product mode.
-  ##
-  ## The Compact strip is the function-key set §3.1's 80x24 drawing shows; the
-  ## wider profiles get the letter set from its 120x40 drawing, which is longer
-  ## and would be truncated at 80 columns.
-  ##
-  ## PLAT-16 ADDS THE THIRD PARAMETER AND ONLY THE `umNormal` ARM READS IT.
-  ## Mode-Transitions.md §8 requires per-mode shortcut scoping, and a hint strip
-  ## that advertised Step Over to somebody in Edit mode would be advertising a
-  ## chord `keymap.resolve` answers `krInertInMode` for — the disabled-button
-  ## failure EMT-D14 names, arriving through the hint strip instead of the
-  ## keyboard. The prompt modes are unchanged because a `:` prompt is the same
-  ## prompt in both product modes.
-  if mode == umNormal and product == pmEdit:
-    return case profile.hintDensity
-      of hdCompact:
-        "Ctrl+F5:debug F9:break | :run :build :w"
-      of hdStandard, hdUltraWide:
-        "Ctrl+F5:debug  F9:breakpoint  Ctrl+z/Ctrl+y:undo/redo | " &
-        ":run :build :w"
-  case mode
-  of umCommand:
-    "Enter:run  Esc:cancel  Tab:complete"
-  of umSearch:
-    "Enter:find  Esc:cancel  n/N:next/prev match"
-  of umInspect:
-    # §4.1: "Deep navigation of complex data structures, memory hex viewing,
-    # and expression origin inspection" — so the hints are §4.2's Variables
-    # Tree row and its Value Origin row, which is exactly the set
-    # `app/input/keymap.nim` binds in `mmInspect`.
-    "Enter/l:expand  h:collapse  x:hex  m:memory  o/O:origin  Esc:leave"
-  of umVisual:
-    "y:yank  Esc:leave  hjkl:extend"
-  of umSeek:
-    "Left/Right:scrub  Enter:jump  Esc:cancel"
-  of umNormal:
-    case profile.hintDensity
-    of hdCompact:
-      "F5:Cont F10:Next F11:Step Shift+F10:Prev | :help"
-    of hdStandard, hdUltraWide:
-      "'n':step-over 'p':rev-step 's':step-into 'b':rev-into 'o':origin | " &
-      ":command /:find"
-
 proc modeStyle*(mode: UiMode): CellStyle =
   ## CTUI-9. The colour §3.3.6's mode indicator is painted in.
   ##
@@ -198,10 +148,9 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   ## The bottom row, exactly `width` cells wide.
   ##
   ## The mode indicator is never dropped, and the notification is
-  ## right-aligned so it is not lost in the middle of a hint strip a reader
-  ## skims past. On a terminal too narrow for both, the hints go and the
-  ## notification stays: a warning the user cannot see is the failure this
-  ## whole row exists to prevent.
+  ## right-aligned. On a terminal too narrow for both, the prompt text is cut
+  ## before the notification is: a warning the user cannot see is the failure
+  ## this whole row exists to prevent.
   if width <= 0:
     return ""
   # THE TWO INDICATORS, IN TWO POSITIONS, ALWAYS BOTH DRAWN.
@@ -212,11 +161,13 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   # a user editing a file on a screen that says NORMAL and nothing else.
   let mode = $m.mode & " " & productIndicator(m.product) &
              (if m.fold.len > 0: " " & m.fold else: "")
+  # PLAT-49: the prompt's text when one is open, and nothing otherwise — no
+  # key-hint strip.
   let middle =
     if m.prompt.len > 0 or promptSigil(m.mode).len > 0:
       promptSigil(m.mode) & m.prompt
     else:
-      keyHints(m.mode, m.profile, m.product)
+      ""
   if textCells(mode) >= width:
     return fitCells(mode, width)
 

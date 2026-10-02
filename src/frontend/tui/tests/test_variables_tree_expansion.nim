@@ -79,7 +79,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 83
+const ExpectedAssertions = 84
 
 var countedAssertions = 0
 
@@ -120,7 +120,7 @@ const
   ChecksSourceRule = 4
   ChecksRootExpansion = 6
   ChecksWideExpansion = 9
-  ChecksMemberFields = 5
+  ChecksMemberFields = 6
   ChecksStructExpansion = 8
   ChecksRelease = 8
   ChecksReExpansion = 5
@@ -282,11 +282,18 @@ suite "CTUI-7: a real compound value expands, shows its fields, and is " &
       # fetch the pane does unasked.
       ck model.isExpanded(localsPath)
       ck model.memberTotal(localsPath) == locals.len
-      ck model.populations == 1
+      # PLAT-49: every root that can be filled is opened (the pane lists the
+      # groups together, with no separator row to open a closed one from),
+      # each its one fetch.
+      var openable = 0
+      for scope in model.scopes:
+        if scope.availability == savaAvailable: inc openable
+      ck model.populations == openable
       let rootsHeld = model.heldNodes(localsPath)
       ck rootsHeld == min(PageSize, locals.len)
       ck rootsHeld > 0
-      ck model.heldNodeTotal() == rootsHeld
+      ck model.heldNodeTotal() == rootsHeld +
+         model.heldNodes(scopePath(skWatches))
 
       # ---- EXPAND THE 600-ENTRY MAPPING ------------------------------------
       let widePath = childPath(localsPath, WideMappingName)
@@ -310,7 +317,8 @@ suite "CTUI-7: a real compound value expands, shows its fields, and is " &
       # PAGED, not materialised: the whole point of the seam.
       ck model.heldNodes(widePath) == PageSize
       ck model.heldNodes(widePath) < declared
-      ck model.heldNodeTotal() == rootsHeld + PageSize
+      ck model.heldNodeTotal() == rootsHeld + PageSize +
+         model.heldNodes(scopePath(skWatches))
 
       # ---- ITS ACTUAL FIELDS, AGAINST THE PROGRAM'S RULE -------------------
       let members = model.childrenOf(widePath)
@@ -326,9 +334,13 @@ suite "CTUI-7: a real compound value expands, shows its fields, and is " &
       ck members.len == PageSize
       # …and the pane really draws them, with the expander showing the node is
       # open and the first member's own key on its row.
-      ck rowTextFor(model, widePath).startsWith(ExpandedGlyph)
+      # (PLAT-49: a row starts with its category tag; the expander sits
+      # against the name.)
+      ck rowTextFor(model, widePath).startsWith("L ")
+      ck rowTextFor(model, widePath).contains(ExpandedGlyph & " " &
+                                              WideMappingName)
       ck rowTextFor(model, members[0].path).contains("key_000")
-      ck rowTextFor(model, members[0].path).startsWith(CollapsedGlyph)
+      ck rowTextFor(model, members[0].path).contains(CollapsedGlyph & " [0]")
 
       # ---- EXPAND ONE MEMBER: A REAL TWO-FIELD STRUCTURE -------------------
       let memberPath = members[0].path

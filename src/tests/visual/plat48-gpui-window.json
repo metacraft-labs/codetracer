@@ -16,6 +16,7 @@
  ],
  "settled": {
   "base": true,
+  "menu-root": true,
   "menu-open": true,
   "menu-hover": true,
   "menu-key": true,
@@ -102,27 +103,48 @@
   "reverse-step-in": 84,
   "step-in": 100,
   "reverse-step-out": 122,
-  "step-out": 106,
+  "step-out": 124,
   "reverse-continue": 44,
   "continue": 44,
-  "run-to-entry": 87
+  "run-to-entry": 111
  },
- "menuTitlesOcr": "File  Edit View Build Reset Debug Help ~ \u00a5 & &8 = 5 . Y",
+ "menuBandOcr": "N A I",
+ "menuTitlesOcr": "File \u00bb\nEdit >\nView \u00bb\nBuild \u00bb\nReset \u00bb\nDebug \u00bb\nHelp \u00bb",
+ "menuRoot": {
+  "popover": [
+   12,
+   46,
+   240,
+   190
+  ],
+  "button": [
+   12,
+   12,
+   34,
+   34
+  ]
+ },
  "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS",
  "menuOpen": {
   "popover": [
-   332,
-   46,
+   252,
+   176,
    508,
    690
   ],
   "changedBox": [
-   332,
-   23,
-   508,
-   713
+   12,
+   50,
+   748,
+   816
   ],
-  "changed": 320152
+  "changed": 291379,
+  "rootPopover": [
+   12,
+   46,
+   240,
+   190
+  ]
  },
  "menuStepOverOcr": "Step Over F10",
  "menuStepOverShortcut": "F10",
@@ -133,12 +155,12 @@
   "stepOutRowChanged": 13208
  },
  "menuChoose": {
-  "popoverPixelsChanged": 319596
+  "popoverPixelsChanged": 278899
  },
- "controlHoverOcr": "Next (F10)",
+ "controlHoverOcr": "Next (F10) .",
  "omnibarQueryOcr": "o :sym add|",
  "omnibarAttempts": {
-  "#42": 2,
+  "#42": 1,
   ":sym add": 1
  },
  "omnibarSymOcr": "add main.py:29",
@@ -153,7 +175,7 @@
    12,
    709,
    1896,
-   353
+   359
   ],
   "changedOutside": 0,
   "ocr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to"
@@ -162,7 +184,7 @@
  "keyRevealOcr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to",
  "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State",
  "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS",
- "unpinnedTabsOcr": "State Scratchpad N",
+ "unpinnedTabsOcr": ". State Scratchpad S",
  "topStrip": {
   "rect": [
    12,
@@ -180,7 +202,7 @@
    316
   ],
   "changedOutside": 0,
-  "ocr": "| Unpin |\nState -\nState\n1 Anr=sle"
+  "ocr": "State Unpin\nLocals"
  },
  "topEscChanged": 0,
  "docTop": {

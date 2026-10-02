@@ -109,8 +109,10 @@ type
       labels*: seq[string]
       active*: int
       strip*: PxRect
-        ## The tab strip, or a zero rectangle when none is drawn (a bare
-        ## pane, or a stack of one).
+        ## The tab strip. Since PLAT-49 EVERY pane box has one — a stack's
+        ## tabs, or a bare pane's one tab with its name — and the leaf draws
+        ## no heading of its own (the user, 2026-10-01: the tab strip
+        ## identifies the pane, as the desktop's GoldenLayout header does).
       tabs*: seq[PxRect]
       body*: PxRect
         ## The pane's own content box: inside the border, below the strip.
@@ -156,6 +158,11 @@ type
     nodes*: seq[GeomNode]
     root*: int
       ## Index of the root node, or -1 when the document drew nothing.
+    loneLabels*: seq[(string, string)]
+      ## PLAT-49: (pane id, label) for a pane whose ONE tab names its content
+      ## rather than the pane — the editor's tab is its open file
+      ## (`product_mode.editorTabLabel`), as the terminal's and the desktop's
+      ## are. Read only for a pane that is not in a stack.
     dividers*: seq[GeomDivider]
 
 func contains*(r: PxRect; x, y: int): bool =
@@ -243,11 +250,16 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
     for t in tabs:
       let id = t{"info", "panel", "pane"}.getStr
       node.panes.add id
-      node.labels.add labelOf(id)
+      var label = labelOf(id)
+      if not node.stacked:
+        for (pane, lone) in g.loneLabels:
+          if pane == id and lone.len > 0:
+            label = lone
+      node.labels.add label
     let inner = PxRect(x: x + FocusOutlinePx, y: y + FocusOutlinePx,
                        w: max(1, w - 2 * FocusOutlinePx),
                        h: max(1, h - 2 * FocusOutlinePx))
-    if tabs.len > 1:
+    if tabs.len >= 1:
       node.strip = PxRect(x: inner.x, y: inner.y, w: inner.w, h: TabStripPx)
       var tx = inner.x + StripInsetPx
       for label in node.labels:
@@ -314,7 +326,9 @@ proc stripsOf(layout: Layout; area: PxRect):
     result.strips.add strip
 
 proc windowGeometryOf*(layout: Layout; dock: JsonNode;
-                       width, height: int; topBandPx = 0): WindowGeometry =
+                       width, height: int; topBandPx = 0;
+                       loneLabels: seq[(string, string)] = @[]):
+                       WindowGeometry =
   ## Where every pane, strip, tab and divider of the window is, for the dock
   ## document `dock` (projected from `layout`) in a `width` x `height` window.
   ## `topBandPx` (PLAT-48) is what the window's top bar and its gap take
@@ -324,7 +338,7 @@ proc windowGeometryOf*(layout: Layout; dock: JsonNode;
     area: PxRect(x: ChromePaddingPx, y: ChromePaddingPx + topBandPx,
                  w: max(1, width - 2 * ChromePaddingPx),
                  h: max(1, height - 2 * ChromePaddingPx - topBandPx)),
-    nodes: @[], root: -1, dividers: @[])
+    nodes: @[], root: -1, dividers: @[], loneLabels: loneLabels)
   let (strips, inner) = stripsOf(layout, result.area)
   result.strips = strips
   result.inner = inner
@@ -400,13 +414,24 @@ proc nodeAtPath(g: WindowGeometry; path: string): int =
       return i
   -1
 
+func dropBodyOf(n: GeomNode): PxRect =
+  ## The rectangle a drop onto a pane box is measured against: its body —
+  ## and, for a BARE pane, its one-tab strip as well. A stack's strip is a
+  ## join zone of its own (`dzTabStrip`); a bare pane's is not, and its edge
+  ## bands and its tint cover the strip and the body together, as they
+  ## covered the heading row and the body before every pane had a strip
+  ## (PLAT-49).
+  if n.stacked or n.strip.isEmpty: n.body
+  else: PxRect(x: n.body.x, y: n.strip.y, w: n.body.w,
+               h: n.strip.h + n.body.h)
+
 proc dropAreaOf*(g: WindowGeometry; path: string): PxRect =
   ## The body a drop onto the node at `path` is measured against: a pane's
   ## content box (below its strip). A path INSIDE a stack names that stack's
   ## body — its tabs share one region.
   let direct = g.nodeAtPath(path)
   if direct >= 0 and g.nodes[direct].kind == gnTabs:
-    return g.nodes[direct].body
+    return dropBodyOf(g.nodes[direct])
   let parent = parentPath(path)
   if parent.isSome:
     let up = g.nodeAtPath(parent.get)
@@ -418,8 +443,8 @@ proc dropAreaOf*(g: WindowGeometry; path: string): PxRect =
 
 proc tabAt*(g: WindowGeometry; x, y: int): tuple[node, tab: int] =
   ## The tab under a pixel: its pane box and its index, or (-1, -1). A bare
-  ## pane's TITLE ROW counts as its one tab — the heading is what a user
-  ## grabs to move it, as the terminal's title row is.
+  ## pane's ONE TAB is what a user grabs to move it, as a stacked pane's tab
+  ## is.
   let i = g.tabsNodeAt(x, y)
   if i < 0:
     return (-1, -1)
@@ -456,9 +481,10 @@ const
     ## text face at the shim's default size, measured off the window (26 px
     ## from one row to the next on `call_pages`, where every line fits). The
     ## call trace pages by the same pitch.
-  EditorLinesAbovePx* = 2 * GpuiEditorRowPx
-    ## What the editor pane draws above its rows: its heading and the source
-    ## statement (`leaves.renderEditor` draws the statement always).
+  EditorLinesAbovePx* = GpuiEditorRowPx
+    ## What the editor pane draws above its rows: the source statement
+    ## (`leaves.renderEditor` draws it always). Its heading went with
+    ## PLAT-49 — the pane's tab strip, outside its body, names it.
 
 proc editorRowsOf*(g: WindowGeometry): int =
   ## **How many source rows the editor pane SHOWS**: its body, less its
@@ -517,13 +543,14 @@ proc pointerAt*(g: WindowGeometry; x, y: int): Option[LayoutPointer] =
   if i < 0:
     return none(LayoutPointer)
   let n = g.nodes[i]
-  if not n.strip.isEmpty and n.strip.contains(x, y):
+  if n.stacked and not n.strip.isEmpty and n.strip.contains(x, y):
     for t, r in n.tabs:
       if r.contains(x, y):
         return some(LayoutPointer(path: n.panePathOf(t), zone: dzTabStrip))
     return some(LayoutPointer(path: n.panePathOf(n.active), zone: dzCentre))
   let path = n.panePathOf(n.active)
-  let b = n.body
+  # A BARE pane's one-tab strip is not a stack's join zone (`dropBodyOf`).
+  let b = dropBodyOf(n)
   if not b.contains(x, y):
     # The border pixel, or the strip's edge: the centre, as the terminal
     # answers for a cell outside the drop area.

@@ -46,6 +46,7 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/views/shell
+from ../app/views/call_trace import StackFallbackTitle
 import ../host/native_host
 import ../host/tui_session
 import ./fixtures/fixture_provider
@@ -96,7 +97,9 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
       ck rt.app.callTrace.rows[i].name ==
          (if l.displayName.len > 0: l.displayName else: l.name)
     let screen = screenText(rt)
-    ck screen.contains("CALL TRACE " & $lines.len & " call(s)")
+    # PLAT-49: the pane's tab names it; there is no title row to count in.
+    ck screen.contains(" Call Trace ")
+    ck not screen.contains("CALL TRACE ")
     ck screen.contains("main #1")
     ck screen.contains("evaluate #2")
     # At the first stop the debugger is at the top level: the root call.
@@ -152,7 +155,7 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     ck rt.app.callTrace.isEmpty
     ck rt.app.callTraceLoaded
     let screen = screenText(rt)
-    ck screen.contains("CALL STACK (no call trace in this recording)")
+    ck screen.contains(StackFallbackTitle)
     ck not screen.contains("CALL TRACE ")
     # The stack's frames are there: `evaluate` in `main` in `<__main__>`.
     ck screen.contains("evaluate")
@@ -205,7 +208,6 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     # The store holds a SECTION, not the trace.
     ck store.calltrace.lines.val.len < total
     ck rt.app.callTrace.total == total
-    ck screenText(rt).contains("CALL TRACE " & $total & " call(s)")
     ck rt.focus.focusPaneKind(paneCalltrace)
     let body = rt.paneBodyRows(paneCalltrace)
     ck body > 5
@@ -256,8 +258,9 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     for line in screen.splitLines:
       if line.contains("│" & CallTraceLoadingText): inc loadingRows
     ck loadingRows == 0
-    # The title counts the whole trace.
-    ck screen.contains("CALL TRACE " & $finalTotal & " call(s)")
+    # The model counts the whole trace (no title row shows the count since
+    # PLAT-49; the strip names the pane).
+    ck rt.app.callTrace.total == finalTotal
 
     # ---- the wheel over the pane's body scrolls it back ----------------
     discard rt.enableLayoutBinding()

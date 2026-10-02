@@ -24,18 +24,26 @@
 ##
 ##   1. the status badge, right-aligned — it is what says the program's
 ##      state, and it was the header's last field to go before PLAT-48;
-##   2. the menu as one `≡` button, and the omnibar as one `⌕` button (the
-##      omnibar collapses to an icon, deliverable 5) — or, while it is OPEN,
-##      as a field wide enough to type in;
+##   2. the menu's ONE root button `≡`, and the omnibar as one `⌕` button
+##      (the omnibar collapses to an icon, deliverable 5) — or, while it is
+##      OPEN, as a field wide enough to type in;
 ##   3. the header's trace and tick, at its narrowest detail;
 ##   4. the debugger controls: every control that fits, dropping from the
 ##      end of `transport_icons.TextPriority` first (text mode keeps exactly
 ##      a priority prefix; the icon modes use the same rule when even glyphs
 ##      do not fit);
-##   5. the menu's folder titles, replacing `≡`;
-##   6. the omnibar's field, replacing `⌕`;
-##   7. the session tabs, scrolled so the active tab shows;
-##   8. the header's fuller detail.
+##   5. the omnibar's field, replacing `⌕`;
+##   6. the session tabs, scrolled so the active tab shows;
+##   7. the header's fuller detail.
+##
+## ## The menu is the desktop's: one root button, cascading submenus
+##
+## PLAT-49 (the user, 2026-10-01). The desktop has a single root menu button;
+## its first-level menus (File, Edit, …) are a list INSIDE it, and each opens
+## its items as a submenu beside it. This row used to draw the first level as
+## a flat menu bar of folder titles. Now the row holds only `≡`; opening it
+## drops the first level below the button, and every entered folder cascades
+## to the right of the item that opened it (`menuDropdowns`).
 ##
 ## ## Shaped by colour, not glyphs (PLAT-47's rule)
 ##
@@ -60,7 +68,6 @@ export session_tabs
 type
   TopBarPart* = enum
     tpMenuButton = "menu"
-    tpMenuTitle = "menu-title"
     tpControl = "control"
     tpOmnibar = "omnibar"
     tpTab = "tab"
@@ -72,9 +79,8 @@ type
     part*: TopBarPart
     col*, width*: int
     index*: int
-      ## The top-level menu folder's index in `MenuVM.root.children` for a
-      ## title; the `TransportControls` index for a control; the tab's index
-      ## for a tab (`tpTabMore`: -1 = scroll left, +1 = scroll right).
+      ## The `TransportControls` index for a control; the tab's index for a
+      ## tab (`tpTabMore`: -1 = scroll left, +1 = scroll right).
 
   TopBarModel* = object
     ## Everything the row shows, as values and the shared ViewModels.
@@ -90,14 +96,22 @@ type
       ## Empty means "no session": every control is drawn disabled.
     hoveredControl*: int
       ## The control under the pointer (or keyboard-focused), -1 for none.
+    hoverTooltip*: string
+      ## PLAT-49: its tooltip (`debug_controls_vm.transportTooltip`), drawn
+      ## as a one-row label under it (`paintControlTooltip`).
     tabs*: seq[SessionTabView]
     tabScroll*: int
     header*: HeaderModel
+    caretDrawn*: bool
+      ## PLAT-49: the terminal is not known to honour DECSCUSR
+      ## (`isonim_tui.caretSupportFor`), so the open omnibar's caret is
+      ## DRAWN into its cell (`isonim_tui.drawCaret`'s rule: reverse for the
+      ## overwrite block, underline for the insert bar) instead of being the
+      ## terminal's own cursor.
 
   TopBarLayout* = object
     width*: int
     segments*: seq[TopBarSegment]
-    menuExpanded*: bool
     omnibarField*: bool
     effectiveIcons*: IconsMode
     shownControls*: seq[int]
@@ -115,7 +129,7 @@ type
     rows*: seq[DropdownRow]
 
   TopBarHitKind* = enum
-    thNone, thMenuButton, thMenuTitle, thControl, thOmnibar, thTab, thTabMore
+    thNone, thMenuButton, thControl, thOmnibar, thTab, thTabMore
 
   TopBarHit* = object
     kind*: TopBarHitKind
@@ -133,7 +147,12 @@ const
   GraphicsControlCells* = 2
     ## A picture control is two cells wide and one tall: about square at the
     ## usual 1:2 cell, which is what the desktop's 16x16 marks are drawn in.
-  TopBarPlaceholder* = "Search files, :commands, :sym, #tick"
+  TopBarPlaceholder* = OmnibarPlaceholder
+    ## The Omnibar ViewModel's placeholder (PLAT-49) — the words the desktop
+    ## and GPUI show in the same empty field.
+  OmnibarPad* = 1
+    ## The field's inner padding, each side: it is an input box on its own
+    ## surface, not text on the bar.
 
 # ---------------------------------------------------------------------------
 # Widths
@@ -180,10 +199,6 @@ proc controlsWidth(mode: IconsMode; shown: seq[int]): int =
     if mode == imText and k > 0:
       inc result
 
-proc menuTitlesWidth(vm: MenuVM): int =
-  for i in vm.root.visibleChildren():
-    result += textCells(vm.root.children[i].label) + 2
-
 # ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
@@ -209,8 +224,8 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
     else: false
 
   let omnibarOpen = not m.omnibar.isNil and m.omnibar.isOpen
-  # 2. The menu button and the omnibar's button (or its open field).
-  var menuW = if take(3): 3 else: 0
+  # 2. The menu's root button and the omnibar's button (or its open field).
+  let menuW = if take(3): 3 else: 0
   var omniW = 0
   if omnibarOpen:
     let want = max(OmnibarOpenMinCells, min(OmnibarOpenMaxCells, width div 3))
@@ -236,13 +251,7 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   let controlsW = controlsWidth(result.effectiveIcons, result.shownControls)
   if controlsW > 0:
     discard take(controlsW + 1)
-  # 5. The menu titles.
-  if not m.menu.isNil:
-    let titles = menuTitlesWidth(m.menu)
-    if titles > 0 and titles > menuW and take(titles - menuW):
-      menuW = titles
-      result.menuExpanded = true
-  # 6. The omnibar field.
+  # 5. The omnibar field.
   if not omnibarOpen and omniW > 0:
     let room = avail - used
     if room >= OmnibarFieldMinCells - omniW:
@@ -251,7 +260,7 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
         used += grown - omniW
         omniW = grown
         result.omnibarField = true
-  # 7. The session tabs, only when there are several.
+  # 6. The session tabs, only when there are several.
   var tabSegs: seq[TopBarSegment] = @[]
   var tabsW = 0
   if m.tabs.len >= 2:
@@ -282,7 +291,7 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
       tabSegs.add TopBarSegment(part: tpTabMore, width: 1, index: 1)
     if tabsW > 0:
       discard take(tabsW + 1)
-  # 8. The header's fuller detail, with what is left.
+  # 7. The header's fuller detail, with what is left.
   if headerW > 0:
     let room = headerW + (avail - used)
     for detail in [hdFull, hdNoKind, hdNoArch]:
@@ -297,16 +306,9 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   # the right.
   var col = 0
   if menuW > 0:
-    if result.menuExpanded:
-      for i in m.menu.root.visibleChildren():
-        let w = textCells(m.menu.root.children[i].label) + 2
-        result.segments.add TopBarSegment(part: tpMenuTitle, col: col,
-                                          width: w, index: i)
-        col += w
-    else:
-      result.segments.add TopBarSegment(part: tpMenuButton, col: col,
-                                        width: menuW)
-      col += menuW
+    result.segments.add TopBarSegment(part: tpMenuButton, col: col,
+                                      width: menuW)
+    col += menuW
     inc col
   if controlsW > 0:
     for k, i in result.shownControls:
@@ -346,10 +348,51 @@ proc headerTextOf*(m: TopBarModel; lay: TopBarLayout): string =
 
 proc segmentOf*(lay: TopBarLayout; part: TopBarPart; index = 0): TopBarSegment =
   for s in lay.segments:
-    if s.part == part and (part notin {tpMenuTitle, tpControl, tpTab} or
+    if s.part == part and (part notin {tpControl, tpTab} or
                            s.index == index):
       return s
   TopBarSegment(part: part, col: -1, width: 0, index: index)
+
+# ---------------------------------------------------------------------------
+# The omnibar's field and its caret (PLAT-49)
+# ---------------------------------------------------------------------------
+
+proc omnibarFieldText*(m: TopBarModel; width: int): tuple[text: string,
+                                                          caretCell: int] =
+  ## What the field shows inside its padding, and the caret's cell within
+  ## that text: `⌕ ` and the query — scrolled so the caret stays in view — or
+  ## the placeholder when there is no query.
+  let room = max(0, width - 2 * OmnibarPad)
+  let ob = m.omnibar
+  if ob.isNil or not ob.isOpen or ob.query.len == 0:
+    return (fitCells(OmnibarGlyph & " " & TopBarPlaceholder, room),
+            textCells(OmnibarGlyph & " "))
+  let lead = OmnibarGlyph & " "
+  let runes = ob.query.toRunes
+  let caret = min(ob.cursorChars, runes.len)
+  # The caret needs a cell of its own after the last character.
+  let visible = max(1, room - textCells(lead) - 1)
+  var first = 0
+  if caret > visible:
+    first = caret - visible
+  var shown = ""
+  for i in first ..< min(runes.len, first + visible + 1):
+    shown.add $runes[i]
+  (fitCells(lead & shown, room), textCells(lead) + (caret - first))
+
+proc omnibarCaret*(m: TopBarModel; lay: TopBarLayout):
+    tuple[shown: bool, row, col: int, overwrite: bool] =
+  ## Where the open omnibar's caret is on screen, and whether it overwrites —
+  ## the terminal's cursor goes there, a bar while inserting and a block
+  ## while overwriting (`main.paint`).
+  if m.omnibar.isNil or not m.omnibar.isOpen or not lay.omnibarField:
+    return (false, 0, 0, false)
+  let s = lay.segmentOf(tpOmnibar)
+  if s.col < 0:
+    return (false, 0, 0, false)
+  let (_, cell) = omnibarFieldText(m, s.width)
+  (true, 0, min(s.col + s.width - 1, s.col + OmnibarPad + cell),
+   m.omnibar.overwrite)
 
 # ---------------------------------------------------------------------------
 # Painting the row
@@ -358,10 +401,6 @@ proc segmentOf*(lay: TopBarLayout; part: TopBarPart; index = 0): TopBarSegment =
 proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
   ## Row 0: every segment on its role's surface. The row's own surface (the
   ## header's card) is filled by the shell first.
-  let menuOpenAt =
-    if m.menu.isNil or not m.menu.isOpen: -2
-    elif m.menu.path.len > 0: m.menu.path[0]
-    else: -1
   for s in lay.segments:
     case s.part
     of tpMenuButton:
@@ -372,19 +411,6 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         g.fillSurface(0, s.col, s.width, 1, srTabActive)
       g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
               if open: CellStyle(role: srTabActive, bold: true)
-              else: CellStyle(role: srChromeText, surface: srSurfaceCard))
-    of tpMenuTitle:
-      let label = m.menu.root.children[s.index].label
-      # The open folder, or the keyboard highlight on the top level, is the
-      # active tab's colour and weight; the others the inactive tier.
-      let active = menuOpenAt == s.index or
-                   (menuOpenAt == -1 and m.menu.highlight == s.index)
-      # Inactive titles are label text on the row's card (the desktop's menu
-      # bar); the active one takes the active tab's surface and weight.
-      if active:
-        g.fillSurface(0, s.col, s.width, 1, srTabActive)
-      g.paint(0, s.col, fitCells(" " & label & " ", s.width),
-              if active: CellStyle(role: srTabActive, bold: true)
               else: CellStyle(role: srChromeText, surface: srSurfaceCard))
     of tpControl:
       let enabled = s.index < m.controlsEnabled.len and
@@ -403,30 +429,28 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       g.paint(0, s.col, fitCells(text, s.width),
               CellStyle(role: role, bold: hovered))
     of tpOmnibar:
-      let ob = m.omnibar
       if lay.omnibarField:
-        if not ob.isNil and ob.isOpen:
-          g.fillSurface(0, s.col, s.width, 1, srSurfaceInput)
-          # The query, its tail kept in view, and a cursor cell after it.
-          var text = OmnibarGlyph & " " & ob.query
-          let room = s.width - 1
-          while textCells(text) > room and text.runeLen > 2:
-            text = OmnibarGlyph & " " & text.runeSubStr(3)
-          g.paint(0, s.col, fitCells(text, s.width),
-                  CellStyle(role: srChromeText))
-          let cur = s.col + min(s.width - 1, textCells(text))
-          g.paint(0, cur, " ", CellStyle(role: srChromeText, reverse: true))
-        else:
-          # CLOSED, the field is its placeholder on the bar's own card, in the
-          # chrome text tier. The muted tier fails PLAT-46's contrast floor in
-          # Light on both the input surface (2.9:1) and the card (2.2:1), so
-          # the placeholder is told from a typed query by the surface (a
-          # query sits on the input surface, with a cursor) rather than by a
-          # colour a reader cannot see.
-          g.fillSurface(0, s.col, s.width, 1, srSurfaceCard)
-          g.paint(0, s.col, fitCells(OmnibarGlyph & " " & TopBarPlaceholder,
-                                     s.width),
-                  CellStyle(role: srChromeText, surface: srSurfaceCard))
+        # PLAT-49: AN INPUT BOX, open or closed — the field on its own
+        # surface (`srSurfaceField`), padded, distinct from the bar it sits in. Closed (or open
+        # and empty) it shows the Omnibar ViewModel's placeholder, in italic
+        # so it is never read as a typed query; open, the query with the
+        # caret where the ViewModel's `cursor` is (`omnibarCaret`).
+        g.fillSurface(0, s.col, s.width, 1, srSurfaceField)
+        g.paint(0, s.col, spaces(s.width),
+                CellStyle(role: srChromeText, surface: srSurfaceField))
+        let (text, _) = omnibarFieldText(m, s.width)
+        let showsPlaceholder = m.omnibar.isNil or m.omnibar.query.len == 0
+        g.paint(0, s.col + OmnibarPad, text,
+                CellStyle(role: srChromeText, surface: srSurfaceField,
+                          italic: showsPlaceholder))
+        let caret = omnibarCaret(m, lay)
+        if caret.shown and m.caretDrawn:
+          g.restyle(0, caret.col, 1,
+                    proc(c: CellStyle): CellStyle =
+                      var r = c
+                      if caret.overwrite: r.reverse = true
+                      else: r.underline = true
+                      r)
       else:
         g.fillSurface(0, s.col, s.width, 1, srTabBar)
         g.paint(0, s.col, fitCells(" " & OmnibarGlyph & " ", s.width),
@@ -446,6 +470,31 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
     of tpBadge:
       g.paint(0, s.col, fitCells("[" & $m.header.status & "]", s.width))
 
+proc controlTooltipArea*(m: TopBarModel; lay: TopBarLayout;
+                         width: int): CellArea =
+  ## Where the hovered control's tooltip goes: the row under the bar, from
+  ## the control's first cell (moved left where it would run off the
+  ## screen), as wide as its text plus a cell of padding each side.
+  if m.hoveredControl < 0 or m.hoverTooltip.len == 0:
+    return CellArea()
+  let s = lay.segmentOf(tpControl, m.hoveredControl)
+  if s.col < 0:
+    return CellArea()
+  let w = min(width, textCells(m.hoverTooltip) + 2)
+  CellArea(col: max(0, min(s.col, width - w)), row: 1, width: w, height: 1)
+
+proc paintControlTooltip*(g: var StyledGrid; m: TopBarModel;
+                          lay: TopBarLayout; width: int) =
+  ## The terminal's tooltip: the ViewModel's text on the card surface, under
+  ## the control the pointer is on — over whatever pane is there, like the
+  ## desktop's.
+  let a = controlTooltipArea(m, lay, width)
+  if a.width <= 0:
+    return
+  g.fillSurface(a.row, a.col, a.width, 1, srSurfaceCard)
+  g.paint(a.row, a.col, fitCells(" " & m.hoverTooltip & " ", a.width),
+          CellStyle(role: srChromeText, surface: srSurfaceCard))
+
 # ---------------------------------------------------------------------------
 # The menu's dropdowns
 # ---------------------------------------------------------------------------
@@ -461,22 +510,18 @@ proc dropdownWidth(level: MenuLevelView): int =
 
 proc menuDropdowns*(m: TopBarModel; lay: TopBarLayout;
                     width, height: int): seq[MenuDropdown] =
-  ## The open menu's dropdowns, outermost first, as overlays over the body:
-  ##   * with the folder titles on the row, the top level IS the row, and
-  ##     each entered folder drops below its title, deeper ones cascading to
-  ##     the right at their parent item's row;
-  ##   * with the `≡` button, the top level drops below the button.
-  ## Clamped to the screen (a dropdown that would run off the right edge is
-  ## moved left; off the bottom, it is cut to the rows that fit).
+  ## The open menu's dropdowns, outermost first, as overlays over the body —
+  ## the desktop's menu: the first level (File, Edit, …) drops below the
+  ## root `≡` button, and every entered folder cascades to the RIGHT of the
+  ## dropdown that holds it, starting at its parent item's row. Clamped to
+  ## the screen (a dropdown that would run off the right edge is moved left;
+  ## off the bottom, it is cut to the rows that fit).
   if m.menu.isNil or not m.menu.isOpen:
     return
   let levels = m.menu.openLevels()
-  var startLevel = if lay.menuExpanded: 1 else: 0
-  var col = 0
+  var col = max(0, lay.segmentOf(tpMenuButton).col)
   var row = 1
-  if lay.menuExpanded and m.menu.path.len > 0:
-    col = lay.segmentOf(tpMenuTitle, m.menu.path[0]).col
-  for depth in startLevel ..< levels.len:
+  for depth in 0 ..< levels.len:
     let lv = levels[depth]
     if lv.items.len == 0:
       continue
@@ -624,7 +669,6 @@ proc topBarHitAt*(lay: TopBarLayout; col: int): TopBarHit =
     if col >= s.col and col < s.col + s.width:
       case s.part
       of tpMenuButton: return TopBarHit(kind: thMenuButton)
-      of tpMenuTitle: return TopBarHit(kind: thMenuTitle, index: s.index)
       of tpControl: return TopBarHit(kind: thControl, index: s.index)
       of tpOmnibar: return TopBarHit(kind: thOmnibar)
       of tpTab: return TopBarHit(kind: thTab, index: s.index)

@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2901
+const ExpectedAssertions = 3069
 
 var countedAssertions = 0
 
@@ -80,7 +80,7 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 109
+  ExpectedRoleCount = 116
     ## PLAT-47 added `srLineNumberActive` (the execution line's number, the
     ## desktop's active line number) and the three syntax roles the desktop's
     ## Monaco Python tokenizer colours on their own (a string's quote, a
@@ -89,8 +89,10 @@ const
     ## keyword, doc comment, regexp, variable, namespace, attribute name,
     ## metatag); its deliverable 6 the drop indication's tint
     ## (`srSurfaceDropIndicator`, a background-only overlay colour).
-    ## `srNone` plus 108 painted roles.
-  ExpectedGroupCount = 18
+    ## PLAT-49 added the six variable-category tag roles (`srCategory*`, a
+    ## group of their own) and the omnibar field's surface
+    ## (`srSurfaceField`). `srNone` plus 115 painted roles.
+  ExpectedGroupCount = 19
   ExpectedMergeCount = 18
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.
@@ -237,13 +239,15 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # editor to its Monaco theme (keyword, the editor ground, the execution
     # line, the selection — generated `editor-theme/*` tokens), the focused
     # border to the desktop's selected-panel outline (ui/border/primary), and
-    # the tab strip onto the pane's surface.
+    # the tab strip onto the pane's surface — which PLAT-49 re-bound by the
+    # user's direction: the strip on its own ground, the selected tab on a
+    # background and in a foreground of its own.
     const Fg = [(srSyntaxKeyword, dtEditorThemeRuleKeyword),
                 (srBorderPane, dtColorsUiBorderSecondary),
                 (srBorderFocused, dtColorsUiBorderPrimary),
                 (srChromeTitle, dtColorsUiTextPrimaryLabel),
                 (srChromeMuted, dtColorsUiTextPrimaryCaptionSubtle),
-                (srTabActive, dtColorsUiTextPrimaryLabel),
+                (srTabActive, dtColorsUiTextPrimaryHeadings),
                 (srTabInactive, dtColorsUiTextPrimaryDisabled)]
     const Bg = [(srSurfaceCanvas, dtColorsUiSurfaceBaseCanvas),
                 (srSurfacePanel, dtColorsUiSurfaceBasePanel),
@@ -254,9 +258,10 @@ suite "CTUI-11 Tier 1: degraded style tables":
                 (srSurfaceSelection, dtEditorThemeSelection),
                 (srSurfaceCurrentLine, dtEditorThemeExecutionLine),
                 (srLineExecution, dtEditorThemeExecutionLine),
-                (srTabBar, dtColorsUiSurfaceBasePanel),
-                (srTabActive, dtColorsUiSurfaceBasePanel),
-                (srTabInactive, dtColorsUiSurfaceBasePanel)]
+                (srTabBar, dtColorsUiSurfaceBaseRaised),
+                (srTabActive, dtColorsUiSurfacePrimaryTertiary),
+                (srTabInactive, dtColorsUiSurfaceBaseRaised),
+                (srSurfaceField, dtColorsUiSurfaceBaseRaised)]
     for (role, token) in Fg:
       ck spec(role).hasFg and spec(role).fg == token
     for (role, token) in Bg:
@@ -654,25 +659,32 @@ suite "CTUI-11 Tier 1: degraded style tables":
           inactiveFg = span.style.fg
       checkpoint("tabs: active " & activeFg & " on " & activeBg &
                  ", inactive " & inactiveFg & " on " & inactiveBg)
-      # PLAT-47: both on the pane's surface, as the desktop's strip measures…
-      ck activeBg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark)
-      ck inactiveBg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark)
-      # …and told apart by their FOREGROUNDS (the label tier for the active
-      # tab, the disabled tier for the rest), which is the only colour the
-      # painter's role choice now moves.
-      ck activeFg == tokenHex(dtColorsUiTextPrimaryLabel, dmDark)
+      # PLAT-49 (the user's direction over PLAT-47's single measured
+      # ground): the selected tab on a background AND in a foreground of its
+      # own, the others on the strip's own ground in the disabled tier.
+      ck activeBg == tokenHex(dtColorsUiSurfacePrimaryTertiary, dmDark)
+      ck inactiveBg == tokenHex(dtColorsUiSurfaceBaseRaised, dmDark)
+      ck activeFg == tokenHex(dtColorsUiTextPrimaryHeadings, dmDark)
       ck inactiveFg == tokenHex(dtColorsUiTextPrimaryDisabled, dmDark)
-    # A PANE sits on the panel surface — its title row as much as its body —
-    # and the header on its card: the shell's fills, read off the emitter.
-    var paneRow = -1
-    for i in 0 ..< truecolor.len:
-      if rowText(truecolor[i]).contains("CALL STACK") or
-         rowText(truecolor[i]).contains("CALL TRACE"):
-        paneRow = i
-    ck paneRow > 0
-    if paneRow > 0:
-      ck truecolor[paneRow][0].style.bg ==
-         tokenHex(dtColorsUiSurfaceBasePanel, dmDark)
+    # A PANE's body sits on the panel surface, and the header on its card:
+    # the shell's fills, read off the emitter. (The row under the Variables
+    # tab strip: the pane's first content row.)
+    let paneRow = tabRow + 1
+    ck paneRow > 1
+    if paneRow > 1:
+      # EVERY blank run of that row — each pane's empty cells, which no
+      # painter writes — is on the panel surface: the shell's fill, not the
+      # canvas showing through. (Single blank cells are a painted row's own
+      # separators — the selected call-stack row carries its highlight in
+      # them — and are not the pane's empty space.)
+      var blank = 0
+      var onPanel = 0
+      for span in truecolor[paneRow]:
+        if span.text.strip.len == 0 and span.text.len >= 2:
+          inc blank
+          if span.style.bg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark):
+            inc onPanel
+      ck blank > 0 and onPanel == blank
     ck truecolor[0][0].style.bg == tokenHex(dtColorsUiSurfaceBaseCard, dmDark)
     # …and under `--palette=terminal` the same screen carries NO 24-bit and no
     # indexed colour at all — only the sixteen names and the default.

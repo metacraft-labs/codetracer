@@ -95,6 +95,7 @@ import codetracer_embed
 
 import ./app/shell
 import ./app/leaves
+from ../../common/view_vocabulary/layout_questions import trPaneTitle
 import ./app/pane_names
 import ./app/edit_arm
 import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
@@ -124,7 +125,8 @@ OPTIONS:
   --window-ops=<spec>
                     PLAT-48, with `--report-window-plan`. A comma-separated
                     list of window events, dispatched through the window's
-                    OWN pointer and key handlers:
+                    OWN pointer and key handlers (in an Edit window a
+                    key reaches the editor, which holds the focus):
                       key:<key>[:<mod>+<mod>]   press:<x>:<y>
                       move:<x>:<y>              release:<x>:<y>
                     and the same events aimed at a part of the window by
@@ -492,6 +494,11 @@ type
 
 var
   openArm: GpuiEditArm = nil
+  gEditorTab = ""
+    ## PLAT-49: what the editor's lone tab says — the open file's name, with
+    ## " ●" while an Edit buffer is modified (`product_mode.editorTabLabel`,
+    ## the terminal's answer too). "" until a file is open: the tab then
+    ## names the pane.
     ## PLAT-44. The open document of an EDIT-mode window, or nil in a replay
     ## window. Module-level for the root builder's reason above.
   editPane: GpuiElement = nil
@@ -600,6 +607,23 @@ var editArmed = false
   ## Whether the editor pane already has its listener — the headless
   ## `--edit-keys` path arms it before the window builder would.
 
+proc drawArrangement(r: GpuiRenderer): bool
+proc windowDrawn(): bool
+
+proc noteEditorTab(r: GpuiRenderer; label: string) =
+  ## The editor's tab names `label` from now on; the arrangement is redrawn
+  ## when that changes it (a step into another file, the first unsaved edit,
+  ## a save), because a tab's width is part of the geometry.
+  if label == gEditorTab:
+    return
+  gEditorTab = label
+  if windowDrawn():
+    discard drawArrangement(r)
+
+proc isHeading(node: GpuiElement): bool =
+  ## Whether `node` is a leaf's heading (`leaves.paneTitleElement`).
+  not node.isNil and getAttribute(node, TextRoleAttribute) == $trPaneTitle
+
 proc findEditorPane(root: GpuiElement): GpuiElement =
   ## The editor leaf: the pane `renderEditor` stamped with the medium
   ## attribute. Read back out of the tree rather than remembered, for the
@@ -622,28 +646,30 @@ proc redrawEditor() =
   ## append is a shadow-tree mutation, which is what asks the shim to repaint.
   if openArm.isNil or editPane.isNil: return
   var r: GpuiRenderer
-  while childCount(editPane) > 1:
+  # A window strips the heading (PLAT-49); the headless `--edit-keys` path
+  # draws no window chrome and keeps it.
+  let keep = if childCount(editPane) > 0 and
+                isHeading(nthChild(editPane, 0)): 1 else: 0
+  while childCount(editPane) > keep:
     r.removeChild(editPane, nthChild(editPane, childCount(editPane) - 1))
   discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
                        openArm.surfaceOf(editViewportRows))
+  noteEditorTab(r, editorTabLabel(openArm.path, openArm.isDirty))
 
 proc cancelWindowGesture(): bool
   ## PLAT-47: `Esc` during a layout gesture (defined with the gestures below).
 
-proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
-  ## The editor pane's `keydown` listener. Built by a separate proc so `el`
-  ## is captured by value — `probeHandler`'s recorded defect.
-  result = proc(ev: GpuiEvent) =
-    discard ev
-    if openArm.isNil or el.lastEventKind() != gekKeyDown: return
-    let key = el.lastEventKey()
-    # PLAT-47: `Esc` cancels a layout gesture in flight, and is not typed.
-    if key.toLowerAscii in ["escape", "esc"] and cancelWindowGesture():
-      return
+proc editKey(key: string; mods: seq[string]) =
+  ## One key of an EDIT window's editor pane: its `keydown` listener's body,
+  ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
+  ## holds the focus there).
+  if openArm.isNil: return
+  # PLAT-47: `Esc` cancels a layout gesture in flight, and is not typed.
+  if key.toLowerAscii in ["escape", "esc"] and cancelWindowGesture():
+    return
+  block:
     let started = epochTime()
-    let applied = openArm.applyGpuiKey(key,
-      modifierNamesOf(el.lastEventModifiers()),
-      int64(started * 1000))
+    let applied = openArm.applyGpuiKey(key, mods, int64(started * 1000))
     if applied.outcome != eoIgnored or applied.saved or
        openArm.status.len > 0:
       redrawEditor()
@@ -657,6 +683,14 @@ proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
                        ffDecimal, 1) & "ms")
     if probeSentinel.len > 0 and key == probeSentinel:
       gpui_quit()
+
+proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
+  ## The editor pane's `keydown` listener. Built by a separate proc so `el`
+  ## is captured by value — `probeHandler`'s recorded defect.
+  result = proc(ev: GpuiEvent) =
+    discard ev
+    if openArm.isNil or el.lastEventKind() != gekKeyDown: return
+    editKey(el.lastEventKey(), modifierNamesOf(el.lastEventModifiers()))
 
 proc armEditorPane(r: GpuiRenderer) =
   ## Focus the editor pane and give it the key listener. Once.
@@ -701,6 +735,11 @@ var
   gestureTrace = getEnv("CODETRACER_GPUI_GESTURE_TRACE", "") == "1"
     ## One stderr line per gesture step, for a window lane's record.
 
+proc windowDrawn(): bool =
+  ## Whether the window's arrangement has been drawn (so a redraw has a root
+  ## to draw into).
+  not gRoot.isNil and not gShell.isNil
+
 const
   DropTintAlpha = "59"
     ## 0.35 of 255: the translucent quad over the region a drop would take —
@@ -744,14 +783,8 @@ proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int) =
   r.setStyle(pane, "flex-direction", "column")
   r.setStyle(pane, "padding", $ChromePaddingPx & "px")
   r.setStyle(pane, "rounded", "4px")
-  # The heading, when the leaf drew one. `leaves.renderLeaf` appends it
-  # first, so index 0 is it — and a leaf that drew no heading (a refusal,
-  # or an unloaded extension) has a text node there instead, which takes
-  # no style and is harmless.
-  if childCount(pane) > 0:
-    let heading = nthChild(pane, 0)
-    if not heading.isNil:
-      r.setStyle(heading, "color", chromeOf(crPaneTitleForeground))
+  # (No heading to colour since PLAT-49: the window strips it, and the
+  # pane's tab strip names the pane.)
 
 proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
   ## One node of the geometry, as elements sized exactly as it says.
@@ -792,9 +825,12 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
       r.setStyle(strip, "padding-left", $StripInsetPx & "px")
       r.setStyle(strip, "height", $TabStripPx & "px")
       r.setStyle(strip, "items", "center")
-      # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), as the desktop's:
-      # every tab on the pane's surface, the active one in the label tier
-      # and bold, the others in the disabled tier — no brackets, no rule.
+      # PLAT-49: the strip on its own ground, distinct from the pane body.
+      for (key, value) in stripStyle():
+        r.setStyle(strip, key, value)
+      # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), no brackets, no
+      # rule — and, by the user's direction (PLAT-49), the selected tab on a
+      # background and in a foreground of its own, the others on the strip's.
       # Each tab is exactly as wide as the geometry says, so a click and a
       # drop caret land where the tab is drawn.
       for t, label in n.labels:
@@ -929,8 +965,29 @@ proc drawOverlay(r: GpuiRenderer) =
       let parent = r.parentNode(pane)
       if not parent.isNil:
         r.removeChild(parent, pane)
+      # PLAT-49: the revealed pane is named by a one-tab strip, as every pane
+      # box is (the leaf draws no heading in the window).
+      let label = labelOf($gGestures.reveal.pane)
+      let strip = r.createElement("div")
+      r.setAttribute(strip, "data-ct-tabs", label)
+      r.setStyle(strip, "flex-direction", "row")
+      r.setStyle(strip, "flex-shrink", "0")
+      r.setStyle(strip, "padding-left", $StripInsetPx & "px")
+      r.setStyle(strip, "height", $TabStripPx & "px")
+      r.setStyle(strip, "items", "center")
+      for (key, value) in stripStyle(): r.setStyle(strip, key, value)
+      let tab = r.createElement("div")
+      r.setAttribute(tab, "data-ct-tab-active", "true")
+      r.setStyle(tab, "width", $tabWidthPx(label) & "px")
+      r.setStyle(tab, "flex-shrink", "0")
+      r.setStyle(tab, "padding-left", $TabPadPx & "px")
+      r.setStyle(tab, "white-space", "nowrap")
+      for (key, value) in tabStyle(true): r.setStyle(tab, key, value)
+      r.appendChild(tab, r.createTextNode(label))
+      r.appendChild(strip, tab)
+      r.appendChild(box, strip)
       stylePaneBox(r, pane, rect.w - 2 * FocusOutlinePx,
-                   rect.h - 2 * FocusOutlinePx)
+                   max(1, rect.h - 2 * FocusOutlinePx - TabStripPx))
       r.appendChild(box, pane)
       gOverlay.add box
   let ind = gGestures.indication()
@@ -988,6 +1045,7 @@ proc writeGeometry() =
     of gnTabs:
       j["kind"] = %"tabs"
       j["panes"] = %n.panes
+      j["labels"] = %n.labels
       j["active"] = %n.active
       j["strip"] = rect(n.strip)
       j["body"] = rect(n.body)
@@ -1030,7 +1088,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   if projection.status == dpsRefused:
     return false
   gGeom = windowGeometryOf(layout, projection.state, pendingViewportWidth,
-                           pendingViewportHeight, GpuiTopBandPx)
+                           pendingViewportHeight, GpuiTopBandPx,
+                           @[($paneEditor, gEditorTab)])
   if gGeom.root < 0:
     return false
   # The leaves are MOVED into the new arrangement, never rebuilt.
@@ -1064,6 +1123,31 @@ proc applyGestureCommand(r: GpuiRenderer; cmd: LayoutCommand) =
       stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
                        failed)
 
+proc stripHeading(r: GpuiRenderer; pane: GpuiElement) =
+  ## PLAT-49 (the user, 2026-10-01): NO TITLE ROW INSIDE A PANE. Every pane
+  ## box has a tab strip naming it (`window_geometry`), so the window removes
+  ## the heading `leaves.renderLeaf` builds as a leaf's first child. The
+  ## leaves keep building it — `--report-plan`, the arrangement suites and
+  ## four harnesses' controls read the leaf tree as it is — and the WINDOW
+  ## does not show it.
+  if not pane.isNil and childCount(pane) > 0 and isHeading(nthChild(pane, 0)):
+    r.removeChild(pane, nthChild(pane, 0))
+
+proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
+  ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
+  ## that procedure keeps its node's FIRST child as the heading and redraws
+  ## the rest, so the old content is cleared first and a stand-in first child
+  ## held while it runs, then dropped — the pane is left with exactly the
+  ## content `renderPaneView` drew.
+  if pane.isNil:
+    return
+  while childCount(pane) > 0:
+    r.removeChild(pane, nthChild(pane, childCount(pane) - 1))
+  let stand = r.createElement("div")
+  r.appendChild(pane, stand)
+  redrawLeafBody(r, pane, leaf)
+  r.removeChild(pane, stand)
+
 proc calltraceHeading(): string =
   ## The call-trace pane's title: its name and the WHOLE trace's call count,
   ## the terminal's `Call Trace N call(s)` (the pane holds one section).
@@ -1079,7 +1163,7 @@ proc redrawCalltrace(r: GpuiRenderer) =
     return
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == paneCalltrace:
-      redrawLeafBody(r, pane, leaf, calltraceHeading())
+      redrawWindowLeaf(r, pane, leaf)
       break
 
 proc scrollCalltrace(r: GpuiRenderer; rows: int) =
@@ -1092,10 +1176,10 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
   let i = gGeom.tabsNodeOfPane($paneCalltrace)
   if i < 0:
     return
-  # The rows the pane shows: its body inside the pane's padding and below
-  # its heading row, at the row pitch.
-  let body = max(1, (gGeom.nodes[i].body.h - 2 * ChromePaddingPx -
-                     CalltraceRowPx) div CalltraceRowPx)
+  # The rows the pane shows: its body inside the pane's padding, at the row
+  # pitch (no heading row since PLAT-49; the tab strip is outside the body).
+  let body = max(1, (gGeom.nodes[i].body.h - 2 * ChromePaddingPx) div
+                    CalltraceRowPx)
   let page = gSession.pageCalltrace(body, rows)
   if page.loaded:
     inc gCalltraceLoads
@@ -1279,8 +1363,8 @@ proc absBox(r: GpuiRenderer; rect: PxRect; bg = ""): GpuiElement =
     r.setStyle(result, "background-color", bg)
 
 proc pinButtonRect(n: GeomNode): PxRect =
-  ## The PIN button of a pane box: the right end of its tab strip (or of its
-  ## heading row, for a bare pane).
+  ## The PIN button of a pane box: the right end of its tab strip (every
+  ## pane box has one since PLAT-49).
   let top = if n.strip.isEmpty: n.body.y else: n.strip.y
   PxRect(x: n.rect.x + n.rect.w - PinButtonPx - 2, y: top + 3,
          w: PinButtonPx, h: TabStripPx - 6)
@@ -1319,7 +1403,6 @@ proc drawTopBar(r: GpuiRenderer) =
   r.setStyle(band, "rounded", "4px")
   gTopEls.add band
   let enabled = controlsEnabled()
-  let openAt = if gMenu.isOpen and gMenu.path.len > 0: gMenu.path[0] else: -1
   for sg in gTopLayout.segs:
     case sg.part
     of gtMenuButton:
@@ -1328,17 +1411,6 @@ proc drawTopBar(r: GpuiRenderer) =
       r.setStyle(b, "padding-left", $TabPadPx & "px")
       for (k, v) in tabStyle(gMenu.isOpen): r.setStyle(b, k, v)
       r.appendChild(b, r.createTextNode("≡"))
-      gTopEls.add b
-    of gtMenuTitle:
-      let active = openAt == sg.index or
-                   (gMenu.isOpen and gMenu.path.len == 0 and
-                    gMenu.highlight == sg.index)
-      let b = absBox(r, sg.rect)
-      r.setAttribute(b, "data-ct-menu-title", gMenu.root.children[sg.index].label)
-      r.setAttribute(b, "data-ct-tab-active", $active)
-      r.setStyle(b, "padding-left", $TabPadPx & "px")
-      for (k, v) in tabStyle(active): r.setStyle(b, k, v)
-      r.appendChild(b, r.createTextNode(gMenu.root.children[sg.index].label))
       gTopEls.add b
     of gtControl:
       let on = sg.index < enabled.len and enabled[sg.index]
@@ -1355,18 +1427,32 @@ proc drawTopBar(r: GpuiRenderer) =
       r.appendChild(b, icon)
       gTopEls.add b
     of gtOmnibar:
-      let b = absBox(r, sg.rect, chromeOf(crWindowBackground))
+      # PLAT-49: AN INPUT BOX on the input surface; empty, it shows the
+      # Omnibar ViewModel's placeholder — the desktop's and the terminal's
+      # words — and open, the query with its caret (a thin bar while
+      # inserting, a block while overwriting) where the ViewModel's
+      # `cursor` is.
+      let b = absBox(r, sg.rect, chromeOf(crInputBackground))
       r.setAttribute(b, "data-ct-omnibar", $gOmnibar.isOpen)
       r.setStyle(b, "padding-left", $TabPadPx & "px")
       r.setStyle(b, "rounded", "4px")
       r.setStyle(b, "white-space", "nowrap")
       r.setStyle(b, "overflow", "hidden")
       let text =
-        if gOmnibar.isOpen: "⌕ " & gOmnibar.query & "▏"
-        elif gTopLayout.omnibarField: "⌕ Search files, :commands, :sym, #tick"
+        if gOmnibar.isOpen and gOmnibar.query.len > 0:
+          let c = min(gOmnibar.cursor, gOmnibar.query.len)
+          "⌕ " & gOmnibar.query[0 ..< c] &
+            (if gOmnibar.overwrite: "█" else: "▏") &
+            gOmnibar.query[c .. ^1]
+        elif gOmnibar.isOpen: "⌕ " & (if gOmnibar.overwrite: "█" else: "▏") &
+                              OmnibarPlaceholder
+        elif gTopLayout.omnibarField: "⌕ " & OmnibarPlaceholder
         else: "⌕"
-      r.setStyle(b, "color", chromeOf(if gOmnibar.isOpen: crTabActiveForeground
-                                      else: crTabInactiveForeground))
+      r.setAttribute(b, "data-ct-omnibar-placeholder",
+                     $(gOmnibar.query.len == 0))
+      r.setStyle(b, "color", chromeOf(
+        if gOmnibar.isOpen and gOmnibar.query.len > 0: crTabActiveForeground
+        else: crTabInactiveForeground))
       r.appendChild(b, r.createTextNode(text))
       gTopEls.add b
     of gtTab:
@@ -1518,7 +1604,6 @@ proc topBarGeometry(): JsonNode =
     for sg in gTopLayout.segs:
       var label = ""
       case sg.part
-      of gtMenuTitle: label = gMenu.root.children[sg.index].label
       of gtControl: label = TransportControls[sg.index].id
       else: discard
       segs.add %*{"part": $sg.part, "index": sg.index, "label": label,
@@ -1572,16 +1657,16 @@ proc refreshReplayWindow(r: GpuiRenderer) =
       budget = gpuiRowBudget(),
       medium = GpuiMedium,
       points = editorPointsOf(gSession.session.store.pointList.rows.val))
-    while childCount(editor) > 1:
+    # No heading in the window (PLAT-49): every child is the editor's own.
+    while childCount(editor) > 0:
       r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
     discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface)
+    noteEditorTab(r, editorTabLabel(surface.path, false))
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin != paneEditor:
       let pane = gPanes.getOrDefault($leaf.builtin)
       if not pane.isNil and not leaf.vm.isNil:
-        redrawLeafBody(r, pane, leaf,
-                       (if leaf.builtin == paneCalltrace: calltraceHeading()
-                        else: ""))
+        redrawWindowLeaf(r, pane, leaf)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu))
   drawTopBar(r)
@@ -1716,6 +1801,12 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     of "up": gOmnibar.moveSelection(-1)
     of "down": gOmnibar.moveSelection(1)
     of "backspace": gOmnibar.backspace()
+    of "delete": gOmnibar.deleteForward()
+    of "left": gOmnibar.moveCursor(-1)
+    of "right": gOmnibar.moveCursor(1)
+    of "home": gOmnibar.cursorHome()
+    of "end": gOmnibar.cursorEnd()
+    of "insert": gOmnibar.toggleOverwrite()
     of "space": gOmnibar.typeText(" ")
     else:
       if key.len == 1 and not ctrl:
@@ -1725,7 +1816,8 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     drawTopBar(r)
     return true
   if gMenu.isOpen:
-    let bar = gTopLayout.menuExpanded
+    # The desktop's cascade (PLAT-49): Up/Down within the open level, Right
+    # (or Enter) into a folder's submenu, Left back out, Esc out and closed.
     case k
     of "escape", "esc": gMenu.escape()
     of "m":
@@ -1736,18 +1828,10 @@ proc handleTopKey(r: GpuiRenderer; key: string;
       if act.ran:
         runGpuiMenuAction(r, act.action)
         return true
-    of "up":
-      if not (bar and gMenu.path.len == 0): gMenu.moveHighlight(-1)
-    of "down":
-      if bar and gMenu.path.len == 0: discard gMenu.enterFolder()
-      else: gMenu.moveHighlight(1)
-    of "right":
-      if bar and gMenu.path.len == 0: gMenu.moveHighlight(1)
-      elif not gMenu.enterFolder() and bar: gMenu.siblingMenu(1)
-    of "left":
-      if bar and gMenu.path.len == 0: gMenu.moveHighlight(-1)
-      elif bar and gMenu.path.len == 1: gMenu.siblingMenu(-1)
-      else: discard gMenu.leaveFolder()
+    of "up": gMenu.moveHighlight(-1)
+    of "down": gMenu.moveHighlight(1)
+    of "right": discard gMenu.enterFolder()
+    of "left": discard gMenu.leaveFolder()
     else:
       if key.len == 1 and not ctrl:
         gMenu.typeToSelect(key, int64(epochTime() * 1000))
@@ -1842,11 +1926,6 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
   case hit.part
   of gtMenuButton:
     if gMenu.isOpen: gMenu.close() else: gMenu.open(keyboard = false)
-  of gtMenuTitle:
-    if gMenu.isOpen and gMenu.path.len > 0 and gMenu.path[0] == hit.index:
-      gMenu.close()
-    else:
-      gMenu.openFolder(hit.index, keyboard = false)
   of gtControl:
     performControl(r, TransportControls[hit.index].id)
     return true
@@ -1915,7 +1994,7 @@ proc vcsTick() {.cdecl.} =
        not leaf.vm.isNil:
       if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
         var r: GpuiRenderer
-        redrawLeafBody(r, gPanes.getOrDefault($paneVcs), leaf)
+        redrawWindowLeaf(r, gPanes.getOrDefault($paneVcs), leaf)
         traceGesture("vcs refreshed")
       break
 
@@ -1986,6 +2065,7 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   for pane in leaves:
     let id = getAttribute(pane, "data-ct-pane")
     if id.len > 0 and id notin gPanes: gPanes[id] = pane
+    stripHeading(r, pane)
   proc stylePane(pane: GpuiElement; w, h: int) =
     stylePaneBox(r, pane, w, h)
     # PLAT-38 — THE INPUT PROBE. The first pane is declared FOCUSABLE and is
@@ -2156,18 +2236,32 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     case parts[0]
     of "key":
       let mods = if parts.len > 2: parts[2].split('+') else: @[]
-      windowKey(parts[1], mods)
+      # An edit window's keys reach its editor (which holds the focus); a
+      # replay window's, its top bar and gestures.
+      if openArm.isNil: windowKey(parts[1], mods)
+      else: editKey(parts[1], mods)
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
     of "menu":
-      for sg in gTopLayout.segs:
-        if sg.part == gtMenuTitle and
-           gMenu.root.children[sg.index].label == parts[1]:
-          let (x, y) = centreOf(sg.rect)
+      # PLAT-49: the desktop's menu — press the root button (when the menu
+      # is not open), then the first-level item `parts[1]` in its popover,
+      # which opens that folder's submenu beside it.
+      if not gMenu.isOpen:
+        let (bx, by) = centreOf(gTopLayout.segOf(gtMenuButton).rect)
+        pressAt(bx, by)
+      let pops = gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
+                                  pendingViewportHeight)
+      if pops.len == 0:
+        return "the menu did not open"
+      let levels = gMenu.openLevels()
+      for row in pops[0].rows:
+        if row.item >= 0 and levels.len > 0 and
+           levels[0].items[row.item].label == parts[1]:
+          let (x, y) = centreOf(row.rect)
           pressAt(x, y)
           return ""
-      return "no menu title '" & parts[1] & "' in the band"
+      return "no first-level menu '" & parts[1] & "' in the root popover"
     of "control":
       for sg in gTopLayout.segs:
         if sg.part == gtControl and TransportControls[sg.index].id == parts[1]:
@@ -2388,6 +2482,7 @@ proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
   if preference.status == kplRefused:
     openArm.status = preference.message
   editViewportRows = rows
+  gEditorTab = editorTabLabel(openArm.path, openArm.isDirty)
   openArm.surfaceOf(editViewportRows)
 
 proc runEdit(cmd: GpuiCommand): int =
@@ -2700,6 +2795,7 @@ proc runOpen(cmd: GpuiCommand): int =
     budget = gpuiRowBudget(),
     medium = GpuiMedium,
     points = points)
+  gEditorTab = editorTabLabel(surface.path, false)
 
   var r: GpuiRenderer
   var leafSet = shell.leavesFor(windowId)

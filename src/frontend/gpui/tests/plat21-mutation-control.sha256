@@ -12,7 +12,7 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16).
 9ac0078ecfb9ac88e2410d2a4abd96cfc3947ba7d33c6f466edf7abf494aadfd  src/frontend/view_vocabulary/gpui_binding.nim
 307b80ab93480368cd2ae3b124c99681460fd3b6ac119f9598bed86548361407  src/frontend/view_vocabulary/fact_reader.nim
-5562dc8d0c4972e46bf7692464724b9c7a0fedcb623760b4f87e140320b1e45f  src/frontend/view_vocabulary/pane_views.nim
+a8199eb980e757178fc2eaff87742252bb7af926a26cbd64763430605ea319a0  src/frontend/view_vocabulary/pane_views.nim
 e6cbb30b6b657c1e14ab3965b10398a6bdfc236a423ef52366a45a96b38ac558  src/common/view_vocabulary/gpui_gaps.nim
 0eaaa7811ee5fe56cce87e800ecf2c3bfe94c681140304596601c1234d7712cd  src/common/view_vocabulary/mappings.nim
 4469367e1543f8cdc4923b86d9a46dd0561c0f7c65c23701141b4ecdde9368ac  src/common/value_presentation/surfaces.nim

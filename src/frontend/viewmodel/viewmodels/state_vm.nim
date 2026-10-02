@@ -51,6 +51,20 @@ type
     stGlobals  ## Global / module-level variables
     stWatches  ## User-defined watch expressions
 
+  VariableCategory* = enum
+    ## PLAT-49 finding 12. WHICH GROUP A VARIABLE ROW BELONGS TO, as a value
+    ## every front-end reads: the desktop and GPUI show one group at a time
+    ## (`StateTab`), the terminal lists the groups one after another and marks
+    ## each ROW with its category (a one-letter tag, colour-coded) instead of
+    ## spending a row on a separator per group. Declaration order is the order
+    ## the groups are listed in.
+    vcLocal = "local"
+    vcArgument = "argument"
+    vcGlobal = "global"
+    vcReturnValue = "return value"
+    vcRegister = "register"
+    vcWatch = "watch"
+
   ValueHistoryRow* = object
     ## One row of a variable's value history, already reduced to the
     ## two fields the panel renders.
@@ -238,6 +252,16 @@ type
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
+
+const
+  VariableCategoryTags*: array[VariableCategory, string] =
+    ["L", "A", "G", "R", "X", "W"]
+    ## The one-letter tag a row of each category carries where a front-end
+    ## lists the categories together (the terminal): Local, Argument, Global,
+    ## Return value, a register (X — R is taken by return values), Watch.
+
+func categoryTag*(c: VariableCategory): string =
+  VariableCategoryTags[c]
 
 proc selectTab*(vm: StateVM; tab: StateTab) =
   ## Switch to a different tab. The `currentVariables` memo updates

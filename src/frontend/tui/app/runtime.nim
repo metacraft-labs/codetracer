@@ -917,7 +917,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   let geometry = rt.layoutGeometry()
   let acted = binding.onMouse(geometry, event)
   outcome.detail = acted.message
-  rt.note(acted.message)
+  # PLAT-49 (the user, 2026-10-01): A PLAIN CLICK SAYS NOTHING. What the
+  # layout did — a drag's progress, a drop, a resize, a reveal — goes on the
+  # status line; a report that did nothing to the layout (`lasNoGesture`: a
+  # click that only focused a pane, a press that marked a tab, a release
+  # with no drag) does not, so clicking around a pane never shows drag
+  # messages like "release with no drag in flight".
+  if acted.status != lasNoGesture:
+    rt.note(acted.message)
   # PLAT-47: A WHEEL OVER THE CALL TRACE'S BODY SCROLLS IT — the hand-off
   # `lasNoGesture` exists for (the binding takes a wheel only over a tab
   # strip).
@@ -938,12 +945,10 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # and only then is the gesture's own pane carried into it.
   rt.rebuildFocus()
   discard rt.focus.focusPaneKind(binding.focus)
-  # EVERY REPORT THE BINDING WAS OFFERED REPAINTS, and that is not a shrug.
-  # `LayoutAction.message` is never empty by that type's own contract — "an
-  # unknown command reports it; it never silently does nothing" — and the
-  # message has just been written to the status line, so the screen has changed
-  # whatever the binding decided. `main.nim`'s write coalescing is what keeps a
-  # dragged pointer from costing a frame per report.
+  # EVERY REPORT THE BINDING WAS OFFERED REPAINTS: a click moves focus (and
+  # the focus outline with it), a gesture moves a tint or a ghost.
+  # `main.nim`'s write coalescing is what keeps a dragged pointer from
+  # costing a frame per report.
   outcome.repaint = true
 
 
@@ -1524,6 +1529,13 @@ proc handleOmnibarKey(rt: TuiRuntime; token: string;
   of "Up": rt.app.omnibar.moveSelection(-1)
   of "Down": rt.app.omnibar.moveSelection(1)
   of "Backspace": rt.app.omnibar.backspace()
+  # PLAT-49: the query is edited at a caret, in insert or overwrite mode.
+  of "Delete": rt.app.omnibar.deleteForward()
+  of "Left": rt.app.omnibar.moveCursor(-1)
+  of "Right": rt.app.omnibar.moveCursor(1)
+  of "Home": rt.app.omnibar.cursorHome()
+  of "End": rt.app.omnibar.cursorEnd()
+  of "Insert": rt.app.omnibar.toggleOverwrite()
   else:
     if isTextKey(name):
       rt.app.omnibar.typeText(keyCharacter(name))
@@ -1532,15 +1544,12 @@ proc handleOmnibarKey(rt: TuiRuntime; token: string;
 
 proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
                    outcome: var RuntimeOutcome) =
-  ## Every key while the menu is open belongs to it. Which key is which
-  ## ViewModel operation is this medium's: on the menu BAR (the folder titles
-  ## drawn across the row, nothing entered) `Left`/`Right` move between
-  ## titles and `Down` opens one; in a dropdown `Up`/`Down` move, `Right`
-  ## enters a folder or — on an item — moves to the next title, `Left` backs
-  ## out or moves to the previous title.
+  ## Every key while the menu is open belongs to it. The menu is the
+  ## desktop's cascade (PLAT-49): `Up`/`Down` move within the open level,
+  ## `Right` (or `Enter`) on a folder opens its submenu beside it, `Left`
+  ## backs out of a submenu, `Esc` backs out and closes at the first level.
   let vm = rt.app.menu
   let name = keyName(token)
-  let bar = shellScreenOf(rt).topBarLayout.menuExpanded
   outcome.repaint = true
   case name
   of "Esc": vm.escape()
@@ -1549,19 +1558,10 @@ proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
     let act = vm.activate()
     if act.ran:
       rt.runMenuAction(act.action, outcome)
-  of "Up":
-    if bar and vm.path.len == 0: discard
-    else: vm.moveHighlight(-1)
-  of "Down":
-    if bar and vm.path.len == 0: discard vm.enterFolder()
-    else: vm.moveHighlight(1)
-  of "Right":
-    if bar and vm.path.len == 0: vm.moveHighlight(1)
-    elif not vm.enterFolder() and bar: vm.siblingMenu(1)
-  of "Left":
-    if bar and vm.path.len == 0: vm.moveHighlight(-1)
-    elif bar and vm.path.len == 1: vm.siblingMenu(-1)
-    else: discard vm.leaveFolder()
+  of "Up": vm.moveHighlight(-1)
+  of "Down": vm.moveHighlight(1)
+  of "Right": discard vm.enterFolder()
+  of "Left": discard vm.leaveFolder()
   else:
     if isTextKey(name):
       vm.typeToSelect(keyCharacter(name), nowMs)
@@ -1633,9 +1633,16 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
           outcome.repaint = true
     if hovered != rt.app.hoveredControl:
       rt.app.hoveredControl = hovered
+      # PLAT-49: the tooltip is the ViewModel's (`transportTooltip`: label
+      # and key), drawn as a label under the control and said on the status
+      # line.
       if hovered >= 0:
         let c = TransportControls[hovered]
-        rt.note(tooltipFor(c, rt.chordOf(transportKeyAction(c.id))))
+        rt.app.hoveredTooltip = transportTooltip(
+          c.id, rt.chordOf(transportKeyAction(c.id)))
+        rt.note(rt.app.hoveredTooltip)
+      else:
+        rt.app.hoveredTooltip = ""
       outcome.repaint = true
     return true
   if event.kind != mekPress or event.button != mbLeft:
@@ -1679,11 +1686,6 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   case hit.kind
   of thMenuButton:
     if vm.isOpen: vm.close() else: vm.open(keyboard = false)
-  of thMenuTitle:
-    if vm.isOpen and vm.path.len > 0 and vm.path[0] == hit.index:
-      vm.close()
-    else:
-      vm.openFolder(hit.index, keyboard = false)
   of thControl:
     let c = TransportControls[hit.index]
     let ka = transportKeyAction(c.id)
@@ -2045,10 +2047,10 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
 
 proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
   ## How many rows `pane` has for its content on the CURRENT screen, under
-  ## its title row (and under its tab strip when it is a tab): the rectangle
-  ## `shell.paintPane` hands its painter, less the divider row a pane with a
-  ## neighbour below gives up (`shell.paneFrame`). Zero when the pane is not
-  ## on the screen.
+  ## its tab strip (every pane has one since PLAT-49, and no title row
+  ## below it): the rectangle `shell.paintPane` hands its painter, less the
+  ## divider row a pane with a neighbour below gives up (`shell.paneFrame`).
+  ## Zero when the pane is not on the screen.
   let model = rt.app.shellModel(rt.width, rt.height)
   let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
                else: model.layout
@@ -2057,8 +2059,7 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
   for region in projection.regions:
     if region.pane == pane:
       let frame = paneFrame(region.area, body)
-      let stacked = region.activeTab >= 0 and region.tabs.len > 0
-      return max(0, frame.box.height - 1 - (if stacked: 1 else: 0))
+      return max(0, frame.box.height - 1)
   0
 
 proc sourcePaneRows*(rt: TuiRuntime): int =

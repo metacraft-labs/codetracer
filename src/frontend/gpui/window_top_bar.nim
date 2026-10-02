@@ -2,8 +2,9 @@
 ## TOP BAR'S PARTS ARE, IN PIXELS, and which part a pointer is on.
 ##
 ## The window's title band holds what the desktop's caption bar holds: the
-## program menu (a `≡` button and, when the band is wide enough, the folder
-## titles), the debugger controls (the desktop's own marks), the omnibar and
+## program menu (ONE root `≡` button, as the desktop's: its first-level menus
+## are a popover inside it and every folder opens a submenu beside its row —
+## PLAT-49), the debugger controls (the desktop's own marks), the omnibar and
 ## the session tabs. The logical state is the shared ViewModels'
 ## (`MenuVM`, `OmnibarVM`, `session_tabs.tabsOf`, `TransportControls`); this
 ## module lays it out and hit-tests it, exactly as `window_geometry` does for
@@ -12,8 +13,7 @@
 ##
 ## Laid out by priority when the window is narrow: the menu button, then the
 ## controls (dropping from the end of `TextPriority`, the terminal's rule),
-## then the omnibar as an icon, then the folder titles, the omnibar's field,
-## and the tabs.
+## then the omnibar as an icon, then the omnibar's field, and the tabs.
 ##
 ## Pure: integers and the models' values, no renderer.
 
@@ -49,7 +49,6 @@ const
 type
   GTopPart* = enum
     gtMenuButton = "menu"
-    gtMenuTitle = "menu-title"
     gtControl = "control"
     gtOmnibar = "omnibar"
     gtTab = "tab"
@@ -58,13 +57,11 @@ type
     part*: GTopPart
     rect*: PxRect
     index*: int
-      ## The top-level folder's index for a title, the control's
-      ## `TransportControls` index, the tab's index.
+      ## The control's `TransportControls` index, the tab's index.
 
   GTopLayout* = object
     band*: PxRect
     segs*: seq[GTopSeg]
-    menuExpanded*: bool
     omnibarField*: bool
 
   GPopover* = object
@@ -116,12 +113,6 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
   var omniW = 0
   if take(OmnibarIconPx + PartGapPx):
     omniW = OmnibarIconPx
-  var titlesW = 0
-  if not menu.isNil:
-    for i in menu.root.visibleChildren():
-      titlesW += titlePx(menu.root.children[i].label)
-  if titlesW > 0 and take(titlesW - MenuButtonPx):
-    result.menuExpanded = true
   if omniW > 0:
     let room = avail - used
     let grow = min(OmnibarFieldPx - omniW, room)
@@ -136,17 +127,10 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
 
   # Place.
   var x = band.x
-  if result.menuExpanded:
-    for i in menu.root.visibleChildren():
-      let w = titlePx(menu.root.children[i].label)
-      result.segs.add GTopSeg(part: gtMenuTitle, index: i,
-                              rect: PxRect(x: x, y: band.y, w: w, h: band.h))
-      x += w
-  else:
-    result.segs.add GTopSeg(part: gtMenuButton,
-                            rect: PxRect(x: x, y: band.y, w: MenuButtonPx,
-                                         h: band.h))
-    x += MenuButtonPx
+  result.segs.add GTopSeg(part: gtMenuButton,
+                          rect: PxRect(x: x, y: band.y, w: MenuButtonPx,
+                                       h: band.h))
+  x += MenuButtonPx
   x += PartGapPx
   for i in shown:
     result.segs.add GTopSeg(part: gtControl, index: i,
@@ -169,7 +153,7 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
 
 proc segOf*(lay: GTopLayout; part: GTopPart; index = 0): GTopSeg =
   for s in lay.segs:
-    if s.part == part and (part notin {gtMenuTitle, gtControl, gtTab} or
+    if s.part == part and (part notin {gtControl, gtTab} or
                            s.index == index):
       return s
   GTopSeg(part: part, rect: PxRect(), index: -1)
@@ -192,19 +176,16 @@ func popoverWidth(level: MenuLevelView): int =
 
 proc gpuiMenuPopovers*(menu: MenuVM; lay: GTopLayout;
                        windowW, windowH: int): seq[GPopover] =
-  ## The open menu's popovers, outermost first: with the folder titles in
-  ## the band the top level IS the band and an entered folder drops below
-  ## its title; with the `≡` button the top level drops below the button.
-  ## Deeper levels open to the right of their parent row.
+  ## The open menu's popovers, outermost first — the desktop's menu: the
+  ## first level (File, Edit, …) drops below the root `≡` button and every
+  ## entered folder cascades to the RIGHT of the popover that holds it,
+  ## level with its parent row.
   if menu.isNil or not menu.isOpen:
     return
   let levels = menu.openLevels()
-  var x = lay.band.x
+  var x = max(lay.band.x, lay.segOf(gtMenuButton).rect.x)
   var y = lay.band.y + lay.band.h
-  if lay.menuExpanded and menu.path.len > 0:
-    x = lay.segOf(gtMenuTitle, menu.path[0]).rect.x
-  let start = if lay.menuExpanded: 1 else: 0
-  for depth in start ..< levels.len:
+  for depth in 0 ..< levels.len:
     let lv = levels[depth]
     if lv.items.len == 0:
       continue
@@ -265,7 +246,9 @@ proc gpuiOmnibarPopover*(omnibar: OmnibarVM; lay: GTopLayout;
                         h: y - (field.y + field.h) + 4), rows: rows)
 
 func controlTooltip*(i: int; chord: string): string =
-  tooltipFor(TransportControls[i], chord)
+  ## The hover popover's text: the ViewModel's tooltip for the control
+  ## (`debug_controls_vm.transportTooltip`, PLAT-49).
+  transportTooltip(TransportControls[i].id, chord)
 
 # ---------------------------------------------------------------------------
 # The window's keymap: the DESKTOP'S bindings
