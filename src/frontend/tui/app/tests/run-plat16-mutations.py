@@ -416,7 +416,7 @@ MUTATIONS = [
         "`--edit` PARSES AND SILENTLY DOES NOTHING — the exact failure "
         "`cli.PlannedOptions`' header is written against. The positional then "
         "reaches the front-end as a trace folder and the binary refuses it for "
-        "having no `trace.json`: a true diagnosis of the wrong question.\n"
+        "not being a recording: a true diagnosis of the wrong question.\n"
         "\n"
         "        THE FIRST VERSION OF THIS ARM DID NOT COMPILE (it changed the "
         "object variant's branch and left a field of the other branch behind), "

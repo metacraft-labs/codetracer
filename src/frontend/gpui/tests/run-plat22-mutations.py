@@ -303,7 +303,7 @@ ARMS = [
         CTL[UISEL][0], CTL[UISEL][1],
         "THE FLAG BECOMES DECORATION. Without `--edit` the positional reaches "
         "`codetracer-gpui` as a RECORDING, and the front-end refuses it for "
-        "having no `trace.json` — a true diagnosis of the wrong question, "
+        "not being a recording — a true diagnosis of the wrong question, "
         "which is the failure `ui-selection.md` §4.1 draws its per-front-end "
         "messages against."),
 
