@@ -510,8 +510,8 @@ suite "PLAT-1 §3: the TUI is reached by handoff":
     ck plan.frontEnd == uiTui
     ck plan.componentBin == "codetracer-tui"
     # THE FLAG IS WHAT MAKES THE POSITIONAL A PROJECT. Without it the front-end
-    # resolves the folder as a trace folder and refuses it for having no
-    # `trace.json` — a true diagnosis of the wrong question.
+    # resolves the folder as a trace folder and refuses it for not being a
+    # recording — a true diagnosis of the wrong question.
     ck plan.handoffArgs == @["--edit", "/tmp/proj"]
 
   test "PLAT-16: `ct edit --ui=tui --headless` is refused, naming both":

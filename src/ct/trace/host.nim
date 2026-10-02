@@ -1,10 +1,12 @@
 import
-  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets, strtabs ],
+  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets, strtabs, sequtils ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   session_import,
   ctfs_sources,
   source_paths,
+  trace_container,
+  trace_kind,
   ../utilities/language_detection,
   ../online_sharing/mcr_enrichment
 
@@ -263,7 +265,7 @@ proc materializeImportedTracePath(tempDir, sourcePath, payloadPath: string): boo
   let effectiveSourcePath =
     if safeFileExists(sourcePath):
       sourcePath
-    elif payloadFileName in ["trace.bin", "trace.json"] and
+    elif payloadFileName in MATERIALIZED_TRACE_EVENT_FILES and
         safeFileExists(tempDir / payloadFileName):
       tempDir / payloadFileName
     else:
@@ -317,7 +319,7 @@ proc normalizeImportedTracePaths(tempDir: string) =
       continue
 
     let rawFileName = rawPath.replace('\\', '/').extractFilename
-    if rawFileName in ["trace.bin", "trace.json"] and safeFileExists(tempDir / rawFileName):
+    if rawFileName in MATERIALIZED_TRACE_EVENT_FILES and safeFileExists(tempDir / rawFileName):
       normalizedPaths.add(rawFileName)
       continue
 
@@ -461,8 +463,8 @@ proc importTraceFolder(traceFolderPath: string): string =
   ## * a `.ct` CTFS container; metadata comes from its internal
   ##   `meta.dat` (M-REC-1.5 — the `trace_db_metadata.json` sidecar that
   ##   used to duplicate it is not accepted);
-  ## * a materialized `runtime_tracing` directory (`trace.json` /
-  ##   `trace.bin` plus its sidecars) as written by ``ct record-web``.
+  ## * a legacy materialized `runtime_tracing` directory (`trace.bin`
+  ##   plus its sidecars).
   ##
   ## If the folder contains an MCR trace (.ct file with CTFS magic),
   ## enrichment via `ct-mcr export --portable` is attempted first
@@ -621,21 +623,27 @@ proc findMaterializedTraceFolder(path: string): string =
 
 proc dirHasLegacyMaterializedTrace(dir: string): bool =
   ## A legacy `runtime_tracing` materialized trace folder carries
-  ## `trace_metadata.json` plus a `trace.json` or `trace.bin` payload.
-  ## The CTFS reader (`db-backend`) still opens these via its
-  ## `from_events` path — see `dap_server.rs` "legacy runtime_tracing
-  ## materialized trace" branch — even though the CTFS-only import
-  ## machinery (M-REC-1.5) does not.  `ct host` therefore must be able
-  ## to register such a folder so the hostable materialized-artifact
-  ## flow (Observability M29/M34) keeps working for these traces.
+  ## `trace_metadata.json` plus a `trace.bin` payload.  The db-backend
+  ## still opens these via its `from_events` path even though the
+  ## CTFS-only import machinery (M-REC-1.5) does not, so `ct host` must be
+  ## able to register such a folder for the hostable materialized-artifact
+  ## flow (Observability M29/M34).
   if not fileExists(dir / "trace_metadata.json"):
     return false
-  fileExists(dir / "trace.json") or fileExists(dir / "trace.bin")
+  MATERIALIZED_TRACE_EVENT_FILES.anyIt(fileExists(dir / it))
 
-proc findLegacyMaterializedTraceFolder(path: string): string =
+proc refuseTestOracleOutput(dir: string) =
+  ## Raise when `dir` holds test-oracle output rather than a recording, so
+  ## the user is told what the folder is instead of "not a hostable trace".
+  if fileExists(dir / TestOracleTraceFileName):
+    raise newException(ValueError, testOracleRefusal(dir))
+
+proc findLegacyMaterializedTraceFolder*(path: string): string =
   ## Resolve `path` to a directory holding a legacy materialized trace
-  ## (`trace_metadata.json` + `trace.json`/`trace.bin`).  Mirrors
+  ## (`trace_metadata.json` + `trace.bin`).  Mirrors
   ## `findMaterializedTraceFolder` but for the pre-CTFS sidecar layout.
+  ## Raises `ValueError` when the folder (or the one recording below it)
+  ## is test-oracle `trace.json` output.
   if path.len == 0:
     return ""
   let fullPath = try:
@@ -646,15 +654,17 @@ proc findLegacyMaterializedTraceFolder(path: string): string =
   if isDir:
     if dirHasLegacyMaterializedTrace(fullPath):
       return fullPath
+    refuseTestOracleOutput(fullPath)
     for entry in walkDir(fullPath):
-      if entry.kind in {pcDir, pcLinkToDir} and
-          dirHasLegacyMaterializedTrace(entry.path):
-        return entry.path
+      if entry.kind in {pcDir, pcLinkToDir}:
+        if dirHasLegacyMaterializedTrace(entry.path):
+          return entry.path
+        refuseTestOracleOutput(entry.path)
   ""
 
 proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   ## Register a legacy `runtime_tracing` materialized trace folder
-  ## (`trace_metadata.json` + `trace.json`/`trace.bin` + `trace_paths.json`)
+  ## (`trace_metadata.json` + `trace.bin` + `trace_paths.json`)
   ## into `trace_index.db` so `ct host` can serve it.
   ##
   ## M-REC-1.5 retired the JSON-sidecar path inside `importTrace`, which
@@ -740,7 +750,7 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   const ctfsVersionMin = 2'u8
   const ctfsVersionMax = 4'u8
   if not fileExists(outputFolder / "trace.ct"):
-    for payloadName in ["trace.bin", "trace.json"]:
+    for payloadName in MATERIALIZED_TRACE_EVENT_FILES:
       let payloadPath = outputFolder / payloadName
       if fileExists(payloadPath):
         var isCtfsContainer = false
@@ -977,7 +987,9 @@ proc materializedPayloadFileName(obj: JsonNode): string =
     if relative.len > 0: relative
     else: obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "uri", "path", "object_id"])
   let fileName = raw.replace('\\', '/').splitFile.name & raw.replace('\\', '/').splitFile.ext
-  if fileName in ["trace.bin", "trace.json"]:
+  if fileName == TestOracleTraceFileName:
+    raise newException(ValueError, testOracleRefusal(raw))
+  if fileName in MATERIALIZED_TRACE_EVENT_FILES:
     return fileName
   if raw.endsWith(".ct"):
     return "materialized.ct"
@@ -1183,7 +1195,7 @@ proc resolveSharedManifest(
         result.recordingId = importTraceFolder(traceFolder)
     else:
       # No CTFS container present: fall back to a legacy `runtime_tracing`
-      # materialized folder (trace_metadata.json + trace.json/trace.bin)
+      # materialized folder (trace_metadata.json + trace.bin)
       # before reaching for the storage-protocol path, so a local
       # materialized_artifact manifest works without --storage-base-url.
       let legacyFolder = findLegacyMaterializedTraceFolder(path)

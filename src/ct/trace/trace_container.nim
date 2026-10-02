@@ -7,24 +7,15 @@
 ## ``trace_db_metadata.json`` sidecar that used to duplicate its
 ## metadata.
 ##
-## It is however **not** the only shape the product replays.  The
-## browser recorder — ``ct record-web``, implemented in
-## ``src/backend-manager`` — writes the *materialized* `runtime_tracing`
-## shape straight to disk:
-##
-## ```
-##   <recording>/
-##     trace.json            # runtime_tracing event stream (or trace.bin)
-##     trace_metadata.json   # {"program", "args", "workdir", "recorder"}
-##     trace_paths.json      # ["<absolute source path>", ...]
-## ```
-##
-## The Rust replay engine reads that shape natively — see
-## ``db-backend/src/dap_server.rs::auto_detect_materialized_trace_file``
-## and ``legacy_materialized_trace_file_in_dir`` — which is why the
-## headless DAP suites replay browser recordings today.  Only the Nim
-## importer refused them, so a browser recording could be replayed by
-## every test in the repo yet never opened by the GUI.
+## Two other shapes reach this module.  A legacy *materialized*
+## `runtime_tracing` folder holds a ``trace.bin`` event stream beside a
+## ``trace_metadata.json`` / ``trace_paths.json`` pair; the Rust replay
+## engine still reads it (``db-backend/src/dap_server.rs::
+## legacy_materialized_trace_file_in_dir``), so the importer accepts it
+## too.  A folder holding a ``trace.json`` event stream is *test-oracle
+## output* from the pure Python and Ruby recorders, compared against
+## ``ct print`` and never opened: it is refused by name
+## (``trace_kind.TestOracleOutputError``).
 ##
 ## This module is the single place that answers "what kind of recording
 ## is this folder?", so ``importTrace`` and ``ct host`` agree, and so the
@@ -36,6 +27,7 @@
 ## - the Rust-side detector this mirrors: ``src/db-backend/src/dap_server.rs``
 
 import std / [ os, strutils, algorithm ]
+import trace_kind
 
 const
   ## Canonical CTFS container name.  Any ``*.ct`` file is accepted, but
@@ -46,10 +38,11 @@ const
   ## Reference: codetracer-native-recorder/ct_recorder/src/ct_recorder/ctfs_nim.nim
   CtfsMagic*: array[5, byte] = [0xC0'u8, 0xDE, 0x72, 0xAC, 0xE2]
 
-  ## Event-stream file names of the materialized `runtime_tracing`
-  ## shape.  Mirrors ``is_legacy_materialized_trace`` in
-  ## ``dap_server.rs`` — keep the two lists in sync.
-  MATERIALIZED_TRACE_EVENT_FILES* = ["trace.json", "trace.bin"]
+  ## Event-stream file names of the legacy materialized `runtime_tracing`
+  ## shape.  Mirrors ``legacy_materialized_trace_file_in_dir`` in
+  ## ``dap_server.rs`` — keep the two lists in sync.  A ``trace.json`` is
+  ## not among them: it is test-oracle output (``trace_kind.TestOracleOutputError``).
+  MATERIALIZED_TRACE_EVENT_FILES* = ["trace.bin"]
 
   ## Sidecars the materialized shape carries next to its event stream.
   MATERIALIZED_TRACE_METADATA_FILE* = "trace_metadata.json"
@@ -66,8 +59,8 @@ type
     TraceShapeMissing
     ## A CTFS container file (``*.ct``).
     TraceShapeCtfs
-    ## A materialized `runtime_tracing` directory (``trace.json`` /
-    ## ``trace.bin`` plus sidecars), as written by ``ct record-web``.
+    ## A legacy materialized `runtime_tracing` directory (``trace.bin``
+    ## plus sidecars).
     TraceShapeMaterialized
     ## A multi-recording ``session.toml`` manifest.
     TraceShapeSession
@@ -234,6 +227,10 @@ proc describeMissingTraceContainer*(folder: string): string =
   ## against a folder that visibly contains ``backend.ct`` — the entry
   ## is there, it is just a *directory* rather than a container file.
   ## So we report what we found, not only what we wanted.
+  if folder.lastPathPart == TestOracleTraceFileName and fileExists(folder):
+    return testOracleRefusal(folder)
+  if dirExists(folder) and fileExists(folder / TestOracleTraceFileName):
+    return testOracleRefusal(folder)
   if not dirExists(folder):
     if fileExists(folder):
       return "not a trace folder: " & folder &

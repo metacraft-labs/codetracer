@@ -30,6 +30,15 @@ mod dap_client;
 mod paths;
 use dap_client::DapClient;
 
+/// Why a `trace.json` is refused.  Worded as the db-backend's
+/// `materialized_source::TEST_ORACLE_OUTPUT_ERROR`; this binary does not
+/// link the db-backend, so the wording is repeated rather than shared.
+const TEST_ORACLE_OUTPUT_ERROR: &str =
+    "is a trace.json event stream: test-oracle output written by \
+     the pure-Python or pure-Ruby recorder to be compared against `ct print` of a production \
+     recording. It is not a recording and CodeTracer does not open it; record the program with \
+     the production recorder to get a .ct recording";
+
 #[derive(Debug)]
 enum CtEvent {
     Keyboard(crossterm::event::KeyEvent),
@@ -62,11 +71,22 @@ fn track_keyboard_events(tx: mpsc::Sender<CtEvent>) {
 impl App {
     /// Create a new application instance.
     ///
-    /// `trace_dir` is the directory containing a recorded trace. The
-    /// application always opens the `trace.json` file from this directory. When
-    /// a DAP server binary is provided, the DAP client is started and a launch
-    /// request is sent containing our PID and the trace directory path.
+    /// `trace_dir` is the directory containing a recorded trace and
+    /// `program` the recorded program's source file, which the editor shows.
+    /// When a DAP server binary is provided, the DAP client is started, a
+    /// launch request is sent for the trace directory, and the source is
+    /// requested through it.  A `trace.json` in `trace_dir` is test-oracle
+    /// output, not a recording, and is refused.
     fn new(trace_dir: &str, dap_bin: Option<&str>, program: &str) -> Result<Self, Box<dyn Error>> {
+        if std::path::Path::new(trace_dir).join("trace.json").is_file() {
+            return Err(format!("'{trace_dir}' {TEST_ORACLE_OUTPUT_ERROR}").into());
+        }
+        if program.is_empty() {
+            return Err(
+                "simple-tui needs the recorded program's source path as its third argument".into(),
+            );
+        }
+
         let mut dap = if let Some(bin) = dap_bin {
             Some(DapClient::start(bin)?)
         } else {
@@ -80,12 +100,10 @@ impl App {
             client.launch(trace_dir, program)?;
         }
 
-        let trace_file = format!("{}/trace.json", trace_dir);
-
         let content = if let Some(client) = dap.as_mut() {
-            client.request_source(&trace_file)?
+            client.request_source(program)?
         } else {
-            fs::read_to_string(&trace_file)?
+            fs::read_to_string(program)?
         };
 
         let lines = content.lines().map(|l| l.to_string()).collect();
@@ -197,7 +215,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: simple-tui <trace-dir> [dap-server-path]");
+        eprintln!("Usage: simple-tui <trace-dir> [dap-server-path] <program-source>");
         std::process::exit(1);
     }
     let dap_bin = if args.len() > 2 {
@@ -259,4 +277,38 @@ fn main() -> Result<(), Box<dyn Error>> {
         DisableMouseCapture
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("simple-tui-test-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_trace_json_folder_is_refused_as_test_oracle_output() {
+        let dir = scratch("oracle");
+        fs::write(dir.join("trace.json"), "[]").unwrap();
+        let program = dir.join("main.py");
+        fs::write(&program, "print(1)\n").unwrap();
+        match App::new(dir.to_str().unwrap(), None, program.to_str().unwrap()) {
+            Ok(_) => panic!("a trace.json folder was opened"),
+            Err(e) => assert!(e.to_string().contains(TEST_ORACLE_OUTPUT_ERROR), "got: {e}"),
+        }
+    }
+
+    #[test]
+    fn the_editor_shows_the_program_source() {
+        let dir = scratch("source");
+        let program = dir.join("main.py");
+        fs::write(&program, "a = 1\nb = 2\n").unwrap();
+        let app = App::new(dir.to_str().unwrap(), None, program.to_str().unwrap()).unwrap();
+        assert_eq!(app.lines, vec!["a = 1".to_string(), "b = 2".to_string()]);
+    }
 }

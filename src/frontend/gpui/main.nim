@@ -330,8 +330,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       # `ct edit <project>`'s positional survives `translateArgs` untouched, so
       # the whole translation for that command is prepending the flag that says
       # the positional is a PROJECT rather than a recording. Without it this
-      # binary would resolve the folder as a trace and refuse it for having no
-      # `trace.json`, which is a true diagnosis of the wrong question.
+      # binary would resolve the folder as a trace and refuse it for not
+      # being a recording, which is a true diagnosis of the wrong question.
       result.product = pmEdit
     elif arg == "--report-plan":
       result.reportPlan = true

@@ -18,7 +18,7 @@
 
 import
   std / [ os, unittest, strutils ],
-  trace_container
+  trace_container, trace_kind
 
 proc scratchDir(name: string): string =
   ## Fresh, empty scratch directory for one test case.
@@ -64,15 +64,22 @@ suite "recording folder shape detection":
     writeCtfsFile(dir / "trace.ct")
     check findCtFileInFolder(dir) == dir / "trace.ct"
 
-  test "a materialized runtime_tracing directory is detected":
-    # This is what `ct record-web` writes for browser recordings.
-    let dir = scratchDir("materialized")
+  test "a trace.json folder is test-oracle output, not a recording":
+    # The pure Python and Ruby recorders write this layout to be compared
+    # against `ct print`; CodeTracer never opens it.
+    let dir = scratchDir("oracle")
     writeFile(dir / "trace.json", "[]")
-    writeFile(dir / "trace_metadata.json", """{"program":"frontend"}""")
+    writeFile(dir / "trace_metadata.json", """{"program":"main.py"}""")
     writeFile(dir / "trace_paths.json", "[]")
-    let shape = detectTraceFolderShape(dir)
-    check shape.kind == TraceShapeMaterialized
-    check shape.path == dir / "trace.json"
+    check detectTraceFolderShape(dir).kind == TraceShapeMissing
+    let message = describeMissingTraceContainer(dir)
+    check TestOracleOutputError in message
+    check dir in message
+
+  test "a trace.json file passed directly is refused the same way":
+    let dir = scratchDir("oracle-file")
+    writeFile(dir / "trace.json", "[]")
+    check TestOracleOutputError in describeMissingTraceContainer(dir / "trace.json")
 
   test "a binary materialized recording is detected":
     let dir = scratchDir("materialized-bin")
@@ -83,7 +90,7 @@ suite "recording folder shape detection":
     # M-REC-1.5 keeps the container authoritative when both are present.
     let dir = scratchDir("both")
     writeCtfsFile(dir / "trace.ct")
-    writeFile(dir / "trace.json", "[]")
+    writeFile(dir / "trace.bin", "\x00\x01")
     check detectTraceFolderShape(dir).kind == TraceShapeCtfs
 
   test "a session manifest wins over any single recording beside it":
@@ -130,7 +137,7 @@ suite "recordings one level below the requested folder":
   test "a single materialized recording one level down is found":
     let dir = scratchDir("nested-materialized")
     createDir(dir / "trace-0")
-    writeFile(dir / "trace-0" / "trace.json", "[]")
+    writeFile(dir / "trace-0" / "trace.bin", "\x00\x01")
     let shape = detectTraceFolderShape(dir)
     check shape.kind == TraceShapeMaterialized
     check shape.folder == dir / "trace-0"
@@ -181,9 +188,9 @@ suite "descent must never open one member of a session":
   proc writeSessionFixture(dir: string) =
     writeFile(dir / SESSION_MANIFEST_FILE, "version = 1\n")
     createDir(dir / "frontend.ct")
-    writeFile(dir / "frontend.ct" / "trace.json", "[]")
+    writeCtfsFile(dir / "frontend.ct" / "frontend.ct")
     createDir(dir / "frontend-wasm.ct")
-    writeFile(dir / "frontend-wasm.ct" / "trace.json", "[]")
+    writeCtfsFile(dir / "frontend-wasm.ct" / "frontend-wasm.ct")
     createDir(dir / "backend.ct")
     writeCtfsFile(dir / "backend.ct" / "server.ct")
 
@@ -243,7 +250,7 @@ suite "missing-recording diagnostics":
   test "the accepted shapes are named":
     let dir = scratchDir("diag-shapes")
     let message = describeMissingTraceContainer(dir)
-    check "trace.json" in message
+    check "trace.json" notin message
     check "trace.bin" in message
     check "the folder is empty" in message
 
