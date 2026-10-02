@@ -480,82 +480,19 @@ fn setup(
         }
     }
 
-    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
-    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS
-    // `.ct` container.  The `session-manager record-web` browser
-    // recordings are the remaining producer.  Treat it exactly like a
-    // materialized trace by decoding the events and running the same
-    // postprocessing pipeline `CTFSTraceReader::open()` uses, rather than wrongly
-    // falling through to the rr/MCR replay-worker path below.
-    let legacy_json_path = {
-        let direct = trace_folder.join("trace.json");
-        if direct.is_file() {
-            Some(direct)
-        } else if trace_folder.is_file() && trace_folder.file_name().map(|n| n == "trace.json").unwrap_or(false) {
-            Some(trace_folder.to_path_buf())
+    // A `trace.json` event stream is what the pure-Python and pure-Ruby
+    // test oracles write; it is compared against `ct print`, never opened.
+    // Refuse it by name instead of letting it fall through to the
+    // replay-worker path, whose error would say nothing about why.
+    if crate::materialized_source::is_test_oracle_output(trace_folder)
+        || crate::materialized_source::is_test_oracle_output(&trace_path)
+    {
+        let shown = if trace_folder.is_file() {
+            trace_folder
         } else {
-            None
-        }
-    };
-    if let Some(json_path) = legacy_json_path {
-        info!(
-            "detected legacy runtime_tracing materialized trace: {}",
-            json_path.display()
-        );
-        let json_bytes = std::fs::read(&json_path)?;
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
-        normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {}: {e}", json_path.display()))?;
-        // Workdir: prefer `trace_metadata.json` next to `trace.json`,
-        // else fall back to the trace folder itself.
-        let meta_workdir = json_path
-            .parent()
-            .map(|d| d.join("trace_metadata.json"))
-            .filter(|p| p.is_file())
-            .and_then(|p| std::fs::read(&p).ok())
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from));
-        let workdir = meta_workdir.unwrap_or_else(|| {
-            json_path
-                .parent()
-                .map(|d| d.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
-        let reader = CTFSTraceReader::from_events(events, &workdir)?;
-        info!(
-            "legacy materialized trace loaded: {} steps, {} calls, {} events",
-            reader.step_count(),
-            reader.call_count(),
-            reader.event_count(),
-        );
-        let reader: Arc<dyn TraceReader> = Arc::new(reader);
-        let mut handler = Handler::construct_with_reader(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            reader,
-            false,
-        );
-        handler.raw_diff_index = raw_diff_index;
-        // RS-M2 — remember the recording directory so
-        // `ct/load-request-spans` can find the container (and any
-        // pre-cutover sidecar beside it).  Stores a path only: the
-        // span stream is deliberately not read at trace-open time.
-        handler.set_trace_folder(trace_folder);
-        handler.load_macro_sourcemaps(trace_folder);
-        // P3 — load Source Map V3 indexes for every recorded source.
-        handler.load_sourcemaps(trace_folder);
-        // §P5 — user-provided variable rename list.
-        handler.load_rename_list(trace_folder, rename_list_path);
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
+            trace_path.as_path()
+        };
+        return Err(crate::materialized_source::test_oracle_refusal(shown.display()).into());
     }
 
     // Legacy `runtime_tracing` binary materialized layout: a `trace.bin`
@@ -564,9 +501,8 @@ fn setup(
     // CTFS container but is NOT one — `CtfsReader::open` rejects it on the
     // version byte (0x00 vs the CTFS-required 2..4), so `setup` would
     // otherwise fall through to the rr replay-worker path and fail with
-    // "program path has no file name".  Decode it the same way as
-    // `trace.json`: read the events, then run the shared `from_events`
-    // postprocessing pipeline.
+    // "program path has no file name".  Read the events, then run the
+    // shared `from_events` postprocessing pipeline.
     let legacy_bin_path = {
         let direct = trace_folder.join("trace.bin");
         if direct.is_file() {
@@ -765,8 +701,8 @@ fn is_session_manifest_path(path: &Path) -> bool {
 ///    naming the manifest routes the launch through `setup_session`
 ///    (M41). Auto-detecting a single trace file here instead would open
 ///    one arbitrary member and silently show a fraction of the program;
-/// 4. otherwise auto-detect, preferring CTFS containers but keeping
-///    legacy materialized `trace.json` / `trace.bin` fixtures loadable;
+/// 4. otherwise auto-detect, preferring CTFS containers, then a legacy
+///    `trace.bin`, then test-oracle `trace.json` (which `setup` refuses);
 /// 5. failing that, default to `trace.ct` so `setup`'s error message
 ///    points at the canonical name.
 fn resolve_launch_trace_file(folder: &Path, explicit: Option<&PathBuf>) -> PathBuf {
@@ -1813,25 +1749,31 @@ fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
 }
 
 fn legacy_materialized_trace_file_in_dir(dir: &Path) -> Option<PathBuf> {
-    for name in ["trace.json", "trace.bin"] {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    let candidate = dir.join(crate::materialized_source::LEGACY_BINARY_TRACE_FILE);
+    candidate.is_file().then_some(candidate)
 }
 
+/// Pick the file a launch of `folder` opens.  Test-oracle output is picked
+/// too, last, so that `setup` refuses it by name rather than reporting a
+/// missing `trace.ct`.
 fn auto_detect_materialized_trace_file(folder: &Path) -> Option<PathBuf> {
-    find_ct_file_in_dir(folder).or_else(|| legacy_materialized_trace_file_in_dir(folder))
+    find_ct_file_in_dir(folder)
+        .or_else(|| legacy_materialized_trace_file_in_dir(folder))
+        .or_else(|| {
+            let oracle = folder.join(crate::materialized_source::TEST_ORACLE_TRACE_FILE);
+            oracle.is_file().then_some(oracle)
+        })
 }
 
+/// Whether the launch names a file `setup` handles without a replay worker:
+/// a legacy `trace.bin`, or test-oracle output, which `setup` refuses.
 fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
+    let handled = |name: &str| {
+        name == crate::materialized_source::LEGACY_BINARY_TRACE_FILE
+            || name == crate::materialized_source::TEST_ORACLE_TRACE_FILE
+    };
     if folder.is_file() {
-        return folder
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "trace.json" || name == "trace.bin");
+        return folder.file_name().and_then(|name| name.to_str()).is_some_and(handled);
     }
 
     let trace_path = folder.join(trace_file);
@@ -1839,15 +1781,16 @@ fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
         && trace_path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "trace.json" || name == "trace.bin")
+            .is_some_and(handled)
 }
 
 /// Determine whether the trace in `folder` is a DB-based trace (JavaScript,
 /// Python, Ruby, etc.) that does NOT require an rr replay worker.
 ///
 /// Most materialized traces are CTFS containers, but a few checked-in legacy
-/// fixtures still use sidecar `trace.json` / `trace.bin` files. Detect both so
-/// neither path incorrectly starts an rr replay worker.
+/// fixtures still use a `trace.bin` event stream, and test-oracle
+/// `trace.json` output must reach `setup`'s refusal.  Detect both so neither
+/// path incorrectly starts an rr replay worker.
 ///
 /// For CTFS, this reduces to detecting whether the folder (or the resolved
 /// trace file) is a CodeTracer DB CTFS container with materialized contents
@@ -3695,6 +3638,7 @@ mod tests {
     use crate::ctfs_trace_reader::meta_dat::{
         FLAG_HAS_MCR_FIELDS, META_DAT_VERSION, McrFields, MetaDat, serialize_meta_dat,
     };
+    use crate::materialized_source::TEST_ORACLE_OUTPUT_ERROR;
 
     /// Build a `meta.dat` payload with the `FlagHasMcrFields` bit set.
     /// The MCR sub-block is filled with plausible-but-arbitrary values:
@@ -3890,7 +3834,7 @@ mod tests {
     /// would auto-detect as a single trace if the manifest were ignored.
     fn write_session_fixture(dir: &Path) {
         std::fs::write(dir.join(SESSION_MANIFEST_FILE), "version = 1\n").unwrap();
-        std::fs::write(dir.join("trace.json"), "[]").unwrap();
+        std::fs::write(dir.join("trace.ct"), b"").unwrap();
     }
 
     /// Build a DAP `launch` request naming `folder` as `traceFolder`,
@@ -3913,7 +3857,7 @@ mod tests {
         assert_eq!(
             resolve_launch_trace_file(dir.path(), None),
             PathBuf::from(SESSION_MANIFEST_FILE),
-            "a folder carrying a session.toml must launch as the session, not as the trace.json beside it",
+            "a folder carrying a session.toml must launch as the session, not as the trace.ct beside it",
         );
         assert!(
             resolve_session_manifest_path(dir.path(), Path::new(SESSION_MANIFEST_FILE)).is_some(),
@@ -3948,8 +3892,11 @@ mod tests {
     #[test]
     fn resolve_launch_trace_file_auto_detects_a_single_recording() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
-        assert_eq!(resolve_launch_trace_file(dir.path(), None), PathBuf::from("trace.json"),);
+        std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), None),
+            PathBuf::from("recording.ct"),
+        );
 
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(
@@ -3995,15 +3942,81 @@ mod tests {
     #[test]
     fn handle_message_launch_still_auto_detects_a_single_recording() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+        std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
 
         let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
         let mut ctx = Ctx::default();
         let request = launch_request_for_folder(dir.path());
         handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
 
-        assert_eq!(ctx.launch_trace_file, PathBuf::from("trace.json"));
+        assert_eq!(ctx.launch_trace_file, PathBuf::from("recording.ct"));
         assert!(resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_none(),);
+    }
+
+    /// A well-formed `trace.json` event stream: the shape the pure-Python
+    /// and pure-Ruby test oracles write.  Well-formed on purpose, so a
+    /// refusal below is a refusal of the format and not a parse error.
+    fn oracle_trace_json() -> Vec<u8> {
+        use codetracer_trace_types::{
+            CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
+        };
+        let events: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/oracle/main.py")),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<module>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        serde_json::to_vec(&events).unwrap()
+    }
+
+    fn setup_error(trace_folder: &Path, trace_file: &Path) -> String {
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        match setup(
+            trace_folder,
+            trace_file,
+            None,
+            Path::new(""),
+            None,
+            sender,
+            false,
+            "oracle-test",
+            None,
+        ) {
+            Ok(_) => panic!("{} was opened as a recording", trace_folder.join(trace_file).display()),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_debugger_refuses_a_trace_json_folder_as_test_oracle_output() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), oracle_trace_json()).unwrap();
+        let launched_as = resolve_launch_trace_file(dir.path(), None);
+        let message = setup_error(dir.path(), &launched_as);
+        assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+        assert!(
+            message.contains(&dir.path().display().to_string()),
+            "the refusal must name the path; got: {message}"
+        );
+    }
+
+    #[test]
+    fn the_debugger_refuses_a_trace_json_file_as_test_oracle_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("trace.json");
+        std::fs::write(&json, oracle_trace_json()).unwrap();
+        let message = setup_error(&json, Path::new(""));
+        assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
     }
 
     // ── Browser handshake order-independence ──────────────────────────

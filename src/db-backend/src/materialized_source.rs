@@ -46,6 +46,24 @@ pub const TEST_ORACLE_OUTPUT_ERROR: &str = "is a trace.json event stream: test-o
      recording. It is not a recording and CodeTracer does not open it; record the program with \
      the production recorder to get a .ct recording";
 
+/// The refusal every entry point gives for test-oracle output at `path`.
+///
+/// One wording for the debugger, the browser engine and the review
+/// collector, so a user meets the same explanation whichever way they tried
+/// to open the file.
+pub fn test_oracle_refusal(path: impl std::fmt::Display) -> String {
+    format!("'{path}' {TEST_ORACLE_OUTPUT_ERROR}")
+}
+
+/// Whether `path` names test-oracle output: a file called
+/// [`TEST_ORACLE_TRACE_FILE`], or a directory holding one.
+pub fn is_test_oracle_output(path: &Path) -> bool {
+    if path.is_file() {
+        return path.file_name().is_some_and(|name| name == TEST_ORACLE_TRACE_FILE);
+    }
+    path.join(TEST_ORACLE_TRACE_FILE).is_file()
+}
+
 /// Locate the unique `*.ct` CTFS container inside `dir`, if there is one.
 fn find_ct_container(dir: &Path) -> Option<PathBuf> {
     if dir.is_file() && dir.extension().is_some_and(|ext| ext == "ct") {
@@ -118,7 +136,7 @@ pub fn open_materialized_trace(dir: &Path) -> Result<CTFSTraceReader, Box<dyn Er
     }
 
     if dir.join(TEST_ORACLE_TRACE_FILE).is_file() {
-        return Err(format!("'{}' {TEST_ORACLE_OUTPUT_ERROR}", dir.display()).into());
+        return Err(test_oracle_refusal(dir.display()).into());
     }
 
     Err(format!(

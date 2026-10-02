@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
 };
 
-use codetracer_trace_types::{StepId, TraceLowLevelEvent, TypeKind};
+use codetracer_trace_types::{StepId, TypeKind};
 
 use crate::{
     ctfs_trace_reader::CTFSTraceReader, db::MaterializedReplaySession, lang::Lang, replay::ReplaySession,
@@ -230,9 +230,7 @@ fn check_equal_values(actual: &Value, expected: &Value) {
 }
 
 /// Open the CTFS materialized trace recorded under `path` and return its
-/// reader. Materialized traces are CTFS-only — legacy
-/// `trace.bin`/`trace.json` + `trace_metadata.json` triplets are no longer
-/// accepted by db-backend.
+/// reader. Materialized traces are CTFS-only.
 ///
 /// Panics with a clear regeneration instruction when the recorder did not
 /// produce a `.ct` container, so the failure is loud (per the
@@ -248,27 +246,7 @@ fn load_reader_for_trace(path: &Path) -> Result<CTFSTraceReader, Box<dyn Error>>
             .map_err(|e| format!("CTFS open failed for {}: {e}", ct_path.display()).into());
     }
 
-    let json_path = path.join("trace.json");
-    if json_path.is_file() {
-        let json_bytes = std::fs::read(&json_path)?;
-        let events: Vec<TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
-        let workdir = path
-            .join("trace_metadata.json")
-            .is_file()
-            .then(|| path.join("trace_metadata.json"))
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
-            .unwrap_or_else(|| path.to_path_buf());
-        return CTFSTraceReader::from_events(events, &workdir);
-    }
-
-    Err(format!(
-        "no *.ct CTFS container or legacy trace.json found in {}",
-        path.display()
-    )
-    .into())
+    Err(format!("no *.ct CTFS container found in {}", path.display()).into())
 }
 
 fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {

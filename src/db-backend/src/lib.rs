@@ -120,8 +120,8 @@ pub mod macro_sourcemap;
 // resolver (spec `Planned-Features/Mixed-Trace-Implicit-Switch.md`, P1/P3).
 pub mod mixed_altitude;
 // RV-4 — the one place that answers "open this materialized recording
-// directory", shared by the DeepReview collector and (for its legacy-stream
-// repair) `dap_server`.
+// directory", shared by the DeepReview collector and (for its test-oracle
+// refusal) `dap_server`.
 pub mod materialized_source;
 pub mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. The Nim shim

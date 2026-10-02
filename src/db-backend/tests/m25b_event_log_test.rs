@@ -262,9 +262,17 @@ fn test_dap_launch_legacy_three_trace_fixture_returns_marker_rows() {
     // recorder* emitted, so a frozen container would let this suite keep
     // describing markers the recorder had stopped producing.
     let trace_dir = test_harness::three_trace_recordings().join("frontend.ct");
+    let holds_container = trace_dir.is_file()
+        || std::fs::read_dir(&trace_dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+            })
+            .unwrap_or(false);
     assert!(
-        trace_dir.join("trace.json").is_file(),
-        "the browser recorder produced {} without a trace.json",
+        holds_container,
+        "the browser recorder produced {} without a .ct container",
         trace_dir.display()
     );
 

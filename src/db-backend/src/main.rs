@@ -75,6 +75,11 @@ mod flow_preloader;
 mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
+// Mirror of the `lib.rs` declaration: `dap_server` refuses test-oracle
+// `trace.json` output with this module's wording.  The bin uses only that
+// part; the collector entry points are the library's.
+#[allow(dead_code)]
+mod materialized_source;
 // IS-M2 — mixed native + VM (GDScript) active-altitude resolver. Mirrors the
 // lib.rs declaration; the bin needs its own copy because
 // `dap_handler::Handler::complete_move` / `load_crossing_spans` reach for the
