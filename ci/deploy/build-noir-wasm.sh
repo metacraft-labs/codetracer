@@ -102,16 +102,10 @@ fi
 
 echo "=== the two Noir wasm modules ==="
 echo "  noir:         ${NOIR_REPO} @ ${NOIR_REV}"
-echo "  trace-format: ${TRACE_FORMAT_REPO} @ ${TRACE_FORMAT_REV}"
 echo "  work dir:     ${work_dir}"
 echo "  ${TOOLCHAIN_STAMP}"
 echo
 
-# The sibling FIRST. Without it `cargo` fails while loading the workspace
-# manifest — before compiling anything — with "failed to read
-# .../codetracer-trace-format/codetracer_trace_types/Cargo.toml", an error that
-# names a missing file rather than a missing repository. Cloning it first turns
-# that into a step that either worked or did not.
 clone_at() {
 	local repo="$1" rev="$2" dest="$3"
 	if [ -d "${dest}/.git" ]; then
@@ -126,12 +120,7 @@ clone_at() {
 	echo "  ${dest}: $(git -C "${dest}" rev-parse HEAD)"
 }
 
-trace_format_dir="${work_dir}/codetracer-trace-format"
 noir_dir="${work_dir}/noir"
-clone_at "${TRACE_FORMAT_REPO}" "${TRACE_FORMAT_REV}" "${trace_format_dir}" || {
-	echo "could not check out the trace-format sibling" >&2
-	exit 1
-}
 clone_at "${NOIR_REPO}" "${NOIR_REV}" "${noir_dir}" || {
 	echo "could not check out noir" >&2
 	exit 1
