@@ -6273,6 +6273,23 @@ Two traps in the same area, both live:
   `cd ../isonim-gpui && nix develop --command just plat37-shims`. Never run
   the capture concurrently with `gpui-shell` or any GPUI suite: they dlopen
   the same swapped path.
+- PLAT-37's capture loads the shim through the path `isonim_gpui/bindings`
+  BAKED IN at compile time: `<ISONIM_GPUI_SRC>/../rust/target/debug/...` when
+  that file exists, else the bare soname. Build `codetracer-gpui` with
+  `ISONIM_GPUI_SRC` pointing at the SAME checkout the lane swaps
+  (`ISONIM_GPUI_DIR`), or the binary loads a different (or no) shim and every
+  windowed run dies in 4 ms with `could not load:`. And the windowed shim's
+  libxcb / libxkbcommon come from `CODETRACER_GPUI_RUNTIME_LIB_PATH`, which a
+  fallback dev-shell profile does not export: run the lane inside
+  `cd ../isonim-gpui && nix develop` (its LD_LIBRARY_PATH carries them), with
+  the binary built there too, and `xvfb-run`/`Xvfb` appended to PATH for the
+  X configuration (2026-10-02: all six scenarios painted that way;
+  `returned-calltrace`, 21 steps before the window, is the slowest — one run
+  at load ~135 outran the 60 s budget, the next painted at tick 183/240).
+- Mutation harnesses refuse an undeclared arm id and an empty `--only=` as
+  well as an unknown flag (`ci/lib/harness_guard.py`, called first in every
+  `run-plat*-mutations.py` main; asserted by
+  `ci/test/harness-argument-refusal.sh`). A new harness must call it.
 - The headless-sway + GPUI window capture DOES run on the self-hosted
   linux-x64 fleet: isonim-gpui's CI job "GUI tests (headless sway)" built the
   `gpui-backend` shim and captured a painted window on gpu-server-002
@@ -6636,3 +6653,50 @@ Two traps in the same area, both live:
 - codetracer imports `nim_everywhere/rs256` (identity), which exists from
   nim-everywhere 955d13f on; the flake/repro.lock pin and the workspace's
   `../nim-everywhere` checkout must be at or past it.
+- TUI panes have NO title row (PLAT-49): `shell.paintPane` hands each painter
+  the box FROM THE STRIP'S ROW, so the painter's own heading (`FILES ───`,
+  `CALL TRACE N call(s)`, `VARIABLES …`) lands on that row and the tab strip,
+  painted last, replaces it. Every pane gets a strip (a lone pane one tab; a
+  lone editor's tab is its file name). Painters whose first row is content (VCS
+  branch, build verdict, the timeline) get the rows BELOW the strip. Tests that
+  located a pane by its upper-cased title must look for its tab label instead
+  (` Call Trace `, ` Variables `, ` Files `, ` main.py `).
+- A TUI press on a tab only MARKS it (`LayoutBinding.pendingPick`); the drag
+  begins on motion past `DragThresholdCols`/`DragThresholdRows`, or on a release
+  that far away. A test that asserts `ikDraggingTab` must first send a motion
+  report (SGR button 32, e.g. `\e[<32;C;RM`). `lasNoGesture` messages are no
+  longer written to the status line (`runtime.routeMouseReport`).
+- The GPUI WINDOW removes each leaf's heading (`main.stripHeading`) but
+  `leaves.renderLeaf` still builds it (`--report-plan` and the arrangement
+  suites read it); redraw a window leaf with `redrawWindowLeaf`, not
+  `leaves.redrawLeafBody` (which keeps child 0 as the heading). Every GPUI
+  pane box has a strip; a bare pane's drop body is strip+body (`dropBodyOf`).
+- The TUI menu is one root `≡` button with cascading dropdowns (no
+  `menuExpanded`/`tpMenuTitle`); GPUI's band likewise (`gtMenuButton` only).
+  `--window-ops=menu:<Folder>` presses the button, then the folder.
+- The omnibar's caret is the TERMINAL'S cursor (`main.paint` epilogue,
+  `isonim_tui.caretBytes`, DECSCUSR bar/block); on terminals
+  `caretSupportFor` answers `caretDrawn` for (TERM=linux, dumb, screen, …)
+  the top bar draws it into the cell instead.
+- Files under `src/frontend/tui/app/` may reach ViewModel modules ONLY through
+  `codetracer_embed` (`from codetracer_embed import X`), never
+  `viewmodels/<module>` directly: `ci/test/sdk-facade-boundary.sh` (and the
+  vm-unit `test_sdk_facade_boundary`) fails on the direct import.
+- `ci/test/gpui-window-captures.sh` builds the windowed shim inside
+  `${ISONIM_GPUI_DIR:-../isonim-gpui}`; from a worktree whose isonim-gpui is a
+  `-pin` checkout, export `ISONIM_GPUI_DIR` or it compiles (1.4 GB) into the
+  user's sibling. The PLAT-48 window record's Ctrl+O step was seen not to
+  register once under load; a re-run took it.
+- The desktop's command palette has TWO renderers in
+  `views/isonim_command_palette_view.nim` (MockRenderer and WebRenderer);
+  the real app draws the WebRenderer one. A change to the palette's DOM must
+  be made in both (PLAT-49's placeholder was first fixed only in the Mock).
+- A real-terminal suite that changes the layout (a tab click is one) must give
+  the binary its OWN state directory (`envSet("CODETRACER_TUI_LAYOUT_DIR",
+  getEnv(...) / "<suite>")`): the lane shares one directory, and a remembered
+  layout makes every later suite open on "layout restored" instead of
+  "opening …", which `settleOnDebugger` reads as the debugger's frame.
+- `ci/test/design-tokens-fresh.sh` is red on `agents` (the design-system pin
+  moved without regenerating). The PLAT-46/47 harnesses refuse to grade while
+  it is red; stage the gitlink at 3d0703d with `git update-index --cacheinfo`
+  to grade, and restore it after.
