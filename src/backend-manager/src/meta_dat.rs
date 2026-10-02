@@ -1430,6 +1430,30 @@ mod tests {
             vec!["/a.rs"]
         );
 
+        // A column-aware record stating `line_count = 0` (the conventional
+        // table, with no `line_lengths` after it) sits between two records
+        // with explicit tables; every path is still its own record's.
+        let mut column_aware = vec![5u8];
+        column_aware.extend_from_slice(b"/a.rs");
+        column_aware.extend_from_slice(&[2, 24, 2]);
+        let first_end = column_aware.len() as u64;
+        column_aware.push(6);
+        column_aware.extend_from_slice(b"/c.bin");
+        column_aware.push(0);
+        let second_end = column_aware.len() as u64;
+        column_aware.push(6);
+        column_aware.extend_from_slice(b"/bb.rs");
+        column_aware.extend_from_slice(&[1, 10]);
+        let off = [0u64, first_end, second_end, column_aware.len() as u64]
+            .map(u64::to_le_bytes)
+            .concat();
+        write_minimal_ctfs(&ct, &[("paths.dat", &column_aware), ("paths.off", &off)]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(
+            read_source_paths_from_ctfs(&raw, FLAG_HAS_COLUMN_AWARE_STEPS).unwrap(),
+            vec!["/a.rs", "/c.bin", "/bb.rs"]
+        );
+
         write_minimal_ctfs(&ct, &[("meta.dat", b"m")]).unwrap();
         let raw = std::fs::read(&ct).unwrap();
         assert!(read_source_paths_from_ctfs(&raw, 0).unwrap().is_empty());

@@ -220,6 +220,40 @@ suite "CTFS source materialization":
       let got = readFile(outDir / "paths.json")
       check not got.contains("\"" & PathA & "\"")
 
+    block columnAwareWithConventionalTable:
+      ## Bit 4 (column-aware) frames each record as Layout A:
+      ## `path_len + path_bytes + line_count + line_lengths`. A record
+      ## stating `line_count = 0` is the conventional table and carries no
+      ## `line_lengths`, so it is one byte shorter than any record with a
+      ## table. It sits between two records that have one, and each path
+      ## must still be read from its own record.
+      const PathC = "/workspace/project/build/firmware.bin"
+      proc layoutARecord(path: string, lineLengths: seq[uint64]): string =
+        result.putLeb128(uint64(path.len))
+        result.add path
+        result.putLeb128(uint64(lineLengths.len))
+        for length in lineLengths:
+          # Every length here is below 64 and each delta from the previous
+          # one is non-negative, so its zigzag form is twice the delta.
+          result.putLeb128(length * 2)
+      let (layoutA, layoutAOff) = pathsTable(@[
+        layoutARecord(PathA, @[12'u64, 3]),
+        layoutARecord(PathC, @[]),
+        layoutARecord(PathB, @[20'u64])])
+      let ctPath = root / "column-aware.ct"
+      let outDir = root / "column-aware-out"
+      createDir(outDir)
+      writeMinimalCtfs(ctPath, @[
+        ("meta.dat", metaDatWithFlags(0x10'u16)),
+        ("paths.dat", layoutA),
+        ("paths.off", layoutAOff)])
+
+      check materializeCtfsSources(ctPath, outDir)
+      let got = readFile(outDir / "paths.json")
+      for path in [PathA, PathC, PathB]:
+        check got.contains("\"" & path & "\"")
+      check not got.contains("\\u")
+
 # ---------------------------------------------------------------------------
 # meta.dat schema version
 # ---------------------------------------------------------------------------
