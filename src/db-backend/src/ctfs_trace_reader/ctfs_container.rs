@@ -65,6 +65,129 @@ pub(crate) const FILE_ENTRY_SIZE: usize = 24;
 /// Maximum number of mapping levels supported (5 levels handles files up to ~35 TB).
 const MAX_MAPPING_LEVELS: usize = 5;
 
+/// Container version 6 — the version that carries the extended (24-byte)
+/// header, and therefore the only version in which a `Profile` byte exists.
+///
+/// It is deliberately NOT folded into `CTFS_VERSION_MIN..=CTFS_VERSION_MAX`:
+/// those versions share one body shape (a 16-byte header followed by the
+/// `FileEntry` array) and this reader implements it. A version-6 container's
+/// body depends on its `Profile`, so acceptance is decided per profile below —
+/// the COMPACT body is implemented here, the version-6 FULL body is not (its
+/// `FileEntry` array starts at 24 rather than at 16, and a reader that shrugged
+/// would resolve every entry out of the reserved area).
+pub(crate) const CTFS_PROFILED_VERSION: u8 = 6;
+
+/// Size of the version-6 header: the 16-byte header every version carries plus
+/// `Profile` (byte 16), `Compression` (byte 17) and six reserved bytes.
+pub(crate) const HEADER_V6_SIZE: usize = 24;
+
+/// Byte offset of the version-6 `Profile` field.
+const PROFILE_OFFSET: usize = 16;
+
+/// Byte offset of the version-6 whole-file `Compression` field.
+const COMPRESSION_OFFSET: usize = 17;
+
+/// The six reserved bytes of the version-6 header, which MUST be zero.
+const RESERVED_RANGE: std::ops::Range<usize> = 18..24;
+
+/// Offset of the compact profile's `MemberCount` (u32 LE).
+const COMPACT_MEMBER_COUNT_OFFSET: u64 = 24;
+
+/// Offset at which the compact profile's directory begins.
+const COMPACT_DIRECTORY_OFFSET: u64 = 28;
+
+/// Size of one compact directory record: `(name: u64, offset: u64, length: u64)`.
+const COMPACT_DIRECTORY_ENTRY_SIZE: u64 = 24;
+
+/// The container body shape a version-6 header selects.
+///
+/// Versions 2..=4 have no `Profile` byte at all and are always
+/// [`CtfsProfile::Full`]; the field is read from the header only at version 6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CtfsProfile {
+    /// Block-mapped body: block 0 carries the `FileEntry` array and every
+    /// member's bytes are reached through its mapping hierarchy.
+    Full,
+    /// Concatenated raw members behind a flat `(name, offset, length)`
+    /// directory, with no block map and no alignment.
+    Compact,
+}
+
+impl fmt::Display for CtfsProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CtfsProfile::Full => write!(f, "full"),
+            CtfsProfile::Compact => write!(f, "compact"),
+        }
+    }
+}
+
+/// Parse the `Profile` byte of a version-6 header.
+///
+/// An unknown value is REFUSED by name rather than defaulted: a reader that
+/// treated an unrecognised profile as `full` would parse a body it has never
+/// seen as the one it happens to implement, which is the whole of the refusal
+/// rule the version-3/4 global-line-index incident bought.
+fn parse_profile(byte: u8) -> Result<CtfsProfile, CtfsError> {
+    match byte {
+        0 => Ok(CtfsProfile::Full),
+        1 => Ok(CtfsProfile::Compact),
+        other => Err(CtfsError::Unimplemented(format!(
+            "CTFS container declares profile {other}, which is not one this reader implements \
+             (known profiles: 0 = full, 1 = compact)"
+        ))),
+    }
+}
+
+/// Parse the whole-file `Compression` byte of a version-6 header.
+///
+/// Same rule, same reason: an unknown scheme is not read as `none`. `none` is
+/// the only scheme this reader can serve — the bytes it is handed must already
+/// be the container — so a declared scheme is refused BY NAME rather than
+/// ignored, which is the difference between "I cannot read this" and silently
+/// parsing compressed bytes as a directory.
+fn parse_whole_file_compression(byte: u8) -> Result<(), CtfsError> {
+    match byte {
+        0 => Ok(()),
+        1 => Err(CtfsError::Unimplemented(
+            "CTFS container declares whole-file compression 1 (zstd); this reader serves only \
+             scheme 0 (none) and does not reconstruct a compressed container"
+                .to_string(),
+        )),
+        other => Err(CtfsError::Unimplemented(format!(
+            "CTFS container declares whole-file compression {other}, which is not one this \
+             reader implements (known schemes: 0 = none, 1 = zstd)"
+        ))),
+    }
+}
+
+/// Whether `name` is a name the base40 encoder in this module could have
+/// produced: non-empty, at most 12 characters, and every character in the
+/// alphabet.
+///
+/// The round-trip alone is NOT sufficient and that is measured rather than
+/// assumed: an out-of-alphabet character maps to the padding index, and an
+/// INTERIOR one yields a word whose decoded name carries an embedded NUL —
+/// which re-encodes to itself and so survives a round-trip unchanged.
+fn name_is_well_formed(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 12 && name.bytes().all(|c| BASE40_CHARS[1..].contains(&c))
+}
+
+/// The one refusal every non-resident door gives for a compact container.
+///
+/// Written once, so the three doors that can be handed one — the positional
+/// source, the follow source and the HTTP range source — cannot drift into
+/// three different diagnoses of one condition. `because` says what is specific
+/// to the caller; the remedy is the same for all of them.
+fn compact_residency_refusal(because: &str) -> CtfsError {
+    CtfsError::Unimplemented(format!(
+        "a compact container must be loaded whole: it has no block map and no alignment, so there \
+         is nothing for a ranged or positional source to seek with ({because}). Open it through \
+         CtfsReader::open or CtfsReader::from_bytes, both of which read the whole image into an \
+         InMemoryBlockSource"
+    ))
+}
+
 // ── Base40 codec ────────────────────────────────────────────────────────
 
 /// The base40 character set used for CTFS file names.
@@ -136,6 +259,16 @@ pub enum CtfsError {
     Io(io::Error),
     /// The container structure is corrupt or inconsistent.
     Corrupt(String),
+    /// The container is WELL-FORMED but declares something this reader does not
+    /// implement — a profile, a whole-file compression scheme, or a body shape
+    /// a newer writer produces.
+    ///
+    /// Distinct from [`CtfsError::Corrupt`] on purpose. A container from a
+    /// newer writer is not broken, and reporting it as corrupt sends a reader
+    /// looking for a defect in the bytes instead of for the support it is
+    /// missing. The same distinction was drawn in the Nim reader when its
+    /// version-6 refusal stopped saying "broken".
+    Unimplemented(String),
 }
 
 impl fmt::Display for CtfsError {
@@ -149,6 +282,7 @@ impl fmt::Display for CtfsError {
             CtfsError::FileNotFound(name) => write!(f, "internal file not found in CTFS container: {name}"),
             CtfsError::Io(e) => write!(f, "CTFS I/O error: {e}"),
             CtfsError::Corrupt(msg) => write!(f, "corrupt CTFS container: {msg}"),
+            CtfsError::Unimplemented(msg) => write!(f, "unsupported CTFS container: {msg}"),
         }
     }
 }
@@ -178,7 +312,19 @@ struct FileEntry {
     /// Size of the file in bytes.
     size: u64,
     /// Block number of the root mapping block (0 if file is empty).
+    ///
+    /// Always 0 for a compact member, which has no mapping block at all.
     map_block: u64,
+    /// COMPACT PROFILE ONLY: the member's absolute byte offset in the
+    /// container image.
+    ///
+    /// `None` for every full-profile entry, and that is what selects the read
+    /// path: a compact member is a contiguous byte range, so it is served by
+    /// one positional read and never touches block arithmetic. Keeping the
+    /// discriminant on the ENTRY rather than only on the reader is deliberate —
+    /// `read_range_inner` is the one place both profiles meet, and a field it
+    /// must match on cannot be forgotten the way a reader-level flag can.
+    compact_offset: Option<u64>,
 }
 
 // ── Block source abstraction ──────────────────────────────────────────────
@@ -235,6 +381,23 @@ pub trait BlockSource: fmt::Debug + Send + Sync {
     /// recordings as not-yet-finalized.
     fn is_finalized(&self) -> bool {
         true
+    }
+
+    /// Whether every byte of the container is already resident in this
+    /// process's memory.
+    ///
+    /// `false` by default, which is the honest answer for every positional
+    /// source: a local file, a follow source and an HTTP range source each
+    /// fetch on demand. Only [`InMemoryBlockSource`] holds the whole image.
+    ///
+    /// This is the predicate the COMPACT profile is gated on, and it is a
+    /// gate rather than a preference. A compact container is specified for a
+    /// one-shot load: it has no block map, no alignment, and therefore nothing
+    /// for a ranged reader to seek with. Serving one over a range source would
+    /// be one request per member read, on a file whose whole point is that it
+    /// is fetched once.
+    fn is_memory_resident(&self) -> bool {
+        false
     }
 
     /// Read the whole of block `block_num` (`block_size` bytes) into a freshly
@@ -321,15 +484,16 @@ fn parse_root_directory(
     source: &dyn BlockSource,
     total: u64,
     max_root_entries: usize,
-) -> Result<HashMap<String, FileEntry>, CtfsError> {
+) -> Result<(HashMap<String, FileEntry>, Vec<String>), CtfsError> {
     let entry_start = (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64;
     // How many whole entries are actually backed by the observable container.
     let available = total.saturating_sub(entry_start) / FILE_ENTRY_SIZE as u64;
     let entry_count = usize::try_from(available).unwrap_or(usize::MAX).min(max_root_entries);
 
     let mut files = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
     if entry_count == 0 {
-        return Ok(files);
+        return Ok((files, order));
     }
 
     let mut region = vec![0u8; entry_count * FILE_ENTRY_SIZE];
@@ -359,9 +523,170 @@ fn parse_root_directory(
         }
 
         let name = base40_decode(name_encoded);
-        files.insert(name.clone(), FileEntry { name, size, map_block });
+        order.push(name.clone());
+        files.insert(
+            name.clone(),
+            FileEntry {
+                name,
+                size,
+                map_block,
+                compact_offset: None,
+            },
+        );
     }
-    Ok(files)
+    Ok((files, order))
+}
+
+/// Parse the COMPACT profile's flat directory (`ctfs-container.md` §1d).
+///
+/// Layout, and every offset is read rather than assumed: `MemberCount` (u32 LE)
+/// at 24, then `MemberCount` 24-byte records from 28, each
+/// `(Name: u64 base40, Offset: u64, Length: u64)`, then the members themselves
+/// concatenated from `28 + 24*N` in directory order with no padding between
+/// them and nothing after the last.
+///
+/// The six reader MUSTs §1d enumerates are applied HERE, before any member is
+/// reachable, so there is no way to read a member out of a directory that has
+/// not been checked. Each is a refusal that names the offending value.
+fn parse_compact_directory(
+    source: &dyn BlockSource,
+    total: u64,
+) -> Result<(HashMap<String, FileEntry>, Vec<String>), CtfsError> {
+    if total < COMPACT_DIRECTORY_OFFSET {
+        return Err(CtfsError::Corrupt(format!(
+            "compact container is {total} bytes, too small to carry the 24-byte header and the \
+             4-byte member count (need at least {COMPACT_DIRECTORY_OFFSET})"
+        )));
+    }
+
+    let mut count_buf = [0u8; 4];
+    read_exact_at(source, COMPACT_MEMBER_COUNT_OFFSET, &mut count_buf, "member count")?;
+    let member_count = u32::from_le_bytes(count_buf) as u64;
+
+    // §1d check 1: the directory fits inside the container.
+    let directory_bytes = member_count
+        .checked_mul(COMPACT_DIRECTORY_ENTRY_SIZE)
+        .ok_or_else(|| CtfsError::Corrupt(format!("compact directory of {member_count} members overflows")))?;
+    let first_member = COMPACT_DIRECTORY_OFFSET
+        .checked_add(directory_bytes)
+        .ok_or_else(|| CtfsError::Corrupt(format!("compact directory of {member_count} members overflows")))?;
+    if first_member > total {
+        return Err(CtfsError::Corrupt(format!(
+            "compact directory declares {member_count} members, whose {directory_bytes} bytes of \
+             directory would end at {first_member} in a {total}-byte container"
+        )));
+    }
+
+    let mut files = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    if member_count == 0 {
+        // A container with no members is well-formed only if nothing follows
+        // the (empty) directory; check 4 below would otherwise not run at all.
+        if total != first_member {
+            return Err(CtfsError::Corrupt(format!(
+                "compact container declares 0 members but carries {} bytes after its directory",
+                total - first_member
+            )));
+        }
+        return Ok((files, order));
+    }
+
+    let mut region = vec![0u8; directory_bytes as usize];
+    read_exact_at(source, COMPACT_DIRECTORY_OFFSET, &mut region, "compact directory")?;
+
+    let mut expected_offset = first_member;
+    for i in 0..member_count as usize {
+        let base = i * COMPACT_DIRECTORY_ENTRY_SIZE as usize;
+        let name_encoded = u64::from_le_bytes(
+            region[base..base + 8]
+                .try_into()
+                .map_err(|_| CtfsError::Corrupt("compact directory name slice".to_string()))?,
+        );
+        let offset = u64::from_le_bytes(
+            region[base + 8..base + 16]
+                .try_into()
+                .map_err(|_| CtfsError::Corrupt("compact directory offset slice".to_string()))?,
+        );
+        let length = u64::from_le_bytes(
+            region[base + 16..base + 24]
+                .try_into()
+                .map_err(|_| CtfsError::Corrupt("compact directory length slice".to_string()))?,
+        );
+
+        // §1d check 5: every name is non-zero, round-trips, and is spelled in
+        // the alphabet. The round-trip alone does not catch an interior
+        // out-of-alphabet character, so both halves are checked.
+        if name_encoded == 0 {
+            return Err(CtfsError::Corrupt(format!(
+                "compact directory entry {i} has a zero Name, which no member can have"
+            )));
+        }
+        let name = base40_decode(name_encoded);
+        if !name_is_well_formed(&name) {
+            return Err(CtfsError::Corrupt(format!(
+                "compact directory entry {i} has Name 0x{name_encoded:016x}, which decodes to \
+                 {name:?} — not a name the base40 alphabet can spell"
+            )));
+        }
+        match base40_encode(&name) {
+            Ok(re_encoded) if re_encoded == name_encoded => {}
+            _ => {
+                return Err(CtfsError::Corrupt(format!(
+                    "compact directory entry {i} has Name 0x{name_encoded:016x}, which does not \
+                     round-trip through the base40 codec (decoded {name:?})"
+                )));
+            }
+        }
+
+        // §1d checks 2 and 3: the first member begins at `28 + 24*N` and the
+        // members are contiguous. Both are the same equality, applied in
+        // directory order, which is why they are one check here.
+        if offset != expected_offset {
+            return Err(CtfsError::Corrupt(format!(
+                "compact member {name:?} (entry {i}) declares Offset {offset}, but the members \
+                 are concatenated in directory order and this one must begin at {expected_offset}"
+            )));
+        }
+        let end = offset
+            .checked_add(length)
+            .ok_or_else(|| CtfsError::Corrupt(format!("compact member {name:?} length overflows")))?;
+        if end > total {
+            return Err(CtfsError::Corrupt(format!(
+                "compact member {name:?} (entry {i}) spans [{offset}, {end}) in a {total}-byte \
+                 container"
+            )));
+        }
+        expected_offset = end;
+
+        // §1d check 6: the names are distinct.
+        order.push(name.clone());
+        if let Some(previous) = files.insert(
+            name.clone(),
+            FileEntry {
+                name: name.clone(),
+                size: length,
+                map_block: 0,
+                compact_offset: Some(offset),
+            },
+        ) {
+            return Err(CtfsError::Corrupt(format!(
+                "compact directory names member {name:?} twice (entry {i} and an earlier one at \
+                 offset {})",
+                previous.compact_offset.unwrap_or(0)
+            )));
+        }
+    }
+
+    // §1d check 4: nothing follows the last member.
+    if expected_offset != total {
+        return Err(CtfsError::Corrupt(format!(
+            "compact container is {total} bytes but its members end at {expected_offset}, leaving \
+             {} byte(s) belonging to no member — the compact profile pads nothing",
+            total - expected_offset
+        )));
+    }
+
+    Ok((files, order))
 }
 
 /// A `BlockSource` backed by the whole container loaded into a `Vec<u8>`.
@@ -399,6 +724,13 @@ impl BlockSource for InMemoryBlockSource {
 
     fn current_size(&self) -> u64 {
         self.data.len() as u64
+    }
+
+    /// The whole image is in `self.data`, so every stream a reader resolves
+    /// through this source is already resident. This is the one source over
+    /// which a compact container may be opened.
+    fn is_memory_resident(&self) -> bool {
+        true
     }
 }
 
@@ -548,6 +880,23 @@ impl FollowFileSource {
             return Err(CtfsError::InvalidMagic);
         }
         let version = header[5];
+        // A COMPACT container is refused HERE with the residency reason rather
+        // than by the version gate below, and the distinction is the whole
+        // point of the message. A follow source exists to watch a container
+        // GROW: it re-reads block 0's `FileEntry` sizes to see a writer's
+        // committed chunks. A compact container has no block 0 and no
+        // `FileEntry` array, and is specified for a one-shot whole-file load —
+        // so "this reader does not know version 6" is the wrong diagnosis for
+        // the right refusal, and the right one names the door to use instead.
+        // MEASURED, which is why this is here at all: before it, this
+        // constructor answered "unsupported CTFS version 6 (expected 2..=4)"
+        // for a container `CtfsReader::open` reads perfectly well.
+        if version == CTFS_PROFILED_VERSION {
+            return Err(compact_residency_refusal(
+                "a follow source exists to observe a growing block-0 directory, which a compact \
+                 container does not have",
+            ));
+        }
         if !(CTFS_VERSION_MIN..=CTFS_VERSION_MAX).contains(&version) {
             return Err(CtfsError::UnsupportedVersion(version));
         }
@@ -700,6 +1049,20 @@ pub struct CtfsReader {
     max_root_entries: usize,
     /// Parsed file directory, keyed by decoded name.
     files: HashMap<String, FileEntry>,
+    /// Which body shape this container carries.
+    ///
+    /// Versions 2..=4 have no `Profile` byte and are always
+    /// [`CtfsProfile::Full`]; a version-6 container's value is read from byte
+    /// 16 of its header.
+    profile: CtfsProfile,
+    /// Member names in DIRECTORY ORDER — the order the container itself
+    /// declares them in, which `files` (a `HashMap`) cannot preserve.
+    ///
+    /// Kept because "a compact and a full container of one recording name the
+    /// same members identically" is a claim about the SEQUENCE, and a
+    /// comparison taken over a hash map's iteration order would be true
+    /// whatever order either writer picked.
+    order: Vec<String>,
 }
 
 impl CtfsReader {
@@ -746,7 +1109,15 @@ impl CtfsReader {
 
         // Check version — we accept v2, v3, and v4 since the extended header
         // and file entry layout is identical across these versions.
+        //
+        // Version 6 is decided per PROFILE, not by this range: its header is 24
+        // bytes and its body depends on byte 16, so the compact body (which
+        // this reader implements) and the version-6 full body (which it does
+        // not) cannot share one verdict.
         let version = header[5];
+        if version == CTFS_PROFILED_VERSION {
+            return Self::from_profiled_source(source, total);
+        }
         if !(CTFS_VERSION_MIN..=CTFS_VERSION_MAX).contains(&version) {
             return Err(CtfsError::UnsupportedVersion(version));
         }
@@ -762,7 +1133,7 @@ impl CtfsReader {
 
         let entries_per_block = block_size / 8;
 
-        let files = parse_root_directory(source.as_ref(), total, max_root_entries)?;
+        let (files, order) = parse_root_directory(source.as_ref(), total, max_root_entries)?;
 
         Ok(CtfsReader {
             source,
@@ -770,7 +1141,111 @@ impl CtfsReader {
             entries_per_block,
             max_root_entries,
             files,
+            profile: CtfsProfile::Full,
+            order,
         })
+    }
+
+    /// Open a container whose version carries the 24-byte PROFILED header
+    /// (version 6), routing on its `Profile` byte.
+    ///
+    /// This is the compact loader's door. It is a separate function rather than
+    /// a branch inside [`CtfsReader::from_source`] because almost nothing is
+    /// shared: the header is 24 bytes rather than 16, `BlockSize` and
+    /// `MaxRootEntries` must be ZERO rather than valid, there is no
+    /// `FileEntry` array, and the directory is read from offset 28.
+    fn from_profiled_source(source: Box<dyn BlockSource>, total: u64) -> Result<Self, CtfsError> {
+        if total < HEADER_V6_SIZE as u64 {
+            return Err(CtfsError::Corrupt(format!(
+                "container declares version {CTFS_PROFILED_VERSION} but is only {total} bytes — \
+                 too short to carry its {HEADER_V6_SIZE}-byte header, so its Profile byte cannot \
+                 be read (a header too short to carry a declared field is a refusal, not a \
+                 default)"
+            )));
+        }
+
+        let mut header = [0u8; HEADER_V6_SIZE];
+        read_exact_at(source.as_ref(), 0, &mut header, "version-6 header")?;
+
+        // Read the two closed-set fields BEFORE anything structural, so an
+        // unknown value is reported as itself rather than as whatever the body
+        // check downstream happens to trip over first.
+        let profile = parse_profile(header[PROFILE_OFFSET])?;
+        parse_whole_file_compression(header[COMPRESSION_OFFSET])?;
+        for offset in RESERVED_RANGE {
+            if header[offset] != 0 {
+                return Err(CtfsError::Corrupt(format!(
+                    "version-6 header byte {offset} is reserved and MUST be zero, but carries \
+                     0x{:02x}",
+                    header[offset]
+                )));
+            }
+        }
+
+        if profile == CtfsProfile::Full {
+            return Err(CtfsError::Unimplemented(format!(
+                "CTFS container is version {CTFS_PROFILED_VERSION}, profile 0 (full); this reader \
+                 implements the version-6 COMPACT body only. A version-6 full container's \
+                 FileEntry array begins at {HEADER_V6_SIZE}, not at {}, so reading it with the \
+                 version 2..={CTFS_VERSION_MAX} directory parser would resolve every entry out \
+                 of the reserved area",
+                HEADER_SIZE + EXTENDED_HEADER_SIZE
+            )));
+        }
+
+        // The compact profile is specified for a one-shot load and carries
+        // nothing a ranged reader could seek with. Gate it on residency HERE,
+        // at the door, so no stream can be served from a source that would
+        // fetch it piecemeal.
+        if !source.is_memory_resident() {
+            return Err(compact_residency_refusal(
+                "this source fetches bytes on demand and reports itself as not memory-resident",
+            ));
+        }
+
+        // §1d's two header MUSTs. Writing 4096 here "because it is the
+        // default" is the defect they exist to catch: "there are no blocks"
+        // spelled as a block size.
+        let declared_block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
+        if declared_block_size != 0 {
+            return Err(CtfsError::Corrupt(format!(
+                "compact container declares BlockSize {declared_block_size}; the compact profile \
+                 has no blocks, so §1d requires 0"
+            )));
+        }
+        let declared_max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]);
+        if declared_max_root_entries != 0 {
+            return Err(CtfsError::Corrupt(format!(
+                "compact container declares MaxRootEntries {declared_max_root_entries}; the \
+                 compact profile has no FileEntry array for a maximum to bound, so §1d requires 0"
+            )));
+        }
+
+        let (files, order) = parse_compact_directory(source.as_ref(), total)?;
+
+        Ok(CtfsReader {
+            source,
+            // There are no blocks. These two carry 0 rather than the 4096 a
+            // full container would, and every read path that would divide by
+            // them is unreachable for a compact entry (`compact_offset` is
+            // `Some`, which short-circuits before any block arithmetic).
+            block_size: 0,
+            entries_per_block: 0,
+            max_root_entries: 0,
+            files,
+            profile: CtfsProfile::Compact,
+            order,
+        })
+    }
+
+    /// Which body shape this container carries.
+    pub fn profile(&self) -> CtfsProfile {
+        self.profile
+    }
+
+    /// Whether this container was opened through the compact loader.
+    pub fn is_compact(&self) -> bool {
+        self.profile == CtfsProfile::Compact
     }
 
     /// Open a CTFS container backed by a [`LocalFileSource`] (positional
@@ -802,7 +1277,16 @@ impl CtfsReader {
     pub fn refresh(&mut self) -> Result<(), CtfsError> {
         self.source.refresh()?;
         let total = self.source.current_size();
-        self.files = parse_root_directory(self.source.as_ref(), total, self.max_root_entries)?;
+        let (files, order) = match self.profile {
+            CtfsProfile::Full => parse_root_directory(self.source.as_ref(), total, self.max_root_entries)?,
+            // A compact container is fetched whole and its only memory-resident
+            // source never grows, so this re-parses the same bytes. It is
+            // routed rather than skipped so the two profiles cannot disagree
+            // about what a refresh means.
+            CtfsProfile::Compact => parse_compact_directory(self.source.as_ref(), total)?,
+        };
+        self.files = files;
+        self.order = order;
         Ok(())
     }
 
@@ -821,7 +1305,7 @@ impl CtfsReader {
             return Ok(Vec::new());
         }
 
-        if entry.map_block == 0 {
+        if entry.compact_offset.is_none() && entry.map_block == 0 {
             return Err(CtfsError::Corrupt(format!(
                 "file '{name}' has non-zero size ({}) but map_block is 0",
                 entry.size
@@ -945,6 +1429,31 @@ impl CtfsReader {
         if len == 0 {
             return Ok(Vec::new());
         }
+
+        // ── The COMPACT read path ────────────────────────────────────────
+        //
+        // A compact member is a contiguous byte range of a resident image, so
+        // the whole of "resolve logical byte N" is one addition. There is no
+        // mapping walk, no block index, no whole-blocks bound and no
+        // partial-block clamp: the four things below this branch all answer
+        // questions the compact layout does not raise. `whole_blocks_only` has
+        // no compact meaning either — it is §5d's rule about the last block a
+        // container carries, and a compact container's last byte IS its last
+        // member's last byte, which the directory checks already established.
+        if let Some(member_base) = entry.compact_offset {
+            let src_offset = member_base
+                .checked_add(offset)
+                .ok_or_else(|| CtfsError::Corrupt(format!("compact member '{name}': offset overflow")))?;
+            let mut out = vec![0u8; len as usize];
+            read_exact_at(
+                self.source.as_ref(),
+                src_offset,
+                &mut out,
+                &format!("compact member '{name}'"),
+            )?;
+            return Ok(out);
+        }
+
         if entry.map_block == 0 {
             return Err(CtfsError::Corrupt(format!(
                 "file '{name}' has non-zero size ({}) but map_block is 0",
@@ -1211,6 +1720,15 @@ impl CtfsReader {
         self.files.keys().map(|s| s.as_str()).collect()
     }
 
+    /// The container's member names in the order its own directory declares
+    /// them.
+    ///
+    /// [`CtfsReader::file_names`] answers from a `HashMap` and is therefore in
+    /// no order at all; this is the sequence the container states.
+    pub fn member_names_in_order(&self) -> &[String] {
+        &self.order
+    }
+
     /// Check whether a named file exists in the container.
     #[allow(dead_code)]
     pub fn has_file(&self, name: &str) -> bool {
@@ -1419,6 +1937,68 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> Result<(), Bo
     }
 
     fs::write(path, &buf)?;
+    Ok(())
+}
+
+// ── Compact-profile writer (test support + conversion) ──────────────────
+
+/// Encode `members` as a COMPACT container image (`ctfs-container.md` §1d).
+///
+/// The inverse of [`parse_compact_directory`], and deliberately written against
+/// §1d's own size identity rather than against that parser: the image is
+/// `24-byte header || MemberCount (u32 LE) || N x 24-byte directory ||
+/// members concatenated in directory order`, so its length is exactly
+/// `28 + 24*N + sum(len)`. Nothing is padded to a block, a page or a word.
+///
+/// Member payloads are copied VERBATIM. That is what makes a conversion from a
+/// full container byte-exact, and it is also why a compact container built this
+/// way inherits whatever per-member compression the source container used: the
+/// §1d requirement that a compact container carry raw members is a property of
+/// the WRITER that produced the recording, not of this encoder.
+pub fn encode_compact_ctfs(members: &[(&str, &[u8])]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let n = members.len() as u64;
+    let directory_bytes = n * COMPACT_DIRECTORY_ENTRY_SIZE;
+    let first_member = COMPACT_DIRECTORY_OFFSET + directory_bytes;
+
+    let mut buf = vec![0u8; first_member as usize];
+    buf[0..5].copy_from_slice(&CTFS_MAGIC);
+    buf[5] = CTFS_PROFILED_VERSION;
+    // bytes 6-7: encryption = 0, max_shards = 0 (already zero).
+    // §1d MUSTs: BlockSize = 0 and MaxRootEntries = 0 (already zero).
+    buf[PROFILE_OFFSET] = 1; // compact
+    buf[COMPRESSION_OFFSET] = 0; // none — the bytes in hand ARE the container
+    // bytes 18..24 reserved, already zero.
+    buf[COMPACT_MEMBER_COUNT_OFFSET as usize..COMPACT_MEMBER_COUNT_OFFSET as usize + 4]
+        .copy_from_slice(&(members.len() as u32).to_le_bytes());
+
+    let mut offset = first_member;
+    for (i, (name, data)) in members.iter().enumerate() {
+        let name_encoded = base40_encode(name)?;
+        if name_encoded == 0 {
+            return Err(format!("compact member {i} has an empty name").into());
+        }
+        let base = COMPACT_DIRECTORY_OFFSET as usize + i * COMPACT_DIRECTORY_ENTRY_SIZE as usize;
+        buf[base..base + 8].copy_from_slice(&name_encoded.to_le_bytes());
+        buf[base + 8..base + 16].copy_from_slice(&offset.to_le_bytes());
+        buf[base + 16..base + 24].copy_from_slice(&(data.len() as u64).to_le_bytes());
+        offset += data.len() as u64;
+    }
+
+    for (_, data) in members {
+        buf.extend_from_slice(data);
+    }
+
+    debug_assert_eq!(
+        buf.len() as u64,
+        first_member + members.iter().map(|(_, d)| d.len() as u64).sum::<u64>(),
+        "§1d size identity"
+    );
+    Ok(buf)
+}
+
+/// Write a COMPACT container at `path`.
+pub fn write_compact_ctfs(path: &Path, members: &[(&str, &[u8])]) -> Result<(), Box<dyn Error>> {
+    fs::write(path, encode_compact_ctfs(members)?)?;
     Ok(())
 }
 
@@ -2004,5 +2584,374 @@ mod tests {
             msg.contains("b.dat"),
             "the refusal does not name the lost stream: {msg}"
         );
+    }
+}
+
+// ── Compact-profile unit tests ──────────────────────────────────────────
+//
+// These exercise the §1d loader at the BYTE level: the header MUSTs, the six
+// directory checks, the residency gate, and the read path. They are unit tests
+// rather than integration ones because what they assert is a verdict about
+// bytes, and reaching that verdict through a whole trace reader would make a
+// refusal indistinguishable from any other way a trace can fail to open.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod compact_profile_tests {
+    use super::*;
+
+    /// The twenty-one member names of the container this campaign was opened on.
+    ///
+    /// Round-tripped BY NAME rather than through a generated alphabet, because
+    /// the base40 table is off-by-one-able in a way that still reports success:
+    /// index 1 is `'0'` and not `'\0'`, and there is no space character, so a
+    /// shifted table decodes `meta.dat` into something else entirely.
+    const MEASURED_MEMBER_NAMES: [&str; 21] = [
+        "events.log",
+        "events.fmt",
+        "meta.json",
+        "paths.json",
+        "calls.dat",
+        "calls.idx",
+        "steps.dat",
+        "steps.idx",
+        "values.dat",
+        "values.idx",
+        "events.dat",
+        "events.idx",
+        "paths.dat",
+        "paths.off",
+        "funcs.dat",
+        "funcs.off",
+        "types.dat",
+        "types.off",
+        "varnames.dat",
+        "varnames.off",
+        "meta.dat",
+    ];
+
+    fn compact_reader(image: Vec<u8>) -> Result<CtfsReader, CtfsError> {
+        CtfsReader::from_bytes(image)
+    }
+
+    /// Pack `name` the way the SIBLING NIM ENCODER packs it: an
+    /// out-of-alphabet character maps to the PADDING index rather than being
+    /// refused.
+    ///
+    /// This exists because of a divergence measured while writing these tests,
+    /// and it is worth stating: `base40_encode` in THIS module REFUSES an
+    /// out-of-alphabet character by name and position, while
+    /// `codetracer-trace-format-nim`'s `base40Encode` silently maps it to index
+    /// 0. Both are safe writers; the Rust one is the stricter. But a READER
+    /// must still refuse the resulting word, because the word can arrive from
+    /// anywhere — a different writer, a corrupted byte — and this module's own
+    /// encoder is not what produces the directories it reads. So the hazard is
+    /// constructed here arithmetically rather than through the encoder, which
+    /// is the only way to reach it at all.
+    fn padding_mapped_word(name: &str) -> u64 {
+        let mut encoded: u64 = 0;
+        let mut multiplier: u64 = 1;
+        for ch in name.bytes() {
+            let idx = BASE40_CHARS.iter().position(|&c| c == ch).unwrap_or(0) as u64;
+            encoded += idx * multiplier;
+            multiplier *= 40;
+        }
+        encoded
+    }
+
+    #[test]
+    fn the_known_member_names_pack_and_unpack() {
+        for name in MEASURED_MEMBER_NAMES {
+            // `assert!` + `unwrap`, not a panicking closure: this module's
+            // sibling tests already record that `clippy::panic` is denied
+            // repo-wide and does not distinguish a test's deliberate abort
+            // from a production one.
+            let packed = base40_encode(name);
+            assert!(packed.is_ok(), "{name} does not encode: {:?}", packed.err());
+            let encoded = packed.unwrap();
+            assert_ne!(encoded, 0, "{name} encodes to the zero word no member may carry");
+            assert_eq!(base40_decode(encoded), name, "{name} does not round-trip");
+            assert!(name_is_well_formed(name), "{name} is rejected as malformed");
+        }
+        // The trap, pinned in the direction a round-trip cannot see: an
+        // INTERIOR out-of-alphabet character decodes to a name with an embedded
+        // NUL, which re-encodes to itself.
+        assert!(
+            base40_encode("meta dat").is_err(),
+            "this module's encoder must REFUSE an out-of-alphabet character rather than pad it; \
+             if it has started padding, padding_mapped_word's reason for existing is gone"
+        );
+        let with_space = padding_mapped_word("meta dat");
+        let decoded = base40_decode(with_space);
+        assert!(
+            decoded.contains('\0'),
+            "expected an embedded NUL from an interior out-of-alphabet character, got {decoded:?}"
+        );
+        assert_eq!(
+            padding_mapped_word(&decoded),
+            with_space,
+            "the malformed word must re-encode to itself — which is exactly why the round-trip \
+             alone is not the whole of §1d check 5"
+        );
+        assert!(
+            !name_is_well_formed(&decoded),
+            "the alphabet test is the half that catches it, and it did not"
+        );
+        // A TRAILING one does collide, which is the correction CCP-2 recorded.
+        assert_eq!(
+            padding_mapped_word("meta "),
+            base40_encode("meta").unwrap(),
+            "a trailing out-of-alphabet character is bit for bit the shorter name"
+        );
+    }
+
+    #[test]
+    fn a_compact_container_serves_every_member_byte_exactly() {
+        let members: Vec<(&str, Vec<u8>)> = MEASURED_MEMBER_NAMES
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                // Deliberately NOT a multiple of any block size, and distinct
+                // per member so a shifted read is visible.
+                let len = 7 + i * 13;
+                (
+                    *name,
+                    (0..len)
+                        .map(|b| (b as u8).wrapping_add((i as u8).wrapping_mul(31)))
+                        .collect(),
+                )
+            })
+            .collect();
+        let refs: Vec<(&str, &[u8])> = members.iter().map(|(n, d)| (*n, d.as_slice())).collect();
+        let image = encode_compact_ctfs(&refs).unwrap();
+
+        // §1d's size identity, recomputed from the members rather than from the
+        // encoder's own arithmetic.
+        let expected_len = 28 + 24 * members.len() + members.iter().map(|(_, d)| d.len()).sum::<usize>();
+        assert_eq!(image.len(), expected_len, "§1d size identity");
+
+        let mut reader = compact_reader(image).expect("the compact container opens");
+        assert_eq!(reader.profile(), CtfsProfile::Compact);
+        assert!(reader.is_compact());
+        assert_eq!(
+            reader.member_names_in_order(),
+            MEASURED_MEMBER_NAMES.map(str::to_owned).as_slice(),
+            "the directory order is not the order the encoder wrote"
+        );
+        for (name, data) in &members {
+            assert_eq!(reader.file_size(name), Some(data.len() as u64), "{name} size");
+            assert_eq!(&reader.read_file(name).unwrap(), data, "{name} payload");
+            // A range read of the interior, which is the path a chunked stream
+            // reader takes and the one block arithmetic would have broken.
+            if data.len() > 4 {
+                assert_eq!(
+                    reader.read_file_range(name, 2, 3).unwrap(),
+                    data[2..5].to_vec(),
+                    "{name} interior range"
+                );
+            }
+        }
+        // At least one member must begin off a 4,096-byte boundary — a thing
+        // the full profile cannot satisfy, since every full member begins at a
+        // block.
+        let mut offset = 28 + 24 * members.len();
+        let mut off_boundary = 0;
+        for (_, data) in &members {
+            if !offset.is_multiple_of(4096) {
+                off_boundary += 1;
+            }
+            offset += data.len();
+        }
+        assert!(off_boundary > 0, "no member begins off a 4 KiB boundary");
+    }
+
+    #[test]
+    fn an_unknown_profile_is_refused_not_defaulted() {
+        let mut image = encode_compact_ctfs(&[("meta.dat", b"x")]).unwrap();
+        for byte in [2u8, 3, 7, 42, 255] {
+            image[PROFILE_OFFSET] = byte;
+            let err = compact_reader(image.clone()).expect_err("an unknown profile must be refused");
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&byte.to_string()) && msg.contains("profile"),
+                "profile {byte} is not refused by name: {msg}"
+            );
+            assert!(
+                matches!(err, CtfsError::Unimplemented(_)),
+                "an unknown profile is a well-formed container this reader cannot serve, not a \
+                 corrupt one: {err:?}"
+            );
+        }
+        // And profile 0 at version 6 — the FULL body this reader does not
+        // implement — is refused for its own reason, not read as a v4 body.
+        image[PROFILE_OFFSET] = 0;
+        let err = compact_reader(image.clone()).expect_err("the version-6 full body must be refused");
+        assert!(
+            err.to_string().contains("profile 0") && err.to_string().contains("FileEntry"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_declared_whole_file_scheme_is_refused_not_ignored() {
+        let base = encode_compact_ctfs(&[("meta.dat", b"x")]).unwrap();
+        for byte in [1u8, 2, 9, 255] {
+            let mut image = base.clone();
+            image[COMPRESSION_OFFSET] = byte;
+            let err = compact_reader(image).expect_err("a declared scheme must be refused");
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&byte.to_string()) && msg.contains("compression"),
+                "scheme {byte} is not refused by name: {msg}"
+            );
+        }
+        // Scheme 0 — the only one this reader serves — must still open, so the
+        // check above is not passing by universal refusal.
+        assert!(compact_reader(base).is_ok());
+    }
+
+    #[test]
+    fn a_poisoned_reserved_byte_is_refused_by_offset() {
+        let base = encode_compact_ctfs(&[("meta.dat", b"x")]).unwrap();
+        for offset in RESERVED_RANGE {
+            let mut image = base.clone();
+            image[offset] = 0xAB;
+            let err = compact_reader(image).expect_err("a non-zero reserved byte must be refused");
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&offset.to_string()) && msg.contains("reserved"),
+                "reserved byte {offset} is not refused by offset: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_header_musts_are_enforced() {
+        let base = encode_compact_ctfs(&[("meta.dat", b"x")]).unwrap();
+        // "there are no blocks", spelled as a block size, is the max_shards
+        // defect again.
+        let mut with_block_size = base.clone();
+        with_block_size[8..12].copy_from_slice(&4096u32.to_le_bytes());
+        let err = compact_reader(with_block_size).expect_err("BlockSize 4096 must be refused");
+        assert!(err.to_string().contains("BlockSize 4096"), "{err}");
+
+        let mut with_root_entries = base;
+        with_root_entries[12..16].copy_from_slice(&31u32.to_le_bytes());
+        let err = compact_reader(with_root_entries).expect_err("MaxRootEntries 31 must be refused");
+        assert!(err.to_string().contains("MaxRootEntries 31"), "{err}");
+    }
+
+    #[test]
+    fn the_six_directory_checks_each_refuse_by_value() {
+        let members: &[(&str, &[u8])] = &[("meta.dat", b"metadata"), ("events.log", b"eventsevents")];
+        let base = encode_compact_ctfs(members).unwrap();
+        let n = members.len() as u64;
+        let dir = COMPACT_DIRECTORY_OFFSET as usize;
+
+        // check 1 — the directory must fit.
+        let mut image = base.clone();
+        image[24..28].copy_from_slice(&1_000_000u32.to_le_bytes());
+        let err = compact_reader(image).expect_err("an oversized member count must be refused");
+        assert!(err.to_string().contains("1000000"), "{err}");
+
+        // check 2 — the first member begins at 28 + 24*N.
+        let mut image = base.clone();
+        let first = COMPACT_DIRECTORY_OFFSET + 24 * n;
+        image[dir + 8..dir + 16].copy_from_slice(&(first + 1).to_le_bytes());
+        let err = compact_reader(image).expect_err("a shifted first member must be refused");
+        assert!(err.to_string().contains(&format!("must begin at {first}")), "{err}");
+
+        // check 3 — the members are contiguous: shrink entry 0's length and the
+        // second member no longer starts where the first ends.
+        let mut image = base.clone();
+        image[dir + 16..dir + 24].copy_from_slice(&7u64.to_le_bytes());
+        let err = compact_reader(image).expect_err("a gap between members must be refused");
+        assert!(err.to_string().contains("events.log"), "{err}");
+
+        // check 4 — nothing follows the last member.
+        let mut image = base.clone();
+        image.push(0);
+        let err = compact_reader(image).expect_err("a trailing byte must be refused");
+        assert!(
+            err.to_string().contains("belonging to no member"),
+            "the refusal does not say what the extra byte is: {err}"
+        );
+
+        // check 5 — a zero Name, and a name outside the alphabet.
+        let mut image = base.clone();
+        image[dir..dir + 8].copy_from_slice(&0u64.to_le_bytes());
+        let err = compact_reader(image).expect_err("a zero Name must be refused");
+        assert!(err.to_string().contains("zero Name"), "{err}");
+
+        let mut image = base.clone();
+        image[dir..dir + 8].copy_from_slice(&padding_mapped_word("meta dat").to_le_bytes());
+        let err = compact_reader(image).expect_err("a name with an embedded NUL must be refused");
+        assert!(err.to_string().contains("base40 alphabet"), "{err}");
+
+        // check 6 — the names are distinct.
+        let duplicate = base40_encode("meta.dat").unwrap();
+        let mut image = base.clone();
+        image[dir + 24..dir + 32].copy_from_slice(&duplicate.to_le_bytes());
+        let err = compact_reader(image).expect_err("a duplicated name must be refused");
+        assert!(err.to_string().contains("twice"), "{err}");
+
+        // The unmodified image must open, so none of the above passes by
+        // universal refusal.
+        assert!(compact_reader(base).is_ok(), "the well-formed container must open");
+    }
+
+    #[test]
+    fn a_compact_container_is_refused_over_a_non_resident_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("compact.ct");
+        write_compact_ctfs(&path, &[("meta.dat", b"metadata")]).unwrap();
+
+        // The memory-resident door opens it.
+        let resident = CtfsReader::open(&path).expect("the whole-file loader opens a compact container");
+        assert!(resident.is_compact());
+
+        // Every positional door refuses it, by name, with the remedy.
+        let err = CtfsReader::open_local_file(&path).expect_err("a positional source must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("loaded whole") && msg.contains("InMemoryBlockSource"),
+            "the refusal does not name the remedy: {msg}"
+        );
+        let err = CtfsReader::open_follow(&path).expect_err("a follow source must be refused");
+        assert!(err.to_string().contains("loaded whole"), "{err}");
+
+        // CONTROL: the same two doors open a FULL container of the same
+        // members, so the refusal is attributable to the PROFILE and not to the
+        // doors being broken.
+        let full_path = dir.path().join("full.ct");
+        write_minimal_ctfs(&full_path, &[("meta.dat", b"metadata")]).unwrap();
+        assert!(CtfsReader::open_local_file(&full_path).is_ok());
+        assert!(CtfsReader::open_follow(&full_path).is_ok());
+    }
+
+    #[test]
+    fn a_truncated_version_six_header_is_refused_rather_than_defaulted() {
+        let base = encode_compact_ctfs(&[("meta.dat", b"x")]).unwrap();
+        // Nine truncation lengths, each shorter than the 24-byte header: a
+        // 17-byte head carries the profile byte and not the compression byte,
+        // so the refusal must be about the HEADER being short rather than about
+        // either field's value.
+        for len in [0usize, 1, 5, 6, 8, 16, 17, 18, 23] {
+            let err = compact_reader(base[..len.min(base.len())].to_vec())
+                .expect_err("a head shorter than the v6 header must be refused");
+            let msg = err.to_string();
+            assert!(
+                !msg.contains("profile 0"),
+                "a {len}-byte head must not be read as profile 0: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_compact_container_with_no_members_is_well_formed_and_empty() {
+        let image = encode_compact_ctfs(&[]).unwrap();
+        assert_eq!(image.len(), 28, "a memberless compact container is header + count");
+        let reader = compact_reader(image).expect("it opens");
+        assert!(reader.member_names_in_order().is_empty());
+        assert!(!reader.has_file("meta.dat"));
     }
 }
