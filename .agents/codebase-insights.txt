@@ -6700,3 +6700,99 @@ Two traps in the same area, both live:
   moved without regenerating). The PLAT-46/47 harnesses refuse to grade while
   it is red; stage the gitlink at 3d0703d with `git update-index --cacheinfo`
   to grade, and restore it after.
+- PLAT-49 part B (2026-10-02) facts:
+  * The engine sends NO DAP response to `ct/expand-calls` / `ct/collapse-calls`
+    (the desktop fires them with `backend.send`). A blocking
+    `DapStdioBackend.sendDapRequest` for either never returns and wedges the
+    front-end's loop; use `sendDapRequestNoResponse`, then reload the section.
+    After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
+    row by its place in the section), on the desktop too.
+  * Call rows: `ct/load-calltrace-section` carries every call's `args` (with
+    `value`s) and `returnValue`; the response's top-level `args` /
+    `returnValues` tables are `{}` on `calc`. Both decoders now put the return
+    in the `__return` `CallArg` (`replay_data_store.callArgsOf`,
+    `ui/calltrace.syncCalltraceData`); a `TypeKind.None` (wire kind 30) return
+    is omitted. `calltrace_vm.CallRow` / `callRowSegments` is the row as data;
+    `currentCallOf` is the one "which call is the debugger in" rule.
+  * GoldenLayout 2.6.0's stack body has NO centre zone: left/right hover areas
+    are the outer quarters (full height), the middle half splits top or bottom
+    (`dist/cjs/ts/items/stack.js`, `Stack.getArea`); the ground adds 50 px
+    side areas that split the WHOLE layout. CodeTracer's shared rule
+    (`layout_interaction.goldenLayoutZone`) keeps the quarters and makes the
+    middle join, by the user's direction. A tab's left half inserts before
+    it, its right half after it (`goldenLayoutInsertsAfter`); a CLICK still
+    activates the tab it is on (`binding.tabAtCell` no longer uses
+    `pointerAt`).
+  * The bottom auto-hide strip lives on the terminal's STATUS ROW (the row
+    under `bodyArea`; `binding.stripAreaFor(leBottom)`), and in GPUI's footer
+    (`WindowGeometry.footer`). A click on a label docks the pane OPEN
+    (`cmdOpenDocked`: `DockedPane.open`, not persisted, one at a time); the
+    band (21% — the desktop's 280/1334 px) comes out of the tree's area. A
+    hover previews after 300 ms and leaving dismisses after 300 ms
+    (`headless_app/auto_hide_hover`); the TUI's idle loop wakes for it
+    (`runtime.autoHideDueMs`), GPUI arms its one shim tick (`armHoverTick`).
+    `--window-ops` gained `hover-label:<pane>` and `wait:<ms>` (advances the
+    hover clock).
+  * The desktop's event-log location column was VISIBLE on `calc` despite
+    `onCompleteMove`'s `column(2).visible(false)` (it ran before the table
+    existed / was re-initialised); the column now declares `visible:` from
+    `event_log_vm.DefaultHiddenEventLogColumns`.
+  * `just test-e2e … -g <grep>` word-splits: a grep with a space turns its
+    second word into a FILE filter and Playwright then collects every spec
+    (failing on unrelated fixtures). Use `.` for spaces.
+  * isonim-gpui's shim ticker (`gpui_set_tick`) used to wait out the
+    interval it had already started: a 300 ms hover deadline armed while a
+    5 s VCS refresh was pending fired after the 5 s. The ticker now waits
+    in 50 ms slices and restarts on every arming (`window.tick_generation`);
+    `gpui/main.armHoverTick` re-arms only when what is due changes
+    (`gArmedTick`), so pointer motion does not keep postponing it.
+  * The status note shares the status row with the footer's labels; at
+    120 columns it is much narrower. `status_bar.fitNoteCells` shortens an
+    ABSOLUTE path's directories first (`…/dir/file`) and otherwise cuts the
+    end, as before. Real-terminal tests that read frame 0's long note
+    (`settleOnDebugger` looks for "opening ") can see it cut: wait for the
+    debugger's own note (" tick ") instead.
+  * The PLAT-49 harness's desktop gates WRITE the answers files the
+    reference suite reads; `run_electron` now restores them after every
+    run (a mutated desktop once left `plat49-panes.electron.json`
+    describing the mutant).
+  * Grading from a sibling worktree: harness `because` entries are
+    repo-relative (PLAT-37's and PLAT-38's `without_checkout_path`, applied
+    to the derived string and to the graded output alike), and PLAT-20's
+    cross-front-end suite is given the `tui` lane's own
+    `-d:isonimTuiGrammarArchive=<repo>/build/grammars/libcodetracer_tui_grammars.a`,
+    so no arm depends on the worktree's name or on `../isonim-tui`.
+    PLAT-46/47 grade only with the design-system gitlink staged at 3d0703d
+    (`git update-index --cacheinfo 160000,<sha>,libs/codetracer-design-system`,
+    restored after).
+  * PLAT-49 part B review (2026-10-03):
+    - GoldenLayout's GROUND side areas (`GroundItem.createSideAreas`, 50 px
+      inside the layout along each edge) win over a stack's body by
+      `LayoutManager.getArea`'s smallest-surface rule; a drop there splits
+      the ROOT (`GroundItem.onDrop`: join a same-axis root at that end with
+      half the end sibling's share, else wrap the root 50/50). Modelled as
+      `lcSplit` with `splitRoot` (`cmdSplitRootMove`), zones `dzRoot*`,
+      region `drRootBand`, indication `diRootBand`. A stack's header (its
+      strip row) is smaller than the band and keeps its own drop.
+    - The desktop ALSO pins a pane dragged within 40 px of the window's
+      left/right/bottom edge (`layout.setupDragToPinListeners`), on top of
+      GoldenLayout's drop; measure GoldenLayout's band 45 px in.
+    - `.lm_dropTargetIndicator` has `transition: all 200ms`: read its
+      TARGET box from `style.left/top/width/height`, never
+      `getBoundingClientRect` right after a move.
+    - A terminal cell carries the desktop's pixel measures as one character
+      of its editor monospace: 9.63 x 22 px (`binding.DesktopCellWidthPx` /
+      `DesktopCellHeightPx`, measured by `plat49-panes-capture.spec.ts`).
+    - The terminal and GPUI now hold several sessions: the shipped hosts
+      register their session in `HeadlessApp` (adopted), the strip's "+"
+      opens the omnibar on `:open ` (`omRecording`; entries from
+      `native_host.recordingsBeside`), and the host opens the recording in
+      a new tab (`TuiApp.recordingOpener` / `gpui main.openRecordingInTab`);
+      a tab switch re-points the panes (`showSession`), a close stops that
+      engine. Close adopted sessions with `disconnectBackend = false` and
+      close the `HeadlessDebugSession` yourself; `DapStdioBackend.close` is
+      idempotent.
+    - The desktop's call trace marks the current call with `.event-selected`
+      (its own ground) and `.call-current` (bold); the native front-ends
+      use `ui/surface/primary/secondary-hover` (the desktop step list's
+      active row) — `srSurfaceActiveRow`.
