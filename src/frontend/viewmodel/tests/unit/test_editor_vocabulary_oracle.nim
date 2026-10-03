@@ -71,6 +71,7 @@ import std/[algorithm, strutils, tables, unittest]
 import ../../editor/operations
 import ../../../../common/editing_key_bindings
 import ../generators/vocabulary_generator
+import ../../../test_support/spec_documents
 
 const ExpectedAssertions = 1050
 
@@ -81,9 +82,13 @@ template ck(condition: untyped) =
   check condition
 
 const
-  SpecRelativePath = "codetracer-specs/GUI/Editing-Operations-And-Keymaps.md"
-  SpecSource = staticRead(
-    "../../../../../../codetracer-specs/GUI/Editing-Operations-And-Keymaps.md")
+  SpecDocName = "GUI/Editing-Operations-And-Keymaps.md"
+    ## Named from the specification tree's root; `test_support/spec_documents`
+    ## is the one module that knows where the sibling checkout is and how it is
+    ## laid out (see its header).
+
+  SpecRelativePath = specDocumentRef(SpecDocName)
+  SpecSource = specDocument(SpecDocName)
     ## **READ, NEVER TRANSCRIBED.** See the header on why this is `staticRead`.
 
   SectionStart = "### 2.2 The four categories"

@@ -131,11 +131,20 @@ TOUCHED = [COLLAB_TEXT, REDUCER, TEXT_OPS, TRANSACTION, OPS, GENERATOR,
 # — `ROOT / rel` resolves the `..` fine, and being in another repo is a reason
 # it can move without this repo's git status saying anything, not a reason to
 # leave it out.
+#
+# **AND IT MOVED.** `codetracer-specs` `1735345d` ("Adopt the pm layout:
+# spec/, milestones/, issues/") put the topical specification trees under
+# `spec/` and left no compatibility symlink, so the row below named a path that
+# no longer existed and this harness refused to run at all. The Nim side of
+# the same breakage is repaired once, in
+# `src/frontend/test_support/spec_documents.nim`, whose `SpecSubdir` is the
+# canonical statement of the layout; this is the one Python spelling of it and
+# it is deliberately not a second copy of that module.
 READ_ONLY_INPUTS = [
     ".github/workflows/codetracer.yml",
     "justfile",
     "ci/lib/test-lane-files.sh",
-    "../codetracer-specs/Architecture/Editor-ViewModel.md",
+    "../codetracer-specs/spec/Architecture/Editor-ViewModel.md",
     # Executed by this harness (it is in `SUITES`) but not mutated by it — see
     # `AUTHORITY` above for why it is digested here rather than in `TOUCHED`.
     AUTHORITY,

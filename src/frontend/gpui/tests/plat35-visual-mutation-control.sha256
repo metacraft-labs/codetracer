@@ -10,9 +10,9 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
-4cc1a0e2949561f289ba2cabd0cfe639b2c41eb167110210aaa8a314d204f43c  src/frontend/gpui/app/leaves.nim
+8e0e4de6045591385d0031f8dec38d4448247441dbe8dbfae7388be613335fbc  src/frontend/gpui/app/leaves.nim
 00376e0236fbf58c526b47a79d91cf30a8d3ba6b0cd3b4fddc75ebdbad9d6b6b  src/frontend/view_vocabulary/gpui_layout_answers.nim
 90bf9191cf39e9bf113d5fe38834b360213011c9ba91b8e81f0c0cb3e5bb6619  src/common/view_vocabulary/layout_questions.nim
 9ff00385224654a2bd29b930cdd0910539f5fda07884a65b7d6c5ba6de59d7bf  tools/visual-review-brief.md
-537bad8b46fe9204aa13d05791e6ec93273861fe3f6d3871c2db66e4614d6811  src/tests/visual/scenarios.json
-ad066ccc08b9347ffa3246c085c9c02c452a0d4b8d14c36dad6caacf7670d992  src/frontend/gpui/tests/test_cross_renderer_visual_alignment.nim
+dc7f2f6eead55f34920fe791d0e936f936a37da8666357e1f9abb93afd8bfac1  src/tests/visual/scenarios.json
+c5df332f3893d952e9e719b5384bccc1890388121ef760528f3296f4da835981  src/frontend/gpui/tests/test_cross_renderer_visual_alignment.nim

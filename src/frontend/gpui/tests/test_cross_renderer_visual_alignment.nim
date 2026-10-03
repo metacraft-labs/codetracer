@@ -115,6 +115,7 @@ import ../../view_vocabulary/editor_surface
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_layout_answers
 import ../../../common/view_vocabulary
+import ../../test_support/spec_documents
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
@@ -131,7 +132,15 @@ template ck(condition: untyped) =
 # ---------------------------------------------------------------------------
 
 const
-  SpecRel = "../codetracer-specs/Testing/Cross-Renderer-Visual-Alignment.md"
+  SpecRel = specDocumentPath("Testing/Cross-Renderer-Visual-Alignment.md")
+    ## Resolved by `test_support/spec_documents`, which is the one module that
+    ## knows where the sibling specification checkout is and how it is laid out
+    ## (see its header). Unlike the other constants here it is ABSOLUTE rather
+    ## than repo-relative, so it does not depend on this suite's own directory
+    ## the way the `../codetracer-specs/…` spelling it replaces did — four
+    ## suites held four different `..` counts and all four broke together.
+    ## `requireFile` below is unchanged and still the thing that makes an
+    ## absent document a hard red.
   ScenarioRel = "src/tests/visual/scenarios.json"
   PinRel = "src/tests/visual/corpus-pins.json"
   ThresholdRel = "src/tests/visual/thresholds.json"
