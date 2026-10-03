@@ -113,6 +113,7 @@ use std::sync::Once;
 
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::meta_dat::{MetaDat, parse_meta_dat};
+use crate::ctfs_trace_reader::snapshot_payload::read_snapshot_payload;
 use crate::db::DbRecordEvent;
 use crate::dwarf_index::{DwarfIndex, PcInfo};
 use crate::emulator_ffi;
@@ -141,11 +142,16 @@ static NIM_RUNTIME_INIT: Once = Once::new();
 /// will need the full binary anyway for `.eh_frame`-driven unwinding.
 const BUNDLED_DEBUG_FILE: &str = "debug.dat";
 
-/// CTFS file carrying the initial memory snapshot, written by the
-/// recorder's `__libc_start_main` wrapper (see
+/// Logical name of the initial memory snapshot, written by the recorder's
+/// `__libc_start_main` wrapper on the `--attach=premain` path (see
 /// `codetracer-native-recorder/ct_interpose/src/ct_interpose/full_snapshot.c`).
 ///
-/// Wire format: a flat sequence of `(address: u64 LE, size: u64 LE, bytes[size])`
+/// It is a snapshot payload: stored raw under this name when it fits in one
+/// container block, otherwise as the `cp0.mzd` + `cp0.mzi` chunked-compressed
+/// pair (`ctfs_trace_reader::snapshot_payload`). Always read it through
+/// `read_snapshot_payload`, never with a plain `read_file`.
+///
+/// Payload format: a flat sequence of `(address: u64 LE, size: u64 LE, bytes[size])`
 /// tuples — one per captured memory region. The recorder writes one region
 /// per `/proc/self/maps` entry it deems "live" (skipping kernel-only ranges
 /// and explicit `[vvar]/[vsyscall]` slots), capping the total at
@@ -206,6 +212,16 @@ const CP0_FSBASE_FILE: &str = "cp0.fsbase";
 /// which is still correct for static binaries with no ASLR (load base
 /// equals static base).
 const CP0_MAPS_FILE: &str = "cp0.maps";
+
+/// Members that mark a recording whose initial state is the execve-stop
+/// boundary (`ct-mcr record --attach=instruction0`, the Linux/x86-64
+/// default): the loader's first instruction, before `ld.so` has mapped any
+/// library. Such a recording carries no `cp0.*` members. Reaching `main`
+/// from that boundary means serving the loader window from the recorded
+/// events (file-backed `mmap`s, `openat`, `read`, ...), which this session
+/// does not do, so it refuses the recording by name instead of seeding an
+/// empty emulator.
+const INSTRUCTION0_BOUNDARY_MEMBERS: [&str; 4] = ["bootelf.bin", "bootelf.stk", "cp.entry.lay", "cp.entry.reg"];
 
 /// Compact layout: 18 × u64 LE.
 const CP0_REGS_COMPACT_LEN: usize = 18 * 8;
@@ -1006,7 +1022,10 @@ impl EmulatorReplaySession {
     /// Returns `Err` if the bytes are not a valid CTFS container, if
     /// `meta.dat` is missing or unparseable, or if the trace does not
     /// declare `FLAG_HAS_MCR_FIELDS` (callers should route those to
-    /// `MaterializedReplaySession` instead).
+    /// `MaterializedReplaySession` instead). Also returns `Err` for a
+    /// recording whose initial state is the `--attach=instruction0`
+    /// execve-stop boundary (see `INSTRUCTION0_BOUNDARY_MEMBERS`), and for a
+    /// malformed `cp0.mem` snapshot payload.
     pub fn new_from_ctfs_bytes(bytes: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::from_bytes(bytes).map_err(|e| ctfs_error(format!("CTFS parse failed: {e}")))?;
 
@@ -1092,8 +1111,26 @@ impl EmulatorReplaySession {
         // needed.
         let pc_rebase = compute_pc_rebase_from_cp0_maps(&mut ctfs, &meta.program, elf_bytes.as_deref());
 
-        let cp0_mem_bytes = match ctfs.read_file(CP0_MEM_FILE) {
-            Ok(bytes) if !bytes.is_empty() => Some(bytes),
+        if !ctfs.has_file(CP0_REGS_FILE) {
+            let boundary: Vec<&str> = INSTRUCTION0_BOUNDARY_MEMBERS
+                .iter()
+                .copied()
+                .filter(|name| ctfs.has_file(name))
+                .collect();
+            if !boundary.is_empty() {
+                return Err(ctfs_error(format!(
+                    "EmulatorReplaySession cannot open this recording: its initial state is the \
+                     execve-stop boundary of `ct-mcr record --attach=instruction0` ({}), and it has \
+                     no {CP0_REGS_FILE} / {CP0_MEM_FILE}. The emulator session starts from the \
+                     `main` boundary that `--attach=premain` records; re-record with \
+                     `ct-mcr record --attach=premain`.",
+                    boundary.join(", ")
+                )));
+            }
+        }
+
+        let cp0_mem_bytes = match read_snapshot_payload(&mut ctfs, CP0_MEM_FILE).map_err(ctfs_error)? {
+            Some(bytes) if !bytes.is_empty() => Some(bytes),
             _ => None,
         };
         let cp0_regs_bytes = match ctfs.read_file(CP0_REGS_FILE) {
@@ -3078,6 +3115,18 @@ mod tests {
         include_dwarf: bool,
         cp0_maps: Option<&str>,
     ) -> Vec<u8> {
+        synthetic_mcr_ctfs_bytes_with_members(cp0_regs, cp0_mem_regions, include_dwarf, cp0_maps, &[])
+    }
+
+    /// The general fixture builder: everything the helpers above write,
+    /// plus `extra` members stored verbatim.
+    fn synthetic_mcr_ctfs_bytes_with_members(
+        cp0_regs: Option<&[u8]>,
+        cp0_mem_regions: &[(u64, Vec<u8>)],
+        include_dwarf: bool,
+        cp0_maps: Option<&str>,
+        extra: &[(&str, &[u8])],
+    ) -> Vec<u8> {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
@@ -3126,8 +3175,13 @@ mod tests {
         if include_dwarf {
             entries.push((BUNDLED_DEBUG_FILE, HELLO_ELF_FIXTURE));
         }
-        if !mem_blob.is_empty() {
-            entries.push((CP0_MEM_FILE, &mem_blob));
+        let mem_members = if mem_blob.is_empty() {
+            Vec::new()
+        } else {
+            crate::ctfs_trace_reader::snapshot_payload::encode_snapshot_payload(CP0_MEM_FILE, &mem_blob).unwrap()
+        };
+        for (name, bytes) in &mem_members {
+            entries.push((name.as_str(), bytes.as_slice()));
         }
         if let Some(regs) = cp0_regs {
             entries.push((CP0_REGS_FILE, regs));
@@ -3136,6 +3190,7 @@ mod tests {
         if let Some(bytes) = cp0_maps_bytes {
             entries.push((CP0_MAPS_FILE, bytes));
         }
+        entries.extend_from_slice(extra);
 
         write_minimal_ctfs(&ct_path, &entries).unwrap();
         std::fs::read(&ct_path).unwrap()
@@ -3374,6 +3429,128 @@ mod tests {
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes)
             .expect("corrupt cp0.regs must not abort session construction");
         assert!(session.dwarf.is_none(), "no DWARF was bundled in this fixture");
+    }
+
+    /// `cp0.mem` larger than one container block is stored as the
+    /// `cp0.mzd` + `cp0.mzi` chunked-compressed pair, and the session must
+    /// seed the emulator from it: the bytes of a region that spans two
+    /// frames read back through the emulator.
+    #[test]
+    fn new_from_ctfs_bytes_seeds_memory_from_compressed_cp0_mem() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let base = 0x6000_0000u64;
+        let region: Vec<u8> = (0..(1usize << 20) + 8192).map(|i| (i % 251) as u8).collect();
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: base + 0x1000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: base,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &[(base, region.clone())], false);
+        let probe = CtfsReader::from_bytes(bytes.clone()).unwrap();
+        assert!(
+            probe.has_file("cp0.mzd") && probe.has_file("cp0.mzi") && !probe.has_file(CP0_MEM_FILE),
+            "the fixture must store cp0.mem in its compressed form"
+        );
+
+        let _session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+
+        let offset = (1usize << 20) + 100;
+        let mut buf = [0u8; 16];
+        let rc = unsafe { emulator_ffi::mcrReadMemory(base + offset as u64, buf.as_mut_ptr(), buf.len() as _) };
+        assert!(rc >= 0, "mcrReadMemory failed with {rc}");
+        assert_eq!(
+            &buf[..],
+            &region[offset..offset + 16],
+            "bytes past the first frame must be seeded"
+        );
+        assert_eq!(unsafe { emulator_ffi::mcrGetPC() }, base);
+    }
+
+    /// Half of `cp0.mem`'s compressed pair is a malformed container; the
+    /// session refuses it and names the missing member.
+    #[test]
+    fn new_from_ctfs_bytes_refuses_half_a_compressed_cp0_mem() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let regs_blob = pack_cp0_regs_compact(&InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: 0x1000,
+            rflags: 0x202,
+        });
+        let bytes = synthetic_mcr_ctfs_bytes_with_members(
+            Some(&regs_blob),
+            &[],
+            false,
+            None,
+            &[("cp0.mzd", b"\x28\xb5\x2f\xfd")],
+        );
+        let err = match EmulatorReplaySession::new_from_ctfs_bytes(bytes) {
+            Ok(_) => panic!("half a compressed cp0.mem must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("cp0.mzi ABSENT"),
+            "the refusal must name the missing member: {err}"
+        );
+    }
+
+    /// A recording whose initial state is the `--attach=instruction0`
+    /// execve-stop boundary carries no `cp0.*`; the session refuses it by
+    /// name rather than coming up with an all-zero register file.
+    #[test]
+    fn new_from_ctfs_bytes_refuses_an_instruction0_recording_by_name() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_members(
+            None,
+            &[],
+            true,
+            None,
+            &[
+                ("bootelf.bin", b"CBL1"),
+                ("cp.entry.lay", b"CPEL"),
+                ("cp.entry.reg", &[0u8; 164]),
+            ],
+        );
+        let err = match EmulatorReplaySession::new_from_ctfs_bytes(bytes) {
+            Ok(_) => panic!("an instruction0 recording must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("--attach=instruction0")
+                && err.contains("bootelf.bin, cp.entry.lay, cp.entry.reg")
+                && err.contains("--attach=premain"),
+            "the refusal must name the boundary, its members and the mode to record with: {err}"
+        );
     }
 
     // ── M-Replay-PC-Rebase fixtures ─────────────────────────────────────

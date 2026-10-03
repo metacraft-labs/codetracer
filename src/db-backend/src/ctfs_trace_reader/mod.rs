@@ -45,6 +45,7 @@ pub mod materialization_cache;
 pub mod memwrites_namespace;
 pub mod meta_dat;
 pub mod server_prep_encoding;
+pub mod snapshot_payload;
 pub mod span_stream;
 pub mod step_map_namespace;
 // M0/2 — as with `call_stream_source` above, the seekable `steps.dat` /

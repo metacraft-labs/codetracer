@@ -81,6 +81,7 @@ automations
 behaviour
 behaviours
 bindgen
+bootelf
 boundarylog
 bursty
 callsite
@@ -105,6 +106,7 @@ contextlib
 contextvars
 counterexample
 counterexamples
+cppages
 ctfs
 ctweb
 dataclasses
@@ -127,7 +129,9 @@ dont
 drainable
 dwarfwarn
 emphasise
+envp
 envrc
+execve
 expanduser
 extensionless
 façade
@@ -210,6 +214,7 @@ phpize
 pipefail
 postcondition
 postconditions
+premain
 prereq
 println
 pyenv
