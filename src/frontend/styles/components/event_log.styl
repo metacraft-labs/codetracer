@@ -680,3 +680,41 @@ label
   font-family: "SpaceGrotesk"
   padding-left: 0.5em
   padding-top: 1em
+
+// PLAT-49 part B (finding 14): the column menu — Event-Log-Pane.md's
+// "[+ Columns]", a row per column of `EventLogVM.columns`: a check to show or
+// hide it, and a move left / right.
+.eventLog-columns-button
+  margin-left: auto
+  white-space: nowrap
+  font-size: 0.75em
+  padding: 0.125em 0.5em
+  cursor: pointer
+
+.eventLog-columns-menu
+  position: absolute
+  right: 0.5em
+  top: 2.25em
+  z-index: 20
+  min-width: 12em
+  padding: 0.25em 0
+  background-color: colors-ui-surface-base-card
+  border: 0.0625em solid colors-ui-border-secondary
+  border-radius: 0.375em
+  color: colors-ui-text-primary-body
+  .eventLog-column-option
+    display: flex
+    align-items: center
+    gap: 0.5em
+    padding: 0.125em 0.625em
+    .eventLog-column-check
+      cursor: pointer
+      width: 1em
+    .eventLog-column-title
+      flex: 1
+    .eventLog-column-left, .eventLog-column-right
+      cursor: pointer
+      background: transparent
+      border: none
+      color: inherit
+      font-size: 0.75em

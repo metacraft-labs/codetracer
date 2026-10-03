@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# plat49-capture-electron.sh — PLAT-49 part A: the REAL Electron front-end on the
+# plat49-capture-electron.sh — PLAT-49: the REAL Electron front-end on the
 # terminal lanes' `calc` recording: the desktop's root menu and its cascade,
-# its transport tooltips and its omnibar placeholder — the reference the
-# terminal and GPUI are measured against. Writes
-# `src/tests/visual/answers/plat49-chrome.electron.json`.
+# its transport tooltips and its omnibar placeholder (part A); its call-trace
+# rows, event-log columns, footer auto-hide panels, GoldenLayout drop zones and
+# session tabs (part B) — the reference the terminal and GPUI are measured
+# against. Writes `src/tests/visual/answers/plat49-chrome.electron.json` and
+# `src/tests/visual/answers/plat49-panes.electron.json`.
 # The prefix is this checkout's desktop JavaScript
 # (`scripts/plat45-desktop-prefix.sh`); without a DISPLAY an Xvfb is started.
 set -euo pipefail
@@ -37,7 +39,10 @@ export PLAT49_DESKTOP_PREFIX="$work/prefix"
 export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
 run_spec() {
-  just test-e2e tests/visual/plat49-chrome-capture.spec.ts "$@"
+  # Part A (the chrome) and part B (the panes, the session tabs): each writes
+  # its own answers file.
+  just test-e2e tests/visual/plat49-chrome-capture.spec.ts \
+    tests/visual/plat49-panes-capture.spec.ts "$@"
 }
 
 case "$(uname -s)" in
