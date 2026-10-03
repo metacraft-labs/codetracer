@@ -124,7 +124,7 @@
    34
   ]
  },
- "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS",
+ "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:1 tick 0",
  "menuOpen": {
   "popover": [
    252,
@@ -167,23 +167,23 @@
  "revealBottom": {
   "rect": [
    12,
-   709,
+   714,
    1896,
-   327
+   330
   ],
   "changedBox": [
-   12,
-   709,
-   1896,
-   359
+   6,
+   714,
+   1902,
+   366
   ],
   "changedOutside": 0,
   "ocr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to"
  },
  "revealEscChanged": 0,
  "keyRevealOcr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to",
- "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State",
- "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS",
+ "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State main.py:79 tick 42",
+ "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:79 tick 42",
  "unpinnedTabsOcr": ". State Scratchpad S",
  "topStrip": {
   "rect": [
@@ -199,7 +199,7 @@
    12,
    86,
    1896,
-   316
+   319
   ],
   "changedOutside": 0,
   "ocr": "State Unpin\nLocals"

@@ -19,6 +19,8 @@
 ## tooltips (label and key). `app/tests/test_layout_profiles.nim` asserts the
 ## status line carries no hint text in any mode.
 
+import std/[sequtils, strutils, unicode]
+
 import ../layout/profile
 
 # PLAT-16. `ProductMode` — Edit and Debug — comes from the CORE
@@ -144,6 +146,53 @@ proc promptSigil*(mode: UiMode): string =
   of umSearch: "/"
   else: ""
 
+proc fitNoteCells*(note: string; width: int): string =
+  ## The notification in `width` cells: whole when it fits. When it does not
+  ## and it carries an ABSOLUTE PATH (`tui_session.describe`'s `<file>:<line>
+  ## tick <n>  extent <a>..<b>`, the Edit toggle's `editing <root> — N
+  ## file(s)`), that path's directories give way first — `…` and as much of
+  ## the path's end as the room allows, its last component always — so what
+  ## follows the path survives; since PLAT-49 part B the footer's auto-hide
+  ## labels share this row and the room is narrower. Whatever is still too
+  ## long is cut at its end, as every note is (its start is the fact —
+  ## `test_edit_mode_source` reads it there). A relative path (`src/a.nim`)
+  ## is a name the note means and is never shortened.
+  if width <= 0:
+    return ""
+  if textCells(note) <= width:
+    return fitCells(note, width)
+  var start = -1
+  var i = 0
+  while i < note.len:
+    if note[i] == '/' and (i == 0 or note[i - 1] == ' '):
+      start = i
+      break
+    inc i
+  if start < 0:
+    return fitCells(note, width)
+  var stop = note.find(' ', start)
+  if stop < 0: stop = note.len
+  let path = note[start ..< stop]
+  let slash = path.rfind('/')
+  let before = note[0 ..< start]
+  let name = path[slash + 1 .. ^1]
+  let after = note[stop .. ^1]
+  # Keep as much of the directory's END as fits beside the rest.
+  let spare = width - textCells(before) - textCells(name) - textCells(after) - 2
+  var dir = ""
+  if spare > 0 and slash > 0:
+    let runesOf = toSeq(runes(path[0 ..< slash]))
+    var tail: seq[string] = @[]
+    var used = 0
+    for k in countdown(runesOf.high, 0):
+      let w = textCells($runesOf[k])
+      if used + w > spare: break
+      tail.insert($runesOf[k], 0)
+      used += w
+    dir = tail.join("")
+  fitCells(before & "…" & (if dir.len > 0: dir & "/" else: "/") & name & after,
+           width)
+
 proc statusBarText*(m: StatusBarModel; width: int): string =
   ## The bottom row, exactly `width` cells wide.
   ##
@@ -188,5 +237,6 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   if middleRoom > 0 and middle.len > 0:
     line.add " | " & fitCells(middle, min(middleRoom, textCells(middle)))
   if noteRoom > 0:
-    return fitCells(line, width - noteRoom) & "  " & fitCells(note, noteRoom - 2)
+    return fitCells(line, width - noteRoom) & "  " &
+           fitNoteCells(note, noteRoom - 2)
   fitCells(line, width)

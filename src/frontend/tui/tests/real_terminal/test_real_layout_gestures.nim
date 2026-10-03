@@ -147,6 +147,23 @@ proc bottomStripRow(rt: TuiRuntime): int =
       return s.area.row
   -1
 
+proc bottomStripCol(rt: TuiRuntime): int =
+  ## Where the bottom strip's labels start on the status row: after the
+  ## status bar's file info (the desktop's order, PLAT-49 part B review).
+  for s in rt.layoutGeometry().strips:
+    if s.edge == leBottom:
+      return s.area.col
+  0
+
+proc bottomStripWidth(rt: TuiRuntime): int =
+  ## How many cells of its row the bottom strip's labels take (PLAT-49 part
+  ## B: the strip is on the status row, which carries the status text after
+  ## the labels).
+  for s in rt.layoutGeometry().strips:
+    if s.edge == leBottom:
+      return s.area.width
+  0
+
 # ---------------------------------------------------------------------------
 # Assertion templates. Every helper that calls `check` is a TEMPLATE.
 # ---------------------------------------------------------------------------
@@ -224,14 +241,15 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       # be docked is on the screen under its own title.
       let before = sess.screenContents()
       let footerBefore = stripLabelProblems(
-        sess.regionText(Rows - 2, 0, Cols, 1).split('\n')[0], footerTitles())
+        sess.regionText(Rows - 1, model.bottomStripCol(), model.bottomStripWidth(), 1)
+          .split('\n')[0], footerTitles())
       for p in footerBefore[0 .. min(3, footerBefore.high)]: checkpoint(p)
       ck footerBefore.len == 0
       ck before.contains(DockedPaneTitleRow)
       # …and the shared default's Variables stack is there, which is what says this
       # is the arrangement the case was written against.
       ck before.contains(" Variables ")
-      ck model.bottomStripRow() == Rows - 2
+      ck model.bottomStripRow() == Rows - 1
 
       # ---- THE GESTURE, ONE BYTE AT A TIME ---------------------------------
       typeAt(sess, DockLine)
@@ -259,8 +277,9 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       let stripRow = model.bottomStripRow()
       checkpoint("the bottom dock strip is on row " & $stripRow)
       ck stripRow > 0
-      ck stripRow == Rows - 2          ## the body's last row, above the status
-      let stripText = sess.regionText(stripRow, 0, Cols, 1).split('\n')[0]
+      ck stripRow == Rows - 1          ## the status row (PLAT-49 part B)
+      let stripText = sess.regionText(stripRow, model.bottomStripCol(),
+                                      model.bottomStripWidth(), 1).split('\n')[0]
       checkpoint("strip row: '" & stripText & "'")
       # EXACT (Verification-Harness-Traps §4b): every label in strip order —
       # the footer's, then the docked pane's — and nothing but blanks besides.
@@ -280,9 +299,10 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       for token in tokensOf(UndoLine):
         discard model.handleToken(token, 0'i64)
       ck model.app.layoutBinding.layout.dockedIndex(DockedPaneKind) < 0
-      ck model.bottomStripRow() == Rows - 2
+      ck model.bottomStripRow() == Rows - 1
       let restored = sess.screenContents()
-      ck stripLabelProblems(sess.regionText(Rows - 2, 0, Cols, 1).split('\n')[0],
+      ck stripLabelProblems(sess.regionText(Rows - 1, model.bottomStripCol(),
+                                            model.bottomStripWidth(), 1).split('\n')[0],
                             footerTitles()).len == 0
       ck restored.contains(DockedPaneTitleRow)
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :undo-layout")
@@ -317,7 +337,8 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       let status = paneRow(sess, Rows - 1)
       checkpoint("status row: '" & status & "'")
       ck status.toLowerAscii().contains("teleport")
-      ck stripLabelProblems(sess.regionText(Rows - 2, 0, Cols, 1).split('\n')[0],
+      ck stripLabelProblems(sess.regionText(Rows - 1, model.bottomStripCol(),
+                                            model.bottomStripWidth(), 1).split('\n')[0],
                             footerTitles()).len == 0
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :teleport")
 

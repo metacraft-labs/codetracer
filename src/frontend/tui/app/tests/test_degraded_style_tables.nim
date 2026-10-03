@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3069
+const ExpectedAssertions = 3162
 
 var countedAssertions = 0
 
@@ -80,7 +80,9 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 116
+  ExpectedRoleCount = 120
+    ## PLAT-49 part B review: +1, `srSurfaceActiveRow` — the ground of the
+    ## call the debugger is in (the desktop's `.event-selected`).
     ## PLAT-47 added `srLineNumberActive` (the execution line's number, the
     ## desktop's active line number) and the three syntax roles the desktop's
     ## Monaco Python tokenizer colours on their own (a string's quote, a
@@ -91,8 +93,11 @@ const
     ## (`srSurfaceDropIndicator`, a background-only overlay colour).
     ## PLAT-49 added the six variable-category tag roles (`srCategory*`, a
     ## group of their own) and the omnibar field's surface
-    ## (`srSurfaceField`). `srNone` plus 115 painted roles.
-  ExpectedGroupCount = 19
+    ## (`srSurfaceField`). Its part B the call trace's argument and return
+    ## parts (`srCallArgs`, `srCallReturn`, a group of their own) and the
+    ## inactive session tab's ground (`srSessionTab`). `srNone` plus 118
+    ## painted roles.
+  ExpectedGroupCount = 20
   ExpectedMergeCount = 18
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.

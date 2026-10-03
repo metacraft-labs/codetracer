@@ -41,7 +41,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 177
+  ExpectedAssertions = 179
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -281,11 +281,13 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       checkpoint("pin " & pin.attr("data-ct-pin"))
       ck not pin.rectOf.overlaps(rr)
 
-  test "a click on a strip label reveals that pane; Esc hides it":
-    let plan = windowPlan("label:problems")
+  test "the pointer resting on a strip label reveals that pane; Esc hides it":
+    # PLAT-49 part B (finding 9): as on the desktop, a HOVER previews the
+    # pane as an overlay; a click docks it open (test_plat49_panes_gpui_plan).
+    let plan = windowPlan("hover-label:problems,wait:350")
     let rev = plan.nodesWith("data-ct-revealed")
     ck rev.len == 1 and rev[0].attr("data-ct-revealed") == $paneProblems
-    let hidden = windowPlan("label:problems,key:escape")
+    let hidden = windowPlan("hover-label:problems,wait:350,key:escape")
     ck hidden.nodesWith("data-ct-revealed").len == 0
     ck hidden.nodesWith("data-ct-unpin").len == 0
 
@@ -303,7 +305,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     # No pane box holds State any more.
     for pin in plan.nodesWith("data-ct-pin"):
       ck pin.attr("data-ct-pin") != $paneState
-    let shown = windowPlan("drag:state:top,label:state")
+    let shown = windowPlan("drag:state:top,hover-label:state,wait:350")
     let rev = shown.nodesWith("data-ct-revealed")
     ck rev.len == 1 and rev[0].attr("data-ct-revealed") == $paneState
     let rr = rev[0].rectOf
@@ -318,7 +320,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       inc under
     ck under >= 1
 
-  test "a tab dragged over a pane: the drop tint is drawn over that pane's pin button":
+  test "a tab dragged over a pane: the drop tint covers its content, never a pin button":
     let plan = windowPlan("hold:state:editor")
     let tints = plan.nodesWith("data-ct-drop")
     ck tints.len == 1
@@ -327,11 +329,15 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for pin in plan.nodesWith("data-ct-pin"):
       checkpoint("pin " & pin.attr("data-ct-pin"))
       ck not pin.rectOf.overlaps(tr)
-    # The editor's own pin is the one the tint covers: it is not drawn.
+    # The tint is the pane's CONTENT (PLAT-49: GoldenLayout highlights a
+    # stack's content, below its header), so the editor's own pin, on its
+    # strip, is drawn and sits above the tint.
     var editorPin = false
     for pin in plan.nodesWith("data-ct-pin"):
-      if pin.attr("data-ct-pin") == $paneEditor: editorPin = true
-    ck not editorPin
+      if pin.attr("data-ct-pin") == $paneEditor:
+        editorPin = true
+        ck pin.rectOf.y + pin.rectOf.h <= tr.y
+    ck editorPin
 
   test "pin docks a pane to the footer; Unpin puts it back beside where it was":
     let pinned = windowPlan("pin:state")
@@ -347,7 +353,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck elsewhere.len == 0
     for p in pinned.nodesWith("data-ct-pin"):
       ck p.attr("data-ct-pin") != $paneState
-    let back = windowPlan("pin:state,label:state,unpin")
+    let back = windowPlan("pin:state,hover-label:state,wait:350,unpin")
     ck back.nodesWith("data-ct-revealed").len == 0
     var slots: seq[string] = @[]
     for s in back.nodesWith("data-ct-dock-slot"):

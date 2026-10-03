@@ -137,6 +137,9 @@ type
     body*: CellArea
       ## Everything the layout owns — `profile.bodyArea`, between the header
       ## and the status bar.
+    footerLead*: int
+      ## How many cells of the status row precede the bottom labels (the
+      ## status bar's file info, `footerLeadCells`).
     inner*: CellArea
       ## `body` minus the dock strips: what the TREE is projected into. The
       ## split tree's partition is total over THIS, not over `body`, which is
@@ -148,6 +151,13 @@ type
       ## Every VISIBLE pane and its node path, resolved once. A pane that is
       ## docked or on the hidden side of a stack is absent, exactly as it is
       ## absent from `projection.regions`.
+    openDock*: CellArea
+      ## PLAT-49 part B (finding 9): where the docked pane shown OPEN
+      ## (`DockedPane.open`, the desktop's clicked strip tab) is painted — a
+      ## band against its edge that the TREE GIVES UP (`inner` excludes it),
+      ## so it is part of the tiled screen, not an overlay. Zero when none.
+    openDockPane*: PaneKind
+    openDockTitle*: string
     revealing*: bool
     revealPane*: PaneKind
     reveal*: CellArea
@@ -240,6 +250,10 @@ type
       ## motion report — so the ghost label follows it. A MEASUREMENT, and so
       ## held here in the terminal's binding, never in the `Interaction`
       ## (PLAT-5's purity law). -1 when no drag is in flight.
+    footerLead*: int
+      ## The status row's file-info width (`footerLeadCells`), kept current
+      ## by the application with every frame it builds, so the bottom
+      ## labels' hit-test is where the frame drew them.
     pendingPick*: Option[PaneKind]
       ## PLAT-49: the pane a press on its tab (a lone pane's strip, a dock
       ## label) WOULD pick up. A press alone picks nothing up: the drag
@@ -258,11 +272,6 @@ const
     ## measured in a few dozen cells and a two-cell strip on two edges costs a
     ## Compact profile four of them; one cell is enough for a readable
     ## collapsed tab and is what §3.1's desktop strip degrades to.
-
-  MaxEdgeBandCells* = 3
-    ## The widest an edge drop-zone gets. Three cells is enough to aim at with
-    ## a mouse and small enough that `dzCentre` stays reachable on a 14-column
-    ## pane — `profile.minPaneWidth`'s narrowest.
 
   DragThresholdCols* = 2
   DragThresholdRows* = 1
@@ -298,16 +307,23 @@ proc isEmptyArea*(a: CellArea): bool =
   a.width <= 0 or a.height <= 0
 
 proc edgeBandCells*(extent: int): int =
-  ## How deep an edge drop-zone is on a side of `extent` cells.
+  ## How deep an edge drop-zone is on a side of `extent` cells: GoldenLayout's
+  ## quarter (PLAT-49 part B, `layout_interaction.GoldenLayoutEdgeShare`) —
+  ## the cells whose centre lies within the first quarter of the extent, the
+  ## very cells `goldenLayoutZone` answers an edge for. A body two cells
+  ## across has a one-cell zone each side; one cell, none (it is all centre).
   ##
-  ## A quarter, capped, and at least one — so that every pane, however narrow,
-  ## HAS all four edge zones (otherwise `dtSplitBefore` would be unreachable on
-  ## a thin pane and a documented drop target would silently not exist), and
-  ## every pane wide enough to have a centre keeps one.
-  max(1, min(MaxEdgeBandCells, extent div 4))
+  ## Until PLAT-49 a quarter CAPPED at three cells (`MaxEdgeBandCells`): on
+  ## an 80-column pane a split needed the pointer within three columns of the
+  ## edge, where the desktop's zone is a quarter of the pane.
+  var d = 0
+  while d < extent and
+        (float(d) + 0.5) / float(extent) <= GoldenLayoutEdgeShare:
+    inc d
+  d
 
-proc stripAreaFor(body: CellArea; edge: LayoutEdge; left, right: int):
-    CellArea =
+proc stripAreaFor(body: CellArea; edge: LayoutEdge; left, right: int;
+                  footerLead = 0): CellArea =
   ## The strip rectangle for `edge` within `body`, given how many columns the
   ## left and right strips have already claimed.
   ##
@@ -326,8 +342,17 @@ proc stripAreaFor(body: CellArea; edge: LayoutEdge; left, right: int):
     CellArea(col: body.col + left, row: body.row,
              width: body.width - left - right, height: DockStripThickness)
   of leBottom:
-    CellArea(col: body.col + left, row: body.row + body.height - DockStripThickness,
-             width: body.width - left - right, height: DockStripThickness)
+    # PLAT-49 part B (finding 9): THE BOTTOM STRIP IS THE STATUS BAR'S ROW —
+    # the row right under the body — as the desktop renders its bottom labels
+    # INSIDE the status bar (Auto-Hide-Panes.md §3.1, "Bottom strip
+    # integration"). It takes no row from the body. It starts after the
+    # status bar's FILE INFO (`footerLead` cells, `footerLeadCells`): the
+    # desktop's status bar opens with the file's language and encoding and
+    # its labels follow them.
+    let lead = max(0, min(footerLead, body.width - left - right))
+    CellArea(col: body.col + left + lead, row: body.row + body.height,
+             width: body.width - left - right - lead,
+             height: DockStripThickness)
 
 proc slotExtent*(edge: LayoutEdge; title: string): int =
   ## How many cells one docked pane's LABEL takes along its strip (PLAT-48):
@@ -388,9 +413,39 @@ proc revealAreaFor(inner: CellArea; edge: LayoutEdge): CellArea =
     CellArea(col: inner.col, row: inner.row + inner.height - h,
              width: inner.width, height: h)
 
+const
+  DockedOpenSharePercent* = 21
+    ## PLAT-49 part B: how much of the arrangement's extent a docked pane
+    ## shown OPEN takes on its axis — the desktop's, measured: its docked
+    ## bottom panel is 280 px of a 1334 px layout (21%,
+    ## `plat49-panes-capture.spec.ts`; `auto_hide.styl`'s default height).
+
+proc openDockAreaFor(inner: CellArea; edge: LayoutEdge): CellArea =
+  ## The band a docked pane shown open takes against its edge.
+  if inner.isEmptyArea:
+    return CellArea()
+  let h = max(2, inner.height * DockedOpenSharePercent div 100)
+  let w = max(2, inner.width * DockedOpenSharePercent div 100)
+  case edge
+  of leLeft: CellArea(col: inner.col, row: inner.row, width: w,
+                      height: inner.height)
+  of leRight: CellArea(col: inner.col + inner.width - w, row: inner.row,
+                       width: w, height: inner.height)
+  of leTop: CellArea(col: inner.col, row: inner.row, width: inner.width,
+                     height: h)
+  of leBottom: CellArea(col: inner.col, row: inner.row + inner.height - h,
+                        width: inner.width, height: h)
+
+proc footerLeadCells*(fileInfo: string): int =
+  ## How many cells of the status row the FILE INFO takes before the bottom
+  ## labels (`headless_app/footer_info`): a cell, the info, two cells; none
+  ## without a file.
+  if fileInfo.len == 0: 0 else: 1 + cellWidthOf(fileInfo) + 2
+
 proc geometryOf*(layout: Layout; body: CellArea;
                  interaction: Interaction = noInteraction();
-                 policy: ProjectionPolicy = DefaultProjectionPolicy):
+                 policy: ProjectionPolicy = DefaultProjectionPolicy;
+                 footerLead = 0):
     LayoutGeometry =
   ## Where everything is, for one frame.
   ##
@@ -399,7 +454,8 @@ proc geometryOf*(layout: Layout; body: CellArea;
   ## meaningful at the same time: the projection is still total and pairwise
   ## disjoint over `inner`, and `inner` plus the strips is `body` exactly, so
   ## nothing on screen belongs to nobody.
-  result = LayoutGeometry(body: body, inner: body, strips: @[], paths: @[],
+  result = LayoutGeometry(body: body, footerLead: footerLead,
+                          inner: body, strips: @[], paths: @[],
                           revealing: false, revealPane: PaneKind.low,
                           reveal: CellArea())
   var left = 0
@@ -409,15 +465,16 @@ proc geometryOf*(layout: Layout; body: CellArea;
       if edge == leLeft: left = DockStripThickness else: rightW = DockStripThickness
   var top = 0
   var bottom = 0
-  for edge in [leTop, leBottom]:
-    if layout.dockedAt(edge).len > 0:
-      if edge == leTop: top = DockStripThickness else: bottom = DockStripThickness
+  if layout.dockedAt(leTop).len > 0:
+    top = DockStripThickness
+  # The bottom strip is on the status row (`stripAreaFor`): the body keeps
+  # all its rows.
 
   for edge in [leLeft, leRight, leTop, leBottom]:
     let docked = layout.dockedAt(edge)
     if docked.len == 0:
       continue
-    let area = stripAreaFor(body, edge, left, rightW)
+    let area = stripAreaFor(body, edge, left, rightW, footerLead)
     var strip = DockStrip(edge: edge, area: area, slots: @[])
     var titles: seq[string] = @[]
     for d in docked:
@@ -428,11 +485,44 @@ proc geometryOf*(layout: Layout; body: CellArea;
         pane: d.pane, title: titles[i],
         order: d.order,
         area: (if i < areas.len: areas[i] else: CellArea()))
+    if edge == leBottom:
+      # On the status row the strip is its LABELS and no more: the rest of
+      # the row is the status bar's (`shell.shellScreen`).
+      var used = 0
+      for a in areas:
+        used += a.width
+      strip.area.width = min(strip.area.width, used)
     result.strips.add strip
 
   result.inner = CellArea(col: body.col + left, row: body.row + top,
                           width: max(0, body.width - left - rightW),
                           height: max(0, body.height - top - bottom))
+  # PLAT-49 part B: A DOCKED PANE SHOWN OPEN TAKES ITS BAND OUT OF THE TREE'S
+  # AREA, as the desktop's docked panel resizes GoldenLayout: the band against
+  # its edge (a third of that axis, the reveal's share), and the tree is
+  # projected into what is left — tiled, never over it.
+  let opened = layout.openDocked
+  if opened.isSome:
+    let band = openDockAreaFor(result.inner, opened.get.edge)
+    if not band.isEmptyArea and
+       (if opened.get.edge in {leTop, leBottom}: band.height < result.inner.height
+        else: band.width < result.inner.width):
+      result.openDock = band
+      result.openDockPane = opened.get.pane
+      result.openDockTitle =
+        if opened.get.title.len > 0: opened.get.title
+        else: terminalPaneName(opened.get.pane)
+      case opened.get.edge
+      of leLeft:
+        result.inner.col += band.width
+        result.inner.width -= band.width
+      of leRight:
+        result.inner.width -= band.width
+      of leTop:
+        result.inner.row += band.height
+        result.inner.height -= band.height
+      of leBottom:
+        result.inner.height -= band.height
   result.projection = projectLayout(layout.tree, result.inner, policy)
   for region in result.projection.regions:
     let p = panePath(layout, region.pane)
@@ -557,8 +647,10 @@ proc dropAreaOfPath*(geom: LayoutGeometry; path: string): CellArea =
     if entry[1] != path:
       continue
     let region = geom.projection.regions[i]
-    if region.activeTab >= 0 and region.tabs.len > 0 and
-       region.area.row == bounds.row and bounds.height > 1:
+    # PLAT-49: EVERY pane's first row is a strip — a stack's tabs or a lone
+    # pane's one tab — so a bare pane's drop body starts below it too, as a
+    # GoldenLayout stack's content area starts below its header.
+    if region.area.row == bounds.row and bounds.height > 1:
       return CellArea(col: bounds.col, row: bounds.row + 1,
                       width: bounds.width, height: bounds.height - 1)
     break
@@ -603,6 +695,64 @@ proc nearestOutsideZone(body: CellArea; row, col: int): DropZone =
     zone = dzOutsideBottom
   zone
 
+const
+  DesktopCellWidthPx* = 9.63
+    ## PLAT-49 part B: how wide one terminal cell stands for on the desktop —
+    ## a character of its editor's monospace at the default size (measured,
+    ## `plat49-panes-capture.spec.ts`, `cellPx`). Used to carry the
+    ## desktop's PIXEL measures that have no proportion of their own (
+    ## GoldenLayout's 50 px ground band) into cells.
+  DesktopCellHeightPx* = 22.0
+    ## …and how tall: the editor's line height.
+
+proc rootBandDepth*(side: LayoutEdge): int =
+  ## GoldenLayout's ground band (`GoldenLayoutRootBandPx`) in cells, across
+  ## the band: columns for the left and right bands, rows for the top and
+  ## bottom ones.
+  case side
+  of leLeft, leRight: goldenLayoutRootBand(DesktopCellWidthPx)
+  of leTop, leBottom: goldenLayoutRootBand(DesktopCellHeightPx)
+
+proc rootBandAreaOf*(geom: LayoutGeometry; side: LayoutEdge): CellArea =
+  ## The band along `side` INSIDE the tree's area (`inner`) where a drop
+  ## splits the whole layout — GoldenLayout's ground side area, and the
+  ## cells its indication tints. Never more than half the area.
+  let a = geom.inner
+  if a.isEmptyArea:
+    return CellArea()
+  case side
+  of leLeft:
+    CellArea(col: a.col, row: a.row,
+             width: min(rootBandDepth(side), max(1, a.width div 2)),
+             height: a.height)
+  of leRight:
+    let w = min(rootBandDepth(side), max(1, a.width div 2))
+    CellArea(col: a.col + a.width - w, row: a.row, width: w, height: a.height)
+  of leTop:
+    CellArea(col: a.col, row: a.row, width: a.width,
+             height: min(rootBandDepth(side), max(1, a.height div 2)))
+  of leBottom:
+    let h = min(rootBandDepth(side), max(1, a.height div 2))
+    CellArea(col: a.col, row: a.row + a.height - h, width: a.width, height: h)
+
+proc surfacePx(width, height: int): int =
+  ## A rectangle of cells as the desktop would measure its surface, so a
+  ## horizontal and a vertical band compare as GoldenLayout compares them.
+  int(float(width) * DesktopCellWidthPx * float(height) * DesktopCellHeightPx)
+
+proc rootBandAt(geom: LayoutGeometry; row, col: int):
+    tuple[found: bool; side: LayoutEdge; surface: int] =
+  ## The ground band under `(row, col)`, if any: of the bands the cell is in
+  ## (two at a corner), the one with the SMALLER surface, as
+  ## `LayoutManager.getArea` picks.
+  result = (found: false, side: leLeft, surface: high(int))
+  for side in [leLeft, leRight, leTop, leBottom]:
+    let band = geom.rootBandAreaOf(side)
+    if not band.isEmptyArea and band.contains(row, col):
+      let surface = surfacePx(band.width, band.height)
+      if surface < result.surface:
+        result = (found: true, side: side, surface: surface)
+
 proc pointerAt*(layout: Layout; geom: LayoutGeometry;
                 row, col: int): Option[LayoutPointer] =
   ## **The hit-test.** A terminal cell, in the layout's own vocabulary.
@@ -631,10 +781,13 @@ proc pointerAt*(layout: Layout; geom: LayoutGeometry;
   ##   4. **The filler past the last tab is `dzCentre`**, which
   ##      `regionForZone` reads as "append", so the obvious gesture (drop on
   ##      the empty part of a tab bar) appends rather than doing nothing.
-  ##   5. **Then the four edge bands, then the centre.** Nearest side wins;
-  ##      ties go left, right, top, bottom. Total and disjoint over the
-  ##      region's cells by construction, which the suite re-derives by
-  ##      sweeping every cell.
+  ##   5. **Then GoldenLayout's zones** (PLAT-49 part B,
+  ##      `layout_interaction.goldenLayoutZone`): a quarter of the body on
+  ##      the left and right, full height; a quarter at the top and bottom
+  ##      between them; the centre JOINS. A tab is split at its middle — the
+  ##      left half inserts before it, the right half after it — and a lone
+  ##      pane's strip joins. Total and disjoint over the region's cells by
+  ##      construction, which the suite re-derives by sweeping every cell.
   let strip = geom.stripIndexAt(row, col)
   if strip >= 0:
     let edge = geom.strips[strip].edge
@@ -660,6 +813,20 @@ proc pointerAt*(layout: Layout; geom: LayoutGeometry;
   let panePath = geom.pathOfPane(region.pane)
   if panePath.isNone:
     return none(LayoutPointer)
+  # PLAT-49 part B: GOLDENLAYOUT'S GROUND BANDS. Inside the tree's area,
+  # along its outer edges, a band `rootBandDepth` deep splits the WHOLE
+  # layout. `getArea` takes the smallest area under the pointer: the band
+  # beats a stack's area (the whole stack, its header row included) unless
+  # that stack is the smaller, and a stack's header — its strip row — beats
+  # the band when it is the smaller.
+  let band = geom.rootBandAt(row, col)
+  if band.found:
+    let onHeader = row == a.row   # every pane has its strip (PLAT-49)
+    let rival =
+      if onHeader: surfacePx(a.width, 1)
+      else: surfacePx(a.width, a.height)
+    if goldenLayoutWins(band.surface, rival):
+      return some(LayoutPointer(path: "", zone: rootZoneOf(band.side)))
   if stacked and row == a.row:
     let flushRight = a.col + a.width >= geom.inner.col + geom.inner.width
     let inner = if flushRight: a.width else: a.width - 1
@@ -668,7 +835,18 @@ proc pointerAt*(layout: Layout; geom: LayoutGeometry;
       if at >= 0:
         let stackPath = parentPath(panePath.get)
         if stackPath.isSome:
-          return some(LayoutPointer(path: childPathOf(stackPath.get, at),
+          # PLAT-49 part B: GoldenLayout's header rule — LEFT of a tab's
+          # middle inserts before it, right of it after it. "After the last
+          # tab" is the filler's answer (`dzCentre`, append).
+          var slot = at
+          for span in tabSpans(region.tabs, region.activeTab):
+            if span.index == at and
+               goldenLayoutInsertsAfter(col - a.col - span.startCol,
+                                        span.width):
+              slot = at + 1
+          if slot >= region.tabs.len:
+            return some(LayoutPointer(path: panePath.get, zone: dzCentre))
+          return some(LayoutPointer(path: childPathOf(stackPath.get, slot),
                                     zone: dzTabStrip))
       # The filler rule past the last label.
       return some(LayoutPointer(path: panePath.get, zone: dzCentre))
@@ -676,28 +854,18 @@ proc pointerAt*(layout: Layout; geom: LayoutGeometry;
   # from there rather than recomputed here, so the two directions of the
   # hit-test cannot disagree about where a node's edge bands are.
   let area = geom.dropAreaOfPath(panePath.get)
+  # PLAT-49 part B: A LONE PANE'S STRIP IS ITS HEADER, and GoldenLayout's
+  # header joins: the strip row is outside the drop body (`dropAreaOfPath`),
+  # so a drop on a bare pane's one tab lands here and makes it a two-tab
+  # stack, as a drop on a one-tab GoldenLayout stack's header does.
   if area.isEmptyArea or not area.contains(row, col):
     return some(LayoutPointer(path: panePath.get, zone: dzCentre))
-  let dl = col - area.col
-  let dr = area.col + area.width - 1 - col
-  let dt = row - area.row
-  let db = area.row + area.height - 1 - row
-  let bandH = edgeBandCells(area.width)
-  let bandV = edgeBandCells(area.height)
-  var zone = dzCentre
-  var best = high(int)
-  if dl < bandH and dl < best:
-    best = dl
-    zone = dzLeftEdge
-  if dr < bandH and dr < best:
-    best = dr
-    zone = dzRightEdge
-  if dt < bandV and dt < best:
-    best = dt
-    zone = dzTopEdge
-  if db < bandV and db < best:
-    zone = dzBottomEdge
-  some(LayoutPointer(path: panePath.get, zone: zone))
+  # GOLDENLAYOUT'S ZONES (PLAT-49 part B, finding 11): a quarter of the body
+  # deep on each side, the centre joins — `goldenLayoutZone`, the rule GPUI's
+  # pixel hit-test applies too.
+  some(LayoutPointer(path: panePath.get,
+                     zone: goldenLayoutZone(col - area.col, row - area.row,
+                                            area.width, area.height)))
 
 # ---------------------------------------------------------------------------
 # §5 obligation 2, second direction: `DropRegion` -> CELLS
@@ -737,6 +905,8 @@ proc cellsFor*(geom: LayoutGeometry; region: DropRegion): CellArea =
   case region.kind
   of drLayoutStrip:
     geom.stripAreaOf(region.side)
+  of drRootBand:
+    geom.rootBandAreaOf(region.side)
   of drWholeNode:
     geom.dropAreaOfPath(region.path)
   of drNodeStrip:
@@ -806,6 +976,9 @@ proc dropIndicationCells*(geom: LayoutGeometry; ind: DropIndication):
     (tint: geom.dropAreaOfPath(ind.path), caret: CellArea())
   of diLayoutEdge:
     (tint: geom.stripAreaOf(ind.side), caret: CellArea())
+  of diRootBand:
+    # GoldenLayout highlights its ground side area itself.
+    (tint: geom.rootBandAreaOf(ind.side), caret: CellArea())
   of diTabSlot:
     let strip = geom.tabStripOf(ind.path)
     if not strip.found:
@@ -884,7 +1057,8 @@ proc resizeGuideFor(layout: Layout; geom: LayoutGeometry;
   let info = nodeInfoAtPath(layout.tree, interaction.node)
   if info.isNone:
     return CellArea()
-  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy)
+  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,
+                         geom.footerLead)
   let now = after.boundsOfPath(interaction.node)
   if now.isEmptyArea:
     return CellArea()
@@ -1057,7 +1231,7 @@ proc newLayoutBinding*(profile: LayoutProfile): LayoutBinding =
 proc geometry*(b: LayoutBinding; body: CellArea;
                policy: ProjectionPolicy = DefaultProjectionPolicy):
     LayoutGeometry =
-  geometryOf(b.layout, body, b.interaction, policy)
+  geometryOf(b.layout, body, b.interaction, policy, b.footerLead)
 
 proc dispatch*(b: LayoutBinding; cmd: LayoutCommand): LayoutAction =
   ## Run one command through the undo log. **The only way this module changes a
@@ -1140,6 +1314,23 @@ proc beginRevealDock*(b: LayoutBinding; pane: PaneKind): LayoutAction =
   b.interaction = revealed.get
   action(lasPending, "revealing " & $pane)
 
+proc toggleDockOpen*(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  ## PLAT-49 part B (finding 9, the user's direction): A CLICK ON A DOCKED
+  ## PANE'S LABEL DOCKS IT OPEN — inline at its edge, taking space from the
+  ## arrangement, no longer an overlay (`cmdOpenDocked`, the desktop's
+  ## `showDockedPanel`); a click on the label of the pane already open closes
+  ## it again (`cmdCloseDocked`, `hideDockedPanel`). A hover preview of it
+  ## ends first, as the desktop's click hides its overlay.
+  if b.interaction.kind == ikRevealingDock:
+    b.interaction = b.interaction.cancel()
+  let at = b.layout.dockedIndex(pane)
+  if at < 0:
+    return action(lasNoGesture, $pane & " is not docked")
+  if b.layout.docked[at].open:
+    b.dispatch(cmdCloseDocked(pane))
+  else:
+    b.dispatch(cmdOpenDocked(pane))
+
 proc focusedIndexIn(geom: LayoutGeometry; pane: PaneKind): int =
   for i, r in geom.projection.regions:
     if r.pane == pane:
@@ -1168,10 +1359,25 @@ proc moveFocus*(b: LayoutBinding; geom: LayoutGeometry;
 proc tabAtCell(b: LayoutBinding; geom: LayoutGeometry;
                row, col: int): Option[PaneKind] =
   ## Which pane's TAB is under the cell, if the cell is on a tab strip.
-  let pointer = pointerAt(b.layout, geom, row, col)
-  if pointer.isNone or pointer.get.zone != dzTabStrip:
+  ##
+  ## The tab the cell is ON — not `pointerAt`'s drop answer, which since
+  ## PLAT-49 part B names the tab AFTER this one over its right half
+  ## (GoldenLayout's insertion rule): a click there is still a click on
+  ## this tab.
+  let idx = geom.regionIndexAt(row, col)
+  if idx < 0:
     return none(PaneKind)
-  let info = nodeInfoAtPath(b.layout.tree, pointer.get.path)
+  let region = geom.projection.regions[idx]
+  if region.activeTab < 0 or region.tabs.len == 0 or row != region.area.row:
+    return none(PaneKind)
+  let at = tabSpanAt(region.tabs, region.activeTab, col - region.area.col)
+  let panePath = geom.pathOfPane(region.pane)
+  if at < 0 or panePath.isNone:
+    return none(PaneKind)
+  let stackPath = parentPath(panePath.get)
+  if stackPath.isNone:
+    return none(PaneKind)
+  let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get, at))
   if info.isNone or info.get.kind != lnPane:
     return none(PaneKind)
   some(info.get.pane)
@@ -1469,11 +1675,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       else:
         let source = pending.get
         if b.layout.dockedIndex(source) >= 0:
-          if b.pressWasRevealing and b.pressRevealedPane == source:
-            # A SECOND click on the revealed pane's label hides it.
-            discard b.cancelGesture()
-            return action(lasCancelled, "hid " & $source)
-          return b.beginRevealDock(source)
+          return b.toggleDockOpen(source)
         return b.dispatch(cmdActivateTab(source))
     if b.interaction.kind != ikDraggingTab:
       # A plain click, or the release of a press that marked nothing: not a
@@ -1486,10 +1688,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       # two entries onto one undo log for one gesture.
       discard b.cancelGesture()
       if b.layout.dockedIndex(source) >= 0:
-        if b.pressWasRevealing and b.pressRevealedPane == source:
-          # A SECOND click on the revealed pane's label hides it.
-          return action(lasCancelled, "hid " & $source)
-        return b.beginRevealDock(source)
+        return b.toggleDockOpen(source)
       return b.dispatch(cmdActivateTab(source))
     discard b.hoverAt(geom, event.row, event.col)
     b.dropDrag()

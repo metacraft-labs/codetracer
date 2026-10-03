@@ -94,6 +94,10 @@ type
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
     ## debugger exists.
     header*: HeaderModel
+    fileInfo*: string
+      ## The status bar's file info — the current file's language and
+      ## encoding (`headless_app/footer_info`), drawn first on the status row
+      ## as the desktop draws it; the bottom labels follow it.
     topBar*: TopBarModel
       ## PLAT-48. Row 0: the program menu, the debugger controls, the
       ## omnibar, the session tabs, then `header`'s trace and tick and the
@@ -868,7 +872,12 @@ proc paintDockStrips*(g: var StyledGrid; geometry: LayoutGeometry) =
       let s = slot.area
       if s.isEmptyArea:
         continue
-      let shown = geometry.revealing and geometry.revealPane == slot.pane
+      # PLAT-49 part B: a label is lit while its pane is PREVIEWED (the hover
+      # overlay) or DOCKED OPEN (the click), as the desktop's strip tab is
+      # `active` in both states.
+      let shown = (geometry.revealing and geometry.revealPane == slot.pane) or
+                  (not geometry.openDock.isEmptyArea and
+                   geometry.openDockPane == slot.pane)
       let role = if shown: srTabActive else: srTabInactive
       g.fillSurface(s.row, s.col, s.width, s.height, role)
       if strip.edge in {leTop, leBottom}:
@@ -957,7 +966,8 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # so this is the same call CTUI-3 made, and every golden written before
   # PLAT-6 is byte-identical.
   let composed = initLayout(model.layout, model.docked)
-  let geometry = geometryOf(composed, body, model.interaction, policy)
+  let geometry = geometryOf(composed, body, model.interaction, policy,
+                            footerLeadCells(model.fileInfo))
   let projection = geometry.projection
   let decorations = decorationsFor(
     composed, geometry, model.interaction, policy,
@@ -1033,8 +1043,18 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # gesture is in flight, so this call paints nothing on a screen CTUI-3 would
   # have painted and the goldens do not move.
   paintDecorations(g, decorations)
+  # PLAT-49 part B: A DOCKED PANE SHOWN OPEN, in the band the tree gave up
+  # (`geometry.openDock`) — a pane of the tiled screen, painted as a placed
+  # pane is, with its one-tab strip.
+  if not geometry.openDock.isEmptyArea:
+    let open = PaneRegion(pane: geometry.openDockPane,
+                          title: geometry.openDockTitle,
+                          area: geometry.openDock, tabs: @[], activeTab: -1)
+    paintPane(g, open, model, geometry.openDock)
   # PLAT-48: the dock strips as labels on the tab-strip surface, and a
-  # revealed dock as the docked pane itself, over the body.
+  # revealed dock as the docked pane itself, over the body. (The bottom
+  # strip is on the status row since PLAT-49 part B and is painted with it,
+  # below.)
   paintDockStrips(g, geometry)
   if geometry.revealing and not geometry.reveal.isEmptyArea:
     paintRevealedPane(g, geometry, model)
@@ -1050,20 +1070,47 @@ proc shellScreen*(model: ShellModel; width, height: int;
   if projection.status != prOk and status.notification.len == 0:
     status.notification = "layout " & $projection.status
   if height > HeaderRows:
+    # PLAT-49 part B (finding 9): THE BOTTOM AUTO-HIDE LABELS ARE IN THIS ROW,
+    # as the desktop renders them inside its status bar (Auto-Hide-Panes.md
+    # §3.1, "Bottom strip integration"), IN THE DESKTOP'S ORDER (measured,
+    # `plat49-panes-capture.spec.ts`): the file info first — language and
+    # encoding — then the labels, then the status bar's own text.
+    let lead = footerLeadCells(model.fileInfo)
+    var footerEnd = min(width, lead)
+    for strip in geometry.strips:
+      if strip.edge == leBottom and strip.area.row == height - 1 and
+         not strip.area.isEmptyArea:
+        footerEnd = strip.area.col + strip.area.width + 1
+    let sc = min(width, footerEnd)
+    let sw = width - sc
     g.fillSurface(height - 1, 0, width, 1, srSurfaceStatusLine)
-    g.paint(height - 1, 0, statusBarText(status, width))
-    # The two indicators in their own roles: the input mode, then the product
-    # mode, exactly where `statusBarText` put them (it never drops them).
-    let modeCells = min(width, textCells($status.mode))
-    g.paint(height - 1, 0, fitCells($status.mode, modeCells),
-            modeStyle(status.mode))
-    let productText = productIndicator(status.product)
-    let productCol = textCells($status.mode) + 1
-    if productCol < width:
-      g.paint(height - 1, productCol,
-              fitCells(productText, min(textCells(productText),
-                                        width - productCol)),
-              productStyle(status.product))
+    if lead > 0:
+      # In the status line's own text colour, as the rest of its text.
+      g.paint(height - 1, 1, fitCells(model.fileInfo, max(0, min(width - 1,
+              lead - 3))))
+    if sw > 0:
+      g.paint(height - 1, sc, statusBarText(status, sw))
+      # The two indicators in their own roles: the input mode, then the
+      # product mode, exactly where `statusBarText` put them (it never drops
+      # them).
+      let modeCells = min(sw, textCells($status.mode))
+      g.paint(height - 1, sc, fitCells($status.mode, modeCells),
+              modeStyle(status.mode))
+      let productText = productIndicator(status.product)
+      let productCol = sc + textCells($status.mode) + 1
+      if productCol < width:
+        g.paint(height - 1, productCol,
+                fitCells(productText, min(textCells(productText),
+                                          width - productCol)),
+                productStyle(status.product))
+    # The labels over the row's left, after the status line's ground.
+    for strip in geometry.strips:
+      if strip.edge == leBottom:
+        paintDockStrips(g, LayoutGeometry(strips: @[strip],
+                                          revealing: geometry.revealing,
+                                          revealPane: geometry.revealPane,
+                                          openDock: geometry.openDock,
+                                          openDockPane: geometry.openDockPane))
 
   for row in 0 ..< height:
     result.rows.add g.rowText(row)

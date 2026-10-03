@@ -266,7 +266,13 @@ suite "PLAT-47: the terminal shows what the desktop shows":
         let g = glyph(sess, r, c)
         if g in DividerGlyphs: break
         text.add(if g.len == 0 or g == "\0": " " else: g)
-      let entry = text.strip(chars = {' ', '>'})
+      # PLAT-49 part B: a row is "<toggle> callee #index(args) => return";
+      # the desktop's entry is its callee and index.
+      var entry = text.strip(chars = {' ', '>'})
+      for g in ["▾ ", "▸ ", "· "]:
+        if entry.startsWith(g): entry = entry[g.len .. ^1]
+      let paren = entry.find('(')
+      if paren > 0: entry = entry[0 ..< paren]
       if entry.len == 0 or not entry.contains(" #"): break
       calls.add entry
     var desktopCalls: seq[string] = @[]

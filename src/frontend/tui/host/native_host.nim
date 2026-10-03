@@ -49,6 +49,8 @@ import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
 import headless_session
 import store/types as store_types   # `FilesystemEntryNode`
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
+from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
+from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
 export headless_session
@@ -226,6 +228,38 @@ proc handshakeBudgetMs*(): int =
     if parsed > 0: parsed else: DefaultHandshakeMs
   except ValueError:
     DefaultHandshakeMs
+
+const
+  MaxListedRecordings* = 64
+    ## How many recordings `recordingsBeside` lists: a folder of thousands
+    ## must not stall the omnibar's opening.
+
+proc recordingsBeside*(traceFolder: string): seq[OmnibarEntry] =
+  ## PLAT-49 part B: THE RECORDINGS A NEW SESSION TAB CAN OPEN without the
+  ## user typing a path — every folder beside `traceFolder` (its own
+  ## included) that `traceFolderProblem` accepts, as `omRecording` omnibar
+  ## entries (its name, its parent, its absolute path), in name order. The
+  ## native front-ends' answer to the desktop's welcome screen, which lists
+  ## the recordings its index knows; a typed path is accepted too
+  ## (`omnibar_vm.rankOmnibar`).
+  if traceFolder.len == 0:
+    return
+  let parent = parentDir(absolutePath(traceFolder.expandTilde()))
+  if not dirExists(parent):
+    return
+  var found: seq[string] = @[]
+  for kind, path in walkDir(parent):
+    if kind notin {pcDir, pcLinkToDir}:
+      continue
+    if traceFolderProblem(path).len == 0:
+      found.add path
+    if found.len >= MaxListedRecordings:
+      break
+  found.sort()
+  for path in found:
+    result.add OmnibarEntry(kind: OmnibarMode.omRecording,
+                            label: extractFilename(path),
+                            detail: parent, target: path)
 
 proc openLocalTrace*(traceFolder: string;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -414,6 +448,26 @@ proc refreshCallStackFallback*(s: HeadlessDebugSession) =
   except CatchableError:
     names = @[]
   vm.fallbackStack.val = names
+
+proc selectCurrentCall*(s: HeadlessDebugSession) =
+  ## PLAT-49 part B: select the call the debugger is in, as the desktop does
+  ## on every move (`CalltraceComponent.onCompleteMove` -> `selectEntry`) —
+  ## `calltrace_vm.currentCallOf` over the section held, the stop's tick and
+  ## its call stack.
+  let vm = s.session.calltraceVM
+  let lines = s.session.store.calltrace.lines.val
+  if vm.isNil or lines.len == 0:
+    return
+  var names: seq[string] = @[]
+  try:
+    let response = s.sendRawDapRequest("stackTrace", %*{
+      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
+    discard s.drainEvents()
+    for f in response{"body", "stackFrames"}.getElems:
+      names.add f{"name"}.getStr("")
+  except CatchableError:
+    return
+  vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-STOP producer: the values in scope where the debugger now is,

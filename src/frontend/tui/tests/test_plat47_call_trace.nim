@@ -112,8 +112,10 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     var labels: seq[string] = @[]
     viewLabels(pv.root, labels)
     ck labels.len >= lines.len
-    ck labels[0].strip() == "<__main__> #0" or labels[0].strip() ==
-       lines[0].name & " #0"
+    # A row is "callee #index(args) => return" (PLAT-49 part B); its head
+    # names the call.
+    let head = labels[0].strip().split('(')[0]
+    ck head == "<__main__> #0" or head == lines[0].name & " #0"
     ck pv.report.len == 0
 
   test "at a later stop the current call is the one the debugger is in":

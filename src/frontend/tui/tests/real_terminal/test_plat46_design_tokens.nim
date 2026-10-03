@@ -66,7 +66,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 150
+const ExpectedAssertions = 159
 
 var countedAssertions = 0
 
@@ -96,7 +96,7 @@ type
 const
   ContrastIssue = "codetracer-specs/issues/2026-09-26-design-system-contrast-failures.md"
   CurrentLineIssue = "codetracer-specs/issues/2026-09-26-design-system-current-line-equals-comment.md"
-  FiledContrastFailures: array[33, FiledPair] = [
+  FiledContrastFailures: array[36, FiledPair] = [
     (dmDark, dtColorsUiBorderSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue),
     (dmDark, dtColorsUiBorderSecondary, dtColorsEditorSurfacePrimary, ContrastIssue),
     (dmDark, dtColorsUiDividerSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue),
@@ -133,7 +133,19 @@ const
     # until the light editor ground was measured (2026-09-28), by the
     # desktop register's (action/secondary, editor ground) entry, because the
     # composed light ground WAS the light panel. Filed where it belongs.
-    (dmLight, dtColorsEditorActionSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue)]
+    (dmLight, dtColorsEditorActionSecondary, dtColorsUiSurfaceBasePanel, ContrastIssue),
+    # PLAT-49 part B: the call trace's return value, painted in the design
+    # system's information colour (the desktop's Light return colour,
+    # exactly), on the Light panel — already in the issue's table (4.00:1);
+    # the terminal had not painted it on a panel before.
+    (dmLight, dtColorsUiTextInformationPrimary, dtColorsUiSurfaceBasePanel, ContrastIssue),
+    # PLAT-49 part B review: the call the debugger is in sits on the active-
+    # row ground (ui/surface/primary/secondary-hover), as the desktop puts it
+    # on a ground of its own. Its argument and return colours clear 4.5:1 on
+    # it in Dark; their Light values fail on every Light ground, the panel
+    # above included (1.86:1 and 2.91:1 here) — the same two tokens, filed.
+    (dmLight, dtColorsUiTextSuccessPrimary, dtColorsUiSurfacePrimarySecondaryHover, ContrastIssue),
+    (dmLight, dtColorsUiTextInformationPrimary, dtColorsUiSurfacePrimarySecondaryHover, ContrastIssue)]
     ## THE PAIRS THE DESIGN SYSTEM ITSELF FAILS, where this front-end paints
     ## them — filed, not silently adjusted (PLAT-46's contrast requirement).
     ## COUNTED: a new failing pair reddens the sweep until it is filed here
@@ -278,7 +290,10 @@ proc readWide(sess: var TuiTestSession): Fidelity =
     let c = colOf(sess, execRow, cols, "-->") + 6
     result.currentLineBg = hexOfColor(sess.cellAt(execRow, c).bg)
   result.statusBg = hexOfColor(sess.cellAt(rows - 1, cols - 1).bg)
-  result.modeFg = hexOfColor(sess.cellAt(rows - 1, 0).fg)
+  # The mode indicator, found by its text: since PLAT-49 part B the footer's
+  # auto-hide labels open the status row, and the mode follows them.
+  let modeCol = colOf(sess, rows - 1, cols, "NORMAL")
+  result.modeFg = hexOfColor(sess.cellAt(rows - 1, max(0, modeCol)).fg)
   # A pane body: the Variables pane's last column before its separator, three
   # rows under its tab strip (PLAT-49: the strip is the pane's first row).
   # Found by the separator rather than by the screen's edge: since PLAT-45
@@ -291,7 +306,16 @@ proc readWide(sess: var TuiTestSession): Fidelity =
   # The editor body: the last cell of a short source line (line 3 is empty)
   # before the Source pane's separator — found by the separator, because the
   # shared default's Source pane is narrower than a fixed offset.
-  let srcRow = rowOf(sess, cols, rows, "   3 ")
+  # Searched in the Source pane's own columns (from its `main.py` tab on):
+  # since PLAT-49 part B the event log's `#` column spells `   3 ` too.
+  var srcRow = -1
+  let tabRow = rowOf(sess, cols, rows, " main.py ")
+  if tabRow >= 0:
+    let srcCol = max(0, colOf(sess, tabRow, cols, " main.py ") - 1)
+    for r in tabRow + 1 ..< rows:
+      if sess.regionText(r, srcCol, 8, 1).contains("   3 "):
+        srcRow = r
+        break
   if srcRow >= 0:
     let c = lastColBeforeRule(sess, srcRow,
                               colOf(sess, srcRow, cols, "   3 "), cols)
@@ -469,7 +493,9 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     # The register may not become a place to park a pair that PASSES: every
     # entry is recomputed from the tokens and must fail its floor (4.5:1, or
     # 3:1 for a chrome token), and must name its issue.
-    ck FiledContrastFailures.len == 33   # 32 + the pair the composed light ground masked
+    ck FiledContrastFailures.len == 36   # 32 + the pair the composed light ground masked
+                                         # + PLAT-49 part B's return colour
+                                         # + its two on the active-row ground
     var genuine = 0
     for f in FiledContrastFailures:
       let ratio = contrastRatio(parseHexColour(hexT(f.fg, f.mode)),
@@ -503,19 +529,35 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
     for (reply, hex, expectMode) in [
         ("\x1b]11;rgb:ffff/ffff/ffff\x1b\\", "#ffffff", dmDark),
         ("\x1b]11;rgb:1e1e/1e1e/2e2e\x07", "#1e1e2e", dmDark)]:
-      var sess = builderFor(@[tracePath], Wide.cols, Wide.rows).spawn()
-      let asked = waitForTranscript(sess, "\x1b]11;?")
+      # THE NOTE, read at the Stacked width: since PLAT-49 part B the footer's
+      # auto-hide labels open the status row, and at 120 columns the light
+      # answer's whole sentence (with the flag that selects Light) no longer
+      # fits beside them — the note is cut at its end, as every note is.
+      var wide = builderFor(@[tracePath], Stacked.cols, Stacked.rows).spawn()
+      let asked = waitForTranscript(wide, "\x1b]11;?")
       ck asked
-      sess.send(reply)
+      wide.send(reply)
       let want = "bg: osc11 " & hex &
                  (if hex == "#ffffff": " (light; --theme=light to use it)"
                   else: "") & " -> dark"
-      let status = waitForStatus(sess, Wide.cols, Wide.rows, want)
+      let status = waitForStatus(wide, Stacked.cols, Stacked.rows, want)
       checkpoint("status after " & hex & ": " & status)
       ck status.contains(want)
-      # The answer may land inside the bounded start-up wait (frame 0 already
+      finish(wide)
+      # THE CELLS, at the Wide geometry the readers know, on a session whose
+      # status row names the answer's source as far as 120 columns allow. The
+      # answer may land inside the bounded start-up wait (frame 0 already
       # says so) or after it (a repaint says so); either way the DEBUGGER's
       # frame is what the cells are read from.
+      var sess = builderFor(@[tracePath], Wide.cols, Wide.rows).spawn()
+      ck waitForTranscript(sess, "\x1b]11;?")
+      sess.send(reply)
+      ck waitForStatus(sess, Wide.cols, Wide.rows,
+                       "bg: osc11 " & hex).contains("bg: osc11 " & hex)
+      # Frame 1 by its own note (the debugger's position): at 120 columns,
+      # beside the footer's labels, frame 0's long light note is cut before
+      # its `opening …`, which is what `settleOnDebugger` tells frames by.
+      ck waitForStatus(sess, Wide.cols, Wide.rows, " tick ").contains(" tick ")
       settleOnDebugger(sess, Wide.cols, Wide.rows)
       let f = readWide(sess)
       ck f.editorBg == hexT(dtEditorThemeGround, expectMode)

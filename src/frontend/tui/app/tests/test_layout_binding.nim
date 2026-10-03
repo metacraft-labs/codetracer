@@ -66,11 +66,16 @@ import ./plat45_old_profiles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
-# declaration is invisible to it.
-const ExpectedAssertions = 2685 + 17 + 2
+# declaration is invisible to it. `+ 3`: PLAT-49 part B's positive controls
+# (a lone pane's header joined; a tab's insert and append halves were seen).
+const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5
+  ## + 5: PLAT-49 part B review — the round trip reaches the root band.
   ## PLAT-48: +17 — the `:pin` / `:unpin` block and the two new verbs in the
   ## every-verb sweep. PLAT-49: +2 — a press MARKS the pane (`pendingPick`)
-  ## and picks nothing up until the pointer moves past the threshold.
+  ## and picks nothing up until the pointer moves past the threshold; part B
+  ## +3 for the GoldenLayout drop rules, and +97 — every partitioned
+  ## geometry's footer strip is on the status row, one row tall (two checks
+  ## per footer), and the sweep reached the footer's cells.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -306,9 +311,17 @@ template ckStripsTileTheBody(l: Layout; geom: LayoutGeometry;
     ck geom.body.cellCount() > 0
     ck innerCells == geom.inner.cellCount()
     ck innerCells + stripCells == geom.body.cellCount()
+    # The BOTTOM strip is the footer's (PLAT-49 part B, finding 9): its labels
+    # sit on the status row, the row right below the body, never in it.
+    var footerCells = 0
+    for s in geom.strips:
+      if s.edge == leBottom and s.area.cellCount() > 0:
+        ck s.area.row == geom.body.row + geom.body.height
+        ck s.area.height == 1
+        footerCells += s.area.cellCount()
     # BOTH DIRECTIONS, so neither half is free: docked panes mean claimed strip
     # cells, and nothing docked means none.
-    ck (l.docked.len > 0) == (stripCells > 0)
+    ck (l.docked.len > 0) == (stripCells + footerCells > 0)
 
 template ckMessageIsNeverSilent(a: LayoutAction; label: string) =
   block:
@@ -325,6 +338,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # that resolved to nothing, or to two things, would make a drag behave
     # differently depending on where in a pane it started.
     var sweptCells = 0
+    var footerSwept = 0
     var resolved = 0
     var zonesSeen: set[DropZone] = {}
     for g in Geometries:
@@ -339,10 +353,21 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
             if p.isSome:
               inc resolved
               zonesSeen.incl p.get.zone
+        # The footer's labels (the bottom strip, on the status row).
+        for s in geom.strips:
+          if s.edge != leBottom: continue
+          for col in s.area.col ..< s.area.col + s.area.width:
+            inc sweptCells
+            inc footerSwept
+            let p = pointerAt(l, geom, s.area.row, col)
+            if p.isSome:
+              inc resolved
+              zonesSeen.incl p.get.zone
     # THE POSITIVE CONTROL. `resolved == sweptCells` is satisfied for free by a
     # sweep that visited nothing, so the number of cells is asserted too — and
     # it is knowable: three geometries, two layouts each, one body apiece.
-    var expectedCells = 0
+    var expectedCells = footerSwept
+    ck footerSwept > 0
     for g in Geometries:
       expectedCells += 2 * bodyFor(g.cols, g.rows).cellCount()
     checkpoint("swept " & $sweptCells & " cell(s), resolved " & $resolved)
@@ -386,7 +411,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # binding's two directions against the model's one — rather than the
     # binding agreeing with itself.
     var wholeNodeChecks = 0
+    var wholeNodeHeaderChecks = 0
     var nodeStripChecks = 0
+    var rootBandChecks = 0
     var tabSlotChecks = 0
     var caretsInsideTheirOwnTab = 0
     var caretsAtTheAppendSlot = 0
@@ -429,7 +456,14 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
           case hovered.get.region.kind
           of drWholeNode:
             inc wholeNodeChecks
-            if not cells.contains(row, col):
+            # PLAT-49 part B: a LONE pane's strip is its header and joins
+            # (GoldenLayout's one-tab header), so its cells resolve to the
+            # whole node whose tint is the body right BELOW that strip.
+            let onHeader = row == cells.row - 1 and col >= cells.col and
+                           col < cells.col + cells.width
+            if onHeader:
+              inc wholeNodeHeaderChecks
+            elif not cells.contains(row, col):
               mismatches.add at & " does not contain its own cell (" &
                 $cells & ")"
           of drNodeStrip:
@@ -486,6 +520,12 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
               inc caretsInsideTheirOwnTab
           of drLayoutStrip:
             mismatches.add at & " offered a dock strip from inside the tree"
+          of drRootBand:
+            # PLAT-49 part B: GoldenLayout's ground band, a root split.
+            inc rootBandChecks
+            if not cells.contains(row, col):
+              mismatches.add at & " does not contain its own cell (" &
+                $cells & ")"
     if mismatches.len > 0:
       for m in mismatches[0 ..< min(8, mismatches.len)]:
         checkpoint(m)
@@ -507,7 +547,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # reached, so `mismatches.len == 0` is not the answer to an empty question;
     # and no cell inside the tree resolved to a dock strip or to nothing.
     ck wholeNodeChecks > 0
+    ck wholeNodeHeaderChecks > 0
     ck nodeStripChecks > 0
+    ck rootBandChecks > 0
     ck tabSlotChecks > 0
     ck stripHitsInsideTheTree == 0
     ck unresolved == 0
@@ -534,6 +576,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # correct only because the one stack the profiles produce starts at column 0
     # with ASCII labels.
     var columnsChecked = 0
+    var insertColumns = 0
+    var appendColumns = 0
     var labelledColumns = 0
     var stripsComparedAbsolutely = 0
     var roleCellsChecked = 0
@@ -586,14 +630,27 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
               disagreements.add where & ": tabSpanAt disagrees with tabSpans"
               continue
             let p = pointerAt(l, geom, region.area.row, col)
+            # PLAT-49 part B — GOLDENLAYOUT'S HEADER RULE, restated here
+            # rather than read from `goldenLayoutInsertsAfter`: left of a
+            # tab's middle the drop goes before it, right of the middle after
+            # it; after the LAST tab is the append (`dzCentre`).
+            let after = offset * 2 + 1 > span.width
+            let wantSlot = if after: span.index + 1 else: span.index
+            if wantSlot >= region.tabs.len:
+              inc appendColumns
+              if p.isNone or p.get.zone != dzCentre:
+                disagreements.add where & ": the last tab's right half " &
+                  "did not append"
+              continue
+            inc insertColumns
             if p.isNone or p.get.zone != dzTabStrip:
               disagreements.add where & ": the hit-test did not say tabStrip"
               continue
             if paneOfPathIn(l, p.get.path) !=
                paneOfPathIn(l, childPathOf(parentPath(p.get.path).get,
-                                           span.index)):
+                                           wantSlot)):
               disagreements.add where & ": named tab " & $p.get.path &
-                " rather than index " & $span.index
+                " rather than index " & $wantSlot
           # …and the label the painter actually wrote is at those columns.
           # BY CELL, NOT BY BYTE — see `sliceCells`.
           let label = sliceCells(tabLabel(region.tabs[span.index],
@@ -624,6 +681,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                $disagreements.len & " disagreement(s)")
     ck disagreements.len == 0
     ck columnsChecked > 0
+    ck insertColumns > 0
+    ck appendColumns > 0
     ck labelledColumns > 0
     # THE ABSOLUTE HALF RAN. Without this, a geometry sweep that stopped
     # producing stacks would leave every "no disagreement" above true for free
@@ -690,12 +749,23 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       discard b.onMouse(geom, press(source.row, source.col))
       discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
+      # Clear of GoldenLayout's ground band (PLAT-49 part B) where the pane
+      # meets the layout's own edge: there a drop splits the whole layout.
+      let inner = geom.inner
+      let inL = if target.col == inner.col: rootBandDepth(leLeft) else: 0
+      let inR = if target.col + target.width == inner.col + inner.width:
+                  rootBandDepth(leRight) else: 0
+      let inT = if target.row == inner.row: rootBandDepth(leTop) else: 0
+      let inB = if target.row + target.height == inner.row + inner.height:
+                  rootBandDepth(leBottom) else: 0
       let cell = case pair[0]
-        of leLeft: (target.row + target.height div 2, target.col)
+        of leLeft: (target.row + target.height div 2, target.col + inL)
         of leRight: (target.row + target.height div 2,
-                     target.col + target.width - 1)
-        of leTop: (target.row, target.col + target.width div 2)
-        of leBottom: (target.row + target.height - 1,
+                     target.col + target.width - 1 - inR)
+        # The first row BELOW the strip: the strip itself is the pane's
+        # header and joins (PLAT-49 part B).
+        of leTop: (target.row + 1 + inT, target.col + target.width div 2)
+        of leBottom: (target.row + target.height - 1 - inB,
                       target.col + target.width div 2)
       let dropped = b.onMouse(geom, release(cell[0], cell[1]))
       checkpoint($pair[0] & " -> " & dropped.message)

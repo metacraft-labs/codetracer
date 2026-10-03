@@ -73,6 +73,9 @@ type
     dtSplitAfter = "splitAfter"
     dtDockEdge = "dockEdge"
       ## Become an auto-hidden pane on this edge of the whole layout.
+    dtSplitRoot = "splitRoot"
+      ## PLAT-49 part B: split the WHOLE LAYOUT on `edge` — GoldenLayout's
+      ## ground side areas (`lcSplit` with `splitRoot`).
 
   DropZone* = enum
     ## Which part of a node's region — or of the window's border — a pointer
@@ -92,6 +95,14 @@ type
     dzOutsideRight = "outsideRight"
     dzOutsideTop = "outsideTop"
     dzOutsideBottom = "outsideBottom"
+    dzRootLeft = "rootLeft"
+      ## PLAT-49 part B: over the band along the layout's OWN outer edge,
+      ## inside it — GoldenLayout's ground side area
+      ## (`GoldenLayoutRootBandPx` deep): a drop splits the whole layout on
+      ## that side. Like `dzOutside*`, names no node.
+    dzRootRight = "rootRight"
+    dzRootTop = "rootTop"
+    dzRootBottom = "rootBottom"
 
   LayoutPointer* = object
     ## Where a gesture currently is, in the LAYOUT's own vocabulary.
@@ -119,6 +130,9 @@ type
       ## One insertion slot of a stack's tab strip.
     drLayoutStrip = "layoutStrip"
       ## A strip along one edge of the whole layout.
+    drRootBand = "rootBand"
+      ## PLAT-49 part B: the band along one edge INSIDE the whole layout —
+      ## where a root split lands (GoldenLayout's ground side area).
 
   DropRegion* = object
     ## §4.2's "the region each occupies", in the only terms this module has:
@@ -127,7 +141,7 @@ type
     ## it.
     path*: string
     case kind*: DropRegionKind
-    of drNodeStrip, drLayoutStrip:
+    of drNodeStrip, drLayoutStrip, drRootBand:
       side*: LayoutEdge
     of drTabSlot:
       slot*: int
@@ -152,7 +166,7 @@ type
     of dtSplitBefore, dtSplitAfter:
       splitTarget*: PaneKind
       axis*: SplitAxis
-    of dtDockEdge:
+    of dtDockEdge, dtSplitRoot:
       edge*: LayoutEdge
 
   DragOriginKind* = enum
@@ -372,7 +386,7 @@ proc `==`*(a, b: DropRegion): bool =
   if a.kind != b.kind or a.path != b.path:
     return false
   case a.kind
-  of drNodeStrip, drLayoutStrip: a.side == b.side
+  of drNodeStrip, drLayoutStrip, drRootBand: a.side == b.side
   of drTabSlot: a.slot == b.slot
   of drWholeNode: true
 
@@ -383,7 +397,7 @@ proc `==`*(a, b: DropTarget): bool =
   of dtIntoStack: a.stackAnchor == b.stackAnchor and a.index == b.index
   of dtSplitBefore, dtSplitAfter:
     a.splitTarget == b.splitTarget and a.axis == b.axis
-  of dtDockEdge: a.edge == b.edge
+  of dtDockEdge, dtSplitRoot: a.edge == b.edge
 
 proc `$`*(r: DropRegion): string =
   case r.kind
@@ -391,6 +405,7 @@ proc `$`*(r: DropRegion): string =
   of drNodeStrip: "strip('" & r.path & "', " & $r.side & ")"
   of drTabSlot: "tabSlot('" & r.path & "', " & $r.slot & ")"
   of drLayoutStrip: "layoutStrip(" & $r.side & ")"
+  of drRootBand: "rootBand(" & $r.side & ")"
 
 proc `$`*(t: DropTarget): string =
   case t.kind
@@ -400,6 +415,8 @@ proc `$`*(t: DropTarget): string =
     $t.kind & "(" & $t.splitTarget & ", " & $t.axis & ") @" & $t.region
   of dtDockEdge:
     "dockEdge(" & $t.edge & ") @" & $t.region
+  of dtSplitRoot:
+    "splitRoot(" & $t.edge & ") @" & $t.region
 
 proc `$`*(o: DragOrigin): string =
   case o.kind
@@ -426,6 +443,91 @@ proc `$`*(i: Interaction): string =
 # §4.2 — the drop-target model
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# GoldenLayout's drop zones, as proportions (PLAT-49 part B, finding 11)
+# ---------------------------------------------------------------------------
+
+const
+  GoldenLayoutEdgeShare* = 0.25
+    ## How far into a pane's body an EDGE zone reaches, as a share of the
+    ## body's extent on that axis. Measured in the desktop's GoldenLayout
+    ## 2.6.0 (`dist/cjs/ts/items/stack.js`, `Stack.getArea`): the left hover
+    ## area is `x1 .. x1 + contentWidth * 0.25` over the body's full height,
+    ## the right one `x1 + contentWidth * 0.75 .. x2`; the top and bottom ones
+    ## lie between those two, in the middle half of the width. A drop there
+    ## SPLITS the pane on that side and the new pane takes HALF of it (the
+    ## `highlightArea`, `contentWidth * 0.5`; `onDrop` halves the target's
+    ## size) — `dropIndicationOf`'s `diSplitHalf`.
+    ##
+    ## ONE DEVIATION, BY THE USER'S DIRECTION (2026-10-01, finding 11: "the
+    ## centre joins the stack"). GoldenLayout's top and bottom zones are the
+    ## whole upper and lower HALVES of that middle column, so a non-empty
+    ## stack's body has no centre and a join happens only on its header. Here
+    ## the top and bottom zones are the same quarter deep as the left and
+    ## right ones, and the middle — the centre half of the body on both axes
+    ## — JOINS the stack (`dzCentre`). The edge zones keep GoldenLayout's
+    ## proportion on both axes.
+
+func goldenLayoutZone*(dx, dy, width, height: int): DropZone =
+  ## **The zone of a body point**, for every front-end: `dx`, `dy` is the
+  ## pointer's offset inside a pane's drop body of `width` x `height`, in the
+  ## front-end's OWN unit (a terminal's cells, a window's pixels). Pure
+  ## arithmetic on the binding's measurement — nothing measured is kept, so
+  ## PLAT-5's purity law holds: the Interaction still carries only the zone.
+  ##
+  ## Judged at the UNIT'S CENTRE (`dx + 0.5`), so a body two units wide has a
+  ## left and a right zone and nothing between, one unit wide only a centre.
+  ## Left and right are tested first (GoldenLayout's left and right areas run
+  ## the body's full height); then top, bottom, and the centre.
+  if width <= 0 or height <= 0:
+    return dzCentre
+  let fx = (float(dx) + 0.5) / float(width)
+  let fy = (float(dy) + 0.5) / float(height)
+  if fx <= GoldenLayoutEdgeShare: dzLeftEdge
+  elif fx >= 1.0 - GoldenLayoutEdgeShare: dzRightEdge
+  elif fy <= GoldenLayoutEdgeShare: dzTopEdge
+  elif fy >= 1.0 - GoldenLayoutEdgeShare: dzBottomEdge
+  else: dzCentre
+
+const
+  GoldenLayoutRootBandPx* = 50
+    ## How deep GoldenLayout's GROUND side areas are, in pixels
+    ## (`dist/cjs/ts/items/ground-item.js`, `GroundItem.createSideAreas`:
+    ## `areaSize = 50`): four bands INSIDE the layout along its outer edges.
+    ## `LayoutManager.getArea` picks the SMALLEST area under the pointer, so
+    ## over the band a stack's body loses to it (its area is the whole stack)
+    ## and a drop there splits the WHOLE LAYOUT on that side
+    ## (`GroundItem.onDrop`, `lcSplit`'s `splitRoot`); a stack's header,
+    ## smaller than the band along the edge, keeps its own drop. Measured on
+    ## the desktop (`plat49-panes-capture.spec.ts`, `rootBand`).
+
+func goldenLayoutRootBand*(unitPx: float): int =
+  ## The band's depth in a front-end's own unit of `unitPx` pixels — a
+  ## window's pixel (1.0) or, for a terminal, the desktop's character cell
+  ## along that axis. At least one unit.
+  if unitPx <= 0.0: 1
+  else: max(1, int(float(GoldenLayoutRootBandPx) / unitPx + 0.5))
+
+func rootZoneOf*(edge: LayoutEdge): DropZone =
+  case edge
+  of leLeft: dzRootLeft
+  of leRight: dzRootRight
+  of leTop: dzRootTop
+  of leBottom: dzRootBottom
+
+func goldenLayoutWins*(bandSurface, areaSurface: int): bool =
+  ## `LayoutManager.getArea`'s rule between two areas under the pointer: the
+  ## SMALLER surface wins, and on a tie the one considered first (the
+  ## ground's side areas are listed before the stacks' — `calculateItemAreas`).
+  bandSurface <= areaSurface
+
+func goldenLayoutInsertsAfter*(dx, tabWidth: int): bool =
+  ## Over a tab of a stack's strip, whether the insertion point is AFTER that
+  ## tab: GoldenLayout's `Stack.highlightHeaderDropZone` puts the drop
+  ## placeholder before a tab when the pointer is left of the tab's middle
+  ## and after it otherwise. `dx` is the offset into the tab.
+  tabWidth > 0 and 2 * dx + 1 > tabWidth
+
 proc edgeOfZone(zone: DropZone): Option[LayoutEdge] =
   case zone
   of dzOutsideLeft: some(leLeft)
@@ -433,6 +535,21 @@ proc edgeOfZone(zone: DropZone): Option[LayoutEdge] =
   of dzOutsideTop: some(leTop)
   of dzOutsideBottom: some(leBottom)
   else: none(LayoutEdge)
+
+proc rootEdgeOfZone(zone: DropZone): Option[LayoutEdge] =
+  case zone
+  of dzRootLeft: some(leLeft)
+  of dzRootRight: some(leRight)
+  of dzRootTop: some(leTop)
+  of dzRootBottom: some(leBottom)
+  else: none(LayoutEdge)
+
+func rootSplitOf(edge: LayoutEdge): (SplitAxis, SplitSide) =
+  case edge
+  of leLeft: (saRow, ssBefore)
+  of leRight: (saRow, ssAfter)
+  of leTop: (saColumn, ssBefore)
+  of leBottom: (saColumn, ssAfter)
 
 proc commandFor*(layout: Layout; source: PaneKind;
                  target: DropTarget): Option[LayoutCommand] =
@@ -473,6 +590,9 @@ proc commandFor*(layout: Layout; source: PaneKind;
     some(cmdSplitMove(target.splitTarget, source, target.axis, side))
   of dtDockEdge:
     some(cmdDock(source, target.edge))
+  of dtSplitRoot:
+    let (axis, side) = rootSplitOf(target.edge)
+    some(cmdSplitRootMove(source, axis, side))
 
 proc intoStackCandidates(layout: Layout; source: PaneKind; leaf: LayoutNode;
                          leafPath: string): seq[DropTarget] =
@@ -551,6 +671,14 @@ proc dropTargetsFor*(layout: Layout; source: PaneKind;
     if isLegal(layout, source, candidate):
       result.add(candidate)
     return
+  let rootEdge = rootEdgeOfZone(pointer.zone)
+  if rootEdge.isSome:
+    let candidate = DropTarget(
+      kind: dtSplitRoot, edge: rootEdge.get,
+      region: DropRegion(kind: drRootBand, path: "", side: rootEdge.get))
+    if isLegal(layout, source, candidate):
+      result.add(candidate)
+    return
   let node = nodeAtPath(layout.tree, pointer.path)
   # A hit-test resolves to the pane whose region the pointer is in. A path
   # naming a container is not a drop location: containers have no region of
@@ -572,6 +700,9 @@ proc regionForZone(layout: Layout; pointer: LayoutPointer): Option[DropRegion] =
   let outside = edgeOfZone(pointer.zone)
   if outside.isSome:
     return some(DropRegion(kind: drLayoutStrip, path: "", side: outside.get))
+  let rootEdge = rootEdgeOfZone(pointer.zone)
+  if rootEdge.isSome:
+    return some(DropRegion(kind: drRootBand, path: "", side: rootEdge.get))
   let node = nodeAtPath(layout.tree, pointer.path)
   if node.isNil or node.kind != lnPane:
     return none(DropRegion)
@@ -690,6 +821,9 @@ type
       ## two-tab stack.
     diLayoutEdge = "layoutEdge"
       ## A dock: the strip along `side` of the whole layout.
+    diRootBand = "rootBand"
+      ## PLAT-49 part B: a split of the whole layout — the band along `side`
+      ## inside it, as GoldenLayout highlights its ground side area.
 
   DropIndication* = object
     ## The drop in flight, as a renderer draws it.
@@ -737,6 +871,9 @@ proc dropIndicationOf*(interaction: Interaction): DropIndication =
       result.path = t.region.path
   of dtDockEdge:
     result.kind = diLayoutEdge
+    result.side = t.edge
+  of dtSplitRoot:
+    result.kind = diRootBand
     result.side = t.edge
 
 proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =

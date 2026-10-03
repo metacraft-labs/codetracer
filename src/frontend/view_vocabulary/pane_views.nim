@@ -300,13 +300,13 @@ proc calltracePaneView*(vm: CalltraceVM): PaneView =
     return
   let lines = vm.visibleLines.val
   var options: seq[ViewOption] = @[]
-  for line in lines:
-    # THE DESKTOP'S `.call-text`: `name #index` (PLAT-47), indented by the
-    # call's depth, so a row reads the same in every front-end.
-    let label = repeat("  ", max(line.depth, 0)) &
-      (if line.displayName.len > 0: line.displayName else: line.name) &
-      " #" & $line.index
-    options.add ViewOption(id: $line.index, label: label)
+  for row in vm.callRows():
+    # THE DESKTOP'S ROW: `.call-text` (`name #index`, PLAT-47), its
+    # `.call-args` and its `.return` (PLAT-49 part B,
+    # `calltrace_vm.callRowText`), indented by the call's depth, so a row
+    # reads the same in every front-end.
+    let label = repeat("  ", max(row.depth, 0)) & callRowText(row)
+    options.add ViewOption(id: $row.index, label: label)
   if options.len == 0:
     # PLAT-47: THE CALL-STACK FALLBACK, captioned. A recording with no call
     # trace still has a stack at every stop, and the host hands it over
@@ -341,9 +341,21 @@ proc calltracePaneView*(vm: CalltraceVM): PaneView =
 # Event log
 # ---------------------------------------------------------------------------
 
-const EventLogColumns* = @["#", "kind", "value"]
-  ## The event log's columns. Named once; the pane and any assertion over it
-  ## read the same list.
+proc eventLogCell(r: EventLogRow; col: EventLogColumn): string =
+  ## One cell of the event log's table, by column (PLAT-49 part B).
+  case col
+  of elcTick: $r.rrTicks
+  of elcIndex: $r.eventIndex
+  of elcLocation:
+    if r.file.len == 0: ""
+    else: r.file.rsplit('/', maxsplit = 1)[^1] & ":" & $r.line
+  of elcKind: r.kind
+  of elcOutput:
+    # The output's LINE TERMINATOR is not part of the text a cell shows: a
+    # `print` arrives as `2 + 3 = 5\n`, and a cell holding the `\n` draws a
+    # blank line under every event in a medium that honours it (PLAT-40
+    # measured every row of the native window's event log double-spaced).
+    r.value.strip(leading = false, chars = {'\n', '\r'})
 
 proc eventLogPaneView*(vm: EventLogVM): PaneView =
   ## The event log: a `Table`.
@@ -351,6 +363,11 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
   ## A `Table` and not a `List` because the pane's cursor really is
   ## two-dimensional — `EventLogVM` carries `sortColumn` as well as
   ## `selectedRow`, so a column IS part of this pane's state.
+  ##
+  ## ITS COLUMNS ARE THE VIEWMODEL'S (PLAT-49 part B, finding 14):
+  ## `EventLogVM.columns` — the desktop's tick, #, kind and output by
+  ## default, location hidden — in the order and with the visibility the
+  ## user chose.
   result.pane = paneEventLog
   if vm.isNil:
     result.report = "the event log has no ViewModel; the session has not " &
@@ -364,19 +381,21 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
     result.root = viewText("eventLog.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  let shown = vm.columns.val.visibleColumns
+  var titles: seq[string] = @[]
+  for col in shown:
+    titles.add eventLogColumnTitle(col)
   var cells: seq[seq[string]] = @[]
   for r in rows:
-    # The output's LINE TERMINATOR is not part of the text a cell shows: a
-    # `print` arrives as `2 + 3 = 5\n`, and a cell holding the `\n` draws a
-    # blank line under every event in a medium that honours it (PLAT-40
-    # measured every row of the native window's event log double-spaced).
-    cells.add @[$r.eventIndex, r.kind, r.value.strip(leading = false,
-                                                     chars = {'\n', '\r'})]
-  let table = viewTable("eventLog", EventLogColumns, cells)
+    var line: seq[string] = @[]
+    for col in shown:
+      line.add eventLogCell(r, col)
+    cells.add line
+  let table = viewTable("eventLog", titles, cells)
   let selected = vm.selectedRow.val
   if selected.isSome and selected.get >= 0 and selected.get < cells.len:
     table.cursor = selected.get
-  table.column = max(min(vm.sortColumn.val, EventLogColumns.high), 0)
+  table.column = max(min(vm.sortColumn.val, titles.high), 0)
   result.root = table
   result.entries = entriesOf(result.root)
 

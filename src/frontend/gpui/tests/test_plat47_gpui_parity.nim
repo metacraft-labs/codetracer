@@ -185,7 +185,11 @@ suite "PLAT-47: the GPUI window at desktop parity":
       ck files.contains(w)
     var calls: seq[string] = @[]
     for e in desk{"calltrace"}.getElems: calls.add e.getStr
-    let trace = paneText(plan, "calltrace")
+    # One entry per drawn call row (PLAT-49: a row is drawn as its semantic
+    # parts — toggle, callee, index, arguments, return — each a text node).
+    var trace: seq[string] = @[]
+    for row in plan.nodesWith("data-call-index"):
+      trace.add textOf(row)
     checkpoint("gpui calltrace: " & $trace[0 ..< min(6, trace.len)])
     ck calls.len >= 5
     # Each of the desktop's first calls, in order, is a row of the GPUI pane
@@ -193,7 +197,9 @@ suite "PLAT-47: the GPUI window at desktop parity":
     var at = 0
     var matched = 0
     for c in calls[0 ..< min(10, calls.len)]:
-      while at < trace.len and trace[at].strip() != c:
+      # A row reads "<toggle> callee #index(args) => return"; the desktop's
+      # `.call-text` is the callee and index, right before the arguments.
+      while at < trace.len and not trace[at].contains(c & "("):
         inc at
       if at < trace.len:
         inc matched

@@ -24,15 +24,17 @@ does — a REAL pointer (isonim-gpui's `build/virtual-pointer`, a
   omni-tick       `Ctrl+P`, `#42`, `Enter`: the debugger at tick 42
   omni-sym        `Ctrl+P`, `:sym add`: the results
   reveal-base     (after `Esc`) the arrangement before a reveal
-  reveal-bottom   a click on the BUILD label: the pane over the tree
+  reveal-bottom   the pointer resting on the BUILD label: the pane over the
+                  tree (PLAT-49: a click docks it open instead)
   reveal-esc      `Esc`: every pixel as before
   key-reveal      `Ctrl+O`: the first footer pane revealed by key
   hover-slot      the pointer on a strip label: its hover label
   pinned          a click on the State stack's pin button: docked
-  unpinned        its label clicked, then Unpin: placed again
+  unpinned        its label hovered, then Unpin: placed again
   top-docked      the Variables tab dragged to the margin above the layout
                   and released: a TOP strip
-  top-revealed    a click on the top label: the pane over the tree, from the
+  top-revealed    the pointer resting on the top label: the pane over the
+                  tree, from the
                   top
   top-esc         `Esc`: every pixel as before
   top-back        the top label dragged back into the tree: placed
@@ -211,6 +213,27 @@ def wt(*args):
 def centre(r):
     x, y, w, h = r
     return x + w // 2, y + h // 2
+
+
+def hover_reveal(win, ptr, rect):
+    """Reveal a docked pane the desktop's way (PLAT-49 part B): the pointer
+    RESTS on its strip label past the hover-preview delay (300 ms,
+    `auto_hide_hover.HoverPreviewDelayMs`), then moves into the overlay,
+    which keeps it shown. A click on a label docks the pane open instead.
+    Answers the revealed geometry, or None."""
+    lx, ly = centre(rect)
+    ptr.jump(lx - 2, ly)
+    ptr.move(lx, ly, steps=2)
+    rv = None
+    for _ in range(20):
+        time.sleep(0.2)
+        rv = win.geom().get("revealed")
+        if rv:
+            break
+    if rv:
+        ptr.move(*centre(rv["rect"]), steps=3, pause_ms=20)
+        time.sleep(0.4)
+    return rv
 
 
 def seg(g, part, label=None):
@@ -437,11 +460,11 @@ def capture():
         g = win.geom()
         bottom = next(s for s in g["strips"] if s["edge"] == "bottom")
         build = next(s for s in bottom["slots"] if s["pane"] == "buildOutput")
-        ptr.click(*centre(build["rect"]))
-        ptr.jump(FRAME_W - 6, 4)
+        hover_reveal(win, ptr, build["rect"])
         steps["reveal-bottom"] = settle("reveal-bottom")
         shutil.copy(win.geometry, os.path.join(OUT, "a-reveal.geometry.json"))
         wt("-k", "Escape")
+        ptr.jump(FRAME_W - 6, 4)
         steps["reveal-esc"] = settle("reveal-esc")
         wt("-M", "ctrl", "-k", "o", "-m", "ctrl")
         steps["key-reveal"] = settle("key-reveal")
@@ -454,6 +477,8 @@ def capture():
         ptr.move(px_, py_, steps=2)
         steps["hover-slot"] = settle("hover-slot")
         ptr.jump(FRAME_W // 2, 300)
+        # Off the label, the preview it opened is dismissed after its delay.
+        time.sleep(0.8)
         # ---- pin / unpin ------------------------------------------------------
         g = win.geom()
         state = node_of(g, "state")
@@ -466,11 +491,10 @@ def capture():
         st = next((s for s in bottom["slots"] if s["pane"] == "state"), None)
         facts["pinnedDocked"] = st is not None
         if st is not None:
-            ptr.click(*centre(st["rect"]))
-            time.sleep(1.0)
-            g = win.geom()
-            rr = g["revealed"]["rect"]
-            ptr.click(rr[0] + rr[2] - 40, rr[1] + 15)
+            rv = hover_reveal(win, ptr, st["rect"])
+            if rv:
+                rr = rv["rect"]
+                ptr.click(rr[0] + rr[2] - 40, rr[1] + 15)
         steps["unpinned"] = settle("unpinned")
         g = win.geom()
         shutil.copy(win.geometry, os.path.join(OUT, "a-unpinned.geometry.json"))
@@ -500,11 +524,11 @@ def capture():
         facts["topDocked"] = top is not None and any(s["pane"] == "state" for s in top["slots"])
         if top is not None:
             lbl = top["slots"][0]["rect"]
-            ptr.click(*centre(lbl))
-            ptr.jump(FRAME_W - 6, 4)
+            hover_reveal(win, ptr, lbl)
             steps["top-revealed"] = settle("top-revealed")
             shutil.copy(win.geometry, os.path.join(OUT, "a-toprev.geometry.json"))
             wt("-k", "Escape")
+            ptr.jump(FRAME_W - 6, 4)
             steps["top-esc"] = settle("top-esc")
             g = win.geom()
             ed = node_of(g, "editor")

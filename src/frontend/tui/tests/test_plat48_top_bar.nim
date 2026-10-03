@@ -33,7 +33,7 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 314
+const ExpectedAssertions = 317
 
 var countedAssertions = 0
 
@@ -283,7 +283,8 @@ suite "PLAT-48: the auto-hide strips":
   test "the shared default's footer panels are the bottom strip's labels":
     let rt = newRuntime(200, 50)
     let rows = rt.visible()
-    let strip = rows[^2]
+    # PLAT-49 part B (finding 9): the labels are IN the status-bar row.
+    let strip = rows[^1]
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
 
@@ -341,7 +342,10 @@ suite "PLAT-48: the auto-hide strips":
     discard rt.handleToken(CtrlO, 0)
     ck not rt.shellScreenOf().geometry.revealing
 
-  test "a second click on the revealed pane's label hides it; outside hides it too":
+  test "a click on a label docks its pane open, a second closes it; outside hides a reveal":
+    # PLAT-49 part B (finding 9), as the desktop: a CLICK on a footer label
+    # docks the pane into the layout (no overlay); a second click collapses
+    # it. A revealed pane (Ctrl+O here) still hides on a press outside it.
     let rt = newRuntime(200, 50)
     var strip: DockStrip
     for s in rt.shellScreenOf().geometry.strips:
@@ -350,12 +354,14 @@ suite "PLAT-48: the auto-hide strips":
     let press = "\x1b[<0;" & $(slot.col + 2) & ";" & $(slot.row + 1)
     discard rt.handleToken(press & "M", 0)
     discard rt.handleToken(press & "m", 0)
-    ck rt.shellScreenOf().geometry.revealPane == paneProblems
-    discard rt.handleToken(press & "M", 0)
-    discard rt.handleToken(press & "m", 0)
+    ck rt.shellScreenOf().geometry.openDockPane == paneProblems
     ck not rt.shellScreenOf().geometry.revealing
     discard rt.handleToken(press & "M", 0)
     discard rt.handleToken(press & "m", 0)
+    ck rt.shellScreenOf().geometry.openDock.height == 0
+    ck not rt.shellScreenOf().geometry.revealing
+    discard rt.handleToken(CtrlO, 0)
+    ck rt.shellScreenOf().geometry.revealing
     discard rt.handleToken("\x1b[<0;60;5M", 0)
     ck not rt.shellScreenOf().geometry.revealing
 
@@ -403,7 +409,10 @@ suite "PLAT-48: session tabs":
       if s.part == tpTab: tabs.add s
     ck tabs.len == 3
     for (s, t) in [(tabs[0], "alpha"), (tabs[1], "beta"), (tabs[2], "gamma")]:
-      ck screen.rows[0].runeSubStr(s.col, s.width) == " " & t & " "
+      # PLAT-49 part B: each tab ends with its close control while there are
+      # several sessions, as the desktop's does.
+      ck screen.rows[0].runeSubStr(s.col, s.width) ==
+         " " & t & " " & SessionTabCloseGlyph & " "
     ck rt.app.shell.activeTabIndex() == 2
     discard rt.handleToken("\x1b[<0;" & $(tabs[0].col + 2) & ";1M", 0)
     ck rt.app.shell.activeTabIndex() == 0
@@ -445,7 +454,8 @@ suite "PLAT-48: session tabs":
     for sg in screen.topBarLayout.segments:
       if sg.part == tpTab and sg.index == rt.app.shell.activeTabIndex():
         active = screen.rows[0].runeSubStr(sg.col, sg.width)
-    ck active == " gamma "
+    # The tab carries its close control (PLAT-49 part B, finding 7).
+    ck active == " gamma × "
     # A bare `t` is still seek-to-tick's prefix, not a tab step: the `g`
     # prefix is what makes `t` a tab key.
     discard rt.handleToken("t", 0)

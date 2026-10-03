@@ -52,6 +52,10 @@ type
     gtControl = "control"
     gtOmnibar = "omnibar"
     gtTab = "tab"
+    gtTabClose = "tab-close"
+      ## PLAT-49 part B: a session tab's close control (several sessions).
+    gtTabAdd = "tab-add"
+      ## PLAT-49 part B: the strip's "+" (`NewSessionTabGlyph`).
 
   GTopSeg* = object
     part*: GTopPart
@@ -78,8 +82,34 @@ func textPx*(s: string): int =
 
 func titlePx(label: string): int = 2 * TabPadPx + textPx(label)
 
+const
+  SessionTabGapPx* = 4
+    ## PLAT-49 part B (finding 7): the bar between two session tabs — the
+    ## desktop's `.session-tab` `margin-right 0.25em` — so each is a separate
+    ## item on its own ground.
+  SessionTabClosePx* = 20
+    ## The close control at a tab's right end (`.session-tab-close`).
+  SessionTabAddPx* = 28
+    ## The strip's "+", after its tabs (`.session-tab-add`, a small image
+    ## button).
+
+func sessionTabText*(t: SessionTabView): string =
+  ## What a session tab says: the agent's indicator (working ⟳, completed ✓,
+  ## failed ✗, stopped ■) and the label — the title with the agent's
+  ## `completed/total` while it works (`SessionTabView.label`).
+  let glyph =
+    if not t.agent.present: ""
+    else:
+      case t.agent.lifecycle
+      of aslConnecting, aslRunning: "⟳ "
+      of aslCompleted: "✓ "
+      of aslError: "✗ "
+      of aslCancelled, aslDisconnected: "■ "
+  glyph & (if t.label.len > 0: t.label else: t.title)
+
 proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
-                       tabs: seq[SessionTabView]; width: int): GTopLayout =
+                       tabs: seq[SessionTabView]; width: int;
+                       canAddTab = false): GTopLayout =
   ## Where each part goes in a `width`-pixel window. See the header for the
   ## priority order.
   let band = PxRect(x: ChromePaddingPx, y: ChromePaddingPx,
@@ -123,7 +153,8 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
   var tabW: seq[int] = @[]
   if tabs.len >= 2:
     for t in tabs:
-      tabW.add titlePx(t.title)
+      tabW.add titlePx(sessionTabText(t)) +
+               (if t.closable: SessionTabClosePx else: 0)
 
   # Place.
   var x = band.x
@@ -147,13 +178,26 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
   for i, w in tabW:
     if x + w > band.x + band.w:
       break
-    result.segs.add GTopSeg(part: gtTab, index: i,
-                            rect: PxRect(x: x, y: band.y, w: w, h: band.h))
-    x += w
+    let r = PxRect(x: x, y: band.y + 4, w: w, h: band.h - 8)
+    # The close control FIRST, so a press on it is not the tab's
+    # (`topBarHitAt` answers the first segment that contains the pixel).
+    if tabs[i].closable:
+      result.segs.add GTopSeg(part: gtTabClose, index: i,
+                              rect: PxRect(x: x + w - SessionTabClosePx,
+                                           y: r.y, w: SessionTabClosePx,
+                                           h: r.h))
+    result.segs.add GTopSeg(part: gtTab, index: i, rect: r)
+    x += w + SessionTabGapPx
+  # PLAT-49 part B: the "+", after the tabs (with one session, on its own):
+  # the desktop's add control is there either way.
+  if canAddTab and x + SessionTabAddPx <= band.x + band.w:
+    result.segs.add GTopSeg(part: gtTabAdd,
+                            rect: PxRect(x: x, y: band.y + 4,
+                                         w: SessionTabAddPx, h: band.h - 8))
 
 proc segOf*(lay: GTopLayout; part: GTopPart; index = 0): GTopSeg =
   for s in lay.segs:
-    if s.part == part and (part notin {gtControl, gtTab} or
+    if s.part == part and (part notin {gtControl, gtTab, gtTabClose} or
                            s.index == index):
       return s
   GTopSeg(part: part, rect: PxRect(), index: -1)

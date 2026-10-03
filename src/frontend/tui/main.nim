@@ -54,7 +54,7 @@
 ## constructed without a `TerminalCapabilities`, and the paint is a method on
 ## the driver.
 
-import std/[os, strutils]
+import std/[os, strutils, tables]
 
 from isonim_tui import caretSupportFor, caretBytes, TextCaret, CaretSupport,
   caretShapes, caretDrawn, ckBar, ckBlock
@@ -83,6 +83,11 @@ import ./host/terminal_driver
 import ./host/terminal_probe
 import ./host/tui_session
 import ./host/vcs_source
+# PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
+import headless_app/headless_app
+import headless_app/session_tabs
+from backend/stdio_backend import toBackendService
+from ./app/views/file_tree import FileTreeModel
 import ./host/control_icons
 import ./host/image_probe
 import ./app/theme/palette
@@ -98,6 +103,15 @@ const
     ## long the process sleeps between two events it does not have. It exists so
     ## a partially framed escape sequence — an `ESC` with nothing after it — is
     ## not held forever.
+
+proc idleWaitMs(rt: TuiRuntime): int =
+  ## How long the loop may block: `IdlePollMs`, or less when the auto-hide
+  ## hover has a preview or a dismissal due sooner (PLAT-49 part B) — so a
+  ## preview opens when its delay is up, not up to `IdlePollMs` later.
+  let due = rt.autoHideDueMs()
+  if due < 0:
+    return IdlePollMs
+  clamp(int(due - nowMs()), 5, IdlePollMs)
 
 type
   EditHostState = ref object
@@ -531,7 +545,14 @@ proc interactive(command: TuiCommand): int =
     stderr.writeLine(TuiProgramName & ": could not open " & folder & ": " &
                      e.msg)
     return ExitUsage
-  defer: session.close()
+  # PLAT-49 part B: EVERY SESSION THIS PROCESS OPENED, by its tab's id — the
+  # one above and each a "+" opens — closed on the way out.
+  var sessions = initTable[int, TuiSession]()
+  defer:
+    for s in sessions.values:
+      s.close()
+    if sessions.len == 0:
+      session.close()
   # THE HATCH COMES OFF NOW. See `tui_session.disarmHandshakeInterrupt`: a read
   # abandoned mid-message cannot be resynchronised, which is the right trade
   # while the session is still being built and the wrong one afterwards.
@@ -543,6 +564,75 @@ proc interactive(command: TuiCommand): int =
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
   session.refresh(rt)
+
+  # PLAT-49 part B (finding 7): THE SESSION IS A TAB OF THE STRIP. It is put
+  # into `HeadlessApp` (adopted, as GPUI's is: the engine is this host's), so
+  # the strip and the header read it; a second recording opened from the
+  # strip's "+" becomes the next tab, and a click on a tab — or its close
+  # control — re-points the panes at that session (`showSession`).
+  let firstSlot = app.shell.openSession(
+    session.session.backend.toBackendService(),
+    title = app.traceName, layout = app.layoutBinding.layout,
+    adopt = session.session.sdk)
+  sessions[int(firstSlot.id)] = session
+  var shownId = firstSlot.id
+  app.recordings = recordingsBeside(folder)
+
+  proc showSession(id: HeadlessSessionId) =
+    ## Point the terminal at the session behind tab `id`: its header, its
+    ## panes from its current stop, its files and its omnibar index. The
+    ## arrangement is the terminal's one remembered layout (PLAT-45
+    ## deliverable 8), the same in every tab — a new tab starts from it, as
+    ## the desktop's new tab starts from the current one.
+    if not sessions.hasKey(int(id)):
+      return
+    session = sessions[int(id)]
+    shownId = id
+    let slot = app.shell.activeSlot()
+    if not slot.isNil:
+      slot.layout = app.layoutBinding.layout.clone()
+    session.header(rt)
+    app.fileTree = FileTreeModel()      # this session's files (`refresh`)
+    session.setViewportHeight(rt.sourcePaneRows())
+    session.refresh(rt)
+    app.refreshOmnibarIndex()
+    app.notification = describe(session)
+
+  app.recordingOpener = proc(path: string): string =
+    # The handshake is BOUNDED, as the first one is; no keyboard hatch: the
+    # loop is running and owns the input.
+    var opened: TuiSession = nil
+    try:
+      opened = openTuiSession(path, viewportHeight = max(1, size.rows - 6),
+                              bound = DapReadBound(timeoutMs: handshakeBudgetMs(),
+                                                   interruptFd: -1))
+    except CatchableError as e:
+      return "could not open " & path & ": " & e.msg.splitLines()[0]
+    if command.noFlowOverlay:
+      opened.setFlowOverlay(false)
+    opened.learnExtent()
+    let slot = app.shell.openSession(
+      opened.session.backend.toBackendService(),
+      title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),
+      layout = app.layoutBinding.layout, adopt = opened.session.sdk)
+    sessions[int(slot.id)] = opened
+    showSession(slot.id)
+    ""
+
+  app.sessionCloser = proc(index: int): bool =
+    # Rule 4: "Closing a tab stops its backend and removes it" — and the last
+    # tab is not closed (the desktop's close control is not drawn on it).
+    let tabs = app.shell.tabsOf()
+    if index < 0 or index >= tabs.len or tabs.len < 2:
+      return false
+    let id = tabs[index].id
+    if not app.shell.closeTab(index, disconnectBackend = false):
+      return false
+    if sessions.hasKey(int(id)):
+      sessions[int(id)].close()
+      sessions.del(int(id))
+    showSession(app.shell.activeSessionId())
+    true
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
   let vcs = newVcsSource(projectRoot)
@@ -595,7 +685,7 @@ proc interactive(command: TuiCommand): int =
         break
       ev = DriverEvent(kind: dekToken, token: token)
     else:
-      ev = driver.nextEvent(IdlePollMs)
+      ev = driver.nextEvent(idleWaitMs(rt))
     case ev.kind
     of dekEof:
       # The terminal closed its end. Not an error and not a quit key: the user
@@ -614,8 +704,11 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
+      # PLAT-49 part B: the auto-hide hover's clock — a preview due after
+      # the pointer rested on a label, a dismissal due after it left.
+      let hoverChanged = rt.tickAutoHide(nowMs())
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         frameOwed:
+         hoverChanged or frameOwed:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -658,6 +751,10 @@ proc interactive(command: TuiCommand): int =
       if outcome.quit:
         running = false
       else:
+        # PLAT-49 part B: a tab click (or `next-session-tab`) chose another
+        # session: the panes follow it before the outcome is applied.
+        if app.shell.activeSessionId() != shownId:
+          showSession(app.shell.activeSessionId())
         session.applyOutcome(rt, outcome)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
@@ -825,7 +922,7 @@ proc editInteractive(command: TuiCommand): int =
 
   var loop = true
   while loop:
-    let ev = driver.nextEvent(IdlePollMs)
+    let ev = driver.nextEvent(idleWaitMs(rt))
     case ev.kind
     of dekEof:
       loop = false
@@ -837,7 +934,9 @@ proc editInteractive(command: TuiCommand): int =
       # session is checked on every tick. See `host/build_runner.pollBuild`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
-      if drainHighlights(rt, highlights, files) or built or vcsChanged:
+      let hoverChanged = rt.tickAutoHide(nowMs())
+      if drainHighlights(rt, highlights, files) or built or vcsChanged or
+         hoverChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size

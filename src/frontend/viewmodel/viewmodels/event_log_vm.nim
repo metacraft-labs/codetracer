@@ -160,6 +160,120 @@ type
     workspaceId*: string
 
 type
+  EventLogColumn* = enum
+    ## PLAT-49 part B (finding 14): THE EVENT LOG'S COLUMNS, the desktop's
+    ## dense table's own (`ui/event_log.nim`, `denseColumns`), in its order.
+    elcTick = "tick"
+      ## The event's tick (`directLocationRRTicks`).
+    elcIndex = "#"
+      ## The event's number in the recorded log (`rrEventId`).
+    elcLocation = "location"
+      ## The file and line the event came from (`fullPath`). HIDDEN BY
+      ## DEFAULT, as on the desktop: `EventLogComponent.onCompleteMove` hides
+      ## it (`column(2).visible(false)`), and Event-Log-Pane.md's column table
+      ## lists the path column "Default Visible: No".
+    elcKind = "kind"
+      ## What kind of event it is. The desktop's column has no title and
+      ## draws only a row expander there; the terminal and GPUI draw the
+      ## event's category.
+    elcOutput = "output"
+      ## The event's text.
+
+  EventLogColumns* = object
+    ## Which columns the event log shows, and in what order — the desktop's
+    ## show/hide/reorder capability (Event-Log-Pane.md: "[+ Columns]",
+    ## `EventLog.ColumnToggle`), modelled once for every front-end. A value:
+    ## the ViewModel holds it in a signal, a front-end that pages its own
+    ## rows (the terminal's) holds one beside its rows.
+    order*: seq[EventLogColumn]
+      ## EVERY column, in display order; hidden ones keep their place.
+    hidden*: set[EventLogColumn]
+
+const
+  DesktopEventLogColumnOrder* = [elcTick, elcIndex, elcLocation, elcKind,
+                                 elcOutput]
+    ## The desktop's dense table, left to right.
+  DefaultHiddenEventLogColumns* = {elcLocation}
+    ## Hidden until the user shows them — the desktop's default.
+
+func eventLogColumnTitle*(c: EventLogColumn): string =
+  ## A column's header text: the desktop's `title` (`renderColumnHeader`),
+  ## and the category's name where the desktop's kind column has none.
+  case c
+  of elcTick: "tick"
+  of elcIndex: "#"
+  of elcLocation: "location"
+  of elcKind: "kind"
+  of elcOutput: "output"
+
+func defaultEventLogColumns*(): EventLogColumns =
+  EventLogColumns(order: @DesktopEventLogColumnOrder,
+                  hidden: DefaultHiddenEventLogColumns)
+
+func visibleColumns*(c: EventLogColumns): seq[EventLogColumn] =
+  ## The columns shown, in display order.
+  for col in c.order:
+    if col notin c.hidden:
+      result.add col
+
+func isVisible*(c: EventLogColumns; col: EventLogColumn): bool =
+  col notin c.hidden
+
+func showColumn*(c: var EventLogColumns; col: EventLogColumn): bool =
+  ## Show `col`. False when it was already shown.
+  if col notin c.hidden:
+    return false
+  c.hidden.excl col
+  true
+
+func hideColumn*(c: var EventLogColumns; col: EventLogColumn): bool =
+  ## Hide `col`. Refused (false) when it was already hidden or when it is the
+  ## LAST visible column: a table with no column draws nothing a user could
+  ## click to get one back.
+  if col in c.hidden or c.visibleColumns.len <= 1:
+    return false
+  c.hidden.incl col
+  true
+
+func toggleColumn*(c: var EventLogColumns; col: EventLogColumn): bool =
+  if col in c.hidden: c.showColumn(col) else: c.hideColumn(col)
+
+func moveColumn*(c: var EventLogColumns; col: EventLogColumn;
+                 delta: int): bool =
+  ## Move `col` `delta` places along the VISIBLE order (negative: left),
+  ## past hidden columns, which keep their own places. False when it cannot
+  ## move (hidden, already at that end, `delta == 0`).
+  if delta == 0 or col in c.hidden:
+    return false
+  let shown = c.visibleColumns
+  let at = shown.find(col)
+  let to = at + delta
+  if at < 0 or to < 0 or to >= shown.len:
+    return false
+  var reordered = shown
+  reordered.delete(at)
+  reordered.insert(col, to)
+  # Hidden columns stay where they were; the visible ones fill the visible
+  # slots in their new order.
+  var k = 0
+  for i in 0 ..< c.order.len:
+    if c.order[i] notin c.hidden:
+      c.order[i] = reordered[k]
+      inc k
+  true
+
+func parseEventLogColumn*(name: string): (bool, EventLogColumn) =
+  ## A column by its title or its enum name, case-insensitively — what a
+  ## typed command names (`:column-hide location`).
+  let n = name.toLowerAscii
+  for col in EventLogColumn:
+    if n == eventLogColumnTitle(col) or n == ($col).toLowerAscii or
+       (col == elcIndex and n in ["index", "id", "number"]) or
+       (col == elcLocation and n in ["file", "path", "filename"]):
+      return (true, col)
+  (false, elcTick)
+
+type
   EventLogVM* = ref object of ViewModel
     ## Reactive state for the Event Log panel.
     ##
@@ -186,6 +300,15 @@ type
     searchQuery*: Signal[string]
     sortColumn*: Signal[int]
     sortAscending*: Signal[bool]
+    columns*: Signal[EventLogColumns]
+      ## PLAT-49 part B: which columns show, in which order
+      ## (`defaultEventLogColumns` — the desktop's set, the location column
+      ## hidden). Every front-end draws `visibleColumns(columns.val)`.
+    columnsMenuOpen*: Signal[bool]
+      ## PLAT-49 part B: the column menu is open — Event-Log-Pane.md's
+      ## "[+ Columns]" control, a checkbox per column (show / hide) with its
+      ## move left / right. The desktop draws it from here; the terminal's
+      ## `:columns` lists the same rows.
 
     # -- Event log data — THE STORE'S OWN SIGNALS --
     #
@@ -331,6 +454,33 @@ proc sort*(vm: EventLogVM; column: int) =
   else:
     vm.sortColumn.val = column
     vm.sortAscending.val = true
+
+proc toggleColumnsMenu*(vm: EventLogVM) =
+  vm.columnsMenuOpen.val = not vm.columnsMenuOpen.val
+
+proc closeColumnsMenu*(vm: EventLogVM) =
+  if vm.columnsMenuOpen.val:
+    vm.columnsMenuOpen.val = false
+
+proc showColumn*(vm: EventLogVM; col: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.showColumn(col)
+  if result: vm.columns.val = c
+
+proc hideColumn*(vm: EventLogVM; col: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.hideColumn(col)
+  if result: vm.columns.val = c
+
+proc toggleColumn*(vm: EventLogVM; col: EventLogColumn): bool =
+  var c = vm.columns.val
+  result = c.toggleColumn(col)
+  if result: vm.columns.val = c
+
+proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
+  var c = vm.columns.val
+  result = c.moveColumn(col, delta)
+  if result: vm.columns.val = c
 
 proc setSearchQuery*(vm: EventLogVM; query: string) =
   ## Update the search query. Resets to page 0 since the result
@@ -804,6 +954,8 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let searchQuery = createSignal("")
     let sortColumn = createSignal(0)
     let sortAscending = createSignal(true)
+    let columns = createSignal(defaultEventLogColumns())
+    let columnsMenuOpen = createSignal(false)
 
     # Event-log state, READ OFF THE STORE rather than created here. See the
     # field declarations above for why these are aliases and not copies.
@@ -860,6 +1012,8 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       searchQuery: searchQuery,
       sortColumn: sortColumn,
       sortAscending: sortAscending,
+      columns: columns,
+      columnsMenuOpen: columnsMenuOpen,
       eventRows: eventRows,
       totalEventCount: totalEventCount,
       loadingState: loadingState,

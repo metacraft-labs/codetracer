@@ -21,6 +21,8 @@ import isonim/core/signals
 
 import ../store/[replay_data_store, types]
 import ./[filesystem_vm, menu_vm, omnibar_vm]
+from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
+  parseEventLogColumn
 
 export omnibar_vm
 
@@ -74,9 +76,50 @@ proc commandsOf*(menu: MenuVM): seq[OmnibarEntry] =
                             detail: menu.shortcutFor(it.action),
                             target: it.action)
 
+const EventLogColumnCommandPrefix* = "eventLogColumn:"
+  ## PLAT-49 part B (finding 14): the target of an omnibar command over the
+  ## event log's columns — `eventLogColumn:<toggle|left|right>:<column>`.
+
+proc eventLogColumnCommands*(): seq[OmnibarEntry] =
+  ## THE EVENT LOG'S COLUMN COMMANDS, for every front-end's omnibar: show or
+  ## hide each column, move each one left or right — the show / hide /
+  ## reorder capability (Event-Log-Pane.md's `[+ Columns]`) over
+  ## `EventLogVM.columns`, reachable the same way in the terminal and GPUI.
+  for col in EventLogColumn:
+    let name = eventLogColumnTitle(col)
+    result.add OmnibarEntry(kind: omCommand,
+                            label: "Event Log › Show / hide column " & name,
+                            target: EventLogColumnCommandPrefix & "toggle:" &
+                                    name)
+    result.add OmnibarEntry(kind: omCommand,
+                            label: "Event Log › Move column " & name & " left",
+                            target: EventLogColumnCommandPrefix & "left:" &
+                                    name)
+    result.add OmnibarEntry(kind: omCommand,
+                            label: "Event Log › Move column " & name &
+                                   " right",
+                            target: EventLogColumnCommandPrefix & "right:" &
+                                    name)
+
+proc parseEventLogColumnCommand*(target: string):
+    tuple[ok: bool, verb: string, column: EventLogColumn] =
+  ## `eventLogColumn:<verb>:<column>` -> its parts; `ok` false for anything
+  ## else.
+  if not target.startsWith(EventLogColumnCommandPrefix):
+    return (false, "", EventLogColumn.low)
+  let rest = target[EventLogColumnCommandPrefix.len .. ^1].split(':', 1)
+  if rest.len != 2 or rest[0] notin ["toggle", "left", "right"]:
+    return (false, "", EventLogColumn.low)
+  let (found, col) = parseEventLogColumn(rest[1])
+  if not found:
+    return (false, "", EventLogColumn.low)
+  (true, rest[0], col)
+
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
                      menu: MenuVM): seq[OmnibarEntry] =
-  ## The whole index, in a fixed order (files, symbols, commands).
+  ## The whole index, in a fixed order (files, symbols, commands — the
+  ## menu's, then the event log's column commands).
   result = filesOf(fs)
   result.add symbolsOf(store)
   result.add commandsOf(menu)
+  result.add eventLogColumnCommands()

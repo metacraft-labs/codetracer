@@ -5,7 +5,7 @@
     "Regenerate: `just plat45-arrangement-window` then",
     "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
   ],
-  "takenAt": "2026-10-02T03:29:35Z",
+  "takenAt": "2026-10-02T14:05:14Z",
   "host": "gpu-server-001",
   "frames": {
     "shared": {
@@ -19,7 +19,7 @@
           "x": 0,
           "y": 55,
           "w": 387,
-          "h": 980,
+          "h": 988,
           "strip": "I Files VCS Tests N",
           "tabs": [
             "Files",
@@ -39,7 +39,7 @@
           "x": 396,
           "y": 55,
           "w": 470,
-          "h": 980,
+          "h": 988,
           "strip": "[ main.py g}",
           "tabs": [
             "Editor"
@@ -57,7 +57,7 @@
           "x": 875,
           "y": 55,
           "w": 511,
-          "h": 485,
+          "h": 489,
           "strip": "' State Scratchpad M‘",
           "tabs": [
             "State",
@@ -76,7 +76,7 @@
           "x": 1396,
           "y": 55,
           "w": 524,
-          "h": 485,
+          "h": 489,
           "strip": "' Call Trace Agent Activity MI",
           "tabs": [
             "Call Trace",
@@ -93,9 +93,9 @@
         },
         {
           "x": 875,
-          "y": 550,
+          "y": 554,
           "w": 1045,
-          "h": 485,
+          "h": 489,
           "strip": "' Event Log Timeline Terminal Output MI",
           "tabs": [
             "Event Log",

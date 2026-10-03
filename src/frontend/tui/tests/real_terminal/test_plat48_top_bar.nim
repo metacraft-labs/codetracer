@@ -37,8 +37,10 @@ import ../../../../common/terminal_graphics/[raster, path_raster]
 import ../../../viewmodel/viewmodels/transport_icons
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
-# as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 101
+# as the suite's RUNTIME assertion count. (PLAT-49 part B: +9 — the footer
+# case checks every row the docked-open pane changed, and a docked band is
+# taller than the overlay the click used to open.)
+const ExpectedAssertions = 110
 
 var countedAssertions = 0
 
@@ -264,7 +266,12 @@ suite "PLAT-48 on a real terminal: the debugger controls":
     for cols in [80, 120, 200]:
       var sess = open(cols, 40, stateDir("text-" & $cols))
       sess.typeLine("icons text")
-      discard sess.waitRow(cols, 39, "icons text")
+      # Synchronised on the TOP ROW taking the first priority control's
+      # text: since PLAT-49 part B the footer's labels share the status row,
+      # and at 80 columns they leave the command's note too little room to
+      # be read back whole.
+      let first = TransportControls[controlIndex(TextPriority[0])].text
+      discard sess.waitRow(cols, 0, " " & first & " ")
       let top = sess.rowOf(cols, 0)
       var shown: HashSet[string]
       shown.init()
@@ -363,34 +370,46 @@ suite "PLAT-48 on a real terminal: the debugger controls":
 
 suite "PLAT-48 on a real terminal: auto-hide panels":
 
-  test "the footer strip; a click reveals the pane's own rows; Esc restores every cell":
+  test "the footer labels on the status row; a click docks the pane's own rows; a second restores every cell":
+    # PLAT-49 part B (the user's direction): the labels are IN the status
+    # row, and a click DOCKS the pane into the arrangement — no overlay, no
+    # message — where a second click on its label closes it again.
     const Cols = 200
     const Rows = 50
     var sess = open(Cols, Rows, stateDir("reveal"))
     let s0 = sess.snap(Cols, Rows)
-    let strip = s0.text(Rows - 2)
+    let strip = s0.text(Rows - 1)
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
-    sess.click(Rows - 2, strip.cellFind(" BUILD ") + 1)
-    discard sess.waitRow(Cols, Rows - 1, "revealing")
-    let s1 = sess.snap(Cols, Rows)
-    # The revealed region: the rows that changed.
+    sess.click(Rows - 1, strip.cellFind(" BUILD ") + 1)
+    let deadline = getMonoTime() + initDuration(seconds = 10)
+    var s1 = sess.snap(Cols, Rows)
+    while getMonoTime() < deadline and s1.text(Rows - 2) == s0.text(Rows - 2):
+      sleep(100)
+      s1 = sess.snap(Cols, Rows)
+    # The docked band: the rows that changed at the bottom of the body.
     var changed: seq[int] = @[]
-    for r in 1 ..< Rows - 2:
+    for r in 1 ..< Rows - 1:
       if s1.text(r) != s0.text(r):
         changed.add r
     ck changed.len > 0
-    # ITS OWN ROWS: the build pane's title and verdict, no fill glyph.
-    ck s1.text(changed[0]).contains("BUILD")
-    ck s1.text(changed[1]).contains("[idle]")
+    # ITS OWN ROWS: the build pane's tab and verdict, no fill glyph.
+    var band = -1
+    for r in changed:
+      if s1.text(r).startsWith(" BUILD "): band = r
+    ck band > 0
+    ck s1.text(band + 1).contains("[idle]")
     for r in changed:
       ck not s1.text(r).contains("▒")
-    # Contiguous and at the bottom of the body: an overlay against its edge.
-    ck changed[^1] == Rows - 3
-    ck changed[^1] - changed[0] + 1 == changed.len
-    sess.esc()
-    discard sess.waitRow(Cols, Rows - 1, "cancelled")
-    let s2 = sess.snap(Cols, Rows)
+    # Contiguous to the status row: docked against the bottom edge.
+    ck changed[^1] == Rows - 2
+    ck not sess.rowOf(Cols, Rows - 1).contains("revealing")
+    sess.click(Rows - 1, strip.cellFind(" BUILD ") + 1)
+    let deadline2 = getMonoTime() + initDuration(seconds = 10)
+    var s2 = sess.snap(Cols, Rows)
+    while getMonoTime() < deadline2 and s2.text(Rows - 2) != s0.text(Rows - 2):
+      sleep(100)
+      s2 = sess.snap(Cols, Rows)
     var same = true
     for r in 0 ..< Rows - 1:
       for c in 0 ..< Cols:
@@ -424,18 +443,18 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     sess.typeLine("focus left")
     sess.typeLine("pin")
     discard sess.waitRow(Cols, Rows - 1, "applied")
-    let strip = sess.rowOf(Cols, Rows - 2)
+    let strip = sess.rowOf(Cols, Rows - 1)
     ck strip.contains(" Files ") or strip.contains(" FILES ")
     sess.quit()
     var again = open(Cols, Rows, state)
-    let strip2 = again.rowOf(Cols, Rows - 2)
+    let strip2 = again.rowOf(Cols, Rows - 1)
     ck strip2.contains(" Files ") or strip2.contains(" FILES ")
     again.typeLine("unpin fileTree")
     discard again.waitRow(Cols, Rows - 1, "applied")
-    ck not again.rowOf(Cols, Rows - 2).contains(" Files ")
+    ck not again.rowOf(Cols, Rows - 1).contains(" Files ")
     again.quit()
     var third = open(Cols, Rows, state)
-    ck not third.rowOf(Cols, Rows - 2).contains(" Files ")
+    ck not third.rowOf(Cols, Rows - 1).contains(" Files ")
     # Placed again: its title row (a bare pane's title is upper-cased) or
     # its tab.
     let body = third.rowOf(Cols, 1) & third.rowOf(Cols, 2)

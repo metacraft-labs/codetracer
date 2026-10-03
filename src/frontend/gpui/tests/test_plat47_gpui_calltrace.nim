@@ -75,14 +75,15 @@ suite "PLAT-47 B3: GPUI's call trace scrolls and pages":
     let atEnd = labels(session)
     checkpoint($atEnd)
     ck atEnd.len == Rows
-    ck atEnd[^1] == "leaf #602"
+    # The row is "callee #index(args) => return"; its head names the call.
+    ck atEnd[^1].split('(')[0] == "leaf #602"
     # Back to the top: the head is read again.
     for _ in 0 ..< 100:
       if session.pageCalltrace(Rows, -60).top == 0: break
     let atTop = labels(session)
     checkpoint($atTop[0 ..< 3])
     ck atTop.len == Rows
-    ck atTop[0].endsWith("#0")
+    ck atTop[0].split('(')[0].endsWith("#0")
 
   test "assertion count":
     echo "CHECKS: ", CHECKS

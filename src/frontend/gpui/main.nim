@@ -102,6 +102,10 @@ import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
 import ../viewmodel/host/keymap_preference
 import ./host/gpui_host
 import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
+import headless_app/auto_hide_hover
+import headless_app/footer_info
+from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
+import headless_session   # `calltraceJumpByLine`, `requestAndLoadCalltrace`
 import ../viewmodel/viewmodels/vcs_vm   # `VCSVM`, `VCSRefreshIntervalMs`: the VCS pane's tick
 
 const DefaultPixelsView* = "window"
@@ -402,7 +406,9 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       for op in spec.split(','):
         let head = op.split(':')[0]
         if head notin ["key", "press", "move", "release", "menu", "control",
-                       "label", "pin", "unpin", "drag", "hold"]:
+                       "label", "pin", "unpin", "drag", "hold",
+                       "hover-label", "wait", "tab", "tab-close",
+                       "tab-add"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -680,6 +686,12 @@ var editArmed = false
   ## `--edit-keys` path arms it before the window builder would.
 
 proc drawArrangement(r: GpuiRenderer): bool
+
+var
+  gAutoHide = initAutoHideHover()
+    ## PLAT-49 part B: the pointer's timing over the auto-hide labels.
+  gHoverClockOffsetMs = 0'i64
+    ## What `--window-ops`'s `wait:<ms>` advanced the hover clock by.
 proc windowDrawn(): bool
 
 proc noteEditorTab(r: GpuiRenderer; label: string) =
@@ -807,6 +819,13 @@ var
   gGeom: WindowGeometry
   gGestures = idle()
   gSession: HeadlessDebugSession = nil
+  gSessionsOpened = initTable[int, HeadlessDebugSession]()
+    ## PLAT-49 part B: every session this window holds, by its tab's id —
+    ## the one it opened with and each the strip's "+" opened.
+  gRecordings: seq[OmnibarEntry] = @[]
+    ## The recordings the "+"'s `:open ` lists (`recordingsBeside`).
+  gOpenCmd: GpuiCommand
+    ## The command the window was opened with (a new tab's editor rows).
   gLeafSet: GpuiLeafSet
   gCalltraceLoads = 0
     ## How many call-trace sections the window has read (the first, at open,
@@ -825,7 +844,8 @@ const
     ## the terminal overlay's `DropTintAlpha`, as a GPU colour's alpha byte.
   DropCaretAlpha = "d9"
     ## 0.85: the insertion caret on a tab strip, stronger than the strip's tint.
-  CalltraceRowPx = 26
+  CalltraceRowPx = CallRowPx
+    ## One call-trace row (`leaves.CallRowPx`, the height each is drawn at).
     ## The pixel pitch of one call-trace row in the window — one line of the
     ## pane's text face, measured off the window (26 px from one row to the
     ## next at the shim's default text size). The pane pages by it: the rows
@@ -1028,7 +1048,12 @@ proc drawWindowBody(r: GpuiRenderer; revealed: Option[PaneKind]): GpuiElement =
     return tree
   var byEdge: array[LayoutEdge, GpuiElement]
   for st in gGeom.strips:
-    byEdge[st.edge] = drawStrip(r, st, revealed)
+    # The bottom strip is the window's footer (PLAT-49 part B), drawn with
+    # the top bar's absolutely placed parts (`drawFooter`).
+    if st.edge != leBottom:
+      byEdge[st.edge] = drawStrip(r, st, revealed)
+  if byEdge[leLeft].isNil and byEdge[leRight].isNil and byEdge[leTop].isNil:
+    return tree
   result = r.createElement("div")
   r.setAttribute(result, "data-ct-window-body", "strips")
   r.setStyle(result, "flex-direction", "row")
@@ -1043,7 +1068,6 @@ proc drawWindowBody(r: GpuiRenderer; revealed: Option[PaneKind]): GpuiElement =
   r.setStyle(column, "height", $gGeom.area.h & "px")
   if not byEdge[leTop].isNil: r.appendChild(column, byEdge[leTop])
   r.appendChild(column, tree)
-  if not byEdge[leBottom].isNil: r.appendChild(column, byEdge[leBottom])
   r.appendChild(result, column)
   if not byEdge[leRight].isNil: r.appendChild(result, byEdge[leRight])
 
@@ -1057,6 +1081,53 @@ proc quad(r: GpuiRenderer; rect: PxRect; colour: string): GpuiElement =
   r.setStyle(result, "height", $max(1, rect.h) & "px")
   r.setStyle(result, "background-color", colour)
 
+proc dockedPaneBox(r: GpuiRenderer; paneId: string; rect: PxRect;
+                   focused: bool): GpuiElement =
+  ## A docked pane drawn in `rect` — previewed over the tree (`focused`, in
+  ## the focus outline) or docked open beside it — named by a one-tab strip
+  ## as every pane box is (PLAT-49: the leaf draws no heading in the window).
+  ## The pane's element is MOVED into the box, never rebuilt. Nil when the
+  ## window has no element for that pane.
+  let pane = gPanes.getOrDefault(paneId)
+  if pane.isNil or rect.isEmpty:
+    return nil
+  result = r.createElement("div")
+  r.setStyle(result, "position", "absolute")
+  r.setStyle(result, "left", $rect.x & "px")
+  r.setStyle(result, "top", $rect.y & "px")
+  r.setStyle(result, "width", $rect.w & "px")
+  r.setStyle(result, "height", $rect.h & "px")
+  r.setStyle(result, "flex-direction", "column")
+  r.setStyle(result, "background-color", chromeOf(crPaneBackground))
+  r.setStyle(result, "rounded", "4px")
+  for (key, value) in paneOutlineStyle(focused):
+    r.setStyle(result, key, value)
+  let parent = r.parentNode(pane)
+  if not parent.isNil:
+    r.removeChild(parent, pane)
+  let label = labelOf(paneId)
+  let strip = r.createElement("div")
+  r.setAttribute(strip, "data-ct-tabs", label)
+  r.setStyle(strip, "flex-direction", "row")
+  r.setStyle(strip, "flex-shrink", "0")
+  r.setStyle(strip, "padding-left", $StripInsetPx & "px")
+  r.setStyle(strip, "height", $TabStripPx & "px")
+  r.setStyle(strip, "items", "center")
+  for (key, value) in stripStyle(): r.setStyle(strip, key, value)
+  let tab = r.createElement("div")
+  r.setAttribute(tab, "data-ct-tab-active", "true")
+  r.setStyle(tab, "width", $tabWidthPx(label) & "px")
+  r.setStyle(tab, "flex-shrink", "0")
+  r.setStyle(tab, "padding-left", $TabPadPx & "px")
+  r.setStyle(tab, "white-space", "nowrap")
+  for (key, value) in tabStyle(true): r.setStyle(tab, key, value)
+  r.appendChild(tab, r.createTextNode(label))
+  r.appendChild(strip, tab)
+  r.appendChild(result, strip)
+  stylePaneBox(r, pane, rect.w - 2 * FocusOutlinePx,
+               max(1, rect.h - 2 * FocusOutlinePx - TabStripPx))
+  r.appendChild(result, pane)
+
 proc drawOverlay(r: GpuiRenderer) =
   ## The drag's transient state, drawn over the arrangement: the drop tint
   ## over exactly the region the drop would take and — for a join — the
@@ -1065,51 +1136,22 @@ proc drawOverlay(r: GpuiRenderer) =
   for e in gOverlay:
     r.removeChild(gRoot, e)
   gOverlay = @[]
+  # PLAT-49 part B: A DOCKED PANE SHOWN OPEN, in the band the tree gave up
+  # (`windowGeometryOf`'s `openDock`) — beside the arrangement, not over it.
+  if not gGeom.openDock.isEmpty:
+    let box = dockedPaneBox(r, gGeom.openDockPane, gGeom.openDock,
+                            focused = false)
+    if not box.isNil:
+      r.setAttribute(box, "data-ct-docked-open", gGeom.openDockPane)
+      gOverlay.add box
   # A REVEALED DOCKED PANE, over the tree against its own edge, in the
   # focused pane's outline — never reflowing the arrangement behind it.
   if gGestures.revealing:
-    let pane = gPanes.getOrDefault($gGestures.reveal.pane)
-    if not pane.isNil:
-      let rect = gGeom.revealRectOf(gGestures.reveal.edge)
-      let box = r.createElement("div")
+    let box = dockedPaneBox(r, $gGestures.reveal.pane,
+                            gGeom.revealRectOf(gGestures.reveal.edge),
+                            focused = true)
+    if not box.isNil:
       r.setAttribute(box, "data-ct-revealed", $gGestures.reveal.pane)
-      r.setStyle(box, "position", "absolute")
-      r.setStyle(box, "left", $rect.x & "px")
-      r.setStyle(box, "top", $rect.y & "px")
-      r.setStyle(box, "width", $rect.w & "px")
-      r.setStyle(box, "height", $rect.h & "px")
-      r.setStyle(box, "flex-direction", "column")
-      r.setStyle(box, "background-color", chromeOf(crPaneBackground))
-      r.setStyle(box, "rounded", "4px")
-      for (key, value) in paneOutlineStyle(true):
-        r.setStyle(box, key, value)
-      let parent = r.parentNode(pane)
-      if not parent.isNil:
-        r.removeChild(parent, pane)
-      # PLAT-49: the revealed pane is named by a one-tab strip, as every pane
-      # box is (the leaf draws no heading in the window).
-      let label = labelOf($gGestures.reveal.pane)
-      let strip = r.createElement("div")
-      r.setAttribute(strip, "data-ct-tabs", label)
-      r.setStyle(strip, "flex-direction", "row")
-      r.setStyle(strip, "flex-shrink", "0")
-      r.setStyle(strip, "padding-left", $StripInsetPx & "px")
-      r.setStyle(strip, "height", $TabStripPx & "px")
-      r.setStyle(strip, "items", "center")
-      for (key, value) in stripStyle(): r.setStyle(strip, key, value)
-      let tab = r.createElement("div")
-      r.setAttribute(tab, "data-ct-tab-active", "true")
-      r.setStyle(tab, "width", $tabWidthPx(label) & "px")
-      r.setStyle(tab, "flex-shrink", "0")
-      r.setStyle(tab, "padding-left", $TabPadPx & "px")
-      r.setStyle(tab, "white-space", "nowrap")
-      for (key, value) in tabStyle(true): r.setStyle(tab, key, value)
-      r.appendChild(tab, r.createTextNode(label))
-      r.appendChild(strip, tab)
-      r.appendChild(box, strip)
-      stylePaneBox(r, pane, rect.w - 2 * FocusOutlinePx,
-                   max(1, rect.h - 2 * FocusOutlinePx - TabStripPx))
-      r.appendChild(box, pane)
       gOverlay.add box
   let ind = gGestures.indication()
   let action = DesignTokenHex[dtColorsUiBorderAction][dmDark]
@@ -1191,12 +1233,28 @@ proc writeGeometry() =
     else: newJNull()
   let top = topBarGeometry()
   try:
+    # PLAT-49 part B: the footer (the status bar the bottom labels live in)
+    # and the docked pane shown open, with its band.
+    let openDock =
+      if gGeom.openDock.isEmpty: newJNull()
+      else: %*{"pane": gGeom.openDockPane, "rect": rect(gGeom.openDock)}
     writeFile(geometryOut, $(%*{"area": rect(gGeom.area),
                                 "inner": rect(gGeom.inner), "nodes": nodes,
                                 "dividers": dividers, "strips": strips,
-                                "revealed": revealed, "topBar": top}))
+                                "revealed": revealed, "topBar": top,
+                                "footer": rect(gGeom.footer),
+                                "openDock": openDock}))
   except IOError:
     discard
+
+proc footerInfo(): string =
+  ## The footer's file info (`headless_app/footer_info`): the file the editor
+  ## shows — the Edit arm's, or the debugger's current one.
+  if not openArm.isNil:
+    footerFileInfoText(openArm.path)
+  elif not gSession.isNil:
+    footerFileInfoText(gSession.getCurrentFile())
+  else: ""
 
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
@@ -1210,7 +1268,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
     return false
   gGeom = windowGeometryOf(layout, projection.state, pendingViewportWidth,
                            pendingViewportHeight, GpuiTopBandPx,
-                           @[($paneEditor, gEditorTab)])
+                           @[($paneEditor, gEditorTab)],
+                           footerLeadPx(footerInfo()))
   if gGeom.root < 0:
     return false
   # The leaves are MOVED into the new arrangement, never rebuilt.
@@ -1311,6 +1370,67 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
                $page.total)
   redrawCalltrace(r)
 
+proc refreshReplayWindow(r: GpuiRenderer)
+  ## Forward-declared for `clickCalltrace`; defined beside the controls.
+
+proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
+  ## PLAT-49 part B: a press on the call trace's body. On a row: go to that
+  ## call (`ct/calltrace-jump`, the desktop's click) and redraw the window
+  ## from the new stop; on the row's toggle: expand or collapse its children
+  ## (`ct/expand-calls` / `ct/collapse-calls`) and read the section again.
+  ## The rows are the ones `leaves.renderCallTrace` draws, `CalltraceRowPx`
+  ## each from the body's padding; the toggle is the first glyph after the
+  ## row's depth offset (`CallIndentPx` a level).
+  if gSession.isNil or gGeom.activePaneAt(x, y) != $paneCalltrace:
+    return false
+  let i = gGeom.tabsNodeOfPane($paneCalltrace)
+  if i < 0 or not gGeom.nodes[i].body.contains(x, y):
+    return false
+  let vm = gSession.session.calltraceVM
+  if vm.isNil:
+    return false
+  let rows = vm.callRows()
+  let body = gGeom.nodes[i].body
+  let at = (y - body.y - ChromePaddingPx) div CalltraceRowPx
+  if y < body.y + ChromePaddingPx or at < 0 or at >= rows.len:
+    return false
+  let row = rows[at]
+  let toggleX = body.x + ChromePaddingPx + row.depth * CallIndentPx
+  let store = gSession.session.store
+  let local = row.index - store.calltrace.startLineIndex.val
+  let lines = store.calltrace.lines.val
+  if local < 0 or local >= lines.len.int64:
+    return false
+  let line = lines[local.int]
+  if row.toggle != crtLeaf and x >= toggleX and x < toggleX + CallIndentPx:
+    let command = if line.isExpanded: "ct/collapse-calls"
+                  else: "ct/expand-calls"
+    traceGesture("calltrace " & command & " #" & $row.index)
+    try:
+      # Fire and forget: the engine answers these with no response (the
+      # terminal host's `toggleCallChildren` says how that was measured).
+      gSession.backend.sendDapRequestNoResponse(command, %*{
+        "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
+      discard gSession.backend.drainEvents()
+      gSession.requestAndLoadCalltrace(
+        startIndex = max(0'i64, vm.scrollPosition.val -
+                                 GpuiCalltraceBuffer.int64),
+        height = max(1, rows.len) + 2 * GpuiCalltraceBuffer,
+        depth = RecordingCalltraceDepth)
+    except CatchableError as e:
+      traceGesture("calltrace toggle failed: " & e.msg)
+    redrawCalltrace(r)
+    return true
+  traceGesture("calltrace jump #" & $row.index)
+  vm.selectEntry(some(row.index))
+  try:
+    gSession.calltraceJumpByLine(line)
+  except CatchableError as e:
+    traceGesture("calltrace jump failed: " & e.msg)
+    return true
+  refreshReplayWindow(r)
+  true
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
@@ -1325,6 +1445,8 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-48: the top bar, its popovers and the pin / unpin buttons first.
     if handleTopPress(r, x, y):
       return
+    if clickCalltrace(r, x, y):
+      return
     step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
   of gekPointerMove:
     if not gGestures.active:
@@ -1335,7 +1457,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if not gGestures.active: return
     step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
     if step.command.isSome:
-      applyGestureCommand(r, step.command.get)
+      let c = step.command.get
+      # PLAT-49 part B: a label's click docked its pane open (or closed it):
+      # the hover preview and its timers end.
+      if c.kind == lcSetAutoHide and c.autoHideDirection in {ahOpen, ahClose}:
+        gAutoHide.clicked()
+      applyGestureCommand(r, c)
+    if not gGestures.revealing:
+      gAutoHide.overlayClosed()
   of gekWheel:
     if gGeom.activePaneAt(x, y) == $paneCalltrace:
       # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
@@ -1423,6 +1552,9 @@ var
     ## The band, its parts, the popovers and the hover label: absolutely
     ## placed on the root, rebuilt by `drawTopBar`.
   gHoverControl = -1
+  gHoverTab = -1
+  gHoverTabAdd = false
+    ## PLAT-49 part B: the pointer is on the strip's "+".
   gHoverSlot = ""
     ## The auto-hide label under the pointer (its pane id), for the hover
     ## label.
@@ -1511,6 +1643,66 @@ proc unpinButtonRect(): PxRect =
   let rr = gGeom.revealRectOf(gGestures.reveal.edge)
   PxRect(x: rr.x + rr.w - 72, y: rr.y + 4, w: 64, h: TabStripPx - 8)
 
+proc drawFooter(r: GpuiRenderer) =
+  ## PLAT-49 part B (finding 9): THE WINDOW'S FOOTER — its status bar, along
+  ## the bottom, full width — with the bottom auto-hide labels on its LEFT,
+  ## as the desktop's status bar holds them (Auto-Hide-Panes.md §3.1), each
+  ## lit while its pane is previewed or docked open, and the position on its
+  ## right. Drawn with the band's absolutely placed parts.
+  if gGeom.footer.isEmpty:
+    return
+  let f = absBox(r, gGeom.footer, chromeOf(crTabStripBackground))
+  r.setAttribute(f, "data-ct-footer", "status-bar")
+  gTopEls.add f
+  # The file info FIRST, as the desktop's status bar opens with it
+  # (`#file-info-status`); the labels follow it (`footerLeadPx`).
+  let info = footerInfo()
+  if info.len > 0:
+    let fi = absBox(r, PxRect(x: gGeom.footer.x, y: gGeom.footer.y,
+                              w: footerLeadPx(info), h: gGeom.footer.h))
+    r.setAttribute(fi, "data-ct-footer-file-info", info)
+    r.setStyle(fi, "padding-left", $TabPadPx & "px")
+    r.setStyle(fi, "items", "center")
+    r.setStyle(fi, "white-space", "nowrap")
+    r.setStyle(fi, "color", chromeOf(crTabInactiveForeground))
+    r.appendChild(fi, r.createTextNode(info))
+    gTopEls.add fi
+  for st in gGeom.strips:
+    if st.edge != leBottom or st.rect.isEmpty:
+      continue
+    # The bottom strip IS a part of the footer: one element naming its edge,
+    # its labels inside it (placed relative to it).
+    let strip = absBox(r, st.rect)
+    r.setAttribute(strip, "data-ct-dock-strip", $st.edge)
+    for sl in st.slots:
+      let shown = (gGestures.revealing and $gGestures.reveal.pane == sl.pane) or
+                  gGeom.openDockPane == sl.pane
+      let b = absBox(r, PxRect(x: sl.rect.x - st.rect.x,
+                               y: sl.rect.y - st.rect.y,
+                               w: sl.rect.w, h: sl.rect.h))
+      r.setAttribute(b, "data-ct-dock-slot", sl.pane)
+      r.setAttribute(b, "data-ct-tab-active", $shown)
+      r.setStyle(b, "padding-left", $TabPadPx & "px")
+      r.setStyle(b, "white-space", "nowrap")
+      r.setStyle(b, "items", "center")
+      for (key, value) in tabStyle(shown): r.setStyle(b, key, value)
+      r.appendChild(b, r.createTextNode(sl.label))
+      r.appendChild(strip, b)
+    gTopEls.add strip
+  if not gSession.isNil:
+    let text = gSession.getCurrentFile().extractFilename & ":" &
+               $gSession.getCurrentLine() & "  tick " &
+               $gSession.getCurrentRRTicks()
+    let w = textPx(text) + 2 * TabPadPx
+    let p = absBox(r, PxRect(x: gGeom.footer.x + gGeom.footer.w - w,
+                             y: gGeom.footer.y, w: w, h: gGeom.footer.h))
+    r.setAttribute(p, "data-ct-footer-position", text)
+    r.setStyle(p, "items", "center")
+    r.setStyle(p, "white-space", "nowrap")
+    r.setStyle(p, "color", chromeOf(crTabInactiveForeground))
+    r.appendChild(p, r.createTextNode(text))
+    gTopEls.add p
+
 proc drawTopBar(r: GpuiRenderer) =
   ## The band and everything over it, from the shared ViewModels.
   if gRoot.isNil or gMenu.isNil:
@@ -1519,11 +1711,13 @@ proc drawTopBar(r: GpuiRenderer) =
     r.removeChild(gRoot, e)
   gTopEls = @[]
   let tabs = if gShell.isNil: @[] else: gShell.app.tabsOf()
-  gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth)
+  gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth,
+                                canAddTab = gSessionsOpened.len > 0)
   let band = absBox(r, gTopLayout.band, chromeOf(crPaneBackground))
   r.setAttribute(band, "data-ct-top-bar", "band")
   r.setStyle(band, "rounded", "4px")
   gTopEls.add band
+  drawFooter(r)
   let enabled = controlsEnabled()
   for sg in gTopLayout.segs:
     case sg.part
@@ -1578,14 +1772,45 @@ proc drawTopBar(r: GpuiRenderer) =
       r.appendChild(b, r.createTextNode(text))
       gTopEls.add b
     of gtTab:
+      # PLAT-49 part B (finding 7): EACH SESSION TAB A SEPARATE ITEM on its
+      # own ground — the active one the strips' selected tab, the others the
+      # strip's card — with the agent's indicator and progress in its text,
+      # rounded as the desktop's `.session-tab` is.
       let t = tabs[sg.index]
-      let b = absBox(r, sg.rect)
+      let b = absBox(r, sg.rect,
+                     chromeOf(if t.active: crTabActiveBackground
+                              else: crTabStripBackground))
       r.setAttribute(b, "data-ct-session-tab", t.title)
       r.setAttribute(b, "data-ct-tab-active", $t.active)
+      r.setAttribute(b, "data-ct-tab-label", sessionTabText(t))
+      if t.agent.present:
+        r.setAttribute(b, "data-ct-tab-agent", $t.agent.lifecycle)
       r.setStyle(b, "padding-left", $TabPadPx & "px")
+      r.setStyle(b, "rounded", "6px")
+      r.setStyle(b, "white-space", "nowrap")
+      r.setStyle(b, "overflow", "hidden")
       for (k, v) in tabStyle(t.active): r.setStyle(b, k, v)
-      r.appendChild(b, r.createTextNode(t.title))
+      r.appendChild(b, r.createTextNode(sessionTabText(t)))
       gTopEls.add b
+    of gtTabClose:
+      let cb = absBox(r, sg.rect)
+      r.setAttribute(cb, "data-ct-session-tab-close", $sg.index)
+      r.setStyle(cb, "justify", "center")
+      r.setStyle(cb, "color", chromeOf(crTabInactiveForeground))
+      r.appendChild(cb, r.createTextNode(SessionTabCloseGlyph))
+      gTopEls.add cb
+    of gtTabAdd:
+      # PLAT-49 part B: the desktop's `.session-tab-add` — a borderless
+      # button, lit under the pointer, its tooltip "New tab".
+      let ab = absBox(r, sg.rect,
+                      if gHoverTabAdd: chromeOf(crTabActiveBackground) else: "")
+      r.setAttribute(ab, "data-ct-session-tab-add", NewSessionTabTitle)
+      r.setStyle(ab, "justify", "center")
+      r.setStyle(ab, "rounded", "6px")
+      r.setStyle(ab, "color", chromeOf(if gHoverTabAdd: crTabActiveForeground
+                                       else: crTabInactiveForeground))
+      r.appendChild(ab, r.createTextNode(NewSessionTabGlyph))
+      gTopEls.add ab
   # PIN BUTTONS on every pane box. Drawn BEFORE the popovers and the
   # omnibar's results, which open over the panes' tab strips and must cover
   # them, and not at all under an overlay of the tree — a revealed pane, a
@@ -1683,22 +1908,20 @@ proc drawTopBar(r: GpuiRenderer) =
                                  TransportControls[gHoverControl].clientAction))
     hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 2,
                      w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
-  elif gHoverSlot.len > 0:
-    for st in gGeom.strips:
-      for sl in st.slots:
-        if sl.pane == gHoverSlot:
-          hoverText = sl.label & " — click to show, drag to place"
-          let w = textPx(hoverText) + 2 * TabPadPx
-          hoverAt =
-            case st.edge
-            of leBottom: PxRect(x: sl.rect.x, y: sl.rect.y - HoverLabelPx - 2,
-                                w: w, h: HoverLabelPx)
-            of leTop: PxRect(x: sl.rect.x, y: sl.rect.y + sl.rect.h + 2,
-                             w: w, h: HoverLabelPx)
-            of leLeft: PxRect(x: sl.rect.x + sl.rect.w + 2, y: sl.rect.y,
-                              w: w, h: HoverLabelPx)
-            of leRight: PxRect(x: sl.rect.x - w - 2, y: sl.rect.y, w: w,
-                               h: HoverLabelPx)
+  elif gHoverTab >= 0 and gHoverTab < tabs.len:
+    # PLAT-49 part B: a session tab's tooltip — its title, and with an agent
+    # in the session its task, state and progress (`SessionTabView.tooltip`).
+    let sg = gTopLayout.segOf(gtTab, gHoverTab)
+    hoverText = tabs[gHoverTab].tooltip
+    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
+                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+  elif gHoverTabAdd:
+    let sg = gTopLayout.segOf(gtTabAdd)
+    hoverText = NewSessionTabTitle
+    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
+                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+  # (An auto-hide label's hover shows its PANE — the preview, PLAT-49 part B
+  # — not a hint label: the desktop's strip tab has none.)
   if hoverText.len > 0:
     let hb = absBox(r, hoverAt, chromeOf(crWindowBackground))
     r.setAttribute(hb, "data-ct-hover-label", hoverText)
@@ -1768,6 +1991,8 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   if not gSourceService.isNil:
     gSourceService.serveWindow()
   discard gSession.loadStopPanes()
+  # PLAT-49 part B: the call the debugger is in, selected, as on the desktop.
+  gSession.selectCurrentCall()
   let editor = gPanes.getOrDefault($paneEditor)
   if not editor.isNil and not gSourceService.isNil:
     let surface = editorSurfaceFor(
@@ -1790,8 +2015,75 @@ proc refreshReplayWindow(r: GpuiRenderer) =
       if not pane.isNil and not leaf.vm.isNil:
         redrawWindowLeaf(r, pane, leaf)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
-                                   gSession.session.store, gMenu))
+                                   gSession.session.store, gMenu) &
+                    gRecordings)
   drawTopBar(r)
+
+proc attachVcs(leafSet: var GpuiLeafSet; directory: string)
+  ## Forward-declared for `showSession`; defined beside the ticks.
+
+proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
+  ## PLAT-49 part B: the window shows the session behind tab `id` — its
+  ## engine, its source window, its ViewModels in every leaf — drawn from
+  ## its current stop (`refreshReplayWindow`). The arrangement stays the
+  ## window's.
+  if gShell.isNil or not gSessionsOpened.hasKey(int(id)):
+    return
+  if not gShell.showSessionIn(gWindow, id):
+    return
+  gSession = gSessionsOpened[int(id)]
+  let rows = editorRowsOf(gGeom)
+  gSourceService = newGpuiSourceService(gSession, gSession.tracePath, rows)
+  var leafSet = gShell.leavesFor(gWindow)
+  attachVcs(leafSet, getCurrentDir())
+  gLeafSet = leafSet
+  traceGesture("session shown " & $id & " " & gSession.tracePath)
+  refreshReplayWindow(r)
+  discard drawArrangement(r)
+
+proc openRecordingInTab(r: GpuiRenderer; path: string) =
+  ## PLAT-49 part B: the "+"'s choice — `path` opened in a new session tab
+  ## (spawned, adopted, its panes loaded as the first one's were), then
+  ## shown. A folder that is not a recording is refused, and said so.
+  var opened: HeadlessDebugSession = nil
+  try:
+    opened = openGpuiTrace(path)
+  except CatchableError as e:
+    traceGesture("open " & path & " refused: " & e.msg.splitLines()[0])
+    stderr.writeLine("codetracer-gpui: could not open " & path & ": " &
+                     e.msg.splitLines()[0])
+    drawTopBar(r)
+    return
+  if not opened.session.editorVM.isNil:
+    opened.session.editorVM.showFlowOverlay.val =
+      FlowOverlayShownByDefault and not gOpenCmd.noFlowOverlay
+  discard opened.loadRecordingPanes()
+  let idx = gShell.windows.indexOf(gWindow)
+  let layout = if idx >= 0: gShell.windows.windows[idx].layout
+               else: sharedDefaultValue()
+  let slot = gShell.app.openSession(
+    opened.backend.toBackendService(),
+    title = extractFilename(opened.tracePath.strip(chars = {'/'})),
+    layout = layout, adopt = opened.sdk)
+  gSessionsOpened[int(slot.id)] = opened
+  traceGesture("opened " & path & " as tab " & $slot.id)
+  showSession(r, slot.id)
+
+proc closeSessionTab(r: GpuiRenderer; index: int) =
+  ## PLAT-49 part B: tab `index`'s close control — its session and its
+  ## engine stopped (rule 4), and the window shows the tab that is active
+  ## next. The last tab is not closed (no close control is drawn on it).
+  let tabs = gShell.app.tabsOf()
+  if index < 0 or index >= tabs.len or tabs.len < 2:
+    return
+  let id = tabs[index].id
+  if not gShell.app.closeTab(index, disconnectBackend = false):
+    return
+  if gSessionsOpened.hasKey(int(id)):
+    gSessionsOpened[int(id)].close()
+    gSessionsOpened.del(int(id))
+  traceGesture("closed tab " & $id)
+  showSession(r, gShell.app.activeSessionId())
 
 proc performControl(r: GpuiRenderer; id: string) =
   ## A debugger control (or its menu item), through the transport
@@ -1839,12 +2131,33 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
   if gMenu.isOpen: gMenu.close()
   if not gSession.isNil:
     gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
-                                     gSession.session.store, gMenu))
+                                     gSession.session.store, gMenu) &
+                      gRecordings)
   gOmnibar.open(query)
   drawTopBar(r)
 
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
+  # PLAT-49 part B (finding 14): the omnibar's event-log column commands,
+  # over the session's `EventLogVM.columns`, then the event log drawn again.
+  let col = parseEventLogColumnCommand(action)
+  if col.ok:
+    if not gSession.isNil and not gSession.session.eventLogVM.isNil:
+      let vm = gSession.session.eventLogVM
+      let changed =
+        case col.verb
+        of "left": vm.moveColumn(col.column, -1)
+        of "right": vm.moveColumn(col.column, 1)
+        else: vm.toggleColumn(col.column)
+      traceGesture("event log columns " & $vm.columns.val.visibleColumns &
+                   (if changed: "" else: " (unchanged)"))
+      let pane = gPanes.getOrDefault($paneEventLog)
+      if not pane.isNil:
+        for leaf in gLeafSet.leaves:
+          if leaf.kind == glkBuiltin and leaf.builtin == paneEventLog:
+            redrawWindowLeaf(r, pane, leaf)
+    drawTopBar(r)
+    return
   for c in TransportControls:
     if c.clientAction.len > 0 and c.clientAction == action:
       performControl(r, c.id)
@@ -1881,6 +2194,9 @@ proc acceptOmnibar(r: GpuiRenderer) =
       return
   of omCommand:
     runGpuiMenuAction(r, entry.target)
+    return
+  of omRecording:
+    openRecordingInTab(r, entry.target)
     return
   else:
     discard
@@ -2056,9 +2372,77 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
       openOmnibar(r)
       return true
   of gtTab:
-    discard gShell.app.activateTab(hit.index)
+    if gShell.app.activateTab(hit.index):
+      showSession(r, gShell.app.activeSessionId())
+  of gtTabClose:
+    # PLAT-49 part B: the desktop's `.session-tab-close` — closing a tab
+    # stops its session (Multi-Window-Tab-Management.md, rule 4).
+    closeSessionTab(r, hit.index)
+    gHoverTab = -1
+  of gtTabAdd:
+    # PLAT-49 part B: the desktop's "New tab" — the omnibar on `:open `,
+    # listing the recordings beside this one; the one chosen (or a typed
+    # path) opens in a new tab (`acceptOmnibar`).
+    gHoverTabAdd = false
+    openOmnibar(r, OpenRecordingQuery)
+    return true
   drawTopBar(r)
   true
+
+proc hoverNowMs(): int64 =
+  ## The auto-hide hover's clock: the wall clock, plus what `--window-ops`'s
+  ## `wait:<ms>` advanced it by (a scripted run has no loop to wait in).
+  int64(epochTime() * 1000.0) + gHoverClockOffsetMs
+
+proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
+  ## What the hover machine said: open the preview overlay or close it.
+  var changed = false
+  case reply.cue
+  of ahcNone: discard
+  of ahcPreview:
+    changed = gGestures.previewReveal(committedLayout(), reply.pane)
+    if changed: traceGesture("previewed " & $reply.pane)
+  of ahcDismiss:
+    changed = gGestures.dismissReveal(reply.pane)
+    if changed: traceGesture("preview dismissed " & $reply.pane)
+  if changed:
+    # The whole arrangement, so a side or top strip lights its previewed
+    # label too (the footer's labels are redrawn with the top bar).
+    if not drawArrangement(r):
+      drawOverlay(r)
+      drawTopBar(r)
+      writeGeometry()
+
+proc hoverTick() {.cdecl.}
+proc vcsTick() {.cdecl.}
+var gVcsDirectory = ""
+  ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
+  ## by `vcsTick`; "" when the window has no VCS pane.
+
+var gArmedTick = (due: -2'i64, vcs: false)
+  ## What the shim's tick is armed for: the hover machine's due moment, or
+  ## the VCS refresh, or nothing (`due` -1, `vcs` false). The shim restarts
+  ## its wait on every arming, so it is re-armed only when this changes —
+  ## a pointer moving over the window must not keep postponing either.
+
+proc armHoverTick() =
+  ## Wake the loop when the hover machine has something due (a preview, a
+  ## dismissal) — the shim's one tick, shared with the VCS refresh.
+  let due = gAutoHide.nextDueMs
+  let want = (due: due, vcs: due < 0 and gVcsDirectory.len > 0)
+  if want == gArmedTick:
+    return
+  gArmedTick = want
+  if due >= 0:
+    # A few ms past the due moment: the loop's timer can fire a little
+    # early, and an early tick would only re-arm for the remainder.
+    let wait = clamp(due - hoverNowMs() + 5, 10, 1000)
+    traceGesture("hover tick in " & $wait & " ms")
+    gpui_set_tick(uint32(wait), hoverTick)
+  elif want.vcs:
+    gpui_set_tick(uint32(VCSRefreshIntervalMs), vcsTick)
+  else:
+    gpui_set_tick(0'u32, nil)
 
 proc handleTopHover(r: GpuiRenderer; x, y: int) =
   ## The pointer moving with no button: a control's tooltip, an auto-hide
@@ -2067,17 +2451,47 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
     return
   gHoverAt = (x, y)
   var control = -1
+  var tab = -1
+  var add = false
   if gTopLayout.band.contains(x, y):
     let hit = gTopLayout.topBarHitAt(x, y)
     if hit.part == gtControl and hit.rect.w > 0:
       control = hit.index
+    elif hit.part in {gtTab, gtTabClose} and hit.rect.w > 0:
+      tab = hit.index
+    elif hit.part == gtTabAdd and hit.rect.w > 0:
+      add = true
+  if tab != gHoverTab or add != gHoverTabAdd:
+    gHoverTab = tab
+    gHoverTabAdd = add
+    drawTopBar(r)
   var slot = ""
   let (si, sj) = gGeom.slotAt(x, y)
   if si >= 0:
     slot = gGeom.strips[si].slots[sj].pane
   var changed = control != gHoverControl or slot != gHoverSlot
+  if slot != gHoverSlot:
+    traceGesture("hover slot '" & slot & "' at " & $x & "," & $y)
   gHoverControl = control
   gHoverSlot = slot
+  # PLAT-49 part B (finding 9): THE DESKTOP'S HOVER — a moment over a label
+  # previews its pane as an overlay; leaving the label and the overlay
+  # closes the preview a moment later (`auto_hide_hover`).
+  block:
+    var label = none(PaneKind)
+    var open = false
+    for k in PaneKind:
+      if $k == slot:
+        label = some(k)
+        open = gGeom.openDockPane == slot
+    let inOverlay = gGestures.revealing and
+                    gGeom.revealRectOf(gGestures.reveal.edge).contains(x, y)
+    # A preview something else closed (Esc, a press outside it) is over.
+    if gAutoHide.previewing.isSome and not gGestures.revealing:
+      gAutoHide.overlayClosed()
+    applyHoverReply(r, gAutoHide.pointerAt(label, inOverlay, open,
+                                           hoverNowMs()))
+    armHoverTick()
   if gMenu.isOpen:
     let pops = gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
                                 pendingViewportHeight)
@@ -2089,10 +2503,6 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
   if changed:
     drawTopBar(r)
 
-var gVcsDirectory = ""
-  ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
-  ## by `vcsTick`; "" when the window has no VCS pane.
-
 proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
   ## Hand the VCS leaf, when the arrangement places one, the ViewModel the
   ## host read `directory` into. The headless replay session owns no VCS
@@ -2101,6 +2511,16 @@ proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
     if leaf.kind == glkBuiltin and leaf.builtin == paneVcs:
       leaf.vm = ViewModel(openGpuiVcs(directory))
       gVcsDirectory = directory
+
+proc hoverTick() {.cdecl.} =
+  ## The hover machine's due moment arrived (`armHoverTick`): run it, then
+  ## re-arm for what is due next — and the VCS refresh it shares the tick
+  ## with keeps its own pace.
+  var r: GpuiRenderer
+  # The arming this tick answered is spent: whatever is due next is armed.
+  gArmedTick = (due: -2'i64, vcs: false)
+  applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
+  armHoverTick()
 
 proc vcsTick() {.cdecl.} =
   ## THE VCS PANE REFRESHES AS THE DESKTOP'S DOES: every
@@ -2367,10 +2787,13 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     case parts[0]
     of "key":
       let mods = if parts.len > 2: parts[2].split('+') else: @[]
+      # `colon` names `:`, which the op's own `:` separator cannot spell
+      # (PLAT-49 part B: the omnibar's command mode).
+      let key = if parts[1] == "colon": ":" else: parts[1]
       # An edit window's keys reach its editor (which holds the focus); a
       # replay window's, its top bar and gestures.
-      if openArm.isNil: windowKey(parts[1], mods)
-      else: editKey(parts[1], mods)
+      if openArm.isNil: windowKey(key, mods)
+      else: editKey(key, mods)
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
@@ -2400,6 +2823,36 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           windowPointer(r, gekPointerMove, x, y)
           return ""
       return "no control '" & parts[1] & "' in the band"
+    of "tab-add", "tab", "tab-close":
+      # PLAT-49 part B: the session strip's "+", tab `n` or its close
+      # control, pressed where the band drew it.
+      let part = case parts[0]
+                 of "tab-add": gtTabAdd
+                 of "tab": gtTab
+                 else: gtTabClose
+      let index = if parts.len > 1: at(1) else: 0
+      let sg = gTopLayout.segOf(part, index)
+      if sg.rect.w <= 0:
+        return "no " & parts[0] & " " & $index & " in the band"
+      let (x, y) = centreOf(sg.rect)
+      windowPointer(r, gekPointerMove, x, y)
+      pressAt(x, y)
+      return ""
+    of "hover-label":
+      # PLAT-49 part B: the pointer onto a strip label, without pressing.
+      for st in gGeom.strips:
+        for sl in st.slots:
+          if sl.pane == parts[1]:
+            let (x, y) = centreOf(sl.rect)
+            windowPointer(r, gekPointerMove, x, y)
+            return ""
+      return "no strip label for '" & parts[1] & "'"
+    of "wait":
+      # PLAT-49 part B: let `ms` pass for the hover machine (a scripted run
+      # has no loop to wait in) and run what fell due.
+      gHoverClockOffsetMs += int64(at(1))
+      applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
+      return ""
     of "label":
       for st in gGeom.strips:
         for sl in st.slots:
@@ -2572,8 +3025,7 @@ proc launchWindow(cmd: GpuiCommand; title: string;
     return capturePixels(cmd)
   if cmd.quitAfterMs > 0'u32:
     gpui_quit_after_ms(cmd.quitAfterMs)
-  if gVcsDirectory.len > 0:
-    gpui_set_tick(uint32(VCSRefreshIntervalMs), vcsTick)
+  armHoverTick()   # nothing hovered yet: the VCS refresh, when there is one
   let loadStart = loadAverage()
   if cmd.frameReport.len > 0:
     gpui_frame_stats_reset()
@@ -2865,9 +3317,15 @@ proc runOpen(cmd: GpuiCommand): int =
       quarantined = true
       stderr.writeLine("codetracer-gpui: " & remembered.message)
   let slot = shell.app.openSession(session.backend.toBackendService(),
-                                   title = cmd.traceFolder,
+                                   title = extractFilename(
+                                     session.tracePath.strip(chars = {'/'})),
                                    layout = layout,
                                    adopt = session.sdk)
+  # PLAT-49 part B: the window's first session tab, and the recordings the
+  # strip's "+" offers beside it.
+  gSessionsOpened[int(slot.id)] = session
+  gRecordings = recordingsBeside(cmd.traceFolder)
+  gOpenCmd = cmd
   let windowId = WindowId(0)
   let opened = shell.openWindowForSession(windowId, slot.id)
   if opened.kind == wsRefused:
@@ -2947,6 +3405,7 @@ proc runOpen(cmd: GpuiCommand): int =
   # "no call trace has been loaded" on every recording.
   discard session.loadRecordingPanes()
   discard session.loadStopPanes()
+  session.selectCurrentCall()
   # PLAT-37. THE BREAKPOINT IS RESOLVED AGAINST THE RECORDING'S OWN SOURCE,
   # never against a literal. `--replay-ops=setBreakpoint@<row>` names an
   # offset into the FIRST ROW THE EDITOR ACTUALLY DREW, which is why the
@@ -3019,7 +3478,8 @@ proc runOpen(cmd: GpuiCommand): int =
   gMenu.setShortcuts(gBindings)
   gOmnibar = newOmnibarVM()
   gOmnibar.setIndex(omnibarIndexOf(session.session.fileTreeVM,
-                                   session.session.store, gMenu))
+                                   session.session.store, gMenu) &
+                    gRecordings)
   gLeafSet = leafSet
   gCalltraceLoads =
     if session.session.store.calltrace.lines.val.len > 0: 1 else: 0
@@ -3086,8 +3546,12 @@ proc runOpen(cmd: GpuiCommand): int =
   # contract, and `--replay-ops` is what stands in for it meanwhile.
   # `--input-probe` is the instrument that shows the delivery half works.
   let dock = shell.projectionFor(windowId)
-  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder, drawn,
-               if dock.status == dpsRefused: nil else: dock.state)
+  result = launchWindow(cmd, "CodeTracer — " & cmd.traceFolder, drawn,
+                        if dock.status == dpsRefused: nil else: dock.state)
+  # PLAT-49 part B: the sessions a "+" opened, and their engines, closed.
+  for id, s in gSessionsOpened:
+    if s != session:
+      s.close()
 
 proc main() =
   let cmd = parseGpuiCommand(commandLineParams())

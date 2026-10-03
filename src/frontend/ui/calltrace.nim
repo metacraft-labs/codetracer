@@ -563,6 +563,16 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       let rendered = callArgText(arg)
       result.add(makeCallArg($arg.name, rendered))
 
+  proc returnArg(call: Call): seq[vm_types.CallArg] =
+    ## PLAT-49 part B: the call's return value as `__return`, the rule the
+    ## native decoder applies too (`replay_data_store.callReturnTextOf`): a
+    ## call that returned none (`TypeKind.None`) shows no ` => `.
+    if call.returnValue.isNil or call.returnValue.kind == TypeKind.None:
+      return
+    let text = callArgValue(call.returnValue).root.text
+    if text.len > 0:
+      result.add makeCallArg("__return", text)
+
   var vmArgs = initTable[string, seq[vm_types.CallArg]]()
   for key, callArgs in results.args:
     vmArgs[$key] = convertCallArgs(callArgs)
@@ -574,10 +584,13 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       continue
     let key = $call.key
     if key in vmArgs:
-      continue  # response-table entry takes precedence (matches legacy lookup)
-    if call.args.len == 0:
+      # response-table entry takes precedence (matches legacy lookup)
+      vmArgs[key].add returnArg(call)
       continue
-    vmArgs[key] = convertCallArgs(call.args)
+    let all = convertCallArgs(call.args) & returnArg(call)
+    if all.len == 0:
+      continue
+    vmArgs[key] = all
   calltraceVMStore.updateCalltraceSection(
     vmLines,
     startIndex = backendStartIndex,

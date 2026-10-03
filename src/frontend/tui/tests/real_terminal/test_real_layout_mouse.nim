@@ -336,7 +336,11 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ckBothSaw(sess, model, sgrReport(0, source.row, source.col, true), 1,
                 "press on the pane's strip row")
       ck model.app.layoutBinding.interaction.kind == ikNone
-      ckBothSaw(sess, model, sgrReport(32, source.row + 1, source.col + 3,
+      # Three rows down: past the drag threshold, and below the layout's top
+      # ground band (two rows: a drop there would split the whole layout —
+      # PLAT-49 part B review), so the pointer is over the pane itself and no
+      # drop is offered.
+      ckBothSaw(sess, model, sgrReport(32, source.row + 3, source.col + 3,
                                        true), 2,
                 "motion past the drag threshold")
       ck model.app.layoutBinding.interaction.kind == ikDraggingTab

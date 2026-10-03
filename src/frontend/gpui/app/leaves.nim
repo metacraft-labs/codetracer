@@ -629,6 +629,90 @@ proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
   r.appendChild(track, fill)
   r.appendChild(parent, track)
 
+const
+  CallRowAttribute* = "data-call-index"
+    ## PLAT-49 part B: a call-trace row's trace index.
+  CallToggleAttribute* = "data-call-toggle"
+    ## Its toggle state (`leaf`, `expanded`, `collapsed`).
+  CallPartAttribute* = "data-call-part"
+    ## A row part's `CallSegmentKind` (`callee`, `argName`, `argValue`, …).
+  CallSelectedAttribute* = "data-call-selected"
+  CallRowPx* = 26
+    ## A row's height: the window's row pitch (`window_geometry
+    ## .GpuiEditorRowPx`), fixed, so a press is mapped to the row it is on
+    ## (`main.clickCalltrace`).
+  CallIndentPx* = 16
+    ## The desktop's depth offset per level (`paddingForDepth(item, 16)`).
+  CallArgsColour* = DesignTokenHex[dtColorsUiTextSuccessPrimary][dmDark]
+    ## CALLTRACE_ARGS_COLOR (#BBF7D0) — the token the terminal's `srCallArgs`
+    ## paints.
+  CallReturnColour* = DesignTokenHex[dtColorsUiTextInformationOnColor][dmDark]
+    ## CALLTRACE_RETURN_COLOR (#BFDBFE, Dark) exactly: the window is Dark.
+    ## (The terminal's `srCallReturn` takes information-primary, the token
+    ## with a legible Light value.)
+  CallToggleColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+  CallTextColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  CallSelectedBackground* =
+    DesignTokenHex[dtColorsUiSurfacePrimarySecondaryHover][dmDark]
+    ## The selected row's ground (`.event-selected`): the design system's
+    ## active-row token (the desktop's `.active-step-line`), the terminal's
+    ## `srSurfaceActiveRow`.
+
+proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
+                      vm: CalltraceVM): bool =
+  ## PLAT-49 part B (finding 8): THE CALL TRACE, ROW BY ROW FROM THE
+  ## VIEWMODEL'S `CallRow`s — indented by depth, the toggle, the callee and
+  ## its index, the arguments with their values in the arguments' colour and
+  ## ` => value` in the return's, the selected row on its own ground — the
+  ## desktop's row (`isonim_calltrace_view.renderCallLineRowWeb`) from the
+  ## same parts the terminal paints (`calltrace_vm.callRowSegments`). False
+  ## when there are no rows (the fallback and the reports stay
+  ## `pane_views`').
+  let rows = vm.callRows()
+  if rows.len == 0:
+    return false
+  let list = r.createElement("div")
+  r.setAttribute(list, "data-calltrace", "rows")
+  r.setStyle(list, "display", "flex")
+  r.setStyle(list, "flex-direction", "column")
+  for row in rows:
+    let el = r.createElement("div")
+    r.setAttribute(el, CallRowAttribute, $row.index)
+    r.setAttribute(el, CallToggleAttribute, $row.toggle)
+    let selected = crfSelected in row.flags
+    r.setAttribute(el, CallSelectedAttribute,
+                   (if selected: "true" else: "false"))
+    # A call row is one line, its parts side by side.
+    for (key, value) in [("display", "flex"), ("white-space", "nowrap")]:
+      r.setStyle(el, key, value)
+    r.setStyle(el, "overflow", "hidden")
+    r.setStyle(el, "flex-shrink", "0")
+    r.setStyle(el, "height", $CallRowPx & "px")
+    r.setStyle(el, "items", "center")
+    r.setStyle(el, "padding-left", $(row.depth * CallIndentPx) & "px")
+    if selected:
+      r.setStyle(el, "background", CallSelectedBackground)
+    for seg in row.callRowSegments(indent = false):
+      let piece = r.createElement("span")
+      r.setAttribute(piece, CallPartAttribute, $seg.kind)
+      r.setStyle(piece, "flex-shrink", "0")
+      r.setStyle(piece, "color",
+        case seg.kind
+        of csToggle:
+          # On the selected row the toggle is the desktop's `active` icon,
+          # in the body colour — the muted one is not legible on that ground.
+          (if selected: CallTextColour else: CallToggleColour)
+        of csPunct, csArgName, csArgValue: CallArgsColour
+        of csReturnArrow, csReturnValue: CallReturnColour
+        else: CallTextColour)
+      if selected and seg.kind in {csCallee, csIndex}:
+        r.setStyle(piece, "font-weight", "bold")
+      r.appendChild(piece, r.createTextNode(seg.text))
+      r.appendChild(el, piece)
+    r.appendChild(list, el)
+  r.appendChild(parent, list)
+  true
+
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
                     leaf: GpuiLeaf; budget: Budget): bool =
   ## Draw a builtin pane's vocabulary tree into `parent`. Answers whether the
@@ -637,6 +721,13 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
   ## `pane_views.paneView` is the ONE door, and its `case` is exhaustive over
   ## `PaneKind`, so a pane added to the enum without a view does not compile
   ## rather than becoming a name nothing renders.
+  ##
+  ## PLAT-49 part B: the call trace's ROWS are drawn natively from its
+  ## semantic rows (`renderCallTrace`) — a vocabulary `List` option is one
+  ## label and could not carry the parts the desktop styles apart.
+  if leaf.builtin == paneCalltrace and not leaf.vm.isNil and
+     renderCallTrace(r, parent, CalltraceVM(leaf.vm)):
+    return true
   let pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
   let binding = renderGpui(r, pv.root)
   r.appendChild(parent, binding.root)

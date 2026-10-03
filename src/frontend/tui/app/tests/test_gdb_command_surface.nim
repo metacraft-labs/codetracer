@@ -245,7 +245,15 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 214
+  ExpectedStyleLiterals = 221
+    ## 2026-10-03 (PLAT-49 part B review): +2 — the call trace's current row
+    ## on its own ground (`call_trace.CurrentRowFill`, and the toggle's two
+    ## styles in `segmentStyle`).
+    ## 2026-10-02 (PLAT-49 part B): +5 net — the call trace's two row styles
+    ## became its semantic parts' four (`call_trace.segmentStyle`: callee and
+    ## index, toggle, arguments, return), the event log's column header
+    ## (`event_log.HeaderStyle`), and the session tab's agent glyph and close
+    ## control (`top_bar`).
     ## 2026-10-01 (PLAT-49): -4 net — the in-pane title styles went with the
     ## titles (the shell's title row, the build and VCS panes' headings and
     ## rules, `vcs_pane.VcsRuleStyle`), and the variables row's category tag, the omnibar field's

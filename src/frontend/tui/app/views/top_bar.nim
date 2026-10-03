@@ -72,6 +72,8 @@ type
     tpOmnibar = "omnibar"
     tpTab = "tab"
     tpTabMore = "tab-more"
+    tpTabAdd = "tab-add"
+      ## PLAT-49 part B: the strip's "+" (`NewSessionTabGlyph`).
     tpHeader = "header"
     tpBadge = "badge"
 
@@ -99,6 +101,15 @@ type
     hoverTooltip*: string
       ## PLAT-49: its tooltip (`debug_controls_vm.transportTooltip`), drawn
       ## as a one-row label under it (`paintControlTooltip`).
+    hoveredTab*: int
+      ## PLAT-49 part B: the session tab under the pointer, -1 for none; its
+      ## `SessionTabView.tooltip` is drawn under it as a control's is.
+    canAddTab*: bool
+      ## PLAT-49 part B: the host can open a recording in a new session tab,
+      ## so the strip carries the desktop's "+" (`NewSessionTabGlyph`) —
+      ## with one session or several, as the desktop's does.
+    hoveredTabAdd*: bool
+      ## The pointer is on the "+": its tooltip (`NewSessionTabTitle`).
     tabs*: seq[SessionTabView]
     tabScroll*: int
     header*: HeaderModel
@@ -129,7 +140,8 @@ type
     rows*: seq[DropdownRow]
 
   TopBarHitKind* = enum
-    thNone, thMenuButton, thControl, thOmnibar, thTab, thTabMore
+    thNone, thMenuButton, thControl, thOmnibar, thTab, thTabMore, thTabClose,
+    thTabAdd
 
   TopBarHit* = object
     kind*: TopBarHitKind
@@ -157,6 +169,36 @@ const
 # ---------------------------------------------------------------------------
 # Widths
 # ---------------------------------------------------------------------------
+
+const
+  NewSessionTabCells* = 3
+    ## The "+" with a cell each side.
+  SessionTabGapCells* = 1
+    ## PLAT-49 part B (finding 7): one cell of the bar between two session
+    ## tabs, so each is a separate item on its own ground (the desktop's
+    ## `.session-tab` `margin-right 0.25em`).
+
+func agentGlyph*(a: SessionTabAgent): string =
+  ## The agent indicator a tab draws before its label (DeepReview
+  ## Agentic-Coding-Integration.md §3.3's icon per state): working ⟳,
+  ## completed ✓, failed ✗, cancelled ■; nothing without an agent.
+  if not a.present: ""
+  else:
+    case a.lifecycle
+    of aslConnecting, aslRunning: "⟳"
+    of aslCompleted: "✓"
+    of aslError: "✗"
+    of aslCancelled, aslDisconnected: "■"
+
+func tabText*(t: SessionTabView): string =
+  ## A session tab's cells: ` [agent ]label [× ]`.
+  let glyph = agentGlyph(t.agent)
+  result = " " & (if glyph.len > 0: glyph & " " else: "") &
+           (if t.label.len > 0: t.label else: t.title) & " "
+  if t.closable:
+    result.add SessionTabCloseGlyph & " "
+
+proc tabCells*(t: SessionTabView): int = textCells(tabText(t))
 
 proc effectiveIconsOf*(m: TopBarModel): IconsMode =
   if m.icons == imGraphics and not m.graphicsDrawn: imUnicode else: m.icons
@@ -267,7 +309,7 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
     var widths: seq[int] = @[]
     var active = 0
     for i, t in m.tabs:
-      widths.add textCells(t.title) + 2
+      widths.add tabCells(t) + SessionTabGapCells
       if t.active: active = i
     let room = avail - used - 1
     var total = 0
@@ -275,7 +317,8 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
     if total <= room:
       result.tabFirst = 0
       for i, w in widths:
-        tabSegs.add TopBarSegment(part: tpTab, width: w, index: i)
+        tabSegs.add TopBarSegment(part: tpTab, width: w - SessionTabGapCells,
+                                  index: i)
         tabsW += w
     elif room >= 4 + widths[active]:
       # Scrolled: `‹` and `›` take a cell each.
@@ -286,11 +329,18 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
       for i in first ..< widths.len:
         if tabsW + widths[i] > room:
           break
-        tabSegs.add TopBarSegment(part: tpTab, width: widths[i], index: i)
+        tabSegs.add TopBarSegment(part: tpTab,
+                                  width: widths[i] - SessionTabGapCells,
+                                  index: i)
         tabsW += widths[i]
       tabSegs.add TopBarSegment(part: tpTabMore, width: 1, index: 1)
     if tabsW > 0:
       discard take(tabsW + 1)
+  # 6b. The strip's "+", after its tabs (with none shown, on its own): the
+  # desktop's add control is there with one session or several.
+  var addW = 0
+  if m.canAddTab and take(NewSessionTabCells + 1):
+    addW = NewSessionTabCells
   # 7. The header's fuller detail, with what is left.
   if headerW > 0:
     let room = headerW + (avail - used)
@@ -326,8 +376,13 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
     for s in tabSegs.mitems:
       s.col = col
       col += s.width
+      if s.part == tpTab:
+        col += SessionTabGapCells
       result.segments.add s
     inc col
+  if addW > 0:
+    result.segments.add TopBarSegment(part: tpTabAdd, col: col, width: addW)
+    col += addW + 1
   if headerW > 0:
     let hcol = width - badgeW - 1 - headerW
     result.segments.add TopBarSegment(part: tpHeader, col: max(col, hcol),
@@ -456,31 +511,73 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         g.paint(0, s.col, fitCells(" " & OmnibarGlyph & " ", s.width),
                 CellStyle(role: srChromeText))
     of tpTab:
+      # PLAT-49 part B (finding 7): EACH SESSION TAB ON ITS OWN GROUND, a
+      # cell of the bar between it and the next (`SessionTabGapCells`): the
+      # active one the strips' selected tab (`srTabActive`), every other one
+      # a subtle step off the bar (`srSessionTab`). The agent's indicator
+      # before the label, its progress after it (`SessionTabView.label`),
+      # and the close control at the end while there are several sessions.
       let t = m.tabs[s.index]
-      let role = if t.active: srTabActive else: srTabInactive
+      let role = if t.active: srTabActive else: srSessionTab
       g.fillSurface(0, s.col, s.width, 1, role)
-      g.paint(0, s.col, fitCells(" " & t.title & " ", s.width),
+      g.paint(0, s.col, fitCells(tabText(t), s.width),
               CellStyle(role: role, bold: t.active))
+      if t.agent.present:
+        let glyph = agentGlyph(t.agent)
+        g.paint(0, s.col + 1, glyph,
+                CellStyle(role: (case t.agent.lifecycle
+                                 of aslError: srChromeError
+                                 of aslCompleted: srChromeSuccess
+                                 else: srChromeInfo),
+                          surface: role, bold: t.agent.running))
+      if t.closable and s.width >= 3:
+        g.paint(0, s.col + s.width - 2, SessionTabCloseGlyph,
+                CellStyle(role: srChromeMuted, surface: role))
     of tpTabMore:
       g.fillSurface(0, s.col, 1, 1, srTabBar)
       g.paint(0, s.col, (if s.index < 0: "‹" else: "›"),
               CellStyle(role: srChromeMuted))
+    of tpTabAdd:
+      # The desktop's `.session-tab-add`: a borderless button on the bar,
+      # lit while the pointer is on it (its tooltip says "New tab").
+      let role = if m.hoveredTabAdd: srTabActive else: srTabBar
+      g.fillSurface(0, s.col, s.width, 1, role)
+      g.paint(0, s.col, fitCells(" " & NewSessionTabGlyph & " ", s.width),
+              CellStyle(role: (if m.hoveredTabAdd: srTabActive
+                               else: srChromeText),
+                        bold: m.hoveredTabAdd))
     of tpHeader:
       g.paint(0, s.col, fitCells(m.headerTextOf(lay), s.width))
     of tpBadge:
       g.paint(0, s.col, fitCells("[" & $m.header.status & "]", s.width))
 
+proc tooltipText*(m: TopBarModel): string =
+  ## The tooltip under the pointer: a control's, else a session tab's
+  ## (PLAT-49 part B — `SessionTabView.tooltip`, with the agent's task and
+  ## progress while one works in that session).
+  if m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
+    m.hoverTooltip
+  elif m.hoveredTab >= 0 and m.hoveredTab < m.tabs.len:
+    m.tabs[m.hoveredTab].tooltip
+  elif m.hoveredTabAdd and m.canAddTab:
+    NewSessionTabTitle
+  else: ""
+
 proc controlTooltipArea*(m: TopBarModel; lay: TopBarLayout;
                          width: int): CellArea =
-  ## Where the hovered control's tooltip goes: the row under the bar, from
-  ## the control's first cell (moved left where it would run off the
-  ## screen), as wide as its text plus a cell of padding each side.
-  if m.hoveredControl < 0 or m.hoverTooltip.len == 0:
+  ## Where the hovered control's — or session tab's — tooltip goes: the row
+  ## under the bar, from the item's first cell (moved left where it would run
+  ## off the screen), as wide as its text plus a cell of padding each side.
+  let text = m.tooltipText
+  if text.len == 0:
     return CellArea()
-  let s = lay.segmentOf(tpControl, m.hoveredControl)
+  let s = if m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
+            lay.segmentOf(tpControl, m.hoveredControl)
+          elif m.hoveredTab >= 0: lay.segmentOf(tpTab, m.hoveredTab)
+          else: lay.segmentOf(tpTabAdd)
   if s.col < 0:
     return CellArea()
-  let w = min(width, textCells(m.hoverTooltip) + 2)
+  let w = min(width, textCells(text) + 2)
   CellArea(col: max(0, min(s.col, width - w)), row: 1, width: w, height: 1)
 
 proc paintControlTooltip*(g: var StyledGrid; m: TopBarModel;
@@ -492,7 +589,7 @@ proc paintControlTooltip*(g: var StyledGrid; m: TopBarModel;
   if a.width <= 0:
     return
   g.fillSurface(a.row, a.col, a.width, 1, srSurfaceCard)
-  g.paint(a.row, a.col, fitCells(" " & m.hoverTooltip & " ", a.width),
+  g.paint(a.row, a.col, fitCells(" " & m.tooltipText & " ", a.width),
           CellStyle(role: srChromeText, surface: srSurfaceCard))
 
 # ---------------------------------------------------------------------------
@@ -664,15 +761,25 @@ proc omnibarHitAt*(m: TopBarModel; lay: TopBarLayout; width, height,
 # Hit-testing the row
 # ---------------------------------------------------------------------------
 
-proc topBarHitAt*(lay: TopBarLayout; col: int): TopBarHit =
+proc topBarHitAt*(lay: TopBarLayout; col: int;
+                  tabs: seq[SessionTabView] = @[]): TopBarHit =
+  ## What a column of row 0 is on. `tabs` (the model's) tells a session tab's
+  ## close control from the tab; without them every tab cell is the tab.
+  proc closable(i: int): bool = i >= 0 and i < tabs.len and tabs[i].closable
   for s in lay.segments:
     if col >= s.col and col < s.col + s.width:
       case s.part
       of tpMenuButton: return TopBarHit(kind: thMenuButton)
       of tpControl: return TopBarHit(kind: thControl, index: s.index)
       of tpOmnibar: return TopBarHit(kind: thOmnibar)
-      of tpTab: return TopBarHit(kind: thTab, index: s.index)
+      of tpTab:
+        # The close control: the `×` two cells from the tab's end, drawn
+        # only while there are several sessions (`tabText`).
+        if s.width >= 3 and col == s.col + s.width - 2 and closable(s.index):
+          return TopBarHit(kind: thTabClose, index: s.index)
+        return TopBarHit(kind: thTab, index: s.index)
       of tpTabMore: return TopBarHit(kind: thTabMore, index: s.index)
+      of tpTabAdd: return TopBarHit(kind: thTabAdd)
       else: return TopBarHit(kind: thNone)
   TopBarHit(kind: thNone)
 

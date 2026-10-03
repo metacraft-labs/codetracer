@@ -152,12 +152,16 @@ const
 
   TerminalEventRowGrammar* = GrammarRule(
     name: "terminal-event-row",
-    shape: "<tick> <category> <file> ':' <line> <text>",
+    shape: "<tick> [<index>] <category> [<file> ':' <line>] <text>",
     note: "PLAT-40. The shipped terminal's event pane (`TRACEPOINTS`): the " &
           "tick, a four-cell CATEGORY (`out`, `err`, `mut`, `sys`, `trc`), " &
           "the location, the text. The category is not a channel — `out` " &
           "covers stdout and stderr alike — so the row answers the TEXT " &
-          "alone, and the three front-ends are compared on the text.")
+          "alone, and the three front-ends are compared on the text. " &
+          "PLAT-49 part B: the pane shows the desktop's default columns — " &
+          "tick, the event's `#`, its kind, its output — with the location " &
+          "hidden until the user shows it, so the index and the location " &
+          "are both optional.")
 
   TransportGrammar* = GrammarRule(
     name: "transport-control",
@@ -412,14 +416,23 @@ func parsePointRow*(line: string): tuple[ok: bool, kind, fileName: string,
 func parseTerminalEventRow*(line: string): tuple[ok: bool, consoleOutput: string] =
   ## `TerminalEventRowGrammar`.
   let toks = line.strip().splitWhitespace()
-  if toks.len < 4: return (false, "")
+  if toks.len < 3: return (false, "")
   if not toks[0].allCharsInSet({'0'..'9'}): return (false, "")
-  if toks[1] notin TerminalEventCategories: return (false, "")
-  let colon = toks[2].rfind(':')
-  if colon <= 0 or not toks[2][colon + 1 .. ^1].allCharsInSet({'0'..'9'}) or
-     colon == toks[2].high:
+  var at = 1
+  # The event's `#` (the desktop's second column), when shown.
+  if toks[at].allCharsInSet({'0'..'9'}):
+    inc at
+  if at >= toks.len or toks[at] notin TerminalEventCategories:
     return (false, "")
-  (true, toks[3 .. ^1].join(" "))
+  inc at
+  # The location, when the user has shown its column: `<file>:<line>`.
+  if at < toks.len:
+    let colon = toks[at].rfind(':')
+    if colon > 0 and colon < toks[at].high and
+       toks[at][colon + 1 .. ^1].allCharsInSet({'0'..'9'}):
+      inc at
+  if at >= toks.len: return (false, "")
+  (true, toks[at .. ^1].join(" "))
 
 func compactText*(s: string): string =
   ## A row's text with every space removed — the form two readings are

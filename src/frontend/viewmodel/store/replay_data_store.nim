@@ -27,6 +27,11 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import types, request_tracker, degraded_state, stop_timeline
+# PLAT-49 part B: a call's arguments and return value, rendered by the one
+# presenter at the `calltrace-arg` budget — the desktop renders its chips with
+# the same budget (`ui/presented_value.callArgValue`).
+from ../../../common/value_presentation import present, CalltraceArgBudget
+from ../../../common/value_presentation/json_adapter import toPValue
 
 export stop_timeline
 export degraded_state
@@ -2100,6 +2105,42 @@ proc callLineWireOf*(entry: JsonNode): Option[CallLineWire] =
     w.callstackDepth = loc.getOrDefault("callstackDepth").getInt(0)
   some(w)
 
+const NoneValueKind = 30
+  ## `TypeKind.None`'s ordinal on the wire: the value of a call that returned
+  ## nothing (`common_types/language_features/type.nim`).
+
+proc callArgTextOf*(arg: JsonNode): string =
+  ## One argument's text: the engine's own spelling when it sent one, else
+  ## its value rendered at the `calltrace-arg` budget.
+  if arg.isNil or arg.kind != JObject: return ""
+  let t = arg.getOrDefault("text").getStr("")
+  if t.len > 0: return t
+  let v = arg.getOrDefault("value")
+  if v.isNil or v.kind != JObject: return ""
+  present(toPValue(v), CalltraceArgBudget).root.text
+
+proc callReturnTextOf*(call: JsonNode): string =
+  ## A call's return value as text, "" when it returned none — the rule both
+  ## decoders apply (the desktop's in `ui/calltrace.syncCalltraceData`).
+  if call.isNil or call.kind != JObject: return ""
+  let v = call.getOrDefault("returnValue")
+  if v.isNil or v.kind != JObject: return ""
+  if v.getOrDefault("kind").getInt(NoneValueKind) == NoneValueKind: return ""
+  present(toPValue(v), CalltraceArgBudget).root.text
+
+proc callArgsOf*(call: JsonNode): seq[CallArg] =
+  ## A call's `CallArg`s — its arguments, then its return value as
+  ## `__return` when it returned one (PLAT-49 part B).
+  if call.isNil or call.kind != JObject: return
+  let args = call.getOrDefault("args")
+  if not args.isNil and args.kind == JArray:
+    for a in args:
+      result.add CallArg(name: a.getOrDefault("name").getStr(""),
+                         text: callArgTextOf(a))
+  let r = callReturnTextOf(call)
+  if r.len > 0:
+    result.add CallArg(name: "__return", text: r)
+
 proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
   ## Decode a `ct/load-calltrace-section` response body into the store.
   ## Answers the number of rows written, or `-1` when the body is not a
@@ -2110,12 +2151,40 @@ proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
   if entries.isNil or entries.kind != JArray: return -1
   let start = body.getOrDefault("startCallLineIndex").getBiggestInt(0).int64
   var lines: seq[CallLine] = @[]
+  # PLAT-49 part B: THE ARGUMENTS AND RETURN VALUES TOO, keyed by call key —
+  # the desktop's decoder merges the response's `args` table with each call's
+  # own `args` (the table wins); this one does the same. Until part B the
+  # native front-ends decoded neither and their rows read `name #index`.
+  var argsTable = initTable[string, seq[CallArg]]()
+  let table = body.getOrDefault("args")
+  if not table.isNil and table.kind == JObject:
+    for key, list in table:
+      var converted: seq[CallArg] = @[]
+      if list.kind == JArray:
+        for a in list:
+          converted.add CallArg(name: a.getOrDefault("name").getStr(""),
+                                text: callArgTextOf(a))
+      argsTable[key] = converted
   for i in 0 ..< entries.len:
     let w = callLineWireOf(entries[i])
     if w.isSome:
       lines.add callLineOf(w.get, start + i.int64)
+      # Defensive: `callArgsOf` answers nothing for a missing call.
+      let call = entries[i]{"content", "call"}
+      let key = w.get.callKey
+      var a = if key in argsTable: argsTable[key] else: @[]
+      let own = callArgsOf(call)
+      if key notin argsTable:
+        a = own
+      else:
+        for x in own:
+          if x.name == "__return":
+            a.add x
+      if a.len > 0 and key.len > 0:
+        argsTable[key] = a
   store.updateCalltraceSection(
-    lines, start, body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64)
+    lines, start, body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64,
+    args = argsTable)
   lines.len
 
 proc stepDirectionToDapCommand*(direction: StepDirection): string =

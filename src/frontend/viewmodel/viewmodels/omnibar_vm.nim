@@ -50,6 +50,11 @@ type
       ## Program text search (`:grep`), answered by the search service.
     omTick = "tick"
     omAgent = "agent"
+    omRecording = "recording"
+      ## PLAT-49 part B: a recording to open IN A NEW SESSION TAB — the
+      ## session strip's "+" (the desktop's `.session-tab-add`, "New tab")
+      ## opens the omnibar on `:open `; the entries are the recordings the
+      ## host can see, and a typed path is one too.
 
   OmnibarEntry* = object
     ## One thing the omnibar can find.
@@ -92,6 +97,8 @@ const
   OmnibarDefaultLimit* = 20
     ## The desktop palette's own limit (`COMMAND_FUZZY_OPTIONS.limit`).
   CommandPrefix* = ":"
+  OpenRecordingQuery* = ":open "
+    ## PLAT-49 part B: what the session strip's "+" opens the omnibar on.
   TickPrefix* = "#"
   OmnibarPlaceholder* = "Navigate to file or run a :command"
     ## PLAT-49: what every front-end's empty omnibar field shows — the
@@ -111,6 +118,10 @@ func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
     return (omSymbol, query[4 .. ^1].strip)
   if query.startsWith("/ai"):
     return (omAgent, query[3 .. ^1].strip)
+  if lower.startsWith(OpenRecordingQuery.strip) and
+     (query.len == OpenRecordingQuery.strip.len or
+      query[OpenRecordingQuery.strip.len] == ' '):
+    return (omRecording, query[OpenRecordingQuery.strip.len .. ^1].strip)
   if query.startsWith(CommandPrefix) and query.len > 1:
     return (omCommand, query[1 .. ^1].strip)
   if query.startsWith(TickPrefix) and query.len > 1:
@@ -124,8 +135,11 @@ func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
 
 func desktopKindOf*(mode: OmnibarMode): OmnibarMode =
   ## The mode the DESKTOP acts in for a classified query: its palette has no
-  ## tick search, so `#…` stays a file query there.
-  if mode == omTick: omFile else: mode
+  ## tick search, so `#…` stays a file query there; its "+" opens a new tab
+  ## on its welcome screen, so `:open …` stays a command there.
+  if mode == omTick: omFile
+  elif mode == omRecording: omCommand
+  else: mode
 
 # ---------------------------------------------------------------------------
 # The ranking
@@ -203,6 +217,13 @@ func rankOmnibar*(index: openArray[OmnibarEntry]; mode: OmnibarMode;
     return
   of omProgram, omAgent:
     return
+  of omRecording:
+    # A TYPED PATH IS A RECORDING TOO, offered first: the host checks it is
+    # one when it is opened (`native_host.openLocalTrace`).
+    if needle.contains('/'):
+      result.add OmnibarResult(entry: OmnibarEntry(
+        kind: omRecording, label: "Open " & needle & " in a new tab",
+        detail: "path", target: needle), score: high(int))
   else:
     discard
   for e in index:

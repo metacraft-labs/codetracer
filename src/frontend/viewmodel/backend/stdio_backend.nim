@@ -156,6 +156,9 @@ type
       ## The replay-server child process.
     seqCounter: int
       ## Monotonically increasing sequence number for outgoing requests.
+    closed: bool
+      ## `close` has run: a second call (a host that closes the session it
+      ## also handed to an SDK that disconnects it) does nothing.
     eventQueue*: seq[JsonNode]
       ## Buffer of DAP events received while waiting for a response.
       ## Tests can inspect or drain this queue after each action.
@@ -623,6 +626,10 @@ proc startReplayServer*(replayServerBin: string;
 proc close*(backend: DapStdioBackend) =
   ## Terminate the replay-server child process.
   ## Attempts a graceful shutdown first (close stdin), then kills.
+  ## Idempotent: the process's handles are released once.
+  if backend.closed:
+    return
+  backend.closed = true
   if backend.process.running:
     try:
       backend.process.inputStream.close()

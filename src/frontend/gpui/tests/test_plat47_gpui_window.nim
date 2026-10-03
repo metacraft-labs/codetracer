@@ -25,6 +25,8 @@
 import std/[algorithm, json, os, sequtils, strutils, unittest]
 
 import gpui/window_top_bar   # `GpuiTopBandPx`: the band above the layout (PLAT-48)
+from gpui/window_geometry import TabStripPx, FooterPx
+  # the pane's tab strip, and the window's footer (PLAT-49 part B)
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -137,7 +139,10 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
 
   test "deliverable 6: each drop kind tints exactly its region, and the ghost follows the pointer":
     let d = rec["drop"]
-    let body = arr(d["editorBody"])
+    let pane = arr(d["editorBody"])
+    # The tint is the pane's CONTENT, below its tab strip (PLAT-49 part B:
+    # GoldenLayout highlights half of a stack's content area).
+    let body = @[pane[0], pane[1] + TabStripPx, pane[2], pane[3] - TabStripPx]
     let half = (body[2] + 1) div 2
     # SPLIT on the editor's right edge band: its right half.
     let split = arr(d["drop-split"]["tintBBox"])
@@ -165,8 +170,10 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     checkpoint("dock " & $dock)
     ck dock[0] == PanePaddingPx and dock[2] < 100
     # The layout's whole height: the window less its padding and, since
-    # PLAT-48, the top bar's band above the layout.
-    ck dock[3] >= rec["frame"][1].getInt - 2 * PanePaddingPx - GpuiTopBandPx
+    # PLAT-48, the top bar's band above the layout and, since PLAT-49, the
+    # footer (the status bar holding the bottom labels) below it.
+    ck dock[3] >= rec["frame"][1].getInt - 2 * PanePaddingPx - GpuiTopBandPx -
+                  FooterPx
     # The ghost label was drawn beside the pointer in every one.
     for k in ["drop-split", "drop-whole", "drop-slot", "drop-dock"]:
       ck d[k]["ghostChangedPixels"].getInt > 100
@@ -224,7 +231,7 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck bb[0] >= pane[0] and bb[1] >= pane[1] and
        bb[0] + bb[2] <= pane[0] + pane[2] and bb[1] + bb[3] <= pane[1] + pane[3]
 
-  test "a pane docked by a drop stays on screen: a strip label, revealed by a click, hidden by Esc":
+  test "a pane docked by a drop stays on screen: a strip label, revealed by a hover, hidden by Esc":
     let d = rec["dock"]
     checkpoint($d["strips"])
     # Docked: out of the tree, one label in the left strip, and the saved
@@ -247,7 +254,8 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     # The strip is drawn, with its label's ink on it, reading down.
     ck d["stripInk"].getInt > 50
     ck d["slotText"].getStr.splitWhitespace().join("").contains("tate")
-    # A click on the label draws the pane over the tree, against the left
+    # The pointer resting on the label (PLAT-49 part B, the desktop's
+    # preview; a click docks it open) draws the pane over the tree, against the left
     # edge: the pixels that changed are the revealed region (and the label's
     # own weight), and the pane's own text is in it.
     ck d["revealed"]["pane"].getStr == "state"

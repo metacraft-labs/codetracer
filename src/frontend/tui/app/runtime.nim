@@ -36,9 +36,10 @@
 ## wrong and recorded it: with nothing pumping the event, a step is sent, the
 ## engine moves, and every pane keeps reporting the old position forever.
 
-import std/[os, strutils, tables]
+import std/[options, os, strutils, tables]
 
 import codetracer_embed   # PLAT-43: `KeymapModel`, `selectKeymap`
+import headless_app/auto_hide_hover
 
 import ./commands/interpreter
 import ./edit_binding
@@ -154,6 +155,15 @@ type
       ## cleared — so the host rebuilds the panes from the session, but must
       ## not pump for a `stopped` event that is not coming.
     pagesCallTrace*: bool
+    jumpsToCall*: bool
+      ## PLAT-49 part B: a click on a call-trace row — the host goes to that
+      ## call (`ct/calltrace-jump`, the desktop's click) and refreshes.
+    togglesCall*: bool
+      ## PLAT-49 part B: a click on a row's toggle — the host expands or
+      ## collapses that call's children (`ct/expand-calls` /
+      ## `ct/collapse-calls`) and reloads the section.
+    callIndex*: int64
+      ## The trace index `jumpsToCall` / `togglesCall` act on.
       ## PLAT-47. The reader scrolled the call trace: the host loads the
       ## section of the trace the pane now shows, if it does not hold it
       ## (`tui_session.pageCallTrace`), and nothing else — no pump, no
@@ -241,6 +251,11 @@ type
     saveIcons*: proc(mode: IconsMode): string {.closure.}
       ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
       ## success. Nil in a host that keeps no state.
+    autoHide*: AutoHideHover
+      ## PLAT-49 part B (finding 9): the pointer's timing over the auto-hide
+      ## labels — the desktop's hover preview and leave dismissal
+      ## (`headless_app/auto_hide_hover`). Medium state, held here, never in
+      ## the layout.
     topBarPressConsumed*: bool
       ## PLAT-48: the top bar (or an open menu / omnibar) took the last
       ## press, so its release is not a layout gesture.
@@ -293,7 +308,8 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
     dispatcher: Dispatcher(),
     context: CommandContext(),
     lastToken: "", lastKey: "",
-    width: width, height: height)
+    width: width, height: height,
+    autoHide: initAutoHideHover())
 
 proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   ## Whether PLAT-6's layout binding is driving this runtime's arrangement.
@@ -512,6 +528,47 @@ proc movesTheDebugger*(action: KeyAction): bool =
 proc refreshMenuForKeymap*(rt: TuiRuntime)
   ## FORWARD-DECLARED for `:keys`; defined with the top bar below.
 
+const EventLogColumnVerbs* = ["columns", "column-show", "column-hide",
+                              "column-left", "column-right"]
+  ## PLAT-49 part B: the event log's column verbs (`runColumnVerb`).
+
+proc describeColumns(c: EventLogColumns): string =
+  var parts: seq[string] = @[]
+  for col in c.order:
+    parts.add (if c.isVisible(col): "" else: "(") & eventLogColumnTitle(col) &
+              (if c.isVisible(col): "" else: ")")
+  "event log columns: " & parts.join(" ") & " — hidden in parentheses"
+
+proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
+  ## One column verb against the event log's `EventLogColumns`; answers the
+  ## status line's text (every verb says what it did, or why it did nothing).
+  if verb == "columns":
+    return describeColumns(rt.app.eventLog.columns)
+  if arg.len == 0:
+    return ":" & verb & " needs a column: tick, #, location, kind or output"
+  let (ok, col) = parseEventLogColumn(arg)
+  if not ok:
+    return "no event log column '" & arg &
+           "'; the columns are tick, #, location, kind and output"
+  var c = rt.app.eventLog.columns
+  let changed =
+    case verb
+    of "column-show": c.showColumn(col)
+    of "column-hide": c.hideColumn(col)
+    of "column-left": c.moveColumn(col, -1)
+    else: c.moveColumn(col, 1)
+  if not changed:
+    return "event log column " & eventLogColumnTitle(col) & ": " &
+      (case verb
+       of "column-show": "already shown"
+       of "column-hide":
+         (if not c.isVisible(col): "already hidden"
+          else: "the last visible column stays")
+       else: (if not c.isVisible(col): "hidden; show it first"
+              else: "already at that end"))
+  rt.app.eventLog.columns = c
+  describeColumns(c)
+
 proc runPromptLine(rt: TuiRuntime; line: string;
                    outcome: var RuntimeOutcome) =
   ## A committed prompt line, through CTUI-10's interpreter.
@@ -584,6 +641,22 @@ proc runPromptLine(rt: TuiRuntime; line: string;
             rt.note("keys: " & arg & ": " & e.msg)
         rt.refreshMenuForKeymap()
       outcome.detail = rt.app.notification
+      return
+
+  # PLAT-49 part B (finding 14): THE EVENT LOG'S COLUMN VERBS — the desktop's
+  # show / hide / reorder capability, over the Event Log ViewModel's column
+  # model (`EventLogColumns`). `:columns` lists them; `:column-show NAME`,
+  # `:column-hide NAME`, `:column-left NAME`, `:column-right NAME`.
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and words[0] in EventLogColumnVerbs:
+      rt.note(rt.runColumnVerb(words[0],
+                               (if words.len > 1: words[1] else: "")))
+      outcome.detail = rt.app.notification
+      outcome.repaint = true
       return
 
   # PLAT-6's TWELVE LAYOUT VERBS, ROUTED HERE AND ONLY WHEN A BINDING IS
@@ -862,6 +935,13 @@ proc scrollCallTrace(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   rt.note("call trace " & $(top + 1) & "-" & $min(m.total, top + body) &
           " of " & $m.total)
 
+const GestureInteractions = {ikDraggingTab, ikResizingSplit}
+  ## A drag or a resize: gestures whose progress the status line narrates.
+const MouseNoteStatuses* = {lasRefused, lasBadArgument, lasUnknownCommand}
+  ## PLAT-49 part B: the outcomes of a MOUSE gesture the status line reports —
+  ## the ones whose result is not on the screen. A click, a drag, a drop, a
+  ## resize or a reveal that worked is visible and says nothing.
+
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
   ## **PLAT-6's MOUSE HALF.** One decoded SGR-1006 report, as a layout gesture.
@@ -915,7 +995,18 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   if had:
     binding.focus = focused
   let geometry = rt.layoutGeometry()
+  let before = binding.interaction.kind
   let acted = binding.onMouse(geometry, event)
+  # PLAT-49 part B: a click on a label docked its pane open (or closed it)
+  # — the preview and its timers end; an overlay closed any other way (an
+  # outside press) is no longer the hover machine's either.
+  if acted.command.isSome and acted.command.get.kind == lcSetAutoHide and
+     acted.command.get.autoHideDirection in {ahOpen, ahClose}:
+    rt.autoHide.clicked()
+  elif binding.interaction.kind != ikRevealingDock:
+    rt.autoHide.overlayClosed()
+  let inGesture = before in GestureInteractions or
+                  binding.interaction.kind in GestureInteractions
   outcome.detail = acted.message
   # PLAT-49 (the user, 2026-10-01): A PLAIN CLICK SAYS NOTHING. What the
   # layout did — a drag's progress, a drop, a resize, a reveal — goes on the
@@ -923,11 +1014,47 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # click that only focused a pane, a press that marked a tab, a release
   # with no drag) does not, so clicking around a pane never shows drag
   # messages like "release with no drag in flight".
-  if acted.status != lasNoGesture:
+  #
+  # PLAT-49 part B (the user's finding 2, followed through): A CLICK THAT
+  # WORKED SAYS NOTHING EITHER. A tab click used to print the layout command
+  # it ran ("activateTab(vcs) applied"), a dock label's click "revealing …" —
+  # an echo of a click whose result is on the screen. Only a refusal and why
+  # is written for a click (`MouseNoteStatuses`). A DRAG or a RESIZE keeps
+  # its running commentary (where the drop would land, what it did): that is
+  # a gesture's feedback, not a click's echo.
+  if acted.status in MouseNoteStatuses or
+     (inGesture and acted.status != lasNoGesture):
     rt.note(acted.message)
   # PLAT-47: A WHEEL OVER THE CALL TRACE'S BODY SCROLLS IT — the hand-off
   # `lasNoGesture` exists for (the binding takes a wheel only over a tab
   # strip).
+  # PLAT-49 part B: A CLICK ON THE CALL TRACE — on a row, go to that call;
+  # on its toggle, expand or collapse it — as the desktop's row does
+  # (`isonim_calltrace_view.rowHandlers`).
+  if acted.status == lasNoGesture and event.kind == mekPress and
+     event.button == mbLeft and not rt.app.callTrace.isEmpty:
+    let idx = geometry.regionIndexAt(event.row, event.col)
+    if idx >= 0 and geometry.projection.regions[idx].pane == paneCalltrace:
+      let region = geometry.projection.regions[idx]
+      let frame = paneFrame(region.area, geometry.body)
+      let area = CellArea(col: region.area.col, row: region.area.row,
+                          width: frame.box.width, height: frame.box.height)
+      let hit = rt.app.callTrace.callTraceHitAt(area, event.row, event.col)
+      case hit.kind
+      of cthRow:
+        outcome.jumpsToCall = true
+        outcome.callIndex = hit.index
+        outcome.repaint = true
+        rt.rebuildFocus()
+        discard rt.focus.focusPaneKind(paneCalltrace)
+        return
+      of cthToggle:
+        outcome.togglesCall = true
+        outcome.callIndex = hit.index
+        outcome.repaint = true
+        return
+      of cthNone:
+        discard
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button in {mbWheelUp, mbWheelDown}:
     let idx = geometry.regionIndexAt(event.row, event.col)
@@ -1438,7 +1565,10 @@ proc openOmnibar*(rt: TuiRuntime; query = "") =
     rt.app.menu.close()
   rt.app.refreshOmnibarIndex()
   rt.app.omnibar.open(query)
-  rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
+  if query == OpenRecordingQuery:
+    rt.note("new tab: choose a recording, or type its folder")
+  else:
+    rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
 
 proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
   ## A View-menu item: bring `pane` forward — reveal it when it is docked,
@@ -1465,6 +1595,18 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
+  # PLAT-49 part B: the omnibar's event-log column commands
+  # (`omnibar_sources.eventLogColumnCommands`), the `:column-*` verbs.
+  let col = parseEventLogColumnCommand(action)
+  if col.ok:
+    let verb = case col.verb
+               of "left": "column-left"
+               of "right": "column-right"
+               else: (if rt.app.eventLog.columns.isVisible(col.column):
+                        "column-hide" else: "column-show")
+    rt.note(rt.runColumnVerb(verb, eventLogColumnTitle(col.column)))
+    outcome.repaint = true
+    return
   let ka = menuKeyAction(action)
   if ka != kaNone:
     rt.performAction(ka, outcome)
@@ -1512,6 +1654,14 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
     else:
       rt.app.fileTree.openPath = entry.target
       rt.note("file " & entry.target)
+  of omRecording:
+    # PLAT-49 part B: open it in a new session tab — the host's to do.
+    if rt.app.recordingOpener.isNil:
+      rt.note("this terminal cannot open another recording")
+    else:
+      let why = rt.app.recordingOpener(entry.target)
+      if why.len > 0:
+        rt.note(why)
   else:
     rt.note(entry.label)
 
@@ -1593,6 +1743,58 @@ proc cycleReveal(rt: TuiRuntime; outcome: var RuntimeOutcome) =
     return
   rt.note(b.beginRevealDock(docked[next].pane).message)
 
+proc applyAutoHideReply(rt: TuiRuntime; reply: AutoHideReply): bool =
+  ## Carry out what the hover machine said: open the preview overlay (the
+  ## binding's `ikRevealingDock`) or close it. True when the screen changed.
+  let b = rt.app.layoutBinding
+  case reply.cue
+  of ahcNone: false
+  of ahcPreview:
+    if b.interaction.kind in {ikDraggingTab, ikResizingSplit}:
+      return false
+    b.beginRevealDock(reply.pane).status == lasPending
+  of ahcDismiss:
+    if b.interaction.kind == ikRevealingDock and
+       b.interaction.pane == reply.pane:
+      b.interaction = b.interaction.cancel()
+      return true
+    false
+
+proc autoHidePointer(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
+                     outcome: var RuntimeOutcome) =
+  ## PLAT-49 part B (finding 9): the pointer over the screen, for the
+  ## auto-hide labels — the desktop's hover: after a moment over a label its
+  ## pane is previewed as an overlay; leaving the label and the overlay closes
+  ## the preview a moment later (`auto_hide_hover`).
+  let b = rt.app.layoutBinding
+  let geom = rt.layoutGeometry()
+  var label = none(PaneKind)
+  var open = false
+  let strip = geom.stripIndexAt(event.row, event.col)
+  if strip >= 0:
+    let slot = geom.strips[strip].slotAt(event.row, event.col)
+    if slot >= 0:
+      let pane = geom.strips[strip].slots[slot].pane
+      label = some(pane)
+      let at = b.layout.dockedIndex(pane)
+      open = at >= 0 and b.layout.docked[at].open
+  let inOverlay = b.interaction.kind == ikRevealingDock and
+                  geom.reveal.contains(event.row, event.col)
+  if rt.applyAutoHideReply(rt.autoHide.pointerAt(label, inOverlay, open,
+                                                 nowMs)):
+    outcome.repaint = true
+
+proc tickAutoHide*(rt: TuiRuntime; nowMs: int64): bool =
+  ## The loop's clock for the auto-hide hover (a preview due, a dismissal
+  ## due). True when the screen changed and must be painted.
+  if not rt.layoutBindingEnabled():
+    return false
+  rt.applyAutoHideReply(rt.autoHide.tick(nowMs))
+
+proc autoHideDueMs*(rt: TuiRuntime): int64 =
+  ## When `tickAutoHide` next has something to do, -1 for never.
+  rt.autoHide.nextDueMs
+
 proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome): bool =
   ## PLAT-48: a mouse report the top bar, an open menu or an open omnibar
@@ -1619,10 +1821,25 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
       return false   # a drag: the binding's
     # Hover: the row's controls, and the open menu's items.
     var hovered = -1
+    var hoveredTab = -1
+    var hoveredAdd = false
     if event.row == 0:
       let hit = lay.topBarHitAt(event.col)
       if hit.kind == thControl:
         hovered = hit.index
+      elif hit.kind == thTab:
+        hoveredTab = hit.index
+      elif hit.kind == thTabAdd:
+        hoveredAdd = true
+    # PLAT-49 part B: a session tab's tooltip (its title; with an agent in
+    # the session, the task, its state and progress) under it while hovered;
+    # the "+"'s ("New tab") under it.
+    if hoveredTab != rt.app.hoveredTab:
+      rt.app.hoveredTab = hoveredTab
+      outcome.repaint = true
+    if hoveredAdd != rt.app.hoveredTabAdd:
+      rt.app.hoveredTabAdd = hoveredAdd
+      outcome.repaint = true
     if vm.isOpen:
       let (inside, path) = menuHitAt(screen.menuDropdowns, event.row,
                                      event.col)
@@ -1682,7 +1899,7 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     return false
   rt.topBarPressConsumed = true
   outcome.repaint = true
-  let hit = lay.topBarHitAt(event.col)
+  let hit = lay.topBarHitAt(event.col, rt.app.shell.tabsOf())
   case hit.kind
   of thMenuButton:
     if vm.isOpen: vm.close() else: vm.open(keyboard = false)
@@ -1699,8 +1916,26 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     if not rt.app.omnibar.isOpen:
       rt.openOmnibar()
   of thTab:
-    if rt.app.shell.activateTab(hit.index):
-      rt.note("session " & $hit.index)
+    # A click on a session tab switches to it; the switch is on the screen,
+    # so nothing is echoed (PLAT-49 part B).
+    discard rt.app.shell.activateTab(hit.index)
+  of thTabClose:
+    # PLAT-49 part B: the tab's close control — the desktop's
+    # `.session-tab-close` (Multi-Window-Tab-Management.md, rule 4: "Closing
+    # a tab stops its backend and removes it"). The HOST closes a session it
+    # opened — its engine with it (`sessionCloser`).
+    let closed =
+      if not rt.app.sessionCloser.isNil: rt.app.sessionCloser(hit.index)
+      else: rt.app.shell.closeTab(hit.index)
+    if closed:
+      rt.app.hoveredTab = -1
+  of thTabAdd:
+    # PLAT-49 part B: the strip's "+" — the desktop's "New tab" opens an
+    # empty tab whose welcome screen picks the recording; here the omnibar
+    # opens on `:open `, listing the recordings the host can see, and the
+    # one chosen (or a typed path) opens in a new tab (`acceptOmnibar`).
+    rt.app.hoveredTabAdd = false
+    rt.openOmnibar(OpenRecordingQuery)
   of thTabMore:
     rt.app.tabScroll = max(0, rt.app.tabScroll + hit.index)
   of thNone:
@@ -1748,6 +1983,10 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   block:
     let (isMouse, event) = decodeMouse(token)
     if isMouse:
+      # PLAT-49 part B: the pointer's passing is the auto-hide hover's too.
+      if event.kind == mekMotion and event.button != mbLeft and
+         rt.layoutBindingEnabled():
+        rt.autoHidePointer(event, nowMs, result)
       if rt.routeTopBarMouse(event, result):
         return
       if event.kind == mekMotion and event.button != mbLeft:

@@ -168,7 +168,8 @@ const
 
   AllZones = [dzTabStrip, dzCentre, dzLeftEdge, dzRightEdge, dzTopEdge,
               dzBottomEdge, dzOutsideLeft, dzOutsideRight, dzOutsideTop,
-              dzOutsideBottom]
+              dzOutsideBottom, dzRootLeft, dzRootRight, dzRootTop,
+              dzRootBottom]
 
 proc shape(name: string): Layout =
   case name
@@ -324,8 +325,11 @@ suite "Interaction — separate from Layout, structurally (§4.1)":
     # PLAT-48 added `DockedPane.beside` (the pane it was docked from),
     # `DockedPane.weight` (its share there) and `DockedPane.besideBefore`
     # (which side of `beside`), so the docked pane's is 8 — where it goes
-    # back to, never where it is drawn.
-    check checkedFields == 7 + 8 + 3
+    # back to, never where it is drawn. PLAT-49 part B added `DockedPane.open`
+    # (docked OPEN, inline at its edge: a state a command sets, like
+    # `revealed` not persisted, and no extent — the binding derives the band),
+    # so the docked pane's arity is 9.
+    check checkedFields == 7 + 9 + 3
 
   test "layout_model names none of the transient types, and cannot":
     # `layout_interaction` imports `layout_model`; the reverse import is a
@@ -568,16 +572,19 @@ suite "dropTargetsFor — pure, and medium-free (§4.2)":
     checkpoint(perShape.join("  "))
     # A bare pane is the one shape that offers NOTHING, and the refusals that
     # make that true are asserted by kind in the next suite.
+    # PLAT-49 part B: every other shape offers the root split too
+    # (GoldenLayout's ground side areas).
     check perShape[0] == "bare pane=[]"
     check perShape[1] ==
-      "two-pane row=[intoStack,splitBefore,splitAfter,dockEdge]"
-    check perShape[2] == "stacked=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "two-pane row=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
+    check perShape[2] ==
+      "stacked=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     check perShape[3] ==
-      "two stacks=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "two stacks=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     check perShape[4] ==
-      "deep tree=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "deep tree=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     check perShape[5] ==
-      "with docked=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "with docked=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     for k in DropTargetKind:
       check k in everywhere
 
@@ -631,6 +638,7 @@ suite "dropTargetsFor — refusals asserted as refusals (§4.2)":
       lpDuplicatePane
     checkRefused apply(l, cmdSplitMove(paneEditor, paneEditor, saRow)),
       lpDuplicatePane
+    checkRefused apply(l, cmdSplitRootMove(paneEditor, saRow)), lpEmptyRoot
 
   test "a docked pane is split into the tree in one command":
     # PLAT-5 recorded this gesture as MISSING: `lcSplit` refused a docked
@@ -1369,9 +1377,16 @@ suite "the drop indication — what a front-end draws (PLAT-47)":
             of dtDockEdge:
               check ind.kind == diLayoutEdge
               check ind.side == t.edge
+            of dtSplitRoot:
+              # PLAT-49 part B: a root split shows the band along that edge
+              # of the whole layout (GoldenLayout's ground side area).
+              check ind.kind == diRootBand
+              check ind.side == t.edge
+              check t.region.kind == drRootBand
     checkpoint("hovered drops checked: " & $checked)
     check checked > 100
-    check seen == {diNone, diSplitHalf, diTabSlot, diWholeNode, diLayoutEdge}
+    check seen == {diNone, diSplitHalf, diTabSlot, diWholeNode, diLayoutEdge,
+                   diRootBand}
 
   test "nothing is indicated when nothing is dragged":
     let l = shape(AllShapes[1])
