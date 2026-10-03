@@ -217,15 +217,15 @@
 <tr><td><code>ct install</code></td><td>Install the CLI tools</td></tr>
 <tr><td><code>ct version</code></td><td>Print the CodeTracer version</td></tr>
 <tr><td><code>ct help</code></td><td>Display help information</td></tr>
-<tr><td><code>ct list</code></td><td>List recorded traces</td></tr>
+<tr><td><code>ct list</code></td><td>List every artifact CodeTracer holds: recordings and review datasets alike</td></tr>
 <tr><td><code>ct console</code></td><td>Open the interactive console</td></tr>
 <tr><td><code>ct doctor &lt;lang&gt;</code></td><td>Probe recorder-readiness for a language (currently <code>python</code>; more languages soon)</td></tr>
 </tbody></table>
 </div>
 <h4 id="online-sharing"><a class="header" href="#online-sharing">Online Sharing</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
-<tr><td><code>ct upload</code></td><td>Upload a trace</td></tr>
-<tr><td><code>ct download</code></td><td>Download a trace</td></tr>
+<tr><td><code>ct upload</code></td><td>Share an artifact of any kind CodeTracer understands — a recording or a review dataset. <code>--encrypt</code> seals the payload on this machine under a password the service never receives; <code>--visibility</code> says who may read the stored copy</td></tr>
+<tr><td><code>ct download</code></td><td>Open a shared artifact from its link. The link carries no kind, so the command asks the store; a password is needed only if the payload turns out to be encrypted</td></tr>
 <tr><td><code>ct login</code></td><td>Authenticate with the sharing service</td></tr>
 </tbody></table>
 </div>

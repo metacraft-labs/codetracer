@@ -206,19 +206,18 @@ CodeTracer can only be installed on Linux and macOS currently.</p>
 <h2 id="download-binaries"><a class="header" href="#download-binaries">Download binaries</a></h2>
 <h3 id="recommended-automatically"><a class="header" href="#recommended-automatically">Recommended: automatically</a></h3>
 <p>We provide a automatic installer that installs CodeTracer in the best possible way for your current system. You can run it by running the following in a terminal:</p>
-<pre><code>user $ curl "https://downloads.codetracer.com/install.sh" | sh
+<pre><code>user $ curl -fsSL https://get.codetracer.com/sh | sh
 </code></pre>
-<blockquote>
-<p>[!CAUTION]
-On macOS it's recommended that you install homebrew beforehand. This is because the installer tries to install ruby from homebrew to enable our ruby recording
-features. Make sure you install homebrew in order to not lose this feature.</p>
-</blockquote>
+<p>On Debian, Ubuntu, Fedora and RHEL the installer registers the Metacraft Labs package
+repository (<code>deb.metacraft-labs.com</code> / <code>rpm.metacraft-labs.com</code>) and installs the <code>codetracer</code>
+package, so later updates arrive with <code>apt upgrade</code> / <code>dnf upgrade</code>. On Arch it uses your AUR
+helper, on Gentoo the metacraft-overlay, and on macOS the signed DMG from downloads.codetracer.com.</p>
 <h3 id="manually-on-linux"><a class="header" href="#manually-on-linux">Manually on Linux</a></h3>
 <p>Here is a list of our Linux packages:</p>
-<p><a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
-<a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
-<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
-<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
+<p><a href="https://deb.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
+<a href="https://deb.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
+<a href="https://rpm.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
+<a href="https://rpm.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
 <a href="https://github.com/metacraft-labs/metacraft-overlay"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/4/48/Gentoo_Linux_logo_matte.svg"></a>
 <a href="https://aur.archlinux.org/packages/codetracer"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/13/Arch_Linux_%22Crystal%22_icon.svg"></a>
 <a href="https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a></p>
@@ -2065,13 +2064,13 @@ the full flag table.</p>
 <p>The CodeTracer MCP server registers two tools that surface origin
 tracking to LLM agents directly:</p>
 <ul>
-<li><strong><code>get_value_origin</code></strong> — one-shot lookup. Returns the canonical
-<code>OriginChain</code> JSON for <code>variable</code> at <code>step</code>/<code>frame</code>. Use this when you
-only need a single chain without authoring a script.</li>
-<li><strong><code>resolve_variable_step</code></strong> — helper that maps a variable name to the
-most recent step at which it was assigned. Pair it with
-<code>get_value_origin</code> when you want the chain at the assignment site
-rather than the current step.</li>
+<li><strong><code>get_value_origin</code></strong> — one-shot lookup. Runs to <code>path</code>:<code>line</code>,
+then returns the canonical <code>OriginChain</code> for <code>variable</code> at that step.
+Use this when you only need a single chain without authoring a script.</li>
+<li><strong><code>resolve_variable_step</code></strong> — the first hop of that same chain: where
+the value the variable holds at <code>path</code>:<code>line</code> came from, reported as
+the step at which it becomes observable plus the statement that
+assigned it.</li>
 </ul>
 <p>The <strong>preferred</strong> multi-step path is to send a Python script through the
 existing <code>exec_script</code> MCP tool and call <code>trace.value_origin(...)</code>
@@ -2687,15 +2686,15 @@ file lands, wiring it through the matrix format reuses this crate's
 <tr><td><code>ct install</code></td><td>Install the CLI tools</td></tr>
 <tr><td><code>ct version</code></td><td>Print the CodeTracer version</td></tr>
 <tr><td><code>ct help</code></td><td>Display help information</td></tr>
-<tr><td><code>ct list</code></td><td>List recorded traces</td></tr>
+<tr><td><code>ct list</code></td><td>List every artifact CodeTracer holds: recordings and review datasets alike</td></tr>
 <tr><td><code>ct console</code></td><td>Open the interactive console</td></tr>
 <tr><td><code>ct doctor &lt;lang&gt;</code></td><td>Probe recorder-readiness for a language (currently <code>python</code>; more languages soon)</td></tr>
 </tbody></table>
 </div>
 <h4 id="online-sharing"><a class="header" href="#online-sharing">Online Sharing</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Command</th><th>Description</th></tr></thead><tbody>
-<tr><td><code>ct upload</code></td><td>Upload a trace</td></tr>
-<tr><td><code>ct download</code></td><td>Download a trace</td></tr>
+<tr><td><code>ct upload</code></td><td>Share an artifact of any kind CodeTracer understands — a recording or a review dataset. <code>--encrypt</code> seals the payload on this machine under a password the service never receives; <code>--visibility</code> says who may read the stored copy</td></tr>
+<tr><td><code>ct download</code></td><td>Open a shared artifact from its link. The link carries no kind, so the command asks the store; a password is needed only if the payload turns out to be encrypted</td></tr>
 <tr><td><code>ct login</code></td><td>Authenticate with the sharing service</td></tr>
 </tbody></table>
 </div>
@@ -2886,53 +2885,52 @@ newline-delimited JSON-RPC messages on stdin/stdout. See the
 milestone. For the full tool list see the tool registration in
 <code>src/backend-manager/src/mcp_server.rs</code>.</p>
 <h3 id="get_value_origin"><a class="header" href="#get_value_origin"><code>get_value_origin</code></a></h3>
-<p>Returns the canonical <code>OriginChain</code> for a queried variable at a chosen
-step. This is a one-shot fallback for callers that only want a single
-chain — the <strong>preferred</strong> multi-step path is to send a Python script
-through the existing <code>exec_script</code> tool and call
+<p>Returns the canonical <code>OriginChain</code> for a variable at a chosen source
+location: where the value came from, hop by hop, down to the literal,
+computation, or parameter that produced it.</p>
+<p>The query is anchored at a <strong>source location</strong>, not at a step id. An MCP
+call is stateless and <code>ct/open-trace</code> rewinds the replay to the program
+entry, where no interesting variable is live yet; the tool therefore sets
+a breakpoint at <code>path</code>:<code>line</code>, runs to it, and queries the step it
+stopped on — the same sequence the per-language <code>origin_*_dap_test.rs</code>
+suites use. If the line is never reached, the call fails rather than
+answering about whatever step the replay ended on.</p>
+<p>For multi-query sessions that reuse one loaded trace, prefer sending a
+Python script through the <code>exec_script</code> tool and calling
 <code>trace.value_origin("&lt;variable&gt;", step=..., frame=..., max_hops=...)</code>
 inside it. The Python binding composes with <code>trace.locals()</code>,
-<code>trace.history()</code>, breakpoints and watchpoints, and reuses the loaded
-trace + classifier pattern set across calls.</p>
+<code>trace.history()</code>, breakpoints and watchpoints, and keeps the trace and
+classifier pattern set loaded across calls.</p>
 <h4 id="input-schema"><a class="header" href="#input-schema">Input schema</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>trace_path</code></td><td><code>string</code></td><td>yes</td><td>Either a local path to a <code>.ct</code> trace folder or an observability dive-in URL (see <code>exec_script</code> for URL format).</td></tr>
+<tr><td><code>path</code></td><td><code>string</code></td><td>yes</td><td>Source file of the query line. May be a suffix of the recorded path (<code>main.py</code>); it is resolved against the trace's source file list, and an ambiguous suffix is an error.</td></tr>
+<tr><td><code>line</code></td><td><code>number</code></td><td>yes</td><td>1-based line to run to before querying. The variable must be live there.</td></tr>
 <tr><td><code>variable</code></td><td><code>string</code></td><td>yes</td><td>Variable identifier to query. V1 is identifier-only; dotted paths are reserved for a future milestone.</td></tr>
-<tr><td><code>step</code></td><td><code>integer</code></td><td>no</td><td>Optional step id. Defaults to the current execution point of the session.</td></tr>
-<tr><td><code>frame</code></td><td><code>integer</code></td><td>no</td><td>Optional DAP frame id. Defaults to the topmost frame.</td></tr>
-<tr><td><code>max_hops</code></td><td><code>integer</code></td><td>no</td><td>Maximum hops in this batch (default 16). Prefer <code>lazy</code> + <code>continuation_token</code> over bumping this above ~32.</td></tr>
-<tr><td><code>lazy</code></td><td><code>boolean</code></td><td>no</td><td>When <code>true</code>, the backend may return early with a <code>continuationToken</code>. Default <code>false</code>.</td></tr>
-<tr><td><code>session_id</code></td><td><code>string</code></td><td>no</td><td>Optional session identifier — when reused across calls the trace and classifier pattern set stay loaded, avoiding a re-load. Same semantics as <code>exec_script.session_id</code>.</td></tr>
+<tr><td><code>max_hops</code></td><td><code>number</code></td><td>no</td><td>Maximum hops in this batch (default 16). Backends clamp it to their own tier limit.</td></tr>
 </tbody></table>
 </div>
 <h4 id="output-shape"><a class="header" href="#output-shape">Output shape</a></h4>
-<p>The tool returns the canonical <code>OriginChain</code> JSON pretty-printed in the
-MCP text content envelope. The body matches the wire shape from spec
-§4.1:</p>
-<pre><code class="language-json">{
-  "hops": [
-    {
-      "kind": "TrivialCopy",
-      "stepId": 41,
-      "location": { "path": "main.py", "line": 6, "column": 0 },
-      "source": "b = helper(a)",
-      "frameTransition": { "kind": "ParameterPass", "from": "main", "to": "helper" }
-    },
-    { "kind": "TrivialCopy", "stepId": 38, "location": { "path": "main.py", "line": 5 }, "source": "a = 10" }
-  ],
-  "terminator": {
-    "kind": "Literal",
-    "expression": "10",
-    "location": { "path": "main.py", "line": 5 }
-  },
-  "truncated": false,
-  "continuationToken": null,
-  "metrics": { "elapsedMs": 12, "hopsWalked": 2 },
-  "confidence": 1.0
-}
+<p>The tool returns the spec §3.2 text rendering of the chain followed by
+the canonical <code>OriginChain</code> JSON (spec §4.1) under a
+<code>Canonical OriginChain JSON:</code> heading, so an agent can either read it or
+parse it:</p>
+<pre><code>Origin chain for 'c' @ step=7
+  hops=3 terminator=literal truncated=no
+
+  0. [=] main.py:12
+     c = b
+  1. [=] main.py:11
+     b = a
+  2. [L] main.py:10
+     a = 10
+  [lit] 10
+      @ main
 </code></pre>
-<p>When <code>truncated</code> is <code>true</code>, pass <code>continuationToken</code> back as the
-<code>continuationToken</code> argument on the next call to resume the walk.</p>
+<p>Note that a recorded step carries the program state on <em>entering</em> a
+line, so each hop's <code>location</code> is the step at which the value first
+becomes observable — one step after the assignment named by that hop's
+<code>sourceText</code>.</p>
 <h4 id="example-call"><a class="header" href="#example-call">Example call</a></h4>
 <pre><code class="language-json">{
   "jsonrpc": "2.0",
@@ -2942,35 +2940,44 @@ MCP text content envelope. The body matches the wire shape from spec
     "name": "get_value_origin",
     "arguments": {
       "trace_path": "/traces/my-bug.ct",
-      "variable": "total",
-      "step": 137,
+      "path": "main.py",
+      "line": 12,
+      "variable": "c",
       "max_hops": 8
     }
   }
 }
 </code></pre>
 <h3 id="resolve_variable_step"><a class="header" href="#resolve_variable_step"><code>resolve_variable_step</code></a></h3>
-<p>Returns the most recent step id at which <code>variable</code> was assigned in the
-trace. Pair it with <code>get_value_origin</code> when you want the chain at the
-assignment site rather than the caller's current step.</p>
+<p>The first hop of the same chain: where the value a variable holds at
+<code>path</code>:<code>line</code> came from, without walking the rest of the way back. Pair
+it with <code>get_value_origin</code> when you want the full provenance.</p>
 <h4 id="input-schema-1"><a class="header" href="#input-schema-1">Input schema</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>trace_path</code></td><td><code>string</code></td><td>yes</td><td>Path to the trace folder (or dive-in URL).</td></tr>
-<tr><td><code>variable</code></td><td><code>string</code></td><td>yes</td><td>Variable identifier to look up.</td></tr>
-<tr><td><code>frame</code></td><td><code>integer</code></td><td>no</td><td>Optional DAP frame id (scopes the search to that frame).</td></tr>
-<tr><td><code>session_id</code></td><td><code>string</code></td><td>no</td><td>Optional session identifier; same semantics as above.</td></tr>
+<tr><td><code>path</code></td><td><code>string</code></td><td>yes</td><td>Source file of the query line (suffix match allowed).</td></tr>
+<tr><td><code>line</code></td><td><code>number</code></td><td>yes</td><td>1-based line to run to before querying.</td></tr>
+<tr><td><code>variable</code></td><td><code>string</code></td><td>yes</td><td>Variable identifier to resolve.</td></tr>
 </tbody></table>
 </div>
 <h4 id="output-shape-1"><a class="header" href="#output-shape-1">Output shape</a></h4>
 <pre><code class="language-json">{
-  "stepId": 138,
-  "variable": "total",
-  "location": { "path": "main.py", "line": 53, "column": 4 }
+  "variable": "a",
+  "stepId": 5,
+  "location": { "path": "main.py", "line": 10, "functionName": "main" },
+  "assignment": "    a = 10",
+  "originKind": "literal",
+  "sourceVariable": null
 }
 </code></pre>
-<p>The formatter scans <code>ct/load-history</code> updates in reverse and returns the
-first match. When no assignment is found the call fails with the
-backend's error message.</p>
+<p><code>stepId</code> / <code>location</code> are the earliest step at which the variable is
+observed holding this value; <code>assignment</code> is the statement that produced
+it. Because of the entering-a-line step semantics above, <code>location.line</code>
+is the line <em>after</em> the assignment statement — both are reported so the
+answer is not ambiguous.</p>
+<p>When no assignment can be resolved the call fails with an explicit
+message naming the variable. It never answers with an empty success: an
+empty answer would be indistinguishable from an unimplemented tool.</p>
 <h4 id="example-call-1"><a class="header" href="#example-call-1">Example call</a></h4>
 <pre><code class="language-json">{
   "jsonrpc": "2.0",
@@ -2980,21 +2987,32 @@ backend's error message.</p>
     "name": "resolve_variable_step",
     "arguments": {
       "trace_path": "/traces/my-bug.ct",
-      "variable": "total"
+      "path": "main.py",
+      "line": 12,
+      "variable": "a"
     }
   }
 }
 </code></pre>
 <h3 id="implementation-references"><a class="header" href="#implementation-references">Implementation references</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Item</th><th>Location</th></tr></thead><tbody>
-<tr><td>Tool registration</td><td><code>src/backend-manager/src/mcp_server.rs::get_value_origin_tool</code></td></tr>
+<tr><td>Tool table (schemas <strong>and</strong> dispatch)</td><td><code>src/backend-manager/src/mcp_server.rs::TOOLS</code></td></tr>
+<tr><td>Tool schemas</td><td><code>src/backend-manager/src/mcp_server.rs::get_value_origin_tool</code></td></tr>
 <tr><td></td><td><code>src/backend-manager/src/mcp_server.rs::resolve_variable_step_tool</code></td></tr>
 <tr><td>Tool handlers</td><td><code>src/backend-manager/src/mcp_server.rs::handle_get_value_origin</code></td></tr>
 <tr><td></td><td><code>src/backend-manager/src/mcp_server.rs::handle_resolve_variable_step</code></td></tr>
+<tr><td>Shared origin query (open / break / walk)</td><td><code>src/backend-manager/src/mcp_server.rs::run_origin_query</code></td></tr>
+<tr><td>Python bridge route (<code>trace.value_origin</code>)</td><td><code>src/backend-manager/src/backend_manager.rs::handle_py_origin_chain</code></td></tr>
 <tr><td>Response formatters</td><td><code>src/backend-manager/src/python_bridge.rs</code></td></tr>
 <tr><td>Wire-shape definitions</td><td><code>src/db-backend/src/task.rs</code> (Rust) / <code>python-api/codetracer/origin.py</code> (Python)</td></tr>
+<tr><td>End-to-end tests</td><td><code>src/backend-manager/tests/mcp_origin_test.rs</code></td></tr>
+<tr><td>Advertise/dispatch divergence check</td><td><code>src/backend-manager/tests/mcp_tool_surface_test.rs</code></td></tr>
 </tbody></table>
 </div>
+<p><code>TOOLS</code> is the single source of truth for the tool surface: <code>tools/list</code>
+advertises from it and <code>tools/call</code> dispatches from it, so a tool cannot
+be advertised without being callable. Add new tools there, never to a
+separate list.</p>
 <p>For the user-facing walkthrough, see
 <a href="reference/../usage_guide/value-origin-tracking.html">Value Origin Tracking</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="origin-kinds-reference"><a class="header" href="#origin-kinds-reference">Origin Kinds Reference</a></h1>

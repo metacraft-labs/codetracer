@@ -183,19 +183,18 @@ CodeTracer can only be installed on Linux and macOS currently.</p>
 <h2 id="download-binaries"><a class="header" href="#download-binaries">Download binaries</a></h2>
 <h3 id="recommended-automatically"><a class="header" href="#recommended-automatically">Recommended: automatically</a></h3>
 <p>We provide a automatic installer that installs CodeTracer in the best possible way for your current system. You can run it by running the following in a terminal:</p>
-<pre><code>user $ curl "https://downloads.codetracer.com/install.sh" | sh
+<pre><code>user $ curl -fsSL https://get.codetracer.com/sh | sh
 </code></pre>
-<blockquote>
-<p>[!CAUTION]
-On macOS it's recommended that you install homebrew beforehand. This is because the installer tries to install ruby from homebrew to enable our ruby recording
-features. Make sure you install homebrew in order to not lose this feature.</p>
-</blockquote>
+<p>On Debian, Ubuntu, Fedora and RHEL the installer registers the Metacraft Labs package
+repository (<code>deb.metacraft-labs.com</code> / <code>rpm.metacraft-labs.com</code>) and installs the <code>codetracer</code>
+package, so later updates arrive with <code>apt upgrade</code> / <code>dnf upgrade</code>. On Arch it uses your AUR
+helper, on Gentoo the metacraft-overlay, and on macOS the signed DMG from downloads.codetracer.com.</p>
 <h3 id="manually-on-linux"><a class="header" href="#manually-on-linux">Manually on Linux</a></h3>
 <p>Here is a list of our Linux packages:</p>
-<p><a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
-<a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
-<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
-<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
+<p><a href="https://deb.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
+<a href="https://deb.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
+<a href="https://rpm.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
+<a href="https://rpm.metacraft-labs.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
 <a href="https://github.com/metacraft-labs/metacraft-overlay"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/4/48/Gentoo_Linux_logo_matte.svg"></a>
 <a href="https://aur.archlinux.org/packages/codetracer"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/13/Arch_Linux_%22Crystal%22_icon.svg"></a>
 <a href="https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a></p>

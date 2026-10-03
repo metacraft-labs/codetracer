@@ -43,3 +43,5 @@
 /misc/troubleshooting.html /reference/troubleshooting 301
 /misc/environment_variables.html /reference/environment_variables 301
 /misc/building_docs.html /reference/building_docs 301
+/index.html / 301
+/usage_guide/deep_review /deep_review 301
