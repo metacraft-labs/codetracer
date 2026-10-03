@@ -40,7 +40,7 @@ fn create_ruby_flow_config() -> FlowTestConfig {
         ],
         // puts and calculate_sum should NOT appear as variables
         excluded_identifiers: vec!["puts".to_string(), "calculate_sum".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

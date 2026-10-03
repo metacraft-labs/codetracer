@@ -1414,14 +1414,31 @@ impl FlowData {
 
     /// Check if a value was successfully loaded (not <NONE>)
     pub fn is_value_loaded(value: &serde_json::Value) -> bool {
-        if let Some(r_val) = value.get("r").and_then(|v| v.as_str()) {
-            return r_val != "<NONE>";
+        if let Some(kind) = value.get("kind") {
+            return match serde_json::from_value::<codetracer_trace_types::TypeKind>(kind.clone()) {
+                Ok(codetracer_trace_types::TypeKind::None | codetracer_trace_types::TypeKind::Error) => false,
+                Ok(codetracer_trace_types::TypeKind::Raw) => value
+                    .get("r")
+                    .and_then(|raw| raw.as_str())
+                    .is_some_and(|raw| !raw.is_empty() && raw != "<NONE>"),
+                Ok(_) => true,
+                Err(_) => false,
+            };
         }
-        false
+        value
+            .get("r")
+            .and_then(|raw| raw.as_str())
+            .is_some_and(|raw| !raw.is_empty() && raw != "<NONE>")
     }
 
     /// Extract an integer value from a flow value structure
     pub fn extract_int_value(value: &serde_json::Value) -> Option<i64> {
+        if let Some(kind) = value.get("kind") {
+            match serde_json::from_value::<codetracer_trace_types::TypeKind>(kind.clone()) {
+                Ok(codetracer_trace_types::TypeKind::Int | codetracer_trace_types::TypeKind::Raw) => {}
+                _ => return None,
+            }
+        }
         // The "i" field contains the integer value as a string
         if let Some(i_val) = value.get("i").and_then(|v| v.as_str())
             && !i_val.is_empty()
@@ -1457,6 +1474,24 @@ impl FlowData {
     }
 }
 
+/// A fixture declares its recorded value representation explicitly.
+pub enum ExpectedFlowValues {
+    Integers(HashMap<String, i64>),
+    Strings(HashMap<String, String>),
+}
+
+impl From<HashMap<String, i64>> for ExpectedFlowValues {
+    fn from(values: HashMap<String, i64>) -> Self {
+        Self::Integers(values)
+    }
+}
+
+impl From<HashMap<String, String>> for ExpectedFlowValues {
+    fn from(values: HashMap<String, String>) -> Self {
+        Self::Strings(values)
+    }
+}
+
 /// Configuration for a flow test case
 pub struct FlowTestConfig {
     pub source_path: PathBuf,
@@ -1466,8 +1501,8 @@ pub struct FlowTestConfig {
     pub expected_variables: Vec<String>,
     /// Variables/identifiers that should NOT be extracted (function calls)
     pub excluded_identifiers: Vec<String>,
-    /// Expected values for specific variables (name -> expected int value)
-    pub expected_values: HashMap<String, i64>,
+    /// Required exact values with their recorded integer/string representation.
+    pub expected_values: ExpectedFlowValues,
 }
 
 /// Look up a tool on the system PATH.
@@ -5226,7 +5261,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
 /// Verify flow results: check excluded identifiers, expected variables, and values.
 ///
 /// Shared between `run_flow_test()` (RR-based) and `run_db_flow_test()` (DB-based).
-fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), String> {
+pub fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), String> {
     println!("\nVerifying flow data...");
 
     // Check excluded identifiers are NOT in the list
@@ -5262,18 +5297,48 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
     println!("  Loaded: {}", loaded);
     println!("  Not loaded: {}", not_loaded);
 
-    // Verify specific expected values
-    for (var_name, expected_value) in &config.expected_values {
-        if let Some(value) = flow.values.get(var_name) {
-            if FlowData::is_value_loaded(value) {
-                if let Some(actual) = FlowData::extract_int_value(value) {
-                    if actual != *expected_value {
-                        return Err(format!("{} should be {}, got {}", var_name, expected_value, actual));
-                    }
-                    println!("  {} = {} (correct)", var_name, actual);
+    // Every configured value must be present, loaded, and exactly equal.
+    match &config.expected_values {
+        ExpectedFlowValues::Integers(expected_values) => {
+            for (var_name, expected_value) in expected_values {
+                let value = flow
+                    .values
+                    .get(var_name)
+                    .ok_or_else(|| format!("required flow value {} is missing", var_name))?;
+                if !FlowData::is_value_loaded(value) {
+                    return Err(format!("required flow value {} is not loaded: {}", var_name, value));
                 }
-            } else {
-                println!("  {} = <NONE>", var_name);
+                let actual = FlowData::extract_int_value(value)
+                    .ok_or_else(|| format!("required flow value {} is not an integer: {}", var_name, value))?;
+                if actual != *expected_value {
+                    return Err(format!("{} should be {}, got {}", var_name, expected_value, actual));
+                }
+                println!("  {} = {} (correct)", var_name, actual);
+            }
+        }
+        ExpectedFlowValues::Strings(expected_values) => {
+            for (var_name, expected_value) in expected_values {
+                let value = flow
+                    .values
+                    .get(var_name)
+                    .ok_or_else(|| format!("required flow value {} is missing", var_name))?;
+                if !FlowData::is_value_loaded(value) {
+                    return Err(format!("required flow value {} is not loaded: {}", var_name, value));
+                }
+                let kind = value
+                    .get("kind")
+                    .and_then(|kind| serde_json::from_value::<codetracer_trace_types::TypeKind>(kind.clone()).ok());
+                if kind != Some(codetracer_trace_types::TypeKind::String) {
+                    return Err(format!("required flow value {} is not a string: {}", var_name, value));
+                }
+                let actual = value
+                    .get("text")
+                    .and_then(|text| text.as_str())
+                    .ok_or_else(|| format!("required flow string {} has invalid text: {}", var_name, value))?;
+                if actual != expected_value {
+                    return Err(format!("{} should be {:?}, got {:?}", var_name, expected_value, actual));
+                }
+                println!("  {} = {:?} (correct)", var_name, actual);
             }
         }
     }

@@ -52,7 +52,7 @@ fn create_solidity_flow_config() -> FlowTestConfig {
         ],
         // `storedResult` and `emit` should not appear as local variables
         excluded_identifiers: vec!["storedResult".to_string(), "Computed".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

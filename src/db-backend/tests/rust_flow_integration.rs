@@ -52,7 +52,7 @@ fn create_rust_flow_config() -> FlowTestConfig {
             "final_result".to_string(),
         ],
         excluded_identifiers: vec!["println".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 
