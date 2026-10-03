@@ -4057,7 +4057,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "e75019940be4722fcaf11f1b239de37adae54f41",
+        "rev": "b464ce17cdf2196e61ccf4ab3e61ed0ee1a70ed2",
         "type": "github"
       },
       "original": {
@@ -4089,7 +4089,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "e13bde4c4a15048ff5e50baa654d3ab743b6d5dd",
+        "rev": "3a8a12825736c84bc8de076056d93fda91ecee70",
         "type": "github"
       },
       "original": {
@@ -4119,7 +4119,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-tui",
-        "rev": "874eee12b51297879f825ae03ed3d456d6cd263a",
+        "rev": "0d98bb438b16d88f41a18379f791e9f21f146ad6",
         "type": "github"
       },
       "original": {
@@ -4288,7 +4288,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-acp",
-        "rev": "adefc2177f8fc76ad1e80f6e9501a818fe518d3d",
+        "rev": "72c85784f1a195707d14e98b12e13cd2065bbe9e",
         "type": "github"
       },
       "original": {
@@ -4303,7 +4303,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-agent-harbor",
-        "rev": "c161688048ad39a790204df98c0cd0ed3655f928",
+        "rev": "6efdbbb3a341d8bfc44a5691db64805d8f2039d3",
         "type": "github"
       },
       "original": {
@@ -4318,7 +4318,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "88e6d7df11aa38a74fede865ccd12fa940bb5b05",
+        "rev": "f113f926315b3a3fa387f80abb1e9294cd937e68",
         "type": "github"
       },
       "original": {
@@ -4365,11 +4365,9 @@
     "nim-everywhere": {
       "flake": false,
       "locked": {
-        "lastModified": 1790724155,
-        "narHash": "sha256-TzPylZdQQWjUGV0K2oo42967jgY7esD/3ggGSdhgTns=",
         "owner": "metacraft-labs",
         "repo": "nim-everywhere",
-        "rev": "7143eb9c748d2ea17c2e5643cacb601e9c76cb05",
+        "rev": "e5655e68fd46b82e28c10c26115b5d6ef1c264b6",
         "type": "github"
       },
       "original": {
@@ -4452,7 +4450,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-pty",
-        "rev": "da5932b60bca2cd395c5e96d8160486c43f702c9",
+        "rev": "2c14f4ecce4f1ac0e572bf509647cce29f90cf91",
         "type": "github"
       },
       "original": {
@@ -4600,7 +4598,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "71f2aae9c68132c5200b78af24f10e7c9575659f",
+        "rev": "3b99d26fd969a48698cf75fc90a8657010c81eec",
         "type": "github"
       },
       "original": {
@@ -4732,7 +4730,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-termctl",
-        "rev": "04aff81426932a47fbcd100d2fb17119bb14ee13",
+        "rev": "2251d7516096019683f04689c11166829c4e14dc",
         "type": "github"
       },
       "original": {
