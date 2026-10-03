@@ -229,17 +229,16 @@ suite "RS-M10 native request panel":
     check fileExists(FixtureContainer)
     let bytes = containerBytes(FixtureContainer)
 
-    # --- the recording declares a span stream ---------------------------
-    # The db-backend's span reader returns "no spans" for a container whose
-    # bit 13 is clear, so a discovery pass that failed to stamp it would show
-    # an empty panel and no error anywhere.  On this path the bit is set by a
-    # length-preserving in-place rewrite AFTER the recording closed, which is
-    # exactly the step that could silently not happen.
+    # --- the recording carries a span stream -----------------------------
+    # Readers find the span stream by the structural presence of
+    # `spans.dat` / `spans.idx`, never by `meta.dat`'s bit-13 hint (trace-format
+    # spec, internal-files.md "Stream-presence flags are a hint, not a gate").
+    # Discovery appends the stream after `meta.dat` was written and leaves the
+    # bit clear, so presence is what this checks.
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    check meta.get().hasSpanStream
     check hasSpanStreamFiles(bytes)
 
     # A ct-mcr recording of a C program carries no source-step streams; the

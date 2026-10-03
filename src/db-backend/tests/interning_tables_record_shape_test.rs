@@ -291,22 +291,6 @@ const NOT_YET_RE_RECORDED: &[(&str, &str)] = &[
         "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
     ),
     (
-        "examples/recordings/mcr/linux-x86_64/trace.ct",
-        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (mcr/linux-x86_64/regenerate.sh)",
-    ),
-    (
-        "examples/recordings/mcr/linux-x86_64/trace-portable.ct",
-        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (mcr/linux-x86_64/regenerate.sh)",
-    ),
-    (
-        "src/db-backend/tests/fixtures/xos/xos_hello.ct",
-        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (src/db-backend/tests/fixtures/xos/rebuild.sh)",
-    ),
-    (
-        "src/tests/gui/tests/request-panel/fixtures/native_nginx/nginx.ct",
-        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (codetracer-native-recorder's just record-request-panel-fixture)",
-    ),
-    (
         "examples/recordings/mcr/windows-x86_64/trace.ct",
         "re-recorded only on Windows in a VS Developer shell (mcr/windows-x86_64/regenerate.ps1)",
     ),
