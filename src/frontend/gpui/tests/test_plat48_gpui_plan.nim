@@ -26,7 +26,7 @@
 ## real recording. A missing prerequisite fails by name.
 
 import std/[json, os, osproc, streams, strtabs, strutils, tables, tempfiles,
-            unittest]
+            unicode, unittest]
 
 import codetracer_embed
 import headless_app/layout_model
@@ -41,7 +41,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 179
+  ExpectedAssertions = 203
+    ## 179 -> 203 at the adversarial review of 2026-10-03: ONE case added
+    ## (`PLAT35-F3`, the horizontal wheel), 24 assertions. The move is
+    ## structural and is stated rather than bumped silently — this file
+    ## carries a literal and the price of a literal is that every move has
+    ## to be accounted for.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -367,6 +372,122 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       let labels = t.attr("data-ct-tabs").split(',')
       if "Scratchpad" in labels: tabs = labels
     ck tabs == @["State", "Scratchpad"]
+
+  test "PLAT35-F3: the horizontal wheel reaches the editor, and the clipped text arrives":
+    # **WHY THIS CASE IS IN THIS FILE AND NOT IN
+    # `test_plat35_editor_scrollbar.nim`.** That suite grades the DECISION and
+    # the DRAWING — `leaves.editorHScrollOf` and the tree `renderEditor`
+    # builds — and `PLAT35-F3`'s closure rested on one thing neither it nor
+    # any other suite could see: the BINDING. The wheel arm
+    # (`main.windowPointer`'s `gekWheel`), the clamp's caller
+    # (`main.scrollEditorColumns`), the redraw (`main.redrawEditorRows`), the
+    # pane width taken from the window's own geometry
+    # (`main.syncEditorViewport`) and the scripted spelling
+    # (`--window-ops=hwheel:<pane>:<columns>`) are all in `gpui/main.nim`,
+    # which is COMPILED by `test_plat35_text_faces.nim` and was ASSERTED OVER
+    # by nothing. This suite drives the shipped binary, so it is the one that
+    # can.
+    #
+    # **AND THE PATH WAS BROKEN WHEN IT WAS ONLY ANNOUNCED.** Measured at the
+    # adversarial review of 2026-10-03: `hwheel` was documented in `--help`
+    # and had its arm in `runWindowOp`, and the argument parser's allow-list
+    # did not carry it, so every `--window-ops=hwheel:…` answered
+    # *"unknown event"* and exited 2. Nothing reddened, because nothing drove
+    # it. That is the §7 shape — a capability that exists in every place
+    # except the one that is used — and this case is what makes it impossible
+    # again: `windowPlan` RAISES on a non-zero exit, so a `hwheel` the parser
+    # refuses fails here by name.
+    #
+    # Nothing here re-derives the arithmetic. The widths come out of the
+    # editor's own `data-ct-editor-scroll` stamp, and the text claim is the
+    # DRAWN text at rest sliced by the offset the plan reports — two readings
+    # of one tree rather than a model of it.
+    let rest = windowPlan("")
+    let metrics = rest.nodesWith("data-ct-editor-scroll")
+    ck metrics.len == 1
+    proc fieldOf(plan: JsonNode; key: string): int =
+      ## One field of `leaves.scrollMetricText`'s `k=v;k=v` stamp.
+      let stamp = plan.nodesWith("data-ct-editor-scroll")[0]
+        .attr("data-ct-editor-scroll")
+      for part in stamp.split(';'):
+        let kv = part.split('=')
+        if kv.len == 2 and kv[0] == key: return parseInt(kv[1])
+      -1
+    proc codeByRow(plan: JsonNode): Table[int, string] =
+      ## Every drawn row's CODE text, by line number.
+      result = initTable[int, string]()
+      for row in plan.nodesWith("data-ct-row"):
+        var code = ""
+        for col in row.nodesWith("data-ct-code-column"):
+          code.add textOf(col)
+        result[parseInt(row.attr("data-ct-row"))] = code
+    proc gutterRunsOf(plan: JsonNode): seq[string] =
+      for lane in plan.nodesWith("data-ct-gutter-lane"):
+        result.add textOf(lane)
+
+    # THE FINDING'S OWN PREMISE, asserted rather than assumed: at this
+    # viewport the drawn content does NOT fit, so there is something to
+    # reach. A layout change that made the editor wide enough reddens here
+    # instead of leaving the rest of this case vacuously true.
+    let maxLeft = rest.fieldOf("maxLeftCols")
+    ck maxLeft > 0
+    ck rest.fieldOf("leftCols") == 0
+    let tracks = rest.nodesWith("data-ct-editor-scrollbar")
+    ck tracks.len == 1
+    ck tracks[0].px("h") == 12
+    ck tracks[0].px("padding_left") == 0
+
+    let atRest = rest.codeByRow()
+    ck atRest.len > 0
+    var widestRow, widestCols = 0
+    for line, code in atRest:
+      if code.runeLen > widestCols:
+        widestCols = code.runeLen
+        widestRow = line
+    ck widestCols > 0
+    # THE STAMP AND THE DRAWN TEXT ARE THE SAME TREE's two readings: the
+    # `codeCols` the editor published is the width of the widest row it
+    # actually drew. A stamp computed from rows other than the drawn ones
+    # fails here, and so does a stamp that is a constant.
+    ck widestCols == rest.fieldOf("codeCols")
+
+    # ONE COLUMN, then HALF WAY: the offset the plan reports is the offset
+    # asked for, and the drawn text is the at-rest text with exactly that
+    # many columns gone.
+    for cols in [1, maxLeft div 2]:
+      let moved = windowPlan("hwheel:editor:" & $cols)
+      ck moved.fieldOf("leftCols") == cols
+      ck moved.codeByRow()[widestRow] ==
+         atRest[widestRow].runeSubstr(cols)
+
+    # PAST THE END: clamped, the last column is INSIDE the pane, and the
+    # thumb is flush against the track's right edge.
+    let last = windowPlan("hwheel:editor:" & $(maxLeft + 100))
+    ck last.fieldOf("leftCols") == maxLeft
+    let tail = atRest[widestRow].runeSubstr(maxLeft)
+    ck last.codeByRow()[widestRow] == tail
+    ck tail.runeLen == widestCols - maxLeft
+    let lastTrack = last.nodesWith("data-ct-editor-scrollbar")[0]
+    let lastThumb = last.nodesWith("data-ct-editor-scrollbar-thumb")[0]
+    ck lastTrack.px("padding_left") ==
+       lastTrack.px("w") - lastThumb.px("w")
+    ck lastTrack.px("padding_left") > 0
+    # THE GUTTER DOES NOT TRAVEL WITH THE CODE, as the desktop's
+    # line-number margin does not.
+    ck gutterRunsOf(last) == gutterRunsOf(rest)
+    ck gutterRunsOf(rest).len > 0
+
+    # BEFORE THE START: clamped the other way, and the tree is the one at
+    # rest rather than a shifted one.
+    let before = windowPlan("hwheel:editor:-5")
+    ck before.fieldOf("leftCols") == 0
+    ck before.codeByRow()[widestRow] == atRest[widestRow]
+
+    # AND IT IS AIMED AT A PANE. A wheel over another pane's centre does
+    # not scroll the editor, so the arm is not "any horizontal wheel".
+    let elsewhere = windowPlan("hwheel:state:" & $maxLeft)
+    ck elsewhere.fieldOf("leftCols") == 0
+    ck elsewhere.codeByRow()[widestRow] == atRest[widestRow]
 
   test "every assertion ran":
     echo "CHECKS: " & $CHECKS

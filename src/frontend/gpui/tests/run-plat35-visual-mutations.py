@@ -133,8 +133,16 @@ ARMS = [
     # ------------------------------------------------------------------
     # THE PANE MUTATION — the milestone's own gate, half one
     # ------------------------------------------------------------------
+    # RE-AIMED 2026-10-03, `PLAT35-F3`. The claim and the mutation are
+    # unchanged; the loop they are aimed at gained an argument.
+    # `renderEditorRow` now takes the horizontal scroll offset, so the call
+    # spans two lines and the old one-line needle occurs ZERO times — which
+    # the needle scan caught by name (`M1.find: occurs 0 time(s)`) rather
+    # than letting the arm run unaimed.
     Arm("M1", LEAVES,
-        "  for i, row in surface.rows:\n    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest))",
+        "  for i, row in surface.rows:\n"
+        "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
+        "                                          scroll.leftCols))",
         "  for i, row in surface.rows:\n    discard row",
         SUITE,
         "stepped-editor / editor-row-count",

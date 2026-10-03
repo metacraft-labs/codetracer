@@ -148,6 +148,9 @@ OPTIONS:
                       drag:<pane>:top (its tab to the top margin)
                       hold:<pane>:<over> (its tab dragged over another
                       pane's centre, not released)
+                      hwheel:<pane>:<columns> (PLAT35-F3: a horizontal
+                      wheel over a pane's centre, the delta in editor
+                      columns; the editor scrolls, clamped to its content)
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
   --quit-after-ms=<n>
@@ -405,10 +408,20 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
           message: "codetracer-gpui: --window-ops needs at least one event")
       for op in spec.split(','):
         let head = op.split(':')[0]
+        # `PLAT35-F3`: `hwheel` BELONGS IN THIS LIST AND WAS LEFT OUT OF IT.
+        # Found at adversarial review 2026-10-03, measured rather than read:
+        # `--report-window-plan --window-ops=hwheel:editor:43` answered
+        # *"codetracer-gpui: --window-ops: unknown event 'hwheel:editor:43'"*
+        # and exited 2, while `--help` documented the op and `runWindowOp` had
+        # its arm. **This list is a SECOND spelling of `runWindowOp`'s own
+        # `case` and that is what §30 is about** — two copies of one set, and
+        # the copy nothing exercised was the wrong one. The op is now driven
+        # by `test_plat48_gpui_plan.nim`, so an arm added to one and not the
+        # other reddens by name instead of being discovered by hand.
         if head notin ["key", "press", "move", "release", "menu", "control",
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
-                       "tab-add"]:
+                       "tab-add", "hwheel"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -582,6 +595,20 @@ var
   editPane: GpuiElement = nil
     ## The editor leaf's element — the one the arm redraws and the keys reach.
   editViewportRows = 0
+  gEditorSurface: EditorSurface
+    ## **The surface the editor pane was last drawn from** (`PLAT35-F3`).
+    ## Kept so a horizontal scroll can draw the rows again without rebuilding
+    ## the surface from the session — a second derivation of one value is
+    ## what §30 is about, and in Edit mode there is no session to rebuild it
+    ## from at all.
+  gEditorViewportPx = 0
+    ## The editor pane's inner width, from the window's own geometry
+    ## (`window_geometry.editorBodyWidthOf`). Zero until a window has been
+    ## laid out, which is exactly the state in which no scrollbar is drawn.
+  gEditorScrollCols = 0
+    ## How far right the editor's code is scrolled, in columns. Clamped by
+    ## `leaves.editorHScrollOf` and never here, so the clamp a suite grades
+    ## is the clamp the window uses.
   pendingOutcome: LeafRenderOutcome
     ## The leaf tree, built BEFORE `gpui_launch` so `--report-plan` and the
     ## window path derive from one render rather than two.
@@ -742,8 +769,9 @@ proc redrawEditor() =
                 isHeading(nthChild(editPane, 0)): 1 else: 0
   while childCount(editPane) > keep:
     r.removeChild(editPane, nthChild(editPane, childCount(editPane) - 1))
+  gEditorSurface = openArm.surfaceOf(editViewportRows)
   discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
-                       openArm.surfaceOf(editViewportRows))
+                       gEditorSurface, gEditorViewportPx, gEditorScrollCols)
   noteEditorTab(r, editorTabLabel(openArm.path, openArm.isDirty))
   applyTextFaces(r, editPane)
 
@@ -1370,6 +1398,59 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
                $page.total)
   redrawCalltrace(r)
 
+proc redrawEditorRows(r: GpuiRenderer) =
+  ## `PLAT35-F3`. Draw the editor pane's body again from the surface it was
+  ## last drawn from, at the window's CURRENT width and horizontal scroll.
+  ##
+  ## The same shape as `redrawEditor` (the edit arm's) and for its reason:
+  ## everything after the heading is removed and handed back to
+  ## `leaves.renderEditor`, the function that drew it the first time, so the
+  ## after-scroll tree is the same derivation as the before-scroll one.
+  let pane = gPanes.getOrDefault($paneEditor)
+  if pane.isNil or gEditorSurface.rows.len == 0:
+    return
+  let keep = if childCount(pane) > 0 and isHeading(nthChild(pane, 0)): 1
+             else: 0
+  while childCount(pane) > keep:
+    r.removeChild(pane, nthChild(pane, childCount(pane) - 1))
+  discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
+                       gEditorSurface, gEditorViewportPx, gEditorScrollCols)
+  applyTextFaces(r, pane)
+
+proc syncEditorViewport(r: GpuiRenderer) =
+  ## `PLAT35-F3`. Take the editor pane's inner width from the geometry the
+  ## window was just drawn at, and redraw the pane if it moved.
+  ##
+  ## **IT IS READ FROM `gGeom` AND NOT FROM THE COMMAND LINE**, which is the
+  ## difference between a scrollbar that is right once and one that stays
+  ## right: a divider drag changes the pane's width without changing the
+  ## window's, and a pane that got wider may no longer have anything off its
+  ## edge.
+  if gGeom.tabsNodeOfPane($paneEditor) < 0:
+    return
+  let w = editorBodyWidthOf(gGeom)
+  if w == gEditorViewportPx:
+    return
+  gEditorViewportPx = w
+  redrawEditorRows(r)
+
+proc scrollEditorColumns(r: GpuiRenderer; cols: int) =
+  ## `PLAT35-F3`. Scroll the editor's code `cols` columns right (negative:
+  ## left), and draw it again. **The clamp is not here** — `editorHScrollOf`
+  ## owns it, and asking it is how this learns whether the move changed
+  ## anything at all.
+  if cols == 0 or gEditorSurface.rows.len == 0:
+    return
+  let scroll = editorHScrollOf(gEditorSurface.rows,
+                               editorNumberWidth(gEditorSurface.rows),
+                               gEditorViewportPx, gEditorScrollCols + cols)
+  if scroll.leftCols == gEditorScrollCols:
+    return
+  gEditorScrollCols = scroll.leftCols
+  traceGesture("editor-hscroll leftCols=" & $gEditorScrollCols & " of " &
+               $scroll.maxLeftCols)
+  redrawEditorRows(r)
+
 proc refreshReplayWindow(r: GpuiRenderer)
   ## Forward-declared for `clickCalltrace`; defined beside the controls.
 
@@ -1432,7 +1513,7 @@ proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   true
 
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
-                   dy = 0.0) =
+                   dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
   ## listener (`pointerHandler`) and `--window-ops` (the plan's scripted
   ## pointer) both call this, so a scripted press is the press a user makes.
@@ -1466,10 +1547,20 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if not gGestures.revealing:
       gAutoHide.overlayClosed()
   of gekWheel:
-    if gGeom.activePaneAt(x, y) == $paneCalltrace:
+    let onPane = gGeom.activePaneAt(x, y)
+    if onPane == $paneCalltrace:
       # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
       # (scroll down) moves the content up, a negative `dy`.
       scrollCalltrace(r, int(round(-dy / float(CalltraceRowPx))))
+    elif onPane == $paneEditor and dx != 0.0:
+      # `PLAT35-F3`. **THE EDITOR SCROLLS SIDEWAYS, and this is the half that
+      # makes the clipped text reachable rather than merely announced.** The
+      # sign convention is the call trace's one line up — the delta is the
+      # CONTENT's motion, so content moving left is the view moving right.
+      # `dx` is the shim's own (`input.rs` spells a wheel `"x,y,dx,dy"`); it
+      # was parsed into `GpuiPointer` and dropped on the floor here until
+      # this line, which is why no horizontal gesture reached any pane.
+      scrollEditorColumns(r, int(round(-dx / EditorColumnPx)))
     return
   else:
     return
@@ -1483,7 +1574,7 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
     let p = pointerOf(ev)
     if not p.valid:
       return
-    windowPointer(r0, ev.kind, int(p.x), int(p.y), p.dy)
+    windowPointer(r0, ev.kind, int(p.x), int(p.y), p.dy, p.dx)
 
 proc windowKey(key: string; mods: seq[string]) =
   ## One key of a replay window, from its `keydown` listener or from
@@ -2007,7 +2098,13 @@ proc refreshReplayWindow(r: GpuiRenderer) =
     # No heading in the window (PLAT-49): every child is the editor's own.
     while childCount(editor) > 0:
       r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
-    discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface)
+    # `PLAT35-F3`. The horizontal scroll is RESET by a move, as Monaco's is:
+    # the debugger put a new line under the cursor and leaving the view 40
+    # columns right of it would hide the line the move was about.
+    gEditorSurface = surface
+    gEditorScrollCols = 0
+    discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface,
+                         gEditorViewportPx, gEditorScrollCols)
     noteEditorTab(r, editorTabLabel(surface.path, false))
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin != paneEditor:
@@ -2673,6 +2770,13 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   armPointer(r, root)
 
   r.appendChild(root, container)
+  # `PLAT35-F3`. **AFTER the arrangement and BEFORE the faces**: the editor
+  # pane's width is only known once `drawArrangement` has run, and a pane
+  # this redraws produces new elements that `applyTextFaces` below still has
+  # to reach — an editor re-drawn after the walk would keep the window's
+  # inherited proportional face, which is the defect that walk exists
+  # against.
+  syncEditorViewport(r)
   drawTopBar(r)
   # PLAT-35. LAST, over the WHOLE window, because `drawArrangement` has by
   # now moved the leaves out of `container` and into the arrangement's own
@@ -2797,6 +2901,19 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
+    of "hwheel":
+      # `PLAT35-F3`. `hwheel:<pane>:<columns>` — a horizontal wheel over a
+      # named pane, aimed at the pane's own centre from the geometry the
+      # window drew, with the delta spelled in COLUMNS so a reader of the op
+      # and a reader of the drawn rows are counting the same thing. It goes
+      # through `windowPointer` like every other scripted event, so what it
+      # exercises is the handler a real wheel reaches.
+      let i = gGeom.tabsNodeOfPane(parts[1])
+      if i < 0:
+        return "no pane box holds '" & parts[1] & "'"
+      let (cx, cy) = centreOf(gGeom.nodes[i].body)
+      windowPointer(r, gekWheel, cx, cy, 0.0,
+                    -float(at(2)) * EditorColumnPx)
     of "menu":
       # PLAT-49: the desktop's menu — press the root button (when the menu
       # is not open), then the first-level item `parts[1]` in its popover,
@@ -3062,6 +3179,19 @@ proc editorRowsFor(layout: Layout; viewport: DockViewport;
                                  else: proj.state),
                                 cmd.width, cmd.height, GpuiTopBandPx))
 
+proc editorBodyWidthFor(layout: Layout; viewport: DockViewport;
+                        cmd: GpuiCommand): int =
+  ## `PLAT35-F3`. How wide the editor pane's content area is, BEFORE the
+  ## window has been laid out — the same `windowGeometryOf` the chrome pass
+  ## will compute, over the same inputs, so the first frame's scrollbar and
+  ## every later one are decided from one rectangle. Written beside
+  ## `editorRowsFor` and in the same shape for that reason.
+  let proj = projectDock(layout, viewport)
+  editorBodyWidthOf(windowGeometryOf(layout,
+                                     (if proj.status == dpsRefused: nil
+                                      else: proj.state),
+                                     cmd.width, cmd.height, GpuiTopBandPx))
+
 proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
   ## PLAT-22. **Edit mode's surface: the WORKING TREE, and no recording.**
   ##
@@ -3158,7 +3288,12 @@ proc runEdit(cmd: GpuiCommand): int =
   # PLAT-47 deliverable 4: in Edit mode the VCS pane shows the project.
   if editProjectProblem(cmd.traceFolder).len == 0:
     attachVcs(leafSet, cmd.traceFolder)
-  let drawn = renderLeaves(r, leafSet, surface)
+  # `PLAT35-F3`: the editor pane's inner width, from the geometry this
+  # window is about to be laid out at.
+  gEditorSurface = surface
+  gEditorViewportPx = editorBodyWidthFor(
+    initLayout(sharedEditLayout().tree), shell.viewport, cmd)
+  let drawn = renderLeaves(r, leafSet, surface, gEditorViewportPx)
   editPane = findEditorPane(drawn.root)
   # PLAT-47 part B: the window's gestures act on this shell; edit mode opens
   # its shared default and remembers nothing (PLAT-45).
@@ -3457,7 +3592,14 @@ proc runOpen(cmd: GpuiCommand): int =
   # from the repository the desktop would show for a replay — the process's
   # working directory.
   attachVcs(leafSet, getCurrentDir())
-  let drawn = renderLeaves(r, leafSet, surface)
+  # `PLAT35-F3`: the editor pane's inner width, from the geometry this
+  # window is about to be laid out at — the same reading `editorRowsFor`
+  # takes for the row count, over the same layout.
+  gEditorSurface = surface
+  gEditorViewportPx = editorBodyWidthFor(
+    shell.windows.windows[shell.windows.indexOf(windowId)].layout,
+    shell.viewport, cmd)
+  let drawn = renderLeaves(r, leafSet, surface, gEditorViewportPx)
   # PLAT-47 part B: what the window's gestures and the call trace's paging
   # act on. A rearrangement is remembered on the terms `--layout-ops` is:
   # never over a quarantined file, and not for a session opened from a named

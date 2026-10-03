@@ -351,14 +351,19 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
   discard slot.activatePane(paneDebugControls)
 
   # The rows the window's editor pane shows (`window_geometry.editorRowsOf`),
-  # as the shipped window asks for them.
-  let editorRows = block:
+  # as the shipped window asks for them — and, `PLAT35-F3`, how WIDE that
+  # pane is. Both come off one geometry, as they do in `main.nim`: a tree
+  # drawn here without the width would carry no horizontal scrollbar while
+  # the window's carries one, and this suite's whole claim is that the two
+  # are one tree.
+  let editorGeom = block:
     let idx = shell.windows.indexOf(windowId)
     let proj = shell.projectionFor(windowId)
-    editorRowsOf(windowGeometryOf(shell.windows.windows[idx].layout,
-                                  (if proj.status == dpsRefused: nil
-                                   else: proj.state),
-                                  viewport.width, viewport.height))
+    windowGeometryOf(shell.windows.windows[idx].layout,
+                     (if proj.status == dpsRefused: nil else: proj.state),
+                     viewport.width, viewport.height)
+  let editorRows = editorRowsOf(editorGeom)
+  let editorWidthPx = editorBodyWidthOf(editorGeom)
   let sourceService = newGpuiSourceService(session, trace, editorRows)
   defer: sourceService.close()
   sourceService.serveWindow()
@@ -390,7 +395,7 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
   resetCallbacks()
   var r: GpuiRenderer
   let leafSet = shell.leavesFor(windowId)
-  let drawn = renderLeaves(r, leafSet, surface)
+  let drawn = renderLeaves(r, leafSet, surface, editorWidthPx)
   doAssert leafPlanIsValid(r, drawn),
     "the GPUI render plan did not verify for scenario " & sc.id
 

@@ -571,6 +571,26 @@ proc editorRowsOf*(g: WindowGeometry): int =
   let h = if i >= 0: g.nodes[i].body.h else: g.inner.h
   max(1, (h - 2 * ChromePaddingPx - EditorLinesAbovePx) div GpuiEditorRowPx)
 
+proc editorBodyWidthOf*(g: WindowGeometry): int =
+  ## **How wide the editor pane's CONTENT area is**: its body, less the
+  ## padding `main.stylePaneBox` puts inside it. `editorRowsOf`'s companion,
+  ## written the same way and against the same node, because the two answers
+  ## have to come from one rectangle — a scrollbar that said the content
+  ## overflowed a width the pane does not have would be worse than no
+  ## scrollbar.
+  ##
+  ## `PLAT35-F3`: this is what `leaves.renderEditor` compares the drawn
+  ## content against to decide whether to draw a horizontal scrollbar.
+  ##
+  ## **CHECKED AGAINST THE FRAMES, not only against the arithmetic.** The
+  ## editor pane's ground measures 466 px wide at 1920x1080 and 346 px at
+  ## 1440x900 on `build/plat35/gpui/*.png`, and the rightmost ink on any row
+  ## sits at exactly 10 px inside the right edge (853 of 863, 637 of 647) —
+  ## which is `ChromePaddingPx`, and is why it is subtracted twice here.
+  let i = g.tabsNodeOfPane("editor")
+  let w = if i >= 0: g.nodes[i].body.w else: g.inner.w
+  max(1, w - 2 * ChromePaddingPx)
+
 # ---------------------------------------------------------------------------
 # §5 obligation 2, first direction: PIXELS -> `LayoutPointer`
 # ---------------------------------------------------------------------------
