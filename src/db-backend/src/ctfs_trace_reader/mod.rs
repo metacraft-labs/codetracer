@@ -1426,18 +1426,28 @@ impl CTFSTraceReader {
                     tables.types.len(),
                     tables.variable_names.len(),
                 );
-                if tables.line_lengths.iter().any(|lls| !lls.is_empty()) {
-                    let files_with_tables = tables.line_lengths.iter().filter(|lls| !lls.is_empty()).count();
+                if tables.file_tables.iter().any(Option::is_some) {
+                    let files_with_tables = tables.file_tables.iter().filter(|t| t.is_some()).count();
+                    // A path whose record states no table occupies no
+                    // positions, which an empty per-line table expresses.
                     let decoder =
-                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_line_lengths(
-                            tables.line_lengths.clone(),
+                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_file_tables(
+                            tables
+                                .file_tables
+                                .iter()
+                                .map(|t| {
+                                    t.clone().unwrap_or(
+                                        codetracer_trace_reader::global_position_decoder::FileTable::Lines(Vec::new()),
+                                    )
+                                })
+                                .collect(),
                         );
                     info!(
                         "CTFS pure-Rust reader: column-aware container — global_position_index decoder built \
                          from {} of {} paths' Layout A line tables ({} addressable positions); steps decode to \
                          (file, line, column)",
                         files_with_tables,
-                        tables.line_lengths.len(),
+                        tables.file_tables.len(),
                         decoder.total_positions(),
                     );
                     position_decoder = Some(std::sync::Arc::new(decoder));
@@ -2319,33 +2329,42 @@ impl CTFSTraceReader {
         // bit-for-bit identical to pre-extension behaviour.
         let position_decoder: Option<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder> =
             if column_aware {
+                use codetracer_trace_reader::global_position_decoder::FileTable;
+                use codetracer_trace_writer_nim::PathTableKind;
                 let path_total = reader.path_count();
-                let mut per_file: Vec<Vec<u32>> = Vec::with_capacity(path_total as usize);
+                let mut per_file: Vec<FileTable> = Vec::with_capacity(path_total as usize);
                 let mut any_with_lines = false;
                 for fid in 0..path_total {
-                    let line_count = reader.line_count_raw(fid);
-                    let mut lls: Vec<u32> = Vec::with_capacity(line_count as usize);
-                    for li in 0..line_count {
-                        match reader.line_length_raw(fid, li as u32) {
-                            Some(v) => lls.push(v),
-                            None => {
-                                // Should not happen because `line_count_raw`
-                                // returns the exact populated length, but
-                                // be defensive: a missing entry leaves a
-                                // zero-byte line which the decoder treats
-                                // as a no-op slot.
-                                lls.push(0);
+                    let table = match reader.path_table_kind(fid) {
+                        // The conventional table is held as its rule; the
+                        // reader's per-line answers for it are never read.
+                        Some(PathTableKind::Conventional) => FileTable::Conventional,
+                        Some(PathTableKind::Lines) => {
+                            let line_count = reader.line_count_raw(fid);
+                            let mut lls: Vec<u32> = Vec::with_capacity(line_count as usize);
+                            for li in 0..line_count {
+                                // `line_count_raw` is the exact populated
+                                // length, so a missing entry is not expected;
+                                // a zero-length line is the decoder's no-op
+                                // slot if it happens.
+                                lls.push(reader.line_length_raw(fid, li as u32).unwrap_or(0));
                             }
+                            FileTable::Lines(lls)
                         }
-                    }
-                    if !lls.is_empty() {
+                        // No column-aware table: the file occupies no
+                        // positions.
+                        Some(PathTableKind::Bare) | Some(PathTableKind::LineCount) | None => {
+                            FileTable::Lines(Vec::new())
+                        }
+                    };
+                    if table != FileTable::Lines(Vec::new()) {
                         any_with_lines = true;
                     }
-                    per_file.push(lls);
+                    per_file.push(table);
                 }
                 if any_with_lines {
                     Some(
-                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_line_lengths(
+                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_file_tables(
                             per_file,
                         ),
                     )
