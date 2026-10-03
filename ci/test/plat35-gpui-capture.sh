@@ -143,6 +143,15 @@ mkdir -p "${OUT}"
 # stopped early cannot pass — the two-sidedness both of PLAT-35's existing
 # readers already have. The viewport comes out of the same file, so a lane
 # that captured everything at one size could not claim the matrix.
+#
+# **AND THE `gpuiProbes` AFTER THEM, SEPARATELY COUNTED.** They are this
+# front-end's own probes — `scenarios.json`'s comment carries the measurement
+# for why an unstepped breakpoint case is a probe and not a seventh scenario,
+# and `gpui/tests/test_plat35_gutter_lanes.nim` is what stops the array being
+# emptied. They are read with the SAME parser, against the SAME closed
+# operation vocabulary and the SAME viewport table, so a probe cannot drift
+# into a shape no driver can perform; and `expectedGpuiProbes` is asserted
+# against the parsed length exactly as `expectedScenarios` is.
 SPEC="${OUT}/scenarios.tsv"
 python3 - "${SCENARIOS}" "${SPEC}" <<'PY' || fail "the scenario set did not parse"
 import json, sys
@@ -151,13 +160,26 @@ scenarios = doc["scenarios"]
 if len(scenarios) != doc["expectedScenarios"]:
     sys.exit(f"FAIL: scenarios.json declares {doc['expectedScenarios']} "
              f"scenarios and holds {len(scenarios)}")
+probes = doc.get("gpuiProbes", [])
+if len(probes) != doc.get("expectedGpuiProbes", 0):
+    sys.exit(f"FAIL: scenarios.json declares {doc.get('expectedGpuiProbes')} "
+             f"GPUI probes and holds {len(probes)}")
 kinds = set(doc["operationKinds"])
 viewports = doc["viewports"]
 if len(viewports) != doc["expectedViewports"]:
     sys.exit(f"FAIL: scenarios.json declares {doc['expectedViewports']} "
              f"viewports and holds {len(viewports)}")
+# A PROBE MAY NOT WEAR A SCENARIO'S NAME. The per-view PNG path is the file
+# name, so a probe sharing a view with one of the six would overwrite that
+# frame and the lane would still report `OK: 7 of 7`.
+names = {sc["view"] for sc in scenarios}
+ids = {sc["id"] for sc in scenarios}
+for pr in probes:
+    if pr["view"] in names or pr["id"] in ids:
+        sys.exit(f"FAIL: probe {pr['id']}/{pr['view']} collides with one of "
+                 f"the six pinned scenarios")
 rows = []
-for sc in scenarios:
+for sc in scenarios + probes:
     terms = []
     for op in sc["operations"]:
         kind = op["kind"]
@@ -170,8 +192,8 @@ for sc in scenarios:
     rows.append("\t".join([sc["id"], sc["view"], str(vp["width"]),
                            str(vp["height"]), ",".join(terms)]))
 open(sys.argv[2], "w").write("\n".join(rows) + "\n")
-print(f"scenarios.json: {len(scenarios)} scenarios, {len(kinds)} operation "
-      f"kinds, {len(viewports)} viewports")
+print(f"scenarios.json: {len(scenarios)} scenarios, {len(probes)} GPUI "
+      f"probe(s), {len(kinds)} operation kinds, {len(viewports)} viewports")
 PY
 
 # ---------------------------------------------------------------------------
@@ -282,7 +304,8 @@ expected="$(python3 -c "
 import json,sys
 doc=json.load(open(sys.argv[1]))
 only=sys.argv[2]
-print(sum(1 for s in doc['scenarios'] if not only or s['view']==only))
+every=doc['scenarios'] + doc.get('gpuiProbes', [])
+print(sum(1 for s in every if not only or s['view']==only))
 " "${SCENARIOS}" "${ONLY}")"
 # THE POPULATION, NOT THE PROPERTY (§34). The realised count is asserted
 # against the scenario set's own cardinality, read off the runs that happened.

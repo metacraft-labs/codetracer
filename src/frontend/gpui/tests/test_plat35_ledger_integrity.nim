@@ -30,6 +30,14 @@
 ## two-copies rule: a record cross-checked only against its own fields cannot
 ## fail).
 ##
+## **AND, SINCE 2026-10-03, THE `resolved` SET.** Until then it was checked
+## for nothing but id-disjointness, which the ledger's own `gate.note` had
+## already identified as the one edit that lowers both counts and reddens
+## nothing: move an entry from `findings` to `resolved` and the gate improves
+## for free. A closure now has to carry a closed-set severity, substantial
+## text, a `remedy` and a `confirmedBy` — what was changed, and what was
+## measured afterwards. See that case for what is deliberately NOT required.
+##
 ## **NOT GATED: any READING'S SCORE, and nothing here quarantines a reading.**
 ## That is the distinction `tier4-review.json` got wrong in the opposite
 ## direction and the status note explains: ten of these twelve readings score
@@ -107,6 +115,20 @@ proc severityCount(findings: JsonNode; severity: string): int =
     if f{"severity"}.getStr == severity:
       inc result
 
+proc flatText(n: JsonNode): string =
+  ## A field that is either a string or an array of lines, as one string.
+  ## The ledger writes both spellings — `PLAT35-F15.remedy` is a string,
+  ## `PLAT35-C1.remedy` is an array — and a check that only understood one of
+  ## them would pass an entry by accident of formatting.
+  if n.isNil: return ""
+  case n.kind
+  of JString: n.getStr.strip()
+  of JArray:
+    var parts: seq[string] = @[]
+    for e in n: parts.add flatText(e)
+    parts.join(" ").strip()
+  else: ""
+
 let ledger = parseJson(readFile(requireFile(LedgerRel,
   "It is PLAT-35's tier-4 ledger, written by the review iterations.")))
 let scenarios = parseJson(readFile(requireFile(ScenariosRel,
@@ -176,6 +198,41 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     for f in findings:
       ck f{"id"}.getStr notin resolvedIds
 
+  test "every RESOLVED entry carries evidence, not just an id":
+    # **THE GAP THIS SUITE WAS FOUND TO HAVE, 2026-10-03, CLOSED.** The ledger
+    # said it of itself: *"it checks the shape of the UNRESOLVED set only.
+    # `resolved` entries are checked for nothing but id-disjointness — no
+    # owner, no closed-set severity, no text floor — so moving an entry from
+    # `findings` to `resolved` is the one edit that lowers both counts and
+    # reddens nothing."* That is the only way this gate could be satisfied by
+    # a deletion dressed as a fix, and the PLAT35-F13 / PLAT35-F14 pass is the
+    # first one to move an entry across, so it is the pass that closes it.
+    #
+    # WHAT IS REQUIRED, AND WHY EACH: a closed-set severity and a text floor,
+    # so a closure cannot be a stub; a `remedy`, so the entry says what was
+    # changed; and a `confirmedBy`, so it says what was MEASURED afterwards.
+    # A closure with a remedy and no confirmation is the shape
+    # `Verification-Harness-Traps` §39 is about — an expectation re-recorded
+    # without a re-grade.
+    #
+    # NOT REQUIRED: an `owner`. An unresolved finding needs one because the
+    # ungated-score argument rests on it; a closed one has no owner left to
+    # name, and none of the five entries closed before today carries one.
+    let resolved = ledger{"resolved"}
+    # §4: the floor is over a population, so the population is asserted.
+    ck resolved.len > 0
+    var resolvedIds = initHashSet[string]()
+    for r in resolved:
+      let id = r{"id"}.getStr
+      ck id.len > 0
+      ck id notin resolvedIds
+      resolvedIds.incl id
+      ck r{"severity"}.getStr in Severities
+      ck r{"finding"}.getStr.strip().len >= MinFindingTextLen
+      ck flatText(r{"remedy"}).len >= MinFindingTextLen
+      ck flatText(r{"confirmedBy"}).len >= MinFindingTextLen
+    ck resolvedIds.len == resolved.len
+
   test "gate.met is false IFF those counts are non-zero — both directions":
     let p1 = severityCount(findings, "P1")
     let p2 = severityCount(findings, "P2")
@@ -227,9 +284,12 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     # a function of the two POPULATIONS, so it is written as that function and
     # never needs bumping:
     #
-    #   16                     the fixed assertions in the six cases
+    #   18                     the fixed assertions in the seven cases
     #   + 6 x findings         5 per finding in *"every finding carries…"*
     #                          plus 1 per finding in the resolved-disjoint loop
+    #   + 6 x resolved         6 per entry in *"every RESOLVED entry carries
+    #                          evidence"* (id, uniqueness, severity, finding,
+    #                          remedy, confirmedBy)
     #   + iterations x (3 + 4 x scenarios)
     #                          2 + 1 fixed per iteration, 4 per reading
     #
@@ -238,7 +298,7 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     # the only thing the number is for. A floor would have lost the second
     # property; a literal would have lost the first.
     let expected = expectedScenarioCount(scenarios)
-    let derived = 16 + 6 * findings.len +
+    let derived = 18 + 6 * findings.len + 6 * ledger{"resolved"}.len +
                   iterations.len * (3 + 4 * expected)
     # `ck` INCREMENTS AND THEN CHECKS, so the echo goes AFTER it or it prints
     # one less than the number being compared — which is exactly the kind of
@@ -247,4 +307,5 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     ck countedAssertions == derived
     echo "PLAT-35 ledger-integrity checks: ", countedAssertions,
          " (derived ", derived, " from ", findings.len, " finding(s), ",
+         ledger{"resolved"}.len, " resolved, ",
          iterations.len, " iteration(s) x ", expected, " scenario(s))"
