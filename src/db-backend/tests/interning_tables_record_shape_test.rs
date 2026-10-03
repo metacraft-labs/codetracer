@@ -240,7 +240,8 @@ fn structured_records_decode_alike_whatever_bit_12_says() {
 }
 
 /// Committed recordings that predate the current container version and whose
-/// documented producer cannot run on a Linux x86_64 host, with the reason.
+/// documented producer needs a device or host this suite does not assume, with
+/// the reason.
 /// Each must still fail, and only with the container-version refusal; one that
 /// opens fails the test so its entry is removed rather than left to hide a
 /// later regression.
@@ -268,6 +269,42 @@ const NOT_YET_RE_RECORDED: &[(&str, &str)] = &[
     (
         "examples/recordings/mcr/macos-arm64/trace-portable.ct",
         "exported from macos-arm64/trace.ct, which must be re-recorded first",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/emulator/eme5/null_main.ct",
+        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/emulator/eme5/one_puts.ct",
+        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/emulator/eme5_inject/one_write.ct",
+        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/emulator/eme5_predyld/one_write.ct",
+        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
+    ),
+    (
+        "examples/recordings/mcr/macos-arm64/emulator/eme_m9c_2006/one_write.ct",
+        "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
+    ),
+    (
+        "examples/recordings/mcr/linux-x86_64/trace.ct",
+        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (mcr/linux-x86_64/regenerate.sh)",
+    ),
+    (
+        "examples/recordings/mcr/linux-x86_64/trace-portable.ct",
+        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (mcr/linux-x86_64/regenerate.sh)",
+    ),
+    (
+        "src/db-backend/tests/fixtures/xos/xos_hello.ct",
+        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (src/db-backend/tests/fixtures/xos/rebuild.sh)",
+    ),
+    (
+        "src/tests/gui/tests/request-panel/fixtures/native_nginx/nginx.ct",
+        "re-recorded only by ct-mcr on a host with CPUID faulting (Intel, or AMD Zen 4 and later); the recorder refuses on hosts without it (codetracer-native-recorder's just record-request-panel-fixture)",
     ),
     (
         "examples/recordings/mcr/windows-x86_64/trace.ct",

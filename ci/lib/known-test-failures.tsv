@@ -128,3 +128,15 @@ vm-native	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor falls
 
 vm-js	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor emits ct/load-step-lines with location + count	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
 vm-js	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor falls back to default panel height when unset	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
+
+# ---------------------------------------------------------------------------
+# THE NATIVE REQUEST-PANEL FIXTURE, 2026-10-03.
+#
+# `request-panel/fixtures/native_nginx/nginx.ct` is a container version 4
+# recording, which the 2026-10 readers refuse. Its producer is ct-mcr
+# (`just record-request-panel-fixture` in codetracer-native-recorder), and
+# ct-mcr records only on a host with CPUID faulting (Intel, or AMD Zen 4 and
+# later); it refuses on hosts without it. Re-record it there and delete both
+# rows.
+vm-native	src/tests/gui/tests/request-panel/native_request_panel_vm_test.nim	vm_native_request_panel_rows	CTFS container version 4 is not supported
+vm-native	src/tests/gui/tests/request-panel/request_span_conformance_test.nim	request_span_conformance_all_languages	[native] meta.dat: unreadable: CTFS container version 4 is not supported
