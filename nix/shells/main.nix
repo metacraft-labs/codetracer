@@ -184,6 +184,13 @@ mkShell {
       ${preCommit.installationScript}
     fi
 
+    # The installer moves each Reprobuild hook dispatcher aside to
+    # `<hook>.legacy` and takes its slot; put the dispatchers back and chain the
+    # pre-commit shim as `<hook>.repro-local` (see the script).
+    if [ -n "$ROOT_PATH" ]; then
+      bash "$ROOT_PATH/ci/dev/reclaim-hook-dispatchers.sh" || true
+    fi
+
     # The installer above ends by writing the RELATIVE `core.hooksPath=.git/hooks`
     # into the config every worktree shares; in a linked worktree that path names
     # nothing, so git silently runs no hooks there. `anchor` repairs that value

@@ -541,6 +541,12 @@ lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
 lint_step "contract suite: core.hooksPath is never left relative" \
 	bash ci/test/git-hooks-path-test.sh
 
+# And: installing the pre-commit hooks must leave Reprobuild's dispatchers in
+# their slots, chaining pre-commit, rather than displacing them. Real commits
+# in mktemp repositories; pure bash + git.
+lint_step "contract suite: the dev shell keeps Reprobuild's hook dispatchers" \
+	bash ci/test/reclaim-hook-dispatchers-test.sh
+
 # The non-Nix leg of the same hooks (ci/dev/portable-pre-commit.py): what native
 # Windows runs at commit time instead of the /nix/store pre-commit shim it cannot
 # execute. Registered here because nothing else runs it -- the hosts it serves
