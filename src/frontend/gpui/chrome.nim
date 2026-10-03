@@ -162,9 +162,11 @@ const
     ## (`total = add(total, i)` glyph widths vary); columns do not line up"*,
     ## and *"the `▶` on line 6 displaces the `6` rightward, so numbers 2/6/10
     ## each sit at a different x"*. The gutter's lanes are fixed-WIDTH in
-    ## characters (`gutterText` is `<padding><pointer><mark><number><gap>`,
-    ## every lane one glyph), which aligns the numbers in a monospaced face
-    ## and in no other.
+    ## characters (`gutterText` is
+    ## `<pointer><mark><lane gap><right-aligned number><gap>` since 2026-10-03
+    ## — `<padding><pointer><mark><number><gap>` before that, which is
+    ## `PLAT35-F14`; every lane is still one glyph), which aligns the numbers
+    ## in a monospaced face and in no other.
     ##
     ## Each value is `WindowFontFamily`'s own monospace sibling on its
     ## platform, so the two faces come from one family and a host that has
@@ -177,17 +179,47 @@ const
     ## titles and variable names"* — which is also `gpuiMetricFor`'s table,
     ## already written and until now unapplied.
     ##
-    ## **THE FALSE SENTENCE IS STILL IN `app/leaves.nim` AND THAT IS A STATED
-    ## RESIDUE RATHER THAN AN OVERSIGHT.** `run-plat20-mutations.py`,
+    ## **THE FALSE SENTENCE IS NOW CORRECTED IN `app/leaves.nim`, 2026-10-03,
+    ## AND THE COUNT THIS PARAGRAPH CARRIED WAS WRONG — AS WAS THE FIRST
+    ## CORRECTION OF IT.** It said that `run-plat20-mutations.py`,
     ## `run-plat21-mutations.py`, `run-plat22-mutations.py` and
-    ## `run-plat35-visual-mutations.py` each digest that file byte-for-byte
-    ## into a `*-control.sha256`, so editing the comment — a comment — moves
-    ## four control digests and each harness then has to be RE-GRADED before
-    ## its digest may be re-recorded (PLAT-47 B1's own precedent). Recording
-    ## a digest without re-grading is `Verification-Harness-Traps` §39. So
-    ## the correction lives here, quoting what it refutes, and PLAT-35's
-    ## status names `GutterGap`'s parenthesis as the line to fix in the pass
-    ## that next re-grades those four.
+    ## `run-plat35-visual-mutations.py` each digest `app/leaves.nim`
+    ## byte-for-byte into a `*-control.sha256`, so editing the comment moved
+    ## FOUR digests. A first correction read only the harnesses under
+    ## `src/frontend/gpui/tests/` and said THREE. Measured at review on
+    ## 2026-10-03 against `c05d8443a`, by parsing EVERY `*-control.sha256` in
+    ## the tree: it is **SIX** — plat20, plat22, plat35-visual, and also
+    ## `run-plat42-surface-mutations.py`, `run-plat47-parity-mutations.py`
+    ## and `run-plat49-chrome-mutations.py`, which live under
+    ## `src/frontend/tui/tests/` and hold `leaves.nim` as a subject across the
+    ## medium boundary. The exclusion every draft got right stands:
+    ## `run-plat21-mutations.py`'s subjects are `gpui_binding`, `fact_reader`,
+    ## `pane_views`, `gpui_gaps`, `mappings`, `surfaces` and
+    ## `terminal_binding`, and `leaves.nim` is not among them.
+    ##
+    ## `leaves.nim`'s own `GutterGap` header carries the full table and, for
+    ## each of the six, THE RE-GRADE THAT WAS ATTEMPTED AND WHAT IT ANSWERED.
+    ## One of them — plat20 — grades on this host (14 of 14 KILLED) and its
+    ## digest IS re-recorded; the other five refuse for reasons named there.
+    ##
+    ## **EDITING *THIS* FILE MOVES THREE**, measured the same way —
+    ## `run-plat37-window-mutations.py`, `run-plat47-parity-mutations.py` and
+    ## `run-plat49-chrome-mutations.py` — and all three were GREEN at the
+    ## parent commit, so all three were RUN rather than reasoned about:
+    ##
+    ##   * `plat37-window` REFUSES — *"an arm in this selection is graded
+    ##     against the LIVE corpus and `build/plat37/manifest.json` is not
+    ##     here"*. That manifest comes from the WINDOWED capture lane
+    ##     (`ci/test/plat37-window-frame.sh`), which is Wayland-only and is
+    ##     TCC-refused on aarch64-darwin — the measurement this module's own
+    ##     header and `ci/test/plat35-gpui-capture.sh` both already carry.
+    ##   * `plat47-parity` and `plat49-chrome` answer *"REFUSING TO RUN:
+    ##     `REPLAY_SERVER_BIN` is not exported"*. Their needle scans pass with
+    ##     `0 problems`; only the environment is missing.
+    ##
+    ## None of those three is re-recorded here, because none could be
+    ## re-graded here, and recording a digest without a re-grade is
+    ## `Verification-Harness-Traps` §39.
 
   ChromeGapPx* = 8
   ChromePaddingPx* = 12
