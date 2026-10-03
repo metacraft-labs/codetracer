@@ -357,8 +357,8 @@ C_VCS_REFRESH = ("a periodic re-read moves the pane's value exactly when the "
 C_G_VCS_REFRESH = ("a re-read picks up another program's changes and reports "
                    "them once")
 C_G_DOCKED = "the docked pane leaves the tree and gets a label in the left strip"
-C_G_REVEAL = ("a click on the label reveals the pane over the tree; a second "
-              "click hides it")
+C_G_REVEAL = ("a click on the label docks the pane open; a second closes it; "
+              "a hover previews it")
 C_G_DISMISS = ("Esc, or a press outside the revealed pane, hides it; the layout "
                "never moved")
 C_G_ROWS = ("the editor's fetch window is the rows its pane shows at the row "
@@ -475,16 +475,17 @@ ARMS = [
         "  initCallTraceModel(@[], s.session.getCurrentRRTicks(), s.callTraceStack,",
         C_SESSION,
         "the calltrace pane is never handed the trace: it shows the stack"),
+    # PLAT-49 part B: the rule is the ViewModel's (`currentCallOf`); the
+    # terminal's model takes its answer here.
     Arm("C4", CTVIEW,
-        "    if stack.len > 0 and r.name == stack[0] and r.depth == stack.len - 1:\n"
-        "      result.current = i\n",
-        "    discard\n",
+        "  if at.isSome:\n    result.current = at.get.int\n",
+        "  if false:\n    result.current = at.get.int\n",
         C_LATER,
         "the current call ignores the stack: no row is marked at a stop "
         "inside a call"),
     Arm("C3", PANEVIEWS,
-        '      " #" & $line.index\n',
-        '      ""\n',
+        "    let label = repeat(\"  \", max(row.depth, 0)) & callRowText(row)\n",
+        "    let label = repeat(\"  \", max(row.depth, 0)) & row.callee\n",
         C_SESSION,
         "GPUI's calltrace rows lose the desktop's `#index`"),
     Arm("C2", SHELL,
@@ -714,9 +715,11 @@ ARMS += [
         "  discard\n",
         C_G_ESC,
         "Esc leaves GPUI's drag in flight, its drop still indicated"),
+    # PLAT-49 part B: the bands are GoldenLayout's quarters, the shared
+    # `goldenLayoutZone`; mirroring its x turns the left band into the right.
     Arm("O7", WINGEOM,
-        "    best = dl\n    zone = dzLeftEdge\n",
-        "    best = dl\n    zone = dzRightEdge\n",
+        "                     zone: goldenLayoutZone(x - b.x, y - b.y, b.w, b.h)))",
+        "                     zone: goldenLayoutZone(b.w - 1 - (x - b.x), y - b.y, b.w, b.h)))",
         C_G_HIT,
         "GPUI's left edge band hit-tests as the right one"),
     # --- GPUI's divider drag ----------------------------------------------------
@@ -812,9 +815,11 @@ ARMS += [
         "    has[edge] = false\n",
         C_G_DOCKED,
         "GPUI draws no strips: a pane docked by a drop disappears"),
+    # PLAT-49 part B: a click on the label DOCKS the pane open (the
+    # desktop's click); the reveal is the hover's.
     Arm("D2", WINGEST,
-        "        let shown = beginReveal(layout, was.source)\n",
-        "        let shown = none(Interaction)\n",
+        "        return GestureStep(changed: true, command: some(cmd), status: $cmd)\n",
+        "        return GestureStep(changed: true, status: $cmd)\n",
         C_G_REVEAL,
         "a click on a docked pane's label reveals nothing"),
     Arm("D3", WINGEST,

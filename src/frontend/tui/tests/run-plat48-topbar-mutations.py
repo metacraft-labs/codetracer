@@ -546,9 +546,11 @@ ARMS = [
         "                               \"\")\n",
         W_HOVER,
         "a hovered control's label names it without the chord that runs it"),
+    # PLAT-49 part B: the box is built by `dockedPaneBox` (shared by the
+    # hover's preview and a docked-open pane).
     Arm("GW6", GPUIMAIN,
-        "      r.appendChild(box, pane)\n      gOverlay.add box\n",
-        "      discard pane\n      gOverlay.add box\n",
+        "               max(1, rect.h - 2 * FocusOutlinePx - TabStripPx))\n  r.appendChild(result, pane)\n",
+        "               max(1, rect.h - 2 * FocusOutlinePx - TabStripPx))\n  discard pane\n",
         W_REVEAL,
         "the window's reveal overlay is an empty box, not the docked pane"),
     Arm("GW7", GPUIMAIN,
@@ -559,11 +561,13 @@ ARMS = [
         W_REVEAL,
         "a revealed pane has no Unpin button: it cannot be placed back from "
         "the reveal"),
+    # PLAT-49 part B: the bottom strip's labels are the FOOTER's
+    # (`drawFooter`), and the footer marks the revealed pane's label there.
     Arm("GW8", GPUIMAIN,
-        "    let shown = revealed.isSome and $revealed.get == sl.pane\n",
-        "    let shown = false\n",
+        "      let shown = (gGestures.revealing and $gGestures.reveal.pane == sl.pane) or\n",
+        "      let shown = false or\n",
         W_REVEAL,
-        "the strip does not mark which docked pane is revealed"),
+        "the footer does not mark which docked pane is revealed"),
     Arm("GW9", GPUIMAIN,
         "    if not pinButtonShown(pr, covers):\n"
         "      continue\n",

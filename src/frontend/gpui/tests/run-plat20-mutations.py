@@ -121,9 +121,20 @@ def _tui_link_flags() -> list[str]:
     to start there would be worse than one that works in both places.
     """
     path = REPO / "build" / "grammars" / "tui-link-flags.txt"
-    if not path.exists():
-        return []
-    return [f"--passL:{flag}" for flag in path.read_text().split()]
+    flags: list[str] = []
+    # THE LANE'S OWN ARCHIVE DEFINE, as `test_lane_extra_flags tui` gives it:
+    # `treesitter_ffi.nim`'s `{.passl.}` otherwise names the archive inside
+    # the isonim-tui CHECKOUT the build resolves, which exists only where
+    # `scripts/build-tui-grammars.sh` linked it (`../isonim-tui`). From a
+    # worktree whose isonim-tui is elsewhere (`ISONIM_TUI_SRC`), the link
+    # failed and G5 and G12 scored DID-NOT-COMPILE — a verdict that depended
+    # on the directory the harness sat in, not on the tree under test.
+    archive = REPO / "build" / "grammars" / "libcodetracer_tui_grammars.a"
+    if archive.exists():
+        flags.append(f"-d:isonimTuiGrammarArchive={archive}")
+    if path.exists():
+        flags += [f"--passL:{flag}" for flag in path.read_text().split()]
+    return flags
 
 
 SUITE_CMD = {

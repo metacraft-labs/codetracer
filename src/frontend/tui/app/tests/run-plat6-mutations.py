@@ -431,13 +431,12 @@ MUTATIONS = [
         "a cell on a dock strip resolves to nothing",
     ),
     Mutation(
-        "M2", BIND,
-        "  if dt < bandV and dt < best:\n"
-        "    best = dt\n"
-        "    zone = dzTopEdge",
-        "  if false:\n"
-        "    best = dt\n"
-        "    zone = dzTopEdge",
+        # PLAT-49 part B: the body's zones are GoldenLayout's proportions,
+        # computed by the shared rule (`layout_interaction.goldenLayoutZone`)
+        # the binding's hit-test calls — the top band lives there now.
+        "M2", INTER,
+        "  elif fy <= GoldenLayoutEdgeShare: dzTopEdge\n",
+        "  elif false: dzTopEdge\n",
         C_ZONES,
         "the top edge band is unreachable, so dzTopEdge is never produced",
     ),

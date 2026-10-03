@@ -603,10 +603,10 @@ MUTATIONS = [
         "B1", BIND,
         "  if info.isNone:\n"
         "    return CellArea()\n"
-        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy)",
+        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,\n",
         "  if info.isNone or info.get.kind != lnPane:\n"
         "    return CellArea()\n"
-        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy)",
+        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,\n",
         T_GUIDE,
         "the guide is drawn for panes only, so a divider between stacks has none",
     ),

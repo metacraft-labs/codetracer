@@ -2,18 +2,18 @@
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-4858f0b2512c957445aec70908cd72a91c529a731117fc00c21ea874dadcded1  src/frontend/tui/app/theme/roles.nim
+f648ad52f8d06480736202c71ddc7c3d9f1d56450dd1f6325f2815125103088d  src/frontend/tui/app/theme/roles.nim
 3a78fc1d60a28e60c21569d4c8f9184d5ea7b0bb7c122ab06536f07dfdfde43a  src/frontend/tui/app/theme/palette.nim
 5e82d0b58e65edc5c05d73eb25d7a070076ad92da84cce6af99cd76ba80286d0  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-7f2e1cc650e84f24bfcbb6b18711eac49f4c9ef233be052799f6fdf3d075227e  src/frontend/tui/app/views/shell.nim
+4290bbd92741a3239887845349e5f47920e0ace48f687fea23952d527f94b2c8  src/frontend/tui/app/views/shell.nim
 704b1ad3389bd76e8f03d2409b160ba06d11657e278811a828556406db7b9527  src/frontend/tui/app/views/gutter.nim
 42e192dc0d0a251ef801b27b7250d9cd43dcf0a1ead61ebd876a1c1a8061e1e4  src/frontend/tui/app/views/source_pane.nim
 81c4fc54101ab04e1f1083fbc63e22d9da9105d12cbc36564abf3e5c810285b7  src/frontend/tui/host/terminal_probe.nim
 ed71c14e100d7b7b0b4670cd047e4018b766148b847d9a3618d94de5222d3243  scripts/tokens-to-styl.sh
-d5bb7e65c4b43325c25854589c46b55b0d3152c4030d0dc868cb211bf7841ab7  src/frontend/tui/app/tests/test_degraded_style_tables.nim
+d063dc9fc46e25485cd546c9dd3df4e71fc9c7c089f484820b88e957f9057948  src/frontend/tui/app/tests/test_degraded_style_tables.nim
 3fad25afeaef25119fbb676154a7729180bf7f8e49cde3e19d5227af224eeae8  src/frontend/tui/app/tests/test_capability_resolution.nim
 43f8243f4031dbc6c1b2613377a33803c03c2729e59b1b0700bbdca64bdfa366  src/frontend/tui/tests/test_plat46_terminal_probe.nim
-586f4f88174bfd4be2387aff28dc4f7532aa3106fa0e714467218f2edd79f136  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim
+4cd20c5ce9428db32562cecc064430ed5d1175625a5fcd7ec3ff9d07d25a8fd8  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim
 09b62f366cca1170b7f9748e6b2ddd1ae46dd2be621438a19c7d94aca0377d05  ci/test/tui-design-tokens-boundary.sh
 037f8d69d9864c8c0730b1784e91fc460ae4348b2f000f368a9fea17fb0881a6  ci/test/design-tokens-fresh.sh
