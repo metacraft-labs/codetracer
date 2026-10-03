@@ -66,7 +66,9 @@ proc buildM1Fixture*(outPath: string;
   w.metadata.workdir = "/workspace/m1"
 
   if columnAware:
-    w.enableColumnAwareSteps()
+    let ca = w.enableColumnAwareSteps()
+    if ca.isErr:
+      return err("enableColumnAwareSteps: " & ca.error)
 
   # A per-line line-length table covering well past the highest line we touch
   # (line 40), so column-aware GLI byte offsets resolve back to the right line.

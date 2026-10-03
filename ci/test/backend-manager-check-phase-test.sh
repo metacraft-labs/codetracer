@@ -7,7 +7,7 @@
 # ---------------
 # That checkPhase excludes two things from the nix build sandbox:
 #
-#   1. one unit test  — browser_stream_host::tests::verify_reframing_...
+#   1. one unit test  — browser_stream_host::tests::a_real_browser_recording_...
 #   2. one whole test TARGET — tests/real_recording_integration.rs
 #
 # Both are excluded because the sandbox cannot supply what they need, not
@@ -117,7 +117,7 @@ if ! nix eval --raw ".#packages.$NIX_SYSTEM.backend-manager.checkPhase" \
 fi
 rm -f "$CHECK_PHASE_FILE.err"
 
-BROWSER_TEST=browser_stream_host::tests::verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+BROWSER_TEST=browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
 EXCLUDED_TARGET=real_recording_integration
 
 # -----------------------------------------------------------------------------
@@ -426,7 +426,7 @@ fi
 # runs first. Recorded here as the guard that actually kills it, not the one
 # that was expected to -- M9 below is the mutation that isolates the '--bins'
 # guard on its own.
-m8="$(mutate "s/^cargoTestTargets=\"--bins\"/cargoTestTargets=\"\"/")"
+m8="$(mutate 's/^cargoTestTargets="--bins"/cargoTestTargets=""/')"
 expect_killed "M8 the crate's unit tests drop out of listing and run" \
 	"$m8" "is not in this crate's test list"
 
@@ -434,7 +434,8 @@ expect_killed "M8 the crate's unit tests drop out of listing and run" \
 # unit tests are still LISTED (so M4's guard is satisfied and sees the browser
 # test) but are no longer RUN. 204 of the 238 tests this lane covers vanish
 # while every earlier guard is happy.
-m9="$(mutate "s/\$cargoTestTargets -- --skip/--test dive_in_url_fetch_test --test mcp_origin_test --test meta_dat_metadata_loading -- --skip/")"
+# shellcheck disable=SC2016 # a sed pattern naming a literal shell variable
+m9="$(mutate 's/$cargoTestTargets -- --skip/--test dive_in_url_fetch_test --test mcp_origin_test --test meta_dat_metadata_loading -- --skip/')"
 expect_killed "M9 unit tests are listed but silently not run" \
 	"$m9" "unit tests did not run"
 

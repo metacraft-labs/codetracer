@@ -1140,8 +1140,11 @@ suite "Layout algebra — floating panels are not expressible (§3A.2)":
     # PLAT-48 added `DockedPane.beside` (the pane it was docked from),
     # `DockedPane.weight` (its share there) and `DockedPane.besideBefore`
     # (which side of `beside`), so the docked pane's is 8 — where it goes
-    # back to, never where it is drawn.
-    check checkedFields == 7 + 8 + 3
+    # back to, never where it is drawn. PLAT-49 part B added `DockedPane.open`
+    # (docked OPEN, inline at its edge: a state a command sets, like
+    # `revealed` not persisted, and no extent — the binding derives the band),
+    # so the docked pane's arity is 9.
+    check checkedFields == 7 + 9 + 3
 
   test "every visible pane occupies a distinct region of the split tree":
     # The model's half of the projection's total-and-disjoint invariant: each

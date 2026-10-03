@@ -237,6 +237,19 @@ proc syncSessionLayouts*(shell: GpuiShell) =
     # a `LayoutNode`) loses every docked pane on the way to `saveLayouts`.
     session.layout = slot.layout.clone()
 
+proc showSessionIn*(shell: GpuiShell; id: WindowId;
+                    session: HeadlessSessionId): bool =
+  ## PLAT-49 part B: window `id` shows `session` from now on — a session tab
+  ## chosen in it. The window keeps its arrangement (one per window, as the
+  ## terminal keeps one); `leavesFor` then hands out the new session's
+  ## ViewModels. False when either is unknown.
+  if shell.isNil or shell.windows.indexOf(id) < 0 or
+     shell.app.slot(session).isNil:
+    return false
+  shell.bindings[int(id)] = session
+  shell.syncSessionLayouts()
+  true
+
 proc applyIn*(shell: GpuiShell; id: WindowId;
               cmd: LayoutCommand): WindowSetOutcome =
   ## Apply one layout command in one window, and keep the session in step.

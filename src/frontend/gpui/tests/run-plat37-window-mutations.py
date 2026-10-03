@@ -518,6 +518,79 @@ CONTROL_HEADER = """\
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
+#
+# ===========================================================================
+# PLATFORM-SCOPED RE-RECORD, 2026-10-02 (PLAT-35, RE-GRADED ON `6fa0bdd89`).
+# ONE ARM IS OWED A GRADE.
+# ===========================================================================
+# This recording is an ASSERTION (§39a) and the scope of what it asserts is
+# stated rather than left to be assumed:
+#
+#   GRADED, here, against these bytes:  M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M12
+#                                       — 11 of 11 KILLED, each verdict
+#                                       reported per arm, not as a total.
+#   NOT GRADED, and OWED:               M11.
+#
+#   HARNESS   run-plat37-window-mutations.py
+#   BASE      6fa0bdd89 (origin/agents). **RE-GRADED FROM SCRATCH ON THIS
+#             BASE** rather than carried over from the `d34c6e087` grade:
+#             `f4afb504b` had already re-recorded this control over ITS
+#             regraded tree, so the tree graded here is upstream's plus
+#             PLAT-35's and neither earlier grade covers it.
+#   ENTRIES   src/frontend/gpui/chrome.nim                        (PLAT-35)
+#             src/frontend/gpui/tests/test_gpui_window_frame.nim  (PLAT-35,
+#               `ExpectedAssertions` 615 -> 625 for the new scanned file —
+#               re-derived on this base, see that constant's own note; the
+#               pre-rebase decomposition said 605 -> 615 and was void here
+#               because PLAT-48 had independently taken that step)
+#   HOST THAT CAN GRADE M11
+#             any LINUX host with a Wayland compositor — `sway`, `grim` and
+#             `wayland-info` on PATH. NOT aarch64-darwin: `ci/test/plat37-
+#             window-frame.sh` refuses those three tools by name, and the
+#             manifest it writes records `sway --version` and `grim -h` as
+#             host fields, so there is nothing to fabricate on macOS that
+#             would not be a false record.
+#   COMMAND   bash ci/test/plat37-window-frame.sh          # writes
+#                                                          # build/plat37/manifest.json
+#             python3 src/frontend/gpui/tests/run-plat37-window-mutations.py --only M11
+#
+# WHY A SCOPED RECORD AND NOT A HOLD. The gap is the HOST's and not
+# PLAT-35's, measured rather than argued, and RE-MEASURED on this base: with
+# every digest row matching at `6fa0bdd89`, the FULL run on aarch64-darwin
+# returns rc 3 — `REFUSED: an arm in this selection is graded against the LIVE
+# corpus and build/plat37/manifest.json is not here`. So the alternative to a
+# scoped record is not a fully graded one; it does not exist on this host, did
+# not exist at `d34c6e087`, and does not exist at the new base either.
+# Calling that PLAT-35's is §40's error with the sign flipped — attributing an
+# environmental limit to a change.
+#
+# AND M11 IS THE ONE ARM NEITHER EDIT CAN HAVE DISARMED, by this harness's
+# own construction rather than by inspection:
+#   * M11's subject is `plat37_vision.nim`. PLAT-35 does not touch it — but
+#     UPSTREAM DID (`eae5ce27…` here against `2a40e3c1…` at `d34c6e087`), so
+#     the pre-rebase note's *"whose digest row is UNCHANGED"* is no longer
+#     true and is corrected rather than reprinted. What survives is the part
+#     that matters: the row is unchanged BY PLAT-35, so nothing in this
+#     change can have disarmed the arm;
+#   * its needle is a line of that file and the needle scan — which gates
+#     this recording — passes for all 12 arms;
+#   * its killer case is the LIVE-corpus *"the needles score ZERO on the
+#     blank control"*, and `ExpectedAssertions` is on §10.3's
+#     `COUNT_SPELLINGS` rejection list, so no arm here may be aimed at the
+#     tally that moved.
+# What a re-grade of M11 would still buy is the one thing introspection
+# cannot: that the OCR join is exercised at all. That is why it is recorded
+# as owed instead of reasoned away.
+#
+# M9'S `because` WAS RE-DERIVED, NOT EDITED, and the derivation found a defect
+# in this harness that is fixed in the same diff: `std/unittest`'s `expect`
+# reports through `instantiationInfo` with full paths, so the recorded string
+# named the directory it was derived in (`f4afb504b` committed
+# `/home/zahary/m/codetracer-gui/codetracer-plat49a/…`) and the row was
+# MIS-ATTRIBUTED in every other checkout. `without_checkout_path` normalises
+# both sides; measured red-then-green in a second worktree of this commit at a
+# different path. The line also moved — 985 -> 1020 — because the constant's
+# own note above grew.
 """
 
 
@@ -558,6 +631,38 @@ def require_live_corpus(selected) -> int:
           "counted as passed is the defect the whole campaign is about; "
           "--only can exclude it deliberately, which is a different act.")
     return 3
+
+
+def without_checkout_path(text: str) -> str:
+    """`text` with this checkout's own absolute prefix removed.
+
+    **A `because` MUST NOT NAME THE DIRECTORY IT WAS DERIVED IN**, and this
+    harness committed one that did. `std/unittest`'s `expect` reports its
+    failure through `instantiationInfo` with full paths, so M9's attribution
+    line — the only arm here whose killer is an `expect` rather than a
+    `check` — arrives as an ABSOLUTE path to the suite. `--derive` wrote that
+    verbatim and `grade` compares it with `in`, so the recorded string carried
+    whichever checkout happened to derive it:
+
+        committed at `f4afb504b`:
+          /home/zahary/m/codetracer-gui/codetracer-plat49a/src/frontend/…(985, 11)
+
+    and that row was MIS-ATTRIBUTED in every other checkout, including the one
+    that recorded it after it moved. MEASURED, not reasoned: a second worktree
+    of this same commit at a different path graded M9 **MIS-ATTRIBUTED**
+    (2026-10-02, aarch64-darwin), and KILLED with this normalisation in place.
+
+    It is a NORMALISATION AND NOT A TRUNCATION, which is the distinction that
+    keeps the attribution specific: the line number, the column, the file name
+    and `std/unittest`'s own wording all survive, so an arm that starts
+    failing a DIFFERENT case still fails to match. Only the one part of the
+    string that is a property of the disk rather than of the tree is dropped.
+
+    Applied to BOTH SIDES — the derived string and the string `grade` compares
+    it against — from this one place, so the two cannot drift into comparing
+    differently-normalised text (§30).
+    """
+    return text.replace(str(REPO) + os.sep, "").replace(str(REPO) + "/", "")
 
 
 def failure_lines_for(out: str, case: str) -> list[str]:
@@ -628,7 +733,8 @@ def derive(selected: list[Arm]) -> int:
                   f"cannot derive a `because`.")
             print("   verdict was:", verdict_for(out, arm.kills))
             continue
-        text = re.sub(r"\s+", " ", checks[0]).strip()
+        text = without_checkout_path(
+            re.sub(r"\s+", " ", checks[0]).strip())
         for spelling in COUNT_SPELLINGS:
             if spelling in text:
                 print(f"{arm.name}: the derived `because` quotes "
@@ -698,7 +804,7 @@ def grade(selected: list[Arm]) -> int:
         raw = failure_lines_for(out, arm.kills)
         lines = " ".join(ln[ln.index("Check failed:"):] if "Check failed:" in ln
                          else ln for ln in raw)
-        lines = re.sub(r"\s+", " ", lines)
+        lines = without_checkout_path(re.sub(r"\s+", " ", lines))
         if because[arm.name] not in lines:
             results.append((arm, "MIS-ATTRIBUTED",
                             f"expected: {because[arm.name]}"))
@@ -734,7 +840,16 @@ def grade(selected: list[Arm]) -> int:
     return 0 if killed == len(results) else 1
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--needle-scan", action="store_true")
     ap.add_argument("--record-control-hashes", action="store_true")

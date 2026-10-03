@@ -209,7 +209,7 @@ schema = "codetracer.visualisers.v1"
 match = "Point"
 summary = "({x}, {y})"
 """)
-    let spec = model.rowSpecFor(model.paneRows()[1], 120)
+    let spec = model.rowSpecFor(model.paneRows()[0], 120)
     ck spec.formattedValue(40) == "(10, 20)"
     let title = model.titleRowText(160)
     checkpoint "title: " & title
@@ -225,7 +225,7 @@ summary = "({x}, {y})"
     # `@[]` is the pre-PLAT-12 behaviour exactly.
     var model = modelWith("locals.p")
     ck model.visualisers.len == 0
-    let spec = model.rowSpecFor(model.paneRows()[1], 120)
+    let spec = model.rowSpecFor(model.paneRows()[0], 120)
     ck spec.formattedValue(40) == "Point(x:10, y:20)"
     ck model.titleRowText(160).contains("builtin.record")
     ck not model.titleRowText(160).contains("project:")
@@ -245,7 +245,7 @@ match = "Image"
 media = "image/png"
 mediaFrom = "pixels"
 """)
-    let spec = model.rowSpecFor(model.paneRows()[3], 200)
+    let spec = model.rowSpecFor(model.paneRows()[2], 200)
     let shown = spec.formattedValue(120)
     checkpoint "row: " & shown
     ck shown.startsWith("Image(")
@@ -271,7 +271,7 @@ match = "Image"
 media = "application/octet-stream"
 mediaFrom = "pixels"
 """)
-    let spec = model.rowSpecFor(model.paneRows()[3], 200)
+    let spec = model.rowSpecFor(model.paneRows()[2], 200)
     ck spec.formattedValue(120) == "<application/octet-stream, 40 bytes>"
     ck model.degradationOf() == ""
     ck not model.provenanceOf().contains("media-degraded")

@@ -14,7 +14,7 @@
 //
 //   1. A TRACE THAT LOADS AND CARRIES ZERO STEPS. An artifact compiled without
 //      debug instrumentation traces to one event and no steps; both wasm
-//      modules answer `ok`, the engine accepts the `trace.json`, and the
+//      modules answer `ok`, the engine accepts the container, and the
 //      session opens onto an empty timeline. So `stepCount` and
 //      `distinctLines` are reported as NUMBERS, not as a boolean.
 //   2. A SESSION THAT RESOLVES POSITIONS THAT ARE ALL `missingPath`. In a

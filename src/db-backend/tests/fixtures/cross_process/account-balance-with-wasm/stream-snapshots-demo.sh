@@ -9,7 +9,7 @@
 #
 #   1. builds and instruments the WASM tier exactly as `regenerate.sh` does;
 #   2. starts `record-web` with `--snapshot-consumer`, so every recording's
-#      `trace.json` bytes are teed into a spawned
+#      boundary log is streamed into a spawned
 #      `wazero-snapshots run --boundary-stream - --slice-dir …`;
 #   3. drives a page once in headless Chromium;
 #   4. reports, with sub-millisecond timestamps, when each slice container
@@ -63,22 +63,14 @@
 # defaults regress to count-only this script fails rather than quietly
 # measuring a page it had reconfigured.
 #
-# # Why the comparison point is `trace.json`'s mtime
+# # Why the comparison point is the recording's mtime
 #
 # The page finalises both recordings itself, by calling `stopRecording()`
-# in its own `finally` block, well before Chromium is torn down. The last
-# write to `trace.json` is the `]` that closes its array, so that file's
-# mtime *is* the instant the recording stopped being produced. A slice
-# sealed before it was sealed while the page was still recording — the
-# property §2 asks for, and the one that was unreachable before
-# `trace.json` was written incrementally, because the file did not exist
-# until the session ended.
-#
-# `--stream-done-marker` is **not** the reference point, and must not be:
-# the daemon closes the tee's pipe and waits for the consumer to exit
-# before creating the marker, so the marker postdates the consumer's last
-# slice by construction and measuring against it would make this check
-# unfalsifiable. It is used only to know the recording finished at all.
+# in its own `finally` block, well before Chromium is torn down. `record-web`
+# writes the `.ct` when the session ends and moves it into place before it
+# closes the consumer's pipe, so the `.ct`'s mtime *is* the instant the
+# recording stopped being produced. A slice sealed before it was sealed while
+# the page was still recording — the property §2 asks for.
 #
 # Exit codes:
 #   0   at least one slice was sealed before the recording finished
@@ -142,8 +134,8 @@ CT_INSTRUMENT_BIN="${CT_INSTRUMENT_BIN:-}"
 if [ -z "$CT_INSTRUMENT_BIN" ]; then
 	CT_INSTRUMENT_BIN="$(newest_executable \
 		"$WASM_INSTRUMENTER/target/release/ct-instrument" \
-		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" \
-		|| CT_INSTRUMENT_BIN=""
+		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" ||
+		CT_INSTRUMENT_BIN=""
 fi
 [ -n "$CT_INSTRUMENT_BIN" ] ||
 	missing+=("- ct-instrument not found (cargo build --release -p ct-instrument-cli in $WASM_INSTRUMENTER)")
@@ -153,8 +145,8 @@ if [ -z "$RECORD_WEB_BIN" ]; then
 	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" \
-		|| RECORD_WEB_BIN=""
+		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" ||
+		RECORD_WEB_BIN=""
 fi
 [ -n "$RECORD_WEB_BIN" ] ||
 	missing+=("- session-manager not built (cargo build in $CODETRACER_ROOT/src/backend-manager)")
@@ -338,13 +330,12 @@ DISPATCH="$SCRATCH/consume.sh"
 cat >"$DISPATCH" <<EOF
 #!/usr/bin/env bash
 set -uo pipefail
-trace_dir="\$1"
-if [ "\$(basename "\$trace_dir")" != "frontend-wasm.ct" ]; then
+trace="\$1"
+if [ "\$(basename "\$trace")" != "frontend-wasm.ct" ]; then
 	# Not a WASM recording; drain it so the daemon never blocks on the pipe.
 	exec cat >/dev/null
 fi
 exec "$WAZERO_SNAPSHOTS_BIN" run \\
-	--boundary-log "\$trace_dir" \\
 	--boundary-stream - \\
 	--slice-dir "$SLICE_ROOT" \\
 	--slice-every "$SLICE_EVERY" \\
@@ -366,8 +357,7 @@ setsid "$RECORD_WEB_BIN" record-web \
 	--bind "127.0.0.1:$RECORD_WEB_PORT" \
 	--out-dir "$RECORD_WEB_OUT" \
 	--workdir "$PAGE" \
-	--stream-done-marker .complete \
-	--snapshot-consumer "$DISPATCH" --snapshot-consumer '{trace_dir}' \
+	--snapshot-consumer "$DISPATCH" --snapshot-consumer '{trace}' \
 	>"$SCRATCH/record-web.log" 2>&1 &
 RECORD_WEB_PID=$!
 cleanup_pids+=("$RECORD_WEB_PID")
@@ -401,24 +391,16 @@ if [ -s "$SCRATCH/consumer.err" ]; then
 	sed 's/^/    /' "$SCRATCH/consumer.err"
 fi
 
-MARKER="$RECORD_WEB_OUT/frontend-wasm.ct/.complete"
-RECORDING="$RECORD_WEB_OUT/frontend-wasm.ct/trace.json"
-if [ ! -f "$MARKER" ]; then
-	echo "[stream-demo] the WASM recording never finished (no $MARKER)" >&2
+RECORDING="$RECORD_WEB_OUT/frontend-wasm.ct"
+if [ ! -f "$RECORDING" ]; then
+	echo "[stream-demo] the WASM recording never finished (no $RECORDING)" >&2
 	sed 's/^/    /' "$SCRATCH/record-web.log" >&2
 	exit 1
 fi
 # `%.Y` is the nanosecond-resolution mtime; plain `%Y` truncates to the
 # second, which is coarser than the whole run and would report every
-# delta as zero.
-#
-# The reference is `trace.json`'s mtime — the `]` that closed its array —
-# and deliberately not the marker's; see the header. The marker's own
-# offset is reported so the difference between the two is visible rather
-# than something a reader has to know.
+# delta as zero. The reference is the recording's own mtime; see the header.
 recording_at="$(stat -c %.Y "$RECORDING")"
-marker_at="$(stat -c %.Y "$MARKER")"
-marker_delta="$(awk -v a="$marker_at" -v b="$recording_at" 'BEGIN{printf "%+.3f", a-b}')"
 
 mapfile -t slices < <(find "$SLICE_ROOT" -maxdepth 1 -name '*.ct' -print | sort)
 if [ ${#slices[@]} -eq 0 ]; then
@@ -429,9 +411,7 @@ fi
 
 echo
 echo "[stream-demo] t=0 is the moment the recording stopped being produced"
-echo "[stream-demo] (trace.json's array closed). For reference, the stream-done"
-echo "[stream-demo] marker landed at t=${marker_delta}s — it waits for the consumer to"
-echo "[stream-demo] exit, which is why it is not the reference point."
+echo "[stream-demo] (record-web finalised frontend-wasm.ct)."
 echo "[stream-demo] slice containers, by the time they were sealed:"
 early=0
 for slice in "${slices[@]}"; do

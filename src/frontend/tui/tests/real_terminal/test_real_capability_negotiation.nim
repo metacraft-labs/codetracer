@@ -243,9 +243,9 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # every "does not contain" below for free.
     let text = screenText(sess)
     checkpoint("status row: " & statusRowText(sess))
-    ck text.contains("CALL TRACE")
-    ck text.contains("SOURCE")
-    ck text.contains("VARIABLES")
+    ck text.contains(" Call Trace ")
+    ck text.contains(" main.py ")
+    ck text.contains(" Variables ")
     ck text.contains("Timeline")
 
     sess.send("q")
@@ -268,8 +268,8 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # …and the screen is otherwise the same debugger, so the flag turned off a
     # protocol and not the application.
     let text = screenText(sess)
-    ck text.contains("CALL TRACE")
-    ck text.contains("SOURCE")
+    ck text.contains(" Call Trace ")
+    ck text.contains(" main.py ")
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
@@ -352,7 +352,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # The positive twin for that loop, through the same haystack: the Unicode
     # glyphs really would have been findable if they were there.
     ck text.len > 0
-    ck text.contains("SOURCE")
+    ck text.contains(" main.py ")
 
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))
@@ -491,7 +491,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # and not a no-op.
     let after = screenText(sess)
     checkpoint("after step: " & statusRowText(sess))
-    ck after.contains("SOURCE")
+    ck after.contains(" main.py ")
     ck statusRowText(sess).len > 0
     sess.send("q")
     discard sess.waitExit(initDuration(seconds = 15))

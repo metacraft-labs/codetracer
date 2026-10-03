@@ -22,12 +22,21 @@
 ## STACK and SAYS SO in its title (`StackFallbackTitle`), because a pane
 ## that silently changed what it lists is one a user cannot read.
 
-import std/strutils
+import std/[options, strutils]
+
+# PLAT-49 part B: the row's parts are the Call Trace ViewModel's `CallRow`.
+from codetracer_embed import CallLine, currentCallOf,
+  CallRow, CallRowToggle, CallSegmentKind,
+  CallSegment, callRowSegments, crtLeaf, crtExpanded, crtCollapsed,
+  CallRowIndentCells,
+  csIndent, csToggle, csCallee, csIndex, csPunct, csArgName, csArgValue,
+  csReturnArrow, csReturnValue
 
 import ../layout/profile
 import ./styled_row
 
 export styled_row, profile
+export CallRow, CallRowToggle, CallSegmentKind, CallSegment, callRowSegments
 
 type
   CallTraceRow* = object
@@ -38,6 +47,11 @@ type
       ## `callDisplayName`.
     depth*: int
     rrTicks*: uint64
+    call*: CallRow
+      ## PLAT-49 part B: THE WHOLE ROW, semantically — callee, arguments with
+      ## their values, return value, toggle state — as the Call Trace
+      ## ViewModel gives it (`calltrace_vm.callRowOf`). A row built with only
+      ## the four fields above gets one from them (`callOf`).
 
   CallTraceModel* = object
     ## THE LOADED WINDOW of the trace, not the trace. The trace is read a
@@ -64,17 +78,15 @@ type
 
 const
   CallTraceTitle* = "CALL TRACE"
-  StackFallbackTitle* = "CALL STACK (no call trace in this recording)"
-    ## The fallback's title, painted over the call stack's own title row.
+  StackFallbackTitle* = "Call stack: this recording has no call trace"
+    ## The fallback's note, painted over the call stack's own heading row.
   CallTraceLoadingText* = "  …"
     ## A row of the trace whose section has not arrived: drawn, not left
     ## blank, because a blank row reads as the end of the trace.
   CallTraceTitleStyle = CellStyle(role: srChromeTitle)
   CallTraceCountStyle = CellStyle(role: srChromeMuted)
   CallTraceRuleStyle = CellStyle(role: srBorderPane)
-  CallTraceRowStyle = CellStyle(role: srChromeText)
   CallTraceLoadingStyle = CellStyle(role: srChromeMuted)
-  CallTraceCurrentStyle = CellStyle(role: srChromeText, bold: true)
   CallTraceRuleGlyph = "─"
 
 proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
@@ -98,21 +110,52 @@ proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
   result = CallTraceModel(rows: rows, current: -1, firstIndex: firstIndex,
                           total: max(total, firstIndex.int + rows.len),
                           scrollTop: max(0, scrollTop), follow: follow)
-  var lastEntered = -1
+  # The ViewModel's rule (`calltrace_vm.currentCallOf`, PLAT-49 part B) —
+  # GPUI selects the same call from it.
+  var lines: seq[CallLine] = @[]
   for i, r in rows:
-    if r.rrTicks > tick:
-      continue
-    lastEntered = i
-    if stack.len > 0 and r.name == stack[0] and r.depth == stack.len - 1:
-      result.current = i
-  if result.current < 0 and stack.len == 0:
-    result.current = lastEntered
+    lines.add CallLine(index: i.int64, name: r.name, depth: r.depth,
+                       rrTicks: r.rrTicks)
+  let at = currentCallOf(lines, tick, stack)
+  if at.isSome:
+    result.current = at.get.int
 
 proc isEmpty*(m: CallTraceModel): bool = m.total == 0
 
+proc callOf*(r: CallTraceRow): CallRow =
+  ## The row's `CallRow`: the ViewModel's when the host gave one, else one
+  ## made of the row's name, depth and index (a leaf with no arguments).
+  if r.call.callee.len > 0:
+    return r.call
+  CallRow(index: r.index, depth: max(0, r.depth), callee: r.name,
+          toggle: crtLeaf, rrTicks: r.rrTicks)
+
 proc rowText*(r: CallTraceRow): string =
-  ## The desktop's `.call-text`, indented by depth: `  evaluate #3`.
-  repeat("  ", max(0, r.depth)) & r.name & " #" & $r.index
+  ## The row as the terminal draws it: indented by depth, the toggle, the
+  ## desktop's `.call-text` (`evaluate #3`), its `.call-args`
+  ## (`(expression=2 + 3)`) and its `.return` (` => 5`).
+  for seg in callRowSegments(r.callOf):
+    result.add seg.text
+
+func segmentStyle*(kind: CallSegmentKind; current: bool): CellStyle =
+  ## How each part of a row is styled — the desktop's classes, as roles:
+  ## the name in the body text, the argument list in CALLTRACE_ARGS_COLOR,
+  ## the return in CALLTRACE_RETURN_COLOR, the toggle muted. THE CALL THE
+  ## DEBUGGER IS IN is the desktop's selected row: `.event-selected` (its own
+  ## ground) with `.call-current` (bold name) and the toggle's `active` icon —
+  ## here its name is bold and its toggle takes the body colour, legible on
+  ## the row's ground (`CurrentRowFill`, painted under the parts: a part
+  ## names no surface, so it keeps the one under it).
+  case kind
+  of csIndent, csCallee, csIndex: CellStyle(role: srChromeText, bold: current)
+  of csToggle:
+    CellStyle(role: (if current: srChromeText else: srChromeMuted))
+  of csPunct, csArgName, csArgValue: CellStyle(role: srCallArgs)
+  of csReturnArrow, csReturnValue: CellStyle(role: srCallReturn)
+
+const CurrentRowFill* = CellStyle(surface: srSurfaceActiveRow)
+  ## The current call's row ground (`srSurfaceActiveRow`, the design
+  ## system's active-row token), the pane's whole width as the desktop's row.
 
 proc clampTop*(m: CallTraceModel; top, bodyRows: int): int =
   ## `top` kept inside the trace: never above its first call, and never so
@@ -174,24 +217,68 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
               truncateToCells(CallTraceLoadingText, area.width),
               CallTraceLoadingStyle)
       continue
-    let style = if index == current: CallTraceCurrentStyle
-                else: CallTraceRowStyle
-    let marker = if index == current: ">" else: " "
-    g.paint(area.row + 1 + i, area.col,
-            truncateToCells(marker & rowText(r), area.width), style)
+    # PLAT-49 part B: EACH PART IN ITS OWN STYLE (`segmentStyle`), and the
+    # call the debugger is in marked as the desktop marks it
+    # (`onCompleteMove` -> `selectEntry`: `.event-selected`, its own ground,
+    # and `.call-current`, bold) — the whole row on the active-row ground.
+    let isCurrent = index == current
+    let y = area.row + 1 + i
+    var x = area.col
+    let stop = area.col + area.width
+    if isCurrent:
+      g.paint(y, area.col, spaces(area.width), CurrentRowFill)
+    for seg in callRowSegments(r.callOf):
+      if x >= stop:
+        break
+      let fitted = truncateToCells(seg.text, stop - x)
+      if fitted.len == 0:
+        continue
+      g.paint(y, x, fitted, segmentStyle(seg.kind, isCurrent))
+      x += cellWidthOf(fitted)
     inc result
 
 proc paintFallbackCaption*(g: var StyledGrid; area: CellArea) =
-  ## The call-stack fallback's title row: says the pane is showing the STACK
-  ## because the recording provides no call trace.
+  ## The call-stack fallback's note, on the pane's first content row (in
+  ## place of the stack's own heading): the pane is showing the STACK because
+  ## the recording provides no call trace. A sentence, not a title bar
+  ## (PLAT-49): no rule, the muted caption tier.
   if area.width <= 0 or area.height <= 0:
     return
-  var line = StackFallbackTitle
-  if cellWidthOf(line) + 1 <= area.width:
-    line.add " "
-    line.add repeatGlyph(CallTraceRuleGlyph, area.width - cellWidthOf(line))
-  g.paint(area.row, area.col, truncateToCells(line, area.width),
-          CallTraceRuleStyle)
-  g.paint(area.row, area.col,
-          truncateToCells(StackFallbackTitle, area.width),
-          CallTraceTitleStyle)
+  g.paint(area.row, area.col, spaces(area.width), CallTraceCountStyle)
+  g.paint(area.row, area.col, truncateToCells(StackFallbackTitle, area.width),
+          CallTraceCountStyle)
+
+type
+  CallTraceHitKind* = enum
+    cthNone      ## not on a call row
+    cthRow       ## on a call row: go to that call (the desktop's click)
+    cthToggle    ## on the row's toggle: expand or collapse its children
+
+  CallTraceHit* = object
+    kind*: CallTraceHitKind
+    index*: int64
+      ## The trace index of the call under the pointer.
+
+proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
+                     row, col: int): CallTraceHit =
+  ## PLAT-49 part B: what a press at `(row, col)` is on, for the pane painted
+  ## into `area` by `paintCallTrace` — the same rows, the same top, the same
+  ## segments, so a click and the drawing cannot disagree. A row whose section
+  ## has not arrived is not a call yet.
+  if area.width <= 0 or area.height <= 1 or row <= area.row or
+     row >= area.row + area.height or col < area.col or
+     col >= area.col + area.width:
+    return CallTraceHit(kind: cthNone)
+  let bodyRows = area.height - 1
+  let index = m.visibleTop(bodyRows) + (row - area.row - 1)
+  if index >= m.total:
+    return CallTraceHit(kind: cthNone)
+  let (loaded, r) = m.rowAt(index)
+  if not loaded:
+    return CallTraceHit(kind: cthNone)
+  let call = r.callOf
+  # The toggle's cell: after the depth's indent (`callRowSegments`).
+  let toggleCol = area.col + call.depth * CallRowIndentCells
+  if col == toggleCol and call.toggle != crtLeaf:
+    return CallTraceHit(kind: cthToggle, index: index.int64)
+  CallTraceHit(kind: cthRow, index: index.int64)

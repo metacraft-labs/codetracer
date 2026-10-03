@@ -43,7 +43,45 @@
     "THE VIEWPORT MATRIX IS EXERCISED BY THE SET RATHER THAN DECLARED BESIDE IT.",
     "Two of the six sit at `laptop`, so the normalised-coordinate claim in",
     "question one — that a rectangle is reported in hundredths of the viewport —",
-    "has scenarios at two viewports to be wrong at."
+    "has scenarios at two viewports to be wrong at.",
+    "",
+    "`gpuiProbes` IS A SECOND ARRAY AND NOT A SEVENTH SCENARIO, 2026-10-03,",
+    "AND THE REASON IS MEASURED RATHER THAN STYLISTIC. PLAT-35's `PLAT35-F14`",
+    "needed an UNSTEPPED breakpoint case: `breakpoint-editor` is",
+    "`stepIn=6, setBreakpoint@1` and `setBreakpoint@<row>` is an offset into",
+    "the editor's FIRST DRAWN ROW, which after six stepIns is 31 — so its mark",
+    "always lands on a two-digit row and that scenario CANNOT fail the finding.",
+    "Reproducing it took an ad-hoc command line, and an assertion that cannot",
+    "fail is the defect this campaign is about.",
+    "",
+    "Growing `scenarios` to seven was measured first and refused, because FOUR",
+    "other milestones pin the six and TWO of them pin it against a record this",
+    "host cannot regenerate:",
+    "  * `screen_oracle/test_screen_oracle.nim` — `ck Scenarios.len == 6` and",
+    "    `declared.toHashSet == Scenarios.toHashSet` against PLAT-39's own",
+    "    `plat39_record.Scenarios` const;",
+    "  * `screen_oracle/test_plat39_record.nim` — the recorded cardinality",
+    "    against this file's, BOTH WAYS, over",
+    "    `src/tests/visual/plat39-readings.json`,",
+    "    which only `just plat39-record` writes and which needs the Electron",
+    "    captures (Xvfb) and the OCR stack;",
+    "  * `gpui/tests/test_gpui_window_frame.nim` — `ck expectedScenarios == 6`;",
+    "  * `gpui/tests/plat38_keys.nim` — `PinnedScenarioCount* = 6`.",
+    "A seventh member would redden PLAT-39 in a commit that cannot re-record",
+    "it, which `ci/test/plat37-window-frame.sh` already states as a rule of",
+    "this corpus: *\"NO SEVENTH SCENARIO. The six come from",
+    "`src/tests/visual/scenarios.json`, unchanged and un-renamed … a scenario",
+    "invented for this milestone would be a corpus that grew to fit its",
+    "instrument.\"*",
+    "",
+    "So the probes are a SEPARATE, SEPARATELY COUNTED array with the same",
+    "shape and the same closed operation vocabulary, read by the GPUI arm",
+    "only — `ci/test/plat35-gpui-capture.sh` captures them after the six and",
+    "`gpui/tests/test_plat35_gutter_lanes.nim` asserts that an unstepped",
+    "breakpoint case is among them. The precedent for the GPUI arm covering a",
+    "different set is `plat39_record.GpuiScenarios`, which is two of the six.",
+    "A probe is NOT part of the cross-renderer comparison: it has no Electron",
+    "arm, so nothing here claims one."
   ],
 
   "schemaVersion": 1,
@@ -52,6 +90,7 @@
   "expectedViewports": 2,
   "expectedOperationKinds": 5,
   "expectedCanaries": 4,
+  "expectedGpuiProbes": 1,
 
   "operationKinds": ["stepIn", "next", "stepOut", "continueForward", "setBreakpoint"],
 
@@ -123,6 +162,17 @@
       ],
       "tier1Canary": false,
       "why": "The only scenario in which the gutter-marks question has a non-empty answer. `line` is relative to the first drawn row and is resolved by each driver against the recording's own source, never against a literal."
+    }
+  ],
+
+  "gpuiProbes": [
+    {
+      "id": "unstepped-breakpoint",
+      "view": "gutterLanes",
+      "recording": "calc",
+      "viewport": "laptop",
+      "operations": [{ "kind": "setBreakpoint", "line": 1 }],
+      "why": "PLAT35-F13 and PLAT35-F14. UNSTEPPED, so the editor's first drawn row is 1 and the frame holds one-digit and two-digit line numbers AT ONCE — which is the only arrangement in which a gutter lane whose cell index moves with the digit count can be seen to collide. `breakpoint-editor` cannot show it (six stepIns put the first drawn row at 31, so its mark always lands on a two-digit row), and before this entry existed the collision was only ever reproduced from an ad-hoc `--replay-ops=setBreakpoint@1` command line. Measured there on 2026-10-03 at 1440x900: line 1 [' ','▶',' ','1'], line 2 [' ',' ','●','2'], line 10 [' ',' ','1','0'] — the dot and the tens digit both at cell index 2. `laptop` because that is where the editor pane is narrowest (276px at 1440) and the gutter's width costs the most."
     }
   ]
 }

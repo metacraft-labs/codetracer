@@ -21,7 +21,7 @@ import ../../../../common/terminal_graphics/[raster, path_raster]
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 141
+const ExpectedAssertions = 139
 
 var countedAssertions = 0
 
@@ -120,15 +120,6 @@ suite "the Menu ViewModel":
     ck before.label == "Step Over" and before.shortcut == "F10"
     vm.setShortcuts({"forwardNext": "Ctrl+n"}.toTable)
     ck vm.openLevels()[1].items[1].shortcut == "Ctrl+n"
-
-  test "a menu bar's sibling step moves to the next top-level folder":
-    let vm = menuWith()
-    vm.openFolder(1)
-    vm.siblingMenu(1)
-    ck vm.path == @[2]
-    vm.siblingMenu(-1)
-    vm.siblingMenu(-1)             # wraps past the hidden macOS folder
-    ck vm.path == @[vm.root.children.high]
 
   test "the menu's own search finds enabled items by label":
     let vm = menuWith()

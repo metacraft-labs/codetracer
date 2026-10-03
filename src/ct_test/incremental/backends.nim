@@ -7,7 +7,7 @@
 ##
 ## | path                | dependency discovery                | shallow hash                |
 ## |---------------------|-------------------------------------|-----------------------------|
-## | source/interpreted  | canonical `Function`/`Call` records | source text (Phase 1)       |
+## | source/interpreted  | `function`/`call` records of a `.ct` | source text (Phase 1)       |
 ## | native / MCR        | executed set from the native trace  | compiled instruction bytes  |
 ##
 ## Phase 1 implemented exactly the source/interpreted path. M6 introduces the
@@ -17,12 +17,13 @@
 ##
 ##   1. `TraceBackend` — which mechanism a given trace requires.
 ##   2. `detectBackend` — infer the backend from a trace directory's shape and
-##      metadata (with an explicit-metadata override).
+##      metadata (with an explicit-metadata override). A `trace.json` event
+##      stream is refused as test-oracle output (`refuseTestOracleOutput`).
 ##   3. The two pluggable seams — `DependencyDiscovery` and `ShallowHasher` —
 ##      and a `backendStrategies` selector that maps a `TraceBackend` to its
 ##      `(DependencyDiscovery, ShallowHasher)` pair. The source/interpreted
-##      implementations are injected by `engine.nim` (which owns the canonical
-##      JSON reader and the source-text extractor/hasher) so this module stays
+##      implementations are injected by `engine.nim` (which wires the CTFS
+##      reader and owns the source-text extractor/hasher) so this module stays
 ##      free of a circular import; the native implementations are wired in by
 ##      M7-M9.
 ##
@@ -46,10 +47,12 @@ type
   TraceBackend* = enum
     ## The incremental-testing mechanism a trace requires.
     tbSourceInterpreted
-      ## Source / interpreted path. The trace carries canonical
-      ## `Function`/`Call` records (a `trace.json` events array) and a function's
-      ## identity is its *source text*. This is the Phase 1 path: Python, Ruby,
-      ## JavaScript, Lua, WASM, and Nim's materialized-source recording.
+      ## Source / interpreted path. The interpreted recorder's CTFS `.ct`
+      ## carries `function`/`call` records and a function's identity is its
+      ## *source text*: Python, Ruby, JavaScript, Lua, WASM, and Nim's
+      ## materialized-source recording. Selected by the explicit
+      ## `recorder_backend: "interpreter"` metadata signal; it reads the bundle
+      ## exactly as `tbSourceCtfs` does.
     tbNativeDwarf
       ## Native / Multi-Core-Recorder (MCR) + RR/DWARF path. The trace does NOT
       ## emit `Function`/`Call` records; the executed-function set comes from the
@@ -89,8 +92,8 @@ type
   DependencyDiscoveryProc* = proc (traceDir: string):
     Result[seq[ExecutedFunction], string] {.nimcall, gcsafe.}
     ## Discover the executed-function set for a trace. The source/interpreted
-    ## impl is `trace_reader.readExecutedFunctions`; the native impl (M8) reads
-    ## the native calltrace.
+    ## impl is `ctfs_trace.readExecutedFunctionsCtfs`; the native impl (M8)
+    ## reads the native calltrace.
 
   ShallowHashProc* = proc (fn: ExecutedFunction; sourceRoot: string): string
     {.nimcall, gcsafe.}
@@ -144,7 +147,7 @@ func backendOfRecorderField(value: string): Result[TraceBackend, string] =
   ##                                       M14/M15 compile-time-instrumentation
   ##                                       capture (the LIVE native path on hosts
   ##                                       without Intel PT / RR / MCR).
-  ##   * ``interpreter``                 ⇒ source/interpreted path (legacy JSON).
+  ##   * ``interpreter``                 ⇒ source/interpreted path (CTFS `.ct`).
   ##   * ``ctfs-interpreted``            ⇒ modern CTFS bundle from an interpreted
   ##                                       recorder (M12): CTFS discovery + source
   ##                                       text hashing.
@@ -221,28 +224,19 @@ proc hasCtfsContainer(traceDir: string): bool =
   false
 
 proc structuralBackend(traceDir: string): Result[TraceBackend, string] =
-  ## Detect the backend purely from the trace directory's shape:
-  ##   * a canonical `trace.json` events array  ⇒ source/interpreted.
-  ##   * an `rr/` subdir OR a `*.ct` container OR a `trace_db_metadata.json`
-  ##                                             ⇒ native.
-  ## Ambiguity (both shapes present) and emptiness (neither) are `Err` so the
-  ## engine re-runs rather than guess.
-  let hasCanonical = fileExists(traceDir / TraceEventsFile)
+  ## Detect the backend purely from the trace directory's shape: an `rr/`
+  ## subdir, a `*.ct` container or a `trace_db_metadata.json` sidecar ⇒
+  ## native. An interpreted recorder's `.ct` is told apart only by explicit
+  ## metadata (see `detectBackend`). An empty/unrecognised directory is an
+  ## `Err` so the engine re-runs rather than guess.
   let hasRr = dirExists(traceDir / RrSubdir)
   let hasDbMeta = fileExists(traceDir / TraceDbMetadataFile)
   let hasCtfs = hasCtfsContainer(traceDir)
-  let nativeSignal = hasRr or hasDbMeta or hasCtfs
-
-  if hasCanonical and nativeSignal:
-    return err("ambiguous trace shape in " & traceDir &
-      ": both canonical " & TraceEventsFile & " and native signal(s) present")
-  if hasCanonical:
-    return ok(tbSourceInterpreted)
-  if nativeSignal:
+  if hasRr or hasDbMeta or hasCtfs:
     return ok(tbNativeDwarf)
   err("unrecognised/empty trace shape in " & traceDir &
-    ": no " & TraceEventsFile & ", no " & RrSubdir & "/, no " &
-    CtfsExtension & " container, no " & TraceDbMetadataFile)
+    ": no " & RrSubdir & "/, no " & CtfsExtension & " container, no " &
+    TraceDbMetadataFile)
 
 # ---------------------------------------------------------------------------
 # Public detection
@@ -256,17 +250,22 @@ proc detectBackend*(traceDir: string): Result[TraceBackend, string] =
   ##   1. EXPLICIT metadata wins: if either `trace_metadata.json` or
   ##      `trace_db_metadata.json` carries a `recorder_backend` string field, that
   ##      value selects the backend (recognised values: `rr`/`mcr`/`ttd` ⇒ native,
-  ##      `interpreter` ⇒ source (legacy JSON), `ctfs-interpreted` ⇒ modern CTFS
+  ##      `interpreter` / `ctfs-interpreted` ⇒ a CTFS `.ct`
   ##      from an interpreted recorder, `nim-instrumented` ⇒ the reserved Nim
   ##      path). An explicit-but-unrecognised value is an `Err` (fail safe).
-  ##   2. STRUCTURE otherwise: a canonical `trace.json` ⇒ source/interpreted; an
-  ##      `rr/` subdir, a `*.ct` CTFS container, or a `trace_db_metadata.json`
-  ##      sidecar ⇒ native.
+  ##   2. STRUCTURE otherwise: an `rr/` subdir, a `*.ct` CTFS container, or a
+  ##      `trace_db_metadata.json` sidecar ⇒ native.
   ##
-  ## Ambiguous (both source and native structural signals), unknown, or empty
-  ## directories yield an `Err` — never a guess — so upstream re-runs.
+  ## Before either, a directory holding a `trace.json` event stream and no
+  ## `.ct` container is refused as test-oracle output, whatever its metadata
+  ## says. Unknown or empty directories yield an `Err` — never a guess — so
+  ## upstream re-runs.
   if not dirExists(traceDir):
     return err("trace dir not found: " & traceDir)
+  if not hasCtfsContainer(traceDir):
+    let oracle = refuseTestOracleOutput(traceDir)
+    if oracle.isErr:
+      return err(oracle.error)
   let explicit = explicitBackendFromMetadata(traceDir)
   if explicit.isOk:
     return explicit

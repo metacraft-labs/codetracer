@@ -13,8 +13,11 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/store/types as vmtypes
 from ../viewmodel/viewmodels/event_log_vm import
-  EventLogVM, createEventLogVM, appendLiveDebuggerStop
+  EventLogVM, createEventLogVM, appendLiveDebuggerStop,
+  EventLogColumns, EventLogColumn, defaultEventLogColumns, isVisible,
+  elcTick, elcIndex, elcLocation, elcKind, elcOutput
 from isonim/core/signals import val
+from isonim/core/computation import createEffect
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_view import
   mountIsoNimEventLog, mountIsoNimEventLogWithDataTables
@@ -47,6 +50,15 @@ var eventLogComponentRef: EventLogComponent
 
 proc tryMountIsoNimEventLogPanel*()
 proc eventLogAfterRedraws(self: EventLogComponent)
+proc events(self: EventLogComponent)
+
+var appliedEventLogColumns = defaultEventLogColumns()
+var tableHasLocationColumn = false
+  ## Whether the dense table was built with the location column (it exists
+  ## only for a materialized trace).
+  ## The column order and hidden set the dense table was last built with
+  ## (PLAT-49 part B): a change of `EventLogVM.columns` from the column menu
+  ## rebuilds the table's columns.
 when defined(js):
   proc stringifyJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
   proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
@@ -431,6 +443,10 @@ proc renderColumnHeader(tableId: cstring; columns: seq[JsObject]) =
   let strip = document.createElement(cstring"div")
   strip.className = cstring"eventLog-column-header"
   for column in columns:
+    # A HIDDEN column has no header cell (PLAT-49 part B): its body cells are
+    # not drawn either.
+    if not column.visible.isUndefined and not column.visible.to(bool):
+      continue
     let cell = document.createElement(cstring"span")
     cell.className = column.className.to(cstring)
     cell.textContent = column.title.to(cstring)
@@ -635,6 +651,14 @@ proc tryMountIsoNimEventLogPanel*() =
           comp.eventLogAfterRedraws()
       )
       cdebug "tryMountIsoNimEventLogPanel: mount COMPLETE in #eventLogComponent-0"
+      # PLAT-49 part B: the column menu changed the ViewModel's columns —
+      # rebuild the dense table's columns from them (`events`).
+      let vm = eventLogVMInstance
+      createEffect proc() =
+        let wanted = vm.columns.val
+        if comp.init and wanted != appliedEventLogColumns:
+          comp.redrawColumns = true
+          comp.events()
 
     except:
       cerror "tryMountIsoNimEventLogPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
@@ -730,7 +754,6 @@ when defined(ctInExtension):
       eventLogComponentForExtension.bindEventLogExtensionHost()
     result = eventLogComponentForExtension
 
-proc events(self: EventLogComponent)
 proc resizeEventLogHandler*(self: EventLogComponent)
 
 proc denseId*(context: EventLogComponent): cstring =
@@ -1293,8 +1316,10 @@ proc events(self: EventLogComponent) =
       self.lastJumpFireTime = currentTime
       let isAction = cast[bool](e.target.classList[0] == "row-expander".toJs)
       if isAction:
-        let textElement = e.currentTarget.childNodes[3]
-        if textElement.classList[0] == "eventLog-text".toJs:
+        # The output cell BY ITS CLASS: the columns' order and visibility are
+        # the user's (PLAT-49 part B), so its position is not fixed.
+        let textElement = e.currentTarget.querySelector(cstring".eventLog-text")
+        if not textElement.isNil and textElement.classList[0] == "eventLog-text".toJs:
           if textElement.style.toJs.maxHeight == "24px".toJs:
             textElement.style.overflow = "auto"
             textElement.style.maxHeight = "20ch".toJs
@@ -1359,41 +1384,58 @@ proc events(self: EventLogComponent) =
     var ret = false
 
     try:
-      var denseColumns = @[
-          js{
-            # width: cstring"100px",
+      # PLAT-49 part B (finding 14): THE COLUMNS ARE THE EVENT LOG
+      # VIEWMODEL'S — its order and its hidden set (`EventLogVM.columns`,
+      # which the column menu and the terminal's `:columns` change), declared
+      # ON EACH COLUMN, so every (re)initialisation of the table honours
+      # them. The location column exists only for a materialized trace; its
+      # default is hidden (`DefaultHiddenEventLogColumns`, as Event-Log-
+      # Pane.md's column table says) — the `column(2).visible(false)` in
+      # `onCompleteMove` used to run once, before the table existed, and the
+      # real desktop showed the column on `calc`.
+      let columnState =
+        if eventLogVMInstance.isNil: defaultEventLogColumns()
+        else: eventLogVMInstance.columns.val
+      appliedEventLogColumns = columnState
+      var denseColumns: seq[JsObject] = @[]
+      for column in columnState.order:
+        let shown = columnState.isVisible(column)
+        case column
+        of elcTick:
+          denseColumns.add js{
             className: cstring"direct-location-rr-ticks eventLog-cell",
             data: cstring"directLocationRRTicks",
             orderable: true,
-            targets: 0,
             title: cstring"tick",
+            visible: shown,
             render: proc(directLocationRRTicks: int): cstring =
               renderRRTicksLine(directLocationRRTicks, self.data.minRRTicks, self.data.maxRRTicks, "event-rr-ticks-line")
-          },
-          js{
+          }
+        of elcIndex:
+          denseColumns.add js{
             className: cstring"eventLog-index eventLog-cell",
             data: cstring"rrEventId",
-            title: cstring"#"
-          },
-      ]
-      if self.usesMaterializedTracesTrace:
-        let lower = cstring("FullPath".toLowerAscii())
-
-        denseColumns.add(
-          js{
-            className: cstring"eventLog-" & lower & " " & local("cell"),
-            searchable: true,
-            title: cstring"location",
-            data: cstring"fullPath",
+            title: cstring"#",
+            visible: shown,
           }
-        )
-      denseColumns.add(
-        @[
-          js{
+        of elcLocation:
+          tableHasLocationColumn = self.usesMaterializedTracesTrace
+          if self.usesMaterializedTracesTrace:
+            let lower = cstring("FullPath".toLowerAscii())
+            denseColumns.add js{
+              className: cstring"eventLog-" & lower & " " & local("cell"),
+              searchable: true,
+              title: cstring"location",
+              data: cstring"fullPath",
+              visible: shown,
+            }
+        of elcKind:
+          denseColumns.add js{
             className: cstring"eventLog-event eventLog-cell",
             searchable: true,
             data: cstring"kind",
             title: cstring"",
+            visible: shown,
             render: proc(kind: EventLogKind, t: js, event: ProgramEvent): cstring =
               if event.content.split("\n").len() == 2 and event.content.split("\n")[^1] == "":
                 cstring""
@@ -1401,12 +1443,14 @@ proc events(self: EventLogComponent) =
                 cstring"""<span class="row-expander flow-hide-content flow-view-more-button"/>"""
               else:
                 cstring""
-          },
-          js{
+          }
+        of elcOutput:
+          denseColumns.add js{
             className: cstring"eventLog-text eventLog-cell",
             searchable: true,
             data: cstring"content",
             title: cstring"output",
+            visible: shown,
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
                 of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
@@ -1418,8 +1462,11 @@ proc events(self: EventLogComponent) =
 
               text
           }
-        ]
-      )
+      # The table orders by the TICK column, wherever it is now.
+      var tickAt = 0
+      for i, c in denseColumns:
+        if c.data.to(cstring) == cstring"directLocationRRTicks":
+          tickAt = i
 
       var detailedColumns = @[
           js{
@@ -1507,7 +1554,7 @@ proc events(self: EventLogComponent) =
             bottomEnd:  nil
           },
           pageLength: -1,
-          order:          @[[0.toJs, (cstring"asc").toJs]],
+          order:          @[[tickAt.toJs, (cstring"asc").toJs]],
           colResize:      js{
             isEnabled: true,
             saveState: true},
@@ -1581,10 +1628,10 @@ proc events(self: EventLogComponent) =
 
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
-    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
-    jqFind(cstring"#" & context.detailedId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
-    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
-    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
+    jqFind(cstring"#" & context.detailedId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"mouseover").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"contextmenu").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
 
     console.timeEnd(cstring"new events: load in datatable: context changes and handlers")
 
@@ -1597,7 +1644,7 @@ proc events(self: EventLogComponent) =
     console.timeEnd(cstring"new events: load in datatable: redraw")
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
-    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
     let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
     let denseScrollBody = cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
     if not denseScrollBody.isNil:
@@ -1619,9 +1666,9 @@ proc events(self: EventLogComponent) =
           if not self.detailedTable.footerDom.isNil:
             self.detailedTable.updateTableFooter()
       )
-    jqFind(cstring"#" & context.detailedId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
-    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
-    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
+    jqFind(cstring"#" & context.detailedId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"mouseover").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"contextmenu").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
 
     if self.resizeObserver.isNil:
       let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
@@ -2084,10 +2131,19 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
   if not self.usesMaterializedTracesTraceSet:
     self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces
     self.usesMaterializedTracesTraceSet = true
-    try:
-      self.denseTable.context.column(2).visible(false)
-    except:
-      cwarn "Complete move came before initializing the event log component"
+    # PLAT-49 part B: the location column exists for a materialized trace,
+    # with the visibility the Event Log ViewModel gives it (declared on the
+    # column, `events`). A table built before this was known has no such
+    # column: rebuild its columns. (Until PLAT-49 this hid "column 2", which
+    # is the location column only in the desktop's default order.)
+    if self.init and self.usesMaterializedTracesTrace and
+       not tableHasLocationColumn:
+      try:
+        self.redrawColumns = true
+        self.events()
+      except:
+        cwarn "event_log: rebuilding the columns failed: " &
+          getCurrentExceptionMsg()
 
   let currentTime: int64 = now()
   self.location = response.location

@@ -32,8 +32,10 @@
 ##      the top strip and its reveal itself, outside the dock document);
 ##   2. a stack's tab strip: the tab under the pointer (`dzTabStrip` on that
 ##      tab's path), or past the last label `dzCentre` ("append");
-##   3. the four edge bands of the pane's body (a quarter of its extent each,
-##      nearest side wins, ties left, right, top, bottom), then the centre.
+##   3. the pane's body by GoldenLayout's proportions
+##      (`layout_interaction.goldenLayoutZone`): a quarter on the left and
+##      right, full height; a quarter at the top and bottom between them;
+##      the centre joins (PLAT-49 part B).
 ##
 ## A divider is the GAP between two siblings of a row or a column: a press
 ## there begins `beginResizeDivider(container, index)`, and the pointer's
@@ -42,6 +44,7 @@
 ## Pure: integers and the model's values, no renderer, no window.
 
 import std/[json, options, strutils]
+from std/unicode import runeLen
 
 import headless_app/layout_model
 import headless_app/layout_interaction
@@ -71,6 +74,11 @@ const
     ## How thick an AUTO-HIDE STRIP is: the band along a window edge that
     ## holds the panes docked there, one label each (Layout-ViewModel §3.1's
     ## collapsed tabs; the terminal draws the same strip one cell thick).
+  DockedOpenSharePercent* = 21
+    ## PLAT-49 part B: the desktop's docked panel, 280 px of a 1334 px layout
+    ## (measured, `plat49-panes-capture.spec.ts`).
+  FooterPx* = DockStripPx + 4
+    ## PLAT-49 part B: the window's footer (status bar) height.
   DockCharPx* = 16
     ## One character's row in a left or right strip, whose labels read
     ## top to bottom one character per row (GPUI draws no rotated text).
@@ -109,8 +117,10 @@ type
       labels*: seq[string]
       active*: int
       strip*: PxRect
-        ## The tab strip, or a zero rectangle when none is drawn (a bare
-        ## pane, or a stack of one).
+        ## The tab strip. Since PLAT-49 EVERY pane box has one — a stack's
+        ## tabs, or a bare pane's one tab with its name — and the leaf draws
+        ## no heading of its own (the user, 2026-10-01: the tab strip
+        ## identifies the pane, as the desktop's GoldenLayout header does).
       tabs*: seq[PxRect]
       body*: PxRect
         ## The pane's own content box: inside the border, below the strip.
@@ -156,7 +166,22 @@ type
     nodes*: seq[GeomNode]
     root*: int
       ## Index of the root node, or -1 when the document drew nothing.
+    loneLabels*: seq[(string, string)]
+      ## PLAT-49: (pane id, label) for a pane whose ONE tab names its content
+      ## rather than the pane — the editor's tab is its open file
+      ## (`product_mode.editorTabLabel`), as the terminal's and the desktop's
+      ## are. Read only for a pane that is not in a stack.
     dividers*: seq[GeomDivider]
+    footer*: PxRect
+      ## PLAT-49 part B (finding 9): the window's FOOTER — a status bar along
+      ## the window's bottom, full width, holding the bottom auto-hide labels
+      ## on its left (the desktop renders them inside its status bar) and the
+      ## position on its right. Empty when nothing is docked at the bottom.
+    openDock*: PxRect
+      ## PLAT-49 part B: the band of the docked pane shown OPEN
+      ## (`DockedPane.open`): taken out of the tree's area, so the tree is
+      ## laid out beside it — tiled, not an overlay. Empty when none.
+    openDockPane*: string
 
 func contains*(r: PxRect; x, y: int): bool =
   x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h
@@ -243,11 +268,16 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
     for t in tabs:
       let id = t{"info", "panel", "pane"}.getStr
       node.panes.add id
-      node.labels.add labelOf(id)
+      var label = labelOf(id)
+      if not node.stacked:
+        for (pane, lone) in g.loneLabels:
+          if pane == id and lone.len > 0:
+            label = lone
+      node.labels.add label
     let inner = PxRect(x: x + FocusOutlinePx, y: y + FocusOutlinePx,
                        w: max(1, w - 2 * FocusOutlinePx),
                        h: max(1, h - 2 * FocusOutlinePx))
-    if tabs.len > 1:
+    if tabs.len >= 1:
       node.strip = PxRect(x: inner.x, y: inner.y, w: inner.w, h: TabStripPx)
       var tx = inner.x + StripInsetPx
       for label in node.labels:
@@ -269,7 +299,15 @@ func slotExtentPx*(edge: LayoutEdge; label: string): int =
   of leTop, leBottom: tabWidthPx(label)
   of leLeft, leRight: 2 * TabPadPx + DockCharPx * label.len
 
-proc stripsOf(layout: Layout; area: PxRect):
+func footerLeadPx*(fileInfo: string): int =
+  ## How far into the footer the bottom labels start: past the status bar's
+  ## FILE INFO (`headless_app/footer_info`), padded a tab's padding each
+  ## side, as the desktop's status bar opens with its language and encoding
+  ## and its labels follow them. None without a file.
+  if fileInfo.len == 0: 0
+  else: 2 * TabPadPx + TabCharPx * fileInfo.runeLen
+
+proc stripsOf(layout: Layout; area, footer: PxRect; footerLead = 0):
     tuple[strips: seq[GeomStrip], inner: PxRect] =
   ## THE STRIPS COME OUT OF THE AREA FIRST, and the tree is laid out in what
   ## is left — the terminal's `binding.geometryOf` order: left and right
@@ -282,7 +320,9 @@ proc stripsOf(layout: Layout; area: PxRect):
   let lw = if has[leLeft]: band else: 0
   let rw = if has[leRight]: band else: 0
   let th = if has[leTop]: band else: 0
-  let bh = if has[leBottom]: band else: 0
+  # The bottom strip is the window's footer (`windowGeometryOf`), outside
+  # `area`: it takes nothing from it here.
+  let bh = 0
   result.inner = PxRect(x: area.x + lw, y: area.y + th,
                         w: max(1, area.w - lw - rw),
                         h: max(1, area.h - th - bh))
@@ -296,8 +336,11 @@ proc stripsOf(layout: Layout; area: PxRect):
                          w: DockStripPx, h: area.h)
       of leTop: PxRect(x: area.x + lw, y: area.y, w: max(1, area.w - lw - rw),
                        h: DockStripPx)
-      of leBottom: PxRect(x: area.x + lw, y: area.y + area.h - DockStripPx,
-                          w: max(1, area.w - lw - rw), h: DockStripPx)
+      of leBottom:
+        # After the footer's file info (`footerLeadPx`).
+        let lead = max(0, min(footerLead, footer.w))
+        PxRect(x: footer.x + lead, y: footer.y, w: footer.w - lead,
+               h: footer.h)
     var strip = GeomStrip(edge: edge, rect: rect, slots: @[])
     var cursor = (if edge in {leTop, leBottom}: rect.x else: rect.y) +
                  StripInsetPx
@@ -313,8 +356,14 @@ proc stripsOf(layout: Layout; area: PxRect):
       cursor += extent
     result.strips.add strip
 
+proc revealRectOf*(g: WindowGeometry; edge: LayoutEdge): PxRect
+  ## Forward-declared for `windowGeometryOf`'s open band.
+
 proc windowGeometryOf*(layout: Layout; dock: JsonNode;
-                       width, height: int; topBandPx = 0): WindowGeometry =
+                       width, height: int; topBandPx = 0;
+                       loneLabels: seq[(string, string)] = @[];
+                       footerLead = 0):
+                       WindowGeometry =
   ## Where every pane, strip, tab and divider of the window is, for the dock
   ## document `dock` (projected from `layout`) in a `width` x `height` window.
   ## `topBandPx` (PLAT-48) is what the window's top bar and its gap take
@@ -324,10 +373,49 @@ proc windowGeometryOf*(layout: Layout; dock: JsonNode;
     area: PxRect(x: ChromePaddingPx, y: ChromePaddingPx + topBandPx,
                  w: max(1, width - 2 * ChromePaddingPx),
                  h: max(1, height - 2 * ChromePaddingPx - topBandPx)),
-    nodes: @[], root: -1, dividers: @[])
-  let (strips, inner) = stripsOf(layout, result.area)
+    nodes: @[], root: -1, dividers: @[], loneLabels: loneLabels)
+  # PLAT-49 part B (finding 9): THE BOTTOM LABELS LIVE IN A FOOTER — the
+  # window's status bar, along its bottom edge, full width — as the
+  # desktop's live in its status bar. The layout area ends a gap above it.
+  if layout.dockedAt(leBottom).len > 0:
+    result.footer = PxRect(x: 0, y: height - FooterPx, w: width, h: FooterPx)
+    let bottom = result.footer.y - ChromeGapPx
+    result.area.h = max(1, bottom - result.area.y)
+  let (strips, inner) = stripsOf(layout, result.area, result.footer,
+                                 footerLead)
   result.strips = strips
   result.inner = inner
+  # PLAT-49 part B: A DOCKED PANE SHOWN OPEN takes its band out of the tree's
+  # area (a third of the axis, the reveal's share, and a gap), and the tree
+  # is laid out beside it — tiled, as the desktop's docked panel resizes
+  # GoldenLayout.
+  let opened = layout.openDocked
+  if opened.isSome:
+    # The desktop's docked panel: 21% of the layout on its axis (280 px of
+    # 1334, measured — the terminal's `binding.DockedOpenSharePercent`).
+    let r = result.inner
+    let w = max(1, r.w * DockedOpenSharePercent div 100)
+    let h = max(1, r.h * DockedOpenSharePercent div 100)
+    let band =
+      case opened.get.edge
+      of leLeft: PxRect(x: r.x, y: r.y, w: w, h: r.h)
+      of leRight: PxRect(x: r.x + r.w - w, y: r.y, w: w, h: r.h)
+      of leTop: PxRect(x: r.x, y: r.y, w: r.w, h: h)
+      of leBottom: PxRect(x: r.x, y: r.y + r.h - h, w: r.w, h: h)
+    if not band.isEmpty:
+      result.openDock = band
+      result.openDockPane = $opened.get.pane
+      case opened.get.edge
+      of leLeft:
+        result.inner.x += band.w + ChromeGapPx
+        result.inner.w = max(1, result.inner.w - band.w - ChromeGapPx)
+      of leRight:
+        result.inner.w = max(1, result.inner.w - band.w - ChromeGapPx)
+      of leTop:
+        result.inner.y += band.h + ChromeGapPx
+        result.inner.h = max(1, result.inner.h - band.h - ChromeGapPx)
+      of leBottom:
+        result.inner.h = max(1, result.inner.h - band.h - ChromeGapPx)
   if dock.isNil or dock.kind != JObject or not dock.hasKey("center"):
     return
   result.root = result.addNode(layout, dock["center"], "",
@@ -400,13 +488,22 @@ proc nodeAtPath(g: WindowGeometry; path: string): int =
       return i
   -1
 
+func dropBodyOf(n: GeomNode): PxRect =
+  ## The rectangle a drop onto a pane box is measured against: its body,
+  ## below its strip — a stack's or a bare pane's one-tab strip alike. Every
+  ## pane box has a strip (PLAT-49 part A), and since part B a bare pane's
+  ## strip is its HEADER, a join zone as a one-tab GoldenLayout stack's
+  ## header is (`pointerAt`); the edge zones are a quarter of the body
+  ## (`goldenLayoutZone`).
+  n.body
+
 proc dropAreaOf*(g: WindowGeometry; path: string): PxRect =
   ## The body a drop onto the node at `path` is measured against: a pane's
   ## content box (below its strip). A path INSIDE a stack names that stack's
   ## body — its tabs share one region.
   let direct = g.nodeAtPath(path)
   if direct >= 0 and g.nodes[direct].kind == gnTabs:
-    return g.nodes[direct].body
+    return dropBodyOf(g.nodes[direct])
   let parent = parentPath(path)
   if parent.isSome:
     let up = g.nodeAtPath(parent.get)
@@ -418,8 +515,8 @@ proc dropAreaOf*(g: WindowGeometry; path: string): PxRect =
 
 proc tabAt*(g: WindowGeometry; x, y: int): tuple[node, tab: int] =
   ## The tab under a pixel: its pane box and its index, or (-1, -1). A bare
-  ## pane's TITLE ROW counts as its one tab — the heading is what a user
-  ## grabs to move it, as the terminal's title row is.
+  ## pane's ONE TAB is what a user grabs to move it, as a stacked pane's tab
+  ## is.
   let i = g.tabsNodeAt(x, y)
   if i < 0:
     return (-1, -1)
@@ -456,9 +553,10 @@ const
     ## text face at the shim's default size, measured off the window (26 px
     ## from one row to the next on `call_pages`, where every line fits). The
     ## call trace pages by the same pitch.
-  EditorLinesAbovePx* = 2 * GpuiEditorRowPx
-    ## What the editor pane draws above its rows: its heading and the source
-    ## statement (`leaves.renderEditor` draws the statement always).
+  EditorLinesAbovePx* = GpuiEditorRowPx
+    ## What the editor pane draws above its rows: the source statement
+    ## (`leaves.renderEditor` draws it always). Its heading went with
+    ## PLAT-49 — the pane's tab strip, outside its body, names it.
 
 proc editorRowsOf*(g: WindowGeometry): int =
   ## **How many source rows the editor pane SHOWS**: its body, less its
@@ -473,9 +571,45 @@ proc editorRowsOf*(g: WindowGeometry): int =
   let h = if i >= 0: g.nodes[i].body.h else: g.inner.h
   max(1, (h - 2 * ChromePaddingPx - EditorLinesAbovePx) div GpuiEditorRowPx)
 
+proc editorBodyWidthOf*(g: WindowGeometry): int =
+  ## **How wide the editor pane's CONTENT area is**: its body, less the
+  ## padding `main.stylePaneBox` puts inside it. `editorRowsOf`'s companion,
+  ## written the same way and against the same node, because the two answers
+  ## have to come from one rectangle — a scrollbar that said the content
+  ## overflowed a width the pane does not have would be worse than no
+  ## scrollbar.
+  ##
+  ## `PLAT35-F3`: this is what `leaves.renderEditor` compares the drawn
+  ## content against to decide whether to draw a horizontal scrollbar.
+  ##
+  ## **CHECKED AGAINST THE FRAMES, not only against the arithmetic.** The
+  ## editor pane's ground measures 466 px wide at 1920x1080 and 346 px at
+  ## 1440x900 on `build/plat35/gpui/*.png`, and the rightmost ink on any row
+  ## sits at exactly 10 px inside the right edge (853 of 863, 637 of 647) —
+  ## which is `ChromePaddingPx`, and is why it is subtracted twice here.
+  let i = g.tabsNodeOfPane("editor")
+  let w = if i >= 0: g.nodes[i].body.w else: g.inner.w
+  max(1, w - 2 * ChromePaddingPx)
+
 # ---------------------------------------------------------------------------
 # §5 obligation 2, first direction: PIXELS -> `LayoutPointer`
 # ---------------------------------------------------------------------------
+
+func rootBandOf*(g: WindowGeometry; side: LayoutEdge): PxRect =
+  ## PLAT-49 part B: GoldenLayout's ground side area along `side` — a band
+  ## `GoldenLayoutRootBandPx` deep INSIDE the tree's area (never more than
+  ## half of it), where a drop splits the whole layout; and the rectangle
+  ## its indication tints.
+  let a = g.inner
+  if a.isEmpty:
+    return PxRect()
+  let dw = min(goldenLayoutRootBand(1.0), max(1, a.w div 2))
+  let dh = min(goldenLayoutRootBand(1.0), max(1, a.h div 2))
+  case side
+  of leLeft: PxRect(x: a.x, y: a.y, w: dw, h: a.h)
+  of leRight: PxRect(x: a.x + a.w - dw, y: a.y, w: dw, h: a.h)
+  of leTop: PxRect(x: a.x, y: a.y, w: a.w, h: dh)
+  of leBottom: PxRect(x: a.x, y: a.y + a.h - dh, w: a.w, h: dh)
 
 proc pointerAt*(g: WindowGeometry; x, y: int): Option[LayoutPointer] =
   ## **The hit-test.** A window pixel, in the layout's own vocabulary. See
@@ -517,37 +651,49 @@ proc pointerAt*(g: WindowGeometry; x, y: int): Option[LayoutPointer] =
   if i < 0:
     return none(LayoutPointer)
   let n = g.nodes[i]
-  if not n.strip.isEmpty and n.strip.contains(x, y):
+  # PLAT-49 part B: GOLDENLAYOUT'S GROUND BANDS (`rootBandOf`), with its
+  # `getArea` rule: the smallest area under the pointer wins — of the bands
+  # (two at a corner), the stack's whole area and, on its strip, its header.
+  var bandSide = leLeft
+  var bandSurface = high(int)
+  for side in [leLeft, leRight, leTop, leBottom]:
+    let band = g.rootBandOf(side)
+    if not band.isEmpty and band.contains(x, y) and band.w * band.h < bandSurface:
+      bandSide = side
+      bandSurface = band.w * band.h
+  if bandSurface < high(int):
+    let rival =
+      if not n.strip.isEmpty and n.strip.contains(x, y): n.strip.w * n.strip.h
+      else: n.rect.w * n.rect.h
+    if goldenLayoutWins(bandSurface, rival):
+      return some(LayoutPointer(path: "", zone: rootZoneOf(bandSide)))
+  if n.stacked and not n.strip.isEmpty and n.strip.contains(x, y):
     for t, r in n.tabs:
       if r.contains(x, y):
-        return some(LayoutPointer(path: n.panePathOf(t), zone: dzTabStrip))
+        # GoldenLayout's header rule (PLAT-49 part B): left of a tab's
+        # middle inserts before it, right of it after it; after the last
+        # tab is the append the strip's filler answers.
+        let slot = if goldenLayoutInsertsAfter(x - r.x, r.w): t + 1 else: t
+        if slot >= n.tabs.len:
+          return some(LayoutPointer(path: n.panePathOf(n.active),
+                                    zone: dzCentre))
+        return some(LayoutPointer(path: n.panePathOf(slot), zone: dzTabStrip))
     return some(LayoutPointer(path: n.panePathOf(n.active), zone: dzCentre))
   let path = n.panePathOf(n.active)
-  let b = n.body
-  if not b.contains(x, y):
-    # The border pixel, or the strip's edge: the centre, as the terminal
-    # answers for a cell outside the drop area.
+  # A BARE pane's one-tab strip is its header: a drop there joins it
+  # (PLAT-49 part B — a one-tab GoldenLayout stack's header joins too).
+  if not n.stacked and not n.strip.isEmpty and n.strip.contains(x, y):
     return some(LayoutPointer(path: path, zone: dzCentre))
-  let dl = x - b.x
-  let dr = b.x + b.w - 1 - x
-  let dt = y - b.y
-  let db = b.y + b.h - 1 - y
-  let bandH = max(1, b.w div 4)
-  let bandV = max(1, b.h div 4)
-  var zone = dzCentre
-  var best = high(int)
-  if dl < bandH and dl < best:
-    best = dl
-    zone = dzLeftEdge
-  if dr < bandH and dr < best:
-    best = dr
-    zone = dzRightEdge
-  if dt < bandV and dt < best:
-    best = dt
-    zone = dzTopEdge
-  if db < bandV and db < best:
-    zone = dzBottomEdge
-  some(LayoutPointer(path: path, zone: zone))
+  let b = dropBodyOf(n)
+  if not b.contains(x, y):
+    # The border pixel: the centre, as the terminal answers for a cell
+    # outside the drop area.
+    return some(LayoutPointer(path: path, zone: dzCentre))
+  # GOLDENLAYOUT'S ZONES (PLAT-49 part B, finding 11): a quarter of the body
+  # on each side splits there, the centre joins — the rule the terminal's
+  # cell hit-test applies too.
+  some(LayoutPointer(path: path,
+                     zone: goldenLayoutZone(x - b.x, y - b.y, b.w, b.h)))
 
 # ---------------------------------------------------------------------------
 # §5 obligation 2, second direction: the drop indication -> PIXELS
@@ -598,6 +744,9 @@ proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication):
       of leBottom: PxRect(x: a.x, y: a.y + a.h - DockBandPx, w: a.w,
                           h: DockBandPx)
     (tint: band, caret: PxRect())
+  of diRootBand:
+    # GoldenLayout highlights its ground side area itself.
+    (tint: g.rootBandOf(ind.side), caret: PxRect())
   of diTabSlot:
     let i = g.nodeAtPath(ind.path)
     if i < 0 or g.nodes[i].kind != gnTabs or g.nodes[i].strip.isEmpty:

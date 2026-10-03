@@ -27,14 +27,17 @@
 import std/[unittest, os, strutils, times, tables]
 
 import engine        # record, decide, initCache, CachedDep, deepHash, ExecutedFunction
+import m0_three_funcs_trace
 import root_hash     # rootHashOfDeps, buildArtifact, fromCachedTest
 
 const
   fixturesDir = currentSourcePath().parentDir / "fixtures"
   threeFuncsFixture = fixturesDir / "m0_three_funcs"
-  threeFuncsTrace = threeFuncsFixture / "trace"
   relSourcePath = "fixtures/m0_three_funcs/src/three_funcs.rb"
   testId = "fixture::three_funcs"
+
+# The m0_three_funcs recording: a `.ct` built by `m0_three_funcs_trace`.
+let threeFuncsTrace = threeFuncsTraceDir()
 
 var counter = 0
 

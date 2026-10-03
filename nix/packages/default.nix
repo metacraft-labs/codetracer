@@ -856,12 +856,24 @@
           name = "backend-manager";
           pname = "backend-manager";
 
-          # NOTE: the source of this derivation is the CRATE, not the
-          # repository. That is deliberate (nothing else in the tree is a
-          # build input of ``session-manager``) but it means the sandbox has
-          # no ``scripts/``, no sibling repos, no browser and no network --
+          # NOTE: the source of this derivation is the CRATE plus the
+          # ``codetracer-trace-format`` workspace it reaches by path (its
+          # Cargo.toml says ``../../../codetracer-trace-format``, exactly as
+          # db-backend's does), laid out so that relative path resolves.
+          # Nothing else in the tree is a build input of ``session-manager``,
+          # so the sandbox has no ``scripts/``, no browser and no network --
           # see ``checkPhase`` below.
-          src = ../../src/backend-manager;
+          src = pkgs.runCommand "backend-manager-src" { } ''
+            mkdir -p $out/codetracer/src
+            cp -r ${../../src/backend-manager} $out/codetracer/src/backend-manager
+            cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
+          '';
+          sourceRoot = "backend-manager-src/codetracer/src/backend-manager";
+
+          # ``codetracer_trace_format_capnp`` (a dependency of the CTFS trace
+          # writer ``record-web`` records with) compiles its schema with
+          # ``capnp`` at build time, as it does for db-backend above.
+          nativeBuildInputs = [ pkgs.capnproto ];
 
           cargoLock = {
             lockFile = ../../src/backend-manager/Cargo.lock;
@@ -876,7 +888,7 @@
             # sandbox at all:
             #
             #   browser_stream_host::tests::
-            #     verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+            #     a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
             #
             # It reads a *real* browser recording, and that recording is
             # deliberately not committed -- commit 5dc395c1 replaced the
@@ -1039,7 +1051,7 @@
               $cargoTestTargets -- --list)
             listed=$(printf '%s\n' "$listing" | grep -c ': test$')
 
-            excluded=browser_stream_host::tests::verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+            excluded=browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
             if ! printf '%s\n' "$listing" | grep -qx "$excluded: test"; then
               echo "ERROR: $excluded is not in this crate's test list." >&2
               echo "The exclusion below would silently filter nothing. If the test was" >&2

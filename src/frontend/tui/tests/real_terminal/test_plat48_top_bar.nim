@@ -37,8 +37,10 @@ import ../../../../common/terminal_graphics/[raster, path_raster]
 import ../../../viewmodel/viewmodels/transport_icons
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
-# as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 99
+# as the suite's RUNTIME assertion count. (PLAT-49 part B: +9 — the footer
+# case checks every row the docked-open pane changed, and a docked band is
+# taller than the overlay the click used to open.)
+const ExpectedAssertions = 110
 
 var countedAssertions = 0
 
@@ -168,14 +170,21 @@ suite "PLAT-48 on a real terminal: the menu":
     const Rows = 50
     var sess = open(Cols, Rows, stateDir("menu"))
     let top = sess.rowOf(Cols, 0)
-    let debugCol = top.cellFind(" Debug ")
-    ck debugCol > 0
-    # BY KEY: F12, then Right across the bar to Debug, Down into it.
+    # PLAT-49: one root button; the first level drops below it.
+    ck top.startsWith(" ≡ ")
+    # BY KEY: F12, then Down through the first level to Debug, Right into it.
     sess.send(F12)
+    # Row 1 already says "Files" (the Files stack's strip, PLAT-49): wait for
+    # the dropdown's second row, which nothing else on that row spells.
+    discard sess.waitRow(Cols, 2, " Edit ")
+    var debugRow = -1
+    for r in 1 ..< 12:
+      if sess.rowOf(Cols, r).cellFind(" Debug ") in 0 .. 3: debugRow = r
+    ck debugRow > 0
     for _ in 0 ..< 5:
-      sess.send(Right)
-    sess.send(Down)
-    discard sess.waitRow(Cols, 1, "Continue")
+      sess.send(Down)
+    sess.send(Right)
+    discard sess.waitRow(Cols, debugRow, "Continue")
     let expected = [("Continue", "c"), ("Step Over", "n"), ("Step In", "s"),
                     ("Step Out", "f"), ("Reverse Continue", "rc"),
                     ("Reverse Step Over", "p"), ("Reverse Step In", "b"),
@@ -183,7 +192,7 @@ suite "PLAT-48 on a real terminal: the menu":
     var s = sess.snap(Cols, Rows)
     for (label, chord) in expected:
       var found = false
-      for r in 1 ..< 12:
+      for r in 1 ..< 24:
         let line = s.text(r)
         let at = line.cellFind(" " & label & " ")
         if at >= 0 and line.runeSubStr(at + 1).strip.startsWith(label):
@@ -193,9 +202,11 @@ suite "PLAT-48 on a real terminal: the menu":
       ck found
     sess.esc()
     sess.esc()
-    # BY CLICK: the Debug title.
-    sess.click(0, debugCol + 1)
-    discard sess.waitRow(Cols, 2, "Step Over")
+    # BY CLICK: the root button, then the Debug folder.
+    sess.click(0, 1)
+    discard sess.waitRow(Cols, debugRow, "Debug")
+    sess.click(debugRow, 2)
+    discard sess.waitRow(Cols, debugRow + 1, "Step Over")
     sess.esc()
     sess.esc()
     # REBIND: Step Over becomes Ctrl+n; the dropdown says so.
@@ -203,8 +214,10 @@ suite "PLAT-48 on a real terminal: the menu":
     writeFile(keys, "NORMAL n = -\nNORMAL F10 = -\nNORMAL Ctrl+n = step-over\n")
     sess.typeLine("keys " & keys)
     discard sess.waitRow(Cols, Rows - 1, "keys " & keys)
-    sess.click(0, debugCol + 1)
-    let row2 = sess.waitRow(Cols, 2, "Step Over")
+    sess.click(0, 1)
+    discard sess.waitRow(Cols, debugRow, "Debug")
+    sess.click(debugRow, 2)
+    let row2 = sess.waitRow(Cols, debugRow + 1, "Step Over")
     ck row2.contains("Ctrl+n")
     # CHOOSE Step Over: the debugger moves.
     let before = tickOf(sess.rowOf(Cols, 0))
@@ -253,7 +266,12 @@ suite "PLAT-48 on a real terminal: the debugger controls":
     for cols in [80, 120, 200]:
       var sess = open(cols, 40, stateDir("text-" & $cols))
       sess.typeLine("icons text")
-      discard sess.waitRow(cols, 39, "icons text")
+      # Synchronised on the TOP ROW taking the first priority control's
+      # text: since PLAT-49 part B the footer's labels share the status row,
+      # and at 80 columns they leave the command's note too little room to
+      # be read back whole.
+      let first = TransportControls[controlIndex(TextPriority[0])].text
+      discard sess.waitRow(cols, 0, " " & first & " ")
       let top = sess.rowOf(cols, 0)
       var shown: HashSet[string]
       shown.init()
@@ -352,33 +370,46 @@ suite "PLAT-48 on a real terminal: the debugger controls":
 
 suite "PLAT-48 on a real terminal: auto-hide panels":
 
-  test "the footer strip; a click reveals the pane's own rows; Esc restores every cell":
+  test "the footer labels on the status row; a click docks the pane's own rows; a second restores every cell":
+    # PLAT-49 part B (the user's direction): the labels are IN the status
+    # row, and a click DOCKS the pane into the arrangement — no overlay, no
+    # message — where a second click on its label closes it again.
     const Cols = 200
     const Rows = 50
     var sess = open(Cols, Rows, stateDir("reveal"))
     let s0 = sess.snap(Cols, Rows)
-    let strip = s0.text(Rows - 2)
+    let strip = s0.text(Rows - 1)
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
-    sess.click(Rows - 2, strip.cellFind(" BUILD ") + 1)
-    discard sess.waitRow(Cols, Rows - 1, "revealing")
-    let s1 = sess.snap(Cols, Rows)
-    # The revealed region: the rows that changed.
+    sess.click(Rows - 1, strip.cellFind(" BUILD ") + 1)
+    let deadline = getMonoTime() + initDuration(seconds = 10)
+    var s1 = sess.snap(Cols, Rows)
+    while getMonoTime() < deadline and s1.text(Rows - 2) == s0.text(Rows - 2):
+      sleep(100)
+      s1 = sess.snap(Cols, Rows)
+    # The docked band: the rows that changed at the bottom of the body.
     var changed: seq[int] = @[]
-    for r in 1 ..< Rows - 2:
+    for r in 1 ..< Rows - 1:
       if s1.text(r) != s0.text(r):
         changed.add r
     ck changed.len > 0
-    # ITS OWN ROWS: the build pane's title and verdict, no fill glyph.
-    ck s1.text(changed[0]).contains("BUILD [idle]")
+    # ITS OWN ROWS: the build pane's tab and verdict, no fill glyph.
+    var band = -1
+    for r in changed:
+      if s1.text(r).startsWith(" BUILD "): band = r
+    ck band > 0
+    ck s1.text(band + 1).contains("[idle]")
     for r in changed:
       ck not s1.text(r).contains("▒")
-    # Contiguous and at the bottom of the body: an overlay against its edge.
-    ck changed[^1] == Rows - 3
-    ck changed[^1] - changed[0] + 1 == changed.len
-    sess.esc()
-    discard sess.waitRow(Cols, Rows - 1, "cancelled")
-    let s2 = sess.snap(Cols, Rows)
+    # Contiguous to the status row: docked against the bottom edge.
+    ck changed[^1] == Rows - 2
+    ck not sess.rowOf(Cols, Rows - 1).contains("revealing")
+    sess.click(Rows - 1, strip.cellFind(" BUILD ") + 1)
+    let deadline2 = getMonoTime() + initDuration(seconds = 10)
+    var s2 = sess.snap(Cols, Rows)
+    while getMonoTime() < deadline2 and s2.text(Rows - 2) != s0.text(Rows - 2):
+      sleep(100)
+      s2 = sess.snap(Cols, Rows)
     var same = true
     for r in 0 ..< Rows - 1:
       for c in 0 ..< Cols:
@@ -412,18 +443,18 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     sess.typeLine("focus left")
     sess.typeLine("pin")
     discard sess.waitRow(Cols, Rows - 1, "applied")
-    let strip = sess.rowOf(Cols, Rows - 2)
+    let strip = sess.rowOf(Cols, Rows - 1)
     ck strip.contains(" Files ") or strip.contains(" FILES ")
     sess.quit()
     var again = open(Cols, Rows, state)
-    let strip2 = again.rowOf(Cols, Rows - 2)
+    let strip2 = again.rowOf(Cols, Rows - 1)
     ck strip2.contains(" Files ") or strip2.contains(" FILES ")
     again.typeLine("unpin fileTree")
     discard again.waitRow(Cols, Rows - 1, "applied")
-    ck not again.rowOf(Cols, Rows - 2).contains(" Files ")
+    ck not again.rowOf(Cols, Rows - 1).contains(" Files ")
     again.quit()
     var third = open(Cols, Rows, state)
-    ck not third.rowOf(Cols, Rows - 2).contains(" Files ")
+    ck not third.rowOf(Cols, Rows - 1).contains(" Files ")
     # Placed again: its title row (a bare pane's title is upper-cased) or
     # its tab.
     let body = third.rowOf(Cols, 1) & third.rowOf(Cols, 2)

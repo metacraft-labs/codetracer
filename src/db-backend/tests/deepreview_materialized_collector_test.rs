@@ -19,14 +19,10 @@
 //!
 //! * Noir, unconditionally — `nargo trace` writes a column-aware `*.ct` CTFS
 //!   container;
-//! * the legacy `runtime_tracing` `trace.json` layout, which
-//!   `diff::load_and_postprocess_trace` refuses and the collector must not
-//!   (`a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it`).
-//!   No recorder writes it by default — `nargo trace` did until it became
-//!   CTFS-only — so that case transcodes the same real Noir recording into it:
-//!   the events are the recorder's, read back out of its container by the
-//!   trace-format reader.  The layout cannot carry columns, so the transcoded
-//!   recording is a line-only one;
+//! * a `trace.json` event stream, which is test-oracle output (the pure
+//!   Python and Ruby recorders write it to be compared against `ct print`)
+//!   and not a recording: the collector refuses it by name
+//!   (`a_trace_json_is_refused_as_test_oracle_output_not_a_recording`);
 //! * Python, when the recorder is importable
 //!   (`a_python_recording_reviews_the_way_a_noir_one_does`) — a line-only
 //!   `*.ct` from a different recorder.  It is also the milestone's own
@@ -417,111 +413,56 @@ fn the_dataset_names_the_recording_it_came_from() {
 }
 
 #[test]
-fn a_legacy_trace_json_recording_is_read_the_way_the_debugger_reads_it() {
-    // The legacy runtime_tracing layout — a `trace.json` event stream beside a
-    // `trace_metadata.json` — is refused outright by
-    // `diff::load_and_postprocess_trace` ("legacy trace_metadata.json +
-    // trace.bin/trace.json sidecars are no longer accepted").  The collector
-    // must not inherit that refusal: the debugger still opens such recordings.
-    //
-    // No recorder writes this layout by default, so the fixture's real Noir
-    // recording is transcoded into it: its events are read back out of the
-    // container by the trace-format reader and written as the JSON event
-    // stream, with the recording's own workdir in the metadata sidecar.
-    //
-    // The event stream's `Step` is `(path, line)` with no column
-    // (`StepRecord`; columns exist only in the CTFS step encoding), so the
-    // transcoded recording is line-only even though `nargo trace` recorded
-    // several column steps per line.
-    use db_backend::trace_reader::TraceReader as _;
-
-    let fixture = build_fixture("legacy");
-    let ct = std::fs::read_dir(fixture.recordings.join("run-1"))
-        .expect("read run-1")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "ct"))
-        .expect("`nargo trace` writes a *.ct container");
-    let events = codetracer_trace_reader::ctfs_reader::read_trace_from_ctfs(&ct).expect("read the recording's events");
-    assert!(!events.is_empty(), "the recording has events to transcode");
-    let workdir = db_backend::ctfs_trace_reader::CTFSTraceReader::open(&ct)
-        .expect("open the recording")
-        .workdir()
-        .to_path_buf();
-
-    let legacy_recordings = fixture.root.join("legacy-recordings");
-    let recording = legacy_recordings.join("run-1");
-    std::fs::create_dir_all(&recording).expect("mkdir legacy run-1");
-    std::fs::write(
-        recording.join("trace.json"),
-        serde_json::to_string(&events).expect("events serialize"),
-    )
-    .expect("write trace.json");
+fn a_trace_json_is_refused_as_test_oracle_output_not_a_recording() {
+    // A `trace.json` event stream is what the pure-Python and pure-Ruby test
+    // oracles write. It is compared against `ct print` of a production
+    // recording; it is not a recording, and the collector must say so by
+    // name rather than review it or call it unreadable junk.
+    let root = std::env::temp_dir().join(format!("rv4-oracle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let recording = root.join("recordings").join("run-1");
+    std::fs::create_dir_all(&recording).expect("mkdir run-1");
+    std::fs::write(recording.join("trace.json"), "[]").expect("write trace.json");
     std::fs::write(
         recording.join("trace_metadata.json"),
-        serde_json::json!({ "workdir": workdir, "program": "main", "args": [] }).to_string(),
+        serde_json::json!({ "workdir": root, "program": "main", "args": [] }).to_string(),
     )
     .expect("write trace_metadata.json");
 
-    assert!(
-        !std::fs::read_dir(&recording)
-            .expect("read the legacy recording")
-            .filter_map(|entry| entry.ok())
-            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "ct")),
-        "the fixture is not a CTFS container"
-    );
-    assert!(
-        db_backend::diff::load_and_postprocess_trace(&recording).is_err(),
-        "the CTFS-only loader still refuses it, which is why this path exists"
-    );
-
-    let found = discover_recordings(&legacy_recordings).expect("discovery");
-    assert_eq!(found, vec![recording]);
-
-    let output = fixture.root.join("out");
-    let args = ReviewCollectArgs {
-        repo: Some(fixture.repo.clone()),
-        diff_spec: Some("HEAD~..HEAD".to_string()),
-        recordings: legacy_recordings,
-        output: output.clone(),
-        progress: false,
-        ..ReviewCollectArgs::default()
+    let error = match db_backend::materialized_source::open_materialized_trace(&recording) {
+        Ok(_) => panic!("a trace.json-only directory was opened as a recording"),
+        Err(e) => e.to_string(),
     };
-    let report = db_backend::deepreview::cli::run(&args).expect("collection");
-    assert_eq!(report.recordings_collected, 1);
-    let data: DeepReviewData =
-        serde_json::from_str(&std::fs::read_to_string(output.join("review.json")).expect("review.json"))
-            .expect("review.json is the dataset shape");
-    assert_eq!(data.recording_count, 1);
-    // A line-only recording's step is one execution of its line, so every
-    // step the transcoded stream holds counts, except the entry step on line 1
-    // (the first `Step`), which marks where the recording began.  That is the
-    // debugger's reading of the same file: it has no columns to group by.
-    let mut steps_per_line = std::collections::BTreeMap::<u32, u32>::new();
-    for step in events
-        .iter()
-        .filter_map(|event| match event {
-            codetracer_trace_types::TraceLowLevelEvent::Step(step) => Some(step),
-            _ => None,
-        })
-        .skip(1)
-    {
-        *steps_per_line.entry(step.line.0 as u32).or_default() += 1;
-    }
-    let covered: Vec<(u32, u32)> = data.files[0]
-        .coverage
-        .iter()
-        .map(|entry| (entry.line, entry.execution_count))
-        .collect();
-    assert_eq!(covered, steps_per_line.into_iter().collect::<Vec<_>>());
-    // Only the loop lines, where `nargo trace` stopped at several columns per
-    // execution, differ from the container's own counts
-    // (`coverage_is_the_recordings_real_per_line_execution_counts`): line 4 is
-    // three steps per iteration and line 5 two.
-    assert_eq!(
-        covered,
-        vec![(1, 1), (2, 1), (3, 9), (4, 12), (5, 8), (6, 4), (7, 1), (8, 1), (9, 1)]
+    assert!(error.contains("trace.json"), "the error names the format: {error}");
+    assert!(
+        error.contains("test-oracle output"),
+        "the error says what it is: {error}"
     );
+    assert!(
+        error.contains("not a recording"),
+        "the error says what it is not: {error}"
+    );
+
+    // Discovery still sees the directory, so `ct review collect` reports the
+    // refusal against it instead of claiming the folder holds nothing.
+    let found = discover_recordings(&root.join("recordings")).expect("discovery");
+    assert_eq!(found, vec![recording.clone()]);
+    let options = CollectOptions {
+        recordings: found,
+        diff: parse_unified_diff(""),
+        progress: false,
+        ..CollectOptions::default()
+    };
+    let (_, report) = collect(&options).expect("collection");
+    assert_eq!(report.recordings_collected, 0);
+    assert_eq!(report.recordings_failed.len(), 1);
+    assert_eq!(report.recordings_failed[0].0, recording);
+    assert!(
+        report.recordings_failed[0].1.contains("test-oracle output"),
+        "the per-recording failure carries the refusal: {:?}",
+        report.recordings_failed[0].1
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -530,7 +471,7 @@ fn a_recording_that_cannot_be_read_is_reported_and_skipped() {
     // A second "recording" that names itself one and is not readable.
     let broken = fixture.recordings.join("run-2");
     std::fs::create_dir_all(&broken).expect("mkdir run-2");
-    std::fs::write(broken.join("trace.json"), "{not json").expect("write junk");
+    std::fs::write(broken.join("trace.ct"), "not a container").expect("write junk");
 
     let patch = "\
 diff --git a/src/main.nr b/src/main.nr

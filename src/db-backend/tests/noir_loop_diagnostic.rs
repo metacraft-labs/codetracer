@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use codetracer_trace_types::{StepId, TraceLowLevelEvent};
+use codetracer_trace_types::StepId;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::db::{Db, MaterializedReplaySession};
 use db_backend::flow_preloader::FlowPreloader;
@@ -36,34 +36,13 @@ fn find_ct_container(target_dir: &Path) -> Option<PathBuf> {
         .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
 }
 
-/// Load the `Db` from the materialized trace in `target_dir`.
-///
-/// Current `nargo trace` (1.0.0-beta.2) emits the legacy runtime-tracing
-/// `trace.json` event stream rather than a `.ct` container.  The db-backend
-/// has a first-class reader path for that stream, so this diagnostic exercises
-/// it directly instead of skipping.
+/// Load the `Db` from the `.ct` container `nargo trace` wrote into
+/// `target_dir`.
 fn load_db_from_trace(target_dir: &Path) -> Db {
-    if let Some(ct_path) = find_ct_container(target_dir) {
-        let reader = CTFSTraceReader::open(&ct_path)
-            .unwrap_or_else(|e| panic!("CTFSTraceReader::open({}): {}", ct_path.display(), e));
-        return reader.db().clone();
-    }
-
-    let json_path = target_dir.join("trace.json");
-    let json_bytes = std::fs::read(&json_path)
-        .unwrap_or_else(|e| panic!("failed to read legacy trace.json at {}: {e}", json_path.display()));
-    let events: Vec<TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
-        .unwrap_or_else(|e| panic!("failed to parse legacy trace.json at {}: {e}", json_path.display()));
-    let workdir = target_dir
-        .join("trace_metadata.json")
-        .is_file()
-        .then(|| target_dir.join("trace_metadata.json"))
-        .and_then(|p| std::fs::read(&p).ok())
-        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-        .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
-        .unwrap_or_else(|| target_dir.to_path_buf());
-    let reader = CTFSTraceReader::from_events(events, &workdir)
-        .unwrap_or_else(|e| panic!("legacy trace.json load failed for {}: {e}", json_path.display()));
+    let ct_path = find_ct_container(target_dir)
+        .unwrap_or_else(|| panic!("nargo trace wrote no *.ct container in {}", target_dir.display()));
+    let reader = CTFSTraceReader::open(&ct_path)
+        .unwrap_or_else(|e| panic!("CTFSTraceReader::open({}): {}", ct_path.display(), e));
     reader.db().clone()
 }
 

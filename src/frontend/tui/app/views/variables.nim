@@ -76,6 +76,8 @@ import std/[strutils, tables]
 import isonim_tui
 
 import ../../../../common/value_presentation
+from codetracer_embed import VariableCategory, vcLocal, vcArgument,
+  vcGlobal, vcReturnValue, vcRegister, vcWatch, categoryTag
 import ../layout/profile
 import ./styled_row
 import ./tree_node
@@ -252,6 +254,22 @@ const
   EmptyPaneText* = "no variables reported"
   EmptyPaneStyle* = CellStyle(role: srChromeMuted, italic: true)
 
+func categoryOf*(kind: ScopeKind): VariableCategory =
+  ## PLAT-49: the ViewModel's category for each of this pane's roots — the
+  ## value the row's tag and colour are read from.
+  case kind
+  of skLocals: vcLocal
+  of skArguments: vcArgument
+  of skGlobals: vcGlobal
+  of skReturnValues: vcReturnValue
+  of skRegisters: vcRegister
+  of skWatches: vcWatch
+
+const CategoryRoles*: array[VariableCategory, SemanticRole] = [
+  srCategoryLocal, srCategoryArgument, srCategoryGlobal,
+  srCategoryReturnValue, srCategoryRegister, srCategoryWatch]
+  ## The colour each category's tag is painted in.
+
 proc scopePath*(kind: ScopeKind): string =
   ScopePathPrefix & $kind
 
@@ -416,24 +434,27 @@ proc appendNodeRows(model: VariablesModel; scope: ScopeKind; path: string;
 
 proc paneRows*(model: VariablesModel): seq[VariablesRow] =
   ## Every row the pane would show if it were tall enough, in order.
+  ##
+  ## PLAT-49 (the user, 2026-10-01): NO SEPARATOR ROW PER CATEGORY. The
+  ## groups keep their order (locals, arguments, globals, …) and every row
+  ## carries its group as `scope`, which the painter draws as a colour-coded
+  ## one-letter tag at the start of the line. A root that cannot be filled
+  ## still says why, as one tagged note; an open root with no members says
+  ## so the same way; a root that is not open contributes nothing.
   result = @[]
   for scope in model.scopes:
     let path = scopePath(scope.kind)
-    let open = model.isExpanded(path)
-    result.add VariablesRow(
-      kind: vrkScope, scope: scope.kind, depth: 0,
-      expandable: scope.availability == savaAvailable, expanded: open,
-      node: VarNode(path: path, name: $scope.kind,
-                    memberCount: model.memberTotal(path)))
     if scope.availability == savaUnsupported:
       result.add VariablesRow(kind: vrkNote, scope: scope.kind, depth: 1,
                               note: scope.note)
       continue
-    if not open:
+    if not model.isExpanded(path):
       continue
     if model.memberTotal(path) == 0:
-      result.add VariablesRow(kind: vrkNote, scope: scope.kind, depth: 1,
-                              note: "empty at this position")
+      # An empty watch list is the normal state, not a statement: no row.
+      if scope.kind != skWatches:
+        result.add VariablesRow(kind: vrkNote, scope: scope.kind, depth: 1,
+                                note: "empty at this position")
       continue
     model.appendNodeRows(scope.kind, path, 1, result)
 
@@ -451,18 +472,22 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
   ## The ONE place that decides which markers a row carries, so "the cursor is
   ## on the selected path" and "the badge is on a changed variable" are one rule
   ## rather than two copies of it.
+  let category = categoryOf(row.scope)
+  let tag = categoryTag(category)
+  let tagRole = CategoryRoles[category]
   case row.kind
   of vrkScope:
     TreeRowSpec(kind: trkScope, name: $row.scope, depth: 0,
                 expandable: row.expandable, expanded: row.expanded,
                 selected: model.selected == row.node.path,
-                memberCount: row.node.memberCount, width: width)
+                memberCount: row.node.memberCount, width: width,
+                tag: tag, tagRole: tagRole)
   of vrkNote:
     TreeRowSpec(kind: trkNote, name: row.note, depth: 1, memberCount: -1,
-                width: width)
+                width: width, tag: tag, tagRole: tagRole)
   of vrkMore:
     TreeRowSpec(kind: trkMore, depth: row.depth, memberCount: row.remaining,
-                width: width)
+                width: width, tag: tag, tagRole: tagRole)
   of vrkVariable:
     TreeRowSpec(
       kind: trkVariable, name: row.node.name, typeName: row.node.typeName,
@@ -473,7 +498,7 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       focused: model.focused == row.node.path,
       memberCount: row.node.memberCount, presented: row.node.presented,
       visualisers: model.visualisers,
-      width: width)
+      width: width, tag: tag, tagRole: tagRole)
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -673,7 +698,7 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
   result = VariablesScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, totalRows: 0,
     scopeRows: 0, variableRows: 0, moreRows: 0, noteRows: 0, modifiedRows: 0,
-    diffColumn: area.col + diffFieldColumn(),
+    diffColumn: area.col + diffFieldColumn(area.width),
     nameColumn: area.col + nameFieldColumn())
   if area.width <= 0 or area.height <= 0:
     return

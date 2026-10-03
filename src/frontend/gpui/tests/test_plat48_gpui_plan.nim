@@ -26,7 +26,7 @@
 ## real recording. A missing prerequisite fails by name.
 
 import std/[json, os, osproc, streams, strtabs, strutils, tables, tempfiles,
-            unittest]
+            unicode, unittest]
 
 import codetracer_embed
 import headless_app/layout_model
@@ -41,7 +41,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 174
+  ExpectedAssertions = 203
+    ## 179 -> 203 at the adversarial review of 2026-10-03: ONE case added
+    ## (`PLAT35-F3`, the horizontal wheel), 24 assertions. The move is
+    ## structural and is stated rather than bumped silently — this file
+    ## carries a literal and the price of a literal is that every move has
+    ## to be accounted for.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -154,7 +159,7 @@ proc markPaths(id: string): seq[string] =
 
 suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
 
-  test "the band: the shared menu's titles, the desktop's nine marks, the omnibar":
+  test "the band: the shared menu's root button, the desktop's nine marks, the omnibar":
     let plan = windowPlan("")
     let band = plan.nodesWith("data-ct-top-bar")
     var bandBox: JsonNode
@@ -163,15 +168,11 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck not bandBox.isNil
     let br = bandBox.rectOf
     ck br.x == ChromePaddingPx and br.y == ChromePaddingPx and br.h == TopBarPx
-    # The titles are the shared tree's visible folders, in its order.
-    let tree = nativeFrontEndMenu("calc")
-    var want: seq[string] = @[]
-    for i in tree.visibleChildren(): want.add tree.children[i].label
-    var got: seq[string] = @[]
-    for t in plan.nodesWith("data-ct-menu-title"):
-      got.add t.attr("data-ct-menu-title")
-      ck t.textOf == t.attr("data-ct-menu-title")
-    ck got == want
+    # PLAT-49: ONE root button, as the desktop's menu has; its folders are a
+    # popover inside it (`test_plat49_gpui_plan`), never titles in the band.
+    ck plan.nodesWith("data-ct-menu-button").len == 1
+    ck plan.nodesWith("data-ct-menu-button")[0].textOf == "≡"
+    ck plan.nodesWith("data-ct-menu-title").len == 0
     # Nine controls, in the desktop toolbar's order, each drawing the
     # DESKTOP'S mark for itself — its own paths — in the ink its state takes.
     let ctl = plan.nodesWith("data-ct-control")
@@ -195,7 +196,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       ck r.y == br.y and r.h > 0 and r.x >= br.x
     let omni = plan.nodesWith("data-ct-omnibar")
     ck omni.len == 1
-    ck omni[0].textOf.startsWith("⌕ Search files")
+    ck omni[0].textOf == "⌕ " & OmnibarPlaceholder
 
   test "the footer strip is the shared default's docked panes, in order":
     let plan = windowPlan("")
@@ -213,8 +214,9 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
   test "an open menu's popover is drawn over every pane's pin button":
     let plan = windowPlan("menu:Debug")
     let pops = plan.nodesWith("data-ct-menu-popover")
-    ck pops.len == 1
-    let pop = pops[0]
+    # The first level and, beside it, the Debug folder (PLAT-49's cascade).
+    ck pops.len == 2
+    let pop = pops[^1]
     let pr = pop.rectOf
     # The Debug folder's items, the chords the desktop binds beside them.
     let items = plan.nodesWith("data-ct-menu-item")
@@ -223,17 +225,23 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for it in items:
       if it.attr("data-ct-menu-item") == "Step Over": stepOver = it.textOf
     ck stepOver.contains("F10")
-    # Paint order: a pin button that the popover overlaps is painted BEFORE
-    # it (under it), never over its rows.
-    var overlapped = 0
-    for pin in plan.nodesWith("data-ct-pin"):
-      if pin.rectOf.overlaps(pr):
-        inc overlapped
-        checkpoint("pin " & pin.attr("data-ct-pin") & " under the popover")
-        ck plan.topIndex(pin) < plan.topIndex(pop)
-    ck overlapped >= 1
+    ck pr.w > 0
     for it in items:
-      ck plan.topIndex(it) > plan.topIndex(pop)
+      ck plan.topIndex(it) > plan.topIndex(pops[0])
+    # Paint order: a pin button that a popover overlaps is painted BEFORE it
+    # (under it), never over its rows. Since PLAT-49 a folder's submenu opens
+    # level with the folder's row, so Debug's (the sixth row) clears the
+    # strips' pins; Edit's opens beside the second row, over the Files pane's
+    # strip and its pin.
+    let edit = windowPlan("menu:Edit")
+    var overlapped = 0
+    for p in edit.nodesWith("data-ct-menu-popover"):
+      for pin in edit.nodesWith("data-ct-pin"):
+        if pin.rectOf.overlaps(p.rectOf):
+          inc overlapped
+          checkpoint("pin " & pin.attr("data-ct-pin") & " under a popover")
+          ck edit.topIndex(pin) < edit.topIndex(p)
+    ck overlapped >= 1
 
   test "a key walks the open menu: the highlight is drawn where the ViewModel has it":
     let plan = windowPlan("menu:Debug,key:down")
@@ -241,7 +249,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for it in plan.nodesWith("data-ct-menu-item"):
       if it.attr("data-ct-menu-active") == "true":
         active.add it.attr("data-ct-menu-item")
-    ck active == @["Step Over"]
+    ck active == @["Debug", "Step Over"]
 
   test "the pointer on a control: its tooltip and the desktop's chord, below it":
     let plan = windowPlan("control:next")
@@ -278,11 +286,13 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       checkpoint("pin " & pin.attr("data-ct-pin"))
       ck not pin.rectOf.overlaps(rr)
 
-  test "a click on a strip label reveals that pane; Esc hides it":
-    let plan = windowPlan("label:problems")
+  test "the pointer resting on a strip label reveals that pane; Esc hides it":
+    # PLAT-49 part B (finding 9): as on the desktop, a HOVER previews the
+    # pane as an overlay; a click docks it open (test_plat49_panes_gpui_plan).
+    let plan = windowPlan("hover-label:problems,wait:350")
     let rev = plan.nodesWith("data-ct-revealed")
     ck rev.len == 1 and rev[0].attr("data-ct-revealed") == $paneProblems
-    let hidden = windowPlan("label:problems,key:escape")
+    let hidden = windowPlan("hover-label:problems,wait:350,key:escape")
     ck hidden.nodesWith("data-ct-revealed").len == 0
     ck hidden.nodesWith("data-ct-unpin").len == 0
 
@@ -300,7 +310,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     # No pane box holds State any more.
     for pin in plan.nodesWith("data-ct-pin"):
       ck pin.attr("data-ct-pin") != $paneState
-    let shown = windowPlan("drag:state:top,label:state")
+    let shown = windowPlan("drag:state:top,hover-label:state,wait:350")
     let rev = shown.nodesWith("data-ct-revealed")
     ck rev.len == 1 and rev[0].attr("data-ct-revealed") == $paneState
     let rr = rev[0].rectOf
@@ -315,7 +325,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       inc under
     ck under >= 1
 
-  test "a tab dragged over a pane: the drop tint is drawn over that pane's pin button":
+  test "a tab dragged over a pane: the drop tint covers its content, never a pin button":
     let plan = windowPlan("hold:state:editor")
     let tints = plan.nodesWith("data-ct-drop")
     ck tints.len == 1
@@ -324,11 +334,15 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     for pin in plan.nodesWith("data-ct-pin"):
       checkpoint("pin " & pin.attr("data-ct-pin"))
       ck not pin.rectOf.overlaps(tr)
-    # The editor's own pin is the one the tint covers: it is not drawn.
+    # The tint is the pane's CONTENT (PLAT-49: GoldenLayout highlights a
+    # stack's content, below its header), so the editor's own pin, on its
+    # strip, is drawn and sits above the tint.
     var editorPin = false
     for pin in plan.nodesWith("data-ct-pin"):
-      if pin.attr("data-ct-pin") == $paneEditor: editorPin = true
-    ck not editorPin
+      if pin.attr("data-ct-pin") == $paneEditor:
+        editorPin = true
+        ck pin.rectOf.y + pin.rectOf.h <= tr.y
+    ck editorPin
 
   test "pin docks a pane to the footer; Unpin puts it back beside where it was":
     let pinned = windowPlan("pin:state")
@@ -344,7 +358,7 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck elsewhere.len == 0
     for p in pinned.nodesWith("data-ct-pin"):
       ck p.attr("data-ct-pin") != $paneState
-    let back = windowPlan("pin:state,label:state,unpin")
+    let back = windowPlan("pin:state,hover-label:state,wait:350,unpin")
     ck back.nodesWith("data-ct-revealed").len == 0
     var slots: seq[string] = @[]
     for s in back.nodesWith("data-ct-dock-slot"):
@@ -358,6 +372,122 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       let labels = t.attr("data-ct-tabs").split(',')
       if "Scratchpad" in labels: tabs = labels
     ck tabs == @["State", "Scratchpad"]
+
+  test "PLAT35-F3: the horizontal wheel reaches the editor, and the clipped text arrives":
+    # **WHY THIS CASE IS IN THIS FILE AND NOT IN
+    # `test_plat35_editor_scrollbar.nim`.** That suite grades the DECISION and
+    # the DRAWING — `leaves.editorHScrollOf` and the tree `renderEditor`
+    # builds — and `PLAT35-F3`'s closure rested on one thing neither it nor
+    # any other suite could see: the BINDING. The wheel arm
+    # (`main.windowPointer`'s `gekWheel`), the clamp's caller
+    # (`main.scrollEditorColumns`), the redraw (`main.redrawEditorRows`), the
+    # pane width taken from the window's own geometry
+    # (`main.syncEditorViewport`) and the scripted spelling
+    # (`--window-ops=hwheel:<pane>:<columns>`) are all in `gpui/main.nim`,
+    # which is COMPILED by `test_plat35_text_faces.nim` and was ASSERTED OVER
+    # by nothing. This suite drives the shipped binary, so it is the one that
+    # can.
+    #
+    # **AND THE PATH WAS BROKEN WHEN IT WAS ONLY ANNOUNCED.** Measured at the
+    # adversarial review of 2026-10-03: `hwheel` was documented in `--help`
+    # and had its arm in `runWindowOp`, and the argument parser's allow-list
+    # did not carry it, so every `--window-ops=hwheel:…` answered
+    # *"unknown event"* and exited 2. Nothing reddened, because nothing drove
+    # it. That is the §7 shape — a capability that exists in every place
+    # except the one that is used — and this case is what makes it impossible
+    # again: `windowPlan` RAISES on a non-zero exit, so a `hwheel` the parser
+    # refuses fails here by name.
+    #
+    # Nothing here re-derives the arithmetic. The widths come out of the
+    # editor's own `data-ct-editor-scroll` stamp, and the text claim is the
+    # DRAWN text at rest sliced by the offset the plan reports — two readings
+    # of one tree rather than a model of it.
+    let rest = windowPlan("")
+    let metrics = rest.nodesWith("data-ct-editor-scroll")
+    ck metrics.len == 1
+    proc fieldOf(plan: JsonNode; key: string): int =
+      ## One field of `leaves.scrollMetricText`'s `k=v;k=v` stamp.
+      let stamp = plan.nodesWith("data-ct-editor-scroll")[0]
+        .attr("data-ct-editor-scroll")
+      for part in stamp.split(';'):
+        let kv = part.split('=')
+        if kv.len == 2 and kv[0] == key: return parseInt(kv[1])
+      -1
+    proc codeByRow(plan: JsonNode): Table[int, string] =
+      ## Every drawn row's CODE text, by line number.
+      result = initTable[int, string]()
+      for row in plan.nodesWith("data-ct-row"):
+        var code = ""
+        for col in row.nodesWith("data-ct-code-column"):
+          code.add textOf(col)
+        result[parseInt(row.attr("data-ct-row"))] = code
+    proc gutterRunsOf(plan: JsonNode): seq[string] =
+      for lane in plan.nodesWith("data-ct-gutter-lane"):
+        result.add textOf(lane)
+
+    # THE FINDING'S OWN PREMISE, asserted rather than assumed: at this
+    # viewport the drawn content does NOT fit, so there is something to
+    # reach. A layout change that made the editor wide enough reddens here
+    # instead of leaving the rest of this case vacuously true.
+    let maxLeft = rest.fieldOf("maxLeftCols")
+    ck maxLeft > 0
+    ck rest.fieldOf("leftCols") == 0
+    let tracks = rest.nodesWith("data-ct-editor-scrollbar")
+    ck tracks.len == 1
+    ck tracks[0].px("h") == 12
+    ck tracks[0].px("padding_left") == 0
+
+    let atRest = rest.codeByRow()
+    ck atRest.len > 0
+    var widestRow, widestCols = 0
+    for line, code in atRest:
+      if code.runeLen > widestCols:
+        widestCols = code.runeLen
+        widestRow = line
+    ck widestCols > 0
+    # THE STAMP AND THE DRAWN TEXT ARE THE SAME TREE's two readings: the
+    # `codeCols` the editor published is the width of the widest row it
+    # actually drew. A stamp computed from rows other than the drawn ones
+    # fails here, and so does a stamp that is a constant.
+    ck widestCols == rest.fieldOf("codeCols")
+
+    # ONE COLUMN, then HALF WAY: the offset the plan reports is the offset
+    # asked for, and the drawn text is the at-rest text with exactly that
+    # many columns gone.
+    for cols in [1, maxLeft div 2]:
+      let moved = windowPlan("hwheel:editor:" & $cols)
+      ck moved.fieldOf("leftCols") == cols
+      ck moved.codeByRow()[widestRow] ==
+         atRest[widestRow].runeSubstr(cols)
+
+    # PAST THE END: clamped, the last column is INSIDE the pane, and the
+    # thumb is flush against the track's right edge.
+    let last = windowPlan("hwheel:editor:" & $(maxLeft + 100))
+    ck last.fieldOf("leftCols") == maxLeft
+    let tail = atRest[widestRow].runeSubstr(maxLeft)
+    ck last.codeByRow()[widestRow] == tail
+    ck tail.runeLen == widestCols - maxLeft
+    let lastTrack = last.nodesWith("data-ct-editor-scrollbar")[0]
+    let lastThumb = last.nodesWith("data-ct-editor-scrollbar-thumb")[0]
+    ck lastTrack.px("padding_left") ==
+       lastTrack.px("w") - lastThumb.px("w")
+    ck lastTrack.px("padding_left") > 0
+    # THE GUTTER DOES NOT TRAVEL WITH THE CODE, as the desktop's
+    # line-number margin does not.
+    ck gutterRunsOf(last) == gutterRunsOf(rest)
+    ck gutterRunsOf(rest).len > 0
+
+    # BEFORE THE START: clamped the other way, and the tree is the one at
+    # rest rather than a shifted one.
+    let before = windowPlan("hwheel:editor:-5")
+    ck before.fieldOf("leftCols") == 0
+    ck before.codeByRow()[widestRow] == atRest[widestRow]
+
+    # AND IT IS AIMED AT A PANE. A wheel over another pane's centre does
+    # not scroll the editor, so the arm is not "any horizontal wheel".
+    let elsewhere = windowPlan("hwheel:state:" & $maxLeft)
+    ck elsewhere.fieldOf("leftCols") == 0
+    ck elsewhere.codeByRow()[widestRow] == atRest[widestRow]
 
   test "every assertion ran":
     echo "CHECKS: " & $CHECKS

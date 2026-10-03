@@ -102,17 +102,10 @@ fi
 
 echo "=== the two Noir wasm modules ==="
 echo "  noir:         ${NOIR_REPO} @ ${NOIR_REV}"
-echo "  trace-format: ${TRACE_FORMAT_REPO} @ ${TRACE_FORMAT_REV}"
 echo "  work dir:     ${work_dir}"
 echo "  ${TOOLCHAIN_STAMP}"
 echo
 
-# Noir reaches `codetracer-trace-format` by GIT REVISION (its Cargo.toml and
-# Cargo.lock name it), so cargo fetches that dependency itself and no sibling
-# checkout is needed. `TRACE_FORMAT_REV` in the pin is the revision the noir
-# lockfile names; the check after the clone refuses a pin whose two revisions
-# disagree, so the provenance line printed above cannot name a trace format
-# the build did not use.
 clone_at() {
 	local repo="$1" rev="$2" dest="$3"
 	if [ -d "${dest}/.git" ]; then
@@ -132,12 +125,6 @@ clone_at "${NOIR_REPO}" "${NOIR_REV}" "${noir_dir}" || {
 	echo "could not check out noir" >&2
 	exit 1
 }
-if ! grep -q "codetracer-trace-format?rev=${TRACE_FORMAT_REV}#" "${noir_dir}/Cargo.lock"; then
-	echo "noir ${NOIR_REV} does not lock codetracer-trace-format at ${TRACE_FORMAT_REV}:" >&2
-	grep 'codetracer-trace-format' "${noir_dir}/Cargo.lock" | sort -u | sed 's/^/    /' >&2
-	echo "  remedy: set TRACE_FORMAT_REV in ci/deploy/noir-wasm.pin to the revision above" >&2
-	exit 1
-fi
 echo
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${work_dir}/target}"

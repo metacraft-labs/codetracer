@@ -1,0 +1,104 @@
+{
+ "_comment": [
+  "PLAT-49 part A — the desktop's chrome, read from the real Electron app on calc.",
+  "Produced by src/tests/gui/tests/visual/plat49-chrome-capture.spec.ts",
+  "(`bash scripts/plat49-capture-electron.sh`)."
+ ],
+ "closed": {
+  "rootButtons": 1,
+  "visibleFirstLevelTitles": []
+ },
+ "open": {
+  "button": {
+   "x": 4,
+   "y": 6,
+   "w": 34,
+   "h": 26
+  },
+  "firstLevel": {
+   "x": 11,
+   "y": 41,
+   "w": 166,
+   "h": 252
+  },
+  "labels": [
+   "File",
+   "Edit",
+   "View",
+   "Build",
+   "Reset",
+   "Debug",
+   "Help"
+  ],
+  "rows": {
+   "File": {
+    "x": 11,
+    "y": 41,
+    "w": 166,
+    "h": 36
+   },
+   "Edit": {
+    "x": 11,
+    "y": 77,
+    "w": 166,
+    "h": 36
+   },
+   "View": {
+    "x": 11,
+    "y": 113,
+    "w": 166,
+    "h": 36
+   },
+   "Build": {
+    "x": 11,
+    "y": 149,
+    "w": 166,
+    "h": 36
+   },
+   "Reset": {
+    "x": 11,
+    "y": 185,
+    "w": 166,
+    "h": 36
+   },
+   "Debug": {
+    "x": 11,
+    "y": 221,
+    "w": 166,
+    "h": 36
+   },
+   "Help": {
+    "x": 11,
+    "y": 257,
+    "w": 166,
+    "h": 36
+   }
+  },
+  "nested": {
+   "x": 179,
+   "y": 221,
+   "w": 197,
+   "h": 902
+  },
+  "nestedFirstLabels": [
+   "Continue",
+   "Step Over",
+   "Step In"
+  ],
+  "firstLevelBelowButton": true,
+  "nestedRightOfFirstLevel": true,
+  "nestedLevelWithFolder": true
+ },
+ "tooltips": {
+  "reverse-next": "Reverse next (SHIFT+F10)",
+  "next": "Next (F10)",
+  "reverse-step-in": "Reverse step in (SHIFT+F11)",
+  "step-in": "Step in (F11)",
+  "reverse-step-out": "Reverse step out (SHIFT+F12)",
+  "step-out": "Step out (F12)",
+  "reverse-continue": "Reverse continue (SHIFT+F8)",
+  "continue": "Continue (F8 F2)",
+  "run-to-entry": "Run to entry (CTRL+ALT+E)"
+ },
+ "omnibarPlaceholder": "Navigate to file or run a :command"
+}

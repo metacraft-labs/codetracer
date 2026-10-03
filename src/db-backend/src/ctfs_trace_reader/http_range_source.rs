@@ -38,7 +38,15 @@ use std::sync::Mutex;
 use super::ctfs_container::{BlockSource, CtfsError};
 
 const FIXED_AND_EXTENDED_HEADER_SIZE: u64 = 16; // HEADER_SIZE + EXTENDED_HEADER_SIZE
-const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
+
+// The magic and the accepted version range are IMPORTED rather than restated.
+// They used to be local copies — `[0xC0, 0xDE, 0x72, 0xAC, 0xE2]` and a literal
+// `(2..=4)` with a comment claiming to "mirror the container reader" — and the
+// literal range is exactly the kind of mirror that stops mirroring: the reader's
+// accepted set moved and this one did not, so an HTTP-served container was
+// refused by the door the browser uses and accepted by the same reader over a
+// local file. One definition, one place.
+use super::ctfs_container::CTFS_MAGIC;
 
 fn validate_half_open_range(start: u64, end: u64, context: &str) -> Result<usize, CtfsError> {
     if end <= start {

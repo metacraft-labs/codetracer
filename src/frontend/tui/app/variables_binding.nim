@@ -305,6 +305,12 @@ proc variablesModelFor*(vm: StateVM;
     return
   let openScope = scopePath(scopeForTab(vm.activeTab.val))
   result.expandNode(openScope)
+  # PLAT-49: the pane lists every group one after another with no separator
+  # row to open a closed one from, so every root that CAN be filled is
+  # opened (its first page held) — watches as well as locals.
+  for scope in result.scopes:
+    if scope.availability == savaAvailable:
+      result.expandNode(scopePath(scope.kind))
   let selected = vm.selectedPath.val
   if selected.len > 0:
     result.selected = childPath(openScope, selected)

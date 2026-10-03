@@ -33,7 +33,7 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 311
+const ExpectedAssertions = 317
 
 var countedAssertions = 0
 
@@ -75,17 +75,20 @@ proc typeLine(rt: TuiRuntime; line: string): RuntimeOutcome =
 
 suite "PLAT-48: the top bar row":
 
-  test "at 200 columns: the menu's titles, every control, the omnibar field, the header":
+  test "at 200 columns: the menu's root button, every control, the omnibar field, the header":
+    # PLAT-49: the menu is ONE root button, as the desktop's is; its folders
+    # are a dropdown inside it, never titles across the row.
     let rt = newRuntime(200, 50)
     let r = rt.row0()
+    ck r.startsWith(" ≡ ")
     for title in ["File", "Edit", "View", "Build", "Reset", "Debug", "Help"]:
-      ck r.contains(" " & title & " ")
+      ck not r.contains(" " & title & " ")
     for c in TransportControls:
       ck r.contains(c.unicode)
-    ck r.contains("⌕ Search")
+    ck r.contains("⌕ " & OmnibarPlaceholder[0 ..< 12])
     ck r.contains("tick: ")
     ck r.strip.endsWith("[PAUSED]")
-    # Colour, not glyphs: no bracket around a title and no rule through it.
+    # Colour, not glyphs: no bracket and no rule through the row.
     ck not r.contains("[File]") and not r.contains("─")
 
   test "at 80 columns: the menu collapses to ≡, the omnibar to ⌕, controls by priority":
@@ -95,7 +98,7 @@ suite "PLAT-48: the top bar row":
     rt.app.tick = 1420
     rt.app.totalTicks = 8950
     let lay = rt.shellScreenOf().topBarLayout
-    ck not lay.menuExpanded and not lay.omnibarField
+    ck not lay.omnibarField
     ck rt.row0().startsWith(" ≡ ")
     var ids: seq[string] = @[]
     for i in lay.shownControls: ids.add TransportControls[i].id
@@ -150,19 +153,20 @@ suite "PLAT-48: the top bar row":
 
 suite "PLAT-48: the menu":
 
-  test "F12 opens it; keys walk the bar and into a folder; the chords are the keymap's":
+  test "F12 opens it; keys walk the first level and into a folder; the chords are the keymap's":
     let rt = newRuntime(200, 50)
     discard rt.handleToken(F12, 0)
     ck rt.app.menu.isOpen
-    # The bar: Right moves across the titles, Down enters one.
+    # PLAT-49, the desktop's cascade: Down walks the first level, Right opens
+    # a folder's submenu beside it.
     for _ in 0 ..< 5:
-      discard rt.handleToken(Right, 0)
+      discard rt.handleToken(Down, 0)
     ck rt.app.menu.highlightedItem().label == "Debug"
-    discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Right, 0)
     ck rt.app.menu.path == @[6]
     let screen = rt.shellScreenOf()
-    ck screen.menuDropdowns.len == 1
-    let dd = screen.menuDropdowns[0]
+    ck screen.menuDropdowns.len == 2
+    let dd = screen.menuDropdowns[1]
     let rows = rt.visible()
     var stepOver = ""
     for dr in dd.rows:
@@ -189,8 +193,8 @@ suite "PLAT-48: the menu":
     let rt = newRuntime(200, 50)
     discard rt.handleToken(F12, 0)
     for _ in 0 ..< 5:
-      discard rt.handleToken(Right, 0)
-    discard rt.handleToken(Down, 0)
+      discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Right, 0)     # into Debug: Continue
     discard rt.handleToken(Down, 0)      # Step Over
     let outcome = rt.handleToken(Enter, 0)
     ck not rt.app.menu.isOpen
@@ -198,20 +202,31 @@ suite "PLAT-48: the menu":
     ck outcome.action == kaStepOver
     # File > Open Trace... is not something the terminal does: disabled.
     discard rt.handleToken(F12, 0)
-    discard rt.handleToken(Down, 0)
+    discard rt.handleToken(Right, 0)
     ck rt.app.menu.path == @[1]
     ck not rt.app.menu.highlightedItem().enabled
     discard rt.handleToken(Enter, 0)
     ck rt.app.menu.isOpen
 
-  test "a click on a title opens it, on an item runs it, outside closes":
+  test "a click on the button opens it, on a folder its submenu, on an item runs it, outside closes":
     let rt = newRuntime(200, 50)
     let lay = rt.shellScreenOf().topBarLayout
-    let view = lay.segmentOf(tpMenuTitle, 3)     # View
-    discard rt.handleToken("\x1b[<0;" & $(view.col + 2) & ";1M", 0)
-    discard rt.handleToken("\x1b[<0;" & $(view.col + 2) & ";1m", 0)
+    let button = lay.segmentOf(tpMenuButton)
+    discard rt.handleToken("\x1b[<0;" & $(button.col + 2) & ";1M", 0)
+    discard rt.handleToken("\x1b[<0;" & $(button.col + 2) & ";1m", 0)
+    ck rt.app.menu.isOpen and rt.app.menu.path.len == 0
+    let first = rt.shellScreenOf().menuDropdowns[0]
+    var viewRow = -1
+    for dr in first.rows:
+      if dr.item >= 0 and first.level.items[dr.item].label == "View":
+        viewRow = dr.row
+    ck viewRow > 0
+    discard rt.handleToken("\x1b[<0;" & $(first.area.col + 3) & ";" &
+                           $(viewRow + 1) & "M", 0)
+    discard rt.handleToken("\x1b[<0;" & $(first.area.col + 3) & ";" &
+                           $(viewRow + 1) & "m", 0)
     ck rt.app.menu.isOpen and rt.app.menu.path == @[3]
-    let dd = rt.shellScreenOf().menuDropdowns[0]
+    let dd = rt.shellScreenOf().menuDropdowns[1]
     var resetRow = -1
     for dr in dd.rows:
       if dr.item >= 0 and dd.level.items[dr.item].label == "Reset Layout":
@@ -268,7 +283,8 @@ suite "PLAT-48: the auto-hide strips":
   test "the shared default's footer panels are the bottom strip's labels":
     let rt = newRuntime(200, 50)
     let rows = rt.visible()
-    let strip = rows[^2]
+    # PLAT-49 part B (finding 9): the labels are IN the status-bar row.
+    let strip = rows[^1]
     for t in ["BUILD", "PROBLEMS", "FIND IN FILES", "REQUESTS"]:
       ck strip.contains(" " & t & " ")
 
@@ -326,7 +342,10 @@ suite "PLAT-48: the auto-hide strips":
     discard rt.handleToken(CtrlO, 0)
     ck not rt.shellScreenOf().geometry.revealing
 
-  test "a second click on the revealed pane's label hides it; outside hides it too":
+  test "a click on a label docks its pane open, a second closes it; outside hides a reveal":
+    # PLAT-49 part B (finding 9), as the desktop: a CLICK on a footer label
+    # docks the pane into the layout (no overlay); a second click collapses
+    # it. A revealed pane (Ctrl+O here) still hides on a press outside it.
     let rt = newRuntime(200, 50)
     var strip: DockStrip
     for s in rt.shellScreenOf().geometry.strips:
@@ -335,12 +354,14 @@ suite "PLAT-48: the auto-hide strips":
     let press = "\x1b[<0;" & $(slot.col + 2) & ";" & $(slot.row + 1)
     discard rt.handleToken(press & "M", 0)
     discard rt.handleToken(press & "m", 0)
-    ck rt.shellScreenOf().geometry.revealPane == paneProblems
-    discard rt.handleToken(press & "M", 0)
-    discard rt.handleToken(press & "m", 0)
+    ck rt.shellScreenOf().geometry.openDockPane == paneProblems
     ck not rt.shellScreenOf().geometry.revealing
     discard rt.handleToken(press & "M", 0)
     discard rt.handleToken(press & "m", 0)
+    ck rt.shellScreenOf().geometry.openDock.height == 0
+    ck not rt.shellScreenOf().geometry.revealing
+    discard rt.handleToken(CtrlO, 0)
+    ck rt.shellScreenOf().geometry.revealing
     discard rt.handleToken("\x1b[<0;60;5M", 0)
     ck not rt.shellScreenOf().geometry.revealing
 
@@ -388,7 +409,10 @@ suite "PLAT-48: session tabs":
       if s.part == tpTab: tabs.add s
     ck tabs.len == 3
     for (s, t) in [(tabs[0], "alpha"), (tabs[1], "beta"), (tabs[2], "gamma")]:
-      ck screen.rows[0].runeSubStr(s.col, s.width) == " " & t & " "
+      # PLAT-49 part B: each tab ends with its close control while there are
+      # several sessions, as the desktop's does.
+      ck screen.rows[0].runeSubStr(s.col, s.width) ==
+         " " & t & " " & SessionTabCloseGlyph & " "
     ck rt.app.shell.activeTabIndex() == 2
     discard rt.handleToken("\x1b[<0;" & $(tabs[0].col + 2) & ";1M", 0)
     ck rt.app.shell.activeTabIndex() == 0
@@ -430,7 +454,8 @@ suite "PLAT-48: session tabs":
     for sg in screen.topBarLayout.segments:
       if sg.part == tpTab and sg.index == rt.app.shell.activeTabIndex():
         active = screen.rows[0].runeSubStr(sg.col, sg.width)
-    ck active == " gamma "
+    # The tab carries its close control (PLAT-49 part B, finding 7).
+    ck active == " gamma × "
     # A bare `t` is still seek-to-tick's prefix, not a tab step: the `g`
     # prefix is what makes `t` a tab key.
     discard rt.handleToken("t", 0)

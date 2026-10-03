@@ -110,9 +110,9 @@
       "gpuiStoppedLine": 56,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
-      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside). PLAT-49 part A (2026-10-01): the window draws no heading inside a pane any more and every pane box has a tab strip (30 px) outside its body, so the editor body is 4 px shorter than it was with the 26 px heading row inside it; at the 26 px row pitch the editor at this viewport shows one row fewer (27 -> 26), and the centred window moves by one line. The stop is unchanged.",
       "gpuiEditorRows": [
-        "rows=27;first=43;last=69"
+        "rows=26;first=44;last=69"
       ],
       "electronEditorRows": [
         "rows=38;first=37;last=74"
@@ -124,9 +124,9 @@
       "gpuiStoppedLine": 110,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
-      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside). PLAT-49 part A (2026-10-01): the window draws no heading inside a pane any more and every pane box has a tab strip (30 px) outside its body, so the editor body is 4 px shorter than it was with the 26 px heading row inside it; at the 26 px row pitch the editor at this viewport shows one row fewer (27 -> 26), and the centred window moves by one line. The stop is unchanged.",
       "gpuiEditorRows": [
-        "rows=27;first=90;last=116"
+        "rows=26;first=91;last=116"
       ],
       "electronEditorRows": [
         "rows=36;first=82;last=117",
@@ -159,9 +159,9 @@
       "gpuiStoppedLine": 44,
       "electronPanes": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
       "gpuiPanes": "debugControls@0/1,editor@0/1,calltrace@0/1,state@0/2",
-      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside).",
+      "_whyGpuiEditorRows": "PLAT-47 part B review (2026-09-30): the GPUI editor's fetch window holds the rows its PANE shows at the window's row pitch (26 px; `window_geometry.editorRowsOf`), not the window's height over a nominal 20 px — which held more rows than the pane showed and squeezed every row, clipping descenders. Fewer rows, so a stop past them is centred (source_vm.topCentringIfOutside). PLAT-49 part A (2026-10-01): the window draws no heading inside a pane any more and every pane box has a tab strip (30 px) outside its body, so the editor body is 4 px shorter than it was with the 26 px heading row inside it; at the 26 px row pitch the editor at this viewport shows one row fewer (27 -> 26), and the centred window moves by one line. The stop is unchanged.",
       "gpuiEditorRows": [
-        "rows=27;first=31;last=57"
+        "rows=26;first=32;last=57"
       ],
       "electronEditorRows": [
         "rows=38;first=25;last=62"

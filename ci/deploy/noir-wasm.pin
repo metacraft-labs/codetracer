@@ -2,8 +2,8 @@
 #
 # WHY A PIN FILE AND NOT `flake.nix`'s `noir` INPUT
 #
-# `flake.nix` already pins a `noir` (ref `codetracer`, rev c008e890) and that
-# pin is NOT this one, even though it currently names the same revision. It supplies the NATIVE `nargo` the recorder builds
+# `flake.nix` already pins a `noir` (ref `codetracer`, rev ca080a58) and that
+# pin is NOT this one. It supplies the NATIVE `nargo` the recorder builds
 # against; these are `wasm32-unknown-unknown` builds of two different crates,
 # consumed by a browser and by nothing else. Sharing one pin between them would
 # couple a desktop toolchain bump to a web deploy in both directions, which is
@@ -25,11 +25,9 @@
 # They are still two pins, and should stay two: this one moves on a web deploy,
 # that one moves on a toolchain bump, and neither should drag the other.
 #
-# NO SIBLING CLONE. Noir reaches `codetracer-trace-format` by git revision
-# from `codetracer`@ca080a58 onwards, and `NOIR_REV` descends from it, so cargo
-# fetches the trace format itself. `TRACE_FORMAT_REV` below is kept as
-# provenance: `ci/deploy/build-noir-wasm.sh` checks that noir's Cargo.lock
-# names exactly that revision and refuses the build otherwise.
+# NO SIBLING CLONE. `NOIR_REV` descends from `codetracer`@ca080a58, where the
+# noir workspace reaches `codetracer-trace-format` through git dependencies, so
+# `ci/deploy/build-noir-wasm.sh` clones noir alone.
 #
 # WHAT THE DISAGREEMENT COST WHILE IT LASTED, kept because the gate that now
 # watches for it only makes sense next to the failure it was written after.
@@ -73,26 +71,6 @@
 
 NOIR_REPO=https://github.com/metacraft-labs/noir
 NOIR_REF=codetracer
-# WHAT THIS BUMP BUYS: the 2026-10 trace format, in the browser.
-#
-# c008e890 is a merge of `ns12/acir-listing-and-nargo-test` (6eb7d024, the
-# previous pin) with `codetracer`@875ee485 (the tracer writing the 2026-10
-# CTFS format). It contains the revision it replaces, so the ACIR listing,
-# `nv_test_vfs` and the tracer frame fix are all still here. It also descends
-# from `codetracer`@ca080a58, which is what lets the trace-format sibling clone
-# go.
-#
-# A trace the browser records is now one the current db-backend opens: readers
-# refuse container versions other than 5 and 6 and meta.dat versions other than
-# 6, and the module this replaces still wrote the previous format.
-#
-# The native `nargo` pin in `flake.nix` moved to the same revision in the same
-# change, so the desktop and the browser record with one tracer.
-#
-# CHECKED THE WAY THE BUILDER RESOLVES IT: `build-noir-wasm.sh` fetched it with
-# `git fetch --depth 1 origin c008e890…` into a fresh directory and built both
-# modules from it.
-#
 # WHAT THIS BUMP BUYS: the CONSTRAINTS pane, for a live visitor.
 #
 # `src/frontend/ui_js.nim`'s `noirConstraintsSink` has a branch for an empty
@@ -236,14 +214,12 @@ NOIR_REF=codetracer
 # resolves in an empty clone that had never seen this machine, and
 # `tooling/tracer_wasm/src/memory_sink.rs` at the fetched commit pushes the
 # `Call` before the `Step`.
-NOIR_REV=c008e89028a360a7854ac9e0e017b647bf8fd0a8
+NOIR_REV=fe4b3429788e91aa2727d916ea4ac817fbef52d7
 
-# The `codetracer-trace-format` revision noir's Cargo.lock names at `NOIR_REV`.
-# Nothing clones it; cargo fetches it as a git dependency. The build script
-# refuses to build when the lockfile names a different revision, so this line
-# cannot drift from what the modules were built with.
-TRACE_FORMAT_REPO=https://github.com/metacraft-labs/codetracer-trace-format
-TRACE_FORMAT_REV=1eae5894ce97001f4b013e50767cc2243a1ed47f
+# NO TRACE-FORMAT SIBLING. `NOIR_REV` descends from `codetracer`@ca080a58, so
+# the noir workspace reaches `codetracer-trace-format` through git dependencies
+# pinned in its own `Cargo.toml`; `cargo` fetches them like any other git
+# dependency and the build needs no checkout beside the noir tree.
 
 # Measured at the revisions above (2026-09-01, aarch64-darwin). This bump
 # touches `tooling/tracer_wasm` and nothing else, so the TRACER figure is the
@@ -306,19 +282,19 @@ TRACE_FORMAT_REV=1eae5894ce97001f4b013e50767cc2243a1ed47f
 # direction: built at 1.89.0 from this tree the compiler is 16487480 against
 # the 16454689 recorded above, so `acir_listing` costs about 32 KB — 0.2%, and
 # nothing like the 1.1 MB the headline delta shows.
-# MEASURED at c008e890 (2026-10-02, x86_64-linux), both of them, by
-# `bash ci/deploy/build-noir-wasm.sh` inside this checkout's dev shell, with
-# the same rustc and cargo as the figures they replace:
+# MEASURED at `codetracer`@fe4b3429 (2026-10-02, x86_64-linux), both of them,
+# by `bash ci/deploy/build-noir-wasm.sh` inside this checkout's dev shell:
 #
-#   noir_wasm.wasm         15366113  (+3920 against 15362193)
-#   noir_tracer_wasm.wasm   4351097  (-8369 against 4359466)
+#   noir_wasm.wasm         15366137  (+3944 against the figure it replaces)
+#   noir_tracer_wasm.wasm   4599728  (+240262)
 #
-# The host changed from aarch64-darwin to x86_64-linux and the build directory
-# changed with it, so these deltas mix the 2026-10 tracer with the
-# build-directory noise described above. Both are well inside the order of
-# magnitude these figures exist to check.
-EXPECT_COMPILER_BYTES=15366113
-EXPECT_TRACER_BYTES=4351097
+# The tracer grew because it now answers a CTFS `.ct` container instead of an
+# event list: the pure-Rust trace writer and its zstd encoder are linked in.
+# The compiler's few kilobytes are the line's other commits since `6eb7d024`.
+# Host differs from the previous figures (arm64-darwin), so part of either
+# delta is path and platform noise as described above.
+EXPECT_COMPILER_BYTES=15366137
+EXPECT_TRACER_BYTES=4599728
 
 # WHICH COMPILER PRODUCED THE TWO FIGURES ABOVE. Recorded, for the first time,
 # and copied verbatim from the run that produced them rather than assembled by
@@ -338,7 +314,7 @@ EXPECT_TRACER_BYTES=4351097
 # `nargo` appear under `not-verified:` because this run never ran them; the
 # stamp keeps them visible rather than dropping them, so the scope of the
 # claim is legible from the claim itself.
-MEASURED_TOOLCHAIN='rustc=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] cargo=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] | lock: toolchains=942c995a fenix=dd2c80d0 noir=c008e890 | host x86_64-linux | not-verified: nim=2.3.1[hh6kjy1y1piz1150yg00xpb3vk5sh3jn-nim-fork-2.3.1-codetracer] nargo=1.0.0-beta.26[kwfjqhf4rhz70znpx6rmkrk9v0dsjq15-Noir]'
+MEASURED_TOOLCHAIN='rustc=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] cargo=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] | lock: toolchains=942c995a fenix=dd2c80d0 noir=ca080a58 | host x86_64-linux | not-verified: nim=2.3.1[hh6kjy1y1piz1150yg00xpb3vk5sh3jn-nim-fork-2.3.1-codetracer] nargo=1.0.0-beta.26[6yqdklnhwsrr96cahxygmnp3mhvkjpqm-Noir]'
 #
 # THE NEXT BUMP KEEPS DOING THIS. Copy the `TOOLCHAIN: …` line the build script
 # prints, alongside the new figures — it is the sentence that makes "the number

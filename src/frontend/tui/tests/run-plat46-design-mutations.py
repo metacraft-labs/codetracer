@@ -98,9 +98,9 @@ ARMS = [
      "    srBorderPane: fgOnly(dgBorder, dtColorsUiBorderPrimary),",
      TABLES, "the pane border points at another border tier"),
     ("T3", ROLES,
-     "                      dtColorsUiSurfaceBasePanel, attrs = {raBold},",
+     "                      dtColorsUiSurfacePrimaryTertiary, attrs = {raBold},",
      "                      dtColorsUiSurfacePrimaryDefault, attrs = {raBold},",
-     TABLES, "the active tab is no longer lifted onto the pane's surface"),
+     TABLES, "the active tab is no longer on a background of its own"),
     ("H1", GUTTER,
      "  BreakpointStyle* = CellStyle(role: srGutterBreakpoint)",
      "  BreakpointStyle* = CellStyle(fg: \"#ff5555\")",
@@ -288,7 +288,16 @@ def restore(rel, backup, digest):
     return sha(rel) == digest
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main():
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--needle-scan", action="store_true")

@@ -13,6 +13,60 @@ exported (the fold, three-media and real-PTY suites open the real `calc`
 recording). The GPUI suites load `libgpui_nim_shim`; the harness puts the shim
 on `LD_LIBRARY_PATH` itself.
 
+=============================================================================
+OWED: A RE-GRADE AND A RE-RECORD, 2026-10-02 (PLAT-35), RE-MEASURED AT
+`6fa0bdd89`. STILL REFUSING, AND THE BLOCKER IS STILL THE HOST'S.
+=============================================================================
+This harness digests `src/frontend/gpui/main.nim`, which PLAT-35 edited for
+the `--pixels-out` capture path. So the comparator now says
+
+    CONTROL DIGEST MOVED: src/frontend/gpui/main.nim
+
+and the harness refuses. That refusal is CORRECT and is left in place.
+
+  HARNESS   run-plat45-layout-mutations.py
+  ENTRY     src/frontend/gpui/main.nim   (PLAT-35, the one row that moved;
+              every other row still matches — checked mechanically, digest
+              line by digest line, against the working tree and HEAD)
+  HOST THAT CAN GRADE IT
+            any host where `just build-tui` COMPILES. NOT aarch64-darwin, and
+            that was RE-MEASURED at `6fa0bdd89` rather than carried over,
+            because upstream touched this very file (`a7bff59ec`, the TUI top
+            bar) in the 142 commits this change was rebased over:
+
+              src/frontend/tui/host/terminal_driver.nim(263, 21)
+                Error: type mismatch: got 'clong' for
+                'clong(timeoutMs mod 1000 * 1000)'
+                but expected 'Suseconds = int32'
+
+            — Darwin's `suseconds_t` is `int32`, the line still casts to
+            `clong`, and upstream's edit to this file did not touch it. The
+            harness's CONTROL step is `build("build-gpui") and
+            build("build-tui")`, so on macOS it reports *"CONTROL: the
+            unmutated binaries do not build"* and grades ZERO of its 23 arms.
+            The gap is the host's and predates PLAT-35.
+  AND A SECOND, EARLIER BLOCKER ARRIVED WITH THE REBASE, which is why the
+  measurement above had to be taken deliberately rather than by running the
+  recipe: at `6fa0bdd89` the `isonim-tui` pin moved to `874eee12` while this
+  workstation's sibling checkout is still `7efcb450` — the pin `d34c6e087`
+  carried — so `just build-tui` now stops EARLIER, at
+  `src/frontend/tui/main.nim(59, 24) Error: undeclared identifier:
+  'caretSupportFor'`. The `Suseconds` error above was reproduced by pointing
+  `ISONIM_TUI_SRC` at the pinned tree, leaving the sibling checkout untouched.
+  Two independent blockers, neither PLAT-35's, and the shallower one hides the
+  deeper one from anyone who only runs the recipe.
+  COMMAND   REPLAY_SERVER_BIN=<path> python3 \
+              src/frontend/tui/tests/run-plat45-layout-mutations.py
+            # all 23 arms must kill, R4 in particular — its subject IS
+            # gpui/main.nim — and only then:
+            python3 ... --record-control-hashes
+
+WHY NOT RECORDED HERE. Re-recording is an ASSERTION that the current bytes
+are the REVIEWED bytes (Verification-Harness-Traps §39a). With zero arms
+gradable on this host, that assertion would rest on nothing at all — §39's
+error exactly, and worse than the stale comparator it would replace, because
+a refusal is visible and a blind record is not.
+
 ONE ARM PER CLAIM OF THE VERIFICATION GATE, each naming the case that must die:
 
   | gate row | arms |
@@ -609,7 +663,16 @@ def check_control_hashes() -> bool:
     return ok
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     only = None
     for arg in sys.argv[1:]:
         if arg == "--needle-scan":

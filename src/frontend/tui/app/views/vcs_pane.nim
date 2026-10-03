@@ -60,11 +60,9 @@ type
       ## How many working-tree rows reached the screen.
 
 const
-  VcsTitle* = "VCS"
-  VcsRule* = "─"
-  VcsTitleStyle* = CellStyle(role: srModeEdit, bold: true)
+  BranchMarker* = "on "
+    ## The branch row's lead-in: `on main`.
   VcsBranchStyle* = CellStyle(role: srChromeText, bold: true)
-  VcsRuleStyle* = CellStyle(role: srBorderPane)
   VcsSectionStyle* = CellStyle(role: srChromeTitle, bold: true)
   VcsPathStyle* = CellStyle(role: srChromeText)
   VcsHashStyle* = CellStyle(role: srChromeMuted)
@@ -103,18 +101,18 @@ proc paintVcsPane*(g: var StyledGrid; area: CellArea;
   result = VcsPaneScreen(rows: @[], fileRows: 0)
   if area.width <= 0 or area.height <= 0:
     return
-  var title = @[StyledSpan(text: VcsTitle, style: VcsTitleStyle)]
-  if model.isRepo and model.branch.len > 0:
-    title.add StyledSpan(text: "  " & model.branch, style: VcsBranchStyle)
-  title.add StyledSpan(text: " ", style: DefaultCellStyle)
-  result.rows.add g.paintLine(area.row, area.col, area.width, title,
-                              VcsRule, VcsRuleStyle)
-  var row = area.row + 1
+  # PLAT-49: NO TITLE BAR — the tab strip above the pane names it. The
+  # first row is CONTENT: the branch the working tree is on (the desktop's
+  # VCS panel heads its list with it), with no `VCS ───` rule.
+  var row = area.row
   let last = area.row + area.height - 1
   template line(spans: seq[StyledSpan]) =
     if row <= last:
       result.rows.add g.paintLine(row, area.col, area.width, spans)
       inc row
+  if model.isRepo and model.branch.len > 0:
+    line @[StyledSpan(text: BranchMarker & model.branch,
+                      style: VcsBranchStyle)]
   if not model.isRepo:
     line @[StyledSpan(text: (if model.message.len > 0: model.message
                              else: "Not a git repository"),

@@ -166,7 +166,7 @@ suite "ct-test M6 Rust libtest provider":
     let node = parseJson(output)
     check node["schemaVersion"].getInt == 1
     let providerIds = node.catalogProviderIds
-    check "smart-wasmi" notin providerIds
+    check "smart-wasm" notin providerIds
     check providerIds.allIt(not it.contains("fake"))
     check node["catalogs"].len == 1
     let catalog = node.jsonCatalogByProvider("rust-libtest")

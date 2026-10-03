@@ -64,7 +64,7 @@ import ../views/timeline_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 90
+const ExpectedAssertions = 92
 
 var countedAssertions = 0
 
@@ -554,13 +554,16 @@ suite "CTUI-8: the scrubber's tick-to-column mapping":
     withLog.eventLog.ensureWindow(0, 16)
     let logged = shellScreen(withLog, Width, Height)
     ck logged.rows[bar + TimelineBarRows].contains(EventLogTitle)
-    # The event's location and not its content: at 120x40 the shared default
-    # gives the event stack 34 columns, and the log's fixed columns leave the
-    # content one cell before the region's edge cuts it.
+    # The log's column header, then the event (PLAT-49 part B: the desktop's
+    # default columns — tick, #, kind, output; the location is hidden until
+    # shown), its output cut at the region's edge.
     checkpoint("event log rows under the bar:\n  '" &
                logged.rows[bar + TimelineBarRows] & "'\n  '" &
-               logged.rows[bar + TimelineBarRows + 1] & "'")
-    ck logged.rows[bar + TimelineBarRows + 1].contains("main.nr:13")
+               logged.rows[bar + TimelineBarRows + 1] & "'\n  '" &
+               logged.rows[bar + TimelineBarRows + 2] & "'")
+    ck logged.rows[bar + TimelineBarRows + 1].contains("tick")
+    ck logged.rows[bar + TimelineBarRows + 2].contains("Positive")
+    ck not logged.rows[bar + TimelineBarRows + 2].contains("main.nr:13")
     # The scrubber's own two rows are untouched by the log below it.
     ck logged.rows[bar] == after.rows[bar]
     ck logged.rows[bar + 1] == after.rows[bar + 1]

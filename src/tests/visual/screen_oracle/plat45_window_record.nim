@@ -5,8 +5,9 @@
 ## next to a BLANK compositor (`build/plat45/blank.ppm`). This program reads
 ## both frames with PLAT-39's pixel reader and nothing else — `locateGrid`
 ## finds the pane cells from the gutters, and OCR of each cell's top strip
-## names what the cell holds: one pane's heading, or a STACK's tab strip
-## (then the heading under the strip names the ACTIVE tab) — and writes
+## names what the cell holds: every pane box carries a tab strip since PLAT-49
+## (one tab for a lone pane), and the ACTIVE tab is the one drawn on the
+## selected tab's own ground (its label OCR'd on its own) — and writes
 ## `src/tests/visual/plat45-gpui-arrangement.json`, which
 ## `src/frontend/tui/tests/test_plat45_three_media.nim` reduces to PLAT-20's
 ## relation and compares with the desktop's and the terminal's.
@@ -37,8 +38,24 @@ const
   StripProbePx = TitleStripHeight + TitleRetryExtraPx
     ## How much of a cell's top is OCR'd for its strip: the tab strip the
     ## window draws for a stack, or a lone pane's heading.
-  WindowTabStripPx = 30
-    ## `gpui/main.TabStripPx`: where the active tab's own heading starts.
+  StripGroundHex = "#262626"
+    ## `chrome.crTabStripBackground` (ui/surface/base/card, Dark): the
+    ## strip's own ground.
+  ActiveTabGroundHex = "#333333"
+    ## `chrome.crTabActiveBackground` (ui/surface/primary/tertiary, Dark): the
+    ## selected tab's own ground.
+
+proc isDocumentName(word: string): bool =
+  ## A file name as a tab shows it: a stem, one dot, an extension of letters
+  ## and digits (`main.py`, `calc.nim`).
+  let dot = word.rfind('.')
+  if dot <= 0 or dot >= word.len - 1:
+    return false
+  for c in word[0 ..< dot]:
+    if c notin {'A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.'}: return false
+  for c in word[dot + 1 .. ^1]:
+    if c notin {'A'..'Z', 'a'..'z', '0'..'9'}: return false
+  true
 
 proc labelsIn(text: string): seq[string] =
   ## The pane labels a strip names, in reading order. Two-word labels
@@ -73,6 +90,13 @@ proc labelsIn(text: string): seq[string] =
         if k.contains(' ') and
            cmpIgnoreCase(k.replace(" ", ""), words[i]) == 0:
           matched = k
+    # A DOCUMENT'S TAB IS THE EDITOR (PLAT-49): a lone editor's tab names its
+    # open file (`main.py`), as the desktop's editor tab does — the reading
+    # `test_plat45_three_media.desktopPaneName` makes of the desktop's DOM
+    # ("every document the editor opens is the editor pane"), made here of
+    # the window's pixels.
+    if matched.len == 0 and isDocumentName(words[i]):
+      matched = gpuiPaneName(paneEditor)
     if matched.len > 0: result.add matched
     inc i
 
@@ -119,15 +143,37 @@ proc outlineOf(img: GrayImage; x, y, w, h: int): JsonNode =
     "right": either(edgeOutlined(img, x + w - 1, y + 4, x + w - 1, y + h - 5, want),
                     edgeOutlined(img, x + w, y + 4, x + w, y + h - 5, want))}
 
-proc ocrLine(img: GrayImage; r: Rect; scratch: string): string =
-  ## One line of labels, upscaled 2x for the OCR engine (PLAT-42's row reader
-  ## does the same): at 1x tesseract read the thin inactive "VCS" as "V(S"
-  ## once the window named its font (measured 2026-09-29); at 2x every label
-  ## of the first screen reads exactly, so no misreading is tolerated.
+proc ocrStrip(img: GrayImage; r: Rect; scratch: string): string =
+  ## A tab strip's labels, read against the strip's two grounds
+  ## (`vision_producer.ocrOnGrounds`).
   var words: seq[string] = @[]
-  for w in ocrRegion(img, r, scratch, psm = 7, upscale = 2.0):
+  for w in ocrOnGrounds(img, r, scratch,
+                        [grayOf(StripGroundHex), grayOf(ActiveTabGroundHex)]):
     words.add w.text
   words.join(" ").strip()
+
+proc activeRun(img: GrayImage; r: Rect): Rect =
+  ## The selected tab's own ground along the strip: the widest run of
+  ## COLUMNS that carry the active tab's grey on at least `MinGroundRows` of
+  ## the strip's rows. Counting rows per column, rather than reading one row,
+  ## keeps a label's glyphs (lighter than the ground) from cutting the run:
+  ## above and below the text every column of the tab is still its ground.
+  const MinGroundRows = 3
+  let want = grayOf(ActiveTabGroundHex)
+  var best = (start: -1, len: 0)
+  var start = -1
+  for x in r.x .. r.x + r.w:
+    var ground = 0
+    if x < r.x + r.w and x < img.width:
+      for y in r.y ..< min(r.y + r.h, img.height):
+        if abs(int(img.pixels[y * img.width + x]) - want) <= 3: inc ground
+    let inRun = ground >= MinGroundRows
+    if inRun and start < 0: start = x
+    if not inRun and start >= 0:
+      if x - start > best.len: best = (start: start, len: x - start)
+      start = -1
+  if best.start < 0: return Rect()
+  Rect(x: best.start, y: r.y, w: best.len, h: r.h)
 
 proc readFrame(path, scratch: string): JsonNode =
   result = %*{"frame": path.extractFilename, "located": false, "reason": "",
@@ -145,21 +191,21 @@ proc readFrame(path, scratch: string): JsonNode =
   createDir(scratch)
   var regions = newJArray()
   for cell in grid.value.cells:
-    let strip = ocrLine(img, Rect(x: cell.x, y: cell.y, w: cell.w,
-                                  h: min(StripProbePx, cell.h)), scratch)
+    let stripRect = Rect(x: cell.x, y: cell.y, w: cell.w,
+                         h: min(StripProbePx, cell.h))
+    let strip = ocrStrip(img, stripRect, scratch)
     let tabs = labelsIn(strip)
     var heading = ""
     var active = ""
     if tabs.len >= 2:
-      # A STACK: the strip names every tab, and the active one is the pane
-      # drawn under it — read from its own heading, not from the strip's
-      # colour, so the answer is text a reader can check.
-      heading = ocrLine(img, Rect(x: cell.x, y: cell.y + WindowTabStripPx,
-                                  w: cell.w, h: min(StripProbePx,
-                                    max(1, cell.h - WindowTabStripPx))),
-                        scratch)
-      let under = labelsIn(heading)
-      if under.len > 0: active = under[0]
+      # A STACK: the strip names every tab, and the active one is the label
+      # drawn on the selected tab's own ground — OCR'd on its own, so the
+      # answer is still text a reader can check.
+      let run = activeRun(img, stripRect)
+      if run.w > 0:
+        heading = ocrStrip(img, run, scratch)
+        let under = labelsIn(heading)
+        if under.len > 0: active = under[0]
     elif tabs.len == 1:
       active = tabs[0]
     regions.add %*{"x": cell.x, "y": cell.y, "w": cell.w, "h": cell.h,

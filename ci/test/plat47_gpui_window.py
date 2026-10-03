@@ -33,7 +33,8 @@ keyboard). After every step it waits for the window to SETTLE (two identical
                     out: the pane lists it without any input
     dock-committed  the Variables tab dragged to the window's left margin
                     and RELEASED: docked, it is a label in the left strip
-    dock-revealed   a click on that label: the pane drawn over the tree
+    dock-revealed   the pointer resting on that label: the pane drawn over
+                    the tree (a click would dock it open)
     dock-dismissed  Esc: the tree exactly as before the reveal
   session B — `call_pages` (603 calls):
     pages-base      the first screen
@@ -216,6 +217,27 @@ def centre(r):
     return x + w // 2, y + h // 2
 
 
+def hover_reveal(win, ptr, rect):
+    """Reveal a docked pane the desktop's way (PLAT-49 part B): the pointer
+    RESTS on its strip label past the hover-preview delay (300 ms,
+    `auto_hide_hover.HoverPreviewDelayMs`), then moves into the overlay,
+    which keeps it shown. A click on a label docks the pane open instead.
+    Answers the revealed geometry, or None."""
+    lx, ly = centre(rect)
+    ptr.jump(lx - 2, ly)
+    ptr.move(lx, ly, steps=2)
+    rv = None
+    for _ in range(20):
+        time.sleep(0.2)
+        rv = win.geom().get("revealed")
+        if rv:
+            break
+    if rv:
+        ptr.move(*centre(rv["rect"]), steps=3, pause_ms=20)
+        time.sleep(0.4)
+    return rv
+
+
 def node_of(geom, pane):
     for n in geom["nodes"]:
         if n["kind"] == "tabs" and pane in n["panes"]:
@@ -337,16 +359,13 @@ def capture():
         left = next((st for st in g.get("strips", []) if st["edge"] == "left"), None)
         slot = left["slots"][0]["rect"] if left else None
         if slot is not None:
-            lx, ly = centre(slot)
-            ptr.jump(lx, ly)
-            ptr.send("down", "sleep 120", "up", "sleep 300")
-            # Off the label before the frames are kept: a pointer resting on
-            # a strip label draws its hover label (PLAT-48), which is not
-            # the reveal's to compare.
-            ptr.jump(4, FRAME_H // 2)
+            # The pointer ends inside the overlay, off the label (whose hover
+            # label, PLAT-48, is not the reveal's to compare).
+            hover_reveal(win, ptr, slot)
             steps["dock-revealed"] = settle("dock-revealed")
             shutil.copy(win.geometry, os.path.join(OUT, "a-revealed.geometry.json"))
             key("Escape")
+            ptr.jump(4, FRAME_H // 2)
             steps["dock-dismissed"] = settle("dock-dismissed")
         else:
             steps["dock-revealed"] = False

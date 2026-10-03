@@ -495,12 +495,6 @@ build_sibling \
 	codetracer-flow-recorder/cadence-trace-helper
 
 # Blockchain / VM recorders.  Each produces target/release/codetracer-<name>-recorder.
-#
-# wasmi is intentionally excluded: it is an upstream-wasmi fork on the
-# `wasm-tracing` branch (no Justfile, no flake, no `codetracer-wasmi-recorder`
-# binary — wasmi_cli is what gets built).  ct doesn't reference it by binary
-# name in src/, so it's effectively a research repo, not a recorder
-# produced via this script.
 for name in cairo cardano circom evm flow fuel leo miden move polkavm solana ton; do
 	build_sibling \
 		"codetracer-${name}-recorder" \

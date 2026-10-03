@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 43
+# RECORDED-DARK-CEILING: 44
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -654,3 +654,73 @@ scripts/plat47-vcs-fixture.sh
 # pinned revision, builds `gdext-hcr` and the H5 driver, and runs `just
 # test-hcr-launch-arms` in a lane that already has the prebuilt desktop app.
 scripts/hcr6-launch-arms.sh
+
+# ---------------------------------------------------------------------------
+# PLAT-35 — THE HEADLESS GPUI PIXEL CAPTURE. **BLOCKED on a shim BUILD
+# CONFIGURATION an existing job does not produce, not on a capability.**
+# ---------------------------------------------------------------------------
+# WHAT IS MISSING, re-measured 2026-10-02 at `6fa0bdd89`: a build of
+# `isonim-gpui` with **`--features gpui-headless`**.
+# `ci/test/plat35-gpui-capture.sh` runs `codetracer-gpui --pixels-out` through
+# `gpui_render_to_pixels`, which that feature and no other compiles in
+# (`ci/test/plat37-window-frame.sh`'s own words: *"A THIRD SHIM IS BUILT AND
+# IS NOT A SUBSTITUTE FOR EITHER"*).
+#
+# **THE EARLIER WORDING OF THIS ENTRY WAS FALSE AND IS CORRECTED HERE RATHER
+# THAN QUIETLY REPLACED**, because the way it went wrong is the way this file
+# goes stale. It read: *"no job in this repository builds an `isonim-gpui`
+# shim of any kind … `grep -rn 'plat37-shims\|gpui-headless\|gpui_nim_shim'`
+# over `.github/workflows/` finds NOTHING"*. The grep STILL finds nothing —
+# re-run at `6fa0bdd89`, zero hits — and the conclusion it was offered for is
+# nonetheless wrong: since PLAT-48's review the `gpui-window-captures` job
+# (`.github/workflows/codetracer.yml`, `[self-hosted, linux, x64]`) builds
+# isonim-gpui's shim on every run, and it does so from
+# `ci/test/gpui-window-captures.sh` — a shell script the workflow YAML only
+# names by its `just` recipe. A grep scoped to the YAML could not see it. The
+# measurement was green, reproducible, and about the wrong files.
+#
+# SO THE BLOCKER IS NOW SMALLER AND IS NAMED EXACTLY:
+#   * a job DOES clone `isonim-gpui` at `flake.lock`'s pin and build its shim
+#     in the sibling's own dev shell — `cargo build --features gpui-backend`,
+#     `ci/test/gpui-window-captures.sh`;
+#   * that is the WINDOWED feature. This lane needs the HEADLESS one, which is
+#     a third, separately-built configuration, and nothing builds it;
+#   * `just test-gpui-shell` — the whole `gpui-shell` Nim lane — is still
+#     called by no workflow (re-measured 2026-10-02, zero hits).
+#
+# **THIS IS BLOCKED, NOT UNWIRED**, and the distinction is the one this file
+# insists on. There IS a `just` recipe — `just plat35-capture-gpui` — and it
+# is not missing; what is missing is a job that has a headless shim. It
+# differs from the Wayland entries above in needing NO compositor and no
+# screen-capture entitlement (that is the whole point of the headless path,
+# and it is why this is the first GPUI pixel lane that runs on macOS), so it
+# is the CHEAPEST of the group to wire and is recorded separately rather than
+# folded into theirs.
+#
+# WHAT WOULD MAKE IT GREEN, concretely, so this entry is trackable and dies
+# when the blocker lifts: one more `cargo build --features gpui-headless` into
+# its own `CARGO_TARGET_DIR` inside `gpui-window-captures`' existing
+# isonim-gpui step, and one step calling `just plat35-capture-gpui` against
+# it. The sibling checkout, the pin, the dev shell and the runner are already
+# that job's. Unlike PLAT-37's entry this needs no unmeasured runner
+# capability — no `/dev/dri`, no `sway`, no `wl_seat`.
+#
+# OWNER: Zahary Karadjov <zahary@metacraft-labs.com>
+# REVIEW-BY: 2026-12-22
+# DECISION (2026-10-02, re-taken when PLAT-35 was rebased onto `6fa0bdd89`):
+# STILL RECORDED, NOT WIRED — but on a corrected and much narrower blocker,
+# and the ceiling above is 44 rather than the 48 the pre-rebase diff recorded,
+# because upstream WIRED four of this list's entries away in the same 142
+# commits (47 - 4 + 1). Wiring this one is a workflow change that cannot be
+# graded on a workstation, so it is not attempted in the rebase; the step it
+# needs is spelled out above so that the next pass touching that job can add
+# it and delete this line.
+#
+# THE GATE THAT READS THIS CAPTURE IS NOT DARK, which is the same design
+# PLAT-37's entry describes: the frames are censused by the lane itself and
+# the LEDGER written beside them
+# (`src/tests/visual/tier4-gpui-readings.json`) is graded by
+# `src/frontend/gpui/tests/test_plat35_ledger_integrity.nim`, which
+# `test-lane-coverage.sh` confirms is collected by a lane. So what is dark
+# here is the RE-TAKING of the capture, not the checking of what it produced.
+ci/test/plat35-gpui-capture.sh

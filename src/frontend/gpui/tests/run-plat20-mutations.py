@@ -121,9 +121,20 @@ def _tui_link_flags() -> list[str]:
     to start there would be worse than one that works in both places.
     """
     path = REPO / "build" / "grammars" / "tui-link-flags.txt"
-    if not path.exists():
-        return []
-    return [f"--passL:{flag}" for flag in path.read_text().split()]
+    flags: list[str] = []
+    # THE LANE'S OWN ARCHIVE DEFINE, as `test_lane_extra_flags tui` gives it:
+    # `treesitter_ffi.nim`'s `{.passl.}` otherwise names the archive inside
+    # the isonim-tui CHECKOUT the build resolves, which exists only where
+    # `scripts/build-tui-grammars.sh` linked it (`../isonim-tui`). From a
+    # worktree whose isonim-tui is elsewhere (`ISONIM_TUI_SRC`), the link
+    # failed and G5 and G12 scored DID-NOT-COMPILE — a verdict that depended
+    # on the directory the harness sat in, not on the tree under test.
+    archive = REPO / "build" / "grammars" / "libcodetracer_tui_grammars.a"
+    if archive.exists():
+        flags.append(f"-d:isonimTuiGrammarArchive={archive}")
+    if path.exists():
+        flags += [f"--passL:{flag}" for flag in path.read_text().split()]
+    return flags
 
 
 SUITE_CMD = {
@@ -673,7 +684,16 @@ def grade(selected: list[Arm]) -> int:
     return 0 if killed == len(results) else 1
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--needle-scan", action="store_true")
     ap.add_argument("--record-control-hashes", action="store_true")

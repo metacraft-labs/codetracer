@@ -38,7 +38,9 @@
 ##                             `deepreview::cli::discover_recordings`)
 ## a ``.ct`` container inside  a materialized CTFS bundle
 ## ``trace_metadata.json`` /   a materialized trace in the pre-CTFS three-file
-## ``trace.bin`` / ``trace.json``  layout
+## ``trace.bin``                 layout; a ``trace.json`` is routed the same
+##                             way so the db-backend can refuse it as
+##                             test-oracle output
 ## ==========================  ==================================================
 ##
 ## The `.ct` container is genuinely ambiguous — native MCR recordings and
@@ -57,8 +59,8 @@
 ## positive evidence — and both move a path towards the backend that can
 ## actually open it:
 ##
-## 1. A *pre-CTFS materialized* folder (`trace_metadata.json` + `trace.bin`,
-##    the shape `ct record-web` writes) has no `.ct` container, so the old
+## 1. A *pre-CTFS materialized* folder (`trace_metadata.json` + `trace.bin`)
+##    has no `.ct` container, so the old
 ##    rule fell through to its `else` and answered ``"rr"`` — a materialized
 ##    recording classified as one the native replay worker opens, which then
 ##    decides the language mapping (`detectTraceLang`) and which arm of
@@ -110,8 +112,27 @@ const
   MaterializedIndexFileNames* = ["trace_metadata.json", "trace.bin",
                                  "trace.json"]
     ## The pre-CTFS materialized layout: any one of these in a directory
-    ## identifies it as a materialized trace.  `ct print-trace` recognises
-    ## the same three (`src/ct/cli/print_trace.detectTraceType`).
+    ## routes it to the db-backend.  ``trace.json`` is listed although it is
+    ## never a recording (it is test-oracle output, see
+    ## `TestOracleOutputError`): routing it to the db-backend is what makes
+    ## `ct review collect` report the refusal against the folder instead of
+    ## claiming the folder holds nothing.
+
+  TestOracleTraceFileName* = "trace.json"
+    ## The file the pure-Python and pure-Ruby test oracles write.  It is
+    ## never a recording: see `TestOracleOutputError`.
+  TestOracleOutputError* = "is a trace.json event stream: test-oracle " &
+    "output written by the pure-Python or pure-Ruby recorder to be compared " &
+    "against `ct print` of a production recording. It is not a recording " &
+    "and CodeTracer does not open it; record the program with the " &
+    "production recorder to get a .ct recording"
+    ## Why test-oracle output is refused.  Worded identically to the
+    ## db-backend's `materialized_source::TEST_ORACLE_OUTPUT_ERROR`, so a
+    ## user meets one explanation whichever entry point they used.
+
+func testOracleRefusal*(path: string): string =
+  ## The refusal for test-oracle output found at `path`.
+  "'" & path & "' " & TestOracleOutputError
 
 type
   TraceEvidence* = object

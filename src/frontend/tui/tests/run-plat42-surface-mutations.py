@@ -43,7 +43,10 @@ HERE = Path(__file__).resolve().parent
 CONTROL = HERE / "plat42-surface-mutation-control.sha256"
 BECAUSE = HERE / "plat42-surface-mutation-because.json"
 NIMCACHE = Path(os.environ.get("TMPDIR", "/tmp")) / "plat42-mutations"
-SHIM = REPO.parent / "isonim-gpui/rust/target/debug"
+# The windowed shim the GPUI suites load: `$ISONIM_GPUI_SHIM_DIR` when set (a
+# worktree whose isonim-gpui is a `-pin` checkout), else the sibling's.
+SHIM = Path(os.environ.get("ISONIM_GPUI_SHIM_DIR",
+                           str(REPO.parent / "isonim-gpui/rust/target/debug")))
 TIMEOUT = 3600
 
 SURFACE = "src/frontend/view_vocabulary/editor_surface.nim"
@@ -231,7 +234,16 @@ def run_suite(suite):
     return "RED", failures[0] if failures else ""
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main():
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--needle-scan", action="store_true")

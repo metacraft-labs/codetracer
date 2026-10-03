@@ -89,6 +89,11 @@ echo
 # ---------------------------------------------------------------------------
 missing=()
 
+# shellcheck source=ci/lib/recording-dump.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$CODETRACER_ROOT/ci/lib/recording-dump.sh"
+resolve_ct_print
+
 require_bin() {
 	command -v "$1" >/dev/null 2>&1 || missing+=("- $1 not on PATH ($2)")
 }
@@ -105,8 +110,8 @@ CT_INSTRUMENT_BIN="${CT_INSTRUMENT_BIN:-}"
 if [ -z "$CT_INSTRUMENT_BIN" ]; then
 	CT_INSTRUMENT_BIN="$(newest_executable \
 		"$WASM_INSTRUMENTER/target/release/ct-instrument" \
-		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" \
-		|| CT_INSTRUMENT_BIN=""
+		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" ||
+		CT_INSTRUMENT_BIN=""
 fi
 if [ -z "$CT_INSTRUMENT_BIN" ] && command -v ct-instrument >/dev/null 2>&1; then
 	CT_INSTRUMENT_BIN="$(command -v ct-instrument)"
@@ -120,8 +125,8 @@ if [ -z "$RECORD_WEB_BIN" ]; then
 	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" \
-		|| RECORD_WEB_BIN=""
+		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" ||
+		RECORD_WEB_BIN=""
 fi
 if [ -z "$RECORD_WEB_BIN" ]; then
 	missing+=("- session-manager not built (cargo build in $CODETRACER_ROOT/src/backend-manager)")
@@ -368,18 +373,19 @@ record_module() {
 	wait_for_port_free "$RECORD_WEB_PORT" || exit 1
 	wait_for_port_free "$PREVIEW_PORT" || exit 1
 
-	if [ ! -d "$out/$program.ct" ]; then
+	if [ ! -f "$out/$program.ct" ]; then
 		echo "[regenerate] record-web did not produce $program.ct" >&2
 		ls -la "$out" >&2 || true
 		exit 1
 	fi
-	cp -R "$out/$program.ct" "$out_dir/$program.ct"
+	cp "$out/$program.ct" "$out_dir/$program.ct"
 	rm -rf "$out"
 
-	if [ "$name" = "vault_apply" ] && [ ! -f "$out_dir/$program.ct/boundary_state.json" ]; then
-		echo "[regenerate] $program.ct carries no boundary_state.json." >&2
+	if [ "$name" = "vault_apply" ] &&
+		! "$CT_PRINT" --full "$out_dir/$program.ct" | grep -q 'wasm-host-state'; then
+		echo "[regenerate] $program.ct carries no host-state record." >&2
 		echo "[regenerate] vault_apply exists to exercise spec §3.3/§3.4;" >&2
-		echo "[regenerate] a recording without the sidecar is not one." >&2
+		echo "[regenerate] a recording without that state is not one." >&2
 		exit 1
 	fi
 

@@ -52,7 +52,7 @@ import ../theme/degradation
 import ../views/build_output
 import ../views/shell
 
-const ExpectedAssertions = 86
+const ExpectedAssertions = 84
 
 var countedAssertions = 0
 
@@ -204,8 +204,8 @@ suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
       text.add g.rowText(row) & "\n"
     checkpoint(text)
     ck screen.renderedLines == 1
-    ck text.contains(BuildPaneTitle)
-    ck text.contains("[failed]")
+    # PLAT-49: the first row is the verdict itself, not a `BUILD ───` title.
+    ck text.startsWith("[failed]")
     ck text.contains("just build")
     ck text.contains("exit 1")
     ck text.contains("undeclared identifier")
@@ -225,8 +225,7 @@ suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
                              model)
     let row0 = g.rowText(0)
     checkpoint(row0)
-    ck row0.contains(BuildPaneTitle)
-    ck row0.contains("[idle]")
+    ck row0.startsWith("[idle]")
     ck row0.contains("no build has been run")
 
   test "the error heuristic offers lines and hides none":

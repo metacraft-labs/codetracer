@@ -204,7 +204,10 @@ done
 # lint-rust's native-recorder setup so their db-backend build.rs takes the
 # direnv path. All four run `nix develop .#devShells.x86_64-linux.default -c
 # direnv ...`, naming `.`'s dev shell, so the foreign-shell rule below holds.
-readonly EXPECTED_SITES=17
+# 17 -> 19: release.yml's `linux` job repeats appimage-build's two sites
+# (`direnv allow` and the ct_emulator `nimble install`), with the same
+# `.#devShells.x86_64-linux.default` shell.
+readonly EXPECTED_SITES=19
 
 if [ "$sites" -eq "$EXPECTED_SITES" ]; then
 	ok "the scanner still matches the direnv call sites ($sites)"

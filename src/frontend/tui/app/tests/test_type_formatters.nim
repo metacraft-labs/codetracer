@@ -68,7 +68,7 @@ import ../views/variables
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 146
+const ExpectedAssertions = 153
 
 var countedAssertions = 0
 
@@ -275,21 +275,33 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     var deep = leaf
     deep.depth = 3
 
-    ck cellAt(rowFor(leaf), 0) == LeafGlyph
-    ck cellAt(rowFor(expandable), 0) == CollapsedGlyph
-    ck cellAt(rowFor(opened), 0) == ExpandedGlyph
+    # PLAT-49: column 0 is the row's CATEGORY TAG (blank on a spec that
+    # names none), the expander sits against the name, and `[MOD]` is at the
+    # row's END — no lone expander column, no blank badge field in front.
+    var tagged = leaf
+    tagged.tag = "L"
+    tagged.tagRole = srCategoryLocal
+    ck cellAt(rowFor(tagged), 0) == "L"
+    ck cellAt(rowFor(leaf), 0) == " "
+    ck cellAt(rowFor(leaf), 2) == LeafGlyph
+    ck cellAt(rowFor(expandable), 2) == CollapsedGlyph
+    ck cellAt(rowFor(opened), 2) == ExpandedGlyph
+    ck treeRow(tagged)[0].style.role == srCategoryLocal
     # THE `[MOD]` FIELD IS AT THE SAME COLUMN ON EVERY ROW, blank when the row
     # did not change. The Tier-2 case reads a real terminal cell at exactly this
     # column, so a drift here would move that read rather than the badge.
-    ck diffFieldColumn() == 2
-    ck nameFieldColumn() == 8
-    ck rowFor(modified)[2 .. 6] == ModifiedTag
-    ck rowFor(leaf)[2 .. 6] == "     "
+    let badge = diffFieldColumn(RowWidth)
+    ck badge == RowWidth - tree_node.ReservedTrailingCells - ModifiedTagCells
+    ck nameFieldColumn() == 4
+    ck rowFor(modified)[badge ..< badge + ModifiedTagCells] == ModifiedTag
+    ck rowFor(leaf)[badge ..< badge + ModifiedTagCells] == "     "
+    ck rowFor(leaf).find("counter") == nameFieldColumn()
     ck diffTagText(modified) == ModifiedTag
     ck diffTagText(leaf).len == ModifiedTagCells
-    # THE INDENT MOVES THE NAME, NEVER THE ROW.
-    ck cellAt(rowFor(deep), 0) == LeafGlyph
-    ck rowFor(deep)[2 .. 6] == "     "
+    # THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG OR THE BADGE.
+    ck cellAt(rowFor(deep), 0) == " "
+    ck cellAt(rowFor(deep), 2 + 2 * IndentCells) == LeafGlyph
+    ck rowFor(deep)[badge ..< badge + ModifiedTagCells] == "     "
     ck rowFor(deep).find("counter") ==
        rowFor(leaf).find("counter") + 2 * IndentCells
     # Every row is exactly the width it was asked for, whatever its kind.
@@ -309,7 +321,8 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     ck wide.typ <= MaximumTypeCells
     ck wide.value >= MinimumValueCells
     ck wide.name + wide.typ + wide.value + 2 ==
-       RowWidth - nameFieldColumn() - tree_node.ReservedTrailingCells
+       RowWidth - nameFieldColumn() - tree_node.ReservedTrailingCells -
+       (ModifiedTagCells + 1)
     # A NARROW PANE DROPS THE TYPE, NOT THE VALUE: a name and a value answer
     # "what is it now", and the type is a detail the tree's own shape carries.
     let narrow = fieldWidths(22)
@@ -486,9 +499,12 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
 
       # The pane's own box: its rectangle minus the dividers to its right and
       # (PLAT-47) below it — `shell.paneFrame`, the one place that says so.
+      # PLAT-49: the painter is handed the WHOLE box, stacked or not, and the
+      # tab strip takes its first row (the painter's own heading): the rows
+      # under the strip are the painter's rows 1 ..
       let frame = paneFrame(area, body)
-      let paneTop = if stacked: area.row + 1 else: area.row
-      let paneHeight = if stacked: frame.box.height - 1 else: frame.box.height
+      let paneTop = area.row
+      let paneHeight = frame.box.height
       let inner = frame.box.width
       let paneRowsText = variablesText(model, inner, paneHeight)
 
@@ -509,7 +525,7 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
 
       var matched = 0
       var firstDiff = ""
-      for i in 0 ..< paneHeight:
+      for i in 1 ..< paneHeight:
         var slice = ""
         var at = 0
         for r in after[paneTop + i].runes:
@@ -524,17 +540,17 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
             paneRowsText[i] & "'"
       if firstDiff.len > 0:
         checkpoint(firstDiff)
-      checkpoint("pane rows matched: " & $matched & " of " & $paneHeight)
-      ck matched == paneHeight
+      checkpoint("pane rows matched: " & $matched & " of " & $(paneHeight - 1))
+      ck matched == paneHeight - 1
 
-      # …and the rectangle's first row still says what CTUI-3 put there. On the
-      # stacked shape that is the tab strip, whose title comes from the SAVED
-      # LAYOUT; on the unstacked one the pane owns the row and puts its own
-      # title there.
+      # …and the rectangle's first row is the TAB STRIP (PLAT-49): the
+      # stack's tabs, or a lone pane's one tab — never the pane's own
+      # `VARIABLES ───` heading.
       if stacked:
         ck after[area.row].contains(paneRegion.tabs[paneRegion.activeTab])
       else:
-        ck after[area.row].contains(VariablesTitle)
+        ck after[area.row].contains(paneTitle(paneState, paneRegion.title))
+      ck not after[area.row].contains(VariablesTitle)
     ck checkedGeometries == 2
 
   test "assertion count":

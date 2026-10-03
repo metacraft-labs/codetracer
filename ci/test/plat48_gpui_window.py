@@ -11,9 +11,11 @@ does — a REAL pointer (isonim-gpui's `build/virtual-pointer`, a
 (`wtype`, the compositor's virtual keyboard) — keeping a settled frame
 (two identical `grim` grabs) after every step:
 
-  base            the first screen: the top bar (menu titles, the desktop's
-                  debugger marks, the omnibar), the footer strip
-  menu-open       a click on the Debug title: its popover
+  base            the first screen: the top bar (the menu's ONE root button
+                  — PLAT-49 — the desktop's debugger marks, the omnibar), the
+                  footer strip
+  menu-root       a click on the root button: the first level's popover
+  menu-open       a click on its Debug row: Debug's popover, beside it
   menu-hover      the pointer over Step In: the highlight moves to it
   menu-key        `Down`: the highlight moves on (the keyboard's route)
   menu-choose     a click on Step Over: the debugger moves, the popover goes
@@ -22,15 +24,17 @@ does — a REAL pointer (isonim-gpui's `build/virtual-pointer`, a
   omni-tick       `Ctrl+P`, `#42`, `Enter`: the debugger at tick 42
   omni-sym        `Ctrl+P`, `:sym add`: the results
   reveal-base     (after `Esc`) the arrangement before a reveal
-  reveal-bottom   a click on the BUILD label: the pane over the tree
+  reveal-bottom   the pointer resting on the BUILD label: the pane over the
+                  tree (PLAT-49: a click docks it open instead)
   reveal-esc      `Esc`: every pixel as before
   key-reveal      `Ctrl+O`: the first footer pane revealed by key
   hover-slot      the pointer on a strip label: its hover label
   pinned          a click on the State stack's pin button: docked
-  unpinned        its label clicked, then Unpin: placed again
+  unpinned        its label hovered, then Unpin: placed again
   top-docked      the Variables tab dragged to the margin above the layout
                   and released: a TOP strip
-  top-revealed    a click on the top label: the pane over the tree, from the
+  top-revealed    the pointer resting on the top label: the pane over the
+                  tree, from the
                   top
   top-esc         `Esc`: every pixel as before
   top-back        the top label dragged back into the tree: placed
@@ -211,6 +215,27 @@ def centre(r):
     return x + w // 2, y + h // 2
 
 
+def hover_reveal(win, ptr, rect):
+    """Reveal a docked pane the desktop's way (PLAT-49 part B): the pointer
+    RESTS on its strip label past the hover-preview delay (300 ms,
+    `auto_hide_hover.HoverPreviewDelayMs`), then moves into the overlay,
+    which keeps it shown. A click on a label docks the pane open instead.
+    Answers the revealed geometry, or None."""
+    lx, ly = centre(rect)
+    ptr.jump(lx - 2, ly)
+    ptr.move(lx, ly, steps=2)
+    rv = None
+    for _ in range(20):
+        time.sleep(0.2)
+        rv = win.geom().get("revealed")
+        if rv:
+            break
+    if rv:
+        ptr.move(*centre(rv["rect"]), steps=3, pause_ms=20)
+        time.sleep(0.4)
+    return rv
+
+
 def seg(g, part, label=None):
     for s in g["topBar"]["segs"]:
         if s["part"] == part and (label is None or s["label"] == label):
@@ -371,12 +396,18 @@ def capture():
         shutil.copy(win.geometry, os.path.join(OUT, "a-base.geometry.json"))
         facts["ticks"]["base"] = g["topBar"]["tick"]
         # ---- the menu: click, hover, key, choose ------------------------
-        dx, dy = centre(seg(g, "menu-title", "Debug")["rect"])
-        ptr.click(dx, dy)
+        # PLAT-49: the desktop's menu — one root button, its first level a
+        # popover, a folder's items a popover beside it.
+        ptr.click(*centre(seg(g, "menu")["rect"]))
+        steps["menu-root"] = settle("menu-root")
+        g = win.geom()
+        shutil.copy(win.geometry, os.path.join(OUT, "a-menu-root.geometry.json"))
+        first = {r["label"]: r for r in g["topBar"]["popovers"][0]["rows"]}
+        ptr.click(*centre(first["Debug"]["rect"]))
         steps["menu-open"] = settle("menu-open")
         g = win.geom()
         shutil.copy(win.geometry, os.path.join(OUT, "a-menu.geometry.json"))
-        pop = g["topBar"]["popovers"][0]
+        pop = g["topBar"]["popovers"][1]
         rows = {r["label"]: r for r in pop["rows"]}
         ptr.move(*centre(rows["Step In"]["rect"]))
         steps["menu-hover"] = settle("menu-hover")
@@ -429,11 +460,11 @@ def capture():
         g = win.geom()
         bottom = next(s for s in g["strips"] if s["edge"] == "bottom")
         build = next(s for s in bottom["slots"] if s["pane"] == "buildOutput")
-        ptr.click(*centre(build["rect"]))
-        ptr.jump(FRAME_W - 6, 4)
+        hover_reveal(win, ptr, build["rect"])
         steps["reveal-bottom"] = settle("reveal-bottom")
         shutil.copy(win.geometry, os.path.join(OUT, "a-reveal.geometry.json"))
         wt("-k", "Escape")
+        ptr.jump(FRAME_W - 6, 4)
         steps["reveal-esc"] = settle("reveal-esc")
         wt("-M", "ctrl", "-k", "o", "-m", "ctrl")
         steps["key-reveal"] = settle("key-reveal")
@@ -446,6 +477,8 @@ def capture():
         ptr.move(px_, py_, steps=2)
         steps["hover-slot"] = settle("hover-slot")
         ptr.jump(FRAME_W // 2, 300)
+        # Off the label, the preview it opened is dismissed after its delay.
+        time.sleep(0.8)
         # ---- pin / unpin ------------------------------------------------------
         g = win.geom()
         state = node_of(g, "state")
@@ -458,11 +491,10 @@ def capture():
         st = next((s for s in bottom["slots"] if s["pane"] == "state"), None)
         facts["pinnedDocked"] = st is not None
         if st is not None:
-            ptr.click(*centre(st["rect"]))
-            time.sleep(1.0)
-            g = win.geom()
-            rr = g["revealed"]["rect"]
-            ptr.click(rr[0] + rr[2] - 40, rr[1] + 15)
+            rv = hover_reveal(win, ptr, st["rect"])
+            if rv:
+                rr = rv["rect"]
+                ptr.click(rr[0] + rr[2] - 40, rr[1] + 15)
         steps["unpinned"] = settle("unpinned")
         g = win.geom()
         shutil.copy(win.geometry, os.path.join(OUT, "a-unpinned.geometry.json"))
@@ -492,11 +524,11 @@ def capture():
         facts["topDocked"] = top is not None and any(s["pane"] == "state" for s in top["slots"])
         if top is not None:
             lbl = top["slots"][0]["rect"]
-            ptr.click(*centre(lbl))
-            ptr.jump(FRAME_W - 6, 4)
+            hover_reveal(win, ptr, lbl)
             steps["top-revealed"] = settle("top-revealed")
             shutil.copy(win.geometry, os.path.join(OUT, "a-toprev.geometry.json"))
             wt("-k", "Escape")
+            ptr.jump(FRAME_W - 6, 4)
             steps["top-esc"] = settle("top-esc")
             g = win.geom()
             ed = node_of(g, "editor")
@@ -571,15 +603,32 @@ def inked(frame, rect):
     return n
 
 
-def ocr(frame_path, rect, name):
+STRIP_GROUNDS = ["#262626", "#333333", "#1b222c"]
+# PLAT-49: a tab strip's labels stand on SEVERAL grounds — the strip's own
+# (`crTabStripBackground`), the selected tab's (`crTabActiveBackground`) and,
+# under a strip, the pane's (`crPaneBackground`). Tesseract binarises a line
+# with one threshold, which drops the dim labels on the dark ground beside a
+# bright one; `ocr(..., grounds=STRIP_GROUNDS)` paints every ground pixel white
+# and every other pixel black first.
+
+
+def _rgb(hexs):
+    return tuple(int(hexs[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def ocr(frame_path, rect, name, grounds=None):
     x, y, w, h = rect
     fw, _, raster = read_ppm(frame_path)
     big = os.path.join(OUT, name + ".big.ppm")
+    gs = [_rgb(g) for g in (grounds or [])]
     out = bytearray()
     for j in range(y, y + h):
         row = bytearray()
         for i in range(x, x + w):
             p = raster[(j * fw + i) * 3:(j * fw + i) * 3 + 3]
+            if gs:
+                on = any(all(abs(p[k] - g[k]) <= 6 for k in range(3)) for g in gs)
+                p = b"\xff\xff\xff" if on else b"\x00\x00\x00"
             row += p + p
         out += row + row
     with open(big, "wb") as f:
@@ -624,16 +673,25 @@ def record():
         if s["part"] == "control":
             marks[s["label"]] = inked(base, s["rect"])
     out["controlMarkInk"] = marks
-    titles = ocr(path("base"), [g["topBar"]["band"][0], g["topBar"]["band"][1],
-                                700, g["topBar"]["band"][3]], "titles")
-    out["menuTitlesOcr"] = titles.strip()
+    # PLAT-49: the band holds ONE root button and no folder title; the first
+    # level is the root popover's rows.
+    out["menuBandOcr"] = ocr(path("base"), [g["topBar"]["band"][0],
+                                            g["topBar"]["band"][1], 330,
+                                            g["topBar"]["band"][3]],
+                             "band").strip()
+    gr = jload("a-menu-root.geometry.json")
+    root = gr["topBar"]["popovers"][0]
+    out["menuTitlesOcr"] = ocr(path("menu-root"), root["rect"], "titles").strip()
+    out["menuRoot"] = {"popover": root["rect"],
+                       "button": seg(g, "menu")["rect"]}
     bottom = next(s for s in g["strips"] if s["edge"] == "bottom")
     out["footerOcr"] = ocr(path("base"), bottom["rect"], "footer").strip()
     # ---- the menu ------------------------------------------------------------
     gm = jload("a-menu.geometry.json")
-    pop = gm["topBar"]["popovers"][0]
-    n, box = changed(base, fr["menu-open"])
-    out["menuOpen"] = {"popover": pop["rect"], "changedBox": box, "changed": n}
+    pop = gm["topBar"]["popovers"][1]
+    n, box = changed(fr["menu-root"], fr["menu-open"])
+    out["menuOpen"] = {"popover": pop["rect"], "changedBox": box, "changed": n,
+                       "rootPopover": gm["topBar"]["popovers"][0]["rect"]}
     rows = {r["label"]: r for r in pop["rows"]}
     so = rows["Step Over"]["rect"]
     out["menuStepOverOcr"] = ocr(path("menu-open"), so, "stepover").strip()
@@ -669,7 +727,8 @@ def record():
     n, box = changed(fr["reveal-base"], fr["reveal-bottom"])
     out["revealBottom"] = {"rect": rect, "changedBox": box,
                            "changedOutside": changed_outside(fr["reveal-base"], fr["reveal-bottom"], rect, gr),
-                           "ocr": ocr(path("reveal-bottom"), [rect[0], rect[1], rect[2], 80], "reveal").strip()}
+                           "ocr": ocr(path("reveal-bottom"), [rect[0], rect[1], rect[2], 80], "reveal",
+                                      STRIP_GROUNDS).strip()}
     n, _ = changed(fr["reveal-base"], fr["reveal-esc"])
     out["revealEscChanged"] = n
     gk = jload("a-keyreveal.geometry.json")
@@ -677,7 +736,7 @@ def record():
     if gk["revealed"]:
         kr = gk["revealed"]["rect"]
         out["keyRevealOcr"] = ocr(path("key-reveal"), [kr[0], kr[1], kr[2], 80],
-                                  "keyreveal").strip()
+                                  "keyreveal", STRIP_GROUNDS).strip()
     # ---- pin / unpin ---------------------------------------------------------
     reported["pinnedDocked"] = facts["pinnedDocked"]
     reported["unpinnedPlaced"] = facts["unpinnedPlaced"]
@@ -689,7 +748,8 @@ def record():
     ub = next(s for s in gu["strips"] if s["edge"] == "bottom")
     out["unpinnedFooterOcr"] = ocr(path("unpinned"), ub["rect"], "unpinnedfooter").strip()
     un = next((n for n in gu["nodes"] if n["kind"] == "tabs" and "state" in n["panes"]), None)
-    out["unpinnedTabsOcr"] = (ocr(path("unpinned"), un["strip"], "unpinnedtabs").strip()
+    out["unpinnedTabsOcr"] = (ocr(path("unpinned"), un["strip"], "unpinnedtabs",
+                                  STRIP_GROUNDS).strip()
                               if un and un["strip"][2] > 0 else "")
     # ---- the top edge --------------------------------------------------------
     gt = jload("a-top.geometry.json")
@@ -703,7 +763,7 @@ def record():
         out["topReveal"] = {"rect": rr,
                             "changedOutside": changed_outside(fr["top-docked"], fr["top-revealed"], rr, gtr),
                             "ocr": ocr(path("top-revealed"), [rr[0], rr[1], rr[2], 80],
-                                       "toprev").strip()}
+                                       "toprev", STRIP_GROUNDS).strip()}
         reported["topRevealPane"] = gtr["revealed"]["pane"]
         n, _ = changed(fr["top-docked"], fr["top-esc"])
         out["topEscChanged"] = n

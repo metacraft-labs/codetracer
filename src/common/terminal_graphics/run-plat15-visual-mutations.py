@@ -879,7 +879,16 @@ def explain(arm_id: str) -> int:
     return 0
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
     # dropped, and the run became a full, file-mutating grade: `--only=A,B`
     # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`

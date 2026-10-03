@@ -303,16 +303,27 @@ ARMS = [
         CTL[UISEL][0], CTL[UISEL][1],
         "THE FLAG BECOMES DECORATION. Without `--edit` the positional reaches "
         "`codetracer-gpui` as a RECORDING, and the front-end refuses it for "
-        "having no `trace.json` — a true diagnosis of the wrong question, "
+        "not being a recording — a true diagnosis of the wrong question, "
         "which is the failure `ui-selection.md` §4.1 draws its per-front-end "
         "messages against."),
 
     # ------------------------------------------------------------------
     # NEVER A BLANK
     # ------------------------------------------------------------------
+    # RE-AIMED 2026-10-03, `PLAT35-F3`. The claim and the mutation are
+    # unchanged; the line they are aimed at moved. `renderEditorRow` used to
+    # inline the placeholder decision at the `createTextNode` call:
+    #     r.createTextNode(if row.held: row.text else: EditorLoadingText))
+    # The horizontal-scroll fix lifted that decision into `leaves
+    # .drawnCodeText`, so the call site now reads
+    # `r.createTextNode(dropColumns(drawnCodeText(row), skipCols)))` and the
+    # old needle occurs ZERO times — which the needle scan caught by name
+    # (`E7: find occurs 0 times`) rather than letting the arm run unaimed.
+    # The arm is now aimed at `drawnCodeText`'s body, which is where the
+    # decision lives, and it discards the placeholder exactly as before.
     Arm("E7", LEAVES,
-        "    r.createTextNode(if row.held: row.text else: EditorLoadingText))",
-        "    r.createTextNode(row.text))",
+        "  if row.held: row.text else: EditorLoadingText",
+        "  row.text",
         SUITE_EDIT,
         "a line the window does not hold renders a PLACEHOLDER, never a blank",
         CTL[LEAVES][0], CTL[LEAVES][1],
@@ -862,7 +873,16 @@ def grade(selected: list[Arm]) -> int:
     return 0 if killed == len(results) else 1
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--needle-scan", action="store_true")
     ap.add_argument("--record-control-hashes", action="store_true")

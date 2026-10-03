@@ -151,6 +151,32 @@ proc waitForScreenText(sess: var TuiTestSession; needle: string;
   raise newException(AssertionDefect,
     "'" & needle & "' never appeared within " & $timeoutMs & " ms; screen:\n" & last)
 
+proc editorTabShows(screen, file: string): bool =
+  ## PLAT-49: the Edit pane has no title row; the editor's TAB names the file,
+  ## on the strip that carries Edit mode's source statement ("the working
+  ## tree") — one row holding both is the editor showing `file`, and not the
+  ## file tree's row for it.
+  for line in screen.splitLines():
+    if line.contains("the working tree") and line.contains(" " & file & " "):
+      return true
+
+proc waitForEditorTab(sess: var TuiTestSession; file: string;
+                      timeoutMs = 20000): string =
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  var last = ""
+  while getMonoTime() < deadline:
+    discard sess.drainOutput(40)
+    last = sess.screenContents()
+    if editorTabShows(last, file):
+      return last
+    if not sess.isAlive:
+      raise newException(AssertionDefect,
+        "the binary exited before the editor showed '" & file &
+        "'; screen was:\n" & last)
+  raise newException(AssertionDefect,
+    "the editor's tab never named '" & file & "' within " & $timeoutMs &
+    " ms; screen:\n" & last)
+
 proc sendKey(sess: var TuiTestSession; name: string) =
   ## One key, as bytes. A lone ESC is followed by a pause long enough that the
   ## next byte cannot be read as the rest of an escape sequence.
@@ -210,7 +236,7 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
       let project = projectFor("select-" & $model, d.text)
       var sess = spawnEditor(project, state)
       try:
-        discard waitForScreenText(sess, "EDIT " & ProjectFile)
+        discard waitForEditorTab(sess, ProjectFile)
         let told = selectByKeys(sess, $model)
         checkpoint(told.splitLines()[^1])
         ck told.contains("keymap " & $model)
@@ -224,7 +250,7 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
       # typed: the same key through the same model, in-process.
       var again = spawnEditor(project, state)
       try:
-        discard waitForScreenText(again, "EDIT " & ProjectFile)
+        discard waitForEditorTab(again, ProjectFile)
         again.sendKey("x")
         again.saveByKeys()
       finally:
@@ -269,7 +295,7 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
         let project = projectFor(name, d.text)
         var sess = spawnEditor(project, state)
         try:
-          discard waitForScreenText(sess, "EDIT " & ProjectFile)
+          discard waitForEditorTab(sess, ProjectFile)
           for k in keys:
             sess.sendKey(k)
           sess.saveByKeys()
@@ -303,7 +329,7 @@ suite "PLAT-31 Tier 2: a pending prefix times out at its bound, on a real pty":
     let project = projectFor(name, d.text)
     var sess = spawnEditor(project, state)
     try:
-      discard waitForScreenText(sess, "EDIT " & ProjectFile)
+      discard waitForEditorTab(sess, ProjectFile)
       for i, k in keys:
         sess.sendKey(k)
         if i == 0 and pauseAfterFirstMs > 0:
@@ -354,7 +380,7 @@ suite "PLAT-36 Tier 2: a `:source`d mapping, typed on a real pty":
     writeFile(project / VimrcFile, Vimrc)
     var sess = spawnEditor(project, state)
     try:
-      discard waitForScreenText(sess, "EDIT " & ProjectFile)
+      discard waitForEditorTab(sess, ProjectFile)
       sess.send(Tab)
       discard waitForScreenText(sess, "focus ")
       sess.send(":source " & VimrcFile & "\r")

@@ -148,6 +148,36 @@ proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
   finally:
     removeFile(path)
 
+proc ocrOnGrounds*(img: GrayImage, r: Rect, scratch: string,
+                   grounds: openArray[int], psm = 7,
+                   upscale = 2.0): seq[OcrWord] =
+  ## OCR one region whose text sits on SEVERAL known backgrounds — a tab
+  ## strip since PLAT-49: inactive labels on the strip's own ground, the
+  ## selected one on a lighter ground of its own. Tesseract binarises a line
+  ## with one threshold, which falls between the dark ground and the bright
+  ## selected label and drops the dim inactive ones. So every pixel within a
+  ## few levels of a declared ground becomes white and every other one black:
+  ## dark text on white, whatever ground each label stands on.
+  let sub = cropGray(img, r)
+  if sub.width <= 0 or sub.height <= 0: return @[]
+  var masked = sub
+  for i in 0 ..< masked.pixels.len:
+    let v = ord(masked.pixels[i])
+    var ground = false
+    for g in grounds:
+      if abs(v - g) <= 6: ground = true
+    masked.pixels[i] = (if ground: char(255) else: char(0))
+  let path = scratch / ("grounds_" & $r.x & "_" & $r.y & "_" &
+                        $r.w & "x" & $r.h & ".pgm")
+  writePgm(masked, path)
+  try:
+    result = runOcrEx(path, initOcrOptions(psm = psm, upscale = upscale,
+                                           invert = oiNever))
+  except CatchableError:
+    result = @[]
+  finally:
+    removeFile(path)
+
 proc lineBands*(img: GrayImage, r: Rect): seq[Rect] =
   ## The region's TEXT LINES, found by ink projection rather than by the OCR
   ## engine: each maximal run of pixel rows carrying ink, padded by two rows.

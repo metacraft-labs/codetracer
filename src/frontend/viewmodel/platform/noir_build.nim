@@ -278,7 +278,7 @@ type
     ## and every obvious assertion passed. A pane that said "traced" over that
     ## would be repeating the mistake to a user.
     decoded*: bool
-    events*: int
+      ## True when the answer is a `TraceResult` carrying a `.ct` container.
     steps*: int
     calls*: int
     paths*: seq[string]
@@ -711,13 +711,12 @@ proc noirTestExpectationNote*(outcome: NoirTestOutcome): string =
 proc summariseNoirTrace*(raw: string): NoirTraceSummary =
   ## Count what a trace contains, without holding a second copy of it.
   ##
-  ## The tracer answers a `MemoryTrace` document — `{events, paths,
-  ## line_lengths, source_views, capabilities, workdir}` — and its `events`
-  ## array is externally tagged: a step is `{"Step": {...}}`, a call is
-  ## `{"Call": {...}}`. That is the same discrimination `compare.mjs` makes
-  ## (`e => 'Step' in e`), and it is made here for the same reason: a trace
-  ## with events but no steps is the failure mode both wasm modules can report
-  ## `ok` over.
+  ## The tracer answers a `TraceResult` document — `{container, paths,
+  ## source_views, workdir, capabilities, steps, calls}`, the recording itself
+  ## being the `.ct` in `container` — and reports its step and call counts
+  ## beside the container, so they are read here rather than decoded out of
+  ## it. A trace with no steps is the failure mode both wasm modules can
+  ## report `ok` over.
   ##
   ## `bytes` is recorded even when decoding fails, so a trace too large or too
   ## malformed to parse is still reported as a SIZE rather than as nothing.
@@ -730,20 +729,21 @@ proc summariseNoirTrace*(raw: string): NoirTraceSummary =
   except:
     return
   if parsed.isNil or parsed.kind != JObject: return
+  # No container, no recording: the retired event-list answer is not one.
+  if not parsed.hasKey("container") or parsed["container"].kind != JString:
+    return
   result.decoded = true
-  if parsed.hasKey("events") and parsed["events"].kind == JArray:
-    for event in parsed["events"]:
-      inc result.events
-      if event.kind != JObject: continue
-      if event.hasKey("Step"): inc result.steps
-      elif event.hasKey("Call"): inc result.calls
+  if parsed.hasKey("steps") and parsed["steps"].kind == JInt:
+    result.steps = parsed["steps"].getInt
+  if parsed.hasKey("calls") and parsed["calls"].kind == JInt:
+    result.calls = parsed["calls"].getInt
   if parsed.hasKey("paths") and parsed["paths"].kind == JArray:
     for path in parsed["paths"]:
       if path.kind == JString: result.paths.add path.getStr
 
 proc isTrivialTrace*(summary: NoirTraceSummary): bool =
-  ## `compare.mjs`'s ONE-EVENT-ZERO-STEPS check, as a value the product can
-  ## read rather than a check only CI makes.
+  ## `compare.mjs`'s ZERO-STEPS check, as a value the product can read rather
+  ## than a check only CI makes.
   ##
   ## Reported to the user rather than hidden: an artifact compiled without
   ## instrumentation traces to one event and no steps, both modules answer
@@ -751,4 +751,4 @@ proc isTrivialTrace*(summary: NoirTraceSummary): bool =
   ## agreements this campaign keeps finding. The Run path asks for
   ## `nbmDebug` precisely so this cannot happen — so if it happens anyway,
   ## something changed and the pane must say so.
-  not summary.decoded or summary.events <= 1 or summary.steps == 0
+  not summary.decoded or summary.steps == 0

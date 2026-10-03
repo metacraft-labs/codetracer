@@ -489,83 +489,19 @@ fn setup(
         }
     }
 
-    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
-    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS
-    // `.ct` container.  External recorders that have not yet adopted the
-    // CTFS writer still emit this — the Noir recorder (`nargo trace`)
-    // being the live example.  Treat it exactly like a materialized
-    // trace by decoding the events and running the same postprocessing
-    // pipeline `CTFSTraceReader::open()` uses, rather than wrongly
-    // falling through to the rr/MCR replay-worker path below.
-    let legacy_json_path = {
-        let direct = trace_folder.join("trace.json");
-        if direct.is_file() {
-            Some(direct)
-        } else if trace_folder.is_file() && trace_folder.file_name().map(|n| n == "trace.json").unwrap_or(false) {
-            Some(trace_folder.to_path_buf())
+    // A `trace.json` event stream is what the pure-Python and pure-Ruby
+    // test oracles write; it is compared against `ct print`, never opened.
+    // Refuse it by name instead of letting it fall through to the
+    // replay-worker path, whose error would say nothing about why.
+    if crate::materialized_source::is_test_oracle_output(trace_folder)
+        || crate::materialized_source::is_test_oracle_output(&trace_path)
+    {
+        let shown = if trace_folder.is_file() {
+            trace_folder
         } else {
-            None
-        }
-    };
-    if let Some(json_path) = legacy_json_path {
-        info!(
-            "detected legacy runtime_tracing materialized trace: {}",
-            json_path.display()
-        );
-        let json_bytes = std::fs::read(&json_path)?;
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
-        normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {}: {e}", json_path.display()))?;
-        // Workdir: prefer `trace_metadata.json` next to `trace.json`,
-        // else fall back to the trace folder itself.
-        let meta_workdir = json_path
-            .parent()
-            .map(|d| d.join("trace_metadata.json"))
-            .filter(|p| p.is_file())
-            .and_then(|p| std::fs::read(&p).ok())
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from));
-        let workdir = meta_workdir.unwrap_or_else(|| {
-            json_path
-                .parent()
-                .map(|d| d.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
-        let reader = CTFSTraceReader::from_events(events, &workdir)?;
-        info!(
-            "legacy materialized trace loaded: {} steps, {} calls, {} events",
-            reader.step_count(),
-            reader.call_count(),
-            reader.event_count(),
-        );
-        let reader: Arc<dyn TraceReader> = Arc::new(reader);
-        let mut handler = Handler::construct_with_reader(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            reader,
-            false,
-        );
-        handler.raw_diff_index = raw_diff_index;
-        // RS-M2 — remember the recording directory so
-        // `ct/load-request-spans` can find the container (and any
-        // pre-cutover sidecar beside it).  Stores a path only: the
-        // span stream is deliberately not read at trace-open time.
-        handler.set_trace_folder(trace_folder);
-        handler.load_macro_sourcemaps(trace_folder);
-        // P3 — load Source Map V3 indexes for every recorded source.
-        handler.load_sourcemaps(trace_folder);
-        // §P5 — user-provided variable rename list.
-        handler.load_rename_list(trace_folder, rename_list_path);
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
+            trace_path.as_path()
+        };
+        return Err(crate::materialized_source::test_oracle_refusal(shown.display()).into());
     }
 
     // Legacy `runtime_tracing` binary materialized layout: a `trace.bin`
@@ -574,9 +510,8 @@ fn setup(
     // CTFS container but is NOT one — `CtfsReader::open` rejects it on the
     // version byte (0x00 vs the CTFS-required 2..4), so `setup` would
     // otherwise fall through to the rr replay-worker path and fail with
-    // "program path has no file name".  Decode it the same way as
-    // `trace.json`: read the events, then run the shared `from_events`
-    // postprocessing pipeline.
+    // "program path has no file name".  Read the events, then run the
+    // shared `from_events` postprocessing pipeline.
     let legacy_bin_path = {
         let direct = trace_folder.join("trace.bin");
         if direct.is_file() {
@@ -708,33 +643,6 @@ fn setup(
     }
 }
 
-/// Repair a legacy `runtime_tracing` `trace.json` in place.
-///
-/// `pub` because `materialized_source` opens the same streams for the
-/// DeepReview collector and must apply the same repair; two copies of it would
-/// diverge and give a review a different trace from the one the debugger
-/// shows.
-pub fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                normalize_legacy_trace_json_values(item);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            if let Some(serde_json::Value::String(text)) = map.get("i")
-                && let Ok(parsed) = text.parse::<i64>()
-            {
-                map.insert("i".to_string(), serde_json::Value::Number(parsed.into()));
-            }
-            for child in map.values_mut() {
-                normalize_legacy_trace_json_values(child);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// File name of a multi-recording session manifest. Mirrored on the Nim
 /// side by `ct/src/ct/trace/trace_container.nim::SESSION_MANIFEST_FILE`.
 /// Spec: `codetracer-specs/Trace-Files/Session-Manifest.md` §5.
@@ -775,8 +683,8 @@ fn is_session_manifest_path(path: &Path) -> bool {
 ///    naming the manifest routes the launch through `setup_session`
 ///    (M41). Auto-detecting a single trace file here instead would open
 ///    one arbitrary member and silently show a fraction of the program;
-/// 4. otherwise auto-detect, preferring CTFS containers but keeping
-///    legacy materialized `trace.json` / `trace.bin` fixtures loadable;
+/// 4. otherwise auto-detect, preferring CTFS containers, then a legacy
+///    `trace.bin`, then test-oracle `trace.json` (which `setup` refuses);
 /// 5. failing that, default to `trace.ct` so `setup`'s error message
 ///    points at the canonical name.
 fn resolve_launch_trace_file(folder: &Path, explicit: Option<&PathBuf>) -> PathBuf {
@@ -1639,64 +1547,20 @@ pub fn setup_from_vfs(
         }
     }
 
-    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
-    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS `.ct`
-    // container.  External recorders that have not adopted the CTFS
-    // writer still emit this — the Noir recorder (`nargo trace`) is the
-    // live example.  The native `try_open_trace` path already handles
-    // this format; the browser path must too, otherwise client-side WASM
-    // replay of a Noir trace fails after `configurationDone` (the handler
-    // is never constructed, so `threads`/`stackTrace` return nothing).
-    let json_candidates = [join_vfs(trace_folder, "trace.json"), trace_folder.to_string()];
-    for candidate in &json_candidates {
-        if !crate::vfs::vfs_exists(candidate) || !candidate.ends_with("trace.json") {
-            continue;
+    // A `trace.json` is test-oracle output from the pure Python and Ruby
+    // recorders, never a recording; refuse it by name rather than with the
+    // generic "nothing found" below.
+    for candidate in [
+        join_vfs(trace_folder, trace_file),
+        join_vfs(trace_folder, crate::materialized_source::TEST_ORACLE_TRACE_FILE),
+    ] {
+        let is_oracle = candidate.rsplit('/').next() == Some(crate::materialized_source::TEST_ORACLE_TRACE_FILE);
+        if is_oracle && crate::vfs::vfs_exists(&candidate) {
+            return Err(crate::materialized_source::test_oracle_refusal(&candidate).into());
         }
-        let json_bytes = match crate::vfs::vfs_read(candidate) {
-            Some(b) => b,
-            None => continue,
-        };
-        info!("setup_from_vfs: detected legacy materialized trace.json at VFS path {candidate:?}");
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {candidate:?}: {e}"))?;
-        normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {candidate:?}: {e}"))?;
-        // Workdir: prefer `trace_metadata.json` alongside `trace.json` in
-        // the VFS, else fall back to the trace folder.
-        let meta_vfs = join_vfs(trace_folder, "trace_metadata.json");
-        let workdir = crate::vfs::vfs_read(&meta_vfs)
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from(trace_folder));
-        let ctfs_reader = CTFSTraceReader::from_events(events, &workdir)?;
-        info!(
-            "setup_from_vfs: legacy materialized trace loaded: {} steps, {} calls, {} events",
-            ctfs_reader.step_count(),
-            ctfs_reader.call_count(),
-            ctfs_reader.event_count(),
-        );
-        let reader: Arc<dyn TraceReader> = Arc::new(ctfs_reader);
-        let mut handler = Handler::construct_with_reader(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            reader,
-            false,
-        );
-        handler.raw_diff_index = raw_diff_index;
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
     }
 
-    Err("setup_from_vfs: no CTFS (.ct) container or legacy trace.json \
-         found in VFS"
-        .into())
+    Err("setup_from_vfs: no CTFS (.ct) container found in VFS".into())
 }
 
 fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<PathBuf> {
@@ -1824,25 +1688,31 @@ fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
 }
 
 fn legacy_materialized_trace_file_in_dir(dir: &Path) -> Option<PathBuf> {
-    for name in ["trace.json", "trace.bin"] {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    let candidate = dir.join(crate::materialized_source::LEGACY_BINARY_TRACE_FILE);
+    candidate.is_file().then_some(candidate)
 }
 
+/// Pick the file a launch of `folder` opens.  Test-oracle output is picked
+/// too, last, so that `setup` refuses it by name rather than reporting a
+/// missing `trace.ct`.
 fn auto_detect_materialized_trace_file(folder: &Path) -> Option<PathBuf> {
-    find_ct_file_in_dir(folder).or_else(|| legacy_materialized_trace_file_in_dir(folder))
+    find_ct_file_in_dir(folder)
+        .or_else(|| legacy_materialized_trace_file_in_dir(folder))
+        .or_else(|| {
+            let oracle = folder.join(crate::materialized_source::TEST_ORACLE_TRACE_FILE);
+            oracle.is_file().then_some(oracle)
+        })
 }
 
+/// Whether the launch names a file `setup` handles without a replay worker:
+/// a legacy `trace.bin`, or test-oracle output, which `setup` refuses.
 fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
+    let handled = |name: &str| {
+        name == crate::materialized_source::LEGACY_BINARY_TRACE_FILE
+            || name == crate::materialized_source::TEST_ORACLE_TRACE_FILE
+    };
     if folder.is_file() {
-        return folder
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "trace.json" || name == "trace.bin");
+        return folder.file_name().and_then(|name| name.to_str()).is_some_and(handled);
     }
 
     let trace_path = folder.join(trace_file);
@@ -1850,15 +1720,16 @@ fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
         && trace_path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "trace.json" || name == "trace.bin")
+            .is_some_and(handled)
 }
 
 /// Determine whether the trace in `folder` is a DB-based trace (JavaScript,
 /// Python, Ruby, etc.) that does NOT require an rr replay worker.
 ///
 /// Most materialized traces are CTFS containers, but a few checked-in legacy
-/// fixtures still use sidecar `trace.json` / `trace.bin` files. Detect both so
-/// neither path incorrectly starts an rr replay worker.
+/// fixtures still use a `trace.bin` event stream, and test-oracle
+/// `trace.json` output must reach `setup`'s refusal.  Detect both so neither
+/// path incorrectly starts an rr replay worker.
 ///
 /// For CTFS, this reduces to detecting whether the folder (or the resolved
 /// trace file) is a CodeTracer DB CTFS container with materialized contents
@@ -2790,12 +2661,11 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
 ///
 /// The native auto-detect uses `Path::is_file()`, which always returns
 /// false under wasm32, so the browser path re-detects against the in-memory
-/// [`crate::vfs`] instead.  Materialized traces are CTFS-only, with the
-/// legacy `runtime_tracing` `trace.json` layout still accepted.
+/// [`crate::vfs`] instead.  Materialized traces are CTFS-only.
 ///
 /// Returns an error when the folder holds a multi-recording session
 /// manifest: `setup_from_vfs` has no session branch, and the probe below
-/// would happily latch onto a `trace.ct`/`trace.json` sitting beside the
+/// would happily latch onto a `trace.ct` sitting beside the
 /// manifest and open a fraction of the program with no error at all — the
 /// exact silent failure the native launch path was fixed for.
 #[cfg(feature = "browser-transport")]
@@ -2816,11 +2686,10 @@ fn browser_detect_trace_file_in_vfs(ctx: &mut Ctx) -> Result<(), Box<dyn Error>>
         .into());
     }
 
-    // `trace.ct` is the canonical CTFS container; `trace.json` is the
-    // legacy `runtime_tracing` materialized layout still emitted by some
-    // recorders (e.g. `nargo trace`).  Probe both so client-side WASM
-    // replay works for either.
-    let candidates = ["trace.ct", "trace.json"];
+    // `trace.ct` is the canonical CTFS container.  A `trace.json` is probed
+    // too, last, only so that `setup_from_vfs` refuses it by name as
+    // test-oracle output instead of reporting that nothing was found.
+    let candidates = ["trace.ct", crate::materialized_source::TEST_ORACLE_TRACE_FILE];
     for name in &candidates {
         let vfs_path = if folder.is_empty() {
             (*name).to_string()
@@ -3727,6 +3596,7 @@ mod tests {
     use crate::ctfs_trace_reader::meta_dat::{
         FLAG_HAS_MCR_FIELDS, META_DAT_VERSION, McrFields, MetaDat, serialize_meta_dat,
     };
+    use crate::materialized_source::TEST_ORACLE_OUTPUT_ERROR;
 
     /// Build a `meta.dat` payload with the `FlagHasMcrFields` bit set.
     /// The MCR sub-block is filled with plausible-but-arbitrary values:
@@ -3943,7 +3813,7 @@ mod tests {
     /// would auto-detect as a single trace if the manifest were ignored.
     fn write_session_fixture(dir: &Path) {
         std::fs::write(dir.join(SESSION_MANIFEST_FILE), "version = 1\n").unwrap();
-        std::fs::write(dir.join("trace.json"), "[]").unwrap();
+        std::fs::write(dir.join("trace.ct"), b"").unwrap();
     }
 
     /// Build a DAP `launch` request naming `folder` as `traceFolder`,
@@ -3966,7 +3836,7 @@ mod tests {
         assert_eq!(
             resolve_launch_trace_file(dir.path(), None),
             PathBuf::from(SESSION_MANIFEST_FILE),
-            "a folder carrying a session.toml must launch as the session, not as the trace.json beside it",
+            "a folder carrying a session.toml must launch as the session, not as the trace.ct beside it",
         );
         assert!(
             resolve_session_manifest_path(dir.path(), Path::new(SESSION_MANIFEST_FILE)).is_some(),
@@ -4001,8 +3871,11 @@ mod tests {
     #[test]
     fn resolve_launch_trace_file_auto_detects_a_single_recording() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
-        assert_eq!(resolve_launch_trace_file(dir.path(), None), PathBuf::from("trace.json"),);
+        std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), None),
+            PathBuf::from("recording.ct"),
+        );
 
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(
@@ -4048,15 +3921,81 @@ mod tests {
     #[test]
     fn handle_message_launch_still_auto_detects_a_single_recording() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+        std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
 
         let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
         let mut ctx = Ctx::default();
         let request = launch_request_for_folder(dir.path());
         handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
 
-        assert_eq!(ctx.launch_trace_file, PathBuf::from("trace.json"));
+        assert_eq!(ctx.launch_trace_file, PathBuf::from("recording.ct"));
         assert!(resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_none(),);
+    }
+
+    /// A well-formed `trace.json` event stream: the shape the pure-Python
+    /// and pure-Ruby test oracles write.  Well-formed on purpose, so a
+    /// refusal below is a refusal of the format and not a parse error.
+    fn oracle_trace_json() -> Vec<u8> {
+        use codetracer_trace_types::{
+            CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
+        };
+        let events: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/oracle/main.py")),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<module>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        serde_json::to_vec(&events).unwrap()
+    }
+
+    fn setup_error(trace_folder: &Path, trace_file: &Path) -> String {
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        match setup(
+            trace_folder,
+            trace_file,
+            None,
+            Path::new(""),
+            None,
+            sender,
+            false,
+            "oracle-test",
+            None,
+        ) {
+            Ok(_) => panic!("{} was opened as a recording", trace_folder.join(trace_file).display()),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_debugger_refuses_a_trace_json_folder_as_test_oracle_output() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), oracle_trace_json()).unwrap();
+        let launched_as = resolve_launch_trace_file(dir.path(), None);
+        let message = setup_error(dir.path(), &launched_as);
+        assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+        assert!(
+            message.contains(&dir.path().display().to_string()),
+            "the refusal must name the path; got: {message}"
+        );
+    }
+
+    #[test]
+    fn the_debugger_refuses_a_trace_json_file_as_test_oracle_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("trace.json");
+        std::fs::write(&json, oracle_trace_json()).unwrap();
+        let message = setup_error(&json, Path::new(""));
+        assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
     }
 
     // ── Browser handshake order-independence ──────────────────────────
@@ -4082,12 +4021,23 @@ mod tests {
             CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
         };
 
-        /// The smallest legacy `runtime_tracing` trace `setup_from_vfs`
-        /// will open: one path, one function, one call, three steps.
-        /// Serialised as `trace.json`, the layout `nargo trace` still
-        /// emits and the browser path explicitly supports.
-        fn minimal_trace_json() -> Vec<u8> {
-            let events: Vec<TraceLowLevelEvent> = vec![
+        /// A `.ct` container holding `events`, built in memory by the same
+        /// pure-Rust writer the web recorders use.
+        fn container_bytes(events: Vec<TraceLowLevelEvent>) -> Vec<u8> {
+            use codetracer_trace_writer::{ctfs_writer::CtfsTraceWriter, trace_writer::TraceWriter};
+            let mut writer = CtfsTraceWriter::new_in_memory("main", &[]);
+            TraceWriter::begin_writing_trace_events(&mut writer, Path::new("trace")).unwrap();
+            for event in events {
+                TraceWriter::add_event(&mut writer, event);
+            }
+            TraceWriter::finish_writing_trace_events(&mut writer).unwrap();
+            writer.take_container_bytes().expect("in-memory writer")
+        }
+
+        /// The smallest trace `setup_from_vfs` will open: one path, one
+        /// function, one call, three steps.
+        fn minimal_trace_events() -> Vec<TraceLowLevelEvent> {
+            vec![
                 TraceLowLevelEvent::Path(PathBuf::from("/browser/handshake/main.nr")),
                 TraceLowLevelEvent::Function(FunctionRecord {
                     path_id: PathId(0),
@@ -4110,15 +4060,57 @@ mod tests {
                     path_id: PathId(0),
                     line: Line(3),
                 }),
-            ];
-            serde_json::to_vec(&events).unwrap()
+            ]
         }
 
-        /// Seed the process-wide VFS with `<folder>/trace.json`.  Each
-        /// test uses its own folder name so the shared static store never
-        /// makes two tests interfere.
+        /// Seed the process-wide VFS with `<folder>/trace.ct`, the
+        /// container the in-browser replay engine is handed.  Each test
+        /// uses its own folder name so the shared static store never makes
+        /// two tests interfere.
         fn seed_vfs(folder: &str) {
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
+        }
+
+        /// A `trace.json` in the VFS is test-oracle output.  Well-formed on
+        /// purpose, so the refusal is a refusal of the format.
+        fn setup_from_vfs_error(folder: &str, trace_file: &str) -> String {
+            let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+            match setup_from_vfs(folder, trace_file, None, None, sender, false, "oracle-test") {
+                Ok(_) => panic!("{folder}/{trace_file} was opened as a recording"),
+                Err(e) => e.to_string(),
+            }
+        }
+
+        #[test]
+        fn a_trace_json_in_the_vfs_is_refused_as_test_oracle_output() {
+            let folder = "browser-oracle-named";
+            crate::vfs::vfs_write(
+                &format!("{folder}/trace.json"),
+                serde_json::to_vec(&minimal_trace_events()).unwrap(),
+            );
+            let message = setup_from_vfs_error(folder, "trace.json");
+            assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+            assert!(
+                message.contains(folder),
+                "the refusal must name the path; got: {message}"
+            );
+        }
+
+        #[test]
+        fn a_folder_holding_only_a_trace_json_is_refused_as_test_oracle_output() {
+            let folder = "browser-oracle-detected";
+            crate::vfs::vfs_write(
+                &format!("{folder}/trace.json"),
+                serde_json::to_vec(&minimal_trace_events()).unwrap(),
+            );
+            let mut ctx = Ctx {
+                launch_trace_folder: PathBuf::from(folder),
+                ..Ctx::default()
+            };
+            browser_detect_trace_file_in_vfs(&mut ctx).unwrap();
+            let file = ctx.launch_trace_file.to_string_lossy().to_string();
+            let message = setup_from_vfs_error(folder, &file);
+            assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
         }
 
         fn request(seq: i64, command: &str, arguments: serde_json::Value) -> DapMessage {
@@ -4441,7 +4433,7 @@ mod tests {
         fn a_session_manifest_in_the_vfs_is_refused() {
             let folder = "browser-handshake-session";
             crate::vfs::vfs_write(&format!("{folder}/{SESSION_MANIFEST_FILE}"), b"version = 1\n".to_vec());
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
 
             let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
@@ -4472,9 +4464,8 @@ mod tests {
         // is NOT reachable from the browser, and these tests do not pretend
         // otherwise:
         //
-        //   * the browser opens a legacy `trace.json` as
-        //     `TraceKind::Materialized` — the `nargo trace` shape the web
-        //     product replays (`setup_from_vfs`);
+        //   * the browser opens the in-browser Noir tracer's `trace.ct` as
+        //     `TraceKind::Materialized` (`setup_from_vfs`);
         //   * `Handler::source_line_jump` answers a Materialized trace with
         //     a direct index jump, and enters the
         //     `disable_breakpoints ... enable_breakpoints` bracket only in
@@ -4493,13 +4484,12 @@ mod tests {
         // threshold becomes load-bearing right here, and these tests are
         // what will say whether it still behaves.
 
-        /// The source path used by [`trace_json_with_lines`].
+        /// The source path used by [`trace_with_lines`].
         const RUN_TO_LINE_PATH: &str = "/browser/runtoline/main.nr";
 
-        /// A legacy `trace.json` with one step per line, `1..=line_count`,
-        /// in the shape `nargo trace` emits and the browser path opens as
-        /// `TraceKind::Materialized`.
-        fn trace_json_with_lines(line_count: i64) -> Vec<u8> {
+        /// A `.ct` container with one step per line, `1..=line_count`, which
+        /// the browser path opens as `TraceKind::Materialized`.
+        fn trace_with_lines(line_count: i64) -> Vec<u8> {
             let mut events: Vec<TraceLowLevelEvent> = vec![
                 TraceLowLevelEvent::Path(PathBuf::from(RUN_TO_LINE_PATH)),
                 TraceLowLevelEvent::Function(FunctionRecord {
@@ -4518,13 +4508,13 @@ mod tests {
                     line: Line(line),
                 }));
             }
-            serde_json::to_vec(&events).unwrap()
+            container_bytes(events)
         }
 
         /// Like [`drive`], but the caller chooses the trace bytes instead
         /// of always getting the 3-step handshake fixture.
         fn drive_against(folder: &str, trace: Vec<u8>, commands: &[(&str, serde_json::Value)]) -> Vec<DapMessage> {
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), trace);
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), trace);
             let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
             let mut handler: Option<Handler> = None;
@@ -4592,7 +4582,7 @@ mod tests {
             commands.push(("continue", json!({ "threadId": 1 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             let verified = received
                 .iter()
@@ -4638,7 +4628,7 @@ mod tests {
             commands.push(("ct/source-line-jump", json!({ "path": RUN_TO_LINE_PATH, "line": 5 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             let lines = stack_trace_lines(&received);
             assert_eq!(
@@ -4669,7 +4659,7 @@ mod tests {
             commands.push(("continue", json!({ "threadId": 1 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             assert_eq!(
                 stack_trace_lines(&received),

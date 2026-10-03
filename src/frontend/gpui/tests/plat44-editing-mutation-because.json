@@ -1,0 +1,10 @@
+{
+  "A1": "arm.text == ProjectText[1 .. ^1]",
+  "A2": "readFile(dir / ProjectFile) == \"z\" & ProjectText",
+  "A3": "refused.outcome != eoChanged",
+  "A4": "surface.mutable",
+  "K1": "canonicalKeyOfGpui(key, mods) == n",
+  "K2": "canonicalKeyOfGpui(key, mods) == n",
+  "M1": "plan.contains(line)",
+  "M2": "rc == 0"
+}

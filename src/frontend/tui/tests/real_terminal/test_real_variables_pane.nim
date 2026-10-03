@@ -68,6 +68,10 @@ import ../../testing/test_app_runtime
 import ../apps/app_variables as varsApp
 import ./derived_colours
 
+const ExpanderCol = NameFieldCol - 2
+  ## PLAT-49: a top-level row starts with its CATEGORY TAG and a gap; the
+  ## expander is the cell two left of the name (`tree_node.NameFieldCol`).
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
@@ -273,8 +277,8 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       # ---- THE EXPANDER, IN ITS OWN COLUMN AND ITS OWN COLOUR --------------
       let collapsedNode = bodyRowForPath(screen, "@Locals.point")
       let leafNode = plainRow
-      let expander = sess.cellAt(collapsedNode, 0)
-      let leaf = sess.cellAt(leafNode, 0)
+      let expander = sess.cellAt(collapsedNode, ExpanderCol)
+      let leaf = sess.cellAt(leafNode, ExpanderCol)
       checkpoint("expander " & describeCell(expander) & ", leaf " &
                  describeCell(leaf))
       ck $expander.rune == CollapsedGlyph
@@ -333,7 +337,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       let collapsed = varsApp.modelFor(0)
       let collapsedScreen = varsApp.screenFor(collapsed, Cols, Rows)
       ck $sess.cellAt(bodyRowForPath(collapsedScreen, "@Locals.point"),
-                      0).rune == CollapsedGlyph
+                      ExpanderCol).rune == CollapsedGlyph
 
       # EXPAND, twice, with a real key. Every frame is waited for by NAME.
       sess.sendKey("f10")
@@ -342,8 +346,8 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       let openedScreen = varsApp.screenFor(opened, Cols, Rows)
       checkPaneMatchesModel(sess, variablesText(opened, Cols, Rows), "opened")
       let openedRow = bodyRowForPath(openedScreen, "@Locals.point")
-      ck $sess.cellAt(openedRow, 0).rune == ExpandedGlyph
-      ck sess.cellAt(openedRow, 0).fg.idx == ExpanderFg
+      ck $sess.cellAt(openedRow, ExpanderCol).rune == ExpandedGlyph
+      ck sess.cellAt(openedRow, ExpanderCol).fg.idx == ExpanderFg
       # …and the struct's two fields are on the screen, under it, indented.
       ck paneRow(sess, openedRow + 1).contains("x")
       ck paneRow(sess, openedRow + 2).contains("y")

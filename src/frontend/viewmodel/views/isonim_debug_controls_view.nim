@@ -103,32 +103,32 @@ proc renderDebugControlsPanel*(r: MockRenderer;
              onclick = proc() = vm.stepBackward()):
         text "◀"
         tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("reverse-next", "Reverse next")
+          text vm.toolbarTooltip("reverse-next")
       button(ref = stepFwd, class = "step-forward",
              onclick = proc() = vm.stepForward()):
         text "▶"
         tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("next", "Next")
+          text vm.toolbarTooltip("next")
       button(ref = stepIn, class = "step-in",
              onclick = proc() = vm.stepIn()):
         text "↓"
         tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("step-in", "Step in")
+          text vm.toolbarTooltip("step-in")
       button(ref = stepOut, class = "step-out",
              onclick = proc() = vm.stepOut()):
         text "↑"
         tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("step-out", "Step out")
+          text vm.toolbarTooltip("step-out")
       button(ref = contBtn, class = "continue-btn",
              onclick = proc() = vm.continueExecution()):
         text "⏩"
         tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("continue", "Continue")
+          text vm.toolbarTooltip("continue")
       button(ref = revContBtn, class = "reverse-continue",
              onclick = proc() = vm.reverseContinue()):
         text "⏪"
         tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("reverse-continue", "Reverse continue")
+          text vm.toolbarTooltip("reverse-continue")
       if vm.toolbarModeText.val.len > 0:
         span(class = "debug-toolbar-mode"):
           text vm.toolbarModeText.val
@@ -233,12 +233,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-next")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-next", "Reverse next")
+            text vm.toolbarTooltip("reverse-next")
         button(ref = nextBtn, id = "next-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "next")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("next", "Next")
+            text vm.toolbarTooltip("next")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse step-in / Step-in --
@@ -246,12 +246,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-step-in")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-step-in", "Reverse step in")
+            text vm.toolbarTooltip("reverse-step-in")
         button(ref = stepInBtn, id = "step-in-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "step-in")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("step-in", "Step in")
+            text vm.toolbarTooltip("step-in")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse step-out / Step-out --
@@ -259,12 +259,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-step-out")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-step-out", "Reverse step out")
+            text vm.toolbarTooltip("reverse-step-out")
         button(ref = stepOutBtn, id = "step-out-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "step-out")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("step-out", "Step out")
+            text vm.toolbarTooltip("step-out")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse continue / Continue --
@@ -272,12 +272,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-continue")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-continue", "Reverse continue")
+            text vm.toolbarTooltip("reverse-continue")
         button(ref = contBtn, id = "continue-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "continue")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("continue", "Continue")
+            text vm.toolbarTooltip("continue")
         tdiv(class = "separate-bar"):
           discard
         # -- Run to entry --
@@ -285,7 +285,7 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "run-to-entry")):
           tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("run-to-entry", "Run to entry")
+            text vm.toolbarTooltip("run-to-entry")
         tdiv(class = "separate-bar"):
           discard
         # -- Reset operation --

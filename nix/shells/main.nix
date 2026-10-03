@@ -153,24 +153,22 @@ mkShell {
 
   # Compose: build-critical exports from ci-base, then dev-only tail.
   shellHook = base.shellHook + ''
-    # Anchor every path below to the repo root. A dev shell can be entered from
-    # any subdirectory, and a relative path then resolves against THAT directory
-    # rather than the checkout. For `.pre-commit-config.yaml` the failure is
-    # indirect and hard to read: a nested copy makes prek run the Rust hooks with
-    # the nested directory as cwd, so `--manifest-path src/db-backend/Cargo.toml`
-    # resolves to `src/db-backend/src/db-backend/Cargo.toml` and surfaces as
-    # "No such file or directory" on a path that reads as correct. The hooks in
-    # nix/pre-commit.nix each `cd` to the toplevel to survive that; this is the
-    # cause those workarounds were compensating for.
+    # Every path below is anchored to ROOT_PATH, which ci-base's hook (composed
+    # above) sets to the top level of the CodeTracer checkout the shell was
+    # entered from, and to "" when the current directory is not inside one. A
+    # dev shell can be entered from any subdirectory, and a relative path then
+    # resolves against THAT directory rather than the checkout. For
+    # `.pre-commit-config.yaml` the failure is indirect and hard to read: a
+    # nested copy makes prek run the Rust hooks with the nested directory as
+    # cwd, so `--manifest-path src/db-backend/Cargo.toml` resolves to
+    # `src/db-backend/src/db-backend/Cargo.toml` and surfaces as "No such file
+    # or directory" on a path that reads as correct. The hooks in
+    # nix/pre-commit.nix each `cd` to the toplevel to survive that.
     #
-    # `|| pwd` is a deliberate choice, not a reflex. Outside a git repo
-    # `--show-toplevel` fails; an unguarded ROOT_PATH would then be empty and aim
-    # the symlink at `/`. Failing loudly there was considered and rejected: the
-    # relative form this replaces degraded harmlessly to the cwd, so aborting
-    # would be a behaviour change smuggled in under a path fix, and a dev shell
-    # that refuses to open outside a repo is a worse failure than a symlink in
-    # the wrong directory. The fallback reproduces the old behaviour exactly.
-    ROOT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    # With ROOT_PATH empty the repository setup below (hook installation, the
+    # config link, sibling detection, the Python recorder venv) is skipped:
+    # entered from another repository the shell writes nothing there.
+    # ci/test/dev-shell-writes-nothing-elsewhere-test.sh
 
     # Install pre-commit hooks automatically -- but NOT from a linked worktree
     # that would be reinstalling on another checkout's behalf.
@@ -182,8 +180,19 @@ mkShell {
     # worktree is relying on, mid-flight. The decision and its full rationale
     # live in the script below so they can be tested directly; it prints its
     # reason on stderr either way, and never writes to the repository.
-    if bash "$ROOT_PATH/ci/dev/should-install-git-hooks.sh"; then
+    if [ -n "$ROOT_PATH" ] && bash "$ROOT_PATH/ci/dev/should-install-git-hooks.sh"; then
       ${preCommit.installationScript}
+    fi
+
+    # The installer above ends by writing the RELATIVE `core.hooksPath=.git/hooks`
+    # into the config every worktree shares; in a linked worktree that path names
+    # nothing, so git silently runs no hooks there. `anchor` repairs that value
+    # and runs on every entry, from any checkout, so a value an earlier entry
+    # left behind is healed too. `check` then reports, loudly, any relative
+    # value `anchor` could not attribute; it does not stop the shell opening.
+    if [ -n "$ROOT_PATH" ]; then
+      bash "$ROOT_PATH/ci/dev/git-hooks-path.sh" anchor || true
+      bash "$ROOT_PATH/ci/dev/git-hooks-path.sh" check || true
     fi
 
     # The config symlink is per-worktree and mutates nothing shared, so it is
@@ -192,7 +201,9 @@ mkShell {
     # has no `.pre-commit-config.yaml` and abort with "No .pre-commit-config.yaml
     # file was found", which is exactly what a worktree entering this shell used
     # to get.
-    ln -sf ${preCommit.settings.configFile} "$ROOT_PATH/.pre-commit-config.yaml"
+    if [ -n "$ROOT_PATH" ]; then
+      ln -sf ${preCommit.settings.configFile} "$ROOT_PATH/.pre-commit-config.yaml"
+    fi
 
     export RUST_LOG=info
 
@@ -210,7 +221,10 @@ mkShell {
     # to wire up overlays between the host checkout and adjacent
     # sibling clones. CI doesn't need this (each repo is cloned
     # separately into a known path).
-    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+    WORKSPACE_ROOT=""
+    if [ -n "$ROOT_PATH" ]; then
+      WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+    fi
     METACRAFT_SCRIPTS=""
     if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/scripts" ]; then
       METACRAFT_SCRIPTS="$WORKSPACE_ROOT/scripts"
@@ -227,7 +241,9 @@ mkShell {
       export PATH="$METACRAFT_SCRIPTS:$PATH"
     fi
 
-    source "$ROOT_PATH/scripts/detect-siblings.sh" "$ROOT_PATH"
+    if [ -n "$ROOT_PATH" ]; then
+      source "$ROOT_PATH/scripts/detect-siblings.sh" "$ROOT_PATH"
+    fi
 
     # Flake-input fallback for the codetracer-trace-format-nim source.
     #
@@ -347,7 +363,9 @@ mkShell {
       } >&2
     }
 
-    if [ -n "$PURE_RECORDER_SRC" ] && [ -d "$PURE_RECORDER_SRC" ]; then
+    if [ -z "$ROOT_PATH" ]; then
+      : # not inside a CodeTracer checkout: no venv is created
+    elif [ -n "$PURE_RECORDER_SRC" ] && [ -d "$PURE_RECORDER_SRC" ]; then
       if ! _ct_venv_matches_pin \
         || ! "$RECORDER_VENV/bin/python" -c "import codetracer_pure_python_recorder" 2>/dev/null; then
         if [ -d "$RECORDER_VENV" ] && ! _ct_venv_matches_pin; then

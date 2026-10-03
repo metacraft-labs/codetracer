@@ -65,6 +65,7 @@ import isonim_tui
 import term_assert
 
 import ../../app/views/event_log
+from codetracer_embed import elcKind
 import ../../app/views/timeline_bar
 import ../../app/views/tracepoint_manager
 import ../../testing/dual_snap
@@ -75,7 +76,7 @@ import ./derived_colours
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 93
+const ExpectedAssertions = 94
 
 const
   Cols = 90
@@ -366,8 +367,13 @@ suite "CTUI-8 Tier 2: the scrubber on a real terminal":
       ck plainCell.bg.kind == ckDefault
       # …and the category field is the OUTPUT colour, at the column the pane
       # reports rather than one this file counted.
-      let categoryCell = sess.cellAt(
-        logScreen.selectedRow, logScreen.tickColumn + TickFieldCells + GapCells)
+      # (Since PLAT-49 part B the event's `#` column sits between the tick and
+      # the kind, the desktop's order; the pane's own column table says where.)
+      var kindColumn = -1
+      for (col, at, _) in logScreen.columnCells:
+        if col == elcKind: kindColumn = at
+      ck kindColumn > logScreen.tickColumn
+      let categoryCell = sess.cellAt(logScreen.selectedRow, kindColumn)
       checkpoint("category cell " & describeCell(categoryCell))
       ck $categoryCell.rune == "o"
       ck categoryCell.fg.kind == ckIndexed

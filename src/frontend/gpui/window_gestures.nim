@@ -221,22 +221,45 @@ proc pointerUp*(g: var WindowGestures; layout: Layout;
     discard moved.pointerMove(layout, geom, x, y)
     if not moved.moved:
       if was.fromStrip:
-        # A CLICK ON A DOCKED PANE'S LABEL: reveal it, or hide it again.
-        if g.reveal.isRevealed(was.source):
-          g.reveal = noInteraction()
+        # PLAT-49 part B (finding 9, the user's direction): A CLICK ON A
+        # DOCKED PANE'S LABEL DOCKS IT OPEN — inline at its edge, taking
+        # space, no longer an overlay (`cmdOpenDocked`, the desktop's
+        # `showDockedPanel`); a click on the open pane's label closes it
+        # (`cmdCloseDocked`). A hover preview of it ends.
+        g.reveal = noInteraction()
+        let at = layout.dockedIndex(was.source)
+        if at < 0:
           return GestureStep(changed: true,
-                             status: "reveal dismissed " & $was.source)
-        let shown = beginReveal(layout, was.source)
-        g.reveal = if shown.isSome: shown.get else: noInteraction()
-        return GestureStep(changed: true,
-                           status: (if shown.isSome: "revealed " & $was.source
-                                    else: "not docked: " & $was.source))
+                             status: "not docked: " & $was.source)
+        let cmd = if layout.docked[at].open: cmdCloseDocked(was.source)
+                  else: cmdOpenDocked(was.source)
+        return GestureStep(changed: true, command: some(cmd), status: $cmd)
       return GestureStep(changed: true,
                          command: some(cmdActivateTab(was.source)),
                          status: "activateTab(" & $was.source & ")")
     let cmd = commit(layout, moved.interaction)
     GestureStep(changed: true, command: cmd,
                 status: (if cmd.isSome: "drop applied" else: "drop: nothing"))
+
+proc previewReveal*(g: var WindowGestures; layout: Layout;
+                    pane: PaneKind): bool =
+  ## PLAT-49 part B: the hover preview — `pane` shown over the tree as an
+  ## overlay (`beginReveal`), as the desktop's `showOverlayPreview`. Not
+  ## during a drag or a resize. True when it is now shown.
+  if g.kind != gkNone:
+    return false
+  let shown = beginReveal(layout, pane)
+  if shown.isNone:
+    return false
+  g.reveal = shown.get
+  true
+
+proc dismissReveal*(g: var WindowGestures; pane: PaneKind): bool =
+  ## PLAT-49 part B: the preview of `pane` closes (the pointer left it).
+  if g.reveal.isRevealed(pane):
+    g.reveal = noInteraction()
+    return true
+  false
 
 proc cancelGesture*(g: var WindowGestures): GestureStep =
   ## `Esc`: the gesture in flight is discarded, the committed layout

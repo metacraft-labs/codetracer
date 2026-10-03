@@ -86,9 +86,15 @@
 ## naming another front-end and draws the refusal, so the field has a
 ## PRODUCTION READER and the arm has something to break.
 
-import std/[json, strutils]
+import std/[json, math, strutils]
+from std/unicode import runeLen, runeSubstr
 
 import isonim_gpui/renderer
+# `PLAT35-F3`: the pane's own padding, so the scrollbar's track covers
+# exactly the span the rows do. `chrome.ChromePaddingPx`'s own comment says
+# why the number lives there — "two spellings of one number is §30" — and an
+# absolutely-placed overlay has to subtract the same one `stylePaneBox` adds.
+import ../chrome
 import ./shell
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_binding
@@ -210,6 +216,24 @@ const
   EditorTokenClassAttribute* = "data-ct-token-class"
     ## A code run's `TokenClass`, so a plan reader can check the class a run
     ## was painted as without re-deriving the colour.
+  GutterLaneAttribute* = "data-ct-gutter-lane"
+    ## **WHICH LANE OF THE GUTTER A RUN IS** — `pointer`, `mark` or `number`
+    ## (`GutterRunKind`). PLAT-35 / `PLAT35-F13`, `PLAT35-F14`.
+    ##
+    ## The gutter is drawn as three runs rather than one text node because the
+    ## MARK has to be painted a colour of its own: before this it sat inside
+    ## the one gutter span and therefore took the line-number colour, which is
+    ## the whole of `PLAT35-F13`'s first half. The attribute exists so that
+    ## *which* run carries the mark is readable from the render plan — the
+    ## structural instrument `--pixels-out` corresponds to — instead of being
+    ## inferred from a glyph's position in a string.
+    ##
+    ## A NEW attribute NAME on purpose. Every census this tree already takes
+    ## counts `data-ct-text-role`, `data-ct-text-metric` and `data-ct-token`,
+    ## and all three stay on the ONE gutter span, so splitting the run moves
+    ## none of those numbers (checked: `test_plat35_text_faces.nim`'s
+    ## `rolesIn(pane, trGutterLineNumber) == surface.rows.len` is still the row
+    ## count).
   TokenAttribute* = "data-ct-token"
     ## **PLAT-35's tier-3 rows for text metrics and token colour.**
     ##
@@ -247,7 +271,16 @@ const
   BreakpointGlyph* = "●"
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
-  NoMarkGlyph* = " "
+  EmptyLaneGlyph* = "\u00A0"
+    ## **AN EMPTY LANE IS ONE NO-BREAK SPACE, and the no-break is load-bearing
+    ## rather than tidy.** Each lane is drawn as its own span (see
+    ## `GutterLaneAttribute`), so a lane whose whole text is one ASCII space is
+    ## a span whose ONLY character is a trailing space — and the text layout
+    ## drops a span's trailing ASCII spaces, which is the measurement
+    ## `GutterGap` below was written from. A dropped lane is a lane of zero
+    ## width, which would put the line numbers back at a different x per row
+    ## and re-open `PLAT35-F16`.
+  NoMarkGlyph* = EmptyLaneGlyph
     ## **THE MEDIUM'S OWN SPELLING, and it is not the terminal's.** The terminal
     ## draws its execution pointer as `-->` across three cells because a
     ## terminal's gutter is measured in cells and CTUI-5 fixed that width; a
@@ -296,36 +329,281 @@ func markGlyph*(m: EditorMark): string =
 
 func pointerGlyph*(p: EditorPointer): string =
   case p
-  of eptNone: " "
+  of eptNone: EmptyLaneGlyph
   of eptInspection: InspectionPointerGlyph
   of eptExecution: ExecutionPointerGlyph
+
+func markColour*(m: EditorMark; inherited: string): string =
+  ## **THE COLOUR THE MARK GLYPH IS PAINTED. THE VALUES ARE THE ELECTRON
+  ## FRONT-END'S OWN**, read out of its gutter classes rather than chosen here
+  ## — the brief's §6: *"the Electron front-end is the reference; where the
+  ## reference is wrong, that is a change to the Electron front-end and to the
+  ## design system, never a licence for the GPUI front-end to differ"*.
+  ## Measured 2026-10-03 in `src/frontend/styles/components/text_editor.styl`:
+  ##
+  ##   `.gutter-breakpoint-enabled`   `background: colors-ui-text-error-primary`
+  ##   `.gutter-breakpoint-disabled`  `background: colors-ui-surface-primary-tertiary`
+  ##   `.gutter-trace`                `background: colors-ui-border-action`
+  ##
+  ## which are `dtColorsUiTextErrorPrimary`, `dtColorsUiSurfacePrimaryTertiary`
+  ## and `dtColorsUiBorderAction` in the generated token table — so the hex is
+  ## the design system's and this function names only the mapping. (Dark:
+  ## `#fca5a5`, `#333333`, `#6366f1`.)
+  ##
+  ## **WHY THIS FUNCTION EXISTS AT ALL — `PLAT35-F13`.** Until 2026-10-03 the
+  ## mark was one character inside the ONE gutter span, so it took the gutter's
+  ## colour, which is the line-number colour. Measured off this front-end's own
+  ## window plan at 1440x900 with `--replay-ops=setBreakpoint@1`: the marked
+  ## row's gutter run was `#575757` — byte-identical to the unmarked rows
+  ## around it — while the SAME node's `data-ct-token` already said
+  ## `gutter.breakpoint.enabled`. The declaration and the ink disagreed and the
+  ## declaration was the true one; this makes the ink follow it.
+  ##
+  ## `emNone` returns the colour the run would have INHERITED. A no-mark lane
+  ## is one blank cell with no ink, so no value is observable there, and
+  ## returning the inherited one keeps a run's declared colour equal to what is
+  ## drawn rather than publishing a colour nothing uses. An exhaustive `case`,
+  ## so a fifth mark does not compile until somebody has looked its class up.
+  ##
+  ## **`#333333` FOR A DISABLED BREAKPOINT IS DARKER THAN THE LINE NUMBERS
+  ## (`#575757`) AND IS RECORDED HERE RATHER THAN SILENTLY CORRECTED.** It is
+  ## the reference's value for a FILLED DISC on a panel ground, used here for a
+  ## `○` outline on the editor's `#282828`; and no scenario in
+  ## `src/tests/visual/scenarios.json` draws a disabled breakpoint or a
+  ## tracepoint, so a different value here would be a choice no lane in this
+  ## tree can grade. Per §6 that is a design-system question and not this
+  ## front-end's to re-decide.
+  case m
+  of emNone: inherited
+  of emBreakpoint: DesignTokenHex[dtColorsUiTextErrorPrimary][dmDark]
+  of emBreakpointDisabled:
+    DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]
+  of emTracepoint: DesignTokenHex[dtColorsUiBorderAction][dmDark]
 
 const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
   ## Between the gutter and the code. A reader — a person, or PLAT-39's
   ## reader splitting the execution band into ink clusters — must be able to
   ## tell where the number ends and the code begins; `39def` could not.
   ##
-  ## FOUR NO-BREAK SPACES, both halves measured on the window frames: the text
-  ## layout drops a span's trailing ASCII spaces, and the face drawn is the
-  ## window's proportional default (the shim does not draw `font-family`, so
-  ## `gpuiMetricFor`'s mono is declared rather than applied — `PLAT35-VG1`),
-  ## where two no-break spaces measured ~9 px and `44` still merged into
-  ## `def`. Four clear the reader's 14 px cluster gap.
+  ## FOUR NO-BREAK SPACES, and the first half of that is measured on the window
+  ## frames: the text layout drops a span's trailing ASCII spaces, and two
+  ## no-break spaces measured ~9 px while `44` still merged into `def`. Four
+  ## clear the reader's 14 px cluster gap.
+  ##
+  ## **THE SECOND HALF OF THIS COMMENT USED TO BE FALSE AND IS CORRECTED HERE,
+  ## 2026-10-03.** It said the face drawn is *"the window's proportional
+  ## default (the shim does not draw `font-family`, so `gpuiMetricFor`'s mono
+  ## is declared rather than applied — `PLAT35-VG1`)"*. That stopped being true
+  ## on 2026-10-02: `chrome.MonoFontFamily` plus `main.applyTextFaces` set the
+  ## key `gpui_app.rs`'s `apply_styles_to_div` already read, and the gutter is
+  ## drawn in `Menlo` on this platform. `chrome.MonoFontFamily`'s own header
+  ## carries that measurement and names this parenthesis as the line to fix in
+  ## the pass that next edits this file; this is that pass.
+  ##
+  ## **EDITING IT MOVES THE `*-control.sha256` DIGESTS OF SIX MUTATION
+  ## HARNESSES THAT DIGEST THIS FILE BYTE-FOR-BYTE**, and each must be
+  ## RE-GRADED before its digest is re-recorded
+  ## (`Verification-Harness-Traps` §39). The six, measured at review on
+  ## 2026-10-03 against `c05d8443a` by parsing EVERY `*-control.sha256` in the
+  ## tree — not by reading the harnesses a reviewer happened to think of,
+  ## which is how the two earlier counts in this comment's history were both
+  ## wrong (an earlier draft said THREE, `chrome.nim`'s said FOUR; both
+  ## counted only the harnesses under `src/frontend/gpui/tests/` and missed
+  ## the three under `src/frontend/tui/tests/` that digest this file across
+  ## the medium boundary):
+  ##
+  ##   * `run-plat20-mutations.py`          `plat20-mutation-control.sha256`
+  ##   * `run-plat22-mutations.py`          `plat22-mutation-control.sha256`
+  ##   * `run-plat35-visual-mutations.py`   `plat35-visual-…`
+  ##   * `run-plat42-surface-mutations.py`  `plat42-surface-…`
+  ##   * `run-plat47-parity-mutations.py`   `plat47-parity-…`
+  ##   * `run-plat49-chrome-mutations.py`   `plat49-chrome-…`
+  ##
+  ## `run-plat21-mutations.py` does NOT, which both earlier drafts had right:
+  ## its subjects are `gpui_binding` / `fact_reader` / `pane_views` /
+  ## `gpui_gaps` / `mappings` / `surfaces` / `terminal_binding`.
+  ##
+  ## **ALL SIX WERE GREEN AT THE PARENT COMMIT, SO EVERY ONE OF THEM WAS RUN
+  ## RATHER THAN REASONED ABOUT.** §39 forbids re-recording without
+  ## re-grading; it does not license leaving a lane red unexamined. Graded at
+  ## `c05d8443a` on aarch64-darwin, 2026-10-03:
+  ##
+  ##   * `plat20` — **14 of 14 KILLED.** It grades on this host, so it was
+  ##     RE-GRADED against these bytes and its digest IS re-recorded in this
+  ##     commit.
+  ##   * `plat22` — REFUSES: *"`src/build-debug/bin/replay-server` does not
+  ##     exist, so every case that spawns a replay-server would fail on an
+  ##     UNMUTATED tree and every arm would score MIS-ATTRIBUTED."* The
+  ##     harness is right to refuse and it mutated nothing.
+  ##   * `plat35-visual` — **0 of 9 KILLED, all nine DID-NOT-COMPILE**,
+  ##     including the `.md` and `.json` subjects, which no mutation could
+  ##     have broken. Its suite reads
+  ##     `../codetracer-specs/Testing/Cross-Renderer-Visual-Alignment.md` at
+  ##     run time and the sibling now keeps that file under `spec/Testing/`.
+  ##     Recording its digest would certify a harness that cannot kill
+  ##     anything.
+  ##   * `plat42-surface` — ABORTS: baseline
+  ##     `test_gpui_editing_surface.nim` is RED on
+  ##     `countedAssertions == ExpectedAssertions` (it needs `/proc/self/statm`,
+  ##     which macOS has not).
+  ##   * `plat47-parity`, `plat49-chrome` — *"REFUSING TO RUN:
+  ##     `REPLAY_SERVER_BIN` is not exported"*. Their needle scans pass
+  ##     (`0 problems`); only the environment is missing.
+  ##
+  ## So FIVE of the six digests are STALE AS OF THIS COMMIT, deliberately, and
+  ## each is owed a re-grade by a pass that can run it: a built
+  ## `src/build-debug/bin/replay-server` and an exported `REPLAY_SERVER_BIN`
+  ## (plat22, plat47, plat49), the specs sibling at the path the suite reads
+  ## (plat35-visual), and a green editing-surface baseline (plat42-surface).
+  ## None of them is a defect in this change, and none is re-recorded blind.
+
+const GutterLaneGap* = " "
+  ## **ONE CELL BETWEEN THE LANES AND THE NUMBER FIELD, DECLARED rather than
+  ## inherited from whichever lane happens to be empty.** `PLAT35-F13`'s second
+  ## half: until 2026-10-03 `●` abutted its digit with ZERO cells while `▶` had
+  ## one, and the one was an accident of ordering — the mark lane sat between
+  ## the pointer and the number, so an occupied POINTER lane was separated from
+  ## the digits by the empty MARK lane and an occupied mark lane was separated
+  ## by nothing at all. One lane, two paddings, neither of them chosen.
+  ##
+  ## It is the terminal's own `gutter.GutterGapCells = 1`, carried across
+  ## rather than re-picked.
+  ##
+  ## **ONE CELL AND NOT TWO** (there is no second gap BETWEEN the two lanes),
+  ## measured: every gutter cell costs about one column of code, and
+  ## `PLAT35-F3` (the editor clipped mid-token with no ellipsis) is what that
+  ## width cost. A second gap cell would buy separation between `▶` and `●`,
+  ## which differ in shape and now in colour, at the price of one more clipped
+  ## column on every row of every frame.
+  ##
+  ## **THE TWO NUMBERS THIS PARAGRAPH USED TO CARRY WERE BOTH WRONG AND ARE
+  ## CORRECTED HERE, 2026-10-03.** It said *"the GPUI editor pane is 276 px
+  ## wide at 1440x900 and a Menlo cell is ~8 px"*. Measured on the frames and
+  ## against `window_geometry` (see `EditorColumnPx` below for the method):
+  ## the editor pane is 348 px (body) / 324 px (inner) at 1440x900, and the
+  ## cell is 9.70 px. The CONCLUSION is unchanged — 324 / 9.70 is 33 columns,
+  ## so one gutter cell is still about one column — which is why
+  ## `PLAT35-F13` and `PLAT35-F14` are not reopened; their entries quote the
+  ## old figures and the ledger's `gate.iteration5` says so.
+  ##
+  ## `PLAT35-F3` is now CLOSED, by a horizontal scrollbar rather than by a
+  ## narrower gutter: the clipped columns are reachable, so the cell this gap
+  ## costs is no longer a column of text nobody can see.
+  ##
+  ## **ASCII AND NOT NO-BREAK**, unlike `GutterGap` and `EmptyLaneGlyph`: it is
+  ## the FIRST character of the number run and is followed by the padding and
+  ## the digits, so it is interior rather than trailing and the layout keeps
+  ## it. The byte budget is the reason to prefer the shorter spelling —
+  ## `tests/plat42_gutter.MaxLaneBytes` is 12, and `▶` + `●` + this gap + the
+  ## padding of a four-digit field is 3 + 3 + 1 + 3 = 10 bytes before the first
+  ## digit.
+
+type
+  GutterRunKind* = enum
+    ## The gutter's three runs, left to right. A KIND rather than a position,
+    ## so a plan reader asks which lane a run IS instead of counting glyphs
+    ## into a string.
+    grkPointer = "pointer"
+    grkMark = "mark"
+    grkNumber = "number"
+
+  GutterRun* = object
+    ## One painted run of one row's gutter.
+    kind*: GutterRunKind
+    text*: string
+    colour*: string
+      ## The hex this run is painted in. `pointer` and `number` carry the
+      ## gutter's own line-number colour — resting, or Monaco's active one on
+      ## the execution row — and `mark` carries `markColour`'s.
+
+func gutterRuns*(row: EditorRow; numberWidth: int): array[3, GutterRun] =
+  ## **THE GUTTER, AS THE THREE RUNS IT IS DRAWN AS:**
+  ## `<pointer><mark><lane gap><right-aligned number><GutterGap>`.
+  ##
+  ## `gutterText` is this function joined, so there is ONE definition of the
+  ## gutter's geometry and an assertion over the string and the rendering ask
+  ## the same question (`Verification-Harness-Traps` §30). It is the shape the
+  ## terminal's `gutter.gutterRow` already has — styled spans, always the same
+  ## ones, whatever the line — and for the same second reason: a gutter whose
+  ## run count changed when a breakpoint appeared would be a different tree per
+  ## row.
+  ##
+  ## **EACH LANE IS ONE RESERVED CELL AT A FIXED INDEX: pointer 0, mark 1.**
+  ## `PLAT35-F14`. Until 2026-10-03 the padding was consumed BEFORE the lanes
+  ## (`spaces(numberWidth - number.len) & pointer & mark & number`), so the
+  ## lanes' cell indices moved with the line number's digit count. Measured on
+  ## this front-end's own window plan, 1440x900, unstepped, with
+  ## `--replay-ops=setBreakpoint@1`:
+  ##
+  ##     line  1 (pointer)  [' ', '▶', ' ', '1']
+  ##     line  2 (mark)     [' ', ' ', '●', '2']
+  ##     line 10            [' ', ' ', '1', '0']
+  ##
+  ## The dot and the TENS DIGIT both at cell index 2, in one frame — so the
+  ## mark formed no column a reader could scan down, and on a two-digit row it
+  ## moved into the cell the pointer occupies on a one-digit row. The padding
+  ## now sits BETWEEN the lanes and the number, which is where the terminal
+  ## puts it: `padLeft(number, numberWidth)` INSIDE the number field, with the
+  ## lanes outside it.
+  ##
+  ## **THE LANES STAY LEFT OF THE NUMBER.** The pointer sat after the number
+  ## until 2026-09-23, where it OCR'd glued to the digits (`44p`) and PLAT-39's
+  ## gutter grammar — marker glyphs, then digits — rejected every execution row
+  ## it had located by its band. The desktop editor's gutter (`> 44`) and the
+  ## terminal's both draw the markers left of the digits. (The terminal's exact
+  ## order is `mark`, number, gap, `pointer`, gap — `gutter.gutterRow` — which
+  ## is NOT the `--> ● 44` this comment used to claim; the GPUI order keeps
+  ## both lanes before the number because its pointer is one glyph and its
+  ## gutter has no third field to spare.)
+  ##
+  ## **WHY THIS DOES NOT REDDEN PLAT-39 — QUOTED FROM ITS READER RATHER THAN
+  ## ARGUED.** The sentence this geometry used to be justified by, *"the only
+  ## wide gap on a row is `GutterGap`, the one a reader locates the gutter's
+  ## end by"*, is not what that reader does.
+  ## `screen_oracle/vision_producer.readGutterDigits` reads *"the shortest
+  ## prefix of the band's clusters (up to `MaxGutterClusters`) that parses as
+  ## `EditorGrammar`"*, with `MaxGutterClusters = 3` and its own comment
+  ## reading: *"Electron's gutter is two clusters (the arrow, ~30 px left of
+  ## the number, then the number); GPUI's is one (`▶ 44`). A THIRD COVERS A
+  ## MARK DRAWN IN ITS OWN LANE."* So the reader already admits three, and the
+  ## invariant it needs is that the gutter's ink forms AT MOST three clusters
+  ## and that no admissible prefix can end mid-number. Both still hold:
+  ##
+  ##   * the pointer and the mark are ADJACENT cells, so they never split from
+  ##     one another — the gutter's ink is at most TWO clusters (the lanes,
+  ##     then the number) where it was one;
+  ##   * the digits stay contiguous, so no cluster boundary falls inside a
+  ##     number;
+  ##   * `GutterGap` — the only thing between the number and the code — is
+  ##     untouched, so the number's cluster still cannot run into the code;
+  ##   * a prefix that stops at the lane cluster is REJECTED and retried,
+  ##     because `pane_grammar.parseGutterDigits` strips leading marker glyphs
+  ##     by CLASS (`uint8(text[i]) >= 0x80'u8`, which is every glyph in these
+  ##     lanes) and then requires at least one digit.
+  ##
+  ## Padded to the widest line number in the surface, so every row's code still
+  ## starts in one column (the gutter face is monospaced,
+  ## `gpuiMetricFor(trGutterLineNumber)`), and the total width is still a
+  ## constant for a surface — `2 + 1 + numberWidth + 4` cells, one more than
+  ## before — which is what keeps `PLAT35-F16` closed.
+  let number = $row.line
+  # THE GUTTER'S OWN COLOUR, UNCHANGED: Monaco's resting line number, and its
+  # active one on the execution line.
+  let own = if row.pointer == eptExecution: EditorActiveLineNumberColour
+            else: EditorLineNumberColour
+  [GutterRun(kind: grkPointer, text: pointerGlyph(row.pointer), colour: own),
+   GutterRun(kind: grkMark, text: markGlyph(row.mark),
+             colour: markColour(row.mark, own)),
+   GutterRun(kind: grkNumber,
+             text: GutterLaneGap & spaces(max(0, numberWidth - number.len)) &
+                   number & GutterGap,
+             colour: own)]
 
 func gutterText*(row: EditorRow; numberWidth: int): string =
-  ## `<padding><pointer><mark><number><gap>`, right-aligned as one unit.
-  ##
-  ## The lanes are LEFT of the number, as the desktop editor (`> 44`) and the
-  ## terminal (`--> ● 44`) draw them; the pointer sat after the number until
-  ## 2026-09-23, where it OCR'd glued to the digits (`44p`). The PADDING goes
-  ## in front of the lanes rather than between them and the number, so the
-  ## only wide gap on a row is `GutterGap` — the one a reader locates the
-  ## gutter's end by. Padded to the widest line number in the surface, so
-  ## every row's code starts in one column (the gutter face is monospaced,
-  ## `gpuiMetricFor(trGutterLineNumber)`).
-  let number = $row.line
-  spaces(max(0, numberWidth - number.len)) & pointerGlyph(row.pointer) &
-    markGlyph(row.mark) & number & GutterGap
+  ## One row's whole gutter as text — `gutterRuns` joined, never a second
+  ## spelling of it.
+  for run in gutterRuns(row, numberWidth):
+    result.add run.text
 
 func inlineValueText*(values: openArray[EditorValue]): string =
   ## `/* x: 42, str: "ready" */`, or "" for no values.
@@ -409,8 +687,344 @@ func tokenColour*(cls: TokenClass): string =
   ## for the class's Monaco scope (`editor_theme.tokenClassToken`), Dark.
   DesignTokenHex[tokenClassToken(cls)][dmDark]
 
+# ---------------------------------------------------------------------------
+# `PLAT35-F3` — THE EDITOR'S HORIZONTAL SCROLLBAR
+# ---------------------------------------------------------------------------
+#
+# **THE FINDING.** The editor clipped a source line mid-token at the pane's
+# right edge with no ellipsis, no wrap and no horizontal scrollbar, so the
+# rest of the statement was unrecoverable. Measured on this front-end's own
+# captures: every row carried `nowrap; overflow: hidden` and no
+# `text_overflow`, and no node anywhere was a scrollbar — 68 of 68
+# role-bearing nodes at 1920x1080 and 54 of 54 at 1440x900.
+#
+# **THE REFERENCE IS ELECTRON, AND IT ALREADY HAS ONE.** The ledger attributed
+# this to `PLAT35-PD1` and parked it as "one decision for both front-ends".
+# That attribution is wrong, read off the spec:
+# `Cross-Renderer-Visual-Alignment.md`'s `PLAT35-PD1` row is about *"the state
+# and call-trace panes"* and says *"the value text has neither an ellipsis nor
+# a horizontal scrollbar"* — not the editor. The same document's §4.1 reads
+# the Electron EDITOR's own horizontal scrollbar off the live DOM at every
+# probed run: *"the content height passes through — 2574 for the lines, 2586
+# with the horizontal scrollbar, 2607 with the view zone"*, and *"it is not a
+# race with the horizontal scrollbar — its 12px is in the content height of
+# every probed run"*. So the Electron arm is correct here and this one simply
+# did not match it; `tools/visual-review-brief.md` says what follows from
+# that — *"the Electron front-end is the reference"*.
+#
+# No ellipsis and no wrap: the desktop editor has neither
+# (`editing_core.terminalWrapSettings` turns soft wrap off in every editor
+# this product ships), and inventing one here would be the divergence the
+# brief forbids.
+#
+# **THE DIGEST DEBT THIS EDIT INCURS, named here as `GutterGap`'s header
+# names iteration 4's.** Editing this file, `gpui/main.nim`,
+# `gpui/window_geometry.nim`, `tests/test_cross_renderer_visual_alignment.nim`
+# and `tests/test_plat48_gpui_plan.nim` moves the `*-control.sha256` of **TEN**
+# mutation harnesses: the six that digest this file (plat20, plat22,
+# plat35-visual, plat42-surface, plat47-parity, plat49-chrome) plus
+# plat44-editing, plat45-layout, plat48-topbar AND **plat34-front-end**, which
+# digest `main.nim`.
+#
+# **THE COUNT WAS NINE AND IS TEN, and the tenth is the same mistake one
+# directory further out.** Iteration 4's count read only
+# `src/frontend/gpui/tests/` and was corrected to six for this file; the first
+# draft of this paragraph widened the scan to `src/frontend/tui/tests/` and
+# still missed `src/frontend/viewmodel/tests/unit/`, where
+# `plat34-front-end-mutation-control.sha256` carries `gpui/main.nim` — at the
+# digest it had at `524acca27`, so this change is what moves it. Found at the
+# adversarial review of 2026-10-03 by scanning EVERY `*-control.sha256` in the
+# tree for the four edited paths rather than the directories somebody expected
+# them in.
+#
+# All ten were run. **plat20 (14 of 14 KILLED) and plat44-editing (8 KILLED,
+# 1 declared survivor, 0 arms not as required) grade on this host, were
+# re-graded against the committed bytes and their digests are re-recorded in
+# this change.** The other eight refuse, and their digests are deliberately
+# LEFT STALE (§39: a digest re-recorded without a re-grade is an expectation
+# re-recorded without one). The verdicts and the verbatim refusals are in
+# `src/tests/visual/tier4-gpui-readings.json`'s `gate.iteration5digests`.
+#
+# **AND TWO ARMS WERE UNAIMED BY THIS EDIT AND ARE RE-AIMED**, because an arm
+# whose needle no longer occurs cannot be killed: plat22's `E7` (the
+# placeholder decision moved into `drawnCodeText`) and plat35-visual's `M1`
+# (the row-append loop gained the scroll argument). Both needle scans caught
+# them by name.
+
+const
+  EditorColumnPx* = 9.70
+    ## **ONE COLUMN OF THE EDITOR'S MONOSPACED FACE, IN PIXELS — MEASURED, not
+    ## declared, and that distinction is `PLAT35-VG1`'s.**
+    ##
+    ## The shim in this workspace is built without `--features gpui-backend`,
+    ## so nothing in this process can ask a text system how wide a glyph is
+    ## (see `gpuiMetricFor`). The number below is therefore read off the
+    ## FRAMES this front-end produces, the same way `window_geometry
+    ## .GpuiEditorRowPx = 26` was read off the row pitch.
+    ##
+    ## **How, and on what.** All seven `build/plat35/gpui/*.png` captures of
+    ## 2026-10-03, decoded, the editor pane located by its ground
+    ## (`EditorGround`, `#282828`), every inked run on every text row
+    ## collected, and the advance taken as the period that maximises the
+    ## concentration of those run-start x positions modulo it (the circular
+    ## resultant). A monospaced grid has a sharp maximum there and a
+    ## proportional one has none. The seven answers:
+    ##
+    ##     shell 9.650  editor 9.670  gutterLanes 9.670  state 9.710
+    ##     calltrace 9.720  editorWithMark 9.730  eventLog 9.735
+    ##
+    ## mean 9.698, spread 0.085 px (0.9%), 183–387 run starts per frame.
+    ## 9.70 is that mean to the nearest hundredth. The same decoding returns
+    ## the row pitch as 26 px on the same frames, which is `GpuiEditorRowPx`
+    ## independently re-measured and is why the method is trusted here.
+    ##
+    ## **IT CORRECTS A NUMBER THIS FILE ALREADY CARRIED.** `GutterLaneGap`'s
+    ## comment says *"the GPUI editor pane is 276 px wide at 1440x900 and a
+    ## Menlo cell is ~8 px"*. Both halves are wrong on the frames: the editor
+    ## pane is 346 px wide at 1440x900 (302..647) and the cell is 9.70 px.
+    ## The conclusion that comment drew — one gutter cell costs about one
+    ## column of code — survives the correction, so the gap stays at one.
+  EditorScrollbarPx* = 12
+    ## **THE SCROLLBAR'S THICKNESS, AND IT IS THE REFERENCE'S OWN NUMBER.**
+    ##
+    ## Monaco's `horizontalScrollbarSize` default, which the desktop editor
+    ## takes because `ui/editor.nim`'s `createMonacoEditor` call for the main
+    ## editor passes no `scrollbar` bag at all:
+    ## `node_modules/monaco-editor/esm/vs/editor/common/config/editorOptions.js`
+    ## line 1903, `horizontalScrollbarSize: 12`. It is the SAME 12 px
+    ## `Cross-Renderer-Visual-Alignment.md` §4.1 measured in the Electron
+    ## editor's content height (`2574` -> `2586`), which is two independent
+    ## readings of one value and the reason this is not a guess.
+    ##
+    ## (The reference's stylesheet overrides the drawn slider to `0.875rem`
+    ## in `styles/components/text_editor.styl`. That is the painted height,
+    ## not the height Monaco RESERVES in layout; the reserved one is what a
+    ## second front-end has to match to leave the same room, and it is the
+    ## one the live DOM's arithmetic exposed.)
+  EditorScrollbarMinThumbPx* = 20
+    ## Monaco's `MINIMUM_SLIDER_SIZE`, quoted from
+    ## `node_modules/monaco-editor/esm/vs/base/browser/ui/scrollbar/scrollbarState.js`
+    ## line 8. Without it a file whose longest line is far past the pane draws
+    ## a thumb a few pixels wide, which reads as no thumb.
+  EditorScrollbarThumbColour* = "#79797966"
+    ## Monaco's `scrollbarSlider.background` for a dark theme, quoted from
+    ## `.../platform/theme/common/colors/miscColors.js`:
+    ## `Color.fromHex('#797979').transparent(0.4)`. `0.4 * 255 = 102 = 0x66`,
+    ## and the shim parses `#rrggbbaa` (`gpui_app.parse_color`), so the alpha
+    ## is carried rather than pre-composited against a ground this element
+    ## does not own.
+    ##
+    ## **NOT A DESIGN-SYSTEM TOKEN, and that is said rather than hidden.**
+    ## `design_tokens.nim` publishes no scrollbar colour — `grep -ci croll`
+    ## over `styles/generated/design_tokens.nim` answers 0 — and neither
+    ## custom Monaco theme publishes one either: `codetracerDark.json` carries
+    ## 46 entries under `colors` and `codetracerWhite.json` 10, and NONE of
+    ## the 56 matches `croll`. (An earlier draft of this paragraph said those
+    ## two files "carry no `colors` block". They both do; the true statement
+    ## is the one above, and it is the one the conclusion needs. Corrected at
+    ## the adversarial review of 2026-10-03, measured.) So the reference's own
+    ## default is the only published value, and §3.1's "never a hex" rule is
+    ## about the `data-ct-token` attribute, which this element deliberately
+    ## does not claim to carry.
+  EditorScrollbarAttribute* = "data-ct-editor-scrollbar"
+    ## **THE SCROLLBAR'S TRACK.** Present on exactly one node, and only on
+    ## frames whose content is wider than the pane. Its value is the axis
+    ## (`horizontal`) rather than `"true"`, so a vertical one can be added
+    ## later without a reader of this one silently counting it.
+  EditorScrollbarThumbAttribute* = "data-ct-editor-scrollbar-thumb"
+  EditorScrollMetricAttribute* = "data-ct-editor-scroll"
+    ## **WHAT THE EDITOR'S HORIZONTAL EXTENT ACTUALLY IS**, stamped on the
+    ## editor's own node on EVERY frame — including the frames with no
+    ## scrollbar, where it reads `content=<px>;viewport=<px>` with the content
+    ## no wider. That is deliberate: a reader can tell "this pane has nothing
+    ## to scroll" from "this pane was never asked" (`viewport=0`, the width
+    ## no caller supplied), which is Verification-Harness-Traps §5a — two
+    ## states behind one absence is the merge that makes a probe unfalsifiable.
+
+type
+  EditorHScroll* = object
+    ## **The editor's horizontal extent, and the scrollbar that follows from
+    ## it.** A value rather than a drawing, so the predicate "is there
+    ## anything off the right-hand edge" is one function a suite can call with
+    ## no renderer (`editorHScrollOf`), and the drawing below has no second
+    ## opinion about it (§30).
+    viewportPx*: int
+      ## The editor pane's own INNER width — its box less its chrome padding.
+      ## Zero means no caller supplied one; see `EditorScrollMetricAttribute`.
+    contentPx*: int
+      ## Gutter plus the widest drawn code line, at `EditorColumnPx`.
+    gutterCols*: int
+    codeCols*: int
+    leftCols*: int
+      ## How many code columns are scrolled off to the left. Clamped into
+      ## `0 .. maxLeftCols`, so a caller cannot scroll past the end.
+    maxLeftCols*: int
+    present*: bool
+      ## Whether a scrollbar is drawn at all. **False whenever the content
+      ## fits**, which is Monaco's `horizontal: 'auto'` — the reference's own
+      ## default, `editorOptions.js` line 1900 — and is the half of this that
+      ## a bare existence check would not notice was missing.
+    thumbPx*: int
+    thumbLeftPx*: int
+
+func columnsPx*(cols: int): int =
+  ## `cols` columns of the editor's face, in whole pixels.
+  int(round(float(cols) * EditorColumnPx))
+
+func editorNumberWidth*(rows: openArray[EditorRow]): int =
+  ## The gutter's number-field width for a surface: the widest DRAWN line
+  ## number. `renderEditor`'s own derivation, lifted out of it so the window
+  ## can ask for it without re-deriving it beside it (§30).
+  result = 1
+  for row in rows:
+    result = max(result, len($row.line))
+
+func editorGutterColumns*(numberWidth: int): int =
+  ## How many columns the gutter occupies, **asked of `gutterRuns` rather
+  ## than recomputed from `2 + 1 + numberWidth + 4`**: a second spelling of
+  ## the geometry is a second chance to get it wrong, and the lanes have
+  ## already moved once this week.
+  gutterText(EditorRow(line: 1), numberWidth).runeLen
+
+func drawnCodeText*(row: EditorRow): string =
+  ## The text a row's CODE span actually draws — the source line, or the
+  ## loading placeholder for a line the window does not hold yet. Not the
+  ## inline value: that is a separate span, and it is the one thing in this
+  ## subtree that already elides (`text-overflow: ellipsis`, below), so
+  ## counting it as content the scrollbar promises to reveal would promise
+  ## something the ellipsis has already given up.
+  if row.held: row.text else: EditorLoadingText
+
+func editorCodeColumns*(rows: openArray[EditorRow]): int =
+  ## The widest drawn code line, in columns.
+  for row in rows:
+    result = max(result, drawnCodeText(row).runeLen)
+
+func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
+                      viewportPx: int; leftCols = 0): EditorHScroll =
+  ## **THE WHOLE DECISION, IN ONE PLACE.** Given the rows as drawn, the
+  ## gutter's width and the pane's inner width: whether anything is off the
+  ## right-hand edge, how far it can be scrolled, and the thumb that says so.
+  ##
+  ## The slider arithmetic is Monaco's, quoted from `scrollbarState.js`
+  ## (`_computeValues`): `sliderSize = round(max(MINIMUM_SLIDER_SIZE,
+  ## floor(visibleSize * representableSize / scrollSize)))` with
+  ## `representableSize == visibleSize` (this scrollbar has no arrows), and
+  ## `sliderPosition = floor(scrollPosition * (representableSize - sliderSize)
+  ## / (scrollSize - visibleSize))`.
+  ##
+  ## **ONE DEVIATION, AND IT IS MEASURED RATHER THAN PREFERRED:** the
+  ## position is taken as a fraction of `maxLeftCols` and not of
+  ## `contentPx - viewportPx`. In Monaco the whole content scrolls; here the
+  ## GUTTER DOES NOT — the desktop editor's line-number margin is fixed and
+  ## this one's is too — so the two denominators differ by the gutter, and
+  ## using Monaco's would leave the thumb short of the track's end at the
+  ## last column.
+  result.viewportPx = max(0, viewportPx)
+  result.gutterCols = editorGutterColumns(numberWidth)
+  result.codeCols = editorCodeColumns(rows)
+  result.contentPx = columnsPx(result.gutterCols + result.codeCols)
+  if rows.len == 0 or result.viewportPx <= 0 or
+     result.contentPx <= result.viewportPx:
+    # Nothing off the edge — or nobody said how wide the pane is. Either way
+    # no scrollbar, and `leftCols` falls back to 0 so a stale scroll offset
+    # cannot survive the pane growing wide enough to hold the file.
+    return
+  result.present = true
+  let visibleCodePx = max(0, result.viewportPx - columnsPx(result.gutterCols))
+  let visibleCodeCols = int(floor(float(visibleCodePx) / EditorColumnPx))
+  result.maxLeftCols = max(0, result.codeCols - visibleCodeCols)
+  result.leftCols = clamp(leftCols, 0, result.maxLeftCols)
+  let track = result.viewportPx
+  result.thumbPx = min(track, max(EditorScrollbarMinThumbPx,
+    int(floor(float(track) * float(result.viewportPx) /
+              float(result.contentPx)))))
+  result.thumbLeftPx =
+    if result.maxLeftCols <= 0: 0
+    else: (track - result.thumbPx) * result.leftCols div result.maxLeftCols
+
+func scrollMetricText*(scroll: EditorHScroll): string =
+  ## `EditorScrollMetricAttribute`'s value.
+  "content=" & $scroll.contentPx & ";viewport=" & $scroll.viewportPx &
+  ";gutterCols=" & $scroll.gutterCols & ";codeCols=" & $scroll.codeCols &
+  ";leftCols=" & $scroll.leftCols & ";maxLeftCols=" & $scroll.maxLeftCols
+
+func dropColumns*(text: string; skip: int): string =
+  ## `text` with its first `skip` COLUMNS gone. Columns and not bytes: the
+  ## face is monospaced, so a column is a rune, and a byte slice would cut a
+  ## multi-byte glyph in half.
+  if skip <= 0: return text
+  let n = text.runeLen
+  if skip >= n: "" else: text.runeSubstr(skip)
+
+func dropColumns*(runs: seq[TokenRun]; skip: int): seq[TokenRun] =
+  ## The same, over classified runs: the runs of a line concatenate to the
+  ## line (`lexical.TokenRun`'s own contract), so dropping `skip` columns
+  ## from the front of the line is dropping them from the front of the run
+  ## sequence. A run emptied by the cut is DROPPED rather than kept empty —
+  ## an empty span is a node with no ink and the censuses count nodes.
+  if skip <= 0: return runs
+  var left = skip
+  for run in runs:
+    let n = run.text.runeLen
+    if left >= n:
+      left -= n
+    elif left == 0:
+      result.add run
+    else:
+      result.add TokenRun(text: run.text.runeSubstr(left), class: run.class)
+      left = 0
+
+proc renderEditorScrollbar(r: GpuiRenderer;
+                           scroll: EditorHScroll): GpuiElement =
+  ## The track, and the thumb inside it at its offset.
+  ##
+  ## **THE TRACK IS NOT FILLED**, which is the reference's own look: Monaco's
+  ## horizontal scrollbar paints a slider over the editor's ground and no
+  ## track behind it. The track element still exists, carries the full width
+  ## and is what `EditorScrollbarAttribute` marks, because the thing a reader
+  ## has to be able to measure is the slider's share of the PANE and that
+  ## needs both numbers present.
+  ##
+  ## The thumb is offset with `padding-left` on the track rather than a
+  ## margin: `gpui_app.apply_styles_to_div` reads per-side padding and reads
+  ## no per-side margin, so a `margin-left` here would be a style nothing
+  ## draws — the defect `GutterGap`'s comment was corrected for.
+  ##
+  ## **IT IS AN OVERLAY AND NOT A ROW, AND THAT IS MEASURED RATHER THAN
+  ## PREFERRED.** The first version appended it to the editor's flex column.
+  ## On the 1920x1080 frames that worked; on all three 1440x900 frames the
+  ## rows already fill the pane, so the bar landed past the bottom edge and
+  ## the pane's own `overflow: hidden` ate it — `build/plat35/gpui/
+  ## gutterLanes.png` showed exactly ONE scanline of it at y=851 against the
+  ## twelve at 1920. The remedy is the reference's own structure rather than
+  ## a taller pane or a row fewer: Monaco draws `.monaco-scrollable-element
+  ## > .scrollbar.horizontal` ABSOLUTELY at the bottom of the editor, over
+  ## the content, which is why its 12 px shows up in the content height and
+  ## not in the line count. Reserving a row instead would have moved this
+  ## front-end's `editor-row-count` on every scenario, which `corpus-pins
+  ## .json` grades as a set.
+  result = r.createElement("div")
+  r.setAttribute(result, EditorScrollbarAttribute, "horizontal")
+  r.setStyle(result, "display", "flex")
+  r.setStyle(result, "position", "absolute")
+  r.setStyle(result, "left", $ChromePaddingPx & "px")
+  r.setStyle(result, "bottom", "0px")
+  r.setStyle(result, "width", $scroll.viewportPx & "px")
+  r.setStyle(result, "height", $EditorScrollbarPx & "px")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "padding-left", $scroll.thumbLeftPx & "px")
+  let thumb = r.createElement("div")
+  r.setAttribute(thumb, EditorScrollbarThumbAttribute, "true")
+  r.setStyle(thumb, "width", $scroll.thumbPx & "px")
+  r.setStyle(thumb, "height", $EditorScrollbarPx & "px")
+  r.setStyle(thumb, "flex-shrink", "0")
+  r.setStyle(thumb, "background-color", EditorScrollbarThumbColour)
+  r.setStyle(thumb, "rounded", "3px")
+  r.appendChild(result, thumb)
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
-                     numberWidth = 1): GpuiElement =
+                     numberWidth = 1; skipCols = 0): GpuiElement =
   ## One row of the source editor.
   ##
   ## Every attribute below is the ROW's own field stringified. Nothing here
@@ -449,18 +1063,36 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
   r.setAttribute(gutter, TextMetricAttribute, gpuiMetricFor(trGutterLineNumber))
   r.setAttribute(gutter, TokenAttribute, gpuiTokenFor(trGutterLineNumber, row))
-  # THE MARKER LANES ARE LEFT OF THE NUMBER, as the desktop editor (`> 44`)
-  # and the terminal (`--> ● 44`) draw them. The pointer sat AFTER the number
-  # until 2026-09-23, where it OCR'd as a letter glued to the digits (`44p`)
-  # and PLAT-39's gutter grammar — marker glyphs, then digits — rejected every
-  # execution row it had located by its band.
-  r.appendChild(gutter,
-    r.createTextNode(gutterText(row, numberWidth)))
+  # THE MARKER LANES ARE LEFT OF THE NUMBER, each one reserved cell at a fixed
+  # index, and the geometry — with the measurements it was changed from — is
+  # `gutterRuns`'. The pointer sat AFTER the number until 2026-09-23, where it
+  # OCR'd as a letter glued to the digits (`44p`) and PLAT-39's gutter grammar
+  # — marker glyphs, then digits — rejected every execution row it had located
+  # by its band.
+  #
+  # THREE RUNS AND NOT ONE TEXT NODE, which is `PLAT35-F13`: the MARK has to be
+  # painted its own colour and a character inside the gutter span can only take
+  # the gutter's. Same pattern as the code column's classified `piece` spans
+  # below — a child span per run, its own `color`, `flex-shrink: 0`, inside a
+  # flex parent — so the face still comes from the ONE metric-bearing node
+  # (children inherit it, which is how the code runs are monospaced) and every
+  # role / metric / token census is unmoved.
+  r.setStyle(gutter, "display", "flex")
   r.setStyle(gutter, "flex-shrink", "0")
   # The line numbers are Monaco's: resting, and active on the execution line.
+  # Still set on the gutter itself, so a reader of the SPAN's colour reads what
+  # it read before; each run then states its own, and for two of the three it
+  # is this same value.
   r.setStyle(gutter, "color",
              if row.pointer == eptExecution: EditorActiveLineNumberColour
              else: EditorLineNumberColour)
+  for run in gutterRuns(row, numberWidth):
+    let lane = r.createElement("span")
+    r.setAttribute(lane, GutterLaneAttribute, $run.kind)
+    r.setStyle(lane, "color", run.colour)
+    r.setStyle(lane, "flex-shrink", "0")
+    r.appendChild(lane, r.createTextNode(run.text))
+    r.appendChild(gutter, lane)
   r.appendChild(el, gutter)
 
   # THE CODE COLUMN: the rest of the row, grown to the pane's right edge, so
@@ -479,8 +1111,13 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   r.setAttribute(code, TextMetricAttribute, gpuiMetricFor(trEditorCode))
   r.setAttribute(code, TokenAttribute, gpuiTokenFor(trEditorCode, row))
   r.setStyle(code, "display", "flex")
+  # `skipCols` IS THE HORIZONTAL SCROLL, and it is applied to the CODE and
+  # not to the row: the gutter does not move, exactly as the desktop editor's
+  # line-number margin does not. Zero on every frame nobody has scrolled, so
+  # the drawn tree is byte-identical to the one before `PLAT35-F3` until the
+  # wheel is turned.
   if row.held and runs.len > 0:
-    for run in runs:
+    for run in dropColumns(runs, skipCols):
       let piece = r.createElement("span")
       r.setAttribute(piece, EditorTokenClassAttribute, $run.class)
       r.setStyle(piece, "color", tokenColour(run.class))
@@ -490,7 +1127,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   else:
     r.setStyle(code, "color", tokenColour(tcPlain))
     r.appendChild(code,
-      r.createTextNode(if row.held: row.text else: EditorLoadingText))
+      r.createTextNode(dropColumns(drawnCodeText(row), skipCols)))
   # THE FLOW OVERLAY, DRAWN AS THE DESKTOP EDITOR DRAWS IT: a line inside an
   # arm the run declined is dimmed to half opacity (`.line-flow-skip` in
   # `styles/components/flow.styl`), and a line that ran is left as it is
@@ -535,8 +1172,20 @@ proc editorRunsOf*(surface: EditorSurface): seq[seq[TokenRun]] =
       result.add tokenRuns(lexer, row.text, context)
 
 proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
-                   escape: ViewNode; surface: EditorSurface): bool =
+                   escape: ViewNode; surface: EditorSurface;
+                   viewportPx = 0; scrollLeftCols = 0): bool =
   ## Draw the source editor into `parent`. Answers whether it drew ROWS.
+  ##
+  ## `viewportPx` is the editor pane's INNER width in pixels and
+  ## `scrollLeftCols` how far right the code is scrolled — `PLAT35-F3`. The
+  ## width is a parameter rather than something read here because this
+  ## module is handed slots and ViewModels and no pixels (see the header):
+  ## the pane's rectangle belongs to the window's geometry, and the window
+  ## passes it (`main.editorBodyWidthFor` / `window_geometry
+  ## .editorBodyWidthOf`). **Nobody passing it means NO SCROLLBAR, not a
+  ## guessed one** — a default width here would be this front-end inventing
+  ## a pane size, and every suite that draws an editor without a window
+  ## would then be grading a number nothing measured.
   ##
   ## **THE MEDIUM IS CHECKED FIRST, AND A MISMATCH IS A REFUSAL RATHER THAN A
   ## ROUNDING.** `escape` is what `pane_views.sourcePaneView` declared and
@@ -578,14 +1227,22 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     let msg = r.createElement("div")
     r.appendChild(msg, r.createTextNode(surface.degradedMessage))
     r.appendChild(parent, msg)
-  var widest = 1
-  for row in surface.rows:
-    widest = max(widest, len($row.line))
+  let widest = editorNumberWidth(surface.rows)
   # PLAT-47 B1: the editor's own ground, Monaco's `editor.background`.
   r.setStyle(parent, "background-color", EditorGround)
+  # `PLAT35-F3`. The extent is decided ONCE, before the rows are drawn, and
+  # both the rows' scroll offset and the scrollbar come out of that one
+  # value — so a clamped offset and the thumb that reports it cannot
+  # disagree (§30).
+  let scroll = editorHScrollOf(surface.rows, widest, viewportPx,
+                               scrollLeftCols)
+  r.setAttribute(parent, EditorScrollMetricAttribute, scrollMetricText(scroll))
   let runs = editorRunsOf(surface)
   for i, row in surface.rows:
-    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest))
+    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
+                                          scroll.leftCols))
+  if scroll.present:
+    r.appendChild(parent, renderEditorScrollbar(r, scroll))
   surface.rows.len > 0
 
 const
@@ -629,6 +1286,90 @@ proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
   r.appendChild(track, fill)
   r.appendChild(parent, track)
 
+const
+  CallRowAttribute* = "data-call-index"
+    ## PLAT-49 part B: a call-trace row's trace index.
+  CallToggleAttribute* = "data-call-toggle"
+    ## Its toggle state (`leaf`, `expanded`, `collapsed`).
+  CallPartAttribute* = "data-call-part"
+    ## A row part's `CallSegmentKind` (`callee`, `argName`, `argValue`, …).
+  CallSelectedAttribute* = "data-call-selected"
+  CallRowPx* = 26
+    ## A row's height: the window's row pitch (`window_geometry
+    ## .GpuiEditorRowPx`), fixed, so a press is mapped to the row it is on
+    ## (`main.clickCalltrace`).
+  CallIndentPx* = 16
+    ## The desktop's depth offset per level (`paddingForDepth(item, 16)`).
+  CallArgsColour* = DesignTokenHex[dtColorsUiTextSuccessPrimary][dmDark]
+    ## CALLTRACE_ARGS_COLOR (#BBF7D0) — the token the terminal's `srCallArgs`
+    ## paints.
+  CallReturnColour* = DesignTokenHex[dtColorsUiTextInformationOnColor][dmDark]
+    ## CALLTRACE_RETURN_COLOR (#BFDBFE, Dark) exactly: the window is Dark.
+    ## (The terminal's `srCallReturn` takes information-primary, the token
+    ## with a legible Light value.)
+  CallToggleColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+  CallTextColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  CallSelectedBackground* =
+    DesignTokenHex[dtColorsUiSurfacePrimarySecondaryHover][dmDark]
+    ## The selected row's ground (`.event-selected`): the design system's
+    ## active-row token (the desktop's `.active-step-line`), the terminal's
+    ## `srSurfaceActiveRow`.
+
+proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
+                      vm: CalltraceVM): bool =
+  ## PLAT-49 part B (finding 8): THE CALL TRACE, ROW BY ROW FROM THE
+  ## VIEWMODEL'S `CallRow`s — indented by depth, the toggle, the callee and
+  ## its index, the arguments with their values in the arguments' colour and
+  ## ` => value` in the return's, the selected row on its own ground — the
+  ## desktop's row (`isonim_calltrace_view.renderCallLineRowWeb`) from the
+  ## same parts the terminal paints (`calltrace_vm.callRowSegments`). False
+  ## when there are no rows (the fallback and the reports stay
+  ## `pane_views`').
+  let rows = vm.callRows()
+  if rows.len == 0:
+    return false
+  let list = r.createElement("div")
+  r.setAttribute(list, "data-calltrace", "rows")
+  r.setStyle(list, "display", "flex")
+  r.setStyle(list, "flex-direction", "column")
+  for row in rows:
+    let el = r.createElement("div")
+    r.setAttribute(el, CallRowAttribute, $row.index)
+    r.setAttribute(el, CallToggleAttribute, $row.toggle)
+    let selected = crfSelected in row.flags
+    r.setAttribute(el, CallSelectedAttribute,
+                   (if selected: "true" else: "false"))
+    # A call row is one line, its parts side by side.
+    for (key, value) in [("display", "flex"), ("white-space", "nowrap")]:
+      r.setStyle(el, key, value)
+    r.setStyle(el, "overflow", "hidden")
+    r.setStyle(el, "flex-shrink", "0")
+    r.setStyle(el, "height", $CallRowPx & "px")
+    r.setStyle(el, "items", "center")
+    r.setStyle(el, "padding-left", $(row.depth * CallIndentPx) & "px")
+    if selected:
+      r.setStyle(el, "background", CallSelectedBackground)
+    for seg in row.callRowSegments(indent = false):
+      let piece = r.createElement("span")
+      r.setAttribute(piece, CallPartAttribute, $seg.kind)
+      r.setStyle(piece, "flex-shrink", "0")
+      r.setStyle(piece, "color",
+        case seg.kind
+        of csToggle:
+          # On the selected row the toggle is the desktop's `active` icon,
+          # in the body colour — the muted one is not legible on that ground.
+          (if selected: CallTextColour else: CallToggleColour)
+        of csPunct, csArgName, csArgValue: CallArgsColour
+        of csReturnArrow, csReturnValue: CallReturnColour
+        else: CallTextColour)
+      if selected and seg.kind in {csCallee, csIndex}:
+        r.setStyle(piece, "font-weight", "bold")
+      r.appendChild(piece, r.createTextNode(seg.text))
+      r.appendChild(el, piece)
+    r.appendChild(list, el)
+  r.appendChild(parent, list)
+  true
+
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
                     leaf: GpuiLeaf; budget: Budget): bool =
   ## Draw a builtin pane's vocabulary tree into `parent`. Answers whether the
@@ -637,6 +1378,13 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
   ## `pane_views.paneView` is the ONE door, and its `case` is exhaustive over
   ## `PaneKind`, so a pane added to the enum without a view does not compile
   ## rather than becoming a name nothing renders.
+  ##
+  ## PLAT-49 part B: the call trace's ROWS are drawn natively from its
+  ## semantic rows (`renderCallTrace`) — a vocabulary `List` option is one
+  ## label and could not carry the parts the desktop styles apart.
+  if leaf.builtin == paneCalltrace and not leaf.vm.isNil and
+     renderCallTrace(r, parent, CalltraceVM(leaf.vm)):
+    return true
   let pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
   let binding = renderGpui(r, pv.root)
   r.appendChild(parent, binding.root)
@@ -658,7 +1406,9 @@ proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
     if leaf.title.len > 0: leaf.title else: leaf.paneId))
 
 proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
-                surface: EditorSurface): (GpuiElement, bool) =
+                surface: EditorSurface;
+                editorViewportPx = 0;
+                editorScrollLeftCols = 0): (GpuiElement, bool) =
   ## One leaf's subtree, and whether it is a REPORT rather than a live pane.
   ##
   ## Three states and not two, which is PLAT-9's `PaneRefKind` arriving at a
@@ -705,7 +1455,8 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
       let heading = paneTitleElement(r, leaf)
       r.appendChild(node, heading)
       let drewRows = renderEditor(r, node, sourcePaneView(GpuiMedium).root,
-                                  surface)
+                                  surface, editorViewportPx,
+                                  editorScrollLeftCols)
       return (node, not drewRows)
     # **AN ACCEPTED EXCEPTION SAYS WHICH EXCEPTION IT IS** (PLAT-41's LAW-P3),
     # in every product mode. `fileTree` and `buildOutput` have no replay
@@ -805,9 +1556,15 @@ const NoSurfaceSuppliedReport* =
 
 proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
                    surface = EditorSurface(medium: GpuiMedium,
-                                           report: NoSurfaceSuppliedReport)):
+                                           report: NoSurfaceSuppliedReport);
+                   editorViewportPx = 0;
+                   editorScrollLeftCols = 0):
                    LeafRenderOutcome =
   ## Build the element tree for one window.
+  ##
+  ## `editorViewportPx` is the editor pane's inner width, from the window's
+  ## own geometry; `renderEditor`'s doc comment says why it is passed in and
+  ## why zero draws no scrollbar (`PLAT35-F3`).
   ##
   ## A REFUSED projection draws its refusal. It does not draw an empty window
   ## and it does not fall back to a default arrangement: the terminal's
@@ -827,7 +1584,8 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
     r.appendChild(root, text)
     return
   for leaf in leafSet.leaves:
-    let (node, reported) = renderLeaf(r, leaf, surface)
+    let (node, reported) = renderLeaf(r, leaf, surface, editorViewportPx,
+                                      editorScrollLeftCols)
     # PLAT-35's focus-order row. The index is the leaf's position in the
     # projected document's own order — the order this front-end would move
     # focus in — stamped so the question can be answered from the RENDERED

@@ -54,6 +54,11 @@ import ./edit_binding
 import ./views/shell
 # PLAT-48: the top bar's shared models come through `codetracer_embed`.
 import headless_app/session_tabs
+import headless_app/footer_info
+import ./views/status_bar   # `productIndicator`, for the status row's room
+import ./views/header       # `textCells`
+import ./layout/binding     # `slotExtent`, `footerLeadCells`
+import ./layout/cells       # `terminalPaneName`
 import ./views/vcs_pane
 import ./views/point_list
 
@@ -191,6 +196,28 @@ type
     graphicsDrawn*: bool
       ## The terminal answered the kitty graphics query: it draws pictures.
     hoveredControl*: int
+    hoveredTab*: int
+      ## PLAT-49 part B: the session tab under the pointer, -1 for none.
+    hoveredTabAdd*: bool
+      ## PLAT-49 part B: the pointer is on the strip's "+".
+    recordingOpener*: proc(path: string): string {.closure.}
+      ## PLAT-49 part B: the HOST's "open this recording in a new session
+      ## tab" — "" when it opened, else why not. Nil when the host cannot
+      ## (an in-process caller with no engine to spawn); the strip then
+      ## draws no "+". It lives in `host/` because opening a recording
+      ## spawns `replay-server`, which this layer cannot.
+    sessionCloser*: proc(index: int): bool {.closure.}
+      ## PLAT-49 part B: the host closes the session behind tab `index`
+      ## (its engine too); nil means the shell's own `closeTab` does.
+    recordings*: seq[OmnibarEntry]
+      ## PLAT-49 part B: the recordings the host can see (`omRecording`
+      ## entries), what the "+"'s `:open ` lists.
+    hoveredTooltip*: string
+      ## PLAT-49: the hovered control's tooltip, from
+      ## `debug_controls_vm.transportTooltip`.
+    caretDrawn*: bool
+      ## PLAT-49: the terminal is not known to honour caret shapes
+      ## (DECSCUSR), so the omnibar's caret is drawn into its cell.
     tabScroll*: int
     controls*: DebugControlsVM
       ## The session's transport ViewModel, for which controls are available.
@@ -216,7 +243,11 @@ proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
          highlighting: newHighlighterCache(),
          modes: initModeRegister(),
          menu: newMenuVM(nativeFrontEndMenu("CodeTracer")),
-         omnibar: newOmnibarVM(), icons: imUnicode, hoveredControl: -1)
+         omnibar: newOmnibarVM(), icons: imUnicode, hoveredControl: -1,
+         hoveredTab: -1,
+         # The event log's default columns before any session (PLAT-49 part
+         # B): `:column-*` acts on these when no log is open yet.
+         eventLog: initEventLogModel())
 
 proc controlsEnabledOf*(app: TuiApp): seq[bool] =
   ## Per `TransportControls`: whether the session's ViewModel offers it now
@@ -230,7 +261,8 @@ proc refreshOmnibarIndex*(app: TuiApp) =
   ## Rebuild what the omnibar can find from the session's ViewModels.
   if app.isNil or app.omnibar.isNil:
     return
-  app.omnibar.setIndex(omnibarIndexOf(app.filesVM, app.store, app.menu))
+  app.omnibar.setIndex(omnibarIndexOf(app.filesVM, app.store, app.menu) &
+                       app.recordings)
 
 proc openSession*(app: TuiApp; backend: BackendService;
                   title: string = ""): HeadlessSessionSlot =
@@ -307,13 +339,27 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # authority there is — a session's `LayoutNode` is a REPLAY arrangement and
   # `HeadlessApp` has no edit slot to hold a second one.
   let registered = app.modes.activeLayout()
+  # PLAT-49 part B: the status bar's file info — the file the editor shows
+  # (the Edit buffer's in Edit mode) — and the width it takes before the
+  # bottom labels, which the binding's hit-test reads.
+  let infoPath =
+    if app.modes.product == pmEdit and not app.editSession.isNil and
+       not app.editSession.activeBuffer().isNil:
+      app.editSession.activeBuffer().path
+    else: app.source.path
+  let fullInfo = footerFileInfoText(infoPath)
   result = ShellModel(
     header: header,
     topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),
                         hoveredControl: app.hoveredControl,
-                        tabs: app.shell.tabsOf(), tabScroll: app.tabScroll),
+                        hoverTooltip: app.hoveredTooltip,
+                        hoveredTab: app.hoveredTab,
+                        canAddTab: not app.recordingOpener.isNil,
+                        hoveredTabAdd: app.hoveredTabAdd,
+                        tabs: app.shell.tabsOf(), tabScroll: app.tabScroll,
+                        caretDrawn: app.caretDrawn),
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
                                product = app.modes.product,
@@ -357,6 +403,28 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     edit: (if app.editSession.isNil: initEditPaneModel()
            else: editPaneModelFor(app.editSession,
                                   app.editSession.activeBuffer())))
+  # THE FILE INFO YIELDS TO A NOTE. The status row carries the file info, the
+  # bottom labels, the mode indicators and the notification; where they do
+  # not all fit, the file info is the one left out — a message the user
+  # cannot read is the failure this row exists to prevent (`statusBarText`),
+  # and the language of the file on screen is the least urgent fact on it.
+  var labelsW = 0
+  for d in result.docked:
+    if d.edge == leBottom:
+      labelsW += slotExtent(leBottom, (if d.title.len > 0: d.title
+                                       else: terminalPaneName(d.pane)))
+  let modeW = textCells("COMMAND " & productIndicator(result.product) &
+                        (if result.status.fold.len > 0: " " & result.status.fold
+                         else: ""))
+  let noteW = (if app.notification.len > 0: textCells(app.notification) + 2
+               else: 0)
+  let fileInfo =
+    if footerLeadCells(fullInfo) + labelsW + 1 + modeW + noteW <= width:
+      fullInfo
+    else: ""
+  result.fileInfo = fileInfo
+  if bound:
+    app.layoutBinding.footerLead = footerLeadCells(fileInfo)
 
 proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   ## Give this application a layout the user can rearrange (PLAT-6).

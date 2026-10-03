@@ -362,6 +362,14 @@ type
       ## that reopened four overlays would be a bug, and `toJson` omitting
       ## this field is what prevents it. It lives here for locality; it
       ## belongs to PLAT-5's transient state.
+    open*: bool
+      ## PLAT-49 part B (finding 9): DOCKED OPEN — the desktop's clicked
+      ## strip tab (`auto_hide.showDockedPanel`): the pane is shown INLINE at
+      ## its edge and TAKES SPACE, the arrangement projected into what is
+      ## left (no overlay), while its label stays on its strip. Set by
+      ## `cmdOpenDocked`, cleared by `cmdCloseDocked`; at most ONE docked pane
+      ## is open at a time (the desktop's single `dockedPanel`). NOT PERSISTED,
+      ## as the desktop does not persist `dockedVisible`.
     beside*: Option[PaneKind]
       ## PLAT-48: where the pane came FROM — the placed pane it sat beside when
       ## it was docked (`pinAnchorOf`, read before the dock took it out of the
@@ -455,6 +463,12 @@ type
     ahRestore = "restore"
       ## Remove it from `docked` and place it back with `lcAddPane`'s
       ## semantics.
+    ahOpen = "open"
+      ## PLAT-49 part B: keep it docked and show it OPEN — inline at its
+      ## edge, taking space (`DockedPane.open`); any other open docked pane
+      ## closes.
+    ahClose = "close"
+      ## PLAT-49 part B: back to collapsed — its label only.
 
   LayoutCommand* = object
     ## A variant object, unlike `LayoutNode`, and for the reason the module
@@ -521,6 +535,15 @@ type
       splitAxis*: SplitAxis
       splitSide*: SplitSide
       splitMovesPane*: bool
+      splitRoot*: bool
+        ## PLAT-49 part B (finding 11): split the WHOLE LAYOUT rather than
+        ## `splitTarget` — GoldenLayout's ground drop (`GroundItem.onDrop`, a
+        ## drop on one of its 50 px side areas along the layout's outer
+        ## edges): the dragged pane goes to that side of the root. When the
+        ## root is already a row (column) and the split is on that axis, the
+        ## pane joins it at that end and takes HALF of the end sibling's
+        ## share; otherwise the root is wrapped in a new row (column), half
+        ## and half. `splitTarget` is not read. Only with `splitMovesPane`.
         ## PLAT-5. When false — every PLAT-4 caller — `splitNewPane` must NOT
         ## be in the tree and a duplicate is `lpDuplicatePane`. When true it
         ## must ALREADY be, and the split MOVES it: detach (§2.4's collapse
@@ -1467,6 +1490,15 @@ proc cmdSplitMove*(target: PaneKind; movedPane: PaneKind; axis: SplitAxis;
                 splitNewTitle: title, splitAxis: axis, splitSide: side,
                 splitMovesPane: true)
 
+proc cmdSplitRootMove*(movedPane: PaneKind; axis: SplitAxis;
+                       side: SplitSide = ssAfter; title = ""): LayoutCommand =
+  ## `lcSplit` over the WHOLE LAYOUT (`splitRoot`): the drop "drag this tab to
+  ## the layout's outer edge" — GoldenLayout's ground side areas. The pane is
+  ## already in the layout (placed or docked) and is MOVED.
+  LayoutCommand(kind: lcSplit, splitTarget: movedPane, splitNewPane: movedPane,
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: true, splitRoot: true)
+
 proc cmdMergeIntoStack*(pane: PaneKind; beside: PaneKind;
                         wholeRegion = false): LayoutCommand =
   LayoutCommand(kind: lcMergeIntoStack, mergedPane: pane, mergeBeside: beside,
@@ -1489,6 +1521,26 @@ proc cmdRestoreDocked*(pane: PaneKind;
   LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahRestore,
                 autoHidePane: pane, autoHideEdge: leLeft, autoHideOrder: -1,
                 autoHideTitle: "", autoHideRestoreBeside: beside)
+
+proc cmdOpenDocked*(pane: PaneKind): LayoutCommand =
+  ## PLAT-49 part B: show a docked pane OPEN — inline at its edge, taking
+  ## space — the desktop's click on a strip tab (`showDockedPanel`).
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahOpen,
+                autoHidePane: pane, autoHideEdge: leLeft, autoHideOrder: -1,
+                autoHideTitle: "", autoHideRestoreBeside: none(PaneKind))
+
+proc cmdCloseDocked*(pane: PaneKind): LayoutCommand =
+  ## PLAT-49 part B: back to its label only (`hideDockedPanel`).
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahClose,
+                autoHidePane: pane, autoHideEdge: leLeft, autoHideOrder: -1,
+                autoHideTitle: "", autoHideRestoreBeside: none(PaneKind))
+
+proc openDocked*(layout: Layout): Option[DockedPane] =
+  ## The docked pane shown open, if any.
+  for d in layout.docked:
+    if d.open:
+      return some(d)
+  none(DockedPane)
 
 proc cmdRename*(pane: PaneKind; title: string): LayoutCommand =
   LayoutCommand(kind: lcRename, renameTarget: pane, renameTitle: title)
@@ -1522,9 +1574,13 @@ proc `$`*(cmd: LayoutCommand): string =
     "moveTab(" & $cmd.movedPane & " -> beside " & $cmd.moveBeside & " @" &
       $cmd.moveIndex & ")"
   of lcSplit:
-    (if cmd.splitMovesPane: "splitMove(" else: "split(") &
-      $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
-      $cmd.splitAxis & ", " & $cmd.splitSide & ")"
+    (if cmd.splitRoot:
+       "splitRoot(" & $cmd.splitNewPane & ", " & $cmd.splitAxis & ", " &
+         $cmd.splitSide & ")"
+     else:
+       (if cmd.splitMovesPane: "splitMove(" else: "split(") &
+         $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
+         $cmd.splitAxis & ", " & $cmd.splitSide & ")")
   of lcMergeIntoStack:
     "mergeIntoStack(" & $cmd.mergedPane & " -> " & $cmd.mergeBeside &
       (if cmd.mergeWholeRegion: ", wholeRegion" else: "") & ")"
@@ -1535,6 +1591,10 @@ proc `$`*(cmd: LayoutCommand): string =
         $cmd.autoHideOrder & ")"
     of ahRestore:
       "restoreDocked(" & $cmd.autoHidePane & ")"
+    of ahOpen:
+      "openDocked(" & $cmd.autoHidePane & ")"
+    of ahClose:
+      "closeDocked(" & $cmd.autoHidePane & ")"
   of lcRename: "rename(" & $cmd.renameTarget & ", '" & cmd.renameTitle & "')"
   of lcAddContributedPane:
     "addContributedPane(" & cmd.addedContributedPane & ", after=" &
@@ -1788,7 +1848,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # it. Every guard here is the mirror of the branch below — "must not be
       # in the tree" becomes "must be", and the detach brings §2.4's collapse
       # rules with it exactly as `lcMoveTab`'s cross-stack path does.
-      if cmd.splitNewPane == cmd.splitTarget:
+      if cmd.splitNewPane == cmd.splitTarget and not cmd.splitRoot:
         return refusedFor(lpDuplicatePane, cmd.splitNewPane)
       let dockedAt = next.dockedIndex(cmd.splitNewPane)
       let moving = tree.find(cmd.splitNewPane)
@@ -1798,7 +1858,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
       if dockedAt < 0 and moving.isNil:
         return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
-      if tree.find(cmd.splitTarget).isNil:
+      if not cmd.splitRoot and tree.find(cmd.splitTarget).isNil:
         return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
       if dockedAt >= 0:
         # From the auto-hide strip: leave `docked`, keep the strip's title.
@@ -1817,6 +1877,37 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpDuplicatePane, cmd.splitNewPane)
       if next.dockedIndex(cmd.splitNewPane) >= 0:
         return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+    if cmd.splitRoot:
+      # GOLDENLAYOUT'S GROUND DROP (`GroundItem.onDrop`), on the tree as it
+      # is after the detach.
+      if not cmd.splitMovesPane:
+        return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
+      if not tree.find(cmd.splitNewPane).isNil:
+        # The pane was the whole tree: nothing is left to split beside it
+        # (the only pane of a layout can be dragged nowhere).
+        return refusedFor(lpEmptyRoot, cmd.splitNewPane)
+      let containerKind = if cmd.splitAxis == saRow: lnRow else: lnColumn
+      let fresh = pane(cmd.splitNewPane, movedTitle, 0.0)
+      if tree.kind == containerKind and tree.children.len > 0:
+        # The root already runs along that axis: join it at that end; the
+        # end sibling gives the newcomer half of its share.
+        let at = if cmd.splitSide == ssBefore: 0 else: tree.children.len
+        let sibling = tree.children[if at == 0: 0 else: tree.children.high]
+        let half = effectiveWeight(sibling) * 0.5
+        sibling.weight = half
+        fresh.weight = half
+        tree.children.insert(fresh, at)
+      else:
+        let inner = copyOf(tree)
+        let share = tree.weight
+        inner.weight = 0.0
+        let kids =
+          if cmd.splitSide == ssBefore: @[fresh, inner] else: @[inner, fresh]
+        tree.becomes(LayoutNode(kind: containerKind, weight: share,
+                                children: kids))
+      if equalTrees(tree, layout.tree):
+        return noOp()
+      return appliedTo(next)
     # RE-FOUND AFTER THE DETACH, for `lcMoveTab`'s reason: collapsing can
     # rewrite a container in place, so a ref taken before it may no longer be
     # in the tree. The target pane is unique, so finding it again is exact.
@@ -1977,6 +2068,28 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
                           before = remembered and entry.besideBefore):
         return refusedFor(lpPaneNotPlaced, cmd.autoHidePane)
       next.docked.delete(at)
+      return appliedTo(next)
+    of ahOpen, ahClose:
+      # PLAT-49 part B: OPEN (docked inline, taking space) or CLOSED. The
+      # pane stays docked — its label stays on the strip — so nothing moves
+      # in the tree; the binding projects the tree into what the open pane
+      # leaves.
+      let at = next.dockedIndex(cmd.autoHidePane)
+      if at < 0:
+        return refusedFor(lpPaneNotDocked, cmd.autoHidePane)
+      let opening = cmd.autoHideDirection == ahOpen
+      var changed = false
+      for i in 0 ..< next.docked.len:
+        # Opening one closes every other (one docked pane open at a time);
+        # closing touches only the pane named.
+        let want = if opening: i == at
+                   elif i == at: false
+                   else: next.docked[i].open
+        if next.docked[i].open != want:
+          next.docked[i].open = want
+          changed = true
+      if not changed:
+        return noOp()
       return appliedTo(next)
 
   of lcRename:

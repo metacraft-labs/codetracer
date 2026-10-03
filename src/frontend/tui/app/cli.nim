@@ -89,7 +89,7 @@ type
       ## the one `TuiCommand`'s own comment gives about `--help`: the fields
       ## differ. A trace folder and a project folder are different arguments
       ## resolved against different things — `host/native_host.traceFolderProblem`
-      ## refuses a folder with no `trace.json`, which is exactly what a project
+      ## refuses a folder that holds no recording, which is exactly what a project
       ## is — and `--goto` is meaningless for one of them. A shared branch with
       ## a boolean on it would let `--goto 500 --edit .` parse.
     tckUsageError
@@ -552,7 +552,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
         # PLAT-16: with `--edit` given, THE POSITIONAL IS THE PROJECT and not a
         # trace folder. Decided by the flag rather than by looking at what is on
         # disk, on this layer's own rule: `app/cli.nim` does no filesystem I/O,
-        # and a parser that guessed from the presence of `trace.json` would
+        # and a parser that guessed from the presence of a recording would
         # make the command line's meaning depend on the machine it runs on.
         if editRequested:
           if editProject.len > 0:

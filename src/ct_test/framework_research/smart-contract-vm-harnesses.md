@@ -1,7 +1,7 @@
 # M13 Smart-Contract and VM Recorder Harnesses
 
 <!-- cspell:words Aleo Blockfrost cardano Circom corelib miden MASM -->
-<!-- cspell:words masm polkavm solana starknet tolk uplc wasmi -->
+<!-- cspell:words masm polkavm solana starknet tolk uplc -->
 
 Scope: catalog integration for sibling recorder repositories present in the
 workspace. Recorder repos are treated as read-only inputs.
@@ -47,7 +47,6 @@ Common contract:
 | `smart-cardano` | `codetracer-cardano-recorder` | `test-programs/aiken`, `test-programs/uplc`                       | `codetracer-cardano-recorder record <file.ak> --out-dir <dir>`                          | CTFS `.ct` sidecars                                   | Blockfrost replay needs credentials and is not cataloged.                                                                                                 |
 | `smart-flow`    | `codetracer-flow-recorder`    | `test-programs/cadence`                                           | `codetracer-flow-recorder record <file.cdc> --out-dir <dir>`                            | CTFS bundle from Cadence helper                       | Needs `cadence-trace-helper`. Replay requires Flow access-node connectivity.                                                                              |
 | `smart-wasm`    | `codetracer-wasm-recorder`    | `examples`                                                        | `go test ./examples/...`                                                                | No CodeTracer recorder artifact contract found        | This sibling is a wazero checkout, not a `record --out-dir` CodeTracer recorder CLI. Discovery is informational.                                          |
-| `smart-wasmi`   | `codetracer-wasmi-recorder`   | `crates/*/tests`                                                  | `cargo test`                                                                            | No CodeTracer recorder artifact contract found        | This sibling is a wasmi runtime checkout, not a `record --out-dir` CodeTracer recorder CLI. Discovery is informational.                                   |
 
 Current local verification notes:
 

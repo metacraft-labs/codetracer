@@ -534,6 +534,13 @@ lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes"
 lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
 	bash ci/test/git-hooks-worktree-test.sh
 
+# Its companion: core.hooksPath must never be left relative. git-hooks.nix's
+# installer writes `.git/hooks`, which a linked worktree cannot resolve, so git
+# runs no hook there at all. Real `git worktree` fixtures and real commits under
+# mktemp; pure bash + git; no nix, no network.
+lint_step "contract suite: core.hooksPath is never left relative" \
+	bash ci/test/git-hooks-path-test.sh
+
 # The non-Nix leg of the same hooks (ci/dev/portable-pre-commit.py): what native
 # Windows runs at commit time instead of the /nix/store pre-commit shim it cannot
 # execute. Registered here because nothing else runs it -- the hosts it serves

@@ -220,21 +220,40 @@ let failures = 0;
 const ok = (m) => console.log(`  [OK]     ${m}`);
 const bad = (m) => { console.log(`  [FAILED] ${m}`); failures++; };
 
+// The tracer answers its recording as a CTFS `.ct` container, base64 in
+// `container`. A container is checked by its header magic, so an answer that
+// carries an empty string, or bytes of some other shape, is not mistaken for a
+// recording because the counts beside it are non-zero.
+const CTFS_MAGIC = [0xc0, 0xde, 0x72, 0xac, 0xe2];
+function containerOf(answer) {
+  if (typeof answer.container !== 'string' || answer.container.length === 0) {
+    return { ok: false, bytes: 0, verdict: 'no .ct container in the answer' };
+  }
+  const bytes = Buffer.from(answer.container, 'base64');
+  const magic = CTFS_MAGIC.every((b, i) => bytes[i] === b);
+  return {
+    ok: magic,
+    bytes: bytes.length,
+    verdict: magic ? `${bytes.length}-byte .ct` : `${bytes.length} bytes without the CTFS magic`,
+  };
+}
+
 const direct = await directPath();
 const viaWorker = await workerPath();
 
 const dTrace = JSON.parse(direct);
-const steps = dTrace.events.filter((e) => 'Step' in e).length;
-const calls = dTrace.events.filter((e) => 'Call' in e).length;
+const dContainer = containerOf(dTrace);
+const steps = dTrace.steps ?? 0;
+const calls = dTrace.calls ?? 0;
 
-console.log(`  direct: ${dTrace.events.length} events, ${steps} steps, ${calls} calls`);
+console.log(`  direct: ${dContainer.verdict}, ${steps} steps, ${calls} calls`);
 console.log(`  digest direct=${digest(direct)} worker=${digest(viaWorker)}`);
 
-if (dTrace.events.length > 1 && steps > 0 && calls > 0) {
-  ok(`the trace is non-trivial (${dTrace.events.length} events, ${steps} steps)`);
+if (dContainer.ok && steps > 0 && calls > 0) {
+  ok(`the trace is non-trivial (a ${dContainer.bytes}-byte .ct, ${steps} steps)`);
 } else {
-  bad(`ONE-EVENT-ZERO-STEPS: ${dTrace.events.length} events, ${steps} steps — ` +
-      'both modules can answer ok over a trace with nothing in it');
+  bad(`ZERO-STEPS or NO CONTAINER: ${dContainer.verdict}, ${steps} steps, ` +
+      `${calls} calls — both modules can answer ok over a trace with nothing in it`);
 }
 if (digest(direct) === digest(viaWorker)) {
   ok('the worker path produced a byte-identical trace to the direct path');
@@ -318,16 +337,17 @@ if (recorded.ok && recorded.artifact) {
     bad(`the tracer refused the recorded test: ${text.slice(0, 200)}`);
   } else {
     const rTrace = JSON.parse(text);
-    const rSteps = rTrace.events.filter((e) => 'Step' in e).length;
-    const rCalls = rTrace.events.filter((e) => 'Call' in e).length;
-    console.log(`  recorded: ${rTrace.events.length} events, ${rSteps} steps, ${rCalls} calls`);
-    if (rTrace.events.length > 1 && rSteps > 0 && rCalls > 0) {
+    const rContainer = containerOf(rTrace);
+    const rSteps = rTrace.steps ?? 0;
+    const rCalls = rTrace.calls ?? 0;
+    console.log(`  recorded: ${rContainer.verdict}, ${rSteps} steps, ${rCalls} calls`);
+    if (rContainer.ok && rSteps > 0 && rCalls > 0) {
       ok(`the recorded test traces with ${rSteps} steps — a session opened over ` +
          'it has something to step');
     } else {
-      bad(`ONE-EVENT-ZERO-STEPS over a recorded test: ${rTrace.events.length} ` +
-          `events, ${rSteps} steps — this is what an uninstrumented compile ` +
-          'produces, and both modules report ok over it');
+      bad(`ZERO-STEPS over a recorded test: ${rContainer.verdict}, ${rSteps} ` +
+          `steps — this is what an uninstrumented compile produces, and both ` +
+          'modules report ok over it');
     }
   }
 } else {

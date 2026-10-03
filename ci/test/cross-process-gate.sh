@@ -133,13 +133,10 @@ mkdir -p \
 	"$fixture/backend" \
 	"$recordings"
 
-# Mirror what the recorders produce: the two browser tiers write the
-# three-file JSON layout, the server tier writes a CTFS container.
+# Mirror what the recorders produce: the two browser tiers are single-file
+# CTFS recordings, the server tier is a directory holding one.
 for container in frontend.ct frontend-wasm.ct; do
-	mkdir -p "$recordings/$container"
-	for payload in trace.json trace_metadata.json trace_paths.json; do
-		printf '{}\n' >"$recordings/$container/$payload"
-	done
+	printf 'ctfs\n' >"$recordings/$container"
 done
 mkdir -p "$recordings/backend.ct"
 printf 'ctfs\n' >"$recordings/backend.ct/server.ct"
@@ -344,9 +341,9 @@ actual_stages="$(cat "$stage_log")"
 [ "$actual_stages" = "$expected_stages" ] ||
 	fail "required stage order/arguments drifted; got: $actual_stages"
 
-mv "$recordings/frontend.ct/trace.json" "$recordings/frontend.ct/trace.json.off"
+mv "$recordings/frontend.ct" "$recordings/frontend.ct.off"
 expect_failure "incomplete recording" "required trace payload is missing or empty" run_gate
-mv "$recordings/frontend.ct/trace.json.off" "$recordings/frontend.ct/trace.json"
+mv "$recordings/frontend.ct.off" "$recordings/frontend.ct"
 
 # The gate must fail when the pipeline itself cannot run. Before the
 # recordings were produced this case did not exist — a broken recorder

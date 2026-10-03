@@ -1,0 +1,56 @@
+name: Refresh the GitHub token
+description: >
+  Mint a new GitHub App installation token and put it everywhere the job's
+  earlier setup stored the previous one: nix.conf's access-tokens, the Nix
+  netrc, the git extraHeader that setup-dev-env exports through GITHUB_ENV,
+  and the credential actions/checkout persisted in the checkout.
+
+  Installation tokens expire after one hour, and the release build's steps
+  add up to far more than that on a cold runner. A dry run of the 26.10.1
+  release failed 66 minutes in, when nix fetched a flake input with the
+  token minted at the start of the job ("401 Bad credentials"). Run this
+  before every step that can reach GitHub after the first hour. A step that
+  itself runs longer than an hour also needs keep-refreshing.
+inputs:
+  app-id:
+    description: The GitHub App id (the CI_TOKEN_PROVIDER_APP_ID secret).
+    required: true
+  private-key:
+    description: The GitHub App private key (the CI_TOKEN_PROVIDER_PRIVATE_KEY secret).
+    required: true
+  keep-refreshing:
+    description: >
+      "true" also starts keep-refreshing.sh in the background, which mints a
+      new token every 40 minutes for the rest of the job and writes it into
+      nix.conf and the Nix netrc. For a single step that runs longer than an
+      hour. Needs Nix (for openssl, curl and jq).
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Mint the token
+      id: token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: metacraft-labs
+
+    - name: Replace the stored token
+      shell: bash
+      env:
+        NEW_TOKEN: ${{ steps.token.outputs.token }}
+      run: bash "${GITHUB_ACTION_PATH}/refresh.sh"
+
+    - name: Keep refreshing it in the background
+      if: inputs.keep-refreshing == 'true'
+      shell: bash
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        log="$RUNNER_TEMP/keep-refreshing-github-token.log"
+        nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq -c \
+          bash "${GITHUB_ACTION_PATH}/keep-refreshing.sh" > "$log" 2>&1 &
+        echo "token refresher started (pid $!); log: $log"

@@ -18,6 +18,58 @@ recording), after `just plat47-capture-electron` (the real-PTY suite compares
 with the desktop's committed capture). The GPUI suite loads
 `libgpui_nim_shim`; the harness puts the shim on `LD_LIBRARY_PATH` itself.
 
+=============================================================================
+OWED: A RE-GRADE AND A RE-RECORD, 2026-10-02 (PLAT-35), RE-MEASURED AT
+`6fa0bdd89`. **BOTH PRE-EXISTING STALE ROWS WERE FIXED UPSTREAM; THIS
+HARNESS NOW REFUSES ON PLAT-35'S TWO ROWS AND NOTHING ELSE.**
+=============================================================================
+This harness digests `src/frontend/gpui/chrome.nim` and
+`src/frontend/gpui/main.nim`, both of which PLAT-35 edited. The digest is
+deliberately NOT re-recorded here.
+
+  HARNESS   run-plat47-parity-mutations.py
+  ENTRIES OWED BY PLAT-35 — and, at this base, the ONLY two rows the
+  comparator reports (measured: `--only=` prints exactly
+  `CONTROL DIGEST MOVED` for these two and `0 problems` for every needle):
+            src/frontend/gpui/chrome.nim   (the per-platform mono face)
+            src/frontend/gpui/main.nim     (the `--pixels-out` capture path)
+  THE TWO ROWS THAT WERE STALE AT `d34c6e087` ARE NOT STALE HERE, and the
+  earlier note's claim that this harness *"ALREADY refused on this host, on
+  those two rows alone, before PLAT-35 touched anything"* no longer describes
+  the tree. Upstream fixed both in `f4afb504b`:
+            src/frontend/index/config.nim
+              — matched neither HEAD nor the working tree at the old base; it
+                matches at `6fa0bdd89`.
+            the overlay row
+              — was recorded as `/home/zahary/m/codetracer-gui/
+                isonim-tui-plat47b/src/isonim_tui/overlay.nim`, an ABSOLUTE
+                path on another host, so the gate reported `CONTROL DIGEST
+                ABSENT` for the local spelling. It is now recorded as the
+                relative `isonim-tui/src/isonim_tui/overlay.nim` and resolves.
+            **SO PLAT-35 NO LONGER ADDS ROWS TO AN ALREADY-REFUSING
+            COMPARATOR; IT IS THE WHOLE REASON THIS ONE REFUSES.** That makes
+            the re-grade PLAT-35's to owe rather than somebody else's to
+            unblock, and it is owed, not waived.
+  HOST THAT CAN GRADE IT
+            a Linux host with `$ISONIM_TUI_SRC` resolving and `just build-tui`
+            compiling. Still NOT aarch64-darwin: this harness's control step
+            is `build_tui()` for every arm whose killer is a binary suite, and
+            `just build-tui` does not compile here — see
+            run-plat45-layout-mutations.py's note for the two errors measured
+            at this base (`terminal_driver.nim(263, 21)` against Darwin's
+            `Suseconds = int32`, behind a stale sibling checkout that stops the
+            build even earlier).
+  COMMAND   REPLAY_SERVER_BIN=<path> ISONIM_TUI_SRC=<path> python3 \
+              src/frontend/tui/tests/run-plat47-parity-mutations.py
+            # every arm must kill, and only then:
+            python3 ... --record-control-hashes
+
+**DO NOT CLEAR THE TWO PLAT-35 ROWS WITH `--record-control-hashes`.** That
+flag rewrites EVERY row, and on this host not one arm can be graded first, so
+it would convert *"these two rows moved"* into *"these bytes are reviewed"*
+without a single verdict behind it — Verification-Harness-Traps §39a's named
+prohibition, arrived at from the same direction as its `plat17` example.
+
 ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
 
   | claim | arms |
@@ -38,7 +90,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | a jump centres the execution line | V1 |
   | TESTS is captioned as the desktop's | N1 |
   | the execution band is Monaco's: the whole code column, not the gutter | X1, X2 |
-  | the terminal's call trace pages: the section around the rows shown is loaded | P1, P2, P3, P4 |
+  | the terminal's call trace pages: the section around the rows shown is loaded | P1, P2, P4 |
   | every language is tokenised by the desktop's Monaco tokenizer, character by character | Y1 (spans cut short), M1 (a state never popped), M2 (negated classes), M3 (a language mapped to another tokenizer), M4 (the generated definitions edited) |
   | a window opening inside a string starts in the state the file leaves | M5 (the contexts dropped), M6 (the VM's contexts misaligned) |
   | a test run never touches the user's state | S1 |
@@ -305,8 +357,8 @@ C_VCS_REFRESH = ("a periodic re-read moves the pane's value exactly when the "
 C_G_VCS_REFRESH = ("a re-read picks up another program's changes and reports "
                    "them once")
 C_G_DOCKED = "the docked pane leaves the tree and gets a label in the left strip"
-C_G_REVEAL = ("a click on the label reveals the pane over the tree; a second "
-              "click hides it")
+C_G_REVEAL = ("a click on the label docks the pane open; a second closes it; "
+              "a hover previews it")
 C_G_DISMISS = ("Esc, or a press outside the revealed pane, hides it; the layout "
                "never moved")
 C_G_ROWS = ("the editor's fetch window is the rows its pane shows at the row "
@@ -423,16 +475,17 @@ ARMS = [
         "  initCallTraceModel(@[], s.session.getCurrentRRTicks(), s.callTraceStack,",
         C_SESSION,
         "the calltrace pane is never handed the trace: it shows the stack"),
+    # PLAT-49 part B: the rule is the ViewModel's (`currentCallOf`); the
+    # terminal's model takes its answer here.
     Arm("C4", CTVIEW,
-        "    if stack.len > 0 and r.name == stack[0] and r.depth == stack.len - 1:\n"
-        "      result.current = i\n",
-        "    discard\n",
+        "  if at.isSome:\n    result.current = at.get.int\n",
+        "  if false:\n    result.current = at.get.int\n",
         C_LATER,
         "the current call ignores the stack: no row is marked at a stop "
         "inside a call"),
     Arm("C3", PANEVIEWS,
-        '      " #" & $line.index\n',
-        '      ""\n',
+        "    let label = repeat(\"  \", max(row.depth, 0)) & callRowText(row)\n",
+        "    let label = repeat(\"  \", max(row.depth, 0)) & row.callee\n",
         C_SESSION,
         "GPUI's calltrace rows lose the desktop's `#index`"),
     Arm("C2", SHELL,
@@ -458,13 +511,13 @@ ARMS = [
         C_STRIP,
         "a rule drawn through the strip again"),
     Arm("B4", ROLES,
-        "    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryLabel,",
+        "    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,",
         "    srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,",
         C_STRIP,
         "the active tab painted in the inactive tabs' foreground"),
     Arm("B3", ROLES,
-        "                      mono = {raBold, raReverse}, baseSurface = true),",
-        "                      mono = {raBold}, baseSurface = true),",
+        "                      mono = {raBold, raReverse}),\n    srTabInactive:",
+        "                      mono = {raBold}),\n    srTabInactive:",
         C_MONO,
         "in monochrome the active tab loses its reverse video"),
     # --- focus -----------------------------------------------------------------
@@ -491,8 +544,8 @@ ARMS = [
         C_GCHROME,
         "GPUI's focused region bordered in the window background: no outline"),
     Arm("K5", CHROME,
-        '    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold")]',
-        '    @[("color", chromeOf(crTabActiveForeground))]',
+        '    @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold"),\n',
+        '    @[("color", chromeOf(crTabActiveForeground)),\n',
         C_GCHROME,
         "GPUI's active tab loses its weight"),
     # --- the user's two decisions ----------------------------------------------
@@ -538,11 +591,15 @@ ARMS += [
         "      startIndex = 0'i64, height = body + 2 * CallTraceBuffer,\n",
         C_PAGES,
         "a page request always reads the trace's head, not the rows scrolled to"),
-    Arm("P3", CTVIEW,
-        '  let count = " " & $m.total & " call(s)"\n',
-        '  let count = " " & $m.rows.len & " call(s)"\n',
-        C_PAGES,
-        "the title counts the loaded section instead of the whole trace"),
+    # P3 (the title counts the whole trace, not the loaded section) retired
+    # by PLAT-49: a pane has no title row in the terminal any more — the tab
+    # strip names it, as the desktop's GoldenLayout header does — so the
+    # count is drawn nowhere a user can read it. Nor does the desktop draw
+    # one: its call trace uses `totalCallsCount` only to size the scroll
+    # extent (`isonim_calltrace_view`, `.local-calltrace` at count x row
+    # height), never as text, so there is no place on the desktop for the
+    # terminal's count to match. The whole-trace count still drives the
+    # paging P1, P2 and P4 grade.
     Arm("P4", RUNTIME,
         "    let idx = geometry.regionIndexAt(event.row, event.col)\n"
         "    if idx >= 0 and geometry.projection.regions[idx].pane == paneCalltrace and\n",
@@ -658,9 +715,11 @@ ARMS += [
         "  discard\n",
         C_G_ESC,
         "Esc leaves GPUI's drag in flight, its drop still indicated"),
+    # PLAT-49 part B: the bands are GoldenLayout's quarters, the shared
+    # `goldenLayoutZone`; mirroring its x turns the left band into the right.
     Arm("O7", WINGEOM,
-        "    best = dl\n    zone = dzLeftEdge\n",
-        "    best = dl\n    zone = dzRightEdge\n",
+        "                     zone: goldenLayoutZone(x - b.x, y - b.y, b.w, b.h)))",
+        "                     zone: goldenLayoutZone(b.w - 1 - (x - b.x), y - b.y, b.w, b.h)))",
         C_G_HIT,
         "GPUI's left edge band hit-tests as the right one"),
     # --- GPUI's divider drag ----------------------------------------------------
@@ -756,9 +815,11 @@ ARMS += [
         "    has[edge] = false\n",
         C_G_DOCKED,
         "GPUI draws no strips: a pane docked by a drop disappears"),
+    # PLAT-49 part B: a click on the label DOCKS the pane open (the
+    # desktop's click); the reveal is the hover's.
     Arm("D2", WINGEST,
-        "        let shown = beginReveal(layout, was.source)\n",
-        "        let shown = none(Interaction)\n",
+        "        return GestureStep(changed: true, command: some(cmd), status: $cmd)\n",
+        "        return GestureStep(changed: true, status: $cmd)\n",
         C_G_REVEAL,
         "a click on a docked pane's label reveals nothing"),
     Arm("D3", WINGEST,
@@ -1155,7 +1216,16 @@ def check_control_hashes() -> bool:
     return ok
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     only = None
     for arg in sys.argv[1:]:
         if arg == "--needle-scan":

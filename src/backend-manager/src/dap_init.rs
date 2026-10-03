@@ -295,9 +295,11 @@ pub async fn run_dap_init(
     //   1. `trace.bin`              (legacy materialized binary)
     //   2. `<program>.ct` CTFS      (current materialized convention —
     //                                only when not a replay-worker bundle)
-    //   3. `trace.json`             (legacy JSON; default fallback so
-    //                                the error path reports a canonical
-    //                                name)
+    //   3. `trace.ct`               (default fallback so the error path
+    //                                reports the canonical name; a
+    //                                folder holding test-oracle
+    //                                `trace.json` output is refused by
+    //                                the db-backend whatever is sent)
     //
     // For CTFS we send the actual filename rather than a hard-coded
     // `trace.ct` because recorders such as the Ruby native gem name
@@ -328,7 +330,7 @@ pub async fn run_dap_init(
     let trace_file = if trace_folder.join("trace.bin").is_file() {
         "trace.bin"
     } else {
-        ctfs_file.as_deref().unwrap_or("trace.json")
+        ctfs_file.as_deref().unwrap_or("trace.ct")
     };
 
     let mut launch_args = json!({

@@ -4,6 +4,7 @@ import
 
 from ../viewmodel/viewmodels/omnibar_vm import classifyOmnibarQuery,
   desktopKindOf, OmnibarMode, omCommand, omProgram, omSymbol, omAgent, omFile,
+  omRecording,
   omTick
 
 let
@@ -79,7 +80,9 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
   ## its first character, as it always was). The desktop has no tick search:
   ## `desktopKindOf` keeps `#…` a file query here.
   case desktopKindOf(classifyOmnibarQuery($query).mode)
-  of omCommand:
+  of omCommand, omRecording:
+    # (`desktopKindOf` keeps `:open …` a command here: the desktop's "+"
+    # opens a tab on its welcome screen.)
     self.parseCommandQuery(cstring(($query).substr(1)))
   of omProgram:
     SearchQuery(kind: ProgramQuery, value: cstring(($query).substr(1)))

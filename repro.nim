@@ -98,7 +98,6 @@ const
     "codetracer-polkavm-recorder",
     "codetracer-solana-recorder",
     "codetracer-ton-recorder",
-    "codetracer-wasmi-recorder",
     "nix-blockchain-development",
     "noir",
     "runquota",
@@ -593,7 +592,7 @@ package codeTracer:
 
     for recorderName in [
         "cairo", "cardano", "circom", "evm", "flow", "fuel", "leo",
-        "miden", "move", "polkavm", "solana", "ton", "native", "wasmi"]:
+        "miden", "move", "polkavm", "solana", "ton", "native"]:
       let recorderRepo = siblingPath(workspaceRoot,
         "codetracer-" & recorderName & "-recorder")
       let recorderBin = recorderRepo / "target" / "release" /

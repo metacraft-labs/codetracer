@@ -50,7 +50,7 @@ import ../views/shell
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 319
+const ExpectedAssertions = 368
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -138,30 +138,15 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # testable independently of rendering, and the only way to demonstrate that
     # is a case that does not render.
     #
-    # PLAT-45: a profile is now the SIZE the default is derived for, and the
-    # old breakpoint table decides one thing only — how much of the key-hint
-    # strip fits (`hintDensity`). The arrangement is the shared default folded
-    # for the size (`depthFor`), asserted by the cases below and swept by
-    # `tests/test_plat45_fold.nim`.
+    # PLAT-45: a profile is now the SIZE the default is derived for. The
+    # arrangement is the shared default folded for the size (`depthFor`),
+    # asserted by the cases below and swept by `tests/test_plat45_fold.nim`.
+    # (PLAT-49 removed the status line's key-hint strip, the last thing the
+    # old breakpoint table decided.)
     ck selectProfile(80, 24) == lpCompact
     ck selectProfile(120, 40) == lpStandard
     ck selectProfile(200, 50) == lpUltraWide
     ck selectProfile(200, 60) == LayoutProfile(width: 200, height: 60)
-    ck hintDensity(selectProfile(80, 24)) == hdCompact
-    ck hintDensity(selectProfile(120, 40)) == hdStandard
-    ck hintDensity(selectProfile(200, 60)) == hdUltraWide
-
-    # THE BOUNDARIES, on both sides, because a breakpoint table is exactly
-    # where an off-by-one lives and neither of the three sizes above is near
-    # one.
-    ck hintDensity(selectProfile(119, 40)) == hdCompact
-    ck hintDensity(selectProfile(120, 40)) == hdStandard
-    ck hintDensity(selectProfile(179, 40)) == hdStandard
-    ck hintDensity(selectProfile(180, 40)) == hdUltraWide
-    ck hintDensity(selectProfile(200, 34)) == hdCompact     ## height first
-    ck hintDensity(selectProfile(200, 35)) == hdUltraWide
-    ck hintDensity(selectProfile(120, 34)) == hdCompact
-    ck hintDensity(selectProfile(120, 35)) == hdStandard
 
     # PURITY, asserted rather than asserted about: the same arguments give the
     # same answer after every other call in this case, and the answer does not
@@ -337,28 +322,36 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     ck not boldAt(h, 61) and boldAt(h, 73)
     h.dispose()
 
-  test "the status bar's hint strip is profile-dependent":
-    # §3.3.6 asks for a "dynamic" strip. A constant would satisfy every other
-    # assertion in this file, so the difference is asserted directly.
-    ck keyHints(umNormal, lpCompact) != keyHints(umNormal, lpStandard)
-    ck keyHints(umNormal, lpStandard) == keyHints(umNormal, lpUltraWide)
-    ck keyHints(umNormal, lpCompact).contains("F10")
-    ck keyHints(umNormal, lpStandard).contains("step-over")
-    ck keyHints(umCommand, lpCompact) != keyHints(umNormal, lpCompact)
-    # And it reaches the screen: the bottom row of an 80x24 shell is the
-    # Compact strip, and of a 120x40 shell the wide one.
+  test "the status bar carries no key-hint strip, at any profile or mode":
+    # PLAT-49 (the user, 2026-10-01): the status line's key hints
+    # (`'n':step-over …`, `F10:Next …`) are gone — no other front-end has
+    # them. Asserted on the composed screen at both profiles and on the row
+    # function in every input mode, so a strip that came back in one mode or
+    # one width is caught.
     let compact = demoModel(80, 24).shellRows(80, 24)
     let standard = demoModel(120, 40).shellRows(120, 40)
-    ck compact[^1].contains(keyHints(umNormal, lpCompact))
-    ck standard[^1].contains("step-over")
+    for hint in ["step-over", "rev-step", "F10:Next", "F5:Cont", ":help",
+                 "Enter:run", "Esc:cancel", "expand", "Ctrl+F5"]:
+      ck not compact[^1].contains(hint)
+      ck not standard[^1].contains(hint)
+    for mode in UiMode:
+      for product in ProductMode:
+        let row = statusBarText(initStatusBarModel(mode = mode,
+                                                   profile = lpStandard,
+                                                   product = product), 120)
+        ck not row.contains("step-over")
+        ck not row.contains(":run")
+        ck not row.contains("Esc:")
+        ck not row.contains("hjkl")
     # PLAT-16: TWO INDICATORS, IN TWO POSITIONS, AND THE INPUT ONE IS STILL
     # FIRST. `NORMAL` is the input mode and `[DEBUG]` is the product mode; the
     # brackets are what keep them from reading as one two-word mode name.
     # PLAT-45: an 80x24 terminal FOLDED the shared default, and the status
     # line says so right after the two indicators; 120x40 did not, and says
     # nothing.
-    ck compact[^1].startsWith("NORMAL [DEBUG] [folded 2] |")
-    ck standard[^1].startsWith("NORMAL [DEBUG] |")
+    ck compact[^1].startsWith("NORMAL [DEBUG] [folded 2] ")
+    ck standard[^1].startsWith("NORMAL [DEBUG] ")
+    ck not standard[^1].startsWith("NORMAL [DEBUG] [folded")
 
   test "the header and the status bar are exactly `width` cells at every width":
     # A SWEEP, not three sizes. Both rows are built by fitting several fields

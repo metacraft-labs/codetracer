@@ -18,28 +18,31 @@
 ## file would make the layer rule harder to state rather than easier. The same
 ## decision, recorded the same way.
 ##
-## ## THE MARKER COLUMNS ARE FIXED, AND THAT IS CTUI-6'S LESSON APPLIED
+## ## THE ROW, SINCE PLAT-49
 ##
-##     ▼ [MOD] wide_mapping    Dict     [("key_000", 0), ("key_001"…
-##     │ └───┘ └───────────┘   └──┘     └────────────────────────┘
-##     │   │         │           │                  │
-##     │   │         │           │                  the formatted value
-##     │   │         │           the type the engine named
-##     │   │         the name, indented by depth
-##     │   §3.3.4's `[MOD]`, in a field that is FIVE CELLS WIDE ON EVERY ROW
-##     the expander
+##     L ▼ wide_mapping    Dict     [("key_000", 0), ("key_001"…   [MOD]
+##     │ │ └───────────┘   └──┘     └────────────────────────┘     └───┘
+##     │ │       │           │                  │                   │
+##     │ │       │           │                  │                   §3.3.4's badge
+##     │ │       │           │                  the formatted value
+##     │ │       │           the type the engine named
+##     │ │       the name
+##     │ the expander, right before the name it opens (indented by depth with it)
+##     the row's CATEGORY TAG (`state_vm.categoryTag`), colour-coded
 ##
-## The `[MOD]` field is blank rather than absent on an unmodified row. Two
-## reasons, and the second is the one that matters: the name column then starts
-## at the same cell on every row, so a reader scans one edge instead of a ragged
-## one; and a Tier-2 case can read the badge out of a real terminal at a column
-## it computed from the layout rather than by searching the row for a string —
-## which is what `test_real_call_stack.nim` had to learn to do for the two
-## cursor columns, after a search matched ordinary source text.
+## The user's direction (2026-10-01): no unexplained first column — the
+## expander used to sit alone in column 0 with a blank five-cell `[MOD]` field
+## after it on every row — and no separator row per category. So a row now
+## starts with the one-letter tag of the group it belongs to, the expander sits
+## against the name, and `[MOD]` moved to the row's END: still at one computed
+## column on every row (`diffFieldColumn`), so a Tier-2 case reads it there
+## rather than searching the row, blank on an unmodified row, and no longer a
+## gap in front of every name.
 ##
-## THE INDENT MOVES THE NAME, NEVER THE ROW, for exactly the reason
-## `frame_item.FrameRowSpec.indent` records: a badge that appears at column 2 on
-## some rows and column 4 on others is not a column anything can read.
+## THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG OR THE BADGE, for
+## the reason `frame_item.FrameRowSpec.indent` records: a marker that appears
+## at one column on some rows and another on others is not a column anything
+## can read.
 ##
 ## ## Pure
 ##
@@ -120,6 +123,10 @@ type
       ## has no built-in rules either, and a row that quietly resolved every
       ## value to `builtin.none` would still render, just wrongly.
     width*: int
+    tag*: string
+      ## PLAT-49: the row's category tag (one letter), painted first in
+      ## `tagRole`. "" draws a blank cell in its place.
+    tagRole*: SemanticRole
 
 const
   CollapsedGlyph* = "▶"
@@ -130,11 +137,10 @@ const
 
   ModifiedTag* = "[MOD]"
   ModifiedTagCells* = 5
-  DiffFieldCol* = 2
-    ## First cell of the `[MOD]` field. Derived by the pane from this constant
-    ## rather than written down twice.
-  NameFieldCol* = DiffFieldCol + ModifiedTagCells + 1
-    ## First cell of the name field: expander, gap, tag, gap.
+  TagCells = 1
+    ## The category tag's field: one cell, then a gap.
+  NameFieldCol* = TagCells + 1 + 2
+    ## First cell of a top-level row's name: tag, gap, expander, gap.
 
   IndentCells* = 2
     ## Cells one level of depth indents the NAME by.
@@ -248,12 +254,13 @@ proc valueStyleFor*(spec: TreeRowSpec): CellStyle =
 
 proc fieldWidths*(width: int): tuple[name, typ, value: int] =
   ## How the cells after the fixed prefix are shared between name, type and
-  ## value.
+  ## value (the `[MOD]` field at the end keeps its own five cells and a gap).
   ##
   ## Reported rather than recomputed by the caller, because a Tier-1 assertion
   ## about which column a field lands in and the paint of that field have to
   ## agree — the drift `frame_item.FrameItem.locationCol` exists to prevent.
-  let remaining = width - NameFieldCol - ReservedTrailingCells
+  let remaining = width - NameFieldCol - ReservedTrailingCells -
+                  (ModifiedTagCells + 1)
   if remaining <= 0:
     return (0, 0, 0)
   var name = min(max(remaining div 3, MinimumNameCells), MaximumNameCells)
@@ -298,10 +305,10 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
         spans.add StyledSpan(text: fitted, style: spanStyle)
         used += cellWidthOf(fitted)
 
-  put(expanderGlyph(spec), (if spec.expandable: ExpanderStyle
-                            else: DefaultCellStyle))
-  put(" ", DefaultCellStyle)
-  put(diffTagText(spec), diffTagStyle(spec))
+  # THE CATEGORY TAG, then a gap.
+  put((if spec.tag.len > 0: spec.tag else: " "),
+      (if spec.tag.len > 0: CellStyle(role: spec.tagRole)
+       else: DefaultCellStyle))
   put(" ", DefaultCellStyle)
 
   let widths = fieldWidths(width)
@@ -310,28 +317,45 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
   case spec.kind
   of trkScope:
     # A scope root spans the whole row: its title and, muted, how many members
-    # it has. There is no value column to share with.
+    # it has. (The variables pane no longer emits one, PLAT-49; kept for a
+    # caller that builds its own spec.)
+    put(expanderGlyph(spec), (if spec.expandable: ExpanderStyle
+                              else: DefaultCellStyle))
+    put(" ", DefaultCellStyle)
     put(spec.name.toUpperAscii(), ScopeTitleStyle)
     if spec.memberCount >= 0:
       put(" " & $spec.memberCount, ScopeCountStyle)
   of trkMore:
-    put(indent & moreRowText(spec.memberCount), MoreRowStyle)
+    put(indent & "  " & moreRowText(spec.memberCount), MoreRowStyle)
   of trkNote:
-    put(indent & spec.name, NoteStyle)
+    put(indent & "  " & spec.name, NoteStyle)
   of trkVariable:
-    let nameText = indent & spec.name
-    put(truncateToCells(nameText, widths.name), nameStyleFor(spec))
-    if used < NameFieldCol + widths.name:
-      put(repeat(' ', NameFieldCol + widths.name - used), DefaultCellStyle)
+    # The expander sits against the name, both moved by the indent; the name
+    # FIELD still ends at one column on every row so type and value align.
+    put(indent, DefaultCellStyle)
+    put(expanderGlyph(spec), (if spec.expandable: ExpanderStyle
+                              else: DefaultCellStyle))
+    put(" ", DefaultCellStyle)
+    let nameEnd = NameFieldCol + widths.name
+    put(truncateToCells(spec.name, max(0, nameEnd - used)),
+        nameStyleFor(spec))
+    if used < nameEnd:
+      put(repeat(' ', nameEnd - used), DefaultCellStyle)
     put(" ", DefaultCellStyle)
     if widths.typ > 0:
       let typeText = truncateToCells(spec.typeName, widths.typ)
       put(typeText, TypeStyle)
-      let typeEnd = NameFieldCol + widths.name + 1 + widths.typ
+      let typeEnd = nameEnd + 1 + widths.typ
       if used < typeEnd:
         put(repeat(' ', typeEnd - used), DefaultCellStyle)
       put(" ", DefaultCellStyle)
     put(formattedValue(spec, widths.value), valueStyleFor(spec))
+    # §3.3.4's `[MOD]`, at the row's end, in a field blank when unmodified.
+    let badgeCol = width - ReservedTrailingCells - ModifiedTagCells
+    if badgeCol > used:
+      put(repeat(' ', badgeCol - used), DefaultCellStyle)
+    if used == badgeCol:
+      put(diffTagText(spec), diffTagStyle(spec))
 
   if used < width:
     put(repeat(' ', width - used), DefaultCellStyle)
@@ -360,9 +384,12 @@ proc treeRowText*(spec: TreeRowSpec): string =
   rowText(treeRow(spec))
 
 proc nameFieldColumn*(): int =
-  ## Where a row's name starts. A proc rather than a bare constant so a caller
-  ## reads it from this module instead of adding two constants together itself.
+  ## Where a top-level row's name starts. A proc rather than a bare constant
+  ## so a caller reads it from this module instead of adding two constants
+  ## together itself.
   NameFieldCol
 
-proc diffFieldColumn*(): int =
-  DiffFieldCol
+proc diffFieldColumn*(width: int): int =
+  ## Where the `[MOD]` field starts in a row `width` cells wide: at the row's
+  ## end, before the reserved trailing cell (PLAT-49).
+  width - ReservedTrailingCells - ModifiedTagCells

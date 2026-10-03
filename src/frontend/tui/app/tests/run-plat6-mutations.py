@@ -431,13 +431,12 @@ MUTATIONS = [
         "a cell on a dock strip resolves to nothing",
     ),
     Mutation(
-        "M2", BIND,
-        "  if dt < bandV and dt < best:\n"
-        "    best = dt\n"
-        "    zone = dzTopEdge",
-        "  if false:\n"
-        "    best = dt\n"
-        "    zone = dzTopEdge",
+        # PLAT-49 part B: the body's zones are GoldenLayout's proportions,
+        # computed by the shared rule (`layout_interaction.goldenLayoutZone`)
+        # the binding's hit-test calls — the top band lives there now.
+        "M2", INTER,
+        "  elif fy <= GoldenLayoutEdgeShare: dzTopEdge\n",
+        "  elif false: dzTopEdge\n",
         C_ZONES,
         "the top edge band is unreachable, so dzTopEdge is never produced",
     ),
@@ -537,8 +536,8 @@ MUTATIONS = [
     # --- every drop-target kind, through the binding -----------------------
     Mutation(
         "M7", BIND,
-        "    let sameCell = event.row == b.pressRow and event.col == b.pressCol",
-        "    let sameCell = true",
+        "    let past = b.dragThresholdPassed(event.row, event.col)",
+        "    let past = false",
         C_KINDS,
         "every release is treated as a click, so no drop ever commits",
     ),
@@ -1669,7 +1668,16 @@ def run_suite(suite: str = SUITE) -> RunResult:
     return res
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
     # dropped, and the run became a full, file-mutating grade: `--only=A,B`
     # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`

@@ -3,17 +3,30 @@
 ##
 ## Pure (no renderer, no shim), so the portable suites that read committed
 ## records can import it. The GPUI gutter is `pointer lane & mark lane &
-## number` (`gpui/app/leaves.renderEditorRow`), the order the desktop editor
-## and the terminal use; the lanes' glyphs are skipped and the number is the
-## first run of digits. Until 2026-09-23 the pointer followed the number and
-## four suites each carried their own leading-digits loop, which a reordered
-## gutter would have broken four times.
+## lane gap & right-aligned number` (`gpui/app/leaves.gutterRuns`), the order
+## the desktop editor and the terminal use; the lanes' glyphs are skipped and
+## the number is the first run of digits. Until 2026-09-23 the pointer followed
+## the number and four suites each carried their own leading-digits loop, which
+## a reordered gutter would have broken four times.
+##
+## The LANE GAP arrived on 2026-10-03 with `PLAT35-F13` / `PLAT35-F14` (the
+## padding moved from in front of the lanes to between them and the number, so
+## that each lane has a fixed cell index). It costs one more byte before the
+## first digit and `MaxLaneBytes` below is what that budget is spent against.
 
 import std/strutils
 
 const MaxLaneBytes = 12
-  ## The two lanes' glyphs are at most a few UTF-8 sequences; a row whose
-  ## first digit is further in than this is not a gutter.
+  ## The two lanes' glyphs, the lane gap and the number field's padding are at
+  ## most a few UTF-8 sequences; a row whose first digit is further in than
+  ## this is not a gutter.
+  ##
+  ## The worst case the GPUI gutter can produce is `▶` (3 bytes) + `●` (3) +
+  ## the ASCII lane gap (1) + the padding of a four-digit number field (3) =
+  ## 10, so a 9999-line file still reads. It must also stay BELOW 16: the
+  ## negative case `gutterLineOf("def f(): return 1") == -1` holds because the
+  ## `1` sits at byte 16, and a limit that reached it would turn a line of code
+  ## into line 1.
 
 func gutterLineOf*(text: string): int =
   ## The line number a row's text starts with, or -1.

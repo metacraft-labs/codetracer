@@ -10,8 +10,7 @@
 #      does not — a private helper no boundary crossing mentions, which
 #      only offline re-execution can recover (spec §6);
 #   3. for `vault_apply`, that the recording carries its spec §3.3 / §3.4
-#      state in BOTH carriers: the `boundary_state.json` sidecar and the
-#      in-stream `wasm-host-state` records M44b added.
+#      state as in-stream `wasm-host-state` records.
 #
 # The parity property itself — trace A from the recording equals trace B
 # from a direct wazero run — is asserted in
@@ -36,6 +35,11 @@ cd "$FIXTURE_DIR"
 WASM_RECORDER="${CODETRACER_WASM_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-recorder}"
 
 missing=()
+
+# shellcheck source=ci/lib/recording-dump.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$CODETRACER_ROOT/ci/lib/recording-dump.sh"
+resolve_ct_print
 
 WAZERO_BIN="${CODETRACER_WAZERO_BIN:-}"
 if [ -z "$WAZERO_BIN" ] && [ -x "$WASM_RECORDER/wazero" ]; then
@@ -72,7 +76,7 @@ MATERIALIZED="$("$CODETRACER_ROOT/scripts/materialize-recording.sh" wasm-parity-
 
 for entry in "${CASES[@]}"; do
 	IFS=':' read -r name program _calls _helper <<<"$entry"
-	[ -d "$MATERIALIZED/modules/$name/$program.ct" ] ||
+	[ -f "$MATERIALIZED/modules/$name/$program.ct" ] ||
 		missing+=("- the pipeline produced no modules/$name/$program.ct")
 	[ -f "$MATERIALIZED/modules/$name/module/$name.wasm" ] ||
 		missing+=("- the pipeline produced no modules/$name/module/$name.wasm")
@@ -130,21 +134,15 @@ for entry in "${CASES[@]}"; do
 	echo "[verify]     ok: the trace names the private helper '$helper'"
 
 	if [ "$name" = "vault_apply" ]; then
-		if [ ! -f "$dir/$program.ct/boundary_state.json" ]; then
-			echo "[verify]     FAIL: no boundary_state.json (spec §3.3/§3.4 sidecar)" >&2
+		# The spec §3.3/§3.4 state rides in the recording's event stream —
+		# its only carrier, and the one a streaming consumer reads.
+		if ! "$CT_PRINT" --full "$dir/$program.ct" | grep -q 'wasm-host-state'; then
+			echo "[verify]     FAIL: the recording carries no host-state record." >&2
+			echo "[verify]           Its module imports its memory, so it cannot replay without one." >&2
 			failed=1
 			continue
 		fi
-		echo "[verify]     ok: the spec §3.3/§3.4 sidecar is present"
-		# M44b: the same state also rides in the event stream, which is
-		# the only carrier a streaming consumer can use.
-		if ! grep -q 'wasm-host-state' "$dir/$program.ct/trace.json"; then
-			echo "[verify]     FAIL: trace.json carries no in-stream host-state record." >&2
-			echo "[verify]           It was made by a pre-M44b producer; re-run ./regenerate.sh" >&2
-			failed=1
-			continue
-		fi
-		echo "[verify]     ok: the same state rides in the event stream (M44b)"
+		echo "[verify]     ok: the spec §3.3/§3.4 state rides in the event stream"
 	fi
 done
 

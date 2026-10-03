@@ -74,7 +74,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 114
+const ExpectedAssertions = 115
 
 var countedAssertions = 0
 
@@ -114,7 +114,7 @@ const
   ChecksCalltraceCursor = 4
   ChecksSameFileArm = 10
   ChecksLatency = 7
-  ChecksShellIntegration = 6
+  ChecksShellIntegration = 7
     ## PLAT-45 added one: the call stack is a TAB of its stack in the shared
     ## default, and the strip naming it is asserted.
   ChecksSummary = 4
@@ -697,7 +697,10 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # PLAT-47: the pane's tab reads `Call Trace` (it lists the recording's
       # trace when there is one; this model carries only a stack).
       ck shellText[stackArea.row].contains(" Call Trace ")
-      let standalone = callStackText(deepModel, inner, paneRows)
+      # PLAT-49: the painter is handed the rectangle FROM THE STRIP'S ROW
+      # (`shell.paintPane`'s `underStrip`), so its own heading lands under the
+      # strip and its row `i` is the shell's row `i` of the box.
+      let standalone = callStackText(deepModel, inner, frame.box.height)
       var matched = 0
       var separators = 0
       for i in 0 ..< stackArea.height:
@@ -712,7 +715,8 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
           elif at == stackArea.col + stackArea.width - 1:
             edge = $r
           at += w
-        if i >= 1 and i - 1 < standalone.len and slice == standalone[i - 1]:
+        if i >= 1 and i <= paneRows and i < standalone.len and
+           slice == standalone[i]:
           inc matched
         # The right divider runs the rectangle's full height; where it meets
         # the bottom divider it is a junction glyph (`shell.junctionGlyph`).
@@ -721,9 +725,12 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
           inc separators
       ck matched == paneRows
       ck separators == stackArea.height
-      # …and the pane still says what CTUI-3's plain title row said, so every
-      # assertion written against that row keeps reading it.
-      ck shellText[paneTop].contains(CallStackTitle)
+      # …and the pane's first row is its TAB STRIP, naming it (PLAT-49: no
+      # title row inside a pane; the strip is what identifies it).
+      ck shellText[stackArea.row].contains("Call Trace") and
+         not shellText[stackArea.row].contains(CallStackTitle)
+      # …and the painter's heading never shows through below it.
+      ck not shellText[paneTop].contains(CallStackTitle)
 
   test "every fixture was examined, and the assertion tally proves it":
     ck examinedFixtures == 1

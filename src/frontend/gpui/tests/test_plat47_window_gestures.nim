@@ -36,7 +36,7 @@ import gpui/chrome
 const
   W = 1440
   H = 900
-  ExpectedAssertions = 105
+  ExpectedAssertions = 124
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -107,10 +107,14 @@ suite "PLAT-47: the window's geometry is total and exact":
   test "the hit-test: a tab, the strip past the tabs, the four bands, the centre, the margins":
     let files = g0.nodeOf("fileTree")
     ck files.stacked and files.tabs.len == 3
-    let (vx, vy) = centre(files.tabs[1])
+    # PLAT-49 part B: a tab's LEFT half inserts before it, its right half
+    # after it (GoldenLayout's header rule).
+    let (vx, vy) = (files.tabs[1].x + 2, centre(files.tabs[1])[1])
     let onVcs = g0.pointerAt(vx, vy)
     ck onVcs.isSome and onVcs.get.zone == dzTabStrip
     ck onVcs.get.path == files.path & "/1"
+    let rightOfVcs = g0.pointerAt(files.tabs[1].x + files.tabs[1].w - 3, vy)
+    ck rightOfVcs.isSome and rightOfVcs.get.path == files.path & "/2"
     let past = g0.pointerAt(files.tabs[^1].x + files.tabs[^1].w + 3, vy)
     ck past.isSome and past.get.zone == dzCentre
     let editor = g0.nodeOf("editor")
@@ -119,8 +123,14 @@ suite "PLAT-47: the window's geometry is total and exact":
     ck g0.pointerAt(cx, cy).get.zone == dzCentre
     ck g0.pointerAt(b.x + 2, cy).get.zone == dzLeftEdge
     ck g0.pointerAt(b.x + b.w - 3, cy).get.zone == dzRightEdge
-    ck g0.pointerAt(cx, b.y + 2).get.zone == dzTopEdge
-    ck g0.pointerAt(cx, b.y + b.h - 3).get.zone == dzBottomEdge
+    # The editor meets the layout's top and bottom edges: there, within
+    # GoldenLayout's 50 px ground band, a drop splits the WHOLE layout
+    # (PLAT-49 part B review); just inside the band, the pane's own quarter.
+    ck g0.pointerAt(cx, b.y + 2).get.zone == dzRootTop
+    ck g0.pointerAt(cx, b.y + b.h - 3).get.zone == dzRootBottom
+    ck g0.pointerAt(cx, max(b.y, g0.inner.y + 50) + 2).get.zone == dzTopEdge
+    ck g0.pointerAt(cx, min(b.y + b.h, g0.inner.y + g0.inner.h - 50) - 3).get.zone ==
+       dzBottomEdge
     ck g0.pointerAt(3, H div 2).get.zone == dzOutsideLeft
     ck g0.pointerAt(W - 3, H div 2).get.zone == dzOutsideRight
     ck g0.pointerAt(W div 2, H - 3).get.zone == dzOutsideBottom
@@ -134,7 +144,8 @@ suite "the editor pane shows whole rows":
 
   test "the editor's fetch window is the rows its pane shows at the row pitch":
     # Every row a full line high (`GpuiEditorRowPx`): as many as fit below
-    # the heading and the source statement, and not one more — a window
+    # the source statement (no heading since PLAT-49: the pane's tab strip,
+    # outside its body, names it), and not one more — a window
     # holding more was squeezed into the pane, clipping every descender.
     let body = g0.nodeOf("editor").body
     let rows = editorRowsOf(g0)
@@ -192,7 +203,10 @@ suite "PLAT-47 deliverable 6: dragging a tab — the drop indication":
   let state = g0.nodeOf("state")
   let (sx, sy) = centre(state.tabs[0])      # the Variables tab
   let editor = g0.nodeOf("editor")
-  let eb = editor.body
+  # A BARE pane's drop area is its one-tab strip and its body together
+  # (PLAT-49: every pane box has a strip; a bare pane's is not a join zone).
+  let eb = PxRect(x: editor.body.x, y: editor.strip.y, w: editor.body.w,
+                  h: editor.strip.h + editor.body.h)
 
   test "a split: the half of the target pane on the drop's side":
     var gest = idle()
@@ -202,7 +216,9 @@ suite "PLAT-47 deliverable 6: dragging a tab — the drop indication":
     let ind = gest.indication()
     ck ind.kind == diSplitHalf and ind.side == leRight
     let (tint, caret) = g0.dropIndicationRects(ind)
-    ck tint == halfOf(eb, leRight)
+    # The tint is the half of the pane's CONTENT (below its strip), as
+    # GoldenLayout highlights half of a stack's content area.
+    ck tint == halfOf(editor.body, leRight)
     ck caret.isEmpty
     # Release: the split the indication named is what is committed.
     let up = gest.pointerUp(start, g0, eb.x + eb.w - 3, eb.y + eb.h div 2)
@@ -223,13 +239,16 @@ suite "PLAT-47 deliverable 6: dragging a tab — the drop indication":
     discard gest.pointerMove(start, g0, cx, cy)
     let ind = gest.indication()
     ck ind.kind == diWholeNode
-    ck g0.dropIndicationRects(ind).tint == eb
+    ck g0.dropIndicationRects(ind).tint == editor.body
 
   test "a join into a stack: its tab strip, and a caret at the slot":
     var gest = idle()
     discard gest.pointerDown(start, g0, sx, sy)
     let ct = g0.nodeOf("calltrace")
-    let (tx, ty) = centre(ct.tabs[1])
+    # The LEFT half of tab 1: GoldenLayout inserts before a tab whose
+    # midpoint the pointer has not passed (`goldenLayoutInsertsAfter`).
+    let tx = ct.tabs[1].x + ct.tabs[1].w div 4
+    let ty = ct.tabs[1].y + ct.tabs[1].h div 2
     discard gest.pointerMove(start, g0, tx, ty)
     let ind = gest.indication()
     ck ind.kind == diTabSlot and ind.slot == 1
@@ -314,13 +333,34 @@ suite "a docked pane stays on screen: its strip, its reveal, its way back":
     let (lx, ly) = centre(st.slots[0].rect)
     ck gd.pointerAt(lx, ly).get.zone == dzOutsideLeft
 
-  test "a click on the label reveals the pane over the tree; a second click hides it":
+  test "a click on the label docks the pane open; a second closes it; a hover previews it":
+    # PLAT-49 part B (the user's direction): A CLICK DOCKS THE PANE OPEN —
+    # beside the tree, which gives up a band for it — and a second click
+    # closes it; the overlay over the tree is the HOVER's preview.
     let (lx, ly) = centre(gd.strips[0].slots[0].rect)
     var gest = idle()
     discard gest.pointerDown(dl, gd, lx, ly)
     ck gest.kind == gkDragTab and gest.fromStrip
     let up = gest.pointerUp(dl, gd, lx + 1, ly)
-    ck up.changed and up.command.isNone
+    ck up.changed and up.command.isSome
+    ck up.command.get.autoHideDirection == ahOpen
+    ck not gest.revealing
+    let opened = apply(dl, up.command.get)
+    ck opened.kind == loApplied
+    let go = geometryOf(opened.layout)
+    ck go.openDockPane == "state"
+    ck go.openDock.x == gd.inner.x and go.openDock.h == gd.inner.h
+    ck go.inner.x == go.openDock.x + go.openDock.w + ChromeGapPx
+    for n in go.nodes:
+      if n.kind == gnTabs:
+        ck n.rect.x >= go.inner.x
+    var gest2 = idle()
+    discard gest2.pointerDown(opened.layout, go, lx, ly)
+    let closeUp = gest2.pointerUp(opened.layout, go, lx, ly)
+    ck closeUp.command.isSome and
+       closeUp.command.get.autoHideDirection == ahClose
+    # The hover's preview: over the tree, against its edge.
+    ck gest.previewReveal(dl, paneState)
     ck gest.revealing and gest.reveal.pane == paneState and
        gest.reveal.edge == leLeft
     let rr = gd.revealRectOf(leLeft)
@@ -332,21 +372,17 @@ suite "a docked pane stays on screen: its strip, its reveal, its way back":
     ck gest.revealing
     discard gest.pointerUp(dl, gd, rx, ry)
     ck gest.revealing
-    # A second click on its label hides it.
-    discard gest.pointerDown(dl, gd, lx, ly)
-    let again = gest.pointerUp(dl, gd, lx, ly)
-    ck again.changed and not gest.revealing
+    # The pointer leaving ends the preview (`dismissReveal`).
+    ck gest.dismissReveal(paneState)
+    ck not gest.revealing
 
   test "Esc, or a press outside the revealed pane, hides it; the layout never moved":
-    let (lx, ly) = centre(gd.strips[0].slots[0].rect)
     var gest = idle()
-    discard gest.pointerDown(dl, gd, lx, ly)
-    discard gest.pointerUp(dl, gd, lx, ly)
+    ck gest.previewReveal(dl, paneState)
     ck gest.revealing
     ck gest.cancelGesture().changed
     ck not gest.revealing
-    discard gest.pointerDown(dl, gd, lx, ly)
-    discard gest.pointerUp(dl, gd, lx, ly)
+    ck gest.previewReveal(dl, paneState)
     ck gest.revealing
     # A point in the tree well right of the revealed third.
     let (ex, ey) = (gd.inner.x + gd.inner.w - 40, gd.inner.y + gd.inner.h div 4)

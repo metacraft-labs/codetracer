@@ -42,10 +42,11 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[json, os, strutils]
+import std/[json, os, strutils, tables]
 
 import codetracer_embed
 import headless_session
+from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
 
 # QUALIFIED, and the qualification is load-bearing: `EventLogRow` is declared
 # TWICE in this module's scope — `viewmodel/store/types.EventLogRow` is the
@@ -345,11 +346,19 @@ proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
   ## current call.
   let store = s.session.session.store
   var rows: seq[CallTraceRow] = @[]
+  # PLAT-49 part B: each row carries the ViewModel's `CallRow` — its
+  # arguments and return value from the store's `calltrace.args`, which the
+  # shared decoder fills (`replay_data_store.applyCalltraceResponse`).
+  let args = store.calltrace.args.val
   for line in store.calltrace.lines.val:
+    let a = if line.callKey.len > 0 and line.callKey in args:
+              args[line.callKey]
+            else: @[]
     rows.add CallTraceRow(
       index: line.index,
       name: (if line.displayName.len > 0: line.displayName else: line.name),
-      depth: line.depth, rrTicks: line.rrTicks)
+      depth: line.depth, rrTicks: line.rrTicks,
+      call: callRowOf(line, a))
   initCallTraceModel(rows, s.session.getCurrentRRTicks(), s.callTraceStack,
                      firstIndex = store.calltrace.startLineIndex.val,
                      total = int(store.calltrace.totalCallsCount.val),
@@ -470,6 +479,10 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   rt.app.tick = int(tick)
   rt.app.totalTicks = int(s.bounds.maxTick)
   let sess = s
+  # PLAT-49 part B: THE COLUMNS ARE THE USER'S, not the stop's — the model is
+  # rebuilt at every stop, and the columns shown, hidden and reordered
+  # (`:column-*`, the omnibar's column commands) are carried across.
+  let keptColumns = rt.app.eventLog.columns
   rt.app.eventLog = eventLogModelFor(
     proc(offset, limit: int): EventPage =
       var rows: seq[EventRow] = @[]
@@ -479,6 +492,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
         discard
       EventPage(rows: rows, atEnd: rows.len < limit),
     currentTick = tick, pageSize = EventLogPageSize)
+  if keptColumns.order.len > 0:
+    rt.app.eventLog.columns = keptColumns
   # THE PANE DOES NOT FETCH WHILE IT PAINTS — `app/views/event_log.nim`'s
   # header states that as the rule that keeps painting a pure function of what
   # is held — so a caller that wants rows asks for them. A caller that forgets
@@ -520,13 +535,62 @@ proc setFlowOverlay*(s: TuiSession; shown: bool) =
   if not s.session.session.editorVM.isNil:
     s.session.session.editorVM.showFlowOverlay.val = shown
 
+proc toggleCallChildren*(s: TuiSession; rt: TuiRuntime; index: int64) =
+  ## PLAT-49 part B: expand or collapse the children of the call at trace
+  ## `index` — the desktop's toggle (`CalltraceVM.toggleExpandCallChildren`:
+  ## `ct/expand-calls` or `ct/collapse-calls` for the call's key, then the
+  ## section again) — and redraw the pane from the reloaded section.
+  let store = s.session.session.store
+  let at = index - store.calltrace.startLineIndex.val
+  let lines = store.calltrace.lines.val
+  if at < 0 or at >= lines.len.int64:
+    return
+  let line = lines[at.int]
+  if not line.hasChildren:
+    return
+  let command = if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"
+  try:
+    # FIRE AND FORGET, as the desktop's `backend.send` is: the engine sends
+    # no response to `ct/expand-calls` / `ct/collapse-calls` (measured — a
+    # blocking `sendDapRequest` never returned), only the changed section
+    # the next load reads.
+    s.session.backend.sendDapRequestNoResponse(command, %*{
+      "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
+    discard s.session.backend.drainEvents()
+    let body = rt.paneBodyRows(paneCalltrace)
+    let start = max(0, rt.app.callTrace.visibleTop(max(1, body)) -
+                       CallTraceBuffer)
+    s.session.requestAndLoadCalltrace(
+      startIndex = start.int64, height = max(1, body) + 2 * CallTraceBuffer,
+      depth = RecordingCalltraceDepth)
+  except CatchableError as e:
+    rt.app.notification = "could not " &
+      (if line.isExpanded: "collapse" else: "expand") & " the call: " & e.msg
+    return
+  rt.app.callTrace = s.callTraceModelOf(rt)
+
 proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
   ## What the host does with one token's outcome, in ONE place so the shipped
   ## loop (`main.nim`) and the suites that drive the host run the same rule: a
   ## navigation is pumped and then refreshed; a change to what the session
   ## holds without a move (a breakpoint) is refreshed and NOT pumped — a pump
   ## there would wait on a `stopped` event no engine sends.
-  if outcome.awaitsMove:
+  if outcome.jumpsToCall:
+    # PLAT-49 part B: a click on a call-trace row goes to that call, as the
+    # desktop's click does (`CalltraceVM.doubleClickEntry`'s
+    # `ct/calltrace-jump`); `calltraceJump` waits for the move itself.
+    let store = s.session.session.store
+    let at = outcome.callIndex - store.calltrace.startLineIndex.val
+    let lines = store.calltrace.lines.val
+    if at >= 0 and at < lines.len.int64:
+      try:
+        s.session.calltraceJumpByLine(lines[at.int])
+      except CatchableError as e:
+        rt.app.notification = "could not go to the call: " & e.msg
+      s.refresh(rt)
+  elif outcome.togglesCall:
+    s.toggleCallChildren(rt, outcome.callIndex)
+  elif outcome.awaitsMove:
     s.pumpMove()
     s.refresh(rt)
   elif outcome.refreshesSession:

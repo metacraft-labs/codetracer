@@ -95,9 +95,44 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 615
-  ## 605 -> 615 (PLAT-48): one more non-test file under `src/frontend/gpui/`
-  ## — `window_top_bar.nim` — ten assertions.
+const ExpectedAssertions = 625
+  ## 615 -> 625 (PLAT-35), RE-DERIVED 2026-10-02 against `6fa0bdd89`: ONE more
+  ## non-test file under `src/frontend/gpui/` — `host/pixel_capture.nim` — by
+  ## the second route in the header above, ten assertions in the registry scan.
+  ##
+  ## **RE-DERIVED FROM SCRATCH ON THIS BASE, NOT ARITHMETIC'D OFF THE OLD
+  ## ONE.** PLAT-35 was first written against `d34c6e087`, where this constant
+  ## read 605 and PLAT-35 moved it to 615. That decomposition is VOID here:
+  ## PLAT-48 independently moved it 605 -> 615 for a file of its own
+  ## (`window_top_bar.nim`), so the two changes claim the same number for
+  ## different files and the sum is not a number either of them measured. It
+  ## was therefore measured again, by the same control the earlier pass used:
+  ##
+  ##   * the rule, with BOTH of its inputs re-measured on this base rather
+  ##     than carried over: the suite itself prints *"window.nim exports 15
+  ##     procs"* (`../isonim-gpui/src/isonim_gpui/window.nim` at `47ea664`,
+  ##     unchanged by the rebase) and `AmbiguousWindowNames` excludes 6, so
+  ##     `subjects.len == 9`; the per-file body of *"no source file CALLS the
+  ##     window registry"* asserts `not hasBlockComment` once and
+  ##     `key notin idents` once per subject — `1 + 9 = 10` per file. The
+  ##     `checkpoint` beside the second is not a `ck` and does not count.
+  ##   * the file set: 15 scanned files at `6fa0bdd89`, 16 with PLAT-35, the
+  ##     one addition being `host/pixel_capture.nim`. (46 `.nim` files live
+  ##     under `src/frontend/gpui/` in total; the scan excludes `/tests/`.)
+  ##   * the control, ONE BINARY AND ONE VARIABLE: with the rest of PLAT-35 in
+  ##     place and only `host/pixel_capture.nim` moved out of the scanned
+  ##     directory — the SAME compiled suite re-run, so the scan's code could
+  ##     not have changed between the two readings — it printed
+  ##     `scanned 15 source files` and `CHECKS: 615`. Putting the file back
+  ##     printed `scanned 16` and `CHECKS: 625`.
+  ##
+  ## **AND THE CONTROL'S 615 IS UPSTREAM'S OWN COMMITTED NUMBER AT
+  ## `6fa0bdd89`**, which is what makes the delta attributable rather than
+  ## merely consistent: the file-set-minus-one reading reproduces the base
+  ## revision's tally exactly, so the +10 is this one file's contribution
+  ## under the existing rule and nothing else. A bare `615 + 10` could not
+  ## have distinguished that from a 20-for-10 swap, and could not have
+  ## noticed that the 605 -> 615 step it was adding to was somebody else's.
   ## 585 -> 605 (PLAT-47 part B): two more non-test files under
   ## `src/frontend/gpui/` — `window_geometry.nim` and `window_gestures.nim` —
   ## ten assertions each.

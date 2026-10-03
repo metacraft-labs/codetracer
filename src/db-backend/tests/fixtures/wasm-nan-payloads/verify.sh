@@ -25,6 +25,11 @@ WASM_RECORDER="${CODETRACER_WASM_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-
 
 missing=()
 
+# shellcheck source=ci/lib/recording-dump.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$CODETRACER_ROOT/ci/lib/recording-dump.sh"
+resolve_ct_print
+
 WAZERO_BIN="${CODETRACER_WAZERO_BIN:-}"
 if [ -z "$WAZERO_BIN" ] && [ -x "$WASM_RECORDER/wazero" ]; then
 	WAZERO_BIN="$WASM_RECORDER/wazero"
@@ -50,7 +55,7 @@ fi
 MATERIALIZED="$("$CODETRACER_ROOT/scripts/materialize-recording.sh" wasm-nan-payloads)"
 RECORDING="$MATERIALIZED/nan-payloads.ct"
 MODULE="$MATERIALIZED/module/nan_payloads.wasm"
-for required in "$RECORDING/trace.json" "$MODULE"; do
+for required in "$RECORDING" "$MODULE"; do
 	[ -e "$required" ] || {
 		echo "[verify] the recording pipeline produced no $required" >&2
 		exit 1
@@ -109,9 +114,11 @@ if (JSON.stringify(want) !== JSON.stringify(got)) {
 	exit 1
 fi
 echo "[verify]     ok: the page asked for the four reviewed bit patterns"
+DUMP="$(mktemp)"
+recording_full_json "$RECORDING" >"$DUMP"
 for want in "${expected_bits[@]}"; do
 	# Two occurrences each: the import argument and the export result.
-	count="$(grep -o -- "$want" "$RECORDING/trace.json" | wc -l)"
+	count="$(grep -o -- "$want" "$DUMP" | wc -l)"
 	if [ "$count" -lt 2 ]; then
 		echo "[verify] MISSING: $want appears $count time(s), expected 2" >&2
 		failed=1
@@ -119,12 +126,19 @@ for want in "${expected_bits[@]}"; do
 		echo "[verify]     ok: $want x$count"
 	fi
 done
-# A NaN that reached JSON as `null` is the loss this demo exists to detect:
-# a producer that carries boundary floats as JavaScript `Number`s instead of
-# as bit patterns. It must not appear in a recording made by the current
-# producer.
-if grep -q '"f":"null"' "$RECORDING/trace.json"; then
-	echo '[verify] the recording contains a NaN lost to JSON ("f":"null")' >&2
+# A NaN that reached the wire as `null` is the loss this demo exists to
+# detect: a producer that carries boundary floats as JavaScript `Number`s
+# instead of as bit patterns. The recording keeps a float it cannot parse as
+# a `Raw` value with the producer's exact text, so the loss shows up as a
+# `Raw` value spelled `null`. It must not appear in a recording made by the
+# current producer.
+if node -e '
+const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+const raw = [];
+for (const e of d.events) for (const v of e.vars || []) if (v.value && v.value.kind === "Raw") raw.push(v.value.r);
+process.exit(raw.includes("null") ? 0 : 1);
+' "$DUMP"; then
+	echo '[verify] the recording contains a NaN lost to JSON (a Raw "null")' >&2
 	echo "[verify] the producer in this tree carries boundary floats as JS numbers" >&2
 	failed=1
 fi

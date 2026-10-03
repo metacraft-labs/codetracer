@@ -568,6 +568,18 @@ def restore(rel: str, original: str):
     (REPO / rel).write_text(original)
 
 
+def without_checkout_path(text: str) -> str:
+    """`text` with this checkout's absolute prefix removed, so a `because`
+    names `src/...` and reads the same from every worktree.
+
+    A NORMALISATION AND NOT A TRUNCATION (`run-plat37-window-mutations.py`'s
+    rule): the file, the line, the column and the message survive; only the
+    part that is a property of the disk is dropped. Applied to BOTH SIDES —
+    the derived string and the text `grade` compares it against.
+    """
+    return text.replace(str(REPO) + os.sep, "").replace(str(REPO) + "/", "")
+
+
 def load_because() -> dict:
     if BECAUSE_FILE.exists():
         return json.loads(BECAUSE_FILE.read_text())
@@ -601,7 +613,7 @@ def derive(selected: list[Arm]) -> int:
                   f"cannot derive a `because`.")
             print("   verdict was:", verdict_for(out, arm.kills))
             continue
-        text = re.sub(r"\s+", " ", checks[0]).strip()
+        text = without_checkout_path(re.sub(r"\s+", " ", checks[0]).strip())
         for spelling in COUNT_SPELLINGS:
             if spelling in text:
                 print(f"{arm.name}: the derived `because` quotes "
@@ -671,7 +683,7 @@ def grade(selected: list[Arm]) -> int:
         raw = failure_lines_for(out, arm.kills)
         lines = " ".join(ln[ln.index("Check failed:"):] if "Check failed:" in ln
                          else ln for ln in raw)
-        lines = re.sub(r"\s+", " ", lines)
+        lines = without_checkout_path(re.sub(r"\s+", " ", lines))
         if because[arm.name] not in lines:
             results.append((arm, "MIS-ATTRIBUTED",
                             f"expected: {because[arm.name]}"))
@@ -707,7 +719,16 @@ def grade(selected: list[Arm]) -> int:
     return 0 if killed == len(results) else 1
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--needle-scan", action="store_true")
     ap.add_argument("--record-control-hashes", action="store_true")

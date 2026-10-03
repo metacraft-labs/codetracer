@@ -29,9 +29,8 @@
 //! The union and a point-in-time read only disagree on a trace whose
 //! steps carry *sparse* values — i.e. where a step records just the
 //! binding that line wrote. That is exactly the shape every JavaScript
-//! trace had before M37 (and the shape the committed
-//! `examples/recordings/javascript/flow_test` fixture still has), and it
-//! is the shape no current recorder produces. A live recording therefore
+//! trace had before M37, and it is the shape no current recorder
+//! produces. A live recording therefore
 //! cannot distinguish the two implementations: with full per-step
 //! snapshots the prefix-union happens to agree with the snapshot almost
 //! everywhere.

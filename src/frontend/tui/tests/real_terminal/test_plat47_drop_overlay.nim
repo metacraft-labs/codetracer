@@ -99,6 +99,13 @@ proc waitStatus(sess: var TuiTestSession; needle: string;
   raise newException(AssertionFailedError,
     "status never said '" & needle & "': " & result)
 
+proc clickTab(sess: var TuiTestSession; row, col: int) =
+  ## A click on a tab activates it SILENTLY (PLAT-49: a plain tab click does
+  ## not echo its layout command on the status line), so the frame is let
+  ## settle rather than a note waited for.
+  sess.sendMouseClick(row, col)
+  discard sess.drainOutput(600)
+
 proc dividerCols(s: Snapshot; row: int): seq[int] =
   ## The columns of `│` on a body row: the right edges the panes drew.
   for c in 0 ..< Cols:
@@ -159,26 +166,42 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
       for d in divs:
         if d < callTraceCol: c = d + 1
       c
-    # The Source pane is a column of its own, the whole body tall: rows 1 ..
-    # StatusRow - 2 — the row above the status line is the bottom strip, the
-    # shared default's footer panels (PLAT-48).
-    let source = Rect(row: 1, col: sourceLeft,
+    # The Source pane is a column of its own, the whole body tall; since
+    # PLAT-49 part B the footer panels' labels are ON the status line, so the
+    # body reaches the row above it. A drop tints the pane's CONTENT — below
+    # its tab strip (row 1), as GoldenLayout highlights a stack's content.
+    let source = Rect(row: 2, col: sourceLeft,
                       width: sourceRight - sourceLeft + 1,
                       height: StatusRow - 2)
 
     # A CLICK ON THE VARIABLES TAB FIRST, so the baseline carries the same
     # focus the drag will: the press that starts the drag focuses that stack.
-    sess.sendMouseClick(1, varCol + 1)
-    discard sess.waitStatus("activateTab(state)")
+    sess.clickTab(1, varCol + 1)
     let base = sess.snap()
 
+    var dragStartStatus = ""
+
     proc startDrag() =
+      # PLAT-49: a press only marks the tab; the drag begins once the pointer
+      # has moved past the threshold (`binding.DragThresholdCols`), so the
+      # press is followed by a motion report three columns along the strip.
+      # The drag is then over the Variables stack's own strip, so the status
+      # line names that drop (`would intoStack(state, …)`) rather than
+      # `dragging`.
       sess.mouse(0, 1, varCol + 1, 'M')
-      discard sess.waitStatus("dragging")
+      sess.mouse(32, 1, varCol + 4, 'M')
+      dragStartStatus = sess.waitStatus("would intoStack(state")
 
     proc hover(row, col: int): Snapshot =
       sess.mouse(32, row, col, 'M')
-      discard sess.waitStatus("would ")
+      # The status line already names the drop under the drag's start
+      # (`dragStartStatus`): wait for it to name the NEW target.
+      let deadline = getMonoTime() + initDuration(milliseconds = 20000)
+      while getMonoTime() < deadline:
+        discard sess.drainOutput(40)
+        let st = sess.regionText(StatusRow, 0, Cols, 1)
+        if st.contains("would ") and st != dragStartStatus:
+          break
       sess.snap()
 
     proc ghostAt(s: Snapshot; row, col: int): bool =
@@ -221,8 +244,7 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     ck afterSplit.dividerCols(2).len > divs.len
     sess.send(":undo-layout\r")
     discard sess.waitStatus("layout undone")
-    sess.sendMouseClick(1, varCol + 1)
-    discard sess.waitStatus("activateTab(state)")
+    sess.clickTab(1, varCol + 1)
 
     # ---- WHOLE PANE: the Source pane's body -> all of it.
     startDrag()
@@ -235,8 +257,7 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     ck sess.waitStatus("applied").len > 0
     sess.send(":undo-layout\r")
     discard sess.waitStatus("layout undone")
-    sess.sendMouseClick(1, varCol + 1)
-    discard sess.waitStatus("activateTab(state)")
+    sess.clickTab(1, varCol + 1)
 
     # ---- TAB SLOT: the Call Trace stack's strip -> that strip row.
     startDrag()
@@ -249,8 +270,7 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     ck sess.waitStatus("applied").len > 0
     sess.send(":undo-layout\r")
     discard sess.waitStatus("layout undone")
-    sess.sendMouseClick(1, varCol + 1)
-    discard sess.waitStatus("activateTab(state)")
+    sess.clickTab(1, varCol + 1)
 
     # ---- DOCK EDGE: above the body -> the layout's top strip (row 1).
     startDrag()

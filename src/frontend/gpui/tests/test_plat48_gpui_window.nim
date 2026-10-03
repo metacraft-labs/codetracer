@@ -37,7 +37,7 @@ template ck(cond: untyped) =
 
 const
   Record = "src/tests/visual/plat48-gpui-window.json"
-  ExpectedAssertions = 120
+  ExpectedAssertions = 131
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -56,20 +56,31 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, read from its pi
       inc n
     ck n >= 20
 
-  test "the menu's titles are the shared tree's, drawn in the band":
+  test "one root menu button; the shared tree's folders drawn in its popover":
+    # PLAT-49: the desktop's menu — the band shows no folder title; the
+    # first level is a popover below the root button.
+    let band = rec["menuBandOcr"].getStr
     let ocr = rec["menuTitlesOcr"].getStr
     let tree = nativeFrontEndMenu("calc")
     for i in tree.visibleChildren():
       checkpoint(tree.children[i].label)
       ck ocr.contains(tree.children[i].label)
+      ck not band.contains(tree.children[i].label)
+    let rootPop = arr(rec["menuRoot"]["popover"])
+    let button = arr(rec["menuRoot"]["button"])
+    ck rootPop[0] == button[0]
+    ck rootPop[1] >= button[1] + button[3]
 
-  test "a click opens Debug: its popover drawn, Step Over's chord the desktop's":
+  test "the button, then Debug: its popover drawn, Step Over's chord the desktop's":
     let pop = arr(rec["menuOpen"]["popover"])
     let box = arr(rec["menuOpen"]["changedBox"])
+    let rootPop = arr(rec["menuOpen"]["rootPopover"])
     ck rec["menuOpen"]["changed"].getInt > 10_000
-    # What changed is the popover (and the title it hangs from), nothing
-    # further down the window.
-    ck box[0] <= pop[0] and box[0] + box[2] >= pop[0] + pop[2]
+    # Debug's popover opens BESIDE the first level (PLAT-49's cascade).
+    ck pop[0] >= rootPop[0] + rootPop[2]
+    # What changed is that popover (and the Debug row it hangs from),
+    # nothing further down the window.
+    ck box[0] + box[2] >= pop[0] + pop[2]
     ck box[1] + box[3] <= pop[1] + pop[3] + 40
     ck rec["menuStepOverOcr"].getStr.contains("Step Over")
     ck rec["menuStepOverOcr"].getStr.contains("F10")

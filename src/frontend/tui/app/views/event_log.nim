@@ -64,10 +64,18 @@ import std/[strutils, tables]
 
 import isonim_tui
 
+# PLAT-49 part B: the column model is the Event Log ViewModel's
+# (`EventLogColumns`), reached through the SDK facade.
+from codetracer_embed import EventLogColumn, EventLogColumns,
+  defaultEventLogColumns, visibleColumns, eventLogColumnTitle, elcTick,
+  elcIndex, elcLocation, elcKind, elcOutput
+
 import ../layout/profile
 import ./styled_row
 
 export styled_row, profile
+export EventLogColumn, EventLogColumns, defaultEventLogColumns,
+  visibleColumns, eventLogColumnTitle
 
 type
   EventCategory* = enum
@@ -138,6 +146,11 @@ type
       ## Where the debugger is. Marks a row; see this module's header.
     note*: string
       ## Why the log is empty, when it is empty and a reason is known.
+    columns*: EventLogColumns
+      ## PLAT-49 part B: which columns the pane draws, in which order — the
+      ## Event Log ViewModel's model (`defaultEventLogColumns`: the desktop's
+      ## tick, #, kind and output; location hidden). `:column-show`,
+      ## `:column-hide`, `:column-left` and `:column-right` change it.
     held: Table[int, seq[EventRow]]
       ## Materialised pages, by page index. PRIVATE: the only way in is
       ## `ensureWindow` and the only way out is `releaseOutside`, so "released
@@ -168,7 +181,13 @@ type
       ## Screen columns of the tick and content fields' first cells. REPORTED
       ## rather than recomputed by the caller, for `frame_item.FrameItem`'s
       ## reason: a Tier-2 case reads a cell at this column and a drift between
-      ## the two arithmetics would move the read rather than the field.
+      ## the two arithmetics would move the read rather than the field. -1
+      ## when that column is hidden.
+    headerRow*: int
+      ## PLAT-49 part B: the SCREEN row of the column header, -1 when none.
+    columnCells*: seq[(EventLogColumn, int, int)]
+      ## Each visible column with its first screen column and its width, in
+      ## display order — the header's cells, for a click and for a test.
 
 const
   EventLogTitle* = "TRACEPOINTS"
@@ -188,8 +207,15 @@ const
 
   TickFieldCells* = 8
   GapCells* = 1
+  IndexFieldCells* = 4
+    ## The `#` column: the event's number in the log.
   CategoryFieldCells* = 4
   LocationFieldCells* = 18
+  OutputFieldCells* = 24
+    ## The output column's width when it is NOT the last column; last, it
+    ## takes the rest of the row.
+  HeaderStyle* = CellStyle(role: srChromeMuted, bold: true)
+    ## The column header's titles (the desktop's `.eventLog-column-header`).
 
   PendingText* = "…"
 
@@ -295,6 +321,7 @@ proc initEventLogModel*(pages: EventPages = nil;
     scrollTop: 0,
     currentTick: currentTick,
     note: note,
+    columns: defaultEventLogColumns(),
     held: initTable[int, seq[EventRow]](),
     fetchedPages: @[],
     endPage: -1,
@@ -504,19 +531,38 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
   let atCurrent = event.tick == model.currentTick
   let selected = row.index == model.selected
   var spans: seq[StyledSpan] = @[]
-  spans.add StyledSpan(
-    text: padLeft($event.tick, TickFieldCells),
-    style: (if atCurrent: CurrentTickStyle else: TickStyle))
-  spans.add StyledSpan(text: " ", style: DefaultCellStyle)
-  spans.add StyledSpan(text: categoryLabel(event.category),
-                       style: categoryStyle(event.category))
-  spans.add StyledSpan(
-    text: padRight(locationTextFor(event), LocationFieldCells),
-    style: LocationStyle)
-  spans.add StyledSpan(text: " ", style: DefaultCellStyle)
-  spans.add StyledSpan(text: event.content.strip(leading = false,
-                                                 trailing = true),
-                       style: ContentStyle)
+  # PLAT-49 part B: THE VISIBLE COLUMNS, in the model's order, each at the
+  # width `columnCellsOf` gives the header — one table of widths, so a
+  # header title sits over its column whatever the order.
+  let shown = model.columns.visibleColumns
+  for k, col in shown:
+    if k > 0:
+      spans.add StyledSpan(text: " ", style: DefaultCellStyle)
+    case col
+    of elcTick:
+      spans.add StyledSpan(
+        text: padLeft($event.tick, TickFieldCells),
+        style: (if atCurrent: CurrentTickStyle else: TickStyle))
+    of elcIndex:
+      spans.add StyledSpan(text: padLeft($row.index, IndexFieldCells),
+                           style: TickStyle)
+    of elcLocation:
+      spans.add StyledSpan(
+        text: padRight(truncateToCells(locationTextFor(event),
+                                       LocationFieldCells),
+                       LocationFieldCells),
+        style: LocationStyle)
+    of elcKind:
+      spans.add StyledSpan(text: categoryLabel(event.category),
+                           style: categoryStyle(event.category))
+    of elcOutput:
+      let text = event.content.strip(leading = false, trailing = true)
+      # The output takes the rest of the row unless a column follows it.
+      spans.add StyledSpan(
+        text: (if k == shown.high: text
+               else: padRight(truncateToCells(text, OutputFieldCells),
+                              OutputFieldCells)),
+        style: ContentStyle)
   var used = 0
   for span in spans:
     if used >= width:
@@ -537,6 +583,42 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
     result.add StyledSpan(text: repeat(' ', width - used),
                           style: CellStyle(surface: SelectedBackground))
 
+func columnCells*(col: EventLogColumn; last: bool; rest: int): int =
+  ## One column's width in cells: fixed for every column but a LAST output
+  ## column, which takes `rest`.
+  case col
+  of elcTick: TickFieldCells
+  of elcIndex: IndexFieldCells
+  of elcLocation: LocationFieldCells
+  of elcKind: CategoryFieldCells
+  of elcOutput: (if last: max(0, rest) else: OutputFieldCells)
+
+proc columnCellsOf*(model: EventLogModel; startCol, width: int):
+    seq[(EventLogColumn, int, int)] =
+  ## Every visible column with its first screen column and width — the ONE
+  ## table both the header and the rows are laid out by.
+  let shown = model.columns.visibleColumns
+  var at = startCol
+  for k, col in shown:
+    if k > 0:
+      at += GapCells
+    let w = columnCells(col, k == shown.high, startCol + width - at)
+    result.add (col, at, w)
+    at += w
+
+proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
+  ## The column header: each visible column's title over its cells, in the
+  ## model's order (the desktop's `.eventLog-column-header`).
+  var line = ""
+  for (col, at, w) in model.columnCellsOf(0, width):
+    while cellWidthOf(line) < at:
+      line.add ' '
+    let title = eventLogColumnTitle(col)
+    # Numbers are right-aligned under a right-aligned title.
+    line.add (if col in {elcTick, elcIndex}: padLeft(title, w)
+              else: title)
+  @[StyledSpan(text: truncateToCells(line, width), style: HeaderStyle)]
+
 proc paintEventLog*(g: var StyledGrid; area: CellArea;
                     model: EventLogModel): EventLogScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
@@ -545,9 +627,11 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
   result = EventLogScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, eventRows: 0,
     pendingRows: 0, selectedRow: -1, currentRow: -1,
-    tickColumn: area.col,
-    contentColumn: area.col + TickFieldCells + GapCells + CategoryFieldCells +
-                   LocationFieldCells + GapCells)
+    tickColumn: -1, contentColumn: -1, headerRow: -1)
+  result.columnCells = model.columnCellsOf(area.col, area.width)
+  for (col, at, _) in result.columnCells:
+    if col == elcTick: result.tickColumn = at
+    if col == elcOutput: result.contentColumn = at
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -561,19 +645,31 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
-  let bodyHeight = area.height - 1
+  # PLAT-49 part B: THE COLUMN HEADER, under the title row (which the shell's
+  # tab strip replaces) — the desktop's table names its columns, and with
+  # columns that can be hidden and reordered the reader has to see which are
+  # which.
+  let header = area.height > 2
+  if header:
+    result.headerRow = area.row + 1
+    var at = area.col
+    for span in headerRowSpans(model, area.width):
+      g.paint(area.row + 1, at, span.text, span.style)
+      at += cellWidthOf(span.text)
+  let firstBody = area.row + (if header: 2 else: 1)
+  let bodyHeight = area.row + area.height - firstBody
   result.bodyHeight = bodyHeight
   let rows = model.paneRows(model.scrollTop, bodyHeight)
 
   if rows.len == 0:
-    g.paint(area.row + 1, area.col,
+    g.paint(firstBody, area.col,
             truncateToCells(EmptyLogText, area.width), EmptyLogStyle)
     for r in area.row ..< area.row + area.height:
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
   for i, row in rows:
-    let screenRow = area.row + 1 + i
+    let screenRow = firstBody + i
     var at = area.col
     for span in eventRowSpans(model, row, area.width):
       g.paint(screenRow, at, span.text, span.style)

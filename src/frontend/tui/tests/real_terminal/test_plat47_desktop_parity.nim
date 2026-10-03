@@ -130,12 +130,16 @@ proc colOf(sess: var TuiTestSession; row, cols: int; needle: string): int =
 proc glyph(sess: var TuiTestSession; row, col: int): string =
   $sess.cellAt(row, col).rune
 
-proc isDivider(sess: var TuiTestSession; row, col: int; canvas: string): bool =
-  ## A divider cell: a box-drawing glyph ON THE CANVAS. A pane's own title
-  ## rule (`SOURCE … ────`) is the same glyph on the pane's surface, which is
-  ## how the two are told apart without asking the binary's model.
+proc isDivider(sess: var TuiTestSession; row, col: int; ground: string): bool =
+  ## A divider cell: a box-drawing glyph on the panes' own ground (PLAT-49:
+  ## dividers sit on the panel surface, not on a canvas of their own) in a
+  ## BORDER colour — the unfocused or the focused divider tier — which is
+  ## what tells it from a box-drawing character a pane's content draws.
+  let cell = sess.cellAt(row, col)
   glyph(sess, row, col) in DividerGlyphs and
-    hexOfColor(sess.cellAt(row, col).bg) == canvas
+    hexOfColor(cell.bg) == ground and
+    hexOfColor(cell.fg) in [DesignTokenHex[dtColorsUiBorderSecondary][dmDark],
+                            DesignTokenHex[dtColorsUiBorderPrimary][dmDark]]
 
 # ---------------------------------------------------------------------------
 # Deliverables 2, 3 and 7: the editor, the Files pane and the call trace
@@ -231,10 +235,11 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     const Rows = 60
     var sess = spawnTui(@["--theme=dark"], Cols, Rows)
     settleOnDebugger(sess, Cols, Rows)
-    # FILES: the rows under the pane's own title, glyphs and indent dropped.
-    let title = rowOf(sess, Cols, Rows, "FILES")
+    # FILES: the rows under the pane's tab strip (PLAT-49: no title row),
+    # glyphs and indent dropped.
+    let title = rowOf(sess, Cols, Rows, " Files ")
     ck title >= 0
-    let filesCol = colOf(sess, title, Cols, "FILES")
+    let filesCol = colOf(sess, title, Cols, " Files ")
     var files: seq[string] = @[]
     for r in title + 1 ..< Rows - 1:
       var text = ""
@@ -251,9 +256,9 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     ck files == want
     # THE CALL TRACE: the visible rows, marker and indent dropped, are the
     # desktop's first entries in order.
-    let ct = rowOf(sess, Cols, Rows, "CALL TRACE")
+    let ct = rowOf(sess, Cols, Rows, " Call Trace ")
     ck ct >= 0
-    let ctCol = colOf(sess, ct, Cols, "CALL TRACE")
+    let ctCol = colOf(sess, ct, Cols, " Call Trace ")
     var calls: seq[string] = @[]
     for r in ct + 1 ..< Rows - 1:
       var text = ""
@@ -261,7 +266,13 @@ suite "PLAT-47: the terminal shows what the desktop shows":
         let g = glyph(sess, r, c)
         if g in DividerGlyphs: break
         text.add(if g.len == 0 or g == "\0": " " else: g)
-      let entry = text.strip(chars = {' ', '>'})
+      # PLAT-49 part B: a row is "<toggle> callee #index(args) => return";
+      # the desktop's entry is its callee and index.
+      var entry = text.strip(chars = {' ', '>'})
+      for g in ["▾ ", "▸ ", "· "]:
+        if entry.startsWith(g): entry = entry[g.len .. ^1]
+      let paren = entry.find('(')
+      if paren > 0: entry = entry[0 ..< paren]
       if entry.len == 0 or not entry.contains(" #"): break
       calls.add entry
     var desktopCalls: seq[string] = @[]
@@ -271,9 +282,9 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     ck desktopCalls.len >= calls.len
     if desktopCalls.len >= calls.len:
       ck calls == desktopCalls[0 ..< calls.len]
-    # The title counts the whole trace, as the desktop's pane lists it.
-    ck sess.regionText(ct, ctCol, 40, 1).contains(
-      $desktopCalls.len & " call(s)")
+    # PLAT-49: the pane's first row is its tab strip, as the desktop's
+    # GoldenLayout header is — no upper-cased title row counting the calls.
+    ck not sess.regionText(ct, ctCol, 40, 1).contains("call(s)")
     quit(sess)
 
 # ---------------------------------------------------------------------------
@@ -322,12 +333,15 @@ suite "PLAT-47: tab bars are shaped by colour and weight":
     ck hexOfColor(active.fg) != hexOfColor(inactive.fg)
     ck caBold in active.attrs
     ck caBold notin inactive.attrs
-    # The strip is the desktop's: the active tab, an inactive one and the
-    # strip's empty run all on the colour the desktop's strip measures.
+    # PLAT-49 finding 4, the user's direction over PLAT-47's measured single
+    # ground: the strip has a ground of its own, distinct from the pane body
+    # (the desktop's panel colour, which the terminal's body also paints),
+    # and the selected tab a ground distinct from both.
     if desk.kind == JObject:
       let panel = desk["focus"]["panel"].getStr
-      ck hexOfColor(active.bg) == panel
-      ck hexOfColor(inactive.bg) == panel
+      ck hexOfColor(active.bg) != panel and
+         hexOfColor(active.bg) != hexOfColor(inactive.bg)
+      ck hexOfColor(inactive.bg) != panel
     quit(sess)
 
   test "in monochrome the active tab is reverse video and bold, and unique":
@@ -427,7 +441,8 @@ suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
     require desk.kind == JObject
     let focusHex = desk["focus"]["outline"].getStr
     let deskEdge = desk["focus"]["unfocusedEdge"].getStr
-    let canvas = DesignTokenHex[dtColorsUiSurfaceBaseCanvas][dmDark]
+    # PLAT-49: dividers sit on the panes' own ground, the panel.
+    let canvas = DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark]
     let unfocused = DesignTokenHex[dtColorsUiBorderSecondary][dmDark]
     # The colour relationship: the terminal's focus colour IS the desktop's,
     # and it stands off an unfocused divider no more than the desktop's
@@ -468,8 +483,9 @@ suite "PLAT-47: --goto centres the stop, and auto-detection keeps Dark":
     settleOnDebugger(sess, Cols, Rows)
     let pointer = rowOf(sess, Cols, Rows, "-->")
     ck pointer > 0
-    # The source view's rows: from its title to the last row with a gutter.
-    let title = rowOf(sess, Cols, Rows, "SOURCE")
+    # The source view's rows: from its tab strip (the file's tab, PLAT-49) to
+    # the last row with a gutter.
+    let title = rowOf(sess, Cols, Rows, " main.py ")
     var last = title
     for r in title + 1 ..< Rows - 1:
       let t = sess.regionText(r, 0, Cols, 1)

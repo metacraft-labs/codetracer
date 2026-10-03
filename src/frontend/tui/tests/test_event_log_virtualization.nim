@@ -63,7 +63,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 62
+const ExpectedAssertions = 64
 
 var countedAssertions = 0
 
@@ -311,7 +311,9 @@ suite "CTUI-8: the event log pages, fetches each page once, and releases":
                                    currentTick = session.getCurrentRRTicks(),
                                    pageSize = PageSize)
       model.ensureWindow(0, BodyHeight)
-      let screen = eventLogScreen(model, PaneWidth, BodyHeight + 1)
+      # The pane's rows: its title, the column header (PLAT-49 part B), and
+      # `BodyHeight` rows of events.
+      let screen = eventLogScreen(model, PaneWidth, BodyHeight + 2)
 
       # PAINTING DOES NOT FETCH. The one entry point is `ensureWindow`, and this
       # is what makes the pane a pure function of what is held.
@@ -327,8 +329,11 @@ suite "CTUI-8: the event log pages, fetches each page once, and releases":
       ck titleText.contains($model.heldRows & "+")
       ck not titleText.contains($truth.len & " event(s)")
 
-      # A row of the pane carries the recording's own tick and content.
-      let firstBody = rowText(screen.rows[1])
+      # The header names the columns; a row of the pane carries the
+      # recording's own tick and content.
+      ck screen.headerRow == 1
+      ck rowText(screen.rows[1]).contains("output")
+      let firstBody = rowText(screen.rows[2])
       checkpoint("first event row: '" & firstBody & "'")
       ck firstBody.contains($truth[0].rrTicks)
       ck firstBody.contains(truth[0].content.strip())
@@ -337,11 +342,11 @@ suite "CTUI-8: the event log pages, fetches each page once, and releases":
       # A WINDOW WHOSE PAGE IS NOT HELD PAINTS A HOLE, NOT A SHORTER LIST.
       # The placeholder is what makes a forgotten `ensureWindow` visible.
       model.scrollTop = 3 * PageSize
-      let unfetched = eventLogScreen(model, PaneWidth, BodyHeight + 1)
+      let unfetched = eventLogScreen(model, PaneWidth, BodyHeight + 2)
       ck seamCalls == 1
       ck unfetched.pendingRows == BodyHeight
       ck unfetched.eventRows == 0
-      ck rowText(unfetched.rows[1]).strip() == PendingText
+      ck rowText(unfetched.rows[2]).strip() == PendingText
 
   test "assertion count":
     echo "CTUI-8 VIRTUALIZATION: examined ", examinedFixtures,

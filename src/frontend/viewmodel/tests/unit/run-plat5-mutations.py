@@ -603,10 +603,10 @@ MUTATIONS = [
         "B1", BIND,
         "  if info.isNone:\n"
         "    return CellArea()\n"
-        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy)",
+        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,\n",
         "  if info.isNone or info.get.kind != lnPane:\n"
         "    return CellArea()\n"
-        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy)",
+        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,\n",
         T_GUIDE,
         "the guide is drawn for panes only, so a divider between stacks has none",
     ),
@@ -620,10 +620,10 @@ MUTATIONS = [
     ),
     Mutation(
         "B3", BIND,
-        "      if sameCell:\n"
-        "        # A click on the divider cell is what it was before the divider was\n",
+        "      if not past:\n"
+        "        # A click on the divider (within the threshold) is what it was\n",
         "      if false:\n"
-        "        # A click on the divider cell is what it was before the divider was\n",
+        "        # A click on the divider (within the threshold) is what it was\n",
         T_MOUSE_DIV,
         "a click on a divider cell is treated as a drop",
     ),
@@ -807,8 +807,17 @@ def check_control_hashes() -> bool:
     return ok
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
     global _ACTIVE
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     only = None
     for arg in sys.argv[1:]:
         if arg == "--needle-scan":
