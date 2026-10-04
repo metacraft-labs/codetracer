@@ -16,7 +16,14 @@
 //! whole step table — which is exactly the owner's "use the prepopulated tables
 //! when available" guidance for breakpoint resolution.
 //!
-//! ## Production-emission status (honest)
+//! ## Current production format
+//!
+//! Since the 2026-10 revision, canonical line-only writers emit version2.
+//! That branch delegates validation and decoding to the shared production
+//! StepMapReader, then builds this same resident breakpoint map. The flat
+//! version1 branch below remains explicit legacy compatibility.
+//!
+//! ## Historical M26 production-emission status
 //!
 //! As of M26 NO production `.ct` bundle carries `step-map.ns`:
 //!
@@ -94,6 +101,8 @@ pub enum StepMapError {
     BadMagic(u32),
     /// The version field is not [`STEP_MAP_VERSION`].
     UnsupportedVersion(u16),
+    /// Current-format validation or a checked UI identifier conversion failed.
+    CurrentFormat(String),
     /// A declared offset / length runs past the end of the blob.
     OutOfBounds {
         /// Human-readable name of the section that overran.
@@ -109,6 +118,7 @@ impl std::fmt::Display for StepMapError {
             StepMapError::TooShort => write!(f, "step-map.ns shorter than header"),
             StepMapError::BadMagic(m) => write!(f, "step-map.ns bad magic 0x{m:08X}"),
             StepMapError::UnsupportedVersion(v) => write!(f, "step-map.ns unsupported version {v}"),
+            StepMapError::CurrentFormat(message) => write!(f, "step-map.ns {message}"),
             StepMapError::OutOfBounds { section, offset } => {
                 write!(f, "step-map.ns {section} out of bounds at offset {offset}")
             }
@@ -192,6 +202,9 @@ impl StepMapNamespace {
             return Err(StepMapError::BadMagic(magic));
         }
         let version = read_u16(buf, 4, "header.version")?;
+        if version == 2 {
+            return Self::parse_current(buf);
+        }
         if version != STEP_MAP_VERSION {
             return Err(StepMapError::UnsupportedVersion(version));
         }
@@ -266,6 +279,47 @@ impl StepMapNamespace {
             min_step_id,
             max_step_id,
         })
+    }
+
+    fn parse_current(buf: &[u8]) -> Result<Self, StepMapError> {
+        use codetracer_trace_reader::step_map_reader::StepMapReader;
+
+        let decoded = StepMapReader::from_bytes(buf.to_vec())
+            .and_then(|reader| reader.load_all())
+            .map_err(StepMapError::CurrentFormat)?;
+        let mut result = Self {
+            min_step_id: i64::MAX,
+            max_step_id: i64::MIN,
+            ..Self::default()
+        };
+        for ((path, line), ids) in decoded {
+            let path =
+                usize::try_from(path).map_err(|_| StepMapError::CurrentFormat("path id exceeds usize".into()))?;
+            let line = usize::try_from(line).map_err(|_| StepMapError::CurrentFormat("line exceeds usize".into()))?;
+            let ids: Vec<StepId> = ids
+                .into_iter()
+                .map(|id| {
+                    i64::try_from(id)
+                        .map(StepId)
+                        .map_err(|_| StepMapError::CurrentFormat("step id exceeds i64".into()))
+                })
+                .collect::<Result<_, _>>()?;
+            result.total_step_ids = result
+                .total_step_ids
+                .checked_add(ids.len())
+                .ok_or_else(|| StepMapError::CurrentFormat("step count exceeds usize".into()))?;
+            if let (Some(first), Some(last)) = (ids.first(), ids.last()) {
+                result.min_step_id = result.min_step_id.min(first.0);
+                result.max_step_id = result.max_step_id.max(last.0);
+            }
+            result.by_path.entry(path).or_default().insert(line, ids);
+        }
+        for (path, by_line) in &result.by_path {
+            let mut lines: Vec<usize> = by_line.keys().copied().collect();
+            lines.sort_unstable_by(|a, b| b.cmp(a));
+            result.lines_desc.insert(*path, lines);
+        }
+        Ok(result)
     }
 
     /// The ascending `step_id`s recorded on `(path_id, line)`, or `None` when
