@@ -92,3 +92,73 @@ fn wrong_representation_and_invalid_payload_fail() {
     assert!(check(Some(json!({"kind":255,"i":"10","r":"10"})), integer()).is_err());
     assert!(check(Some(value(TypeKind::Int, "not-int", "", "")), integer()).is_err());
 }
+
+fn field() -> ExpectedFlowValues {
+    ExpectedFlowValues::Fields(HashMap::from([("a".into(), 10_i64)]))
+}
+fn actual_field(text: &str) -> Value {
+    json!({"kind":TypeKind::String,"text":text,"typ":{"kind":TypeKind::Int,"langType":"Field"}})
+}
+#[test]
+fn canonical_noir_field_uses_full_wire_text_and_real_type_identity() {
+    let text = format!("0x{:064x}", 10);
+    assert!(check(Some(actual_field(&text)), field()).is_ok());
+    assert!(
+        check(Some(actual_field(&format!("0x{:064x}", 11))), field())
+            .unwrap_err()
+            .contains("should be")
+    );
+    assert!(check(None, field()).unwrap_err().contains("missing"));
+    assert!(
+        check(Some(actual_field(&format!("0x{:064x}", 1_u128 << 100))), field())
+            .unwrap_err()
+            .contains("should be")
+    );
+    for kind in [TypeKind::None, TypeKind::Error, TypeKind::Int, TypeKind::Raw] {
+        let mut bad = actual_field(&text);
+        bad["kind"] = json!(kind);
+        assert!(check(Some(bad), field()).is_err());
+    }
+    for typ in [
+        json!(null),
+        json!({"kind":TypeKind::Raw,"langType":"Field"}),
+        json!({"kind":TypeKind::Int,"langType":"int"}),
+    ] {
+        let mut bad = actual_field(&text);
+        bad["typ"] = typ;
+        assert!(check(Some(bad), field()).is_err());
+    }
+    for (member, unknown) in [("kind", json!(255)), ("typ", json!({"kind":255,"langType":"Field"}))] {
+        let mut bad = actual_field(&text);
+        bad[member] = unknown;
+        assert!(check(Some(bad), field()).is_err());
+    }
+    for unloaded in [
+        json!({"kind":TypeKind::Raw,"r":"<NONE>"}),
+        json!({"r":"<NONE>"}),
+        json!({"kind":TypeKind::Raw,"r":""}),
+    ] {
+        assert!(check(Some(unloaded), field()).unwrap_err().contains("not loaded"));
+    }
+    for bad in [
+        "0xa".to_string(),
+        format!("0x{:064X}", 10),
+        format!("0x{:065x}", 10),
+        format!(" {}", text),
+        format!("0x{}g", "0".repeat(63)),
+    ] {
+        assert!(check(Some(actual_field(&bad)), field()).is_err());
+    }
+    let mut bad = actual_field(&text);
+    bad["text"] = json!(10);
+    assert!(check(Some(bad), field()).is_err());
+    assert!(
+        check(
+            Some(actual_field(&text)),
+            ExpectedFlowValues::Fields(HashMap::from([("a".into(), -1_i64)]))
+        )
+        .is_err()
+    );
+    // Hex-shaped strings remain invalid for ordinary integer expectations.
+    assert!(check(Some(actual_field(&text)), integer()).is_err());
+}

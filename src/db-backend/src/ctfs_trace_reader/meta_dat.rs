@@ -497,7 +497,8 @@ pub fn known_flags_mask() -> u16 {
 pub struct MetaDat {
     /// Format version actually present in the parsed header.
     ///
-    /// The serializer always writes [`META_DAT_VERSION`]; the parser
+    /// The legacy serializer writes [`META_DAT_VERSION`]; the current serializer
+    /// writes [`META_DAT_VERSION_NO_PATH_LIST`]. The parser
     /// accepts any version listed in [`SUPPORTED_VERSIONS`].
     pub version: u16,
     /// Raw flag bits as parsed from the header.
@@ -1174,13 +1175,24 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 /// `x` (after `x.flags` is normalised) and that we never produce output
 /// our own parser would reject.
 pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
-    // Pre-allocate a reasonable starting capacity. The header is 8 bytes;
+    serialize_meta_dat_version(meta, META_DAT_VERSION)
+}
+
+/// Encode current native metadata, retaining every optional extension block.
+/// Paths live in the container's paths.dat/off members rather than metadata.
+/// Extended capabilities are zero: this native DTO carries no flags_ext word.
+pub fn serialize_current_meta_dat(meta: &MetaDat) -> Vec<u8> {
+    serialize_meta_dat_version(meta, META_DAT_VERSION_NO_PATH_LIST)
+}
+
+fn serialize_meta_dat_version(meta: &MetaDat, version: u16) -> Vec<u8> {
+    // Pre-allocate a reasonable starting capacity. Headers are 8 or 12 bytes;
     // the rest of the payload grows with the metadata size.
     let mut out = Vec::with_capacity(64);
 
     // Magic + version.
     out.extend_from_slice(&META_DAT_MAGIC);
-    out.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
+    out.extend_from_slice(&version.to_le_bytes());
 
     // Canonicalise flags — only emit bits we know how to read back.
     let mut flags: u16 = 0;
@@ -1198,6 +1210,9 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         flags |= FLAG_HAS_TRACE_FILTER_PROVENANCE;
     }
     out.extend_from_slice(&flags.to_le_bytes());
+    if version >= META_DAT_VERSION_NO_PATH_LIST {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
 
     // M-REC-1: recording_id prepends the program field in v3+.
     write_string(&meta.recording_id, &mut out);
@@ -1210,9 +1225,11 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     }
     write_string(&meta.workdir, &mut out);
     write_string(&meta.recorder_id, &mut out);
-    encode_varint(meta.paths.len() as u64, &mut out);
-    for path in &meta.paths {
-        write_string(path, &mut out);
+    if version <= PATH_LIST_LAST_VERSION {
+        encode_varint(meta.paths.len() as u64, &mut out);
+        for path in &meta.paths {
+            write_string(path, &mut out);
+        }
     }
 
     // Optional MCR block.
@@ -1977,6 +1994,66 @@ mod tests {
         assert_eq!(parsed.filter_provenance.len(), 1);
         assert_eq!(parsed.filter_provenance[0].path, "abcd");
         assert_eq!(parsed.filter_provenance[0].sha256, sha);
+    }
+
+    #[test]
+    fn current_metadata_roundtrips_all_four_optional_blocks_without_a_path_list() {
+        let mut original = fixture_with_mcr();
+        original.version = META_DAT_VERSION_NO_PATH_LIST;
+        original.flags = FLAG_HAS_MCR_FIELDS
+            | FLAG_HAS_REPLAY_LAUNCH_FIELDS
+            | FLAG_HAS_LAYOUT_SNAPSHOT
+            | FLAG_HAS_TRACE_FILTER_PROVENANCE;
+        original.replay_launch = Some(ReplayLaunchFields { aslr_disabled: true });
+        original.layout_snapshot = Some(LayoutSnapshotFields {
+            layout_hash: 0x0102_0304_0506_0708,
+            layout_fingerprint: vec![0xde, 0xad],
+        });
+        original.filter_provenance = vec![FilterProvenanceEntry {
+            path: "filters/actual.toml".to_owned(),
+            sha256: [0x33; 32],
+        }];
+        original.has_filter_provenance = true;
+        assert!(
+            !original.paths.is_empty(),
+            "fixture must prove obsolete paths are omitted"
+        );
+        let bytes = serialize_current_meta_dat(&original);
+        assert_eq!(u16::from_le_bytes([bytes[4], bytes[5]]), META_DAT_VERSION_NO_PATH_LIST);
+        assert_eq!(
+            &bytes[8..12],
+            &0u32.to_le_bytes(),
+            "native DTO declares no extended capability"
+        );
+        original.paths.clear();
+        assert_eq!(parse_meta_dat(&bytes).unwrap(), original);
+    }
+
+    #[test]
+    fn current_metadata_core_is_byte_identical_to_the_actual_shipping_writer() {
+        let original = fixture_with_args_and_paths();
+        let expected = codetracer_trace_writer::meta_dat::encode_meta_dat_ext(
+            &original.recording_id,
+            &original.program,
+            &original.args,
+            &original.workdir,
+            &original.recorder_id,
+            0,
+            0,
+        );
+        assert_eq!(serialize_current_meta_dat(&original), expected);
+        let mut parsed_expected = original;
+        parsed_expected.version = META_DAT_VERSION_NO_PATH_LIST;
+        parsed_expected.paths.clear();
+        assert_eq!(parse_meta_dat(&expected).unwrap(), parsed_expected);
+    }
+
+    #[test]
+    fn legacy_serializer_still_matches_the_independent_existing_writer_golden() {
+        let bytes = writer_compat_fixture_bytes();
+        let original = parse_meta_dat(&bytes).unwrap();
+        assert_eq!(serialize_meta_dat(&original), bytes);
+        assert_ne!(serialize_current_meta_dat(&original), bytes);
     }
 
     #[test]

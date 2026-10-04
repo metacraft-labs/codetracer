@@ -51,7 +51,7 @@ fn create_noir_flow_config() -> FlowTestConfig {
         // the variable list. Once Noir-specific filtering is added to
         // expr_loader.rs, add "println" and "calculate_sum" here.
         excluded_identifiers: vec![],
-        expected_values: expected_values.into(),
+        expected_values: test_harness::ExpectedFlowValues::Fields(expected_values),
     }
 }
 

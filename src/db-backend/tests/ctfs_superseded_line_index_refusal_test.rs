@@ -38,8 +38,8 @@ use codetracer_trace_writer::line_position::LinePositionSpace;
 use codetracer_trace_writer::meta_dat::{FLAG_HAS_STEP_STREAM, encode_meta_dat};
 use codetracer_trace_writer::step_stream::{StepStream, StepStreamRecord, encode_step_stream};
 
+use codetracer_ctfs::writer::CtfsWriter;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
-use db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
 use db_backend::ctfs_trace_reader::meta_dat::LAST_SHIFTED_GLOBAL_INDEX_VERSION;
 use db_backend::trace_reader::TraceReader;
 
@@ -71,28 +71,30 @@ struct Container {
 
 impl Container {
     fn write(&self, path: &Path) {
-        write_minimal_ctfs(
-            path,
-            &[
-                ("steps.dat", &self.steps_dat),
-                ("steps.idx", &self.steps_idx),
-                ("paths.dat", &self.paths_dat),
-                ("paths.off", &self.paths_off),
-                // The pure-Rust reader builds ALL FOUR interning tables from a
-                // container that carries any of them, so the three this fixture
-                // has no vocabulary for are present and empty rather than
-                // absent. Without them the container is refused for a missing
-                // `funcs.dat` — a refusal that would mask the one under test.
-                ("funcs.dat", EMPTY_TABLE_DAT),
-                ("funcs.off", EMPTY_TABLE_OFF),
-                ("types.dat", EMPTY_TABLE_DAT),
-                ("types.off", EMPTY_TABLE_OFF),
-                ("varnames.dat", EMPTY_TABLE_DAT),
-                ("varnames.off", EMPTY_TABLE_OFF),
-                ("meta.dat", &self.meta),
-            ],
-        )
-        .expect("write container");
+        let mut writer = CtfsWriter::create(path, 4096, 31).expect("create current container");
+        let files: &[(&str, &[u8])] = &[
+            ("steps.dat", &self.steps_dat),
+            ("steps.idx", &self.steps_idx),
+            ("paths.dat", &self.paths_dat),
+            ("paths.off", &self.paths_off),
+            // The pure-Rust reader builds ALL FOUR interning tables from a
+            // container that carries any of them, so the three this fixture
+            // has no vocabulary for are present and empty rather than
+            // absent. Without them the container is refused for a missing
+            // `funcs.dat` — a refusal that would mask the one under test.
+            ("funcs.dat", EMPTY_TABLE_DAT),
+            ("funcs.off", EMPTY_TABLE_OFF),
+            ("types.dat", EMPTY_TABLE_DAT),
+            ("types.off", EMPTY_TABLE_OFF),
+            ("varnames.dat", EMPTY_TABLE_DAT),
+            ("varnames.off", EMPTY_TABLE_OFF),
+            ("meta.dat", &self.meta),
+        ];
+        for &(name, bytes) in files {
+            let handle = writer.add_file(name).expect("add fixture member");
+            writer.write(handle, bytes).expect("write fixture member");
+        }
+        writer.close().expect("publish current container");
     }
 }
 
@@ -123,10 +125,6 @@ fn container(addresses: &[u64], version: u16) -> Container {
             .iter()
             .map(|a| StepStreamRecord::Step { global_line_index: *a })
             .collect(),
-        // Every step absolute, so each address is on the wire as written rather
-        // than as a delta from its predecessor. The fixture is about which
-        // integers the steps carry.
-        forced_absolute: vec![true; addresses.len()],
     };
     let encoded = encode_step_stream(&stream, 4, 3).expect("encode steps.dat");
 
@@ -136,12 +134,30 @@ fn container(addresses: &[u64], version: u16) -> Container {
         &[],
         "/tmp",
         "test-recorder",
-        &SOURCES.map(str::to_owned),
         FLAG_HAS_STEP_STREAM,
     );
+    // The shipping encoder chooses absolute/delta forms by the mandatory
+    // step rule. Prove its actual decoded addresses, not an obsolete request
+    // for all-absolute encoding, before marking this fixture superseded.
+    let mut reader = codetracer_trace_reader::step_stream_reader::StepStreamReader::from_files(
+        &meta,
+        encoded.dat.clone(),
+        encoded.idx.clone(),
+    )
+    .expect("read actual encoded steps")
+    .expect("actual step stream present");
+    assert_eq!(reader.count(), addresses.len() as u64);
+    for (i, expected) in addresses.iter().enumerate() {
+        match reader.read(i as u64).expect("actual encoded step present") {
+            StepStreamRecord::Step { global_line_index } => assert_eq!(global_line_index, *expected),
+            other => panic!("fixture step {i} changed representation: {other:?}"),
+        }
+    }
+
     // The current writer can no longer stamp a superseded version — that is
     // what the bump means — so the fixture sets the field back over a header it
-    // did produce. Every other byte is what a writer at that version wrote.
+    // did produce. This is a deliberately incompatible-header fault input,
+    // not a claim that a historical writer emitted the current metadata body.
     meta[4..6].copy_from_slice(&version.to_le_bytes());
 
     let (paths_dat, paths_off) = path_table();
@@ -202,7 +218,7 @@ fn a_current_container_opens_and_its_steps_read_back_where_they_were_recorded() 
     let ct = dir.join("current.ct");
     container(
         &current_addresses(),
-        db_backend::ctfs_trace_reader::meta_dat::META_DAT_VERSION,
+        codetracer_trace_writer::meta_dat::META_DAT_VERSION,
     )
     .write(&ct);
     let bytes = std::fs::read(&ct).expect("read container");

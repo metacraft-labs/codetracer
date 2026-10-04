@@ -11,24 +11,26 @@
 //! path need a producer that does not depend on a writer switch that no longer
 //! exists.
 //!
-//! The bytes are exactly what the retired writer wrote for its CBOR
+//! The events.log bytes are exactly what the retired writer wrote for its CBOR
 //! serialization: `meta.dat`, plus an `events.log` holding the 8-byte
 //! `HEADERV1` magic followed by the CBOR-encoded `TraceLowLevelEvent`s in
 //! `codetracer_ctfs::ChunkedWriter`'s zstd chunks (no `events.fmt` marker, which
 //! is what selects CBOR over split-binary).
 //!
 //! This is a producer of a real on-disk format, not a mock: every byte is read
-//! back by the production `CtfsReader` and `open_old_format`.
+//! back by the production `CtfsReader` and `open_old_format`. The logical
+//! events.log encoding remains legacy, while its container and metadata use
+//! the shipping CtfsWriter and genuine current metadata API, so both current
+//! readers can exercise that retained logical compatibility path.
 
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
-use codetracer_ctfs::{ChunkedWriter, CompressionMethod};
+use codetracer_ctfs::{ChunkedWriter, CompressionMethod, CtfsWriter};
 use codetracer_trace_types::TraceLowLevelEvent;
 
-use db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
-use db_backend::ctfs_trace_reader::meta_dat::{META_DAT_VERSION, MetaDat, serialize_meta_dat};
+use db_backend::ctfs_trace_reader::meta_dat::{META_DAT_VERSION, MetaDat, serialize_current_meta_dat};
 
 /// `codetracer_trace_format_cbor_zstd::HEADERV1`: "C0DE72ACE2", format version 1.
 const EVENTS_HEADER_V1: [u8; 8] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2, 0x01, 0x00, 0x00];
@@ -54,7 +56,7 @@ pub fn write_legacy_events_log_bundle(dir: &Path, name: &str, events: &[TraceLow
     let mut events_log = EVENTS_HEADER_V1.to_vec();
     events_log.extend_from_slice(&chunks);
 
-    let meta = serialize_meta_dat(&MetaDat {
+    let meta = serialize_current_meta_dat(&MetaDat {
         version: META_DAT_VERSION,
         flags: 0,
         recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
@@ -71,6 +73,13 @@ pub fn write_legacy_events_log_bundle(dir: &Path, name: &str, events: &[TraceLow
     });
 
     let ct = dir.join(format!("{name}.ct"));
-    write_minimal_ctfs(&ct, &[("meta.dat", &meta), ("events.log", &events_log)]).expect("write the legacy bundle");
+    let mut writer = CtfsWriter::create(&ct, 4096, 31).expect("create shipping container for legacy logical stream");
+    for (name, bytes) in [("meta.dat", meta.as_slice()), ("events.log", events_log.as_slice())] {
+        let handle = writer.add_file(name).expect("add legacy logical stream member");
+        writer.write(handle, bytes).expect("write legacy logical stream member");
+    }
+    writer
+        .close()
+        .expect("publish shipping container for legacy logical stream");
     ct
 }

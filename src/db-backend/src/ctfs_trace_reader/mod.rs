@@ -738,69 +738,20 @@ fn is_new_format(ctfs: &CtfsReader) -> bool {
     ctfs.has_file("steps.dat") && !ctfs.has_file("events.log")
 }
 
-/// The `meta.dat` buffer handed to the format-level
-/// `{Call,Step,Value}StreamReader::from_files` constructors when THIS crate has
-/// already resolved stream presence STRUCTURALLY — i.e. it read the internal
-/// file out of the container and is passing its bytes in.
-///
-/// # Why this exists (the shipping defect it fixes)
-///
-/// Every caller in this module resolves presence the way the trace-format spec
-/// requires — "stream-presence flags are a hint, not a gate" — by asking the
-/// container for `steps.dat` / `calls.dat` / `values.dat` and only calling
-/// `from_files` once the bytes are in hand. Those call sites used to pass `&[]`
-/// for the `meta` argument, on the documented understanding that `from_files`
-/// IGNORES it (the parameter is spelled `_meta` in the trace-format revision the
-/// contract was written against).
-///
-/// That is only true of `codetracer-trace-format` at or after
-/// `9ad9454 fix(reader): resolve stream presence structurally, not by meta.dat bit`.
-/// Codetracer's `flake.lock` pins `codetracer-trace-format` at `392c555`, which
-/// PREDATES that commit, and there `from_files` still opens with
-///
-/// ```ignore
-/// if !meta_dat_has_step_stream(meta) { return Ok(None); }
-/// ```
-///
-/// `meta_dat_has_step_stream(&[])` is `false` — an eight-byte-minimum header
-/// cannot be parsed out of an empty slice — so against the pinned crate EVERY
-/// such call returned `Ok(None)` unconditionally. For `steps.dat` that is fatal:
-/// `open_new_format_rust` reports "new-format container advertises steps.dat but
-/// no seekable step stream could be opened", and every container that carries
-/// split streams and no `events.log` — which is every recording that publishes
-/// source — is refused. Old-format containers were unaffected because they never
-/// reach this path.
-///
-/// The container is NOT at fault and nothing about it changes: this restores the
-/// reader's ability to open images that are already published and genuinely
-/// well-formed. It is deliberately version-agnostic — a crate that ignores
-/// `_meta` is unaffected by what is passed, and a crate that gates on it is told
-/// the truth the caller has already established structurally — so it neither
-/// requires nor is invalidated by a later flake-input bump.
-///
-/// Built from the FORMAT CRATE's own constants so it cannot drift from the
-/// parser that reads it.
-fn structural_presence_meta() -> [u8; 8] {
-    use codetracer_trace_writer::meta_dat::{
-        FLAG_HAS_CALL_STREAM, FLAG_HAS_INTERNING_TABLES, FLAG_HAS_IO_EVENT_STREAM, FLAG_HAS_STEP_STREAM,
-        FLAG_HAS_VALUE_STREAM, META_DAT_MAGIC, META_DAT_VERSION,
-    };
-
-    // Only ever consumed by `from_files`, and each of those inspects exactly one
-    // bit, so asserting all of the stream capabilities is safe: the caller has
-    // established structural presence for the one stream it is opening, and the
-    // other bits are never read from this buffer.
-    let flags: u16 = FLAG_HAS_CALL_STREAM
-        | FLAG_HAS_STEP_STREAM
-        | FLAG_HAS_VALUE_STREAM
-        | FLAG_HAS_IO_EVENT_STREAM
-        | FLAG_HAS_INTERNING_TABLES;
-
-    let mut buf = [0u8; 8];
-    buf[0..4].copy_from_slice(&META_DAT_MAGIC);
-    buf[4..6].copy_from_slice(&META_DAT_VERSION.to_le_bytes());
-    buf[6..8].copy_from_slice(&flags.to_le_bytes());
-    buf
+/// Supply the stream decoder with the same container's committed metadata.
+/// Structural member presence still decides whether a stream exists. A missing
+/// or unpublished metadata member declares no extended capability; otherwise
+/// preserve the complete real header, including source-reload capability bits.
+/// Read failures, short headers and unknown extended bits fail closed.
+fn stream_metadata(ctfs: &mut CtfsReader) -> Result<Vec<u8>, String> {
+    if ctfs.file_size("meta.dat").is_none_or(|size| size == 0) {
+        return Ok(Vec::new());
+    }
+    let meta = ctfs
+        .read_file("meta.dat")
+        .map_err(|e| format!("committed meta.dat unreadable: {e}"))?;
+    codetracer_trace_writer::meta_dat::read_meta_dat_ext_flags(&meta)?;
+    Ok(meta)
 }
 
 /// Decode one interned CBOR value payload — a `values.dat` `StepValues` entry or
@@ -2056,6 +2007,16 @@ impl CTFSTraceReader {
         use num_traits::FromPrimitive;
         use std::path::PathBuf;
 
+        // Validate committed metadata with the same parser as from_bytes.
+        // An absent/uncommitted member remains delegated to the existing Nim
+        // follow path; a published malformed header must never be ignored.
+        if ctfs.file_size("meta.dat").is_some_and(|size| size > 0) {
+            let meta_bytes = ctfs
+                .read_file("meta.dat")
+                .map_err(|e| format!("new-format container has no readable meta.dat: {e}"))?;
+            meta_dat::parse_meta_dat(&meta_bytes).map_err(|e| format!("meta.dat is malformed: {e}"))?;
+        }
+
         let ct_path = ct_file_path.to_string_lossy().to_string();
 
         let reader =
@@ -2111,16 +2072,16 @@ impl CTFSTraceReader {
         let has_all_interning_tables = ["paths.dat", "funcs.dat", "types.dat", "varnames.dat"]
             .iter()
             .all(|name| ctfs.has_file(name));
-        let declared_sites = if has_all_interning_tables {
+        let declared_tables = if has_all_interning_tables {
             interning_tables::InterningTables::open_from_ctfs(ctfs)
                 .map_err(|e| format!("interning tables: {e}"))?
-                .map(|tables| tables.functions)
+                .map(|tables| (tables.functions, tables.types))
         } else {
             None
         };
         for i in 0..reader.function_count() {
             let name = reader.function(i).map_err(|e| format!("function {i}: {e}"))?;
-            let (path_id, line) = match declared_sites.as_ref().map(|sites| sites.get(i as usize)) {
+            let (path_id, line) = match declared_tables.as_ref().map(|(sites, _)| sites.get(i as usize)) {
                 Some(Some(site)) if site.name == name => (site.path_id, site.line),
                 Some(Some(site)) => {
                     return Err(format!(
@@ -2139,14 +2100,41 @@ impl CTFSTraceReader {
             db.functions.push(FunctionRecord { name, path_id, line });
         }
 
-        // Types — only the type name is available via FFI.
+        // The FFI supplies names; the already decoded same-container table
+        // supplies the complete typed record. Never infer a kind from a name.
+        if let Some((_, types)) = declared_tables.as_ref()
+            && types.len() != reader.type_count() as usize
+        {
+            return Err(format!(
+                "type table count disagrees: Nim reader reports {}, types.dat carries {}",
+                reader.type_count(),
+                types.len()
+            )
+            .into());
+        }
         for i in 0..reader.type_count() {
             let name = reader.type_name(i).map_err(|e| format!("type {i}: {e}"))?;
-            db.types.push(TypeRecord {
-                kind: TypeKind::Raw,
-                lang_type: name,
-                specific_info: TypeSpecificInfo::None,
-            });
+            let record = match declared_tables.as_ref().map(|(_, types)| types.get(i as usize)) {
+                Some(Some(record)) if record.lang_type == name => record.clone(),
+                Some(Some(record)) => {
+                    return Err(format!(
+                        "type {i}: the Nim reader names it {name:?} but types.dat decodes as {:?}",
+                        record.lang_type
+                    )
+                    .into());
+                }
+                Some(None) => {
+                    return Err(format!("type {i}: the Nim reader reports it but types.dat has no such record").into());
+                }
+                // Keep the existing follow/incomplete-table behavior. A missing
+                // typed table provides no evidence for assigning a typed kind.
+                None => TypeRecord {
+                    kind: TypeKind::Raw,
+                    lang_type: name,
+                    specific_info: TypeSpecificInfo::None,
+                },
+            };
+            db.types.push(record);
         }
 
         // Variable names
@@ -5184,8 +5172,7 @@ mod tests {
     }
 
     /// Repackage a set of internal files into a fresh `.ct` image and return its
-    /// bytes (via the test container writer, which lays out the same block
-    /// mapping the production writers use).
+    /// bytes through the actual shipping container writer.
     fn repackage_ct(meta: &[u8], others: &[(String, Vec<u8>)]) -> Vec<u8> {
         let dir = tempfile::tempdir().unwrap();
         let ct = dir.path().join("repacked.ct");
@@ -5193,15 +5180,20 @@ mod tests {
         for (n, b) in others {
             files.push((n.as_str(), b.as_slice()));
         }
-        ctfs_container::write_minimal_ctfs(&ct, &files).unwrap();
+        let mut writer = codetracer_ctfs::writer::CtfsWriter::create(&ct, 4096, 31).unwrap();
+        for (name, bytes) in files {
+            let handle = writer.add_file(name).unwrap();
+            writer.write(handle, bytes).unwrap();
+        }
+        writer.close().unwrap();
         std::fs::read(&ct).unwrap()
     }
 
     /// STRUCTURAL PRESENCE WINS: a container whose `steps.dat` is present but
     /// whose `has_step_stream` (bit 9) hint is CLEAR must still read its steps.
     ///
-    /// The db-backend `serialize_meta_dat` emits only bits 0..3, so re-stamping
-    /// the real bundle's meta leaves `steps.dat` structurally present with the
+    /// The genuine current native metadata producer derives optional bits 0..3.
+    /// Serializing the real bundle's metadata leaves `steps.dat` structurally present with the
     /// step bit cleared — exactly the still-recording shape the spec forbids a
     /// reader from gating on.
     #[test]
@@ -5210,7 +5202,7 @@ mod tests {
 
         let mut md = meta_dat::parse_meta_dat(&meta).unwrap();
         md.mcr = None;
-        let cleared = meta_dat::serialize_meta_dat(&md);
+        let cleared = meta_dat::serialize_current_meta_dat(&md);
         assert_eq!(
             meta_dat::parse_meta_dat(&cleared).unwrap().flags & meta_dat::FLAG_HAS_STEP_STREAM,
             0,
@@ -5244,7 +5236,7 @@ mod tests {
 
         let mut md = meta_dat::parse_meta_dat(&meta).unwrap();
         md.mcr = Some(test_mcr_fields());
-        let combined = meta_dat::serialize_meta_dat(&md);
+        let combined = meta_dat::serialize_current_meta_dat(&md);
         assert_ne!(
             meta_dat::parse_meta_dat(&combined).unwrap().flags & meta_dat::FLAG_HAS_MCR_FIELDS,
             0,

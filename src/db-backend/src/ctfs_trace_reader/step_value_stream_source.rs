@@ -168,15 +168,9 @@ impl SeekableStepStream {
     /// of re-opening the `.ct` by filesystem path.
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableStepStream>, String> {
         // Existence is answered by STRUCTURAL PRESENCE of `steps.dat`, never by
-        // `meta.dat`'s `has_step_stream` hint bit — a writer may stamp that bit
-        // only at close, so gating on it (or on `meta.dat` being present at all,
-        // which the writer also emits only at close) would refuse a step stream
-        // that structurally exists in a still-recording trace (trace-format spec:
-        // "Stream-presence flags are a hint, not a gate"). The container's own
-        // `meta.dat` is therefore never read here: `from_files` is handed
-        // `structural_presence_meta()`, which states the presence THIS call has
-        // already established structurally. See that helper for why passing an
-        // empty slice instead silently refused every split-stream container.
+        // the metadata hint bit. Preserve the same-container committed extended
+        // flags so a declared source-reload record remains decodable. Missing or
+        // uncommitted metadata declares none without suppressing ordinary steps.
         let dat = match ctfs.read_file("steps.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
@@ -190,7 +184,7 @@ impl SeekableStepStream {
         // did.
         let line_space = super::line_position_space::container_line_space(ctfs).map(Arc::new);
 
-        match StepStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
+        match StepStreamReader::from_files(&super::stream_metadata(ctfs)?, dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -433,7 +427,8 @@ impl SeekableValueStream {
         // Structural presence of `values.dat` decides existence, not the
         // `has_value_stream` hint bit or the presence of `meta.dat` (see
         // `SeekableStepStream::open_from_ctfs`). `from_files` is handed
-        // `structural_presence_meta()` rather than the container's `meta.dat`.
+        // the same-container committed metadata, or no extended capabilities when
+        // the metadata member is absent/uncommitted.
         let dat = match ctfs.read_file("values.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
@@ -442,7 +437,7 @@ impl SeekableValueStream {
             .read_file("values.idx")
             .map_err(|e| format!("values.idx missing despite values.dat presence: {e}"))?;
 
-        match ValueStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
+        match ValueStreamReader::from_files(&super::stream_metadata(ctfs)?, dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -521,9 +516,10 @@ impl SeekableValueStream {
 fn open_step_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<StepStreamReader>, String> {
     // Structural presence of `steps.dat` decides existence, not the
     // `has_step_stream` hint bit or `meta.dat` presence — the LIVE refresh path
-    // must serve a still-recording trace whose `meta.dat` is not yet written
+    // must serve a still-recording trace even before metadata is committed
     // (see `SeekableStepStream::open_from_ctfs`). `from_files` is handed
-    // `structural_presence_meta()` rather than the container's `meta.dat`.
+    // the same-container committed metadata, or no extended capabilities when
+    // the metadata member is absent/uncommitted.
     let dat = match ctfs.read_file("steps.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
@@ -531,15 +527,16 @@ fn open_step_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<StepStream
     let idx = ctfs
         .read_file("steps.idx")
         .map_err(|e| format!("steps.idx missing despite steps.dat presence: {e}"))?;
-    StepStreamReader::from_files(&super::structural_presence_meta(), dat, idx)
+    StepStreamReader::from_files(&super::stream_metadata(ctfs)?, dat, idx)
 }
 
 fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStreamReader>, String> {
     // Structural presence of `values.dat` decides existence, not the
     // `has_value_stream` hint bit or `meta.dat` presence — the LIVE refresh path
-    // must serve a still-recording trace whose `meta.dat` is not yet written
+    // must serve a still-recording trace even before metadata is committed
     // (see `SeekableStepStream::open_from_ctfs`). `from_files` is handed
-    // `structural_presence_meta()` rather than the container's `meta.dat`.
+    // the same-container committed metadata, or no extended capabilities when
+    // the metadata member is absent/uncommitted.
     let dat = match ctfs.read_file("values.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
@@ -547,7 +544,7 @@ fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStre
     let idx = ctfs
         .read_file("values.idx")
         .map_err(|e| format!("values.idx missing despite values.dat presence: {e}"))?;
-    ValueStreamReader::from_files(&super::structural_presence_meta(), dat, idx)
+    ValueStreamReader::from_files(&super::stream_metadata(ctfs)?, dat, idx)
 }
 
 /// Reconstruct the per-step `Vec<FullValueRecord>` (the materialized

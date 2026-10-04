@@ -100,15 +100,9 @@ impl SeekableCallStream {
     /// `BlockSource`/overlay instead of re-opening the `.ct` by filesystem path.
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableCallStream>, String> {
         // Existence is answered by STRUCTURAL PRESENCE of `calls.dat`, never by
-        // `meta.dat`'s `has_call_stream` hint bit — a writer may stamp that bit
-        // only at close, so gating on it (or on `meta.dat` being present at all,
-        // which the writer also emits only at close) would refuse a call stream
-        // that structurally exists in a still-recording trace (trace-format spec:
-        // "Stream-presence flags are a hint, not a gate"). The container's own
-        // `meta.dat` is therefore never read here: `from_files` is handed
-        // `structural_presence_meta()`, which states the presence THIS call has
-        // already established structurally. See that helper for why passing an
-        // empty slice instead silently refused every split-stream container.
+        // the metadata hint bit. The real committed metadata supplies extended
+        // capabilities; absent/uncommitted metadata declares none and does not
+        // suppress a structurally present ordinary stream.
         let dat = match ctfs.read_file("calls.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
@@ -117,7 +111,7 @@ impl SeekableCallStream {
             .read_file("calls.idx")
             .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
 
-        match CallStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
+        match CallStreamReader::from_files(&super::stream_metadata(ctfs)?, dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -221,9 +215,10 @@ impl SeekableCallStream {
 fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStreamReader>, String> {
     // Structural presence of `calls.dat` decides existence, not the
     // `has_call_stream` hint bit or `meta.dat` presence — the LIVE refresh path
-    // must serve a still-recording trace whose `meta.dat` is not yet written
+    // must serve a still-recording trace even before metadata is committed
     // (see `SeekableCallStream::open_from_ctfs`). `from_files` is handed
-    // `structural_presence_meta()` rather than the container's `meta.dat`.
+    // the same-container committed metadata, or no extended capabilities when
+    // the metadata member is absent/uncommitted.
     let dat = match ctfs.read_file("calls.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
@@ -231,7 +226,7 @@ fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStream
     let idx = ctfs
         .read_file("calls.idx")
         .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
-    CallStreamReader::from_files(&super::structural_presence_meta(), dat, idx)
+    CallStreamReader::from_files(&super::stream_metadata(ctfs)?, dat, idx)
 }
 
 /// Convert a `calls.dat` [`CallStreamRecord`] into the db-backend's [`DbCall`].

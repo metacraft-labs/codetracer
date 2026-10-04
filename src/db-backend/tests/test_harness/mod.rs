@@ -1478,6 +1478,8 @@ impl FlowData {
 pub enum ExpectedFlowValues {
     Integers(HashMap<String, i64>),
     Strings(HashMap<String, String>),
+    /// Nonnegative scalar expectations rendered as canonical full-width Noir Field values.
+    Fields(HashMap<String, i64>),
 }
 
 impl From<HashMap<String, i64>> for ExpectedFlowValues {
@@ -5312,6 +5314,58 @@ pub fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(
                     .ok_or_else(|| format!("required flow value {} is not an integer: {}", var_name, value))?;
                 if actual != *expected_value {
                     return Err(format!("{} should be {}, got {}", var_name, expected_value, actual));
+                }
+                println!("  {} = {} (correct)", var_name, actual);
+            }
+        }
+        ExpectedFlowValues::Fields(expected_values) => {
+            for (var_name, expected_value) in expected_values {
+                if *expected_value < 0 {
+                    return Err(format!("Field expectation {} must be nonnegative", var_name));
+                }
+                let value = flow
+                    .values
+                    .get(var_name)
+                    .ok_or_else(|| format!("required flow Field {} is missing", var_name))?;
+                if !FlowData::is_value_loaded(value) {
+                    return Err(format!("required flow Field {} is not loaded: {}", var_name, value));
+                }
+                let decode_kind = |kind: &serde_json::Value| {
+                    serde_json::from_value::<codetracer_trace_types::TypeKind>(kind.clone()).ok()
+                };
+                let value_kind = value.get("kind").and_then(decode_kind);
+                let type_kind = value.get("typ").and_then(|typ| typ.get("kind")).and_then(decode_kind);
+                let language_type = value
+                    .get("typ")
+                    .and_then(|typ| typ.get("langType"))
+                    .and_then(|name| name.as_str());
+                if value_kind != Some(codetracer_trace_types::TypeKind::String)
+                    || type_kind != Some(codetracer_trace_types::TypeKind::Int)
+                    || language_type != Some("Field")
+                {
+                    return Err(format!(
+                        "required flow value {} is not a typed Noir Field: {}",
+                        var_name, value
+                    ));
+                }
+                let actual = value
+                    .get("text")
+                    .and_then(|text| text.as_str())
+                    .ok_or_else(|| format!("required flow Field {} has invalid text: {}", var_name, value))?;
+                let canonical = actual.len() == 66
+                    && actual.starts_with("0x")
+                    && actual.as_bytes()[2..]
+                        .iter()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte));
+                if !canonical {
+                    return Err(format!(
+                        "required flow Field {} has noncanonical full-width text: {:?}",
+                        var_name, actual
+                    ));
+                }
+                let expected_text = format!("0x{:064x}", expected_value);
+                if actual != expected_text {
+                    return Err(format!("{} should be {}, got {}", var_name, expected_text, actual));
                 }
                 println!("  {} = {} (correct)", var_name, actual);
             }
