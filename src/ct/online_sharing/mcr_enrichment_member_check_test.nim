@@ -137,7 +137,7 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
     writeContainer(ctPath, [
       ("meta.dat", "metadata bytes"),
       ("platform.bin", "platform bytes"),
-      ("recordcfg.bi", "record config"),
+      ("recordcfg", "record config"),
       ("t00000000001", "thread stream bytes"),
       ("eventlog.dat", "event log bytes"),
       ("eventlog.idx", "event log index"),
@@ -156,7 +156,7 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
     writeContainer(lossy, [
       ("meta.dat", "metadata bytes"),
       ("platform.bin", "platform bytes"),
-      ("recordcfg.bi", "record config"),
+      ("recordcfg", "record config"),
       ("t00000000001", "thread stream bytes"),
       ("eventlog.dat", "event log bytes"),
     ])
@@ -190,7 +190,7 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
     writeContainer(shortened, [
       ("meta.dat", "metadata bytes"),
       ("platform.bin", "platform bytes"),
-      ("recordcfg.bi", "record config"),
+      ("recordcfg", "record config"),
       ("t00000000001", "thread"),          # shorter than the original
       ("eventlog.dat", "event log bytes"),
       ("eventlog.idx", "event log index"),
@@ -218,7 +218,7 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
     writeContainer(hollow, [
       ("meta.dat", "metadata bytes"),
       ("platform.bin", "platform bytes"),
-      ("recordcfg.bi", "record config"),
+      ("recordcfg", "record config"),
       ("t00000000001", "thread stream bytes"),
       ("eventlog.dat", "event log bytes"),
       ("eventlog.idx", "event log index"),
@@ -252,7 +252,7 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
     writeContainer(cut, [
       ("meta.dat", "metadata bytes"),
       ("platform.bin", "platform bytes"),
-      ("recordcfg.bi", "record config"),
+      ("recordcfg", "record config"),
       ("t00000000001", "thread stream bytes"),
       ("eventlog.dat", "event log bytes"),
       ("eventlog.idx", "event log index"),
@@ -274,7 +274,7 @@ suite "MCR Enrichment — the replacement must not rest on the exit code alone":
     writeContainer(good, [
       ("meta.dat", "metadata bytes"),
       ("platform.bin", "platform bytes"),
-      ("recordcfg.bi", "record config"),
+      ("recordcfg", "record config"),
       ("t00000000001", "thread stream bytes"),
       ("eventlog.dat", "event log bytes"),
       ("eventlog.idx", "event log index"),

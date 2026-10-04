@@ -263,14 +263,6 @@ const NOT_YET_RE_RECORDED: &[(&str, &str)] = &[
         "exported from ios-arm64/trace.ct, which must be re-recorded first",
     ),
     (
-        "examples/recordings/mcr/macos-arm64/trace.ct",
-        "re-recorded only on an Apple Silicon Mac (mcr/macos-arm64/regenerate.sh)",
-    ),
-    (
-        "examples/recordings/mcr/macos-arm64/trace-portable.ct",
-        "exported from macos-arm64/trace.ct, which must be re-recorded first",
-    ),
-    (
         "examples/recordings/mcr/macos-arm64/emulator/eme5/null_main.ct",
         "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
     ),
