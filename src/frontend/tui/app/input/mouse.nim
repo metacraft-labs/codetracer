@@ -68,6 +68,9 @@ type
     button*: MouseButton
     row*: int
     col*: int
+    shift*, alt*, ctrl*: bool
+      ## PLAT-50: the modifiers held (SGR's bits 4, 8 and 16) — the desktop's
+      ## Ctrl+click on a line is "Jump to line" (`ui/editor`'s `onMouseDown`).
 
 proc decodeMouse*(token: string): (bool, MouseEvent) =
   ## Decode one SGR-1006 report. `(false, _)` when `token` is not one.
@@ -107,6 +110,9 @@ proc decodeMouse*(token: string): (bool, MouseEvent) =
       of 1: mbMiddle
       of 2: mbRight
       else: mbOther
+  event.shift = (code and 4) != 0
+  event.alt = (code and 8) != 0
+  event.ctrl = (code and 16) != 0
   # 1-BASED ON THE WIRE. See this module's header.
   event.row = row - 1
   event.col = col - 1

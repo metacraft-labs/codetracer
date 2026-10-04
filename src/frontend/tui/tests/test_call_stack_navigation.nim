@@ -718,10 +718,9 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
         if i >= 1 and i <= paneRows and i < standalone.len and
            slice == standalone[i]:
           inc matched
-        # The right divider runs the rectangle's full height; where it meets
-        # the bottom divider it is a junction glyph (`shell.junctionGlyph`).
-        if flushRight or edge in [PaneSeparatorGlyph, "┤", "┼", "├", "┬", "┴",
-                                  "┘", "└", "┐", "┌"]:
+        # The right divider runs the rectangle's full height (PLAT-50: the
+        # edge line `shell.DividerGlyph`, the strip row's included).
+        if flushRight or edge == DividerGlyph:
           inc separators
       ck matched == paneRows
       ck separators == stackArea.height

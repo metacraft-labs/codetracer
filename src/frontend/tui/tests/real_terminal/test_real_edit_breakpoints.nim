@@ -92,10 +92,12 @@ proc markedLines(screen, fileText: string): seq[int] =
     var rest = row[g + BreakpointGlyph.len .. ^1]
     # THE EDIT PANE'S OWN CELLS ONLY. Since PLAT-45 the shared default puts a
     # column to the editor's right, so the row carries a `│` border and the
-    # neighbour's text after the file's line.
-    let border = rest.find("│")
-    if border >= 0:
-      rest = rest[0 ..< border]
+    # neighbour's text after the file's line. PLAT-50: the divider is the
+    # edge one-eighth block `▏` (`shell.DividerGlyph`).
+    for glyph in ["│", "▏"]:
+      let border = rest.find(glyph)
+      if border >= 0:
+        rest = rest[0 ..< border]
     let words = rest.splitWhitespace()
     var number = -1
     if words.len > 0:

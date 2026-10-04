@@ -66,10 +66,10 @@ type
       ## PLAT-47. Every other tab: the desktop's disabled title tier.
     crTabStripBackground = "tab.strip.background"
       ## PLAT-49. The tab strip's own ground, distinct from the pane body —
-      ## the user's direction, 2026-10-01. The window's card tier
-      ## (ui/surface/base/card): the terminal's strip token (base/raised,
-      ## #161616) is all but the WINDOW's own ground between the panes
-      ## (#12161c), so in the window a strip on it would read as a gap.
+      ## the user's direction, 2026-10-01. PLAT-50: the desktop's ground
+      ## behind its tabs, ui/surface/primary/default — the window's own, so
+      ## two strips side by side run on across the gap between them (the
+      ## user, 2026-10-02).
     crTabActiveBackground = "tab.active.background"
       ## PLAT-49. The active tab's own background (ui/surface/primary/
       ## tertiary), so the selected tab is unmistakable.
@@ -79,27 +79,48 @@ type
     crFocusOutline = "focus.outline"
       ## PLAT-47. The focused pane's 1px outline: the desktop's selected-panel
       ## stroke (`SELECTED_PANEL_BORDER_COLOR`, ui/border/primary).
+    crMenuBackground = "menu.background"
+      ## PLAT-50. An open dropdown's ground — the menu, the omnibar's results,
+      ## a right-click menu: the desktop's dropdown surface.
+    crMenuBorder = "menu.border"
+      ## PLAT-50. Its 1px border (ui/border/primary).
+    crFieldBorder = "field.border"
+      ## PLAT-50. The omnibox's and the menu button's 1px border, and the
+      ## `--dividers=subtle` line (ui/border/secondary).
 
 const
   WindowChrome*: array[ChromeRole, string] = [
-    "#12161c", # crWindowBackground — the surface behind every pane
-    "#e6edf3", # crWindowForeground — body text
-    "#1b222c", # crPaneBackground — one pane's fill, lifted off the surface
-    "#7ee3c8", # crPaneTitleForeground — the pane heading
+    # PLAT-50 (the user, 2026-10-02: "design tokens only; TUI and GPUI"): the
+    # window's own four colours were chosen here (PLAT-37's #12161c /
+    # #e6edf3 / #1b222c / #7ee3c8, said so above) and are now the DESKTOP'S,
+    # measured on the real app (`plat50-desktop-capture.spec.ts`): the ground
+    # behind and between its panes — its body, its caption bar, its
+    # splitters — is ui/surface/primary/default (#1b1b1b); a pane is
+    # ui/surface/base/panel (#282828); body text and headings their text
+    # tiers.
+    DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark],
+    DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark],
+    DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark],
+    DesignTokenHex[dtColorsUiTextPrimaryHeadings][dmDark],
     # PLAT-47: the tab strip and the focus outline are the DESKTOP'S, read
     # from the design system the desktop's stylesheets are generated from
     # (Dark), not chosen here — see `components/golden_layout.styl`.
     DesignTokenHex[dtColorsUiTextPrimaryHeadings][dmDark],
     DesignTokenHex[dtColorsUiTextPrimaryDisabled][dmDark],
-    # PLAT-49: the strip's own ground (see `crTabStripBackground`) and the
-    # active tab's own background — the token the terminal's `srTabActive`
-    # paints.
-    DesignTokenHex[dtColorsUiSurfaceBaseCard][dmDark],
+    # PLAT-50: the strip's ground is the desktop's ground behind its tabs —
+    # ui/surface/primary/default, the window's own (PLAT-49 had it on card,
+    # because raised was indistinguishable from the old #12161c). The active
+    # tab keeps its own background (PLAT-49).
+    DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark],
     DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark],
     DesignTokenHex[dtColorsUiSurfaceInputDefault][dmDark],
     DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
+    # PLAT-50: the desktop's dropdown surface (`dropdown-surface-chrome()`)
+    # and its border, and the field / menu button border.
+    DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark],
+    DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
+    DesignTokenHex[dtColorsUiBorderSecondary][dmDark],
   ]
-    ## Indexed by `ChromeRole`, so a role with no colour does not compile.
 
   FocusOutlinePx* = 1
     ## The focused pane's outline width, in device pixels — the desktop's

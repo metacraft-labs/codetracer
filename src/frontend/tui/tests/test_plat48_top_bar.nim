@@ -33,7 +33,7 @@ import codetracer_embed
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 317
+const ExpectedAssertions = 318
 
 var countedAssertions = 0
 
@@ -80,7 +80,9 @@ suite "PLAT-48: the top bar row":
     # are a dropdown inside it, never titles across the row.
     let rt = newRuntime(200, 50)
     let r = rt.row0()
-    ck r.startsWith(" ≡ ")
+    # PLAT-50: the button inside its border lines, as the desktop's
+    # `#menu-root` is.
+    ck r.startsWith(FieldEdgeLeft & MenuButtonGlyph & FieldEdgeRight)
     for title in ["File", "Edit", "View", "Build", "Reset", "Debug", "Help"]:
       ck not r.contains(" " & title & " ")
     for c in TransportControls:
@@ -99,7 +101,7 @@ suite "PLAT-48: the top bar row":
     rt.app.totalTicks = 8950
     let lay = rt.shellScreenOf().topBarLayout
     ck not lay.omnibarField
-    ck rt.row0().startsWith(" ≡ ")
+    ck rt.row0().startsWith(FieldEdgeLeft & MenuButtonGlyph & FieldEdgeRight)
     var ids: seq[string] = @[]
     for i in lay.shownControls: ids.add TransportControls[i].id
     # A priority PREFIX, in toolbar order.
@@ -274,7 +276,10 @@ suite "PLAT-48: the omnibar":
     for ch in ":step":
       discard rt.handleToken($ch, 0)
     let rows = rt.visible()
-    ck rows[1].contains("Debug › Step")
+    # PLAT-50: the results are framed (the dropdown surface's border on row
+    # 1), the first result on row 2.
+    ck rows[1].contains("┌")
+    ck rows[2].contains("Debug › Step")
     discard rt.handleToken(Esc, 0)
     ck not rt.app.omnibar.isOpen
 

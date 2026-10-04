@@ -287,6 +287,10 @@ suite "PLAT-41 — the five panes DRAW DATA, not only reports":
     createRoot proc(dispose: proc()) =
       let vm = createFilesystemVM(freshStore())
       vm.setRoot(recordingFileTree(calc.tracePath))
+      # Every folder open, as the native hosts load it
+      # (`native_host.loadRecordingPanes`): since PLAT-50 the view draws a
+      # folder's children only while the VM has it expanded.
+      expandAllFolders(vm)
       let pv = paneView(paneFileTree, ViewModel(vm), GpuiPanelBudget, "gpui")
       ck pv.report.len == 0
       ck pkTree in pv.entries

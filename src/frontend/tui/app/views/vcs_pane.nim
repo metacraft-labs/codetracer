@@ -53,11 +53,29 @@ type
       ## carried in the value so the two front-ends cannot word it differently.
     cleanText*: string
       ## What the section says for a clean tree (`vcs_vm.VCSCleanTreeText`).
+    expandedCommit*: int
+      ## PLAT-50 (K53): the commit a click opened (its files listed under
+      ## it, `VCSVM.commitFilesMap`), -1 for none — the desktop's accordion.
+    commitFiles*: seq[VcsFileLine]
+      ## The files `expandedCommit` changed.
+
+  VcsRowKind* = enum
+    vrNone, vrFile, vrCommit, vrCommitFile
+
+  VcsRowTarget* = object
+    ## PLAT-50: what one painted row is, for a click.
+    row*: int
+    kind*: VcsRowKind
+    index*: int
+      ## The file's, the commit's or the commit file's index.
+    status*, path*, hash*: string
 
   VcsPaneScreen* = object
     rows*: seq[StyledRow]
     fileRows*: int
       ## How many working-tree rows reached the screen.
+    targets*: seq[VcsRowTarget]
+      ## PLAT-50: every row a click acts on, as painted.
 
 const
   BranchMarker* = "on "
@@ -122,9 +140,11 @@ proc paintVcsPane*(g: var StyledGrid; area: CellArea;
                           $model.files.len & ")", style: VcsSectionStyle)]
   if model.files.len == 0:
     line @[StyledSpan(text: " " & model.cleanText, style: VcsMessageStyle)]
-  for f in model.files:
+  for i, f in model.files:
     if row > last:
       break
+    result.targets.add VcsRowTarget(row: row, kind: vrFile, index: i,
+                                    status: f.status, path: f.path)
     line @[StyledSpan(text: " ", style: DefaultCellStyle),
            StyledSpan(text: f.status, style: statusStyle(f.status)),
            StyledSpan(text: " " & f.path, style: VcsPathStyle)]
@@ -132,8 +152,29 @@ proc paintVcsPane*(g: var StyledGrid; area: CellArea;
   if model.commits.len > 0:
     line @[StyledSpan(text: CommitsTitle & " (" & $model.commits.len & ")",
                       style: VcsSectionStyle)]
-    for c in model.commits:
+    for ci, c in model.commits:
       if row > last:
         break
+      result.targets.add VcsRowTarget(row: row, kind: vrCommit, index: ci,
+                                      hash: c.hash)
       line @[StyledSpan(text: " " & c.hash, style: VcsHashStyle),
              StyledSpan(text: " " & c.subject, style: VcsPathStyle)]
+      # PLAT-50 (K53): an opened commit lists the files it changed under it,
+      # indented, as the desktop's accordion does.
+      if ci == model.expandedCommit:
+        for fi, f in model.commitFiles:
+          if row > last:
+            break
+          result.targets.add VcsRowTarget(row: row, kind: vrCommitFile,
+                                          index: fi, status: f.status,
+                                          path: f.path, hash: c.hash)
+          line @[StyledSpan(text: "   ", style: DefaultCellStyle),
+                 StyledSpan(text: f.status, style: statusStyle(f.status)),
+                 StyledSpan(text: " " & f.path, style: VcsPathStyle)]
+
+proc vcsTargetAt*(screen: VcsPaneScreen; row: int): VcsRowTarget =
+  ## PLAT-50: the row a press on screen row `row` is on.
+  for t in screen.targets:
+    if t.row == row:
+      return t
+  VcsRowTarget(row: row, kind: vrNone)

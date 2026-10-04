@@ -179,6 +179,15 @@ type
     elcOutput = "output"
       ## The event's text.
 
+  EventLogOrder* = object
+    ## PLAT-50: how the event log is ordered — the column its header click
+    ## chose and the direction (the desktop's DataTables `order`). The engine
+    ## sorts (`ct/event-load`'s `sortKey` / `sortAscending`,
+    ## `ct/update-table`'s `order`), so every front-end pages through one
+    ## ordered log.
+    column*: EventLogColumn
+    ascending*: bool
+
   EventLogColumns* = object
     ## Which columns the event log shows, and in what order — the desktop's
     ## show/hide/reorder capability (Event-Log-Pane.md: "[+ Columns]",
@@ -195,6 +204,15 @@ const
     ## The desktop's dense table, left to right.
   DefaultHiddenEventLogColumns* = {elcLocation}
     ## Hidden until the user shows them — the desktop's default.
+
+const RecordedEventOrder* = EventLogOrder(column: elcTick, ascending: true)
+  ## The recorded order, the desktop's initial `order: [[tick, "asc"]]`.
+
+func clickedHeader*(o: EventLogOrder; column: EventLogColumn): EventLogOrder =
+  ## A click on `column`'s header, as DataTables answers one: the column
+  ## already ordering flips its direction; any other orders ascending.
+  if o.column == column: EventLogOrder(column: column, ascending: not o.ascending)
+  else: EventLogOrder(column: column, ascending: true)
 
 func eventLogColumnTitle*(c: EventLogColumn): string =
   ## A column's header text: the desktop's `title` (`renderColumnHeader`),
@@ -454,6 +472,24 @@ proc sort*(vm: EventLogVM; column: int) =
   else:
     vm.sortColumn.val = column
     vm.sortAscending.val = true
+
+proc order*(vm: EventLogVM): EventLogOrder =
+  ## PLAT-50: the order `sortColumn` / `sortAscending` say, by column: the
+  ## index is into the columns shown.
+  let shown = vm.columns.val.visibleColumns
+  let col = vm.sortColumn.val
+  EventLogOrder(column: (if col >= 0 and col < shown.len: shown[col]
+                         else: elcTick),
+                ascending: vm.sortAscending.val)
+
+proc sortBy*(vm: EventLogVM; order: EventLogOrder) =
+  ## PLAT-50: order the log by `order` (the header click's answer,
+  ## `clickedHeader`) — the column's index among those shown, and the
+  ## direction.
+  let shown = vm.columns.val.visibleColumns
+  let at = shown.find(order.column)
+  vm.sortColumn.val = max(0, at)
+  vm.sortAscending.val = order.ascending
 
 proc toggleColumnsMenu*(vm: EventLogVM) =
   vm.columnsMenuOpen.val = not vm.columnsMenuOpen.val
@@ -1112,13 +1148,19 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         lastCol = col
         lastAsc = asc
         hasFired = true
-        let args = %*{
+        var args = %*{
           "page": page,
           "pageSize": ps,
           "searchQuery": query,
           "sortColumn": col,
           "sortAscending": asc,
         }
+        # PLAT-50: the engine orders by a column NAME (`sortKey`); the
+        # column index alone was never read, so a sorted pane got the
+        # recorded order back.
+        let shown = vm.columns.val.visibleColumns
+        if col >= 0 and col < shown.len:
+          args["sortKey"] = %($shown[col])
         let future = store.backend.send("ct/event-load", args)
         let vmRef = vm
         let storeRef = store

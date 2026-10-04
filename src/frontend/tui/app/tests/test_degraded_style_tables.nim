@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3162
+const ExpectedAssertions = 3266
 
 var countedAssertions = 0
 
@@ -80,7 +80,10 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 120
+  ExpectedRoleCount = 124
+    ## PLAT-50: +4 — `srBorderMenu` (a dropdown's frame), `srDividerStrip`
+    ## (the `--dividers=strip` line), `srSurfaceTopBar` (the caption bar's
+    ## ground) and `srSurfaceMenu` (a dropdown's ground).
     ## PLAT-49 part B review: +1, `srSurfaceActiveRow` — the ground of the
     ## call the debugger is in (the desktop's `.event-selected`).
     ## PLAT-47 added `srLineNumberActive` (the execution line's number, the
@@ -98,7 +101,7 @@ const
     ## inactive session tab's ground (`srSessionTab`). `srNone` plus 118
     ## painted roles.
   ExpectedGroupCount = 20
-  ExpectedMergeCount = 18
+  ExpectedMergeCount = 21
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.
 
@@ -263,10 +266,15 @@ suite "CTUI-11 Tier 1: degraded style tables":
                 (srSurfaceSelection, dtEditorThemeSelection),
                 (srSurfaceCurrentLine, dtEditorThemeExecutionLine),
                 (srLineExecution, dtEditorThemeExecutionLine),
-                (srTabBar, dtColorsUiSurfaceBaseRaised),
+                # PLAT-50 (the user, 2026-10-02): the strip and inactive
+                # tabs on the desktop's ground behind its tabs; the field on
+                # the input surface (raised was "black" / "white").
+                (srTabBar, dtColorsUiSurfacePrimaryDefault),
                 (srTabActive, dtColorsUiSurfacePrimaryTertiary),
-                (srTabInactive, dtColorsUiSurfaceBaseRaised),
-                (srSurfaceField, dtColorsUiSurfaceBaseRaised)]
+                (srTabInactive, dtColorsUiSurfacePrimaryDefault),
+                (srSurfaceField, dtColorsUiSurfaceInputDefault),
+                (srSurfaceTopBar, dtColorsUiSurfacePrimaryDefault),
+                (srSurfaceMenu, dtColorsUiSurfacePrimaryDefault)]
     for (role, token) in Fg:
       ck spec(role).hasFg and spec(role).fg == token
     for (role, token) in Bg:
@@ -525,7 +533,7 @@ suite "CTUI-11 Tier 1: degraded style tables":
       inc mapped
     checkpoint("ASCII fallback pairs: " & $mapped)
     ck mapped == AsciiFallbackTable.len
-    ck mapped == 25
+    ck mapped == 27       # PLAT-50: `▏` and `▕`, the divider and edge lines
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.
@@ -586,12 +594,15 @@ suite "CTUI-11 Tier 1: degraded style tables":
     var originalText = ""
     for row in rows:
       originalText.add rowText(row)
-    checkpoint("undegraded screen holds ─:" & $originalText.contains("─") &
-               " │:" & $originalText.contains("│"))
-    ck originalText.contains("─")
-    ck originalText.contains("│")
-    ck not text.contains("─")
-    ck not text.contains("│")
+    checkpoint("undegraded screen holds ▏:" & $originalText.contains("▏") &
+               " ▕:" & $originalText.contains("▕"))
+    # PLAT-50: the dividers are edge one-eighth blocks (`▏`) and there are
+    # no rule rows between stacked panes; the top bar's border lines are `▕`
+    # and `▏`. Every one of them is `|` at the ASCII tier.
+    ck originalText.contains("▏")
+    ck originalText.contains("▕")
+    ck not text.contains("▏")
+    ck not text.contains("▕")
     ck not text.contains("●")
     ck text.contains("-")
     ck text.contains("|")
@@ -668,7 +679,8 @@ suite "CTUI-11 Tier 1: degraded style tables":
       # ground): the selected tab on a background AND in a foreground of its
       # own, the others on the strip's own ground in the disabled tier.
       ck activeBg == tokenHex(dtColorsUiSurfacePrimaryTertiary, dmDark)
-      ck inactiveBg == tokenHex(dtColorsUiSurfaceBaseRaised, dmDark)
+      # PLAT-50: on the desktop's ground behind its tabs.
+      ck inactiveBg == tokenHex(dtColorsUiSurfacePrimaryDefault, dmDark)
       ck activeFg == tokenHex(dtColorsUiTextPrimaryHeadings, dmDark)
       ck inactiveFg == tokenHex(dtColorsUiTextPrimaryDisabled, dmDark)
     # A PANE's body sits on the panel surface, and the header on its card:
@@ -690,7 +702,9 @@ suite "CTUI-11 Tier 1: degraded style tables":
           if span.style.bg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark):
             inc onPanel
       ck blank > 0 and onPanel == blank
-    ck truecolor[0][0].style.bg == tokenHex(dtColorsUiSurfaceBaseCard, dmDark)
+    # PLAT-50: the top bar on the desktop's caption-bar ground.
+    ck truecolor[0][0].style.bg == tokenHex(dtColorsUiSurfacePrimaryDefault,
+                                            dmDark)
     # …and under `--palette=terminal` the same screen carries NO 24-bit and no
     # indexed colour at all — only the sixteen names and the default.
     let term = degradeRows(rows, capsFor(cdTrueColor, bmUnicode,

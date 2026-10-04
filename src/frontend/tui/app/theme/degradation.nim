@@ -66,7 +66,7 @@ type
       ## "" for a role that tints text rather than painting a mark.
 
 const
-  PermittedMerges*: array[18, (SemanticRole, SemanticRole, string)] = [
+  PermittedMerges*: array[21, (SemanticRole, SemanticRole, string)] = [
     (srSyntaxPlain, srSyntaxIdentifier,
      "An identifier IS plain text. The design system paints both with" &
      " `colors/editor/syntax/primary` (`plain` is an alias of it), and" &
@@ -133,7 +133,20 @@ const
      " reads as a keyword-like marker in monochrome's bold."),
     (srSyntaxTag, srSyntaxMetatag,
      "The shebang and a decorator are both markers: bold, at the monochrome" &
-     " rung, as the decorator and the keyword already are.")]
+     " rung, as the decorator and the keyword already are."),
+    # PLAT-50: three lines of the chrome's border tier.
+    (srBorderPane, srDividerStrip,
+     "The two `--dividers` choices for the same pane divider (the user's open" &
+     " choice): a screen draws one or the other, never both, so where no" &
+     " colour is left they are the one divider line `▏` they always are."),
+    (srBorderPane, srBorderMenu,
+     "A dropdown's frame and a pane divider: the frame is drawn in box" &
+     " glyphs (`┌─┐│└┘`) and the divider in `▏`, so the GLYPH tells them" &
+     " apart at every rung; the colour rungs add the frame's lighter" &
+     " ui/border/primary."),
+    (srBorderMenu, srDividerStrip,
+     "A dropdown's frame and the strip-coloured divider: told apart by their" &
+     " glyphs as above, and by colour on every colour rung.")]
     ## Pairs of roles in one group that share an appearance at some tier ON
     ## PURPOSE, each with the argument for it. The COUNT is asserted by
     ## `app/tests/test_degraded_style_tables.nim`.

@@ -22,8 +22,9 @@
 ##     reverse + bold and unique;
 ##   * focus (deliverable 9): for every pane in turn (`Tab`), at the three
 ##     standard sizes, the divider cells in the focus colour are exactly the
-##     closed ring around ONE pane — every divider on that pane's perimeter,
-##     no other — the colour is the desktop's measured outline, and its
+##     outline of ONE pane — since PLAT-50 (no divider rows) its two sides,
+##     unbroken over the same rows, no other — the colour is the desktop's
+##     measured outline, and its
 ##     contrast against an unfocused divider does not exceed the desktop's own
 ##     outline-to-edge contrast;
 ##   * `--goto` (the user's 2026-09-27 decision): a stop outside the viewport
@@ -40,8 +41,8 @@
 ## background query into the pty, because libvterm is a parser and answers
 ## nothing — the binary's own reading of the answer is what is under test.
 
-import std/[json, math, monotimes, os, sets, strutils, tables, times, unicode,
-            unittest]
+import std/[algorithm, json, math, monotimes, os, sets, strutils, tables,
+            times, unicode, unittest]
 
 import nim_libvterm
 import term_assert
@@ -66,8 +67,11 @@ const
   CaptureRecipe = "just plat47-capture-electron"
   Sizes = [(80, 24), (120, 40), (200, 60)]
     ## CodeTracer-TUI.md §3.2's three standard sizes.
-  DividerGlyphs = ["│", "─", "┼", "├", "┤", "┬", "┴", "┌", "┐", "└", "┘"]
-  VerticalDividerGlyphs = ["│", "┼", "├", "┤", "┬", "┴", "┌", "┐", "└", "┘"]
+  DividerGlyphs = ["▏", "│", "─", "┼", "├", "┤", "┬", "┴", "┌", "┐", "└", "┘"]
+  VerticalDividerGlyphs = ["▏", "│", "┼", "├", "┤", "┬", "┴", "┌", "┐", "└",
+                           "┘"]
+    ## PLAT-50: a divider is the edge one-eighth block `▏`
+    ## (`shell.DividerGlyph`); the box-drawing glyphs stay for older frames.
     ## The glyphs that END a strip on its row. `─` is not one of them: a
     ## strip bounded by it would stop at the very rule deliverable 8 forbids,
     ## and never see it (the PLAT-47 mutation harness's arm B2 caught exactly
@@ -135,11 +139,15 @@ proc isDivider(sess: var TuiTestSession; row, col: int; ground: string): bool =
   ## dividers sit on the panel surface, not on a canvas of their own) in a
   ## BORDER colour — the unfocused or the focused divider tier — which is
   ## what tells it from a box-drawing character a pane's content draws.
+  ## PLAT-50: the default divider colour is the strip's ground
+  ## (`--dividers=strip`, ui/surface/primary/default), the desktop's
+  ## splitters'.
   let cell = sess.cellAt(row, col)
   glyph(sess, row, col) in DividerGlyphs and
     hexOfColor(cell.bg) == ground and
     hexOfColor(cell.fg) in [DesignTokenHex[dtColorsUiBorderSecondary][dmDark],
-                            DesignTokenHex[dtColorsUiBorderPrimary][dmDark]]
+                            DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
+                            DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark]]
 
 # ---------------------------------------------------------------------------
 # Deliverables 2, 3 and 7: the editor, the Files pane and the call trace
@@ -384,54 +392,48 @@ type Ring = tuple[top, left, bottom, right: int]
 
 proc focusRingOf(sess: var TuiTestSession; cols, rows: int; canvas,
                  focus: string; ok: var bool): Ring =
-  ## The bounding box of the focus-coloured divider cells, and whether it is a
-  ## CLOSED RING around one pane: every divider cell on the box's perimeter is
-  ## in the focus colour (the ones on an edge that is the body's own edge
-  ## need not exist), no focus-coloured divider lies off the perimeter, and no
-  ## divider lies strictly inside it.
-  var cells: seq[(int, int)] = @[]
+  ## The focused pane's outline: its SIDES. PLAT-50 removed the divider rows
+  ## between stacked panes (the lower pane's tab strip is the separator, the
+  ## user's direction of 2026-10-02), so the outline PLAT-47 drew on four
+  ## sides is the two dividers beside the pane's box. `ok` when the
+  ## focus-coloured divider cells are one or two COLUMNS, each one unbroken
+  ## run over the same rows (the pane's rows below its strip), and every
+  ## divider cell of those columns inside that run is in the focus colour —
+  ## the outline is symmetric whichever neighbour owns a divider. The answer
+  ## is (first row, left column, last row, right column); a side at the
+  ## body's edge has no divider and reads -1 / `cols`.
+  ## A focus-coloured divider cell may sit on a neighbour's STRIP ground
+  ## (where the side meets a stacked neighbour's tab strip), so the focus
+  ## cells are read by glyph and colour, not by `isDivider`'s ground.
   var focusCells = initHashSet[(int, int)]()
   for r in 1 ..< rows - 1:
     for c in 0 ..< cols:
-      if isDivider(sess, r, c, canvas):
-        cells.add (r, c)
-        if hexOfColor(sess.cellAt(r, c).fg) == focus:
-          focusCells.incl (r, c)
+      if glyph(sess, r, c) in VerticalDividerGlyphs and
+         hexOfColor(sess.cellAt(r, c).fg) == focus:
+        focusCells.incl (r, c)
   ok = focusCells.len > 0
   if not ok:
     return (top: -1, left: -1, bottom: -1, right: -1)
-  result = (top: high(int), left: high(int), bottom: -1, right: -1)
+  var columns: seq[int] = @[]
+  result = (top: high(int), left: -1, bottom: -1, right: cols)
   for (r, c) in focusCells:
+    if c notin columns: columns.add c
     result.top = min(result.top, r)
     result.bottom = max(result.bottom, r)
-    result.left = min(result.left, c)
-    result.right = max(result.right, c)
-  # A pane at the body's edge has no divider there; the box then extends to
-  # that edge (the header row above, the status row below, column 0 / the
-  # last column beside).
-  var hasTop, hasBottom, hasLeft, hasRight = false
-  for (r, c) in focusCells:
-    if r == result.top and c > result.left and c < result.right: hasTop = true
-    if r == result.bottom and c > result.left and c < result.right:
-      hasBottom = true
-  for (r, c) in focusCells:
-    if c == result.left and r > result.top and r < result.bottom: hasLeft = true
-    if c == result.right and r > result.top and r < result.bottom:
-      hasRight = true
-  if not hasTop: result.top = 0
-  if not hasBottom: result.bottom = rows - 1
-  if not hasLeft: result.left = -1
-  if not hasRight: result.right = cols
-  for (r, c) in cells:
-    let onPerimeter = (r == result.top or r == result.bottom) and
-                      c >= result.left and c <= result.right or
-                      (c == result.left or c == result.right) and
-                      r >= result.top and r <= result.bottom
-    let inside = r > result.top and r < result.bottom and
-                 c > result.left and c < result.right
-    if inside: ok = false
-    if onPerimeter and (r, c) notin focusCells: ok = false
-    if not onPerimeter and (r, c) in focusCells: ok = false
+  columns.sort()
+  if columns.len > 2:
+    ok = false
+  for c in columns:
+    for r in result.top .. result.bottom:
+      if (r, c) notin focusCells: ok = false
+  if columns.len == 2:
+    result.left = columns[0]
+    result.right = columns[1]
+  elif columns.len == 1:
+    # One side: the other is the body's edge. Which one it is follows from
+    # where the divider is.
+    if columns[0] < cols div 2: result.left = columns[0]
+    else: result.right = columns[0]
 
 suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
 
@@ -489,8 +491,8 @@ suite "PLAT-47: --goto centres the stop, and auto-detection keeps Dark":
     var last = title
     for r in title + 1 ..< Rows - 1:
       let t = sess.regionText(r, 0, Cols, 1)
-      if t.len > 0 and t.contains("│") and
-         (t.split("│")[1].strip().len > 0 or last == r - 1):
+      if t.len > 0 and t.contains(DividerGlyphs[0]) and
+         (t.split(DividerGlyphs[0])[1].strip().len > 0 or last == r - 1):
         last = r
     let first = title + 1
     let height = last - first + 1

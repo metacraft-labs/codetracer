@@ -607,7 +607,20 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
     for c in log.value:
       rows.add VCSCommitRow(hash: c.shortId, message: c.subject,
                             author: c.authorName, fullHash: c.id, dotLane: -1)
-  vm.setCommits(rows, [])
+  # PLAT-50: A REFRESH KEEPS THE OPEN COMMIT while the history is the same
+  # history (the periodic refresh used to close it every few seconds).
+  let previous = vm.commits.val
+  var same = previous.len == rows.len
+  if same:
+    for i in 0 ..< rows.len:
+      if previous[i].fullHash != rows[i].fullHash:
+        same = false
+        break
+  if same:
+    vm.setCommits(rows, vm.selectedCommitIndices.val, vm.lastClickedIndex.val)
+  else:
+    vm.setCommits(rows, [])
+    vm.syncCommitFilesMap([])
 
 proc workingStateKey*(vm: VCSVM): string =
   ## Everything a native VCS pane draws from this ViewModel — repository or

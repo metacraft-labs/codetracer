@@ -110,12 +110,13 @@ proc terminalCapability*(): PaneCapability =
     {paneEditor, paneCalltrace, paneState, paneEventLog, paneTimeline,
      panePointList, paneFileTree, paneBuildOutput,
      # PLAT-47 deliverable 4: the VCS pane (`views/vcs_pane.nim`).
-     paneVcs},
+     paneVcs,
+     # PLAT-50: the scratchpad (`views/scratchpad_pane.nim`).
+     paneScratchpad},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
      (paneSearch, "search results open in the command line, not a pane"),
-     (paneScratchpad, "the terminal has no scratchpad view yet"),
      (paneShell, "the terminal has no embedded shell view yet"),
      (paneAgentActivity, "the terminal has no agent-activity view yet"),
      (paneTerminalOutput, "the recorded program's terminal output has no " &

@@ -1382,6 +1382,44 @@ proc tabAtCell(b: LayoutBinding; geom: LayoutGeometry;
     return none(PaneKind)
   some(info.get.pane)
 
+const
+  LoneEditorLabelCells* = 24
+    ## PLAT-50: how many cells of a lone editor's strip are its tab. The
+    ## terminal names a lone editor's tab after its FILE (`shell.paintPane`),
+    ## which the binding does not know; the file names this front-end shows
+    ## fit here, and past it the strip is the divider above (`dividerAt`).
+
+proc onStripLabel(b: LayoutBinding; geom: LayoutGeometry; idx, col: int): bool =
+  ## PLAT-50: whether `col` of a LONE pane's strip row (region `idx`) is on
+  ## its one label rather than the strip's empty ground. A stack's tabs are
+  ## resolved before either caller asks (`tabAtCell`, first in `onMouse` and
+  ## in `stripPaneAt`), so for a stack every cell asked about is ground.
+  let region = geom.projection.regions[idx]
+  let at = col - region.area.col
+  if region.activeTab >= 0 and region.tabs.len > 0:
+    return false
+  let label =
+    if region.pane == paneEditor: LoneEditorLabelCells
+    else: textCells(" " & terminalPaneName(region.pane) & " ")
+  at >= 0 and at < label
+
+proc stripPaneAt*(b: LayoutBinding; geom: LayoutGeometry;
+                  row, col: int): Option[PaneKind] =
+  ## PLAT-50: the pane whose TAB is under `(row, col)` — a stack's tab, or a
+  ## lone pane's one label — for a right-click's tab menu
+  ## (`pane_clicks.tabContextMenu`).
+  let tab = b.tabAtCell(geom, row, col)
+  if tab.isSome:
+    return tab
+  let idx = geom.regionIndexAt(row, col)
+  if idx < 0:
+    return none(PaneKind)
+  let region = geom.projection.regions[idx]
+  if region.activeTab < 0 and row == region.area.row and
+     b.onStripLabel(geom, idx, col):
+    return some(region.pane)
+  none(PaneKind)
+
 proc dividerAt(b: LayoutBinding; geom: LayoutGeometry;
                row, col: int): Option[(string, int)] =
   ## The divider a cell sits on, as `(container path, divider index)` — the
@@ -1396,6 +1434,13 @@ proc dividerAt(b: LayoutBinding; geom: LayoutGeometry;
   ## between two panes is. A cell where the two regions meet only at a corner,
   ## or across a container of the other axis, is on no divider this gesture
   ## can move.
+  ##
+  ## PLAT-50: THE HORIZONTAL DIVIDER IS THE LOWER PANE'S TAB STRIP. There is no
+  ## divider row between vertically adjacent panes any more (the strip is the
+  ## separator, `shell.paneFrame`), so a vertical resize is picked up on the
+  ## lower pane's strip row OFF its tabs — the strip's empty ground, the way
+  ## GoldenLayout's header is the edge of the stack below a splitter. The pair
+  ## answered is the UPPER pane's, as the old divider row's was.
   let idx = geom.regionIndexAt(row, col)
   if idx < 0:
     return none((string, int))
@@ -1404,37 +1449,43 @@ proc dividerAt(b: LayoutBinding; geom: LayoutGeometry;
   let here = geom.pathOfPane(pane)
   if here.isNone:
     return none((string, int))
-  for (vertical, r, c) in [(true, row, col + 1), (false, row + 1, col)]:
-    if vertical and col != area.col + area.width - 1:
-      continue
-    if not vertical and row != area.row + area.height - 1:
-      continue
-    let other = geom.regionIndexAt(r, c)
-    if other < 0 or other == idx:
-      continue
-    let there = geom.pathOfPane(geom.projection.regions[other].pane)
-    if there.isNone:
-      continue
-    let a = here.get.split('/')
-    let z = there.get.split('/')
+  proc between(first, second: string; kind: LayoutNodeKind): Option[(string, int)] =
+    ## The divider between two panes' subtrees when they are adjacent
+    ## children (i, i + 1) of one container of `kind`.
+    let a = first.split('/')
+    let z = second.split('/')
     var k = 0
     while k < a.len and k < z.len and a[k] == z[k]:
       inc k
     if k >= a.len or k >= z.len:
-      continue
+      return none((string, int))
     let container = a[0 ..< k].join("/")
     var ia, iz: int
     try:
       ia = parseInt(a[k])
       iz = parseInt(z[k])
     except ValueError:
-      continue
+      return none((string, int))
     let info = nodeInfoAtPath(b.layout.tree, container)
-    if info.isNone or iz != ia + 1:
-      continue
-    if info.get.kind != (if vertical: lnRow else: lnColumn):
-      continue
-    return some((container, ia))
+    if info.isNone or iz != ia + 1 or info.get.kind != kind:
+      return none((string, int))
+    some((container, ia))
+  # The vertical divider: the region's last column, the next pane right.
+  if col == area.col + area.width - 1:
+    let other = geom.regionIndexAt(row, col + 1)
+    if other >= 0 and other != idx:
+      let there = geom.pathOfPane(geom.projection.regions[other].pane)
+      if there.isSome:
+        let found = between(here.get, there.get, lnRow)
+        if found.isSome:
+          return found
+  # The horizontal one: this pane's strip row, the pane above it.
+  if row == area.row and row > 0 and not b.onStripLabel(geom, idx, col):
+    let other = geom.regionIndexAt(row - 1, col)
+    if other >= 0 and other != idx:
+      let there = geom.pathOfPane(geom.projection.regions[other].pane)
+      if there.isSome:
+        return between(there.get, here.get, lnColumn)
   none((string, int))
 
 proc dividerFraction(b: LayoutBinding; geom: LayoutGeometry; node: string;
@@ -1641,8 +1692,10 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
         return action(lasNoGesture, "press outside the layout")
       let region = geom.projection.regions[idx]
       b.focus = region.pane
-      if region.activeTab < 0 and event.row == region.area.row:
-        # A pane not in a stack is marked by its one-tab strip row.
+      if region.activeTab < 0 and event.row == region.area.row and
+         b.onStripLabel(geom, idx, event.col):
+        # A pane not in a stack is marked by its one tab. PLAT-50: on its
+        # LABEL — the rest of the strip is the divider above (`dividerAt`).
         b.pendingPick = some(region.pane)
         return action(lasNoGesture, "pressed the " & $region.pane & " tab")
       let divider = b.dividerAt(geom, event.row, event.col)

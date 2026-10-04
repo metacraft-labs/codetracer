@@ -603,7 +603,11 @@ def inked(frame, rect):
     return n
 
 
-STRIP_GROUNDS = ["#262626", "#333333", "#1b222c"]
+STRIP_GROUNDS = ["#1b1b1b", "#333333", "#282828"]
+# PLAT-50: the window's colours are the desktop's tokens — the strip on
+# ui/surface/primary/default (#1b1b1b), the selected tab on
+# ui/surface/primary/tertiary (#333333), a pane on ui/surface/base/panel
+# (#282828); they were #262626 / #333333 / #1b222c.
 # PLAT-49: a tab strip's labels stand on SEVERAL grounds — the strip's own
 # (`crTabStripBackground`), the selected tab's (`crTabActiveBackground`) and,
 # under a strip, the pane's (`crPaneBackground`). Tesseract binarises a line

@@ -261,11 +261,11 @@ type
     unfilled, cells: int
 
 proc lastColBeforeRule(sess: var TuiTestSession; row, fromCol, cols: int): int =
-  ## The column just left of the first `│` at or right of `fromCol` on `row`
-  ## — the last body cell of the region `fromCol` is in — or `cols - 2` when
-  ## the region runs to the screen's edge.
+  ## The column just left of the first divider (`│`, since PLAT-50 `▏`) at or
+  ## right of `fromCol` on `row` — the last body cell of the region `fromCol`
+  ## is in — or `cols - 2` when the region runs to the screen's edge.
   for c in fromCol ..< cols:
-    if $sess.cellAt(row, c).rune == "│":
+    if $sess.cellAt(row, c).rune in ["│", "▏"]:
       return max(fromCol, c - 1)
   cols - 2
 
@@ -274,17 +274,20 @@ proc readWide(sess: var TuiTestSession): Fidelity =
   let defRow = rowOf(sess, cols, rows, "def add")
   if defRow >= 0:
     result.keywordFg = hexOfColor(sess.cellAt(defRow, colOf(sess, defRow, cols, "def add")).fg)
-  # Title row 1: every rule and separator glyph is a pane border — the
-  # focused pane's in the focus role, the others in the ordinary one. Both are
-  # collected. The separator (`│`) counts too: in the shared default (PLAT-45)
-  # the focused region at start is the Files STACK, whose row 1 is a tab strip,
-  # so its focus-role border on that row is its right-hand separator.
-  for c in 0 ..< cols:
-    let cell = sess.cellAt(1, c)
-    if $cell.rune == "─" or $cell.rune == "│":
-      let h = hexOfColor(cell.fg)
-      if h notin result.ruleFgs:
-        result.ruleFgs.add h
+  # Every line glyph of the top three rows is a border — the focused pane's
+  # in the focus role, the others in the ordinary one. Both are collected.
+  # PLAT-50: there are no rule rows; the top bar's field and menu button are
+  # bounded by edge lines (`▕` `▏`) in ui/border/secondary on row 0, and the
+  # focused region at start — the Files STACK (PLAT-45) — has its right-hand
+  # divider `▏` in the focus role on its body rows (row 2). A divider in a
+  # strip row (row 1) is the strip's own ground (`srDividerStrip`).
+  for r in 0 .. 2:
+    for c in 0 ..< cols:
+      let cell = sess.cellAt(r, c)
+      if $cell.rune in ["─", "│", "▏", "▕"]:
+        let h = hexOfColor(cell.fg)
+        if h notin result.ruleFgs:
+          result.ruleFgs.add h
   let execRow = rowOf(sess, cols, rows, "-->")
   if execRow >= 0:
     let c = colOf(sess, execRow, cols, "-->") + 6
@@ -331,7 +334,7 @@ proc focusedBorders(sess: var TuiTestSession; cols, rows: int;
   for r in 0 ..< rows:
     for c in 0 ..< cols:
       let cell = sess.cellAt(r, c)
-      if ($cell.rune == "─" or $cell.rune == "│") and
+      if $cell.rune in ["─", "│", "▏"] and
          hexOfColor(cell.fg) == focusHex:
         inc result
 
@@ -379,6 +382,16 @@ proc contrastViolations(sess: var TuiTestSession; cols, rows: int;
       let cell = sess.cellAt(r, c)
       let ch = $cell.rune
       if cell.rune.int32 == 0 or ch.strip().len == 0:
+        continue
+      # PLAT-50: THE EDGE LINES ARE BOUNDARIES, NOT TEXT. A divider `▏` and
+      # a field / menu-button edge `▕` `▏` are drawn in the colours the
+      # desktop's own splitters and borders measure (#1b1b1b splitters
+      # against #282828 panels; ui/border/secondary round the omnibox), and a
+      # divider in a tab-strip row is deliberately the strip's own ground (the
+      # user, 2026-10-02) — legible as a line only in monochrome. Those pairs
+      # are asserted against the desktop in `test_plat50_desktop_reference`
+      # and `test_plat50_chrome`; the text-contrast floor is not theirs.
+      if ch in ["▏", "▕"]:
         continue
       let fg = hexOfColor(cell.fg)
       let bg = hexOfColor(cell.bg)
@@ -468,13 +481,15 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       let t = readTabs(tabs)
       checkpoint(modeName & " tabs: " & $t)
       # PLAT-49, the user's direction over PLAT-47's measured single ground:
-      # the strip on its own ground (ui/surface/base/raised), the selected
-      # tab on a background (ui/surface/primary/tertiary) and in a foreground
+      # the strip on its own ground, the selected tab on a background
+      # (ui/surface/primary/tertiary) and in a foreground
       # (ui/text/primary/headings) of its own, bold; inactive tabs on the
-      # strip in the disabled tier.
+      # strip in the disabled tier. PLAT-50 (the user, 2026-10-02: inactive
+      # tabs "not black"): the strip's ground is ui/surface/primary/default,
+      # the ground the desktop's tabs sit on, no longer base/raised.
       ck t.activeBg == hexT(dtColorsUiSurfacePrimaryTertiary, mode)
-      ck t.inactiveBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
-      ck t.barBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
+      ck t.inactiveBg == hexT(dtColorsUiSurfacePrimaryDefault, mode)
+      ck t.barBg == hexT(dtColorsUiSurfacePrimaryDefault, mode)
       ck t.barBg != hexT(dtColorsUiSurfaceBasePanel, mode)
       ck t.activeFg == hexT(dtColorsUiTextPrimaryHeadings, mode)
       ck t.inactiveFg == hexT(dtColorsUiTextPrimaryDisabled, mode)

@@ -1273,6 +1273,8 @@ proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
   r.appendChild(label, r.createTextNode(timelineText(current, first, last)))
   r.appendChild(parent, label)
   let track = r.createElement("div")
+  # PLAT-50: a press on the track seeks (`window_clicks`, K30).
+  r.setAttribute(track, "data-ct-timeline-track", "true")
   r.setStyle(track, "width", $TimelineBarWidthPx & "px")
   r.setStyle(track, "height", $TimelineBarHeightPx & "px")
   r.setStyle(track, "background", TimelineTrackColor)
@@ -1294,6 +1296,8 @@ const
   CallPartAttribute* = "data-call-part"
     ## A row part's `CallSegmentKind` (`callee`, `argName`, `argValue`, …).
   CallSelectedAttribute* = "data-call-selected"
+  CallArgAttribute* = "data-call-arg"
+    ## PLAT-50: the argument a row part belongs to (0-based into `args`).
   CallRowPx* = 26
     ## A row's height: the window's row pitch (`window_geometry
     ## .GpuiEditorRowPx`), fixed, so a press is mapped to the row it is on
@@ -1352,6 +1356,9 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     for seg in row.callRowSegments(indent = false):
       let piece = r.createElement("span")
       r.setAttribute(piece, CallPartAttribute, $seg.kind)
+      # PLAT-50 (K23): an argument's parts name it, for its right-click menu.
+      if seg.arg > 0:
+        r.setAttribute(piece, CallArgAttribute, $(seg.arg - 1))
       r.setStyle(piece, "flex-shrink", "0")
       r.setStyle(piece, "color",
         case seg.kind
@@ -1405,7 +1412,7 @@ proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
   r.appendChild(result, r.createTextNode(
     if leaf.title.len > 0: leaf.title else: leaf.paneId))
 
-proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
+proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
                 surface: EditorSurface;
                 editorViewportPx = 0;
                 editorScrollLeftCols = 0): (GpuiElement, bool) =

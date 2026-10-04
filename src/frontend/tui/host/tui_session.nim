@@ -46,7 +46,8 @@ import std/[json, os, strutils, tables]
 
 import codetracer_embed
 import headless_session
-from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
+from backend/stdio_backend import sendDapRequestNoResponse, drainEvents,
+  waitForEvent
 
 # QUALIFIED, and the qualification is load-bearing: `EventLogRow` is declared
 # TWICE in this module's scope — `viewmodel/store/types.EventLogRow` is the
@@ -60,6 +61,7 @@ import ../../viewmodel/viewmodels/inline_value_timeline
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
+import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
 import ../app/call_stack_binding
 import ../app/runtime
 import ../app/source_binding
@@ -121,6 +123,8 @@ type
       ## `SourceVM` with each window, so a window that opens inside a
       ## docstring is coloured as the desktop colours it.
     valueGate*: InlineValueGate
+    tracepointsRun*: int
+      ## PLAT-50: how many tracepoints `:tracepoint` swept (each its own id).
       ## PLAT-29. The inline values are drawn only when the locals they come
       ## from are about the stop the debugger is at — reconciled against the
       ## store's stop timeline (`viewmodels/inline_value_timeline`). Counts
@@ -257,7 +261,8 @@ func eventRowOf(row: store_types.EventLogRow): EventRow =
     category: categoryFor(row.kindId, row.stdout),
     kindId: row.kindId)
 
-proc loadedEventRows(s: TuiSession; offset, limit: int): seq[EventRow] =
+proc loadedEventRows(s: TuiSession; offset, limit: int;
+                     order = RecordedEventOrder): seq[EventRow] =
   ## Ask the backend for a window and read the answer OUT OF THE STORE.
   ##
   ## `requestAndLoadEventLog` decodes into `store.eventLog.rows` — see its
@@ -265,7 +270,8 @@ proc loadedEventRows(s: TuiSession; offset, limit: int): seq[EventRow] =
   ## from the one place they live. This used to convert the returned sequence
   ## itself, which made the terminal one of three independent decoders of the
   ## same payload.
-  discard s.session.requestAndLoadEventLog(start = offset, count = limit)
+  discard s.session.requestAndLoadEventLog(start = offset, count = limit,
+                                           order = order)
   result = @[]
   for row in s.session.session.store.eventLog.rows.val:
     result.add eventRowOf(row)
@@ -274,14 +280,22 @@ proc fileTreeModelOf*(vm: FilesystemVM): FileTreeModel =
   ## The Files pane's rows for a replay: the `FilesystemVM`'s tree, root
   ## included, depth-first in the tree's own order — the rows the desktop's
   ## Files pane draws for the same VM content, with the same labels.
+  ##
+  ## PLAT-50: a folder's children are listed only while the VM has it
+  ## EXPANDED (`FilesystemVM.isExpanded`), as the desktop's tree renders
+  ## them — the VM's own smart expansion opens single-child chains and the
+  ## active file's ancestors; a click toggles one (`toggleFolder`).
   var entries: seq[FileTreeEntry] = @[]
   proc walk(n: FilesystemEntryNode; depth: int) =
     if n.text.len == 0 and n.children.len == 0:
       return
+    let open = not n.isFolder or vm.isExpanded(n.path)
     entries.add FileTreeEntry(text: n.text, depth: depth,
-                              isFolder: n.isFolder, path: n.path)
-    for c in n.children:
-      walk(c, depth + 1)
+                              isFolder: n.isFolder, path: n.path,
+                              expanded: n.isFolder and open)
+    if open:
+      for c in n.children:
+        walk(c, depth + 1)
   if not vm.isNil:
     walk(vm.rootEntry.val, 0)
   initFileTreeModel(entries)
@@ -402,6 +416,48 @@ proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   # The reader's position is kept exactly across the load.
   rt.app.callTrace.scrollTop = top
 
+proc scratchpadModelOf*(vm: ScratchpadVM): ScratchpadPaneModel =
+  ## PLAT-50: the Scratchpad ViewModel's rows as the pane's value.
+  result = ScratchpadPaneModel(loaded: not vm.isNil)
+  if vm.isNil:
+    return
+  for e in vm.entries.val:
+    result.rows.add ScratchpadPaneRow(expression: e.expression,
+                                      value: e.valueText)
+
+proc refreshScratchpad(s: TuiSession; rt: TuiRuntime) =
+  rt.app.scratchpad = scratchpadModelOf(s.session.session.scratchpadVM)
+
+proc showViewedFile(s: TuiSession; rt: TuiRuntime)
+
+proc refresh*(s: TuiSession; rt: TuiRuntime)
+
+proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
+                        request: TracepointRequest): int =
+  ## PLAT-50: one tracepoint swept over the recording; its hits shown, the
+  ## panes refreshed (the point list and the gutter carry it). Answers how
+  ## many hits.
+  inc s.tracepointsRun
+  let hits = s.session.runTracepoints(@[TracepointSweepSpec(
+    tracepointId: s.tracepointsRun - 1, path: request.path,
+    line: request.line, expression: request.expression)])
+  var text = ""
+  for h in hits:
+    var parts: seq[string] = @[]
+    for (name, value) in h.values:
+      parts.add name & " = " & value
+    text.add "tick " & $h.rrTicks & "  " &
+             (if h.errorMessage.len > 0: h.errorMessage
+              else: parts.join(", ")) & "\n"
+  rt.app.content = ContentOverlay(
+    open: true,
+    title: "tracepoint `" & request.expression & "` at " &
+           request.path.extractFilename & ":" & $request.line & " — " &
+           $hits.len & " hit(s)",
+    text: (if text.len > 0: text else: "the line never ran"))
+  s.refresh(rt)
+  hits.len
+
 proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## Rebuild every pane's model from the CURRENT stop, and re-point the
   ## dispatcher and the command context at it.
@@ -461,6 +517,10 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     points = s.points,
     notTakenLines = notTaken,
     inlineValues = values)
+  # PLAT-50: A FILE OPENED FROM THE FILES PANE stays in the editor until the
+  # debugger moves (`applyOutcome` clears `viewedFile` on every move).
+  if rt.app.viewedFile.len > 0:
+    s.showViewedFile(rt)
 
   # PLAT-40. The Points pane reads the same points the gutter just drew.
   rt.app.points = pointListPaneModelFor(s.points)
@@ -483,17 +543,25 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # rebuilt at every stop, and the columns shown, hidden and reordered
   # (`:column-*`, the omnibar's column commands) are carried across.
   let keptColumns = rt.app.eventLog.columns
+  # PLAT-50: and so is the ORDER a header click chose — the pages are asked
+  # for in it (read when a page is fetched, so a reorder applies at once).
+  let keptOrder = rt.app.eventLog.order
+  let runtime = rt
   rt.app.eventLog = eventLogModelFor(
     proc(offset, limit: int): EventPage =
       var rows: seq[EventRow] = @[]
       try:
-        rows = sess.loadedEventRows(offset, limit)
+        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order)
       except CatchableError:
         discard
       EventPage(rows: rows, atEnd: rows.len < limit),
     currentTick = tick, pageSize = EventLogPageSize)
   if keptColumns.order.len > 0:
     rt.app.eventLog.columns = keptColumns
+  rt.app.eventLog.order = keptOrder
+  s.refreshScratchpad(rt)
+  rt.app.location = s.session.getCurrentFile() & ":" &
+                    $s.session.getCurrentLine()
   # THE PANE DOES NOT FETCH WHILE IT PAINTS — `app/views/event_log.nim`'s
   # header states that as the rule that keeps painting a pure function of what
   # is held — so a caller that wants rows asks for them. A caller that forgets
@@ -519,6 +587,13 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     services: CommandServices(
       setBreakpoint: proc(path: string; line: int): bool =
         sess.toggleBreakpoint(path, line),
+      # PLAT-50: `:tracepoint <expr>` RUNS — the sweep over the whole
+      # recording (`ct/run-tracepoints`), its hits shown over the body as the
+      # desktop's tracepoint editor lists them under the line, the point on
+      # the point list and in the gutter. Until now the shipped terminal
+      # composed the request and said no sweep service was wired.
+      runTracepoint: proc(request: TracepointRequest): int =
+        sess.runTracepointSweep(runtime, request),
       setTheme: rt.themeService))
   rt.context = CommandContext(
     file: s.session.getCurrentFile(),
@@ -526,8 +601,52 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     tick: tick,
     frameCount: frames.len,
     targets: targetsFor(s.bounds, s.callBoundaries, s.mutations),
+    # A move rebuilds the Variables model with nothing selected; a click on
+    # a row sets this (`runtime.routePaneClick`).
     selectedVariable: "",
     functions: @[])
+
+proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
+  ## PLAT-50 (K17): the editor shows `rt.app.viewedFile` — a file the user
+  ## clicked in the Files pane — read whole from the recording through the
+  ## same source provider the stop's file comes from (generation 0, the
+  ## recorded one), with its breakpoints in the gutter. The execution
+  ## pointer is drawn only when the debugger is IN that file. The desktop
+  ## opens such a file in a tab of its own (`FilesystemVM.openFile` →
+  ## `openTab`); this editor has one tab, so the file takes it until the
+  ## debugger next moves, as the desktop's editor then switches back to the
+  ## location's file.
+  let path = rt.app.viewedFile
+  if path == s.source.path.val:
+    rt.app.viewedFile = ""
+    return
+  var fetched = SourceFetch(status: sfsProviderUnavailable,
+                            detail: "the provider callback never ran")
+  s.provider.fetch(SourceLineRequest(path: path, sourceGeneration: 0,
+                                     sourceDigest: "", firstLine: 1,
+                                     lastLine: high(int32)),
+                   proc(f: SourceFetch) = fetched = f)
+  drainSourceCallbacks()
+  if fetched.fileLines.len == 0 and fetched.lines.len == 0:
+    rt.app.notification = "could not open " & path & ": " & fetched.detail
+    rt.app.viewedFile = ""
+    return
+  let lines = if fetched.fileLines.len > 0: fetched.fileLines
+              else: fetched.lines
+  let top = if rt.app.source.path == path: max(1, rt.app.source.viewportTop)
+            else: 1
+  rt.app.source = initSourcePaneModel(
+    path = path,
+    revisionLabel = "@0",
+    provenance = provenanceFor(savVerified),
+    firstHeldLine = 1,
+    heldLines = lines,
+    totalLineCount = lines.len,
+    viewportTop = top,
+    executionLine = 0,
+    marks = marksForFile(s.points, path),
+    columnMarks = columnMarksForFile(s.points, path))
+  rt.app.fileTree.openPath = path
 
 proc setFlowOverlay*(s: TuiSession; shown: bool) =
   ## Show or hide the flow overlay for this session — `EditorVM`'s own toggle,
@@ -569,13 +688,183 @@ proc toggleCallChildren*(s: TuiSession; rt: TuiRuntime; index: int64) =
     return
   rt.app.callTrace = s.callTraceModelOf(rt)
 
+proc describe*(s: TuiSession): string
+
+proc noteWhere(s: TuiSession; rt: TuiRuntime) =
+  ## PLAT-50: after a click moved the debugger, the status line says where it
+  ## landed — as a step names what it did — instead of keeping the note of
+  ## whatever happened before (it kept the startup's `main.py:1 tick 0`).
+  rt.app.notification = s.describe()
+
+proc moved(s: TuiSession; rt: TuiRuntime) =
+  ## A click moved the debugger: the panes follow it, and the status line
+  ## says where it landed.
+  rt.app.viewedFile = ""
+  s.refresh(rt)
+  s.noteWhere(rt)
+
+proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
+  ## PLAT-50: a click in a pane that needs the session — the shared
+  ## operations of `headless_app/pane_clicks.ClickInventory`.
+  let session = s.session
+  case c.kind
+  of pcNone: discard
+  of pcVcsDiff, pcVcsCommit:
+    discard   # the VCS source's (`vcs_source.applyClick`)
+  of pcColumnBreakpoint:
+    # K14: the desktop's Alt+click (`lineActionClickAt` →
+    # `addColumnBreakpoint`).
+    if session.setColumnBreakpoint(c.path, c.line, c.column):
+      rt.app.notification = "a breakpoint at line " & $c.line & ", column " &
+                            $c.column
+    else:
+      rt.app.notification = "the engine refused a breakpoint at " & c.path &
+                            ":" & $c.line & ":" & $c.column
+    s.refresh(rt)
+  of pcCallJump:
+    # K15 / the editor menu's call jumps (`ct/source-call-jump`).
+    try:
+      session.sourceCallJump(c.path, c.line, c.text, c.behaviour)
+    except CatchableError as e:
+      # The engine may have reached the line before finding no call there:
+      # the panes follow wherever it is, then say why.
+      rt.app.viewedFile = ""
+      s.refresh(rt)
+      rt.app.notification = "could not go to the call of " & c.text & ": " &
+                            e.msg
+      return
+    s.moved(rt)
+  of pcEventOrder:
+    # K26: the engine orders the log (`ct/event-load`'s `sortKey`); the pane
+    # pages through it in that order from the top.
+    rt.app.eventLog.reorder(c.order)
+    rt.app.eventLog.ensureWindow(0, EventLogPageSize)
+    rt.app.notification =
+      if c.order == RecordedEventOrder: "event log in recorded order"
+      else: "event log ordered by " & eventLogColumnTitle(c.order.column) &
+            (if c.order.ascending: ", ascending" else: ", descending")
+  of pcScratchpadAdd:
+    # K23 / K36: "Add value to scratchpad" / Ctrl+click / "Add all values".
+    for (name, value) in c.values:
+      session.addToScratchpad(name, value)
+    s.refreshScratchpad(rt)
+    rt.app.notification =
+      if c.values.len == 1: "added " & c.values[0].name & " to the scratchpad"
+      else: "added " & $c.values.len & " values to the scratchpad"
+  of pcScratchpadRemove:
+    # K33: the scratchpad's close button.
+    let vm = session.session.scratchpadVM
+    if not vm.isNil:
+      vm.removeValue(int(c.index))
+    s.refreshScratchpad(rt)
+  of pcValueHistory:
+    # K28: "Toggle value history" — the value's recorded history.
+    let name = variablePathOf(c.path)
+    try:
+      let rows = session.loadValueHistory(name)
+      var text = ""
+      for r in rows:
+        text.add $r.locationTicks & "  " & r.valueText & "\n"
+      rt.app.content = ContentOverlay(
+        open: true, title: "history of " & name & " (" & $rows.len &
+                           " value" & (if rows.len == 1: "" else: "s") & ")",
+        text: (if rows.len > 0: text else: "no recorded values"))
+    except CatchableError as e:
+      rt.app.notification = "no history for " & name & ": " & e.msg
+  of pcValueOrigin:
+    # K28: "Show value origin" — the chain the desktop's origin panel lists.
+    let name = variablePathOf(c.path)
+    try:
+      let lines = session.loadValueOrigin(name).originHopLines
+      rt.app.content = ContentOverlay(
+        open: true, title: "origin of " & name,
+        text: (if lines.len > 0: lines.join("\n")
+               else: "no recorded origin for " & name))
+    except CatchableError as e:
+      rt.app.notification = "no origin for " & name & ": " & e.msg
+  of pcOpenFile:
+    # K17: the desktop's `FilesystemVM.openFile`.
+    rt.app.viewedFile = c.path
+    s.showViewedFile(rt)
+    if rt.app.viewedFile.len > 0:
+      rt.app.notification = "opened " & c.path
+  of pcToggleFolder:
+    # K18: the desktop's `FilesystemVM.toggleExpanded`.
+    let vm = session.session.fileTreeVM
+    if not vm.isNil:
+      vm.toggleExpanded(c.path)
+      let open = rt.app.fileTree.openPath
+      s.files = fileTreeModelOf(vm)
+      rt.app.fileTree = s.files
+      rt.app.fileTree.openPath = open
+  of pcToggleBreakpoint:
+    # K10: the desktop's gutter click (`lineActionClick` → `toggleBreakpoint`).
+    if not s.toggleBreakpoint(c.path, c.line):
+      rt.app.notification = "the engine refused a breakpoint at " & c.path &
+                            ":" & $c.line
+    s.refresh(rt)
+  of pcSetBreakpointEnabled:
+    # K11: the desktop's gutter right-click (`enable` / `disable`).
+    if session.setBreakpointEnabled(c.path, c.line, c.enabled):
+      rt.app.notification = (if c.enabled: "enabled" else: "disabled") &
+                            " the breakpoint at line " & $c.line
+    s.refresh(rt)
+  of pcLineJump:
+    # K12 / K13: "Jump to line" / "Run to Cursor" / "Jump backward to line".
+    try:
+      session.sourceLineJump(c.path, c.line, c.behaviour)
+    except CatchableError as e:
+      rt.app.notification = "could not go to line " & $c.line & ": " & e.msg
+      return
+    s.moved(rt)
+  of pcEventJump:
+    # K24: the desktop's event-log row click (`ct/event-jump`).
+    try:
+      session.eventJump(EventLogEntry(content: c.text, rrTicks: c.tick,
+                                      line: c.line, file: c.path,
+                                      eventIndex: int(c.index)))
+    except CatchableError as e:
+      rt.app.notification = "could not go to the event: " & e.msg
+      return
+    rt.app.viewedFile = ""
+    s.refresh(rt)
+    s.noteWhere(rt)
+  of pcDeleteBreakpoints:
+    # K13's "Delete breakpoints in file" / "Delete ALL breakpoints".
+    var paths: seq[string] = @[]
+    for r in session.session.store.pointList.rows.val:
+      if r.kind == PointKindBreakpoint and r.path notin paths and
+         (c.path.len == 0 or r.path == c.path):
+        paths.add r.path
+    for p in paths:
+      discard session.clearBreakpoints(p)
+    rt.app.notification = "deleted the breakpoints " &
+      (if c.path.len == 0: "in every file" else: "in " & c.path)
+    s.refresh(rt)
+  of pcSeek:
+    # K30: the timeline's click (`TimelineVM.seek` → `ct/timeline-seek`,
+    # the handler `ct/goto-ticks` reaches).
+    try:
+      session.gotoTick(c.tick)
+    except CatchableError as e:
+      rt.app.notification = "could not go to tick " & $c.tick & ": " & e.msg
+      return
+    rt.app.viewedFile = ""
+    s.refresh(rt)
+    s.noteWhere(rt)
+
+const OriginWaitMs = 20_000
+  ## How long `o` waits for the engine's origin chain.
+
 proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
   ## What the host does with one token's outcome, in ONE place so the shipped
   ## loop (`main.nim`) and the suites that drive the host run the same rule: a
   ## navigation is pumped and then refreshed; a change to what the session
   ## holds without a move (a breakpoint) is refreshed and NOT pumped — a pump
   ## there would wait on a `stopped` event no engine sends.
-  if outcome.jumpsToCall:
+  if outcome.paneClick.kind != pcNone:
+    s.applyPaneClick(rt, outcome.paneClick)
+  elif outcome.jumpsToCall:
     # PLAT-49 part B: a click on a call-trace row goes to that call, as the
     # desktop's click does (`CalltraceVM.doubleClickEntry`'s
     # `ct/calltrace-jump`); `calltraceJump` waits for the move itself.
@@ -587,11 +876,33 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
         s.session.calltraceJumpByLine(lines[at.int])
       except CatchableError as e:
         rt.app.notification = "could not go to the call: " & e.msg
+      rt.app.viewedFile = ""
       s.refresh(rt)
+      s.noteWhere(rt)
   elif outcome.togglesCall:
     s.toggleCallChildren(rt, outcome.callIndex)
+  elif outcome.awaitsOrigin:
+    # PLAT-50: the chain `o` / `:origin` asked for — its event taken into
+    # the Origin ViewModel, then the action run again to walk it. Bounded:
+    # an engine that never answers leaves the note saying it is querying.
+    var event: JsonNode = nil
+    let saved = s.session.backend.bound
+    if saved.timeoutMs == 0 or saved.timeoutMs > OriginWaitMs:
+      s.session.backend.bound.timeoutMs = OriginWaitMs
+    try:
+      event = s.session.backend.waitForEvent(OriginEventName)
+    except CatchableError:
+      discard
+    s.session.backend.bound = saved
+    if event.isNil or applyOriginEvents(s.origin, @[event]) == 0:
+      rt.app.notification = "no origin arrived for the query"
+      return
+    let again = rt.retryOrigin(outcome.originRetry)
+    if not again.awaitsOrigin:
+      s.applyOutcome(rt, again)
   elif outcome.awaitsMove:
     s.pumpMove()
+    rt.app.viewedFile = ""
     s.refresh(rt)
   elif outcome.refreshesSession:
     s.refresh(rt)

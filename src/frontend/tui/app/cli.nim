@@ -57,6 +57,7 @@
 import std/strutils
 
 import ./theme/capabilities
+import ./theme/roles
 
 # The product's own version, not a second one. `src/ct/version.nim` imports
 # `strutils` and nothing else, so reaching it costs nothing and cannot drag a
@@ -118,6 +119,9 @@ type
       recordKeys*: string
       replayKeys*: string
         ## `--record-keys=<file>` and `--replay-keys=<file>`, or "".
+      dividers*: DividerChoice
+        ## PLAT-50: `--dividers=strip|subtle` — the colour a pane divider is
+        ## drawn in (`roles.DividerChoice`); `strip` when absent.
       noFlowOverlay*: bool
         ## `--no-flow-overlay` — the flow overlay hidden for this session.
         ## PLAT-42 built the overlay on both native front-ends and shows it by
@@ -312,6 +316,8 @@ options:
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
   --layout-binding   (default) : and the mouse rearrange panes; remembered
   --no-flow-overlay  do not dim the lines the run did not reach
+  --dividers=NAME    strip (default: pane dividers in the tab strips' ground,
+                     as the desktop's splitters) or subtle (a distinct line)
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
@@ -416,6 +422,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var replayKeys = ""
   var layoutBinding = false
   var noFlowOverlay = false
+  var dividers = dcStrip
   var editProject = ""
   var editRequested = false
   var i = first
@@ -491,6 +498,20 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                                 message: themeRefusal(themeName))
             flags.theme = theme
             flags.themePinned = true
+            break options
+          # PLAT-50: the divider colour, the user's open choice.
+          let (isDividers, dividersName) = optionValue(arg, "--dividers")
+          if isDividers:
+            var known = false
+            for c in DividerChoice:
+              if $c == dividersName:
+                dividers = c
+                known = true
+            if not known:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "unknown dividers '" & dividersName &
+                         "'; pick one of strip, subtle")
             break options
           # PLAT-46 deliverable 9.
           let (isPalette, paletteName) = optionValue(arg, "--palette")
@@ -733,9 +754,9 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
     TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
-               noFlowOverlay: noFlowOverlay)
+               noFlowOverlay: noFlowOverlay, dividers: dividers)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
-               noFlowOverlay: noFlowOverlay)
+               noFlowOverlay: noFlowOverlay, dividers: dividers)

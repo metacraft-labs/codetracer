@@ -57,7 +57,7 @@ from ../../../viewmodel/viewmodels/state_vm import VariableCategory,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 564
+const ExpectedAssertions = 566
 
 var countedAssertions = 0
 
@@ -173,13 +173,16 @@ suite "PLAT-49 on a real terminal: the menu is one root button with cascades":
   test "row 0 holds one root button; F12 drops the first level; Right cascades":
     var sess = open()
     let top = sess.rowText(0)
-    ck top.startsWith(" ≡ ")
+    # PLAT-50: the button bounded by edge lines (the desktop's `#menu-root`).
+    ck top.startsWith("▕≡▏")
     for title in ["File", "Edit", "View", "Build", "Debug", "Help"]:
       ck not top.contains(" " & title & " ")
     sess.send(F12)
     # Row 1 already says "Files" (the Files stack's strip): wait for the
-    # dropdown's SECOND row instead, which nothing else on that row spells.
-    discard sess.waitRow(2, " Edit ")
+    # dropdown's SECOND item instead, which nothing else on that row spells.
+    # PLAT-50: the dropdown is framed — row 1 is its top edge, its items
+    # start on row 2, one cell in.
+    discard sess.waitRow(3, " Edit ")
     let s = sess.snap()
     # The first level, one folder per row, starting under the button.
     var firstCol = -1
@@ -192,7 +195,7 @@ suite "PLAT-49 on a real terminal: the menu is one root button with cascades":
           rows.add (title, r)
           if firstCol < 0: firstCol = at
     ck rows.len == 7
-    ck firstCol == 0
+    ck firstCol == 1                    # inside the frame's left edge
     var debugRow = -1
     for (t, r) in rows:
       if t == "Debug": debugRow = r
@@ -211,12 +214,12 @@ suite "PLAT-49 on a real terminal: the menu is one root button with cascades":
     # Esc backs out of the submenu, then closes.
     sess.esc()
     discard sess.waitRow(debugRow, "Continue", present = false)
-    ck sess.rowText(1).contains(" File ")
+    ck sess.rowText(2).contains(" File ")
     sess.esc()
-    discard sess.waitRow(1, " File ", present = false)
+    discard sess.waitRow(2, " File ", present = false)
     # A click on the button, then on a folder: the same cascade.
     sess.click(0, 1)
-    discard sess.waitRow(2, " Edit ")
+    discard sess.waitRow(3, " Edit ")
     sess.click(debugRow, 2)
     discard sess.waitRow(debugRow, "Continue")
     ck sess.rowText(debugRow).cellFind(" Continue ") > folderAt + 8
@@ -296,7 +299,9 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
                   "SOURCE main.py", "TIMELINE", "AGENT"]:
         ck not line.contains(old & " ")
     # Every pane's first row is a strip: row 1 across the three top panes.
-    let strip = dark(dtColorsUiSurfaceBaseRaised)
+    # PLAT-50: the strip on ui/surface/primary/default, the ground the
+    # desktop's tabs sit on (it was ui/surface/base/raised).
+    let strip = dark(dtColorsUiSurfacePrimaryDefault)
     let activeBg = dark(dtColorsUiSurfacePrimaryTertiary)
     let activeFg = dark(dtColorsUiTextPrimaryHeadings)
     let inactiveFg = dark(dtColorsUiTextPrimaryDisabled)
@@ -334,22 +339,34 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
        hexOfColor(s[varRow][emptyAt].bg) == strip
     # A LONE pane (the editor) has a one-tab strip naming its file.
     ck hexOfColor(s[1][editorAt + 1].bg) == activeBg
-    # 13. Every divider cell: the panes' own ground, a border-tier glyph.
-    let subtle = dark(dtColorsUiBorderSecondary)
+    # 13. Every divider cell on the panes' own ground. PLAT-50: a divider is
+    # the edge line `▏` in the default (`--dividers=strip`) colour — the
+    # strip's ground, the desktop's splitters' — or the focused pane's
+    # border tier; in a tab-strip row it is the strip's own ground, glyph
+    # and cell alike, so strips connect. No box-drawing divider is left.
     let focused = dark(dtColorsUiBorderPrimary)
     var dividers = 0
     var onPanel = 0
-    var subtleFg = 0
+    var inStrip = 0
+    var lineFg = 0
+    var boxDrawn = 0
     for r in 1 ..< Rows - 2:
       for c in 0 ..< Cols:
         let ch = $s[r][c].rune
         if ch in ["│", "─", "┼", "┬", "┴", "├", "┤"]:
+          inc boxDrawn
+        if ch == "▏":
           inc dividers
-          if hexOfColor(s[r][c].bg) == panel: inc onPanel
-          if hexOfColor(s[r][c].fg) in [subtle, focused]: inc subtleFg
+          let bg = hexOfColor(s[r][c].bg)
+          let fg = hexOfColor(s[r][c].fg)
+          if bg == panel: inc onPanel
+          if bg == strip and fg == strip: inc inStrip
+          if fg in [strip, focused]: inc lineFg
     ck dividers > 50
-    ck onPanel == dividers
-    ck subtleFg == dividers
+    ck onPanel + inStrip == dividers
+    ck inStrip > 0
+    ck lineFg == dividers
+    ck boxDrawn == 0
     # 10. No key hints on the status line.
     let st = sess.status()
     for hint in ["step-over", "rev-step", "F10", ":command", "/:find"]:
@@ -400,7 +417,9 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     let barBg = hexOfColor(s[0][1].bg)
     checkpoint("row 0: " & top & " field at " & $field & " bg " & fieldBg &
                " bar bg " & barBg)
-    ck fieldBg == dark(dtColorsUiSurfaceBaseRaised)
+    # PLAT-50: the design system's input surface, one subtle step off the
+    # bar (it was the raised slab).
+    ck fieldBg == dark(dtColorsUiSurfaceInputDefault)
     ck fieldBg != barBg
     ck caItalic in s[0][field + 3].attrs
     sess.send(CtrlP)

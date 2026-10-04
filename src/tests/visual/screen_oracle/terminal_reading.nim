@@ -33,9 +33,10 @@ type
     body*: seq[string]
 
 const
-  PaneSeparators = ["|", "│"]
+  PaneSeparators = ["|", "│", "▏"]
     ## The glyph between two side-by-side panes: ASCII under
-    ## `--ascii-borders`, the box-drawing one otherwise.
+    ## `--ascii-borders`, the box-drawing one before PLAT-50, the edge
+    ## one-eighth block (`shell.DividerGlyph`) since.
   DividerCells = ["─", "-", "┼", "┬", "┴", "├", "┤", "└", "┘", "┌", "┐", "+"]
     ## What a horizontal divider row between two stacked panes is made of,
     ## in both spellings (box-drawing, and `--ascii-borders`).

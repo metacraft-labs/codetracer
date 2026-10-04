@@ -33,6 +33,9 @@ type
     depth*: int
     isFolder*: bool
     path*: string
+    expanded*: bool
+      ## PLAT-50: a folder whose children follow it (the VM's
+      ## `isExpanded`); a collapsed one is marked `CollapsedFolderGlyph`.
 
   FileTreeModel* = object
     entries*: seq[FileTreeEntry]
@@ -83,11 +86,15 @@ proc isEmpty*(model: FileTreeModel): bool =
 const FolderGlyph* = "▼"
   ## Beside an expanded folder, as the desktop's twisty. One cell;
   ## `borders.asciiFor` degrades it to `v`.
+const CollapsedFolderGlyph* = "▶"
+  ## PLAT-50: beside a COLLAPSED folder (a click opens it). `asciiFor`: `>`.
 
 proc entryText*(e: FileTreeEntry): string =
   ## What one tree row says: indented by depth, a folder marked.
   repeat("  ", max(0, e.depth)) &
-    (if e.isFolder: FolderGlyph & " " else: "  ") & e.text
+    (if not e.isFolder: "  "
+     elif e.expanded: FolderGlyph & " "
+     else: CollapsedFolderGlyph & " ") & e.text
 
 proc initFileTreeModel*(entries: seq[FileTreeEntry]): FileTreeModel =
   ## A replay session's file tree.

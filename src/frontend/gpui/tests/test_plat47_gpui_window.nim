@@ -36,7 +36,8 @@ template ck(cond: untyped) =
 const
   Record = "src/tests/visual/plat47-gpui-window.json"
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
-  ExpectedAssertions = 102
+  ExpectedAssertions = 103
+    ## PLAT-50: +1, the docked reveal is read by the span of its change.
   GhostBoxPx = 160 * 32
   EditorRowPx = 26
     ## One editor row's pitch in the window (`window_geometry.GpuiEditorRowPx`).
@@ -264,7 +265,14 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     checkpoint("reveal " & $rr & " changed " & $bb)
     ck bb[0] + bb[2] <= rr[0] + rr[2] + 1 and bb[1] >= rr[1] and
        bb[1] + bb[3] <= rr[1] + rr[3]
-    ck d["revealChangedPixels"].getInt > rr[2] * rr[3] div 4
+    # PLAT-50: the revealed pane and the editor under it are both
+    # ui/surface/base/panel now (the window's colours are the desktop's
+    # tokens), so the pixels that change are the TEXT, not a whole new
+    # ground: what proves the pane is drawn over the region is that the
+    # change spans it — most of its width and of its height — not a
+    # pixel count that assumed two grounds.
+    ck d["revealChangedPixels"].getInt > 0
+    ck bb[2] >= rr[2] * 3 div 4 and bb[3] >= rr[3] div 2
     ck "Locals" in d["revealText"].getStr
     # Esc: every pixel back — the reveal never touched the arrangement.
     ck d["dismissChangedPixels"].getInt == 0

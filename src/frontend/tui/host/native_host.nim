@@ -42,7 +42,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[algorithm, json, os, posix, strutils]
+import std/[algorithm, json, os, posix, sets, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
 
@@ -404,6 +404,19 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
                                               path: "/" & root)
 
 
+proc expandAllFolders*(vm: FilesystemVM) =
+  ## PLAT-50: mark every folder of `vm`'s tree expanded.
+  if vm.isNil:
+    return
+  var paths = initHashSet[string]()
+  proc walk(n: FilesystemEntryNode) =
+    if n.isFolder:
+      paths.incl n.path
+    for c in n.children:
+      walk(c)
+  walk(vm.rootEntry.val)
+  vm.setExpandedPaths(paths)
+
 proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-RECORDING producers, asked once at open: the event log's first
   ## window and the call trace. Both decode into the store, which is the one
@@ -425,6 +438,12 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   if not files.isNil:
     files.setRoot(recordingFileTree(s.tracePath))
     result.files = files.rootEntry.val.children.len > 0
+    # PLAT-50: BOTH NATIVE TREES OPEN FULLY EXPANDED, as they have always
+    # listed it (every root and file of a multi-root recording —
+    # `test_recording_file_tree`); from there a click collapses or expands a
+    # folder through the VM (`FilesystemVM.toggleExpanded`, the desktop's
+    # Files click), which the terminal's rows and GPUI's view follow.
+    expandAllFolders(files)
 
 proc refreshCallStackFallback*(s: HeadlessDebugSession) =
   ## PLAT-47: hand the calltrace pane the call STACK when — and only when —

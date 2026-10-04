@@ -424,13 +424,29 @@ def near(a, b, tol=6):
     return all(abs(x - y) <= tol for x, y in zip(a, b))
 
 
+def body_top():
+    """The first pixel row below the top bar's band (the window's geometry):
+    the focus ring is searched only there. Since PLAT-50 the band is the
+    window's own ground (#1b1b1b), and the transport icons' antialiased
+    edges on it include pixels of exactly the outline colour, which a
+    whole-frame search took for the ring."""
+    try:
+        with open(os.path.join(OUT, "a-base.geometry.json")) as f:
+            band = json.load(f)["topBar"]["band"]
+        return band[1] + band[3]
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return 0
+
+
 def ring_bbox(frame, colour):
-    """The bounding box of every pixel of exactly `colour`."""
+    """The bounding box of every pixel of exactly `colour`, below the top
+    bar (`body_top`)."""
     w, h, raster = frame
     x0 = y0 = 10 ** 9
     x1 = y1 = -1
+    top = body_top()
     target = bytes(colour)
-    i = raster.find(target)
+    i = raster.find(target, top * w * 3)
     while i >= 0:
         if i % 3 == 0:
             p = i // 3

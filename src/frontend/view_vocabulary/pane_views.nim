@@ -382,9 +382,15 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
     result.entries = entriesOf(result.root)
     return
   let shown = vm.columns.val.visibleColumns
+  let order = vm.order()
   var titles: seq[string] = @[]
   for col in shown:
-    titles.add eventLogColumnTitle(col)
+    # PLAT-50: the ordering column carries the desktop's sort arrow once a
+    # header click left the recorded order (the terminal's header rule).
+    titles.add eventLogColumnTitle(col) &
+      (if order != RecordedEventOrder and order.column == col:
+         (if order.ascending: " ▲" else: " ▼")
+       else: "")
   var cells: seq[seq[string]] = @[]
   for r in rows:
     var line: seq[string] = @[]
@@ -576,6 +582,9 @@ proc searchPaneView*(vm: SearchVM): PaneView =
   if options.len == 0:
     result.report = "no search results"
 
+const ScratchpadCloseGlyph* = "✕"
+  ## PLAT-50: a pinned value's close button, as the terminal draws it.
+
 proc scratchpadPaneView*(vm: ScratchpadVM): PaneView =
   ## The scratchpad: a `Table` of pinned expressions and their values.
   ##
@@ -596,10 +605,12 @@ proc scratchpadPaneView*(vm: ScratchpadVM): PaneView =
     result.root = viewText("scratchpad.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  # PLAT-50 (K33): each row leads with the desktop's close button
+  # (`isonim_scratchpad_view`'s `close-element`), which removes it.
   var cells: seq[seq[string]] = @[]
   for e in entries:
-    cells.add @[e.expression, e.valueText]
-  result.root = viewTable("scratchpad", @["expression", "value"], cells)
+    cells.add @[ScratchpadCloseGlyph, e.expression, e.valueText]
+  result.root = viewTable("scratchpad", @["", "expression", "value"], cells)
   result.entries = entriesOf(result.root)
 
 proc shellPaneView*(vm: ShellVM): PaneView =
@@ -670,11 +681,16 @@ proc sourcePaneView*(medium: string): PaneView =
 # The one door
 # ---------------------------------------------------------------------------
 
-proc fileTreeNode(e: FilesystemEntryNode; path: string): ViewNode =
+proc fileTreeNode(vm: FilesystemVM; e: FilesystemEntryNode;
+                  path: string): ViewNode =
+  ## PLAT-50: a folder is open while the VM has it expanded
+  ## (`FilesystemVM.isExpanded` — the desktop's Files click toggles it); the
+  ## native hosts open every folder at load (`native_host.loadRecordingPanes`).
   var kids: seq[ViewNode] = @[]
   for i, c in e.children:
-    kids.add fileTreeNode(c, path & "." & $i)
-  viewTreeNode(path, e.text, kids, expanded = kids.len > 0)
+    kids.add fileTreeNode(vm, c, path & "." & $i)
+  viewTreeNode(path, e.text, kids,
+               expanded = kids.len > 0 and vm.isExpanded(e.path))
 
 proc fileTreePaneView*(vm: FilesystemVM): PaneView =
   ## The REPLAY session's file tree: the recording's own source folders, a
@@ -697,7 +713,7 @@ proc fileTreePaneView*(vm: FilesystemVM): PaneView =
     result.root = viewText("fileTree.report", result.report)
     result.entries = entriesOf(result.root)
     return
-  result.root = fileTreeNode(root, "fileTree")
+  result.root = fileTreeNode(vm, root, "fileTree")
   result.entries = entriesOf(result.root)
 
 # ---------------------------------------------------------------------------
@@ -738,9 +754,18 @@ proc vcsPaneView*(vm: VCSVM): PaneView =
     if fileRows.len == 0: @[viewText("vcs.workingTree.clean", VCSCleanTreeText)]
     else: @[viewList("vcs.workingTree.files", fileRows)]
   var commitRows: seq[ViewOption] = @[]
+  # PLAT-50 (K53): the commit a click opened lists the files it changed
+  # under it (`commitFilesMap`), the desktop's accordion.
+  let opened = vm.selectedCommitIndices.val
   for i, c in vm.commits.val:
     commitRows.add ViewOption(id: "commit-" & $i,
                               label: c.hash & " " & c.message)
+    if opened == @[i]:
+      for (index, files) in vm.commitFilesMap.val:
+        if index == i:
+          for fi, f in files:
+            commitRows.add ViewOption(id: "commitfile-" & $i & "-" & $fi,
+                                      label: "   " & f.status & " " & f.path)
   # The branch is the section's own caption, as the desktop's panel heads
   # its lists with it.
   result.root = viewCollapsible("vcs.branch", vm.currentBranch.val, @[

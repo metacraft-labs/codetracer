@@ -39,8 +39,9 @@ import ../../../viewmodel/viewmodels/transport_icons
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count. (PLAT-49 part B: +9 — the footer
 # case checks every row the docked-open pane changed, and a docked band is
-# taller than the overlay the click used to open.)
-const ExpectedAssertions = 110
+# taller than the overlay the click used to open. PLAT-50: -1 — with no
+# divider row between stacked panes the docked band changes one row fewer.)
+const ExpectedAssertions = 109
 
 var countedAssertions = 0
 
@@ -170,13 +171,16 @@ suite "PLAT-48 on a real terminal: the menu":
     const Rows = 50
     var sess = open(Cols, Rows, stateDir("menu"))
     let top = sess.rowOf(Cols, 0)
-    # PLAT-49: one root button; the first level drops below it.
-    ck top.startsWith(" ≡ ")
+    # PLAT-49: one root button; the first level drops below it. PLAT-50: the
+    # button is bounded by edge lines, as the desktop's `#menu-root` border.
+    ck top.startsWith("▕≡▏")
     # BY KEY: F12, then Down through the first level to Debug, Right into it.
     sess.send(F12)
     # Row 1 already says "Files" (the Files stack's strip, PLAT-49): wait for
-    # the dropdown's second row, which nothing else on that row spells.
-    discard sess.waitRow(Cols, 2, " Edit ")
+    # the dropdown's second item, which nothing else on that row spells.
+    # PLAT-50: the dropdown is framed, its items one row down (row 1 is its
+    # top edge).
+    discard sess.waitRow(Cols, 3, " Edit ")
     var debugRow = -1
     for r in 1 ..< 12:
       if sess.rowOf(Cols, r).cellFind(" Debug ") in 0 .. 3: debugRow = r
@@ -235,13 +239,14 @@ suite "PLAT-48 on a real terminal: the omnibar":
     var sess = open(Cols, Rows, stateDir("omnibar"))
     sess.send(CtrlP)
     sess.send("#42")
-    discard sess.waitRow(Cols, 1, "Go to tick 42")
+    # PLAT-50: the results are framed; the first is on row 2.
+    discard sess.waitRow(Cols, 2, "Go to tick 42")
     sess.send(Enter)
     let t = sess.waitTick(Cols, proc(t: int): bool = t == 42)
     ck t == 42
     sess.send(CtrlP)
     sess.send(":sym apply")
-    let r1 = sess.waitRow(Cols, 1, "apply_op")
+    let r1 = sess.waitRow(Cols, 2, "apply_op")
     ck r1.contains("apply_op")
     sess.send(Enter)
     let moved = sess.waitTick(Cols, proc(t: int): bool = t != 42)

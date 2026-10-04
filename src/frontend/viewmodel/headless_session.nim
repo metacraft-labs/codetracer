@@ -28,7 +28,7 @@ when defined(js):
 # `strutils` went out with the parsing that moved to
 # `store/replay_data_store.eventLogRowFromJson`: the inline wire decode this
 # module used to carry was its last user here.
-import std/[json, options, asyncdispatch, osproc, os, streams]
+import std/[json, options, asyncdispatch, osproc, os, streams, strutils]
 
 import isonim/core/[signals, computation, async_compat]
 
@@ -46,7 +46,8 @@ import ../../common/value_presentation/json_adapter
 import session_vm
 import app/app_vm
 import sdk/[debugger_session, trace_source]
-import viewmodels/[state_vm, calltrace_vm]
+import viewmodels/[state_vm, calltrace_vm, scratchpad_vm, event_log_vm,
+                  origin_chain_types]
 
 type
   HeadlessDebugSession* = ref object
@@ -861,6 +862,44 @@ proc lastSetTracepointResponse*(s: HeadlessDebugSession;
 proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode]
   ## Forward: defined with the rest of the event queue below.
 
+proc sendBreakpoints(s: HeadlessDebugSession; path: string;
+                     anchors: seq[BreakpointAnchor];
+                     disabled: seq[BreakpointAnchor] = @[]): bool =
+  ## `setBreakpoints` for `path` with exactly `anchors` (a column breakpoint
+  ## carries its `column`, Column-Aware Navigation M1's wire), and the store's
+  ## rows for `path` replaced by what the engine verified — at the line and
+  ## column it BOUND, which it echoes — plus the `disabled` breakpoints the
+  ## engine does not hold (PLAT-50). False (and nothing changed) when the
+  ## engine refused.
+  var wanted = newJArray()
+  for a in anchors:
+    var bp = %*{"line": a.line}
+    if a.column > 0:
+      bp["column"] = %a.column
+    wanted.add bp
+  let resp = s.backend.sendDapRequest("setBreakpoints",
+    %*{"source": {"path": path}, "breakpoints": wanted})
+  discard s.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    return false
+  var verified: seq[BreakpointAnchor] = @[]
+  for i, bp in resp{"body", "breakpoints"}.getElems:
+    if bp.getOrDefault("verified").getBool(false):
+      let asked = if i < anchors.len: anchors[i].column else: 0
+      verified.add (bp.getOrDefault("line").getInt(0),
+                    (if asked > 0: bp.getOrDefault("column").getInt(asked)
+                     else: 0))
+  s.session.store.applyVerifiedBreakpoints(path, verified, disabled)
+  true
+
+proc heldBreakpoints(s: HeadlessDebugSession; path: string):
+    tuple[enabled, disabled: seq[BreakpointAnchor]] =
+  ## `path`'s breakpoints as the store holds them, enabled and disabled.
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path:
+      if r.enabled: result.enabled.add (r.line, r.column)
+      else: result.disabled.add (r.line, r.column)
+
 proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
                        line: int): bool =
   ## Toggle a breakpoint at `path:line` through the engine, and keep the
@@ -882,28 +921,193 @@ proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
   ## lines the engine BOUND, which need not be the line asked for. Returns
   ## false (and changes nothing) when the engine refused the request; rows of
   ## other kinds and other files are untouched.
-  var lines: seq[int] = @[]
+  ##
+  ## PLAT-50: a DISABLED breakpoint (`setBreakpointEnabled`) is not sent — the
+  ## engine holds only the enabled ones, as the desktop's
+  ## `dapSetBreakpoints` sends only `b.enabled` — and its row is kept,
+  ## disabled, unless it is the line being toggled (toggling a disabled
+  ## breakpoint removes it, as a gutter click does on the desktop). A column
+  ## breakpoint on another line keeps its column.
+  let held = s.heldBreakpoints(path)
+  var anchors, disabled: seq[BreakpointAnchor] = @[]
   var removing = false
-  for r in s.session.store.pointList.rows.val:
-    if r.kind == PointKindBreakpoint and r.path == path:
-      if r.line == line: removing = true
-      else: lines.add r.line
+  for a in held.enabled:
+    if a.line == line: removing = true
+    else: anchors.add a
+  for a in held.disabled:
+    if a.line == line: removing = true
+    else: disabled.add a
   if not removing:
-    lines.add line
-  var wanted = newJArray()
-  for l in lines:
-    wanted.add %*{"line": l}
-  let resp = s.backend.sendDapRequest("setBreakpoints",
-    %*{"source": {"path": path}, "breakpoints": wanted})
-  discard s.drainEvents()
-  if not resp.getOrDefault("success").getBool(false):
+    anchors.add (line, 0)
+  s.sendBreakpoints(path, anchors, disabled)
+
+proc setColumnBreakpoint*(s: HeadlessDebugSession; path: string; line,
+                          column: int): bool =
+  ## PLAT-50: a breakpoint at `path:line` ANCHORED AT `column` — the
+  ## desktop's Alt+click on the editor's text (`ui/editor.lineActionClickAt`
+  ## → `DebuggerService.addColumnBreakpoint`), which REPLACES whatever
+  ## breakpoint the line had (one breakpoint per line, as the desktop's
+  ## `breakpointTable[path][line]` holds one) and is never a toggle. The
+  ## engine stops on it only at a step recorded at that column. False when
+  ## the engine refused, or `column` is not a column.
+  if column < 1:
     return false
-  var verified: seq[int] = @[]
-  for bp in resp{"body", "breakpoints"}.getElems:
-    if bp.getOrDefault("verified").getBool(false):
-      verified.add bp.getOrDefault("line").getInt(0)
-  s.session.store.applyVerifiedBreakpoints(path, verified)
-  true
+  let held = s.heldBreakpoints(path)
+  var anchors, disabled: seq[BreakpointAnchor] = @[]
+  for a in held.enabled:
+    if a.line != line: anchors.add a
+  for a in held.disabled:
+    if a.line != line: disabled.add a
+  anchors.add (line, column)
+  s.sendBreakpoints(path, anchors, disabled)
+
+proc clearBreakpoints*(s: HeadlessDebugSession; path: string): bool =
+  ## PLAT-50: delete every breakpoint of `path` — the editor menu's "Delete
+  ## breakpoints in file" (and, file by file, "Delete ALL breakpoints"): one
+  ## `setBreakpoints` with none, which also drops its disabled rows.
+  s.sendBreakpoints(path, @[])
+
+proc setBreakpointEnabled*(s: HeadlessDebugSession; path: string; line: int;
+                           enabled: bool): bool =
+  ## PLAT-50: enable or disable the breakpoint at `path:line` — the desktop's
+  ## gutter right-click (`ui/editor.lineActionContextMenu` →
+  ## `DebuggerService.enable` / `disable`). A disabled breakpoint stays on
+  ## the point list and the gutter, dimmed, and is NOT sent to the engine (the
+  ## desktop's `dapSetBreakpoints` sends only `enabled` ones), so the replay
+  ## no longer stops there; its column, if it has one, is kept. False when
+  ## there is no breakpoint at the line or the engine refused.
+  let held = s.heldBreakpoints(path)
+  var found = false
+  var anchors, disabled: seq[BreakpointAnchor] = @[]
+  for a in held.enabled & held.disabled:
+    if a.line == line:
+      found = true
+      if enabled: anchors.add a
+      else: disabled.add a
+    elif a in held.enabled: anchors.add a
+    else: disabled.add a
+  if not found:
+    return false
+  s.sendBreakpoints(path, anchors, disabled)
+
+const LineJumpQuietMs* = 15_000
+  ## How long `sourceLineJump` waits for the engine's next message before it
+  ## takes silence for "no step reaches that line" (a stepping engine answers
+  ## a reachable line well inside it; the materialized replay at once).
+
+const NotificationErrorWire = 2
+  ## `task.rs`' `NotificationKind::Error` (`Serialize_repr`: Info 0,
+  ## Warning 1, Error 2, Success 3).
+
+proc awaitJump(s: HeadlessDebugSession; command: string; args: JsonNode;
+               what: string; settle = false) =
+  ## Send a jump request and wait for the move it makes, BOUNDED: the engine
+  ## (`dap_handler`) answers a move with `stopped`, then `ct/complete-move`,
+  ## then (mostly) the response; a jump that finds nothing with a warning
+  ## notification and the response only, or — on its error paths, which do
+  ## not respond — with nothing at all. So this reads until `stopped` or the
+  ## response, each message under `LineJumpQuietMs`, and raises — the
+  ## debugger where it was — on a response without a move or on silence
+  ## (`what` is the message). Waiting for `stopped` alone
+  ## froze the front-end on "Jump backward to line" from the first stop.
+  s.backend.sendDapRequestNoResponse(command, args)
+  let saved = s.backend.bound
+  if saved.timeoutMs == 0 or saved.timeoutMs > LineJumpQuietMs:
+    s.backend.bound.timeoutMs = LineJumpQuietMs
+  var moved = false
+  try:
+    while true:
+      let msg = s.backend.readDapMessage()
+      case msg.getOrDefault("type").getStr("")
+      of "event":
+        if msg.getOrDefault("event").getStr("") == "stopped":
+          moved = true
+          break
+        s.backend.undelivered.add msg
+        s.backend.eventQueue.add msg
+      of "response":
+        if msg.getOrDefault("command").getStr("") == command:
+          break
+      else: discard
+  except DapStalledError:
+    s.backend.bound = saved
+    raise newException(CatchableError,
+      what & " (the engine did not move)")
+  if not moved:
+    s.backend.bound = saved
+    raise newException(CatchableError, what)
+  # `settle`: a move is not yet the answer — the engine may have moved only
+  # part of the way and then refuse (`source_call_jump` reaches the LINE,
+  # then finds no call of the token: an error notification and no
+  # response). Read on to the response or that notification.
+  var refused = ""
+  if settle:
+    try:
+      while true:
+        let msg = s.backend.readDapMessage()
+        case msg.getOrDefault("type").getStr("")
+        of "response":
+          if msg.getOrDefault("command").getStr("") == command:
+            # The engine's error path answers `success: false` (the stdio
+            # server turns a handler's error into one).
+            if not msg.getOrDefault("success").getBool(true) and
+               refused.len == 0:
+              refused = msg.getOrDefault("message").getStr("refused")
+            break
+        of "event":
+          s.backend.undelivered.add msg
+          s.backend.eventQueue.add msg
+          if msg.getOrDefault("event").getStr("") == "ct/notification" and
+             msg{"body", "kind"}.getInt(-1) == NotificationErrorWire:
+            refused = msg{"body", "text"}.getStr("")
+        else: discard
+    except DapStalledError:
+      refused = "the engine did not answer"
+  s.backend.bound = saved
+  s.consumeCompleteMoveEvent()
+  if refused.len > 0:
+    raise newException(CatchableError, refused)
+
+func jumpWire(behaviour: string): int =
+  ## The engine's `JumpBehaviour` is `Serialize_repr` (`task.rs`): Smart 0,
+  ## Forward 1, Backward 2.
+  case behaviour
+  of "forward": 1
+  of "backward": 2
+  else: 0
+
+proc sourceLineJump*(s: HeadlessDebugSession; path: string; line: int;
+                     behaviour = "smart") =
+  ## PLAT-50: go to `path:line` — the desktop's editor "Jump to line" (Ctrl+
+  ## click / middle click; `behaviour` "smart"), "Run to Cursor" ("forward")
+  ## and "Jump backward to line" ("backward") — `ct/source-line-jump` with a
+  ## `SourceLocation` (`DebuggerService.sourceLineJump`), waiting for the
+  ## move as the other jumps do (`awaitJump`: a jump that finds nothing does
+  ## not move, and must not hang).
+  s.awaitJump("ct/source-line-jump",
+              %*{"path": path, "line": line, "behaviour": jumpWire(behaviour)},
+              "no " & (if behaviour == "smart": "" else: behaviour & " ") &
+                "step reaches " & path & ":" & $line)
+
+proc sourceCallJump*(s: HeadlessDebugSession; path: string; line: int;
+                     token: string; behaviour = "smart") =
+  ## PLAT-50: go to the call of `token` on `path:line` — the desktop's
+  ## Ctrl+Alt+click on a function's name and its editor menu's "Jump to
+  ## call" / "Jump forward to call" / "Jump backward to call"
+  ## (`ui/editor.sourceCallJump` → `ct/source-call-jump` with a
+  ## `SourceCallJumpTarget`). The engine reaches the line, then the first
+  ## step inside a function named `token` (`dap_handler.get_call_target`);
+  ## it reads no `behaviour` (`task.rs`' `SourceCallJumpTarget` declares
+  ## none), so the three entries move alike on every front-end — sent anyway,
+  ## as the desktop sends it. A name the line does not call leaves the
+  ## debugger ON THE LINE and raises with the engine's own message ("Line
+  ## reached but couldn't find the function!"), as the desktop reports it.
+  s.awaitJump("ct/source-call-jump",
+              %*{"path": path, "line": line, "token": token,
+                 "behaviour": jumpWire(behaviour)},
+              "no step reaches a call of " & token & " on " & path & ":" &
+                $line,
+              settle = true)
 
 proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
                                  file: string; line: int;
@@ -980,7 +1184,8 @@ func toEventLogEntry*(row: EventLogRow): EventLogEntry =
 
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
-                             count: int = 0): seq[EventLogEntry] =
+                             count: int = 0;
+                             order = RecordedEventOrder): seq[EventLogEntry] =
   ## Send ``ct/event-load``, feed the answer into the store, and return the
   ## window that was loaded.
   ##
@@ -1038,10 +1243,15 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
   # stops.
   for _ in 0 ..< 4:
     drain()
-  let args = %*{
+  var args = %*{
     "start": start,
     "count": count,
   }
+  # PLAT-50: THE HEADER CLICK'S ORDER (`EventLogOrder`), which the engine
+  # applies before cutting the window (`dap_handler.event_load`'s `sortKey`).
+  if order != RecordedEventOrder:
+    args["sortKey"] = %($order.column)
+    args["sortAscending"] = %order.ascending
   let resp = s.backend.sendDapRequest("ct/event-load", args)
   # Drain interleaved events (the server may push events before the response).
   discard s.backend.drainEvents()
@@ -1249,6 +1459,90 @@ proc recordTrace*(programPath: string; outputDir: string = "";
     raise newException(IOError,
       "ct record failed (exit " & $exitCode & "): " & output)
   return traceDir
+
+# ---------------------------------------------------------------------------
+# PLAT-50: a value's history, the scratchpad
+# ---------------------------------------------------------------------------
+
+proc currentLocationJson(s: HeadlessDebugSession): JsonNode =
+  ## The engine's own `Location` for the current stop — the one its last
+  ## `ct/complete-move` carried, echoed back verbatim so no field of it is
+  ## re-spelled here; the three fields every request reads when no move has
+  ## been seen.
+  let body = if s.lastCompleteMoveEvent.isNil: nil
+             else: s.lastCompleteMoveEvent.getOrDefault("body")
+  if not body.isNil and body.kind == JObject and body.hasKey("location"):
+    return body["location"]
+  %*{"path": s.getCurrentFile(), "line": s.getCurrentLine(),
+     "rrTicks": s.getCurrentRRTicks()}
+
+proc loadValueHistory*(s: HeadlessDebugSession; expression: string;
+                       budget: Budget = tuiValueBudget()):
+    seq[ValueHistoryRow] =
+  ## PLAT-50: the history of `expression`'s value — the Variables row menu's
+  ## "Toggle value history" (`StateVM.toggleHistory` →
+  ## `ui/state.stateHistoryBridge` → `ct/load-history` with the stop's
+  ## location). The rows are the engine's: each recorded value with the tick
+  ## it was observed at, rendered one line each as the desktop's history row
+  ## shows them (`"<rrTicks>  <value>"`). They are also stored on the State
+  ## ViewModel (`updateHistory`), keyed by `expression`, as the desktop's
+  ## `CtUpdatedHistory` subscriber stores them.
+  let resp = s.backend.sendDapRequest("ct/load-history", %*{
+    "expression": expression,
+    "location": s.currentLocationJson(),
+    "isForward": false})
+  discard s.backend.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(CatchableError,
+      "the engine has no history for " & expression)
+  for r in resp{"body", "results"}.getElems:
+    result.add ValueHistoryRow(
+      locationTicks: r{"location", "rrTicks"}.getBiggestInt(0),
+      valueText: presentedValueText(r{"value"}, budget))
+  if not s.session.stateVM.isNil:
+    s.session.stateVM.updateHistory(expression, result)
+
+proc loadValueOrigin*(s: HeadlessDebugSession; expression: string;
+                      maxHops = 16): OriginChain =
+  ## PLAT-50: where `expression`'s value came from — the Variables row
+  ## menu's "Show value origin" (`StateVM.onShowOrigin` → `ct/originChain`
+  ## for the current step), answered with the chain the desktop's origin
+  ## panel lists, nearest cause first. Raises when the engine refuses.
+  let resp = s.backend.sendDapRequest("ct/originChain",
+    originChainArgs(expression = expression, stepId = -1, maxHops = maxHops))
+  discard s.backend.drainEvents()
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(CatchableError,
+      resp.getOrDefault("message").getStr("the engine has no origin for " &
+                                          expression))
+  parseOriginChain(resp.getOrDefault("body"))
+
+func originHopLines*(chain: OriginChain): seq[string] =
+  ## The chain's hops, one line each — `tick N  kind  target <- source
+  ## file:line`, the desktop's origin panel's row — skipping a hop that names
+  ## no recorded step.
+  for hop in chain.hops:
+    if hop.location.path.len == 0 and hop.location.rrTicks == 0'u64:
+      continue
+    var file = hop.location.path
+    let slash = file.rfind('/')
+    if slash >= 0: file = file[slash + 1 .. ^1]
+    result.add "tick " & $hop.location.rrTicks & "  " & $hop.kind & "  " &
+               hop.targetExpr & " <- " & hop.sourceExpr.strip() & "  " &
+               file & ":" & $hop.location.line
+
+proc addToScratchpad*(s: HeadlessDebugSession; expression, value: string) =
+  ## PLAT-50: pin `expression = value` to the scratchpad — the desktop's
+  ## "Add value to scratchpad" on a call-trace argument
+  ## (`isonim_calltrace_view.addCallArgToScratchpad`) and on a flow value
+  ## (`ui/flow`'s `openValueInScratchpad`), both of which hand the
+  ## Scratchpad ViewModel the value's TEXT (`rawScratchpadValue`). One row
+  ## per expression: a second capture of the same expression appends its
+  ## sample (`ScratchpadVM.addValue`).
+  let vm = s.session.scratchpadVM
+  if vm.isNil or expression.len == 0:
+    return
+  vm.addValue(ScratchpadValueEntry(expression: expression, valueText: value))
 
 # ---------------------------------------------------------------------------
 # Watch expressions

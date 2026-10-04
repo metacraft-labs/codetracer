@@ -97,8 +97,7 @@ const
     collapsed: "▶", expanded: "▼",
     needle: "▲", span: "█",
     ellipsis: "…", dotFill: "·", dashFill: "┊")
-    ## The set every pane in this tree already paints — `shell.PaneRuleGlyph`,
-    ## `shell.PaneSeparatorGlyph`, `gutter.BreakpointGlyph`,
+    ## The set every pane in this tree already paints — `gutter.BreakpointGlyph`,
     ## `tree_node.CollapsedGlyph`, `timeline_bar.NeedleGlyph` and the rest are
     ## exactly these runes. Collected here rather than re-spelled, so the
     ## degradation table below and the views cannot disagree about what a
@@ -145,8 +144,12 @@ const AsciiFallbacks: array[21, (string, string)] = [
   ("●", "*"), ("○", "o"), ("◆", "+"),
   ("▶", ">"), ("▼", "v"), ("▲", "^")]
 
-const ExtraAsciiFallbacks: array[3, (string, string)] = [
-  ("█", "#"), ("…", "."), ("·", ".")]
+const ExtraAsciiFallbacks: array[5, (string, string)] = [
+  ("█", "#"), ("…", "."), ("·", "."),
+  # PLAT-50: the edge one-eighth blocks a pane divider and the top bar's
+  # field and menu button borders are drawn with (`shell.DividerGlyph`,
+  # `top_bar.FieldEdgeLeft` / `FieldEdgeRight`): a line, so `|`.
+  ("▏", "|"), ("▕", "|")]
 
 var asciiTable {.compileTime.}: Table[string, string]
 

@@ -258,6 +258,9 @@ type
     kind*: CallTraceHitKind
     index*: int64
       ## The trace index of the call under the pointer.
+    arg*: int
+      ## PLAT-50 (K23): the argument under the pointer (its name, `=` or
+      ## value), an index into the row's `args`; -1 for none.
 
 proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
                      row, col: int): CallTraceHit =
@@ -268,17 +271,28 @@ proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
   if area.width <= 0 or area.height <= 1 or row <= area.row or
      row >= area.row + area.height or col < area.col or
      col >= area.col + area.width:
-    return CallTraceHit(kind: cthNone)
+    return CallTraceHit(kind: cthNone, arg: -1)
   let bodyRows = area.height - 1
   let index = m.visibleTop(bodyRows) + (row - area.row - 1)
   if index >= m.total:
-    return CallTraceHit(kind: cthNone)
+    return CallTraceHit(kind: cthNone, arg: -1)
   let (loaded, r) = m.rowAt(index)
   if not loaded:
-    return CallTraceHit(kind: cthNone)
+    return CallTraceHit(kind: cthNone, arg: -1)
   let call = r.callOf
   # The toggle's cell: after the depth's indent (`callRowSegments`).
   let toggleCol = area.col + call.depth * CallRowIndentCells
   if col == toggleCol and call.toggle != crtLeaf:
-    return CallTraceHit(kind: cthToggle, index: index.int64)
-  CallTraceHit(kind: cthRow, index: index.int64)
+    return CallTraceHit(kind: cthToggle, index: index.int64, arg: -1)
+  # PLAT-50: which argument the pointer is on — walked over the same
+  # segments `paintCallTrace` draws, each argument being its name, its `=`
+  # and its value (the desktop's `.call-arg`).
+  var x = area.col
+  var arg = -1
+  for seg in callRowSegments(call):
+    let w = cellWidthOf(seg.text)
+    if col >= x and col < x + w:
+      arg = seg.arg - 1
+      break
+    x += w
+  CallTraceHit(kind: cthRow, index: index.int64, arg: arg)

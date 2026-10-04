@@ -60,10 +60,10 @@ proc stripTabs(row: string): seq[string] =
   ## The tab labels a painted strip shows: `[Active]  Other  Third  ----`.
   ## Split on the two-space gaps the strip draws between tabs, with the
   ## brackets of the active tab and the trailing rule removed.
-  ## A region's right border (`│`) is not part of any label: where a region
-  ## is exactly as wide as its active tab's bracketed name, the border touches
-  ## the closing bracket.
-  for raw in row.replace("─", " ").replace("│", " ").split("  "):
+  ## A region's right border (`│`; since PLAT-50 the divider's `▏`) is not
+  ## part of any label: where a region is exactly as wide as its active tab's
+  ## bracketed name, the border touches the closing bracket.
+  for raw in row.replace("─", " ").replace("│", " ").replace("▏", " ").split("  "):
     var t = raw.strip(chars = {' ', '-', '|', '[', ']'})
     if t.len > 0:
       result.add t

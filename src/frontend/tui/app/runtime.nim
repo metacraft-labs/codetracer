@@ -51,6 +51,8 @@ import ./theme/degradation
 import ./tui_app
 import ./views/command_line
 import ./views/shell
+import ./views/event_log
+import ./views/vcs_pane
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -136,6 +138,70 @@ type
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
 
+  PaneClickKind* = enum
+    ## PLAT-50: what a click in a pane asks the HOST to do — the operations
+    ## that need the session (`headless_app/pane_clicks`' shared ops). The
+    ## ones the runtime can do on its own models (a variable expanded, a
+    ## menu opened, a point selected) never reach the host.
+    pcNone
+    pcOpenFile
+      ## Files: a file — show it in the editor (`path`).
+    pcToggleFolder
+      ## Files: a folder — expand or collapse it (`path`).
+    pcToggleBreakpoint
+      ## The editor's gutter: a breakpoint on `path:line`, or none.
+    pcSetBreakpointEnabled
+      ## The editor's gutter, right-click: `enabled` for `path:line`'s.
+    pcLineJump
+      ## The editor's text, Ctrl / middle click or the menu: go to
+      ## `path:line` (`behaviour`: smart, forward, backward).
+    pcEventJump
+      ## The event log: go to the event whose log index is `index`.
+    pcSeek
+      ## The timeline: go to `tick`.
+    pcDeleteBreakpoints
+      ## The editor's menu: delete every breakpoint of `path` ("Delete
+      ## breakpoints in file"), or of every file when `path` is "" ("Delete
+      ## ALL breakpoints").
+    pcColumnBreakpoint
+      ## The editor's text, Alt+click: a breakpoint on `path:line` anchored
+      ## at `column`.
+    pcCallJump
+      ## Ctrl+Alt+click on a call, or the menu's call jumps: go to the call
+      ## of `text` (the word) on `path:line` (`behaviour`).
+    pcEventOrder
+      ## The event log's header: order the log by `order`.
+    pcScratchpadAdd
+      ## Pin `values` to the scratchpad.
+    pcScratchpadRemove
+      ## The scratchpad's close button: remove the value at `index`.
+    pcValueHistory
+      ## The Variables menu's "Toggle value history" on the variable at
+      ## `path`.
+    pcValueOrigin
+      ## The Variables menu's "Show value origin" on the variable at `path`.
+    pcVcsDiff
+      ## The VCS pane: show the diff of `path` (`text` its state letter) —
+      ## the working tree's, or commit `behaviour`'s when it names one.
+    pcVcsCommit
+      ## The VCS pane: open or close commit `index`.
+
+  PaneClickRequest* = object
+    kind*: PaneClickKind
+    path*: string
+    line*: int
+    column*: int
+    index*: int64
+    tick*: uint64
+    enabled*: bool
+    behaviour*: string
+    text*: string
+      ## An event's content (`pcEventJump`), the word a call jump names.
+    values*: seq[NamedValue]
+      ## The (expression, value) pairs `pcScratchpadAdd` pins.
+    order*: EventLogOrder
+      ## `pcEventOrder`'s order.
+
   RuntimeOutcome* = object
     ## Everything one token decided, as a value the host acts on.
     ##
@@ -150,6 +216,15 @@ type
       ## A navigation command was SENT and the host must consume the
       ## `stopped` + `ct/complete-move` pair it will produce. See the module
       ## header.
+    awaitsOrigin*: bool
+      ## `o` / `:origin` ASKED for a chain (`ct/originChain`) rather than
+      ## moving: no `stopped` comes, so the host must not pump a move. It
+      ## takes the `ct/updated-origin-chain` answer into the Origin ViewModel
+      ## and runs the action again (`retryOrigin`), which then walks the
+      ## chain — `interpreter.dispatchOrigin`'s arm 2. Until this, the host
+      ## pumped a move here and the terminal froze waiting for one.
+    originRetry*: string
+      ## The command line to run again (`:origin X`), or "" for the key.
     refreshesSession*: bool
       ## The engine's state changed WITHOUT a move — a breakpoint was set or
       ## cleared — so the host rebuilds the panes from the session, but must
@@ -164,6 +239,8 @@ type
       ## `ct/collapse-calls`) and reloads the section.
     callIndex*: int64
       ## The trace index `jumpsToCall` / `togglesCall` act on.
+    paneClick*: PaneClickRequest
+      ## PLAT-50: a click in a pane that the host carries out.
       ## PLAT-47. The reader scrolled the call trace: the host loads the
       ## section of the trace the pane now shows, if it does not hold it
       ## (`tui_session.pageCallTrace`), and nothing else — no pump, no
@@ -886,7 +963,17 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     else:
       discard
 
-  let result = runCommand(rt.dispatcher, rt.context, line)
+  # PLAT-50: "Add tracepoint" on an editor line chose WHERE the next
+  # `:tracepoint` goes (the desktop's tracepoint editor opens on that line);
+  # any other command forgets it.
+  var context = rt.context
+  if rt.app.tracepointAt.path.len > 0:
+    let verb = line.strip().strip(chars = {':'}).splitWhitespace()
+    if verb.len > 0 and verb[0] == "tracepoint":
+      context.file = rt.app.tracepointAt.path
+      context.line = rt.app.tracepointAt.line
+    rt.app.tracepointAt = ("", 0)
+  let result = runCommand(rt.dispatcher, context, line)
   outcome.detail = result.message
   var text = describeOutcome(result)
   if text.len == 0:
@@ -914,6 +1001,12 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   if result.dispatch.status == drDone:
     outcome.awaitsMove = movesTheDebugger(outcome.action)
     outcome.refreshesSession = changesSessionState(outcome.action)
+    # PLAT-50: an origin query is not a move (`awaitsOrigin`).
+    if outcome.action == kaValueOrigin and
+       result.message.startsWith(OriginPendingText):
+      outcome.awaitsMove = false
+      outcome.awaitsOrigin = true
+      outcome.originRetry = line
 
 const CallTraceWheelRows* = 3
   ## Rows one wheel notch scrolls the call trace — the common terminal
@@ -941,6 +1034,594 @@ const MouseNoteStatuses* = {lasRefused, lasBadArgument, lasUnknownCommand}
   ## PLAT-49 part B: the outcomes of a MOUSE gesture the status line reports —
   ## the ones whose result is not on the screen. A click, a drag, a drop, a
   ## resize or a reveal that worked is visible and says nothing.
+
+# ---------------------------------------------------------------------------
+# PLAT-50: CLICKS IN PANES — the desktop's click behaviours
+# (`headless_app/pane_clicks.ClickInventory`)
+# ---------------------------------------------------------------------------
+
+proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
+                      outcome: var RuntimeOutcome): bool
+  ## Forward-declared for the tab menu's "Maximise container".
+
+proc shellScreenOf*(rt: TuiRuntime): ShellScreen
+  ## FORWARD-DECLARED for the top bar's and the panes' hit-testing, which
+  ## read the cells the next frame is painted with; defined with the other
+  ## screen readers.
+
+proc paneUnderStrip(geometry: LayoutGeometry; idx: int): CellArea =
+  ## The rectangle a pane's painter is handed (`shell.paintPane`'s `under`):
+  ## from its strip's row, its box's width and height. Its first row is the
+  ## painter's heading, which the strip covers; its content starts below.
+  let region = geometry.projection.regions[idx]
+  let frame = paneFrame(region.area, geometry.body)
+  CellArea(col: region.area.col, row: region.area.row,
+           width: frame.box.width, height: frame.box.height)
+
+proc openContextMenu(rt: TuiRuntime; menu: ContextMenuModel; row, col: int;
+                     outcome: var RuntimeOutcome) =
+  ## A right-click's menu, at the cell pressed.
+  rt.app.contextMenu.openAt(menu, row, col)
+  rt.app.menu.close()
+  outcome.repaint = true
+
+proc requestClick(outcome: var RuntimeOutcome; request: PaneClickRequest) =
+  outcome.paneClick = request
+  outcome.repaint = true
+
+proc showContent(rt: TuiRuntime; title, text: string; diff = false;
+                 outcome: var RuntimeOutcome) =
+  ## A text over the body (`views/context_menu.ContentOverlay`).
+  rt.app.content = ContentOverlay(open: true, title: title, text: text,
+                                  diff: diff)
+  outcome.repaint = true
+
+proc copyToClipboard(rt: TuiRuntime; text, what: string) =
+  ## PLAT-50: hand `text` to the terminal's clipboard (OSC 52, written by the
+  ## next frame) and say what was copied, as the desktop's copy does.
+  rt.app.clipboard = text
+  rt.note("copied " & what)
+
+proc eventRowAt(model: EventLogModel; area: CellArea;
+                row: int): (bool, event_log.EventLogRow, EventLogScreen) =
+  ## The row painted on `row` when the log is painted into `area` (the
+  ## pane's painter, re-run on a scratch grid so the hit is the paint's), and
+  ## that screen (its header, for a header press).
+  var g = newStyledGrid(area.col + area.width, area.row + area.height)
+  let screen = paintEventLog(g, area, model)
+  let firstBody = area.row + (if screen.headerRow >= 0: 2 else: 1)
+  let i = row - firstBody
+  if i < 0 or i >= screen.visible.len or screen.visible[i].kind != elrEvent:
+    return (false, event_log.EventLogRow(), screen)
+  (true, screen.visible[i], screen)
+
+proc timelineTickAt(rt: TuiRuntime; content: CellArea; col: int): int64 =
+  ## The tick the timeline's track maps column `col` to, for the bar painted
+  ## into `content` (the painter re-run on a scratch grid, so the mapping is
+  ## the drawing's), or -1 off the track.
+  var g = newStyledGrid(content.col + content.width,
+                        content.row + content.height)
+  let bar = paintTimelineBar(g, content, rt.app.timeline)
+  if bar.barRow < 0 or bar.trackWidth <= 0 or col < bar.trackCol or
+     col >= bar.trackCol + bar.trackWidth:
+    return -1
+  int64(tickForColumn(col - bar.trackCol, rt.app.timeline.minTick,
+                      rt.app.timeline.maxTick, bar.trackWidth))
+
+proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
+                        outcome: var RuntimeOutcome): bool =
+  ## K24 / K25 / K26: a left click on an event goes to it (`eventJump`, the
+  ## desktop's row click); a right click shows its whole content (the desktop
+  ## opens it in a read-only editor view); a left click on a column's header
+  ## orders the log by it, again to reverse (the desktop's DataTables order).
+  let (ok, row, screen) = eventRowAt(rt.app.eventLog, area, event.row)
+  if not ok:
+    let (onHeader, column) = screen.headerColumnAt(event.row, event.col)
+    if onHeader and event.button == mbLeft:
+      outcome.requestClick(PaneClickRequest(
+        kind: pcEventOrder,
+        order: rt.app.eventLog.order.clickedHeader(column)))
+      return true
+    return false
+  let ev = row.event
+  rt.app.eventLog.selected = row.index
+  if event.button == mbRight:
+    rt.showContent("event #" & $ev.index & " at tick " & $ev.tick &
+                     (if ev.file.len > 0: "  " & ev.file & ":" & $ev.line
+                      else: ""),
+                   ev.content, outcome = outcome)
+    return true
+  outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: ev.index,
+                                        tick: ev.tick, path: ev.file,
+                                        line: ev.line, text: ev.content))
+  true
+
+proc editorTextMenu(rt: TuiRuntime; target: SourceClickTarget):
+    ContextMenuModel =
+  ## The editor menu on `target`'s line, with the line's breakpoint state and
+  ## the word under the pointer (`callTokenAt`).
+  let src = rt.app.source
+  let mark = src.markFor(target.line)
+  var inFile, any = false
+  for p in rt.app.points.rows:
+    if p.kind == PointKindBreakpoint:
+      any = true
+      if p.path == src.path: inFile = true
+  let onLine: LineBreakpoint =
+    case mark
+    of gmBreakpoint: lbEnabled
+    of gmBreakpointDisabled: lbDisabled
+    else: lbNone
+  let (token, tokenError) = callTokenAt(target.lineText, target.column,
+                                        rust = src.path.endsWith(".rs"))
+  editorTextContextMenu(src.path, target.line, lineText = target.lineText,
+                        column = target.column, token = token,
+                        tokenError = tokenError, breakpoint = onLine,
+                        fileHasBreakpoints = inFile, anyBreakpoints = any)
+
+proc lineValues(target: SourceClickTarget): seq[NamedValue] =
+  for v in target.values:
+    result.add (v.name, v.value)
+
+proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
+                      outcome: var RuntimeOutcome): bool =
+  ## K10-K15 and K36 on the recording's source in Debug: the gutter's toggle
+  ## and enable / disable, the text's line and call jumps, a column
+  ## breakpoint, the editor menu, and an inline value's click, Ctrl+click and
+  ## menu — `ui/editor`'s and `ui/flow`'s mouse handlers.
+  if rt.app.modes.product == pmEdit or rt.app.source.isEmpty:
+    return false
+  let src = rt.app.source
+  let target = src.sourceClickTargetAt(under, event.row, event.col)
+  if target.line < 1:
+    return false
+  let line = target.line
+  if target.onGutter:
+    if event.button == mbLeft:
+      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,
+                                            path: src.path, line: line))
+      return true
+    if event.button == mbRight:
+      # The desktop's gutter right-click enables / disables a breakpoint
+      # that is there, and does nothing on a line without one.
+      let mark = src.markFor(line)
+      if mark in {gmBreakpoint, gmBreakpointDisabled}:
+        outcome.requestClick(PaneClickRequest(
+          kind: pcSetBreakpointEnabled, path: src.path, line: line,
+          enabled: mark == gmBreakpointDisabled))
+        return true
+    return false
+  # K36: AN INLINE VALUE — `ui/flow`'s value: a click goes to the step the
+  # line ran at, Ctrl+click pins it, a right click opens its menu.
+  if target.value >= 0:
+    let v = target.values[target.value]
+    case event.button
+    of mbRight:
+      rt.openContextMenu(flowValueContextMenu(src.path, line, v.name, v.value,
+                                              lineValues(target)),
+                         event.row, event.col, outcome)
+    of mbLeft:
+      if event.ctrl:
+        outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,
+                                              values: @[(v.name, v.value)]))
+      else:
+        # The value IS the current step's (the terminal annotates only the
+        # line the debugger is on), so the step it was observed at is here.
+        rt.note(v.name & " = " & v.value & " is the value at this step")
+        outcome.repaint = true
+    else:
+      return false
+    return true
+  case event.button
+  of mbRight:
+    rt.openContextMenu(rt.editorTextMenu(target), event.row, event.col,
+                       outcome)
+    true
+  of mbMiddle:
+    outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: src.path,
+                                          line: line, behaviour: "smart"))
+    true
+  of mbLeft:
+    if event.ctrl and event.alt:
+      # K15: the desktop's Ctrl+Alt+click on a function's name.
+      let (token, err) = callTokenAt(target.lineText, target.column,
+                                     rust = src.path.endsWith(".rs"))
+      if token.len == 0:
+        rt.note(if err.len > 0: err & " on line " & $line & "."
+                else: NoWordSelected)
+        outcome.repaint = true
+      else:
+        outcome.requestClick(PaneClickRequest(kind: pcCallJump,
+                                              path: src.path, line: line,
+                                              text: token,
+                                              behaviour: "smart"))
+      true
+    elif event.alt:
+      # K14: the desktop's Alt+click — a breakpoint anchored at the column
+      # (`column_click_resolver`: the text's column, clamped to the line).
+      let width = max(1, cellWidthOf(target.lineText))
+      outcome.requestClick(PaneClickRequest(
+        kind: pcColumnBreakpoint, path: src.path, line: line,
+        column: max(1, min(target.column, width))))
+      true
+    elif event.ctrl:
+      outcome.requestClick(PaneClickRequest(kind: pcLineJump, path: src.path,
+                                            line: line, behaviour: "smart"))
+      true
+    else:
+      false
+  else:
+    false
+
+proc routeDockLabelClick(rt: TuiRuntime; geometry: LayoutGeometry;
+                         event: MouseEvent;
+                         outcome: var RuntimeOutcome): bool =
+  ## K42: a right-click on a docked pane's label opens the desktop's strip
+  ## menu (`ui/auto_hide`'s `onContextMenu`).
+  if event.kind != mekPress or event.button != mbRight:
+    return false
+  let s = geometry.stripIndexAt(event.row, event.col)
+  if s < 0:
+    return false
+  let strip = geometry.strips[s]
+  let i = strip.slotAt(event.row, event.col)
+  if i < 0:
+    return false
+  rt.openContextMenu(dockLabelContextMenu(strip.slots[i].pane, strip.edge),
+                     event.row, event.col, outcome)
+  true
+
+proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
+                    event: MouseEvent; outcome: var RuntimeOutcome): bool =
+  ## A press the layout did not act on (`lasNoGesture`), on a pane's strip or
+  ## body, or a dock label: what the desktop does there. Answers whether it
+  ## was taken.
+  if event.kind != mekPress or
+     event.button notin {mbLeft, mbRight, mbMiddle}:
+    return false
+  if rt.routeDockLabelClick(geometry, event, outcome):
+    return true
+  # K37: the status line (the desktop's status bar location and its copy
+  # button) — a click on it copies the current file's path, as the
+  # desktop's copy control does (measured: the path, without the line). The
+  # bottom dock labels in that row are the layout's, handled before this.
+  if event.row == rt.height - 1 and event.button == mbLeft:
+    let colon = rt.app.location.rfind(':')
+    if colon <= 0:
+      return false
+    let path = rt.app.location[0 ..< colon]
+    rt.copyToClipboard(path, "the path " & path)
+    outcome.repaint = true
+    return true
+  let idx = geometry.regionIndexAt(event.row, event.col)
+  if idx < 0:
+    return false
+  let region = geometry.projection.regions[idx]
+  let under = paneUnderStrip(geometry, idx)
+  # K7: a right-click on a TAB opens the tab's menu.
+  if event.row == region.area.row:
+    if event.button != mbRight:
+      return false
+    let pane = rt.app.layoutBinding.stripPaneAt(geometry, event.row,
+                                                event.col)
+    if pane.isNone:
+      return false
+    rt.openContextMenu(tabContextMenu(pane.get, rt.maximize.active),
+                       event.row, event.col, outcome)
+    return true
+  if not under.contains(event.row, event.col):
+    return false   # the divider
+  case region.pane
+  of paneFileTree:
+    # K17 / K18 (K19: the desktop has no Files menu).
+    if event.button != mbLeft:
+      return false
+    let tree = rt.app.fileTree
+    if tree.entries.len == 0:
+      return false
+    let i = tree.scrollTop + (event.row - under.row - 1)
+    if i < 0 or i >= tree.entries.len:
+      return false
+    let e = tree.entries[i]
+    outcome.requestClick(PaneClickRequest(
+      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path))
+    return true
+  of paneEditor:
+    return rt.routeEditorClick(under, event, outcome)
+  of paneCalltrace:
+    # K22 / K23 (K20 / K21 are the left press in `routeMouseReport`).
+    if event.button != mbRight or rt.app.callTrace.isEmpty:
+      return false
+    let hit = rt.app.callTrace.callTraceHitAt(under, event.row, event.col)
+    if hit.kind == cthNone:
+      return false
+    let local = int(hit.index - rt.app.callTrace.firstIndex)
+    if local < 0 or local >= rt.app.callTrace.rows.len:
+      return false
+    let call = rt.app.callTrace.rows[local].callOf
+    if hit.arg >= 0 and hit.arg < call.args.len:
+      let a = call.args[hit.arg]
+      rt.openContextMenu(callArgumentContextMenu(hit.index, a.name, a.value),
+                         event.row, event.col, outcome)
+      return true
+    rt.openContextMenu(callTraceContextMenu(hit.index, call.toggle != crtLeaf,
+                                            call.toggle == crtExpanded),
+                       event.row, event.col, outcome)
+    return true
+  of paneEventLog:
+    if event.button notin {mbLeft, mbRight}:
+      return false
+    return rt.routeEventLogClick(under, event, outcome)
+  of paneTimeline:
+    # K30 / K45 on the scrubber's track; the event log under it as K24-K26.
+    let content = CellArea(col: under.col, row: under.row + 1,
+                           width: under.width,
+                           height: max(0, under.height - 1))
+    if content.height < 2 or not rt.app.timeline.boundsKnown:
+      return false
+    if event.row < content.row + TimelineBarRows:
+      if event.button != mbLeft:
+        return false
+      let tick = rt.timelineTickAt(content, event.col)
+      if tick < 0:
+        return false
+      # A press seeks; a drag from it seeks again where it is released (the
+      # desktop's `mousedown` / `mouseup` on the track).
+      rt.app.timelineDrag = true
+      outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: uint64(tick)))
+      return true
+    if event.button notin {mbLeft, mbRight}:
+      return false
+    let log = CellArea(col: content.col, row: content.row + TimelineBarRows - 1,
+                       width: content.width,
+                       height: content.height - TimelineBarRows + 1)
+    return rt.routeEventLogClick(log, event, outcome)
+  of paneState:
+    # K27 / K28.
+    if rt.app.variables.isEmpty:
+      return false
+    var g = newStyledGrid(under.col + under.width, under.row + under.height)
+    let screen = paintVariables(g, under, rt.app.variables)
+    let path = screen.pathAtScreenRow(event.row)
+    if path.len == 0:
+      return false
+    rt.app.variables.selected = path
+    rt.app.variables.focused = path
+    # `o` acts on the selected variable (`CommandContext.selectedVariable`).
+    rt.context.selectedVariable = variablePathOf(path)
+    if event.button == mbRight:
+      rt.openContextMenu(variablesContextMenu(path), event.row, event.col,
+                         outcome)
+      return true
+    if event.button == mbLeft:
+      discard rt.app.variables.toggleNode(path)
+      outcome.repaint = true
+      return true
+    return false
+  of panePointList:
+    # K31: the desktop's click selects the point.
+    if event.button != mbLeft or not rt.app.points.loaded:
+      return false
+    let i = event.row - under.row - 1
+    if i < 0 or i >= rt.app.points.rows.len:
+      return false
+    rt.app.points.selected = i
+    outcome.repaint = true
+    return true
+  of paneScratchpad:
+    # K33: the close button removes the value.
+    if event.button != mbLeft or not rt.app.scratchpad.loaded:
+      return false
+    let hit = rt.app.scratchpad.scratchpadHitAt(under, event.row, event.col)
+    if hit.row < 0 or not hit.close:
+      return false
+    outcome.requestClick(PaneClickRequest(kind: pcScratchpadRemove,
+                                          index: hit.row))
+    return true
+  of paneVcs:
+    # K34 / K53: a changed file opens its diff; a commit opens (lists the
+    # files it changed) or closes; a commit's file opens that change.
+    if event.button != mbLeft or not rt.app.vcs.loaded:
+      return false
+    var g = newStyledGrid(under.col + under.width, under.row + under.height)
+    let content = CellArea(col: under.col, row: under.row + 1,
+                           width: under.width,
+                           height: max(0, under.height - 1))
+    let screen = paintVcsPane(g, content, rt.app.vcs)
+    let t = screen.vcsTargetAt(event.row)
+    case t.kind
+    of vrNone:
+      return false
+    of vrFile, vrCommitFile:
+      outcome.requestClick(PaneClickRequest(kind: pcVcsDiff, path: t.path,
+                                            text: t.status,
+                                            behaviour: t.hash))
+    of vrCommit:
+      outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,
+                                            index: t.index))
+    return true
+  else:
+    return false
+
+proc runContextAction(rt: TuiRuntime; action: ContextAction;
+                      target: ContextTarget; outcome: var RuntimeOutcome) =
+  ## A context-menu entry was chosen: route its action to the operation the
+  ## desktop's entry runs.
+  outcome.repaint = true
+  let binding = rt.app.layoutBinding
+  proc layout(rt: TuiRuntime; cmd: LayoutCommand) =
+    if binding.isNil:
+      return
+    let acted = binding.dispatch(cmd)
+    if acted.status == lasApplied:
+      rt.afterLayoutCommit()
+      rt.rebuildFocus()
+    elif acted.status in MouseNoteStatuses:
+      rt.note(acted.message)
+  case action
+  of caNone: discard
+  of caPinLeft: rt.layout(cmdDock(target.pane, leLeft))
+  of caPinBottom: rt.layout(cmdDock(target.pane, leBottom))
+  of caPinRight: rt.layout(cmdDock(target.pane, leRight))
+  of caUnpin: rt.layout(cmdRestoreDocked(target.pane))
+  of caClosePane: rt.layout(cmdRemovePane(target.pane))
+  of caMaximise:
+    rt.rebuildFocus()
+    discard rt.focus.focusPaneKind(target.pane)
+    discard rt.applyLocalAction(kaMaximizePane, outcome)
+  of caCopy:
+    # Monaco's Copy with nothing selected copies the caret's line, and the
+    # right-click put the caret on it.
+    rt.copyToClipboard(target.text & "\n", "line " & $target.line)
+  of caFind:
+    # The desktop's Find (Monaco's find widget): this front-end's search.
+    discard rt.applyLocalAction(kaSearchForward, outcome)
+  of caAddBreakpoint, caDeleteBreakpoint:
+    outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,
+                                          path: target.path,
+                                          line: target.line))
+  of caEnableBreakpoint, caDisableBreakpoint:
+    outcome.requestClick(PaneClickRequest(
+      kind: pcSetBreakpointEnabled, path: target.path, line: target.line,
+      enabled: action == caEnableBreakpoint))
+  of caDeleteBreakpointsInFile:
+    outcome.requestClick(PaneClickRequest(kind: pcDeleteBreakpoints,
+                                          path: target.path))
+  of caDeleteAllBreakpoints:
+    outcome.requestClick(PaneClickRequest(kind: pcDeleteBreakpoints))
+  of caJumpToLine, caRunToCursor, caJumpBackwardToLine:
+    outcome.requestClick(PaneClickRequest(
+      kind: pcLineJump, path: target.path, line: target.line,
+      behaviour: (case action
+                  of caRunToCursor: "forward"
+                  of caJumpBackwardToLine: "backward"
+                  else: "smart")))
+  of caJumpToCall, caJumpForwardToCall, caJumpBackwardToCall:
+    if target.token.len == 0:
+      rt.note(if target.tokenError.len > 0:
+                target.tokenError & " on line " & $target.line & "."
+              else: NoWordSelected)
+    else:
+      outcome.requestClick(PaneClickRequest(
+        kind: pcCallJump, path: target.path, line: target.line,
+        text: target.token,
+        behaviour: (case action
+                    of caJumpForwardToCall: "forward"
+                    of caJumpBackwardToCall: "backward"
+                    else: "smart")))
+  of caAddTracepoint:
+    # The desktop opens its tracepoint editor on the line; this front-end
+    # sets tracepoints with `:tracepoint <expr>`, so the prompt opens with it
+    # typed, placed on the chosen line instead of the stop's.
+    rt.app.tracepointAt = (target.path, target.line)
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert("tracepoint ")
+    rt.note("a tracepoint at " & target.path.extractFilename & ":" &
+            $target.line & " — type its expression and press Enter")
+  of caToggleCallChildren:
+    outcome.togglesCall = true
+    outcome.callIndex = target.index
+  of caToggleValueHistory:
+    outcome.requestClick(PaneClickRequest(kind: pcValueHistory,
+                                          path: target.path))
+  of caShowValueOrigin:
+    # The desktop's entry SHOWS the chain (its origin panel); `o` / `:origin`
+    # walk it, which is a different act.
+    outcome.requestClick(PaneClickRequest(kind: pcValueOrigin,
+                                          path: target.path))
+  of caAddValueToScratchpad, caAddAllValuesToScratchpad:
+    outcome.requestClick(PaneClickRequest(
+      kind: pcScratchpadAdd, values: target.scratchpadSamplesOf(action)))
+  of caJumpToValue:
+    rt.note(target.expression & " = " & target.text &
+            " is the value at this step")
+
+proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
+                       outcome: var RuntimeOutcome): bool =
+  ## PLAT-50: an open context menu or content overlay owns the mouse: the
+  ## pointer over an entry selects it, a press on an entry chooses it, a press
+  ## anywhere else closes the menu (or the overlay) and does nothing else; the
+  ## wheel scrolls the overlay's text.
+  if rt.app.contextMenu.open:
+    let screen = shellScreenOf(rt)
+    let (inside, index) = rt.app.contextMenu.contextMenuHitAt(
+      screen.contextMenuArea, event.row, event.col)
+    case event.kind
+    of mekMotion:
+      if inside and index >= 0 and index != rt.app.contextMenu.selected:
+        rt.app.contextMenu.hover(index)
+        outcome.repaint = true
+      return true
+    of mekRelease:
+      return true
+    of mekPress:
+      outcome.repaint = true
+      if inside:
+        if index >= 0 and event.button == mbLeft:
+          let chosen = rt.app.contextMenu.choose(index)
+          if chosen.chosen:
+            rt.runContextAction(chosen.action, chosen.target, outcome)
+          elif rt.app.contextMenu.open:
+            rt.note(rt.app.contextMenu.menu.entries[index].label & ": " &
+                    rt.app.contextMenu.menu.entries[index].reason)
+        return true
+      rt.app.contextMenu.close()
+      return true
+  if rt.app.content.open:
+    if event.kind == mekPress:
+      if event.button in {mbWheelUp, mbWheelDown}:
+        rt.app.content.scroll(if event.button == mbWheelDown: 3 else: -3)
+      else:
+        rt.app.content = ContentOverlay()
+      outcome.repaint = true
+    return event.kind != mekMotion
+  false
+
+proc routeTimelineDrag(rt: TuiRuntime; event: MouseEvent;
+                       outcome: var RuntimeOutcome): bool =
+  ## K45: while a press on the timeline's track is held, the motion previews
+  ## the tick under the pointer and the release seeks there (the desktop's
+  ## drag on the track: `mousemove` previews, `mouseup` seeks).
+  if not rt.app.timelineDrag:
+    return false
+  if event.kind == mekPress:
+    rt.app.timelineDrag = false
+    return false
+  let geometry = rt.layoutGeometry()
+  let idx = geometry.regionIndexAt(event.row, event.col)
+  var tick = -1'i64
+  if idx >= 0 and geometry.projection.regions[idx].pane == paneTimeline:
+    let under = paneUnderStrip(geometry, idx)
+    let content = CellArea(col: under.col, row: under.row + 1,
+                           width: under.width,
+                           height: max(0, under.height - 1))
+    tick = rt.timelineTickAt(content, event.col)
+  if event.kind == mekMotion:
+    if tick >= 0:
+      rt.note("tick " & $tick)
+      outcome.repaint = true
+    return true
+  # The release.
+  rt.app.timelineDrag = false
+  if tick >= 0 and uint64(tick) != rt.app.timeline.currentTick:
+    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: uint64(tick)))
+  true
+
+proc handleContextMenuKey(rt: TuiRuntime; token: string;
+                          outcome: var RuntimeOutcome) =
+  ## Up / Down move, Enter chooses, Esc closes — the program menu's keys.
+  outcome.repaint = true
+  case keyName(token)
+  of "Up": rt.app.contextMenu.move(-1)
+  of "Down": rt.app.contextMenu.move(1)
+  of "Enter":
+    let chosen = rt.app.contextMenu.choose(-1)
+    if chosen.chosen:
+      rt.runContextAction(chosen.action, chosen.target, outcome)
+  of "Escape", "Esc": rt.app.contextMenu.close()
+  else:
+    if token == "\x1b":
+      rt.app.contextMenu.close()
 
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
@@ -1064,6 +1745,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
+  # PLAT-50: every other press the layout did not act on is the pane's —
+  # the desktop's click behaviour there (`routePaneClick`).
+  if acted.status == lasNoGesture and not inGesture and
+     rt.routePaneClick(geometry, event, outcome):
+    rt.rebuildFocus()
+    discard rt.focus.focusPaneKind(binding.focus)
+    return
   if acted.status == lasApplied:
     rt.afterLayoutCommit()
   # A gesture can take a pane off the screen (a drop on a dock strip) or put one
@@ -1545,13 +2233,12 @@ proc performAction(rt: TuiRuntime; action: KeyAction;
   rt.note(dispatch.detail)
   outcome.repaint = true
   if dispatch.status == drDone and movesTheDebugger(action):
-    outcome.awaitsMove = true
+    if action == kaValueOrigin and dispatch.detail.startsWith(OriginPendingText):
+      outcome.awaitsOrigin = true
+    else:
+      outcome.awaitsMove = true
   if dispatch.status == drDone and changesSessionState(action):
     outcome.refreshesSession = true
-
-proc shellScreenOf*(rt: TuiRuntime): ShellScreen
-  ## FORWARD-DECLARED for the top bar's hit-testing, which reads the cells
-  ## the next frame is painted with; defined with the other screen readers.
 
 proc omnibarHit(rt: TuiRuntime; screen: ShellScreen;
                 event: MouseEvent): (bool, int) =
@@ -1589,7 +2276,20 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
     b.focus = pane
     rt.note("focus " & $pane)
   else:
-    rt.note($pane & " is not in this arrangement")
+    # PLAT-50: A PANE THE ARRANGEMENT DOES NOT PLACE IS OPENED, as the
+    # desktop's View menu opens its panel — a tab beside the event log
+    # (the "Timeline & Tracepoints" stack), else at the root.
+    let anchor = if b.layout.tree.contains(paneEventLog): some(paneEventLog)
+                 else: none(PaneKind)
+    let added = b.dispatch(cmdAddPane(pane, after = anchor))
+    if added.status == lasApplied:
+      rt.afterLayoutCommit()
+      rt.rebuildFocus()
+      discard rt.focus.focusPaneKind(pane)
+      b.focus = pane
+      rt.note("opened " & $pane)
+    else:
+      rt.note($pane & ": " & added.message)
   outcome.repaint = true
 
 proc runMenuAction*(rt: TuiRuntime; action: string;
@@ -1987,6 +2687,14 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       if event.kind == mekMotion and event.button != mbLeft and
          rt.layoutBindingEnabled():
         rt.autoHidePointer(event, nowMs, result)
+      # PLAT-50: an open right-click menu or content overlay first — it is
+      # over everything, the top bar included.
+      if rt.routeOverlayMouse(event, result):
+        return
+      # PLAT-50 (K45): a press held on the timeline's track owns the
+      # pointer until it is released.
+      if rt.routeTimelineDrag(event, result):
+        return
       if rt.routeTopBarMouse(event, result):
         return
       if event.kind == mekMotion and event.button != mbLeft:
@@ -2045,6 +2753,23 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         result.repaint = true
       return
 
+  # PLAT-50: an open right-click menu owns the keys, as the program menu
+  # does; the content overlay closes on Esc / q / Enter.
+  if rt.app.contextMenu.open:
+    rt.handleContextMenuKey(token, result)
+    return
+  if rt.app.content.open:
+    case keyName(token)
+    of "Escape", "Esc", "Enter", "q":
+      rt.app.content = ContentOverlay()
+      result.repaint = true
+      return
+    of "Up", "k": rt.app.content.scroll(-1); result.repaint = true; return
+    of "Down", "j": rt.app.content.scroll(1); result.repaint = true; return
+    of "PageUp": rt.app.content.scroll(-10); result.repaint = true; return
+    of "PageDown", "Space":
+      rt.app.content.scroll(10); result.repaint = true; return
+    else: discard
   # PLAT-48: AN OPEN OMNIBAR, THEN AN OPEN MENU, OWN EVERY KEY — the text
   # field and the menu are modal, as the desktop's are.
   if rt.app.omnibar.isOpen:
@@ -2342,3 +3067,13 @@ proc describe*(rt: TuiRuntime): string =
     " focus=" & (if had: $pane else: "-") &
     " size=" & $rt.width & "x" & $rt.height &
     " " & describe(rt.caps)
+
+proc retryOrigin*(rt: TuiRuntime; line: string): RuntimeOutcome =
+  ## PLAT-50: run `o` (`line` "") or `:origin X` again, now that the host
+  ## put the chain it asked for into the Origin ViewModel — the walk then
+  ## moves (`awaitsMove`), or says why it cannot.
+  if line.len > 0:
+    rt.runPromptLine(line, result)
+  else:
+    rt.performAction(kaValueOrigin, result)
+  result.repaint = true

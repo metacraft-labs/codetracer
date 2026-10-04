@@ -119,15 +119,17 @@ suite "CTUI-0 Tier 2: the entrypoint through a real pty":
     sess.close()
 
   test "--help reaches a real terminal's screen, in full":
-    var sess = newTuiTest(tuiBinary, @["--help"]).width(100).height(40).spawn()
+    var sess = newTuiTest(tuiBinary, @["--help"]).width(100).height(50).spawn()
     sess.waitForText("usage:", initDuration(seconds = 10))
     let screen = sess.screenContents()
     checkpoint("screen: " & screen.strip())
     # EVERY LINE, not two needles. The help text is a `const` in `app/cli.nim`,
     # so the whole of it is knowable here — and a Tier-2 claim about it that
     # checked two substrings would pass over a screen that had truncated,
-    # scrolled away or wrapped the rest. 100x40 is chosen so it cannot: the
-    # longest line is 77 columns and the text is 14 rows.
+    # scrolled away or wrapped the rest. 100x50 is chosen so it cannot: the
+    # longest line is 78 columns and the text is 41 rows (40 rows overflowed
+    # once PLAT-50's `--dividers` lines were added — the first line scrolled
+    # off).
     var checkedLines = 0
     var missing: seq[string] = @[]
     for rawLine in TuiHelpText.splitLines():

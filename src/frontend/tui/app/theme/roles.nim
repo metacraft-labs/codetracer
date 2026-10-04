@@ -100,6 +100,12 @@ type
     # ---- dgBorder: box drawing ---------------------------------------------
     srBorderPane = "border-pane"
     srBorderFocused = "border-focused"
+    srBorderMenu = "border-menu"
+      ## PLAT-50: the hairline round a dropdown (the menu, a context menu) —
+      ## the desktop's `dropdown-surface-chrome()` border.
+    srDividerStrip = "divider-strip"
+      ## PLAT-50: a pane divider drawn in the TAB STRIP'S ground — the
+      ## `--dividers=strip` choice, the desktop's splitter colour.
 
     # ---- dgTab: tab strips ------------------------------------------------
     srTabBar = "tab-bar"
@@ -112,6 +118,10 @@ type
 
     # ---- dgSurface: what a region's cells are filled with ------------------
     srSurfaceCanvas = "surface-canvas"
+    srSurfaceTopBar = "surface-top-bar"
+      ## PLAT-50: the top bar's ground — the desktop's caption bar (`#menu`).
+    srSurfaceMenu = "surface-menu"
+      ## PLAT-50: an open dropdown's ground — the desktop's dropdown surface.
     srSurfacePanel = "surface-panel"
     srSurfaceCard = "surface-card"
     srSurfaceEditor = "surface-editor"
@@ -252,7 +262,19 @@ type
     srHeat4 = "heat-4"
     srHeat5 = "heat-5"
 
+  DividerChoice* = enum
+    ## PLAT-50 (the user, 2026-10-02, undecided between the two): the colour a
+    ## pane-body divider is drawn in. Either way the divider is a thin edge
+    ## line (`DividerGlyph`) and, in a tab-strip row, the strip's own ground.
+    dcStrip = "strip"
+      ## The tab strip's ground (`srDividerStrip`, ui/surface/primary/
+      ## default) — the desktop's splitter colour (`.lm_splitter`, measured
+      ## #1b1b1b, the ground its tabs sit on). The default: closer to the
+      ## desktop.
+    dcSubtle = "subtle"
+      ## A distinct subtle line (`srBorderPane`, ui/border/secondary).
   RoleAttr* = enum
+
     raBold, raItalic, raUnderline, raReverse
 
   RoleSpec* = object
@@ -332,6 +354,19 @@ const
     # the one attribute a divider glyph can carry there.
     srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderPrimary,
                             mono = {raBold}),
+    # PLAT-50 (the user, 2026-10-02: "the drop-down menu needs its own
+    # background ... its borders are invisible"): A DROPDOWN IS FRAMED, as
+    # the desktop's is — `dropdown-surface-chrome()` (components/
+    # shared_widgets.styl) is ui/surface/primary/default under a
+    # ui/border/primary hairline, measured on `#menu-main` (#1b1b1b, 1px
+    # #565656) over #282828 panels. Monochrome keeps the frame's glyphs.
+    srBorderMenu: fgOnly(dgBorder, dtColorsUiBorderPrimary),
+    # PLAT-50: THE DIVIDER IN THE STRIP'S GROUND. The desktop's splitters
+    # (`.lm_splitter`, components/golden_layout.styl) are
+    # ui/surface/primary/default — the ground its tabs sit on — so a divider
+    # drawn in that colour joins the tab strips it meets. The other choice is
+    # `srBorderPane` (ui/border/secondary); `--dividers` picks.
+    srDividerStrip: fgOnly(dgBorder, dtColorsUiSurfacePrimaryDefault),
 
     # THE TAB STRIP, BY THE USER'S DIRECTION (PLAT-49 finding 4, 2026-10-01),
     # which overrides PLAT-47's measured "follow the desktop's single
@@ -346,22 +381,41 @@ const
     # colours, the terminal palette's neutrals) the collapse guard paints the
     # monochrome attributes, and monochrome is reverse + bold (CTUI-11).
     srTabBar: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
-                   dtColorsUiSurfaceBaseRaised, baseSurface = true),
+                   dtColorsUiSurfacePrimaryDefault, baseSurface = true),
     srTabActive: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,
                       dtColorsUiSurfacePrimaryTertiary, attrs = {raBold},
                       mono = {raBold, raReverse}),
+    # PLAT-50 (the user, 2026-10-02: "the black of the inactive tabs looks
+    # like a defect"): the strip's ground moved from ui/surface/base/raised
+    # (#161616 / #f3f3f3) to ui/surface/primary/default (#1b1b1b /
+    # #f8f6f2) — the ground the desktop's tabs sit on, measured behind
+    # `.lm_header` and on every `.lm_splitter`. Still its own ground, apart
+    # from the pane body (PLAT-49 finding 4), by the desktop's own step.
     srTabInactive: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
-                        dtColorsUiSurfaceBaseRaised, baseSurface = true),
+                        dtColorsUiSurfacePrimaryDefault, baseSurface = true),
     # PLAT-49 part B: a session tab off the bar's card (#262626 / #dbd6cc) by
     # one subtle step — ui/surface/primary/default (#1b1b1b / #f8f6f2) —
     # under the caption tier, the desktop's dimmed `.session-tab` text; the
     # active one is `srTabActive`'s tertiary with headings, as on the strips.
     srSessionTab: fgbg(dgTab, dtColorsUiTextPrimaryCaption,
-                       dtColorsUiSurfacePrimaryDefault, baseSurface = true,
+                       dtColorsUiSurfacePrimaryDefaultHover, baseSurface = true,
                        mono = {raUnderline}),
 
     srSurfaceCanvas: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                           dtColorsUiSurfaceBaseCanvas, baseSurface = true),
+    # PLAT-50: THE TOP BAR IS THE DESKTOP'S CAPTION BAR — `#menu` is
+    # ui/surface/primary/default (components/menu_bar.styl), measured #1b1b1b,
+    # and its menu button, transport buttons and omnibox all sit on that
+    # ground with no fill of their own (they were on ui/surface/base/card, the
+    # controls filled #161616).
+    srSurfaceTopBar: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
+                          dtColorsUiSurfacePrimaryDefault, baseSurface = true),
+    # PLAT-50: AN OPEN DROPDOWN'S GROUND — the desktop's dropdown surface
+    # (see `srBorderMenu`). Not a base surface: under `--palette=terminal`
+    # the menu keeps an index of its own rather than the terminal's ground,
+    # so it never merges with the panes it covers.
+    srSurfaceMenu: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
+                        dtColorsUiSurfacePrimaryDefault, mono = {raReverse}),
     srSurfacePanel: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
                          dtColorsUiSurfaceBasePanel, baseSurface = true),
     srSurfaceCard: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
@@ -384,8 +438,15 @@ const
     # modes: ui/surface/base/raised, recessed in Dark, lifted in Light. Not a
     # base surface, so `--palette=terminal` keeps an index for it; monochrome
     # underlines it, as the prompt's input surface is.
+    #
+    # PLAT-50 (the user, 2026-10-02: "the omnibox's white background looks
+    # like a selection"): raised was #f3f3f3 in Light. The desktop's field
+    # (`.command-input-row`) is the bar's own ground inside a
+    # ui/border/secondary border; here it is the design system's input
+    # surface (#242424 / #f8f6f2) — one subtle step off the bar — bounded by
+    # that border as edge lines (`top_bar.paintTopBar`).
     srSurfaceField: fgbg(dgSurface, dtColorsUiTextPrimaryBody,
-                         dtColorsUiSurfaceBaseRaised, mono = {raUnderline}),
+                         dtColorsUiSurfaceInputDefault, mono = {raUnderline}),
     srSurfaceSelection: bgOnly(dgSurface, dtEditorThemeSelection,
                                mono = {raReverse}),
     srSurfaceCurrentLine: bgOnly(dgSurface, dtEditorThemeExecutionLine,
@@ -647,3 +708,11 @@ func isSurface*(role: SemanticRole): bool =
 func tokenHex*(token: DesignToken; mode: DesignMode): string =
   ## The resolved `#rrggbb` of one design-system token in one mode.
   DesignTokenHex[token][mode]
+
+func dividerLineRole*(choice: DividerChoice): SemanticRole =
+  ## The role a body-row divider's line is drawn in, for a `--dividers`
+  ## choice.
+  case choice
+  of dcStrip: srDividerStrip
+  of dcSubtle: srBorderPane
+

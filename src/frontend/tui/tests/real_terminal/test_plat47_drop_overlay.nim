@@ -107,9 +107,10 @@ proc clickTab(sess: var TuiTestSession; row, col: int) =
   discard sess.drainOutput(600)
 
 proc dividerCols(s: Snapshot; row: int): seq[int] =
-  ## The columns of `│` on a body row: the right edges the panes drew.
+  ## The columns of the divider glyph on a body row: the right edges the
+  ## panes drew (PLAT-50: `▏`, `shell.DividerGlyph`).
   for c in 0 ..< Cols:
-    if $s[row][c].rune == "│":
+    if $s[row][c].rune == "▏":
       result.add c
 
 proc changedCells(a, b: Snapshot): HashSet[(int, int)] =
