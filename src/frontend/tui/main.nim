@@ -528,6 +528,24 @@ proc interactive(command: TuiCommand): int =
     driver.stop()
     stderr.writeLine(TuiProgramName & ": cancelled while opening " & folder)
     return ExitOk
+  except DapLaunchRefusedError as e:
+    # THE ENGINE ANSWERED, AND THE ANSWER REACHES THE USER. This arm sits
+    # ABOVE the stalled one on purpose: before it existed, a recording
+    # `replay-server` had explicitly refused — naming the container version it
+    # found, the version it requires, and that re-recording is the remedy —
+    # produced no response at all. The refusal arrived as a `ct/notification`
+    # the handshake buffered, the wait for `stopped` ran out its budget, and
+    # the user was told the engine had stopped answering. Before CTUI-14 put a
+    # clock on that wait, they were told nothing and the panes simply stayed
+    # empty for as long as they cared to look.
+    #
+    # The engine's sentence is printed VERBATIM and alone. Every fact a user
+    # needs is already in it and a summary of it here would be a second
+    # wording of the same thing, free to go stale against the reader that
+    # produced it.
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": cannot open " & folder & ": " & e.msg)
+    return ExitUnreadableRecording
   except DapStalledError as e:
     # A DISTINCT EXIT CODE, because this is a distinct fact. `ExitUsage` would
     # send a user to look at their command line for a folder that named itself

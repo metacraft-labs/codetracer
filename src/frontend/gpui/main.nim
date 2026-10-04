@@ -3710,6 +3710,16 @@ proc main() =
   of gckOpen:
     try:
       quit(runOpen(cmd))
+    except DapLaunchRefusedError as e:
+      # A recording this build cannot read is not an unhandled error. The
+      # engine stated its reason — the container version it found, the one it
+      # requires, and that re-recording is the remedy — and that sentence is
+      # what the user gets, whole: `splitLines()[0]` below would truncate it
+      # if the engine ever wraps. Exit 5 matches the terminal front-end's
+      # `cli.ExitUnreadableRecording`, which both front-ends owe a script
+      # driving either of them.
+      stderr.writeLine("codetracer-gpui: " & e.msg)
+      quit(5)
     except CatchableError as e:
       stderr.writeLine("codetracer-gpui: " & e.msg.splitLines()[0])
       quit(1)

@@ -149,6 +149,27 @@ type
   DapInterruptedError* = object of CatchableError
     ## The user asked for the read to stop.  Not a failure of the peer.
 
+  DapLaunchRefusedError* = object of CatchableError
+    ## The peer ANSWERED, and what it answered was that the trace it had
+    ## already acknowledged cannot be opened.  ``msg`` is the engine's own
+    ## sentence, verbatim.
+    ##
+    ## THE FOURTH STATE, and the one this file was missing.  Taking the three
+    ## that were already here as given — the adapter died, the adapter refused
+    ## a *request*, the adapter went quiet — a refusal of the whole recording
+    ## arrives as none of them.  ``replay-server`` answers ``launch``
+    ## ``success: true`` before it opens anything, so a load it cannot perform
+    ## can only be reported out of band, as a ``ct/notification`` of kind
+    ## ``Error``.  ``waitForEvent`` buffered that notification like any other
+    ## event and kept reading, so the wait for ``stopped`` ended on
+    ## ``bound.timeoutMs`` and was reported as ``DapStalledError`` — a peer
+    ## that had stated its reason, reported as a peer that had gone silent.
+    ##
+    ## Distinct from ``DapStalledError`` because the remedies are opposite: a
+    ## stalled engine is worth retrying and worth investigating, and a stated
+    ## refusal is neither — it will say the same thing every time, and what it
+    ## says is what the user needs.
+
   DapStdioBackend* = ref object
     ## Manages a replay-server child process and provides synchronous
     ## DAP request/response communication over pipes.
@@ -560,6 +581,72 @@ proc waitForEvent*(backend: DapStdioBackend; eventName: string;
         backend.eventQueue.add(msg)
     # Responses without a pending request are ignored (shouldn't happen
     # in a well-behaved session but we tolerate it).
+
+  raise newException(ValueError,
+    "DapStdioBackend: did not receive '" & eventName &
+    "' event within " & $maxMessages & " messages")
+
+const
+  LaunchFailedEvent* = "ct/launch-failed"
+    ## The event ``replay-server`` uses to report a failure for a ``launch``
+    ## it has already acknowledged — ``dap_server::LAUNCH_FAILED_EVENT``.
+    ##
+    ## NOT ``ct/notification``.  That event carries kind-``Error``
+    ## notifications for recordings that opened PERFECTLY WELL — the engine's
+    ## ``complete_move`` emits one when the first step has a recorded error
+    ## event ("recorded error on step #N: …") — so a handshake that ended on
+    ## every error notification would refuse working recordings.  That is the
+    ## same conflation this whole change undoes, pointing the other way, and
+    ## the reason the engine emits a separate event beside the notification
+    ## rather than asking a reader to guess which kind-2 is which.
+
+proc launchRefusalText*(event: JsonNode): string =
+  ## The refusal text carried by a ``ct/launch-failed`` event, or ``""`` for
+  ## every other message.
+  if event.isNil or event.kind != JObject: return ""
+  if event.getOrDefault("event").getStr("") != LaunchFailedEvent: return ""
+  let body = event.getOrDefault("body")
+  if body.isNil or body.kind != JObject: return ""
+  result = body.getOrDefault("message").getStr("").strip()
+
+proc waitForEventOrRefusal*(backend: DapStdioBackend; eventName: string;
+                            maxMessages: int = 50): JsonNode =
+  ## ``waitForEvent``, except that a stated refusal ENDS THE WAIT instead of
+  ## being buffered and waited past.
+  ##
+  ## Raises ``DapLaunchRefusedError`` carrying the engine's own text when a
+  ## ``ct/launch-failed`` arrives first.  Everything else is ``waitForEvent``'s
+  ## behaviour unchanged, including both of its bounds: the message budget here
+  ## and the per-message clock inside ``readDapMessage``.
+  ##
+  ## This is deliberately NOT folded into ``waitForEvent``.  A re-launch
+  ## mid-session can fail without that being a reason to abandon whatever the
+  ## caller was waiting for; during the HANDSHAKE the refusal is the answer to
+  ## what we are waiting for, and that is the one place this belongs.
+  for i in 0 ..< backend.eventQueue.len:
+    if backend.eventQueue[i].getOrDefault("event").getStr("") == eventName:
+      result = backend.eventQueue[i]
+      backend.eventQueue.delete(i)
+      return
+  for i in 0 ..< backend.eventQueue.len:
+    let refusal = launchRefusalText(backend.eventQueue[i])
+    if refusal.len > 0:
+      raise newException(DapLaunchRefusedError, refusal)
+
+  for _ in 0 ..< maxMessages:
+    let msg = backend.readDapMessage()
+    if msg.getOrDefault("type").getStr("") == "event":
+      backend.undelivered.add(msg)
+      if msg.getOrDefault("event").getStr("") == eventName:
+        return msg
+      let refusal = launchRefusalText(msg)
+      if refusal.len > 0:
+        # Queued as well as raised: the refusal is still an event the
+        # `BackendService` subscribers are owed, and a caller that catches
+        # this and keeps the session must not find it missing.
+        backend.eventQueue.add(msg)
+        raise newException(DapLaunchRefusedError, refusal)
+      backend.eventQueue.add(msg)
 
   raise newException(ValueError,
     "DapStdioBackend: did not receive '" & eventName &

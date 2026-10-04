@@ -34,7 +34,7 @@ import isonim/core/[signals, computation, async_compat]
 
 import backend/stdio_backend
 export stdio_backend.DapReadBound, stdio_backend.DapStalledError,
-       stdio_backend.DapInterruptedError
+       stdio_backend.DapInterruptedError, stdio_backend.DapLaunchRefusedError
 import store/[replay_data_store, types]
 # PLAT-2's value-presentation pipeline. `json_adapter` is qualified at its call
 # sites because `toPValue` also exists on the `Value` side of the bridge, and a
@@ -235,7 +235,17 @@ proc newHeadlessDebugSession*(
     # 5. Wait for the initial stopped event and ct/complete-move.
     # The server sends a standard DAP "stopped" event plus a CT-specific
     # "ct/complete-move" event that carries the actual source location.
-    discard backend.waitForEvent("stopped")
+    #
+    # `waitForEventOrRefusal`, NOT `waitForEvent`. The `launch` response above
+    # is answered `success: true` before `replay-server` opens anything, so a
+    # recording it turns out to be unable to read is reported afterwards, as a
+    # `ct/notification` of kind `Error`. `waitForEvent` buffered that
+    # notification and kept waiting for a `stopped` that was never coming, so
+    # the open ended on the handshake clock and was reported as a stalled
+    # engine — the engine had said why, in a sentence naming the container
+    # version it found, the version it requires and the re-record remedy, and
+    # the front-end threw it away. See `DapLaunchRefusedError`.
+    discard backend.waitForEventOrRefusal("stopped")
 
     # 6. Create the ViewModel layer through the Embed SDK session, with the
     #    stdio backend injected as the BackendService (spec §3.1 — the

@@ -263,6 +263,23 @@ const
     ## that as a usage error would send a user to inspect a command line that
     ## was correct.
 
+  ExitUnreadableRecording* = 5
+    ## A REAL recording, correctly written, that THIS BUILD cannot read — the
+    ## engine opened it, found a container version outside the range it
+    ## implements, and said so.
+    ##
+    ## Fourth code because fourth fact, and the three it is not are each a
+    ## different message to send a user looking for. `ExitUsage` says "that is
+    ## not a recording", which about a perfectly good older one is false.
+    ## `ExitEngineStalled` says "the engine went quiet", which about an engine
+    ## that answered with a reason is also false — and its remedy line invites
+    ## a user to go run `replay-server` by hand to find out what it says, when
+    ## it has already said it. `ExitUnhandled` says nobody considered this.
+    ##
+    ## Nothing the user can do to the FILE changes the outcome; the remedy is
+    ## to re-record the program. A distinct code lets a script tell that apart
+    ## from a bad path, which is the one of these four a script can retry.
+
   TuiVersionText* = TuiProgramName & " " & CodeTracerVersionStr
     ## Deliberately the CodeTracer version. The TUI is a front-end of this
     ## repository's debugger, not a separately versioned product, and a second

@@ -374,6 +374,58 @@ where
     handle_client(receiving_receiver, &receiving_thread, writer, cli_default_rename_list)
 }
 
+/// A recording this build structurally cannot open, refused on the container
+/// version the reader found in it.
+///
+/// **Why this is a type and not a formatted string.** `launch_failure_text`
+/// renders anything it cannot downcast with `{err:?}`, so a refusal boxed as a
+/// `String` reaches the user as an escaped Rust debug literal. The precedent
+/// here is [`ReplayWorkerStartError`], which exists for the same reason: a
+/// caller must be able to branch on *why* the launch failed instead of
+/// substring-matching a rendered message.
+///
+/// **Why it is distinct from every other open failure.** `refuse_unreadable_ctfs_version`
+/// already separates the three states `setup` can be in — not a container at
+/// all, a container this build reads, and a container whose VERSION it refuses
+/// — and it does so structurally, off six header bytes, with no reader and no
+/// text matching. What it could not do is get its answer to a user: it returned
+/// a `String`, which `launch_failure_text` renders with `{err:?}`, and the only
+/// carrier out was a `ct/notification` that no handshake can key on. So the
+/// refusal reached the engine's log and stopped there, and the front-ends
+/// reported a stall or a timeout for a recording whose reason was already
+/// known. This type is that answer made carryable.
+///
+/// A version-refused recording is **not** a corrupt one, and must never be
+/// reported as such: the bytes are intact and were written correctly by an
+/// older recorder. The only remedy is re-recording the program; nothing can be
+/// done to the file.
+#[derive(Debug, Clone)]
+pub struct ContainerVersionRefusal {
+    /// The container the reader refused.
+    pub container: PathBuf,
+    /// The reader's own refusal, verbatim — the one place the container
+    /// version it found, the versions it requires, and the re-record remedy are
+    /// all written down. It is quoted rather than paraphrased because a
+    /// paraphrase here would be a second vocabulary for the same fact, free to
+    /// drift from the reader that produced it.
+    pub reader_refusal: String,
+}
+
+impl fmt::Display for ContainerVersionRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: this recording cannot be opened by this build: {}. The file itself is \
+             intact and there is nothing that can be changed about it to make this build \
+             read it.",
+            self.container.display(),
+            self.reader_refusal
+        )
+    }
+}
+
+impl Error for ContainerVersionRefusal {}
+
 #[allow(clippy::too_many_arguments)]
 fn setup(
     trace_folder: &Path,
@@ -481,6 +533,12 @@ fn setup(
             Err(e) => {
                 // Not a valid CTFS materialised trace — fall through to
                 // MCR native replay or rr replay-worker handling below.
+                //
+                // A container whose VERSION this build refuses never reaches
+                // here: `refuse_unreadable_ctfs_version` above has already
+                // returned it, structurally, off the header's six bytes. That
+                // is the right place for it — a header probe needs no reader,
+                // so it answers even for a container no reader will open.
                 info!(
                     "CTFS open as materialised trace failed for {}: {e} — trying replay-worker path",
                     ctfs_path.display()
@@ -1756,7 +1814,16 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
 /// version this backend does not read. Version bytes 0 and 1 are not
 /// containers: the legacy `runtime_tracing` binary shares the magic with
 /// version 0.
-fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), String> {
+/// The refusal is returned as a TYPED [`ContainerVersionRefusal`] and not as a
+/// `String`, because the type is what carries it the rest of the way to the
+/// user. `launch_failure_text` renders anything it cannot downcast with
+/// `{err:?}`, which turns this sentence into an escaped Rust literal; and the
+/// front-ends' handshakes need to be able to tell a stated refusal from an
+/// engine that went quiet, which they do by the event this error's `Display`
+/// ends up on. Returning a string here left both of those broken while the
+/// diagnosis itself was already correct — the engine knew, and said so only to
+/// its own log.
+fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), ContainerVersionRefusal> {
     use std::io::Read;
     let mut header = [0u8; 6];
     let Ok(mut file) = std::fs::File::open(path) else {
@@ -1767,8 +1834,13 @@ fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), String> {
     }
     match header[5] {
         0 | 1 => Ok(()),
-        version => crate::ctfs_trace_reader::ctfs_container::check_container_version(version)
-            .map_err(|e| format!("{}: {e}", path.display())),
+        version => crate::ctfs_trace_reader::ctfs_container::check_container_version(version).map_err(|e| {
+            warn!("refusing {}: {e}", path.display());
+            ContainerVersionRefusal {
+                container: path.to_path_buf(),
+                reader_refusal: e.to_string(),
+            }
+        }),
     }
 }
 
@@ -2980,11 +3052,39 @@ pub fn handle_message_browser(
 /// the concrete type survives to here. If a future caller wraps it in a
 /// `format!`, this downcast stops matching and the test named below goes red.
 fn launch_failure_text(err: &(dyn Error + 'static)) -> String {
-    match err.downcast_ref::<ReplayWorkerStartError>() {
-        Some(worker_error) => worker_error.to_string(),
-        None => format!("launch error: {err:?}"),
+    if let Some(worker_error) = err.downcast_ref::<ReplayWorkerStartError>() {
+        return worker_error.to_string();
     }
+    // A container the reader refuses ON VERSION is the one launch failure whose
+    // user-facing wording is already decided — by the reader that refused it.
+    // `Display`, not `{err:?}`: the debug rendering would reach the user as an
+    // escaped Rust literal, and the sentence it mangles is the only place the
+    // version found, the version required and the re-record remedy are
+    // written down.
+    if let Some(version_refusal) = err.downcast_ref::<ContainerVersionRefusal>() {
+        return version_refusal.to_string();
+    }
+    format!("launch error: {err:?}")
 }
+
+/// The event that says, unambiguously, "the `launch` I acknowledged cannot
+/// succeed, and here is why".
+///
+/// **Why a second event and not just the notification.** A client waiting for
+/// the handshake's `stopped` has to be able to stop waiting when the launch
+/// has failed, and `ct/notification` of kind `Error` cannot tell it that:
+/// `dap_handler::complete_move` emits one for a trace that opened PERFECTLY
+/// WELL whose first step carries a recorded error event ("recorded error on
+/// step #N: …"). A handshake that aborted on every error notification would
+/// refuse working recordings — the same conflation this whole change exists to
+/// undo, pointing the other way.
+///
+/// So the carrier for the GUI is left exactly as it was — `ct/notification`,
+/// rendered into the status bar by `src/frontend/ui/status.nim`, same shape,
+/// same kind — and the handshake signal is a separate event beside it. Clients
+/// that do not know this event ignore it, as DAP requires; the two carry the
+/// same sentence so there is one wording, not two.
+pub const LAUNCH_FAILED_EVENT: &str = "ct/launch-failed";
 
 /// Tell the DAP client that a `launch` it asked for cannot succeed.
 ///
@@ -2998,11 +3098,11 @@ fn launch_failure_text(err: &(dyn Error + 'static)) -> String {
 ///
 /// A second `launch` response is not the fix: `request_seq` has already been
 /// answered, and two responses to one request is a protocol violation. The
-/// carrier is `ct/notification`, the route the frontend already consumes —
+/// carriers are `ct/notification`, the route the frontend already consumes —
 /// `src/frontend/middleware.nim` forwards it and `src/frontend/ui/status.nim`
-/// subscribes to `CtNotification` and renders every one into the status bar.
-/// No new renderer surface is introduced here; the GUI prompt issue #689 asks
-/// for (usage count, reset time, upgrade link) is still unspecified work.
+/// subscribes to `CtNotification` and renders every one into the status bar —
+/// and [`LAUNCH_FAILED_EVENT`], which the handshake waits key on. See that
+/// constant for why one of them could not do both jobs.
 fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
     let notification = task::Notification::new(task::NotificationKind::Error, text, false);
     let body = match serde_json::to_value(&notification) {
@@ -3012,18 +3112,23 @@ fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
             return;
         }
     };
-    let event = DapMessage::Event(Event {
-        base: ProtocolMessage {
-            // Patched by the sending thread, like every other message queued
-            // on this channel (see `patch_message_seq`).
-            seq: 0,
-            type_: "event".to_string(),
-        },
-        event: "ct/notification".to_string(),
-        body,
-    });
-    if let Err(send_err) = sender.send(event) {
-        error!("failed to send launch-failure notification: {send_err:?}");
+    for (name, body) in [
+        ("ct/notification", body),
+        (LAUNCH_FAILED_EVENT, json!({ "message": text })),
+    ] {
+        let event = DapMessage::Event(Event {
+            base: ProtocolMessage {
+                // Patched by the sending thread, like every other message queued
+                // on this channel (see `patch_message_seq`).
+                seq: 0,
+                type_: "event".to_string(),
+            },
+            event: name.to_string(),
+            body,
+        });
+        if let Err(send_err) = sender.send(event) {
+            error!("failed to send launch-failure event {name}: {send_err:?}");
+        }
     }
 }
 
@@ -3693,7 +3798,13 @@ mod tests {
         let mut bytes = std::fs::read(&ct_path).unwrap();
         bytes[5] = 4;
         std::fs::write(&ct_path, &bytes).unwrap();
-        let err = refuse_unreadable_ctfs_version(&ct_path).unwrap_err();
+        // `.to_string()` because the refusal is now a typed
+        // [`ContainerVersionRefusal`] rather than a `String`. The assertion is
+        // unchanged and still reads the same sentence: the type exists so the
+        // sentence survives `launch_failure_text`'s `{err:?}` and can be told
+        // apart from an engine that went quiet, neither of which a `String`
+        // could do. What it SAYS was already right.
+        let err = refuse_unreadable_ctfs_version(&ct_path).unwrap_err().to_string();
         assert!(err.contains("version 4") && err.contains("versions 5 and 6"), "{err}");
 
         // The legacy runtime_tracing binary shares the magic with version 0.
@@ -3996,6 +4107,121 @@ mod tests {
         std::fs::write(&json, oracle_trace_json()).unwrap();
         let message = setup_error(&json, Path::new(""));
         assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+    }
+
+    // ── A container version this build refuses ───────────────────────
+    //
+    // `refuse_unreadable_ctfs_version` decided this correctly already; what it
+    // could not do was get the answer out. These arms pin the two steps that
+    // carry it: the refusal survives as a TYPE, and `launch_failure_text`
+    // renders that type's sentence rather than its debug form. See
+    // [`ContainerVersionRefusal`].
+
+    /// A container at a version this build does not read is refused, TYPED,
+    /// and the text a client receives is the sentence and not an escaped Rust
+    /// literal.
+    ///
+    /// Hermetic: the container is five header bytes written here, so the arm
+    /// depends on no committed fixture and cannot be quietly turned into a
+    /// test of nothing by a re-recording. Version 4 because that is the
+    /// version the recordings in the field carry; the assertion is on what the
+    /// refusal SAYS, so it holds for any version outside the readable set.
+    #[test]
+    fn a_container_version_this_build_cannot_read_is_refused_by_name_and_by_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let container = dir.path().join("trace.ct");
+        // Magic, then the version byte. Nothing else is read before the
+        // version gate, which is the point of probing the header rather than
+        // asking a reader that will not open it.
+        std::fs::write(&container, [0xC0u8, 0xDE, 0x72, 0xAC, 0xE2, 4, 0, 0]).unwrap();
+
+        let typed = refuse_unreadable_ctfs_version(&container)
+            .expect_err("a container at an unreadable version must be refused");
+
+        let boxed: Box<dyn Error> = Box::new(typed.clone());
+        let user_facing = launch_failure_text(&*boxed);
+        assert_eq!(
+            user_facing,
+            typed.to_string(),
+            "the user-facing text must be the type's `Display`. With the downcast removed it is \
+             `{{err:?}}`, and the sentence reaches the user as an escaped Rust literal."
+        );
+        assert!(
+            !user_facing.contains('\\'),
+            "a debug-escaped message has reached the user: {user_facing}"
+        );
+        assert!(
+            user_facing.contains("container version 4"),
+            "the version FOUND must reach the user: {user_facing}"
+        );
+        assert!(
+            user_facing.contains(&container.display().to_string()),
+            "the refusal must name the recording it is about: {user_facing}"
+        );
+        assert!(
+            !user_facing.to_lowercase().contains("corrupt"),
+            "an intact recording from an older recorder is not corrupt: {user_facing}"
+        );
+    }
+
+    /// THE CONTROL. The probe refuses one thing, not everything: a container
+    /// at a version this build reads is not refused, and neither is a file
+    /// that is not a container at all.
+    ///
+    /// Without this, the arm above is satisfied by a probe that refuses every
+    /// path it is handed — which would take every working recording, and every
+    /// legacy `trace.bin`, off the paths that serve them.
+    #[test]
+    fn the_version_probe_refuses_only_an_unreadable_container() {
+        use crate::ctfs_trace_reader::ctfs_container::CTFS_VERSION;
+        let dir = tempfile::tempdir().unwrap();
+
+        let readable = dir.path().join("readable.ct");
+        std::fs::write(&readable, [0xC0u8, 0xDE, 0x72, 0xAC, 0xE2, CTFS_VERSION, 0, 0]).unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&readable).is_ok(),
+            "a container at the version this build writes must not be refused"
+        );
+
+        // Version byte 0 is the legacy `runtime_tracing` binary stream, which
+        // shares the magic and is NOT a container; it has its own loader
+        // further down `setup` and must reach it.
+        let legacy = dir.path().join("trace.bin");
+        std::fs::write(&legacy, [0xC0u8, 0xDE, 0x72, 0xAC, 0xE2, 0, 0, 0]).unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&legacy).is_ok(),
+            "the legacy binary stream is not a container and must not be refused as one"
+        );
+
+        let not_a_container = dir.path().join("notes.txt");
+        std::fs::write(&not_a_container, b"this is not a recording").unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&not_a_container).is_ok(),
+            "a file that is not a CTFS container must not be refused on version"
+        );
+
+        let absent = dir.path().join("absent.ct");
+        assert!(
+            refuse_unreadable_ctfs_version(&absent).is_ok(),
+            "a path that does not exist is not a version refusal; `setup`'s own error owns it"
+        );
+    }
+
+    /// A folder with no container at all still reaches the replay-worker
+    /// path's own error, so the refusal above has not been turned into a
+    /// catch-all for every way a launch can fail.
+    #[test]
+    fn a_folder_with_no_container_still_reaches_the_replay_worker_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let message = setup_error(dir.path(), Path::new("trace.ct"));
+        assert!(
+            !message.contains("container version"),
+            "a folder with no container must not be reported as a version refusal: {message}"
+        );
+        assert!(
+            message.contains("replay-worker"),
+            "the fall-through to the replay-worker path must be intact: {message}"
+        );
     }
 
     // ── Browser handshake order-independence ──────────────────────────
