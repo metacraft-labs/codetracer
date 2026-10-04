@@ -607,6 +607,39 @@ package codeTracer:
     if nixOverrideFlags.len > 0:
       setEnv "CODETRACER_NIX_OVERRIDE_FLAGS", nixOverrideFlags.join(" ")
 
+    # The browser-replay edge, so `repro up` brings it up instead of a developer
+    # remembering `browser-replay/start-server.sh`.
+    #
+    # `--foreground` because `repro up` is a SUPERVISOR: it tracks the process it
+    # started, and the default (daemonising) mode returns immediately, which a
+    # supervisor cannot distinguish from a service that died.
+    #
+    # Readiness is a MARKER FILE, not an HTTP probe, and the reason is specific:
+    # the supervisor's `httpGet` kind speaks plain HTTP to a HOST:PORT, and this
+    # listener is TLS-only -- so an http probe would never go ready against a
+    # perfectly healthy server. The marker is written by `start-server.sh` after a
+    # real connect to 8443 succeeds, not after the spawn, because nginx writes its
+    # pid file before it begins accepting and a pid-file probe would report ready
+    # while the first request still fails.
+    #
+    # Scoped to the `frontend` and `tests` activities: a developer working on a
+    # recorder has no reason to be running an nginx.
+    servicePlaceholder "browser-replay",
+      metadata = """{
+        "schemaId": "reprobuild.dev-session.service.v1",
+        "command": ["bash", "browser-replay/start-server.sh", "--foreground"],
+        "cwd": ".",
+        "readiness": {
+          "kind": "fileExists",
+          "path": ".repro/browser-replay/ready",
+          "timeoutMs": 60000
+        },
+        "resources": [
+          {"kind": "directory", "path": ".repro/browser-replay"}
+        ]
+      }""",
+      activities = ["frontend", "tests"]
+
     task "build", command = "just build-once",
       description = "Build the CodeTracer development binaries"
     task "watch", command = "just build",

@@ -222,6 +222,7 @@ pipefail
 postcondition
 postconditions
 premain
+preflights
 prereq
 println
 pyenv

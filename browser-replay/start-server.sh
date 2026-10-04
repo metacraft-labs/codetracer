@@ -57,6 +57,9 @@ HAS_QUIC=true
 # date, covers MCL_SERVER_NAME and that the key matches -- so these are read, not
 # checked again here. Keep the name in step with that script's SERVER_NAME.
 MCL_SERVER_NAME=replay.codetracer.localhost
+# Readiness marker for a supervisor (`repro up`). Under .repro/ because that is
+# already gitignored state rather than part of the served tree.
+READY_MARKER="$REPO_ROOT/.repro/browser-replay/ready"
 MCL_LEAF_CRT=/etc/mcl-dev-certs/codetracer.localhost/fullchain.pem
 MCL_LEAF_KEY=/etc/mcl-dev-certs/codetracer.localhost/key.pem
 
@@ -110,5 +113,38 @@ echo "To stop: bash $SCRIPT_DIR/stop-server.sh"
 echo ""
 
 cd "$REPO_ROOT"
+
+# --foreground: run nginx in the foreground and write a readiness marker once the
+# port actually accepts a connection.
+#
+# This is the shape a SUPERVISOR needs, and `repro up` is one: it tracks the
+# process it started, so a command that daemonises and returns looks like a
+# service that died immediately. The marker is what `repro.nim` declares as the
+# service's readiness, and it is written after a real connect rather than after
+# the spawn, because nginx writes its pid file before it begins accepting -- so a
+# pid-file probe would report ready while the first request still fails.
+if [ "${1:-}" = "--foreground" ]; then
+	rm -f "$READY_MARKER"
+	nginx -c "$CONF" -p "$REPO_ROOT" -g 'daemon off;' &
+	nginx_pid=$!
+	# Propagate a stop to nginx rather than orphaning it.
+	trap 'rm -f "$READY_MARKER"; kill "$nginx_pid" 2>/dev/null || true' TERM INT EXIT
+	for _ in $(seq 1 100); do
+		if (exec 3<>/dev/tcp/127.0.0.1/8443) 2>/dev/null; then
+			mkdir -p "$(dirname "$READY_MARKER")"
+			: >"$READY_MARKER"
+			echo "nginx ready (marker: $READY_MARKER)"
+			break
+		fi
+		kill -0 "$nginx_pid" 2>/dev/null || {
+			echo "nginx exited before accepting on 8443" >&2
+			exit 1
+		}
+		sleep 0.1
+	done
+	wait "$nginx_pid"
+	exit $?
+fi
+
 nginx -c "$CONF" -p "$REPO_ROOT"
 echo "nginx started."
