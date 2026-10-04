@@ -156,7 +156,12 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 98
+  ExpectedAppModules = 100
+    ## 2026-10-04 (PLAT-50 review): 99 → 100. `views/scratchpad_pane.nim`,
+    ## the terminal's Scratchpad pane (pinned values and their close buttons).
+    ## 2026-10-03 (PLAT-50): 98 → 99. `views/context_menu.nim`, the
+    ## terminal's right-click menus and the event-content overlay.
+    ##
     ## RE-COUNTED ON 2026-09-30 (PLAT-48): 97 → 98. `views/top_bar.nim`, the
     ## terminal's top bar: the shared menu, the debugger controls, the
     ## omnibar field and the session tabs on row 0, and their drop-downs.
@@ -245,7 +250,14 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 221
+  ExpectedStyleLiterals = 234
+    ## 2026-10-04 (PLAT-50 review): +3 in ONE new painting file,
+    ## `views/scratchpad_pane.nim` (the empty note, a pinned value's name and
+    ## its close button), so 31 → 32 styled files.
+    ## 2026-10-03 (PLAT-50): +10 — the top bar's border lines (menu button and
+    ## omnibox edges), its controls on the bar's ground, the dropdown frame,
+    ## the divider in a strip row, and the context menu's and content
+    ## overlay's entries (`views/context_menu.nim`).
     ## 2026-10-03 (PLAT-49 part B review): +2 — the call trace's current row
     ## on its own ground (`call_trace.CurrentRowFill`, and the toggle's two
     ## styles in `segmentStyle`).
@@ -322,7 +334,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 30
+  ExpectedStyledFiles = 32
+    ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
     ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.
     ## 2026-09-29 (PLAT-47 part B): +2, `views/vcs_pane.nim` and
     ## `views/frame_overlay.nim`.
