@@ -5120,6 +5120,12 @@ plat48-capture-electron *args:
 plat49-capture-electron *args:
   bash scripts/plat49-capture-electron.sh {{args}}
 
+# The desktop's caption bar, strips, menu surface, right-click menus and click
+# behaviours, as the terminal's and GPUI's are measured against them —
+# written to `src/tests/visual/answers/plat50-desktop.electron.json`.
+plat50-capture-electron *args:
+  bash scripts/plat50-capture-electron.sh {{args}}
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh

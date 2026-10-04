@@ -625,11 +625,19 @@ proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
     self.refreshEditorLine(lineNumber)
 
 proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
+  # PLAT-50: THE PARENT'S DATASET IS READ AFTER MOVING TO IT, as
+  # `lineActionClick` does. It read the clicked element's `dataset` once and
+  # kept it, so a right-click on a gutter marker (whose `data-line` is on the
+  # `.gutter` row around it) moved to the row and then tested the marker's
+  # empty dataset again — measured on the real desktop: a right-click on a
+  # breakpoint enabled nothing and disabled nothing
+  # (`plat50-desktop-capture.spec.ts`).
   var element = line
-  let dataset = element.dataset
+  var dataset = element.dataset
 
   if dataset.line.isNil:
     element = element.parentNode
+    dataset = element.dataset
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
     let path = tabInfo.name
@@ -3479,6 +3487,13 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
         self.sourceOrCallJump(e.target.position)
       else:
         self.editorLineJump(self.lastMouseMoveLine, SmartJump)
+    elif e.target.position.isNil or e.target.element.isNil:
+      # A press Monaco resolves to no text position (the margin's padding, an
+      # overlay widget, a press while the editor is still laying out — the
+      # right-click that opens the menu reaches here too): no caret to move.
+      # Reading `lineNumber` off the null position threw, and the exception
+      # kept the context menu that same press opens from appearing.
+      discard
     else:
       let position = e.target.position
       let target = cast[cstring](e.target.element.classList.value).split(" ")[0]
@@ -3614,7 +3629,11 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
 
   document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
     for element in cast[seq[cstring]](ev.toJs.target.classList):
-      if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
+      # PLAT-50: the breakpoint's MARKER is `gutter-breakpoint-enabled` /
+      # `-disabled` (`trace.editorLineNumber`); an exact `gutter-breakpoint`
+      # matched no element the gutter draws.
+      if element == cstring"gutter-line" or
+         cstrutils.startsWith(element, cstring"gutter-breakpoint"):
         ev.preventDefault()
         ev.stopPropagation()
         self.lineActionContextMenu(tabInfo, ev.target.toJs)

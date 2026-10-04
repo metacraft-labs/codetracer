@@ -5,8 +5,10 @@ import type { CallTracePane } from "./call-trace-pane";
 import { retry } from "../../../lib/retry-helpers";
 import { debugLogger } from "../../../lib/debug-logger";
 
-const EXPAND_CHILDREN_OPTIONS = ["Expand Call Children", "Expand Full Callstack"];
-const COLLAPSE_CHILDREN_OPTIONS = ["Collapse Call Children", "Expand Full Callstack"];
+// A call row's menu is its children's toggle alone: "Expand Full Callstack"
+// unfolded calls the engine auto-collapses, which no view asks it to do.
+const EXPAND_CHILDREN_OPTIONS = ["Expand Call Children"];
+const COLLAPSE_CHILDREN_OPTIONS = ["Collapse Call Children"];
 
 const ACTIVATE_RETRY_ATTEMPTS = 5;
 const ACTIVATE_RETRY_DELAY_MS = 50;

@@ -3826,6 +3826,17 @@ jobs:
         # recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat49-capture-electron
 
+      - name: The desktop's click behaviours and chrome are the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the click sweep and the chrome colours: its
+        # caption bar (the omnibox centred, the buttons on the bar's ground),
+        # its strip and splitters, its menu surface, its right-click menus and
+        # what a click on a call, an event and the gutter does — read from the
+        # REAL Electron app on `calc` with this checkout's desktop JavaScript.
+        # Here for the reasons the steps above give; the recipe starts its own
+        # Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat50-capture-electron
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
