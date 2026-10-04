@@ -32,8 +32,17 @@ http {
 @QUIC_LISTEN@
         http2 on;
 
-        ssl_certificate @SCRIPT_DIR@/certs/server.crt;
-        ssl_certificate_key @SCRIPT_DIR@/certs/server.key;
+        # The org development certificate, read from the location
+        # environment-domains-and-dev-certificates.md §5 fixes. NOT a copy under
+        # this directory: §5 forbids a project carrying its own, and the whole
+        # point is that one root is already trusted machine-wide.
+        ssl_certificate @MCL_LEAF_CRT@;
+        ssl_certificate_key @MCL_LEAF_KEY@;
+
+        # The leaf covers `codetracer.localhost` and `*.codetracer.localhost`, so
+        # this server answers on the name below and the apex. It is NOT reached at
+        # bare `localhost` any more -- that name is not in the certificate.
+        server_name @MCL_SERVER_NAME@ codetracer.localhost;
 
         # Advertise HTTP/3
         add_header Alt-Svc 'h3=":8443"; ma=86400' always;

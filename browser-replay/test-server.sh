@@ -3,7 +3,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASE_URL="https://localhost:8443"
+# The replay server is reached at a name under the org development scheme, not at
+# bare `localhost`: the certificate it serves is the org leaf for
+# `*.codetracer.localhost` and does not cover `localhost`. The name needs no
+# /etc/hosts entry -- RFC 6761 reserves `localhost`, so resolvers answer any name
+# under it from loopback -- and its root CA is already trusted machine-wide, so
+# no --cacert anywhere below -- and, as of this change, no `-k` either.
+#
+# Every curl in this file used to be `curl -sk`. `-k` is `--insecure`: it skips
+# verification altogether, so the tests proved only that *something* answered on
+# the port, never that it presented a credential any client would accept. With
+# the org root in the system trust store that bypass is no longer needed, and
+# dropping it is the point of the migration rather than a tidy-up: the tests now
+# fail if TLS is wrong, which is what section 7 asks of them.
+BASE_URL="https://replay.codetracer.localhost:8443"
 PASS=0
 FAIL=0
 
@@ -25,7 +38,7 @@ echo '{"program":"test","recordingMode":"mcr-interpose","platform":"x86_64-linux
 dd if=/dev/urandom of="$SCRIPT_DIR/traces/test/trace.ct" bs=1024 count=10 2>/dev/null
 
 # Test 1: Health check
-STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL/health")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/health")
 if [ "$STATUS" = "200" ]; then
 	pass "health check (HTTP $STATUS)"
 else
@@ -33,7 +46,7 @@ else
 fi
 
 # Test 2: Fetch trace metadata
-STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL/traces/test/meta.json")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/traces/test/meta.json")
 if [ "$STATUS" = "200" ]; then
 	pass "fetch trace metadata (HTTP $STATUS)"
 else
@@ -41,7 +54,7 @@ else
 fi
 
 # Test 3: Range request
-RANGE_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -H "Range: bytes=0-99" "$BASE_URL/traces/test/trace.ct")
+RANGE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Range: bytes=0-99" "$BASE_URL/traces/test/trace.ct")
 if [ "$RANGE_STATUS" = "206" ]; then
 	pass "range request (HTTP $RANGE_STATUS)"
 else
@@ -49,7 +62,7 @@ else
 fi
 
 # Test 4: CORS headers
-CORS=$(curl -sk -D - -o /dev/null "$BASE_URL/traces/test/meta.json" | grep -i "access-control-allow-origin" | head -1)
+CORS=$(curl -s -D - -o /dev/null "$BASE_URL/traces/test/meta.json" | grep -i "access-control-allow-origin" | head -1)
 if grep -q "\*" <<<"$CORS"; then
 	pass "CORS header present"
 else
@@ -57,7 +70,7 @@ else
 fi
 
 # Test 5: Alt-Svc header (HTTP/3 advertisement)
-ALT_SVC=$(curl -sk -D - -o /dev/null "$BASE_URL/health" | grep -i "alt-svc" | head -1)
+ALT_SVC=$(curl -s -D - -o /dev/null "$BASE_URL/health" | grep -i "alt-svc" | head -1)
 if grep -qi "h3" <<<"$ALT_SVC"; then
 	pass "Alt-Svc header advertises HTTP/3"
 else
@@ -65,7 +78,7 @@ else
 fi
 
 # Test 6: Accept-Ranges header
-ACCEPT_RANGES=$(curl -sk -D - -o /dev/null "$BASE_URL/traces/test/trace.ct" | grep -i "accept-ranges" | head -1)
+ACCEPT_RANGES=$(curl -s -D - -o /dev/null "$BASE_URL/traces/test/trace.ct" | grep -i "accept-ranges" | head -1)
 if grep -qi "bytes" <<<"$ACCEPT_RANGES"; then
 	pass "Accept-Ranges: bytes header present"
 else

@@ -52,6 +52,14 @@ echo "mime.types: $MIME_TYPES"
 # Detect QUIC support by testing the config
 QUIC_LISTEN="        listen 8443 quic reuseport;"
 HAS_QUIC=true
+# The org development certificate (environment-domains-and-dev-certificates.md
+# §5). `setup-certs.sh` above has already verified that all of this exists, is in
+# date, covers MCL_SERVER_NAME and that the key matches -- so these are read, not
+# checked again here. Keep the name in step with that script's SERVER_NAME.
+MCL_SERVER_NAME=replay.codetracer.localhost
+MCL_LEAF_CRT=/etc/mcl-dev-certs/codetracer.localhost/fullchain.pem
+MCL_LEAF_KEY=/etc/mcl-dev-certs/codetracer.localhost/key.pem
+
 # Generate a minimal test config to check QUIC support
 TEST_CONF=$(mktemp)
 cat >"$TEST_CONF" <<TESTEOF
@@ -63,8 +71,8 @@ http {
     server {
         listen 18443 ssl;
         listen 18443 quic reuseport;
-        ssl_certificate $SCRIPT_DIR/certs/server.crt;
-        ssl_certificate_key $SCRIPT_DIR/certs/server.key;
+        ssl_certificate $MCL_LEAF_CRT;
+        ssl_certificate_key $MCL_LEAF_KEY;
     }
 }
 TESTEOF
@@ -79,6 +87,9 @@ rm -f "$TEST_CONF"
 sed \
 	-e "s|@MIME_TYPES@|$MIME_TYPES|g" \
 	-e "s|@SCRIPT_DIR@|$SCRIPT_DIR|g" \
+	-e "s|@MCL_LEAF_CRT@|$MCL_LEAF_CRT|g" \
+	-e "s|@MCL_LEAF_KEY@|$MCL_LEAF_KEY|g" \
+	-e "s|@MCL_SERVER_NAME@|$MCL_SERVER_NAME|g" \
 	-e "s|@QUIC_LISTEN@|$QUIC_LISTEN|g" \
 	"$SCRIPT_DIR/nginx.conf.template" >"$SCRIPT_DIR/nginx.conf"
 
@@ -88,7 +99,7 @@ echo "Starting nginx..."
 echo "  Config:  $CONF"
 echo "  Traces:  $SCRIPT_DIR/traces/"
 echo "  App:     $SCRIPT_DIR/app/"
-echo "  URL:     https://localhost:8443"
+echo "  URL:     https://$MCL_SERVER_NAME:8443"
 if [ "$HAS_QUIC" = true ]; then
 	echo "  HTTP/3:  enabled"
 else
