@@ -26,10 +26,11 @@ use std::path::{Path, PathBuf};
 use codetracer_trace_reader::interning_tables_reader::open_interning_tables;
 use codetracer_trace_types::{TypeKind, TypeSpecificInfo};
 
-use db_backend::ctfs_trace_reader::ctfs_container::{CtfsReader, write_minimal_ctfs};
+use codetracer_ctfs::writer::CtfsWriter;
+use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::interning_tables::InterningTables;
 use db_backend::ctfs_trace_reader::meta_dat::{
-    FLAG_HAS_INTERNING_TABLES, META_DAT_VERSION, MetaDat, serialize_meta_dat,
+    FLAG_HAS_INTERNING_TABLES, META_DAT_VERSION, MetaDat, serialize_current_meta_dat,
 };
 
 fn varint(mut v: u64, out: &mut Vec<u8>) {
@@ -75,7 +76,7 @@ fn structured_type(kind: TypeKind, lang_type: &str) -> Vec<u8> {
 /// Write a container carrying the four interning tables, with `meta.dat` bit 12
 /// set or clear, and return its path.
 fn write_container(dir: &Path, name: &str, bit12: bool, funcs: &[Vec<u8>], types: &[Vec<u8>]) -> PathBuf {
-    let meta = serialize_meta_dat(&MetaDat {
+    let meta = serialize_current_meta_dat(&MetaDat {
         version: META_DAT_VERSION,
         flags: if bit12 { FLAG_HAS_INTERNING_TABLES } else { 0 },
         recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
@@ -95,21 +96,23 @@ fn write_container(dir: &Path, name: &str, bit12: bool, funcs: &[Vec<u8>], types
     let (types_dat, types_off) = table(types);
     let (varnames_dat, varnames_off) = table(&[b"x".to_vec()]);
     let ct = dir.join(format!("{name}.ct"));
-    write_minimal_ctfs(
-        &ct,
-        &[
-            ("meta.dat", &meta),
-            ("paths.dat", &paths_dat),
-            ("paths.off", &paths_off),
-            ("funcs.dat", &funcs_dat),
-            ("funcs.off", &funcs_off),
-            ("types.dat", &types_dat),
-            ("types.off", &types_off),
-            ("varnames.dat", &varnames_dat),
-            ("varnames.off", &varnames_off),
-        ],
-    )
-    .expect("write the container");
+    let mut writer = CtfsWriter::create(&ct, 4096, 31).expect("create current container");
+    let members: &[(&str, &[u8])] = &[
+        ("meta.dat", &meta),
+        ("paths.dat", &paths_dat),
+        ("paths.off", &paths_off),
+        ("funcs.dat", &funcs_dat),
+        ("funcs.off", &funcs_off),
+        ("types.dat", &types_dat),
+        ("types.off", &types_off),
+        ("varnames.dat", &varnames_dat),
+        ("varnames.off", &varnames_off),
+    ];
+    for &(name, bytes) in members {
+        let handle = writer.add_file(name).expect("add interning fixture member");
+        writer.write(handle, bytes).expect("write interning fixture member");
+    }
+    writer.close().expect("publish current container");
     ct
 }
 
@@ -287,4 +290,82 @@ fn every_committed_recording_opens() {
         "{with_tables} of {} committed recordings carry interning tables; all open",
         files.len()
     );
+}
+
+// Independent real-filesystem control for the approved constructor seam.
+// The retained old constructor below is an independent prechange oracle: its
+// original metadata initializer and table calls are copied verbatim from b1.
+// This compares actual members from a genuine historical container to the new
+// shipping container; it does not claim the library accepts historical CTFS.
+#[test]
+fn current_fixture_preserves_retained_legacy_member_bytes_and_metadata_fields() {
+    use db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
+    use db_backend::ctfs_trace_reader::meta_dat::{parse_meta_dat, serialize_meta_dat};
+    let dir = tempfile::tempdir().unwrap();
+    for bit12 in [false, true] {
+        let funcs = [structured_func(7, "main"), structured_func(3, "helper")];
+        let types = [
+            structured_type(TypeKind::Int, "int"),
+            structured_type(TypeKind::String, "String"),
+        ];
+        let current = write_container(dir.path(), "identity", bit12, &funcs, &types);
+        let retained_meta = serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
+            flags: if bit12 { FLAG_HAS_INTERNING_TABLES } else { 0 },
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
+            program: "identity".to_owned(),
+            args: vec![],
+            workdir: dir.path().to_string_lossy().into_owned(),
+            recorder_id: "test".to_owned(),
+            paths: vec![],
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        });
+        let (paths_dat, paths_off) = table(&[b"/src/main.nr".to_vec()]);
+        let (funcs_dat, funcs_off) = table(&funcs);
+        let (types_dat, types_off) = table(&types);
+        let (varnames_dat, varnames_off) = table(&[b"x".to_vec()]);
+        let old = dir.path().join("retained-original.ct");
+        write_minimal_ctfs(
+            &old,
+            &[
+                ("meta.dat", &retained_meta),
+                ("paths.dat", &paths_dat),
+                ("paths.off", &paths_off),
+                ("funcs.dat", &funcs_dat),
+                ("funcs.off", &funcs_off),
+                ("types.dat", &types_dat),
+                ("types.off", &types_off),
+                ("varnames.dat", &varnames_dat),
+                ("varnames.off", &varnames_off),
+            ],
+        )
+        .unwrap();
+        let mut old_reader = CtfsReader::open(&old).unwrap();
+        let mut new_reader = CtfsReader::open(&current).unwrap();
+        for member in [
+            "paths.dat",
+            "paths.off",
+            "funcs.dat",
+            "funcs.off",
+            "types.dat",
+            "types.off",
+            "varnames.dat",
+            "varnames.off",
+        ] {
+            assert_eq!(
+                new_reader.read_file(member).unwrap(),
+                old_reader.read_file(member).unwrap(),
+                "bit12 {bit12}: {member}"
+            );
+        }
+        let mut expected_meta = parse_meta_dat(&old_reader.read_file("meta.dat").unwrap()).unwrap();
+        assert_eq!(expected_meta.version, 4);
+        expected_meta.version = 6;
+        let actual_meta = parse_meta_dat(&new_reader.read_file("meta.dat").unwrap()).unwrap();
+        assert_eq!(actual_meta, expected_meta, "only metadata version may change");
+    }
 }
