@@ -316,6 +316,11 @@ type
       ## see `resolution` below. A row with `line == 0` is a row a pane must
       ## not offer as a jump target.
     enabled*: bool
+    column*: int
+      ## PLAT-50: a breakpoint ANCHORED AT A COLUMN (1-based) — the desktop's
+      ## Alt+click (`ui/editor.lineActionClickAt`, Column-Aware Navigation
+      ## M6), which the replay stops at only on a step at that column. 0 (the
+      ## zero value, every other producer) is a line breakpoint.
 
     # -- PLAT-11 -----------------------------------------------------------
     #

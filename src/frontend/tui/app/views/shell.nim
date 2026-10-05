@@ -68,11 +68,13 @@ import ./tracepoint_manager
 import ./vcs_pane
 import ./frame_overlay
 import ./variables
+import ./context_menu
+import ./scratchpad_pane
 
 export header, status_bar, profile, project, source_pane, styled_row
 # PLAT-48: the top bar is painted by this module from a `ShellModel` field.
 export top_bar
-# PLAT-6 moved `tabRow` and `PaneRuleGlyph` to `app/layout/tab_strip.nim`, so
+# PLAT-6 moved `tabRow` to `app/layout/tab_strip.nim`, so
 # the painter and the binding's hit-test read ONE answer about where tab `i`
 # sits. Re-exported here because this module declared both before, and every
 # CTUI-3 call site must keep resolving.
@@ -87,6 +89,10 @@ export frame_viewer
 # PLAT-16's two Edit-mode panes, on exactly that rule: both are `ShellModel`
 # fields painted by this module.
 export edit_pane, file_tree, build_output
+# PLAT-50: the right-click menu and the event-content overlay are
+# `ShellModel` fields painted by this module.
+export context_menu
+export scratchpad_pane
 
 type
   ShellModel* = object
@@ -171,6 +177,8 @@ type
       ## takes the top `TimelineBarRows` rows and this takes the rest. In the
       ## Compact profile they are two tabs of one stack and each owns its whole
       ## rectangle.
+    scratchpad*: ScratchpadPaneModel
+      ## PLAT-50: the scratchpad pane's rows.
     tracepoints*: TracepointManagerModel
       ## CTUI-8's post-hoc tracepoint dialog. An OVERLAY: when `open` it is
       ## painted over the middle of the body, after every pane, so it is not
@@ -233,6 +241,14 @@ type
       ## `bvIdle`, which is what a project nobody has built is in.
     focused*: PaneKind
     hasFocus*: bool
+    dividers*: DividerChoice
+      ## PLAT-50: which colour a pane divider is drawn in (`--dividers`).
+    contextMenu*: ContextMenuState
+      ## PLAT-50: the open right-click menu (`headless_app/pane_clicks`),
+      ## painted over everything at the cell it was opened at.
+    content*: ContentOverlay
+      ## PLAT-50: an event's full content (a right-click on an event-log
+      ## row), over the body.
       ## PLAT-46. The pane the keyboard's focus is in (the runtime's
       ## `PaneFocus`), so the shell can give it the FOCUSED border role —
       ## the focused pane is distinguished by its border's colour and weight,
@@ -293,6 +309,10 @@ type
       ## PLAT-49: the top bar's model as painted (the header folded in), so
       ## the host can place the omnibar's caret without rebuilding it.
     menuDropdowns*: seq[MenuDropdown]
+    contextMenuArea*: CellArea
+      ## PLAT-50: where the open right-click menu was painted.
+    contentArea*: CellArea
+      ## PLAT-50: where the event-content overlay was painted.
       ## PLAT-48. The open menu's dropdowns, over everything else.
     frameOverlays*: seq[FrameOverlay]
       ## PLAT-47 deliverable 6: what the compositor draws OVER this frame's
@@ -301,9 +321,6 @@ type
       ## ghost label following the pointer. Derived from `decorations`.
 
 const
-  PaneSeparatorGlyph* = "│"
-    ## The right-hand edge a pane draws when it is not flush with the body's
-    ## right edge.
   TimelineTrackGlyph* = "─"
   TimelineCursorGlyph* = "▲"
     ## §3.3.5's execution-pointer marker on the scrubber. The same glyph
@@ -547,10 +564,13 @@ proc tracepointOverlayArea*(body: CellArea): CellArea =
            width: w, height: h)
 
 const
-  PaneRuleStyle = CellStyle(role: srBorderPane)
-  DividerSurface* = srSurfacePanel
-    ## The background every divider cell is painted on: the panes' own
-    ## (PLAT-49 finding 13), never a ground of its own.
+  DividerGlyph* = "▏"
+    ## PLAT-50: a pane divider is U+258F LEFT ONE EIGHTH BLOCK — a line at
+    ## the divider cell's left edge, its foreground the divider's colour and
+    ## its background the fill beside it (the user's direction, 2026-10-02),
+    ## so it joins the tab strips it meets as a box-drawing `│` on its own
+    ## ground could not. Monochrome keeps the glyph (a visible line where
+    ## colour is gone, CTUI-11); the ASCII tier draws `|`.
 
 proc paintTabRow(g: var StyledGrid; row, col: int; tabs: seq[string];
                  active, width: int) =
@@ -572,32 +592,29 @@ proc paintTabRow(g: var StyledGrid; row, col: int; tabs: seq[string];
 
 type
   PaneFrame* = object
-    ## Where a pane's own box ends and its dividers begin (PLAT-47).
+    ## Where a pane's own box ends and its divider begins (PLAT-47).
     box*: CellArea
-      ## The cells the pane's painters get: its rectangle minus its dividers.
+      ## The cells the pane's painters get: its rectangle minus its divider.
     rightDivider*: bool
-      ## The rectangle's last column is a `│` divider: another pane is to the
+      ## The rectangle's last column is a divider: another pane is to the
       ## right. A pane flush with the body's right edge has none.
-    bottomDivider*: bool
-      ## The rectangle's last row is a `─` divider: another pane is below.
-      ## New in PLAT-47. Until then vertically adjacent panes had no line
-      ## between them — the lower pane's tab strip, whose `────` rule ran
-      ## through it, did that job — and the strip is now shaped by colour
-      ## alone (deliverable 8), so the line moved to where the desktop has its
-      ## splitter: BETWEEN the panes. It is also what gives the focused pane
-      ## an outline on all four sides.
+      ##
+      ## PLAT-50: THERE IS NO BOTTOM DIVIDER. PLAT-47 put a `─` row between
+      ## vertically adjacent panes; since PLAT-49 every pane opens with its tab
+      ## strip, and the user (2026-10-02) asked for the row above a tab bar to
+      ## go — the strip IS the separator, as GoldenLayout's header is. A pane
+      ## keeps its whole height; a vertical resize is picked up on the lower
+      ## pane's strip, off its tabs (`binding.dividerAt`).
 
 proc paneFrame*(area, body: CellArea): PaneFrame =
-  ## A pane's frame inside `body`. A rectangle one cell wide or tall keeps
-  ## that cell for its content rather than giving it to a divider.
+  ## A pane's frame inside `body`. A rectangle one cell wide keeps that cell
+  ## for its content rather than giving it to a divider.
   let right = area.col + area.width < body.col + body.width and area.width > 1
-  let bottom = area.row + area.height < body.row + body.height and
-               area.height > 1
   PaneFrame(
     box: CellArea(col: area.col, row: area.row,
                   width: area.width - (if right: 1 else: 0),
-                  height: area.height - (if bottom: 1 else: 0)),
-    rightDivider: right, bottomDivider: bottom)
+                  height: area.height),
+    rightDivider: right)
 
 proc dividerCells*(regions: seq[PaneRegion]; body: CellArea): HashSet[(int, int)] =
   ## Every divider cell of the screen, as `(row, col)`.
@@ -610,78 +627,93 @@ proc dividerCells*(regions: seq[PaneRegion]; body: CellArea): HashSet[(int, int)
     if f.rightDivider:
       for row in a.row ..< a.row + a.height:
         result.incl (row, a.col + a.width - 1)
-    if f.bottomDivider:
-      for col in a.col ..< a.col + f.box.width:
-        result.incl (a.row + a.height - 1, col)
 
-proc junctionGlyph*(up, down, left, right: bool): string =
-  ## The box-drawing glyph that joins a divider cell to the neighbouring
-  ## divider cells it touches. `borders.asciiFor` degrades each to `+`, `|`
-  ## or `-`.
-  let vertical = up or down
-  let horizontal = left or right
-  if vertical and not horizontal: return PaneSeparatorGlyph
-  if horizontal and not vertical: return PaneRuleGlyph
-  if up and down and left and right: return "┼"
-  if up and down: return (if left: "┤" else: "├")
-  if left and right: return (if up: "┴" else: "┬")
-  if up: return (if left: "┘" else: "└")
-  if left: "┐" else: "┌"
+proc stripCells*(regions: seq[PaneRegion]; body: CellArea): HashSet[(int, int)] =
+  ## PLAT-50: every cell of every pane's TAB STRIP row (a pane's first row,
+  ## its box's width), as `(row, col)` — where a divider takes the strip's
+  ## ground instead of drawing its line.
+  result = initHashSet[(int, int)]()
+  for region in regions:
+    let a = region.area
+    if a.width <= 0 or a.height <= 0:
+      continue
+    let f = paneFrame(a, body)
+    for col in a.col ..< a.col + f.box.width:
+      result.incl (a.row, col)
 
 proc focusRing*(focused: CellArea; body: CellArea): HashSet[(int, int)] =
-  ## The cells ALL AROUND the focused pane's box — the column left of it, the
-  ## column right of it, the row above and the row below, corners included —
-  ## whichever pane's divider happens to be in each. Intersected with the
-  ## divider cells by the caller, this is the focused pane's outline, closed
-  ## and symmetric whichever neighbour OWNS a shared divider: the defect the
-  ## user reported on 2026-09-27 was a highlight on the sides the focused pane
-  ## drew itself and not on the ones its neighbours drew.
+  ## The cells beside the focused pane's box — the column left of it and the
+  ## column right of it — whichever pane's divider happens to be in each.
+  ## Intersected with the divider cells by the caller, this is the focused
+  ## pane's outline, symmetric whichever neighbour OWNS a shared divider (the
+  ## defect the user reported on 2026-09-27). Since PLAT-50 there are no
+  ## horizontal dividers, so the outline is the two sides.
   result = initHashSet[(int, int)]()
   let box = paneFrame(focused, body).box
-  let top = box.row - 1
-  let bottom = box.row + box.height
   let left = box.col - 1
   let right = box.col + box.width
-  for col in left .. right:
-    result.incl (top, col)
-    result.incl (bottom, col)
-  for row in top .. bottom:
+  for row in box.row ..< box.row + box.height:
     result.incl (row, left)
     result.incl (row, right)
 
+proc groundOf(regions: seq[PaneRegion]; row, col: int): SemanticRole =
+  ## PLAT-50: the BASE fill of the pane at `(row, col)` — the editor's ground
+  ## below its strip, every other pane's panel — not whatever a row painted
+  ## over it (a selected row's highlight must not bleed into a divider).
+  for region in regions:
+    if region.area.contains(row, col):
+      if region.pane == paneEditor and row > region.area.row:
+        return srSurfaceEditor
+      return srSurfacePanel
+  srSurfacePanel
+
 proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
-                   body: CellArea; focused: CellArea; hasFocus: bool) =
-  ## Settle every divider cell once all panes are painted: the glyph that
-  ## joins it to its neighbours (a `┬` where a vertical divider meets a
-  ## horizontal one, …), and — for the cells around the focused pane — the
-  ## focused border role (`focusRing`).
+                   body: CellArea; focused: CellArea; hasFocus: bool;
+                   choice: DividerChoice) =
+  ## Settle every divider cell once all panes are painted (PLAT-50):
+  ##
+  ## * in a TAB-STRIP ROW — the cell beside it, either side, is a strip — the
+  ##   divider is the strip's own ground, so two strips side by side run on
+  ##   as one bar (the user, 2026-10-02: "the vertical divider cell inside a
+  ##   tab-bar row gets the inactive-tab background"); its glyph is drawn in
+  ##   that same ground, invisible in colour and a separator in monochrome;
+  ## * in a BODY ROW it is `DividerGlyph`, a one-eighth line at the cell's
+  ##   left edge in the chosen colour (`dividerLineRole`; the focused pane's
+  ##   sides in `srBorderFocused`), on the ground of the pane to its right —
+  ##   so the two fills either side meet at the line.
   let cells = dividerCells(regions, body)
+  let strips = stripCells(regions, body)
   var ring = initHashSet[(int, int)]()
   if hasFocus and focused.width > 0 and focused.height > 0:
     ring = focusRing(focused, body)
+  let line = dividerLineRole(choice)
   for cell in cells:
     let (row, col) = cell
     if row < 0 or row >= g.height or col < 0 or col >= g.width:
       continue
-    let glyph = junctionGlyph(
-      up = (row - 1, col) in cells, down = (row + 1, col) in cells,
-      left = (row, col - 1) in cells, right = (row, col + 1) in cells)
-    let role = if cell in ring: srBorderFocused else: srBorderPane
-    # ON THE PANES' OWN SURFACE (PLAT-49, the user, 2026-10-01): a divider is
-    # a thin line in the subtle-contrast border foreground, drawn on the same
-    # background as the panes either side of it. It used to sit on the canvas
-    # — a darker ground than the panels — so every divider read as a band two
-    # shades wide rather than a line.
-    g.paint(row, col, glyph, CellStyle(role: role, surface: DividerSurface))
+    # THE FOCUSED PANE'S SIDES STAY UNBROKEN: beside its body rows the
+    # outline is drawn even where the neighbour's strip begins (a pane whose
+    # side faces two stacked panes meets the lower one's strip mid-side).
+    # Only the focused pane's own strip row keeps the strip's ground.
+    let focusSide = cell in ring and row != focused.row
+    let stripBeside = (row, col - 1) in strips or (row, col + 1) in strips
+    if stripBeside and not focusSide:
+      g.paint(row, col, DividerGlyph,
+              CellStyle(role: srDividerStrip, surface: srTabBar))
+      continue
+    let role = if focusSide: srBorderFocused else: line
+    let ground = if (row, col + 1) in strips: srTabBar
+                 else: groundOf(regions, row, col + 1)
+    g.paint(row, col, DividerGlyph, CellStyle(role: role, surface: ground))
 
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea) =
   ## One pane, into its own rectangle and no other.
   ##
-  ## THE RECTANGLE'S LAST COLUMN AND LAST ROW ARE DIVIDERS when another pane
-  ## is beyond them (`paneFrame`): the column a `│`, the row a `─` (PLAT-47).
-  ## `a` below is the pane's own box — the rectangle without them — and is
-  ## what every painter is handed.
+  ## THE RECTANGLE'S LAST COLUMN IS A DIVIDER when another pane is beyond it
+  ## (`paneFrame`; PLAT-50: there is no divider row). `a` below is the pane's
+  ## own box — the rectangle without it — and is what every painter is
+  ## handed.
   let full = region.area
   if full.width <= 0 or full.height <= 0:
     return
@@ -787,6 +819,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == panePointList and model.points.loaded:
     underStrip:
       discard paintPointList(g, under, model.points)
+  # PLAT-50. THE SCRATCHPAD — the values a click pinned.
+  elif region.pane == paneScratchpad and model.scratchpad.loaded:
+    underStrip:
+      discard paintScratchpad(g, under, model.scratchpad)
   elif not TerminalCaps.canDraw(region.pane):
     # PLAT-45: A REPORT LEAF. The shared default places this pane and the
     # terminal has no view for it, so the slot says which pane it is and why
@@ -843,16 +879,9 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
       g.paint(content.row + 1, content.col,
               timelineScrubber(model.header.tick, model.header.totalTicks,
                                inner))
-  # THE DIVIDERS, in the pane-border role. Their junction glyphs and the
-  # focused pane's outline are settled once every pane is painted
-  # (`paintDividers`), because both depend on the NEIGHBOURS' dividers.
-  if frame.rightDivider:
-    for row in full.row ..< full.row + full.height:
-      g.paint(row, full.col + full.width - 1, PaneSeparatorGlyph,
-              PaneRuleStyle)
-  if frame.bottomDivider:
-    g.paint(full.row + full.height - 1, full.col,
-            repeatGlyph(PaneRuleGlyph, inner), PaneRuleStyle)
+  # THE DIVIDER is settled once every pane is painted (`paintDividers`):
+  # its ground and line depend on the NEIGHBOURS — a strip beside it, the
+  # pane to its right.
 
 proc paintDockStrips*(g: var StyledGrid; geometry: LayoutGeometry) =
   ## PLAT-48 deliverable 6: every auto-hide strip, the terminal's spelling of
@@ -991,7 +1020,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # it, the header on a card; each pane fills its own rectangle in `paintPane`
   # and the status line its row below.
   g.fillSurface(0, 0, width, height, srSurfaceCanvas)
-  g.fillSurface(0, 0, width, HeaderRows, srSurfaceCard)
+  g.fillSurface(0, 0, width, HeaderRows, srSurfaceTopBar)
   # PLAT-48: ROW 0 IS THE TOP BAR — the menu, the debugger controls, the
   # omnibar and the session tabs, with the header's trace, tick and badge
   # where the row leaves room (`views/top_bar`). The session tabs used to be
@@ -1011,7 +1040,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
       if region.pane == model.focused:
         focusedArea = region.area
   paintDividers(g, projection.regions, geometry.inner, focusedArea,
-                model.hasFocus)
+                model.hasFocus, model.dividers)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))
 
@@ -1065,6 +1094,12 @@ proc shellScreen*(model: ShellModel; width, height: int;
   result.menuDropdowns = menuDropdowns(bar, barLayout, width, height)
   paintMenuDropdowns(g, result.menuDropdowns)
   paintOmnibarDropdown(g, bar, barLayout, width, height)
+  # PLAT-50: the event-content overlay over the body, and the right-click
+  # menu over everything.
+  result.contentArea = contentOverlayArea(model.content, body)
+  paintContentOverlay(g, model.content, result.contentArea)
+  result.contextMenuArea = contextMenuArea(model.contextMenu, width, height)
+  paintContextMenu(g, model.contextMenu, result.contextMenuArea)
 
   var status = model.status
   if projection.status != prOk and status.notification.len == 0:

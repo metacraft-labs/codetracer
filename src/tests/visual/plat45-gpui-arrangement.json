@@ -5,7 +5,7 @@
     "Regenerate: `just plat45-arrangement-window` then",
     "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
   ],
-  "takenAt": "2026-10-02T14:05:14Z",
+  "takenAt": "2026-10-03T06:12:21Z",
   "host": "gpu-server-001",
   "frames": {
     "shared": {
@@ -20,7 +20,7 @@
           "y": 55,
           "w": 387,
           "h": 988,
-          "strip": "I Files VCS Tests N",
+          "strip": "Files VCS Tests S",
           "tabs": [
             "Files",
             "VCS",
@@ -40,7 +40,7 @@
           "y": 55,
           "w": 470,
           "h": 988,
-          "strip": "[ main.py g}",
+          "strip": "’ main.py > ‘",
           "tabs": [
             "Editor"
           ],
@@ -58,7 +58,7 @@
           "y": 55,
           "w": 511,
           "h": 489,
-          "strip": "' State Scratchpad M‘",
+          "strip": "State Scratchpad S",
           "tabs": [
             "State",
             "Scratchpad"
@@ -77,7 +77,7 @@
           "y": 55,
           "w": 524,
           "h": 489,
-          "strip": "' Call Trace Agent Activity MI",
+          "strip": "Call Trace Agent Activity S",
           "tabs": [
             "Call Trace",
             "Agent Activity"
@@ -93,10 +93,10 @@
         },
         {
           "x": 875,
-          "y": 554,
+          "y": 556,
           "w": 1045,
-          "h": 489,
-          "strip": "' Event Log Timeline Terminal Output MI",
+          "h": 487,
+          "strip": "Event Log Timeline Terminal Cutput S",
           "tabs": [
             "Event Log",
             "Timeline",

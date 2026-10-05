@@ -10,9 +10,9 @@
 # reading the files proves nothing and running the hooks is the evidence.
 #
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16).
-9ac0078ecfb9ac88e2410d2a4abd96cfc3947ba7d33c6f466edf7abf494aadfd  src/frontend/view_vocabulary/gpui_binding.nim
+2f665b501f1b09784be12cc15786beed92c492743a81d6a22ede5b1fb2b1f568  src/frontend/view_vocabulary/gpui_binding.nim
 307b80ab93480368cd2ae3b124c99681460fd3b6ac119f9598bed86548361407  src/frontend/view_vocabulary/fact_reader.nim
-3eaa4b0cb184de99e4b87cd4ff04755326fadd8f6300f4c99418bbdf88c0f3c2  src/frontend/view_vocabulary/pane_views.nim
+e64122fb800ee478bf2e070e7fd1597b75ad0cc2a13da2e987db288f5a296c74  src/frontend/view_vocabulary/pane_views.nim
 e6cbb30b6b657c1e14ab3965b10398a6bdfc236a423ef52366a45a96b38ac558  src/common/view_vocabulary/gpui_gaps.nim
 0eaaa7811ee5fe56cce87e800ecf2c3bfe94c681140304596601c1234d7712cd  src/common/view_vocabulary/mappings.nim
 4469367e1543f8cdc4923b86d9a46dd0561c0f7c65c23701141b4ecdde9368ac  src/common/value_presentation/surfaces.nim

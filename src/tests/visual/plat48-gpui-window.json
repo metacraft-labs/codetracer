@@ -109,7 +109,7 @@
   "run-to-entry": 111
  },
  "menuBandOcr": "N A I",
- "menuTitlesOcr": "File \u00bb\nEdit >\nView \u00bb\nBuild \u00bb\nReset \u00bb\nDebug \u00bb\nHelp \u00bb",
+ "menuTitlesOcr": "File \u00bb\nEdit \u00bb\nView \u00bb\nBuild \u00bb\nReset \u00bb\nDebug \u00bb\nHelp \u00bb",
  "menuRoot": {
   "popover": [
    12,
@@ -138,7 +138,7 @@
    748,
    816
   ],
-  "changed": 291379,
+  "changed": 358024,
   "rootPopover": [
    12,
    46,
@@ -149,15 +149,15 @@
  "menuStepOverOcr": "Step Over F10",
  "menuStepOverShortcut": "F10",
  "menuHover": {
-  "stepInRowChanged": 13208
+  "stepInRowChanged": 13197
  },
  "menuKey": {
-  "stepOutRowChanged": 13208
+  "stepOutRowChanged": 13198
  },
  "menuChoose": {
-  "popoverPixelsChanged": 278899
+  "popoverPixelsChanged": 345568
  },
- "controlHoverOcr": "Next (F10) .",
+ "controlHoverOcr": "Next (F10)",
  "omnibarQueryOcr": "o :sym add|",
  "omnibarAttempts": {
   "#42": 1,
@@ -172,9 +172,9 @@
    330
   ],
   "changedBox": [
-   6,
+   12,
    714,
-   1902,
+   1896,
    366
   ],
   "changedOutside": 0,
@@ -183,8 +183,8 @@
  "revealEscChanged": 0,
  "keyRevealOcr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to",
  "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State main.py:79 tick 42",
- "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:79 tick 42",
- "unpinnedTabsOcr": ". State Scratchpad S",
+ "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:111 tick 168",
+ "unpinnedTabsOcr": "State Scratchpad h'|",
  "topStrip": {
   "rect": [
    12,

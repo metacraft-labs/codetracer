@@ -420,7 +420,14 @@ proc dataTableRowOf(event: ProgramEvent; extras: EventLogRowExtras): JsObject =
     else: extras.fullPath
   result.lowLevelLocation = extras.lowLevelLocation
 
-proc renderColumnHeader(tableId: cstring; columns: seq[JsObject]) =
+proc dataTableOrder(table: js): js {.importjs: "#.order()".}
+  ## DataTables' current order: `[[columnIndex, "asc" | "desc"], …]`.
+proc orderDataTable(table: js; column: int; direction: cstring)
+  {.importjs: "#.order([[#, #]]).draw()".}
+  ## Order by one column and redraw (an ajax table asks the engine again).
+
+proc renderColumnHeader(tableId: cstring; columns: seq[JsObject];
+                        dataTable: js = nil) =
   ## **THE TABLE SAYS WHAT ITS COLUMNS ARE** (`PLAT35-PD2`, closed by
   ## PLAT-40). A strip of header cells above the rows, one per column, each
   ## carrying the column's OWN class — so the class rules that size a body
@@ -432,6 +439,14 @@ proc renderColumnHeader(tableId: cstring; columns: seq[JsObject]) =
   ## against a table layout these flex rows do not use — a capture with it
   ## visible lost the location column entirely. Drawn again, idempotently, on
   ## every column (re)initialisation, because the column set can change.
+  ##
+  ## PLAT-50: A HEADER CLICK ORDERS THE LOG BY ITS COLUMN, again to reverse
+  ## it — what DataTables' own (hidden) header did, through its API on
+  ## `dataTable`, and the engine applies the order (`event_db.
+  ## ordered_event_positions`). The strip replaced the clickable header and
+  ## nothing took its clicks over, so the log could no longer be ordered at
+  ## all. The ordered column carries the arrow once the order is not the
+  ## recorded one (tick, ascending), as the native front-ends draw it.
   let table = document.getElementById(tableId)
   if table.isNil: return
   var host = table.parentNode
@@ -442,14 +457,35 @@ proc renderColumnHeader(tableId: cstring; columns: seq[JsObject]) =
   if not old.isNil: old.parentNode.removeChild(old)
   let strip = document.createElement(cstring"div")
   strip.className = cstring"eventLog-column-header"
-  for column in columns:
+  # The order DataTables holds: its first (column, direction) pair.
+  var orderedAt = -1
+  var ascending = true
+  if not dataTable.isNil:
+    let current = dataTable.dataTableOrder()
+    if current.length.to(int) > 0:
+      orderedAt = current[0][0].to(int)
+      ascending = current[0][1].to(cstring) != cstring"desc"
+  let recorded = orderedAt < 0 or
+    (columns[orderedAt].data.to(cstring) == cstring"directLocationRRTicks" and
+     ascending)
+  for index, column in columns:
     # A HIDDEN column has no header cell (PLAT-49 part B): its body cells are
     # not drawn either.
     if not column.visible.isUndefined and not column.visible.to(bool):
       continue
     let cell = document.createElement(cstring"span")
     cell.className = column.className.to(cstring)
-    cell.textContent = column.title.to(cstring)
+    var title = column.title.to(cstring)
+    if not recorded and index == orderedAt and title.len > 0:
+      title = title & (if ascending: cstring" ▲" else: cstring" ▼")
+    cell.textContent = title
+    if not dataTable.isNil:
+      let at = index
+      cell.addEventListener(cstring"click", proc(ev: Event) =
+        let again = at == orderedAt
+        let direction = if again and ascending: cstring"desc" else: cstring"asc"
+        dataTable.orderDataTable(at, direction)
+        renderColumnHeader(tableId, columns, dataTable))
     strip.appendChild(cell)
   host.insertBefore(strip, host.firstChild)
 
@@ -1603,7 +1639,7 @@ proc events(self: EventLogComponent) =
             self.api.emit(CtUpdateTable, updateTableArgs),
         }
       )
-      renderColumnHeader(self.denseId, denseColumns)
+      renderColumnHeader(self.denseId, denseColumns, self.denseTable.context)
 
       console.timeEnd(cstring"new events: load in datatable: dense datatable preparation and call")
 

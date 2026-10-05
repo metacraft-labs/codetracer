@@ -65,7 +65,8 @@ const
   TallRows = 40
   CaptureRecipe = "just plat46-capture-electron"
   SharedRoles = ["tab-inactive-fg", "surface-panel", "chrome-text",
-                 "syntax-keyword", "syntax-identifier", "surface-editor"]
+                 "syntax-keyword", "syntax-identifier", "surface-editor",
+                 "surface-canvas"]
     ## Every role the capture measures that the two front-ends paint alike.
   KnownDivergences = [
     ("tab-active-bg",
@@ -76,17 +77,19 @@ const
      "PLAT-49 finding 4: the selected tab's text is in the headings tier, " &
      "so it differs from the others by foreground as well as ground"),
     ("tab-inactive-bg",
-     "PLAT-49 finding 4: the strip has a ground of its own " &
-     "(ui/surface/base/raised), distinct from the pane body"),
-    ("surface-canvas",
-     "PLAT-49 finding 13: a divider is drawn on its neighbours' own ground " &
-     "(the panel surface) with the subtle border foreground, where the " &
-     "desktop's splitter shows the layout's darker ground")]
+     "PLAT-49 finding 4: the strip has a ground of its own, distinct from " &
+     "the pane body; PLAT-50 (the user, 2026-10-02) moved it from " &
+     "ui/surface/base/raised to ui/surface/primary/default, the ground the " &
+     "desktop's tabs sit on, where the desktop's inactive tab itself is the " &
+     "panel's #282828")]
     ## Counted, so a divergence that appears reddens this suite until it is
     ## filed here with its reason, and one that closes reddens it too. PLAT-47
-    ## had emptied it; PLAT-49 files the four the user asked for: the tab
+    ## had emptied it; PLAT-49 filed the four the user asked for: the tab
     ## strip's own ground and the selected tab's own ground and foreground
-    ## (finding 4), and dividers on the panes' ground (finding 13).
+    ## (finding 4), and dividers on the panes' ground (finding 13). PLAT-50
+    ## CLOSED the last: a divider in a strip row is the strip's ground,
+    ## ui/surface/primary/default — the desktop's splitters' colour — so
+    ## `surface-canvas` is a shared role again.
 
 proc hexOfColor(c: Color): string =
   if c.kind == ckRgb: hexOf((c.r.int, c.g.int, c.b.int)) else: ""
@@ -105,11 +108,11 @@ proc colOf(sess: var TuiTestSession; row: int; needle: string): int =
 
 proc lastColBeforeRule(sess: var TuiTestSession; row, fromCol: int): int =
   ## The last body cell of the region `fromCol` is in: the column left of the
-  ## first `│` at or right of it, or `Cols - 2` at the screen's edge. Since
+  ## first divider (`▏` since PLAT-50) at or right of it, or `Cols - 2` at the screen's edge. Since
   ## PLAT-45 the Variables and Source panes are not the rightmost regions, so
   ## a fixed offset from the edge lands in a neighbour.
   for c in fromCol ..< Cols:
-    if $sess.cellAt(row, c).rune == "│":
+    if $sess.cellAt(row, c).rune in ["│", "▏"]:
       return max(fromCol, c - 1)
   Cols - 2
 

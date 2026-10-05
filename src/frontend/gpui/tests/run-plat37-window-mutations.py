@@ -259,8 +259,8 @@ ARMS = [
     # THE PALETTE, THE PARSER, THE SCAN AND THE POPULATION
     # ------------------------------------------------------------------
     Arm("M8", CHROME,
-        '    "#e6edf3", # crWindowForeground',
-        '    "#13171d", # crWindowForeground',
+        '    DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark],\n    DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark],',
+        '    "#1c1c1c",\n    DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark],',
         SUITE,
         "every foreground/background pair clears the contrast floor",
         CTL[CHROME][0], CTL[CHROME][1],

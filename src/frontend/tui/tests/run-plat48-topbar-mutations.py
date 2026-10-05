@@ -531,11 +531,13 @@ ARMS = [
     Arm("GW4", GPUIMAIN,
         "    r.setAttribute(box, \"data-ct-menu-popover\", $p.folderPath)\n"
         "    r.setStyle(box, \"rounded\", \"6px\")\n"
-        "    for (k, v) in paneOutlineStyle(true): r.setStyle(box, k, v)\n"
+        "    r.setStyle(box, \"border-width\", \"1px\")\n"
+        "    r.setStyle(box, \"border-color\", chromeOf(crMenuBorder))\n"
         "    gTopEls.add box\n",
         "    r.setAttribute(box, \"data-ct-menu-popover\", $p.folderPath)\n"
         "    r.setStyle(box, \"rounded\", \"6px\")\n"
-        "    for (k, v) in paneOutlineStyle(true): r.setStyle(box, k, v)\n"
+        "    r.setStyle(box, \"border-width\", \"1px\")\n"
+        "    r.setStyle(box, \"border-color\", chromeOf(crMenuBorder))\n"
         "    gTopEls.insert(box, 0)\n",
         W_POPOVER,
         "the menu's popover is painted under the panes' pin buttons: a ⇲ "

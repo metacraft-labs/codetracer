@@ -84,6 +84,7 @@ import ./layout_memory
 import ./window_geometry
 import ./window_gestures
 import ./window_top_bar
+import ./window_clicks
 import ../viewmodel/views/debug_control_marks
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../styles/generated/design_tokens
@@ -107,6 +108,11 @@ import headless_app/footer_info
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
 import headless_session   # `calltraceJumpByLine`, `requestAndLoadCalltrace`
 import ../viewmodel/viewmodels/vcs_vm   # `VCSVM`, `VCSRefreshIntervalMs`: the VCS pane's tick
+import ../viewmodel/host/native_vcs_details   # PLAT-50: commit files, diffs
+from std/unicode import runeLen
+import ../viewmodel/viewmodels/[point_list_vm, scratchpad_vm, state_vm,
+                                calltrace_vm, event_log_vm,
+                                origin_chain_types]
 
 const DefaultPixelsView* = "window"
   ## What `--pixels-out` records as the view when `--pixels-view` is not
@@ -151,6 +157,15 @@ OPTIONS:
                       hwheel:<pane>:<columns> (PLAT35-F3: a horizontal
                       wheel over a pane's centre, the delta in editor
                       columns; the editor scrolls, clamped to its content)
+                    and (PLAT-50) a press on a pane's row, delivered to
+                    the row as the window delivers a real press:
+                      click:<part>:<key>[:left|right|middle[:ctrl|alt|
+                      ctrl+alt]] (part: file, event, header, var, statetab,
+                      gutter, code, value, call, arg, tab, timeline, point,
+                      scratch, position, vcsfile, commit — a timeline's key
+                      is the permille along its track, a code or value key
+                      `<line>@<column>`, an arg's `<call>/<arg>`) and
+                      ctx:<label> (an entry of the open right-click menu)
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
   --quit-after-ms=<n>
@@ -198,6 +213,10 @@ OPTIONS:
                     maps a key to a replay operation here yet. That is
                     PLAT-23's `--ui=gui` contract rather than a renderer
                     gap, and this flag stays until it lands.
+  --dividers=NAME   PLAT-50. strip (default: the gaps between panes in the
+                    window's own ground, as the desktop's splitters) or
+                    subtle (a 1px line in each gap between side-by-side
+                    panes)
   --no-flow-overlay
                     Open with the flow overlay hidden (it is shown by default,
                     as `flow.enabled: true` ships).
@@ -346,6 +365,10 @@ type
       ## reads the window's arrangement out of it (the GPUI front-end's OWN
       ## output) rather than out of the model.
     noFlowOverlay: bool
+    subtleDividers: bool
+      ## PLAT-50. `--dividers=subtle`: a 1px ui/border/secondary line in the
+      ## vertical gaps between panes; `strip` (the default) leaves the gaps
+      ## the window's own ground, the desktop's splitter colour.
       ## PLAT-42. Open with the flow overlay hidden — the user's
       ## `EditorVM.showFlowOverlay` toggle, from the command line; the window
       ## lane's negative twin for the drawn overlay.
@@ -421,7 +444,7 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         if head notin ["key", "press", "move", "release", "menu", "control",
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
-                       "tab-add", "hwheel"]:
+                       "tab-add", "hwheel", "click", "ctx", "label-menu"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -458,6 +481,14 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
           message: "codetracer-gpui: --replay-ops: " & e.msg)
     elif arg == "--no-flow-overlay":
       result.noFlowOverlay = true
+    elif arg.startsWith("--dividers="):
+      case arg["--dividers=".len .. ^1]
+      of "strip": result.subtleDividers = false
+      of "subtle": result.subtleDividers = true
+      else:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: unknown dividers '" &
+                   arg["--dividers=".len .. ^1] & "'; pick one of strip, subtle")
     elif arg.startsWith("--layout="):
       result.layoutFile = arg["--layout=".len .. ^1]
       if result.layoutFile.len == 0:
@@ -570,7 +601,25 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
 # ABI, so a closure cannot be handed across it. `isonim-gpui`'s own
 # `tests/test_gui.nim` does the same thing with its scene constants.
 
+const
+  DiffAddedColour = DesignTokenHex[dtColorsUiTextSuccessPrimary][dmDark]
+  DiffRemovedColour = DesignTokenHex[dtColorsUiTextErrorPrimary][dmDark]
+    ## PLAT-50 (K34): a diff's added and removed lines, the terminal's
+    ## `srChromeSuccess` / `srChromeError` tokens.
+  TracepointCommand = ":tracepoint "
+    ## PLAT-50: the omnibar's tracepoint command ("Add tracepoint").
+
 type
+  GContent = object
+    ## PLAT-50: a text over the window — an event's full content, a value's
+    ## history, a value's origin, a changed file's diff.
+    open: bool
+    title, text: string
+    diff: bool
+      ## The text is a unified diff, its lines in the diff colours.
+    top: int
+      ## The first line shown (the wheel and Up / Down scroll it).
+
   ProbeArrival = object
     ## **ONE KEY, AS THE RUST-SIDE ELEMENT STORE RECORDED IT.** Read inside
     ## the handler the shim called, out of the node's own record, which the
@@ -666,7 +715,8 @@ proc probeHandler(el: GpuiElement): GpuiEventHandler =
       kind: (case el.lastEventKind()
              of gekKeyDown: "keydown"
              of gekKeyUp: "keyup"
-             of gekPointerDown, gekPointerMove, gekPointerUp, gekWheel:
+             of gekPointerDown, gekPointerMove, gekPointerUp, gekWheel,
+                gekContextMenu, gekAuxDown:
                "pointer"
              of gekOther: "other"),
       seqNo: el.lastEventSeq())
@@ -853,6 +903,26 @@ var
   gRecordings: seq[OmnibarEntry] = @[]
     ## The recordings the "+"'s `:open ` lists (`recordingsBeside`).
   gOpenCmd: GpuiCommand
+  gCtxMenu: ContextMenuState
+    ## PLAT-50: the open right-click menu (`headless_app/pane_clicks`).
+  gContent: GContent
+    ## PLAT-50: a text over the window (`GContent`).
+  gMaximised = none(PaneKind)
+    ## PLAT-50 (K7): the pane whose container "Maximise container" shows
+    ## alone, until "Minimise container".
+  gTracepointsRun = 0
+    ## PLAT-50: how many tracepoints the omnibar swept (each its own id).
+  gTracepointAt: tuple[path: string, line: int]
+    ## PLAT-50: the line the editor menu's "Add tracepoint" was chosen on;
+    ## the omnibar's `:tracepoint <expression>` is placed there.
+  gPressDedupe: PressDedupe
+    ## PLAT-50: the press the deepest row answered (`window_clicks`).
+  gViewedFile = ""
+    ## PLAT-50: a file opened from the Files pane, shown in the editor until
+    ## the debugger next moves.
+  gSourceService: GpuiSourceService = nil
+    ## The editor's source window (moved up with PLAT-50, which reads its
+    ## provider to open a file).
     ## The command the window was opened with (a new tab's editor rows).
   gLeafSet: GpuiLeafSet
   gCalltraceLoads = 0
@@ -1005,6 +1075,9 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
       for t, label in n.labels:
         let tab = r.createElement("div")
         r.setAttribute(tab, "data-ct-tab-active", $(t == n.active))
+        # PLAT-50: which pane the tab is, for its right-click menu.
+        if t < n.panes.len:
+          r.setAttribute(tab, TabPaneAttribute, n.panes[t])
         r.setStyle(tab, "width", $n.tabs[t].w & "px")
         r.setStyle(tab, "flex-shrink", "0")
         r.setStyle(tab, "padding-left", $TabPadPx & "px")
@@ -1164,6 +1237,22 @@ proc drawOverlay(r: GpuiRenderer) =
   for e in gOverlay:
     r.removeChild(gRoot, e)
   gOverlay = @[]
+  # PLAT-50: `--dividers=subtle` — a 1px ui/border/secondary line down the
+  # middle of each gap BETWEEN SIDE-BY-SIDE panes, below their tab strips
+  # (a strip row stays the strips' ground, so two strips connect). The
+  # default draws nothing: the gaps are the window's own ground, the colour
+  # of the desktop's splitters and of the strips.
+  if gOpenCmd.subtleDividers:
+    for d in gGeom.dividers:
+      if not d.horizontal or d.rect.w <= 0 or d.rect.h <= TabStripPx:
+        continue
+      let line = quad(r, PxRect(x: d.rect.x + d.rect.w div 2,
+                                y: d.rect.y + TabStripPx, w: 1,
+                                h: d.rect.h - TabStripPx),
+                      chromeOf(crFieldBorder))
+      r.setAttribute(line, "data-ct-divider-line", d.container & "/" &
+                                                   $d.index)
+      gOverlay.add line
   # PLAT-49 part B: A DOCKED PANE SHOWN OPEN, in the band the tree gave up
   # (`windowGeometryOf`'s `openDock`) — beside the arrangement, not over it.
   if not gGeom.openDock.isEmpty:
@@ -1284,13 +1373,41 @@ proc footerInfo(): string =
     footerFileInfoText(gSession.getCurrentFile())
   else: ""
 
+proc maximisedLayout(layout: Layout; pane: PaneKind): Layout
+  ## PLAT-50 (K7): forward-declared; defined with the clicks.
+
+proc stripHeading(r: GpuiRenderer; pane: GpuiElement)
+  ## Forward-declared for `adoptNewLeaves`.
+
+proc adoptNewLeaves(r: GpuiRenderer) =
+  ## PLAT-50: a pane a layout command ADDED (the View menu opening a pane the
+  ## arrangement did not place) has no leaf yet — the leaves were rendered
+  ## once, at open. Its leaf is taken from the shell's projection as every
+  ## other was, rendered, and kept with the rest, so the arrangement below
+  ## draws it.
+  if gShell.isNil:
+    return
+  let fresh = gShell.leavesFor(gWindow)
+  for leaf in fresh.leaves:
+    if leaf.paneId.len == 0 or gPanes.hasKey(leaf.paneId):
+      continue
+    let (node, _) = renderLeaf(r, leaf, gEditorSurface, gEditorViewportPx)
+    stripHeading(r, node)
+    applyTextFaces(r, node)
+    gPanes[leaf.paneId] = node
+    gLeafSet.leaves.add leaf
+    traceGesture("leaf adopted " & leaf.paneId)
+
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
   ## one, or, while a divider is dragged, the committed one with the pending
   ## resize applied (`previewLayout`, the model's own `pendingCommand` and
   ## `apply`) — and draw the gesture's overlay over it. Answers whether an
   ## arrangement was drawn (a refused projection leaves the last one).
-  let layout = gGestures.previewLayout(committedLayout())
+  var layout = gGestures.previewLayout(committedLayout())
+  # PLAT-50 (K7): a maximised container is drawn alone.
+  if gMaximised.isSome:
+    layout = maximisedLayout(layout, gMaximised.get)
   let projection = projectDock(layout, gShell.viewport)
   if projection.status == dpsRefused:
     return false
@@ -1300,6 +1417,7 @@ proc drawArrangement(r: GpuiRenderer): bool =
                            footerLeadPx(footerInfo()))
   if gGeom.root < 0:
     return false
+  adoptNewLeaves(r)
   # The leaves are MOVED into the new arrangement, never rebuilt.
   for _, pane in gPanes:
     let parent = r.parentNode(pane)
@@ -1512,6 +1630,21 @@ proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   refreshReplayWindow(r)
   true
 
+proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
+                        x, y: int): bool
+  ## PLAT-50: an open right-click menu or event content takes a press
+  ## (defined with the clicks, after the top bar).
+
+proc wireClicks(r: GpuiRenderer)
+  ## PLAT-50: every redraw re-wires the rows it made (`window_clicks`).
+
+proc runContextAction(r: GpuiRenderer; action: ContextAction;
+                      target: ContextTarget)
+  ## PLAT-50: a right-click menu's chosen entry (the keys choose too).
+
+proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int)
+  ## PLAT-50: forward-declared for the dock labels' right-click menu.
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
@@ -1521,7 +1654,21 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   if gShell.isNil:
     return
   var step: GestureStep
+  # PLAT-50: an open right-click menu or event content first.
+  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and
+     handlePopoverPress(r, kind, x, y):
+    return
   case kind
+  of gekContextMenu:
+    # PLAT-50 (K42): a right-click on a docked pane's label opens the
+    # desktop's strip menu (`ui/auto_hide`'s `onContextMenu`).
+    let (si, sl) = gGeom.slotAt(x, y)
+    if si >= 0 and sl >= 0:
+      let strip = gGeom.strips[si]
+      for k in PaneKind:
+        if $k == strip.slots[sl].pane:
+          openContextMenuAt(r, dockLabelContextMenu(k, strip.edge), x, y)
+    return
   of gekPointerDown:
     # PLAT-48: the top bar, its popovers and the pin / unpin buttons first.
     if handleTopPress(r, x, y):
@@ -1547,6 +1694,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if not gGestures.revealing:
       gAutoHide.overlayClosed()
   of gekWheel:
+    # PLAT-50: a text over the window scrolls under the wheel.
+    if gContent.open:
+      gContent.top = max(0, gContent.top +
+                            (if dy < 0.0: 3 elif dy > 0.0: -3 else: 0))
+      drawTopBar(r)
+      return
     let onPane = gGeom.activePaneAt(x, y)
     if onPane == $paneCalltrace:
       # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
@@ -1569,8 +1722,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     discard drawArrangement(r)
 
 proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
-  ## The root's pointer listener: every pointer event of the window.
+  ## The root's pointer listener: every pointer event of the window. The
+  ## root hears a press LAST (GPUI bubbles it from the row under the
+  ## pointer), so a row's answer (`window_clicks`) is already in when the
+  ## press reaches here; the next press is a new one (`PressDedupe`).
   result = proc(ev: GpuiEvent) =
+    gPressDedupe.clear()
     let p = pointerOf(ev)
     if not p.valid:
       return
@@ -1598,7 +1755,8 @@ proc armPointer(r: GpuiRenderer; root: GpuiElement) =
   if gShell.isNil:
     return
   let handler = pointerHandler(r)
-  for name in ["mousedown", "mousemove", "mouseup", "wheel"]:
+  for name in ["mousedown", "mousemove", "mouseup", "wheel", "contextmenu",
+               "auxdown"]:
     r.addEventListener(root, name, handler)
   # A REPLAY window's keys: the editor pane takes focus (the pane the focus
   # outline marks) and `Esc` cancels a gesture. Not while the input probe
@@ -1656,7 +1814,6 @@ var
     ## the pointer really moved — the desktop menu's rule too.
   gIconDir = ""
     ## Where the desktop's marks are written as SVG documents for `img`.
-  gSourceService: GpuiSourceService = nil
   gBindings: Table[string, string]
     ## The window's keymap: the desktop's default chords
     ## (`window_top_bar.desktopBindings`), shown in the menu and bound here.
@@ -1804,7 +1961,9 @@ proc drawTopBar(r: GpuiRenderer) =
   let tabs = if gShell.isNil: @[] else: gShell.app.tabsOf()
   gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth,
                                 canAddTab = gSessionsOpened.len > 0)
-  let band = absBox(r, gTopLayout.band, chromeOf(crPaneBackground))
+  # PLAT-50: the band is the desktop's caption bar — the window's own ground
+  # (ui/surface/primary/default), no card of its own.
+  let band = absBox(r, gTopLayout.band, chromeOf(crWindowBackground))
   r.setAttribute(band, "data-ct-top-bar", "band")
   r.setStyle(band, "rounded", "4px")
   gTopEls.add band
@@ -1817,12 +1976,21 @@ proc drawTopBar(r: GpuiRenderer) =
       r.setAttribute(b, "data-ct-menu-button", $gMenu.isOpen)
       r.setStyle(b, "padding-left", $TabPadPx & "px")
       for (k, v) in tabStyle(gMenu.isOpen): r.setStyle(b, k, v)
+      # PLAT-50: the desktop's `#menu-root` — the bar's ground inside a 1px
+      # ui/border/secondary border.
+      if not gMenu.isOpen:
+        r.setStyle(b, "border-width", "1px")
+        r.setStyle(b, "border-color", chromeOf(crFieldBorder))
+        r.setStyle(b, "rounded", "6px")
       r.appendChild(b, r.createTextNode("≡"))
       gTopEls.add b
     of gtControl:
       let on = sg.index < enabled.len and enabled[sg.index]
+      # PLAT-50: a control has no ground of its own (the desktop's buttons
+      # are the bar's); the hovered one is lifted.
       let b = absBox(r, sg.rect,
-                     if gHoverControl == sg.index: chromeOf(crWindowBackground)
+                     if gHoverControl == sg.index:
+                       chromeOf(crTabActiveBackground)
                      else: "")
       r.setAttribute(b, "data-ct-control", TransportControls[sg.index].id)
       r.setAttribute(b, "data-ct-enabled", $on)
@@ -1842,7 +2010,10 @@ proc drawTopBar(r: GpuiRenderer) =
       let b = absBox(r, sg.rect, chromeOf(crInputBackground))
       r.setAttribute(b, "data-ct-omnibar", $gOmnibar.isOpen)
       r.setStyle(b, "padding-left", $TabPadPx & "px")
-      r.setStyle(b, "rounded", "4px")
+      r.setStyle(b, "rounded", "6px")
+      # PLAT-50: bounded as the desktop's `.command-input-row` is.
+      r.setStyle(b, "border-width", "1px")
+      r.setStyle(b, "border-color", chromeOf(crFieldBorder))
       r.setStyle(b, "white-space", "nowrap")
       r.setStyle(b, "overflow", "hidden")
       let text =
@@ -1923,10 +2094,13 @@ proc drawTopBar(r: GpuiRenderer) =
   # the open path and the highlight lifted, the chord right-aligned.
   for p in gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
                             pendingViewportHeight):
-    let box = absBox(r, p.rect, chromeOf(crPaneBackground))
+    # PLAT-50: the desktop's dropdown surface and border, apart from the
+    # panes it opens over.
+    let box = absBox(r, p.rect, chromeOf(crMenuBackground))
     r.setAttribute(box, "data-ct-menu-popover", $p.folderPath)
     r.setStyle(box, "rounded", "6px")
-    for (k, v) in paneOutlineStyle(true): r.setStyle(box, k, v)
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
     gTopEls.add box
     let levels = gMenu.openLevels()
     var lv: MenuLevelView
@@ -1937,7 +2111,7 @@ proc drawTopBar(r: GpuiRenderer) =
         continue
       let it = lv.items[row.item]
       let rb = absBox(r, row.rect,
-                      if it.active: chromeOf(crWindowBackground) else: "")
+                      if it.active: chromeOf(crTabActiveBackground) else: "")
       r.setAttribute(rb, "data-ct-menu-item", it.label)
       r.setAttribute(rb, "data-ct-menu-active", $it.active)
       r.setStyle(rb, "padding-left", $TabPadPx & "px")
@@ -1955,14 +2129,15 @@ proc drawTopBar(r: GpuiRenderer) =
   # THE OMNIBAR'S RESULTS.
   let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
   if op.rows.len > 0:
-    let box = absBox(r, op.rect, chromeOf(crPaneBackground))
+    let box = absBox(r, op.rect, chromeOf(crMenuBackground))
     r.setAttribute(box, "data-ct-omnibar-results", $gOmnibar.results.len)
-    for (k, v) in paneOutlineStyle(true): r.setStyle(box, k, v)
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
     gTopEls.add box
     for row in op.rows:
       let selected = row.item >= 0 and row.item == gOmnibar.selected
       let rb = absBox(r, row.rect,
-                      if selected: chromeOf(crWindowBackground) else: "")
+                      if selected: chromeOf(crTabActiveBackground) else: "")
       r.setStyle(rb, "padding-left", $TabPadPx & "px")
       r.setStyle(rb, "white-space", "nowrap")
       r.setStyle(rb, "overflow", "hidden")
@@ -1978,6 +2153,69 @@ proc drawTopBar(r: GpuiRenderer) =
                                        else: crWindowForeground))
       r.appendChild(rb, r.createTextNode(text))
       gTopEls.add rb
+  # PLAT-50: THE RIGHT-CLICK MENU, on the desktop's dropdown surface, and an
+  # event's CONTENT.
+  if gCtxMenu.open:
+    let rect = contextMenuRect(gCtxMenu, pendingViewportWidth,
+                               pendingViewportHeight)
+    let box = absBox(r, rect, chromeOf(crMenuBackground))
+    r.setAttribute(box, "data-ct-context-menu", $gCtxMenu.menu.kind)
+    r.setStyle(box, "rounded", "6px")
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
+    gTopEls.add box
+    for (rr, i) in contextMenuRows(gCtxMenu, rect):
+      let e = gCtxMenu.menu.entries[i]
+      let selected = i == gCtxMenu.selected and e.enabled
+      let rb = absBox(r, rr,
+                      if selected: chromeOf(crTabActiveBackground) else: "")
+      r.setAttribute(rb, "data-ct-context-entry", e.label)
+      r.setAttribute(rb, "data-ct-context-enabled", $e.enabled)
+      r.setStyle(rb, "padding-left", $TabPadPx & "px")
+      r.setStyle(rb, "white-space", "nowrap")
+      r.setStyle(rb, "color", chromeOf(
+        if not e.enabled: crTabInactiveForeground
+        elif selected: crTabActiveForeground
+        else: crWindowForeground))
+      r.appendChild(rb, r.createTextNode(
+        e.label & (if e.hint.len > 0: "   " & e.hint else: "")))
+      gTopEls.add rb
+  if gContent.open:
+    let w = min(pendingViewportWidth - 80, 960)
+    let h = min(pendingViewportHeight - 120, 640)
+    let rect = PxRect(x: (pendingViewportWidth - w) div 2,
+                      y: (pendingViewportHeight - h) div 2, w: w, h: h)
+    let box = absBox(r, rect, chromeOf(crMenuBackground))
+    r.setAttribute(box, "data-ct-event-content", gContent.title)
+    r.setStyle(box, "rounded", "6px")
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
+    r.setStyle(box, "flex-direction", "column")
+    r.setStyle(box, "padding", $ChromePaddingPx & "px")
+    let title = r.createElement("div")
+    r.setStyle(title, "color", chromeOf(crPaneTitleForeground))
+    r.appendChild(title, r.createTextNode(gContent.title))
+    r.appendChild(box, title)
+    let lines = gContent.text.replace("\\n", "\n").splitLines()
+    let room = max(1, (h - 2 * ChromePaddingPx) div MenuItemPx - 1)
+    for i in min(gContent.top, max(0, lines.high)) ..< lines.len:
+      if i - gContent.top >= room:
+        break
+      let l = lines[i]
+      let row = r.createElement("div")
+      r.setAttribute(row, "data-ct-content-line", $i)
+      r.setStyle(row, "white-space", "nowrap")
+      r.setStyle(row, "color",
+        if not gContent.diff: chromeOf(crWindowForeground)
+        elif l.startsWith("+++") or l.startsWith("---"):
+          chromeOf(crPaneTitleForeground)
+        elif l.startsWith("+"): DiffAddedColour
+        elif l.startsWith("-"): DiffRemovedColour
+        elif l.startsWith("@@"): chromeOf(crTabInactiveForeground)
+        else: chromeOf(crWindowForeground))
+      r.appendChild(row, r.createTextNode(l))
+      r.appendChild(box, row)
+    gTopEls.add box
   # UNPIN on a revealed pane (the PIN buttons are drawn before the
   # popovers, below).
   if gGestures.revealing:
@@ -2023,6 +2261,8 @@ proc drawTopBar(r: GpuiRenderer) =
     gTopEls.add hb
   for e in gTopEls:
     r.appendChild(gRoot, e)
+  # PLAT-50: the rows a redraw made get their click listeners.
+  wireClicks(r)
   writeGeometry()
   traceGesture("topbar menu=" & $gMenu.isOpen & " path=" & $gMenu.path &
                " highlight=" & $gMenu.highlight & " omnibar=" &
@@ -2079,6 +2319,8 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   ## availability moved too).
   if gSession.isNil:
     return
+  # PLAT-50: a move takes the editor back to the debugger's file.
+  gViewedFile = ""
   if not gSourceService.isNil:
     gSourceService.serveWindow()
   discard gSession.loadStopPanes()
@@ -2222,6 +2464,13 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
       gGestures.reveal = shown.get
   elif layout.tree.contains(pane):
     applyGestureCommand(r, cmdActivateTab(pane))
+  else:
+    # PLAT-50: a pane the arrangement does not place is OPENED, as the
+    # desktop's View menu opens its panel — a tab beside the event log, else
+    # at the root (the terminal's rule).
+    applyGestureCommand(r, cmdAddPane(pane,
+      after = (if layout.tree.contains(paneEventLog): some(paneEventLog)
+               else: none(PaneKind))))
   discard drawArrangement(r)
 
 proc openOmnibar(r: GpuiRenderer; query = "") =
@@ -2273,7 +2522,50 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   else: traceGesture("menu action " & action & " is not available here")
   drawTopBar(r)
 
+proc showContent(r: GpuiRenderer; title, text: string; diff = false)
+
+proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
+                       expression: string) =
+  ## PLAT-50: "Add tracepoint" then `:tracepoint <expression>` — the sweep
+  ## over the recording (`ct/run-tracepoints`), its hits shown over the
+  ## window as the desktop's tracepoint editor lists them under the line, the
+  ## point on the point list and in the gutter.
+  if gSession.isNil or expression.len == 0:
+    return
+  inc gTracepointsRun
+  var hits: seq[TracepointSweepHit] = @[]
+  try:
+    hits = gSession.runTracepoints(@[TracepointSweepSpec(
+      tracepointId: gTracepointsRun - 1, path: path, line: line,
+      expression: expression)])
+  except CatchableError as e:
+    traceGesture("tracepoint failed: " & e.msg)
+    return
+  var text = ""
+  for h in hits:
+    var parts: seq[string] = @[]
+    for (name, value) in h.values:
+      parts.add name & " = " & value
+    text.add "tick " & $h.rrTicks & "  " &
+             (if h.errorMessage.len > 0: h.errorMessage
+              else: parts.join(", ")) & "\n"
+  refreshReplayWindow(r)
+  showContent(r, "tracepoint `" & expression & "` at " &
+                   path.extractFilename & ":" & $line & " — " & $hits.len &
+                   " hit(s)",
+              (if text.len > 0: text else: "the line never ran"))
+
 proc acceptOmnibar(r: GpuiRenderer) =
+  # PLAT-50: the tracepoint "Add tracepoint" asked for, on its line.
+  if gTracepointAt.path.len > 0 and
+     gOmnibar.query.startsWith(TracepointCommand):
+    let expression = gOmnibar.query[TracepointCommand.len .. ^1].strip()
+    let at = gTracepointAt
+    gTracepointAt = ("", 0)
+    gOmnibar.close()
+    drawTopBar(r)
+    runGpuiTracepoint(r, at.path, at.line, expression)
+    return
   let (ok, entry) = gOmnibar.accept()
   if not ok:
     drawTopBar(r)
@@ -2327,6 +2619,31 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     return false
   let k = key.toLowerAscii
   let ctrl = "control" in mods
+  # PLAT-50: an open right-click menu, then an event's content, own the keys.
+  if gCtxMenu.open:
+    case k
+    of "escape", "esc": gCtxMenu.close()
+    of "up": gCtxMenu.move(-1)
+    of "down": gCtxMenu.move(1)
+    of "enter", "return":
+      let chosen = gCtxMenu.choose(-1)
+      if chosen.chosen:
+        drawTopBar(r)
+        runContextAction(r, chosen.action, chosen.target)
+        return true
+    else: discard
+    drawTopBar(r)
+    return true
+  if gContent.open:
+    case k
+    of "escape", "esc", "enter", "return": gContent = GContent()
+    of "up": gContent.top = max(0, gContent.top - 1)
+    of "down": gContent.top = gContent.top + 1
+    of "pageup": gContent.top = max(0, gContent.top - 10)
+    of "pagedown", "space": gContent.top = gContent.top + 10
+    else: return true
+    drawTopBar(r)
+    return true
   if gOmnibar.isOpen:
     case k
     of "escape", "esc": gOmnibar.close()
@@ -2639,6 +2956,707 @@ proc vcsTick() {.cdecl.} =
         traceGesture("vcs refreshed")
       break
 
+# ---------------------------------------------------------------------------
+# PLAT-50: the desktop's click behaviours on the window's panes
+# (`headless_app/pane_clicks.ClickInventory`, wired by `window_clicks`)
+# ---------------------------------------------------------------------------
+
+proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind) =
+  ## One builtin leaf drawn again from its ViewModel (a folder toggled, a
+  ## value expanded), its faces re-stamped and its rows wired.
+  let el = gPanes.getOrDefault($pane)
+  if el.isNil:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == pane:
+      redrawWindowLeaf(r, el, leaf)
+      applyTextFaces(r, el)
+      break
+  wireClicks(r)
+
+proc fileEntryOf(vm: FilesystemVM; id: string): FilesystemEntryNode =
+  ## The Files node a vocabulary id names (`fileTree.0.1`: child 0, then 1).
+  if vm.isNil:
+    return
+  result = vm.rootEntry.val
+  for i in childIndexPath(id, "fileTree"):
+    if i < 0 or i >= result.children.len:
+      return FilesystemEntryNode()
+    result = result.children[i]
+
+proc editorPath(): string =
+  ## The file the editor shows: one opened from Files, else the stop's.
+  if gViewedFile.len > 0: gViewedFile
+  elif gSession.isNil: ""
+  else: gSession.getCurrentFile()
+
+proc showViewedFile(r: GpuiRenderer) =
+  ## PLAT-50 (K17): the editor draws `gViewedFile` — read whole from the
+  ## recording through the source service's provider, its breakpoints in the
+  ## gutter, the execution pointer only when the debugger is in it — until
+  ## the debugger moves (`refreshReplayWindow` clears it), as the desktop's
+  ## editor follows the debugger back to the location's file.
+  let editor = gPanes.getOrDefault($paneEditor)
+  if editor.isNil or gSourceService.isNil or gViewedFile.len == 0:
+    return
+  var fetched = SourceFetch(status: sfsProviderUnavailable)
+  gSourceService.provider.fetch(
+    SourceLineRequest(path: gViewedFile, sourceGeneration: 0,
+                      sourceDigest: "", firstLine: 1, lastLine: high(int32)),
+    proc(f: SourceFetch) = fetched = f)
+  drainSourceCallbacks()
+  let lines = if fetched.fileLines.len > 0: fetched.fileLines
+              else: fetched.lines
+  if lines.len == 0:
+    traceGesture("could not open " & gViewedFile & ": " & fetched.detail)
+    gViewedFile = ""
+    return
+  var surface = EditorSurface(medium: GpuiMedium, path: gViewedFile,
+                              revisionLabel: "@0",
+                              provenance: epVerified, viewportTop: 1,
+                              totalLineCount: lines.len,
+                              gutterVisible: true)
+  let points = editorPointsOf(gSession.session.store.pointList.rows.val)
+  let shown = min(lines.len, editorRowsOf(gGeom))
+  for i in 0 ..< shown:
+    var mark = emNone
+    for p in points:
+      if p.path == gViewedFile and p.line == i + 1:
+        mark = (if p.kind == epkTracepoint: emTracepoint
+                elif p.enabled: emBreakpoint
+                else: emBreakpointDisabled)
+    surface.rows.add EditorRow(line: i + 1, text: lines[i], held: true,
+                               mark: mark)
+  while childCount(editor) > 0:
+    r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
+  discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface)
+  applyTextFaces(r, editor)
+  noteEditorTab(r, editorTabLabel(gViewedFile, false))
+  wireClicks(r)
+  traceGesture("opened " & gViewedFile)
+
+proc lineMarkOf(path: string; line: int): EditorMark =
+  ## The breakpoint on `path:line`, as the gutter draws it.
+  result = emNone
+  if gSession.isNil: return
+  for p in editorPointsOf(gSession.session.store.pointList.rows.val):
+    if p.path == path and p.line == line and p.kind == epkBreakpoint:
+      return (if p.enabled: emBreakpoint else: emBreakpointDisabled)
+
+proc afterMove(r: GpuiRenderer) =
+  ## A click moved the debugger: the window follows it, as a step does.
+  gViewedFile = ""
+  refreshReplayWindow(r)
+
+proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int) =
+  gCtxMenu.openAt(menu, y, x)
+  traceGesture("context menu " & $menu.kind & " " & menu.labels.join("|"))
+  drawTopBar(r)
+
+proc showContent(r: GpuiRenderer; title, text: string; diff = false) =
+  ## PLAT-50: a text over the window — an event's content, a value's
+  ## history, a value's origin, a changed file's diff.
+  gContent = GContent(open: true, title: title, text: text, diff: diff)
+  traceGesture("content " & title)
+  drawTopBar(r)
+
+proc copyToClipboard(text, what: string) =
+  ## PLAT-50: `text` to the system clipboard, through the shim (`gpui_write_
+  ## clipboard`, which GPUI's platform clipboard takes on the next frame).
+  writeClipboard(text)
+  # What the shim now holds for the clipboard, read back: the trace says
+  # what was copied, not what was meant to be.
+  traceGesture("copied " & what & ": " & clipboardText().strip())
+
+# ---- the editor's columns -------------------------------------------------
+
+proc editorCodeLeftPx(): int =
+  ## The window x of the editor's first code column: the pane's body, its
+  ## padding and the gutter (`leaves.editorGutterColumns`), as `renderEditor`
+  ## lays a row out at `EditorColumnPx` per column.
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0:
+    return -1
+  gGeom.nodes[i].body.x + ChromePaddingPx +
+    columnsPx(editorGutterColumns(editorNumberWidth(gEditorSurface.rows)))
+
+proc editorColumnAt(x: int): int =
+  ## The 1-based text column a press at window x is on (the horizontal
+  ## scroll counted), 0 left of the code.
+  let left = editorCodeLeftPx()
+  if left < 0 or x < left:
+    return 0
+  int(floor(float(x - left) / EditorColumnPx)) + 1 + gEditorScrollCols
+
+proc editorXOfColumn(column: int): int =
+  ## The inverse: the window x at the middle of `column` (for `--window-ops`,
+  ## which presses where a user would).
+  let left = editorCodeLeftPx()
+  if left < 0:
+    return 0
+  left + int(round((float(column - 1 - gEditorScrollCols) + 0.5) *
+                   EditorColumnPx))
+
+proc editorRowOf(line: int): EditorRow =
+  for row in gEditorSurface.rows:
+    if row.line == line:
+      return row
+
+proc lineTextOf(path: string; line: int): string =
+  ## The text of `path:line` as the editor holds it.
+  if gViewedFile.len == 0 or path == gViewedFile:
+    let row = editorRowOf(line)
+    if row.held:
+      return row.text
+  ""
+
+proc valueAtColumn(row: EditorRow; column: int): int =
+  ## The inline value a press on `column` of `row` is on: the annotation
+  ## (`/* a: 1, b: 2 */`) follows the code, and each `name: value` is its
+  ## own run of columns — or -1.
+  if row.values.len == 0:
+    return -1
+  var at = drawnCodeText(row).runeLen + 1 + "/* ".len
+  for i, v in row.values:
+    if i > 0:
+      at += ", ".len
+    let w = (v.name & ": " & v.value).runeLen
+    if column >= at and column < at + w:
+      return i
+    at += w
+  -1
+
+proc lineValuesOf(row: EditorRow): seq[NamedValue] =
+  for v in row.values:
+    result.add (v.name, v.value)
+
+proc editorMenuAt(path: string; line, column: int): ContextMenuModel =
+  ## The editor menu for a press on `column` of `path:line`.
+  let session = gSession.session
+  let mark = lineMarkOf(path, line)
+  var inFile, any = false
+  for row in session.store.pointList.rows.val:
+    if row.kind == PointKindBreakpoint:
+      any = true
+      if row.path == path: inFile = true
+  let onLine: LineBreakpoint =
+    case mark
+    of emBreakpoint: lbEnabled
+    of emBreakpointDisabled: lbDisabled
+    else: lbNone
+  let text = lineTextOf(path, line)
+  let (token, tokenError) = callTokenAt(text, column,
+                                        rust = path.endsWith(".rs"))
+  editorTextContextMenu(path, line, lineText = text, column = column,
+                        token = token, tokenError = tokenError,
+                        breakpoint = onLine, fileHasBreakpoints = inFile,
+                        anyBreakpoints = any)
+
+# ---- the window's maximised container --------------------------------------
+
+proc maximisedLayout(layout: Layout; pane: PaneKind): Layout =
+  ## PLAT-50 (K7): "Maximise container" — the window shows the stack `pane`
+  ## is in (the desktop's GoldenLayout container), alone; the docked panes
+  ## stay docked. The committed layout is untouched: minimising shows it
+  ## again.
+  result = clone(layout)
+  let leaf = result.tree.find(pane)
+  if leaf.isNil:
+    return
+  let parent = result.tree.parentOf(leaf)
+  let container = if not parent.isNil and parent.kind == lnStack: parent
+                  else: leaf
+  result.tree = clone(container)
+  result.tree.weight = 1.0
+
+proc toggleMaximised(r: GpuiRenderer; pane: PaneKind) =
+  gMaximised = if gMaximised.isSome: none(PaneKind) else: some(pane)
+  traceGesture(if gMaximised.isSome: "maximised " & $pane
+               else: "minimised")
+  discard drawArrangement(r)
+
+# ---- the event log's order -------------------------------------------------
+
+proc orderEventLog(r: GpuiRenderer; order: EventLogOrder) =
+  ## PLAT-50 (K26): the log in `order` — the engine sorts (`ct/event-load`'s
+  ## `sortKey`), the ViewModel records which column (its header shows the
+  ## arrow), and the pane is drawn again.
+  let vm = gSession.session.eventLogVM
+  if vm.isNil:
+    return
+  vm.sortBy(order)
+  try:
+    discard gSession.requestAndLoadEventLog(start = 0,
+                                            count = RecordingEventWindow,
+                                            order = order)
+  except CatchableError as e:
+    traceGesture("event order failed: " & e.msg)
+  traceGesture("event log order " & $order.column & " " &
+               (if order.ascending: "ascending" else: "descending"))
+  redrawPaneOf(r, paneEventLog)
+
+# ---- the VCS pane ----------------------------------------------------------
+
+proc vcsVM(): VCSVM =
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
+       not leaf.vm.isNil:
+      return VCSVM(leaf.vm)
+
+proc toggleVcsCommit(r: GpuiRenderer; index: int) =
+  ## PLAT-50 (K53): the desktop's accordion — a commit opens, listing the
+  ## files it changed (`git diff-tree`), and the open one closes.
+  let vm = vcsVM()
+  if vm.isNil:
+    return
+  let commits = vm.commits.val
+  if index < 0 or index >= commits.len:
+    return
+  if vm.selectedCommitIndices.val == @[index]:
+    vm.setCommits(commits, [])
+    vm.removeCommitFiles(index)
+    traceGesture("commit closed #" & $index)
+  else:
+    let c = commits[index]
+    var rows: seq[VCSFileRow] = @[]
+    for (status, path) in commitChangedFiles(
+        gVcsDirectory, (if c.fullHash.len > 0: c.fullHash else: c.hash)):
+      rows.add VCSFileRow(status: status, path: path,
+                          baseName: path.extractFilename)
+    vm.syncCommitFilesMap([])
+    vm.setCommitFiles(index, rows)
+    vm.setCommits(commits, [index], index)
+    traceGesture("commit opened #" & $index & " " & $rows.len & " file(s)")
+  redrawPaneOf(r, paneVcs)
+
+proc openVcsDiff(r: GpuiRenderer; option: string) =
+  ## PLAT-50 (K34): a changed file's diff — `file-<i>` of the working tree,
+  ## `commitfile-<commit>-<i>` of an opened commit.
+  let vm = vcsVM()
+  if vm.isNil:
+    return
+  var status, path, hash = ""
+  let parts = option.split('-')
+  try:
+    if parts.len == 2 and parts[0] == "file":
+      let f = vm.workingTreeFiles.val[parseInt(parts[1])]
+      status = f.status
+      path = f.path
+    elif parts.len == 3 and parts[0] == "commitfile":
+      let ci = parseInt(parts[1])
+      let fi = parseInt(parts[2])
+      for (index, files) in vm.commitFilesMap.val:
+        if index == ci and fi < files.len:
+          status = files[fi].status
+          path = files[fi].path
+      let c = vm.commits.val[ci]
+      hash = if c.fullHash.len > 0: c.fullHash else: c.hash
+  except ValueError, IndexDefect:
+    return
+  if path.len == 0:
+    return
+  let text = if hash.len > 0: commitFileDiff(gVcsDirectory, hash, path)
+             else: workingTreeFileDiff(gVcsDirectory, path, status)
+  showContent(r, "diff " & path &
+                   (if hash.len > 0: "  (commit " & hash[0 ..< min(7, hash.len)] &
+                                     ")"
+                    else: "  (working tree)"),
+              (if text.len > 0: text else: "no changes to show for " & path),
+              diff = true)
+
+# ---- a value's history and origin -------------------------------------------
+
+proc showValueHistory(r: GpuiRenderer; path: string) =
+  ## PLAT-50 (K28): "Toggle value history" — the value's recorded history.
+  let name = path.split('.')[0]
+  try:
+    let rows = gSession.loadValueHistory(name, gpuiRowBudget())
+    var text = ""
+    for row in rows:
+      text.add $row.locationTicks & "  " & row.valueText & "\n"
+    showContent(r, "history of " & name & " (" & $rows.len & " value" &
+                     (if rows.len == 1: "" else: "s") & ")",
+                (if rows.len > 0: text else: "no recorded values"))
+  except CatchableError as e:
+    traceGesture("no history for " & name & ": " & e.msg)
+
+proc showValueOrigin(r: GpuiRenderer; path: string) =
+  ## PLAT-50 (K28): "Show value origin" — the chain the desktop's origin
+  ## panel lists (`ct/originChain`, `HeadlessDebugSession.loadValueOrigin`),
+  ## nearest cause first.
+  let name = path.split('.')[0]
+  try:
+    let lines = gSession.loadValueOrigin(name).originHopLines
+    showContent(r, "origin of " & name,
+                (if lines.len > 0: lines.join("\n")
+                 else: "no recorded origin for " & name))
+  except CatchableError as e:
+    showContent(r, "origin of " & name, "no origin for " & name & ": " & e.msg)
+
+# ---- the actions -----------------------------------------------------------
+
+proc runContextAction(r: GpuiRenderer; action: ContextAction;
+                      target: ContextTarget) =
+  ## A right-click menu's chosen entry, routed to the operation the
+  ## desktop's entry runs.
+  traceGesture("context action " & $action)
+  if gSession.isNil:
+    return
+  case action
+  of caNone: discard
+  of caPinLeft, caPinBottom, caPinRight:
+    applyGestureCommand(r, cmdDock(target.pane,
+      (case action
+       of caPinLeft: leLeft
+       of caPinRight: leRight
+       else: leBottom)))
+    discard drawArrangement(r)
+  of caUnpin:
+    applyGestureCommand(r, cmdRestoreDocked(target.pane))
+    discard drawArrangement(r)
+  of caClosePane:
+    applyGestureCommand(r, cmdRemovePane(target.pane))
+    discard drawArrangement(r)
+  of caMaximise:
+    toggleMaximised(r, target.pane)
+  of caCopy:
+    # Monaco's Copy with nothing selected copies the caret's line, and the
+    # right-click put the caret on it.
+    copyToClipboard(target.text & "\n", "line " & $target.line)
+  of caFind:
+    openOmnibar(r)
+  of caJumpToLine, caRunToCursor, caJumpBackwardToLine:
+    try:
+      gSession.sourceLineJump(target.path, target.line,
+        (case action
+         of caRunToCursor: "forward"
+         of caJumpBackwardToLine: "backward"
+         else: "smart"))
+    except CatchableError as e:
+      traceGesture("line jump failed: " & e.msg)
+      return
+    afterMove(r)
+  of caJumpToCall, caJumpForwardToCall, caJumpBackwardToCall:
+    if target.token.len == 0:
+      traceGesture(if target.tokenError.len > 0:
+                     target.tokenError & " on line " & $target.line & "."
+                   else: NoWordSelected)
+      return
+    try:
+      gSession.sourceCallJump(target.path, target.line, target.token,
+        (case action
+         of caJumpForwardToCall: "forward"
+         of caJumpBackwardToCall: "backward"
+         else: "smart"))
+    except CatchableError as e:
+      traceGesture("call jump failed: " & e.msg)
+      refreshReplayWindow(r)
+      return
+    afterMove(r)
+  of caAddBreakpoint, caDeleteBreakpoint:
+    discard gSession.toggleBreakpoint(target.path, target.line)
+    refreshReplayWindow(r)
+  of caEnableBreakpoint, caDisableBreakpoint:
+    discard gSession.setBreakpointEnabled(target.path, target.line,
+                                          action == caEnableBreakpoint)
+    refreshReplayWindow(r)
+  of caDeleteBreakpointsInFile, caDeleteAllBreakpoints:
+    var paths: seq[string] = @[]
+    for row in gSession.session.store.pointList.rows.val:
+      if row.kind == PointKindBreakpoint and row.path notin paths and
+         (action == caDeleteAllBreakpoints or row.path == target.path):
+        paths.add row.path
+    for path in paths:
+      discard gSession.clearBreakpoints(path)
+    refreshReplayWindow(r)
+  of caAddTracepoint:
+    # The desktop opens its tracepoint editor on the line; the window's
+    # omnibar takes `:tracepoint <expression>`, placed on this line.
+    gTracepointAt = (target.path, target.line)
+    openOmnibar(r, TracepointCommand)
+  of caToggleCallChildren:
+    let store = gSession.session.store
+    let local = target.index - store.calltrace.startLineIndex.val
+    let lines = store.calltrace.lines.val
+    if local < 0 or local >= lines.len.int64:
+      return
+    let line = lines[local.int]
+    try:
+      gSession.backend.sendDapRequestNoResponse(
+        (if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"),
+        %*{"callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
+      discard gSession.backend.drainEvents()
+      let vm = gSession.session.calltraceVM
+      gSession.requestAndLoadCalltrace(
+        startIndex = max(0'i64, vm.scrollPosition.val -
+                                 GpuiCalltraceBuffer.int64),
+        height = max(1, vm.callRows().len) + 2 * GpuiCalltraceBuffer,
+        depth = RecordingCalltraceDepth)
+    except CatchableError as e:
+      traceGesture("calltrace toggle failed: " & e.msg)
+    redrawCalltrace(r)
+  of caToggleValueHistory:
+    showValueHistory(r, target.path)
+  of caShowValueOrigin:
+    showValueOrigin(r, target.path)
+  of caAddValueToScratchpad, caAddAllValuesToScratchpad:
+    for (name, value) in target.scratchpadSamplesOf(action):
+      gSession.addToScratchpad(name, value)
+    traceGesture("scratchpad " &
+                 $gSession.session.scratchpadVM.entries.val.len & " value(s)")
+    redrawPaneOf(r, paneScratchpad)
+  of caJumpToValue:
+    traceGesture(target.expression & " = " & target.text &
+                 " is the value at this step")
+
+proc onPaneClick(c: GPaneClick) =
+  ## PLAT-50: a press on a row of a pane (`window_clicks`), as the desktop's
+  ## click there. An open popover (a menu, the omnibar's results, a
+  ## right-click menu, a text over the window) owns the press instead.
+  var r: GpuiRenderer
+  if gSession.isNil or gCtxMenu.open or gContent.open or
+     (not gMenu.isNil and gMenu.isOpen) or
+     (not gOmnibar.isNil and gOmnibar.isOpen):
+    return
+  traceGesture("pane click " & $c.part & " " & c.key & " #" & $c.index &
+               " line " & $c.line & " " & $c.button &
+               (if c.ctrl: "+ctrl" else: "") & (if c.alt: "+alt" else: ""))
+  let session = gSession.session
+  case c.part
+  of gcpNone: discard
+  of gcpFileNode:
+    # K17 / K18 (K19: no Files menu, as on the desktop).
+    let vm = session.fileTreeVM
+    let e = fileEntryOf(vm, c.key)
+    if e.text.len == 0 or c.button != gbLeft:
+      return
+    if e.isFolder:
+      vm.toggleExpanded(e.path)
+      redrawPaneOf(r, paneFileTree)
+    else:
+      gViewedFile = e.path
+      if gViewedFile == gSession.getCurrentFile():
+        gViewedFile = ""
+        refreshReplayWindow(r)
+      else:
+        showViewedFile(r)
+  of gcpEventRow:
+    # K24 / K25.
+    let rows = session.eventLogVM.eventRows.val
+    if c.index < 0 or c.index >= rows.len.int64:
+      return
+    let row = rows[c.index.int]
+    if c.button == gbRight:
+      showContent(r, "event #" & $row.eventIndex & " at tick " &
+                       $row.rrTicks, row.value)
+    elif c.button == gbLeft:
+      try:
+        gSession.eventJump(toEventLogEntry(row))
+      except CatchableError as e:
+        traceGesture("event jump failed: " & e.msg)
+        return
+      afterMove(r)
+  of gcpEventHeader:
+    # K26: the column's header orders the log by it, again to reverse.
+    if c.button != gbLeft or session.eventLogVM.isNil:
+      return
+    let shown = session.eventLogVM.columns.val.visibleColumns
+    if c.index < 0 or c.index >= shown.len:
+      return
+    orderEventLog(r, session.eventLogVM.order.clickedHeader(shown[c.index]))
+  of gcpVariable:
+    # K27 / K28.
+    if c.button == gbRight:
+      openContextMenuAt(r, variablesContextMenu(c.key), c.x, c.y)
+    elif c.button == gbLeft:
+      session.stateVM.toggleExpand(c.key)
+      redrawPaneOf(r, paneState)
+  of gcpStateTab:
+    # K29: Locals / Globals / Watches.
+    if c.button != gbLeft or c.index < 0 or c.index > ord(StateTab.high):
+      return
+    session.stateVM.selectTab(StateTab(c.index))
+    traceGesture("state tab " & $StateTab(c.index))
+    redrawPaneOf(r, paneState)
+  of gcpGutter:
+    # K10 / K11.
+    let path = editorPath()
+    if c.button == gbLeft:
+      discard gSession.toggleBreakpoint(path, c.line)
+      if gViewedFile.len > 0: showViewedFile(r) else: refreshReplayWindow(r)
+    elif c.button == gbRight:
+      let mark = lineMarkOf(path, c.line)
+      if mark in {emBreakpoint, emBreakpointDisabled}:
+        discard gSession.setBreakpointEnabled(path, c.line,
+                                              mark == emBreakpointDisabled)
+        if gViewedFile.len > 0: showViewedFile(r)
+        else: refreshReplayWindow(r)
+  of gcpCode:
+    # K12-K15.
+    let path = editorPath()
+    let column = editorColumnAt(c.x)
+    if c.button == gbRight:
+      openContextMenuAt(r, editorMenuAt(path, c.line, column), c.x, c.y)
+    elif c.button == gbLeft and c.ctrl and c.alt:
+      # K15: Ctrl+Alt+click on a function's name.
+      let (token, err) = callTokenAt(lineTextOf(path, c.line), column,
+                                     rust = path.endsWith(".rs"))
+      if token.len == 0:
+        traceGesture(if err.len > 0: err & " on line " & $c.line & "."
+                     else: NoWordSelected)
+        return
+      try:
+        gSession.sourceCallJump(path, c.line, token, "smart")
+      except CatchableError as e:
+        traceGesture("call jump failed: " & e.msg)
+        refreshReplayWindow(r)
+        return
+      afterMove(r)
+    elif c.button == gbLeft and c.alt:
+      # K14: Alt+click — a breakpoint anchored at the column, clamped to the
+      # line (`column_click_resolver`).
+      let width = max(1, lineTextOf(path, c.line).runeLen)
+      let col = max(1, min(column, width))
+      if gSession.setColumnBreakpoint(path, c.line, col):
+        traceGesture("column breakpoint " & $c.line & ":" & $col)
+      if gViewedFile.len > 0: showViewedFile(r) else: refreshReplayWindow(r)
+    elif c.button == gbMiddle or (c.button == gbLeft and c.ctrl):
+      try:
+        gSession.sourceLineJump(path, c.line, "smart")
+      except CatchableError as e:
+        traceGesture("line jump failed: " & e.msg)
+        return
+      afterMove(r)
+  of gcpValue:
+    # K36: an inline value — Ctrl+click pins it, a right click opens its
+    # menu; a click is the value at this step (the window annotates only the
+    # line the debugger is on).
+    let row = editorRowOf(c.line)
+    let i = valueAtColumn(row, editorColumnAt(c.x))
+    if i < 0:
+      return
+    let v = row.values[i]
+    if c.button == gbRight:
+      openContextMenuAt(r, flowValueContextMenu(editorPath(), c.line, v.name,
+                                                v.value, lineValuesOf(row)),
+                        c.x, c.y)
+    elif c.button == gbLeft and c.ctrl:
+      gSession.addToScratchpad(v.name, v.value)
+      traceGesture("scratchpad " &
+                   $session.scratchpadVM.entries.val.len & " value(s)")
+      redrawPaneOf(r, paneScratchpad)
+    elif c.button == gbLeft:
+      traceGesture(v.name & " = " & v.value & " is the value at this step")
+  of gcpCallRow:
+    # K22 (K20 / K21 are `clickCalltrace`'s, by the rows' fixed pitch).
+    if c.button != gbRight:
+      return
+    let store = session.store
+    let local = c.index - store.calltrace.startLineIndex.val
+    let lines = store.calltrace.lines.val
+    if local < 0 or local >= lines.len.int64:
+      return
+    let line = lines[local.int]
+    openContextMenuAt(r, callTraceContextMenu(c.index, line.hasChildren,
+                                              line.isExpanded), c.x, c.y)
+  of gcpCallArg:
+    # K23: an argument's menu (a left press is the row's, `clickCalltrace`).
+    if c.button != gbRight:
+      return
+    for row in session.calltraceVM.callRows():
+      if row.index == c.index and c.line >= 0 and c.line < row.args.len:
+        let a = row.args[c.line]
+        openContextMenuAt(r, callArgumentContextMenu(c.index, a.name, a.value),
+                          c.x, c.y)
+  of gcpTab:
+    if c.button != gbRight:
+      return
+    for k in PaneKind:
+      if $k == c.key:
+        openContextMenuAt(r, tabContextMenu(k, gMaximised.isSome), c.x, c.y)
+  of gcpTimelineTrack:
+    # K30: the track is `TimelineBarWidthPx` wide from the pane's padding.
+    if c.button != gbLeft:
+      return
+    let i = gGeom.tabsNodeOfPane($paneTimeline)
+    if i < 0:
+      return
+    let x0 = gGeom.nodes[i].body.x + ChromePaddingPx
+    let marks = session.timelineVM.bounds.val
+    let first = if marks.len > 0: marks[0] else: 0'u64
+    let last = if marks.len > 1: marks[1] else: first
+    let frac = clamp(float(c.x - x0) / float(TimelineBarWidthPx), 0.0, 1.0)
+    let tick = first + uint64(float(last - first) * frac + 0.5)
+    try:
+      gSession.gotoTick(tick)
+    except CatchableError as e:
+      traceGesture("seek failed: " & e.msg)
+      return
+    afterMove(r)
+  of gcpPoint:
+    # K31: the desktop's click selects the point.
+    if c.button != gbLeft or session.pointListVM.isNil:
+      return
+    session.pointListVM.selectPoint(some(int(c.index)))
+    traceGesture("point selected #" & $c.index)
+    redrawPaneOf(r, panePointList)
+  of gcpScratchClose:
+    # K33: a pinned value's close button.
+    if c.button != gbLeft or session.scratchpadVM.isNil:
+      return
+    session.scratchpadVM.removeValue(int(c.index))
+    traceGesture("scratchpad " &
+                 $session.scratchpadVM.entries.val.len & " value(s)")
+    redrawPaneOf(r, paneScratchpad)
+  of gcpPosition:
+    # K37: the footer's location — the current file's path copied, as the
+    # desktop's copy control copies it (measured: the path, no line).
+    if c.button == gbLeft:
+      copyToClipboard(gSession.getCurrentFile(), "the path")
+  of gcpVcsFile:
+    if c.button == gbLeft:
+      openVcsDiff(r, c.key)
+  of gcpVcsCommit:
+    if c.button == gbLeft and c.key.startsWith("commit-"):
+      try: toggleVcsCommit(r, parseInt(c.key["commit-".len .. ^1]))
+      except ValueError: discard
+
+proc wireClicks(r: GpuiRenderer) =
+  ## Give every row the window draws its click listeners (`window_clicks`).
+  # The whole window: the panes (`gContainer`) and the footer, whose
+  # location is a click target too (K37).
+  if not gRoot.isNil:
+    discard wireWindowClicks(r, gRoot, addr gPressDedupe, onPaneClick)
+  elif not gContainer.isNil:
+    discard wireWindowClicks(r, gContainer, addr gPressDedupe, onPaneClick)
+
+proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
+                        x, y: int): bool =
+  ## PLAT-50: an open right-click menu or event content owns a press: on an
+  ## enabled entry (left button) it runs it; anywhere else in the menu,
+  ## nothing; outside, the menu closes. The content closes on any press.
+  if gCtxMenu.open:
+    let rect = contextMenuRect(gCtxMenu, pendingViewportWidth,
+                               pendingViewportHeight)
+    let (inside, entry) = gCtxMenu.contextMenuHitAt(rect, x, y)
+    if inside:
+      if kind == gekPointerDown and entry >= 0:
+        let chosen = gCtxMenu.choose(entry)
+        if chosen.chosen:
+          drawTopBar(r)
+          runContextAction(r, chosen.action, chosen.target)
+        else:
+          traceGesture("disabled: " & gCtxMenu.menu.entries[entry].label)
+      return true
+    gCtxMenu.close()
+    drawTopBar(r)
+    return true
+  if gContent.open:
+    gContent = GContent()
+    drawTopBar(r)
+    return true
+  false
+
 proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   ## The `root_builder` handed to `gpui_launch`, called from inside the shim
   ## before the event loop starts.
@@ -2701,6 +3719,9 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
     if not pane.isNil: leaves.add pane
   var painted = 0
   gRoot = root
+  # PLAT-50: named, so `--window-ops`' bubbling stops below it (a handle is a
+  # fresh pointer per lookup, so it cannot be compared with `gRoot`).
+  r.setAttribute(root, WindowRootAttribute, "true")
   gContainer = container
   gPanes = initTable[string, GpuiElement]()
   for pane in leaves:
@@ -2955,6 +3976,87 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       windowPointer(r, gekPointerMove, x, y)
       pressAt(x, y)
       return ""
+    of "click":
+      # PLAT-50: `click:<part>:<key>[:left|right|middle[:ctrl]]` — a press
+      # on a row the window wired (`window_clicks.findClickTarget`),
+      # dispatched to it as the shim delivers a press to the element under
+      # the pointer, then to the window root, as a real press bubbles.
+      var part = gcpNone
+      for p in GClickPart:
+        if $p == parts[1]: part = p
+      var key = if parts.len > 2: parts[2] else: ""
+      let button = if parts.len > 3: parts[3] else: "left"
+      let mods = if parts.len > 4: parts[4] else: ""
+      let ctrl = "ctrl" in mods
+      let alt = "alt" in mods
+      # An editor press names its COLUMN too: `<line>@<column>`, pressed at
+      # that column's pixel (`editorXOfColumn`, the inverse of the mapping a
+      # press is read back with).
+      var column = 0
+      if part in {gcpCode, gcpValue} and '@' in key:
+        try: column = parseInt(key[key.find('@') + 1 .. ^1])
+        except ValueError: return "bad column in '" & key & "'"
+        key = key[0 ..< key.find('@')]
+      # A LEFT press on a pane tab is the window's own (it activates the tab):
+      # pressed where the strip drew the tab.
+      if part == gcpTab and button == "left":
+        for n in gGeom.nodes:
+          if n.kind == gnTabs and key in n.panes and n.tabs.len > 0:
+            let (tx, ty) = centreOf(n.tabs[n.panes.find(key)])
+            pressAt(tx, ty)
+            return ""
+        return "no tab '" & key & "' in the window"
+      # The timeline's track: `click:timeline:<permille>`.
+      let el = findClickTarget(r, (if gRoot.isNil: gContainer else: gRoot), part,
+                               if part == gcpTimelineTrack: "" else: key)
+      if el.isNil:
+        return "no " & parts[1] & " row '" & key & "' in the window"
+      # The timeline's track is named by the permille along it pressed.
+      var x = 0
+      if column > 0:
+        x = editorXOfColumn(column)
+      if part == gcpTimelineTrack:
+        let i = gGeom.tabsNodeOfPane($paneTimeline)
+        if i < 0:
+          return "the timeline is not drawn"
+        x = gGeom.nodes[i].body.x + ChromePaddingPx +
+            TimelineBarWidthPx * parseInt(key) div 1000
+      let kind = case button
+                 of "right": gekContextMenu
+                 of "middle": gekAuxDown
+                 else: gekPointerDown
+      let name = case button
+                 of "right": "contextmenu"
+                 of "middle": "auxdown"
+                 else: "mousedown"
+      # AS A REAL PRESS BUBBLES: the shim delivers a dispatched event to one
+      # node, and GPUI delivers a press to every element under the pointer,
+      # innermost first — so the row, then each of its ancestors, up to (not
+      # including) the window root, whose own listener is the window's
+      # pointer router; the root's clearing of the dedupe is done here.
+      var modifiers: set[GpuiModifier] = {}
+      if ctrl: modifiers.incl gmControl
+      if alt: modifiers.incl gmAlt
+      let ev = GpuiEvent(kind: kind, key: $x & ",0", modifiers: modifiers)
+      var node = el
+      while not node.isNil and
+            getAttribute(node, WindowRootAttribute) != "true":
+        discard fireEvent(node, name, ev)
+        node = r.parentNode(node)
+      gPressDedupe.clear()
+      return ""
+    of "ctx":
+      # PLAT-50: the open right-click menu's entry `parts[1]`, pressed.
+      if not gCtxMenu.open:
+        return "no right-click menu is open"
+      let rect = contextMenuRect(gCtxMenu, pendingViewportWidth,
+                                 pendingViewportHeight)
+      for (rr, i) in contextMenuRows(gCtxMenu, rect):
+        if gCtxMenu.menu.entries[i].label == parts[1]:
+          let (x, y) = centreOf(rr)
+          pressAt(x, y)
+          return ""
+      return "no entry '" & parts[1] & "' in the right-click menu"
     of "hover-label":
       # PLAT-49 part B: the pointer onto a strip label, without pressing.
       for st in gGeom.strips:
@@ -2970,12 +4072,16 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       gHoverClockOffsetMs += int64(at(1))
       applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
       return ""
-    of "label":
+    of "label", "label-menu":
       for st in gGeom.strips:
         for sl in st.slots:
           if sl.pane == parts[1]:
             let (x, y) = centreOf(sl.rect)
-            pressAt(x, y)
+            if parts[0] == "label-menu":
+              # PLAT-50 (K42): the label's right-click.
+              windowPointer(r, gekContextMenu, x, y)
+            else:
+              pressAt(x, y)
             return ""
       return "no strip label for '" & parts[1] & "'"
     of "pin":
@@ -3710,6 +4816,16 @@ proc main() =
   of gckOpen:
     try:
       quit(runOpen(cmd))
+    except DapLaunchRefusedError as e:
+      # A recording this build cannot read is not an unhandled error. The
+      # engine stated its reason — the container version it found, the one it
+      # requires, and that re-recording is the remedy — and that sentence is
+      # what the user gets, whole: `splitLines()[0]` below would truncate it
+      # if the engine ever wraps. Exit 5 matches the terminal front-end's
+      # `cli.ExitUnreadableRecording`, which both front-ends owe a script
+      # driving either of them.
+      stderr.writeLine("codetracer-gpui: " & e.msg)
+      quit(5)
     except CatchableError as e:
       stderr.writeLine("codetracer-gpui: " & e.msg.splitLines()[0])
       quit(1)

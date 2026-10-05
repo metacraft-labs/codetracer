@@ -102,7 +102,10 @@ ARMS = [
      "the host passes no breakpoints to the pane again"),
     # MOVED 2026-09-23: PLAT-40 moved the terminal's breakpoint toggle into
     # the session both native front-ends share, so the arm follows it there.
-    ("L2", SESSION, "  for l in lines:\n", "  for l in [line]:\n", [LINE_TERM],
+    ("L2", SESSION,
+     "    lines.add line\n  s.sendBreakpointLines(path, lines, disabled)\n",
+     "    lines.add line\n  s.sendBreakpointLines(path, @[line], disabled)\n",
+     [LINE_TERM],
      "a toggle sends only its own line: setBreakpoints clears the others"),
     ("L3", RUNTIME,
      "    outcome.awaitsMove = movesTheDebugger(outcome.action)",

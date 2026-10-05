@@ -6796,3 +6796,92 @@ Two traps in the same area, both live:
       (its own ground) and `.call-current` (bold); the native front-ends
       use `ui/surface/primary/secondary-hover` (the desktop step list's
       active row) — `srSurfaceActiveRow`.
+- PLAT-50 (2026-10-03) facts — clicks, chrome colours, dividers:
+  * The desktop's click behaviours are DATA: `headless_app/pane_clicks.nim`
+    (`ClickInventory` K1..K56, one row per behaviour with each native
+    front-end's state — done / existing / n/a, never "deferred" — and the
+    right-click menus as `ContextMenuModel` builders: tab, dock label, editor
+    text, call-trace row, call argument, Variables row, inline value). The
+    desktop has NO Files menu (its four entries ran nothing and were
+    removed), and a call argument's left press is the row's (no tooltip).
+    `ContextMenuState` (openAt / move / hover / choose) is the open menu
+    for both front-ends; a disabled entry carries its reason and is never
+    chosen. Labels are asserted against the real desktop's
+    (`plat50-desktop-capture.spec.ts` -> `answers/plat50-desktop.electron.json`).
+  * Terminal: a press the layout returns `lasNoGesture` for goes to
+    `runtime.routePaneClick`; what needs the session comes back as
+    `RuntimeOutcome.paneClick` (`PaneClickKind`) and runs in
+    `tui_session.applyPaneClick`. An open context menu / content overlay
+    owns the mouse (`routeOverlayMouse`, before the top bar) and the keys.
+    `MouseEvent.ctrl/alt/shift` are SGR bits 16/8/4.
+  * GPUI: rows are not hit-tested by pixel; `window_clicks.wireWindowClicks`
+    puts mousedown/contextmenu/auxdown listeners on recognised rows (by
+    data attributes) after every redraw, the deepest row acts and
+    `PressDedupe` drops its ancestors' copies (the root clears it). The
+    shim (isonim-gpui) delivers right/middle presses as `contextmenu` /
+    `auxdown` (`gekContextMenu` / `gekAuxDown`). `--window-ops`
+    `click:<part>:<key>[:button[:ctrl]]` and `ctx:<label>` drive them; a
+    `click:` is dispatched to the row and then to each ancestor up to (not
+    into) the element marked `data-ct-window-root`, as GPUI bubbles a real
+    press (the shim's dispatch reaches one node; element handles are fresh
+    pointers per lookup, so never compare them with `==`).
+  * A line jump the engine cannot satisfy (e.g. backward from the first
+    stop) never answers `stopped`; `waitForEvent` has no clock by default,
+    so a plan run that does it hangs — the PLAT-50 GPUI plan suite runs the
+    window under `timeout 120`.
+  * Shared ops added to `HeadlessDebugSession`: `sourceLineJump(path, line,
+    "smart"|"forward"|"backward")` (`ct/source-line-jump`, behaviour 0/1/2),
+    `setBreakpointEnabled` (a disabled breakpoint is NOT sent to the engine,
+    as the desktop's `dapSetBreakpoints`; its row stays via
+    `applyVerifiedBreakpoints(..., disabledLines)` — still the ONLY
+    pointList writer, `test_plat40_producers` enforces it), `clearBreakpoints`.
+  * Files: both native trees open fully expanded (`native_host.expandAllFolders`
+    in `loadRecordingPanes`) and then follow `FilesystemVM.isExpanded`
+    (`tui_session.fileTreeModelOf`, `pane_views.fileTreeNode`). A test that
+    builds a `FilesystemVM` itself must expand it the same way.
+  * There is NO divider row between stacked panes any more: the lower pane's
+    strip is the separator, and a press on it OFF its tabs picks up the split
+    above (`binding.dividerAt` / `onStripLabel`; a lone editor's label is
+    `LoneEditorLabelCells` wide). Body dividers are `shell.DividerGlyph` "▏"
+    (fg = `dividerLineRole(--dividers)`, bg = the right pane's base ground);
+    in a strip row the divider is the strip's ground. `--dividers=strip`
+    (default, ui/surface/primary/default = the desktop's splitters) or
+    `subtle` (ui/border/secondary); GPUI draws 1px lines only for subtle.
+  * Chrome tokens (desktop-measured): top bar / strip / inactive tabs / menu
+    surface = ui/surface/primary/default (#1b1b1b); omnibox = ui/surface/input
+    /default inside ui/border/secondary edges ▕ ▏; menu frame =
+    ui/border/primary; GPUI's `WindowChrome` is now token-derived. The omnibox
+    is centred and `clamp(24em, 24vw, 40em)` wide (terminal: 9.63 px cells,
+    `top_bar.omnibarDesktopCells`; GPUI `omnibarDesktopPx`).
+  * Desktop bugs fixed in `ui/editor.nim`: the gutter right-click
+    (`lineActionContextMenu`) re-tested the marker's empty dataset, the
+    contextmenu listener matched no `gutter-breakpoint-*` class, and
+    `onMouseDown` read `lineNumber` off a null position (the exception kept
+    the right-click menu from opening). "Expand Full Callstack" was REMOVED
+    from every call-trace menu: it sends `ct/expand-calls` with
+    `CallstackInternal`, which unfolds only calls the engine AUTO-collapsed,
+    and no view loads the trace with `autoCollapsing: true` — it could change
+    nothing. The event log's header sort was dead twice over: the visible
+    header is `ui/event_log.renderColumnHeader`'s own strip (DataTables'
+    header row is hidden) and took no click, and the ENGINE ignored the
+    order (`event_db.ordered_event_positions`; `ct/event-load` reads
+    `sortKey`/`sortAscending` and keeps each event's recorded `eventIndex`).
+    The status bar's copy control copies the file PATH (no line); the native
+    status line / footer copy the same.
+  * More shared ops: `setColumnBreakpoint` (Alt+click; columns survive every
+    re-send through `BreakpointAnchor`), `sourceCallJump` (Ctrl+Alt+click,
+    `ct/source-call-jump`, settles on the engine's error notification),
+    `loadValueHistory` (`ct/load-history`), `loadValueOrigin`
+    (`ct/originChain`), `addToScratchpad`, `requestAndLoadEventLog(order)`.
+    `pane_clicks.callTokenAt` is Monaco's word rule (+ Rust `::` paths).
+  * Terminal `o` / `:origin` used to freeze (it waited for a `stopped` an
+    origin query never sends): `RuntimeOutcome.awaitsOrigin` waits for the
+    origin event, bounded, then re-runs the walk. `o` acts on
+    `CommandContext.selectedVariable`, which nothing set before PLAT-50 (so
+    `o` always said "no variable selected"); a click on a Variables row sets
+    it, and a move (a rebuilt Variables model) clears it.
+  * A View-menu pane the arrangement does not place is ADDED (after the
+    event log) on both native front-ends; GPUI renders its leaf on demand
+    (`adoptNewLeaves`). GPUI copies through the shim's clipboard
+    (`gpui_write_clipboard`, written to the platform clipboard on the next
+    frame); the terminal through OSC 52.

@@ -216,14 +216,24 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 1661
+  ExpectedAssertions = 1705
     ## Written from a run, not estimated: **29** cases (six in suite 1, four
     ## in suite 2, NINE × two viewports in suite 3, and the count case) over
     ## this host's plan at both viewports and three populated stops. It was
-    ## 27 cases / 1299 assertions before this pass drew the column rule, which
-    ## re-pointed one case and added a second beside it. The 362 new
+    ## 27 cases / 1299 assertions before the pass that drew the column rule,
+    ## which re-pointed one case and added a second beside it. The 362 new
     ## assertions are mostly the per-row loop over the rule: thirteen rows and
     ## a header, times fifteen readings, times three stops is where they are.
+    ##
+    ## **1661 → 1705 AT THE PLAT-50 MERGE, 2026-10-05, AND THE CASE COUNT DID
+    ## NOT MOVE.** The tab-strip case stopped asserting one thing per
+    ## `data-view-id` node it happened to find — a contribution that moved
+    ## with the rows — and now asserts a FIXED pair (the state tree has
+    ## exactly one owner, and it is the table) plus two readings per body row
+    ## (that each row is a vocabulary `Tree` row and names its variable),
+    ## which is the PLAT-50 click contract this renderer now relies on. The
+    ## +44 is MEASURED from the run, not derived: no case was added or
+    ## removed.
     ## `std/unittest` prints one `[OK]` per test BLOCK and
     ## never one per `check`, so a file of empty cases scores a full pass; this
     ## is what makes a case that stopped running fail instead (§7).
@@ -252,16 +262,38 @@ const
   UnsteppedOps = ""
     ## `entry-shell`'s. The population control for case 6: at entry the pane
     ## has no variables and must still be the vocabulary's report.
-  StateGroundHex = "#1b222c"
+  StateGroundHex = "#282828"
     ## The state pane's own background, as the plan reports it. Asserted
     ## against the plan rather than assumed, because it is one end of the
     ## blend the column rule's rendered colour is.
-  SeparatorRenderedHex = "#47494c"
+    ##
+    ## **RE-MEASURED AT THE PLAT-50 MERGE (2026-10-05), AND IT MOVED.** It
+    ## read `#1b222c` until then. PLAT-50 (`0a52bd0aa`, *"the desktop's chrome
+    ## colours"*) re-grounded the panes on the DESKTOP'S measured tokens —
+    ## `main.PanelGround = "#282828"  # ui/surface/base/panel, Dark` — and
+    ## that commit's own notes name `#1b222c` as the value it replaced and
+    ## describe the border *"(#565656) over the #282828 panes"*. So this is
+    ## upstream's deliberate change showing through a carried literal, not a
+    ## regression here: the rule's GEOMETRY did not move at all (x 767, 277 of
+    ## 277 rows, y 176-452 contiguous, measured both before and after).
+  SeparatorRenderedHex = "#4b4b4b"
     ## **WHAT THE FRAMEBUFFER HOLDS WHERE THE RULE IS DRAWN**, and it is NOT
-    ## `leaves.StateSeparatorColour`. `(71, 73, 76)`, measured in a captured
-    ## frame — the declared `#565656` over `StateGroundHex` at coverage
-    ## ≈ 0.75. A CARRIED measurement: nothing in this file opens a window, and
-    ## the case that uses it says so and asserts the arithmetic instead.
+    ## `leaves.StateSeparatorColour`. `(75, 75, 75)`, MEASURED in
+    ## `build/plat35/gpui/state.png` at the merged bytes — the declared
+    ## `#565656` over `StateGroundHex` at coverage ≈ 0.76. A CARRIED
+    ## measurement: nothing in this file opens a window, and the case that
+    ## uses it says so and asserts the arithmetic instead.
+    ##
+    ## **RE-MEASURED AT THE PLAT-50 MERGE, AND IT MOVED WITH THE GROUND.** It
+    ## read `#47494c` = `(71, 73, 76)` over the old `#1b222c`. The rule still
+    ## declares the same token; only the ground under it changed, so the
+    ## composite did. Found by a STRUCTURAL probe that discovers the rule
+    ## rather than searching for a colour — the column where one pixel sits
+    ## between two pixels of the same ground on the most rows — which answered
+    ## x = 767 on 281 rows against 28 for the runner-up, and the colour was
+    ## then READ OFF those rows. The declared `#565656` meanwhile counts 429
+    ## in this very frame, which is why an exact-token probe is not merely
+    ## blind here but insensitive (`Verification-Harness-Traps` §67).
   PaneAttr = "data-ct-pane"               # `leaves.PaneRoleAttribute`
   StateAttr = "data-ct-state"             # `leaves.StateAttribute`
   HighlightedAttr = "data-highlighted"    # the vocabulary binding's
@@ -935,7 +967,7 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
       # Both ends of the blend come out of the plan.
       ck rule.style("bg") == "#565656"
       ck pane.style("bg") == StateGroundHex
-      ck StateGroundHex == "#1b222c"
+      ck StateGroundHex == "#282828"
       let mixed = mixAtThreeQuarters(rule.style("bg"), pane.style("bg"))
       let rendered = channels(SeparatorRenderedHex)
       checkpoint(vp & " declared " & rule.style("bg") & " over " &
@@ -943,8 +975,13 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
                  ", frame holds " & $rendered & " (" & SeparatorRenderedHex &
                  ")")
       # Within one unit per channel, because the measured coverage is not
-      # exactly 3/4 on all three (0.746 / 0.750 / 0.762) and the rasteriser
-      # rounds. A token or a ground that MOVED would miss by tens.
+      # exactly 3/4 (≈ 0.76 over the `#282828` ground) and the rasteriser
+      # rounds: truncated 3/4 gives 74 per channel and the frame holds 75.
+      # A token or a ground that MOVED would miss by tens — which is exactly
+      # what this case did at the PLAT-50 merge, by 3 and 2 on two channels,
+      # when the ground went from `#1b222c` to `#282828` and these two
+      # constants still held the old composite. It was re-measured, not
+      # widened: the tolerance is still one unit.
       for i in 0 .. 2:
         ck abs(rendered[i] - mixed[i]) <= 1
       # **AND IT IS NOT THE DECLARED TOKEN**, which is the whole point: a
@@ -981,9 +1018,40 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
       for n in pane.nodesWith(HighlightedAttr):
         if n.attr(HighlightedAttr) == "true": inc highlighted
       ck highlighted == 1
-      # The variables TREE is gone from the plan: its rows are the table's now.
+      # **THE STATE TREE HAS EXACTLY ONE OWNER AND IT IS THIS TABLE.**
+      #
+      # RE-AIMED AT THE PLAT-50 MERGE, 2026-10-05. This block asserted that
+      # NOTHING in the pane carried `state.root`, because `renderState` had
+      # removed the vocabulary's `Tree` outright. PLAT-50 then made that
+      # absence a REGRESSION rather than a virtue: `window_clicks` decides a
+      # press is a variable press by walking for `data-view-kind == "Tree"`
+      # UNDER an ancestor whose `data-view-id` is `state.root`, so with the id
+      # absent every variable press in this pane stopped being recognised and
+      # PLAT-50's own case *"a value expands; a variable's menu"* went red
+      # (measured: 95 assertions against upstream's own 104 at the same
+      # merge). The table therefore CLAIMS the id — it IS the state tree now.
+      #
+      # So the invariant worth holding was never "the id is absent"; it is
+      # that the id is not DUPLICATED, because two owners of one node is §30.
+      # That is what is asserted, and it is a FIXED number of assertions
+      # rather than one per `data-view-id` node, which is what made the old
+      # loop's contribution move with the rows it happened to find.
+      var treeOwners = 0
+      var tableOwnsTree = false
       for n in pane.nodesWith(ViewIdAttr):
-        ck n.attr(ViewIdAttr) != StateTreeViewId
+        if n.attr(ViewIdAttr) == StateTreeViewId:
+          inc treeOwners
+          if n.attr(StateTableAttribute).len > 0: tableOwnsTree = true
+      ck treeOwners == 1
+      ck tableOwnsTree
+      # And every body row names the variable it draws, as a vocabulary
+      # `Tree` row, in the spelling `stateVM.toggleExpand` and
+      # `variablesContextMenu` take — the two attributes PLAT-50 dispatches
+      # on, published here so this renderer's agreement with that click model
+      # is GATED and not merely intended.
+      for row in pane.bodyRows:
+        ck row.attr(ViewKindAttr) == "Tree"
+        ck row.attr(ViewIdAttr).len > 0
 
     test "at " & vp & " `data-column` ELSEWHERE in the window is the Table's fact":
       # §4: the instrument must measure the subject. The mirror of the mistake

@@ -152,8 +152,6 @@ const
   OmnibarGlyph* = "⌕"
   FolderMarker* = "›"
   OmnibarOpenMinCells* = 16
-  OmnibarOpenMaxCells* = 40
-  OmnibarFieldMaxCells* = 28
   OmnibarFieldMinCells* = 14
   OmnibarResultRows* = 10
   GraphicsControlCells* = 2
@@ -164,7 +162,29 @@ const
     ## and GPUI show in the same empty field.
   OmnibarPad* = 1
     ## The field's inner padding, each side: it is an input box on its own
-    ## surface, not text on the bar.
+    ## surface, not text on the bar. Since PLAT-50 the padding cell on each
+    ## side carries the field's border as an edge line (`FieldEdgeLeft` /
+    ## `FieldEdgeRight`).
+  FieldEdgeLeft* = "▕"
+    ## PLAT-50: the field's (and the menu button's) left border — U+2595
+    ## RIGHT ONE EIGHTH BLOCK, a line at the cell's right edge, against the
+    ## field — in ui/border/secondary on the bar's ground, the desktop's
+    ## `.command-input-row` 1px border in a cell.
+  FieldEdgeRight* = "▏"
+    ## PLAT-50: the field's right border — U+258F LEFT ONE EIGHTH BLOCK.
+  DesktopEmPx = 16.0
+    ## PLAT-50: the desktop caption bar's em (its 16px root font), which its
+    ## omnibox width is written in.
+  DesktopCellPx = 9.63
+    ## The desktop's editor monospace cell, measured (PLAT-49 part B,
+    ## `binding.DesktopCellWidthPx`): one terminal cell stands for this many
+    ## of the desktop's pixels.
+  OmnibarDesktopFloorCells* = int(24.0 * DesktopEmPx / DesktopCellPx + 0.5)
+    ## `clamp(24em, 24vw, 40em)`'s floor in cells (40).
+  OmnibarDesktopCeilingCells* = int(40.0 * DesktopEmPx / DesktopCellPx + 0.5)
+    ## Its ceiling in cells (66).
+  OmnibarDesktopShare* = 0.24
+    ## Its middle term: 24% of the row (`24vw`).
 
 # ---------------------------------------------------------------------------
 # Widths
@@ -245,6 +265,13 @@ proc controlsWidth(mode: IconsMode; shown: seq[int]): int =
 # Layout
 # ---------------------------------------------------------------------------
 
+func omnibarDesktopCells*(width: int): int =
+  ## PLAT-50: the width the desktop gives its omnibox in a row `width` cells
+  ## wide — `COMMAND_PROMPT_WIDTH = clamp(24em, 24vw, 40em)`
+  ## (components/menu_bar.styl), in the desktop's own cells.
+  clamp(int(float(width) * OmnibarDesktopShare + 0.5),
+        OmnibarDesktopFloorCells, OmnibarDesktopCeilingCells)
+
 proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   ## Which cells each part of the row gets. See the module header for the
   ## priority order.
@@ -270,7 +297,9 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   let menuW = if take(3): 3 else: 0
   var omniW = 0
   if omnibarOpen:
-    let want = max(OmnibarOpenMinCells, min(OmnibarOpenMaxCells, width div 3))
+    # PLAT-50: open or closed, the field is the desktop's width
+    # (`omnibarDesktopCells`) where the row has it.
+    let want = max(OmnibarOpenMinCells, omnibarDesktopCells(width))
     let room = avail - used - 1
     omniW = min(want, room)
     if omniW >= 6: discard take(omniW + 1) else: omniW = 0
@@ -297,7 +326,7 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   if not omnibarOpen and omniW > 0:
     let room = avail - used
     if room >= OmnibarFieldMinCells - omniW:
-      let grown = min(OmnibarFieldMaxCells, omniW + room)
+      let grown = min(omnibarDesktopCells(width), omniW + room)
       if grown >= OmnibarFieldMinCells:
         used += grown - omniW
         omniW = grown
@@ -352,8 +381,16 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
         headerW = textCells(candidate)
         break
 
-  # Place, left to right: menu, controls, omnibar, tabs; header and badge on
-  # the right.
+  # Place, left to right: menu, controls; the omnibar CENTRED; the session
+  # tabs and their "+" right after it; header and badge on the right.
+  #
+  # PLAT-50 (the user, 2026-10-02: "the omnibox is centred in the top bar in
+  # Electron"): measured, the desktop's caption bar is one flex row — the
+  # toolbar and the session tab bar both `flex: 1 1 0` either side of the
+  # omnibox — so the field sits in the MIDDLE of the bar and moves right only
+  # when the toolbar (`min-width: max-content`) needs the room. Here the field
+  # is centred on the row, never left of the controls, and never so far
+  # right that the tabs, the "+" and the header after it lose their cells.
   var col = 0
   if menuW > 0:
     result.segments.add TopBarSegment(part: tpMenuButton, col: col,
@@ -370,8 +407,18 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
       col += w
     inc col
   if omniW > 0:
-    result.segments.add TopBarSegment(part: tpOmnibar, col: col, width: omniW)
-    col += omniW + 1
+    var after = 0
+    if tabSegs.len > 0:
+      after += tabsW + 1
+    if addW > 0:
+      after += addW + 1
+    let rightLimit =
+      (if headerW > 0: width - badgeW - 1 - headerW else: width - badgeW) - 1
+    let latest = rightLimit - after - omniW
+    let centred = (width - omniW) div 2
+    let at = max(col, min(centred, latest))
+    result.segments.add TopBarSegment(part: tpOmnibar, col: at, width: omniW)
+    col = at + omniW + 1
   if tabSegs.len > 0:
     for s in tabSegs.mitems:
       s.col = col
@@ -460,13 +507,21 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
     case s.part
     of tpMenuButton:
       let open = not m.menu.isNil and m.menu.isOpen
-      # Closed, the button sits on the row's own card, like the desktop's
-      # menu bar; open, it takes the active tab's surface.
+      # Closed, the button sits on the bar's own ground inside a border, as
+      # the desktop's `#menu-root` does (#1b1b1b, 1px ui/border/secondary —
+      # PLAT-50); open, it takes the active tab's surface.
       if open:
         g.fillSurface(0, s.col, s.width, 1, srTabActive)
-      g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
-              if open: CellStyle(role: srTabActive, bold: true)
-              else: CellStyle(role: srChromeText, surface: srSurfaceCard))
+        g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
+                CellStyle(role: srTabActive, bold: true))
+      else:
+        g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
+                CellStyle(role: srChromeText, surface: srSurfaceTopBar))
+        if s.width >= 3:
+          g.paint(0, s.col, FieldEdgeLeft,
+                  CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
+          g.paint(0, s.col + s.width - 1, FieldEdgeRight,
+                  CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
     of tpControl:
       let enabled = s.index < m.controlsEnabled.len and
                     m.controlsEnabled[s.index]
@@ -474,7 +529,12 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       let role = if hovered: srTabActive
                  elif enabled: srChromeText
                  else: srChromeMuted
-      g.fillSurface(0, s.col, s.width, 1, if hovered: srTabActive else: srTabBar)
+      # PLAT-50 (the user, 2026-10-02: "the toolbar buttons must not have a
+      # separate (black) background"): a control is the BAR'S ground, as the
+      # desktop's `.ct-button-image-md-secondary` buttons are (measured
+      # #1b1b1b on the #1b1b1b `#menu`); only the hovered one is lifted.
+      g.fillSurface(0, s.col, s.width, 1,
+                    if hovered: srTabActive else: srSurfaceTopBar)
       let c = TransportControls[s.index]
       let text =
         case lay.effectiveIcons
@@ -482,14 +542,19 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         of imText: " " & c.text & " "
         else: " " & c.glyphFor(lay.effectiveIcons) & " "
       g.paint(0, s.col, fitCells(text, s.width),
-              CellStyle(role: role, bold: hovered))
+              CellStyle(role: role, bold: hovered,
+                        surface: (if hovered: srTabActive
+                                  else: srSurfaceTopBar)))
     of tpOmnibar:
       if lay.omnibarField:
-        # PLAT-49: AN INPUT BOX, open or closed — the field on its own
-        # surface (`srSurfaceField`), padded, distinct from the bar it sits in. Closed (or open
-        # and empty) it shows the Omnibar ViewModel's placeholder, in italic
-        # so it is never read as a typed query; open, the query with the
-        # caret where the ViewModel's `cursor` is (`omnibarCaret`).
+        # PLAT-49: AN INPUT BOX, open or closed. PLAT-50: on the design
+        # system's input surface (`srSurfaceField`), one subtle step off the
+        # bar, and BORDERED as the desktop's field is — the first and last
+        # cells are the bar's ground carrying the border as an edge line
+        # (`FieldEdgeLeft` / `FieldEdgeRight`, ui/border/secondary). Closed
+        # (or open and empty) it shows the Omnibar ViewModel's placeholder,
+        # in italic so it is never read as a typed query; open, the query
+        # with the caret where the ViewModel's `cursor` is (`omnibarCaret`).
         g.fillSurface(0, s.col, s.width, 1, srSurfaceField)
         g.paint(0, s.col, spaces(s.width),
                 CellStyle(role: srChromeText, surface: srSurfaceField))
@@ -498,6 +563,13 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         g.paint(0, s.col + OmnibarPad, text,
                 CellStyle(role: srChromeText, surface: srSurfaceField,
                           italic: showsPlaceholder))
+        if s.width > 2 * OmnibarPad:
+          g.fillSurface(0, s.col, 1, 1, srSurfaceTopBar)
+          g.paint(0, s.col, FieldEdgeLeft,
+                  CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
+          g.fillSurface(0, s.col + s.width - 1, 1, 1, srSurfaceTopBar)
+          g.paint(0, s.col + s.width - 1, FieldEdgeRight,
+                  CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
         let caret = omnibarCaret(m, lay)
         if caret.shown and m.caretDrawn:
           g.restyle(0, caret.col, 1,
@@ -507,9 +579,8 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
                       else: r.underline = true
                       r)
       else:
-        g.fillSurface(0, s.col, s.width, 1, srTabBar)
         g.paint(0, s.col, fitCells(" " & OmnibarGlyph & " ", s.width),
-                CellStyle(role: srChromeText))
+                CellStyle(role: srChromeText, surface: srSurfaceTopBar))
     of tpTab:
       # PLAT-49 part B (finding 7): EACH SESSION TAB ON ITS OWN GROUND, a
       # cell of the bar between it and the next (`SessionTabGapCells`): the
@@ -534,13 +605,12 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         g.paint(0, s.col + s.width - 2, SessionTabCloseGlyph,
                 CellStyle(role: srChromeMuted, surface: role))
     of tpTabMore:
-      g.fillSurface(0, s.col, 1, 1, srTabBar)
       g.paint(0, s.col, (if s.index < 0: "‹" else: "›"),
-              CellStyle(role: srChromeMuted))
+              CellStyle(role: srChromeMuted, surface: srSurfaceTopBar))
     of tpTabAdd:
       # The desktop's `.session-tab-add`: a borderless button on the bar,
       # lit while the pointer is on it (its tooltip says "New tab").
-      let role = if m.hoveredTabAdd: srTabActive else: srTabBar
+      let role = if m.hoveredTabAdd: srTabActive else: srSurfaceTopBar
       g.fillSurface(0, s.col, s.width, 1, role)
       g.paint(0, s.col, fitCells(" " & NewSessionTabGlyph & " ", s.width),
               CellStyle(role: (if m.hoveredTabAdd: srTabActive
@@ -605,24 +675,53 @@ proc dropdownWidth(level: MenuLevelView): int =
   # " label   chord › "
   1 + label + (if chord > 0: 3 + chord else: 0) + 3
 
+const
+  DropdownFrameCells* = 1
+    ## PLAT-50: the frame round a dropdown, each side — the desktop's
+    ## `dropdown-surface-chrome()` hairline (ui/border/primary) in cells.
+
+proc paintDropdownFrame*(g: var StyledGrid; a: CellArea) =
+  ## PLAT-50: an open dropdown's ground and frame — the desktop's dropdown
+  ## surface (`srSurfaceMenu`, ui/surface/primary/default) framed in its
+  ## border (`srBorderMenu`, ui/border/primary), so the menu stands apart
+  ## from the panes and strips it covers (the user, 2026-10-02: "its borders
+  ## are invisible"). The frame's glyphs keep it legible in monochrome.
+  if a.width < 2 or a.height < 2:
+    g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
+    return
+  g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
+  let st = CellStyle(role: srBorderMenu, surface: srSurfaceMenu)
+  let inner = a.width - 2
+  g.paint(a.row, a.col, "┌" & repeat("─", inner) & "┐", st)
+  g.paint(a.row + a.height - 1, a.col, "└" & repeat("─", inner) & "┘", st)
+  for r in a.row + 1 ..< a.row + a.height - 1:
+    g.paint(r, a.col, "│", st)
+    g.paint(r, a.col + 1, spaces(inner),
+            CellStyle(role: srChromeText, surface: srSurfaceMenu))
+    g.paint(r, a.col + a.width - 1, "│", st)
+
 proc menuDropdowns*(m: TopBarModel; lay: TopBarLayout;
                     width, height: int): seq[MenuDropdown] =
   ## The open menu's dropdowns, outermost first, as overlays over the body —
   ## the desktop's menu: the first level (File, Edit, …) drops below the
   ## root `≡` button, and every entered folder cascades to the RIGHT of the
-  ## dropdown that holds it, starting at its parent item's row. Clamped to
-  ## the screen (a dropdown that would run off the right edge is moved left;
-  ## off the bottom, it is cut to the rows that fit).
+  ## dropdown that holds it, its first item level with its parent item's
+  ## row. Clamped to the screen (a dropdown that would run off the right
+  ## edge is moved left; off the bottom, it is cut to the rows that fit).
+  ##
+  ## PLAT-50: each dropdown is FRAMED (`paintDropdownFrame`): `area` is the
+  ## whole framed box, its items one cell in from every side.
   if m.menu.isNil or not m.menu.isOpen:
     return
   let levels = m.menu.openLevels()
   var col = max(0, lay.segmentOf(tpMenuButton).col)
   var row = 1
+  const f = DropdownFrameCells
   for depth in 0 ..< levels.len:
     let lv = levels[depth]
     if lv.items.len == 0:
       continue
-    let w = min(width, dropdownWidth(lv))
+    let w = min(width, dropdownWidth(lv) + 2 * f)
     var rows: seq[DropdownRow] = @[]
     var r = 0
     for k, it in lv.items:
@@ -631,50 +730,55 @@ proc menuDropdowns*(m: TopBarModel; lay: TopBarLayout;
       if it.separatorAfter and k < lv.items.high:
         rows.add DropdownRow(row: r, item: -1)
         inc r
-    let h = min(rows.len, max(0, height - 1 - row))
+    let h = min(rows.len, max(0, height - 1 - row - 2 * f))
     let c = max(0, min(col, width - w))
     var kept: seq[DropdownRow] = @[]
     for dr in rows:
       if dr.row < h:
-        kept.add DropdownRow(row: row + dr.row, item: dr.item)
+        kept.add DropdownRow(row: row + f + dr.row, item: dr.item)
     result.add MenuDropdown(area: CellArea(col: c, row: row, width: w,
-                                           height: h),
+                                           height: h + 2 * f),
                             level: lv, rows: kept)
-    # The next level opens beside the entered item.
+    # The next level opens beside the entered item, its first item on the
+    # entered item's row (its frame one row above).
     if depth < m.menu.path.len:
       let entered = m.menu.path[depth]
       for dr in kept:
         if dr.item >= 0 and lv.items[dr.item].index == entered:
-          row = dr.row
+          row = dr.row - f
       col = c + w
 
 proc paintMenuDropdowns*(g: var StyledGrid; dropdowns: seq[MenuDropdown]) =
-  ## Each dropdown on the card surface; the item on the open path (and the
-  ## highlight) lifted onto the selection surface; a disabled item in the
-  ## muted role; the chord right-aligned, muted; `›` on a folder. A
-  ## separator is an empty row — spacing, not a drawn rule.
+  ## Each dropdown framed on the desktop's dropdown surface
+  ## (`paintDropdownFrame`); the item on the open path (and the highlight)
+  ## lifted onto the selection surface; a disabled item in the muted role;
+  ## the chord right-aligned, muted; `›` on a folder. A separator is an
+  ## empty row — spacing, not a drawn rule.
+  const f = DropdownFrameCells
   for d in dropdowns:
     let a = d.area
-    g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceCard)
+    paintDropdownFrame(g, a)
+    let ic = a.col + f
+    let iw = max(0, a.width - 2 * f)
     for dr in d.rows:
-      g.paint(dr.row, a.col, spaces(a.width), CellStyle(role: srChromeText,
-                                                       surface: srSurfaceCard))
+      g.paint(dr.row, ic, spaces(iw), CellStyle(role: srChromeText,
+                                                surface: srSurfaceMenu))
       if dr.item < 0:
         continue
       let it = d.level.items[dr.item]
-      let surface = if it.active: srSurfaceSelection else: srSurfaceCard
+      let surface = if it.active: srSurfaceSelection else: srSurfaceMenu
       let role = if not it.enabled: srChromeMuted
                  elif it.active: srTabActive
                  else: srChromeText
-      g.fillSurface(dr.row, a.col, a.width, 1, surface)
-      g.paint(dr.row, a.col, fitCells(" " & it.label, a.width),
+      g.fillSurface(dr.row, ic, iw, 1, surface)
+      g.paint(dr.row, ic, fitCells(" " & it.label, iw),
               CellStyle(role: role, bold: it.active))
       var tail = ""
       if it.shortcut.len > 0: tail.add it.shortcut
       tail.add (if it.folder: " " & FolderMarker & " " else: "   ")
       let tw = textCells(tail)
-      if tw < a.width:
-        g.paint(dr.row, a.col + a.width - tw, tail,
+      if tw < iw:
+        g.paint(dr.row, ic + iw - tw, tail,
                 CellStyle(role: (if it.folder: role else: srChromeMuted)))
 
 proc menuHitAt*(dropdowns: seq[MenuDropdown];
@@ -710,19 +814,27 @@ proc omnibarDropdown*(m: TopBarModel; lay: TopBarLayout;
     w = max(w, textCells(r.entry.label) + textCells(r.entry.detail) + 4)
   w = min(w, max(field.width, width div 2))
   let rows = max(1, min(OmnibarResultRows, m.omnibar.results.len))
-  let h = min(rows, max(0, height - 2))
+  # PLAT-50: framed like the menu (`paintDropdownFrame`); `area` is the
+  # framed box, its rows one cell in.
+  const f = DropdownFrameCells
+  w = min(width, w + 2 * f)
+  let h = min(rows, max(0, height - 2 - 2 * f))
   let col = max(0, min(field.col, width - w))
   var first = 0
   if m.omnibar.selected >= h:
     first = m.omnibar.selected - h + 1
-  (CellArea(col: col, row: 1, width: w, height: h), first)
+  (CellArea(col: col, row: 1, width: w, height: h + 2 * f), first)
 
 proc paintOmnibarDropdown*(g: var StyledGrid; m: TopBarModel;
                            lay: TopBarLayout; width, height: int) =
-  let (a, first) = m.omnibarDropdown(lay, width, height)
-  if a.width <= 0 or a.height <= 0:
+  let (box, first) = m.omnibarDropdown(lay, width, height)
+  if box.width <= 0 or box.height <= 0:
     return
-  g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceCard)
+  paintDropdownFrame(g, box)
+  const f = DropdownFrameCells
+  let a = CellArea(col: box.col + f, row: box.row + f,
+                   width: max(0, box.width - 2 * f),
+                   height: max(0, box.height - 2 * f))
   if m.omnibar.results.len == 0:
     let what =
       case m.omnibar.mode
@@ -730,7 +842,7 @@ proc paintOmnibarDropdown*(g: var StyledGrid; m: TopBarModel;
       of omAgent: "the agent is not available in the terminal"
       else: "no match"
     g.paint(a.row, a.col, fitCells(" " & what, a.width),
-            CellStyle(role: srChromeMuted, surface: srSurfaceCard))
+            CellStyle(role: srChromeMuted, surface: srSurfaceMenu))
     return
   for k in 0 ..< a.height:
     let i = first + k
@@ -738,7 +850,7 @@ proc paintOmnibarDropdown*(g: var StyledGrid; m: TopBarModel;
       break
     let r = m.omnibar.results[i]
     let selected = i == m.omnibar.selected
-    let surface = if selected: srSurfaceSelection else: srSurfaceCard
+    let surface = if selected: srSurfaceSelection else: srSurfaceMenu
     g.fillSurface(a.row + k, a.col, a.width, 1, surface)
     g.paint(a.row + k, a.col, fitCells(" " & r.entry.label, a.width),
             CellStyle(role: (if selected: srTabActive else: srChromeText),
@@ -754,7 +866,11 @@ proc omnibarHitAt*(m: TopBarModel; lay: TopBarLayout; width, height,
   let (a, first) = m.omnibarDropdown(lay, width, height)
   if a.width <= 0 or not a.contains(row, col):
     return (false, -1)
-  let i = first + (row - a.row)
+  # The frame is inside the dropdown but on no result.
+  let k = row - a.row - DropdownFrameCells
+  if k < 0 or k >= a.height - 2 * DropdownFrameCells:
+    return (true, -1)
+  let i = first + k
   (true, (if i < m.omnibar.results.len: i else: -1))
 
 # ---------------------------------------------------------------------------

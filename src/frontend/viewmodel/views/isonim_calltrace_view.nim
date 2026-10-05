@@ -402,11 +402,11 @@ when defined(js):
       hint: cstring"",
       handler: proc(ev: kdom.Event) =
         vm.toggleExpandCallChildren(lineIndex)))
-    result.add(ContextMenuItem(
-      name: cstring"Expand Full Callstack",
-      hint: cstring"",
-      handler: proc(ev: kdom.Event) =
-        discard))
+    # PLAT-50: no "Expand Full Callstack". Its handler was empty here; what
+    # the original sent (`ct/expand-calls` with `CallstackInternal`) unfolds
+    # the calls the engine AUTO-collapses, and no view asks the engine to
+    # auto-collapse (`autoCollapsing` is false on every load), so the entry
+    # could change nothing — measured on this desktop, deep in a recording.
 
   proc callArgContextItems(argName, argText: string):
       seq[ContextMenuItem] =

@@ -37,8 +37,14 @@ const
   ControlIconPx* = 18
   MenuButtonPx* = 34
   OmnibarIconPx* = 34
-  OmnibarFieldPx* = 300
   OmnibarFieldMinPx* = 160
+  OmnibarDesktopFloorPx* = 384
+    ## PLAT-50: `clamp(24em, 24vw, 40em)`'s floor at the desktop's 16 px em
+    ## (components/menu_bar.styl, `COMMAND_PROMPT_WIDTH`).
+  OmnibarDesktopCeilingPx* = 640
+    ## Its ceiling.
+  OmnibarDesktopShare* = 0.24
+    ## Its middle term: 24% of the window (`24vw`).
   MenuItemPx* = 26
     ## One menu or omnibar row.
   MenuPopoverMinPx* = 240
@@ -107,6 +113,12 @@ func sessionTabText*(t: SessionTabView): string =
       of aslCancelled, aslDisconnected: "■ "
   glyph & (if t.label.len > 0: t.label else: t.title)
 
+func omnibarDesktopPx*(width: int): int =
+  ## PLAT-50: the omnibox's width in a `width`-pixel window — the desktop's
+  ## `clamp(24em, 24vw, 40em)`.
+  clamp(int(float(width) * OmnibarDesktopShare + 0.5), OmnibarDesktopFloorPx,
+        OmnibarDesktopCeilingPx)
+
 proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
                        tabs: seq[SessionTabView]; width: int;
                        canAddTab = false): GTopLayout =
@@ -145,7 +157,7 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
     omniW = OmnibarIconPx
   if omniW > 0:
     let room = avail - used
-    let grow = min(OmnibarFieldPx - omniW, room)
+    let grow = min(omnibarDesktopPx(width) - omniW, room)
     if omniW + grow >= OmnibarFieldMinPx or omnibarOpen and grow > 0:
       used += grow
       omniW += grow
@@ -171,6 +183,16 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
   if shown.len > 0:
     x += PartGapPx
   if omniW > 0:
+    # PLAT-50: CENTRED in the band, as the desktop's omnibox is between its
+    # two equal-share neighbours (measured: 703..1155 of a 1900 px window);
+    # never left of the controls, and moved left only as far as the session
+    # tabs and the "+" after it need.
+    var after = 0
+    for w in tabW: after += w + SessionTabGapPx
+    if canAddTab: after += SessionTabAddPx + PartGapPx
+    let centred = band.x + (band.w - omniW) div 2
+    let latest = band.x + band.w - after - omniW - PartGapPx
+    x = max(x, min(centred, latest))
     result.segs.add GTopSeg(part: gtOmnibar,
                             rect: PxRect(x: x, y: band.y + 3, w: omniW,
                                          h: band.h - 6))

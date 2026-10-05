@@ -22,7 +22,8 @@ The client fetches the recording manifest and trace bytes through
 codetracer-ci's authenticated browser-replay gateway endpoints:
 
 - `GET /api/v1/observability/gateway/manifests/{traceId}` — manifest fetch.
-- `GET /api/v1/observability/gateway/ranges/{traceId}/{**objectKey}` — byte fetch with HTTP Range.
+- `GET /api/v1/observability/gateway/ranges/{traceId}/{**objectKey}` —
+  byte fetch with HTTP Range.
 - `POST /api/v1/observability/gateway/credential-validate` — precondition probe (optional).
 
 This is the path used in production. Users get to a CodeTracer
@@ -50,7 +51,7 @@ The client reads its configuration from the URL query string. The
 `gatewayBaseUrl` and `traceId` are set; the legacy static path is
 selected otherwise.
 
-```
+```text
 https://<host>/index.html
   ?gatewayBaseUrl=https://codetracer.example.com
   &traceId=019e0744-31cf-7ad9-b350-f8d2e3eda5a2
@@ -100,7 +101,7 @@ flow without CORS configuration.
 | `app/worker.js`               | Web Worker that loads the WASM module. Two message types: `load-trace` (legacy static fetch) and `load-trace-from-gateway` (M40). |
 | `app/pkg/db_backend.js`       | Generated wasm-bindgen JS bindings (rebuilt from `src/db-backend/wasm-testing/`).                                  |
 | `app/pkg/db_backend_bg.wasm`  | Generated WASM module.                                                                                             |
-| `nginx.conf`, `start-server.sh`, `stop-server.sh`, `setup-certs.sh` | Local nginx test harness for the legacy static-fetch path. Not used by the gateway-authenticated path.            |
+| `nginx.conf`, `start-server.sh`, `stop-server.sh`, `setup-certs.sh` | Local nginx test harness for the legacy static-fetch path. Not used by the gateway-authenticated path. Declared as a repro dev-env service, so `repro up --activity=frontend` brings it up; `start-server.sh --foreground` is what the supervisor runs. |
 | `test-server.sh`              | One-shot wrapper around the nginx harness.                                                                         |
 | `traces/`                     | Hardcoded test traces for the legacy static path.                                                                  |
 

@@ -1747,9 +1747,15 @@ proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
 
+type
+  BreakpointAnchor* = tuple[line, column: int]
+    ## PLAT-50: where a breakpoint is — a line, and the column it is anchored
+    ## at (0: the whole line).
+
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
-                               verifiedLines: openArray[int]) =
-  ## Replace `path`'s breakpoint rows with the lines the ENGINE verified.
+                               verified: openArray[BreakpointAnchor];
+                               disabled: openArray[BreakpointAnchor] = []) =
+  ## Replace `path`'s breakpoint rows with the anchors the ENGINE verified.
   ##
   ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
   ## native front-ends reach it through `HeadlessDebugSession.toggleBreakpoint`
@@ -1760,20 +1766,47 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   ## is not a place and is dropped. Rows of other kinds and other files are
   ## untouched; `path`'s breakpoint set is replaced whole, as DAP's
   ## `setBreakpoints` replaces it.
+  ##
+  ## PLAT-50: an anchor carries its COLUMN (a column breakpoint, the
+  ## desktop's Alt+click), and a DISABLED breakpoint is not on the engine
+  ## (only enabled ones are sent, as the desktop's `dapSetBreakpoints` sends
+  ## them) and stays a row of the point list — and a dimmed mark in the
+  ## gutter — until it is deleted.
   var rows: seq[PointListEntry] = @[]
   for r in store.pointList.rows.val:
     if not (r.kind == PointKindBreakpoint and r.path == path):
       rows.add r
-  for line in verifiedLines:
-    if line >= 1:
-      var name = path
-      let slash = max(path.rfind('/'), path.rfind('\\'))
-      if slash >= 0: name = path[slash + 1 .. ^1]
-      rows.add PointListEntry(kind: PointKindBreakpoint,
-                              label: name & ":" & $line, path: path,
-                              line: line, enabled: true,
+  var name = path
+  let slash = max(path.rfind('/'), path.rfind('\\'))
+  if slash >= 0: name = path[slash + 1 .. ^1]
+  var lines: seq[int] = @[]
+  proc label(a: BreakpointAnchor): string =
+    name & ":" & $a.line & (if a.column > 0: ":" & $a.column else: "")
+  for a in verified:
+    if a.line >= 1 and a.line notin lines:
+      lines.add a.line
+      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
+                              path: path, line: a.line,
+                              column: max(0, a.column), enabled: true,
+                              resolution: "verified")
+  for a in disabled:
+    if a.line >= 1 and a.line notin lines:
+      lines.add a.line
+      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
+                              path: path, line: a.line,
+                              column: max(0, a.column), enabled: false,
                               resolution: "verified")
   store.applyPointRows(rows)
+
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verifiedLines: openArray[int];
+                               disabledLines: openArray[int] = []) =
+  ## The line-only form (every producer before PLAT-50's column
+  ## breakpoints): each line a whole-line breakpoint.
+  var verified, disabled: seq[BreakpointAnchor] = @[]
+  for l in verifiedLines: verified.add (l, 0)
+  for l in disabledLines: disabled.add (l, 0)
+  store.applyVerifiedBreakpoints(path, verified, disabled)
 
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
                              stopAfter = -1): JsonNode =

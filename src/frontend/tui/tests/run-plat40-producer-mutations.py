@@ -73,7 +73,7 @@ ARMS = [
      "    discard", [PRODUCERS],
      "the recording's event log is never asked for"),
     ("P1", SESSION,
-     "  s.session.store.applyVerifiedBreakpoints(path, verified)",
+     "  s.session.store.applyVerifiedBreakpoints(path, verified, disabled)",
      "  discard verified", [PRODUCERS],
      "the engine's breakpoint verdict never reaches the store"),
     # --- the one decoder ---------------------------------------------------

@@ -332,6 +332,14 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
       TextCaret(row: caret.row, col: caret.col, visible: true,
                 shape: (if caret.overwrite: ckBlock else: ckBar)),
       gCaretSupport)
+  # PLAT-50: TEXT A CLICK COPIED (the editor menu's Copy) goes to the
+  # terminal's clipboard — OSC 52 (`ESC ] 52 ; c ; <base64> BEL`, xterm's
+  # "Manipulate Selection Data",
+  # https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands),
+  # which a terminal that allows it forwards to the system clipboard — once.
+  if rt.app.clipboard.len > 0:
+    epilogue.add osc52Copy(rt.app.clipboard)
+    rt.app.clipboard = ""
   driver.paint(screen.styledRows,
                prologue = cursorControlBytes(rt.modal.mode),
                epilogue = epilogue,
@@ -528,6 +536,24 @@ proc interactive(command: TuiCommand): int =
     driver.stop()
     stderr.writeLine(TuiProgramName & ": cancelled while opening " & folder)
     return ExitOk
+  except DapLaunchRefusedError as e:
+    # THE ENGINE ANSWERED, AND THE ANSWER REACHES THE USER. This arm sits
+    # ABOVE the stalled one on purpose: before it existed, a recording
+    # `replay-server` had explicitly refused — naming the container version it
+    # found, the version it requires, and that re-recording is the remedy —
+    # produced no response at all. The refusal arrived as a `ct/notification`
+    # the handshake buffered, the wait for `stopped` ran out its budget, and
+    # the user was told the engine had stopped answering. Before CTUI-14 put a
+    # clock on that wait, they were told nothing and the panes simply stayed
+    # empty for as long as they cared to look.
+    #
+    # The engine's sentence is printed VERBATIM and alone. Every fact a user
+    # needs is already in it and a summary of it here would be a second
+    # wording of the same thing, free to go stale against the reader that
+    # produced it.
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": cannot open " & folder & ": " & e.msg)
+    return ExitUnreadableRecording
   except DapStalledError as e:
     # A DISTINCT EXIT CODE, because this is a distinct fact. `ExitUsage` would
     # send a user to look at their command line for a folder that named itself
@@ -559,6 +585,7 @@ proc interactive(command: TuiCommand): int =
   session.disarmHandshakeInterrupt()
 
   session.header(rt)
+  app.dividers = command.dividers
   if command.noFlowOverlay:
     session.setFlowOverlay(false)
   session.setViewportHeight(rt.sourcePaneRows())
@@ -755,7 +782,9 @@ proc interactive(command: TuiCommand): int =
         # session: the panes follow it before the outcome is applied.
         if app.shell.activeSessionId() != shownId:
           showSession(app.shell.activeSessionId())
-        session.applyOutcome(rt, outcome)
+        # PLAT-50: a click in the VCS pane is the VCS source's.
+        if not vcs.applyClick(rt, outcome.paneClick):
+          session.applyOutcome(rt, outcome)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         # `report = false`: the line the key just wrote is the user's own.
@@ -954,6 +983,9 @@ proc editInteractive(command: TuiCommand): int =
       if outcome.quit:
         loop = false
       else:
+        # PLAT-50: a click in the VCS pane is the VCS source's, in Edit mode
+        # too.
+        discard vcs.applyClick(rt, outcome.paneClick)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         discard advanceBuild(rt, edit, report = false)

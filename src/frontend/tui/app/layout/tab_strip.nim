@@ -77,13 +77,6 @@ type
       ## `textCells` of the label, including its two framing cells.
 
 const
-  PaneRuleGlyph* = "─"
-    ## What fills the rest of a title or tab row. One cell wide (U+2500), so
-    ## the row's cell count is its rune count. CTUI-3 declared this in
-    ## `app/views/shell.nim`; it moved here with `tabRow`, and `shell.nim`
-    ## re-exports it so `app/views/borders.nim`'s comment and every existing
-    ## reference still resolve.
-
   TabGapCells* = 1
     ## One cell between neighbouring labels. Named rather than spelled `" "` at
     ## three sites, because the hit-test has to know which side of the gap a

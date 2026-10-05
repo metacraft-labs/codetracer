@@ -2627,22 +2627,50 @@ impl Handler {
             }
         };
 
-        // Determine the slice to return.
-        let (page_events, page_contents) = if count > 0 {
-            // Explicit pagination: return the requested window.
-            let clamped_start = start.min(all_events.len());
-            let clamped_end = (clamped_start + count).min(all_events.len());
-            let slice = &all_events[clamped_start..clamped_end];
-            let contents = slice.iter().map(|e| e.content.as_str()).collect::<Vec<_>>().join("\n");
-            (slice.to_vec(), contents)
-        } else {
-            // Legacy behaviour: return the first 20 events (matches
-            // the original `first_events` semantics).
-            let n = all_events.len().min(20);
-            let slice = &all_events[..n];
-            let contents = slice.iter().map(|e| e.content.as_str()).collect::<Vec<_>>().join("\n");
-            (slice.to_vec(), contents)
+        // The order the event log's header click asked for (`sortKey`, a
+        // column name, and `sortAscending`); the recorded order when absent.
+        // The window below is cut from the ORDERED list, so a pane that pages
+        // through a sorted log pages through it in that order.
+        let order = req
+            .arguments
+            .get("sortKey")
+            .and_then(serde_json::Value::as_str)
+            .and_then(crate::event_db::EventOrderKey::from_column_name)
+            .map(|key| crate::event_db::EventOrder {
+                key,
+                ascending: req
+                    .arguments
+                    .get("sortAscending")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+            })
+            .filter(|o| !o.is_recorded());
+
+        // Determine the slice to return: the requested window of the
+        // ordered list, or (legacy, `count` 0) its first 20 events.
+        let positions = match order {
+            Some(order) => crate::event_db::ordered_event_positions(all_events.len(), |i| &all_events[i], order),
+            None => (0..all_events.len()).collect(),
         };
+        let (skip, take) = if count > 0 { (start, count) } else { (0, 20) };
+        // Each event carries its place in the RECORDED log (`eventIndex`),
+        // whatever order the window was cut in, so a sorted pane still
+        // numbers an event as the recording does.
+        let page_events: Vec<ProgramEvent> = positions
+            .iter()
+            .skip(skip)
+            .take(take)
+            .map(|&i| {
+                let mut event = all_events[i].clone();
+                event.event_index = i;
+                event
+            })
+            .collect();
+        let page_contents = page_events
+            .iter()
+            .map(|e| e.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let raw_event = self.dap_client.updated_events(page_events.clone())?;
         sender.send(raw_event)?;

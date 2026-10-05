@@ -130,6 +130,34 @@ type
     notification*: string
       ## §3.3.6's message line. Owned here rather than recomputed per frame so
       ## the answer to the last command survives until the next one.
+    dividers*: DividerChoice
+      ## PLAT-50: `--dividers` — the colour a pane divider is drawn in.
+    contextMenu*: ContextMenuState
+      ## PLAT-50: the open right-click menu, if any.
+    content*: ContentOverlay
+      ## PLAT-50: a text shown over the body — an event's full content (a
+      ## right-click on its row), a call argument's value (a click on it), a
+      ## value's history, a changed file's diff.
+    viewedFile*: string
+      ## PLAT-50: a file the user opened from the Files pane, shown in the
+      ## editor instead of the stop's file until the debugger next moves (the
+      ## desktop opens it in a tab, and its editor follows the debugger back).
+    scratchpad*: ScratchpadPaneModel
+      ## PLAT-50: the values pinned to the scratchpad (`ScratchpadVM`'s rows).
+    location*: string
+      ## PLAT-50 (K37): where the debugger is, `path:line` — what a click on
+      ## the status line copies (the desktop's status bar location and its
+      ## copy button).
+    clipboard*: string
+      ## PLAT-50: text a click copied (Copy, the status bar's location),
+      ## handed to the terminal's clipboard by the next frame (OSC 52) and
+      ## cleared.
+    tracepointAt*: tuple[path: string, line: int]
+      ## PLAT-50: the line the editor menu's "Add tracepoint" was chosen on;
+      ## the next `:tracepoint` is placed there instead of at the stop.
+    timelineDrag*: bool
+      ## PLAT-50: a press on the timeline's track is held — its release seeks
+      ## where the pointer is then (the desktop's drag on the track).
     layoutBinding*: LayoutBinding
       ## PLAT-6's terminal layout binding: the committed `Layout` with its undo
       ## log, the gesture in flight, and the responsive-profile freeze.
@@ -350,6 +378,9 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   let fullInfo = footerFileInfoText(infoPath)
   result = ShellModel(
     header: header,
+    dividers: app.dividers,
+    contextMenu: app.contextMenu,
+    content: app.content,
     topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),
@@ -395,6 +426,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     timeline: app.timeline,
     eventLog: app.eventLog,
     points: app.points,
+    scratchpad: app.scratchpad,
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
     vcs: app.vcs,

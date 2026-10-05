@@ -169,6 +169,9 @@ type
     line*: int
     kind*: SourcePointKind
     enabled*: bool
+    column*: int
+      ## PLAT-50: a breakpoint anchored at this column (1-based), 0 for a
+      ## line breakpoint.
 
 proc sourcePointsOf*(rows: openArray[PointListEntry]): seq[SourcePoint] =
   ## The store's point rows as the pane's points: breakpoints and
@@ -179,7 +182,7 @@ proc sourcePointsOf*(rows: openArray[PointListEntry]): seq[SourcePoint] =
     if r.line < 1: continue
     if r.kind == PointKindBreakpoint:
       result.add SourcePoint(path: r.path, line: r.line, kind: sptBreakpoint,
-                             enabled: r.enabled)
+                             enabled: r.enabled, column: r.column)
     elif r.kind == PointKindTracepoint:
       result.add SourcePoint(path: r.path, line: r.line, kind: sptTracepoint,
                              enabled: r.enabled)
@@ -230,6 +233,17 @@ proc marksForFile*(points: openArray[SourcePoint];
     if p.kind == sptBreakpoint:
       result.add (p.line, (if p.enabled: gmBreakpoint
                            else: gmBreakpointDisabled))
+
+proc columnMarksForFile*(points: openArray[SourcePoint];
+                         path: string): seq[(int, int)] =
+  ## PLAT-50 (K14): the column breakpoints on `path`, as `(line, column)` —
+  ## the desktop's `ct-column-breakpoint-marker` decorations
+  ## (`ui/editor.applyColumnBreakpointDecorations`), enabled ones only, as it
+  ## draws them.
+  for p in points:
+    if p.path == path and p.kind == sptBreakpoint and p.enabled and
+       p.line > 0 and p.column > 0:
+      result.add (p.line, p.column)
 
 proc annotationsFrom*(variables: seq[Variable]):
                      seq[inline_annotations.Annotation] =
@@ -286,6 +300,7 @@ proc sourcePaneModelFor*(vm: SourceVM;
     viewportTop = vm.visibleFirstLine.val,
     executionLine = vm.executionLine.val,
     marks = marksForFile(points, path),
+    columnMarks = columnMarksForFile(points, path),
     values = (if inlineValues.len > 0: annotationsOf(inlineValues)
               else: annotationsFrom(variables)),
     heat = heat,
@@ -312,5 +327,5 @@ proc pointListPaneModelFor*(points: openArray[SourcePoint]): PointListPaneModel 
     rows.add PointListPaneRow(
       kind: (if p.kind == sptBreakpoint: PointKindBreakpoint
              else: PointKindTracepoint),
-      path: p.path, line: p.line, enabled: p.enabled)
+      path: p.path, line: p.line, enabled: p.enabled, column: p.column)
   initPointListPaneModel(rows, loaded = true)

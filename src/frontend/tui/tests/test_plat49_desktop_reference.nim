@@ -109,7 +109,9 @@ suite "PLAT-49: the desktop is the reference":
       for dr in drops[0].rows:
         if dr.item >= 0 and drops[0].level.items[dr.item].label == "Debug":
           debugRow = dr.row
-      ck drops[1].area.row == debugRow                # level with the folder
+      # Level with the folder: the cascade's FIRST ITEM on the folder's row
+      # (PLAT-50: its frame one row above).
+      ck drops[1].rows[0].row == debugRow
 
     test "GPUI draws the same menu: one button, a first level below it, a cascade":
       let menu = openOnDebug()

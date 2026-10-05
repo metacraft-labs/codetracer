@@ -68,14 +68,16 @@ import isonim_tui
 # (`EventLogColumns`), reached through the SDK facade.
 from codetracer_embed import EventLogColumn, EventLogColumns,
   defaultEventLogColumns, visibleColumns, eventLogColumnTitle, elcTick,
-  elcIndex, elcLocation, elcKind, elcOutput
+  elcIndex, elcLocation, elcKind, elcOutput, EventLogOrder,
+  RecordedEventOrder, clickedHeader
 
 import ../layout/profile
 import ./styled_row
 
 export styled_row, profile
 export EventLogColumn, EventLogColumns, defaultEventLogColumns,
-  visibleColumns, eventLogColumnTitle
+  visibleColumns, eventLogColumnTitle, EventLogOrder, RecordedEventOrder,
+  clickedHeader
 
 type
   EventCategory* = enum
@@ -151,6 +153,10 @@ type
       ## Event Log ViewModel's model (`defaultEventLogColumns`: the desktop's
       ## tick, #, kind and output; location hidden). `:column-show`,
       ## `:column-hide`, `:column-left` and `:column-right` change it.
+    order*: EventLogOrder
+      ## PLAT-50 (K26): the column the header click ordered the log by, and
+      ## its direction — the engine sorts (`ct/event-load`'s `sortKey`), the
+      ## pages arrive in that order; `RecordedEventOrder` is the tick order.
     held: Table[int, seq[EventRow]]
       ## Materialised pages, by page index. PRIVATE: the only way in is
       ## `ensureWindow` and the only way out is `releaseOutside`, so "released
@@ -322,6 +328,7 @@ proc initEventLogModel*(pages: EventPages = nil;
     currentTick: currentTick,
     note: note,
     columns: defaultEventLogColumns(),
+    order: RecordedEventOrder,
     held: initTable[int, seq[EventRow]](),
     fetchedPages: @[],
     endPage: -1,
@@ -387,6 +394,29 @@ proc rowAt*(model: EventLogModel; index: int): (bool, EventRow) =
   if within < 0 or within >= rows.len:
     return (false, EventRow(index: -1))
   (true, rows[within])
+
+proc reorder*(model: var EventLogModel; order: EventLogOrder) =
+  ## PLAT-50 (K26): order the log by `order` — every held page is dropped
+  ## (its rows were cut from the old order), the cursor and the scroll go back
+  ## to the top, and the next `ensureWindow` asks the seam again.
+  model.order = order
+  model.held.clear()
+  model.fetchedPages = @[]
+  model.endPage = -1
+  model.knownTotal = -1
+  model.selected = -1
+  model.scrollTop = 0
+
+proc headerColumnAt*(screen: EventLogScreen; row, col: int):
+    (bool, EventLogColumn) =
+  ## PLAT-50 (K26): the column whose header a press at `(row, col)` is on, as
+  ## `paintEventLog` laid the header out.
+  if screen.headerRow < 0 or row != screen.headerRow:
+    return (false, elcTick)
+  for (c, at, w) in screen.columnCells:
+    if col >= at and col < at + max(1, w):
+      return (true, c)
+  (false, elcTick)
 
 proc ensureWindow*(model: var EventLogModel; first, count: int) =
   ## Materialise every page the window `[first, first+count)` touches.
@@ -544,7 +574,10 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
         text: padLeft($event.tick, TickFieldCells),
         style: (if atCurrent: CurrentTickStyle else: TickStyle))
     of elcIndex:
-      spans.add StyledSpan(text: padLeft($row.index, IndexFieldCells),
+      # The EVENT's number in the recorded log (`EventRow.index`), not the
+      # row's position — the two differ once a header click ordered the log
+      # by another column (PLAT-50).
+      spans.add StyledSpan(text: padLeft($event.index, IndexFieldCells),
                            style: TickStyle)
     of elcLocation:
       spans.add StyledSpan(
@@ -613,7 +646,13 @@ proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
   for (col, at, w) in model.columnCellsOf(0, width):
     while cellWidthOf(line) < at:
       line.add ' '
-    let title = eventLogColumnTitle(col)
+    # PLAT-50: the column the log is ordered by carries the desktop's sort
+    # arrow (DataTables' `dt-ordering-asc` / `-desc`) once a header click
+    # left the recorded order.
+    let title = eventLogColumnTitle(col) &
+      (if model.order != RecordedEventOrder and model.order.column == col:
+         (if model.order.ascending: " ▲" else: " ▼")
+       else: "")
     # Numbers are right-aligned under a right-aligned title.
     line.add (if col in {elcTick, elcIndex}: padLeft(title, w)
               else: title)

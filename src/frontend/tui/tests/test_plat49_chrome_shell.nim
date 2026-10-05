@@ -21,7 +21,8 @@
 ##      `srSurfaceField`; open, the caret is where the ViewModel's `cursor` is.
 ##  12. VARIABLES — no scope rows; each row's first cell is its category tag
 ##      in the category's role.
-##  13. DIVIDERS — every divider cell on `DividerSurface` (the panes' own).
+##  13. DIVIDERS — every divider cell on the panes' own ground (PLAT-50: the
+##      strip's ground in a tab-strip row).
 ##
 ## No mocks: the product's own layout binding, shell, top bar and ViewModels;
 ## the variables pane's one seam (`NodeChildren`) is answered from a fixed
@@ -188,21 +189,29 @@ suite "PLAT-49: panes, strips and dividers on the shell":
     ck screen.rows[1].contains(" main.py ")
 
   test "every divider cell sits on the panes' own surface":
+    # PLAT-50 refines finding 13: a divider in a BODY row is on the ground of
+    # the pane beside it (the panel, or the editor's own); in a TAB-STRIP
+    # row it is the strip's ground, so two strips connect (the user,
+    # 2026-10-02).
     let model = newShellModel(200, 50)
     let screen = shellScreen(model, 200, 50)
     let cells = dividerCells(screen.projection.regions, screen.geometry.inner)
+    let strips = stripCells(screen.projection.regions, screen.geometry.inner)
     ck cells.len > 50
     var onSurface = 0
     for (row, col) in cells:
+      let inStrip = (row, col - 1) in strips or (row, col + 1) in strips
       var at = 0
       for span in screen.styledRows[row]:
         let w = cellWidthOf(span.text)
         if col >= at and col < at + w:
-          if span.style.surface == DividerSurface: inc onSurface
+          if inStrip and span.style.surface == srTabBar: inc onSurface
+          elif not inStrip and span.style.surface in {srSurfacePanel,
+                                                       srSurfaceEditor}:
+            inc onSurface
           break
         at += w
     ck onSurface == cells.len
-    ck DividerSurface == srSurfacePanel
 
 suite "PLAT-49: the top bar's tooltip and omnibar":
 
@@ -239,15 +248,21 @@ suite "PLAT-49: the top bar's tooltip and omnibar":
       at += cellWidthOf(s.text)
     ck fieldSurface == srSurfaceField
     # …and the BOX is the field's ground end to end, not only under its
-    # text: the field's last cell (padding past the placeholder) too.
+    # text: the cell before its right border (padding past the placeholder)
+    # too. PLAT-50: the last cell itself is the border — the bar's ground
+    # under a ui/border/secondary edge line.
     var lastSurface = srNone
+    var edge = srNone
     at = 0
     for s in spans:
       let w = cellWidthOf(s.text)
-      if seg.col + seg.width - 1 >= at and seg.col + seg.width - 1 < at + w:
+      if seg.col + seg.width - 2 >= at and seg.col + seg.width - 2 < at + w:
         lastSurface = s.style.surface
+      if seg.col + seg.width - 1 >= at and seg.col + seg.width - 1 < at + w:
+        edge = s.style.surface
       at += w
     ck lastSurface == srSurfaceField
+    ck edge == srSurfaceTopBar
     ck not omnibarCaret(m, lay).shown
     ob.open()
     ob.typeText("calc")

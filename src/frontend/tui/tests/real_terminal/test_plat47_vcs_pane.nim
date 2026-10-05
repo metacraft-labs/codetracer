@@ -70,10 +70,10 @@ proc colorKey(c: Color): string =
 
 proc paneWidth(strip: string): int =
   ## The FILES stack's width: the cells before the first divider on its
-  ## strip row.
+  ## strip row (PLAT-50: `▏`, `shell.DividerGlyph`, in the strip's ground).
   var i = 0
   for r in strip.runes:
-    if r == "│".runeAt(0):
+    if r == "▏".runeAt(0):
       return i
     inc i
   i

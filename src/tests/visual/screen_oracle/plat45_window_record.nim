@@ -30,6 +30,7 @@ import ./region_locator
 import gui_assert/image_math
 
 import ../../../frontend/gpui/app/pane_names
+import ../../../frontend/gpui/chrome
 import headless_app/layout_model
 
 const
@@ -38,12 +39,12 @@ const
   StripProbePx = TitleStripHeight + TitleRetryExtraPx
     ## How much of a cell's top is OCR'd for its strip: the tab strip the
     ## window draws for a stack, or a lone pane's heading.
-  StripGroundHex = "#262626"
-    ## `chrome.crTabStripBackground` (ui/surface/base/card, Dark): the
-    ## strip's own ground.
-  ActiveTabGroundHex = "#333333"
-    ## `chrome.crTabActiveBackground` (ui/surface/primary/tertiary, Dark): the
-    ## selected tab's own ground.
+  StripGroundHex = chromeOf(crTabStripBackground)
+    ## The strip's own ground, read from the window's own colour table (since
+    ## PLAT-50 ui/surface/primary/default, Dark; it was ui/surface/base/card
+    ## spelled here as #262626).
+  ActiveTabGroundHex = chromeOf(crTabActiveBackground)
+    ## The selected tab's own ground (ui/surface/primary/tertiary, Dark).
 
 proc isDocumentName(word: string): bool =
   ## A file name as a tab shows it: a stem, one dot, an extension of letters
@@ -56,6 +57,20 @@ proc isDocumentName(word: string): bool =
   for c in word[dot + 1 .. ^1]:
     if c notin {'A'..'Z', 'a'..'z', '0'..'9'}: return false
   true
+
+proc oneGlyphOff(a, b: string): bool =
+  ## PLAT-50: `a` is `b` with at most one character misread — the same length,
+  ## at most one position different, case aside, three characters or more.
+  ## The OCR engine reads a dim label on the strip's ground
+  ## (ui/surface/primary/default) with a glyph off now and then ("Cutput",
+  ## "V(S"); a label is still read as itself, never as a different label (no
+  ## two labels the window draws are one glyph apart).
+  if a.len != b.len or a.len < 3:
+    return false
+  var diff = 0
+  for i in 0 ..< a.len:
+    if toLowerAscii(a[i]) != toLowerAscii(b[i]): inc diff
+  diff <= 1
 
 proc labelsIn(text: string): seq[string] =
   ## The pane labels a strip names, in reading order. Two-word labels
@@ -76,12 +91,24 @@ proc labelsIn(text: string): seq[string] =
       let two = words[i] & " " & words[i + 1]
       for k in known:
         if cmpIgnoreCase(k, two) == 0: matched = k
+    if matched.len == 0 and i + 1 < words.len:
+      for k in known:
+        let parts = k.split(' ')
+        if parts.len == 2 and
+           (cmpIgnoreCase(parts[0], words[i]) == 0 or
+            oneGlyphOff(words[i], parts[0])) and
+           (cmpIgnoreCase(parts[1], words[i + 1]) == 0 or
+            oneGlyphOff(words[i + 1], parts[1])):
+          matched = k
     if matched.len > 0:
       result.add matched
       i += 2
       continue
     for k in known:
       if cmpIgnoreCase(k, words[i]) == 0: matched = k
+    if matched.len == 0:
+      for k in known:
+        if not k.contains(' ') and oneGlyphOff(words[i], k): matched = k
     # A two-word label the OCR engine read as ONE word ("Eventlog"): since
     # PLAT-47 the window draws the ACTIVE tab bold, and tesseract closes the
     # gap of a bold two-word label. Matched with its space (and case) removed.
@@ -147,8 +174,11 @@ proc ocrStrip(img: GrayImage; r: Rect; scratch: string): string =
   ## A tab strip's labels, read against the strip's two grounds
   ## (`vision_producer.ocrOnGrounds`).
   var words: seq[string] = @[]
+  # PLAT-50: the pane's own ground too — the probe runs past the strip into
+  # the pane's first rows, which were a solid black band in the mask.
   for w in ocrOnGrounds(img, r, scratch,
-                        [grayOf(StripGroundHex), grayOf(ActiveTabGroundHex)]):
+                        [grayOf(StripGroundHex), grayOf(ActiveTabGroundHex),
+                         grayOf(chromeOf(crPaneBackground))]):
     words.add w.text
   words.join(" ").strip()
 
@@ -191,10 +221,30 @@ proc readFrame(path, scratch: string): JsonNode =
   createDir(scratch)
   var regions = newJArray()
   for cell in grid.value.cells:
-    let stripRect = Rect(x: cell.x, y: cell.y, w: cell.w,
+    var top = cell.y
+    var height = cell.h
+    var stripRect = Rect(x: cell.x, y: cell.y, w: cell.w,
                          h: min(StripProbePx, cell.h))
-    let strip = ocrStrip(img, stripRect, scratch)
-    let tabs = labelsIn(strip)
+    var strip = ocrStrip(img, stripRect, scratch)
+    var tabs = labelsIn(strip)
+    # PLAT-50: THE STRIP MAY BE OUTSIDE THE LOCATED CELL. The strip's ground
+    # is the window's own (ui/surface/primary/default, the ground the
+    # desktop's tabs sit on), so the grid locator, which finds cells by their
+    # fill against that ground, can start a cell BELOW its strip. Then the
+    # strip is the strip-high band just above the cell, probed as a cell's
+    # own strip is (`StripProbePx` from the strip's top) — not higher, where
+    # the top bar's menu-button border would be read as ink.
+    if tabs.len == 0 and cell.y >= TitleStripHeight:
+      let above = Rect(x: cell.x, y: cell.y - TitleStripHeight, w: cell.w,
+                       h: StripProbePx)
+      let alt = ocrStrip(img, above, scratch)
+      if labelsIn(alt).len > 0:
+        stripRect = above
+        strip = alt
+        tabs = labelsIn(alt)
+        # The region is the strip and the cell under it.
+        top = cell.y - TitleStripHeight
+        height = cell.h + TitleStripHeight
     var heading = ""
     var active = ""
     if tabs.len >= 2:
@@ -208,10 +258,10 @@ proc readFrame(path, scratch: string): JsonNode =
         if under.len > 0: active = under[0]
     elif tabs.len == 1:
       active = tabs[0]
-    regions.add %*{"x": cell.x, "y": cell.y, "w": cell.w, "h": cell.h,
+    regions.add %*{"x": cell.x, "y": top, "w": cell.w, "h": height,
                    "strip": strip, "tabs": tabs, "heading": heading,
                    "active": active,
-                   "outline": outlineOf(img, cell.x, cell.y, cell.w, cell.h)}
+                   "outline": outlineOf(img, cell.x, top, cell.w, height)}
   result["regions"] = regions
   result["located"] = %(regions.len > 0)
 

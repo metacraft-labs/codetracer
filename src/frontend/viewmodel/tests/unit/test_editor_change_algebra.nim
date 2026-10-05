@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1735
+const ExpectedAssertions = 1738
+  ## *1735 -> 1738 on 2026-10-04: one new production module under
+  ## `viewmodel/`, `host/native_vcs_details.nim` (a commit's changed files and
+  ## a file's diff for the native VCS panes) x three assertions.
   ## *1693 -> 1735 on 2026-10-01: §35's enumeration over `viewmodel/` — FOURTEEN
   ## net new production modules x three assertions, landed on 2026-09-30 by
   ## lines of work that each left this number alone (none ran this suite after

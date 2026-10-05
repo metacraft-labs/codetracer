@@ -197,6 +197,10 @@ type
   CallSegment* = object
     kind*: CallSegmentKind
     text*: string
+    arg*: int
+      ## PLAT-50: which argument a part belongs to — 1-based into the row's
+      ## `args` (its name, its `=`, its value: the desktop's `.call-arg`),
+      ## 0 for a part of no argument.
 
 const
   ReturnArgName* = "__return"
@@ -247,9 +251,9 @@ func callRowSegments*(r: CallRow; indent = true): seq[CallSegment] =
   for i, a in r.args:
     if i > 0:
       result.add CallSegment(kind: csPunct, text: ", ")
-    result.add CallSegment(kind: csArgName, text: a.name)
-    result.add CallSegment(kind: csPunct, text: "=")
-    result.add CallSegment(kind: csArgValue, text: a.value)
+    result.add CallSegment(kind: csArgName, text: a.name, arg: i + 1)
+    result.add CallSegment(kind: csPunct, text: "=", arg: i + 1)
+    result.add CallSegment(kind: csArgValue, text: a.value, arg: i + 1)
   result.add CallSegment(kind: csPunct, text: ")")
   if r.hasReturn:
     result.add CallSegment(kind: csReturnArrow, text: " => ")

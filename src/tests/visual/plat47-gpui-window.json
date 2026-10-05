@@ -69,14 +69,14 @@
    988
   ],
   "pixelsByDesktopColour": {
-   "keyword": 80,
-   "string": 3972,
-   "comment": 127,
-   "identifier": 401,
-   "delimiter": 2,
-   "lineNumber": 1108,
-   "activeLineNumber": 66,
-   "ground": 388267,
+   "keyword": 139,
+   "string": 3406,
+   "comment": 133,
+   "identifier": 466,
+   "delimiter": 15,
+   "lineNumber": 938,
+   "activeLineNumber": 34,
+   "ground": 398607,
    "oldBand4f4f4f": 0,
    "chromePaneFill": 0
   },
@@ -93,16 +93,16 @@
    "executionLine": "#404040",
    "selection": "#353535"
   },
-  "text": "main.py b\nthe recording's source\np\u00bb 1 #!/usr/binfenv python3\n\"\"\"calc \u2014 the small, fast, deterministic program b\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS\n"
+  "text": "main.py b\nthe recording's source\n\u00bb 1 #'/usr/bin/env python3\n\"\"\"calc \u2014 the small, fast, determinist\nWHY THIS PROGRAM EXISTS, AND WHY IT LO\n"
  },
  "band": {
   "rows": [
    123,
    148
   ],
-  "startX": 462,
+  "startX": 487,
   "endX": 852,
-  "activeNumberMaxX": 439,
+  "activeNumberMaxX": 445,
   "gutterAtBandRow": "#282828",
   "afterBandAtRow": "#282828",
   "bodyLeft": 397,
@@ -124,7 +124,7 @@
    "vcs": {
     "mass": 124.2,
     "ink": "#727272",
-    "ground": "#262626"
+    "ground": "#1b1b1b"
    }
   },
   "vcs": {
@@ -135,9 +135,9 @@
     30
    ],
    "base": {
-    "mass": 112.3,
+    "mass": 112.4,
     "ink": "#727272",
-    "ground": "#262626"
+    "ground": "#1b1b1b"
    },
    "vcs": {
     "mass": 204.7,
@@ -489,9 +489,9 @@
    {
     "edge": "bottom",
     "rect": [
-     0,
+     160,
      1052,
-     1920,
+     1760,
      28
     ],
     "slots": [
@@ -499,7 +499,7 @@
       "pane": "buildOutput",
       "label": "BUILD",
       "rect": [
-       6,
+       166,
        1052,
        70,
        28
@@ -509,7 +509,7 @@
       "pane": "problems",
       "label": "PROBLEMS",
       "rect": [
-       76,
+       236,
        1052,
        100,
        28
@@ -519,7 +519,7 @@
       "pane": "search",
       "label": "FIND IN FILES",
       "rect": [
-       176,
+       336,
        1052,
        150,
        28
@@ -529,7 +529,7 @@
       "pane": "requests",
       "label": "REQUESTS",
       "rect": [
-       326,
+       486,
        1052,
        100,
        28
@@ -550,8 +550,8 @@
    "timeline",
    "vcs"
   ],
-  "stripGround": "#1b222c",
-  "stripInk": 161,
+  "stripGround": "#282828",
+  "stripInk": 141,
   "slotText": "=\nt\na\nt\ne\n",
   "savedLayout": {
    "version": 5,
@@ -690,12 +690,12 @@
    653,
    990
   ],
-  "revealChangedPixels": 185375,
+  "revealChangedPixels": 42353,
   "revealText": "State Unpin\nLocals\n\nGlobals\n\nWatches\n",
   "dismissChangedPixels": 0
  },
  "calltrace": {
-  "baseText": "v <toplevel> #0() => 0\nv < _main_> #1()\nv main #2()\nv step #3(i=0) =>1\n- leaf #4(i=0) =>0\nv step #5(i=1) => 3\n- leaf #6(i=1) => 2\nv step #7(i=2) == 5\n- leaf #8(i=2) =>4\nv step #9(i=3) => 7\n- leaf #10(i=3) =>6\nv step #11(i=4) => 9\n- leaf #12(i=4) => 8\nv step #13(i=5) => 11\n- leaf #14(i=5) => 10\nv step #15(i=6) => 13\n- leaf #16(i=6) => 12\n",
+  "baseText": "<toplevel> #0() == 0\nv < main_ > #1()\nmain #2()\nstep #3(i=0) =>1\nleaf #4(i=0) => 0\nstep #5(i=1) => 3\nleaf #6(i=1) => 2\nstep #7(i=2) =>5\nleaf #8(i=2) =>4\nstep #9(i=3) =>7\nleaf #10(i=3) => 6\nstep #11(i=4) == 9\nleaf #12(i=4) => 8\nstep #13(i=5) => 11\nleaf #14(i=5) => 10\nstep #15(i=6) => 13\nleaf #16(i=6) => 12\n",
   "endText": "v step #587(i=292) => 585\n\n- leaf #588(i=292) => 584\nv step #589(i=293) => 587\n\n- leaf #590(i=293) => 586\nv step #591(i=294) => 589\n\n- leaf #592(i=294) => 588\nv step #593(i=295) => 591\n\n- leaf #594(i=295) => 590\nv step #595(i=296) => 593\n\n- leaf #596(i=296) => 592\nv step #597(i=297) => 595\n\n- leaf #598(i=297) => 594\nv step #599(i=298) => 597\n\n- leaf #600(i=298) => 596\nv step #601(i=299) => 599\n\n- leaf #602(i=299) => 598\n",
   "sectionLoads": 9,
   "lastTop": "gesture calltrace top=587 rows=16 total=603"

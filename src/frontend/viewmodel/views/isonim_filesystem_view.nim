@@ -52,9 +52,6 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
-  from ./context_menu_bridge import showContextMenu
-  from ../../types import ContextMenuItem
-  import kdom except Location
 
 import ../store/types
 import ../viewmodels/filesystem_vm
@@ -345,18 +342,11 @@ when defined(js):
     while not isonim_dom.isNodeNil(asNode.firstChild):
       discard isonim_dom.removeChild(asNode, asNode.firstChild)
 
-  proc filesystemContextItems(): seq[ContextMenuItem] =
-    for label in [cstring"Create", cstring"Rename", cstring"Delete", cstring"Edit"]:
-      result.add(ContextMenuItem(
-        name: label,
-        hint: cstring"",
-        handler: proc(ev: kdom.Event) =
-          discard))
-
-  proc showFilesystemContextMenu(ev: isonim_dom.Event) =
-    ev.preventDefault()
-    ev.stopPropagation()
-    showContextMenu(filesystemContextItems(), ev.eventClientX(), ev.eventClientY())
+  # PLAT-50: NO RIGHT-CLICK MENU. This view showed Create / Rename / Delete
+  # / Edit, and every handler was empty — four entries that did nothing. In
+  # a replay the tree is the recording's sources, which the user does not
+  # edit, so the menu is gone rather than left offering nothing (the native
+  # front-ends open none either, `headless_app/pane_clicks` row K19).
 
   proc renderWebEntry(vm: FilesystemVM; entry: FilesystemEntryNode;
                       level: int; isLast: bool): isonim_dom.Element =
@@ -404,9 +394,6 @@ when defined(js):
         vm.toggleExpanded(entryPath)
       else:
         vm.openFile(entryPath))
-    isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"contextmenu",
-                                proc(ev: isonim_dom.Event) =
-      showFilesystemContextMenu(ev))
     let icon = createWebElement("i", jstreeIconClass(entry))
     isonim_dom.setAttribute(icon, cstring"role", cstring"presentation")
     isonim_dom.appendChild(isonim_dom.Node(anchor), isonim_dom.Node(icon))

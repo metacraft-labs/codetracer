@@ -126,6 +126,10 @@ type
       ## never been.
     marks*: seq[(int, GutterMark)]
       ## Breakpoints and tracepoints on this file, by line.
+    columnMarks*: seq[(int, int)]
+      ## PLAT-50 (K14): the column breakpoints on this file, `(line,
+      ## column)` — the cell they are anchored at is marked in the code, as
+      ## the desktop's `ct-column-breakpoint-marker` decoration marks it.
     values*: seq[Annotation]
       ## What the ViewModel reports at THIS tick. Rebuilt every frame; see
       ## `inline_annotations.nim` on why nothing here is cached.
@@ -240,7 +244,8 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           degradedMessage = "";
                           inspectionLine = 0;
                           notTakenLines: seq[int] = @[];
-                          entryContext = ""): SourcePaneModel =
+                          entryContext = "";
+                          columnMarks: seq[(int, int)] = @[]): SourcePaneModel =
   ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
   ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
@@ -249,8 +254,9 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
     entryContext: entryContext,
     totalLineCount: totalLineCount, viewportTop: viewportTop,
     executionLine: executionLine, inspectionLine: inspectionLine,
-    marks: marks, values: values, heat: heat, notTakenLines: notTakenLines,
-    gutterMode: gutterMode, degradedMessage: degradedMessage)
+    marks: marks, columnMarks: columnMarks, values: values, heat: heat,
+    notTakenLines: notTakenLines, gutterMode: gutterMode,
+    degradedMessage: degradedMessage)
 
 # ---------------------------------------------------------------------------
 # Reading the model
@@ -478,6 +484,16 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
           var out2 = FlowNotTakenStyle
           out2.surface = s.surface
           out2)
+      # PLAT-50 (K14): A COLUMN BREAKPOINT'S CELL, underlined in the
+      # breakpoint's colour — the desktop's inline `ct-column-breakpoint-
+      # marker` on the one character the breakpoint is anchored at.
+      for (ml, mc) in model.columnMarks:
+        if ml == line and mc >= 1 and mc <= shown:
+          g.restyle(row, codeCol + mc - 1, 1, proc(s: CellStyle): CellStyle =
+            var out2 = s
+            out2.role = srGutterBreakpoint
+            out2.underline = true
+            out2)
       # The inline annotation, for the EXECUTION line only. §3.3.2 renders the
       # evaluated values "at the current step", and a value printed beside a
       # line the debugger is not on is a value from another moment.
@@ -521,6 +537,59 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
+
+type
+  SourceClickTarget* = object
+    ## PLAT-50: what a press on the source pane is on.
+    line*: int
+      ## The source line pressed, 0 for none.
+    onGutter*: bool
+    column*: int
+      ## The code column pressed (1-based cell of the line's text); 0 on the
+      ## gutter or past the code column.
+    lineText*: string
+      ## The held text of `line` ("" while it is loading).
+    value*: int
+      ## The inline value pressed (an index into `values`), -1 for none.
+    values*: seq[Annotation]
+      ## Every value the line's annotation shows.
+
+proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
+                          row, col: int): SourceClickTarget =
+  ## A press at `(row, col)` on the pane `paintSourcePane` painted into
+  ## `area`, read back by the same arithmetic: the line, the gutter or the
+  ## code column, and on the execution line which inline value it is on.
+  result = SourceClickTarget(value: -1)
+  if area.width <= 0 or area.height <= 1 or row <= area.row or
+     row >= area.row + area.height or col < area.col or
+     col >= area.col + area.width:
+    return
+  let line = model.viewportTop + (row - area.row - 1)
+  if line < 1 or (model.totalLineCount > 0 and line > model.totalLineCount):
+    return
+  result.line = line
+  let gutW = min(area.width, model.paneGutterWidth())
+  let codeW = max(0, area.width - gutW)
+  if col < area.col + gutW:
+    result.onGutter = true
+    return
+  let codeCol = area.col + gutW
+  result.column = col - codeCol + 1
+  if not model.holdsLine(line):
+    return
+  let raw = model.heldTextAt(line)
+  result.lineText = raw
+  if line == model.executionLine and model.values.len > 0:
+    let shown = cellWidthOf(truncateToCells(raw, codeW))
+    let start = codeCol + shown + AnnotationGap
+    let targets = annotationTargets(raw, model.values, codeW, shown)
+    for t in targets:
+      result.values.add t.value
+    for i, t in targets:
+      if col >= start + t.startCell and col < start + t.endCell:
+        result.value = i
+        result.column = 0
+        break
 
 proc sourcePaneScreen*(model: SourcePaneModel; width, height: int;
                        cache: HighlighterCache = nil): SourcePaneScreen =

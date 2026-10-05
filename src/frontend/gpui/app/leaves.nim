@@ -98,6 +98,12 @@ import ../chrome
 import ./shell
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_binding
+# `PLAT35-F4` x PLAT-50: the two attributes `window_clicks` dispatches a
+# VARIABLE press on. Imported from where the vocabulary declares them rather
+# than spelled again here, so this renderer and the binding cannot drift
+# about what a `Tree` row is called (§30) — see `renderState`'s `table`.
+from ../../view_vocabulary/fact_reader import ViewIdAttribute,
+                                              ViewKindAttribute
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
@@ -1273,6 +1279,8 @@ proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
   r.appendChild(label, r.createTextNode(timelineText(current, first, last)))
   r.appendChild(parent, label)
   let track = r.createElement("div")
+  # PLAT-50: a press on the track seeks (`window_clicks`, K30).
+  r.setAttribute(track, "data-ct-timeline-track", "true")
   r.setStyle(track, "width", $TimelineBarWidthPx & "px")
   r.setStyle(track, "height", $TimelineBarHeightPx & "px")
   r.setStyle(track, "background", TimelineTrackColor)
@@ -1294,6 +1302,8 @@ const
   CallPartAttribute* = "data-call-part"
     ## A row part's `CallSegmentKind` (`callee`, `argName`, `argValue`, …).
   CallSelectedAttribute* = "data-call-selected"
+  CallArgAttribute* = "data-call-arg"
+    ## PLAT-50: the argument a row part belongs to (0-based into `args`).
   CallRowPx* = 26
     ## A row's height: the window's row pitch (`window_geometry
     ## .GpuiEditorRowPx`), fixed, so a press is mapped to the row it is on
@@ -1352,6 +1362,9 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     for seg in row.callRowSegments(indent = false):
       let piece = r.createElement("span")
       r.setAttribute(piece, CallPartAttribute, $seg.kind)
+      # PLAT-50 (K23): an argument's parts name it, for its right-click menu.
+      if seg.arg > 0:
+        r.setAttribute(piece, CallArgAttribute, $(seg.arg - 1))
       r.setStyle(piece, "flex-shrink", "0")
       r.setStyle(piece, "color",
         case seg.kind
@@ -1492,16 +1505,30 @@ const
     ## **THE RENDERED COLOUR IS NOT THE DECLARED TOKEN, AND AN EXACT-TOKEN
     ## PIXEL PROBE CANNOT FIND THIS RULE IN ANY BUILD — WORKING OR BROKEN.**
     ## `StateSeparatorColour` declares `#565656`; the frame holds
-    ## **`(71, 73, 76)` = `#47494C`**, that token over the pane's `#1b222c`
-    ## ground at coverage ≈ 0.75 (0.746 / 0.750 / 0.762 on R / G / B). The
+    ## **`(75, 75, 75)` = `#4B4B4B`**, that token over the pane's `#282828`
+    ## ground at coverage ≈ 0.76. (RE-MEASURED AT THE PLAT-50 MERGE,
+    ## 2026-10-05, AND BOTH NUMBERS MOVED: it read `(71, 73, 76)` = `#47494C`
+    ## over a `#1b222c` ground at 0.746 / 0.750 / 0.762. PLAT-50's
+    ## `0a52bd0aa` re-grounded the panes on the desktop's own tokens —
+    ## `main.PanelGround = "#282828"`, `ui/surface/base/panel` — and its notes
+    ## name `#1b222c` as what it replaced. The rule declares the same token
+    ## and sits at the same x on the same rows; only the ground beneath it
+    ## changed, so the composite did.) The
     ## blend is the RASTERISER's and not the token's — the shim parses a
     ## 6-digit hex at full alpha (`gpui_app.parse_color`) — so a 1 px logical
     ## box simply fails to land on one whole device pixel.
     ##
-    ## A search for exact `#565656` returning zero is the FALSE NEGATIVE that
-    ## cost this finding two passes: the rule was built, probed for the
-    ## declared token, reported as painting nothing, deleted, and its absence
-    ## asserted in a suite. **Any pixel assertion here must target the
+    ## A search for exact `#565656` is the FALSE NEGATIVE that cost this
+    ## finding two passes: the rule was built, probed for the declared token,
+    ## reported as painting nothing, deleted, and its absence asserted in a
+    ## suite. **IT IS NOT MERELY BLIND, IT IS INSENSITIVE**, measured over all
+    ## seven frames at the merged bytes: exact `#565656` counts 350 / 468 /
+    ## 429 / 464 / 602 / 388 / 328 in `shell` / `editor` / `state` /
+    ## `calltrace` / `eventLog` / `editorWithMark` / `gutterLanes` — a few
+    ## hundred in EVERY frame, including the two whose state pane has no rows
+    ## and therefore no rule at all. So the declared-token count does not
+    ## distinguish a drawn rule from an undrawn one in either direction.
+    ## **Any pixel assertion here must target the
     ## RENDERED value and must carry a POSITIVE CONTROL proving the probe can
     ## find the rule when the rule is there** (`Verification-Harness-Traps`
     ## §67). The shim's own source refutes the deleted-on-sight reading
@@ -1564,7 +1591,9 @@ const
     ## (`StateSeparatorAttribute`).
   StateSeparatorColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
     ## `colors/ui/border/primary` — `#565656` in dark mode. **DECLARED, NOT
-    ## RENDERED**: the frame holds `#47494C`. See `StateSeparatorAttribute`.
+    ## RENDERED**: the frame holds `#4B4B4B` over PLAT-50's `#282828` pane
+    ## ground (it was `#47494C` over `#1b222c`). See
+    ## `StateSeparatorAttribute`.
   StateRowPx* = CallRowPx
     ## A row's height, and it is the window's own row pitch rather than a new
     ## number — the call trace's rows take the same one, which is
@@ -1804,6 +1833,28 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   let nameColumnPx = stateNameColumnPx(rows)
   let table = r.createElement("div")
   r.setAttribute(table, StateTableAttribute, "rows")
+  # **PLAT-50's CLICK MODEL DISPATCHES ON THE VOCABULARY'S OWN TWO
+  # ATTRIBUTES, AND THIS TABLE CARRIES THEM RATHER THAN GROWING A SECOND
+  # CLICK PATH BESIDE THEM (§30).**
+  #
+  # `window_clicks.wireWindowClicks` decides a press is a VARIABLE press by
+  # walking for `data-view-kind == "Tree"` under an ancestor whose
+  # `data-view-id` is `state.root`, and then wires `gcpVariable` with the
+  # node's `data-view-id` AS THE KEY — which `main` hands straight to
+  # `stateVM.toggleExpand` (left) and `variablesContextMenu` (right).
+  # Taking the `state.root` `Tree` over, as `renderState` does, removed the
+  # ancestor that makes `ctx` become `state`, so every variable press in this
+  # pane stopped being recognised. MEASURED, not inferred: with this table
+  # unlabelled, PLAT-50's own case *"a value expands; a variable's menu"*
+  # fails and the suite counts 95 assertions; upstream's `leaves.nim` at the
+  # same merge counts 104.
+  #
+  # So the table IS the state tree now and says so, and each body row names
+  # the variable it draws. The KEY SPELLING IS ALREADY GATED: `StateRow.path`
+  # is compared against `statePaneView`'s own visible `Tree` row ids by
+  # `test_plat40_state_pane_columns.nim`, so the id this publishes is the id
+  # the ViewModel's `expandedPaths` uses and the one the menu will act on.
+  r.setAttribute(table, ViewIdAttribute, StateTreeViewId)
   r.setAttribute(table, StateAlignAttribute,
                  $stateValueColumnPx(nameColumnPx))
   r.setStyle(table, "display", "flex")
@@ -1827,6 +1878,11 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     r.setAttribute(el, StateDepthAttribute, $row.depth)
     r.setAttribute(el, StateSelectedAttribute,
                    (if row.selected: "true" else: "false"))
+    # The two the click model reads (see the note on `table`): the row IS a
+    # vocabulary `Tree` row as far as a press is concerned, and its id is the
+    # path `toggleExpand` and `variablesContextMenu` take.
+    r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
+    r.setAttribute(el, ViewIdAttribute, row.path)
     # The indent is the NAME CELL's padding and not the row's: a fixed-width
     # name cell ends where every other row's does however deep the row is,
     # which is the terminal's rule (`tree_node.fieldWidths`) and is why a
@@ -1887,7 +1943,7 @@ proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
   r.appendChild(result, r.createTextNode(
     if leaf.title.len > 0: leaf.title else: leaf.paneId))
 
-proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
+proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
                 surface: EditorSurface;
                 editorViewportPx = 0;
                 editorScrollLeftCols = 0): (GpuiElement, bool) =
