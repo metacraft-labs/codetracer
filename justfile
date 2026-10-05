@@ -978,6 +978,7 @@ test:
     test-sibling-backend-path \
     test-agent-api-contract \
     test-rust \
+    test-ctfs-source-importer \
     test-nimsuggest \
     "$@"
 
@@ -6288,3 +6289,7 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     export PATH="${extra_path}${PATH}"
 
     cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test
+
+# Generate real declared Rust/Python protocol fixtures and run native importer controls.
+test-ctfs-source-importer:
+  "$CODETRACER_PYTHON_CMD" tests/ctfs_sources_fixtures/run_ctfs_sources_fixtures.py

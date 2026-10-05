@@ -74,9 +74,19 @@ checks=0
 failures=0
 skips=0
 
-ok() { checks=$((checks + 1)); echo "  [OK]      $*"; }
-bad() { checks=$((checks + 1)); failures=$((failures + 1)); echo "  [FAILED]  $*"; }
-skip() { skips=$((skips + 1)); echo "  [SKIPPED] $*"; }
+ok() {
+	checks=$((checks + 1))
+	echo "  [OK]      $*"
+}
+bad() {
+	checks=$((checks + 1))
+	failures=$((failures + 1))
+	echo "  [FAILED]  $*"
+}
+skip() {
+	skips=$((skips + 1))
+	echo "  [SKIPPED] $*"
+}
 note() { echo "      $*"; }
 check() {
 	# check <verdict> <text...> — `ok` when $1 is the string `ok`.
@@ -434,9 +444,9 @@ if not e.get("present"):
 elif c.get("present"):
     # The user, 2026-09-27: CONSTRAINTS does not belong in the default replay
     # layout (it was a tab of the EVENT LOG stack until then) —
-    # `frontend.modeDefaultOmittedContentIds(DebugMode)`.
+    # frontend.modeDefaultOmittedContentIds(DebugMode).
     print("no")
-    print("debug mode's default places CONSTRAINTS in [%s]" % c.get("stackKey"))
+    print("debug mode'"'"'s default places CONSTRAINTS in [%s]" % c.get("stackKey"))
 else:
     print("ok"); print("the EVENT LOG is in [%s] and CONSTRAINTS is not placed"
                        % e.get("stackKey"))

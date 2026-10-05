@@ -1,4 +1,6 @@
-# Provenance — `verno_emitted_solver_model.json`
+# Counterexample fixture provenance
+
+## Provenance — `verno_emitted_solver_model.json`
 
 **Deliberately not part of the shared conformance corpus** in
 `../payload/`. That corpus is byte-identical in `blocksense-network/verno` and
@@ -6,7 +8,7 @@ in this repository and is tied by a SHA-256 manifest; this file is not, because
 it is not a document either side is asked to agree about. It is one specific
 document, produced by one side, so the other side can be checked against it.
 
-## What produced it
+### What produced it
 
 `cargo test -p formal_verification --lib -- --nocapture w8` in
 `blocksense-network/verno` at `vn-m5/counterexample-payload`. The check prints
@@ -20,7 +22,7 @@ is *unique*: `n = 42`, `total = n + 1 = 43`, `doubled = total * 2 = 86`,
 against the obligation `doubled < 0`. Those are not one model among many; they
 are the values the failing execution computes.
 
-## What is **not** real about it
+### What is **not** real about it
 
 Everything around the model. There is no Noir workspace, no `venir` process and
 no recorded run:
@@ -34,7 +36,7 @@ no recorded run:
   had no `FileManager`;
 * `source_map.files` is empty for the same reason.
 
-## What it is for
+### What it is for
 
 To check that the document Verno's emitter *actually produces* for a payload
 carrying a solver model decodes here — with the values, the program points in
@@ -43,7 +45,7 @@ that the payload opens VN-M5's gate (`hasSteppableCounterexample` answers
 `true`). Writing that document by hand on this side would have made the check
 agree with itself.
 
-## What would replace it
+### What would replace the emitted solver model
 
 A Linux run of `tests/manual/verno_payload_end_to_end.nim` with `venir` against
 a real Noir package. That would produce the same shape with a real workspace, a
@@ -52,13 +54,13 @@ would then belong in the shared corpus rather than here.
 
 ---
 
-# Provenance — `bounded_loop_model.json`
+## Provenance — `bounded_loop_model.json`
 
 **Authored here, and it is the only fixture in this directory that is.** That
 is a weakness, it is stated first, and it is why nothing in this document is
 trusted to be right about arithmetic — see "How it is kept honest" below.
 
-## Why it exists
+### Why it exists
 
 VN-M5 deliverable 4: "Loops from a bounded model driven through the **existing**
 loop controls, not a parallel mechanism." The contract has carried
@@ -73,7 +75,7 @@ quantifying over an empty set, which passes
 grouping, the iteration boundaries and the slider's end stops are exercised over
 a loop of known, asserted size.
 
-## What is real about it
+### What is real about it
 
 Nothing. There is no Noir package, no `venir` run, no solver and no z3. The
 values are consistent with the program they describe — `n = 3`, and an
@@ -87,7 +89,7 @@ same reason its neighbour is not: that corpus is byte-identical in
 `blocksense-network/verno` and tied by a SHA-256 manifest, and this is not a
 document either side is asked to agree about.
 
-## How it is kept honest
+### How it is kept honest
 
 The loop checks in `../../unit/test_counterexample_session.nim` do not take this
 file's word for what an iteration is. Every answer the session gives about
@@ -102,7 +104,7 @@ two.
 The one thing this file is trusted for is its *shape*: which steps are loop
 iterations, and which iteration number each carries.
 
-## What would replace it
+### What would replace the bounded-loop model
 
 A `venir` that distinguishes an unrolled iteration. That is a producer-side
 change nobody has made, it is named in VN-M5's deliverable 4, and until it
@@ -110,16 +112,16 @@ exists this file is the only input deliverable 4's consumer half has.
 
 ---
 
-# Provenance — `verno_end_to_end_macos.json`
+## Provenance — `verno_end_to_end_macos.json`
 
 **The first document in this repository that nobody authored any part of.** No
 hand-written envelope, no substituted timestamps, no `NOT A RECORDING` marker —
 because it is not synthetic. Its two siblings above stay exactly as they are;
 this file does not replace either of them.
 
-## What produced it, end to end
+### What produced it, end to end
 
-```
+```text
 verno fv        # blocksense-network/verno main cc90731, release build
   -> Noir v1.0.0-beta.26 front end -> VIR
   -> venir       # blocksense-network/Venir vn-m5/report-counterexample 7cc0e51
@@ -137,7 +139,7 @@ That is deliberate and is the point: the two files above say `NOT A RECORDING`
 because their envelopes are invented, and this one must not, because its
 envelope is not.
 
-## Why it exists next to the other two rather than instead of them
+### Why it exists next to the other two rather than instead of them
 
 Each answers a different question.
 
@@ -150,7 +152,7 @@ Each answers a different question.
 * **This file** — does the whole chain, with nothing authored anywhere in it,
   reach the consumer's gate?
 
-## What it establishes, and one thing it corrects
+### What it establishes, and one thing it corrects
 
 `hasSteppableCounterexample` answers **true** for it. Opening `f1` gives a
 2-step session: one program point with values and **no** source position, and
@@ -169,7 +171,7 @@ binding here is `noloc`. So any claim that a value can be shown against its
 declaration site rests on a fixture shape the producer does not yet produce.
 Recorded here rather than left to be discovered.
 
-## Two producer defects this run exposed, neither fixed here
+### Two producer defects this run exposed, neither fixed here
 
 1. **An encoding-internal name reaches the developer.** Trace `cx0`'s model
    shows a binding named `no%param`. `payload/counterexample.rs::demangle`

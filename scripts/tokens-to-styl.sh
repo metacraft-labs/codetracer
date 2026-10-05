@@ -36,13 +36,28 @@ POSITIONAL=()
 NIM_OUT=""
 EDITOR_THEME_DIR=""
 while [ $# -gt 0 ]; do
-  case "$1" in
-    --nim-out) NIM_OUT="${2:?--nim-out needs a file path}"; shift 2 ;;
-    --nim-out=*) NIM_OUT="${1#--nim-out=}"; shift ;;
-    --editor-theme) EDITOR_THEME_DIR="${2:?--editor-theme needs a directory}"; shift 2 ;;
-    --editor-theme=*) EDITOR_THEME_DIR="${1#--editor-theme=}"; shift ;;
-    *) POSITIONAL+=("$1"); shift ;;
-  esac
+	case "$1" in
+	--nim-out)
+		NIM_OUT="${2:?--nim-out needs a file path}"
+		shift 2
+		;;
+	--nim-out=*)
+		NIM_OUT="${1#--nim-out=}"
+		shift
+		;;
+	--editor-theme)
+		EDITOR_THEME_DIR="${2:?--editor-theme needs a directory}"
+		shift 2
+		;;
+	--editor-theme=*)
+		EDITOR_THEME_DIR="${1#--editor-theme=}"
+		shift
+		;;
+	*)
+		POSITIONAL+=("$1")
+		shift
+		;;
+	esac
 done
 set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 

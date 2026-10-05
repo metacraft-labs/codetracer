@@ -491,7 +491,7 @@ via_var_out="$(run_guard "${work}/arm")"
 if grep -q 'RESULT: OK' <<<"${via_var_out}"; then
 	ok "15b/a gate RUN through the variable that names it IS credited"
 else
-	bad "15b/a gate run as \${VAR} was reported dark — the position rule dropped a real wire"
+	bad $'15b/a gate run as ${VAR} was reported dark — the position rule dropped a real wire'
 	printf '%s\n' "${via_var_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
 fi
 
@@ -515,7 +515,7 @@ printf '// a probe a wrapper runs\nconsole.log("x");\n' \
 } >>"${work}/arm/ci/test/gate2.sh"
 wrapper_out="$(run_guard "${work}/arm")"
 if grep -q 'RESULT: OK' <<<"${wrapper_out}"; then
-	ok "15c/a gate a local wrapper EXECUTES as \$2 IS credited"
+	ok $'15c/a gate a local wrapper EXECUTES as $2 IS credited'
 else
 	bad "15c/a gate run by a local wrapper was reported dark — the position rule stops at the call"
 	printf '%s\n' "${wrapper_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'

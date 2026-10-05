@@ -204,6 +204,7 @@
     # in the change that touches each file anyway, rather than as one
     # unreviewable whitespace commit.
     shellcheck.enable = true;
+    shellcheck.args = [ "--external-sources" ];
     shfmt.enable = true;
 
     # Nix formatter

@@ -96,7 +96,7 @@ The binary is **not committed**. The test builds it (and edited copies) at test
 time into temp dirs via `build.sh <source.c> <out>`, which runs the dev shell's
 `cc`:
 
-```
+```text
 cc -O0 -g -fno-stack-protector -fno-asynchronous-unwind-tables -o <out> <source.c>
 ```
 

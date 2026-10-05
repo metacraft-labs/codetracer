@@ -146,7 +146,8 @@ for repo in $(printf '%s\n' "$flake_list" "$workflow_list" | cut -f1 | sort -u);
 		# reported as one -- otherwise this branch would turn "pin it to a
 		# commit" into a way to opt out of the contract, which is the failure
 		# mode this whole file is written against.
-		locked=$(python3 - "$repo" <<'PY' 2>/dev/null || true
+		locked=$(
+			python3 - "$repo" <<'PY' 2>/dev/null || true
 import json,sys
 repo=sys.argv[1]
 try: nodes=json.load(open("flake.lock"))["nodes"]

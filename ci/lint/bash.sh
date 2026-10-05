@@ -23,9 +23,9 @@ shopt -s globstar
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
-# The pre-commit shellcheck hook runs without -x, so it cannot follow the
-# source and reports SC1091; the source= directive above still tells the -x
-# runs (ci/lint/bash.sh) where the library lives.
+# The native pre-commit hook follows external sources (--external-sources).
+# The source directive identifies the actual library; the existing SC1091
+# annotation serves the plain ShellCheck invocations that do not use -x.
 # shellcheck source=ci/lib/lint-steps.sh disable=SC1091
 source ci/lib/lint-steps.sh
 

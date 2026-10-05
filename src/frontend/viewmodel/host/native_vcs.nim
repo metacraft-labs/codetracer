@@ -182,4 +182,3 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
                      refspec: string): PlatformFuture[PlatformOutcome[Nothing]] =
     let res = git(repository, @["push", remote, refspec])
     if res.ok: resolvedOk() else: resolved(failed[Nothing](res.error))
-

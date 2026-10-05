@@ -221,7 +221,10 @@ for f in "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT/repro.nim"; do
 	rel="${f#"$REPO_ROOT"/}"
 	# Comments may still mention the old name (e.g. "formerly ..."); only
 	# non-comment lines constitute a live lookup.
-	if hits="$(grep -n 'codetracer-rr-backend' "$f" | grep -vE ':[[:space:]]*(#|##|--)' || true)"; [ -z "$hits" ]; then
+	if
+		hits="$(grep -n 'codetracer-rr-backend' "$f" | grep -vE ':[[:space:]]*(#|##|--)' || true)"
+		[ -z "$hits" ]
+	then
 		pass "case C: $rel has no live codetracer-rr-backend lookup"
 	else
 		fail "case C: $rel still looks up the retired name:"$'\n'"$hits"

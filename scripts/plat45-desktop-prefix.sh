@@ -27,17 +27,21 @@ layout="${2:-$repo/src/config/default_layout.json}"
 
 ct_bin="$(readlink -f "$repo/src/build-debug/bin/ct")"
 base="$(dirname "$(dirname "$ct_bin")")"
-[ -x "$ct_bin" ] || { echo "FAIL: no built ct — run 'just build-once'" >&2; exit 1; }
+[ -x "$ct_bin" ] || {
+	echo "FAIL: no built ct — run 'just build-once'" >&2
+	exit 1
+}
 
 # A linked worktree has empty submodule directories; the libraries are the
 # main checkout's.
 libs_root="$repo"
 if [ ! -e "$repo/libs/nim-chronicles/chronicles.nim" ]; then
-  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)"
-  libs_root="$(dirname "$common")"
+	common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)"
+	libs_root="$(dirname "$common")"
 fi
 
-flags="$(python3 - "$repo" "$libs_root" <<'PY'
+flags="$(
+	python3 - "$repo" "$libs_root" <<'PY'
 import re, sys
 repo, libs_root = sys.argv[1], sys.argv[2]
 text = open(repo + "/src/Tuprules.tup").read()
@@ -60,24 +64,31 @@ work="$out.build"
 mkdir -p "$out" "$work"
 # shellcheck disable=SC2086
 nim $flags -d:ctIndex -d:nodejs --sourcemap:on --nimcache:"$work/nc-index" \
-  --out:"$work/index.js" js "$repo/src/frontend/index.nim" >"$work/index.log" 2>&1 ||
-  { tail -20 "$work/index.log" >&2; exit 1; }
+	--out:"$work/index.js" js "$repo/src/frontend/index.nim" >"$work/index.log" 2>&1 ||
+	{
+		tail -20 "$work/index.log" >&2
+		exit 1
+	}
 # shellcheck disable=SC2086
 nim $flags -d:chronicles_enabled=off -d:ctRenderer -d:ctHmr -d:isonimHmr \
-  --debugInfo:on --lineDir:on --hints:off --warnings:off \
-  --nimcache:"$work/nc-ui" --out:"$work/ui.js" js "$repo/src/frontend/ui_js.nim" \
-  >"$work/ui.log" 2>&1 || { tail -20 "$work/ui.log" >&2; exit 1; }
+	--debugInfo:on --lineDir:on --hints:off --warnings:off \
+	--nimcache:"$work/nc-ui" --out:"$work/ui.js" js "$repo/src/frontend/ui_js.nim" \
+	>"$work/ui.log" 2>&1 || {
+	tail -20 "$work/ui.log" >&2
+	exit 1
+}
 
-mirror() {  # mirror <src-dir> <dst-dir> <name-to-skip>...
-  local src="$1" dst="$2"; shift 2
-  mkdir -p "$dst"
-  for entry in "$src"/* "$src"/.cargo; do
-    [ -e "$entry" ] || continue
-    local name skip=0
-    name="$(basename "$entry")"
-    for s in "$@"; do [ "$name" = "$s" ] && skip=1; done
-    [ "$skip" = 1 ] || ln -sfn "$(readlink -f "$entry")" "$dst/$name"
-  done
+mirror() { # mirror <src-dir> <dst-dir> <name-to-skip>...
+	local src="$1" dst="$2"
+	shift 2
+	mkdir -p "$dst"
+	for entry in "$src"/* "$src"/.cargo; do
+		[ -e "$entry" ] || continue
+		local name skip=0
+		name="$(basename "$entry")"
+		for s in "$@"; do [ "$name" = "$s" ] && skip=1; done
+		[ "$skip" = 1 ] || ln -sfn "$(readlink -f "$entry")" "$dst/$name"
+	done
 }
 mirror "$base" "$out" config src public index.js index.js.map ui.js bin
 # `bin/ct` is a real COPY, not a link: `ct` finds the Electron main script it

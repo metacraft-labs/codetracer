@@ -71,7 +71,7 @@ It is consumed by `../ruby_request_panel_vm_test.nim`
 `CoreViewModelGateTests`, and is checked in so that ViewModel test needs no Ruby
 toolchain, no Sinatra and no server.
 
-### Regenerating
+### Regenerating — ruby_sinatra
 
 ```sh
 direnv exec ../codetracer-ruby-recorder just \
@@ -88,7 +88,7 @@ It records exactly the schedule `just demo-request-panel ruby` records —
 `codetracer-ruby-recorder/test-programs/web/session_driver.rb` — so the fixture
 and the hand-run demo always show the same session.
 
-### What the session contains
+### What the session contains — ruby_sinatra
 
 | # | Request                    | Status | Route                     |
 | - | -------------------------- | ------ | ------------------------- |
@@ -137,7 +137,7 @@ It is consumed by `../php_request_panel_vm_test.nim`
 `src/ct_test/release_gate.nim`'s `CoreViewModelGateTests`. It is checked in so
 that ViewModel test needs no PHP toolchain, no built C extension and no server.
 
-### Regenerating
+### Regenerating — php_builtin
 
 ```sh
 direnv exec ../codetracer-php-recorder just \
@@ -154,7 +154,7 @@ It records exactly the schedule `just demo-request-panel php` records —
 `codetracer-php-recorder/tests/programs/web/session_driver.php` — so the fixture
 and the hand-run demo always show the same session.
 
-### What the session contains
+### What the session contains — php_builtin
 
 | # | Request                    | Status | Route                        |
 | - | -------------------------- | ------ | ---------------------------- |
@@ -193,7 +193,7 @@ It is consumed by `../elixir_request_panel_vm_test.nim`
 that ViewModel test needs no Erlang/Elixir toolchain, no Hex packages and no
 server.
 
-### Regenerating
+### Regenerating — elixir_plug
 
 ```sh
 direnv exec ../codetracer-beam-recorder just \
@@ -209,7 +209,7 @@ It records exactly the schedule `just demo-request-panel elixir` records —
 `PlugWeb.main/0` in `codetracer-beam-recorder` — so the fixture and the hand-run
 demo always show the same session.
 
-### What the session contains
+### What the session contains — elixir_plug
 
 Twelve requests in two phases. The first four are issued **at once** and block
 in `PlugWeb.Barrier` until the whole cohort has arrived, so all four are inside
@@ -279,7 +279,7 @@ registered in `src/ct_test/release_gate.nim`'s `CoreViewModelGateTests`, and is
 checked in so that ViewModel test needs no Node toolchain, no Express and no
 server.
 
-### Regenerating
+### Regenerating — js_express
 
 ```sh
 direnv exec ../codetracer-js-recorder just \
@@ -342,7 +342,7 @@ It is consumed by `../native_request_panel_vm_test.nim`
 `CoreViewModelGateTests`, and is checked in so that ViewModel test needs no
 nginx, no recorder build and no server.
 
-### Regenerating
+### Regenerating — native_nginx
 
 ```sh
 direnv exec ../codetracer-native-recorder just \
@@ -361,7 +361,7 @@ fixture is ~2.1 MB against ~170–290 KB for the five managed rows, because a
 native recording holds every syscall and lock event the process made, not a
 per-line step stream of application code.
 
-### What the session contains
+### What the session contains — native_nginx
 
 | # | Request              | Status | Why it is in the schedule                                  |
 |---|----------------------|--------|------------------------------------------------------------|
@@ -415,7 +415,7 @@ read a growing container over a real HTTP socket with real byte-range requests.
 
 Regenerate:
 
-```
+```bash
 cd src/db-backend
 direnv exec ../.. env CT_REGENERATE_REMOTE_DELTA_FIXTURE=1 \
   cargo test --test remote_span_tail_http_test remote_live_panel_over_http_range

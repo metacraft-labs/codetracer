@@ -679,7 +679,7 @@ run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
 	--branch cloud --publisher-workflow "${wf_dir}/block.yml" \
 	--grace-seconds 0 --poll-seconds 1
 expect_contains "$STALL_BANNER" "coverage/covered-block"
-ok "a block-sequence \`branches:\` list is read too, so a covered branch is never called uncovered"
+ok $'a block-sequence `branches:` list is read too, so a covered branch is never called uncovered'
 
 # THE CONTRACT THAT MATTERS. This is the exact condition that took out 11 of 21
 # jobs on `cloud`, and the check must name it rather than blame the workspace.
@@ -919,7 +919,7 @@ run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
 expect_rc 4 "derivation/workflow-bare"
 expect_contains "declared-bare-in-workflow" "derivation/workflow-bare"
 expect_contains "mixed.yml" "derivation/workflow-bare"
-ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is named"
+ok $'a BARE `siblings:` entry in a workflow is probed, and the workflow is named'
 
 # 9e — the same block's `name=ref`, SHA-pinned and commented entries are NOT
 # probed, and neither is the `name=ref` in the sibling list. They are in the
@@ -928,7 +928,7 @@ ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is name
 expect_not_contains "pinned-by-ref" "derivation/workflow-ref"
 expect_not_contains "sha-pinned" "derivation/workflow-ref"
 expect_not_contains "commented-out-repo" "derivation/workflow-ref"
-ok "a \`name=ref\` entry bypasses the lock and is NOT probed — nor is a commented one"
+ok $'a `name=ref` entry bypasses the lock and is NOT probed — nor is a commented one'
 
 # 9g — THE DEFAULTS. Everything above drives fixtures; if the defaults did not
 # point at this repo's real declaration sites the whole mechanism would be
@@ -953,7 +953,7 @@ ok "the default set spans BOTH declaration sites, from the real files"
 # it. A derivation that swept every token in those blocks would fail here.
 expect_not_contains "codetracer-native-backend" "derivation/defaults"
 expect_not_contains "io-mon" "derivation/defaults"
-ok "names that are only ever \`=ref\` or SHA-pinned in the real workflows are excluded"
+ok $'names that are only ever `=ref` or SHA-pinned in the real workflows are excluded'
 
 # --- 9h. an empty declared set is refused, not passed -----------------------
 #

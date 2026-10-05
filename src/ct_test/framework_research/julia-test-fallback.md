@@ -13,7 +13,8 @@
 
 ## Source Discovery And Entry Points
 
-- M12 treats a Julia test file, typically `test/runtests.jl`, as the fixture entry point.
+- M12 treats a Julia test file, typically `test/runtests.jl`, as the fixture
+  entry point.
 
 ## Recording Feasibility
 
@@ -27,6 +28,7 @@
 ## Limitations And Capability Diagnostics
 
 - `canRunSingle=false` and `canRecordSingle=false`.
-- Julia `Test` does not provide a stable built-in machine-readable single-test selector for this provider.
+- Julia `Test` does not provide a stable built-in machine-readable single-test
+  selector for this provider.
 - `canRecordFile=false`; file recording returns an unsupported-recording diagnostic.
 - Missing `julia` reports a missing-tool diagnostic for run actions.

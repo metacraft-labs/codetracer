@@ -168,7 +168,7 @@ for file in "$target_dir"/macos-*.sh; do
 	handler="$(printf '%s' "$trap_text" | sed -E "s/^[[:space:]]*trap[[:space:]]+//; s/[[:space:]]+EXIT[[:space:]]*$//")"
 
 	case "$handler" in
-	\'*|\"*)
+	\'* | \"*)
 		# Inline handler: the body is the quoted string itself.
 		body="$handler"
 		;;

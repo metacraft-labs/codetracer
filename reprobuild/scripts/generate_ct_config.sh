@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -eu
 
 out=build/generated/ct_config.h

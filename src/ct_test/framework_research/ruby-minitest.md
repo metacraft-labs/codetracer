@@ -61,11 +61,23 @@ Sources:
 
 ## Execution Commands
 
-| Operation         | Command                                                                 |
-| ----------------- | ----------------------------------------------------------------------- | --- | ---------------------- |
-| Run project       | `bundle exec ruby -Itest -e "Dir['test/**/*_test.rb'].sort.each {       | f   | require_relative f }"` |
-| Run file          | `bundle exec ruby -Itest test/file_test.rb`                             |
-| Run single method | `bundle exec ruby -Itest test/file_test.rb --name /Class#test_method$/` |
+### Run project
+
+```bash
+bundle exec ruby -Itest -e "Dir['test/**/*_test.rb'].sort.each { |f| require_relative f }"
+```
+
+### Run file
+
+```bash
+bundle exec ruby -Itest test/file_test.rb
+```
+
+### Run single method
+
+```bash
+bundle exec ruby -Itest test/file_test.rb --name /Class#test_method$/
+```
 
 M9 implements command construction and guarded process execution. If Ruby or
 Bundler is absent, the provider returns an explicit diagnostic.

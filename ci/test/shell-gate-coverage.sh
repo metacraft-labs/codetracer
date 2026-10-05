@@ -1119,7 +1119,7 @@ echo
 # ---------------------------------------------------------------------------
 echo "Step 4: nothing CI reaches names a script or a recipe that does not exist"
 echo "    A step invoking a missing script fails loudly — but only if that"
-echo "    workflow runs, and a step behind an \`if:\` may not for months."
+echo $'    workflow runs, and a step behind an `if:` may not for months.'
 # ---------------------------------------------------------------------------
 # THE SUBJECT IS THE WORKFLOWS AND THE LINT DISPATCHERS, AND NOT EVERY REACHABLE
 # SCRIPT. Widening it to the whole reachable set was tried and produced five
@@ -1185,6 +1185,6 @@ echo "  Every shell script under ci/ and scripts/ is reached by a workflow lane,
 echo "  declares in its own header that it is not a gate, or is recorded as dark"
 echo "  with a reason, in a list that can only shrink."
 echo "  NOT claimed: that any of them passes, or that a reachable gate is actually"
-echo "  RUN — a step behind a false \`if:\` is reachable and never executes. This"
+echo $'  RUN — a step behind a false `if:` is reachable and never executes. This'
 echo "  guard measures the graph, which is strictly less than the schedule."
 echo "RESULT: OK"

@@ -1097,9 +1097,9 @@ fi
 for job in "${win_timeout_jobs[@]+"${win_timeout_jobs[@]}"}"; do
 	timeout_value="$(job_timeout_minutes "$job")"
 	if [ -z "$timeout_value" ]; then
-		fail "$job declares timeout-minutes" 			"without it the job inherits GitHub's ${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default," 			"which is the six hours this job already spent holding the branch's" 			"concurrency group in run 33880354195 without ever reporting."
+		fail "$job declares timeout-minutes" "without it the job inherits GitHub's ${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default," "which is the six hours this job already spent holding the branch's" "concurrency group in run 33880354195 without ever reporting."
 	elif [ "$timeout_value" -ge "$GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES" ]; then
-		fail "$job bounds itself below GitHub's default" 			"timeout-minutes: $timeout_value is not lower than the" 			"${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default it is supposed to replace," 			"so this job can still starve the concurrency group for six hours."
+		fail "$job bounds itself below GitHub's default" "timeout-minutes: $timeout_value is not lower than the" "${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default it is supposed to replace," "so this job can still starve the concurrency group for six hours."
 	else
 		ok "$job bounds itself (timeout-minutes: $timeout_value)"
 	fi

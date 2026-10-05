@@ -742,7 +742,7 @@ fi
 stub="src/frontend/value_presentation.nim"
 if [ ! -f "${stub}" ]; then
 	check_failed "stub-is-a-reexport: ${stub} is missing"
-	detail "It is the name \`common_types\` resolves to when \`src/frontend/types.nim\` is the includer."
+	detail $'It is the name `common_types` resolves to when `src/frontend/types.nim` is the includer.'
 else
 	stub_routines="$(code_lines "${stub}" | grep -cE '^(proc|func|template|macro|iterator|method|converter)[[:space:]]' || true)"
 	if [ "${stub_routines}" -eq 0 ]; then

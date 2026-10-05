@@ -212,7 +212,7 @@ else
 $own_opinion"
 	elif [ "$forwards" -eq 0 ]; then
 		fail "(A3) nix/python.nix forwards the recorder's declaration" \
-			"it does not read inputs.\"codetracer-python-recorder\" at all"
+			'it does not read inputs."codetracer-python-recorder" at all'
 	else
 		pass "(A3) nix/python.nix forwards the recorder's declaration and states no version of its own"
 	fi
@@ -321,7 +321,7 @@ else
 	if [ "${CODETRACER_PYTHON_ABI_TAG:-}" = "$PIN_ABI_TAG" ]; then
 		pass "(C2) \$CODETRACER_PYTHON_ABI_TAG (${CODETRACER_PYTHON_ABI_TAG:-<unset>}) is derived from the declared $PIN_VERSION"
 	else
-		fail "(C2) \$CODETRACER_PYTHON_ABI_TAG is derived from the declared version" \
+		fail $'(C2) $CODETRACER_PYTHON_ABI_TAG is derived from the declared version' \
 			"shell says ${CODETRACER_PYTHON_ABI_TAG:-<unset>}; the declared $PIN_VERSION gives $PIN_ABI_TAG"
 	fi
 
@@ -330,11 +330,11 @@ else
 		if [ "$cmd_v" = "$PIN_VERSION" ]; then
 			pass "(C3) \$CODETRACER_PYTHON_CMD is Python $cmd_v"
 		else
-			fail "(C3) \$CODETRACER_PYTHON_CMD is the declared interpreter" \
+			fail $'(C3) $CODETRACER_PYTHON_CMD is the declared interpreter' \
 				"$CODETRACER_PYTHON_CMD is Python ${cmd_v:-<unreadable>}, declared is $PIN_VERSION"
 		fi
 	else
-		fail "(C3) \$CODETRACER_PYTHON_CMD is the declared interpreter" \
+		fail $'(C3) $CODETRACER_PYTHON_CMD is the declared interpreter' \
 			"CODETRACER_PYTHON_CMD=${CODETRACER_PYTHON_CMD:-<unset>} is not executable"
 	fi
 
@@ -403,13 +403,13 @@ else
 fi
 
 if [ -n "${CT_PYALIGN_NO_ENV:-}" ] || [ -z "${CODETRACER_PYTHON_INTERPRETER:-}" ]; then
-	na "(D3) \$CODETRACER_PYTHON_INTERPRETER -- unset"
+	na $'(D3) $CODETRACER_PYTHON_INTERPRETER -- unset'
 else
 	interp_v="$("$CODETRACER_PYTHON_INTERPRETER" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
 	if [ "$interp_v" = "$PIN_VERSION" ]; then
 		pass "(D3) \$CODETRACER_PYTHON_INTERPRETER is Python $interp_v"
 	else
-		fail "(D3) \$CODETRACER_PYTHON_INTERPRETER is the declared interpreter" \
+		fail $'(D3) $CODETRACER_PYTHON_INTERPRETER is the declared interpreter' \
 			"$CODETRACER_PYTHON_INTERPRETER is Python ${interp_v:-<unreadable>}, declared is $PIN_VERSION"
 	fi
 fi
@@ -577,7 +577,8 @@ if [ ! -f "$pure_toml" ]; then
 elif [ ! -x "$pure_probe" ]; then
 	na "(G) pure recorder floor -- no python3 available to parse the source with"
 else
-	pep604_files="$("$pure_probe" - "$PURE_DIR" <<'PY' 2>/dev/null || true
+	pep604_files="$(
+		"$pure_probe" - "$PURE_DIR" <<'PY' 2>/dev/null || true
 import ast, pathlib, sys
 
 root = pathlib.Path(sys.argv[1])

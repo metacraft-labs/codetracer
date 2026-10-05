@@ -24,15 +24,19 @@ Sources:
 
 - Prefer explicit package dependencies on `@playwright/test` or `playwright`.
 - A package script containing `playwright test` is sufficient.
-- `playwright.config.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, and `.mts` are accepted as framework markers.
+- `playwright.config.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, and `.mts` are accepted
+  as framework markers.
 
 ## Discovery
 
 - Framework-native discovery should run:
   `npx --no-install playwright test [file] --workers=1 --list --reporter=json`
-- M8 parses Playwright JSON reporter/list output under the documented JSON reporter shape. Items are built from `suites[].specs[]`, using `file`, `line`, `column`, `title`, `titlePath`, `tags`, and `tests[].projectName`.
+- M8 parses Playwright JSON reporter/list output under the documented JSON
+  reporter shape. Items are built from `suites[].specs[]`, using `file`, `line`,
+  `column`, `title`, `titlePath`, `tags`, and `tests[].projectName`.
 - Source selectors are `{relativeFile}::{suite title > test title}`.
-- Location provenance is `framework/exact` because Playwright reports file and line in JSON output.
+- Location provenance is `framework/exact` because Playwright reports file and
+  line in JSON output.
 
 ## Execution Commands
 

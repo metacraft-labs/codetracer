@@ -17,7 +17,8 @@
 
 ## Recording Feasibility
 
-- Native recording wraps `v run <file>`. This records the compiler/runner process and the launched executable path as observed by `ct-mcr`.
+- Native recording wraps `v run <file>`. This records the compiler/runner
+  process and the launched executable path as observed by `ct-mcr`.
 
 ## Limitations And Capability Diagnostics
 

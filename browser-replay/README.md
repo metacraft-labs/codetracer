@@ -22,7 +22,8 @@ The client fetches the recording manifest and trace bytes through
 codetracer-ci's authenticated browser-replay gateway endpoints:
 
 - `GET /api/v1/observability/gateway/manifests/{traceId}` — manifest fetch.
-- `GET /api/v1/observability/gateway/ranges/{traceId}/{**objectKey}` — byte fetch with HTTP Range.
+- `GET /api/v1/observability/gateway/ranges/{traceId}/{**objectKey}` — byte
+  fetch with HTTP Range.
 - `POST /api/v1/observability/gateway/credential-validate` — precondition probe (optional).
 
 This is the path used in production. Users get to a CodeTracer
@@ -50,7 +51,7 @@ The client reads its configuration from the URL query string. The
 `gatewayBaseUrl` and `traceId` are set; the legacy static path is
 selected otherwise.
 
-```
+```text
 https://<host>/index.html
   ?gatewayBaseUrl=https://codetracer.example.com
   &traceId=019e0744-31cf-7ad9-b350-f8d2e3eda5a2

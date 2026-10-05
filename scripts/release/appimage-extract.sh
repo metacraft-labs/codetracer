@@ -14,10 +14,14 @@
 # and `unsquashfs -o <offset>` reads it in place. Needs od and unsquashfs.
 set -eu
 
-die() { printf 'appimage-extract: ERROR: %s\n' "$*" >&2; exit 1; }
+die() {
+	printf 'appimage-extract: ERROR: %s\n' "$*" >&2
+	exit 1
+}
 
 [ $# -eq 2 ] || die 'usage: appimage-extract.sh <appimage> <dest-dir>'
-img="$1"; dest="$2"
+img="$1"
+dest="$2"
 [ -f "$img" ] || die "$img does not exist"
 command -v unsquashfs >/dev/null 2>&1 || die 'unsquashfs not found (squashfs-tools)'
 [ ! -e "$dest" ] || die "$dest already exists; refusing to extract over it"
@@ -37,6 +41,6 @@ sqmagic="$(od -An -c -j "$offset" -N 4 "$img" | tr -d ' ')"
 [ "$sqmagic" = 'hsqs' ] || die "no squashfs image at offset $offset of $img (found '$sqmagic')"
 
 mkdir -p "$(dirname "$dest")"
-unsquashfs -q -n -o "$offset" -d "$dest" "$img" >/dev/null \
-  || die "unsquashfs failed on $img at offset $offset"
+unsquashfs -q -n -o "$offset" -d "$dest" "$img" >/dev/null ||
+	die "unsquashfs failed on $img at offset $offset"
 [ -x "$dest/AppRun" ] || die "$img extracted, but has no executable AppRun at its root"

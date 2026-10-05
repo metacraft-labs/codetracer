@@ -25,9 +25,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/../../../../.." && pwd)"
 
 if ! command -v nim >/dev/null 2>&1; then
-  echo "regenerate.sh: no 'nim' on PATH — run this inside the codetracer dev shell:" >&2
-  echo "  direnv exec $repo_root $0" >&2
-  exit 1
+	echo "regenerate.sh: no 'nim' on PATH — run this inside the codetracer dev shell:" >&2
+	echo "  direnv exec $repo_root $0" >&2
+	exit 1
 fi
 
 work="$(mktemp -d)"
@@ -39,8 +39,8 @@ echo "[gdscript_mixed fixture] compiling generator with the canonical Nim writer
 # the Nim path.
 cd "$repo_root"
 nim c -d:release --hints:off --warnings:off \
-  --out:"$work/gen_combined_fixture" \
-  "$here/gen_combined_fixture.nim"
+	--out:"$work/gen_combined_fixture" \
+	"$here/gen_combined_fixture.nim"
 
 echo "[gdscript_mixed fixture] generating into $here"
 "$work/gen_combined_fixture" "$here"

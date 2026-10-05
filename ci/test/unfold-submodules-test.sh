@@ -153,12 +153,12 @@ buggy_out="$(
 	set -uo pipefail
 	PARENT="$WORK/regression/parent"
 	while IFS= read -r line; do
-		[[ -z "$line" ]] && continue
-		[[ "${line:0:1}" == "-" ]] && continue
+		[[ -z $line ]] && continue
+		[[ ${line:0:1} == "-" ]] && continue
 		rest="${line:1}"
 		rest="${rest#* }"
 		sub="${rest%% *}"
-		[[ -z "$sub" ]] && continue
+		[[ -z $sub ]] && continue
 		echo "  unfolding submodule ${sub}"
 		rm -rf "$PARENT/${sub}/.git"
 		git -C "$PARENT" rm -f --cached "${sub}" >/dev/null 2>&1 || true
@@ -250,7 +250,10 @@ done
 
 # A nested submodule that survives as a gitlink is the original bug one level
 # down: `git ls-files` shows the PATH but Nix still cannot see inside it.
-inner_mode="$(git -C "$WORK/happy/parent" ls-files --stage -- libs/rr/third-party/inner | { read -r m _ || true; printf '%s' "${m:-}"; })"
+inner_mode="$(git -C "$WORK/happy/parent" ls-files --stage -- libs/rr/third-party/inner | {
+	read -r m _ || true
+	printf '%s' "${m:-}"
+})"
 if [ "$inner_mode" != "160000" ]; then
 	ok "the nested submodule is not re-added as a gitlink (mode '${inner_mode:-<none>}')"
 else

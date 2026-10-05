@@ -80,7 +80,7 @@ for f in "${app_files[@]}"; do
 	hits="$(strip_comments "$f" | hex_hits)"
 	if [ -n "$hits" ]; then
 		echo "FAIL: hand-written #rrggbb in $f:" >&2
-		echo "$hits" | sed 's/^/    /' >&2
+		printf '    %s\n' "${hits//$'\n'/$'\n    '}" >&2
 		hex_found=1
 	fi
 done
@@ -93,7 +93,7 @@ for f in "${painter_files[@]}"; do
 	hits="$(strip_comments "$f" | ansi_hits)"
 	if [ -n "$hits" ]; then
 		echo "FAIL: ANSI colour name painted directly in $f (paint a role):" >&2
-		echo "$hits" | sed 's/^/    /' >&2
+		printf '    %s\n' "${hits//$'\n'/$'\n    '}" >&2
 		ansi_found=1
 	fi
 done

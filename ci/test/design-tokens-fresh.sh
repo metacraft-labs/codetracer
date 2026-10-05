@@ -41,8 +41,8 @@ generated=src/frontend/styles/generated
 
 pinned="$(git ls-files -s -- "$sub" | awk '$1 == "160000" {print $2}')"
 if [ -z "$pinned" ]; then
-  echo "FAIL: $sub is not a submodule gitlink in the index" >&2
-  exit 1
+	echo "FAIL: $sub is not a submodule gitlink in the index" >&2
+	exit 1
 fi
 
 scratch="$(mktemp -d)"
@@ -50,64 +50,68 @@ trap 'rm -rf "$scratch"' EXIT
 src=""
 
 if [ -e "$sub/.git" ] &&
-   [ "$(git -C "$sub" rev-parse HEAD 2>/dev/null || true)" = "$pinned" ]; then
-  src="$sub"
-  origin="checked-out submodule"
+	[ "$(git -C "$sub" rev-parse HEAD 2>/dev/null || true)" = "$pinned" ]; then
+	src="$sub"
+	origin="checked-out submodule"
 else
-  sibling="$repo_root/../codetracer-design-system"
-  if [ -d "$sibling/.git" ] &&
-     git -C "$sibling" cat-file -e "${pinned}^{commit}" 2>/dev/null; then
-    mkdir -p "$scratch/ds"
-    git -C "$sibling" archive "$pinned" | tar -x -C "$scratch/ds"
-    src="$scratch/ds"
-    origin="workspace sibling ../codetracer-design-system"
-  else
-    url="$(git config -f .gitmodules "submodule.$sub.url")"
-    git init -q "$scratch/fetch"
-    if git -C "$scratch/fetch" fetch -q --depth 1 "$url" "$pinned" 2>/dev/null; then
-      mkdir -p "$scratch/ds"
-      git -C "$scratch/fetch" archive "$pinned" | tar -x -C "$scratch/ds"
-      src="$scratch/ds"
-      origin="shallow fetch of $url"
-    fi
-  fi
+	sibling="$repo_root/../codetracer-design-system"
+	if [ -d "$sibling/.git" ] &&
+		git -C "$sibling" cat-file -e "${pinned}^{commit}" 2>/dev/null; then
+		mkdir -p "$scratch/ds"
+		git -C "$sibling" archive "$pinned" | tar -x -C "$scratch/ds"
+		src="$scratch/ds"
+		origin="workspace sibling ../codetracer-design-system"
+	else
+		url="$(git config -f .gitmodules "submodule.$sub.url")"
+		git init -q "$scratch/fetch"
+		if git -C "$scratch/fetch" fetch -q --depth 1 "$url" "$pinned" 2>/dev/null; then
+			mkdir -p "$scratch/ds"
+			git -C "$scratch/fetch" archive "$pinned" | tar -x -C "$scratch/ds"
+			src="$scratch/ds"
+			origin="shallow fetch of $url"
+		fi
+	fi
 fi
 
 if [ -z "$src" ]; then
-  echo "FAIL: cannot obtain codetracer-design-system at the pinned $pinned" >&2
-  echo "  remedy: git submodule update --init $sub" >&2
-  exit 1
+	echo "FAIL: cannot obtain codetracer-design-system at the pinned $pinned" >&2
+	echo "  remedy: git submodule update --init $sub" >&2
+	exit 1
 fi
 
 echo "design system: $pinned ($origin)"
 bash scripts/tokens-to-styl.sh "$src" "$scratch/out" \
-  --nim-out "$scratch/out/design_tokens.nim" \
-  --editor-theme src/public/third_party/monaco-themes/themes/customThemes/json \
-  >/dev/null
+	--nim-out "$scratch/out/design_tokens.nim" \
+	--editor-theme src/public/third_party/monaco-themes/themes/customThemes/json \
+	>/dev/null
 
 status=0
 for f in "$scratch/out"/*; do
-  name="$(basename "$f")"
-  if [ ! -f "$generated/$name" ]; then
-    echo "STALE: $generated/$name is missing (the generator produces it)" >&2
-    status=1
-  elif ! cmp -s "$f" "$generated/$name"; then
-    echo "STALE: $generated/$name differs from what $pinned generates:" >&2
-    diff -u "$generated/$name" "$f" | head -20 >&2 || true
-    status=1
-  fi
+	name="$(basename "$f")"
+	if [ ! -f "$generated/$name" ]; then
+		echo "STALE: $generated/$name is missing (the generator produces it)" >&2
+		status=1
+	elif ! cmp -s "$f" "$generated/$name"; then
+		echo "STALE: $generated/$name differs from what $pinned generates:" >&2
+		diff -u "$generated/$name" "$f" | head -20 >&2 || true
+		status=1
+	fi
 done
 for f in "$generated"/*; do
-  name="$(basename "$f")"
-  if [ ! -e "$scratch/out/$name" ]; then
-    echo "STALE: $generated/$name is not produced by the generator" >&2
-    status=1
-  fi
+	name="$(basename "$f")"
+	if [ ! -e "$scratch/out/$name" ]; then
+		echo "STALE: $generated/$name is not produced by the generator" >&2
+		status=1
+	fi
 done
 
 if [ "$status" -ne 0 ]; then
-  echo "remedy: just sync-design-tokens (regenerates both outputs)" >&2
-  exit 1
+	echo "remedy: just sync-design-tokens (regenerates both outputs)" >&2
+	exit 1
 fi
-count="$(ls "$scratch/out" | wc -l)"
+count="$(
+	shopt -s nullglob
+	generated_files=("$scratch/out"/*)
+	printf '%s' "${#generated_files[@]}"
+)"
 echo "OK: $count generated files match the pinned design system"

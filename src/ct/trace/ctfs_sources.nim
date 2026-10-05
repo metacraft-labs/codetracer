@@ -1,6 +1,8 @@
 import std/[json, os, sets, strutils, sequtils]
 
 import source_paths
+import results
+from codetracer_ctfs/container import readMemberBytes
 
 const
   LastShiftedGlobalIndexVersion* = 3'u16
@@ -13,6 +15,9 @@ const
     ## changed the packing again would raise it, and a reader comparing
     ## against a stale literal would answer such a container instead of
     ## refusing it.
+
+  MetaDatVersionNoPathList* = 6'u16
+    ## Twelve-byte header; source paths are authoritative interning tables.
 
   MetaDatVersionExtendedFlags* = 5'u16
     ## GDH-M2 (2026-09-10) — the schema version a container carries when at
@@ -98,6 +103,9 @@ type
     mapBlock: uint64
 
   CtfsReader = object
+    containerVersion: int
+    v5Bytes: seq[byte]
+    v5RootBlocks: uint64
     data: string
     blockSize: uint32
     entries: seq[CtfsEntry]
@@ -141,22 +149,36 @@ proc openCtfs(path: string): CtfsReader =
   # different number from the ``meta.dat`` schema version that
   # ``parseCtfsMetaDat`` gates on, and the two move independently.
   #
-  # A set is right here where a singleton is right there. This byte
-  # describes the block-and-mapping layout that locates internal files;
-  # every version in the set addresses blocks identically, so reading a v2
-  # container yields the same bytes a v4 one would. It says nothing about
-  # what those bytes MEAN — in particular nothing about how a step's
-  # ``global_position_index`` is packed — so it cannot stand in for the
-  # ``meta.dat`` gate, and widening it does not widen that one.
+  # Versions 2–4 retain their legacy mapped-member decoder. Version 5
+  # declares tagged direct members and is decoded by readMemberBytes.
+  # Version 6's extended header/profiles are not implemented here.
   let version = result.data[5].ord
-  if version notin {2, 3, 4}:
-    raise newException(ValueError, "unsupported CTFS version")
+  if version notin {2, 3, 4, 5}:
+    raise newException(ValueError, "unsupported CTFS container version " & $version)
+  result.containerVersion = version
   result.blockSize = readU32Le(result.data, 8)
   if result.blockSize notin [uint32 1024, 2048, 4096]:
     raise newException(ValueError, "invalid CTFS block size")
-  let maxEntries = int(readU32Le(result.data, 12))
+  var maxEntries = uint64(readU32Le(result.data, 12))
   var offset = 16
-  for _ in 0 ..< maxEntries:
+  if version == 5:
+    if result.data[6].ord != 0:
+      raise newException(ValueError, "unsupported CTFS v5 encryption")
+    offset += 42 * result.data[7].ord
+    if maxEntries == 0:
+      if offset > int(result.blockSize):
+        raise newException(ValueError, "CTFS v5 auto-fill has no block-0 entry area")
+      maxEntries = uint64((int(result.blockSize) - offset) div 24)
+    let rootBytes = uint64(offset) + maxEntries * 24'u64
+    result.v5RootBlocks = (rootBytes + uint64(result.blockSize) - 1) div uint64(result.blockSize)
+    if result.v5RootBlocks > uint64(result.data.len div int(result.blockSize)):
+      raise newException(ValueError, "truncated CTFS v5 reserved root region")
+    result.v5Bytes = newSeq[byte](result.data.len)
+    for i, value in result.data:
+      result.v5Bytes[i] = byte(value.ord)
+  if maxEntries > uint64(high(int)):
+    raise newException(ValueError, "CTFS root entry count exceeds address space")
+  for _ in 0 ..< int(maxEntries):
     let size = readU64Le(result.data, offset)
     let mapBlock = readU64Le(result.data, offset + 8)
     let encodedName = readU64Le(result.data, offset + 16)
@@ -174,6 +196,9 @@ proc findEntry(reader: CtfsReader, name: string): CtfsEntry =
   raise newException(ValueError, "CTFS file not found: " & name)
 
 proc readBlockPtr(reader: CtfsReader, blockNum: uint64, index: int): uint64 =
+  if reader.containerVersion == 5 and
+      (blockNum < reader.v5RootBlocks or blockNum >= uint64(reader.data.len div int(reader.blockSize))):
+    raise newException(ValueError, "CTFS v5 mapping pointer outside member blocks")
   let offset = int(blockNum * uint64(reader.blockSize)) + index * 8
   readU64Le(reader.data, offset)
 
@@ -220,6 +245,28 @@ proc resolveBlock(reader: CtfsReader, entry: CtfsEntry, blockIndex: uint64): uin
 
 proc readCtfsFile(reader: CtfsReader, name: string): string =
   let entry = reader.findEntry(name)
+  if reader.containerVersion == 5:
+    if entry.size > uint64(reader.data.len) or entry.size > uint64(high(int)):
+      raise newException(ValueError, "CTFS v5 member size exceeds container bounds")
+    const directTag = 1'u64 shl 63
+    if (entry.mapBlock and directTag) != 0:
+      if (entry.mapBlock and not directTag) < reader.v5RootBlocks:
+        raise newException(ValueError, "CTFS v5 direct pointer names reserved root region")
+    elif entry.mapBlock != 0:
+      if entry.mapBlock < reader.v5RootBlocks:
+        raise newException(ValueError, "CTFS v5 mapping root names reserved root region")
+      let count = (entry.size + uint64(reader.blockSize) - 1) div uint64(reader.blockSize)
+      for blockIndex in 0'u64 ..< count:
+        if reader.resolveBlock(entry, blockIndex) < reader.v5RootBlocks:
+          raise newException(ValueError, "CTFS v5 data pointer names reserved root region")
+    let decoded = readMemberBytes(reader.v5Bytes, name, entry.size, entry.mapBlock, reader.blockSize)
+    if decoded.isErr:
+      raise newException(ValueError, decoded.error)
+    let payload = decoded.get
+    result = newString(payload.len)
+    for i, value in payload:
+      result[i] = char(value)
+    return
   if entry.size == 0:
     return ""
 
@@ -300,7 +347,26 @@ proc safePayloadPath*(realPath: string): string =
     return realPath.extractFilename
   rel
 
-proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string] =
+proc guardSchema6SourceDestination(outputFolder, destination: string): string =
+  let root = normalizedPath(absolutePath(outputFolder))
+  result = normalizedPath(absolutePath(destination))
+  if symlinkExists(root) or not dirExists(root):
+    raise newException(ValueError, "schema 6 source output root is not a regular directory")
+  var component = result
+  while component != root:
+    if symlinkExists(component):
+      raise newException(ValueError, "schema 6 source payload component is a symlink")
+    if component != result and fileExists(component):
+      raise newException(ValueError, "schema 6 source payload ancestor is not a directory")
+    let parent = component.parentDir
+    if parent == component or parent.len == 0:
+      raise newException(ValueError, "schema 6 source payload escapes its output root")
+    component = parent
+  if dirExists(result):
+    raise newException(ValueError, "schema 6 source payload is a directory")
+
+proc extractFilemapSources(reader: CtfsReader, outputFolder: string,
+                          strictSchema6Destination = false): seq[string] =
   let filemap = reader.readCtfsFile("filemap.bin")
   if filemap.len == 0:
     return @[]
@@ -335,7 +401,13 @@ proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string
       discard readVarString(filemap, offset)
       result.add realPath
       let sourceBytes = reader.readCtfsFile(ctfsName)
-      let outputPath = outputFolder / "files" / safePayloadPath(realPath)
+      var outputPath = outputFolder / "files" / safePayloadPath(realPath)
+      if strictSchema6Destination:
+        outputPath = guardSchema6SourceDestination(outputFolder, outputPath)
+        if fileExists(outputPath):
+          if readFile(outputPath) != sourceBytes:
+            raise newException(ValueError, "schema 6 filemap disagrees with preserved source payload")
+          continue # Preserve the existing identical source bytes.
       createDir(outputPath.parentDir)
       writeFile(outputPath, sourceBytes)
 
@@ -363,7 +435,47 @@ proc metaDatFlagWord(reader: CtfsReader): uint16 =
       return 0
   uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
 
-proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
+proc readStrictPathVarint(data: string, pos: var int, limit: int): uint64 =
+  var shift = 0
+  while pos < limit:
+    let b = byte(data[pos].ord)
+    inc pos
+    if shift == 63 and (b and 0xfe) != 0:
+      raise newException(ValueError, "schema 6 paths.dat varint overflow")
+    result = result or (uint64(b and 0x7f) shl shift)
+    if (b and 0x80) == 0:
+      return
+    shift += 7
+    if shift > 63:
+      raise newException(ValueError, "schema 6 paths.dat varint overflow")
+  raise newException(ValueError, "schema 6 paths.dat truncated varint")
+
+proc validateStrictPathFrame(data: string, pos: var int, limit: int, columnAware: bool) =
+  let count = readStrictPathVarint(data, pos, limit)
+  if not columnAware:
+    if count == 0:
+      raise newException(ValueError, "schema 6 paths.dat line_count is zero")
+  elif count > uint64(limit - pos):
+    raise newException(ValueError, "schema 6 paths.dat line_count exceeds record bytes")
+  else:
+    var previous: int64 = 0
+    var hasPositiveLength = count == 0 # Explicit conventional Layout A table.
+    for _ in 0 ..< int(count):
+      let encoded = readStrictPathVarint(data, pos, limit)
+      let delta = int64(encoded shr 1) xor -int64(encoded and 1)
+      if (delta > 0 and previous > high(int64) - delta) or
+         (delta < 0 and previous < low(int64) - delta):
+        raise newException(ValueError, "schema 6 paths.dat line length overflow")
+      previous += delta
+      if previous < 0:
+        raise newException(ValueError, "schema 6 paths.dat negative line length")
+      hasPositiveLength = hasPositiveLength or previous > 0
+    if not hasPositiveLength:
+      raise newException(ValueError, "schema 6 paths.dat has no addressable line")
+  if pos != limit:
+    raise newException(ValueError, "schema 6 paths.dat framed record has trailing bytes")
+
+proc extractInterningTablePaths(reader: CtfsReader, strict = false): seq[string] =
   ## Decode the CTFS v4 interning-table path list (``paths.dat`` +
   ## ``paths.off``) written by the current trace writer
   ## (``codetracer-trace-format-nim``'s ``InterningTable`` /
@@ -386,6 +498,22 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
   ## (no ``paths.dat``); the caller falls back to ``paths.json``.
   result = @[]
   var datBytes, offBytes: string
+  if strict:
+    let hasDat = reader.entries.anyIt(it.name == "paths.dat")
+    let hasOff = reader.entries.anyIt(it.name == "paths.off")
+    if not hasDat and not hasOff:
+      return @[]
+    if hasDat != hasOff:
+      raise newException(ValueError, "schema 6 source paths require both paths.dat and paths.off")
+    datBytes = reader.readCtfsFile("paths.dat")
+    offBytes = reader.readCtfsFile("paths.off")
+    if offBytes.len == 0 or offBytes.len mod 8 != 0:
+      raise newException(ValueError, "schema 6 paths.off is not a nonempty u64 table")
+    if readU64Le(offBytes, 0) != 0 or
+       readU64Le(offBytes, offBytes.len - 8) != uint64(datBytes.len):
+      raise newException(ValueError, "schema 6 paths.off finalized bounds disagree with paths.dat")
+    if offBytes.len == 8:
+      return @[]
   try:
     datBytes = reader.readCtfsFile("paths.dat")
     offBytes = reader.readCtfsFile("paths.off")
@@ -407,6 +535,9 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
   let flags = reader.metaDatFlagWord()
   let framed = (flags and (FlagHasColumnAwareSteps or FlagHasLineCountTable)) != 0
   for i in 0 ..< offsetCount - 1:
+    if strict and (offsets[i] > offsets[i + 1] or
+                   offsets[i + 1] > uint64(datBytes.len)):
+      raise newException(ValueError, "schema 6 paths.dat offset out of range")
     let startOff = int(offsets[i])
     let endOff = int(offsets[i + 1])
     if startOff > endOff or endOff > datBytes.len:
@@ -425,21 +556,31 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
         while pos < endOff:
           let b = byte(datBytes[pos].ord)
           pos += 1
-          if shift >= 64:
+          if shift >= 64 or (strict and shift == 63 and (b and 0xfe) != 0):
             break
           pathLen = pathLen or (uint64(b and 0x7f) shl shift)
           if (b and 0x80) == 0:
             ok = true
             break
           shift += 7
+        if strict and pathLen > uint64(endOff - pos):
+          raise newException(ValueError, "schema 6 paths.dat string exceeds its record")
         if not ok or pos + int(pathLen) > endOff:
           raise newException(ValueError,
             "CTFS paths.dat record " & $i & ": path_len " & $pathLen &
             " extends past the record. meta.dat flags 0x" & toHex(flags, 4) &
             " declare a framed record layout")
         result.add datBytes[pos ..< pos + int(pathLen)]
+        if strict:
+          pos += int(pathLen)
+          validateStrictPathFrame(datBytes, pos, endOff,
+            (flags and FlagHasColumnAwareSteps) != 0)
       else:
         result.add datBytes[startOff ..< endOff]
+    elif strict:
+      if framed:
+        raise newException(ValueError, "schema 6 paths.dat framed record is empty")
+      result.add "" # Preserve the empty bare record's path ID.
 
 proc parseCtfsMetaDat(data: string): CtfsMetaDat   # forward decl — used by materializeCtfsSources' meta.paths fallback below
 
@@ -455,6 +596,38 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     reader = openCtfs(ctFilePath)
   except CatchableError:
     return false
+
+  var metadata: string
+  try:
+    metadata = reader.readCtfsFile("meta.dat")
+  except CatchableError:
+    discard # Legacy materialization can use interning/filemap without metadata.
+  if metadata.len >= 6 and readU16Le(metadata, 4) == MetaDatVersionNoPathList:
+    let core = parseCtfsMetaDat(metadata) # Validate the actual schema before selecting paths.
+    let authoritativePaths = extractInterningTablePaths(reader, strict = true)
+    let outputRoot = normalizedPath(absolutePath(outputFolder))
+    if symlinkExists(outputRoot) or not dirExists(outputRoot):
+      raise newException(ValueError, "schema 6 source output root is not a regular directory")
+    if reader.entries.anyIt(it.name == "filemap.bin"):
+      discard extractFilemapSources(reader, outputRoot, strictSchema6Destination = true)
+    # Schema 6 path IDs come from the interning table. Source bytes can already
+    # be self-contained in the trace folder or reside at their original path,
+    # independently of whether an MCR filemap member exists.
+    for path in authoritativePaths:
+      if path.len == 0:
+        continue # Preserve the genuine empty path ID; it names no source file.
+      let stored = guardSchema6SourceDestination(outputRoot,
+        outputRoot / "files" / safePayloadPath(path))
+      if not fileExists(stored):
+        let original = resolveTraceSourcePath(path, core.workdir)
+        if not fileExists(original) or symlinkExists(original):
+          raise newException(ValueError, "schema 6 referenced source is unavailable: " & path)
+        let sourceBytes = readFile(original)
+        createDir(stored.parentDir)
+        writeFile(stored, sourceBytes)
+    let pathsOutput = guardSchema6SourceDestination(outputRoot, outputRoot / "paths.json")
+    writeFile(pathsOutput, $(%authoritativePaths))
+    return true # No schema 6 inline/sidecar fallback, including genuinely empty tables.
 
   var paths: seq[string] = @[]
   # NOTE: two different files are called ``paths.json`` in this proc. The one
@@ -545,6 +718,29 @@ proc decodeVarintFromString(data: string, pos: var int): uint64 =
       raise newException(ValueError, "meta.dat varint overflow")
   raise newException(ValueError, "meta.dat truncated varint")
 
+proc decodeSchema6Varint(data: string, pos: var int): uint64 =
+  var shift = 0
+  while pos < data.len:
+    let b = byte(data[pos].ord)
+    inc pos
+    if shift == 63 and (b and 0xfe) != 0:
+      raise newException(ValueError, "meta.dat schema 6 varint overflow")
+    result = result or (uint64(b and 0x7f) shl shift)
+    if (b and 0x80) == 0:
+      return
+    shift += 7
+    if shift > 63:
+      raise newException(ValueError, "meta.dat schema 6 varint overflow")
+  raise newException(ValueError, "meta.dat schema 6 truncated varint")
+
+proc readSchema6String(data: string, pos: var int): string =
+  let size = decodeSchema6Varint(data, pos)
+  if size > uint64(data.len - pos):
+    raise newException(ValueError, "meta.dat schema 6 truncated string")
+  let count = int(size) # bounded by the existing string's actual length
+  result = data[pos ..< pos + count]
+  pos += count
+
 proc readVarStringFromMetaDat(data: string, pos: var int): string =
   let len = int(decodeVarintFromString(data, pos))
   if pos + len > data.len:
@@ -575,7 +771,8 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
       raise newException(ValueError, "meta.dat: bad magic")
   let version = uint16(data[4].ord) or (uint16(data[5].ord) shl 8)
   if version != SupportedMetaDatVersion and
-     version != MetaDatVersionExtendedFlags:
+     version != MetaDatVersionExtendedFlags and
+     version != MetaDatVersionNoPathList:
     let detail =
       if version <= LastShiftedGlobalIndexVersion:
         " — its step addresses use the superseded global_position_index " &
@@ -586,8 +783,10 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     raise newException(ValueError,
       "meta.dat: unsupported version " & $version &
       " (expected " & $SupportedMetaDatVersion & " or " &
-      $MetaDatVersionExtendedFlags & ")" & detail)
+      $MetaDatVersionExtendedFlags & " or " & $MetaDatVersionNoPathList & ")" & detail)
   let flags = uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
+  if version == MetaDatVersionNoPathList and (flags and 0x4010'u16) == 0x4010'u16:
+    raise newException(ValueError, "meta.dat schema 6 framing flags 4 and 14 are mutually exclusive")
 
   # GDH-M2: schema version 5 inserts a ``[4] flags_ext u32 LE`` word after
   # the u16 flags.  The word is validated and its width consumed; nothing in
@@ -596,10 +795,10 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
   # the recording id's length prefix — which surfaces as "invalid
   # recording_id" rather than as anything about the version.
   var bodyStart = 8
-  if version == MetaDatVersionExtendedFlags:
+  if version in {MetaDatVersionExtendedFlags, MetaDatVersionNoPathList}:
     if data.len < 12:
       raise newException(ValueError,
-        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
+        "meta.dat: schema version " & $version &
         " declares a flags_ext word but the header is only " & $data.len &
         " bytes")
     let flagsExt = uint32(data[8].ord) or (uint32(data[9].ord) shl 8) or
@@ -609,7 +808,7 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
       raise newException(ValueError,
         "meta.dat: unknown extended flag bits set: 0x" &
         toHex(BiggestInt(unknownExt), 8))
-    if flagsExt == 0:
+    if flagsExt == 0 and version == MetaDatVersionExtendedFlags:
       # The canonical reader (``meta_dat.nim``) refuses this shape BY NAME
       # and this one must agree, or the two disagree about what a valid v5
       # container is — and "which reader opened it" becomes part of the
@@ -628,22 +827,34 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     bodyStart = 12
 
   var pos = bodyStart
-  let recordingId = readVarStringFromMetaDat(data, pos)
+  proc readCoreString(): string =
+    if version == MetaDatVersionNoPathList:
+      readSchema6String(data, pos)
+    else:
+      readVarStringFromMetaDat(data, pos)
+  let recordingId = readCoreString()
   if recordingId.len != 36:
     raise newException(ValueError,
       "meta.dat: invalid recording_id (length " & $recordingId.len & ")")
 
-  let program = readVarStringFromMetaDat(data, pos)
-  let argsCount = int(decodeVarintFromString(data, pos))
+  let program = readCoreString()
+  let rawArgsCount =
+    if version == MetaDatVersionNoPathList: decodeSchema6Varint(data, pos)
+    else: decodeVarintFromString(data, pos)
+  if version == MetaDatVersionNoPathList and rawArgsCount > uint64(data.len - pos):
+    raise newException(ValueError, "meta.dat schema 6 argument count exceeds its core bytes")
+  let argsCount = int(rawArgsCount)
   var args = newSeqOfCap[string](argsCount)
   for _ in 0 ..< argsCount:
-    args.add readVarStringFromMetaDat(data, pos)
-  let workdir = readVarStringFromMetaDat(data, pos)
-  discard readVarStringFromMetaDat(data, pos)  # recorder_id (unused here)
-  let pathsCount = int(decodeVarintFromString(data, pos))
-  var paths = newSeqOfCap[string](pathsCount)
-  for _ in 0 ..< pathsCount:
-    paths.add readVarStringFromMetaDat(data, pos)
+    args.add readCoreString()
+  let workdir = readCoreString()
+  discard readCoreString() # recorder_id (unused here)
+  var paths: seq[string] = @[]
+  if version != MetaDatVersionNoPathList:
+    let pathsCount = int(decodeVarintFromString(data, pos))
+    paths = newSeqOfCap[string](pathsCount)
+    for _ in 0 ..< pathsCount:
+      paths.add readVarStringFromMetaDat(data, pos)
 
   # The MCR/replay-launch/layout-snapshot/trace-filter blocks are skipped:
   # callers in ct/host don't need them.  We still keep this proc resilient
@@ -671,4 +882,6 @@ proc readCtfsMetaDat*(ctFilePath: string): CtfsMetaDat =
   if data.len == 0:
     raise newException(ValueError,
       "meta.dat missing or empty in " & ctFilePath)
-  parseCtfsMetaDat(data)
+  result = parseCtfsMetaDat(data)
+  if readU16Le(data, 4) == MetaDatVersionNoPathList:
+    result.paths = extractInterningTablePaths(reader, strict = true)

@@ -67,16 +67,16 @@ PY
 # derivation, and writes both generated files under a scratch root.
 mkdir -p "$work/scratch-root/src/config" "$work/scratch-root/src/frontend/headless_app"
 nim js -d:nodejs --hints:off --warnings:off --nimcache:"$work/nimcache" \
-  -o:"$work/generate_scratch.js" \
-  "$scratch_src/headless_app/generate_default_layout.nim" >"$work/build.log" 2>&1 || {
-    cat "$work/build.log" >&2
-    exit 1
-  }
+	-o:"$work/generate_scratch.js" \
+	"$scratch_src/headless_app/generate_default_layout.nim" >"$work/build.log" 2>&1 || {
+	cat "$work/build.log" >&2
+	exit 1
+}
 node "$work/generate_scratch.js" --out="$work/scratch-root"
 cp "$work/scratch-root/src/config/default_layout.json" "$work/scratch-default_layout.json"
 if cmp -s "$work/scratch-default_layout.json" src/config/default_layout.json; then
-  echo "FAIL: the scratch edit did not change the generated default" >&2
-  exit 1
+	echo "FAIL: the scratch edit did not change the generated default" >&2
+	exit 1
 fi
 # The same prefix, with the scratch build's default in its `config/`.
 cp -a "$work/generated" "$work/scratch"
@@ -88,28 +88,28 @@ export PLAT45_PREFIX_SCRATCH="$work/scratch"
 export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
 run_spec() {
-  just test-e2e tests/visual/plat45-default-arrangement-capture.spec.ts \
-    tests/layout/plat45-desktop-remembers-own.spec.ts "$@"
+	just test-e2e tests/visual/plat45-default-arrangement-capture.spec.ts \
+		tests/layout/plat45-desktop-remembers-own.spec.ts "$@"
 }
 
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
-    run_spec "$@"
-    ;;
-  *)
-    if [ -n "${DISPLAY:-}" ]; then
-      run_spec "$@"
-    else
-      display_num=99
-      while [ -e "/tmp/.X${display_num}-lock" ]; do
-        display_num=$((display_num + 1))
-      done
-      Xvfb ":${display_num}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
-      xvfb_pid=$!
-      trap 'kill $xvfb_pid 2>/dev/null || true; rm -rf "$work"' EXIT
-      sleep 1
-      export DISPLAY=":${display_num}"
-      run_spec "$@"
-    fi
-    ;;
+MINGW* | MSYS* | CYGWIN* | *_NT* | Darwin)
+	run_spec "$@"
+	;;
+*)
+	if [ -n "${DISPLAY:-}" ]; then
+		run_spec "$@"
+	else
+		display_num=99
+		while [ -e "/tmp/.X${display_num}-lock" ]; do
+			display_num=$((display_num + 1))
+		done
+		Xvfb ":${display_num}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+		xvfb_pid=$!
+		trap 'kill $xvfb_pid 2>/dev/null || true; rm -rf "$work"' EXIT
+		sleep 1
+		export DISPLAY=":${display_num}"
+		run_spec "$@"
+	fi
+	;;
 esac

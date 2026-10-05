@@ -36,7 +36,7 @@ recounted from memory, and memory rounds down.
 
 **Symptom.** Any `repro build` on the runner dies with:
 
-```
+```text
 daemon-hosted build failed: No such file or directory
 ```
 
@@ -165,7 +165,9 @@ afterwards.
 
 ---
 
-## 5 & 6. `/usr/bin` missing from a raw `run:` step's PATH → exit 127 — CLOSED per site, STRUCTURALLY OPEN
+## 5 & 6. `/usr/bin` missing from a raw `run:` step's PATH → exit 127
+
+CLOSED per site, STRUCTURALLY OPEN.
 
 These were logged as two defects and are one root cause, which is why they kept
 recurring under new names.

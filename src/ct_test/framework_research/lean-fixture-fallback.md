@@ -18,7 +18,8 @@
 ## Recording Feasibility
 
 - Recording wraps the Lean runner process with `ct-mcr`.
-- This is honest runner-level recording for interpreted/JIT-style execution, not theorem-prover tactic stepping.
+- This is honest runner-level recording for interpreted/JIT-style execution, not
+  theorem-prover tactic stepping.
 
 ## Limitations And Capability Diagnostics
 

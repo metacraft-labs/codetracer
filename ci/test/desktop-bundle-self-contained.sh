@@ -202,7 +202,8 @@ else
 		# defect shipped. Resolution is done textually against the bundle
 		# root so the answer does not depend on what the running host
 		# happens to have.
-		link_report="$(python3 - "${ROOT}" <<'PY'
+		link_report="$(
+			python3 - "${ROOT}" <<'PY'
 import os
 import sys
 
@@ -241,7 +242,7 @@ for label, rows in (("ESCAPES", escaping), ("NIX STORE", store), ("DANGLING", da
 
 sys.exit(1 if (escaping or store or dangling) else 0)
 PY
-)"
+		)"
 		link_rc=$?
 		indent "${link_report}"
 		if [ "${link_rc}" -eq 0 ]; then
@@ -310,7 +311,8 @@ PY
 		# ---------------------------------------------------------------------
 		banner "owner-writability of the bundle's directories"
 
-		perm_report="$(python3 - "${ROOT}" <<'PY'
+		perm_report="$(
+			python3 - "${ROOT}" <<'PY'
 import os
 import sys
 
@@ -345,7 +347,7 @@ if len(unwritable) > 20:
 
 sys.exit(1 if unwritable else 0)
 PY
-)"
+		)"
 		perm_rc=$?
 		indent "${perm_report}"
 		if [ "${perm_rc}" -eq 0 ]; then

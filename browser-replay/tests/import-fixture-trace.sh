@@ -61,15 +61,14 @@ cp "$CT_TRACE_FILE" "$TRACE_DIR/trace.ct"
 # may use symlinks for shared source files).
 TRACE_PARENT=$(dirname "$CT_TRACE_FILE")
 for src_ext in c cpp rs py rb; do
-	for src_file in "$TRACE_PARENT"/source."$src_ext"; do
-		if [ -e "$src_file" ]; then
-			REAL_SOURCE=$(readlink -f "$src_file")
-			if [ -f "$REAL_SOURCE" ]; then
-				mkdir -p "$TRACE_DIR/files"
-				cp "$REAL_SOURCE" "$TRACE_DIR/files/$(basename "$src_file")"
-			fi
+	src_file="$TRACE_PARENT/source.$src_ext"
+	if [ -e "$src_file" ]; then
+		REAL_SOURCE=$(readlink -f "$src_file")
+		if [ -f "$REAL_SOURCE" ]; then
+			mkdir -p "$TRACE_DIR/files"
+			cp "$REAL_SOURCE" "$TRACE_DIR/files/$(basename "$src_file")"
 		fi
-	done
+	fi
 done
 
 # Copy binaries if present (portable payload for cross-platform replay)

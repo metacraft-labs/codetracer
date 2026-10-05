@@ -14,7 +14,7 @@ From [amix/vimrc](https://github.com/amix/vimrc) at `46294d58`. MIT requires
 its copyright and permission notice to accompany substantial portions of the
 software, so it is reproduced in full:
 
-```
+```text
 The MIT License (MIT)
 
 Copyright (c) 2016 Amir Salihefendic

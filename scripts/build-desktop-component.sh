@@ -241,7 +241,7 @@ if [[ -z $CORE_BIN || ! -x $CORE_BIN ]]; then
 		echo "error: the CodeTracer core binary has not been built."
 		echo "  looked for: ${CORE_BIN:-<build-dir>/bin/ct$EXE_SUFFIX}"
 		echo "  Build it with:  just build-once"
-		echo "  Or point at an existing binary:  --core-bin <path>  (or \$CODETRACER_CORE_BIN)"
+		echo $'  Or point at an existing binary:  --core-bin <path>  (or $CODETRACER_CORE_BIN)'
 	} >&2
 	exit 1
 fi

@@ -60,6 +60,7 @@ let
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black
+    ps.psutil
     pythonRecorderPkg
   ]);
 
@@ -690,6 +691,10 @@ with pkgs;
     # Python or an adjacent checkout. This absolute interpreter contains the
     # Rust-backed recorder built from the flake-locked input above.
     export CODETRACER_PYTHON_CMD="${pythonWithRecorder}/bin/python3"
+    export CODETRACER_CTFS_FIXTURE_PYTHON_RECORDER="${pythonWithRecorder}/bin/codetracer-python-recorder"
+    export CODETRACER_CTFS_FIXTURE_FORMAT_SRC="${inputs.codetracer-trace-format}"
+    export CODETRACER_CTFS_FIXTURE_NIM_SRC="${inputs.codetracer-trace-format-nim}/src"
+    export CODETRACER_CTFS_FIXTURE_PYTHON_SRC="${inputs.codetracer-python-recorder}"
 
     # The declared interpreter — `codetracer-python-recorder`'s own
     # `.python-version`, reached through ../python.nix — published so that
