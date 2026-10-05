@@ -76,8 +76,23 @@ const
   WorkspaceRoot = CheckoutRoot.parentDir
     ## The directory the sibling checkouts share.
 
-  SpecRepoRoot = WorkspaceRoot / SpecRepoDirName
-    ## The sibling specification checkout's root. **Deliberately not exported.**
+  SpecsDirEnvVar = "CT_SPECS_DIR"
+    ## An explicit `codetracer-specs` checkout to read instead of the
+    ## workspace sibling — the same variable, with the same meaning, that
+    ## `ci/test/shortcut-shadow-spec-agreement.sh` and
+    ## `ci/test/editor-model-case-floor.sh` honour. It exists because the
+    ## sibling directory is a SHARED checkout in a multi-repo workspace: it can
+    ## sit on a branch from before `1735345d`, and a worktree under test has no
+    ## business moving it. It is an override, not a fallback: when it is set,
+    ## ONLY that checkout is read, and a document absent there is the same
+    ## hard red as an absent sibling. An ABSOLUTE path. Read at COMPILE time, because
+    ## `specDocument` is a `staticRead`; a suite is compiled and run in one
+    ## environment by every lane and harness.
+
+  SpecRepoRoot =
+    when getEnv(SpecsDirEnvVar).len > 0: getEnv(SpecsDirEnvVar)
+    else: WorkspaceRoot / SpecRepoDirName
+    ## The specification checkout's root. **Deliberately not exported.**
     ## No caller needs it — the three procs below are the whole surface — and
     ## `ci/test/frontend-reachability.sh` counts an exported frontend symbol
     ## that nothing reaches, so exporting it put a finding on the ratchet in

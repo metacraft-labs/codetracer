@@ -104,6 +104,9 @@
 ## already uses to read a published table.
 
 import std/[os, strutils, unittest]
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
 
 # THE LAUNCHER'S OWN PARSER, across the workspace. Not a copy, not a
 # re-implementation: a missing `codetracer-launcher` checkout must fail the
@@ -134,7 +137,7 @@ template ck(condition: untyped) =
 
 const
   ShippedCaps = "packaging/codetracer-tui.caps"
-  SpecRelative = "codetracer-specs/Front-Ends/CodeTracer-TUI.md"
+  SpecRelative = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
   SpecAnchor = "**Capability File Location:**"
     ## The line §6.1's illustrative block follows. Anchored on the sentence
     ## rather than on a line number so an edit above it does not silently move
@@ -178,7 +181,7 @@ proc specPath(): string =
   ## `codetracer-specs` as a workspace sibling. A missing checkout raises with
   ## the path it wanted: rule 1 applies to an absent oracle exactly as it does
   ## to an absent grammar archive.
-  let candidate = repoRoot().parentDir / SpecRelative
+  let candidate = specDocumentPath("Front-Ends/CodeTracer-TUI.md")
   if not fileExists(candidate):
     raise newException(IOError,
       "the published specification is not checked out at " & candidate &

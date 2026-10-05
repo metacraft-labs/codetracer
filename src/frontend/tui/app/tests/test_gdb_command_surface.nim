@@ -82,6 +82,10 @@
 
 import std/[algorithm, os, strutils, unittest]
 
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
+
 import ../commands/interpreter
 import ../views/command_line
 
@@ -106,7 +110,7 @@ type
 
 const
   SpecSectionHeading = "### 4.3 GDB-Compatible Command Surface"
-  SpecRelativePath = "codetracer-specs/Front-Ends/CodeTracer-TUI.md"
+  SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
   ExpectedSpecCommands = 16
     ## §4.3's command count, counted from the document on 2026-09-06. Asserted
@@ -385,10 +389,7 @@ proc specPath(): string =
   ## Where the published block lives, resolved from THIS FILE rather than from
   ## the working directory, so the suite answers the same way however it is
   ## invoked. Same walk as `test_keymap_no_conflicts.specPath`.
-  var dir = currentSourcePath().parentDir()
-  for _ in 0 ..< 5:
-    dir = dir.parentDir()
-  dir.parentDir() / SpecRelativePath
+  specDocumentPath("Front-Ends/CodeTracer-TUI.md")
 
 proc parseAlias(comment: string): (string, string) =
   ## `(summary, alias)` from a §4.3 comment. `(alias: s)` is the document's own

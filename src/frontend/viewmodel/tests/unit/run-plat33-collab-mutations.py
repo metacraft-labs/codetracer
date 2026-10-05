@@ -522,8 +522,24 @@ def write_source(rel, text):
     (ROOT / rel).write_text(text)
 
 
+SPECS_PREFIX = "../codetracer-specs/"
+
+
+def resolve_input(rel):
+    """Where a digested path is READ from. A path into the sibling
+    specification checkout is read from `CT_SPECS_DIR` when that names one —
+    the override `src/frontend/test_support/spec_documents.nim` honours for
+    the suites this harness runs, so the harness digests the document they
+    read. The control file keeps the canonical `../codetracer-specs/...`
+    spelling either way, so one recording compares in both environments."""
+    specs = os.environ.get("CT_SPECS_DIR", "")
+    if specs and rel.startswith(SPECS_PREFIX):
+        return Path(specs) / rel[len(SPECS_PREFIX):]
+    return ROOT / rel
+
+
 def digest(rel):
-    return hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
+    return hashlib.sha256(resolve_input(rel).read_bytes()).hexdigest()
 
 
 def declared_counts():

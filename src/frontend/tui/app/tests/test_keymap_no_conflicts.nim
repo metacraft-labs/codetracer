@@ -49,6 +49,10 @@
 
 import std/[algorithm, os, sequtils, strutils, tables, unittest]
 
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
+
 import ../input/keymap
 import ../input/modal_state
 
@@ -73,7 +77,7 @@ type
 
 const
   SpecSectionHeading = "### 4.2 Keybindings Reference Table"
-  SpecRelativePath = "codetracer-specs/Front-Ends/CodeTracer-TUI.md"
+  SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
   ExpectedSpecRows = 33
     ## §4.2's row count, counted from the document on 2026-09-06. Asserted so
@@ -146,10 +150,7 @@ proc specPath(): string =
   ## six `parentDir`s reach the repo root and a seventh reaches the workspace
   ## the sibling checkouts share (see `CLAUDE.md`: "the parent directory of the
   ## checkout IS the workspace root, by definition").
-  var dir = currentSourcePath().parentDir()
-  for _ in 0 ..< 5:
-    dir = dir.parentDir()
-  dir.parentDir() / SpecRelativePath
+  specDocumentPath("Front-Ends/CodeTracer-TUI.md")
 
 proc backtickedTokens(cell: string): seq[string] =
   ## Every `…`-quoted spelling in a Keybinding cell, in order.

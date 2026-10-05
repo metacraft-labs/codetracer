@@ -44,6 +44,9 @@
 ## `programResult` goes to 1.
 
 import std/[os, strutils, tables, unittest]
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
 
 import ../cli
 import ../theme/capabilities
@@ -85,17 +88,10 @@ proc specPath(): string =
   ## rather than from the working directory — the lane runner's cwd is the repo
   ## root today and a resolver that depended on that would break the first time
   ## someone ran the binary by hand.
-  var dir = currentSourcePath().parentDir
-  while true:
-    let candidate = dir.parentDir / "codetracer-specs" / "Front-Ends" /
-                    "CodeTracer-TUI.md"
-    if fileExists(candidate):
-      return candidate
-    let parent = dir.parentDir
-    if parent == dir:
-      break
-    dir = parent
-  ""
+  ## Resolved by `test_support/spec_documents`; "" when the document is not
+  ## there, which the cases below turn into a named failure.
+  let candidate = specDocumentPath("Front-Ends/CodeTracer-TUI.md")
+  if fileExists(candidate): candidate else: ""
 
 proc sectionText(document, heading: string): string =
   ## The text of one `### N.M` section, from its heading to the next one.
