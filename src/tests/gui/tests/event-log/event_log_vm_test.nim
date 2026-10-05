@@ -490,10 +490,14 @@ suite "EventLogVM auto-load effect":
       for cmd in mock.receivedCommands:
         if cmd.command == "ct/event-load":
           check not cmd.args.hasKey("rrTicks")
+          # PLAT-50: the request names the sorted column too (`sortKey`), the
+          # one the engine orders by — the name of the shown column at
+          # `sortColumn`.
           check cmd.args == %*{
             "page": vm.currentPage.val, "pageSize": vm.pageSize.val,
             "searchQuery": vm.searchQuery.val, "sortColumn": vm.sortColumn.val,
-            "sortAscending": vm.sortAscending.val}
+            "sortAscending": vm.sortAscending.val,
+            "sortKey": $vm.columns.val.visibleColumns[vm.sortColumn.val]}
           initialLoads += 1
       check initialLoads == 1
 

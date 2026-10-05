@@ -73,9 +73,13 @@ const
   TuiRecipe = "just build-tui"
   LauncherRecipe = "cd ../codetracer-launcher && just build"
 
-  PaneTitles: array[4, string] = ["CALL STACK", "SOURCE", "VARIABLES",
-                                  "TIMELINE"]
-    ## §3.1's screen, as the pane titles a real headless frame carries.
+  PaneTitles: array[4, string] = ["Call Trace", "Variables", "Event Log",
+                                  "Timeline"]
+    ## §3.1's screen, as the pane names a real headless frame carries. Since
+    ## PLAT-49 a pane has no title row: its TAB STRIP names it, in the
+    ## desktop's spelling (`Call Trace`, not `CALL STACK`), and these are four
+    ## strips of the shared default at the pinned geometry. The uppercase
+    ## titles this list used to hold had not been drawn since then.
     ## Asserted as a counted sweep rather than as four loose `contains` calls,
     ## so a partially painted screen cannot satisfy "at least one".
     ##

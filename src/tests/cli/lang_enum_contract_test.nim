@@ -1062,7 +1062,7 @@ suite "the deleted Lang copies stay deleted and their sites use ct-lang":
         "removed here in the same change, with the reason.")
     check actual == expectedSorted
 
-  test "src/backend-manager stays free of path dependencies (its nix sandbox is the crate alone)":
+  test "src/backend-manager's path dependencies are all inside its nix sandbox":
     # The counterpart of the exclusion above.  The `backend-manager`
     # derivation in `nix/packages/default.nix` has `src = ../../src/backend-manager`
     # -- the crate, not the repository -- so ANY `path = ".."`-style
@@ -1072,8 +1072,24 @@ suite "the deleted Lang copies stay deleted and their sites use ct-lang":
     # review caught it by copying the crate directory alone and running
     # `cargo metadata --locked --offline` in it, which is what the sandbox
     # amounts to; this check is the cheap form of that experiment.
+    #
+    # 2026-10-02 (`record-web` writes CTFS): the derivation's source was
+    # WIDENED, the remedy this case always offered — it is now the crate plus
+    # the `codetracer-trace-format` workspace, laid out so the crate's
+    # `../../../codetracer-trace-format/...` paths resolve. So the rule is the
+    # sandbox's, read from the derivation rather than restated: a path
+    # dependency must name a sibling the `backend-manager` source block
+    # stages (`cp -r ... $out/<sibling>`), and anything else still fails.
     let manifest = RepoRoot / "src" / "backend-manager" / "Cargo.toml"
     check fileExists(manifest)
+    let nixFile = readFile(RepoRoot / "nix" / "packages" / "default.nix")
+    let blockAt = nixFile.find("backend-manager = pkgs.rustPlatform.buildRustPackage")
+    check blockAt >= 0
+    let srcAt = nixFile.find("src = pkgs.runCommand \"backend-manager-src\"", blockAt)
+    let srcEnd = nixFile.find("'';", srcAt)
+    check srcAt > blockAt and srcEnd > srcAt
+    let staged = (if srcAt > blockAt and srcEnd > srcAt: nixFile[srcAt ..< srcEnd]
+                  else: "")
     var pathDeps: seq[string] = @[]
     for rawLine in readFile(manifest).splitLines():
       let line = rawLine.strip()
@@ -1081,12 +1097,23 @@ suite "the deleted Lang copies stay deleted and their sites use ct-lang":
         continue
       if line.contains("path") and line.contains("=") and
          (line.contains("\"../") or line.contains("\"/")):
-        pathDeps.add(line)
+        # `../../../<sibling>/...` from `<workspace>/codetracer/src/backend-manager`
+        # is `<workspace>/<sibling>`: staged when the source block copies it
+        # to `$out/<sibling>`.
+        let q = line.find("\"../../../")
+        var sibling = ""
+        if q >= 0:
+          let rest = line[q + len("\"../../../") .. ^1]
+          let slash = rest.find('/')
+          sibling = (if slash > 0: rest[0 ..< slash] else: "")
+        if sibling.len == 0 or ("$out/" & sibling) notin staged:
+          pathDeps.add(line)
     if pathDeps.len > 0:
       checkpoint(
         manifest & " declares path dependencies that leave the crate " &
-        "directory:\n  " & pathDeps.join("\n  ") & "\n  The nix " &
-        "derivation's source is the crate alone; see " &
+        "directory to a sibling the nix derivation does not stage:\n  " &
+        pathDeps.join("\n  ") & "\n  The derivation's source is the crate " &
+        "plus the siblings its `src` block copies; see " &
         "`nix/packages/default.nix` (`backend-manager`, `src = ...`).  Spell " &
         "the value locally (as `LOAD_LOCALS_DEFAULT_LANG` does) or widen the " &
         "derivation's source in the same change.")

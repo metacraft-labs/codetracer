@@ -58,10 +58,11 @@ const
     # `ct-mcr record --split` — the RECORDER's flag, named when explaining
     # what a pre-split slice directory is.
     "--split",
-    # `ct-mcr export --portable` — the RECORDER's flag again, named by the
-    # enrichment step's warnings. `ct upload` has `--no-portable`, which is a
-    # different flag on a different binary; the scan finding both is the point.
-    "--portable",
+    # (`--portable` was listed here as `ct-mcr export`'s flag, which the
+    # enrichment step's warnings name. Since `ct record --portable` exists
+    # (cc9bbc8b4) `ct` accepts the spelling itself, so the entry was dead and
+    # "no allowlist entry is dead" below named it; it is removed rather than
+    # kept, as that case asks.)
     # Not a message at all: `remote.nim` builds this into the argv of a
     # SUBPROCESS. The scan cannot tell a printed string from a constructed
     # argument list, so this one is listed rather than the rule weakened.
