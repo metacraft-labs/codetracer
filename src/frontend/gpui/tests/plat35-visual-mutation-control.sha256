@@ -10,7 +10,7 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
-8e0e4de6045591385d0031f8dec38d4448247441dbe8dbfae7388be613335fbc  src/frontend/gpui/app/leaves.nim
+1856673406b4ce599876b76cef3bbdeb690983a47b71005315e70707415462d2  src/frontend/gpui/app/leaves.nim
 00376e0236fbf58c526b47a79d91cf30a8d3ba6b0cd3b4fddc75ebdbad9d6b6b  src/frontend/view_vocabulary/gpui_layout_answers.nim
 90bf9191cf39e9bf113d5fe38834b360213011c9ba91b8e81f0c0cb3e5bb6619  src/common/view_vocabulary/layout_questions.nim
 9ff00385224654a2bd29b930cdd0910539f5fda07884a65b7d6c5ba6de59d7bf  tools/visual-review-brief.md

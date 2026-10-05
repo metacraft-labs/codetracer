@@ -86,7 +86,7 @@
 ## naming another front-end and draws the refusal, so the field has a
 ## PRODUCTION READER and the arm has something to break.
 
-import std/[json, math, strutils]
+import std/[json, math, sets, strutils]
 from std/unicode import runeLen, runeSubstr
 
 import isonim_gpui/renderer
@@ -1370,6 +1370,480 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
   r.appendChild(parent, list)
   true
 
+const
+  StateColumnAttribute* = "data-column"
+    ## **`PLAT35-F4`. WHICH COLUMN A STATE-PANE CELL IS**, `name` or `value`,
+    ## on every cell of every row INCLUDING the header's.
+    ##
+    ## The finding this answers: *"the state pane's rows are flat
+    ## `name: value` strings … no column structure, so name and value cannot
+    ## be distinguished and nothing aligns vertically"* — measured as ZERO
+    ## occurrences of this attribute anywhere in the pane, over all seven
+    ## `scenarios.json` plans, at `73e8c3dc4` and again at `42655fd72`.
+    ##
+    ## It is the attribute a reader can ask the shipped binary for
+    ## (`--report-window-plan`), which is why the structure is published here
+    ## rather than left to be inferred from text and pixels.
+  StateRowAttribute* = "data-state-row"
+    ## A body row's index among the pane's VISIBLE rows. The header has none,
+    ## so "the rows" and "the header" are separable by a reader without
+    ## counting children.
+  StateHeaderAttribute* = "data-state-header"
+    ## `"true"` on the header row, and on nothing else.
+  StateDepthAttribute* = "data-state-depth"
+    ## A row's depth in the variable tree. Published because the INDENT lives
+    ## inside the name cell (see `renderState`) — so a reader can check that
+    ## an indented row still ends its name field where every other row does,
+    ## which is the whole of the alignment claim.
+  StateSelectedAttribute* = "data-state-selected"
+    ## Whether this row is `StateVM.selectedPath`'s. Carried so the fact the
+    ## vocabulary `Tree` published as `data-cursor` is not LOST by drawing the
+    ## rows here; nothing paints it yet, and a selected-row ground is not
+    ## `PLAT35-F4`'s to add.
+  StateAlignAttribute* = "data-state-value-x"
+    ## **THE ONE X EVERY VALUE CELL STARTS AT**, in px, on the table.
+    ##
+    ## Derived from the same number that sets each name cell's width, so it
+    ## cannot disagree with the drawing — the shape `PLAT35-F3`'s scroll
+    ## metric uses and the reason it is one value and not two (§30).
+  StateNameColumn* = "name"
+  StateValueColumn* = "value"
+  StateTableAttribute* = "data-state-table"
+  # **THE NAME/VALUE COLUMN RULE IS DRAWN, AND THE SPEC DOES PUBLISH IT.**
+  # The element is `StateSeparatorAttribute`'s, below; this is the spec
+  # reading, because the text that stood here said the opposite.
+  #
+  # **THE CENSUS THAT SETTLES IT**, taken by CODEPOINT and COLUMN INDEX over
+  # **all five** fenced wireframes of `Variable-State-Pane.md`. Measured at
+  # the THIRD adversarial review of 2026-10-04 — the one that read the
+  # wireframes; three reviews share that date and are distinguished here by
+  # what each measured, because "adversarial review, 2026-10-04" on its own
+  # names no instrument. Re-measured from this pass before being written
+  # down:
+  #
+  #   | block   | section               | rows with an interior U+007C      | col |
+  #   | 47–56   | Value Expansion       | 0 — AND NO OUTER FRAME AT ALL     | —   |
+  #   | 75–82   | Value History         | 0                                 | —   |
+  #   | 92–98   | Column Resizing       | 2 (header 94, body 96)            | 14  |
+  #   | 191–214 | ## Wireframe (ASCII …) | 10 (header 197, body 199–206, 208) | 26 |
+  #   | 254–263 | Desired Future Design | 1 (256)                           | 28  |
+  #
+  # THIRTEEN wireframed rows carry the bar at a CONSTANT column, the ASCII
+  # Reference's outer frame being at 0 and 67. Block 47–56 draws NO `|` at
+  # all, outer or interior — it is a frameless tree diagram — so its silence
+  # about an interior rule is not a statement about one, and the earlier text
+  # built its whole case on that silence.
+  #
+  # **THREE READINGS ARE RETRACTED, IN THE WORDS THEY WERE PUBLISHED IN.**
+  # The record of the error is worth more than a clean file.
+  #  1. RETRACTED: *"the `+---...---+` rules above and below (lines 95, 97,
+  #     198) are unbroken dashes with no `+` at the column position, which is
+  #     what a published column boundary would have put there."* **THAT PROBE
+  #     FAILS ITS OWN POSITIVE CONTROL.** §"Column Resizing"'s prose
+  #     guarantees the subject outright — *"The Name/Value column separator
+  #     can be dragged to resize"* — and its rules (93, 95, 97) carry `+` at
+  #     columns 0 and 28 and **none at column 14**, which is where both of
+  #     its rows put the bar. A probe that answers "no boundary" where the
+  #     boundary is textually guaranteed is measuring the wrong thing
+  #     (`Verification-Harness-Traps` §67). The same probe would deny the
+  #     OUTER frame of the ASCII Reference, whose rules carry `+` at 0 and 67
+  #     only because the dashes run between them.
+  #  2. RETRACTED as evidence: *"`State.ColumnResize` is ranked **`Low`** in
+  #     that same document's test-scenario table."* True, and it ranks the
+  #     DRAG's test priority. Its own description — *"Drag column separator
+  #     to resize"* — names the separator as a thing that exists, so the row
+  #     is evidence FOR the rule and against only the drag's urgency.
+  #  3. RETRACTED as evidence: the *"Fixed flex tracks with no separator
+  #     element"* row at line 148. It is the **BlockTracer** column of
+  #     §"Applicability: this pane is CodeTracer-only", whose opening
+  #     sentence excludes it from this pane — *"Everything above describes
+  #     the CodeTracer desktop/web pane"*, *"BlockTracer implements none of
+  #     value expansion, 'load more', or column resizing"*.
+  #
+  # **WHAT STANDS FROM THE EARLIER PASSES, BECAUSE IT WAS MEASURED AND
+  # RIGHT**: the rule paints iff it declares its own height, and the colour
+  # the framebuffer holds is not the declared token. Both are carried on
+  # `StateSeparatorAttribute`, where a reader looking at the drawing will be.
+  #
+  # **THE DRAG IS STILL NOT DRAWN, AND STAYS NAMED RESIDUE**
+  # (`PLAT35-F4.residue` 1): it needs a persisted width and a
+  # pointer-capture model, it is the `Low`-ranked row above, and the
+  # governing clause is the one `PLAT35-F7`'s remedy turns on — *"A rendered
+  # affordance must do the thing it advertises, or not be rendered"*. So the
+  # rule carries NO `cursor` and NO click handler, and a case asserts that: a
+  # static rule is not an affordance, and a `col-resize` cursor over no drag
+  # would be.
+  StateSeparatorAttribute* = "data-state-separator"
+    ## **THE 1 px RULE BETWEEN THE NAME AND VALUE COLUMNS**, on the header
+    ## row and on every body row — the `|` thirteen of the spec's wireframed
+    ## rows put at a constant column (see `StateTableAttribute`).
+    ##
+    ## **IT PAINTS IFF IT DECLARES ITS OWN HEIGHT. NECESSARY AND
+    ## SUFFICIENT.** A childless flex child inherits none: a row declaring
+    ## `height: 26px` does not pass it to a child with no content. Four arms
+    ## were measured — `flex-shrink: 0` plus its own `height: 26px` → paints
+    ## on 276 of 276 scanned rows; its own `height: 26px` alone → 194 of 276;
+    ## `flex-shrink: 0` with no height → **nothing**; a bare `div` with a
+    ## background → **nothing**. `flex-shrink` is neither necessary nor
+    ## sufficient. In the two failing arms the element still consumed its 1 px
+    ## of layout width: present, laid out, INVISIBLE, which is §7a. Both
+    ## declarations are made below, which is the arm that painted everywhere.
+    ##
+    ## **THE RENDERED COLOUR IS NOT THE DECLARED TOKEN, AND AN EXACT-TOKEN
+    ## PIXEL PROBE CANNOT FIND THIS RULE IN ANY BUILD — WORKING OR BROKEN.**
+    ## `StateSeparatorColour` declares `#565656`; the frame holds
+    ## **`(71, 73, 76)` = `#47494C`**, that token over the pane's `#1b222c`
+    ## ground at coverage ≈ 0.75 (0.746 / 0.750 / 0.762 on R / G / B). The
+    ## blend is the RASTERISER's and not the token's — the shim parses a
+    ## 6-digit hex at full alpha (`gpui_app.parse_color`) — so a 1 px logical
+    ## box simply fails to land on one whole device pixel.
+    ##
+    ## A search for exact `#565656` returning zero is the FALSE NEGATIVE that
+    ## cost this finding two passes: the rule was built, probed for the
+    ## declared token, reported as painting nothing, deleted, and its absence
+    ## asserted in a suite. **Any pixel assertion here must target the
+    ## RENDERED value and must carry a POSITIVE CONTROL proving the probe can
+    ## find the rule when the rule is there** (`Verification-Harness-Traps`
+    ## §67). The shim's own source refutes the deleted-on-sight reading
+    ## outright: `apply_styles_to_div` applies `bg` UNCONDITIONALLY
+    ## (`gpui-nim-shim/src/gpui_app.rs:415`–`:419` → `el = el.bg(color)`),
+    ## with no test of children and none of height.
+  StateTreeViewId* = "state.root"
+    ## `pane_views.statePaneView`'s id for the variables `Tree`. The ONE node
+    ## this renderer takes over from the vocabulary; everything else the pane
+    ## view answers — the `Collapsible` and the `Tabs` over §3.3.4's three
+    ## roots — is still drawn by `gpui_binding`, so `Locals` / `Globals` /
+    ## `Watches` keep ONE owner and one spelling.
+  StateHeaderNameLabel* = "Name"
+  StateHeaderValueLabel* = "Value"
+    ## `Variable-State-Pane.md` §"Variable Display" publishes a table of
+    ## **TWO** columns and these are its two headings — `Name` (*"Variable or
+    ## expression name"*) and `Value` (*"Current value (expandable for
+    ## complex types)"*) — and §"Column Resizing" draws the same two over a
+    ## `| Name | Value |` header.
+    ##
+    ## **THERE IS NO TYPE COLUMN, AND ITS ABSENCE IS A READING OF THE SPEC
+    ## RATHER THAN AN OMISSION.** `tools/visual-review-brief.md`'s `editor`
+    ## block asks for *"name, type and value per row"* and the spec does not;
+    ## the brief is the review instrument and the spec is the published
+    ## specification. `store_types.Variable.typeName` is in reach here and is
+    ## deliberately not drawn. Changing that is a spec change — it would move
+    ## Electron and the design system too — and is recorded in
+    ## `PLAT35-F4.specCorrection`, not taken here.
+  StateCharPx* = 8
+    ## The width budgeted per character of a NAME, for the one purpose of
+    ## deciding the name column's width.
+    ##
+    ## A BUDGET AND NOT A MEASUREMENT, exactly as `window_geometry.TabCharPx`
+    ## is and for the same reason: nothing in this workspace can ask a text
+    ## system for an advance (`PLAT35-VG1` — the shim is built without
+    ## `--features gpui-backend`), and a column whose width is known HERE is
+    ## what lets the header and every row agree about where the value column
+    ## starts. Eight px is under `TabCharPx`'s ten because this
+    ## is body text rather than the tab strip's bold face.
+  StateIndentPx* = 14
+    ## A child row's offset per level. INSIDE the name cell, so depth moves
+    ## the name and never the column.
+  StateNameMinPx* = 72
+  StateNameMaxPx* = 260
+    ## The name column's bounds. A floor so `Name` and a one-letter variable
+    ## still read as a column; a ceiling so one long dunder cannot push the
+    ## value column off a laptop-width pane.
+  StateValuePadPx* = 6
+    ## The value cell's own left inset, past the RULE that ends the name
+    ## column. So `stateValueColumnPx` is the name column's width, plus
+    ## `StateSeparatorPx`, plus this.
+    ##
+    ## (Until this pass the line above said this inset was *"the ONLY thing
+    ## between the two columns — there is no rule"*. That is RETRACTED with
+    ## the reading it rested on; see `StateTableAttribute`.)
+  StateSeparatorPx* = 1
+    ## The rule's width, and the second term of `stateValueColumnPx`. ONE
+    ## device-independent pixel, which is what the spec's single `|` column
+    ## is and is why the rendered colour is a composite rather than the token
+    ## (`StateSeparatorAttribute`).
+  StateSeparatorColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
+    ## `colors/ui/border/primary` — `#565656` in dark mode. **DECLARED, NOT
+    ## RENDERED**: the frame holds `#47494C`. See `StateSeparatorAttribute`.
+  StateRowPx* = CallRowPx
+    ## A row's height, and it is the window's own row pitch rather than a new
+    ## number — the call trace's rows take the same one, which is
+    ## `window_geometry.GpuiEditorRowPx` read off the frame. MEASURED rather
+    ## than chosen: the rows this pane already drew sat 26 px apart in the
+    ## captured frame (y 214, 240, 266, …), so declaring it changes no
+    ## spacing.
+    ##
+    ## It is ALSO the rule's own height, which is what makes the rule paint at
+    ## all (`StateSeparatorAttribute`). It was introduced for that, kept
+    ## through the two passes that had deleted the rule on a false reading,
+    ## and is load-bearing again.
+  StateNameColour* = DesignTokenHex[dtColorsUiTextPrimaryActive][dmDark]
+    ## `.value-name { color: colors-ui-text-primary-active }` —
+    ## `styles/components/state.styl:232`, the Electron front-end's own
+    ## choice, carried across rather than picked (§6: the desktop is the
+    ## reference).
+  StateValueColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  StateHeaderColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+
+type
+  StateRow* = object
+    ## One VISIBLE row of the state pane, flattened.
+    path*: string      ## `StateVM.expandedPaths`' and `selectedPath`'s spelling
+    name*: string
+    value*: string     ## the presenter's answer at the caller's budget
+    typeName*: string  ## carried, NOT drawn — see `StateHeaderValueLabel`
+    depth*: int
+    hasChildren*: bool
+    expanded*: bool
+    selected*: bool
+
+proc appendStateRows(v: Variable; path: string; depth: int;
+                     budget: Budget; expanded: HashSet[string];
+                     selected: string; acc: var seq[StateRow]) =
+  ## `v` and, when `v` is expanded, its descendants, in draw order.
+  ##
+  ## **THE PATH SPELLING AND THE EXPANSION RULE ARE
+  ## `pane_views.variableRow`'s, and that agreement is GATED rather than
+  ## trusted**: `test_plat40_state_pane_columns.nim` compares the paths this
+  ## produces against the ids of `statePaneView`'s own visible `Tree` rows,
+  ## for the same ViewModel, and fails if they differ. Two derivations of one
+  ## rule is §30; a derivation the suite compares against the other is the
+  ## shape this file can have without publishing a `stateRows` on `StateVM`
+  ## (which is the durable answer, and would move two more harnesses').
+  let rendered =
+    if v.presented.isNil: v.value
+    else: presentText(v.presented, budget)
+  acc.add StateRow(path: path, name: v.name, value: rendered,
+                   typeName: v.typeName, depth: depth,
+                   hasChildren: v.hasChildren or v.children.len > 0,
+                   expanded: path in expanded,
+                   selected: path == selected)
+  if path in expanded:
+    for c in v.children:
+      appendStateRows(c, path & "." & c.name, depth + 1, budget, expanded,
+                      selected, acc)
+
+proc stateRows*(vm: StateVM; budget: Budget): seq[StateRow] =
+  ## The pane's visible rows, from the ViewModel the other two front-ends read.
+  ##
+  ## `MaxTreeRows` caps the TOP-LEVEL loop, which is where
+  ## `statePaneView` caps it too — the same cap in the same place, so the two
+  ## renderings cannot show different numbers of variables.
+  result = @[]
+  if vm.isNil:
+    return
+  let expanded = vm.expandedPaths.val
+  let selected = vm.selectedPath.val
+  let vars = vm.currentVariables.val
+  for i, v in vars:
+    if i >= MaxTreeRows: break
+    appendStateRows(v, v.name, 0, budget, expanded, selected, result)
+
+func stateNameColumnPx*(rows: openArray[StateRow]): int =
+  ## **THE ONE WIDTH EVERY NAME CELL GETS**, header included.
+  ##
+  ## Decided ONCE, from the widest drawn name at its own indent and from the
+  ## `Name` heading, then clamped. One number for the whole pane is what makes
+  ## *"nothing aligns vertically"* answerable: the value column's x is this
+  ## plus the rule's 1 px plus the value cell's inset
+  ## (`stateValueColumnPx`), and it is the same arithmetic on every row
+  ## because it is the same number.
+  ##
+  ## (This docstring said *"plus the value cell's inset and NOTHING ELSE
+  ## (there is no boundary rule)"*. RETRACTED — the rule is drawn, and the
+  ## arithmetic above is the one `stateValueColumnPx` does.)
+  ##
+  ## A pure `func` so the rule has a test of its own that opens no window
+  ## (`test_plat40_state_pane_columns.nim`, suite 1), which is the half a plan
+  ## reading cannot gate: a plan shows what one program state produced, and
+  ## this shows what the rule answers for a state no recording has to reach.
+  var widest = StateHeaderNameLabel.runeLen * StateCharPx
+  for row in rows:
+    let needed = row.depth * StateIndentPx + row.name.runeLen * StateCharPx
+    if needed > widest:
+      widest = needed
+  min(max(widest, StateNameMinPx), StateNameMaxPx)
+
+func stateValueColumnPx*(nameColumnPx: int): int =
+  ## Where the value column's text begins, given the name column's width.
+  ## Derived, never a second literal — `StateAlignAttribute`'s own reason.
+  ##
+  ## THREE terms, and the middle one is the drawn rule: a layout engine puts
+  ## the 1 px `div` between the two cells, so a value x that skipped it would
+  ## be a published number the drawing disagrees with. The suite recomputes
+  ## the same sum from the plan's own three boxes rather than reading this.
+  nameColumnPx + StateSeparatorPx + StateValuePadPx
+
+proc stateCell(r: GpuiRenderer; column, text: string; widthPx: int;
+               indentPx: int; colour: string; bold: bool): GpuiElement =
+  ## One cell: its column, its width when it has a fixed one, its text.
+  ##
+  ## `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` is what
+  ## the vocabulary `Tree` binding already put on these rows, and it is kept
+  ## BYTE-FOR-BYTE: `PLAT35-F7` is open against exactly that elision and this
+  ## change is not its remedy. A cell that started wrapping here would have
+  ## silently answered another milestone's open question.
+  # **A `div` AND NOT A `span`, AND THAT IS MEASURED.** The shim renders a
+  # `span` as a `TextContainer`, which honours NEITHER `white-space: nowrap`
+  # NOR `text-overflow: ellipsis`: with `span`s the `__builtins__` value — a
+  # 7269-character string carrying 21 newlines — wrapped to twenty-one drawn
+  # lines and pushed every other variable out of the pane, where the
+  # vocabulary `Tree`'s `li` had elided it to one. Four pixel readers saw the
+  # wrapped form before this line existed. A `div` is what the `Tree` rows
+  # were, so the pane's line budget and `PLAT35-F7`'s measured elision are
+  # both exactly what they were.
+  result = r.createElement("div")
+  r.setAttribute(result, StateColumnAttribute, column)
+  if widthPx > 0:
+    r.setStyle(result, "width", $widthPx & "px")
+    r.setStyle(result, "flex-shrink", "0")
+  else:
+    # The value column takes the rest of the row and clips inside it. Without
+    # `min-width: 0` a flex child cannot shrink below its content, so there is
+    # nothing for the ellipsis to be an ellipsis OF.
+    r.setStyle(result, "flex-grow", "1")
+    r.setStyle(result, "min-width", "0")
+  r.setStyle(result, "white-space", "nowrap")
+  r.setStyle(result, "overflow", "hidden")
+  r.setStyle(result, "text-overflow", "ellipsis")
+  if indentPx > 0:
+    r.setStyle(result, "padding-left", $indentPx & "px")
+  r.setStyle(result, "color", colour)
+  if bold:
+    r.setStyle(result, "font-weight", "bold")
+  r.appendChild(result, r.createTextNode(text))
+
+proc stateSeparatorElement(r: GpuiRenderer): GpuiElement =
+  ## **THE COLUMN RULE**, one per row, between the name cell and the value
+  ## cell — `StateSeparatorAttribute`'s element.
+  ##
+  ## FOUR DECLARATIONS AND EVERY ONE OF THEM IS LOAD-BEARING:
+  ##  * `width: 1px` — the spec's single `|` column, and the second term of
+  ##    `stateValueColumnPx`.
+  ##  * `height: 26px` (`StateRowPx`) — **WITHOUT ITS OWN HEIGHT IT DOES NOT
+  ##    PAINT.** A childless flex child inherits none from a row that declares
+  ##    one; measured, four arms, on `StateSeparatorAttribute`.
+  ##  * `flex-shrink: 0` — so a wide value cannot squeeze the rule to nothing.
+  ##    Not sufficient on its own (the no-height arms painted nothing with it)
+  ##    and not necessary (the height-only arm painted on 194 of 276 rows),
+  ##    but the pair is the arm that painted on 276 of 276.
+  ##  * `background` — the only thing that puts ink on the pixel.
+  ##    `apply_styles_to_div` applies it unconditionally.
+  ##
+  ## NO `cursor` AND NO CLICK HANDLER, deliberately: the drag is residue, and
+  ## a rule that advertised one without having it is exactly what
+  ## `PLAT35-F7`'s clause forbids.
+  result = r.createElement("div")
+  r.setAttribute(result, StateSeparatorAttribute, "true")
+  r.setStyle(result, "width", $StateSeparatorPx & "px")
+  r.setStyle(result, "height", $StateRowPx & "px")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "background", StateSeparatorColour)
+
+proc stateRowElement(r: GpuiRenderer): GpuiElement =
+  ## A row: one line, its cells side by side. The header and a body row are
+  ## the SAME container, so the heading cannot drift from the rows it names.
+  result = r.createElement("div")
+  r.setStyle(result, "display", "flex")
+  r.setStyle(result, "white-space", "nowrap")
+  r.setStyle(result, "overflow", "hidden")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "height", $StateRowPx & "px")
+  r.setStyle(result, "items", "center")
+
+proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
+                  pv: var PaneView; budget: Budget): bool =
+  ## **`PLAT35-F4`: THE STATE PANE'S ROWS AS THE SPEC'S TWO COLUMNS** — a
+  ## `Name` / `Value` header, one shared alignment x, the 1 px rule between
+  ## the columns (`StateSeparatorAttribute`), and
+  ## `StateColumnAttribute` on every cell — drawn natively from `StateVM`,
+  ## exactly as the call trace's rows are drawn from `CalltraceVM`
+  ## (`renderCallTrace`, PLAT-49 part B: *"a vocabulary `List` option is one
+  ## label and could not carry the parts the desktop styles apart"*). A
+  ## vocabulary `Tree` node carries ONE `label` and no columns, which is the
+  ## same sentence one pane over.
+  ##
+  ## THIS CONVERGES THE THREE FRONT-ENDS RATHER THAN DIVERGING THEM, measured:
+  ## the terminal already aligns these fields
+  ## (`tui/app/views/tree_node.fieldWidths`, *"the name FIELD still ends at
+  ## one column on every row so type and value align"*) and so does the web
+  ## (`viewmodel/views/isonim_state_view.nim`'s `span.value-name` /
+  ## `span.value-type` / `span.value-view`). Neither of them reaches
+  ## `pane_views.statePaneView`: excluding tests it has exactly one functional
+  ## caller in this tree, `renderPaneView` below.
+  ##
+  ## THE PANE'S OWN CHROME STAYS THE VOCABULARY'S. `pv.root`'s `Tabs` over
+  ## §3.3.4's three roots is rendered by `gpui_binding` as before; only the
+  ## `state.root` `Tree` is taken over. So `--report-plan` still prints
+  ## `Locals` (`test_gpui_editing_surface` asserts it), the tab strip has one
+  ## owner, and a seventeenth vocabulary entry — a tree WITH columns, which
+  ## `admission.Rejections` has never considered-and-refused — remains the
+  ## durable answer and not a precondition.
+  ##
+  ## False when there are no variables, so the pane's own report
+  ## (*"no variables at this position"*) is still the vocabulary's to draw and
+  ## `data-ct-state` still reads `pane-report`.
+  if vm.isNil:
+    return false
+  let rows = stateRows(vm, budget)
+  if rows.len == 0:
+    return false
+  # The body: the pane view WITHOUT its variables tree, then the table. One
+  # column container, so the two cannot be laid out over each other.
+  let body = r.createElement("div")
+  r.setStyle(body, "display", "flex")
+  r.setStyle(body, "flex-direction", "column")
+  var kept: seq[ViewNode] = @[]
+  for child in pv.root.children:
+    if child.id != StateTreeViewId:
+      kept.add child
+  pv.root.children = kept
+  let binding = renderGpui(r, pv.root)
+  r.appendChild(body, binding.root)
+
+  let nameColumnPx = stateNameColumnPx(rows)
+  let table = r.createElement("div")
+  r.setAttribute(table, StateTableAttribute, "rows")
+  r.setAttribute(table, StateAlignAttribute,
+                 $stateValueColumnPx(nameColumnPx))
+  r.setStyle(table, "display", "flex")
+  r.setStyle(table, "flex-direction", "column")
+  r.setStyle(table, "overflow", "hidden")
+
+  # THE HEADER, which is the half of the finding a `data-column` census does
+  # not cover: *"no header row"* was what all four pixel readers reported.
+  let header = stateRowElement(r)
+  r.setAttribute(header, StateHeaderAttribute, "true")
+  r.appendChild(header, stateCell(r, StateNameColumn, StateHeaderNameLabel,
+                                  nameColumnPx, 0, StateHeaderColour, true))
+  r.appendChild(header, stateSeparatorElement(r))
+  r.appendChild(header, stateCell(r, StateValueColumn, StateHeaderValueLabel,
+                                  0, StateValuePadPx, StateHeaderColour, true))
+  r.appendChild(table, header)
+
+  for i, row in rows:
+    let el = stateRowElement(r)
+    r.setAttribute(el, StateRowAttribute, $i)
+    r.setAttribute(el, StateDepthAttribute, $row.depth)
+    r.setAttribute(el, StateSelectedAttribute,
+                   (if row.selected: "true" else: "false"))
+    # The indent is the NAME CELL's padding and not the row's: a fixed-width
+    # name cell ends where every other row's does however deep the row is,
+    # which is the terminal's rule (`tree_node.fieldWidths`) and is why a
+    # nested row cannot push the value column right.
+    r.appendChild(el, stateCell(r, StateNameColumn, row.name, nameColumnPx,
+                                row.depth * StateIndentPx, StateNameColour,
+                                false))
+    # THE RULE, between the two cells — the same element on the header, so
+    # the heading and the rows cannot end their name field at different x.
+    r.appendChild(el, stateSeparatorElement(r))
+    r.appendChild(el, stateCell(r, StateValueColumn, row.value, 0,
+                                StateValuePadPx, StateValueColour, false))
+    r.appendChild(table, el)
+  r.appendChild(body, table)
+  r.appendChild(parent, body)
+  true
+
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
                     leaf: GpuiLeaf; budget: Budget): bool =
   ## Draw a builtin pane's vocabulary tree into `parent`. Answers whether the
@@ -1382,10 +1856,18 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
   ## PLAT-49 part B: the call trace's ROWS are drawn natively from its
   ## semantic rows (`renderCallTrace`) — a vocabulary `List` option is one
   ## label and could not carry the parts the desktop styles apart.
+  ##
+  ## `PLAT35-F4`: and so are the state pane's, for the same reason one pane
+  ## over (`renderState`). It takes the pane view rather than re-asking for
+  ## one, because the `Tabs` half of that view is still the vocabulary's to
+  ## draw.
   if leaf.builtin == paneCalltrace and not leaf.vm.isNil and
      renderCallTrace(r, parent, CalltraceVM(leaf.vm)):
     return true
-  let pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
+  var pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
+  if leaf.builtin == paneState and not leaf.vm.isNil and
+     renderState(r, parent, StateVM(leaf.vm), pv, budget):
+    return true
   let binding = renderGpui(r, pv.root)
   r.appendChild(parent, binding.root)
   pv.report.len == 0
