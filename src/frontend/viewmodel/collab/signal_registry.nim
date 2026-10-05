@@ -195,6 +195,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Calltrace expansion set is collaborative session intent.",
     requiresStableId = true,
     stableIdNote = "Currently stores row indices; expansion ops need stable call node ids.")
+  entries.addEntry("CalltraceVM", "fallbackStack", vscBackendAuthoritative,
+    "PLAT-47: the call stack the host fetched when the recording has no call " &
+    "trace — the engine's stackTrace answer, cached in a signal because a " &
+    "projection cannot issue a request.")
   entries.addMany("CalltraceVM", ["searchQuery", "rawIgnorePatterns"],
     vscSharedSessionViewState,
     "Calltrace filter/search settings are logical shared view state.")
@@ -290,6 +294,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # `filterBar` is the parsed projection of `searchQuery` (already
   # shared). It is a mutable signal rather than a memo, but it carries
   # the same shared filter intent.
+  # PLAT-49 part B: which columns the table shows and in which order is the
+  # same kind of choice as the sort (`sortColumn` is an index INTO the shown
+  # columns), so it travels with it; the column menu being open is one
+  # participant's pointer state, as a drop-down is.
+  entries.addEntry("EventLogVM", "columns", vscSharedSessionViewState,
+    "The shown columns and their order are logical shared view state; the sort column indexes them.")
+  entries.addEntry("EventLogVM", "columnsMenuOpen", vscRendererLocal,
+    "An open column menu is this participant's transient UI, like any open drop-down.")
   entries.addEntry("EventLogVM", "filterBar", vscSharedSessionViewState,
     "Parsed marker filter bar mirrors the shared search/filter intent.")
   entries.addDerived("EventLogVM",
@@ -342,7 +354,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Timeline range is collaborative view state over stable rrTicks.")
   entries.addEntry("TimelineVM", "hoveredTick", vscPresenceAwareness,
     "Hover is ephemeral participant awareness.")
-  entries.addDerived("TimelineVM", ["currentPosition", "markers"])
+  entries.addDerived("TimelineVM",
+    ["currentPosition", "bounds", "markers", "tickLabels"])
 
   entries.addDerived("DebugControlsVM",
     ["canStepForward", "canStepBackward", "canContinue", "canReverseContinue",
@@ -578,6 +591,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
      "pendingRequests"],
     vscBackendAuthoritative,
     "The fetched source window, the revision it was fetched at, the file's extent and the requests still in flight: backend answers, cached in signals because a projection cannot issue a request.")
+  entries.addEntry("SourceVM", "heldLineContexts", vscRendererLocal,
+    "PLAT-47 B4: each held line's highlighter state, derived by THIS front-end's highlighter from the fetched file; another front-end's lexer states are not this one's.")
   entries.addDerived("SourceVM",
     ["revision", "executionLine", "path", "sourceGeneration", "sourceDigest",
      "visibleFirstLine", "visibleLastLine", "windowFirstLine", "windowLastLine",
