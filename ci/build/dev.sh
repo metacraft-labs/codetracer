@@ -8,6 +8,10 @@ echo '##########################################################################
 
 node_modules/.bin/webpack
 
+cargo_target_setup="$(python3 scripts/prepare-tup-cargo-target.py)"
+eval "$cargo_target_setup"
+unset cargo_target_setup
+
 pushd src
 
 # Use tup generate, because FUSE may not be supported on the CI runners.

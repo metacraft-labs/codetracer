@@ -6,6 +6,10 @@ set -euo pipefail
 # problem because the Tupfiles refer to it.
 mkdir -p src/public/dist
 
+cargo_target_setup="$(python3 scripts/prepare-tup-cargo-target.py)"
+eval "$cargo_target_setup"
+unset cargo_target_setup
+
 cd src
 "${TUP:-tup}" build-debug
 cd ..

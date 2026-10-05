@@ -14,6 +14,10 @@ set -euo pipefail
 # build-debug/codetracer user-setup
 
 # Start building continuously
+cargo_target_setup="$(python3 scripts/prepare-tup-cargo-target.py)"
+eval "$cargo_target_setup"
+unset cargo_target_setup
+
 cd src
 "${TUP:-tup}" build-debug
 "${TUP:-tup}" monitor -a

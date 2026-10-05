@@ -241,3 +241,6 @@ src/tup.config
 /sub-agent-report-*.txt
 .tmp/
 .tools/
+
+# Owning compiler-bound Tup Cargo outputs (outside the src Tup hierarchy).
+.cargo-tup-targets/
