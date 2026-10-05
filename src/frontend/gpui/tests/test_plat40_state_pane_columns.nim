@@ -241,14 +241,17 @@ const
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   Viewports = [(1920, 1080), (1440, 900)]
     ## `scenarios.json`'s two, which are the two the finding was measured at.
-  PopulatedOps = ["stepIn=6", "stepIn=6,next=3", "stepIn=21,stepOut=1"]
+  PopulatedOps = ["stepIn=5", "stepIn=5,next=3", "stepIn=21,stepOut=1"]
     ## `stepped-editor`'s, `advanced-state`'s and `returned-calltrace`'s
     ## operation sequences — the three `scenarios.json` stops at which the
-    ## pane has variables to put in columns.
+    ## pane has variables to put in columns. FIVE stepIns, not six, since the
+    ## engine opens a recording in the program's entry call rather than on the
+    ## trace root's synthetic entry step one step earlier: the same stops
+    ## (line 44, and three `next`s on), as `scenarios.json` records.
     ##
     ## **THE THIRD ONE IS HERE BECAUSE THE FIRST TWO BOTH ANSWER 96 px.**
-    ## Measured on this host at both viewports: `stepIn=6` draws 11 body rows
-    ## and `stepIn=6,next=3` draws 12, and BOTH get a 96 px name column and
+    ## Measured on this host at both viewports: `stepIn=5` draws 11 body rows
+    ## and `stepIn=5,next=3` draws 12, and BOTH get a 96 px name column and
     ## `data-state-value-x` 103, because `__builtins__` (12 chars) is the
     ## widest drawn name in each. So the drawn-width case below — the one that
     ## is supposed to catch a width that is not the rule's answer — was
@@ -839,7 +842,7 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
       # against literals in suite 1 — applied to the names THE PLAN DREW.
       #
       # **AND IT TAKES MORE THAN ONE STOP TO MEAN THAT.** With only
-      # `stepIn=6` and `stepIn=6,next=3` in `PopulatedOps` this case was
+      # `stepIn=5` and `stepIn=5,next=3` in `PopulatedOps` this case was
       # satisfied by a HARDCODED `96px`, because both of those stops answer
       # 96. `stepIn=21,stepOut=1` answers 88, so the constant now fails here
       # and nowhere else — see `PopulatedOps` and the §7 note above.

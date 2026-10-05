@@ -7,7 +7,16 @@
  "calltrace": [
   {
    "toggle": "expanded",
-   "text": "<__main__> #0",
+   "text": "<toplevel> #0",
+   "args": "()",
+   "returnText": "0",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "<__main__> #1",
    "args": "()",
    "returnText": "",
    "selected": true,
@@ -16,7 +25,7 @@
   },
   {
    "toggle": "expanded",
-   "text": "main #1",
+   "text": "main #2",
    "args": "()",
    "returnText": "@[5, 7, 42, 17, 2]",
    "selected": false,
@@ -25,7 +34,7 @@
   },
   {
    "toggle": "expanded",
-   "text": "evaluate #2",
+   "text": "evaluate #3",
    "args": "(expression=\"2 + 3\")",
    "returnText": "5",
    "selected": false,
@@ -34,7 +43,7 @@
   },
   {
    "toggle": "expanded",
-   "text": "apply_op #3",
+   "text": "apply_op #4",
    "args": "(symbol=\"+\", left=2, right=3)",
    "returnText": "5",
    "selected": false,
@@ -43,7 +52,7 @@
   },
   {
    "toggle": "leaf",
-   "text": "add #4",
+   "text": "add #5",
    "args": "(left=2, right=3)",
    "returnText": "5",
    "selected": false,
@@ -52,7 +61,7 @@
   },
   {
    "toggle": "expanded",
-   "text": "evaluate #5",
+   "text": "evaluate #6",
    "args": "(expression=\"10 - 4 + 1\")",
    "returnText": "7",
    "selected": false,
@@ -61,7 +70,7 @@
   },
   {
    "toggle": "expanded",
-   "text": "apply_op #6",
+   "text": "apply_op #7",
    "args": "(symbol=\"-\", left=10, right=4)",
    "returnText": "6",
    "selected": false,
@@ -70,7 +79,7 @@
   },
   {
    "toggle": "leaf",
-   "text": "sub #7",
+   "text": "sub #8",
    "args": "(left=10, right=4)",
    "returnText": "6",
    "selected": false,
@@ -79,7 +88,7 @@
   },
   {
    "toggle": "expanded",
-   "text": "apply_op #8",
+   "text": "apply_op #9",
    "args": "(symbol=\"+\", left=6, right=1)",
    "returnText": "7",
    "selected": false,
@@ -88,7 +97,7 @@
   },
   {
    "toggle": "leaf",
-   "text": "add #9",
+   "text": "add #10",
    "args": "(left=6, right=1)",
    "returnText": "7",
    "selected": false,
@@ -97,17 +106,8 @@
   },
   {
    "toggle": "expanded",
-   "text": "evaluate #10",
+   "text": "evaluate #11",
    "args": "(expression=\"6 * 7\")",
-   "returnText": "42",
-   "selected": false,
-   "argColour": "rgb(187, 247, 208)",
-   "returnColour": "rgb(191, 219, 254)"
-  },
-  {
-   "toggle": "expanded",
-   "text": "apply_op #11",
-   "args": "(symbol=\"*\", left=6, right=7)",
    "returnText": "42",
    "selected": false,
    "argColour": "rgb(187, 247, 208)",
@@ -260,7 +260,7 @@
   "stripBox": {
    "x": 327,
    "y": 1372,
-   "w": 999,
+   "w": 957,
    "h": 24
   },
   "labels": [
@@ -302,7 +302,7 @@
     "id": "auto-hide-bottom-strip",
     "cls": "auto-hide-bottom-strip has-tabs",
     "x": 327,
-    "w": 999,
+    "w": 957,
     "text": "BUILD\nPROBLEMS\nFIND IN FILES\nREQUESTS"
    },
    {
@@ -336,30 +336,30 @@
    {
     "id": "",
     "cls": "test-movement",
-    "x": 1326,
+    "x": 1283,
     "w": 16,
     "text": "14"
    },
    {
     "id": "",
     "cls": "status-right",
-    "x": 1342,
-    "w": 558,
-    "text": "No certificates\n/home/zahary/m/codetracer-gui/codetracer/tes"
+    "x": 1299,
+    "w": 601,
+    "text": "No certificates\n/home/zahary/m/codetracer-gui/codetracer-gre"
    },
    {
     "id": "",
     "cls": "test-certificate-status status-inline test-certificate-none",
-    "x": 1342,
+    "x": 1299,
     "w": 82,
     "text": "No certificates"
    },
    {
     "id": "location-status",
     "cls": "",
-    "x": 1432,
-    "w": 460,
-    "text": "/home/zahary/m/codetracer-gui/codetracer/test-programs/calc/"
+    "x": 1389,
+    "w": 503,
+    "text": "/home/zahary/m/codetracer-gui/codetracer-green2/test-program"
    }
   ],
   "overlayAfter120ms": false,

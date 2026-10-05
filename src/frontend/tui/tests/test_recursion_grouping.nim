@@ -182,7 +182,14 @@ suite "CTUI-6: a >50-frame recursion is one bounded row until it is opened":
         frames = framesFromStackTrace(body)
         # See this file's header: 39 MB per stop without this line.
         discard session.drainEvents()
-        if frames.len > DepthFloor:
+        # The RECURSION is past the floor — counted in the recursive frames,
+        # not in the whole stack, whose other frames are the ones the
+        # recorder and the program wrap it in (`<toplevel>`, `<__main__>`,
+        # `main`), and how many of those there are is the recorder's choice.
+        var recursive = 0
+        for f in frames:
+          if f.name == RecursiveFunction: inc recursive
+        if recursive > DepthFloor:
           break
       echo "CTUI-6 RECURSION: " & $frames.len & " frame(s) over " & $stops &
            " stop(s) at " & recursiveFile & ":" & $recursiveLine
@@ -205,7 +212,7 @@ suite "CTUI-6: a >50-frame recursion is one bounded row until it is opened":
           inc otherFrames
       checkpoint("recursive frames " & $recursiveFrames & ", other " &
                  $otherFrames)
-      ck recursiveFrames > DepthFloor - 2
+      ck recursiveFrames > DepthFloor
       # THE POSITIVE CONTROL ON THE GROUP: the stack is not ONE run. If it were,
       # a grouper that collapsed everything would pass every assertion below.
       ck otherFrames >= 1

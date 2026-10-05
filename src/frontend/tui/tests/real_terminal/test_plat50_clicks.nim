@@ -548,9 +548,12 @@ suite "PLAT-50 on a real terminal: the call-trace click's status (F2)":
     var sess = open()
     let (ra, ca) = sess.waitForCall("· add #", "(left=2, right=3)")
     ck sess.rowText(StatusRow).contains("main.py:1 ")
+    # The entry's tick, read rather than assumed: the program's first step
+    # comes after the trace format's `<toplevel>` entry step.
+    let t0 = sess.rowText(0).tickOf
     sess.press(ra, ca + 4)
-    let t1 = sess.waitTick(0)
-    ck t1 > 0
+    let t1 = sess.waitTick(t0)
+    ck t1 > t0
     var deadline = getMonoTime() + initDuration(seconds = 10)
     while getMonoTime() < deadline and
           not sess.rowText(StatusRow).contains("tick " & $t1):
@@ -728,8 +731,9 @@ suite "PLAT-50 on a real terminal: the event log's order (K26)":
     ck s.findRow("checksum = 73")[0] == rh + 1
     # A click on an event still goes to IT, whatever the order.
     let (re, ce) = s.findRow("6 * 7 = 42")
+    let t0 = sess.rowText(0).tickOf
     sess.press(re, ce + 2)
-    ck sess.waitTick(0) == 88
+    ck sess.waitTick(t0) == 88
     sess.quit()
 
 suite "PLAT-50 on a real terminal: the status line, a dock label, the timeline (K37, K42, K45)":
@@ -782,8 +786,9 @@ suite "PLAT-50 on a real terminal: the status line, a dock label, the timeline (
     let b = start + 1 + (stop - start - 1) * 4 div 5
     # Press at a fifth, move, release at four fifths (button-event motion,
     # code 32: the left button held).
+    let t0 = sess.rowText(0).tickOf
     sess.mouse(0, rb + 1, a)
-    let t1 = sess.waitTick(0)
+    let t1 = sess.waitTick(t0)
     ck t1 > 20 and t1 < 50
     sess.mouse(32, rb + 1, (a + b) div 2)
     sess.mouse(32, rb + 1, b)

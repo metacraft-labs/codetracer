@@ -47,7 +47,10 @@ import ../../../styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 67
+const ExpectedAssertions = 71
+  ## 67 -> 71 (2026-10-04): the call-trace rows are found by what each call
+  ## is, and the first descent's numbers are asserted to follow one another
+  ## (+3), and the root row found before its colours are read (+1).
 
 var countedAssertions = 0
 
@@ -112,6 +115,28 @@ proc findRow(s: Snapshot; needle: string; below = Rows): (int, int) =
       return (r, c)
   (-1, -1)
 
+proc findCall(s: Snapshot; head, args: string; below = Rows):
+    tuple[row, col, index: int] =
+  ## The call-trace row that reads `head`, a number, then `args` — e.g.
+  ## `findCall(s, "▾ evaluate #", "(expression=\"2 +")` — its row, the column
+  ## `head` starts at, and the call's number. Found by WHAT the call is, not
+  ## by its number: the number depends on the frames the recorder wraps the
+  ## program in (the Python recorder roots the trace in `<toplevel>` above the
+  ## `<__main__>` module frame).
+  for r in 0 ..< min(below, Rows):
+    let line = s.text(r)
+    var at = line.find(head)
+    while at >= 0:
+      var i = at + head.len
+      var n = ""
+      while i < line.len and line[i].isDigit:
+        n.add line[i]
+        inc i
+      if n.len > 0 and line.continuesWith(args, i):
+        return (r, line[0 ..< at].runeLen, parseInt(n))
+      at = line.find(head, at + 1)
+  (-1, -1, -1)
+
 proc waitFor(sess: var TuiTestSession; needle: string; present = true;
              timeoutMs = 20000; below = Rows): (int, int) =
   let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
@@ -122,6 +147,19 @@ proc waitFor(sess: var TuiTestSession; needle: string; present = true;
     sleep(40)
   raise newException(AssertionFailedError,
     (if present: "never showed '" else: "kept showing '") & needle & "'")
+
+proc waitForCall(sess: var TuiTestSession; head, args: string; present = true;
+                 timeoutMs = 20000): tuple[row, col, index: int] =
+  ## `findCall`, waited for (or, with `present = false`, waited away).
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    let at = sess.snap().findCall(head, args)
+    if (at.row >= 0) == present:
+      return at
+    sleep(40)
+  raise newException(AssertionFailedError,
+    (if present: "never showed '" else: "kept showing '") & head & "…" &
+    args & "'")
 
 proc mouse(sess: var TuiTestSession; code, row, col: int; release = false) =
   sess.send("\x1b[<" & $code & ";" & $(col + 1) & ";" & $(row + 1) &
@@ -159,21 +197,39 @@ suite "PLAT-49 part B on a real terminal: the call trace's rows":
 
   test "the rows carry arguments, returns and toggles; the current call selected":
     var sess = open()
-    let (r2, _) = sess.waitFor("▾ evaluate #2(expression=\"2 +")
-    ck r2 > 0
+    let ev = sess.waitForCall("▾ evaluate #", "(expression=\"2 +")
+    ck ev.row > 0
     let s = sess.snap()
-    ck s.findRow("▾ main #1() => @[5, 7, 42")[0] > 0
-    ck s.findRow("▾ apply_op #3(symbol=\"+\", l")[0] > 0
-    ck s.findRow("· add #4(left=2, right=3)")[0] > 0
-    ck s.findRow("▾ <__main__> #0()")[0] > 0
+    let main = s.findCall("▾ main #", "() => @[5, 7, 42")
+    let op = s.findCall("▾ apply_op #", "(symbol=\"+\", l")
+    let add = s.findCall("· add #", "(left=2, right=3)")
+    ck main.row > 0
+    ck op.row > 0
+    ck add.row > 0
+    # One call after another down the first descent: main, the first
+    # evaluate, its apply_op, its add.
+    ck ev.index == main.index + 1
+    ck op.index == ev.index + 1
+    ck add.index == op.index + 1
+    ck s.findCall("▾ <__main__> #", "()").row > 0
     # The pane is narrower than these rows: a wider terminal shows the
     # returns of the deeper calls too (the shell suite reads whole rows).
-    # The current call — the debugger is at the entry, in <__main__> — is
-    # the desktop's selected row: bold, on the design system's active-row
+    # The current call — the debugger is at the entry, in the module's
+    # frame — is the desktop's selected row: bold, on the design system's active-row
     # ground (ui/surface/primary/secondary-hover, #333333 Dark), the other
     # rows on the pane's own (#282828).
-    let (r0, c0) = s.findRow("<__main__> #0()")
-    let (r4, c4) = s.findRow("add #4(")
+    # The current call at the entry is the call that encloses `main` — the
+    # module's frame, one row above it on the first descent.
+    let entryHead = " #" & $(main.index - 1) & "("
+    var (r0, c0) = (-1, -1)
+    for r in 0 ..< Rows:
+      let line = s.text(r)
+      let at = line.find("▾ <")
+      if at >= 0 and line.find(entryHead, at) > at:
+        (r0, c0) = (r, line[0 ..< at].runeLen + 2)
+        break
+    let (r4, c4) = (add.row, add.col + 2)
+    ck r0 > 0
     ck s[r0][c0].bgHex == "#333333"
     ck s[r4][c4].bgHex == "#282828"
     ck caBold in s[r0][c0 + 2].attrs
@@ -182,11 +238,14 @@ suite "PLAT-49 part B on a real terminal: the call trace's rows":
 
   test "a click on a row goes to that call; a toggle collapses and expands":
     var sess = open()
-    discard sess.waitFor("add #4(left=2, right=3)")
+    let add = sess.waitForCall("· add #", "(left=2, right=3)")
+    let addText = "add #" & $add.index & "(left=2, right=3)"
+    # The entry stop's tick (the program's first step, after the trace
+    # format's `<toplevel>` entry step): read, so the jump below is measured
+    # from it.
     let before = sess.rowText(0).tickOf
-    ck before == 0
-    let s = sess.snap()
-    let (ra, ca) = s.findRow("add #4(left=2, right=3)")
+    ck before >= 0
+    let (ra, ca) = (add.row, add.col + 2)
     sess.click(ra, ca + 2)
     let deadline = getMonoTime() + initDuration(seconds = 20)
     var after = before
@@ -197,18 +256,19 @@ suite "PLAT-49 part B on a real terminal: the call trace's rows":
     ck after > before
     # The status line echoes nothing for the click.
     ck not sess.rowText(StatusRow).contains("calltrace")
-    # Collapse apply_op #3: its child add #4 goes, the toggle reads ▸.
+    # Collapse add's apply_op: its child add goes, the toggle reads ▸.
     let s2 = sess.snap()
-    let (rt, ct) = s2.findRow("▾ apply_op #3(")
+    let opHead = "apply_op #" & $(add.index - 1) & "("
+    let (rt, ct) = s2.findRow("▾ " & opHead)
     ck rt > 0
     sess.click(rt, ct)
-    discard sess.waitFor("▸ apply_op #3(")
-    discard sess.waitFor("add #4(left=2, right=3)", present = false)
-    let (rt2, ct2) = sess.snap().findRow("▸ apply_op #3(")
+    discard sess.waitFor("▸ " & opHead)
+    discard sess.waitFor(addText, present = false)
+    let (rt2, ct2) = sess.snap().findRow("▸ " & opHead)
     ck rt2 == rt and ct2 == ct
     sess.click(rt2, ct2)
-    discard sess.waitFor("▾ apply_op #3(")
-    let (r4, _) = sess.waitFor("add #4(left=2, right=3)")
+    discard sess.waitFor("▾ " & opHead)
+    let (r4, _) = sess.waitFor(addText)
     ck r4 == rt + 1
     sess.quit()
 
@@ -397,7 +457,7 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     # Its own tab, its own engine, its own panes.
     discard sess.waitFor("call_pages-d6745afd1e2e ×", timeoutMs = 30000,
                          below = 1)
-    discard sess.waitFor("step #3(i=0)", timeoutMs = 30000)
+    discard sess.waitForCall("step #", "(i=0)", timeoutMs = 30000)
     ck sess.rowText(0).contains("calc-")
     ck sess.rowText(0).contains("trace: call_pages")
     ck replayServerPids().len == before + 1
@@ -405,9 +465,9 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     let (_, c0) = sess.snap().findRow("calc-2f0")
     ck c0 > 0
     sess.click(0, c0 + 2)
-    discard sess.waitFor("evaluate #2(expression=", timeoutMs = 20000)
+    discard sess.waitForCall("evaluate #", "(expression=", timeoutMs = 20000)
     ck sess.rowText(0).contains("trace: calc-")
-    ck sess.snap().findRow("step #3(i=0)")[0] < 0
+    ck sess.snap().findCall("step #", "(i=0)").row < 0
     # Close the second: its engine stops; one session, the "+" alone.
     let line = sess.rowText(0)
     let at = line.cellFind("call_pages-d6745afd1e2e ×")

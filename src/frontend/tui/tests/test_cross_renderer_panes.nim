@@ -121,6 +121,10 @@ import ./fixtures/fixture_provider
 
 var asserted = 0
 var countedAssertions = 0
+var sameBytesRows = 0
+  ## How many recorded variables "one recorded value renders to the SAME
+  ## BYTES" compared — four assertions each, which the file's total adds to
+  ## `ExpectedAssertions` (that count is the recording's, not this file's).
 
 template ck(condition: untyped) =
   inc asserted
@@ -139,11 +143,39 @@ const
   FixtureName = "calc"
     ## The smallest fixture that fills all four panes. Measured on 2026-09-15:
     ## twelve locals, twenty-eight call lines and six recorded events, six
-    ## steps in.
-  StepsIn = 6
-    ## Far enough that `main`'s frame has locals. The number is here rather
-    ## than inline because the three panes below all depend on the SAME stop,
-    ## and a stop that moved would move all three.
+    ## steps in. Re-measured 2026-10-04 with the Python recorder at the
+    ## `repro.lock` pin: twenty-six PROGRAM calls, now wrapped — the recorder roots the trace in a
+    ## `<toplevel>` call (it carries the exit code) above the `<__main__>`
+    ## module frame, and lists the interpreter's module attributes
+    ## (`__name__`, `__file__`, …) among the module frame's variables. So the
+    ## floors below count what the PROGRAM put there (`ProgramVariables`,
+    ## `ProgramCalls`), and every other number is read from the session.
+  ProgramVariables = 9
+    ## The names `calc/main.py` binds at module level, all bound by the stop:
+    ## its four operators, `apply_op`, `evaluate`, `main` and the two tables.
+  ProgramCalls = 26
+    ## The calls `calc/main.py` makes: `main`, five `evaluate`s, ten
+    ## `apply_op`s and their ten operators. Frames the recorder wraps it in are
+    ## named `<…>` (`<toplevel>`, `<__main__>`, the `<end of program>` marker)
+    ## and are not the program's.
+  EntryFunction = "<__main__>"
+  StopText = "main()"
+    ## The stop every case below reads: the module frame on its last
+    ## statement, the call to `main`, where every module-level name is bound —
+    ## including the interpreter's `__builtins__`, a mapping of some hundred
+    ## and fifty entries. THAT ROW IS WHY THE STOP IS HERE: it is the one value
+    ## the state panel's budget (`GpuiPanelBudget`, 200 members) and the
+    ## stored rendering's (`tuiValueBudget`, 64) draw DIFFERENTLY, and "one
+    ## recorded value renders to the SAME BYTES" can only tell the presenter's
+    ## answer from the stored one on a row where they differ — mutation arm
+    ## G9 survived the 2026-10-04 stop inside `main`, whose frame lists no
+    ## such value. Reached BY NAME — step in until the innermost frame is the
+    ## module's, then step over until the debugger is on this line — rather
+    ## than as a count of steps from the entry, because what precedes the
+    ## module's code is the recorder's to decide (a recorder that roots the
+    ## trace differently moves a counted stop). Here rather than inline
+    ## because the three panes below all depend on the SAME stop, and a stop
+    ## that moved would move all three.
   AnchorText = "def add("
     ## A line the recorded program really contains, used as a tracepoint
     ## anchor. Asserted to be present in the recorded source BEFORE it is used,
@@ -153,6 +185,15 @@ const
     ## And one it does not, so the tracepoint list carries an UNRESOLVED row —
     ## which `pane_views` renders as a disabled option, which is what the
     ## keyboard case below asserts motion skips.
+
+proc isProgramName(name: string): bool =
+  ## A name the PROGRAM bound, as opposed to one the interpreter gives every
+  ## module (`__name__`, `__doc__`, `__file__`, …).
+  not (name.len > 4 and name.startsWith("__") and name.endsWith("__"))
+
+proc isProgramCall(name: string): bool =
+  ## A call the PROGRAM made, as opposed to a frame the recorder wraps it in.
+  not (name.startsWith("<") and name.endsWith(">"))
 
 # ---------------------------------------------------------------------------
 # One real session, shared by every case. Opening a recording costs a process
@@ -182,9 +223,33 @@ proc openLive() =
     echo liveSkip
     return
   let s = newHeadlessDebugSession(res.tracePath, findReplayServer())
-  for _ in 0 ..< StepsIn:
+  proc innermostFrame(): string =
+    let body = s.sendRawDapRequest("stackTrace", %*{
+      "threadId": 1, "startFrame": 0, "levels": 1}).getOrDefault("body")
+    if body.isNil or body{"stackFrames"}.isNil or body["stackFrames"].len == 0:
+      return ""
+    body["stackFrames"][0]{"name"}.getStr
+  var stepIns = 0
+  while innermostFrame() != EntryFunction and stepIns < 400:
+    s.stepIn()
+    discard s.drainEvents()
+    inc stepIns
+  doAssert innermostFrame() == EntryFunction,
+    "never stepped into `" & EntryFunction & "` (" & $stepIns & " step-ins)"
+  var stopLine = 0
+  let programLines = readFile(s.getCurrentFile()).splitLines()
+  for i, l in programLines:
+    if l.strip() == StopText:
+      stopLine = i + 1
+      break
+  doAssert stopLine > 0, "`" & StopText & "` is not in " & s.getCurrentFile()
+  var overs = 0
+  while s.getCurrentLine() != stopLine and overs < 40:
     s.stepForward()
     discard s.drainEvents()
+    inc overs
+  doAssert s.getCurrentLine() == stopLine and innermostFrame() == EntryFunction,
+    "never reached `" & StopText & "` in `" & EntryFunction & "`"
   s.requestAndLoadLocals()
   s.requestAndLoadCalltrace()
   # THE EVENT LOG GOES IN THROUGH ITS OWN PRODUCER NOW, and this line is the
@@ -453,8 +518,14 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     ck live.sourceLines.len > 10
     ck AnchorText in readFile(live.sourcePath)
     ck MissingAnchorText notin readFile(live.sourcePath)
-    ck live.session.session.stateVM.currentVariables.val.len == 12
-    ck live.session.session.calltraceVM.visibleLines.val.len == 28
+    var programVars = 0
+    for v in live.session.session.stateVM.currentVariables.val:
+      if isProgramName(v.name): inc programVars
+    ck programVars == ProgramVariables
+    var programCalls = 0
+    for l in live.session.session.calltraceVM.visibleLines.val:
+      if isProgramCall(l.name): inc programCalls
+    ck programCalls == ProgramCalls
     ck live.session.session.eventLogVM.eventRows.val.len == 6
     publishTracepoints()
     ck live.session.session.pointListVM.points.val.len == 3
@@ -582,14 +653,16 @@ suite "PLAT-21: three renderers, one pane view, the same state":
     allThreeSay(t, "state.tabs.selected", "0")
     allThreeSay(t, "state.root.cursor", "0")
     allThreeSay(t, "state.expanded", "true")
-    # Twelve variables plus the tree root, and the number comes from the
+    # Every variable plus the tree root, and the number comes from the
     # RECORDING rather than from this file: a pane that rendered three rows
-    # would agree with itself on all three media.
+    # would agree with itself on all three media. The session's variable
+    # count is itself floored by the first case (`ProgramVariables`).
     let tf = terminalFacts(t)
     var treeRows = 0
     for k in tf.keys:
       if k.endsWith(".expanded"): inc treeRows
-    ck treeRows == 14      # 12 variables + the tree root + the Collapsible
+    ck treeRows ==         # every variable + the tree root + the Collapsible
+      live.session.session.stateVM.currentVariables.val.len + 2
     expectCount(12)
 
   liveTest "the call trace pane renders the same state on all three media":
@@ -642,13 +715,16 @@ suite "PLAT-21: the keyboard contract, per view, on all three media":
     allThreeSay(t, "calltrace.highlight", "0")
     sendAll(t, "calltrace", kDown)
     allThreeSay(t, "calltrace.highlight", "1")
+    # The last row is the session's last call line (its count floored by
+    # the first case's `ProgramCalls`), not a number written here.
+    let lastRow = $(live.session.session.calltraceVM.visibleLines.val.len - 1)
     sendAll(t, "calltrace", kEnd)
-    allThreeSay(t, "calltrace.highlight", "27")
+    allThreeSay(t, "calltrace.highlight", lastRow)
     sendAll(t, "calltrace", kDown)
     # NO WRAP, agreed by all three — and the terminal arm is the independent
     # one, so this is isonim-tui's `ListViewWidget` and the vocabulary
     # agreeing rather than one function agreeing with itself.
-    allThreeSay(t, "calltrace.highlight", "27")
+    allThreeSay(t, "calltrace.highlight", lastRow)
     sendAll(t, "calltrace", kHome)
     allThreeSay(t, "calltrace.highlight", "0")
     # A key OUTSIDE the contract changes nothing anywhere.
@@ -702,8 +778,12 @@ suite "PLAT-21: PLAT-2's purity requirement, with a third witness":
     # from a string this file wrote down.
     var t = buildThreeWay(paneState, GpuiPanelBudget)
     let vars = live.session.session.stateVM.currentVariables.val
-    ck vars.len == 12
+    var programVars = 0
+    for v in vars:
+      if isProgramName(v.name): inc programVars
+    ck programVars == ProgramVariables
     var compared = 0
+    var budgetDependent = 0
     for v in vars:
       let terminalLabel = tbind.treeLabelOf(t.terminal, "state.root", v.name)
       let webLabel = childTextOf(t.web, v.name)
@@ -722,9 +802,21 @@ suite "PLAT-21: PLAT-2's purity requirement, with a third witness":
         (if v.presented.isNil: v.value
          else: presentText(v.presented, GpuiPanelBudget)))
       ck terminalLabel == expected
+      if not v.presented.isNil and
+          presentText(v.presented, GpuiPanelBudget) != v.value:
+        inc budgetDependent
       inc compared
-    ck compared == 12
-    expectCount(50)
+    ck compared == vars.len
+    # THE §4a FLOOR: at least one row the two budgets render differently.
+    # On a stop where every value fits both, "the PRESENTER's answer at this
+    # budget" and "the rendering stored at another budget" are the same
+    # bytes, and a pane that used the wrong one would pass — which is what
+    # arm G9 did at a stop with no such row.
+    ck budgetDependent > 0
+    sameBytesRows = vars.len
+    # Four per row, every row the recording has, plus the three floors: a row
+    # the loop skipped would miss four.
+    expectCount(3 + 4 * vars.len)
 
   liveTest "…and on a row that HAS children rendered under it":
     # **ADDED AFTER ARM U1 SURVIVED**, and the arm was right about the case
@@ -993,10 +1085,16 @@ suite "PLAT-21: the session is closed":
 # accepted exceptions. No other case changed. PLAT-45 adds 15 more (293 -> 308):
 # the five desktop panes it added are accepted exceptions, three assertions each.
 # PLAT-48 adds 6 (308 -> 314): PROBLEMS and REQUESTS, the same three each.
-const ExpectedAssertions = 314
+# 2026-10-04 (314 -> 266 + 4 per variable): the same-bytes case compares
+# EVERY recorded variable at four assertions each, and how many variables the
+# stop has is the recording's (the Python recorder now lists the module's
+# interpreter attributes too), so those 4 x n are added at run time from
+# `sameBytesRows`; the 267 are the rest, the case's three floors included.
+const ExpectedAssertions = 267
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":
     echo "CHECKS: " & $countedAssertions
     checkpoint("counted assertions: " & $countedAssertions)
-    check countedAssertions == ExpectedAssertions
+    check sameBytesRows >= ProgramVariables
+    check countedAssertions == ExpectedAssertions + 4 * sameBytesRows

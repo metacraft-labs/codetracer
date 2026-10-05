@@ -102,9 +102,14 @@ ARMS = [
      "the host passes no breakpoints to the pane again"),
     # MOVED 2026-09-23: PLAT-40 moved the terminal's breakpoint toggle into
     # the session both native front-ends share, so the arm follows it there.
+    # RE-AIMED 2026-10-05: `toggleBreakpoint` builds `anchors` (every held
+    # breakpoint, column breakpoints keep their column) and hands them to
+    # `sendBreakpoints` since PLAT-50; the `sendBreakpointLines(path, lines,
+    # …)` line this needle named is gone, and the scan said so.
     ("L2", SESSION,
-     "    lines.add line\n  s.sendBreakpointLines(path, lines, disabled)\n",
-     "    lines.add line\n  s.sendBreakpointLines(path, @[line], disabled)\n",
+     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, anchors, disabled)\n",
+     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, "
+     "(if removing: @[] else: @[(line, 0)]), disabled)\n",
      [LINE_TERM],
      "a toggle sends only its own line: setBreakpoints clears the others"),
     ("L3", RUNTIME,

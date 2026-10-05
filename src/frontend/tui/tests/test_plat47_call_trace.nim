@@ -100,10 +100,28 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     # PLAT-49: the pane's tab names it; there is no title row to count in.
     ck screen.contains(" Call Trace ")
     ck not screen.contains("CALL TRACE ")
-    ck screen.contains("main #1")
-    ck screen.contains("evaluate #2")
-    # At the first stop the debugger is at the top level: the root call.
-    ck rt.app.callTrace.current == 0
+    # The calls are found by WHAT they are, not by their number: the number
+    # depends on the frames the recorder wraps the program in (the Python
+    # recorder's `<toplevel>` root, which carries the exit code, then the
+    # `<__main__>` module frame), so `main` is the first call named `main`
+    # and `evaluate` the first named `evaluate`, and each is drawn with ITS
+    # trace index.
+    proc firstNamed(name: string): int =
+      result = -1
+      for l in lines:
+        if l.name == name: return l.index
+    let mainAt = firstNamed("main")
+    let evaluateAt = firstNamed("evaluate")
+    ck mainAt >= 0
+    ck evaluateAt > mainAt
+    ck screen.contains("main #" & $mainAt)
+    ck screen.contains("evaluate #" & $evaluateAt)
+    # At the first stop the debugger is at the program's entry: the call
+    # that encloses `main` (the module's frame), which the trace's root — a
+    # frame the recorder opens before the program runs — encloses in turn.
+    ck rt.app.callTrace.current >= 0
+    ck rt.app.callTrace.current == mainAt - 1
+    ck lines[rt.app.callTrace.current].depth == lines[mainAt].depth - 1
     # FILES: the recording's tree, on the interactive path.
     ck screen.contains("source folders")
     ck screen.contains("main.py")
@@ -134,10 +152,17 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     for f in rt.app.callStack.frames: checkpoint("frame " & f.name)
     ck cur >= 0
     if cur >= 0:
-      # `evaluate`'s loop: the innermost frame is `evaluate`, at depth 2
-      # (`<__main__>` > `main` > `evaluate`).
+      # `evaluate`'s loop: the innermost frame is `evaluate`, and its depth
+      # in the trace is its depth in the call stack — one less than the
+      # stack's frame count (`<toplevel>` > `<__main__>` > `main` >
+      # `evaluate` with the current Python recorder), read from the stack
+      # rather than from a number that depends on the recorder's wrapping
+      # frames.
       ck rt.app.callTrace.rows[cur].name == "evaluate"
-      ck rt.app.callTrace.rows[cur].depth == 2
+      ck rt.app.callStack.frames.len >= 3
+      ck rt.app.callStack.frames[0].name == "evaluate"
+      ck rt.app.callStack.frames[1].name == "main"
+      ck rt.app.callTrace.rows[cur].depth == rt.app.callStack.frames.len - 1
 
   test "no call trace: the pane shows the call stack and says so, in both front-ends":
     require resolved.outcome == foRecorded

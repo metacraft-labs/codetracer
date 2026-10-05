@@ -54,7 +54,7 @@
 ## takes its `else` branch, and the case still prints `[OK]` while
 ## `programResult` goes to 1.
 
-import std/[json, monotimes, os, strutils, times, unicode, unittest]
+import std/[json, monotimes, os, sequtils, strutils, times, unicode, unittest]
 
 import isonim/core/[signals, computation]
 import isonim/viewmodel
@@ -74,7 +74,10 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 115
+# 115 -> 116 (2026-10-04): the entry stack may carry the trace's `<toplevel>`
+# root under the entry function, and every frame of it is asserted to be in
+# the entry file.
+const ExpectedAssertions = 116
 
 var countedAssertions = 0
 
@@ -98,7 +101,7 @@ const
     ## depth it actually reached — rather than by hanging.
   LatencyFrames = 40
 
-  ChecksSessionOpen = 7
+  ChecksSessionOpen = 8
   ChecksStepIn = 5
   ChecksClassification = 5
   ChecksPaneShape = 10
@@ -352,18 +355,28 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       ck h.provider.supports()
       let entryStack = framesFromStackTrace(h.stackBody())
       checkpoint("entry stack: " & $entryStack.len & " frame(s)")
-      ck entryStack.len == 1
+      # The entry function, and beneath it the `<toplevel>` root the trace
+      # format opens before the program runs — both at the entry point, in
+      # the entry file. No more: the debugger has not stepped into anything.
+      ck entryStack.len in 1 .. 2
       ck entryStack[0].path == h.entryFile
+      ck entryStack.allIt(it.path == h.entryFile)
       ck h.controls.store == h.session.session.store
       ck userRootsFor(h.entryFile).len == 1
 
       # ---- STEP INTO A NESTED CALL ----------------------------------------
       # `stepIn` really steps in: the walk stops as soon as the ENGINE reports
-      # a deeper stack, and the assertion after the loop is on the depth the
-      # engine reported rather than on the number of steps it took.
+      # a deeper stack whose caller is in ANOTHER FILE, and the assertion after
+      # the loop is on the stack the engine reported rather than on the number
+      # of steps it took. "Another file" is part of the stop condition, not just
+      # of the assertion below: the recorder roots the trace in a `<toplevel>`
+      # frame in the entry file, so the first deeper stack (`main` under
+      # `<toplevel>`, both in `main.nr`) is not yet the cross-file one this
+      # fixture was chosen for.
       var stepIns = 0
       var frames = entryStack
-      while stepIns < MaxStepIns and frames.len < 2:
+      while stepIns < MaxStepIns and
+          not (frames.len >= 2 and frames[1].path != frames[0].path):
         h.session.stepIn()
         discard h.session.drainEvents()
         inc stepIns

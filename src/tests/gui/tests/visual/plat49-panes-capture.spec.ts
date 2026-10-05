@@ -422,8 +422,12 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
   // ---- THE GATES -------------------------------------------------------------
   // Finding 8: the call trace's rows carry arguments and return values.
   expect((out.calltrace as any[]).some((r) => r.args.length > 2)).toBe(true);
-  const evaluate2 = (out.calltrace as any[]).find((r) => r.text === "evaluate #2");
-  expect(evaluate2?.returnText).toBe("5");
+  // The first `evaluate`, found by what it is (its name and its argument),
+  // not by its number: the number depends on the frames the recorder wraps the
+  // program in (the Python recorder's `<toplevel>` root above `<__main__>`).
+  const firstEvaluate = (out.calltrace as any[]).find((r) =>
+    /^evaluate #\d+$/.test(r.text) && r.args.includes('"2 + 3"'));
+  expect(firstEvaluate?.returnText).toBe("5");
   // Finding 9: the labels are in the status bar, and a click docks.
   expect(footer.labelsInsideStatusBar).toBe(true);
   // The review's gates: the column menu changes the header as the ViewModel

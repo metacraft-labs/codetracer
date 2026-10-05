@@ -8,8 +8,7 @@
   "stoppedPath": "main.py",
   "rrTicks": 37,
   "trajectory": [
-    "entry=1@0",
-    "stepIn=1@1",
+    "entry=1@1",
     "stepIn=2@2",
     "stepIn=29@3",
     "stepIn=34@4",
@@ -30,6 +29,7 @@
     "stepIn=108@19",
     "stepIn=109@20",
     "stepIn=72@21",
+    "stepIn=79@22",
     "stepOut=110@37"
   ],
   "viewportCss": "1440x900",

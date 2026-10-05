@@ -177,9 +177,12 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   // A right-click whose menu is not up within a few seconds is pressed
   // again: the renderer can still be settling a previous press (a pane that
   // just took focus), and a lost press is not what is being measured.
-  const rightClickMenu = async (target: ReturnType<typeof ctPage.locator>): Promise<string[]> => {
+  const rightClickMenu = async (
+    target: ReturnType<typeof ctPage.locator>,
+    position?: { x: number; y: number },
+  ): Promise<string[]> => {
     for (let attempt = 0; attempt < 3; attempt++) {
-      await target.click({ button: "right" });
+      await target.click({ button: "right", ...(position ? { position } : {}) });
       try {
         await ctPage.locator("#context-menu-container").waitFor({ state: "visible", timeout: 5_000 });
         break;
@@ -200,7 +203,29 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
     ? await menuLabels() : [];
   // The editor's text, on a line with no breakpoint, in Debug.
   const line31 = ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first();
-  menus.editorText = await rightClickMenu(line31);
+  // ON THE LINE'S TEXT, near its start — not at the centre of the
+  // `.view-line`, which is as wide as the editor's WIDEST line. Since the
+  // recording opens in the module's frame, the flow annotates the module's
+  // own lines with their values, some of them long; the centre of a line
+  // then lies far right of the visible text, the press scrolls the editor
+  // sideways, and lands on nothing.
+  menus.editorText = await rightClickMenu(line31, { x: 60, y: 8 });
+  // AND A PRESS THAT LANDS ON NO TEXT POSITION, kept on purpose: the
+  // editor's own vertical scrollbar, which Monaco's mouse target resolves to
+  // no position. The editor's mouse handler once read `lineNumber` off that
+  // null position and threw (`ui/editor.nim`, "A press Monaco resolves to no
+  // text position"); `pageErrors` below is what notices it. No menu is
+  // expected there, so none is waited for. This press used to happen by
+  // accident — the right-click on the line's text above landed at the centre
+  // of a `.view-line` as wide as the widest line — and the line's own press
+  // now lands on its text, so the null-position press is made explicitly.
+  // The scrollbar track is drawn only while hovered, so the press is made at
+  // its place — the editor's right edge — rather than on its element.
+  const editorBox = await line31.locator("xpath=ancestor::div[contains(@class,'monaco-editor')][1]").boundingBox();
+  expect(editorBox).not.toBeNull();
+  await ctPage.mouse.click(editorBox!.x + editorBox!.width - 4, editorBox!.y + editorBox!.height / 2,
+    { button: "right" });
+  await ctPage.keyboard.press("Escape");
   // A call's ARGUMENT, and a docked pane's label in the footer.
   menus.callArgument = await rightClickMenu(ctPage.locator(".calltrace-view .call-arg", { hasText: "left" }).first());
   menus.dockLabelBottom = await rightClickMenu(ctPage.locator(".auto-hide-strip-tab", { hasText: /^BUILD$/i }).first());

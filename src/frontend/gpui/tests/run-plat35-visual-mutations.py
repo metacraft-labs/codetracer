@@ -309,7 +309,7 @@ ARMS = [
     # action. The needle quotes the sequence, so it had to follow.
     Arm("M9", SCENARIOS,
         '      "viewport": "laptop",\n      "operations": [\n        { "kind": "stepIn", "times": 21 },\n        { "kind": "stepOut", "times": 1 }\n      ],',
-        '      "viewport": "wide",\n      "operations": [\n        { "kind": "stepIn", "times": 6 }\n      ],',
+        '      "viewport": "wide",\n      "operations": [\n        { "kind": "stepIn", "times": 5 }\n      ],',
         SUITE,
         "THE POPULATION: the six scenarios are pairwise distinct on screen",
         CTL[SCENARIOS][0], CTL[SCENARIOS][1],

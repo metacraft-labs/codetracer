@@ -982,20 +982,18 @@ for (const scenario of definition.scenarios) {
       // but not in the run that reads it. `Editor-Model-Conformance-Suite.md`
       // §10.5 requires a case whose Electron side is not live to be labelled,
       // and a label with no date is a label nobody can age.
+      // THE BUNDLE THAT RAN: a prepared prefix's when the run uses one
+      // (`CODETRACER_TEST_PREFIX`, the fixture's `codetracerPrefixOverride`),
+      // `src/build-debug`'s otherwise. Reading `src/build-debug` under a
+      // prefix recorded a bundle the capture never loaded.
+      const uiBundle = path.join(
+        process.env.CODETRACER_TEST_PREFIX || path.join(repoRoot, "src", "build-debug"),
+        "ui.js",
+      );
       const provenance = {
         capturedAt: new Date().toISOString(),
-        uiBundleBytes: fs.existsSync(
-          path.join(repoRoot, "src", "build-debug", "ui.js"),
-        )
-          ? fs.statSync(path.join(repoRoot, "src", "build-debug", "ui.js")).size
-          : 0,
-        uiBundleMtime: fs.existsSync(
-          path.join(repoRoot, "src", "build-debug", "ui.js"),
-        )
-          ? fs
-              .statSync(path.join(repoRoot, "src", "build-debug", "ui.js"))
-              .mtime.toISOString()
-          : "",
+        uiBundleBytes: fs.existsSync(uiBundle) ? fs.statSync(uiBundle).size : 0,
+        uiBundleMtime: fs.existsSync(uiBundle) ? fs.statSync(uiBundle).mtime.toISOString() : "",
       };
       fs.writeFileSync(
         path.join(answersDir, `${scenario.id}.electron.json`),

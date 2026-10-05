@@ -52,7 +52,7 @@
   "Invite to Collaborative Session...": ""
  },
  "stepOver": {
-  "before": 0,
+  "before": 1,
   "after": 2,
   "closed": true
  },
