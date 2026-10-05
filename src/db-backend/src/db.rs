@@ -43,6 +43,11 @@ pub(crate) const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
 /// at an outermost frame, instead of reporting "no successor".
 pub(crate) const OUTERMOST_CALL_DEPTH: i64 = 0;
 
+/// The name the trace-format spec gives the call tree's root (`trace-events.md`,
+/// "`<toplevel>` is the call tree's root and its id is fixed"). The same
+/// spelling `deepreview::collector` keys on.
+pub(crate) const TOP_LEVEL_FUNCTION_NAME: &str = "<toplevel>";
+
 #[derive(Debug, Clone)]
 pub struct Db {
     pub workdir: PathBuf,
@@ -2404,15 +2409,53 @@ impl MaterializedReplaySession {
         !path.is_empty() && !path.starts_with("/nix/store/")
     }
 
+    /// Whether `call` is the recording's `<toplevel>` root WRAPPING the
+    /// program: the call `start` opens at depth 0 around the entry step
+    /// (`codetracer-trace-format-spec` `trace-events.md`, "`<toplevel>` is the
+    /// call tree's root and its id is fixed" and "The entry step is part of
+    /// `start`"), when the program's own first step lies in a call nested
+    /// inside it (Python's module frame, JavaScript's `<module>`).
+    ///
+    /// A root whose next step is its OWN is not a wrapper: several recorders
+    /// (Fuel, Cardano, …) merge the program's entry function into
+    /// `<toplevel>`, so the root's steps ARE the program's body and its first
+    /// nested call is a helper the body calls later. Skipping such a root
+    /// would open the recording inside that helper, past the body's opening
+    /// lines.
+    fn is_wrapping_toplevel_root(&self, call: &DbCall) -> bool {
+        call.key == CallKey(0)
+            && self
+                .reader
+                .function(call.function_id)
+                .is_some_and(|function| function.name == TOP_LEVEL_FUNCTION_NAME)
+            && self
+                .reader
+                .step(StepId(call.step_id.0 + 1))
+                .is_some_and(|next| next.call_key != call.key)
+    }
+
+    /// The program's entry call: the first call in user source that is not
+    /// a `<toplevel>` root wrapping the program.
+    ///
+    /// A wrapping root has to be skipped by name. Its function record sits at
+    /// the entry point's `(path, line)` — in user source — so the path test
+    /// alone chose it for every such recording, and the debugger opened on
+    /// the synthetic entry step in the `<toplevel>` frame. From there a step
+    /// over is a step over the WHOLE program (everything else is nested
+    /// inside the root), so the first Step Over ran to the end of the
+    /// recording. Falls back to the root when the recording has no other
+    /// call.
     fn first_user_call(&self) -> Option<&DbCall> {
         self.reader
             .calls_iter()
             .find(|call| {
-                self.reader
-                    .function(call.function_id)
-                    .and_then(|function| self.reader.path(function.path_id))
-                    .map(Self::is_user_source_path)
-                    .unwrap_or(false)
+                !self.is_wrapping_toplevel_root(call)
+                    && self
+                        .reader
+                        .function(call.function_id)
+                        .and_then(|function| self.reader.path(function.path_id))
+                        .map(Self::is_user_source_path)
+                        .unwrap_or(false)
             })
             .or_else(|| self.reader.call(CallKey(0)))
     }
