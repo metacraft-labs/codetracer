@@ -464,8 +464,19 @@ suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
         if ring in seen: break
         seen.add ring
         sess.send("\t")
-        discard sess.drainOutput(300)
-        waitForCompleteFrame(sess, cols, rows, timeoutMs = 10000)
+        # WAIT FOR THE REPAINT THE KEY CAUSES, not for 300 ms: on a loaded
+        # host the frame read after a fixed pause can still be the one from
+        # BEFORE the Tab, and then this loop meets its own previous ring and
+        # stops at one pane — a timing artefact, not a focus defect. Polled
+        # until the ring moves, bounded; a Tab that moves nothing still ends
+        # the loop below with `ring in seen`, and the count fails.
+        let tabDeadline = getMonoTime() + initDuration(seconds = 10)
+        while getMonoTime() < tabDeadline:
+          discard sess.drainOutput(100)
+          waitForCompleteFrame(sess, cols, rows, timeoutMs = 10000)
+          var moved = false
+          if focusRingOf(sess, cols, rows, canvas, focusHex, moved) != ring:
+            break
       # Tab visited more than one pane, and each was ringed on its own.
       ck seen.len >= 2
       quit(sess)

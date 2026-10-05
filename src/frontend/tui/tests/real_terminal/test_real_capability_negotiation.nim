@@ -87,7 +87,9 @@ import ../fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 76
+# 76 -> 77 (2026-10-04): the cold start is sampled `ColdStarts` times and the
+# sample count is asserted beside the frame-0 check.
+const ExpectedAssertions = 77
 
 var countedAssertions = 0
 
@@ -117,6 +119,18 @@ const
     ## alternate screen, first frame. The engine handshake is measured
     ## separately and reported, because it is a different number with a
     ## different owner (CTUI-14).
+  ColdStarts = 5
+    ## Cold starts sampled; the gate is on the BEST. One sample used to be the
+    ## whole measurement, and on a host shared with CI runners (load 100-260
+    ## on 24 cores) one wall-clock sample measures the scheduler: the
+    ## unmodified tree went over 6 times in 10 while the same binary idle
+    ## measured 44-49 ms (codetracer-specs issue
+    ## 2026-09-30-wall-clock-gates-fail-under-host-load). Every sample is a
+    ## NEW process to its first frame — the same cold start, not a warm
+    ## repaint — so the minimum is still a cold start, and a regression that
+    ## makes EVERY start slower still fails; what no longer fails is one start
+    ## that waited for a CPU. The palette gate takes the best of nine for the
+    ## same reason.
 
 var tracePath = ""
 
@@ -504,18 +518,31 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # MEASURED TO FRAME 0. `main.nim` negotiates, claims the tty and paints
     # before it spawns `replay-server`; the engine handshake is CTUI-14's number
     # and is reported below rather than gated here.
-    let started = getMonoTime()
-    var sess = baseSession(@[tracePath]).spawn()
-    waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 20000)
-    let firstFrameMs = (getMonoTime() - started).inMilliseconds
-    let firstRow = strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1),
-                                  leading = false)
-    checkpoint("first frame at " & $firstFrameMs & " ms; status row: '" &
-               firstRow & "'")
-    # THE FIRST FRAME REALLY IS FRAME 0 — the one painted before the engine —
-    # which is what makes the number the cold start rather than a partial
-    # debugger.
-    ck firstRow.contains("opening ")
+    var samples: seq[int64] = @[]
+    var openingFrames = 0
+    var started = getMonoTime()
+    var sess: TuiTestSession
+    for i in 0 ..< ColdStarts:
+      started = getMonoTime()
+      sess = baseSession(@[tracePath]).spawn()
+      waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 20000)
+      samples.add (getMonoTime() - started).inMilliseconds
+      let firstRow = strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1),
+                                    leading = false)
+      checkpoint("cold start " & $i & ": first frame at " & $samples[^1] &
+                 " ms; status row: '" & firstRow & "'")
+      # THE FIRST FRAME REALLY IS FRAME 0 — the one painted before the engine
+      # — which is what makes the number the cold start rather than a partial
+      # debugger. Every sample, not only the best.
+      if firstRow.contains("opening "): inc openingFrames
+      if i < ColdStarts - 1:
+        sess.send("q")
+        discard sess.waitExit(initDuration(seconds = 15))
+        sess.close()
+    let firstFrameMs = min(samples)
+    echo "CTUI-11 COLD START SAMPLES: ", samples, " ms; best ", firstFrameMs
+    ck samples.len == ColdStarts
+    ck openingFrames == ColdStarts
     ck firstFrameMs < ColdStartBudgetMs
 
     settleOnDebugger(sess)
