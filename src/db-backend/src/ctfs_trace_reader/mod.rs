@@ -2125,12 +2125,14 @@ impl CTFSTraceReader {
         let has_all_interning_tables = ["paths.dat", "funcs.dat", "types.dat", "varnames.dat"]
             .iter()
             .all(|name| ctfs.has_file(name));
-        let declared_sites = if has_all_interning_tables {
-            interning_tables::InterningTables::open_from_ctfs(ctfs)
-                .map_err(|e| format!("interning tables: {e}"))?
-                .map(|tables| tables.functions)
+        let structured_tables = if has_all_interning_tables {
+            interning_tables::InterningTables::open_from_ctfs(ctfs).map_err(|e| format!("interning tables: {e}"))?
         } else {
             None
+        };
+        let (declared_sites, declared_types) = match structured_tables {
+            Some(tables) => (Some(tables.functions), Some(tables.types)),
+            None => (None, None),
         };
         for i in 0..reader.function_count() {
             let name = reader.function(i).map_err(|e| format!("function {i}: {e}"))?;
@@ -2153,14 +2155,44 @@ impl CTFSTraceReader {
             db.functions.push(FunctionRecord { name, path_id, line });
         }
 
-        // Types — only the type name is available via FFI.
+        // Types. The Nim FFI exposes a type's NAME only, but the `types.dat`
+        // record (`kind, lang_type, specific_info`) also carries its kind and,
+        // for a struct, its field names. Those come from the same pure-Rust
+        // decode the function sites do. Without them every type read as
+        // `Raw` with no fields, so a struct's members reached the front-ends
+        // unnamed (`[0]` where the recording says `a`). The two readers must
+        // agree on the count, and on every name, or the container is refused:
+        // a kind is never inferred from a name or a payload.
+        if let Some(types) = declared_types.as_ref()
+            && types.len() as u64 != reader.type_count()
+        {
+            return Err(format!(
+                "types: the Nim reader reports {} type(s) but types.dat decodes {}",
+                reader.type_count(),
+                types.len()
+            )
+            .into());
+        }
         for i in 0..reader.type_count() {
             let name = reader.type_name(i).map_err(|e| format!("type {i}: {e}"))?;
-            db.types.push(TypeRecord {
-                kind: TypeKind::Raw,
-                lang_type: name,
-                specific_info: TypeSpecificInfo::None,
-            });
+            match declared_types.as_ref().map(|types| types.get(i as usize)) {
+                Some(Some(record)) if record.lang_type == name => db.types.push(record.clone()),
+                Some(Some(record)) => {
+                    return Err(format!(
+                        "type {i}: the Nim reader names it {name:?} but types.dat decodes as {:?}",
+                        record.lang_type
+                    )
+                    .into());
+                }
+                Some(None) => {
+                    return Err(format!("type {i}: the Nim reader reports it but types.dat has no such record").into());
+                }
+                None => db.types.push(TypeRecord {
+                    kind: TypeKind::Raw,
+                    lang_type: name,
+                    specific_info: TypeSpecificInfo::None,
+                }),
+            }
         }
 
         // Variable names
