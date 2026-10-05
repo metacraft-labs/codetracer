@@ -372,7 +372,7 @@ type
       ## as the desktop does not persist `dockedVisible`.
     beside*: Option[PaneKind]
       ## PLAT-48: where the pane came FROM — the placed pane it sat beside when
-      ## it was docked (`pinAnchorOf`, read before the dock took it out of the
+      ## it was docked (`pinPlaceOf`, read before the dock took it out of the
       ## tree). `ahRestore` without an explicit anchor puts it back there
       ## while that pane is still placed, so "pin, then unpin" — in any
       ## front-end, across a restart — returns a pane to its own container
@@ -1294,7 +1294,14 @@ proc indexIn(parent: LayoutNode; child: LayoutNode): int =
 
 proc pinPlaceOf*(layout: Layout; pane: PaneKind):
     tuple[beside: Option[PaneKind], before: bool] =
-  ## `pinAnchorOf`, and on which side of it the pane sat: `before` is true
+  ## PLAT-48: the pane `pane` should come back BESIDE when it is unpinned —
+  ## read BEFORE the pin (`cmdDock`) takes it out of the tree, and handed to
+  ## `cmdRestoreDocked(pane, beside)` on unpin, so "pin, then unpin" puts a
+  ## pane back in the container it left (its stack, or its split) rather
+  ## than appending it to the root, which is `ahRestore`'s answer without an
+  ## anchor: the previous sibling leaf when there is one (the restore lands
+  ## directly after it), else the next one; `none` when the pane is alone in
+  ## its container or not placed. And on which side of it the pane sat: `before` is true
   ## when the anchor is the pane's NEXT sibling (the pane was first in its
   ## container), so the restore goes in front of it, where the pane was.
   let leaf = find(layout.tree, pane)
@@ -1311,18 +1318,6 @@ proc pinPlaceOf*(layout: Layout; pane: PaneKind):
     if c.kind == lnPane and not c.isContributed:
       return (some(c.pane), true)
   (none(PaneKind), false)
-
-proc pinAnchorOf*(layout: Layout; pane: PaneKind): Option[PaneKind] =
-  ## PLAT-48: the pane `pane` should come back BESIDE when it is unpinned —
-  ## read BEFORE the pin (`cmdDock`) takes it out of the tree, and handed to
-  ## `cmdRestoreDocked(pane, beside)` on unpin, so "pin, then unpin" puts a
-  ## pane back in the container it left (its stack, or its split) rather
-  ## than appending it to the root, which is `ahRestore`'s answer without an
-  ## anchor. The previous sibling leaf when there is one (the restore lands
-  ## directly after it), else the next one (the restore lands in front of
-  ## it — `pinPlaceOf` says which); `none` when the pane is alone in its
-  ## container or not placed.
-  layout.pinPlaceOf(pane).beside
 
 proc copyOf(n: LayoutNode): LayoutNode =
   ## A shallow structural copy: the same fields, the same child refs. Used

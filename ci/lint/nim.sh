@@ -631,8 +631,27 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 # 1296 -> 1292 ON 2026-09-28: the terminal and GPUI desktop-parity work reached
 # four exports nothing had reached (and removed or moved into their tests the
 # ones it added and nothing reads); the ceiling follows the tree down.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1292 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1292 bash ci/test/frontend-reachability.sh
+#
+# 1292 -> 1285 ON 2026-10-04, after `agents` had drifted to 1300 (red on the
+# branch itself) with the identity, web-deployment and PLAT-48..50 work:
+#   -13, a CLASSIFICATION FIX, not a hiding: `frontend/test_support/` and
+#       `frontend/tui/testing/` are test-support trees whose every importer is
+#       a suite or the lane runner (`tui/testing/`'s own LAYER RULE says so and
+#       `test_tui_build_prerequisites.nim` asserts it), so the guard now reads
+#       them as test code, as it reads `tests/`. All thirteen were "tested, no
+#       product module reaches it" helpers a suite calls: `spec_documents`'
+#       `specDocument` and `specDocumentRef`, `strip_read`'s `footerTitles` and
+#       `stripLabelProblems`, and nine of `dual_snap`'s (CTUI-2's two-tier
+#       harness).
+#   -2, DELETED: `layout_model.pinAnchorOf` (its one reader was folded into
+#       `pinPlaceOf` and only comments named it) and
+#       `event_log_vm.closeColumnsMenu` (no caller: the column menu toggles).
+#   The other new findings since 1292 are the identity layer's and the web
+#   front door's accessors (`device_grant`, `jwt`, `session`, `token`,
+#   `endpoint_codec`, `endpoint_protocol`), tested and awaiting their product
+#   callers; they are left for those features' owners, inside the ceiling.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1285 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1285 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -762,6 +781,23 @@ lint_step "PLAT-39 oracle independence: the vision producer imports nothing from
 
 lint_step "PLAT-40 production callers: every pane producer has a caller a user can reach" \
 	bash ci/test/plat40-production-callers.sh
+
+# Two more source scans of the same kind — coreutils, grep and sed, no build —
+# that `shell-gate-coverage.sh` reported as reachable from no lane.
+#
+# PLAT-35's §30a scan: neither cross-renderer answer producer derives its
+# answer from the other's, and nothing else under src/ relays one. It was red
+# when it landed (it refused PLAT-39's screen-oracle records, and later every
+# milestone's desktop-reference suite), which is why it was never wired; it now
+# grades the screen oracle as a fourth subject set and sets aside, by name,
+# readers of another milestone's `plat<N>-` record.
+lint_step "PLAT-35 answer independence: neither producer's answer is derived from the other's" \
+	bash ci/test/plat35-answer-independence.sh
+
+# The `-d:ctWeb` partition inventory (WD1c §7.5): the deferred convergence may
+# shrink freely and grow only by editing the inventory. Costs milliseconds.
+lint_step "ctWeb partition: the compile-time web fork is the recorded inventory" \
+	bash ci/test/ctweb-partition-inventory.sh
 
 # `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
 # allow-list is hand-written but no longer hand-CHECKED: the guard derives the

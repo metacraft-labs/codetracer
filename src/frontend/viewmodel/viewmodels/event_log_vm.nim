@@ -494,10 +494,6 @@ proc sortBy*(vm: EventLogVM; order: EventLogOrder) =
 proc toggleColumnsMenu*(vm: EventLogVM) =
   vm.columnsMenuOpen.val = not vm.columnsMenuOpen.val
 
-proc closeColumnsMenu*(vm: EventLogVM) =
-  if vm.columnsMenuOpen.val:
-    vm.columnsMenuOpen.val = false
-
 proc showColumn*(vm: EventLogVM; col: EventLogColumn): bool =
   var c = vm.columns.val
   result = c.showColumn(col)

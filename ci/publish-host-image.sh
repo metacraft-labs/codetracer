@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: an operator's publication step, not a check. It WRITES `ct host`'s
+# image into an Incus daemon's image store (and confirms the write);
+# `ci/test/host-image-serves-in-a-container.sh` is the gate that runs it.
 # Publish `ct host`'s OCI image into an Incus daemon's image store, and CONFIRM
 # it is resolvable before anything depends on it — WD2.
 #

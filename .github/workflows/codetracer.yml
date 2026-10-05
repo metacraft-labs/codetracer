@@ -1867,6 +1867,57 @@ jobs:
       # inside a contract suite.
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/nim.sh"
 
+  dev-shell-hygiene:
+    runs-on: [self-hosted, linux, x64]
+    # NEW, NO SAMPLE YET. Three gates that `shell-gate-coverage.sh` reported as
+    # reachable from no lane, each a `just` recipe already written: two enter
+    # the default dev shell from a scratch repository (`nix develop`, cached on
+    # this runner class) and one serves the web front door's Functions with
+    # the `.#ci` shell's pinned wrangler on localhost. 45m is a first bound,
+    # to be tightened from the first green runs.
+    timeout-minutes: 45
+    name: Dev shell hygiene and the local web front door
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # Entering the dev shell from ANOTHER repository writes nothing there
+      # (no `node_modules` link, no hook config): the header of
+      # ci/test/dev-shell-writes-nothing-elsewhere-test.sh.
+      - name: The dev shell writes nothing into the repository it is entered from
+        run: nix develop .#devShells.x86_64-linux.default --command just test-dev-shell-writes-nothing-elsewhere
+
+      # build-once.sh sources the cached dev-shell profile with THIS repository
+      # as its working directory: scripts/test-build-once-profile-cwd.sh.
+      - name: build-once prepares this checkout, whatever directory it runs from
+        run: nix develop .#devShells.x86_64-linux.default --command just test-build-once-profile-cwd
+
+      # The front door's Functions served by the pinned wrangler, on
+      # localhost — no network, no deploy (ci/test/web-front-door-local.sh).
+      - name: The web front door's logic, served locally
+        if: always()
+        run: nix develop .#ci --command just test-web-front-door-local
+
   lint-nix:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 42 green, median 5.4m, max 7.2m. 25m is ~3.5x the slowest

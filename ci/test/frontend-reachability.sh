@@ -33,8 +33,11 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1292 bash ci/test/frontend-reachability.sh`, so 1293
-# findings fail `lint-nim` and 1292 do not.
+# `env CT_REACHABILITY_MAX=1285 bash ci/test/frontend-reachability.sh`, so 1286
+# findings fail `lint-nim` and 1285 do not.
+#
+# THE CEILING MOVED 1292 -> 1285 ON 2026-10-04: a classification fix (thirteen helpers
+# in the two test-support trees) and two deletions. Account in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1296 -> 1292 ON 2026-09-28: the tree got better by four.
 # Account in `ci/lint/nim.sh`.

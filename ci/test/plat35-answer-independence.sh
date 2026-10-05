@@ -137,6 +137,18 @@ ELECTRON_DIR="src/tests/gui/tools"
 # collects specs by directory, not because it is a different kind of thing.
 ELECTRON_SPEC_DIR="src/tests/gui/tests/visual"
 SHARED_DIR="src/common/view_vocabulary"
+# PLAT-39's screen oracle: the THIRD reader of a frame, which reads PIXELS.
+# Its records (`plat39_record` … `plat45_window_record`) and its suite name the
+# answer vocabulary because they put a pixel reading BESIDE the producers'
+# answers — `plat40_record` copies the desktop's DOM reading into its record
+# next to the pixel one, `test_screen_oracle` compares readings with the
+# committed `answers/` — and that is the whole point of an independent reader.
+# What would make it a §30a defect is a reading DERIVED from a producer: an
+# import of either producer, the DOM, or the GPUI shadow tree. So it is a
+# subject set of its own with exactly those rules, rather than an outgrowth
+# that no rule grades (codetracer-specs issue
+# 2026-09-26-plat35-answer-independence-refuses-screen-oracle-readers).
+ORACLE_DIR="src/tests/visual/screen_oracle"
 
 # The canonical member of each set. It is asserted PRESENT rather than used as
 # the set: a rename that emptied a directory would otherwise turn this scan
@@ -165,9 +177,10 @@ mapfile -t ELECTRON_SUBJECTS < <(
 	subjects_in "${ELECTRON_SPEC_DIR}" '*.ts'
 )
 mapfile -t SHARED_SUBJECTS < <(subjects_in "${SHARED_DIR}" '*.nim')
+mapfile -t ORACLE_SUBJECTS < <(subjects_in "${ORACLE_DIR}" '*.nim')
 
 for pair in "GPUI_SUBJECTS ${GPUI_DIR}" "ELECTRON_SUBJECTS ${ELECTRON_DIR}" \
-	"SHARED_SUBJECTS ${SHARED_DIR}"; do
+	"SHARED_SUBJECTS ${SHARED_DIR}" "ORACLE_SUBJECTS ${ORACLE_DIR}"; do
 	# PARAMETER EXPANSION RATHER THAN `set -- ${pair}`. The unquoted form relied
 	# on word splitting to cut "NAME DIR" in two, which is SC2086; quoting it
 	# would pass one argument and silently give `dir` the empty string, so the
@@ -244,6 +257,20 @@ SHARED_MUST_NOT_MENTION=(
 	"readFile"
 )
 
+ORACLE_MUST_NOT_MENTION=(
+	# Either producer: a pixel reading taken from an answer module is that
+	# answer read twice.
+	"gpui_layout_answers"
+	"layout-answers"
+	# The DOM and the GPUI shadow tree: the two things the producers read.
+	"querySelector"
+	"getComputedStyle"
+	"getBoundingClientRect"
+	"gpui_get_attribute"
+	"gpui_tree_node_count"
+	"projectDock"
+)
+
 failed=0
 
 check_one() {
@@ -293,9 +320,14 @@ for f in "${SHARED_SUBJECTS[@]}"; do
 	check_one "a shared-vocabulary module" "${f}" strip_nim_comments \
 		"${SHARED_MUST_NOT_MENTION[@]}"
 done
+for f in "${ORACLE_SUBJECTS[@]}"; do
+	check_one "a screen-oracle (pixel reader) module" "${f}" strip_nim_comments \
+		"${ORACLE_MUST_NOT_MENTION[@]}"
+done
 
-echo "scan graded ${#GPUI_SUBJECTS[@]} GPUI-side, ${#ELECTRON_SUBJECTS[@]} Electron-side" \
-	"and ${#SHARED_SUBJECTS[@]} shared module(s), derived from the directories."
+echo "scan graded ${#GPUI_SUBJECTS[@]} GPUI-side, ${#ELECTRON_SUBJECTS[@]} Electron-side," \
+	"${#SHARED_SUBJECTS[@]} shared and ${#ORACLE_SUBJECTS[@]} screen-oracle module(s)," \
+	"derived from the directories."
 
 # -----------------------------------------------------------------------
 # THE OUTGROWTH GUARD — a producer OUTSIDE the three directories
@@ -305,7 +337,8 @@ echo "scan graded ${#GPUI_SUBJECTS[@]} GPUI-side, ${#ELECTRON_SUBJECTS[@]} Elect
 # a test is a producer no rule above can see.
 in_subject_set() {
 	local needle="$1" s
-	for s in "${GPUI_SUBJECTS[@]}" "${ELECTRON_SUBJECTS[@]}" "${SHARED_SUBJECTS[@]}"; do
+	for s in "${GPUI_SUBJECTS[@]}" "${ELECTRON_SUBJECTS[@]}" "${SHARED_SUBJECTS[@]}" \
+		"${ORACLE_SUBJECTS[@]}"; do
 		[ "${s}" = "${needle}" ] && return 0
 	done
 	return 1
@@ -604,6 +637,34 @@ is_readonly_comparator() {
 
 COMPARATORS=()
 COMMENT_ONLY=()
+# ANOTHER MILESTONE'S DESKTOP RECORD IS NOT THIS SCAN'S ARTEFACT.
+#
+# `answers/` is shared: beside PLAT-35's `<scenario>.electron[.capture].json`
+# it holds the desktop's reference records for later milestones
+# (`plat45-default-arrangement.electron.json`, `plat47-vcs.electron.json`, …),
+# which the terminal and GPUI parity suites and their mutation harnesses read
+# BY NAME as their oracle. None of them is a PLAT-35 layout answer, no PLAT-35
+# producer may read them (the GPUI rules above forbid the directory and the
+# word "electron" outright), and a suite that compares a front-end with one is
+# exactly the independent comparison §30a asks for. Refusing them made this
+# scan red on every milestone after PLAT-45, which is why it could never be
+# wired. So a body is set aside here ONLY when every answer file it names is a
+# `plat<N>-…` record and it names none of PLAT-35's answer TYPES — a relay that
+# builds a PLAT-35 file name (`"<dir>/" & scenario & ".electron.json"`) names
+# an artefact with no `plat<N>-` prefix and stays refused, which the control
+# below asserts. Each file set aside is listed by name.
+names_only_other_milestone_records() {
+	local body="$1" name found=0
+	grep -qE -- "${ANSWER_NEEDLE}" <<<"${body}" && return 1
+	while IFS= read -r name; do
+		[ -z "${name}" ] && continue
+		found=1
+		[[ ${name} =~ ^plat[0-9]+- ]] || return 1
+	done < <(grep -oE '[A-Za-z0-9_-]*\.electron(\.capture)?\.json' <<<"${body}")
+	[ "${found}" = 1 ]
+}
+OTHER_RECORD_READERS=()
+
 outgrowth=0
 HARNESS_EXEMPTIONS=0
 while IFS= read -r f; do
@@ -649,6 +710,10 @@ while IFS= read -r f; do
 	fi
 	if comparator_refusal="$(is_readonly_comparator "${f}")"; then
 		COMPARATORS+=("${f}")
+		continue
+	fi
+	if names_only_other_milestone_records "${f_body}"; then
+		OTHER_RECORD_READERS+=("${f}")
 		continue
 	fi
 	if ! in_subject_set "${f}"; then
@@ -706,6 +771,9 @@ for c in "${COMMENT_ONLY[@]}"; do
 done
 for c in "${COMPARATORS[@]}"; do
 	echo "exempt as a read-only comparator (unimported test entry point, no outflow): ${c}"
+done
+for c in "${OTHER_RECORD_READERS[@]}"; do
+	echo "reads only another milestone's plat<N>- desktop record, not a PLAT-35 answer: ${c}"
 done
 
 if [ "${outgrowth}" -ne 0 ]; then
@@ -771,6 +839,28 @@ if grep -qE -- "${OUTGROWTH_NEEDLE}" <<<"${BENIGN_BODY}"; then
 	exit 1
 fi
 echo "OK: the outgrowth needle sees the artefact relay and not a benign body."
+
+# THE CONTROL FOR THE OTHER-MILESTONE SET-ASIDE, both polarities: the relay
+# plant above is NOT set aside (its artefact has no `plat<N>-` name), a body
+# that names a PLAT-35 answer type beside a `plat<N>-` record is NOT, and a
+# body naming only `plat<N>-` records IS.
+OTHER_RECORD_BODY='const Capture = "'"${ARTEFACT_DIR}"'/plat47-vcs.electron.json"'
+TYPED_BODY="${OTHER_RECORD_BODY}
+var a: ${ANSWER_TYPES[0]}"
+if names_only_other_milestone_records "${RELAY_PLANT}"; then
+	echo "FAIL: the relay plant is set aside as another milestone's record reader."
+	exit 1
+fi
+if names_only_other_milestone_records "${TYPED_BODY}"; then
+	echo "FAIL: a body naming ${ANSWER_TYPES[0]} is set aside as another milestone's record reader."
+	exit 1
+fi
+if ! names_only_other_milestone_records "${OTHER_RECORD_BODY}"; then
+	echo "FAIL: a body naming only a plat<N>- desktop record is not recognised as one."
+	exit 1
+fi
+echo "OK: the other-milestone set-aside refuses the relay and a typed body, and"
+echo "    admits a body that names only a plat<N>- record."
 
 # -----------------------------------------------------------------------
 # THE COMPARATOR'S CONTROLS — both rules, both polarities

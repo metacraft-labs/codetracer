@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 44
+# RECORDED-DARK-CEILING: 48
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -724,3 +724,40 @@ scripts/hcr6-launch-arms.sh
 # `test-lane-coverage.sh` confirms is collected by a lane. So what is dark
 # here is the RE-TAKING of the capture, not the checking of what it produced.
 ci/test/plat35-gpui-capture.sh
+
+# =============================================================================
+# BLOCKED ON THREE CI CAPABILITIES — 2026-10-05, CEILING 44 -> 48
+# =============================================================================
+# Four gates `shell-gate-coverage.sh` reported as reachable from nothing on
+# `agents`. Each was checked against the runner fleet
+# (infra/docs/CI-Runner-Fleet-Status.md: `eph-linux-x64*` containers, the
+# `-nested` class adding nested Docker and KVM, no Incus daemon) and against
+# every workflow here: none of them can be wired to a job that would find its
+# input, so each is BLOCKED, not unwired, and names what would make it green.
+# Each blocker is a codetracer-specs issue of 2026-10-05.
+
+# Needs a reachable Incus daemon with a managed bridge, and `ct host`'s image
+# published into it (`ci/publish-host-image.sh`). No runner class provides an
+# Incus daemon to a job (the nested class gives Docker and KVM, not Incus).
+# Green when a job runs on a runner with Incus: wire `bash
+# ci/test/host-image-serves-in-a-container.sh` there and delete this line.
+# Issue: 2026-10-05-ct-host-container-gate-has-no-incus-runner.
+ci/test/host-image-serves-in-a-container.sh
+
+# Need a running local Zitadel issuer (isonim-platform's local stack, its dev
+# CA trusted) that no CI job provisions; the gate exits 2 with the remedy when
+# the stack is absent, so wiring it as-is would be a lane that never grades.
+# `just test-identity-live-device-grant` is the recipe. The `.mjs` is its
+# browser leg and lights up with it. Green when a job brings the stack up.
+# Issue: 2026-10-05-identity-live-device-grant-has-no-issuer-in-ci.
+ci/test/identity-live-device-grant.sh
+ci/test/identity-device-approve.mjs
+
+# A library: its only consumers are the WebAssembly boundary-recording fixture
+# checks (`src/db-backend/tests/fixtures/wasm-*/verify.sh`, run by `just
+# verify-wasm-recordings`), which need the wazero replayer built from the
+# `codetracer-wasm-recorder` sibling. No workflow clones or builds that
+# sibling. Green when a job does and runs `just verify-wasm-recordings`; the
+# both-directions rule then deletes this line.
+# Issue: 2026-10-05-wasm-recording-fixture-checks-have-no-wazero-in-ci.
+ci/lib/recording-dump.sh

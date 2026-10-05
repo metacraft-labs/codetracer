@@ -222,7 +222,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
-	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron)" ;;
+	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
 		return 1
@@ -1316,8 +1316,19 @@ test_lane_files() {
 				'/test_plugin_io_sdk\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
+				'/test_vcs_working_tree\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
 				'/test_project_action_runner\.nim$'
+		# EIGHT entries since 2026-10-04: `test_vcs_working_tree` (PLAT-47)
+		# runs the SYSTEM `git` through `std/osproc`, the same reason it is
+		# rejected from `vm-unit-js` above, and it dies on the same line as
+		# the rest of this family, measured on the stabilisation pass:
+		#
+		#     wasm-ld: error: @posproc.nim.c.o: undefined symbol: posix_spawnp
+		#
+		# It landed with the VCS pane (3214a61de) rejected from the JS lane
+		# and not from this one, so this lane has been red on it since.
+		#
 		# SEVEN entries since 2026-09-18. `test_editor_async_closure` (PLAT-29)
 		# joins the same `posix_spawnp` family as the five below, and the line it
 		# dies on is the same one, measured:
@@ -1709,9 +1720,11 @@ test_lane_files() {
 		# exist sat in NO lane (`ci/test/test-lane-coverage.sh` said so) and
 		# were run only by `just plat39-record-gate` and the case-floor gate.
 		# `test_screen_oracle.nim` reads the six gitignored Electron captures
-		# and needs `tesseract`; its prerequisite is `just
-		# plat35-capture-electron`, exactly as the floors recipe's declared
-		# deferral says. `test_plat39_record.nim` asserts the committed record
+		# and the two gitignored GPUI window frames, and needs `tesseract`; its
+		# prerequisites are `just plat35-capture-electron` and `just
+		# plat37-capture` (which exports the windowed frames to
+		# `captures/gpui/`), exactly as the floors recipe's declared deferral
+		# says. `test_plat39_record.nim` asserts the committed record
 		# and runs anywhere.
 		_tlf_glob src/tests/visual/screen_oracle 'test_*.nim'
 		;;
