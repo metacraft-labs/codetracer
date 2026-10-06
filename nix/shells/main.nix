@@ -49,6 +49,10 @@ mkShell {
   packages =
     base.packages
     ++ [
+      # The developer-only recorder environment constructor below requires
+      # maturin for the declared Rust-backed source branch.
+      maturin
+
       # Developer convenience CLI tools.
       delta
       universal-ctags
