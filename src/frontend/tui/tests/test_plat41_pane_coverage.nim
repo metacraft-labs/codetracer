@@ -77,7 +77,7 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
        PaneVocabularyPanes + PaneNativePanes + PaneAcceptedExceptions
 
   test "the cardinalities add up, and they are the measured ones":
-    # 18 = 11 + 2 + 5. Written out because the sum is the claim: when a pane
+    # 20 = 12 + 2 + 6. Written out because the sum is the claim: when a pane
     # moves category, TWO of these move and the test names which. It did
     # once already — 9 + 2 + 2 until the replay file tree was expressed
     # (PLAT-41's measured correction: the desktop draws the recording's own
@@ -89,14 +89,17 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     #
     # PLAT-48 added the desktop's two footer panels the enum could not name
     # (PROBLEMS, REQUESTS) — docked by the shared default, reported here.
+    # PLAT-52 moved `paneTerminalOutput` into the vocabulary: it draws the
+    # session's `TerminalOutputVM`.
     ck card(allPanes()) == 20
-    ck card(PaneVocabularyPanes) == 11
+    ck card(PaneVocabularyPanes) == 12
     ck card(PaneNativePanes) == 2
-    ck card(PaneAcceptedExceptions) == 7
+    ck card(PaneAcceptedExceptions) == 6
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
+    ck paneTerminalOutput in PaneVocabularyPanes
     ck PaneAcceptedExceptions == {paneBuildOutput, paneAgentActivity,
-                                  paneTerminalOutput, paneTestResults,
+                                  paneTestResults,
                                   paneConstraints, paneProblems,
                                   paneRequests}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +

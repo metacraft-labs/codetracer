@@ -35,7 +35,7 @@ import viewmodels/event_log_vm
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 214
+const ExpectedAssertions = 215
 
 var countedAssertions = 0
 
@@ -87,7 +87,9 @@ suite "PLAT-50: the click inventory":
     # An argument's left press is the row's: the desktop opens no tooltip.
     ck behaviour("K38").terminal == nsExisting
     ck behaviour("K38").gpui == nsExisting
-    ck behaviour("K32").terminal == nsNotApplicable
+    # PLAT-52 drew the Terminal Output pane on both native front-ends.
+    ck behaviour("K32").terminal == nsDone
+    ck behaviour("K32").gpui == nsDone
     ck behaviour("K99").id.len == 0
     ck describe(behaviour("K24")).startsWith("K24 Event log: row [click]")
 

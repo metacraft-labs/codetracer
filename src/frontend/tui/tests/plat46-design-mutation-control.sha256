@@ -2,16 +2,16 @@
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-45675d8948f552f6363c8fa9b07a376c424d35478d85ec619a82ccaa0c342b6f  src/frontend/tui/app/theme/roles.nim
+ce3c4414112a1f03564f42a13f18e457c33b2deff4841df4a732745f502a6711  src/frontend/tui/app/theme/roles.nim
 3a78fc1d60a28e60c21569d4c8f9184d5ea7b0bb7c122ab06536f07dfdfde43a  src/frontend/tui/app/theme/palette.nim
 5e82d0b58e65edc5c05d73eb25d7a070076ad92da84cce6af99cd76ba80286d0  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-f0d691a513a747956e0c8f4bb6cf7d83c9cb0247b4ade79cb908ce2615c791d4  src/frontend/tui/app/views/shell.nim
+d25864550d719284134a9cb9f64de47766c1e636cd8f2ee4fcafd4ae53cdc4e1  src/frontend/tui/app/views/shell.nim
 704b1ad3389bd76e8f03d2409b160ba06d11657e278811a828556406db7b9527  src/frontend/tui/app/views/gutter.nim
 c87fae28bd0d59182bbed04f0b97200a03d115f6bd56a63fc55d2f2fc180eead  src/frontend/tui/app/views/source_pane.nim
 81c4fc54101ab04e1f1083fbc63e22d9da9105d12cbc36564abf3e5c810285b7  src/frontend/tui/host/terminal_probe.nim
 ed71c14e100d7b7b0b4670cd047e4018b766148b847d9a3618d94de5222d3243  scripts/tokens-to-styl.sh
-99fdf1cd0d5b987e8e72d72eb5409944d74fd6182196d0e454f300537638ac28  src/frontend/tui/app/tests/test_degraded_style_tables.nim
+2a81794b2fc445db285605bed6a3369a46150eaf0a64d476e8763ac5a59610aa  src/frontend/tui/app/tests/test_degraded_style_tables.nim
 57f2f24ad847c4e352b260d0f1f95a26caf77203ff34cf7ef1b63c83fad73e4d  src/frontend/tui/app/tests/test_capability_resolution.nim
 43f8243f4031dbc6c1b2613377a33803c03c2729e59b1b0700bbdca64bdfa366  src/frontend/tui/tests/test_plat46_terminal_probe.nim
 87cac377484934a3778c33b16c5c2e9338935b6c198547378548c0189440dd8d  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim

@@ -202,8 +202,9 @@ suite "PLAT-45: the GPUI window and the shared default":
     # names itself, never an absent slot.
     let cap = gpuiCapability()
     let reports = reportLeaves(sharedDefaultLayout().tree, cap)
-    # Four until PLAT-47 part B drew the VCS pane (from the desktop's VCSVM).
-    ck reports.len == 3
+    # Four until PLAT-47 part B drew the VCS pane (from the desktop's VCSVM);
+    # three until PLAT-52 drew the Terminal Output pane.
+    ck reports.len == 2
     let text = planText(run.plan)
     for r in reports:
       var state = ""

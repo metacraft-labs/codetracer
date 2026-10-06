@@ -5126,6 +5126,13 @@ plat49-capture-electron *args:
 plat50-capture-electron *args:
   bash scripts/plat50-capture-electron.sh {{args}}
 
+# The desktop's Terminal Output pane as the terminal's and GPUI's are measured
+# against it: its lines and their computed styles, a click on a fragment, its
+# screen view with the real-time scrubber and its marks — written to
+# `src/tests/visual/answers/plat52-terminal.electron.json`.
+plat52-capture-electron *args:
+  bash scripts/plat52-capture-electron.sh {{args}}
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
