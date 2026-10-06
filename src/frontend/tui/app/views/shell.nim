@@ -70,6 +70,7 @@ import ./frame_overlay
 import ./variables
 import ./context_menu
 import ./scratchpad_pane
+import ./terminal_output_pane
 
 export header, status_bar, profile, project, source_pane, styled_row
 # PLAT-48: the top bar is painted by this module from a `ShellModel` field.
@@ -93,6 +94,8 @@ export edit_pane, file_tree, build_output
 # `ShellModel` fields painted by this module.
 export context_menu
 export scratchpad_pane
+# PLAT-52: the Terminal Output pane is a `ShellModel` field painted here.
+export terminal_output_pane
 
 type
   ShellModel* = object
@@ -179,6 +182,9 @@ type
       ## rectangle.
     scratchpad*: ScratchpadPaneModel
       ## PLAT-50: the scratchpad pane's rows.
+    terminalOutput*: TerminalOutputPaneModel
+      ## PLAT-52: the recorded program's terminal output — its lines, its
+      ## screen and their scrubbers.
     tracepoints*: TracepointManagerModel
       ## CTUI-8's post-hoc tracepoint dialog. An OVERLAY: when `open` it is
       ## painted over the middle of the body, after every pane, so it is not
@@ -823,6 +829,12 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneScratchpad and model.scratchpad.loaded:
     underStrip:
       discard paintScratchpad(g, under, model.scratchpad)
+  # PLAT-52. THE TERMINAL OUTPUT — lines, or a TUI program's screen.
+  # Unloaded (no session supplied it yet) it says it is loading, as the
+  # desktop's pane does — never an empty rectangle.
+  elif region.pane == paneTerminalOutput:
+    underStrip:
+      discard paintTerminalOutput(g, under, model.terminalOutput)
   elif not TerminalCaps.canDraw(region.pane):
     # PLAT-45: A REPORT LEAF. The shared default places this pane and the
     # terminal has no view for it, so the slot says which pane it is and why

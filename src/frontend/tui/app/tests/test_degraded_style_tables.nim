@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3266
+const ExpectedAssertions = 3387
 
 var countedAssertions = 0
 
@@ -80,7 +80,9 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 124
+  ExpectedRoleCount = 128
+    ## PLAT-52: +4, the scrubbers' group (`srScrubberTrack`,
+    ## `srScrubberThumb`, `srScrubberThumbGround`, `srScrubberMark`).
     ## PLAT-50: +4 — `srBorderMenu` (a dropdown's frame), `srDividerStrip`
     ## (the `--dividers=strip` line), `srSurfaceTopBar` (the caption bar's
     ## ground) and `srSurfaceMenu` (a dropdown's ground).
@@ -100,7 +102,8 @@ const
     ## parts (`srCallArgs`, `srCallReturn`, a group of their own) and the
     ## inactive session tab's ground (`srSessionTab`). `srNone` plus 118
     ## painted roles.
-  ExpectedGroupCount = 20
+  ExpectedGroupCount = 21
+    ## PLAT-52: `dgScrubber`.
   ExpectedMergeCount = 21
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.
@@ -533,7 +536,9 @@ suite "CTUI-11 Tier 1: degraded style tables":
       inc mapped
     checkpoint("ASCII fallback pairs: " & $mapped)
     ck mapped == AsciiFallbackTable.len
-    ck mapped == 27       # PLAT-50: `▏` and `▕`, the divider and edge lines
+    # PLAT-50: `▏` and `▕`, the divider and edge lines (27); PLAT-52: the
+    # thirteen eighth blocks a scrubber's thumb ends are drawn with (40).
+    ck mapped == 40
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.

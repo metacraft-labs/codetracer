@@ -77,6 +77,12 @@ type
     dgCallTrace = "call-trace"
       ## PLAT-49 part B: the parts of a call-trace row the desktop colours —
       ## its arguments and its return value.
+    dgScrubber = "scrubber"
+      ## PLAT-52: a scrubber's parts — a list pane's scrollbar scrubber
+      ## (Scrollbar-Scrubbers.md §4) and the terminal screen's built-in one
+      ## (Terminal-Output-Pane.md §3): the track, the thumb, the thumb's ground
+      ## where an eighth block is drawn reversed, and the current-position
+      ## mark.
 
   SemanticRole* = enum
     ## Every distinction this front-end's screen carries. `srNone` is the zero
@@ -261,6 +267,18 @@ type
     srHeat3 = "heat-3"
     srHeat4 = "heat-4"
     srHeat5 = "heat-5"
+
+    # ---- dgScrubber: PLAT-52's scrubbers -----------------------------------
+    srScrubberTrack = "scrubber-track"
+    srScrubberThumb = "scrubber-thumb"
+    srScrubberThumbGround = "scrubber-thumb-ground"
+      ## The thumb's colour as a GROUND, for the one partial cell at a thumb's
+      ## far end: an upper (or right) part of a cell has no eighth-block glyph,
+      ## so it is drawn as the complementary lower (left) block in the track's
+      ## colour on this ground.
+    srScrubberMark = "scrubber-mark"
+      ## The current recording position on the track, in the execution
+      ## pointer's colour.
 
   DividerChoice* = enum
     ## PLAT-50 (the user, 2026-10-02, undecided between the two): the colour a
@@ -692,7 +710,20 @@ const
     srHeat4: fgOnly(dgHeat, dtColorsEditorActionSecondary,
                     mono = {raBold, raUnderline}),
     srHeat5: fgOnly(dgHeat, dtColorsEditorSyntaxPrimary, attrs = {raBold},
-                    mono = {raBold, raReverse})]
+                    mono = {raBold, raReverse}),
+
+    # PLAT-52. The track is a divider line; the thumb the scrollbar thumb's
+    # colour (the desktop's `::-webkit-scrollbar-thumb` reads the subtle
+    # caption tone); the mark the execution pointer's (the gutter's) colour.
+    srScrubberTrack: fgOnly(dgScrubber, dtColorsUiDividerSecondary,
+                            mono = {raItalic}),
+    srScrubberThumb: fgOnly(dgScrubber, dtColorsUiTextPrimaryCaptionSubtle,
+                            mono = {raReverse}),
+    srScrubberThumbGround: bgOnly(dgScrubber,
+                                  dtColorsUiTextPrimaryCaptionSubtle,
+                                  mono = {raReverse, raItalic}),
+    srScrubberMark: fgOnly(dgScrubber, dtColorsEditorActionSecondary,
+                           attrs = {raBold}, mono = {raBold, raUnderline})]
 
 func spec*(role: SemanticRole): RoleSpec {.inline.} =
   RoleSpecs[role]

@@ -185,6 +185,9 @@ type
       ## the working tree's, or commit `behaviour`'s when it names one.
     pcVcsCommit
       ## The VCS pane: open or close commit `index`.
+    pcTerminalView
+      ## PLAT-52: the Terminal Output pane's toggle — show the view named by
+      ## `text` (`lines` / `screen`), remembered for this recording.
 
   PaneClickRequest* = object
     kind*: PaneClickKind
@@ -1069,6 +1072,183 @@ proc requestClick(outcome: var RuntimeOutcome; request: PaneClickRequest) =
   outcome.paneClick = request
   outcome.repaint = true
 
+# ---------------------------------------------------------------------------
+# PLAT-52: the Terminal Output pane — K32 and its scrubbers
+# ---------------------------------------------------------------------------
+
+const TerminalWheelRows* = 3
+
+proc terminalOutputArea(rt: TuiRuntime; geometry: LayoutGeometry): CellArea =
+  ## The rectangle the Terminal Output pane is painted into (its strip row
+  ## first), or an empty one when it is not on the screen.
+  for i, region in geometry.projection.regions:
+    if region.pane == paneTerminalOutput:
+      return paneUnderStrip(geometry, i)
+  CellArea()
+
+proc terminalWriteJump(rt: TuiRuntime; write: int;
+                       outcome: var RuntimeOutcome): bool =
+  ## Go to the moment write `write` was produced: the host's `ct/event-jump`
+  ## (`pcEventJump`), the desktop's fragment click (K32).
+  let m = rt.app.terminalOutput
+  if m.screen.isNil or write < 0 or write >= m.screen.writes.len:
+    return false
+  let ev = m.screen.writes[write]
+  outcome.requestClick(PaneClickRequest(
+    kind: pcEventJump, index: ev.logIndex, tick: ev.rrTicks, path: ev.path,
+    line: ev.line))
+  true
+
+proc scrollTerminalOutput(rt: TuiRuntime; delta: int;
+                          outcome: var RuntimeOutcome) =
+  ## Scroll the line view by `delta` rows (wheel, keys), leaving follow.
+  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
+  let rows = max(1, geo.contentRows)
+  let m = rt.app.terminalOutput
+  let top = max(0, min(max(0, m.lines.len - rows), m.visibleTop(rows) + delta))
+  rt.app.terminalOutput.scrollTop = top
+  rt.app.terminalOutput.follow = false
+  outcome.repaint = true
+
+proc scrubTerminalLines(rt: TuiRuntime; area: CellArea; row: int;
+                        click: bool) =
+  ## The line view's scrubber (Scrollbar-Scrubbers.md §3): a click on the
+  ## track centres the line at the clicked fraction of the WHOLE output; a
+  ## dragged thumb follows the pointer. It moves the view, never the
+  ## debugger.
+  let m = rt.app.terminalOutput
+  let geo = terminalPaneGeometry(m, area)
+  if geo.contentRows <= 0:
+    return
+  let sm = m.scrubberOf(geo.contentRows)
+  let f = fractionAt(row - geo.contentTop, geo.contentRows)
+  let top =
+    if click: sm.clickAt(f)
+    else: sm.dragTo(f - sm.thumbLength / 2.0)
+  rt.app.terminalOutput.scrollTop = top
+  rt.app.terminalOutput.follow = false
+
+proc scrubTerminalScreen(rt: TuiRuntime; area: CellArea; col: int;
+                         outcome: var RuntimeOutcome) =
+  ## The screen's built-in scrubber held at column `col`. REAL-TIME (the
+  ## user, 2026-10-06; Terminal-Output-Pane.md §3): the debugger moves to the
+  ## write under the pointer as it is dragged — one jump per write crossed —
+  ## and the screen shows that write while the move is made.
+  let m = rt.app.terminalOutput
+  if m.screen.isNil:
+    return
+  let geo = terminalPaneGeometry(m, area)
+  let f = fractionAt(col - geo.screenTrackCol, geo.screenTrackWidth)
+  let w = writeAtFraction(m.screen.writeCount, f)
+  if w < 0:
+    return
+  rt.app.terminalOutput.shownWrite = w
+  rt.app.terminalOutput.previewing = true
+  if w != m.scrubSent:
+    rt.app.terminalOutput.scrubSent = w
+    discard rt.terminalWriteJump(w, outcome)
+  outcome.repaint = true
+
+proc endTerminalScrub(rt: TuiRuntime) =
+  rt.app.terminalOutput.previewing = false
+  rt.app.terminalOutput.scrubSent = -1
+
+proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
+                              event: MouseEvent;
+                              outcome: var RuntimeOutcome): bool =
+  ## A press in the Terminal Output pane: the toggle, a fragment (K32), the
+  ## line view's scrubber, the screen's scrubber. The desktop has no menu on
+  ## the pane, so a right press is not taken.
+  if event.button != mbLeft or not rt.app.terminalOutput.loaded:
+    return false
+  let hit = rt.app.terminalOutput.terminalOutputHitAt(area, event.row,
+                                                      event.col)
+  case hit.kind
+  of thNone, thScreen:
+    return false
+  of thViewLines:
+    outcome.requestClick(PaneClickRequest(kind: pcTerminalView,
+                                          text: $tvLines))
+  of thViewScreen:
+    outcome.requestClick(PaneClickRequest(kind: pcTerminalView,
+                                          text: $tvScreen))
+  of thFragment:
+    return rt.terminalWriteJump(hit.eventIndex, outcome)
+  of thLineTrack:
+    rt.scrubTerminalLines(area, event.row, click = true)
+    outcome.repaint = true
+  of thLineThumb:
+    rt.app.terminalDrag = tdLineThumb
+    rt.scrubTerminalLines(area, event.row, click = false)
+    outcome.repaint = true
+  of thScreenTrack:
+    rt.app.terminalDrag = tdScreen
+    rt.app.terminalOutput.scrubSent = -1
+    rt.scrubTerminalScreen(area, event.col, outcome)
+  true
+
+proc routeTerminalDrag(rt: TuiRuntime; event: MouseEvent;
+                       outcome: var RuntimeOutcome): bool =
+  ## A press held on one of the pane's scrubbers owns the pointer until it is
+  ## released: the line view's thumb follows it (the view, never the
+  ## debugger); the screen's scrubber moves the debugger LIVE to the write
+  ## under it (§3, real-time), and the release ends the drag there.
+  if rt.app.terminalDrag == tdNone:
+    return false
+  let kind = rt.app.terminalDrag
+  if event.kind == mekPress:
+    rt.app.terminalDrag = tdNone
+    if kind == tdScreen:
+      rt.endTerminalScrub()
+    return false
+  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  if event.kind == mekMotion:
+    case kind
+    of tdLineThumb:
+      rt.scrubTerminalLines(area, event.row, click = false)
+      outcome.repaint = true
+    of tdScreen: rt.scrubTerminalScreen(area, event.col, outcome)
+    of tdNone: discard
+    return true
+  # The release: the screen's drag ends on the write under the pointer.
+  rt.app.terminalDrag = tdNone
+  if kind == tdScreen:
+    rt.scrubTerminalScreen(area, event.col, outcome)
+    rt.endTerminalScrub()
+  outcome.repaint = true
+  true
+
+proc terminalOutputOwnsToken*(rt: TuiRuntime; token: string): bool =
+  ## The pane's own keys while it is focused: Left / Right step a write back /
+  ## forward (the screen's "step-by-write keys ... scoped to the pane", which
+  ## the line view keeps too), `v` toggles lines / screen.
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused != paneTerminalOutput or
+     not rt.app.terminalOutput.loaded:
+    return false
+  keyName(token) in ["Left", "Right", "v"]
+
+proc routeTokenToTerminalOutput(rt: TuiRuntime; token: string;
+                                outcome: var RuntimeOutcome) =
+  let m = rt.app.terminalOutput
+  case keyName(token)
+  of "v":
+    outcome.requestClick(PaneClickRequest(
+      kind: pcTerminalView,
+      text: (if m.view == tvScreen: $tvLines else: $tvScreen)))
+  of "Left", "Right":
+    let n = if m.screen.isNil: 0 else: m.screen.writeCount
+    let delta = if keyName(token) == "Left": -1 else: 1
+    let at = m.shownWrite
+    let target = if at < 0 and delta > 0: 0 else: at + delta
+    if n == 0 or target < 0 or target >= n:
+      rt.note(if delta < 0: "no earlier write" else: "no later write")
+      outcome.repaint = true
+      return
+    discard rt.terminalWriteJump(target, outcome)
+  else: discard
+
 proc showContent(rt: TuiRuntime; title, text: string; diff = false;
                  outcome: var RuntimeOutcome) =
   ## A text over the body (`views/context_menu.ContentOverlay`).
@@ -1440,6 +1620,10 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       outcome.requestClick(PaneClickRequest(kind: pcVcsCommit,
                                             index: t.index))
     return true
+  of paneTerminalOutput:
+    # PLAT-52 (K32): a fragment goes to the write that produced it; the
+    # toggle and the two scrubbers.
+    return rt.routeTerminalOutputClick(under, event, outcome)
   else:
     return false
 
@@ -1745,6 +1929,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
+    # PLAT-52: the wheel scrolls the Terminal Output's line view.
+    if idx >= 0 and
+       geometry.projection.regions[idx].pane == paneTerminalOutput and
+       rt.app.terminalOutput.loaded and not rt.app.terminalOutput.screenShown:
+      rt.scrollTerminalOutput(
+        (if event.button == mbWheelDown: TerminalWheelRows
+         else: -TerminalWheelRows), outcome)
+      return
   # PLAT-50: every other press the layout did not act on is the pane's —
   # the desktop's click behaviour there (`routePaneClick`).
   if acted.status == lasNoGesture and not inGesture and
@@ -2009,6 +2201,21 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     # pane that answers them here. Any other focused pane leaves them to the
     # dispatcher, exactly as before.
     let (had, focused) = rt.focus.focusedPane()
+    # PLAT-52: the Terminal Output's line view scrolls the same way; `.`
+    # follows the current position again.
+    if had and focused == paneTerminalOutput and
+       rt.app.terminalOutput.loaded and not rt.app.terminalOutput.screenShown:
+      if action == kaCenterOnPointer:
+        rt.app.terminalOutput.follow = true
+        rt.note("terminal output follows the current position")
+        outcome.repaint = true
+        return true
+      let area = rt.terminalOutputArea(rt.layoutGeometry())
+      let rows = max(1, terminalPaneGeometry(rt.app.terminalOutput,
+                                             area).contentRows)
+      let (_, delta) = scrollDelta(action, rows)
+      rt.scrollTerminalOutput(delta, outcome)
+      return true
     if not had or focused != paneCalltrace or rt.app.callTrace.isEmpty:
       return false
     if action == kaCenterOnPointer:
@@ -2695,6 +2902,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       # pointer until it is released.
       if rt.routeTimelineDrag(event, result):
         return
+      # PLAT-52: a press held on a Terminal Output scrubber, likewise.
+      if rt.routeTerminalDrag(event, result):
+        return
       if rt.routeTopBarMouse(event, result):
         return
       if event.kind == mekMotion and event.button != mbLeft:
@@ -2827,6 +3037,12 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     if outcome != ekIgnored:
       result.repaint = true
       return
+
+  # PLAT-52: THE TERMINAL OUTPUT'S OWN KEYS while it is focused — the
+  # previous / next write and the view toggle, keys no global binding uses.
+  if rt.terminalOutputOwnsToken(token):
+    rt.routeTokenToTerminalOutput(token, result)
+    return
 
   let resolution = rt.keymap.resolve(rt.modal, rt.pending, token, nowMs,
                                      rt.app.modes.product)

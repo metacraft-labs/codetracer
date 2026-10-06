@@ -62,6 +62,7 @@ import ../../viewmodel/viewmodels/inline_value_timeline
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
+import ../../viewmodel/host/terminal_output_source   # PLAT-52
 import ../app/call_stack_binding
 import ../app/runtime
 import ../app/source_binding
@@ -318,6 +319,13 @@ proc learnExtent*(s: TuiSession) =
   # silently `@[]` — "empty because nothing asked" and "empty because the
   # request failed" produced the same value. `PaneLoad` now says which.
   let loaded = s.session.loadRecordingPanes()
+  # PLAT-52: the recorded program's terminal output — the Terminal Output
+  # pane's lines and screen model (`terminal_output_source`, which GPUI asks
+  # through too). A refusal leaves the pane in its loading state.
+  try:
+    discard s.session.loadTerminalOutput()
+  except CatchableError:
+    discard
   s.files = fileTreeModelOf(s.session.session.fileTreeVM)
   s.callTraceAsked = true
   var rows: seq[EventRow] = @[]
@@ -427,6 +435,39 @@ proc scratchpadModelOf*(vm: ScratchpadVM): ScratchpadPaneModel =
 
 proc refreshScratchpad(s: TuiSession; rt: TuiRuntime) =
   rt.app.scratchpad = scratchpadModelOf(s.session.session.scratchpadVM)
+
+proc terminalOutputModelOf*(vm: TerminalOutputVM; ticks: uint64;
+                            prior: TerminalOutputPaneModel):
+                            TerminalOutputPaneModel =
+  ## PLAT-52: the Terminal Output ViewModel at the stop `ticks`, as the pane's
+  ## value — the line view's lines and the screen model, both the shared
+  ## model's (`terminal_output_model`). The reading position (`scrollTop`,
+  ## `follow`) and a held screen scrubber are the pane's own and are carried
+  ## across stops (a drag moves the debugger, so it crosses many).
+  result = TerminalOutputPaneModel(loaded: not vm.isNil, follow: prior.follow,
+                                   scrollTop: prior.scrollTop,
+                                   shownWrite: -1, currentLine: -1,
+                                   # A drag of the screen's scrubber moves
+                                   # the debugger live: it is still held
+                                   # across the refresh each move makes.
+                                   previewing: prior.previewing,
+                                   scrubSent: prior.scrubSent)
+  if vm.isNil:
+    return
+  result.loading = vm.initialLoad.val
+  result.lines = vm.lines.val
+  result.screen = vm.screen
+  result.offered = vm.screenOffered.val
+  result.view = vm.view.val
+  result.currentTicks = ticks
+  result.currentLine = lineOfTick(result.lines, ticks)
+  if not vm.screen.isNil:
+    result.shownWrite = vm.screen.writeAtTick(ticks)
+
+proc refreshTerminalOutput*(s: TuiSession; rt: TuiRuntime) =
+  rt.app.terminalOutput = terminalOutputModelOf(
+    s.session.session.terminalOutputVM, s.session.getCurrentRRTicks(),
+    rt.app.terminalOutput)
 
 proc showViewedFile(s: TuiSession; rt: TuiRuntime)
 
@@ -560,6 +601,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     rt.app.eventLog.columns = keptColumns
   rt.app.eventLog.order = keptOrder
   s.refreshScratchpad(rt)
+  s.refreshTerminalOutput(rt)
   rt.app.location = s.session.getCurrentFile() & ":" &
                     $s.session.getCurrentLine()
   # THE PANE DOES NOT FETCH WHILE IT PAINTS — `app/views/event_log.nim`'s
@@ -711,6 +753,16 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
   of pcNone: discard
   of pcVcsDiff, pcVcsCommit:
     discard   # the VCS source's (`vcs_source.applyClick`)
+  of pcTerminalView:
+    # PLAT-52: the Terminal Output's view toggle — the ViewModel's choice,
+    # remembered for this recording (`native_host.loadRecordingPanes` wires
+    # the memory).
+    let vm = session.session.terminalOutputVM
+    if not vm.isNil:
+      vm.setView(if c.text == $tvScreen: tvScreen else: tvLines)
+      if vm.view.val == tvLines and c.text == $tvScreen:
+        rt.app.notification = "this recording's output drives no screen"
+    s.refreshTerminalOutput(rt)
   of pcColumnBreakpoint:
     # K14: the desktop's Alt+click (`lineActionClickAt` →
     # `addColumnBreakpoint`).

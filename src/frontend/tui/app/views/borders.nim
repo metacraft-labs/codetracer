@@ -144,12 +144,18 @@ const AsciiFallbacks: array[21, (string, string)] = [
   ("●", "*"), ("○", "o"), ("◆", "+"),
   ("▶", ">"), ("▼", "v"), ("▲", "^")]
 
-const ExtraAsciiFallbacks: array[5, (string, string)] = [
+const ExtraAsciiFallbacks: array[18, (string, string)] = [
   ("█", "#"), ("…", "."), ("·", "."),
   # PLAT-50: the edge one-eighth blocks a pane divider and the top bar's
   # field and menu button borders are drawn with (`shell.DividerGlyph`,
   # `top_bar.FieldEdgeLeft` / `FieldEdgeRight`): a line, so `|`.
-  ("▏", "|"), ("▕", "|")]
+  ("▏", "|"), ("▕", "|"),
+  # PLAT-52: the eighth blocks a scrubber's thumb ends are drawn with
+  # (`terminal_output_pane.thumbCells`) — part of the thumb, so the thumb's
+  # `#` (Scrollbar-Scrubbers.md §4: "ASCII tier: `#` on `|`").
+  ("▁", "#"), ("▂", "#"), ("▃", "#"), ("▄", "#"), ("▅", "#"), ("▆", "#"),
+  ("▇", "#"), ("▎", "#"), ("▍", "#"), ("▌", "#"), ("▋", "#"), ("▊", "#"),
+  ("▉", "#")]
 
 var asciiTable {.compileTime.}: Table[string, string]
 

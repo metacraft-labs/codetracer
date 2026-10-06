@@ -160,7 +160,10 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 100
+  ExpectedAppModules = 101
+    ## 2026-10-06 (PLAT-52): 100 → 101. `views/terminal_output_pane.nim`,
+    ## the terminal's Terminal Output pane (the line view, the screen view and
+    ## their scrubbers).
     ## 2026-10-04 (PLAT-50 review): 99 → 100. `views/scratchpad_pane.nim`,
     ## the terminal's Scratchpad pane (pinned values and their close buttons).
     ## 2026-10-03 (PLAT-50): 98 → 99. `views/context_menu.nim`, the
@@ -254,7 +257,11 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 234
+  ExpectedStyleLiterals = 244
+    ## 2026-10-06 (PLAT-52): +10 in ONE new painting file,
+    ## `views/terminal_output_pane.nim` (a run's literal colours, the future
+    ## muted, the header, the scrubbers' track, thumb and marks), so 32 → 33
+    ## styled files.
     ## 2026-10-04 (PLAT-50 review): +3 in ONE new painting file,
     ## `views/scratchpad_pane.nim` (the empty note, a pinned value's name and
     ## its close button), so 31 → 32 styled files.
@@ -338,7 +345,7 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 32
+  ExpectedStyledFiles = 33
     ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
     ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.
     ## 2026-09-29 (PLAT-47 part B): +2, `views/vcs_pane.nim` and

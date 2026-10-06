@@ -66,6 +66,12 @@ export headless_app
 export shell
 
 type
+  TerminalDragKind* = enum
+    ## PLAT-52: which of the Terminal Output pane's scrubbers a held press is
+    ## on — the line view's scrollbar (it scrolls the VIEW) or the screen's
+    ## built-in one (it previews, and its release moves the debugger).
+    tdNone, tdLineThumb, tdScreen
+
   TuiApp* = ref object
     ## The terminal front-end's application state.
     ##
@@ -144,6 +150,12 @@ type
       ## desktop opens it in a tab, and its editor follows the debugger back).
     scratchpad*: ScratchpadPaneModel
       ## PLAT-50: the values pinned to the scratchpad (`ScratchpadVM`'s rows).
+    terminalOutput*: TerminalOutputPaneModel
+      ## PLAT-52: the Terminal Output pane's model, built by the host from the
+      ## session's `TerminalOutputVM`; its reading position (`scrollTop`,
+      ## `follow`) and the screen scrubber's preview are the pane's own.
+    terminalDrag*: TerminalDragKind
+      ## PLAT-52: a press held on one of the pane's scrubbers.
     location*: string
       ## PLAT-50 (K37): where the debugger is, `path:line` — what a click on
       ## the status line copies (the desktop's status bar location and its
@@ -275,7 +287,10 @@ proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
          hoveredTab: -1,
          # The event log's default columns before any session (PLAT-49 part
          # B): `:column-*` acts on these when no log is open yet.
-         eventLog: initEventLogModel())
+         eventLog: initEventLogModel(),
+         terminalOutput: TerminalOutputPaneModel(follow: true,
+                                                 shownWrite: -1,
+                                                 currentLine: -1))
 
 proc controlsEnabledOf*(app: TuiApp): seq[bool] =
   ## Per `TransportControls`: whether the session's ViewModel offers it now
@@ -427,6 +442,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     eventLog: app.eventLog,
     points: app.points,
     scratchpad: app.scratchpad,
+    terminalOutput: app.terminalOutput,
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
     vcs: app.vcs,

@@ -113,6 +113,9 @@ from std/unicode import runeLen
 import ../viewmodel/viewmodels/[point_list_vm, scratchpad_vm, state_vm,
                                 calltrace_vm, event_log_vm,
                                 origin_chain_types]
+# PLAT-52: the Terminal Output pane, drawn natively, and its producer.
+import ./terminal_output_leaf
+import ../viewmodel/host/terminal_output_source
 
 const DefaultPixelsView* = "window"
   ## What `--pixels-out` records as the view when `--pixels-view` is not
@@ -166,6 +169,12 @@ OPTIONS:
                       is the permille along its track, a code or value key
                       `<line>@<column>`, an arg's `<call>/<arg>`) and
                       ctx:<label> (an entry of the open right-click menu)
+                    and (PLAT-52) the Terminal Output pane:
+                      term:view:<lines|screen>  term:line:<line>[:<col>]
+                      term:track:<permille> (the line scrubber's track)
+                      term:drag:<from>:<to> (its thumb, held and moved)
+                      term:scrub:<from>:<to>[:hold] (the screen's scrubber)
+                      term:key:<key>  term:wheel:<rows>
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
   --quit-after-ms=<n>
@@ -444,7 +453,9 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         if head notin ["key", "press", "move", "release", "menu", "control",
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
-                       "tab-add", "hwheel", "click", "ctx", "label-menu"]:
+                       "tab-add", "hwheel", "click", "ctx", "label-menu",
+                       # PLAT-52: the Terminal Output pane's events.
+                       "term"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -803,6 +814,10 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.}
   ## has to re-stamp it — a redraw produces new elements, and an element the
   ## walk never reached keeps the window's inherited proportional face.
 
+proc drawTerminalPane(r: GpuiRenderer)
+  ## PLAT-52: the Terminal Output pane, drawn natively (defined with its
+  ## clicks, before `windowPointer`).
+
 proc redrawEditor() =
   ## PLAT-44. Redraw the editor pane from the arm's CURRENT document.
   ##
@@ -920,6 +935,9 @@ var
   gViewedFile = ""
     ## PLAT-50: a file opened from the Files pane, shown in the editor until
     ## the debugger next moves.
+  gTerminal = initGTerminalPane()
+    ## PLAT-52: the Terminal Output pane's own state — where the reader
+    ## scrolled, a scrubber held by the pointer, whether its keys are its own.
   gSourceService: GpuiSourceService = nil
     ## The editor's source window (moved up with PLAT-50, which reads its
     ## provider to open a file).
@@ -1428,6 +1446,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   gTop = drawWindowBody(r, (if gGestures.revealing: some(gGestures.reveal.pane)
                             else: none(PaneKind)))
   r.appendChild(gContainer, gTop)
+  # PLAT-52: the Terminal Output pane is laid out from the box it now has.
+  drawTerminalPane(r)
   if not gRoot.isNil:
     drawOverlay(r)
     drawTopBar(r)
@@ -1645,6 +1665,162 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
 proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int)
   ## PLAT-50: forward-declared for the dock labels' right-click menu.
 
+# ---------------------------------------------------------------------------
+# PLAT-52: the Terminal Output pane — drawn natively from the shared model,
+# its clicks (K32), its scrollbar scrubber and the screen's built-in one
+# ---------------------------------------------------------------------------
+
+proc terminalVM(): TerminalOutputVM =
+  if gSession.isNil: nil else: gSession.session.terminalOutputVM
+
+proc terminalBody(): PxRect =
+  ## The pane's body in window pixels, or a zero rectangle when it is not
+  ## the visible tab of a drawn box.
+  let i = gGeom.tabsNodeOfPane($paneTerminalOutput)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneTerminalOutput:
+    return PxRect()
+  n.body
+
+proc drawTerminalPane(r: GpuiRenderer) =
+  ## Draw the pane from its ViewModel, natively (`terminal_output_leaf`),
+  ## replacing whatever the leaf held — the vocabulary list `renderLeaf` built
+  ## is the leaf plan's (`--report-plan`), the window draws the runs.
+  let pane = gPanes.getOrDefault($paneTerminalOutput)
+  let vm = terminalVM()
+  if pane.isNil or vm.isNil:
+    return
+  if drawTerminalOutput(r, pane, vm, gTerminal, terminalBody()):
+    applyTextFaces(r, pane)
+
+proc terminalJump(r: GpuiRenderer; write: int): bool =
+  ## Go to the moment write `write` was produced (`ct/event-jump`, K32), and
+  ## the window follows.
+  let vm = terminalVM()
+  if vm.isNil or write < 0 or write >= vm.events.val.len:
+    return false
+  let ev = vm.events.val[write]
+  try:
+    gSession.eventJump(EventLogEntry(content: "", rrTicks: ev.rrTicks,
+                                     line: ev.line, file: ev.path,
+                                     eventIndex: ev.logIndex))
+  except CatchableError as e:
+    traceGesture("terminal jump failed: " & e.msg)
+    return false
+  traceGesture("terminal write " & $write & " at tick " & $ev.rrTicks)
+  vm.cancelScrub()
+  gViewedFile = ""
+  refreshReplayWindow(r)
+  drawTerminalPane(r)
+  true
+
+proc scrubTerminalLines(r: GpuiRenderer; y: int; click: bool) =
+  ## The line view's scrubber: a click centres the row at the fraction of the
+  ## WHOLE output; a held thumb follows the pointer. The view, never the
+  ## debugger.
+  let vm = terminalVM()
+  let lay = terminalLayout(terminalBody(), vm)
+  if vm.isNil or lay.track.h <= 0:
+    return
+  let sm = vm.scrubberFor(gTerminal, lay.rows)
+  let f = fractionAt(y - lay.track.y, lay.track.h)
+  gTerminal.scrollTop = if click: sm.clickAt(f)
+                        else: sm.dragTo(f - sm.thumbLength / 2.0)
+  gTerminal.follow = false
+  drawTerminalPane(r)
+
+proc scrubTerminalScreen(r: GpuiRenderer; x: int) =
+  ## The screen's scrubber held at `x`. REAL-TIME (the user, 2026-10-06;
+  ## Terminal-Output-Pane.md §3): the debugger moves to the write under the
+  ## pointer as it is dragged — one jump per write crossed, through the
+  ## window's own `ct/event-jump` (`terminalJump`), which waits for the move.
+  let vm = terminalVM()
+  let lay = terminalLayout(terminalBody(), vm)
+  if vm.isNil or lay.screenTrack.w <= 0:
+    return
+  let w = writeAtFraction(vm.screen.writeCount,
+    max(0.0, min(1.0, float(x - lay.screenTrack.x) /
+                      float(max(1, lay.screenTrack.w)))))
+  if w < 0:
+    return
+  vm.scrubPreview.val = w
+  if w != gTerminal.scrubSent:
+    gTerminal.scrubSent = w
+    discard terminalJump(r, w)
+    # The drag is still held: keep showing the write under the pointer.
+    vm.scrubPreview.val = w
+  drawTerminalPane(r)
+
+proc pressTerminalOutput(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on the pane: the toggle, a fragment, a scrubber.
+  let vm = terminalVM()
+  let body = terminalBody()
+  gTerminal.focused = body.w > 0 and body.contains(x, y)
+  if vm.isNil or not gTerminal.focused:
+    return false
+  let hit = terminalHitAt(vm, gTerminal, body, x, y)
+  case hit.kind
+  of ghNone, ghScreen:
+    return false
+  of ghViewLines, ghViewScreen:
+    vm.setView(if hit.kind == ghViewLines: tvLines else: tvScreen)
+    traceGesture("terminal view " & $vm.view.val)
+    drawTerminalPane(r)
+  of ghWrite:
+    return terminalJump(r, hit.write)
+  of ghLineTrack:
+    scrubTerminalLines(r, y, click = true)
+  of ghLineThumb:
+    gTerminal.drag = gtdLineThumb
+    scrubTerminalLines(r, y, click = false)
+  of ghScreenTrack:
+    gTerminal.drag = gtdScreen
+    gTerminal.scrubSent = -1
+    scrubTerminalScreen(r, x)
+  true
+
+proc moveTerminal(r: GpuiRenderer; x, y: int) =
+  case gTerminal.drag
+  of gtdLineThumb: scrubTerminalLines(r, y, click = false)
+  of gtdScreen: scrubTerminalScreen(r, x)
+  of gtdNone: discard
+
+proc releaseTerminal(r: GpuiRenderer; x, y: int) =
+  ## The release of a held scrubber: the screen's drag ends on the write
+  ## under the pointer (the debugger is already there, or goes there now);
+  ## the line view's just ends.
+  let kind = gTerminal.drag
+  gTerminal.drag = gtdNone
+  if kind == gtdScreen:
+    scrubTerminalScreen(r, x)
+    gTerminal.scrubSent = -1
+    let vm = terminalVM()
+    if not vm.isNil:
+      vm.cancelScrub()
+    drawTerminalPane(r)
+
+proc terminalKey(r: GpuiRenderer; key: string): bool =
+  ## The pane's keys while it has the pointer's focus: Left / Right step a
+  ## write back / forward, `v` toggles lines / screen.
+  let vm = terminalVM()
+  if vm.isNil or not gTerminal.focused:
+    return false
+  case key.toLowerAscii
+  of "left", "arrowleft", "right", "arrowright":
+    let delta = if key.toLowerAscii in ["left", "arrowleft"]: -1 else: 1
+    let target = vm.stepTarget(delta)
+    if target >= 0:
+      discard terminalJump(r, target)
+    true
+  of "v":
+    vm.toggleView()
+    drawTerminalPane(r)
+    true
+  else: false
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
@@ -1675,13 +1851,22 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     if clickCalltrace(r, x, y):
       return
+    # PLAT-52: the Terminal Output pane's presses.
+    if pressTerminalOutput(r, x, y):
+      return
     step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
   of gekPointerMove:
+    if gTerminal.drag != gtdNone:
+      moveTerminal(r, x, y)
+      return
     if not gGestures.active:
       handleTopHover(r, x, y)
       return
     step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
   of gekPointerUp:
+    if gTerminal.drag != gtdNone:
+      releaseTerminal(r, x, y)
+      return
     if not gGestures.active: return
     step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
     if step.command.isSome:
@@ -1705,6 +1890,19 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
       # (scroll down) moves the content up, a negative `dy`.
       scrollCalltrace(r, int(round(-dy / float(CalltraceRowPx))))
+    elif onPane == $paneTerminalOutput and dy != 0.0:
+      # PLAT-52: the wheel scrolls the line view, as the call trace's does.
+      let vm = terminalVM()
+      if not vm.isNil and not vm.screenShown:
+        let lay = terminalLayout(terminalBody(), vm)
+        let rows = int(round(-dy / float(TerminalRowPx)))
+        let maxTop = max(0, vm.lines.val.len - lay.rows)
+        gTerminal.scrollTop = max(0, min(maxTop,
+          vm.visibleTop(gTerminal, lay.rows) + (if rows == 0: (if dy < 0: 1
+                                                              else: -1)
+                                                else: rows)))
+        gTerminal.follow = false
+        drawTerminalPane(r)
     elif onPane == $paneEditor and dx != 0.0:
       # `PLAT35-F3`. **THE EDITOR SCROLLS SIDEWAYS, and this is the half that
       # makes the clipped text reachable rather than merely announced.** The
@@ -1739,6 +1937,9 @@ proc windowKey(key: string; mods: seq[string]) =
   ## all), then `Esc` cancels a layout gesture.
   var r: GpuiRenderer
   if handleTopKey(r, key, mods):
+    return
+  # PLAT-52: the Terminal Output pane's own keys, while it has focus.
+  if mods.len == 0 and terminalKey(r, key):
     return
   if key.toLowerAscii in ["escape", "esc"]:
     discard cancelWindowGesture()
@@ -2353,6 +2554,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
       let pane = gPanes.getOrDefault($leaf.builtin)
       if not pane.isNil and not leaf.vm.isNil:
         redrawWindowLeaf(r, pane, leaf)
+  drawTerminalPane(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu) &
                     gRecordings)
@@ -2397,6 +2599,10 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
     opened.session.editorVM.showFlowOverlay.val =
       FlowOverlayShownByDefault and not gOpenCmd.noFlowOverlay
   discard opened.loadRecordingPanes()
+  try:
+    discard opened.loadTerminalOutput()   # PLAT-52
+  except CatchableError:
+    discard
   let idx = gShell.windows.indexOf(gWindow)
   let layout = if idx >= 0: gShell.windows.windows[idx].layout
                else: sharedDefaultValue()
@@ -2966,6 +3172,9 @@ proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind) =
   ## value expanded), its faces re-stamped and its rows wired.
   let el = gPanes.getOrDefault($pane)
   if el.isNil:
+    return
+  if pane == paneTerminalOutput:
+    drawTerminalPane(r)
     return
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == pane:
@@ -3919,6 +4128,82 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # replay window's, its top bar and gestures.
       if openArm.isNil: windowKey(key, mods)
       else: editKey(key, mods)
+    of "term":
+      # PLAT-52: the Terminal Output pane, aimed from the geometry it was
+      # drawn with (`terminal_output_leaf.terminalLayout`):
+      #   term:view:<lines|screen>          press a toggle button
+      #   term:line:<line>[:<column>]       press a line (scrolled into view)
+      #   term:track:<permille>             press the line scrubber's track
+      #   term:drag:<from>:<to>             hold its thumb, move, release
+      #   term:scrub:<from>:<to>[:hold]     the screen scrubber, dragged
+      #   term:key:<key>                    a key while the pane has focus
+      #   term:wheel:<rows>                 the wheel over the pane
+      let vm = terminalVM()
+      let body = terminalBody()
+      if vm.isNil or body.w <= 0:
+        return "the terminal output pane is not drawn"
+      let lay = terminalLayout(body, vm)
+      proc trackY(permille: int): int =
+        lay.track.y + min(lay.track.h - 1, lay.track.h * permille div 1000)
+      proc scrubX(permille: int): int =
+        lay.screenTrack.x + min(lay.screenTrack.w - 1,
+                                lay.screenTrack.w * permille div 1000)
+      case parts[1]
+      of "view":
+        let b = if parts[2] == "screen": lay.screenButton else: lay.linesButton
+        if b.w <= 0:
+          return "the screen view is not offered"
+        let (x, y) = centreOf(b)
+        pressAt(x, y)
+      of "line":
+        let line = at(2)
+        let column = if parts.len > 3: at(3) else: 0
+        if line < vm.visibleTop(gTerminal, lay.rows) or
+           line >= vm.visibleTop(gTerminal, lay.rows) + lay.rows:
+          gTerminal.follow = false
+          gTerminal.scrollTop = line
+          drawTerminalPane(r)
+        let top = vm.visibleTop(gTerminal, lay.rows)
+        let y = lay.content.y + (line - top) * TerminalRowPx +
+                TerminalRowPx div 2
+        let x = lay.content.x + int((float(column) + 0.5) * EditorColumnPx)
+        pressAt(x, y)
+      of "track":
+        if lay.track.h <= 0:
+          return "the line view has no scrubber"
+        pressAt(lay.track.x + TerminalTrackPx div 2, trackY(at(2)))
+      of "drag":
+        let x = lay.track.x + TerminalTrackPx div 2
+        let sm = vm.scrubberFor(gTerminal, lay.rows)
+        let span = sm.thumbSpan(lay.track.h, TerminalMinThumbPx)
+        # Hold the THUMB (wherever it is), then move to each step.
+        windowPointer(r, gekPointerDown, x, lay.track.y + span.start +
+                                            span.length div 2)
+        let a = at(2)
+        let b = at(3)
+        for k in 0 .. 10:
+          windowPointer(r, gekPointerMove, x, trackY(a + (b - a) * k div 10))
+        windowPointer(r, gekPointerUp, x, trackY(b))
+      of "scrub":
+        if lay.screenTrack.w <= 0:
+          return "the screen view is not shown"
+        let y = lay.screenTrack.y + ScreenTrackPx div 2
+        let a = at(2)
+        let b = at(3)
+        windowPointer(r, gekPointerDown, scrubX(a), y)
+        for k in 1 .. 8:
+          windowPointer(r, gekPointerMove, scrubX(a + (b - a) * k div 8), y)
+        if not (parts.len > 4 and parts[4] == "hold"):
+          windowPointer(r, gekPointerUp, scrubX(b), y)
+      of "key":
+        gTerminal.focused = true
+        if not terminalKey(r, parts[2]):
+          return "the terminal output pane does not take '" & parts[2] & "'"
+      of "wheel":
+        let (cx, cy) = centreOf(body)
+        windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
+      else:
+        return "unknown terminal event '" & parts[1] & "'"
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
@@ -4645,6 +4930,12 @@ proc runOpen(cmd: GpuiCommand): int =
   # 2026-09-23 this asked for the locals alone, and the call-trace pane drew
   # "no call trace has been loaded" on every recording.
   discard session.loadRecordingPanes()
+  # PLAT-52: the recorded program's terminal output — the Terminal Output
+  # pane's lines and screen, the producer the terminal calls too.
+  try:
+    discard session.loadTerminalOutput()
+  except CatchableError:
+    discard
   discard session.loadStopPanes()
   session.selectCurrentCall()
   # PLAT-37. THE BREAKPOINT IS RESOLVED AGAINST THE RECORDING'S OWN SOURCE,
