@@ -67,7 +67,7 @@ import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 934
+const ExpectedAssertions = 941
 var counted = 0
 var failedChecks = 0
 
@@ -269,6 +269,39 @@ suite "the welcome frame declares what the table serves":
       let reply = endpoint.handleFrame(encodeHello(HelloFrame(contractVersion: version)))
       ck frameKind(reply) == FrameWelcome
       ck decodeWelcome(reply).contractMax == EndpointContractVersion
+
+  test "the welcome is addressed to the session the hello asked for":
+    # ECHOED, never chosen here. A client driving several sessions cannot tell
+    # two welcomes apart until after it has acted on one, so the endpoint
+    # answers about the conversation it was asked about and names no other.
+    let reply = endpoint.handleFrame(encodeHello(HelloFrame(
+      contractVersion: EndpointContractVersion, session: "s-7")))
+    ck decodeWelcome(reply).session == "s-7"
+    # And a hello that names none is answered with none -- the single-session
+    # wire, unchanged in both directions.
+    let bare = endpoint.handleFrame(encodeHello(HelloFrame(
+      contractVersion: EndpointContractVersion)))
+    ck decodeWelcome(bare).session == ""
+
+  test "a reply carries the session of the call it answers":
+    # THE PAIR IS WHAT CORRELATES, not the id. Ids are allocated per client
+    # from 1, so a reply carrying only an id can be claimed by a client waiting
+    # on that number in a different session -- which completes the wrong call
+    # with a payload that looks right. Echoing the session is this side's whole
+    # part in preventing it, and it has to happen on the REFUSAL paths too:
+    # a client whose unknown-verb refusal went unaddressed would hang instead.
+    let served = endpoint.handleFrame(encodeCall(CallFrame(
+      session: "s-7", id: 3, verb: "fs.readText",
+      args: %*{"path": "/definitely/absent"})))
+    ck decodeReply(served).session == "s-7"
+    ck decodeReply(served).id == 3
+    let unknown = endpoint.handleFrame(encodeCall(CallFrame(
+      session: "s-7", id: 4, verb: "nosuch.verb", args: newJObject())))
+    ck decodeReply(unknown).session == "s-7"
+    ck not decodeReply(unknown).ok
+    let bare = endpoint.handleFrame(encodeCall(CallFrame(
+      id: 5, verb: "nosuch.verb", args: newJObject())))
+    ck decodeReply(bare).session == ""
 
   test "a frame this endpoint does not own is left alone, not refused":
     # §6.1: the facade and the existing index IPC surface share ONE connection

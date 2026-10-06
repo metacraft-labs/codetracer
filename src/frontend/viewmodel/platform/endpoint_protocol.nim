@@ -27,6 +27,30 @@
 ## that silently ignored it would present a narrower platform than the server
 ## serves, with nothing anywhere saying why.
 ##
+## ## Several sessions on one connection — the `session` field
+##
+## One WebUI drives SEVERAL container sessions. The transport may or may not
+## give each its own connection, and the contract must not depend on which:
+## §6.1 already shares this connection with the index IPC surface, so "one
+## connection carries traffic that is not this conversation's" is the existing
+## shape rather than a new one.
+##
+## Every frame therefore carries a `session`, and a client accepts a frame only
+## when it names the session that client is driving. **Without it the failure
+## is silent and it is a WRONG ANSWER, not a dropped one:** `id` is allocated
+## per client starting at 1, so two clients on one connection both have a call
+## `1` outstanding, and whichever decodes a reply first retires its own call
+## with the other's payload. Correlation "by `id` and by nothing else" (§6.2)
+## is correct only within one session; the session is what makes `id` unique.
+##
+## It is OMITTED FROM THE JSON WHEN EMPTY, and empty is the default on both
+## sides. A deployment serving one session is byte-identical on the wire to
+## what it sent before this field existed, in both directions, which is why
+## this is not a contract version bump: there is no frame a peer built against
+## the older spelling can send that this one reads differently, and none this
+## one sends that the older peer cannot read. A peer that never fills it in is
+## a peer with one session, which is exactly what it had.
+##
 ## ## What is deliberately NOT here
 ##
 ## No authentication. §6.6 says so plainly: the socket carries filesystem
@@ -79,8 +103,17 @@ type
 
   HelloFrame* = object
     contractVersion*: int
+    session*: string
+      ## Which session this client is driving. Empty is "the only one" and is
+      ## omitted from the wire — see the header. In `hello` it is the client
+      ## ASKING for a session, so a server multiplexing several knows which
+      ## conversation the handshake opens.
 
   WelcomeFrame* = object
+    session*: string
+      ## Which session this welcome is for. A client ignores a `welcome` naming
+      ## a session it is not driving, or two clients on one connection would
+      ## each install the first profile that arrived — including the other's.
     contractMin*: int
     contractMax*: int
     profile*: PlatformProfile
@@ -94,11 +127,15 @@ type
       ## does not own.
 
   CallFrame* = object
+    session*: string
     id*: int
+      ## Unique WITHIN A SESSION, not within a connection. See the header: the
+      ## pair is what correlates a reply, and `id` alone does not.
     verb*: string
     args*: JsonNode
 
   ReplyFrame* = object
+    session*: string
     id*: int
     ok*: bool
     payload*: JsonNode
@@ -116,6 +153,7 @@ type
       ## call made in-process — which is the one thing a deployment must not be.
 
   EventFrame* = object
+    session*: string
     handle*: string
     event*: string
     payload*: JsonNode
@@ -228,6 +266,20 @@ proc requireStr(node: JsonNode; key: string): string =
   f.getStr
 
 # ---------------------------------------------------------------------------
+# The session discriminator. ABSENT MEANS EMPTY in both directions, and empty
+# is omitted rather than sent as `""`, so a one-session deployment's bytes are
+# the ones it sent before this field existed. See the header for why that is
+# what makes this a non-breaking addition.
+# ---------------------------------------------------------------------------
+proc withSession(node: JsonNode; session: string): JsonNode =
+  result = node
+  if session.len > 0: result["session"] = %session
+
+proc readSession(node: JsonNode): string =
+  let f = node{"session"}
+  if f.isNil or f.kind != JString: "" else: f.getStr
+
+# ---------------------------------------------------------------------------
 # Profiles on the wire.
 # ---------------------------------------------------------------------------
 proc encodeProfile*(p: PlatformProfile): JsonNode =
@@ -282,22 +334,26 @@ proc decodeProfile*(node: JsonNode; unknown: var seq[string]): PlatformProfile =
 # Frames.
 # ---------------------------------------------------------------------------
 proc encodeHello*(f: HelloFrame): string =
-  $(%*{"kind": FrameHello, "contractVersion": f.contractVersion})
+  $withSession(%*{"kind": FrameHello,
+                  "contractVersion": f.contractVersion}, f.session)
 
 proc decodeHello*(text: string): HelloFrame =
   let node = parseFrame(text, FrameHello)
-  HelloFrame(contractVersion: requireInt(node, "contractVersion"))
+  HelloFrame(contractVersion: requireInt(node, "contractVersion"),
+             session: readSession(node))
 
 proc encodeWelcome*(f: WelcomeFrame): string =
-  $(%*{
+  $withSession(%*{
     "kind": FrameWelcome,
     "contractMin": f.contractMin,
     "contractMax": f.contractMax,
     "profile": encodeProfile(f.profile),
-    "deployment": if f.deployment.isNil: newJObject() else: f.deployment})
+    "deployment": if f.deployment.isNil: newJObject() else: f.deployment},
+    f.session)
 
 proc decodeWelcome*(text: string): WelcomeFrame =
   let node = parseFrame(text, FrameWelcome)
+  result.session = readSession(node)
   result.contractMin = requireInt(node, "contractMin")
   result.contractMax = requireInt(node, "contractMax")
   if result.contractMin > result.contractMax:
@@ -309,14 +365,15 @@ proc decodeWelcome*(text: string): WelcomeFrame =
   result.deployment = if deployment.isNil: newJObject() else: deployment
 
 proc encodeCall*(f: CallFrame): string =
-  $(%*{
+  $withSession(%*{
     "kind": FrameCall,
     "id": f.id,
     "verb": f.verb,
-    "args": if f.args.isNil: newJObject() else: f.args})
+    "args": if f.args.isNil: newJObject() else: f.args}, f.session)
 
 proc decodeCall*(text: string): CallFrame =
   let node = parseFrame(text, FrameCall)
+  result.session = readSession(node)
   result.id = requireInt(node, "id")
   result.verb = requireStr(node, "verb")
   if result.verb.len == 0 or not result.verb.contains('.'):
@@ -330,16 +387,17 @@ proc decodeCall*(text: string): CallFrame =
 
 proc encodeReply*(f: ReplyFrame): string =
   if f.ok:
-    $(%*{"kind": FrameReply, "id": f.id, "ok": true,
-         "payload": if f.payload.isNil: newJNull() else: f.payload})
+    $withSession(%*{"kind": FrameReply, "id": f.id, "ok": true,
+         "payload": if f.payload.isNil: newJNull() else: f.payload}, f.session)
   else:
-    $(%*{"kind": FrameReply, "id": f.id, "ok": false,
+    $withSession(%*{"kind": FrameReply, "id": f.id, "ok": false,
          "errorKind": errorKindName(f.errorKind),
          "errorMessage": f.errorMessage,
-         "detail": f.detail})
+         "detail": f.detail}, f.session)
 
 proc decodeReply*(text: string): ReplyFrame =
   let node = parseFrame(text, FrameReply)
+  result.session = readSession(node)
   result.id = requireInt(node, "id")
   let ok = node{"ok"}
   if ok.isNil or ok.kind != JBool:
@@ -370,14 +428,15 @@ proc decodeReply*(text: string): ReplyFrame =
       if detail.isNil or detail.kind != JString: "" else: detail.getStr
 
 proc encodeEvent*(f: EventFrame): string =
-  $(%*{
+  $withSession(%*{
     "kind": FrameEvent,
     "handle": f.handle,
     "event": f.event,
-    "payload": if f.payload.isNil: newJNull() else: f.payload})
+    "payload": if f.payload.isNil: newJNull() else: f.payload}, f.session)
 
 proc decodeEvent*(text: string): EventFrame =
   let node = parseFrame(text, FrameEvent)
+  result.session = readSession(node)
   result.handle = requireStr(node, "handle")
   result.event = requireStr(node, "event")
   let payload = node{"payload"}

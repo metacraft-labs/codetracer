@@ -67,7 +67,7 @@ import ../../platform/browser_facades
 import ../../platform/endpoint_protocol
 import ../../host/container_boot
 
-const ExpectedAssertions = 47
+const ExpectedAssertions = 61
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -105,6 +105,32 @@ proc newFakeServer(profile: PlatformProfile; min = EndpointContractVersion;
   FakeServer(sent: @[], autoWelcome: autoWelcome,
              contractMin: min, contractMax: max, profile: profile)
 
+type Wire = ref object
+  ## ONE connection with SEVERAL clients on it — the shape `channelOf` cannot
+  ## express, because it stores a single handler and a second `subscribe`
+  ## overwrites the first.
+  ##
+  ## `broadcast` delivers to every subscriber, which is not a simplification:
+  ## a shared transport hands every frame to every client on it, and the client
+  ## is what decides whether a frame is its own. A fake that routed by session
+  ## would be implementing the thing under test.
+  sent: seq[string]
+  handlers: seq[proc(frame: string)]
+
+proc newWire(): Wire = Wire(sent: @[], handlers: @[])
+
+proc wireChannel(w: Wire): ContainerChannel =
+  ContainerChannel(
+    send: proc(frame: string) =
+      # `add(frame)` and not `add frame`: command syntax would swallow the
+      # comma that ends this field and read `subscribe:` as a second argument.
+      w.sent.add(frame),
+    subscribe: proc(handler: proc(frame: string)) =
+      w.handlers.add(handler))
+
+proc broadcast(w: Wire; frame: string) =
+  for h in w.handlers: h(frame)
+
 proc inertTab(): BrowserTabBridge =
   ## Answers everything, because the tab's own behaviour is
   ## `test_container_tab_facades.nim`'s subject and not this file's.
@@ -131,6 +157,14 @@ let servedProfile = PlatformProfile(
   displayName: "the fake container",
   capabilities: {capFilesystemRead, capVcsRead, capSettingsRead},
   degradations: @[])
+
+proc welcomeFor(session: string): string =
+  ## A welcome addressed to one session, built with the REAL encoder so a field
+  ## name that drifts fails here rather than being agreed on by two fakes.
+  encodeWelcome(WelcomeFrame(
+    session: session, contractMin: EndpointContractVersion,
+    contractMax: EndpointContractVersion, profile: servedProfile,
+    deployment: newJObject()))
 
 # ---------------------------------------------------------------------------
 
@@ -286,6 +320,94 @@ suite "silence, and somebody else's traffic":
     ck boot.platform == installed
     ck boot.platform.can(capFilesystemRead)
     ck not boot.platform.can(capProcessSpawn)
+
+suite "several sessions on ONE channel":
+  # The WebUI drives several container sessions. Whether the transport gives
+  # each its own connection is the transport's business — §6.1 already shares
+  # this one with the index IPC surface — so the client has to be correct when
+  # it does not.
+  #
+  # WITHOUT A SESSION ON THE FRAME THE FAILURE IS A WRONG VALUE, not a dropped
+  # one, and that is why these cases exist rather than a comment. `nextId`
+  # starts at 1 in every boot, so two boots on one channel both have call `1`
+  # outstanding; `deliverReply` retired by `id` alone, so whichever decoded a
+  # reply first completed ITS call with the OTHER session's payload. A test
+  # that only asserted "frames arrive" could not see that.
+
+  test "a `hello` asks for the session the caller named":
+    let wire = newWire()
+    discard beginContainerBoot(wireChannel(wire), inertTab(), session = "s-1")
+    ck decodeHello(wire.sent[0]).session == "s-1"
+
+  test "a `welcome` installs only into the session it names":
+    let wire = newWire()
+    let one = beginContainerBoot(wireChannel(wire), inertTab(), session = "s-1")
+    let two = beginContainerBoot(wireChannel(wire), inertTab(), session = "s-2")
+    wire.broadcast(welcomeFor("s-1"))
+    ck one.outcome == cbInstalled
+    # Still PENDING, not refused and not malformed: from `two`'s point of view
+    # nothing has answered it yet, which is the state silence leaves it in.
+    ck two.outcome == cbPending
+    ck two.platform.isNil
+
+  test "another session's welcome does not fire `onSettled`":
+    # A caller that heard about a settlement which did not happen would show
+    # §6.5's sentence, or mount an editor, for a session that has not answered.
+    let wire = newWire()
+    var settledFor: seq[string] = @[]
+    # The handler is bound first rather than written inline: an anonymous proc
+    # body inside an argument list runs to the end of the line, so `session =`
+    # after it would be read as part of the body.
+    let note = proc(b: ContainerBoot) = settledFor.add(b.session)
+    discard beginContainerBoot(wireChannel(wire), inertTab(),
+                               onSettled = note, session = "s-1")
+    wire.broadcast(welcomeFor("s-2"))
+    ck settledFor.len == 0
+    wire.broadcast(welcomeFor("s-1"))
+    ck settledFor == @["s-1"]
+
+  test "a `call` carries the session that made it":
+    let wire = newWire()
+    let one = beginContainerBoot(wireChannel(wire), inertTab(), session = "s-1")
+    wire.broadcast(welcomeFor("s-1"))
+    discard one.platform.fs.readText("/w/a.nr")
+    ck decodeCall(wire.sent[^1]).session == "s-1"
+
+  test "a reply is retired by (session, id) and NOT by id alone":
+    let wire = newWire()
+    let one = beginContainerBoot(wireChannel(wire), inertTab(), session = "s-1")
+    let two = beginContainerBoot(wireChannel(wire), inertTab(), session = "s-2")
+    wire.broadcast(welcomeFor("s-1"))
+    wire.broadcast(welcomeFor("s-2"))
+    discard one.platform.fs.readText("/w/a.nr")
+    discard two.platform.fs.readText("/w/b.nr")
+    let idOne = decodeCall(wire.sent[^2]).id
+    let idTwo = decodeCall(wire.sent[^1]).id
+    # THE COLLISION ITSELF, asserted rather than assumed: ids are allocated per
+    # session from 1, so these ARE the same number. If they ever stop being,
+    # this case stops exercising what it was written for and should be fixed
+    # rather than deleted.
+    ck idOne == idTwo
+    ck one.outstandingCalls() == @[idOne]
+    ck two.outstandingCalls() == @[idTwo]
+    wire.broadcast(encodeReply(ReplyFrame(
+      session: "s-2", id: idTwo, ok: true, payload: %"FOR-TWO")))
+    # `two` answered, `one` untouched. Before the session field, `one` would
+    # have completed its own read with "FOR-TWO".
+    ck two.outstandingCalls().len == 0
+    ck one.outstandingCalls() == @[idOne]
+
+  test "a session that names one ignores an UNADDRESSED welcome":
+    # The other direction of the same rule. A deployment that serves one
+    # session sends no `session`, and a client driving several cannot tell
+    # which of them such a welcome is for — so it is for the unnamed one, and
+    # for no other.
+    let wire = newWire()
+    let named = beginContainerBoot(wireChannel(wire), inertTab(), session = "s-1")
+    let unnamed = beginContainerBoot(wireChannel(wire), inertTab())
+    wire.broadcast(welcomeFor(""))
+    ck unnamed.outcome == cbInstalled
+    ck named.outcome == cbPending
 
 suite "the tally":
   test "assertion count":

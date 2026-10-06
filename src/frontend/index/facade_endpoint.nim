@@ -1101,8 +1101,14 @@ const
     ## own, so a build that moves the contract moves the server's ceiling with
     ## it and cannot answer `welcome` with a range it does not implement.
 
-proc welcomeFrame*(ep: FacadeEndpoint): WelcomeFrame =
+proc welcomeFrame*(ep: FacadeEndpoint; session = ""): WelcomeFrame =
+  ## `session` is ECHOED, never chosen here. The client names the conversation
+  ## it is opening and this endpoint answers the one it was asked about; a
+  ## server that assigned the name instead would have to be consulted before a
+  ## client could address anything, and a client driving several sessions would
+  ## have no way to tell two welcomes apart until after it had acted on one.
   WelcomeFrame(
+    session: session,
     contractMin: ServedContractMin,
     contractMax: ServedContractMax,
     profile: servedProfile(),
@@ -1113,9 +1119,23 @@ proc welcomeFrame*(ep: FacadeEndpoint): WelcomeFrame =
 # ---------------------------------------------------------------------------
 
 proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
-  ## One `call` frame in, one `reply` frame out. The `id` is copied back and
-  ## nothing else correlates them — §6.2.
-  result.id = call.id
+  ## One `call` frame in, one `reply` frame out. The `(session, id)` PAIR is
+  ## copied back and nothing else correlates them.
+  ##
+  ## §6.2 says `id`, and that was complete while a connection carried one
+  ## conversation. It does not survive several: ids are allocated per client
+  ## from 1, so a reply carrying only an `id` can be claimed by a client that
+  ## is waiting on that number in a DIFFERENT session — which completes the
+  ## wrong call with the right-looking payload. Echoing the session is this
+  ## side's whole part in preventing that, and it is unconditional: an empty
+  ## session echoes as empty, which is the single-session wire unchanged.
+  # NO `result.id = ...` / `result.session = ...` HERE. Every path below either
+  # `return`s a fresh `ReplyFrame` or falls into the final `if`, which builds
+  # one -- so an assignment to `result` at the top is dead on all of them. It
+  # was dead for `id` before the session was added, and reading as though it
+  # set a default is exactly how a path that forgot to copy the pair would look
+  # correct. Each literal carries both, and the suite checks them on the
+  # refusal paths too.
   let index = findVerb(call.verb)
   if index < 0:
     # A verb this endpoint has never heard of. `pkNotSupported` by name, with a
@@ -1125,13 +1145,13 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
     # knows about — and a suite that cannot tell them apart cannot notice a
     # verb missing from the table.
     return ReplyFrame(
-      id: call.id, ok: false, errorKind: pkNotSupported,
+      session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
       errorMessage: "this endpoint declares no verb named '" & call.verb & "'")
 
   let entry = facadeVerbs[index]
   if entry.handler.isNil:
     return ReplyFrame(
-      id: call.id, ok: false, errorKind: pkNotSupported,
+      session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
       errorMessage: entry.verb & " is declared by the contract and not " &
         "served here: " & entry.unservedBecause)
 
@@ -1142,11 +1162,11 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
     # The client sent a field this build cannot read — a missing name, a
     # string where a number belongs, an enum value from another version.
     return ReplyFrame(
-      id: call.id, ok: false, errorKind: pkInvalidArgument,
+      session: call.session, id: call.id, ok: false, errorKind: pkInvalidArgument,
       errorMessage: entry.verb & ": " & err.msg)
   except CatchableError as err:
     return ReplyFrame(
-      id: call.id, ok: false, errorKind: pkFailed,
+      session: call.session, id: call.id, ok: false, errorKind: pkFailed,
       errorMessage: entry.verb & " failed: " & err.msg)
   except:
     # THE BARE `except:` IS DELIBERATE, for `endpoint_protocol`'s measured
@@ -1155,14 +1175,15 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
     # exception escapes — here, out of a socket handler, taking the connection
     # with it. A dispatcher must answer even when a handler misbehaves.
     return ReplyFrame(
-      id: call.id, ok: false, errorKind: pkFailed,
+      session: call.session, id: call.id, ok: false, errorKind: pkFailed,
       errorMessage: entry.verb & " failed: " & getCurrentExceptionMsg())
 
   if reply.ok:
-    ReplyFrame(id: call.id, ok: true,
+    ReplyFrame(session: call.session, id: call.id, ok: true,
                payload: if reply.payload.isNil: newJNull() else: reply.payload)
   else:
-    ReplyFrame(id: call.id, ok: false, errorKind: reply.errorKind,
+    ReplyFrame(session: call.session, id: call.id, ok: false,
+               errorKind: reply.errorKind,
                errorMessage: reply.errorMessage, detail: reply.detail)
 
 proc handleFrame*(ep: FacadeEndpoint; text: string): string =
@@ -1180,11 +1201,12 @@ proc handleFrame*(ep: FacadeEndpoint; text: string): string =
   ## nothing to name the two numbers from.
   case frameKind(text)
   of FrameHello:
+    var hello: HelloFrame
     try:
-      discard decodeHello(text)
+      hello = decodeHello(text)
     except ProtocolError:
       return ""
-    encodeWelcome(ep.welcomeFrame())
+    encodeWelcome(ep.welcomeFrame(hello.session))
   of FrameCall:
     var call: CallFrame
     try:

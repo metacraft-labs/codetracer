@@ -488,3 +488,120 @@ suite "path arithmetic is host-free and behaves":
     check not isAbsolute("a/b")
     check not isAbsolute("")
     check splitDrive("C:/a/b") == ("C:", "/a/b")
+
+# ---------------------------------------------------------------------------
+# SEVERAL SESSIONS IN ONE PROCESS.
+#
+# One WebUI drives several container-backed sessions, each a different process
+# on the other end of a different connection with its own filesystem, its own
+# VCS and its own capability profile. "The platform" is therefore no longer a
+# property of the process, and the single `installedPlatform` that used to hold
+# it could only ever name one of them.
+#
+# The global is narrowed rather than removed — `platform()` is the ACTIVE
+# session's — so what these cases are really pinning is that the narrowing did
+# not change the single-session behaviour underneath it. That is where a
+# regression would land: every pre-session call site still says `platform()`.
+# ---------------------------------------------------------------------------
+
+proc markedPlatform(name: string): Platform =
+  ## Platforms distinguishable BY VALUE, so a lookup that returned the wrong
+  ## session's is visible. Identity comparison would pass for two platforms a
+  ## registry had aliased to one object, which is the mistake worth catching.
+  newPlatform(PlatformProfile(kind: pkContainer, displayName: name,
+                              capabilities: {capFilesystemRead},
+                              degradations: @[]))
+
+suite "several sessions, one process":
+  setup:
+    resetPlatformForTesting()
+
+  teardown:
+    resetPlatformForTesting()
+
+  test "the single-session spelling is unchanged":
+    # The whole compatibility claim, in one case: no session named anywhere,
+    # and `platform()` is what was installed.
+    installPlatform(markedPlatform("only"))
+    check platform().profile.displayName == "only"
+    check activePlatformSession() == DefaultPlatformSession
+    check platformWasExplicitlyChosen()
+
+  test "two sessions keep their own platforms":
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    check platformFor("s-1").profile.displayName == "one"
+    check platformFor("s-2").profile.displayName == "two"
+    check platformSessions() == @["s-1", "s-2"]
+
+  test "the first session installed becomes the active one":
+    installPlatform("s-1", markedPlatform("one"))
+    check activePlatformSession() == "s-1"
+    check platform().profile.displayName == "one"
+
+  test "a later session does NOT steal the active one":
+    # A second session booting in the background while the user is looking at
+    # the first must not redirect every `platform()` read in the tree. If this
+    # ever fails, a handshake completing is silently switching the UI.
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    check activePlatformSession() == "s-1"
+    check platform().profile.displayName == "one"
+
+  test "switching is explicit, and reported":
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    check setActivePlatformSession("s-2")
+    check platform().profile.displayName == "two"
+
+  test "switching to a session that has not booted is REFUSED, not silent":
+    # The refusal matters more than the switch. Pointing `platform()` at a
+    # session with nothing installed would render every panel as "unsupported"
+    # and leave the difference between "not booted" and "cannot do that"
+    # invisible to whoever is looking at it.
+    installPlatform("s-1", markedPlatform("one"))
+    check not setActivePlatformSession("s-absent")
+    check activePlatformSession() == "s-1"
+    check platform().profile.displayName == "one"
+
+  test "an unknown session refuses rather than crashing, and is not created":
+    # Two assertions in one case because they are the same promise: the answer
+    # is a refusing platform (the header's rule about `nil`), AND asking did
+    # not bring the session into existence. A lookup that registered would make
+    # `platformSessions()` grow every time a caller checked.
+    installPlatform("s-1", markedPlatform("one"))
+    let absent = platformFor("s-absent")
+    check not absent.isNil
+    check not absent.can(capFilesystemRead)
+    check platformSessions() == @["s-1"]
+    check not hasPlatformSession("s-absent")
+
+  test "a released session's platform is gone":
+    # A facade call made after the container is gone must refuse. Left
+    # installed, it would reach a transport whose socket is closed and hang
+    # pending for ever, which is the worse failure: no answer at all.
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    releasePlatformSession("s-1")
+    check platformSessions() == @["s-2"]
+    check not platformFor("s-1").can(capFilesystemRead)
+
+  test "releasing the ACTIVE session leaves the page between sessions":
+    # Not a crash and not an automatic successor: this code cannot know which
+    # of the remaining sessions the user was about to look at.
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    releasePlatformSession("s-1")
+    check activePlatformSession() == "s-1"
+    check not platform().can(capFilesystemRead)
+    check setActivePlatformSession("s-2")
+    check platform().profile.displayName == "two"
+
+  test "the empty session id is an ordinary session, not a sentinel":
+    # This is what makes the compatibility claim structural rather than a
+    # special case bolted on: `installPlatform(p)` and
+    # `installPlatform("", p)` must be the same thing.
+    installPlatform(DefaultPlatformSession, markedPlatform("default"))
+    check platform().profile.displayName == "default"
+    check hasPlatformSession(DefaultPlatformSession)
+    check platformFor(DefaultPlatformSession).profile.displayName == "default"

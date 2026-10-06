@@ -37,6 +37,21 @@
 ## handshake, the version refusal and the reply correlation be tested on both
 ## Nim backends.
 ##
+## ## Several sessions, and why a boot filters by one
+##
+## One WebUI drives several container sessions, so there is one `ContainerBoot`
+## per session — the object is already per-connection and holds its own
+## `pending` table, so that part needed nothing. What it did NOT have was a way
+## to tell its own frames from another session's on a channel it shares.
+##
+## That is not a tidiness point. `nextId` starts at 1 in every boot, so two
+## boots on one channel both have call `1` outstanding, and `deliverReply`
+## retired a reply by `id` alone: whichever boot decoded it first would have
+## completed its own call with the OTHER session's payload — a wrong value, not
+## a dropped frame. Each boot now accepts only frames whose `session` is its
+## own, and `""` (the default on both sides) is a session like any other, so a
+## deployment serving one session behaves exactly as it did.
+##
 ## ## What it does with a refusal
 ##
 ## §6.5 puts the version decision in the CLIENT, because the stale artefact is
@@ -84,6 +99,10 @@ type
   ContainerBoot* = ref object
     channel: ContainerChannel
     tab: BrowserTabBridge
+    session: string
+      ## The session this boot drives, stamped on every frame it sends and
+      ## required on every frame it accepts. Empty is the single-session
+      ## deployment and is omitted from the wire.
     nextId: int
     pending: Table[int, proc(response: RemoteResponse)]
     outcome*: ContainerBootOutcome
@@ -134,7 +153,8 @@ proc transportFor(boot: ContainerBoot): RemoteTransport =
     let completer = newCompleter[RemoteResponse]()
     boot.pending[id] = completer.complete
     boot.channel.send(encodeCall(
-      CallFrame(id: id, verb: request.verb, args: request.args)))
+      CallFrame(session: boot.session, id: id, verb: request.verb,
+                args: request.args)))
     completer.future
 
 proc deliverReply(boot: ContainerBoot; text: string) =
@@ -146,6 +166,11 @@ proc deliverReply(boot: ContainerBoot; text: string) =
     # under. The call it belonged to stays pending, which is visible as a hung
     # operation rather than as a wrong value.
     return
+  # THE SESSION TEST COMES FIRST, and it is not interchangeable with the `id`
+  # test below. Ids are allocated per session from 1, so another session's
+  # reply can carry an id this boot has outstanding — the `hasKey` check would
+  # pass and complete the wrong call with the wrong payload.
+  if reply.session != boot.session: return
   if not boot.pending.hasKey(reply.id): return
   let complete = boot.pending[reply.id]
   boot.pending.del(reply.id)
@@ -154,13 +179,17 @@ proc deliverReply(boot: ContainerBoot; text: string) =
   else:
     complete(remoteErr(reply.errorKind, reply.errorMessage, reply.detail))
 
-proc receiveWelcome(boot: ContainerBoot; text: string) =
+proc receiveWelcome(boot: ContainerBoot; text: string): bool =
+  ## True when this welcome was ADDRESSED TO THIS BOOT and was acted on —
+  ## which is what decides whether `onSettled` may fire. A welcome for another
+  ## session is not this boot's business and must not settle it; a MALFORMED
+  ## one is, and settles it as `cbMalformed`.
   if boot.outcome != cbPending:
     # A second `welcome` — a reconnect, most likely. Replacing the platform
     # under a running page would swap the facades out from under in-flight
     # calls; the profile is a property of the deployment and a reconnect to the
     # same deployment cannot have changed it.
-    return
+    return false
   var welcome: WelcomeFrame
   try:
     welcome = decodeWelcome(text)
@@ -168,7 +197,12 @@ proc receiveWelcome(boot: ContainerBoot; text: string) =
     boot.outcome = cbMalformed
     boot.message = "this deployment sent a welcome this build cannot read: " &
       err.msg
-    return
+    return true
+
+  # Another session's welcome. Not an error and not this boot's: it stays
+  # `cbPending`, which is the same state silence leaves it in, because from
+  # this boot's point of view nothing has answered it yet.
+  if welcome.session != boot.session: return false
 
   let verdict = negotiate(EndpointContractVersion,
                           welcome.contractMin, welcome.contractMax)
@@ -176,10 +210,11 @@ proc receiveWelcome(boot: ContainerBoot; text: string) =
     boot.outcome = cbRefused
     boot.message = negotiationMessage(verdict, EndpointContractVersion,
                                       welcome.contractMin, welcome.contractMax)
-    return
+    return true
 
   boot.platform = newContainerPlatform(transportFor(boot), boot.tab, welcome)
   boot.outcome = cbInstalled
+  true
 
 proc outstandingCalls*(boot: ContainerBoot): seq[int] =
   ## The ids of calls that have been sent and not yet answered, in ascending
@@ -211,12 +246,12 @@ proc receive*(boot: ContainerBoot; text: string) =
   ## because a suite drives this directly.
   case frameKind(text)
   of FrameWelcome:
-    boot.receiveWelcome(text)
+    let mine = boot.receiveWelcome(text)
     # The notification lives HERE rather than in a channel wrapper, so that a
     # channel which delivers the `welcome` synchronously from inside `send`
     # — every fake one in a suite does — is not a case the caller silently
     # never hears about.
-    if boot.outcome != cbPending and boot.onSettled != nil:
+    if mine and boot.outcome != cbPending and boot.onSettled != nil:
       let settled = boot.onSettled
       boot.onSettled = nil
       settled(boot)
@@ -226,9 +261,14 @@ proc receive*(boot: ContainerBoot; text: string) =
     # not a frame of ours belongs to somebody else.
     discard
 
+proc session*(boot: ContainerBoot): string =
+  ## Which session this boot drives. Public so a caller holding several can say
+  ## which one settled — `onSettled` hands back the boot and nothing else.
+  boot.session
+
 proc beginContainerBoot*(channel: ContainerChannel; tab: BrowserTabBridge;
-                         onSettled: proc(boot: ContainerBoot) = nil
-                        ): ContainerBoot =
+                         onSettled: proc(boot: ContainerBoot) = nil;
+                         session = ""): ContainerBoot =
   ## Subscribe, send `hello`, and hand back the handle.
   ##
   ## Returns before the answer arrives — `outcome` is `cbPending` until one
@@ -241,9 +281,10 @@ proc beginContainerBoot*(channel: ContainerChannel; tab: BrowserTabBridge;
   ## That is the dev-server case and it is not an error: the page keeps the
   ## platform it already had.
   result = ContainerBoot(
-    channel: channel, tab: tab, nextId: 1,
+    channel: channel, tab: tab, session: session, nextId: 1,
     pending: initTable[int, proc(response: RemoteResponse)](),
     outcome: cbPending, onSettled: onSettled)
   let boot = result
   channel.subscribe(proc(frame: string) = boot.receive(frame))
-  channel.send(encodeHello(HelloFrame(contractVersion: EndpointContractVersion)))
+  channel.send(encodeHello(HelloFrame(
+    contractVersion: EndpointContractVersion, session: session)))
