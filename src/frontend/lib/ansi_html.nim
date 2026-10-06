@@ -1,9 +1,10 @@
 ## The one AnsiUp constructor CodeTracer uses, with its escaping stated.
 ##
-## `ansi_up` turns a recorded program's ANSI-coloured output into `<span>`
-## runs, and both consumers — `ui/terminal_output.nim` (program stdout/stderr)
-## and `ui/build.nim` (compiler output) — put the result into `innerHTML`.
-## That is deliberate: the `<span>`s are the point.
+## `ansi_up` turns ANSI-coloured output into `<span>` runs, and its consumer
+## — `ui/build.nim` (compiler output) — puts the result into `innerHTML`.
+## That is deliberate: the `<span>`s are the point. (The Terminal Output pane
+## was a second consumer until PLAT-52; it now decodes SGR into data —
+## `viewmodels/terminal_output_model` — and builds its spans from text nodes.)
 ##
 ## What is NOT deliberate is that the *escaping* of everything around those
 ## spans was a library default nobody had written down.  `ansi_up` 6.0.6

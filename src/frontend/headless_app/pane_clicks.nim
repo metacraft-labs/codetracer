@@ -539,8 +539,9 @@ const ClickInventory*: array[56, ClickBehaviour] = [
   k("K31", "Point list: row", {cgClick}, "select the point",
     "PointListVM.selectPoint", nsDone, nsDone),
   k("K32", "Terminal output: line", {cgClick}, "go to that output",
-    "ct/event-jump", nsNotApplicable, nsNotApplicable,
-    "a report leaf natively (PLAT-45)"),
+    "ct/event-jump", nsDone, nsDone,
+    "PLAT-52: the pane is drawn natively; a fragment (or the line past its " &
+      "text) goes to its write"),
   k("K33", "Scratchpad: close", {cgClick},
     "remove the entry", "ScratchpadVM.removeValue", nsDone, nsDone),
   k("K34", "VCS: changed file", {cgClick}, "open the file's diff",

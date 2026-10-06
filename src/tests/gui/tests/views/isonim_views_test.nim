@@ -4747,7 +4747,7 @@ proc makeTerminalLine(lineIndex: int;
 proc makeTerminalFragment(text: string; eventIndex: int = 0;
                           rrTicks: uint64 = 100'u64): TerminalEventFragment =
   TerminalEventFragment(
-    htmlText: text,
+    text: text,
     eventIndex: eventIndex,
     rrTicks: rrTicks,
   )
@@ -4978,6 +4978,199 @@ suite "IsoNim Terminal Output Panel — interactions":
       check req.get.args["directLocationRRTicks"].getInt == 42
       check req.get.args["kind"].getInt == 0
 
+      dispose()
+
+# ---------------------------------------------------------------------------
+# PLAT-52: the fragments carry SGR data; the screen view and its REAL-TIME
+# scrubber. The mock backend is the one stand-in: it records the
+# `ct/event-jump` requests the view's gestures send (the real engine's answer
+# is the native suites' subject), which is the whole of what is asserted here.
+# ---------------------------------------------------------------------------
+
+proc terminalEvent(content: string; ticks: uint64;
+                   index: int): TerminalOutputEvent =
+  TerminalOutputEvent(content: content, rrTicks: ticks, eventIndex: index,
+                      logIndex: index + 100, path: "/p/main.py", line: index)
+
+proc spanOf(fragNode: MockNode): MockNode =
+  ## A fragment's styled span (fragment div > content div > span).
+  fragNode.children[0].children[0]
+
+suite "IsoNim Terminal Output Panel — PLAT-52":
+
+  test "a fragment is a span styled from its SGR data, its text a text node":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[31mred\e[0m <img src=x onerror=alert(1)> " &
+                      "\e[1;48;5;4mbold on blue\e[0m\n", 10, 0)])
+      let line = findByClass(panel, "terminal-line")
+      check line.children.len == 3
+      let red = spanOf(line.children[0])
+      check red.tag == "span"
+      check red.attributes["style"] == "color:rgb(187,0,0)"
+      check red.textContent == "red"
+      # Program output is TEXT: the markup in it is a text node, no element.
+      let plain = spanOf(line.children[1])
+      check "style" notin plain.attributes
+      check plain.children.len == 1
+      check plain.children[0].kind == mnkText
+      check plain.textContent == " <img src=x onerror=alert(1)> "
+      let bold = spanOf(line.children[2])
+      check bold.attributes["style"] ==
+            "background-color:rgb(0,0,187);font-weight:bold"
+      check line.children[2].attributes["data-event-index"] == "0"
+      dispose()
+
+  test "each fragment's click goes to ITS write, not the last one's":
+    # On the JS backend a closure made inside the line loop shares the loop's
+    # variable, and every fragment went to the last write (measured on the
+    # real desktop). The vm-js lane runs this case on that backend.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[terminalEvent("first\n", 10, 0),
+                     terminalEvent("second\n", 20, 1),
+                     terminalEvent("third\n", 30, 2)])
+      let lines = findAllByClass(panel, "terminal-line")
+      check lines.len == 3
+      mock.clearReceivedCommands()
+      lines[1].children[0].fireEvent("click")
+      let jump = mock.findCommand("ct/event-jump")
+      check jump.isSome
+      check jump.get.args["directLocationRRTicks"].getInt == 20
+      check jump.get.args["eventIndex"].getInt == 101
+      dispose()
+
+  test "a line-oriented program: lines shown, no toggle, no screen":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[terminalEvent("hello\n", 10, 0)])
+      check panel.attributes["data-terminal-view"] == "lines"
+      check findByClass(panel, "terminal-view-toggle").styles["display"] ==
+            "none"
+      check findByTag(panel, "pre").styles["display"] == "block"
+      check findByClass(panel, "terminal-screen").styles["display"] == "none"
+      dispose()
+
+  test "a full-screen program opens on its screen, with the scrubber's marks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[?1049h\e[2J\e[1;1Hframe one", 10, 0),
+        terminalEvent("\e[1;1Hframe two", 20, 1),
+        terminalEvent("\e[2J\e[3;3Hcleared", 30, 2),
+        terminalEvent("\e[?1049lbye\n", 40, 3)])
+      check panel.attributes["data-terminal-view"] == "screen"
+      check findByClass(panel, "terminal-view-toggle").styles["display"] ==
+            "block"
+      vm.setCurrentRRTicks(20)
+      let grid = findByClass(panel, "terminal-screen-grid")
+      check grid.attributes["data-write"] == "1"
+      check grid.attributes["data-cols"] == "80"
+      let rows = findAllByClass(panel, "terminal-screen-row")
+      check rows.len == 24
+      check rows[0].textContent.startsWith("frame two")
+      let marks = findAllByClass(panel, "terminal-scrubber-mark")
+      var kinds: seq[string] = @[]
+      for m in marks: kinds.add m.attributes["data-kind"]
+      check kinds == @["alt-enter", "clear", "alt-leave"]
+      check findByClass(panel, "terminal-scrubber-range").attributes["max"] ==
+            "3"
+      # The toggle: the lines, remembered as the choice.
+      let linesButton = findAllByClass(panel, "terminal-view-button")[0]
+      linesButton.fireEvent("click")
+      check panel.attributes["data-terminal-view"] == "lines"
+      check vm.viewChosen
+      dispose()
+
+  test "the scrubber is REAL-TIME: each input moves the debugger":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
+        terminalEvent("\e[1;1Hb", 20, 1),
+        terminalEvent("\e[1;1Hc", 30, 2),
+        terminalEvent("\e[?1049l", 40, 3)])
+      let range = findByClass(panel, "terminal-scrubber-range")
+      mock.clearReceivedCommands()
+      # A drag: `input` events while the thumb is held, before any release.
+      r.setAttribute(range, "value", "2")
+      range.fireEvent("input")
+      var jumps = 0
+      for c in mock.receivedCommands:
+        if c.command == "ct/event-jump":
+          inc jumps
+          check c.args["directLocationRRTicks"].getInt == 30
+          check c.args["eventIndex"].getInt == 102
+      check jumps == 1
+      # The screen shows the write under the pointer while the move lands.
+      check findByClass(panel, "terminal-screen-grid").attributes[
+        "data-write"] == "2"
+      proc jumpTicks(): seq[int] =
+        for c in mock.receivedCommands:
+          if c.command == "ct/event-jump":
+            result.add c.args["directLocationRRTicks"].getInt
+      # The same write again sends nothing more.
+      range.fireEvent("input")
+      check jumpTicks() == @[30]
+      # The move lands (the engine's complete-move); the next write the
+      # pointer reaches is sent at once.
+      vm.setCurrentRRTicks(30)
+      r.setAttribute(range, "value", "1")
+      range.fireEvent("input")
+      check jumpTicks() == @[30, 20]
+      # While that move is in flight the pointer crosses two more writes:
+      # nothing is sent, and the NEWER one supersedes the older — one move
+      # queued behind the engine's, however fast the drag.
+      r.setAttribute(range, "value", "3")
+      range.fireEvent("input")
+      r.setAttribute(range, "value", "0")
+      range.fireEvent("input")
+      check jumpTicks() == @[30, 20]
+      check findByClass(panel, "terminal-screen-grid").attributes[
+        "data-write"] == "0"
+      vm.setCurrentRRTicks(20)
+      check jumpTicks() == @[30, 20, 10]
+      # The release ends the drag where it is: no further jump.
+      vm.setCurrentRRTicks(10)
+      range.fireEvent("change")
+      check jumpTicks() == @[30, 20, 10]
+      check vm.scrubPreview.val == -1
+      dispose()
+
+  test "ArrowRight on the screen steps to the next write":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
+        terminalEvent("\e[1;1Hb", 20, 1)])
+      vm.setCurrentRRTicks(10)
+      mock.clearReceivedCommands()
+      let screen = findByClass(panel, "terminal-screen")
+      let ev = MockEvent(`type`: "keydown", key: "ArrowRight")
+      screen.fireEventWith("keydown", ev)
+      check ev.defaultPrevented
+      let jump = mock.findCommand("ct/event-jump")
+      check jump.isSome
+      check jump.get.args["directLocationRRTicks"].getInt == 20
       dispose()
 
 # ===========================================================================

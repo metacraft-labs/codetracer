@@ -117,7 +117,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1738
+const ExpectedAssertions = 1747
+  ## *1738 -> 1747 on 2026-10-06: three new production modules under
+  ## `viewmodel/` — `viewmodels/terminal_output_model.nim` (the Terminal
+  ## Output pane's lines and screen), `viewmodels/scrollbar_scrubber.nim` (a
+  ## list pane's scrollbar as a scrubber) and `host/terminal_output_source.nim`
+  ## (the native front-ends' producer) — x three assertions.
   ## *1735 -> 1738 on 2026-10-04: one new production module under
   ## `viewmodel/`, `host/native_vcs_details.nim` (a commit's changed files and
   ## a file's diff for the native VCS panes) x three assertions.

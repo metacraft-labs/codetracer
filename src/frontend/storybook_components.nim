@@ -316,35 +316,26 @@ proc mountWithStore(container: isonim_dom.Element; body: MountBody): DisposeProc
       rootDisposer()
     container.innerHTML = ""
 
-proc terminalLine(lineIndex: int; htmlText: string; rrTicks: uint64): TerminalLine =
+proc terminalLine(lineIndex: int; text: string; rrTicks: uint64): TerminalLine =
   TerminalLine(lineIndex: lineIndex, fragments: @[
     TerminalEventFragment(
-      htmlText: htmlText,
+      text: text,
       eventIndex: lineIndex,
       rrTicks: rrTicks,
     ),
   ])
 
-proc demoTerminalLines(): seq[TerminalLine] =
+proc demoTerminalEvents(): seq[TerminalOutputEvent] =
+  ## Coloured output, written as a program writes it (ANSI SGR), so the
+  ## story renders through the same shared model the product does.
   @[
-    terminalLine(
-      0,
-      "<span class=\"ansi-bright-green-fg\">CodeTracer</span> replay started",
-      100'u64,
-    ),
-    TerminalLine(lineIndex: 1, fragments: @[
-      TerminalEventFragment(htmlText: "running ", eventIndex: 11, rrTicks: 140'u64),
-      TerminalEventFragment(
-        htmlText: "<span class=\"ansi-bright-cyan-fg\">noir-space-ship</span>",
-        eventIndex: 12,
-        rrTicks: 180'u64,
-      ),
-    ]),
-    terminalLine(
-      2,
-      "<span class=\"ansi-bright-yellow-fg\">warning:</span> flow loop still rendering",
-      220'u64,
-    ),
+    TerminalOutputEvent(content: "\e[92mCodeTracer\e[0m replay started\n",
+                        rrTicks: 100'u64, eventIndex: 0),
+    TerminalOutputEvent(content: "running ", rrTicks: 140'u64, eventIndex: 1),
+    TerminalOutputEvent(content: "\e[96mnoir-space-ship\e[0m\n",
+                        rrTicks: 180'u64, eventIndex: 2),
+    TerminalOutputEvent(content: "\e[93mwarning:\e[0m flow loop still rendering\n",
+                        rrTicks: 220'u64, eventIndex: 3),
   ]
 
 const noirTerminalTranscript = [
@@ -1438,7 +1429,7 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
       vm.setLines(@[])
       vm.setCurrentRRTicks(0'u64)
     of "demo":
-      vm.setLines(demoTerminalLines())
+      vm.setEvents(demoTerminalEvents())
       vm.setCurrentRRTicks(180'u64)
     else:
       vm.setLines(storyLines())

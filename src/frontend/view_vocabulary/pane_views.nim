@@ -88,6 +88,8 @@ import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
 import viewmodels/vcs_vm
+# PLAT-52 — the Terminal Output pane's ViewModel.
+import viewmodels/terminal_output_vm
 
 import headless_app/layout_model
 
@@ -126,7 +128,11 @@ const
                                          paneFileTree,
                                          # PLAT-47 deliverable 4: the VCS pane,
                                          # from the desktop's own `VCSVM`.
-                                         paneVcs}
+                                         paneVcs,
+                                         # PLAT-52: the recorded program's
+                                         # terminal output (its lines, or its
+                                         # screen), from `TerminalOutputVM`.
+                                         paneTerminalOutput}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -140,9 +146,9 @@ const
 
   PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
                                             # PLAT-45 — the desktop's panes
-                                            # (PLAT-47 drew `paneVcs`).
+                                            # (PLAT-47 drew `paneVcs`,
+                                            # PLAT-52 `paneTerminalOutput`).
                                             paneAgentActivity,
-                                            paneTerminalOutput,
                                             paneTestResults, paneConstraints,
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks.
@@ -613,6 +619,50 @@ proc scratchpadPaneView*(vm: ScratchpadVM): PaneView =
   result.root = viewTable("scratchpad", @["", "expression", "value"], cells)
   result.entries = entriesOf(result.root)
 
+proc terminalOutputPaneView*(vm: TerminalOutputVM): PaneView =
+  ## PLAT-52. The recorded program's terminal output: a `List`, one option per
+  ## line of the LINE view (its text; the styled runs are each medium's to
+  ## draw from the fragments' attributes), or one per row of the SCREEN view
+  ## when that is the view shown — the reconstructed screen at the current
+  ## position (`TerminalOutputVM.shownScreen`). The highlighted option is the
+  ## current position's line.
+  ##
+  ## A `List` rather than `Text`: a line is a THING the reader acts on (a
+  ## click goes to the write that produced it, K32), and an option's `id`
+  ## carries the write.
+  result.pane = paneTerminalOutput
+  if vm.isNil:
+    result.report = "the terminal output has no ViewModel; the session has " &
+                    "not launched"
+    result.root = viewText("terminalOutput.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  if vm.screenOffered.val and vm.view.val == tvScreen:
+    let screen = vm.shownScreen()
+    var rows: seq[ViewOption] = @[]
+    for r in 0 ..< screen.rows:
+      rows.add ViewOption(id: "screen-" & $r, label: screen.screenRowText(r))
+    result.root = viewList("terminalOutput.screen", rows, highlight = -1)
+    result.entries = entriesOf(result.root)
+    return
+  let lines = vm.lines.val
+  if lines.len == 0:
+    result.report =
+      if vm.initialLoad.val: "Loading record output..."
+      else: "The current record does not print anything to the terminal."
+    result.root = viewText("terminalOutput.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var options: seq[ViewOption] = @[]
+  for line in lines:
+    let write = if line.fragments.len > 0: line.fragments[0].eventIndex
+                else: -1
+    options.add ViewOption(id: "line-" & $line.lineIndex & "-write-" & $write,
+                           label: lineText(line))
+  result.root = viewList("terminalOutput", options,
+                         highlight = max(0, vm.currentLine()))
+  result.entries = entriesOf(result.root)
+
 proc shellPaneView*(vm: ShellVM): PaneView =
   ## The shell: a `Tree` of the input `Input` and a `List` of history.
   ##
@@ -826,7 +876,9 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
       report: "accepted exception: edit-mode pane, no replay-session source")
   # PLAT-47 deliverable 4.
   of paneVcs: vcsPaneView(VCSVM(vm))
-  of paneAgentActivity, paneTerminalOutput, paneTestResults,
+  # PLAT-52.
+  of paneTerminalOutput: terminalOutputPaneView(TerminalOutputVM(vm))
+  of paneAgentActivity, paneTestResults,
      paneConstraints, paneProblems, paneRequests:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which

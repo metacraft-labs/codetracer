@@ -24,9 +24,12 @@
  *     check there is, and 1- and 2-trace manifests have no role whitelist),
  *     and `panel_transfer.nim:151` carries a window title.
  *
- *  3. `ui/terminal_output.nim` and `ui/build.nim` put `ansi_up` output into
- *     `innerHTML` on purpose — the `<span>` colour runs are the point.  That
- *     is safe ONLY because `ansi_up` 6.0.6 initialises `_escape_html = true`.
+ *  3. `ui/build.nim` puts `ansi_up` output into `innerHTML` on purpose — the
+ *     `<span>` colour runs are the point.  That is safe ONLY because
+ *     `ansi_up` 6.0.6 initialises `_escape_html = true`.  (The terminal
+ *     output pane was the second such sink until PLAT-52: its fragments now
+ *     carry decoded SGR attributes and the view builds `<span style>`s with
+ *     TEXT nodes, so a program's output never reaches `innerHTML` there.)
  *     Nothing pinned it.  `escape_html = false` is one line, and the library
  *     offers it.
  *
@@ -780,7 +783,6 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/viewmodel/views/isonim_agent_activity_view.nim', 0, 2],
   ['src/frontend/viewmodel/views/isonim_build_view.nim', 0, 1],
   ['src/frontend/viewmodel/views/isonim_request_panel_view.nim', 0, 1],
-  ['src/frontend/viewmodel/views/isonim_terminal_output_view.nim', 0, 1],
   ['src/frontend/viewmodel/views/isonim_vcs_view.nim', 0, 1],
 ];
 
@@ -809,7 +811,6 @@ const INNER_HTML_LIVE_WRITES = [
   "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)\"\"\".}",
   'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
-  'src/frontend/viewmodel/views/isonim_terminal_output_view.nim: contentNode.innerHTML = cstring(frag.htmlText)',
   'src/frontend/viewmodel/views/isonim_vcs_view.nim: node.innerHTML = cstring(html)',
 ];
 

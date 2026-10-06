@@ -245,6 +245,20 @@ export debug_controls_vm
 import viewmodels/request_panel_vm
 export request_panel_vm
 
+# PLAT-52: the Terminal Output pane — its ViewModel and the pure model under
+# it (the line view's styled fragments, the screen emulator with its snapshots
+# and the built-in scrubber's marks; `terminal_output_vm` re-exports
+# `terminal_output_model`), and the list panes' scrollbar SCRUBBER model
+# (Scrollbar-Scrubbers.md §3). The terminal and GPUI front-ends draw both, so
+# both must be behind this one door. Adds nothing to the facade's import graph
+# beyond the three modules: they import `std/*`, `isonim/core/*`,
+# `isonim/viewmodel`, `backend_service` and `store/*`, all already here.
+import viewmodels/terminal_output_vm
+export terminal_output_vm
+
+import viewmodels/scrollbar_scrubber
+export scrollbar_scrubber
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #

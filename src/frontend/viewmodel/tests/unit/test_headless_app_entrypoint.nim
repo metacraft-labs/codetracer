@@ -198,7 +198,9 @@ suite "Headless app — launch":
     # PLAT-48 adds two more of the same kind: the desktop's PROBLEMS and
     # REQUESTS footer panels, which the shared default now docks at the
     # bottom (`layout_model.sharedDefaultDocked`).
-    const DesktopOnlyPanes = {paneVcs, paneAgentActivity, paneTerminalOutput,
+    # PLAT-52: `paneTerminalOutput` left this set — the session's
+    # `TerminalOutputVM` is its ViewModel.
+    const DesktopOnlyPanes = {paneVcs, paneAgentActivity,
                               paneTestResults, paneConstraints,
                               paneProblems, paneRequests}
     var replayPanes = 0
@@ -222,7 +224,7 @@ suite "Headless app — launch":
         check not slot.paneViewModel(p).isNil
     checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
     check editPanes == 1
-    check desktopPanes == 7
+    check desktopPanes == 6
     check replayPanes > 0
     # The pane PLAT-41 moved, pinned by name so the move cannot be undone
     # quietly by re-adding it to the set above.

@@ -56,6 +56,7 @@ import viewmodels/[
   filesystem_vm,
   origin_chain_vm,
   origin_chain_types,
+  terminal_output_vm,
 ]
 
 type
@@ -112,6 +113,11 @@ type
       ## folders, as the desktop's Files pane shows them in replay — never the
       ## working tree, which an edit-mode session owns. Filled by the native
       ## hosts' `loadRecordingPanes` from the trace's `paths.json`.
+    terminalOutputVM*: TerminalOutputVM
+      ## PLAT-52. The Terminal Output pane's ViewModel — the recorded
+      ## program's output as lines and as a screen. Filled by the native
+      ## hosts' `loadRecordingPanes` (`ct/load-terminal`); the desktop keeps
+      ## its own instance in `ui/terminal_output.nim`.
     originChainVM*: OriginChainVM
       ## Optional Value Origin Tracking VM. The host attaches it via
       ## `attachOriginChainVM` so the derived `crossProcessSpans`
@@ -238,6 +244,8 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.shellVM = createShellVM(session.store)
   if session.fileTreeVM.isNil:
     session.fileTreeVM = createFilesystemVM(session.store)
+  if session.terminalOutputVM.isNil:
+    session.terminalOutputVM = createTerminalOutputVM(session.store)
 
 # ---------------------------------------------------------------------------
 # M29 §5.3 — multi-process session management
@@ -449,6 +457,8 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.shellVM.dispose()
   if not session.fileTreeVM.isNil:
     session.fileTreeVM.dispose()
+  if not session.terminalOutputVM.isNil:
+    session.terminalOutputVM.dispose()
   if not session.processTree.isNil:
     session.processTree.dispose()
   if not session.store.isNil:

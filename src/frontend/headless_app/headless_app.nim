@@ -376,7 +376,13 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # replay session has no ViewModel for that pane* — and `paneIsLive`
     # reports false.
     nil
-  of paneVcs, paneAgentActivity, paneTerminalOutput, paneTestResults,
+  of paneTerminalOutput:
+    # PLAT-52. The recorded program's terminal output — its lines and its
+    # screen — which the session's `TerminalOutputVM` holds (filled by the
+    # native hosts' `loadRecordingPanes` from `ct/load-terminal`). Until
+    # PLAT-52 this pane answered nil below, as a desktop-only pane.
+    ViewModel(s.terminalOutputVM)
+  of paneVcs, paneAgentActivity, paneTestResults,
      paneConstraints:
     # PLAT-45. NIL, FOR THE SAME REASON AS THE BUILD PANE AND SAID AS PLAINLY.
     #

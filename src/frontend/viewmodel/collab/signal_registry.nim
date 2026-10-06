@@ -496,12 +496,18 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     stableIdNote = "Current field is an index; needs stable trace-log entry identity.")
   entries.addDerived("TraceLogVM", ["isEmpty", "rowCount"])
 
-  entries.addMany("TerminalOutputVM", ["lines", "currentRRTicks"],
+  entries.addMany("TerminalOutputVM",
+    ["events", "lines", "currentRRTicks", "screenVersion"],
     vscBackendAuthoritative,
-    "Terminal output is backend trace data.")
+    "Terminal output (the writes, their lines, the screen model's rebuild count) is backend trace data.")
   entries.addEntry("TerminalOutputVM", "initialLoad", vscRendererLocal,
     "Initial-load flag controls local render behavior.")
-  entries.addDerived("TerminalOutputVM", ["isLoading", "isEmpty"])
+  entries.addEntry("TerminalOutputVM", "view", vscRendererLocal,
+    "Lines or screen is a per-viewer choice, remembered per recording by each front-end.")
+  entries.addEntry("TerminalOutputVM", "scrubPreview", vscRendererLocal,
+    "A dragged screen scrubber's preview moves no debugger and belongs to the viewer dragging it.")
+  entries.addDerived("TerminalOutputVM",
+    ["isLoading", "isEmpty", "screenOffered", "shownWrite"])
 
   entries.addMany("StepListVM", ["lineSteps", "currentLocation"],
     vscBackendAuthoritative,
