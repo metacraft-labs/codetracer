@@ -303,114 +303,69 @@ mkShell {
     RECORDER_VENV="$ROOT_PATH/.python-recorder-venv"
     PURE_RECORDER_SRC="''${CODETRACER_PYTHON_PURE_RECORDER_SRC:-}"
 
-    # A venv is only usable if it was built from the pinned interpreter. An
-    # existing venv at the wrong minor version is not "already set up" — it is
-    # precisely the failure this block exists to prevent — so it is rebuilt
-    # rather than reused. That is what makes the fix self-healing on a tree
-    # that already carries a stale 3.13 venv.
-    _ct_venv_python_version() {
-      [ -x "$RECORDER_VENV/bin/python" ] || return 1
-      "$RECORDER_VENV/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null
-    }
-    _ct_venv_matches_pin() {
-      [ "$(_ct_venv_python_version)" = "''${CODETRACER_PYTHON_VERSION:-}" ]
-    }
-
-    # Failure reporting. This is deliberately NOT `exit 1`.
-    #
-    # This shell is entered for hundreds of tasks that never touch Python —
-    # every Nim build, every Rust test, every frontend run — and it is entered
-    # non-interactively by `nix develop --command`, where a hook that exits
-    # takes the whole command with it. Making a Python-recorder problem fatal
-    # would convert "Python tracing is unavailable" into "nothing in this repo
-    # builds", which is a worse failure than the one being fixed.
-    #
-    # What the old code did wrong was not that it continued; it is that it
-    # continued *quietly and then lied*: it printed one grey WARNING line into
-    # a wall of shell-hook output and then exported
-    # CODETRACER_PYTHON_INTERPRETER anyway, pointing `ct` at a venv that could
-    # not serve it. So instead of exiting we do three things that a warning
-    # alone does not:
-    #
-    #   1. print an unmissable framed banner on STDERR (stdout is parsed by
-    #      callers of `nix develop --command`),
-    #   2. leave CODETRACER_PYTHON_INTERPRETER UNSET and the broken venv off
-    #      PATH, so `ct record x.py` falls back to the pinned interpreter that
-    #      does carry a matching recorder, and any remaining failure names a
-    #      real interpreter instead of a poisoned one,
-    #   3. record the reason in $RECORDER_VENV/.broken, which
-    #      `scripts/test-python-version-alignment.sh` reads and FAILS on — so
-    #      the condition is caught by a test rather than by a human noticing
-    #      a line of scrollback.
+    # Compare the complete declared interpreter/module principal. A stale
+    # managed environment is retained in an owned quarantine, never deleted.
     _ct_python_recorder_broken() {
-      mkdir -p "$RECORDER_VENV" 2>/dev/null || true
-      printf '%s\n' "$1" > "$RECORDER_VENV/.broken" 2>/dev/null || true
+      unset CODETRACER_PYTHON_INTERPRETER
       {
         echo ""
         echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
         echo "  !!  PYTHON RECORDER UNAVAILABLE IN THIS SHELL                   !!"
         echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
         echo "  !!  $1"
-        echo "  !!"
-        echo "  !!  \`ct record <file>.py\` will not use the sibling checkout."
-        echo "  !!  CODETRACER_PYTHON_INTERPRETER has been left UNSET rather than"
-        echo "  !!  pointed at a venv that cannot serve it."
-        echo "  !!"
-        echo "  !!  Diagnose with:  just test-python-version-alignment"
-        echo "  !!  Retry with:     rm -rf $RECORDER_VENV && exit  # then re-enter"
+        echo "  !!  CODETRACER_PYTHON_INTERPRETER has been left UNSET."
+        echo "  !!  Diagnose with: just test-python-version-alignment"
+        echo "  !!  Retained attempt receipts: $ROOT_PATH/.repro/python-recorder-venv-*"
         echo "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-        echo ""
       } >&2
     }
 
-    if [ -z "$ROOT_PATH" ]; then
-      : # not inside a CodeTracer checkout: no venv is created
-    elif [ -n "$PURE_RECORDER_SRC" ] && [ -d "$PURE_RECORDER_SRC" ]; then
-      if ! _ct_venv_matches_pin \
-        || ! "$RECORDER_VENV/bin/python" -c "import codetracer_pure_python_recorder" 2>/dev/null; then
-        if [ -d "$RECORDER_VENV" ] && ! _ct_venv_matches_pin; then
-          echo "Rebuilding Python recorder venv: it is Python $(_ct_venv_python_version), the pin is $CODETRACER_PYTHON_VERSION."
-          rm -rf "$RECORDER_VENV"
+    unset CODETRACER_PYTHON_INTERPRETER
+    # A previous shell may have left this managed environment on PATH.
+    # Remove every exact entry before verification; success adds it back.
+    _ct_remaining_path="$PATH"
+    _ct_verified_path=""
+    _ct_path_entry_added=0
+    while :; do
+      _ct_path_entry="''${_ct_remaining_path%%:*}"
+      if [ "$_ct_path_entry" != "$RECORDER_VENV/bin" ]; then
+        if [ "$_ct_path_entry_added" = 1 ]; then
+          _ct_verified_path="$_ct_verified_path:$_ct_path_entry"
+        else
+          _ct_verified_path="$_ct_path_entry"
+          _ct_path_entry_added=1
         fi
-        echo "Setting up Python recorder venv (first time or module needs rebuild)..."
-        rm -f "$RECORDER_VENV/.broken" 2>/dev/null || true
-        # --system-site-packages exposes the flake-built, ABI-matched
-        # `codetracer_python_recorder` from $CODETRACER_PYTHON_CMD's own
-        # environment, which is the module `src/ct/trace/record.nim` requires
-        # of CODETRACER_PYTHON_INTERPRETER. Without it this venv carried only
-        # the pure recorder and `ct record` refused to run.
-        "$CODETRACER_PYTHON_CMD" -m venv --system-site-packages "$RECORDER_VENV"
-        "$RECORDER_VENV/bin/pip" install --quiet "$PURE_RECORDER_SRC" 2>&1 | tail -5
       fi
-      if "$RECORDER_VENV/bin/python" -c "import codetracer_pure_python_recorder" 2>/dev/null; then
-        rm -f "$RECORDER_VENV/.broken" 2>/dev/null || true
-        export CODETRACER_PYTHON_INTERPRETER="$RECORDER_VENV/bin/python"
-        export PATH="$RECORDER_VENV/bin:$PATH"
-      else
-        _ct_python_recorder_broken "codetracer_pure_python_recorder failed to install into $RECORDER_VENV"
-      fi
+      case "$_ct_remaining_path" in
+        *:*) _ct_remaining_path="''${_ct_remaining_path#*:}" ;;
+        *) break ;;
+      esac
+    done
+    export PATH="$_ct_verified_path"
+    _ct_recorder_branch=""
+    _ct_recorder_source=""
+    if [ -z "$ROOT_PATH" ]; then
+      : # Not inside a CodeTracer checkout: no venv is created.
+    elif [ -n "$PURE_RECORDER_SRC" ] && [ -d "$PURE_RECORDER_SRC" ]; then
+      _ct_recorder_branch="pure"
+      _ct_recorder_source="$PURE_RECORDER_SRC"
     elif [ -n "$RECORDER_SRC" ] && [ -d "$RECORDER_SRC" ]; then
       if command -v maturin &>/dev/null; then
-        if ! _ct_venv_matches_pin \
-          || ! "$RECORDER_VENV/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
-          if [ -d "$RECORDER_VENV" ] && ! _ct_venv_matches_pin; then
-            echo "Rebuilding Python recorder venv: it is Python $(_ct_venv_python_version), the pin is $CODETRACER_PYTHON_VERSION."
-            rm -rf "$RECORDER_VENV"
-          fi
-          echo "Setting up Python recorder venv (Rust-backed, first time or module needs rebuild)..."
-          rm -f "$RECORDER_VENV/.broken" 2>/dev/null || true
-          "$CODETRACER_PYTHON_CMD" -m venv --system-site-packages "$RECORDER_VENV"
-          "$RECORDER_VENV/bin/pip" install --quiet "$RECORDER_SRC" 2>&1 | tail -5
-        fi
-        if "$RECORDER_VENV/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
-          rm -f "$RECORDER_VENV/.broken" 2>/dev/null || true
-          export CODETRACER_PYTHON_INTERPRETER="$RECORDER_VENV/bin/python"
-          export PATH="$RECORDER_VENV/bin:$PATH"
-        else
-          _ct_python_recorder_broken "codetracer_python_recorder failed to install into $RECORDER_VENV"
-        fi
+        _ct_recorder_branch="rust"
+        _ct_recorder_source="$RECORDER_SRC"
       else
         _ct_python_recorder_broken "maturin is not on PATH, so the Rust-backed recorder cannot be built from $RECORDER_SRC (and no pure-Python recorder source was found)."
+      fi
+    fi
+    if [ -n "$_ct_recorder_branch" ]; then
+      if _ct_recorder_interpreter=$("$CODETRACER_PYTHON_CMD" \
+        "$ROOT_PATH/scripts/manage_python_recorder_venv.py" \
+        "$ROOT_PATH" "$CODETRACER_PYTHON_CMD" \
+        "$_ct_recorder_branch" "$_ct_recorder_source"); then
+        export CODETRACER_PYTHON_INTERPRETER="$_ct_recorder_interpreter"
+        export PATH="$RECORDER_VENV/bin:$PATH"
+      else
+        _ct_python_recorder_broken "The declared recorder environment could not be verified or reconciled; inspect its retained attempt receipt."
       fi
     fi
 
