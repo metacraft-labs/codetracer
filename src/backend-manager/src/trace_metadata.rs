@@ -128,10 +128,12 @@ fn detect_language(program: &str) -> String {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Reads metadata from a trace directory's CTFS `.ct` container.
+/// Reads metadata from a trace's CTFS `.ct` container.
 ///
-/// The directory must contain a `trace.ct` file whose `meta.dat` internal
-/// stream is a version this parser accepts (M-REC-1; see
+/// `trace_dir` is either a `.ct` container itself (a native recording or
+/// one of its `--split` slices) or a directory holding a `trace.ct` (or
+/// exactly one other `.ct`).  The container's `meta.dat` internal stream
+/// must be a version this parser accepts (M-REC-1; see
 /// `meta_dat::SUPPORTED_META_DAT_VERSIONS`).
 ///
 /// # Errors
@@ -242,6 +244,14 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
 /// happens to contain a single `.ct` file under a different name, that
 /// file is used as a fallback.
 fn locate_ct_file(trace_dir: &Path) -> Result<std::path::PathBuf, TraceMetadataError> {
+    // A bare container is its own trace: `ct-mcr record` writes
+    // `<name>.ct` (and `--split` writes `<name>.ct_slices/slice_NNNN.ct`)
+    // with no enclosing trace directory, and the replay server accepts the
+    // file itself as its trace folder.  Whether it is a valid container is
+    // decided by the CTFS reader, which names what is wrong with it.
+    if trace_dir.is_file() {
+        return Ok(trace_dir.to_path_buf());
+    }
     let canonical = trace_dir.join("trace.ct");
     if canonical.exists() {
         return Ok(canonical);
@@ -477,6 +487,62 @@ mod tests {
         assert_eq!(meta.total_events, 0);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `.ct` path is read as the container itself, the shape `ct-mcr
+    /// record` writes (`<name>.ct`, and `<name>.ct_slices/slice_NNNN.ct`
+    /// with `--split`).  Two slices sit in one directory here, which a
+    /// directory lookup refuses as ambiguous, so each file must be read by
+    /// its own path and yield its own fields.
+    #[test]
+    fn test_read_trace_metadata_from_a_bare_container_file() {
+        let first = make_trace_dir("bare-a", "first.c", "/w/a", &[], &["a.c"]);
+        let second = make_trace_dir("bare-b", "second.nim", "/w/b", &[], &["b.nim"]);
+        let slices = std::env::temp_dir()
+            .join("ct-trace-meta-test")
+            .join(format!("bare-{}", std::process::id()))
+            .join("rec.ct_slices");
+        let _ = std::fs::remove_dir_all(&slices);
+        std::fs::create_dir_all(&slices).expect("create slices dir");
+        std::fs::copy(first.join("trace.ct"), slices.join("slice_0000.ct")).expect("copy");
+        std::fs::copy(second.join("trace.ct"), slices.join("slice_0001.ct")).expect("copy");
+
+        let a = read_trace_metadata(&slices.join("slice_0000.ct")).expect("read slice 0");
+        assert_eq!(
+            (a.program.as_str(), a.workdir.as_str()),
+            ("first.c", "/w/a")
+        );
+        assert_eq!(
+            (a.language.as_str(), a.source_files.clone()),
+            ("c", vec!["a.c".to_owned()])
+        );
+        let b = read_trace_metadata(&slices.join("slice_0001.ct")).expect("read slice 1");
+        assert_eq!(
+            (b.program.as_str(), b.workdir.as_str()),
+            ("second.nim", "/w/b")
+        );
+        assert_eq!(b.source_files, vec!["b.nim".to_owned()]);
+        assert!(matches!(
+            read_trace_metadata(&slices),
+            Err(TraceMetadataError::AmbiguousCtFile { count: 2, .. })
+        ));
+
+        // A file that is not a container is refused by the CTFS reader,
+        // not reported as a directory without a `trace.ct`.
+        let not_a_container = slices.join("notes.ct");
+        std::fs::write(&not_a_container, b"not a container").expect("write");
+        assert!(matches!(
+            read_trace_metadata(&not_a_container),
+            Err(TraceMetadataError::Ctfs { .. })
+        ));
+
+        for dir in [
+            first,
+            second,
+            slices.parent().expect("parent").to_path_buf(),
+        ] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]
