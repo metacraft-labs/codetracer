@@ -1900,6 +1900,211 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.appendChild(parent, body)
   true
 
+# ---------------------------------------------------------------------------
+# The event log's FOOTER and its HEADER ROW — `PLAT35-F5` and `PLAT35-F12`
+# ---------------------------------------------------------------------------
+
+const
+  EventLogFooterAttribute* = "data-event-log-footer"
+    ## **THE ROW-COUNT FOOTER** (`PLAT35-F5`). The pane drew none at all:
+    ## measured at `3e2a5c5ba`, the body was ONE vocabulary `Table` whose
+    ## children are the header texts and six `data-row-index` rows, with no
+    ## footer node and no count-bearing attribute anywhere in the subtree
+    ## (`grep -i footer src/frontend/gpui/app/leaves.nim` returned nothing).
+    ##
+    ## **IT CARRIES NO `data-column-index`, AND THAT IS LOAD-BEARING RATHER
+    ## than cosmetic.** `window_clicks` classifies a press inside the
+    ## `eventLog` context as a HEADER CELL when the element has a
+    ## `data-column-index` and its parent has no `data-row-index`
+    ## (`window_clicks.nim:211-217`) — which is exactly the shape a footer
+    ## built out of column cells would have. Such a footer would re-sort the
+    ## log when clicked, which is `PLAT35-F7`'s clause in reverse: an element
+    ## that does a thing it does not advertise. The footer is a plain `div`
+    ## appended AFTER the table element for the same reason, so the table's
+    ## own subtree — every `data-row-index`, `data-column-index` and
+    ## `data-cell` the vocabulary binding wrote, and the column arithmetic in
+    ## `tableColumnWidthsPx` — is left BYTE-FOR-BYTE as it was.
+  EventLogTotalAttribute* = "data-event-log-total"
+    ## The number the footer's `of N` was computed from, published so a test
+    ## can assert WHICH number it is rather than that a number is present.
+    ##
+    ## **THE DISTINCTION THIS ATTRIBUTE EXISTS TO MAKE.** A footer that
+    ## counted the rows it holds would read `6` on a recording with thousands
+    ## of events, and `Event-Log-Pane.md`'s Requirement says why it cannot be
+    ## computed that way: the counts come from `ct/update-table`'s
+    ## `recordsTotal` / `recordsFiltered`, and *"no single window can supply
+    ## them: they describe the whole log and the whole filtered log, not the
+    ## rows in hand"*. `rows` is ONE WINDOW — `store.eventLog.loadedStart`
+    ## says which — so `rows.len` is wrong outright once the pane has paged.
+  EventLogHeaderAttribute* = "data-event-log-header"
+    ## **THE HEADER ROW, MARKED AND STYLED AS ONE** (`PLAT35-F12`, the two
+    ## sub-claims that are grounded). Measured at `3e2a5c5ba`: all six
+    ## `data-row-index` rows and the header share ONE style object,
+    ## `{gap: 12px, display: flex, white_space: nowrap}` — `layOutRow` in
+    ## `gpui_binding.nim:486` applies the same three declarations to `head`
+    ## and to every body `tr` — so the header was the same weight and colour
+    ## as a data row.
+  EventLogRulePx* = 1
+    ## The header rule's width, the state pane's `StateSeparatorPx`.
+  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
+    ## **A PUBLISHED TOKEN AND NOT A HEX LITERAL**, the same one the state
+    ## pane's column rule takes (`StateSeparatorColour`). The event-log spec
+    ## publishes no rule — grepped at `codetracer-specs@90ff8fce` for zebra /
+    ## divider / header rule / alternat / stripe / border over
+    ## `Event-Log-Pane.md`: **zero hits for all six** — so this is grounded on
+    ## the TOKEN plus convergence with the two front-ends that already draw
+    ## one, not on a clause. The terminal rules its event-log title row with
+    ## `PaneRule "─"` at `RuleStyle = CellStyle(role: srBorderPane)`
+    ## (`tui/app/views/event_log.nim:203,230,537-541`); the state pane rules
+    ## its columns with this token. Typing `#565656` here instead is what arm
+    ## **G** of the state-pane suite exists to redden.
+  EventLogHeaderColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+    ## The header's own colour, `StateHeaderColour`'s token — and the
+    ## terminal's `HeaderStyle = CellStyle(role: srChromeMuted, bold: true)`
+    ## (`tui/app/views/event_log.nim:223`) is the same decision in that
+    ## medium. Both front-ends distinguish the header by COLOUR AND WEIGHT
+    ## together, so this renderer does both rather than picking one.
+  EventLogFooterColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+    ## The footer reads as chrome, not as data — the header's token.
+
+proc eventLogTotalOf*(windowStart, shown, total: int): int =
+  ## **THE NUMBER THE FOOTER'S `of N` IS, DECIDED ONCE.** The drawn string and
+  ## the published `EventLogTotalAttribute` both read it from here, so the
+  ## attribute a test asserts on and the text a user reads cannot disagree —
+  ## the shape `stateValueColumnPx` and `data-state-value-x` already take one
+  ## pane over (§30). The clamp below was written out twice — once for the
+  ## string and once for the attribute — until it was written here once.
+  ##
+  ## THE FLOOR IS THE STORE'S OWN ARITHMETIC, NOT A COUNT OF THE ROWS IN HAND.
+  ## `recordsTotal` is a high-water mark, and the store raises it exactly this
+  ## way when a producer supplies none (`replay_data_store.nim:1640-1641`). It
+  ## can only lift `N` to something already known to have ARRIVED, and on any
+  ## window whose total is larger it does nothing at all.
+  max(total, windowStart + shown)
+
+proc eventLogFooterText*(windowStart, shown, total: int): string =
+  ## **`Rows N to M of T`** — the desktop's own footer, to the byte.
+  ##
+  ## `PLAT35-PD2` records the Electron pane's footer as **`Rows 1 to 6 of 6`**
+  ## and §6 makes the desktop the reference, so the shape is carried across
+  ## rather than chosen. The web front-end builds the same three fields out of
+  ## DataTables — `viewmodel/views/isonim_event_log_view.nim:399-411` nests
+  ## `Rows` / `to` / `of` around a `data-tables-footer-input`, a
+  ## `data-tables-footer-end-row` and a `data-tables-footer-rows-count` — so
+  ## this spelling CONVERGES on the two front-ends that have a footer instead
+  ## of adding a third. (PD2's complaint about Electron is a different one —
+  ## no column headers, and one row drawn six times — and neither defect is
+  ## imported here: the columns and headers are already right in GPUI, which
+  ## is the half of the finding that passed.)
+  ##
+  ## A PURE FUNCTION OF THREE INTEGERS, so the formula is asserted without a
+  ## renderer, a window or a session.
+  ##
+  ## **WHY `T` IS FLOORED BY THE WINDOW.** `store.eventLog.recordsTotal` is
+  ## documented as a HIGH-WATER MARK rather than the engine's count —
+  ## *"`ct/event-load`'s response body carries `events`, `content` and
+  ## `markers` and no total, so the only honest total available here is
+  ## derived from what has arrived"* (`replay_data_store.nim:212-219`) — and
+  ## the store itself floors it exactly this way when the producer supplies
+  ## none: `recordsTotal.val = max(recordsTotal.val, start + rows.len)`
+  ## (`replay_data_store.nim:1640-1641`). So the floor is the store's own
+  ## arithmetic repeated at the last moment, NOT a count of the rows in hand:
+  ## it can only raise `T` to something already known to have arrived, and on
+  ## every window where the total is larger — every paged or `update-table`
+  ## window — it does nothing at all. Without it a pane whose total had not
+  ## been published yet would print `Rows 1 to 6 of 0`, a footer visibly
+  ## disagreeing with the rows above it.
+  let first = windowStart + 1
+  let last = windowStart + shown
+  result = "Rows " & $first & " to " & $last & " of " &
+           $eventLogTotalOf(windowStart, shown, total)
+
+proc eventLogFooterElement(r: GpuiRenderer; windowStart, shown,
+                           total: int): GpuiElement =
+  ## The footer node: its text, its two attributes, and no column cell.
+  result = r.createElement("div")
+  r.setAttribute(result, EventLogFooterAttribute, "true")
+  r.setAttribute(result, EventLogTotalAttribute,
+                 $eventLogTotalOf(windowStart, shown, total))
+  r.setStyle(result, "color", EventLogFooterColour)
+  r.setStyle(result, "white-space", "nowrap")
+  r.setStyle(result, "overflow", "hidden")
+  r.setStyle(result, "flex-shrink", "0")
+  r.appendChild(result, r.createTextNode(
+    eventLogFooterText(windowStart, shown, total)))
+
+proc styleEventLogHeader(r: GpuiRenderer; table: GpuiElement): bool =
+  ## Mark the vocabulary table's header row and style it AS a header: the
+  ## rule under it, and its cells' colour and weight.
+  ##
+  ## **THE HEADER IS FOUND THE WAY THE CLICK CLASSIFIER FINDS IT** — the row
+  ## carrying no `data-row-index` (`window_clicks.nim:211-213`) — rather than
+  ## by position. One definition of "the header row", in two readers, is §30;
+  ## `nthChild(table, 0)` would have been a second one, and it would drift
+  ## the moment the binding appended anything before `head`.
+  for i in 0 ..< childCount(table):
+    let row = nthChild(table, i)
+    if getAttribute(row, "data-row-index").len > 0:
+      continue
+    r.setAttribute(row, EventLogHeaderAttribute, "true")
+    # THE RULE. `border-bottom-width` plus `border-color` and not a 1 px
+    # child `div`: the shim draws a border on the element itself
+    # (`gpui_app.rs:640-666`, the 2026-09-29 repair — *"Both were parsed into
+    # the plan and never drawn"*), so there is no childless flex child to
+    # inherit no height, which is the trap `StateSeparatorAttribute` carries.
+    r.setStyle(row, "border-bottom-width", $EventLogRulePx & "px")
+    r.setStyle(row, "border-color", EventLogRuleColour)
+    for c in 0 ..< childCount(row):
+      let cell = nthChild(row, c)
+      r.setStyle(cell, "color", EventLogHeaderColour)
+      r.setStyle(cell, "font-weight", "bold")
+    return true
+  false
+
+proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
+                     pv: var PaneView): bool =
+  ## **`PLAT35-F5` AND `PLAT35-F12`: THE EVENT LOG'S FOOTER AND ITS HEADER.**
+  ##
+  ## This leaf is deliberately NOT the shape `renderCallTrace` and
+  ## `renderState` have, and the difference is the whole argument for it.
+  ## Those two draw their rows natively because *"a vocabulary `List` option
+  ## is one label and could not carry the parts the desktop styles apart"* —
+  ## their vocabulary node was the wrong shape. The event log's is the RIGHT
+  ## shape: `eventLogPaneView` already builds a true `Table` with the
+  ## ViewModel's columns, the sort arrow, the 2-D cursor and the click
+  ## attributes, and the pane's columns and headers were measured PRESENT and
+  ## aligned at `3e2a5c5ba`. Re-drawing that table here would duplicate
+  ## `tableColumnWidthsPx`, every `data-*` attribute `window_clicks`
+  ## dispatches on, and the sort-arrow logic — §30's shape, for nothing.
+  ##
+  ## So the vocabulary table is rendered through the SHARED binding
+  ## unchanged, and the two things the vocabulary has no word for are added
+  ## around it: the footer, and the header's own styling.
+  ##
+  ## **WHY THIS LIVES IN `leaves.nim` AND NOT IN `gpui_binding.nim`.** The
+  ## header styling would have been one line shorter in the `pkTable` arm,
+  ## and it is not taken there because that file is NOT GPUI-private:
+  ## `tui/tests/test_cross_renderer_panes.nim` imports it at line 119
+  ## (`../../view_vocabulary/gpui_binding as gbind`) and builds its GPUI
+  ## column from it at line 369, so a style added there reaches a suite whose
+  ## subject is three-way AGREEMENT, and would style the scratchpad, the
+  ## point list and the VCS tables too. That suite imports no
+  ## `gpui/app/leaves` — verified at `3e2a5c5ba`, and `app/shell.nim` names
+  ## `leaves` only in prose — so a native leaf cannot reach it.
+  if vm.isNil or pv.report.len > 0:
+    return false
+  let binding = renderGpui(r, pv.root)
+  r.appendChild(parent, binding.root)
+  discard styleEventLogHeader(r, binding.root)
+  # The window, from the signals the spec designates. `eventRows` is the
+  # window's rows and `loadedStart` its offset; `totalEventCount` is
+  # `store.eventLog.recordsTotal`, aliased on the ViewModel
+  # (`event_log_vm.nim:347-348`, wired at `:995`).
+  r.appendChild(parent, eventLogFooterElement(
+    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,
+    vm.totalEventCount.val))
+  true
+
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
                     leaf: GpuiLeaf; budget: Budget): bool =
   ## Draw a builtin pane's vocabulary tree into `parent`. Answers whether the
@@ -1923,6 +2128,13 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
   var pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
   if leaf.builtin == paneState and not leaf.vm.isNil and
      renderState(r, parent, StateVM(leaf.vm), pv, budget):
+    return true
+  # `PLAT35-F5` / `PLAT35-F12`: and so are the event log's footer and header
+  # rule (`renderEventLog`) — which, unlike the two arms above, keeps the
+  # vocabulary's own `Table` and adds only the parts the vocabulary has no
+  # word for. See that proc for why it is not in the shared binding.
+  if leaf.builtin == paneEventLog and not leaf.vm.isNil and
+     renderEventLog(r, parent, EventLogVM(leaf.vm), pv):
     return true
   let binding = renderGpui(r, pv.root)
   r.appendChild(parent, binding.root)
