@@ -228,7 +228,6 @@ const
     projectRootPath / "src/frontend",
     projectRootPath / "libs/NimYAML",
     projectRootPath / "libs/asynctools",
-    projectRootPath / "libs/karax/karax",
     projectRootPath / "libs/nim",
     projectRootPath / "libs/nim-chronicles",
     projectRootPath / "libs/nim-faststreams",
