@@ -1,5 +1,12 @@
 ## test_plat40_state_pane_columns.nim — **TIER 3 OVER THE STATE PANE'S TWO
-## COLUMNS: `PLAT35-F4`.**
+## COLUMNS: `PLAT35-F4`, AND ITS ACTIVE TAB'S WORD: `PLAT35-F9`.**
+##
+## The second finding is here rather than in a suite of its own because it is
+## the same pane and the same instrument, and because what closed it was
+## `PLAT35-F4`'s own `leaves.renderState` — see the case *"the pane draws its
+## ACTIVE TAB's word exactly ONCE"* for what it asserts, what would satisfy it
+## if it stood alone, and which half of the finding is deliberately left to
+## the UNSTEPPED case below it.
 ##
 ## Run (needs the real `isonim-gpui` shim at the baked path and the built
 ## binary, like every suite that imports `app/leaves` AND reads
@@ -216,9 +223,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 1705
-    ## Written from a run, not estimated: **29** cases (six in suite 1, four
-    ## in suite 2, NINE × two viewports in suite 3, and the count case) over
+  ExpectedAssertions = 1747
+    ## Written from a run, not estimated: **31** cases (six in suite 1, four
+    ## in suite 2, TEN × two viewports in suite 3, and the count case) over
     ## this host's plan at both viewports and three populated stops. It was
     ## 27 cases / 1299 assertions before the pass that drew the column rule,
     ## which re-pointed one case and added a second beside it. The 362 new
@@ -234,6 +241,17 @@ const
     ## which is the PLAT-50 click contract this renderer now relies on. The
     ## +44 is MEASURED from the run, not derived: no case was added or
     ## removed.
+    ##
+    ## **1705 → 1747, 2026-10-07, AND THIS TIME A CASE WAS ADDED** — the
+    ## tenth in suite 3, *"the pane draws its ACTIVE TAB's word exactly
+    ## ONCE"*, which gates `PLAT35-F9`'s residue. **+42 = 7 readings x 3
+    ## populated stops x 2 viewports**, and the arithmetic is checkable rather
+    ## than asserted: this suite's counted total was 1641 against a declared
+    ## 1705 at `bc915c73d` before the case existed and 1683 against 1747
+    ## after, so the shortfall is 64 in both runs. A contribution that was not
+    ## exactly 42 would have moved it. (The 64 itself is this suite's known
+    ## pre-existing red and is NOT this case's: it predates it at the
+    ## unmodified bytes.)
     ## `std/unittest` prints one `[OK]` per test BLOCK and
     ## never one per `check`, so a file of empty cases scores a full pass; this
     ## is what makes a case that stopped running fail instead (§7).
@@ -427,6 +445,19 @@ proc textNodeCount(n: JsonNode): int =
   if n.isNil: return 0
   if n{"kind"}.getStr == "TextNode": return 1
   for c in n{"children"}.getElems: result += textNodeCount(c)
+
+proc textNodes(n: JsonNode): seq[string] =
+  ## Every TEXT NODE's own text, separately, in document order.
+  ##
+  ## `textOf` is the wrong instrument for PLAT35-F9's question and that is why
+  ## this exists beside it: `textOf` CONCATENATES a subtree into one string, so
+  ## "the pane draws `Locals` twice, in two places" and "the pane draws one
+  ## label that happens to contain the word twice" become the same string, and
+  ## a `count` over the join cannot separate them. The finding is about two
+  ## DRAWN LABELS, so the instrument counts labels.
+  if n.isNil: return @[]
+  if n{"kind"}.getStr == "TextNode": return @[n{"text"}.getStr]
+  for c in n{"children"}.getElems: result.add textNodes(c)
 
 proc nodesWithOutside(plan: JsonNode; attribute, pane: string): seq[JsonNode] =
   ## Every node carrying `attribute` that is NOT inside the pane whose
@@ -1055,6 +1086,111 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
       for row in pane.bodyRows:
         ck row.attr(ViewKindAttr) == "Tree"
         ck row.attr(ViewIdAttr).len > 0
+
+    test "at " & vp & " the pane draws its ACTIVE TAB's word exactly ONCE":
+      # **PLAT35-F9's residue, GATED.** The finding, rewritten to its residue
+      # on 2026-10-03: *"The state pane's variable tree labels its root
+      # `locals` directly under the active tab `Locals`, so the same word is
+      # drawn twice in the same pane."*
+      #
+      # It is CLOSED, and not by anything done for it. `renderState` strips
+      # the vocabulary's `state.root` `Tree` out of `pv.root.children` before
+      # binding (`leaves.nim`'s `kept` loop) and redraws the variables from
+      # `vm.currentVariables.val` at depth 0, so the node that CARRIED that
+      # label — `pane_views.statePaneView`'s `viewTreeNode("state.root", …)`,
+      # whose text is `"locals"` / `"globals"` / `"watches"` by active tab —
+      # is not in the window plan at all. The id survives, on the TABLE, which
+      # is the PLAT-50 click contract and not a drawn label.
+      #
+      # **SO THIS CASE EXISTS BECAUSE THE FIX IS SOMEBODY ELSE'S.** PLAT35-F2
+      # is the precedent: a finding closed upstream, with no assertion left
+      # behind, is a finding that regresses silently.
+      #
+      # **AND IT IS NOT SUBSUMED BY THE CASE ABOVE IT, WHICH WAS MEASURED
+      # RATHER THAN ASSUMED — TWO RED-CONTROL ARMS, BOTH KILLED.** Arm R1
+      # drops the `kept` filter so the vocabulary `Tree` is drawn again: that
+      # reds BOTH this case (`repeats was 2`, `sole was locals`) and *"the
+      # pane's TAB STRIP is still the vocabulary's"* (`treeOwners == 2`),
+      # because the node carrying the label is also the node carrying the id.
+      # So R1 alone does not show this case is needed. **Arm R2 does.** It
+      # keeps the filter and substitutes `viewText("state.caption",
+      # child.label)` for the dropped child — the regression PLAT-49 named in
+      # `statePaneView` (*"a label here drew a second 'State' as the pane's
+      # first row"*): the word is drawn twice, `state.root` still has exactly
+      # ONE owner, and the table, the columns, the rule, the widths and the
+      # tab strip are all still exactly right. Under R2, at both viewports and
+      # all three stops, **this is the only case in the file this arm reds**:
+      # 28 OK / 3 FAILED, where the two new reds are this case at the two
+      # viewports and the third is the §7 count case that is red at the
+      # unmodified bytes too. Counted 1683 under the arm and 1683 without it,
+      # so no case aborted (§69). Measured at `bc915c73d` plus that one arm,
+      # with `leaves.nim` restored by copy afterwards and its digest
+      # `10411cb1f3ee…` asserted both ways.
+      #
+      # ## §7b: what would satisfy this case if it stood alone
+      #
+      # `repeats == 1` alone is satisfied by a pane with NO ROWS — the three
+      # tab labels would be the only text and the active one would appear
+      # once. That is why `bodyRows.len > 0` is asserted beside it and why the
+      # needle is READ OFF the plan rather than written here: a hardcoded
+      # `"Locals"` would keep passing on a pane whose tabs had been renamed,
+      # and the finding is about a pane repeating ITS OWN tab, whatever that
+      # tab says.
+      #
+      # **THE EMPTY PANE IS OUT OF SCOPE HERE, DELIBERATELY, AND IT IS WHERE
+      # THE RESIDUE SURVIVES.** `renderState` returns false when there are no
+      # rows, so at an UNSTEPPED stop the vocabulary draws the root again and
+      # the pane really does read `Locals` over `locals — no variables at this
+      # position`. That path is the next case's subject (*"an UNSTEPPED
+      # session draws the report, not an empty table"*), it is recorded in the
+      # ledger as `PLAT35-F9.residue`, and asserting its absence here would
+      # red this case against behaviour nobody has decided to change.
+      #
+      # ALL THREE STOPS AND BOTH VIEWPORTS: the plans are already cached by
+      # the cases above, so the coverage is free and a stop-dependent answer
+      # cannot hide.
+      for ops in PopulatedOps:
+        checkpoint(vp & " " & ops)
+        let plan = windowPlan(w, h, ops)
+        let pane = plan.paneOf("state")
+        ck not pane.isNil
+        var tabs: JsonNode
+        for n in pane.nodesWith(ViewIdAttr):
+          if n.attr(ViewIdAttr) == "state.tabs": tabs = n
+        ck not tabs.isNil
+        # The needle: the pane's OWN active tab, read off the plan.
+        var active = ""
+        var activeCount = 0
+        for o in tabs.kids:
+          if o.attr(HighlightedAttr) == "true":
+            inc activeCount
+            if active.len == 0: active = o.textOf
+        ck activeCount == 1
+        ck active == "Locals"
+        # The population control. Without it the scan below is a count over
+        # three tab labels and would pass on an empty pane.
+        ck pane.bodyRows.len > 0
+        # THE GATE. A PREFIX match and not equality, because the label the
+        # finding named is `locals — no variables at this position`, not
+        # `locals`; and case-folded, because the two spellings that collided
+        # are `Locals` and `locals`. `repeats` is -1 rather than a count when
+        # the needle is empty, so an empty needle — which `startsWith` says
+        # every string begins with — fails loudly instead of matching
+        # everything or being quietly skipped (§4).
+        var repeats = -1
+        var sole = ""
+        if active.len > 0:
+          repeats = 0
+          let needle = active.toLowerAscii
+          for t in pane.textNodes:
+            if t.strip().toLowerAscii().startsWith(needle):
+              inc repeats
+              sole = t
+        ck repeats == 1
+        # And the one occurrence is the TAB, not a row that swallowed it: an
+        # equality here separates `Locals` from `Locals — …` in the case where
+        # the tab itself went missing and a row took its place.
+        ck sole == active
 
     test "at " & vp & " `data-column` ELSEWHERE in the window is the Table's fact":
       # §4: the instrument must measure the subject. The mirror of the mistake
