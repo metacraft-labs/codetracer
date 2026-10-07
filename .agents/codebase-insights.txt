@@ -3929,10 +3929,11 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     called and a mouse report takes the old path — `keyName` answers "" and
     `keymap.resolve` reports `krNone`.
     THE LAYOUT BINDING IS THE ONLY MOUSE CONSUMER IN THIS FRONT-END, and that
-    was measured rather than assumed: `call_stack_keys.applyMouse` and
-    `timeline_keys.applyMouse` are each reached only from their own module's
-    `applyKey` / `applyToken`, and those only from `tests/apps/app_call_stack
-    .nim` and `tests/apps/app_timeline.nim`.  (An earlier note here called that
+    was measured rather than assumed: `call_stack_keys.applyMouse` is reached
+    only from its own module's `applyKey` / `applyToken`, and those only from
+    `tests/apps/app_call_stack.nim` (PLAT-51 removed the Timeline pane and
+    `timeline_keys.applyMouse` with it; the pane-level mouse routes since
+    PLAT-50/51 live in `runtime.nim`).  (An earlier note here called that
     precedence question "the part that is NOT small"; there was no contest at
     all.)  `lasNoGesture` is the seam a pane's own mouse contract belongs at
     when one is wired.
@@ -3975,8 +3976,8 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
         pane cannot hand its arrangement to the next file.
       - Tests that assume where a pane sits must be written against the shared
         default (e.g. at 80x24 the first focus stop is the Files stack; the
-        Source pane is the only bare region; the Timeline is a TAB of the
-        events stack, so read `Timeline`, not a `TIMELINE` title).
+        Source pane is the only bare region; the events stack is Event Log |
+        Terminal Output since PLAT-51 removed the Timeline).
     `CODETRACER_TUI_LAYOUT_DIR` overrides the state root; that is how the two
     persistence suites point a real spawned binary at a directory of their own.
     THE "file would not OPEN at all" PATH IS THE ONE ONLY
@@ -6172,11 +6173,12 @@ Two traps in the same area, both live:
   * `TimelineVM.markers` used to BE the extent — two numbers, min and max — and
     `timeline_vm_test.nim` pinned that as correct. The extent now lives on
     `TimelineVM.bounds` and `markers` is the real projection; `boundsFromVm`
-    (`tui/app/timeline_binding.nim`), `gpui/app/leaves.renderTimeline` and
-    `views/isonim_timeline_view` were all reading the old field.
+    (`tui/app/timeline_binding.nim`) and the (since PLAT-51 deleted) Timeline
+    panes of GPUI and the desktop were all reading the old field.
 - 2026-09-24: **A `for` inside an isonim `ui:` block runs ONCE PER RENDER, and
   `for x in someSeq` will not compile there.** Two separate facts, both found in
-  `views/isonim_timeline_view.nim`:
+  the desktop's Timeline view (deleted with the pane by PLAT-51; the facts are
+  the DSL's and still hold):
   * `dsl/ui.processForStmt` expands the loop at render time, so rows/marks
     produced by a `for` are frozen in the node that was appended — unlike
     `text`/style/attribute expressions, which the DSL wraps in their own
@@ -6901,3 +6903,83 @@ Two traps in the same area, both live:
 - 2026-10-06: a `src/build-debug` that symlinks another checkout's `bin/` can carry a `ct` older than the engine `REPLAY_SERVER_BIN` names. Such a `ct` with an older Python recorder writes CTFS container v4, which the current engine refuses ("CTFS container version 4 is not readable: this reader reads versions 5 and 6"); with a current recorder it fails at record time with "unsupported CTFS version". The fixture provider caches by program hash only (`test-logs/tui-fixtures/<name>-<hash>`), so a stale recording keeps failing until it is deleted. Keep `CT_BIN` / `src/build-debug/bin/ct` and the engine from the same era, and delete the fixture to re-record. `scripts/plat45-desktop-prefix.sh` builds the Electron prefix on `src/build-debug`, so the desktop captures need that same pairing.
 - 2026-10-06: grading `run-plat50-clicks-mutations.py` in a tree other than the one `CT_P50_ENGINE_DIR`'s sandbox links: the engine arms (EN1–EN4) edit `<tree>/src/db-backend/src`, but cargo builds the sandbox's `src` symlink. If that symlink names a different checkout, the mutant is never compiled and all four "survive". Point the sandbox's `src` at the graded tree, and keep its siblings (`codetracer-trace-format*`, `libs`) at their pins. Also, `test_real_no_orphans` and `test_real_signal_handling` count EVERY replay-server on the machine, so a mutation grade or capture running beside the tui-real-terminal lane reddens them.
 - 2026-10-06 (PLAT-52 review): the DESKTOP's screen scrubber sends its moves asynchronously (`TerminalOutputVM.scrubTo` → `requestHistoricalNavigation`), so it COALESCES: at most one move in flight, the newest write the pointer reached while it is in flight waits in `scrubPending` (superseding older ones) and is sent when the recording position moves (`landScrub`, from the store effect and `setCurrentRRTicks`). A move to the tick the debugger is already at is never left in flight (no landing would be seen). Landing state is in plain fields (`lastTicks`, `scrubHeld`) and the effect calls `landScrub` under `untrack`, because sending reads `store.session` — a dependency the effect must not take. The terminal and GPUI jump synchronously (`session.eventJump` waits for the move), so they need no such queue.
+- 2026-10-06 (PLAT-51 Part A): **THE TIMELINE PANEL IS GONE FROM ALL THREE
+  PRODUCTS, AND A SAVED LAYOUT STILL OPENS.** `PaneKind.paneTimeline` is
+  removed; `LayoutSchemaVersion` is 6 and `layout_model.migrateV5toV6` drops a
+  `timeline` leaf (`RetiredPaneSpellings`) BEFORE decoding — a stack keeps its
+  other tabs (the active index slides to the tab that took its place), an
+  emptied container goes, a row/column left with one child collapses into it
+  (`validate` refuses single-child rows/columns), a docked Timeline and any
+  `beside: "timeline"` reference go. A CURRENT (v6) document naming it is
+  still `ldeUnknownPane`. The desktop retires `Content.Timeline` as
+  `RetiredTimelinePanel = 19` and sanitises saved GoldenLayout configs with
+  `index/config.dropRetiredPanels` (= `sanitizeLayoutConfig(..., retiredContentIds())`).
+  `TimelineVM` stays (its tick memo is still the position the panes follow).
+  `4` selects the Event Log (`kaSelectEventLog`, `select-event-log`).
+- 2026-10-06 (PLAT-51): **LIST SCROLLBARS ARE SCRUBBERS, ONE MODEL.**
+  `viewmodels/scrollbar_scrubber.nim` (model, `trackFractionAt` — the track's
+  ENDS are 0 and 1, not unit centres, or the last rows of a long list are
+  unreachable by a click — `windowFor`, `FetchCoalescer`). Projections:
+  terminal `tui/app/views/scrubber_track.nim` (event log / call trace /
+  terminal output's last column), GPUI `gpui/list_scrubber.nim` (the press is
+  routed BEFORE `clickCalltrace` in `main.windowPointer`, or a press on the
+  track is a jump to the call row under it), desktop
+  `viewmodel/views/list_scrubber_dom.nim` (DataTables' Scroller SCALES its
+  body: rowHeight = scrollHeight / total; a body scrolled to its END is
+  `first = total - visible`, not floor(scrollTop/rowH)). The engine answers
+  `ct/event-load` with `total` and `indexAtTick` (and an `indexOnly` mode), and
+  a calltrace section with `currentCallLineIndex` — the marks.
+  The terminal's screen readers (`screen_oracle/terminal_reading.nim`) strip
+  the scrubber column off an event-log row.
+- 2026-10-06 (PLAT-51): **TWO StateVMs IN A TUI SESSION.** `TuiSession.state`
+  (the one the Variables pane is read from) is NOT `session.session.stateVM`
+  (whose `watchExpressions` `ct/load-locals` sends). A watch edit must reach
+  BOTH (`pcWatch` in `tui_session.applyPaneClick`), or the engine evaluates
+  one list and the pane shows another.
+- 2026-10-06 (PLAT-51): changed values: the desktop had NO changed-value style;
+  now `.value-changed` (colors/ui/text/information/primary/hover, #60a5fa dark)
+  from `StateVM.isChanged`, the terminal's `srValueModified` on the VALUE (the
+  `[MOD]` badge is gone), GPUI's `StateChangedColour` — all over
+  `viewmodels/value_changes.nim` (moved from the TUI's diff_highlighter; anchor
+  = the recording's observed predecessor). The current-line mark is `▸`
+  (U+25B8, measured closer to the desktop SVG than `►`; never `▶`), ASCII `>`.
+  The terminal's menus end in an inert "Terminal menu: Shift + right-click"
+  row and every Shift-modified mouse report is left to the terminal; GPUI
+  opens its menu on Shift + right-click. `CT_SPECS_DIR` points the
+  spec-reading suites at a `codetracer-specs` checkout when the workspace
+  sibling predates the `spec/` layout.
+- 2026-10-07: RECORDING AT THE `repro.lock` PINS WITHOUT TOUCHING THE SIBLINGS. A
+  sibling `codetracer-trace-format-nim` older than the pin (`types.nim`:
+  `CtfsVersion* = 4`) makes every recorder that links it write CTFS v4, which
+  the engine refuses ("reads versions 5 and 6"), and makes every Nim suite that
+  READS a container (`request-panel/*`, through `config.nims`'s sibling path)
+  fail with "mapping root block 9223372036854775818 ... is out of bounds" (the
+  v5 block-flag bit read by a v4 reader). Export the three pinned trees side by
+  side with `git archive` (`codetracer-python-recorder`,
+  `codetracer-trace-format`, `codetracer-trace-format-nim` — the Rust crates
+  find each other by `../../codetracer-trace-format` and the writer's build.rs
+  finds the Nim repo as the trace-format's sibling), `cargo build --release
+  --lib` the Python recorder there, copy the `.so` over the package's
+  `codetracer_python_recorder.cpython-312-*.so`, and point a fresh
+  `--system-site-packages` venv at it with a `.pth` plus a
+  `codetracer-python-recorder` console script (`ct record` finds the recorder
+  ON PATH, `paths.pythonRecorderExe`). The JS recorder likewise
+  (`npx napi build --release` for `crates/recorder_native/index.node`, then
+  `npm run build`, with a COPY of the sibling's `node_modules` — its workspace
+  links are relative). Nim readers: `CODETRACER_TRACE_FORMAT_NIM_SRC=<pinned>/src`
+  overrides the sibling (`config.nims` adds it after the sibling path).
+- 2026-10-07: `CODETRACER_JS_RECORDER_PATH` MEANS TWO THINGS. The Nim suites
+  (`test_plat50_column_ops_vm`), `ct`'s GUI fixtures (`js-trace-fixture.ts`) and
+  `value-origin-fixtures.ts` read it as the CLI FILE
+  (`packages/cli/dist/index.js`); `scripts/materialize-recording.sh` reads it
+  as the repository ROOT and appends `packages/cli/dist/index.js`. No single
+  value satisfies both.
+- 2026-10-07: ALT + A CHARACTER IN A REAL TERMINAL. A terminal sends Alt+T as
+  `ESC t` in one write. `host/terminal_driver.feed` used to drop the ESC and
+  deliver `t` (the seek-to-tick key), so the read-only editor's Alt+T
+  tracepoint chord never arrived from a real terminal while the in-process
+  suite — which hands `"\x1bt"` to `handleToken` directly — passed. The framer
+  now delivers `ESC <printable>` as ONE token; `runtime.handleToken` treats an
+  Alt chord the runtime does not bind (`caretTakesAltChord`) as the character
+  alone, which is what the framer delivered before. Only a real-PTY suite
+  (`test_plat51_pty`) can see framing.
