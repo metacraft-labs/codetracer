@@ -7,5 +7,10 @@
   "M6": "Check failed: compareAnswer(lqGutterMarks, a, b).verdict == cvDiffers",
   "M7": "Check failed: compareAnswer(lqPaneRectangles, near, far).verdict == cvDiffers",
   "M8": "Check failed: bullets >= 3",
-  "M9": "Check failed: distinctGpui.len == scenarios.len"
+  "M9": "Check failed: distinctGpui.len == scenarios.len",
+  "N1": "Check failed: f.attr(EventLogTotalAttribute) == $WholeLog",
+  "N2": "Check failed: eventLogFooterText(WindowStart, WindowRows, WholeLog) ==",
+  "N3": "Check failed: cell.style(\"font_weight\") == \"bold\"",
+  "N4": "Check failed: h.style(\"border_color\") == DesignTokenHex[dtColorsUiBorderPrimary][dmDark]",
+  "N5": "Check failed: not f.has(\"data-column-index\")"
 }

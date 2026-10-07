@@ -3,7 +3,7 @@
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
 760c9789966aa810e8297c531897589763924b952facf2ac22d2094a059562f1  src/frontend/view_vocabulary/editor_surface.nim
-218691071fa6571cea9530e656095a8dbbfa3cdbc533502f25f275aa3c19b019  src/frontend/gpui/app/leaves.nim
+10411cb1f3eee432752a9eefd7dfa3c25dcebc0f642c07dc9ec0de4b73570f76  src/frontend/gpui/app/leaves.nim
 c87fae28bd0d59182bbed04f0b97200a03d115f6bd56a63fc55d2f2fc180eead  src/frontend/tui/app/views/source_pane.nim
 c7e62609ed32b49150e62dc380a3751fa745d50f28889d99d443ea566a77d680  src/frontend/tui/host/tui_session.nim
 59a835e3a525657e9abef241c2bf7426edd39bfd1ab70f03cb2034d67082bf63  src/frontend/viewmodel/backend/stdio_backend.nim
